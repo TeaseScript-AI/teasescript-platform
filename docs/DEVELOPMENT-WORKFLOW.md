@@ -315,6 +315,15 @@ output, and the same success or failure at the same place, for every script and 
 or by a measurement over a stated complete domain. The report says in plain words what a maker could notice and in which
 case.
 
+Until the type core (`src/type-inference/core/`) replaces the legacy type checker, what it does on its test-only
+candidate route is not yet accepted behavior. The coordinator decides it and adds each such decision to the list
+re-assessed before the switch (#1526's condition 2, in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md#coarse-type-core-bounds));
+the owner judges that list as a whole before the switch (owner, 2026-11-10). A choice that shapes the language, the
+switch itself, or what makers get after the switch still comes to the owner when it arises. Each entry says what the
+type core does, in which case, what a maker would notice after the switch, and its measured extent. This does not make
+a missing check acceptable: #1526's condition 1 stands, and a published plan that passes a value the natural compile
+rejects is a defect to repair, not a decision to list.
+
 These rules prevent accidental scope escalation. They do not permit reviewers
 to dismiss reproducible defects or weaken accepted syntax/semantics,
 deterministic execution, serializable checkpoint requirements, or validation at

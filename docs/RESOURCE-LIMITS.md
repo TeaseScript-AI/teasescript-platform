@@ -202,6 +202,35 @@ report can read the group from the registry. Also open: whether a refusal the sl
 contract only a stop produces ("this operand" from a stop's TSV043 warning; "a default whose collection the value it
 stands in for does not type") is a refusal a limit causes, and which others there are (#2236).
 
+The same list holds what the coordinator decided about the type core's behavior on this route, for the Owner to judge as
+a whole before the switch ([Proportional repair and owner escalation](DEVELOPMENT-WORKFLOW.md#proportional-repair-and-owner-escalation)).
+Each entry says what the type core does, in which case, what a maker would notice after the switch, and its measured
+extent. An entry records a consequence of how the type core behaves in an edge case; what makers are given by design,
+such as a decline's code and wording, is the Owner's and stands above as an open item. Where the workflow's rule on a
+changed warning or wording applies to the same change, the entry is its report:
+
+- **Where a stop falls decides more than whether a script is refused (#2116, feec35987).** The decision index's work is
+  charged, so a script too large for its budget stops at another point than before, inside windows of demand allowances
+  (widest measured: 0.521 units per syntax node, on 15 constructed sources). A maker would notice nothing for a script
+  that fits its budget: every natural compile of the corpus (15,406 sources, four modes) and of those 15 sources is
+  unchanged. For a script whose budget falls in a window: refused where it compiled or the reverse (the Owner's decision,
+  2026-11-10), other warnings, or a less precise reported type. Measured against the main before it: 1,081 settings
+  (source, mode, allowance) with a refusal on one side and 475 where both compile with identical plans, on those 15
+  sources.
+- **Which property a runtime message names after a stop (#2216, 664f1183f; open #2218).** A store's check taken from the
+  receiving completion lists an object's properties by the store's own records. Where another store asked that level
+  first with records that rank the properties otherwise, the listed order still follows where the stop fell. A maker
+  would notice, for a too-large script and a value wrong in more than one property, another property named in the same
+  runtime error at the same place. Measured: 476 stopped plans changed over 186,428 forced settings; the remaining class
+  reached at 16 settings in six sources built for it.
+- **The form of a store's check after a settled stop (open #2231).** A store the natural plan checks whole can be checked
+  by its parts, where the completion makes no check at the stored value. Where the claim #2184 records holds, a maker
+  would notice another wording of the same runtime error. It is not shown that a store checked by its parts has a part
+  at every level where its value may not be an object; a failure there would be a missing check, condition 1's defect
+  and not this entry. Measured: 4 settings on one source built for it, with equal outcomes over 678 host values; an
+  attempt to make the two forms disagree reached no part-checked store in 6,040 stops (343 published settled stops, each
+  checked whole).
+
 How a repair of the type core's work is accepted against `main` (its growth gate) is a testing rule:
 [Scaling diagnostics](TESTING.md#scaling-diagnostics).
 
