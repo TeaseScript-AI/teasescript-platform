@@ -280,6 +280,8 @@ async function mount(context: TestContext, debug = true) {
     rewind: () => rewind!,
     answer,
     busy,
+    /** Ends Debug's features, as the Debug switch does. */
+    debugOff: () => scoped?.stop(),
     /** Ends Debug's features and runs them again, as the Debug switch does. */
     toggle: () => {
       scoped?.stop();
@@ -302,6 +304,28 @@ test("Debug's end and a new history behind a busy connection queue: the session 
   await queued;
   await until(() => mounted.rewind().state.value.points.length === 1, "the new history's point");
   healthy(mounted);
+});
+
+test("Debug's end posts its history close in the turn it decides it, behind a busy connection queue", async (context) => {
+  const mounted = await mount(context);
+  const queued = mounted.busy();
+  const posted: string[] = [];
+  const clone = globalThis.structuredClone;
+  context.after(() => void (globalThis.structuredClone = clone));
+  globalThis.structuredClone = <T>(value: T, options?: StructuredSerializeOptions): T => {
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      "kind" in value &&
+      value.kind === "request" &&
+      "op" in value
+    )
+      posted.push(String(value.op));
+    return clone(value, options);
+  };
+  mounted.debugOff();
+  assert.ok(posted.includes("historyClose"), `posted in the same turn: ${posted.join(", ")}`);
+  await queued;
 });
 
 test("Debug turned on behind a busy connection queue: the choice shown then is a point, answered at once", async (context) => {

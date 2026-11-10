@@ -131,8 +131,9 @@ export interface BridgeClient {
     body: (send: SectionSend) => Promise<T>,
   ): Promise<T>;
   /**
-   * Posts history control `op` now, of no session, behind no earlier request's reply: the host runs it after every
-   * request posted before it and before every request posted after it, in arrival order, as any request. Any op outside
+   * Posts history control `op` now, of no session, behind no earlier request's reply: the host runs it in arrival order
+   * as any ordinary request, after every request posted before it and before every ordinary one posted after it (a
+   * `halt` is dispatched on receipt, ahead of work the host still awaits). Any op outside
    * `HISTORY_CONTROL_OPS` is refused, as is a request on a lost client or with arguments that cannot cross; the
    * disposition says so before `post` returns.
    */
