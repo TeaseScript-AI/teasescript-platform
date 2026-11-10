@@ -199,7 +199,8 @@ export function expectation(each: LifecycleCase): LifecycleExpectation {
         clears,
         history: debug,
       };
-    return outcome === "succeeds"
+    // Debug off's reinstatement goes on when its gate fails, as on its success, and the failure is reported (#2230).
+    return outcome === "succeeds" || operation === "reinstate"
       ? {
           shows: "live",
           inspecting: false,
@@ -210,7 +211,7 @@ export function expectation(each: LifecycleCase): LifecycleExpectation {
           history: debug,
         }
       : {
-          // A failed gate restarts nothing: the restored state stays inspected, its history held.
+          // A failed Return gate restarts nothing: the restored state stays inspected, its history held.
           shows: "restored",
           inspecting: true,
           held: { live: true, restored: true },

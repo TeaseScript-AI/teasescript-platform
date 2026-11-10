@@ -61,8 +61,7 @@ export interface RewindHost {
       readonly inspecting: Readonly<Ref<boolean>>;
       readonly showing: boolean;
       readonly state: { readonly sealed: "disposal" | "loss" | null; readonly blocked: boolean };
-      readonly reinstatement: Readonly<Ref<"pending" | "failed" | null>>;
-      retryReturn(): boolean;
+      readonly reinstatement: Readonly<Ref<"pending" | null>>;
     } & MutableOwner;
   };
   loadScriptStorage(): Promise<void>;

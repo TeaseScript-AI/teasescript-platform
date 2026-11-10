@@ -468,22 +468,9 @@ async function handoffRow(
           `the log at ${JSON.stringify(position)} resolves`,
         );
     } else assert.equal(view, null, "no history is open");
-    // The return's state, which the Player shows, and a failed reinstatement retried through the same gate.
-    if (gated && !want.lost && (want.shows === "live" || want.shows === "restored")) {
-      const failed = each.operation === "reinstate" && each.outcome === "fails";
-      assert.equal(
-        host.rewind.owner.reinstatement.value,
-        failed ? "failed" : null,
-        "the return's state",
-      );
-      if (failed) {
-        host.rewind.beforeRestart = async () => {};
-        assert.equal(host.rewind.owner.retryReturn(), true, "retried");
-        await settle(context);
-        assert.equal(shownView(host).lineage, live.lineage, "reinstated on the retry");
-        assert.equal(host.rewind.inspecting.value, false, "no longer inspected");
-      }
-    }
+    // The return's state, which the Player shows: nothing waits once the gate settled, opened or failed.
+    if (gated && !want.lost && (want.shows === "live" || want.shows === "restored"))
+      assert.equal(host.rewind.owner.reinstatement.value, null, "the return's state");
     if (mutate === undefined) lifecycleRun.push(each);
   }
 }

@@ -55,11 +55,8 @@ export interface LifecycleState {
   } | null;
   /** Whether an adoption of the shown restored state was admitted and has not settled. */
   readonly adopting: boolean;
-  /**
-   * Debug off waiting: for an adoption's outcome, or for its reinstatement's gate; or holding its history after that
-   * gate failed, unreinstated, until a new session, a retirement or the Player's disposal closes it.
-   */
-  readonly closing: "adoption" | "gate" | "failed" | null;
+  /** Debug off waiting: for an adoption's outcome, or for its reinstatement's gate. */
+  readonly closing: "adoption" | "gate" | null;
   /** Whether Return waits at its gate. */
   readonly returning: boolean;
   /** The serial of the newest gate asked, `0` before any: each gate's identity, which its settlement names. */
@@ -130,8 +127,6 @@ export type LifecycleEvent =
   | { readonly kind: "adoptionBegun" }
   | { readonly kind: "adoptionSettled"; readonly succeeded: boolean }
   | { readonly kind: "return" }
-  /** The user retries a reinstatement whose gate failed, through the same gate. */
-  | { readonly kind: "retryReinstate" }
   | { readonly kind: "closeSettled"; readonly ok: boolean };
 
 /**
@@ -484,10 +479,6 @@ export function advanceLifecycle(state: LifecycleState, event: LifecycleEvent): 
       if (!state.adopting) return decided(false, done(state));
       return decided(true, settleAdoption(state, event.succeeded));
     }
-    case "retryReinstate":
-      // A reinstatement whose gate failed goes through that gate again; Debug's state stays as it was asked.
-      if (state.closing !== "failed" || state.history === null) return done(state);
-      return done(...ask({ ...state, closing: "gate" }, "reinstate"));
     case "return": {
       if (
         !state.debug ||
@@ -574,11 +565,9 @@ function gateSettled(
           ? done({ ...closed, closing: null }, { kind: "clearView" })
           : done(renewal[0], { kind: "clearView" }, renewal[1]);
       }
-      // A failed gate restarts nothing: the history and its sessions stay as they are, and the next open waits; its
-      // failure is the Player's host failure to report.
-      if (!event.ok) return done({ ...settled, closing: "failed" }, { kind: "reportFailure" });
       // The close is posted before the parked session shows. A Debug on meanwhile renews at that show's `follow`,
-      // before the reinstated session's work.
+      // before the reinstated session's work. A failed gate reinstates all the same, and its failure is the Player's
+      // host failure to report, once (#2230).
       const reopening = closed.debug && closed.opening !== null;
       return done(
         {
@@ -597,6 +586,7 @@ function gateSettled(
         },
         { kind: "showParked" },
         { kind: "clearView" },
+        ...(event.ok ? [] : [{ kind: "reportFailure" } as const]),
       );
     }
   }
