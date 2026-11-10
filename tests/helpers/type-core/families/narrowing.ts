@@ -440,9 +440,9 @@ export const NARROWING_FAMILIES: readonly WorkFamily[] = [
 ];
 
 /**
- * The route rule's narrowed default (#1938): in a program that holds an `if` arm no run enters,
- * each route query passes only entered arms and leavable loops, over one feasibility layer built per program. Each
- * family asks k route queries beside k such arms, through the analysis.
+ * The route rule's narrowed default (#1938): in a program that holds an `if` arm no run enters, a route promotes only
+ * along the closed list (`NarrowingRoutes.#plain`: entered arms, passable statements, no loop before the use), over one
+ * feasibility layer built per program. Each family asks k route queries beside k such arms, through the analysis.
  */
 export const ROUTE_FEASIBILITY_FAMILIES: readonly WorkFamily[] = [
   {
@@ -479,7 +479,7 @@ export const ROUTE_FEASIBILITY_FAMILIES: readonly WorkFamily[] = [
   {
     name: "R-break-only-loops",
     measures:
-      "N3: k loops only an infeasible break leaves, each before a use, closed in the feasibility layer",
+      "N3: k loops only an infeasible break leaves, each before a use, each route refused at its loop by the closed list",
     program: (k) =>
       main(
         lines(
@@ -493,7 +493,8 @@ export const ROUTE_FEASIBILITY_FAMILIES: readonly WorkFamily[] = [
   },
   {
     name: "R-loops-left",
-    measures: "N3: k loops their header leaves crossed by k routes, beside one infeasible arm",
+    measures:
+      "N3: k loops their header leaves, each before a use beside one infeasible arm, each route refused at its loop",
     program: (k) =>
       main(
         lines(
