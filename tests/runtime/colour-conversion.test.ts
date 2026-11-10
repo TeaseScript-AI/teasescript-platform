@@ -636,6 +636,7 @@ function conversionEscapes(overrides: Readonly<Record<string, string>> = {}): st
         }
         // `String` reads a number's digit count, in the text module only, and only as a callee.
         if (
+          (color || textModule) &&
           node.text === "String" &&
           isGlobal(node) &&
           !(textModule && ts.isCallExpression(parent) && parent.expression === node)
