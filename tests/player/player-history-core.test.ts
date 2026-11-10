@@ -407,9 +407,27 @@ test("only advance writes the core's state: its dispatcher alone calls each kind
       ? "constructor"
       : (at.name?.getText(file) ?? "(unnamed)");
   };
+  // `#advance` dispatches each observation to its kind's method; six return their change to `#delta`.
+  const kinds = [
+    "#undoPublication",
+    "#publish",
+    "#prepare",
+    "#commit",
+    "#drop",
+    "#return",
+    "#adoptBegun",
+    "#adoptEnded",
+    "#stopCollection",
+    "#close",
+    "#refuseUnknown",
+    "#delta",
+  ];
+  const shared = ["#forget", "#linkResponses", "#stop"];
   const writers = new Set<string>();
-  // Each private method's call sites, by the member each is in.
+  // Each governed method's admitted call sites, by the member each is in; any other reference to one is an escape.
+  const governed = new Set(["#advance", ...kinds, ...shared]);
   const callers = new Map<string, string[]>();
+  const escapes: string[] = [];
   file.forEachChild(function visit(node): void {
     const assigned =
       (ts.isBinaryExpression(node) &&
@@ -432,33 +450,37 @@ test("only advance writes the core's state: its dispatcher alone calls each kind
     const target = assigned ?? mutating;
     if (target !== undefined && /this\.#|inspecting|inspecting!/u.test(target.getText(file)))
       writers.add(memberOf(node));
+    // Every reference to a governed name but its method's own declaration. The one admitted form is a call
+    // `this.#method(...)` directly in a member of the core, outside any nested function; every other form escapes.
+    const { parent } = node;
     if (
-      ts.isCallExpression(node) &&
-      ts.isPropertyAccessExpression(node.expression) &&
-      node.expression.expression.kind === ts.SyntaxKind.ThisKeyword &&
-      ts.isPrivateIdentifier(node.expression.name)
+      ts.isPrivateIdentifier(node) &&
+      governed.has(node.text) &&
+      !(ts.isMethodDeclaration(parent) && parent.name === node)
     ) {
-      const name = node.expression.name.text;
-      callers.set(name, [...(callers.get(name) ?? []), memberOf(node)]);
+      const site = ts.findAncestor(parent, ts.isFunctionLike);
+      const direct =
+        ts.isPropertyAccessExpression(parent) &&
+        parent.expression.kind === ts.SyntaxKind.ThisKeyword &&
+        ts.isCallExpression(parent.parent) &&
+        parent.parent.expression === parent &&
+        site !== undefined &&
+        ts.isClassElement(site) &&
+        ts.isClassDeclaration(site.parent) &&
+        site.parent.name?.text === "HistoryCore";
+      if (direct) callers.set(node.text, [...(callers.get(node.text) ?? []), memberOf(node)]);
+      else {
+        const form = ts.isPropertyAccessExpression(parent) ? parent.parent : parent;
+        escapes.push(`${memberOf(node)}: ${form.getText(file).split("\n")[0]}`);
+      }
     }
     node.forEachChild(visit);
   });
-  // `#advance` dispatches each observation to its kind's method; six return their change to `#delta`.
-  const kinds = [
-    "#undoPublication",
-    "#publish",
-    "#prepare",
-    "#commit",
-    "#drop",
-    "#return",
-    "#adoptBegun",
-    "#adoptEnded",
-    "#stopCollection",
-    "#close",
-    "#refuseUnknown",
-    "#delta",
-  ];
-  const shared = ["#forget", "#linkResponses", "#stop"];
+  assert.deepEqual(
+    escapes,
+    [],
+    "a governed method is referenced only by a direct `this.#method(...)` call",
+  );
   assert.deepEqual(
     [...writers].sort(),
     [
