@@ -87,16 +87,36 @@ test("requests of no session are posted in the order made, none behind a reply; 
     raw.request("captureKeep", { session: "s1", plan: null }, { after: "s1" }),
   ])
     void each.catch(() => {});
-  const sent = client.post("historyClose", { history: 1, by: "debugOff" });
-  if (sent.posted) void sent.reply.catch(() => {});
+  // Consecutive posts, and posts and requests mixed, all while every earlier reply is withheld.
+  for (const sent of [
+    client.post("historyClose", { history: 1, by: "debugOff" }),
+    client.post("historyTimeline", { history: 1 }),
+  ])
+    if (sent.posted) void sent.reply.catch(() => {});
+  void raw.request("planMetadata", { plan: "p1" }).catch(() => {});
+  const last = client.post("historyTimeline", { history: 2 });
+  if (last.posted) void last.reply.catch(() => {});
   assert.deepEqual(
     posted.map((each) => each.op),
-    ["planMetadata", "stepTime", "planMetadata", "historyClose"],
+    [
+      "planMetadata",
+      "stepTime",
+      "planMetadata",
+      "historyClose",
+      "historyTimeline",
+      "planMetadata",
+      "historyTimeline",
+    ],
+  );
+  assert.deepEqual(
+    posted.map((each) => each.id),
+    posted.map((each) => each.id).toSorted((a, b) => a - b),
+    "in the order made",
   );
   reply(posted[1]!.id);
   return new Promise<void>((resolve) => setImmediate(resolve)).then(() => {
     assert.deepEqual(
-      posted.slice(4).map((each) => each.op),
+      posted.slice(7).map((each) => each.op),
       ["stepTime"],
       "the session's next request, once its first has its reply",
     );
@@ -137,6 +157,10 @@ interface DebugRewind {
 }
 let usePlayerSession: (options: Record<string, unknown>) => RewindPlayer;
 let useDebugRewind: (player: RewindPlayer) => DebugRewind;
+let usePlayerDebug: (
+  player: RewindPlayer,
+  initial: { readonly menu: boolean; readonly autoSkip: boolean },
+) => { readonly menu: Ref<boolean> };
 let facade: typeof InProcess;
 let compiler: typeof CompileProject;
 let input: RuntimeInput;
@@ -150,6 +174,10 @@ before(async () => {
   usePlayerSession = session.usePlayerSession as typeof usePlayerSession;
   // EVIDENCE: validation: as above.
   useDebugRewind = rewind.useDebugRewind as typeof useDebugRewind;
+  const debug = await loadPlayerModule("player/vue/src/debug/usePlayerDebug.ts");
+  assert.equal(typeof debug.usePlayerDebug, "function");
+  // EVIDENCE: validation: as above, the Debug features' composable.
+  usePlayerDebug = debug.usePlayerDebug as typeof usePlayerDebug;
   // EVIDENCE: validation: the bundle the composable runs in, whose backend it uses.
   facade = (await loadPlayerModule("player/engine-bridge/in-process.ts")) as typeof facade;
   // EVIDENCE: validation: the bundle's compiler module, from the same module graph.
@@ -436,4 +464,21 @@ test("the in-process host holds a request made while it awaits another in its ar
     JSON.stringify({ requests, replies }),
   );
   healthy(mounted);
+});
+
+test("Round 2 R2-01: Debug turned on behind a busy queue traces from the moment it is turned on", async (context) => {
+  const mounted = await mount(context, false);
+  const plan = mounted.player.session.value!.planToken;
+  const queued = Promise.allSettled(
+    Array.from({ length: 100 }, () => mounted.bridge.client.request("planMetadata", { plan })),
+  );
+  const scope = effectScope();
+  context.after(() => scope.stop());
+  const debug = scope.run(() => usePlayerDebug(mounted.player, { menu: false, autoSkip: false }))!;
+  debug.menu.value = true;
+  await mounted.answer();
+  // The base traced nothing until the queue drained: no record of this answer.
+  const records = facade.heldTrace(mounted.bridge)?.status().records ?? 0;
+  assert.ok(records > 0, `records of the first answer: ${records}`);
+  await queued;
 });
