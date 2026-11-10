@@ -1925,9 +1925,7 @@ const PUBLICATION_AXES = {
   media: ["on", "off"],
   failure: ["two basis refusals", "a refusal, then another failure", "another failure first"],
 } as const;
-type PublicationRow = {
-  readonly [Axis in keyof typeof PUBLICATION_AXES]: (typeof PUBLICATION_AXES)[Axis][number];
-};
+type PublicationRow = Readonly<Record<string, string>>;
 function publicationInfeasible(row: PublicationRow): string | null {
   if (
     row.failure === "another failure first" &&
@@ -1991,24 +1989,27 @@ for (const row of publicationRows) {
         section(id, ticket, async (send) => {
           const first = sends === 0;
           if (first && row.moment === "before first send") publish();
-          const result = await body(async (op, args, basis, onReply) => {
-            if (op !== "observeTime") return send(op, args, basis, onReply);
-            sends += 1;
-            const attempt = first ? sends : 0;
-            const fails =
-              (row.failure === "another failure first" && attempt === 1) ||
-              (row.failure === "a refusal, then another failure" && attempt === 2);
-            try {
-              if (fails) throw new Error("The request could not cross.");
-              return await send(op, args, basis, onReply);
-            } catch (error) {
-              if (attempt === 1 && row.moment === "between sends") publish();
-              if (attempt === 2 && row.moment === "before catch") publish();
-              throw error;
-            }
-          });
-          if (first && row.moment === "between catch and release") publish();
-          return result;
+          try {
+            return await body(async (op, args, basis, onReply) => {
+              if (op !== "observeTime") return send(op, args, basis, onReply);
+              sends += 1;
+              const attempt = first ? sends : 0;
+              const fails =
+                (row.failure === "another failure first" && attempt === 1) ||
+                (row.failure === "a refusal, then another failure" && attempt === 2);
+              try {
+                if (fails) throw new Error("The request could not cross.");
+                return await send(op, args, basis, onReply);
+              } catch (error) {
+                if (attempt === 1 && row.moment === "between sends") publish();
+                if (attempt === 2 && row.moment === "before catch") publish();
+                throw error;
+              }
+            });
+          } finally {
+            // After the attempt's last catch, before its release, however it ended.
+            if (first && row.moment === "between catch and release") publish();
+          }
         }),
     );
     await player.advance(100);
