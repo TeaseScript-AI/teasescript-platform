@@ -24,7 +24,7 @@ import ts from "typescript";
  * Anything else is an escape, named by file, line and form.
  */
 
-export const CHECKED_FILES = [
+const CHECKED_FILES = [
   "src/color.ts",
   "src/color-text.ts",
   "src/deterministic-math.ts",
@@ -33,7 +33,7 @@ export const CHECKED_FILES = [
 const TEXT_MODULE = "src/color-text.ts";
 
 /** Each file's import declarations: a module, its default binding, its named bindings (`type` marked). */
-export const PINNED_IMPORTS: Readonly<Record<string, readonly string[]>> = {
+const PINNED_IMPORTS: Readonly<Record<string, readonly string[]>> = {
   "src/color.ts": [
     "colorjs.io: Color {}",
     "./deterministic-math.js: {atan2Degrees, cosDegrees, cubeRoot, sinDegrees}",
@@ -589,8 +589,8 @@ export function exactOperationEscapes(overrides: Readonly<Record<string, string>
       (ts.getCombinedNodeFlags(parent.parent) & ts.NodeFlags.Const) !== 0
         ? parent.parent
         : null;
-    if (declaration !== null)
-      parsedObjects.add(checker.getSymbolAtLocation(declaration.name as ts.Identifier)!);
+    if (declaration !== null && ts.isIdentifier(declaration.name))
+      parsedObjects.add(checker.getSymbolAtLocation(declaration.name)!);
     else if (!alpha) escape(node, "a colorjs.io use");
   };
   const assigned = (target: ts.Node) =>
@@ -721,6 +721,7 @@ export function exactOperationEscapes(overrides: Readonly<Record<string, string>
         ts.isIdentifier(node) &&
         !isName(node) &&
         checker.getSymbolAtLocation(node) === symbol &&
+        // EVIDENCE: invariant: a module constant's or function's declaration is a variable or function declaration, both named.
         node !== (declaration as ts.NamedDeclaration).name
       ) {
         let use: ts.Node = node;
@@ -863,16 +864,17 @@ export function exactOperationEscapes(overrides: Readonly<Record<string, string>
     )
       return true;
     if (checker.isTupleType(type)) {
-      if (!((type as ts.TypeReference).target as ts.TupleType).readonly) return false;
-      return checker
-        .getTypeArguments(type as ts.TypeReference)
-        .every((member) => deeplyReadonly(member, seen));
+      // EVIDENCE: invariant: `isTupleType` holds only for a type reference whose target is a tuple type.
+      const reference = type as ts.TypeReference;
+      // EVIDENCE: invariant: as above, the reference's target is the tuple type.
+      if (!(reference.target as ts.TupleType).readonly) return false;
+      return checker.getTypeArguments(reference).every((member) => deeplyReadonly(member, seen));
     }
     if (checker.isArrayType(type)) {
       if (type.getSymbol()?.name !== "ReadonlyArray") return false;
-      return checker
-        .getTypeArguments(type as ts.TypeReference)
-        .every((member) => deeplyReadonly(member, seen));
+      // EVIDENCE: invariant: `isArrayType` holds only for a type reference to Array or ReadonlyArray.
+      const reference = type as ts.TypeReference;
+      return checker.getTypeArguments(reference).every((member) => deeplyReadonly(member, seen));
     }
     return checker
       .getPropertiesOfType(type)
