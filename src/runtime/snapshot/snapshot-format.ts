@@ -5,7 +5,7 @@ import { isPlainRecord } from "../values/plain-data.js";
 // The snapshot format's revision and the span check host data shares with snapshot validation, without the snapshot
 // model (`state.ts`), whose scope helpers are the engine's.
 
-export const RUNTIME_SNAPSHOT_VERSION = 92;
+export const RUNTIME_SNAPSHOT_VERSION = 93;
 
 /** Whether `value` is a source span: exactly a start and an end position, the end not before the start. */
 export function validSpan(value: unknown): value is SourceSpan {

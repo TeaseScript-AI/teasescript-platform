@@ -183,11 +183,11 @@ export const NUMERIC_CONTRACTS = {
       "Rounds a number to the nearest whole number, a half away from zero: round(2.5) is 3 and round(-2.5) is -3. With decimals:, a whole number of at least 0, it rounds to that many decimal places as the number is written and gives a number: round(2.675, decimals: 2) is 2.68.",
   },
   floor: rounding(
-    Math.floor,
+    (value) => Math.floor(value),
     "Rounds a number down to a whole number, toward negative infinity: floor(-2.5) is -3.",
   ),
   ceil: rounding(
-    Math.ceil,
+    (value) => Math.ceil(value),
     "Rounds a number up to a whole number, toward positive infinity: ceil(-2.5) is -2.",
   ),
   abs: {
@@ -557,8 +557,11 @@ const EXPONENT_LIMIT = 2400;
 /** Further roots that are this close to 1 change the product by less than 2^-107 together. */
 const ROOT_PRECISION = 1 / TWO_32 / TWO_32 / TWO_32 / 4096; // 2^-108
 
-/** `base` (positive, not 1) to the power `exponent` (not 0), or `undefined` when it is too large to represent. */
-function positivePower(base: number, exponent: number): number | undefined {
+/**
+ * `base` (positive, not 1) to the power `exponent` (not 0), or `undefined` when it is too large to represent. It uses
+ * only this module's own functions below, so `color.ts` converts colours with it.
+ */
+export function positivePower(base: number, exponent: number): number | undefined {
   const whole = Math.trunc(Math.abs(exponent));
   const fraction = Math.abs(exponent) - whole;
   const scaled = scaledOf(base);
