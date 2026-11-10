@@ -321,9 +321,9 @@ compile charges and the questions it asks its answers, exactly; `--demands 16,64
 analysis of the held family's stop search, or that search's work between them) stalls by the runner's rule above: its
 units past `--units` (4) times its program's allowance, the allowance of the source's natural compile for a run at a
 test allowance; a run past the safety net, `--timeout` (1,800 s), makes its source `uncharged`, never a stall. One JSON
-line per source goes to `--out`, whose sources a rerun with it counts as recorded without running them again, and a
-summary to stdout; `plans.mjs summary <records>...` classifies the records (identical, work only, questions,
-publication, stops) and lists each difference, stall and uncharged source. A builder runs the head tree's copy instead
+line per source (its set, name and `key`) goes to `--out`, whose sources, by name and key, a rerun with it counts as
+recorded without running them again, and a summary to stdout; `plans.mjs summary <records>...` classifies the records
+(identical, work only, questions, publication, stops) and lists each difference, stall and uncharged source. A builder runs the head tree's copy instead
 of copying a kit, and extends it here where a comparison needs more:
 
 ```sh
@@ -405,9 +405,12 @@ round put it: positive escapes are the blockers; an unwitnessed cell is unresolv
   each natural error's site; it and the type-derived values find escapes and never decide `closed`.
 - `declined`, `natural declined`, `no plan`: a refusal, or nothing to run.
 
-An item is a `plans.mjs` record's `{set, name, mode, demand}` or a records row's `{files, globals, label, demand}`.
-The tool writes `rows.jsonl` and `summary.json` to `--out`, a missing unit's row marked `missing`.
-- Exit 1: any `open` or `later` item, a missing unit, or an exception.
+An item is a `plans.mjs` record's `{set, name, key?, mode, demand}` or a records row's `{files, globals, label, demand}`.
+A set's item runs the unit of its name and, given one, its `key` (`sourceKey`, which `units.mjs` gives every unit):
+units of one name with one key are one unit, and an item matching units with different keys is never resolved by a
+pick (#2254). The tool writes `rows.jsonl` (each with the `key` it ran) and `summary.json` to `--out`, a missing unit's
+row marked `missing`, an ambiguous item's `ambiguous` with the keys it matches.
+- Exit 1: any `open` or `later` item, a missing or ambiguous unit, or an exception.
 - Exit 2: a usage error or a bad `--shard`.
 - `unwitnessed` is counted, not failed.
 

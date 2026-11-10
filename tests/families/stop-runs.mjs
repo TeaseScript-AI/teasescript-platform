@@ -5,16 +5,20 @@
 // docs/DEVELOPMENT-WORKFLOW.md#review-convergence): positive escapes are the blockers, an unwitnessed cell is unresolved
 // evidence (#2080's design round). `open` and `later` are shown escapes, `closed` means the two plans are equal, and
 // every other difference is `unwitnessed`, never proof that no check is owed.
-// An item is a line of JSON: a plans record's `{set, name, mode, demand}` (`mode` a `HELD_MODES` index; `set` as
-// `plans.mjs` reads it: corpus with CASES_JSON, fixture, held, or an area of the tree's tests/families) or a records
-// row's `{files, globals, label, demand}` (`label` src-on, src-off, rev-on or rev-off, a `MODES` mode). With
-// `--shard i/N`, the items whose index k has k mod N = i. Writes `rows.jsonl` (the item without its files, and
-// `stopRuns`' result; a missing unit's row marked `missing`) and `summary.json` (the items, each kind's count, missing
-// units and exceptions) to `--out`. Exit 0 when no item is `open` or `later`, none is missing and none threw, else 1
-// (`unwitnessed` is counted, not failed); 2 on a usage error or a bad `--shard`.
+// An item is a line of JSON: a plans record's `{set, name, key?, mode, demand}` (`mode` a `HELD_MODES` index; `set` as
+// `plans.mjs` reads it: corpus with CASES_JSON, fixture, held, or an area of the tree's tests/families; `key` the unit's
+// `sourceKey`, `units.mjs`) or a records row's `{files, globals, label, demand}` (`label` src-on, src-off, rev-on or
+// rev-off, a `MODES` mode). A set's item names the units of its name and, given one, its key: units that differ under
+// one name are never picked between (#2254), so such an item without a key is `ambiguous`. With `--shard i/N`, the
+// items whose index k has k mod N = i. Writes `rows.jsonl` (the item without its files, the `key` of the unit run, and
+// `stopRuns`' result; a missing unit's row marked `missing`, an ambiguous item's `ambiguous` with the keys it matches)
+// and `summary.json` (the items, each kind's count, missing units, ambiguous items and exceptions) to `--out`. Exit 0
+// when no item is `open` or `later`, none is missing or ambiguous and none threw, else 1 (`unwitnessed` is counted, not
+// failed); 2 on a usage error or a bad `--shard`.
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { sourceKey } from "./sources.mjs";
 import { unitsOf } from "./units.mjs";
 
 const args = process.argv.slice(2);
@@ -58,14 +62,21 @@ const setOf = (set) =>
     ? set
     : path.join(root, "tests", "families", set);
 const units = new Map();
+// (the item's unit, or the keys of every unit it matches when they differ; units with one key are one unit)
 const unitOf = async (item) => {
-  if (item.files !== undefined) return { files: item.files, globals: item.globals };
-  if (!units.has(item.set))
-    units.set(
-      item.set,
-      new Map((await unitsOf(setOf(item.set), root, root)).map((unit) => [unit.name, unit])),
-    );
-  return units.get(item.set).get(item.name);
+  if (item.files !== undefined)
+    return { unit: { files: item.files, globals: item.globals, key: sourceKey(item) } };
+  if (!units.has(item.set)) {
+    const byName = new Map();
+    for (const unit of await unitsOf(setOf(item.set), root, root))
+      byName.set(unit.name, [...(byName.get(unit.name) ?? []), unit]);
+    units.set(item.set, byName);
+  }
+  const matched = (units.get(item.set).get(item.name) ?? []).filter(
+    (unit) => item.key === undefined || unit.key === item.key,
+  );
+  const keys = [...new Set(matched.map((unit) => unit.key))];
+  return keys.length > 1 ? { keys } : { unit: matched[0] };
 };
 const modeOf = (item) => {
   if (item.label === undefined) return (make) => HELD_MODES[item.mode].run(make);
@@ -82,16 +93,21 @@ const summary = {
   items: items.length,
   kinds: {},
   missing: 0,
+  ambiguous: 0,
   exceptions: 0,
 };
 for (const item of items) {
   const row = { item: { ...item, files: undefined } };
   try {
-    const unit = await unitOf(item);
-    if (unit === undefined) {
+    const { unit, keys } = await unitOf(item);
+    if (keys !== undefined) {
+      summary.ambiguous += 1;
+      row.ambiguous = keys;
+    } else if (unit === undefined) {
       summary.missing += 1;
       row.missing = true;
     } else {
+      row.key = unit.key;
       Object.assign(row, stopRuns(unit.files, unit.globals, modeOf(item), item.demand));
       summary.kinds[row.kind] = (summary.kinds[row.kind] ?? 0) + 1;
     }
@@ -103,9 +119,10 @@ for (const item of items) {
 }
 writeFileSync(path.join(out, "summary.json"), JSON.stringify(summary));
 process.stdout.write(`${JSON.stringify(summary)}\n`);
-// (a missing unit, an exception, or an escape a run showed: never a pass)
+// (a missing or ambiguous unit, an exception, or an escape a run showed: never a pass)
 const failed =
   ["open", "later"].reduce((sum, kind) => sum + (summary.kinds[kind] ?? 0), 0) +
   summary.missing +
+  summary.ambiguous +
   summary.exceptions;
 process.exit(failed === 0 ? 0 : 1);

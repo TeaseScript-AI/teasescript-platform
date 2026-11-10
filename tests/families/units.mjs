@@ -1,14 +1,20 @@
 // A set's sources by its name, as the plans comparison (`plans.mjs`) and the stop runs (`stop-runs.mjs`) read a set:
 // corpus (CASES_JSON), fixture (the base tree's tools/corpus/fixture), held (the base tree's `heldFamily()`), or an
-// area's folder (its generators' sources at their own sizes, by the head tree's `sources.mjs`).
+// area's folder (its generators' sources at their own sizes, by the head tree's `sources.mjs`). Each unit carries its
+// `key` (`sourceKey`, a baseline's identity of a source), which tells apart two units of one name (#2254).
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { sourceKey } from "./sources.mjs";
 
 const distOf = (root) => (existsSync(path.join(root, "dist")) ? path.join(root, "dist") : root);
 
-/** The set's sources, each `{ name, files, globals, single, held? }`, the same list in every worker. */
+/** The set's sources, each `{ name, key, files, globals, single, held? }`, the same list in every worker. */
 export async function unitsOf(set, baseRoot, headRoot) {
+  return (await listed(set, baseRoot, headRoot)).map((unit) => ({ ...unit, key: sourceKey(unit) }));
+}
+
+async function listed(set, baseRoot, headRoot) {
   if (set === "corpus")
     return JSON.parse(readFileSync(process.env.CASES_JSON, "utf8")).map(({ name, files }) => ({
       name,
