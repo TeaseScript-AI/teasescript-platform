@@ -613,11 +613,18 @@ export function phaseEnds(
   return ends;
 }
 
-/** The compiles the candidate route declined (outside the slice): no plan, each judged alone (Astra r1's B1 on #1597). */
-const declined = new WeakSet<object>();
+/**
+ * The compiles the candidate route declined (outside the slice), each with its reason: no plan, each judged alone (Astra
+ * r1's B1 on #1597).
+ */
+const declined = new WeakMap<object, string>();
 
 /** Whether a run's compile was declined by the candidate route. */
 const declinedRun = (run: StopRun): boolean => declined.has(run.result);
+
+/** The reason the candidate route declined a run's compile (`CandidateOutsideSlice.what`), or `null`. */
+export const declineOf = (run: Pick<StopRun, "result">): string | null =>
+  declined.get(run.result) ?? null;
 
 /**
  * A case's analysis and, in the slice, its compile, unstopped or at an allowance, in a mode, its `without` at the same
@@ -641,7 +648,7 @@ export function heldRun(c: HeldCase, mode: HeldMode, allowance?: number, demand?
     } catch (error) {
       if (!(error instanceof CandidateOutsideSlice)) throw error;
       const none = { diagnostics: [], plan: null };
-      declined.add(none);
+      declined.set(none, error.what);
       return none;
     }
   };

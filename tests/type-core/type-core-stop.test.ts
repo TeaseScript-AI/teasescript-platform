@@ -69,6 +69,7 @@ import {
   combinedStop,
   combinedStopRule,
   withReadsChanged,
+  declineOf,
   heldDemands,
   heldFamily,
   heldProblems,
@@ -2383,8 +2384,8 @@ test("the stop oracle counts each check's content on both sides, a further copy 
     );
     // (stopped before admission settled, the plain gate declines it: its ledger is compared)
     assert.deepEqual(
-      [stopped.answers.budget.settled, stopped.result.plan],
-      [false, null],
+      [stopped.answers.budget.settled, stopped.result.plan, declineOf(stopped)],
+      [false, null, UNDECIDED],
       mode.name,
     );
     assert.deepEqual(
@@ -2410,7 +2411,7 @@ test("the stop oracle counts each check's content on both sides, a further copy 
     stopped.answers.budget.deferred.some((mark) => JSON.stringify(mark.obligation) === text),
   );
   // (the plain gate declines the stopped run: no plan, its ledger compared)
-  assert.equal(stopped.result.plan, null);
+  assert.deepEqual([stopped.result.plan, declineOf(stopped)], [null, UNDECIDED]);
   const judge = (run: StopRun): string[] =>
     stopProblems({ unstopped: reference, stopped: run, fitting: [], violating: [] }).filter(
       (problem) => problem !== "no plan",
@@ -2459,7 +2460,7 @@ test("the stop oracle counts each check's content on both sides, a further copy 
   // the restarted pass, #2080 part 2: each side is its own analysis, the reference's owing the check, with the natural
   // run's plan, each rerun likewise; equal as built, and the store's guard, `requireExisting`, toggled in the stopped
   // plan is a plan problem)
-  assert.equal(reference.result.plan, null);
+  assert.deepEqual([reference.result.plan, declineOf(reference)], [null, UNDECIDED]);
   const naturalRun = heldRun(o, mode);
   assert.ok(naturalRun.result.plan !== null);
   const built: StopRun = {
@@ -2564,7 +2565,7 @@ test("the stop oracle counts each check's content on both sides, a further copy 
   const owned0 = JSON.stringify(own0.obligation);
   assert.ok(!natural0.answers.checks.some((x) => JSON.stringify(x) === owned0));
   assert.ok(early0.answers.checks.some((x) => JSON.stringify(x) === owned0));
-  assert.equal(early0.result.plan, null);
+  assert.deepEqual([early0.result.plan, declineOf(early0)], [null, UNDECIDED]);
   const once0 = (run: StopRun): string[] =>
     stopProblems({ unstopped: natural0, stopped: run, fitting: [], violating: [] }).filter(
       (problem) => problem !== "no plan",
@@ -2683,7 +2684,7 @@ test("the stop oracle counts each check's content on both sides, a further copy 
     },
   });
   // (the plain gate declines the stopped run, #2080 part 2: its ledger is compared)
-  assert.equal(early.result.plan, null);
+  assert.deepEqual([early.result.plan, declineOf(early)], [null, UNDECIDED]);
   const shaped = (run: StopRun): string[] =>
     stopProblems({ unstopped: natural, stopped: run, fitting: [], violating: [], excused }).filter(
       (problem) => problem !== "no plan",

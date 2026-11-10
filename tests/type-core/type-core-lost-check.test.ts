@@ -14,6 +14,10 @@ import { analyseCore, type Answers } from "../../src/type-inference/core/answers
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { narrower } from "../../src/type-inference/core/check-result/kept-checks.js";
 import {
+  OutsideContract,
+  UNESTABLISHED_AT_BUDGET,
+} from "../../src/type-inference/core/check-result/slice-index.js";
+import {
   withTestAllowance,
   withTestDemandAllowance,
 } from "../../src/type-inference/core/budget.js";
@@ -528,4 +532,12 @@ test("a decline the budget causes carries the limit marker, one the slice does n
     assert.deepEqual([error.what, error.limit], [what, true]);
   const outside = reasonOf(() => compiled(`function f {\n  say 1\n}\nf()${END}`, null));
   assert.equal(outside.limit, false, outside.what);
+  // (the slice's own error, which the route turns into `CandidateOutsideSlice`, carries the same marker)
+  const request = coreRequest([{ path: "main.tease", source: `let n = 1${END}` }], GLOBALS);
+  assert.ok(request !== null);
+  const [statement] = request.files[0]!.program.statements;
+  assert.ok(statement?.kind === "letStatement");
+  for (const what of [OPEN_BY_STOP, LOST, UNDECIDED, UNESTABLISHED_AT_BUDGET])
+    assert.equal(new OutsideContract(statement.initializer, what).limit, true, what);
+  assert.equal(new OutsideContract(statement.initializer, outside.what).limit, false, outside.what);
 });
