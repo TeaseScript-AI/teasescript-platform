@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -587,6 +589,27 @@ test(
       passed([]);
       passed(["src"]);
       passed(["src/a.ts", "src/b.ts"]);
+      // Sol r1: a PATH outside the folder it runs in, where the user's configuration limits a diff to that folder
+      const other = join(move.root, "other");
+      mkdirSync(other);
+      const sibling = spawnSync(
+        process.execPath,
+        [tool, base, "--renames", family, "../src/a.ts", "../src/b.ts"],
+        {
+          cwd: other,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            GIT_CONFIG_COUNT: "1",
+            GIT_CONFIG_KEY_0: "diff.relative",
+            GIT_CONFIG_VALUE_0: "true",
+          },
+        },
+      );
+      assert.deepEqual(
+        { status: sibling.status, out: sibling.stdout + sibling.stderr },
+        move.run("--renames", family),
+      );
     } finally {
       move.done();
     }

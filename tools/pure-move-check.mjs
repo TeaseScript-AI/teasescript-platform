@@ -779,7 +779,8 @@ export function checkMove(
   const git = (...args) =>
     execFileSync("git", args, { cwd, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
   const mergeBase = git("merge-base", base, "HEAD").trim();
-  // each PATH by Git's own pathspec matching: the change limited to it is empty or not (exit 0 or 1)
+  // each PATH by Git's own pathspec matching, with `movedLinesOf`'s settings that decide which files a diff shows: the
+  // change limited to it is empty or not (exit 0 or 1)
   const unmatched = paths.filter((file) => {
     const { status, stderr } = spawnSync(
       "git",
@@ -788,6 +789,7 @@ export function checkMove(
         "--quiet",
         "--no-ext-diff",
         "--no-textconv",
+        "--no-relative",
         mergeBase,
         "HEAD",
         "--",
