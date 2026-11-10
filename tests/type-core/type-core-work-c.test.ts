@@ -3,20 +3,26 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { type Answers } from "../../src/type-inference/core/answers.js";
+import { compileProjectWithBackend } from "../../src/compiler.js";
+import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
+import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { withTestDemandAllowance, type WorkCounter } from "../../src/type-inference/core/budget.js";
+import { CoreProgram, propertyStep } from "../../src/type-inference/core/program.js";
 import { coreRequest, type SourceFile } from "../helpers/type-core-analysis.js";
 import {
   ADMISSION_FAMILIES,
   ADMISSION_INGRESS_PRESETS,
   ADMISSION_KNOWN_PRODUCTS,
   ADMISSION_SAME_SOURCES,
+  DECISION_HOLDER_FAMILIES,
   LAYER_FAMILIES,
   NARROWING_FAMILIES,
   VALUE_CLASS_SITES,
   type WorkFamily,
 } from "../helpers/type-core/type-core-families.js";
+import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import { narrowingPass } from "../helpers/type-core/type-core-narrowing.js";
+import { inMode, MODES } from "../helpers/type-core-oracles.js";
 import {
   DOUBLING,
   type Sized,
@@ -614,5 +620,199 @@ test("a search of a key's events charges each comparison it makes (#1221)", () =
     assert.equal(lists.eventIn(key, [[last, last]]), "branch", `k = ${k}`);
     assert.equal(lists.eventIn(key, [[first! + 1, second! - 1]]), null, `k = ${k}`);
     assert.equal(lists.eventIn(key, [[last + 1, Number.MAX_SAFE_INTEGER]]), null, `k = ${k}`);
+  }
+});
+
+/**
+ * #2065 (#2059, #1585): a decided path below an ordinary property reads, of its prefix's whole stores and settled
+ * stores, those that may hold the property and those unproved (`holdersOf`), once the reads it saves pay for the index.
+ * Every family of `DECISION_HOLDER_FAMILIES` (k objects stored into a place or copied into it from k terminal places;
+ * one holder each, none, every one, or every other store an unproved copy; decided below, at and past the index's
+ * first bound) grows from k = 16 to 32 within the suite's bound, or within 1 % of `main`'s own growth where `main` grows
+ * faster (`MAIN_GROWTH`, measured once on `53c7b4bfc`, sharing on and off). Publications equal `main`'s on every family,
+ * size and mode, and each counter keeps within its row's declared term (the PR's evidence, outside CI).
+ */
+test("a decided path reads its prefix's stores that may hold its first step, the family within main's growth (#2065)", () => {
+  const MAIN_GROWTH: Record<string, readonly [number, number]> = {
+    "holders-direct-holders-below": [3.069, 3.158],
+    "holders-direct-holders-at": [3.169, 3.258],
+    "holders-direct-holders-past": [2.797, 2.867],
+    "holders-direct-none-below": [3.053, 3.134],
+    "holders-direct-none-at": [3.146, 3.216],
+    "holders-direct-none-past": [2.777, 2.832],
+    "holders-direct-every-below": [2.625, 2.692],
+    "holders-direct-every-at": [2.678, 2.743],
+    "holders-direct-every-past": [2.765, 2.729],
+    "holders-direct-unproved-below": [2.78, 2.966],
+    "holders-direct-unproved-at": [2.892, 3.076],
+    "holders-direct-unproved-past": [2.496, 2.631],
+    "holders-copy-holders-below": [2.074, 2.065],
+    "holders-copy-holders-at": [2.044, 2.032],
+    "holders-copy-holders-past": [3.05, 3.093],
+    "holders-copy-none-below": [2.107, 2.099],
+    "holders-copy-none-at": [2.203, 2.191],
+    "holders-copy-none-past": [3.305, 3.326],
+    "holders-copy-every-below": [2.084, 2.083],
+    "holders-copy-every-at": [2.156, 2.151],
+    "holders-copy-every-past": [2.898, 2.905],
+    "holders-copy-unproved-below": [2.022, 2.012],
+    "holders-copy-unproved-at": [1.925, 1.894],
+    "holders-copy-unproved-past": [2.801, 2.79],
+  };
+  assert.deepEqual(
+    DECISION_HOLDER_FAMILIES.map((family) => family.name).sort(),
+    Object.keys(MAIN_GROWTH).sort(),
+  );
+  const steep: string[] = [];
+  for (const family of DECISION_HOLDER_FAMILIES)
+    for (const [index, mode] of [MODES[0]!, MODES[1]!].entries()) {
+      const [small, large] = [16, 32].map((k) => {
+        const request = coreRequest(family.program(k), ["hostValue", "hostOther"]);
+        assert.ok(request !== null, family.name);
+        const { budget } = inMode(mode, () => analyseCore(request));
+        assert.equal(budget.exhausted, null, family.name);
+        return { total: budget.total, nodes: budget.counts.get("syntaxNodes") ?? 1 };
+      });
+      const growth = (2 * (large!.total / small!.total)) / (large!.nodes / small!.nodes);
+      const bound = Math.max(DOUBLING, 1.01 * MAIN_GROWTH[family.name]![index]!);
+      if (growth > bound)
+        steep.push(`${family.name} ${JSON.stringify(mode)}: ${growth.toFixed(3)}`);
+    }
+  assert.deepEqual(steep, []);
+});
+
+/**
+ * #2065: a place's decided path below a property that sixteen earlier stores lack, read after sixteen paths the index
+ * is paid by, so its last walk is the built index's (in the forward order), decides as the full scan does: each
+ * program's diagnostics, by code, severity and line, are `main`'s in every held mode, and so are the decision of `a.p`
+ * (kinds, decider, inherited, what it holds) and, where its holders store lists, of its element. Each witness keeps
+ * one part of the selection: a whole copy of a terminal place, its literal's names (Sol's copied-source witness); a
+ * source's own store below its root, a layer no settled store shows (#1466), after the decider, where it offends, and
+ * before it, where it decides; a holder whose element is `null` alone beside a written list, which decides nothing and
+ * leaves its element nullable; two holders of different kinds; a host value's store and a copy of a place of two
+ * stores, each unproved, which hold every step; a copy of a written binding, whose written type decides; stores the
+ * first pass rejects (A6) before the path's holder, so the next pass's admission lists the stores without them and
+ * decides afresh, where a state kept from the first misreads.
+ */
+test("a decided path past the decision index's first bound decides as the full scan does (#2065)", () => {
+  const irrelevant = ["let a={x0:1}", ...Array.from({ length: 15 }, (_, i) => `a={x${i + 1}:1}`)];
+  const reads = Array.from({ length: 16 }, (_, i) => `repeat a.x${i} {}`);
+  const program = (
+    before: readonly string[],
+    holders: readonly string[],
+    after: readonly string[],
+  ) => [...before, ...irrelevant, ...holders, ...reads, ...after, "exit"].join("\n");
+  const cases: readonly {
+    readonly source: string;
+    readonly diagnostics: readonly string[];
+    readonly decided: readonly string[];
+  }[] = [
+    {
+      source: program(["let root={p:1}"], ["a=root", 'a={p:"wrong"}'], ["repeat a.p {}"]),
+      diagnostics: ["TSV041 error L18"],
+      decided: ["integer by root L17, holds integer|unknown"],
+    },
+    {
+      source: program(["let s={q:1}", 's.p="wrong"'], ["a={p:1}", "a=s"], ["repeat a.p {}"]),
+      diagnostics: ["TSV043 error L0", "TSV041 error L19"],
+      decided: ["integer by 1 L18, holds integer|unknown"],
+    },
+    {
+      source: program(["let s={q:1}", 's.p="wrong"'], ["a=s", "a={p:1}"], ["repeat a.p {}"]),
+      diagnostics: ["TSV043 error L0", "TSV041 error L19", "TSV011 error L36"],
+      decided: ["string by s L18, holds string|unknown"],
+    },
+    {
+      source: program(
+        ["let typed:integer[]=[]"],
+        ["a={p:[null]}", "a={p:typed}"],
+        ["let b=a.p", "let c=b[0]", "repeat c {}"],
+      ),
+      diagnostics: [],
+      decided: [
+        "list by [null] L17, holds list|unknown",
+        "integer|null by typed L18 inherited, holds integer|null|unknown",
+      ],
+    },
+    {
+      source: program([], ["a={p:1}", 'a={p:"wrong"}'], ["repeat a.p {}"]),
+      diagnostics: ["TSV041 error L17"],
+      decided: ["integer by 1 L16, holds integer|unknown"],
+    },
+    {
+      source: program(["let t:integer=1"], ["a=hostValue", "a={p:t}"], ["repeat a.p {}"]),
+      diagnostics: ["TSV041 warning L17", "TSV041 warning L17"],
+      decided: ["integer by t L18 inherited, holds integer|unknown"],
+    },
+    {
+      source: program(
+        ["let t:integer=1", "let s={p:t}", "s={q:1}"],
+        ["a=s", 'a={p:"wrong"}'],
+        ["repeat a.p {}"],
+      ),
+      diagnostics: ["TSV041 error L20", "TSV011 warning L37", "TSV043 warning L37"],
+      decided: ["integer by s L19 inherited, holds integer|unknown"],
+    },
+    {
+      source: program(["let typed:object={x:1}"], ["a=typed", 'a={p:"wrong"}'], ["repeat a.p {}"]),
+      diagnostics: ["TSV011 error L35"],
+      decided: ["unknown by typed L17 inherited, holds string|unknown"],
+    },
+    {
+      source: program(
+        [],
+        ["a={q:1}", 'a={q:"wrong"}', "a={p:1}", 'a={p:"text"}'],
+        ["repeat a.q {}", "repeat a.p {}"],
+      ),
+      diagnostics: [
+        "TSV041 error L17",
+        "TSV041 error L19",
+        "TSV011 warning L36",
+        "TSV043 warning L36",
+      ],
+      decided: ["integer by 1 L18, holds integer|unknown"],
+    },
+  ];
+  const lineOf = (text: string) => Number(text.slice(text.lastIndexOf("L") + 1));
+  for (const { source, diagnostics, decided } of cases) {
+    // (each read of an irrelevant property: a count that may be another type, of an object that may lack it)
+    const padding = source
+      .split("\n")
+      .flatMap((line, at) =>
+        line.startsWith("repeat a.x") ? [`TSV011 warning L${at}`, `TSV043 warning L${at}`] : [],
+      );
+    const expected = [...diagnostics, ...padding].sort((x, y) => lineOf(x) - lineOf(y));
+    for (const mode of HELD_MODES) {
+      const result = mode.run(() =>
+        compileProjectWithBackend(
+          [{ path: "main.tease", source }],
+          { globals: ["hostValue"] },
+          CORE_BACKEND,
+        ),
+      );
+      assert.deepEqual(
+        result.diagnostics.map((d) => `${d.code} ${d.severity} L${d.span.start.line}`),
+        expected,
+        `${mode.name}: ${source}`,
+      );
+    }
+    const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+    assert.ok(request !== null, source);
+    const a = new CoreProgram(request).places.find(
+      ({ kind }) => kind.kind === "binding" && kind.name === "a",
+    )!.id;
+    for (const mode of [MODES[0]!, MODES[1]!]) {
+      const answers: Answers = inMode(mode, () => analyseCore(request));
+      const paths = [[propertyStep("p")], [propertyStep("p"), "element"]] as const;
+      const shown = paths.slice(0, decided.length).map((path): string => {
+        const { admitted, contract } = answers.place(a, path);
+        assert.ok(admitted.by === "decided" && admitted.decider !== null, source);
+        const { start, end } = admitted.decider;
+        const line = source.slice(0, start).split("\n").length - 1;
+        const holds = contract.kinds.map((item) => item.tag).join("|");
+        return `${admitted.kinds.join("|")} by ${source.slice(start, end)} L${line}${admitted.inherited ? " inherited" : ""}, holds ${holds}`;
+      });
+      assert.deepEqual(shown, decided, `${JSON.stringify(mode)}: ${source}`);
+    }
   }
 });
