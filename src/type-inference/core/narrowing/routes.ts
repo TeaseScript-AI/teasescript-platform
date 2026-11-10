@@ -1099,7 +1099,7 @@ export class NarrowingRoutes {
     this.#work.charge("eventSteps");
     const { program } = this.pass;
     const d = found.def;
-    if (!program.live(d.node) || program.dom.edom(d.node) !== program.dom.edom(node)) return false;
+    if (!program.live(d.node)) return false;
     const layer = this.#testLayer(key, tag);
     const writer = found.chain;
     let level = 0;

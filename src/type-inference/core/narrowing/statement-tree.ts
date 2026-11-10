@@ -296,8 +296,21 @@ export class StatementTree {
         if ((closed?.leaves ?? 0) > 0) made.sharedArms.leaves += 1;
         if ((closed?.calls ?? 0) > 0) made.sharedArms.calls += 1;
       }
+      // (what-if B: a loop a live break leaves is never closed by `leaves`)
+      const breaks =
+        made.loop !== null &&
+        some(
+          work,
+          "indexSteps",
+          made.loop.exit.predecessors,
+          (before) =>
+            program.live(before) &&
+            !flow.isDeadEdge(before, made.loop!.exit) &&
+            before.statement?.kind === "breakStatement",
+        );
       if (made.arms.length > 0 && !made.leaves && !made.skip) {
-        if (made.sharedArms.leaves === made.liveArms) made.leaves = made.calls = true;
+        if (made.sharedArms.leaves === made.liveArms && !breaks) made.leaves = made.calls = true;
+        else if (made.sharedArms.leaves === made.liveArms) made.calls = true;
         else if (made.sharedArms.calls === made.liveArms) made.calls = true;
       }
       let counts = closedIn.get(made.block);
