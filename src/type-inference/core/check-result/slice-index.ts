@@ -467,7 +467,7 @@ export const UNESTABLISHED_AT_BUDGET =
   "a store whose required checks could not be established at the budget";
 /** After a settled stop, a required check the published plan does not keep (`lostCheck`). */
 export const LOST_AT_BUDGET = "a store whose check was lost at the budget";
-/** After a stop before admission settled, a store's own mark against `unknown` no complete store check carries (#2080). */
+/** After a stop before admission settled, an owed obligation against `unknown` (#2080). */
 export const UNDECIDED_AT_BUDGET = "a store whose check was left undecided at the budget";
 
 /**

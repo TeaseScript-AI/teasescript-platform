@@ -40,7 +40,7 @@ import { outsideSyntax, sliceCall, type Outside } from "./slice-syntax.js";
  * route to the use has no check, else a warning whose use the runtime checks.
  * Refused during it: a value whose structure the slice does not follow, at the store whose capture established it
  * (`leftSlice`), the analysis ended there. A stop compiles with its warning and its checks at runtime (D4 a′), but a
- * store whose check the stop leaves uncarried declines the program (#1526 decision 2, condition 1,
+ * store whose check the stop leaves uncarried or undecided declines the program (#1526 decision 2, condition 1,
  * `check-result/runtime-plan.ts` `lostCheck`): where admission settled, "a store whose check was lost at the budget";
  * where it had not, "a store whose check was left undecided at the budget" (#2080). These and the other declines a
  * limit causes carry `limit` (`LIMIT_REASONS`).

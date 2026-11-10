@@ -933,24 +933,22 @@ function marksAt(answers: Answers, site: EnclosingCase["site"], target: string):
 }
 
 /**
- * #2080 part 2: a decline before admission settled stands only at the store of an own mark against `unknown` that no
- * complete store check carries. Read where the gate reads: the analysis inside `asked`, and the published contract and
- * store check `runtimeChecks` gives the gate.
+ * #2080 part 2: a decline before admission settled stands only at the site of an owed obligation against `unknown`, read
+ * where the gate reads: the analysis inside `asked`.
  */
 function undecidedProblems(
   request: NonNullable<ReturnType<typeof coreRequest>>,
   capped: <T>(make: () => T) => T,
   site: { readonly file: number; readonly start: number; readonly end: number },
 ): string[] {
-  const read = capped(() =>
+  const undecided = capped(() =>
     asked(analyseCore(request), (answers) => {
       const index = new SliceIndex(request.files.map((file) => file.program));
-      const { checks, contracts } = runtimeChecks(answers, index, request);
-      const at = [...answers.diagnostics, ...answers.budget.deferred].flatMap((d) => {
-        if (d.class !== "warning-runtime-check" || d.kind === "budget") return [];
+      return [...answers.diagnostics, ...answers.budget.deferred].some((d) => {
+        if (d.class !== "warning-runtime-check" || d.kind === "budget") return false;
         const { obligation } = d;
-        if (obligation.boundary || obligation.against.join("|") !== "unknown") return [];
-        if (obligation.site.file !== site.file) return [];
+        if (obligation.against.join("|") !== "unknown" || obligation.site.file !== site.file)
+          return false;
         const expression = index.expressionAt(obligation.site);
         const store = index.storeOf(expression);
         const value =
@@ -959,19 +957,11 @@ function undecidedProblems(
             : store.kind === "letStatement"
               ? store.initializer
               : store.value;
-        if (value.span.start.offset !== site.start || value.span.end.offset !== site.end) return [];
-        return [
-          store !== undefined && contracts.get(store)?.state === "complete" && checks.has(store),
-        ];
+        return value.span.start.offset === site.start && value.span.end.offset === site.end;
       });
-      return { undecided: at.length > 0, carried: at.some((carried) => carried) };
     }),
   );
-  if (!read.undecided)
-    return [`declined at ${site.start}:${site.end} with no undecided mark there`];
-  if (read.carried)
-    return [`declined at ${site.start}:${site.end} where a complete store check carries it`];
-  return [];
+  return undecided ? [] : [`declined at ${site.start}:${site.end} with no undecided mark there`];
 }
 
 /**
