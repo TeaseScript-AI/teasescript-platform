@@ -28,6 +28,9 @@ import {
 // #1526 decision 2, condition 1: after any stop the candidate publishes no plan that lets through what
 // the natural plan rejects. The generated matrix (`type-core-lost-check-matrix.ts`), and the rows of Codex r4's review.
 
+/** The slice's refusal of a default whose collection the value it stands in for leaves untyped, at a stop. */
+const UNTYPED_DEFAULT = "a default whose collection the value it stands in for does not type";
+
 test("over the matrix of destinations, value forms and stops, a stopped plan never lets through what the natural plan rejects (#1526 decision 2)", () => {
   const runs: MatrixRun[] = [];
   for (const cell of matrixCells())
@@ -36,10 +39,17 @@ test("over the matrix of destinations, value forms and stops, a stopped plan nev
     const where = `${run.cell} (${run.mode}) ${run.at}: ${run.stop}`;
     const { outcome } = run;
     // (a decline publishes nothing, and stands only with a limit's reason at its stop's phase, #2080 part 2: the gate's
-    // or rule (R)'s, the natural compile here publishing; a published plan, at every stop, lets nothing through)
+    // or rule (R)'s, the natural compile here publishing; or, for a cell whose value has a default, the slice's refusal of
+    // a default whose collection a stop left untyped, `runtime-plan.ts`'s fallback types. A published plan, at every
+    // stop, lets nothing through)
     if (outcome.kind === "declined")
       assert.equal(
-        stopDeclineProblem(outcome.what, run.stop === "unsettled program stop", null),
+        stopDeclineProblem(
+          outcome.what,
+          run.stop === "unsettled program stop",
+          null,
+          / default$/u.test(run.cell.replace(/ \/ padded$/u, "")) ? [UNTYPED_DEFAULT] : [],
+        ),
         null,
         where,
       );
@@ -110,7 +120,7 @@ test("Codex r4's rows: a cap while the completion finds its obligations is gated
         if (!(error instanceof CandidateOutsideSlice)) throw error;
         // (only a limit's reason at the phase it belongs to, #2080 part 2)
         assert.equal(
-          stopDeclineProblem(error.what, unsettledStop(budget), null),
+          stopDeclineProblem(error.what, unsettledStop(budget), null, []),
           null,
           `${source} @${allowance}`,
         );
@@ -229,7 +239,7 @@ test("Astra r1's B1: a settled stop in the capture's extraction is gated, in fou
         // (a settled stop: only a limit's reason after admission settled, #2080 part 2)
         assert.ok(error instanceof CandidateOutsideSlice, `${mode.name} ${phase} @${allowance}`);
         assert.equal(
-          stopDeclineProblem(error.what, false, null),
+          stopDeclineProblem(error.what, false, null, []),
           null,
           `${mode.name} ${phase} @${allowance}`,
         );

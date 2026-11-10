@@ -490,6 +490,8 @@ export interface HeldCase {
     readonly globals: Globals;
     readonly says: readonly string[] | null;
   }[];
+  /** The slice's refusals the case expects at a stop but not unstopped (`stopDeclineProblem`): none unless named. */
+  readonly stopReasons?: readonly string[];
 }
 
 /** A host object as the runtime takes it, its `n` the value. */
@@ -684,6 +686,7 @@ export function heldRun(c: HeldCase, mode: HeldMode, allowance?: number, demand?
       what,
       unsettledStop(run.answers.budget),
       LIMIT_REASONS.includes(what) ? null : natural(),
+      c.stopReasons ?? [],
     );
     if (problem !== null) throw new Error(`${c.name}: ${problem}`);
     return run;

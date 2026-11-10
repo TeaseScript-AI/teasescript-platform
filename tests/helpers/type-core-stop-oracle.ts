@@ -101,19 +101,20 @@ export const unsettledStop = (budget: Answers["budget"]): boolean =>
   budget.exhausted !== null && !budget.settled;
 
 /**
- * Why a compile's decline at a stop does not stand, or `null` where it does (#2080 part 2, Codex r2, r3): a decline a
+ * Why a compile's decline at a stop does not stand, or `null` where it does (#2080 part 2, Codex r1–r3): a decline a
  * limit causes, at the phase it belongs to ("a store whose check was left undecided at the budget" before admission
- * settled; the lost and unestablished checks only after it; an open typed default at any stop), whatever the unstopped
- * compile gave; or, for a construct outside the slice, the reason the unstopped compile gives too (`natural`). Any other
- * decline would hide a wrong reason as no plan.
+ * settled; the lost and unestablished checks only after it; an open typed default at any stop); or a construct outside
+ * the slice, with the reason the unstopped compile gives too (`natural`) or one the caller names as expected at its
+ * stops (`expected`, none unless named). Any other decline would hide a wrong reason as no plan.
  */
 export function stopDeclineProblem(
   what: string,
   unsettled: boolean,
   natural: string | null,
+  expected: readonly string[],
 ): string | null {
   if (!LIMIT_REASONS.includes(what))
-    return what === natural
+    return what === natural || expected.includes(what)
       ? null
       : `declined at a stop with "${what}", unstopped ${natural ?? "compiled"}`;
   if (what === UNDECIDED_AT_BUDGET ? unsettled : what === OPEN_BY_STOP || !unsettled) return null;
@@ -1047,14 +1048,15 @@ export function stopRuns(
   };
   const natural = runAt(null);
   const made = runAt(demand);
-  // (each side's decline carries its reason, `StopRunSide.declined`, for its reader to compare; a limit's reason stands
-  // only at the phase it belongs to, `stopDeclineProblem`, #2080 part 2)
+  // (each side's decline carries its reason, `StopRunSide.declined`, which every test reading `declined` compares; a slice
+  // reason is carried and not required here, because the census reads thousands of items this oracle did not write,
+  // whose stop-only refusals no caller names; a limit's reason stands only at the phase it belongs to, #2080 part 2)
   for (const [side, each] of [
     ["natural", natural],
     ["stopped", made],
   ] as const) {
     if (each.declined === null || !LIMIT_REASONS.includes(each.declined)) continue;
-    const problem = stopDeclineProblem(each.declined, unsettledStop(each.answers.budget), null);
+    const problem = stopDeclineProblem(each.declined, unsettledStop(each.answers.budget), null, []);
     if (problem !== null) throw new Error(`${side} run: ${problem}`);
   }
   const stopped =
