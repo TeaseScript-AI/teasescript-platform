@@ -71,7 +71,10 @@ const CONSTANT = [
     "DefinitionLists.live",
     "DefinitionLists.spanBetween",
   ]),
-  ...core("type-inference/core/flow-graph/dominators.ts", ["Dominators.dominates", "Dominators.edom"]),
+  ...core("type-inference/core/flow-graph/dominators.ts", [
+    "Dominators.dominates",
+    "Dominators.edom",
+  ]),
   ...core("type-inference/core/flow-graph/model.ts", [
     "FlowGraph.isDeadEdge",
     "FlowGraph.ownerOf",
