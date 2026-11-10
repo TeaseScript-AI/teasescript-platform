@@ -165,7 +165,9 @@ export function useSessionRewind({
     // A stopped session is not adopted: its saved data are not replaced either.
     if (stopped.value || !inspecting.value || rewindWork.value !== null || session.value === null)
       return Promise.resolve(false);
-    return adoptShown(session.value);
+    // The `finally` keeps the caller's continuation as late as it was when a binding held the adoption: a later
+    // microtask, which the input path's ordering observes.
+    return adoptShown(session.value).finally(() => {});
   }
   /**
    * Whether the adoption that began in generation `owner` on the shown session `shown` still owns the page: it is mounted,
