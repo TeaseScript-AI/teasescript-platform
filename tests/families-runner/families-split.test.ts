@@ -57,6 +57,17 @@ test("a split puts every place in one shard, by the places' order and the costs 
   assert.deepEqual(countOf(seconds, 900, 1), { count: 3, seconds: [2000, 600, 500] });
   assert.deepEqual(countOf(seconds, 900, 2), { count: 4, seconds: [4000, 1200, 500, 500] });
   assert.equal(countOf({ rest: { count: 0, ms: 0 }, sources: {} }, 900, 2).count, 1);
+  // the estimate fills the milliseconds `binsOf` fills, so a tie falls as there (review round 2: in fractional seconds
+  // the last source went to the other shard)
+  const tied: Area = {
+    rest: { count: 0, ms: 0 },
+    sources: { s0: 370_956, s1: 251_131, s2: 191_918, s3: 72_093, s4: 72_093 },
+  };
+  const filled = [0, 0];
+  for (const [place, shard] of binsOf(Object.keys(tied.sources), tied, 2))
+    filled[shard] = (filled[shard] ?? 0) + (tied.sources[place] ?? 0);
+  assert.deepEqual(countOf(tied, 900, 1), { count: 2, seconds: filled.map((ms) => ms / 1000) });
+  assert.deepEqual(filled, [515_142, 443_049]);
 });
 
 test("a costs file is a function of the records: per tree, the largest of a place's records, the short ones as their mean (#2272)", async () => {

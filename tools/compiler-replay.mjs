@@ -201,7 +201,8 @@ function shardOf(args, i) {
 
 /**
  * `submit`'s batch: every shard of `all` (`submissions`) as its own submission, the areas' shards that `split` sizes
- * longest first by `countOf`'s estimate, then the others in `all`'s order.
+ * longest first by `countOf`'s estimate, then the others in `all`'s order. The estimate comes from the costs file, not
+ * the shards the head fills, so a tie can order two shards the other way; the equality verdict never depends on order.
  */
 export function batchOf(all, split) {
   const shards = all.flatMap((args) => {
