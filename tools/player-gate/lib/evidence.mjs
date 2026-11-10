@@ -1,9 +1,9 @@
-// The kit's strict reader of records (orchestrator 2's ruling after Sol code r6): every derivation reads the raw records
-// a row kept only through `strictRecord`. A read of a missing value (`undefined` or `null`) throws `MissingEvidence`;
-// a value that may truly be absent (a frame not yet drawn, a reply not yet arrived) is read with `nullable`, by name;
-// and `span` is the only subtraction over timestamps: both ends present and in order, else it throws. `deriveSample`
-// (`validate.mjs`) is the one place a row's records are wrapped, and its one `try` turns either error into that
-// sample's problem, which fails its cell.
+// The kit's strict reader of records: the derivations read a row's records only through `strictRecord`, and its target
+// is the validated copy `records.mjs` parsed from the row, never the raw row (#2122). A read of a missing value
+// (`undefined` or `null`) throws `MissingEvidence`; a value that may truly be absent (a frame not yet drawn, a reply
+// not yet arrived) is read with `nullable`, by name; `span` is the derivations' interval: both ends present and in
+// order, else it throws; and a write through the reader throws. `validateSample` (`validate.mjs`) turns any of these
+// errors into the problem of the cell whose derivation raised it.
 
 /** A required value a record does not hold. */
 export class MissingEvidence extends Error {
@@ -19,6 +19,15 @@ export class ContradictoryEvidence extends Error {
   constructor(what) {
     super(`contradictory evidence: ${what}`);
     this.name = "ContradictoryEvidence";
+  }
+}
+
+/** A value a record holds whose type or domain is not its shape's (`row-shapes.mjs`), or a path no shape declares. */
+export class MalformedEvidence extends Error {
+  constructor(field, what) {
+    super(`malformed evidence: ${field} ${what}`);
+    this.name = "MalformedEvidence";
+    this.field = field;
   }
 }
 
@@ -39,12 +48,18 @@ function strictValue(found, field) {
   return strictRecord(found, field);
 }
 
+/** A trap that refuses a change of the record at `path`: the derivations read evidence, they never write it. */
+const refuse = (path) => () => {
+  throw new TypeError(`the evidence at ${path} is read-only`);
+};
+
 /**
  * `value` read strictly: an object or array whose every property read returns the value wrapped the same way, or
- * throws `MissingEvidence` (with the field's path) when it is `undefined` or `null`. A read by reflection is read the
- * same way (Sol code r10): a property descriptor's `value` comes back wrapped or throws (so `Object.keys`, `Object.values`
- * and a spread of a record with a missing field throw too), and the key, `in` and prototype traps reveal no value. Functions (an array's methods) pass through, so `records.find(…)` hands its callback wrapped
- * elements. A primitive is returned as it is.
+ * throws `MissingEvidence` (with the field's path) when it is `undefined` or `null`. A property descriptor's `value`
+ * comes back wrapped or throws the same way, and the key, `in` and prototype traps reveal no value; since the target is
+ * a validated copy, a reflective read reaches only validated data. Functions (an array's methods) pass through, so
+ * `records.find(…)` hands its callback wrapped elements. A write, a definition, a deletion, a prototype change or
+ * `Object.preventExtensions` throws. A primitive is returned as it is.
  */
 export function strictRecord(value, path = "record") {
   if (value === null || typeof value !== "object" || value[RAW] !== undefined) return value;
@@ -74,6 +89,11 @@ export function strictRecord(value, path = "record") {
     ],
     has: (target, key) => key in target,
     getPrototypeOf: (target) => Object.getPrototypeOf(target),
+    set: refuse(path),
+    defineProperty: refuse(path),
+    deleteProperty: refuse(path),
+    setPrototypeOf: refuse(path),
+    preventExtensions: refuse(path),
   });
 }
 
@@ -130,9 +150,10 @@ export function span(from, to, what = "an interval") {
 }
 
 /**
- * The difference `to − from` between two realms' clocks (a page's epoch time and its Worker's), not an interval on one
- * clock: both must be finite (`MissingEvidence` otherwise), but its sign is no ordering, since Firefox and WebKit coarsen
- * each clock to 1 ms. Only the bridge's delivery latency uses it, which stays in the `unvalidated` cells (#2122).
+ * The signed difference `to − from` between two realms' clocks (a page's epoch time and its Worker's), not an interval
+ * on one clock: both must be finite (`MissingEvidence` otherwise), but its sign is no ordering, since Firefox and WebKit
+ * coarsen each clock to 1 ms. The delivery latencies use it; they are their cell's `/ cross-clock` part, outside the
+ * headline (`validate.mjs`).
  */
 export function crossClock(from, to, what = "a cross-clock difference") {
   if (!Number.isFinite(from)) throw new MissingEvidence(`${what}: its start`);
@@ -140,8 +161,9 @@ export function crossClock(from, to, what = "a cross-clock difference") {
   return to - from;
 }
 
-/** Whether `error` is one of the reader's: missing evidence, a reversed interval or a contradicted cache. */
+/** Whether `error` is one of the reader's: missing or malformed evidence, a reversed interval or a contradicted cache. */
 export const isEvidenceError = (error) =>
   error instanceof MissingEvidence ||
+  error instanceof MalformedEvidence ||
   error instanceof ReversedInterval ||
   error instanceof ContradictoryEvidence;

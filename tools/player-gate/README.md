@@ -11,28 +11,37 @@ runs real browsers and the Pixel 4a, outside CI, and never sets a threshold. It 
 Playwright is loaded from the package.json that `PLAYWRIGHT_PACKAGE` names. Without it, or without a phone, the kit
 exits 2.
 
-## Every value is unvalidated
+## Validation (#2122)
 
-The kit's values are read from its retained rows without a validation claim; the validation obligation is #2122,
-before the activation PR's R1 run. Every cell in the report is labelled `measured, unvalidated`.
+Every value a cell reports derives from records that passed the kit's shared validation; a sample that fails makes its
+cell incomplete and is never a value in a median. Every cell stays labelled `measured, unvalidated` until #2122 closes.
 
-- **The headline.** The headline, the summary (`--json`) and the R0 comparison hold the `ms` and `boolean` fields of
-  `session`, `aa`, `keepDurable`, `demo` and `delayedSmoke`: playable, A/A, the keep timings and outcomes, and the
-  demo's and the smoke's pass or fail.
-- **Outside the headline.** The scenarios in `UNVALIDATED` (`bridge`, `sessionInstrumented`, `taps`, `bridgeTaps`,
-  `keepHandler`, `keepCompletion`), every cell's `bytes` and `count` fields (`<cell> / bytes and counts`: served bytes
-  per phase, requests, heap, sizes, counts) and the artifact inventory print apart, with their known gaps under
-  "Declared gaps".
+- **One parse.** `report.mjs` parses each row once (`lib/records.mjs`) against its scenario's closed shape
+  (`lib/row-shapes.mjs`). Every path is declared, with its type and domain. An undeclared path, a missing required
+  value, a wrong type or a number outside its domain fails the result section that owns it. Clock readings and recorded
+  durations lie in [0, 2^53 − 1] ms, so no difference, sum or median over them overflows. The row's own summaries are
+  not copied. Its cached flags and outcomes are kept apart and only compared.
+- **Validated copies, read strictly.** The derivations read only those copies, through `lib/evidence.mjs`'s strict
+  reader: `nullable` and its `NULLABLE` list for a value that may be absent, `span` for an interval, and a write
+  refused. `buildReport` takes no row the parser did not make, so no derivation can reach a raw row, whatever form a
+  read takes.
+- **Each scenario's parts** (`validate.mjs` `PARTS`) check their order relations and the evidence a trial needs before
+  they derive. Examples: each reply after its request, a tap's handler after its event, a keep trial's hiding.
+- **Three cells per scenario**, each its own failure boundary:
+  - the timing cell (`ms`, `boolean`): the only one in the headline, the summary (`--json`) and the R0 comparison;
+  - `<cell> / bytes and counts`;
+  - `<cell> / cross-clock`: the signed differences between the page's clock and the Worker's, its sign kept.
+
+  A section's failure fails the cells whose fields read it, and no other.
 - **A measured failure is a value** (`cells.mjs`): a pass/fail scenario's failing run is its result, with its finding.
-- **The derivation code, where #2122 starts.**
-  - `lib/evidence.mjs`'s strict reader: `strictRecord`, `nullable` and its closed `NULLABLE` list, `span` and
-    `crossClock`.
-  - The partition by unit in `validate.mjs`.
-  - `deriveSample`'s per-cell failure boundary: a sample whose derivation fails makes its cell incomplete, and is never
-    a value in a median.
-  - A kit test that parses the derivations for raw row reads, reflective globals and subtractions outside `span`.
 
-  #2122 lists what they do not yet cover, with its acceptance controls.
+The validation is of the records. It does not prove that a derivation pairs the right records or computes the right
+formula. Four things stay trusted code, reviewed and covered by the kit's tests rather than checked:
+
+- which records a derivation pairs, and its formula;
+- a derivation that swallows a reader error;
+- which of two fields of one type a value comes from;
+- a derivation that reaches records through anything but its arguments (a file read, a global).
 
 Pass or fail is derived from primary records, never from a cached flag:
 
@@ -57,8 +66,8 @@ Pass or fail is derived from primary records, never from a cached flag:
   - `bridge`;
   - the hidden-page keep: `keepHandler` on the desktop, `keepCompletion` and `keepDurable` on the Pixel;
   - `demo`.
-- **`validate.mjs`** derives every field again from a row's records, partitions the fields by unit, and lists
-  `UNVALIDATED`.
+- **`validate.mjs`** derives every field again from a row's validated records, scenario by scenario and part by part,
+  and checks each value against its unit's domain.
 - **`report.mjs`** prints the cost report: `node tools/player-gate/report.mjs --phase r0|r1 --artifacts FILE
 ROWS.jsonl...`. Beside each number it writes the conditions it depends on. The report is incomplete (exit 1) in any
   of these cases:
