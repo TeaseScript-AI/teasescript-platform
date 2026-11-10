@@ -346,6 +346,8 @@ test("after a stop a typed default's null leaves its level open, as without one 
  */
 /** The lost-check gate's decline (#1526 decision 2, condition 1). */
 const LOST_CHECK = "a store whose check was lost at the budget";
+/** A settled stop's decline at a fallback whose requirement it lost (#2183). */
+const DEFAULT_LOST = "a default whose check was lost at the budget";
 
 function readers(source: string): string[] {
   try {
@@ -550,7 +552,8 @@ test("after a stop a load still takes its default for a stored value its default
       for (const stop of [<T>(make: () => T): T => make(), ...sampled(readerStops(source, mode))]) {
         // (a stop that leaves the load's store without a result declines, #1526 decision 2, an accepted over-decline,
         // #1832; one before admission settled leaves the inferred store's check undecided, and the plain gate
-        // declines; every published plan reads as unstopped)
+        // declines; a settled one that loses the `otherwise` fallback's requirement declines at it, #2183; every
+        // published plan reads as unstopped)
         const unsettled = unsettledAt(source, stop, mode);
         let plan;
         try {
@@ -560,7 +563,10 @@ test("after a stop a load still takes its default for a stored value its default
         } catch (error) {
           assert.ok(
             error instanceof CandidateOutsideSlice &&
-              error.what === (unsettled ? UNDECIDED : LOST_CHECK),
+              (unsettled
+                ? error.what === UNDECIDED
+                : error.what === LOST_CHECK ||
+                  (source.includes("otherwise") && error.what === DEFAULT_LOST)),
             `${source} (${mode.name})`,
           );
           continue;
@@ -900,10 +906,15 @@ const host = (hostValue: SerializableRuntimeValue, hostOther: SerializableRuntim
  * written or written element type, Astra's B1 of round 2; an `otherwise`'s). Each mode's phases found in that mode; the
  * stop at the first unit of each settled phase and at its last, its phase asserted (the every-unit sweep runs outside
  * CI). `marked`: the code of an obligation a stop may leave undecided and the source text of its site, the first after
- * `after`: the stop marks it at one stop at least.
+ * `after`: the stop marks it at one stop at least. A case's fourth element, `true`, says some of its settled stops owe a
+ * fallback's obligation against `unknown` and decline at the default (#2183, `owesLostDefault`), every other stop as
+ * above; without it no stop declines.
  */
 function settledPhases(
-  cases: readonly (readonly [string, readonly Globals[], readonly Globals[]])[],
+  cases: readonly (
+    | readonly [string, readonly Globals[], readonly Globals[]]
+    | readonly [string, readonly Globals[], readonly Globals[], true]
+  )[],
   marked?: { readonly code: string; readonly after: string; readonly text: string },
 ): void {
   const options = { globals: ["hostValue", "hostOther"] };
@@ -913,7 +924,7 @@ function settledPhases(
     { reversed: false, sharing: false },
     { reversed: true, sharing: false },
   ];
-  for (const [source, fitting, violating] of cases)
+  for (const [source, fitting, violating, lostDefault = false] of cases)
     for (const { reversed, sharing } of modes) {
       const inMode = <T>(make: () => T): T => {
         const ordered = (): T =>
@@ -943,6 +954,7 @@ function settledPhases(
       const start = marked && source.indexOf(marked.text, source.indexOf(marked.after));
       const site = marked && `${marked.code} ${start}:${start! + marked.text.length}`;
       let marks = 0;
+      let declined = 0;
       for (const [phase, ends] of stops)
         for (const allowance of ends) {
           const answers = analyse(allowance);
@@ -951,11 +963,21 @@ function settledPhases(
             answers.budget.deferred.some((d) => `${d.code} ${d.site.start}:${d.site.end}` === site)
           )
             marks += 1;
+          let result: StopRun["result"];
+          try {
+            result = withTestAllowance(allowance, compile);
+          } catch (error) {
+            if (!(error instanceof CandidateOutsideSlice) || error.what !== DEFAULT_LOST)
+              throw error;
+            assert.ok(owesLostDefault(answers), `${where} ${phase} @${allowance}`);
+            declined += 1;
+            continue;
+          }
           assert.deepEqual(
             stopProblems({
               unstopped,
               stopped: {
-                result: withTestAllowance(allowance, compile),
+                result,
                 answers,
                 without: (omit) => withTestAllowance(allowance, () => withoutRecords(omit, both)),
               },
@@ -967,7 +989,23 @@ function settledPhases(
           );
         }
       if (marked !== undefined) assert.ok(marks > 0, where);
+      assert.equal(declined > 0, lostDefault, `${where}: declined at ${declined} stops`);
     }
+}
+
+/**
+ * Whether a settled stop's analysis owes a fallback's obligation against exactly `unknown`, which declines its compile
+ * at the default (#2183, `settledOwed`).
+ */
+function owesLostDefault(answers: Answers): boolean {
+  return [...answers.diagnostics, ...answers.budget.deferred].some(
+    (d) =>
+      d.class === "warning-runtime-check" &&
+      d.kind !== "budget" &&
+      d.rule.rule === "fallback" &&
+      d.obligation.against.length === 1 &&
+      d.obligation.against[0] === "unknown",
+  );
 }
 
 test("a stop after admission settled keeps its contracts, findings, quiet proofs and checks", () => {
@@ -1003,30 +1041,39 @@ test("a stop after admission settled keeps its contracts, findings, quiet proofs
       [host("bad", 3)],
     ],
     // a domain is not the value's kinds: `integer?` copied where the value is only `null` imposes no
-    // family on the fallback, so a text fallback still runs (Codex r9's B1)
+    // family on the fallback, so a text fallback still runs (Codex r9's B1); where a stop leaves `c`'s kinds the stop's,
+    // the fallback owes its check against `unknown` and the program declines at it, a false decline (#2183)
     [
       'let v: integer? = null\nlet a = {v:v}\nlet b = a\nlet c = b.v\nsay c otherwise hostValue\nsay "AFTER"\nexit\n',
       [host("bad", 3)],
       [],
+      true,
     ],
   ]);
 });
 
 /** A compile of `source` and its analysis, under an allowance where one is given. */
-function stopRun(source: string, allowance?: number): StopRun & { readonly undecided: boolean } {
+function stopRun(
+  source: string,
+  allowance?: number,
+): StopRun & { readonly undecided: boolean; readonly lostDefault: boolean } {
   const options = { globals: ["hostValue", "hostOther"] };
   const request = coreRequest([{ path: "main.tease", source }], options.globals);
   assert.ok(request !== null);
   const allowed = <T>(make: () => T): T =>
     allowance === undefined ? make() : withTestAllowance(allowance, make);
-  // (the plain gate's decline, #2080 part 2, is no plan and no diagnostics, as `heldRun` records a decline)
+  // (the plain gate's decline, #2080 part 2, and a settled stop's at a lost default, #2183, are no plan and no
+  // diagnostics, as `heldRun` records a decline)
   let undecided = false;
+  let lostDefault = false;
   const compile = (): StopRun["result"] => {
     try {
       return compileSourceWithBackend(source, options, CORE_BACKEND);
     } catch (error) {
-      if (!(error instanceof CandidateOutsideSlice) || error.what !== UNDECIDED) throw error;
-      undecided = true;
+      if (!(error instanceof CandidateOutsideSlice)) throw error;
+      if (error.what === UNDECIDED) undecided = true;
+      else if (error.what === DEFAULT_LOST) lostDefault = true;
+      else throw error;
       return { diagnostics: [], plan: null };
     }
   };
@@ -1034,6 +1081,7 @@ function stopRun(source: string, allowance?: number): StopRun & { readonly undec
   return {
     ...allowed(both),
     undecided,
+    lostDefault,
     without: (omit) => allowed(() => withoutRecords(omit, both)),
   };
 }
@@ -1137,9 +1185,10 @@ test("the stop oracle sees every change no mark of the stop names", () => {
   assert.notDeepEqual(problems(vessel, edited(vessel, withoutGuard)), []);
   // a walk stop marks the default, which excuses its own check and not the guard; where `vessel` holds a host
   // value, its lowest walk stop loses the vessel's check, which `{amount: "x"}` passes, and the candidate declines it
-  // (#1526 decision 2), so the oracle is judged on its variant, `vessel` a typed load's, which its reader carries
+  // (#1526 decision 2), so the oracle is judged on its variant, `vessel` a typed load's, which its reader carries (the
+  // list's elements admit no `null`, so the mark keeps their family: one against `unknown` declines, #2183)
   const original =
-    'let nums: number?[] = [null,1.25]\nlet pack={nums:nums}\nlet twin=pack\nsay twin.nums.get(4, default:hostValue)\nlet vessel=hostOther\nvessel.amount=4\nsay "AFTER"\nexit\n';
+    'let nums: number[] = [1.25]\nlet pack={nums:nums}\nlet twin=pack\nsay twin.nums.get(4, default:hostValue)\nlet vessel=hostOther\nvessel.amount=4\nsay "AFTER"\nexit\n';
   assert.throws(
     () => stopRun(original, walkEnds(original)[0]),
     (error: unknown) =>
@@ -1573,31 +1622,35 @@ test("a stop keeps the empty check of a selection read through a copied written 
 /**
  * The key's finished contract is a domain too: `b.v` is only `null` at the read though `v` may hold an
  * integer later, so no stop gives the fallback the integer family (Codex r10's B1, a band inside the walk): at every
- * settled walk stop, in the source order, the text fallback still runs.
+ * settled walk stop, in the source order, the text fallback still runs, or, where the stop leaves `b.v`'s kinds the
+ * stop's, the fallback owes its check against `unknown` and the program declines at it, a false decline (#2183).
  */
 test("no stop in a settled walk gives a fallback the family of its key's contract", () => {
   const source =
     'let v: integer? = null\nlet a = {v:v}\nlet b = a\nsay b.v otherwise hostValue\nv = 2\nsay "AFTER"\nexit\n';
   const unstopped = stopRun(source);
   const [low, high] = walkEnds(source);
-  for (let allowance = low; allowance <= high; allowance += 1)
+  let declined = 0;
+  for (let allowance = low; allowance <= high; allowance += 1) {
+    const stopped = stopRun(source, allowance);
+    if (stopped.lostDefault) {
+      assert.ok(owesLostDefault(stopped.answers), `@${allowance}`);
+      declined += 1;
+      continue;
+    }
     assert.deepEqual(
-      stopProblems({
-        unstopped,
-        stopped: stopRun(source, allowance),
-        fitting: [host("good", 3)],
-        violating: [],
-      }),
+      stopProblems({ unstopped, stopped, fitting: [host("good", 3)], violating: [] }),
       [],
       `@${allowance}`,
     );
+  }
+  assert.ok(declined > 0);
 });
 
 /**
  * The same of an inferred list's default (`get`'s C10): its element type is first found by its own unit's read, so a walk
  * stop before that unit leaves the element's contract unfinished; the stores' syntax decides it (`[2, 3]`: integers),
- * so the default keeps its check. A copied element type that admits `null` (`integer?[]`) is a domain that
- * leaves the default's family undecided: the stop marks it "not checked (budget)" at the default.
+ * so the default keeps its check.
  */
 test("a stop after admission settled checks an inferred list's default by its stores' syntax", () => {
   settledPhases([
@@ -1614,6 +1667,10 @@ test("a stop after admission settled checks an inferred list's default by its st
   ]);
 });
 
+/**
+ * A copied element type that admits `null` leaves the default's family undecided: the stop marks the default against
+ * `unknown`, and the program declines at it (#2183).
+ */
 test("a stop after admission settled marks a default whose element domain admits null", () => {
   settledPhases(
     [
@@ -1621,6 +1678,7 @@ test("a stop after admission settled marks a default whose element domain admits
         'let items: integer?[] = [2,null]\nlet a = {xs: items}\nlet b = a\nsay b.xs.get(hostOther, default: hostValue)\nsay "AFTER"\nexit\n',
         [host(2, 3)],
         [host("bad", 3)],
+        true,
       ],
     ],
     { code: "TSV041", after: "default:", text: "hostValue" },
@@ -1860,7 +1918,12 @@ test("a stop before a store below an own selection takes its target settles noth
           allowance === undefined ? make() : withTestAllowance(allowance, make);
         undecided = false;
         const made = allowed(both);
-        return { ...made, undecided, without: (omit) => allowed(() => withoutRecords(omit, both)) };
+        return {
+          ...made,
+          undecided,
+          lostDefault: false,
+          without: (omit) => allowed(() => withoutRecords(omit, both)),
+        };
       };
       const unstopped = runAt();
       const value = source.indexOf('"bad"');
@@ -2214,24 +2277,24 @@ test("a stop before admission settled checks a written store's literal parts at 
 
 /**
  * #1594: a stopped run's `without` reruns its compile and analysis at the run's own allowance (`StopRun.without`).
- * At the first stop after admission settled, a `get` whose default's element domain admits `null` publishes a plan
- * whose content the oracle excuses only where `without` measures it: the held host's own stopped run (`heldRun`) gives
- * no problem, and one made outside its allowance (`withTestAllowance` around `heldUnstopped`, whose `without` then runs
- * unstopped) is refused. (The issue's witness, a literal-zero `get` with a named default, stores into inferred places, so
- * before admission settles the plain gate declines it, #2080 part 2.)
+ * At a settled walk stop whose plan differs from the natural one by what the stop's marks excuse, the oracle excuses
+ * that content only where `without` measures it: the held host's own stopped run (`heldRun`) gives no problem, and one
+ * made outside its allowance (`withTestAllowance` around `heldUnstopped`, whose `without` then runs unstopped) is
+ * refused. #1631's witness at program allowance 1,766, its lowest such stop in held mode 0. (The issue's witness, a
+ * literal-zero `get` with a named default, stores into inferred places, so before admission settles the plain gate
+ * declines it, #2080 part 2; a default whose element domain admits `null` leaves its mark against `unknown`, which
+ * declines after it, #2183.)
  */
 test("the stop oracle refuses a stopped run whose without leaves the run's allowance (#1594)", () => {
   const source =
-    'let items: integer?[] = [2,null]\nlet a = {xs: items}\nlet b = a\nsay b.xs.get(hostOther, default: hostValue)\nsay "AFTER"\nexit\n';
+    'let root = {inside: {f0: hostValue}}\nlet first = root\nroot = {inside: {f0: hostOther}}\nsay "BEFORE"\nrepeat first.inside.f0 {say "ok"}\nsay "AFTER"\nexit\n';
   const values = [0, 2, "bad", true, null].map((value) => ({
     globals: { hostValue: value, hostOther: value },
     says: typeof value === "number" ? ["AFTER"] : null,
   }));
-  const c: HeldCase = { name: "ownDefault", source, slice: true, values };
+  const c: HeldCase = { name: "domain-nested", source, slice: true, values };
   const mode = HELD_MODES[0]!;
-  const allowance = Math.min(
-    ...heldStops(c, mode, Number.MAX_SAFE_INTEGER).map((stop) => stop.allowance),
-  );
+  const allowance = 1766;
   const { run: unstopped } = heldUnstopped(c, mode);
   const judge = (stopped: StopRun): string[] =>
     stopProblems({
@@ -2241,7 +2304,8 @@ test("the stop oracle refuses a stopped run whose without leaves the run's allow
       violating: values.filter((each) => each.says === null).map((each) => each.globals),
     });
   const kept = heldRun(c, mode, allowance);
-  assert.equal(kept.answers.budget.settled, true);
+  assert.deepEqual([kept.answers.budget.stoppedIn, kept.answers.budget.settled], ["walk", true]);
+  assert.ok(kept.result.plan !== null);
   // (the oracle measures the content: it reruns `without`)
   let reruns = 0;
   assert.deepEqual(
@@ -3661,8 +3725,8 @@ test("a settled stop keeps a projection's read obligations where one literal lac
  * #1563's forms structure does not decide: an element whose kinds the solver derives by a rule (a conversion's here; an
  * operation's, a fallback's, a `get`'s and a comparison's alike) is not decided after a stop, so where the walk stopped
  * before the receiver's element was read, the default's mark stands against `unknown`, "not checked (budget)" at the
- * default, and the oracle reports the unstopped check lost and `bad` running on (#1580, for #1526's completion).
- * Forward with the sharing, at every eighth settled stop.
+ * default, and the oracle reports the unstopped check lost; the program declines at the default, where before it ran
+ * `bad` on (#2183). Forward with the sharing, at every eighth settled stop.
  */
 test("a settled stop reports an unused get's default lost where only a rule decides its family (#1563)", () => {
   const c = unusedGet("conversion", [], "[toInteger(hostValue, default: 3)]");
@@ -3685,12 +3749,19 @@ test("a settled stop reports an unused get's default lost where only a rule deci
     const found = heldProblems(c, mode, allowance, unstopped);
     if (found.length === 0) continue;
     reported += 1;
-    assert.deepEqual(
-      found,
-      [
-        `unowned check ${JSON.stringify(lost)}`,
-        'forbidden {"hostValue":2,"hostOther":"bad"} said ["BEFORE","AFTER"]',
-      ],
+    assert.deepEqual(found, [`unowned check ${JSON.stringify(lost)}`], `${phase} @${allowance}`);
+    assert.throws(
+      () =>
+        mode.run(() =>
+          withTestAllowance(allowance, () =>
+            compileSourceWithBackend(
+              c.source,
+              { globals: ["hostValue", "hostOther"] },
+              CORE_BACKEND,
+            ),
+          ),
+        ),
+      (error) => error instanceof CandidateOutsideSlice && error.what === DEFAULT_LOST,
       `${phase} @${allowance}`,
     );
     const marks = mode
