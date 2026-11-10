@@ -55,7 +55,8 @@ test("the core gives the expected record for every record of the cells it comple
   }
   assert.deepEqual(Object.fromEntries(held), {
     "the adapters' records (S9b)": 3,
-    "the route rule's corridor across locations (#1938)": 18,
+    "the route rule's corridor across locations (#1938)": 17,
+    "a method no member of a receiver's union supports (#2258)": 1,
     "a written optional load's definite number error (#1173, listed in #1938)": 1,
     "a static warning of S9b's otherwise (#1737)": 7,
     "U4's consumer remainder (#2025)": 3,
@@ -105,6 +106,10 @@ test("each stage 3b record held by name exists, has an N cell, and differs in ev
     ],
     ["cp9-cells/3b/invalidation/sort/changed", "a fixture expectation awaiting its ruling (#2025)"],
     ["cp9-cells/r49/sharing/record-aliases/guarded", "the numeric crossover (#1173, #2025)"],
+    [
+      "cp9-cells/r46/m3/astra-m3/routes/method-null-kind",
+      "a method no member of a receiver's union supports (#2258)",
+    ],
   ]);
   const causeOf = (name: string, lines: readonly string[]): string => {
     const named = assigned.get(name);
