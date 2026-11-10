@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 import { buildReport } from "./report.mjs";
 import { isParsedRow, parseRow, sectionsOf } from "./lib/records.mjs";
+import { cellName } from "./cells.mjs";
 import { SHAPES } from "./lib/row-shapes.mjs";
 import { NULLABLE, strictRecord } from "./lib/evidence.mjs";
 import { cellOf, isValidated, NUMBERS, validateSample } from "./validate.mjs";
@@ -1073,11 +1074,123 @@ const RELATIONS = [
     "1 CDP send errors",
   ],
   [
+    "taps: a delivery no send has",
+    "taps chromium main",
+    (r) => (r.result.deliveries[1].id = 9),
+    ["counts", "timing"],
+    "1 taps off their grid point",
+  ],
+  [
     "taps: a tap off its grid point",
     "taps chromium main",
     (r) => (r.result.deliveries[1].x = 40),
     ["counts", "timing"],
     "1 taps off their grid point",
+  ],
+  // Sol final r1, F1 and the inventory's scope sites (orchestrator 2's ruling (a)): an ended transaction's session put
+  // without its observation or its scope, or a trial without its scope, is no evidence, its cached negative agreeing.
+  [
+    "keep: a committed session put without its observation (Sol final r1)",
+    "keepHandler chromium",
+    (r) => {
+      r.result.outcome = "not observed within 30 s";
+      r.result.transactions[0].puts[0].observedMs = null;
+    },
+    ["timing"],
+    "the trial's transaction 0: a session put's observed scene time",
+  ],
+  [
+    "keep: a committed session put without its scope",
+    "keepHandler chromium",
+    (r) => {
+      r.result.outcome = "not observed within 30 s";
+      r.result.transactions[0].puts[0].scope = null;
+    },
+    ["timing"],
+    "the trial's transaction 0: a session put's scope",
+  ],
+  [
+    "keep: the trial without its scope",
+    "keepHandler chromium",
+    (r) => {
+      r.result.outcome = "not observed within 30 s";
+      delete r.result.scope;
+    },
+    ["timing"],
+    "missing evidence: row.result.scope",
+  ],
+  [
+    "session: a page's committed session put without its observation",
+    "session chromium main",
+    (r) => (r.result.probe.cold.transactions[0].puts[0].observedMs = null),
+    ["counts", "timing"],
+    "the cold page's transaction 0: a session put's observed scene time",
+  ],
+  // The implied sites' ordering rows (Sol final r1, F3): each breaks both the earlier check and the implied condition,
+  // so the earlier check's reason pins which one speaks first.
+  [
+    "first save: a commit before the press (ordering)",
+    "session chromium main",
+    (r) => (r.result.probe.cold.transactions[0].end = 554),
+    ["counts", "timing"],
+    "the cold page's transaction 0: its start → its end",
+  ],
+  [
+    "keep: a commit before the hiding (ordering)",
+    "keepHandler chromium",
+    (r) => (r.result.transactions[0].end = 99),
+    ["timing"],
+    "the trial's transaction 0: its start → its end",
+  ],
+  // The absence sites' witnesses: a value absent where its context requires it makes the cell incomplete.
+  [
+    "bridge: a request without its reply",
+    "bridge chromium worker",
+    (r) => (r.result.requests[1].replyAt = null),
+    ["timing"],
+    "start: request → reply (ms)",
+  ],
+  [
+    "bridge: the Worker's reply absent",
+    "bridge chromium worker",
+    (r) => r.result.workerLog.splice(2, 1),
+    ["timing"],
+    "prepare: Worker receipt → reply (ms)",
+  ],
+  [
+    "session: a worker build without its engine Worker's requests",
+    "session chromium worker",
+    (r) => (r.result.bytes.requests = r.result.bytes.requests.filter((q) => q.target === "page")),
+    ["counts"],
+    "requests of the engine Worker's target (count)",
+  ],
+  [
+    "heap: the engine Worker's reading absent",
+    "session chromium worker",
+    (r) => (r.result.memory[0].workers[0].usedBytes = null),
+    ["counts"],
+    "heap, engine Worker, at Start enabled (bytes)",
+  ],
+  [
+    "instrumented: the probe's gaps absent",
+    "sessionInstrumented chromium worker",
+    (r) => delete r.result.probe.cold.gaps,
+    ["counts", "crossClock", "timing"],
+    "missing evidence: row.result.probe.cold.gaps",
+  ],
+  [
+    "first save: still open",
+    "session chromium main",
+    (r) => Object.assign(r.result.probe.cold.transactions[0], { end: null, outcome: null }),
+    ["counts", "timing"],
+    "first save: the first save never ended",
+  ],
+  [
+    "first save: long tasks absent where the engine reports them",
+    "session chromium main",
+    (r) => (r.result.probe.cold.longTasks = null),
+    ["timing"],
+    "first save: long tasks in that span (ms)",
   ],
 ];
 
@@ -1198,6 +1311,90 @@ test("the strict reader refuses every write, and a reflective read of a parsed c
   assert.deepEqual(missing.get("timing").problems, ["missing evidence: row.result.baselineMs"]);
 });
 
+test("Sol final r1, F1: a committed session put without its observation fails its keep cell through the report; valid negatives, plan puts and open transactions stay values", () => {
+  const trial = (base, change) => {
+    const fixture = clone(BASES[base]);
+    change(fixture.result);
+    return fixture;
+  };
+  const outcome = (fixture) => {
+    const name = cellName(axes(fixture));
+    const report = buildReport([parseRow(fixture)], "r0");
+    return {
+      incomplete: report.incomplete.some((line) => line.startsWith(`- ${name}:`)),
+      completed: report.summary[name]?.["completed while hidden"]?.median ?? null,
+    };
+  };
+  for (const base of ["keepHandler chromium", "keepCompletion pixel"]) {
+    // The counterexample, its cached negative agreeing: the observation null, or deleted.
+    for (const missing of [(put) => (put.observedMs = null), (put) => delete put.observedMs])
+      assert.deepEqual(
+        outcome(
+          trial(base, (result) => {
+            result.outcome = "not observed within 30 s";
+            missing(result.transactions[0].puts[0]);
+          }),
+        ),
+        { incomplete: true, completed: null },
+        base,
+      );
+    // A valid observation not later than the baseline is an observed negative; a later one completes.
+    assert.deepEqual(
+      outcome(
+        trial(base, (result) => {
+          result.outcome = "not observed within 30 s";
+          result.transactions[0].puts[0].observedMs = 4;
+        }),
+      ),
+      { incomplete: false, completed: 0 },
+      `${base}: observed 4`,
+    );
+    assert.deepEqual(outcome(trial(base, () => {})), { incomplete: false, completed: 1 }, base);
+    // A plan put has no observation, and a transaction still open committed nothing: both stay valid.
+    assert.deepEqual(
+      outcome(
+        trial(base, (result) => {
+          result.transactions[0].puts.push({ store: "plans", scope: null, observedMs: null });
+          result.transactions.push({
+            start: 350,
+            end: null,
+            outcome: null,
+            puts: [{ store: "sessions", scope: null, observedMs: null }],
+          });
+        }),
+      ),
+      { incomplete: false, completed: 1 },
+      `${base}: a plan put and an open transaction`,
+    );
+  }
+});
+
+test("Sol final r1, F2: the parsed copy holds no raw record; ignored and cached data are unreachable, and a later change of the row reaches nothing", () => {
+  const fixture = clone(BASES["session chromium main"]);
+  fixture.result.metrics = { JSHeapUsedSize: 1 };
+  const handle = parseRow(fixture);
+  const sections = sectionsOf(handle);
+  const bytes = strictRecord(sections.get("bytes").value, "row.result").bytes;
+  // An ignored subtree (a discarded page's requests, the account's own ok) and a cached phase flag are not in the copy,
+  // by a property read or by a descriptor.
+  assert.throws(() => bytes.discarded[0].requests, /missing evidence/u);
+  assert.equal(Object.getOwnPropertyDescriptor(bytes.discarded[0], "requests"), undefined);
+  assert.equal(Object.getOwnPropertyDescriptor(bytes, "ok"), undefined);
+  assert.throws(() => bytes.requests[0].beforeStartEnabled, /missing evidence/u);
+  assert.throws(
+    () => strictRecord(sections.get("timing").value, "row.result").metrics,
+    /missing evidence/u,
+  );
+  // No copy is an alias of the row: changing the row after the parse changes no derived value.
+  const before = validateSample(axes(fixture), handle);
+  fixture.result.probe.cold.states[0].frame = 999;
+  fixture.result.probe.repeat.changes[0].frame = 950;
+  fixture.result.bytes.requests[0].encodedBytes = 1_000_000;
+  fixture.result.bytes.discarded[0].requests.push({ url: "/raw" });
+  assert.deepEqual(validateSample(axes(fixture), handle), before);
+  assert.notEqual(sections.get("timing").value.probe.cold, fixture.result.probe.cold);
+});
+
 test("every NULLABLE name is an optional leaf of some section, never of the header alone", () => {
   const optionalKeys = new Set();
   const walk = (shape, key, inSection) => {
@@ -1228,8 +1425,11 @@ test("every NULLABLE name is an optional leaf of some section, never of the head
  * position: its file, its top-level declaration and its message. A message that several positions share, which no
  * reason can tell apart, is witnessed per position (`SHARED`), by the rows that reach that position or the position
  * whose check always precedes it. A message with little literal text (`WEAK`) is witnessed only by the rows named for
- * it. The limit: a check written in another form (a bare comparison that throws, a new module) is outside the claim
- * until its kind is added here.
+ * it. A site an earlier check always precedes (`IMPLIED`) has an ordering row that breaks both and expects the earlier
+ * one's reason. A second claim covers absence (Sol final r1, F1): every `nullable(` read and every `??` or `||` in
+ * these modules (`absenceSites`, by position) has rows where its absence, in a context that requires the value, makes
+ * the cell incomplete, or a stated reason the absence is permitted (`ABSENCE`). The limit: a check written in another
+ * form (a bare comparison that throws, a new module) is outside both claims until its kind is added here.
  */
 const MODULES = ["validate.mjs", "lib/measure.mjs", "scenarios/keep.mjs", "scenarios/taps.mjs"];
 const PASS_THROUGH = new Set(["error.message", "...problems"]);
@@ -1458,6 +1658,319 @@ function checkSites() {
 }
 
 /**
+ * Every read of a value that may be absent, and every default applied where one may be, in `MODULES`: each `nullable(`
+ * call and each `??` and `||` in a module's code (comments and string text blanked). Each is a position: its file, its
+ * top-level declaration and its line's text (`#n` for a second on one line).
+ */
+function absenceSites() {
+  const found = [];
+  for (const file of MODULES) {
+    const text = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
+    const code = codeOf(text);
+    const lines = text.split("\n");
+    const declarations = [
+      ...code.matchAll(
+        /^(?:export\s+)?(?:async\s+)?(?:function\*?\s+([\w$]+)|(?:const|let)\s+([\w$]+))/gmu,
+      ),
+    ].map((m) => ({ index: m.index, name: m[1] ?? m[2] }));
+    const declarationOf = (index) =>
+      declarations.findLast((declaration) => declaration.index <= index)?.name ?? "(module)";
+    for (const m of code.matchAll(/\bnullable\s*\(|\?\?|\|\|/gu)) {
+      if (/^import\b/mu.test(code.slice(code.lastIndexOf("\n", m.index) + 1, m.index + 1)))
+        continue;
+      const line = text.slice(0, m.index).split("\n").length;
+      const kind = m[0].startsWith("nullable") ? "nullable" : m[0];
+      const base = `${file} ${declarationOf(m.index)} ${kind}: ${lines[line - 1].trim()}`;
+      const repeats = found.filter(
+        (site) => site.key === base || site.key.startsWith(`${base} #`),
+      ).length;
+      found.push({
+        key: repeats > 0 ? `${base} #${repeats + 1}` : base,
+        at: `${file}:${line}`,
+        kind,
+      });
+    }
+  }
+  return found;
+}
+
+/**
+ * Every read of a value that may be absent and every default where one may be (`absenceSites`), by position: the
+ * rows where its absence, in a context that requires the value, makes the cell incomplete, or why the absence is
+ * permitted (Sol final r1, F1, and orchestrator 2's ruling).
+ */
+const ABSENCE = {
+  'validate.mjs transactionsComplete nullable: const end = nullable(transaction, "end");': {
+    rows: [
+      "keep: a transaction with an outcome has its end",
+      "keep: an ended transaction has its outcome",
+    ],
+  },
+  'validate.mjs transactionsComplete nullable: const outcome = nullable(transaction, "outcome");': {
+    rows: [
+      "keep: a transaction with an outcome has its end",
+      "keep: an ended transaction has its outcome",
+    ],
+  },
+  'validate.mjs transactionsComplete nullable: if (nullable(put, "scope") === null)': {
+    rows: ["keep: a committed session put without its scope"],
+  },
+  'validate.mjs transactionsComplete nullable: if (nullable(put, "observedMs") === null)': {
+    rows: [
+      "keep: a committed session put without its observation (Sol final r1)",
+      "session: a page's committed session put without its observation",
+    ],
+  },
+  'validate.mjs sessionTiming ??: if (save?.ok !== true) problems.push(`first save: ${save?.reason ?? "no playable cold page"}`);':
+    {
+      permitted:
+        "the message of a first save already failed: its absence is reported, never a value",
+    },
+  'validate.mjs sessionTiming ||: if (cell.backend === "worker" && (worker === null || worker.readyMs === null))':
+    { rows: ["Worker start: ready present"] },
+  'validate.mjs sessionTiming nullable: nullable(turn, "sentAt") === null': {
+    rows: ["session: a turn without its records"],
+  },
+  'validate.mjs sessionTiming nullable: ? { ok: false, reason: nullable(turn, "reason") ?? "no records of the turn" }':
+    { rows: ["session: a turn without its records"] },
+  'validate.mjs sessionTiming ??: ? { ok: false, reason: nullable(turn, "reason") ?? "no records of the turn" }':
+    { rows: ["session: a turn without its records"] },
+  'validate.mjs sessionTiming nullable: : turnTimes(repeat, turn.sentAt, turn.before, nullable(turn, "end")),':
+    { rows: ["turn: neither settled nor ended"] },
+  'validate.mjs bridgeTiming nullable: const reply = nullable(request, "replyAt");': {
+    rows: ["bridge: a request without its reply"],
+  },
+  "validate.mjs keepTiming ??: return { outcome: derived.outcome, hiddenToCommitMs: derived.hiddenToCommitMs ?? null };":
+    {
+      permitted: "no capture while hidden: the interval does not exist, and its field is optional",
+    },
+  'validate.mjs BYTES ??: (r.bytes?.requests ?? []).filter((q) => q.target !== "page" && /engine/u.test(q.target))':
+    {
+      permitted:
+        "the field applies only on a worker build on a CDP engine, where the byte part reads the byte account strictly",
+    },
+  "validate.mjs BYTES ||: .length || null,": {
+    rows: ["session: a worker build without its engine Worker's requests"],
+  },
+  'validate.mjs KEEP_FIELDS ||: (r) => (r.outcome === "completed" || r.outcome === "durable after 1 s" ? 1 : 0),':
+    { permitted: "a condition, no default" },
+  "validate.mjs NUMBERS ??: (r) => summarize((r.turns ?? []).map((t) => t.feedbackMs)).median,": {
+    permitted: "the part's sample always holds its turns; a failed part is never read",
+  },
+  "validate.mjs NUMBERS ??: (r) => summarize((r.turns ?? []).map((t) => t.settledMs)).median,": {
+    permitted: "the part's sample always holds its turns; a failed part is never read",
+  },
+  "validate.mjs NUMBERS ??: (r) => (r.turns ?? []).filter((t) => t.ok !== false).length,": {
+    permitted: "the part's sample always holds its turns; a failed part is never read",
+  },
+  "validate.mjs NUMBERS ??: (r) => (r.turns ?? []).filter((t) => t.end).length,": {
+    permitted: "the part's sample always holds its turns; a failed part is never read",
+  },
+  "validate.mjs NUMBERS ??: (r) => summarize((r.diagnostics?.turns ?? []).filter(Boolean).map((t) => t.length)).median,":
+    { permitted: "the part's sample always holds its turns; a failed part is never read" },
+  "validate.mjs NUMBERS ??: (r.diagnostics?.gaps?.cold?.length ?? NaN) + (r.diagnostics?.gaps?.repeat?.length ?? NaN),":
+    { rows: ["instrumented: the probe's gaps absent"] },
+  "validate.mjs NUMBERS ??: (r.diagnostics?.gaps?.cold?.length ?? NaN) + (r.diagnostics?.gaps?.repeat?.length ?? NaN), #2":
+    { rows: ["instrumented: the probe's gaps absent"] },
+  "validate.mjs bytesOf ||: if (sample.bytes === null || sample.bytes === undefined) return null;":
+    { permitted: "the byte fields apply only where the byte part reads the byte account strictly" },
+  "validate.mjs bytesOf ||: (phase === null || inPhase(bytes, request, phase)),": {
+    permitted: "a condition: no phase means every request",
+  },
+  'validate.mjs bytesOf nullable: nullable(request, "failed") !== null ? sum : sum + (request.finished ? request[field] : NaN),':
+    { rows: ["byte account: every request finished or failed"] },
+  'validate.mjs heapAt nullable: (worker) => worker.engine && nullable(worker, "usedBytes") !== null,':
+    { rows: ["heap: the engine Worker's reading absent"] },
+  'validate.mjs request nullable: const request = (sample, op) => sample.requests.find((entry) => nullable(entry, "op") === op);':
+    { permitted: "a lookup key: a bridge request's op is required by its shape" },
+  'validate.mjs rtt nullable: const reply = nullable(found, "replyAt");': {
+    rows: ["bridge: a request without its reply"],
+  },
+  'validate.mjs UNITS ||: ["boolean", { cell: "timing", domain: (v) => v === 0 || v === 1, what: "neither 0 nor 1" }],':
+    { permitted: "a condition, no default" },
+  "validate.mjs AGGREGATE ??: if (!Object.hasOwn(PARTS[scenario] ?? {}, part))": {
+    permitted: "the table of parts, read at load: no record",
+  },
+  "validate.mjs runParts ??: ...(part.after ?? []).flatMap((before) => done[before].problems),": {
+    permitted: "the table of parts: no record",
+  },
+  "validate.mjs validateSample ??: const out = (cells[cellOf(field)] ??= { values: [], problems: [] });":
+    { permitted: "the cells' accumulator: no record" },
+  "validate.mjs validateSample ||: if (found === null || found === undefined) {": {
+    rows: ["a required field without a value"],
+  },
+  'lib/measure.mjs answerable nullable: const composer = nullable(state, "composer");': {
+    permitted: "the page shows no composer",
+  },
+  'lib/measure.mjs answerable nullable: nullable(state, "start") === null &&': {
+    permitted: "no start button is shown",
+  },
+  "lib/measure.mjs answerable ||: (state.buttons.some((button) => button.enabled) ||": {
+    permitted: "a condition, no default",
+  },
+  'lib/measure.mjs frameOf nullable: const frame = nullable(record, "frame");': {
+    rows: [
+      "playable: Start enabled has no frame",
+      "playable: the first control has no frame",
+      "turn: no feedback frame",
+    ],
+  },
+  "lib/measure.mjs firstControlAfter ??: return gate.states.find((state) => state.t > after && answerable(state)) ?? null;":
+    { rows: ["playable: no control after the input"] },
+  "lib/measure.mjs inputAfter ??: gate.inputs.find((input) => input.t >= after && input.trusted && types.includes(input.type)) ??":
+    { rows: ["playable: no trusted input after Start"] },
+  'lib/measure.mjs playable nullable: const start = nullable(state, "start");': {
+    rows: ["playable: Start never shown enabled"],
+  },
+  "lib/measure.mjs turnSettlement ??: read = (record, key) => record[key] ?? null,": {
+    permitted: "the page's own read in `SETTLED`; the derivations pass `nullable` (`turnTimes`)",
+  },
+  'lib/measure.mjs turnSettlement ||: (input.type === "pointerdown" || input.type === "touchstart" || input.type === "keydown"),':
+    { permitted: "a condition, no default" },
+  'lib/measure.mjs turnSettlement ||: (input.type === "pointerdown" || input.type === "touchstart" || input.type === "keydown"), #2':
+    { permitted: "a condition, no default" },
+  "lib/measure.mjs turnSettlement ??: ) ?? null;": { rows: ["turn: no input recorded"] },
+  "lib/measure.mjs turnSettlement ||: (state.buttons.some((button) => button.enabled) ||": {
+    permitted: "a condition, no default",
+  },
+  "lib/measure.mjs turnSettlement ??: const event = events[0] ?? null;": {
+    rows: ["turn: neither settled nor ended"],
+  },
+  "lib/measure.mjs turnSettlement ??: return { submission, settledAt: event?.at ?? null, by: event?.by ?? null, event };":
+    { permitted: "the page's wait reads `settledAt`; `turnTimes` reads the event itself" },
+  "lib/measure.mjs turnSettlement ??: return { submission, settledAt: event?.at ?? null, by: event?.by ?? null, event }; #2":
+    { permitted: "the page's wait reads `settledAt`; `turnTimes` reads the event itself" },
+  'lib/measure.mjs turnTimes nullable: const { submission, event } = turnSettlement(gate, sentAt, nullable(before, "control"), nullable);':
+    {
+      permitted:
+        "a state before the turn with no foreground controls root, such as one still showing Start (a complete variant)",
+    },
+  'lib/measure.mjs turnTimes nullable: nullable(record, "shownFrame") !== null,': {
+    permitted: "a row not yet drawn; the first row's time is no reported field",
+  },
+  'lib/measure.mjs publishesAfter nullable: nullable(transaction, "outcome") === "complete" &&': {
+    permitted: "live code only, which no derivation calls",
+  },
+  'lib/measure.mjs publishesAfter ||: (put) => put.store === "sessions" && (scope === null || nullable(put, "scope") === scope),':
+    { permitted: "live code only, which no derivation calls" },
+  'lib/measure.mjs publishesAfter nullable: (put) => put.store === "sessions" && (scope === null || nullable(put, "scope") === scope),':
+    { permitted: "live code only, which no derivation calls" },
+  'lib/measure.mjs firstSave nullable: const outcome = nullable(save, "outcome");': {
+    rows: ["first save: still open"],
+  },
+  'lib/measure.mjs firstSave ??: return { ok: false, outcome, reason: `the first save ${outcome ?? "never ended"}` };':
+    { rows: ["first save: still open"] },
+  'lib/measure.mjs firstSave nullable: const longTasks = nullable(gate, "longTasks");': {
+    rows: ["first save: long tasks absent where the engine reports them"],
+  },
+  'lib/measure.mjs firstSave nullable: scope: nullable(session, "scope"),': {
+    permitted: "a scope the first save does not report",
+  },
+  'lib/measure.mjs firstSave nullable: planScope: nullable(plan, "scope"),': {
+    permitted: "a scope the first save does not report",
+  },
+  "lib/measure.mjs firstSave ||: blocked === null || blocked.length === 0": {
+    permitted: "the longest long task: no reported field",
+  },
+  'lib/measure.mjs firstSave nullable: longTasksUnavailable: nullable(gate, "longTasksUnavailable"),':
+    { permitted: "the reason a browser gives: no reported field" },
+  'lib/measure.mjs workerStart nullable: const ready = nullable(worker, "ready");': {
+    rows: ["Worker start: ready present"],
+  },
+  'lib/measure.mjs requestsOf nullable: .filter((entry) => entry.dir === "reply" && nullable(entry, "id") !== null)':
+    { permitted: "a message outside a request (the Worker's ready) has no ID" },
+  'lib/measure.mjs requestsOf nullable: .filter((entry) => entry.dir === "post" && nullable(entry, "id") !== null)':
+    { permitted: "a message outside a request (the Worker's ready) has no ID" },
+  "lib/measure.mjs requestsOf ??: const reply = replies.get(post.id) ?? null;": {
+    rows: ["instrumented: the start request's reply"],
+  },
+  'lib/measure.mjs requestsOf nullable: op: nullable(post, "op"),': {
+    permitted:
+      "a post without an op is no request the report names; a named op's missing reply fails its field",
+  },
+  'lib/measure.mjs requestsOf nullable: reply === null ? null : span(post.at, reply.at, `${nullable(post, "op")}\'s round trip`),':
+    { permitted: "the label of a span only" },
+  'lib/measure.mjs requestsOf nullable: replySize: reply === null ? null : nullable(reply, "size"),':
+    { permitted: "only captureKeep's reply has a size, and its field is optional" },
+  'lib/measure.mjs workerSideOf nullable: (entry) => entry.dir === "request" && nullable(entry, "id") === request.id,':
+    { permitted: "a message outside a request (the Worker's ready) has no ID" },
+  'lib/measure.mjs workerSideOf nullable: (entry) => entry.dir === "reply" && nullable(entry, "id") === request.id,':
+    { permitted: "a message outside a request (the Worker's ready) has no ID" },
+  "lib/measure.mjs workerSideOf ||: receipt === undefined || reply === undefined": {
+    rows: ["bridge: the Worker's reply absent"],
+  },
+  'scenarios/keep.mjs storedObservedMs ??: read.result?.snapshotJson ?? "",': {
+    permitted: "live code only, which no derivation calls",
+  },
+  'scenarios/keep.mjs hiddenCapture ||: (event.type === "resume" ||': {
+    permitted: "a condition, no default",
+  },
+  'scenarios/keep.mjs hiddenCapture nullable: const end = (transaction) => nullable(transaction, "end");':
+    {
+      permitted:
+        "an open transaction committed nothing; an end without its outcome is refused first (`transactionsComplete`)",
+    },
+  'scenarios/keep.mjs hiddenCapture nullable: transaction.puts.some((put) => put.store === "sessions" && nullable(put, "scope") === scope),':
+    { rows: ["keep: a committed session put without its scope"] },
+  'scenarios/keep.mjs hiddenCapture nullable: nullable(transaction, "outcome") === "complete" &&': {
+    permitted:
+      "an open transaction committed nothing; an end without its outcome is refused first (`transactionsComplete`)",
+  },
+  'scenarios/keep.mjs hiddenCapture nullable: (put) => put.store === "sessions" && (nullable(put, "observedMs") ?? -Infinity) > baselineMs,':
+    { rows: ["keep: a committed session put without its observation (Sol final r1)"] },
+  'scenarios/keep.mjs hiddenCapture ??: (put) => put.store === "sessions" && (nullable(put, "observedMs") ?? -Infinity) > baselineMs,':
+    { rows: ["keep: a committed session put without its observation (Sol final r1)"] },
+  'scenarios/keep.mjs hiddenCapture nullable: const outcome = nullable(transaction, "outcome");': {
+    permitted:
+      "an open transaction committed nothing; an end without its outcome is refused first (`transactionsComplete`)",
+  },
+  'scenarios/keep.mjs hiddenCapture ||: return (outcome === "abort" || outcome === "error") && end(transaction) <= boundary;':
+    { permitted: "a condition, no default" },
+  'scenarios/keep.mjs keepOutcome nullable: const storedMs = nullable(record, "storedMs");': {
+    permitted: "the store held no snapshot: an observed negative (design r1, C10)",
+  },
+  'scenarios/keep.mjs keepOutcome nullable: const found = hiddenCapture(record, hiddenAt, nullable(record, "scope"), record.baselineMs);':
+    { rows: ["keep: the trial without its scope"] },
+  "scenarios/taps.mjs calibrate ||: if (element === null || element.closest(interactive) !== null) return false;":
+    { permitted: "live code only, which no derivation calls" },
+  "scenarios/taps.mjs tapCounts ||: if (!Array.isArray(ledger) || !Array.isArray(deliveries) || !(window?.toMs >= window?.fromMs))":
+    {
+      permitted:
+        "the shapes make both lists arrays, and the taps window's span orders the window first (`IMPLIED`)",
+    },
+  "scenarios/taps.mjs tapCounts ||: if (!Array.isArray(ledger) || !Array.isArray(deliveries) || !(window?.toMs >= window?.fromMs)) #2":
+    {
+      permitted:
+        "the shapes make both lists arrays, and the taps window's span orders the window first (`IMPLIED`)",
+    },
+  "scenarios/taps.mjs tapCounts ||: sent === undefined ||": {
+    rows: ["taps: a delivery no send has"],
+  },
+  "scenarios/taps.mjs tapCounts ||: Math.abs(tap.x - sent.x) > TAP_SPACING / 2 ||": {
+    rows: ["taps: a tap off its grid point"],
+  },
+};
+
+test("every absence read and default in the derivation modules is witnessed or permitted, by position", () => {
+  const rows = new Set(RELATIONS.map(([name]) => name));
+  const keys = absenceSites().map((site) => site.key);
+  assert.deepEqual(
+    keys.filter((key) => !Object.hasOwn(ABSENCE, key)),
+    [],
+    "absence sites without an entry",
+  );
+  assert.deepEqual(
+    Object.keys(ABSENCE).filter((key) => !keys.includes(key)),
+    [],
+    "entries without their site",
+  );
+  for (const [key, entry] of Object.entries(ABSENCE))
+    if (entry.rows !== undefined)
+      for (const name of entry.rows) assert.ok(rows.has(name), `${key}: no row ${name}`);
+    else assert.ok(entry.permitted.length > 0, key);
+});
+
+/**
  * The sites whose message has little literal text, witnessed only by the rows named here (their own reasons), so a
  * loose pattern cannot be matched by another site's message.
  */
@@ -1497,20 +2010,35 @@ const SHARED = {
 };
 
 /**
- * The sites an earlier check of the same records always precedes, so that no row can reach them, each with the site
- * whose row witnesses it and why: weakening such a site lets no wrong value through.
+ * The sites an earlier check of the same records always precedes, so that no row can reach them alone: each with that
+ * earlier site (`by`) and its ordering row (`row`), which breaks both checks and expects the earlier one's reason, so
+ * a reorder fails a test (Sol final r1, F3). Weakening an implied site lets no wrong value through.
  */
 const IMPLIED = {
   // `between` reads the marks `bridgeTiming` has ordered.
-  "`the bridge page's ${from} → ${to}`": '"the bridge page\'s Worker start"',
+  "`the bridge page's ${from} → ${to}`": {
+    by: '"the bridge page\'s Worker start"',
+    row: "bridge: Worker construction → ready",
+  },
   // The first save is the first transaction to start after the press, and every transaction is ordered first.
-  "\"Start's input → the first save's commit\"":
-    "`${where} transaction ${index}: its start → its end`",
-  '"the first save\'s transaction"': "`${where} transaction ${index}: its start → its end`",
+  "\"Start's input → the first save's commit\"": {
+    by: "`${where} transaction ${index}: its start → its end`",
+    row: "first save: a commit before the press (ordering)",
+  },
+  '"the first save\'s transaction"': {
+    by: "`${where} transaction ${index}: its start → its end`",
+    row: "first save: its start → its commit",
+  },
   // A capture counts only when it started after the hiding (`hiddenCapture`), and every transaction is ordered first.
-  '"hidden → the commit"': "`${where} transaction ${index}: its start → its end`",
+  '"hidden → the commit"': {
+    by: "`${where} transaction ${index}: its start → its end`",
+    row: "keep: a commit before the hiding (ordering)",
+  },
   // `tapCounts` refuses only an unordered window, which the taps window's span refuses first.
-  '"the send ledger, the deliveries and the window"': '"the taps window"',
+  '"the send ledger, the deliveries and the window"': {
+    by: '"the taps window"',
+    row: "taps: the window",
+  },
 };
 
 test("every check site in the derivation modules is readable and has a row that fails when it is weakened", () => {
@@ -1520,7 +2048,8 @@ test("every check site in the derivation modules is readable and has a row that 
   const byKey = new Map(sites.map((site) => [site.key, site]));
   const sharing = (site) => sites.filter((other) => other.regex.source === site.regex.source);
   const texts = new Set(sites.map((site) => site.text));
-  for (const text of [...Object.keys(WEAK), ...Object.keys(IMPLIED), ...Object.values(IMPLIED)])
+  const implied = Object.values(IMPLIED).map(({ by }) => by);
+  for (const text of [...Object.keys(WEAK), ...Object.keys(IMPLIED), ...implied])
     assert.ok(texts.has(text), `no site ${text}`);
   for (const [key, entry] of Object.entries(SHARED)) {
     assert.ok(byKey.has(key), `no site ${key}`);
@@ -1538,8 +2067,11 @@ test("every check site in the derivation modules is readable and has a row that 
         ? witnessed(byKey.get(entry.impliedBy))
         : named(site, entry.rows);
     }
-    if (Object.hasOwn(IMPLIED, site.text))
-      return witnessed(sites.find((other) => other.text === IMPLIED[site.text]));
+    if (Object.hasOwn(IMPLIED, site.text)) {
+      const { by, row } = IMPLIED[site.text];
+      const earlier = sites.find((other) => other.text === by);
+      return witnessed(earlier) && rows.has(row) && earlier.regex.test(rows.get(row)[4]);
+    }
     if (Object.hasOwn(WEAK, site.text)) return named(site, WEAK[site.text]);
     return site.literal >= 16 && RELATIONS.some((row) => site.regex.test(row[4]));
   };

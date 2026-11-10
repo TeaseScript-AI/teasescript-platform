@@ -68,6 +68,8 @@ const gate = object({
       start: time,
       end: optional(time),
       outcome: optional(string),
+      // A plan put has no scope and no scene time; an ended transaction's session put requires both, a rule this shape
+      // cannot state: `transactionsComplete` (`validate.mjs`) requires them.
       puts: array(
         object({
           store: string,
@@ -186,7 +188,7 @@ const sessionFields = {
 const keepTrial = object({
   ok: section("timing", ignored),
   outcome: section("timing", cached(string)),
-  scope: section("timing", optional(string)),
+  scope: section("timing", string),
   baselineMs: section("timing", time),
   lifecycle: section("timing", array(object({ type: string, t: time, visibility: string }))),
   transactions: section("timing", gate.fields.transactions),

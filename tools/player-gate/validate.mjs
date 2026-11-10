@@ -28,7 +28,8 @@ import { tapCounts } from "./scenarios/taps.mjs";
 /**
  * The kept-session transactions the probe recorded (`probe.mjs`), each open (no end, no outcome) or ended with both,
  * its start before its end: the probe sets the two together, so one without the other is no evidence (Sol code r1,
- * #2253).
+ * #2253). An ended transaction's session put holds its scope and the scene time it kept: a plan put has neither, but
+ * a session put without them cannot be told from a lost record, so it is no evidence either (Sol final r1, F1).
  */
 function transactionsComplete(transactions, where) {
   transactions.forEach((transaction, index) => {
@@ -38,8 +39,17 @@ function transactionsComplete(transactions, where) {
       throw new MissingEvidence(
         `${where} transaction ${index}: its ${end === null ? "end" : "outcome"}, beside its ${end === null ? "outcome" : "end"}`,
       );
-    if (end !== null)
-      span(transaction.start, end, `${where} transaction ${index}: its start → its end`);
+    if (end === null) return;
+    span(transaction.start, end, `${where} transaction ${index}: its start → its end`);
+    for (const put of transaction.puts) {
+      if (put.store !== "sessions") continue;
+      if (nullable(put, "scope") === null)
+        throw new MissingEvidence(`${where} transaction ${index}: a session put's scope`);
+      if (nullable(put, "observedMs") === null)
+        throw new MissingEvidence(
+          `${where} transaction ${index}: a session put's observed scene time`,
+        );
+    }
   });
 }
 

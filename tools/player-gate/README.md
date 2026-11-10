@@ -30,9 +30,12 @@ says beside the label what that claims.
   they derive. Examples: each reply after its request, a tap's handler after its event, a keep trial's hiding, a
   transaction's end with its outcome.
 - **Every check has a witness.** A kit test (`records.test.mjs`) reads every `span` call, `ok: false` return,
-  `problems.push` and evidence-error `throw` in the derivation modules. Each must have a row whose reason is its
-  message, so the row fails when the check is weakened. A check written in another form, or in another module, is
-  outside that test until its kind is added.
+  `problems.push` and evidence-error `throw` in the derivation modules. Each named check site needs a witness at that
+  position or an explicit implication from an earlier check. An implied site has an ordering row instead of an
+  independently killing one: the row breaks both checks and expects the earlier one's reason, so a reorder fails a
+  test. Every `nullable(` read and every `??` or `||` default there either has a row where its absence, in a context
+  that requires the value, makes the cell incomplete, or a stated reason the absence is permitted. A check written in
+  another form, or in another module, is outside that test until its kind is added.
 - **Three cells per scenario**, each its own failure boundary:
   - the timing cell (`ms`, `boolean`): the only one in the headline, the summary (`--json`) and the R0 comparison;
   - `<cell> / bytes and counts`;
