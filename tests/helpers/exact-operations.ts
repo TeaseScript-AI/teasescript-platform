@@ -7,16 +7,17 @@ import ts from "typescript";
  * throwing-`Math` run in that test, they are what the claim "a normalized colour is the same text in every engine"
  * rests on beyond the conversion as it stands, whose evidence is the four-engine job over the sample, not a guard that
  * runs. The checks, over `color.ts`, `color-text.ts`, `deterministic-math.ts` and `numeric-functions.ts`:
- * 1. `Math` only as a direct call of an exact member or a read of `PI`; no `**` on numbers; no `globalThis`, `window`
- *    or `self`; each file's module references, as the compiler collects them, equal to `PINNED_IMPORTS`, its import
- *    declarations equal to it, and no `import()` or `require` call;
+ * 1. `Math` only as a direct call of an exact member or a read of `PI`; no `**` on numbers; the identifiers
+ *    `globalThis`, `window`, `self` and `require` occur nowhere outside a property-name position; each file's module
+ *    references, as the compiler collects them, equal to `PINNED_IMPORTS`, its import declarations equal to it, and no
+ *    `import()`;
  * 2. `src/color-text.ts` closed as a whole: numbers become text only by `toPrecision(15)` or `toPrecision(17)`;
  * 3. the exported `normalizeColor` is one exported function declaration whose every return is `null` or the one
  *    template of three calls of the text module's exported `formatNumber`, itself one exported function declaration,
  *    all resolved through the exports by the compiler;
  * 4. every decimal numeric literal has at most 20 significant digits, which ECMAScript reads exactly; non-decimal
  *    integer literals have exactly specified values.
- * Not checked (the residual): a callable reached by property and called (`Number.constructor`); float storage
+ * Not checked (the residual): a callable reached by property and called (`Number.constructor`, `module.require`); float storage
  * (`DataView` writes and their NaN bits); aliased writes to support data; an implicit number-to-text conversion or a
  * read of host state inside the conversion, which cannot reach the output as text (check 3) but could enter the
  * arithmetic as a value; string-to-number parsing or coercion of a long decimal inside the conversion; colorjs.io's
@@ -188,15 +189,10 @@ export function exactOperationEscapes(overrides: Readonly<Record<string, string>
       }
       if (ts.isCallExpression(node) && node.expression.kind === K.ImportKeyword)
         escape(node, "a dynamic import");
-      if (
-        ts.isCallExpression(node) &&
-        ts.isIdentifier(node.expression) &&
-        node.expression.text === "require"
-      )
-        escape(node, "a require call");
       if (ts.isIdentifier(node) && !isName(node)) {
         const parent = node.parent;
-        if (["globalThis", "window", "self"].includes(node.text)) escape(node, node.text);
+        if (["globalThis", "window", "self", "require"].includes(node.text))
+          escape(node, node.text);
         const declares =
           (ts.isVariableDeclaration(parent) ||
             ts.isParameter(parent) ||

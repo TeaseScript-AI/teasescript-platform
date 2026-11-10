@@ -425,6 +425,48 @@ export const normalizeColor = (value: unknown): string | null => normalizeColorI
       ),
     ],
     [
+      "an optional require call",
+      added(
+        "src/color.ts",
+        'export function loadSupport(require?: NodeJS.Require): unknown {\n  return require?.("node:os");\n}',
+      ),
+    ],
+    [
+      "a non-null require call on an injected loader",
+      added(
+        "src/color.ts",
+        'export function loadSupport(require: NodeJS.Require | undefined): unknown {\n  return require!("node:os");\n}',
+      ),
+    ],
+    [
+      "a parenthesized require call",
+      added(
+        "src/color.ts",
+        'export function loadSupport(require: NodeJS.Require): unknown {\n  return (require)("node:os");\n}',
+      ),
+    ],
+    [
+      "an asserted require call",
+      added(
+        "src/color.ts",
+        'export function loadSupport(loader: unknown): unknown {\n  return (require as NodeJS.Require)("node:os") ?? loader;\n}',
+      ),
+    ],
+    [
+      "a satisfies-checked require call",
+      added(
+        "src/color.ts",
+        'export function loadSupport(): unknown {\n  return (require satisfies NodeJS.Require)("node:os");\n}',
+      ),
+    ],
+    [
+      "a require parameter alone",
+      added(
+        "src/color.ts",
+        "export function takesLoader(require: NodeJS.Require | undefined): boolean {\n  return true;\n}",
+      ),
+    ],
+    [
       "a module reference outside the pinned list",
       added("src/deterministic-math.ts", 'import "./angle.js";'),
     ],
