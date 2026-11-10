@@ -319,6 +319,68 @@ function resolvedError(
   return path === null ? null : { requires, path };
 }
 
+/**
+ * Whether every instruction of `plan` whose span is `own` evaluates nothing besides the site's own read and the
+ * operations around it that consume it, apart from literals, collections of them, parentheses, plain reads of a
+ * binding or a temporary, a call's argument holders and a method callee's receiver (#2183, Codex r2). So the value a snapshot holds before the instruction is the value its
+ * consumer reads (nothing before it in the instruction can change it), and a failure inside the instruction on that
+ * value is the consumer's or the read's (nothing before it can fail first). Any other instruction leaves the error
+ * unresolved, read as before.
+ */
+function isolated(plan: InstructionPlan, own: Span, site: SourceSite): boolean {
+  const consumed = { start: site.start, end: site.end };
+  const pure = (value: unknown): boolean => {
+    if (Array.isArray(value)) return value.every(pure);
+    if (value === null || typeof value !== "object") return true;
+    const span = spanOf(value);
+    const kind = "kind" in value ? value.kind : undefined;
+    if (span !== null && typeof kind === "string") {
+      // (the site's own read, and the operations it lies inside, which consume it)
+      if (within(span, consumed)) return true;
+      if (!within(consumed, span) && !QUIET.has(kind)) return false;
+    }
+    return Object.entries(value).every(([key, part]) =>
+      key === "span"
+        ? true
+        : // (a method call's callee names the method on its receiver: only the receiver is evaluated)
+          key === "callee" &&
+            kind === "call" &&
+            part !== null &&
+            typeof part === "object" &&
+            "kind" in part &&
+            part.kind === "property" &&
+            "object" in part
+          ? pure(part.object)
+          : pure(part),
+    );
+  };
+  return plan.instructions.every((instruction) => {
+    const span = spanOf(instruction);
+    if (span === null || span.start !== own.start || span.end !== own.end) return true;
+    return Object.entries(instruction).every(([key, part]) => key === "span" || pure(part));
+  });
+}
+
+/**
+ * Expression kinds that read nothing a run changes and cannot fail, with a call's argument holders (`positional`,
+ * `named`): `isolated`'s besides the site's read.
+ */
+const QUIET: ReadonlySet<string> = new Set([
+  "positional",
+  "named",
+  "literal",
+  "regex",
+  "duration",
+  "calendarDuration",
+  "list",
+  "object",
+  "set",
+  "dict",
+  "group",
+  "identifier",
+  "temporary",
+]);
+
 /** A binding and the property names and element positions read below it. */
 interface ValuePath {
   readonly name: string;
@@ -1348,15 +1410,12 @@ export function stopRuns(
           : at.some((c) => !c.against.includes("unknown"))
             ? "typed"
             : "unknown";
-      const resolved = single ? resolvedError(natural.answers, request, code, site) : null;
-      return {
-        code,
-        site,
-        key: siteKey(site),
-        checks,
-        own: instructionHolding(got, site),
-        resolved,
-      };
+      const own = instructionHolding(got, site);
+      const resolved =
+        single && own !== null && isolated(got, own, site)
+          ? resolvedError(natural.answers, request, code, site)
+          : null;
+      return { code, site, key: siteKey(site), checks, own, resolved };
     });
     const sites = errors.map(({ code, key, checks }) => ({ code, site: key, checks }));
     // (a resolved error's runs: whether one failed at its own instruction on a value its requirement excludes)

@@ -1352,4 +1352,42 @@ test("a stop's runs read a no-plan error passed only by values its requirement a
         mode.name,
       );
     }
+  // (Codex r2 on #2257: where the consumer's instruction evaluates anything else, the snapshot need not hold what the
+  // consumer reads, and a failure there need not be its own, so the error reads as before: a sort beside the read
+  // changes the value inside the instruction, and an index beside it fails first)
+  const sorted =
+    "let xs:number[]=[1,0.5]\nlet root={n:xs,nest:{n:xs,keep:1},spare:xs}\nlet a=root\nlet b={p:a}\nlet out=[b.p,root].get(0,default:root)\nsay [out.nest.n.sort(),[4][out.nest.n[0]]][1]\nexit\n";
+  const inner = sorted.indexOf("[4][out");
+  const unindexed = (plan: InstructionPlan): InstructionPlan => ({
+    ...plan,
+    instructions: plan.instructions.map((instruction) =>
+      instruction.kind === "say" &&
+      instruction.value.kind === "index" &&
+      instruction.value.object.kind === "list"
+        ? {
+            ...instruction,
+            value: {
+              ...instruction.value,
+              object: {
+                ...instruction.value.object,
+                elements: instruction.value.object.elements.map((item) =>
+                  item.kind === "index" && item.span.so === inner ? item.index : item,
+                ),
+              },
+            },
+          }
+        : instruction,
+    ),
+  });
+  const preempted =
+    "let t:integer?=null\nlet root={n:t,nest:{n:t,keep:1},spare:t}\nlet a=root\nlet b={p:a}\nb.p.nest.n=null\nlet out=[b.p,root].get(0, default: root)\nsay [[4][2],[4][out.nest.n]][1]\nexit\n";
+  for (const mode of HELD_MODES)
+    for (const [source, planted, kind] of [
+      [sorted, unindexed, "open"],
+      [sorted, undefined, "unwitnessed"],
+      [preempted, undefined, "unwitnessed"],
+    ] as const) {
+      const found = stopRuns(unit(source), [], (make) => mode.run(make), 64, planted);
+      assert.deepEqual([found.kind, found.resolved ?? []], [kind, []], mode.name);
+    }
 });
