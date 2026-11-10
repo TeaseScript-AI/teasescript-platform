@@ -25,18 +25,40 @@ import { sectionsOf } from "./lib/records.mjs";
 import { keepOutcome } from "./scenarios/keep.mjs";
 import { tapCounts } from "./scenarios/taps.mjs";
 
-/** A probe that dropped records past its limit (`probe.mjs`) is incomplete evidence: its lists are cut short. */
-function noDropped(gate, page) {
+/**
+ * The kept-session transactions the probe recorded (`probe.mjs`), each open (no end, no outcome) or ended with both,
+ * its start before its end: the probe sets the two together, so one without the other is no evidence (Sol code r1,
+ * #2253).
+ */
+function transactionsComplete(transactions, where) {
+  transactions.forEach((transaction, index) => {
+    const end = nullable(transaction, "end");
+    const outcome = nullable(transaction, "outcome");
+    if ((end === null) !== (outcome === null))
+      throw new MissingEvidence(
+        `${where} transaction ${index}: its ${end === null ? "end" : "outcome"}, beside its ${end === null ? "outcome" : "end"}`,
+      );
+    if (end !== null)
+      span(transaction.start, end, `${where} transaction ${index}: its start → its end`);
+  });
+}
+
+/**
+ * One page's probe records as evidence: none dropped past the probe's limit (its lists would be cut short), and its
+ * transactions complete.
+ */
+function gateComplete(gate, page) {
   if (gate.dropped !== 0)
     throw new MissingEvidence(`${page} page: ${gate.dropped} probe records dropped`);
+  transactionsComplete(gate.transactions, `${page} page's`);
 }
 
 /** A session's timings, from its probe records and its turn records. */
 function sessionTiming(result, cell, problems) {
   const cold = result.probe.cold;
   const repeat = result.probe.repeat;
-  noDropped(cold, "the cold");
-  noDropped(repeat, "the repeat");
+  gateComplete(cold, "the cold");
+  gateComplete(repeat, "the repeat");
   const coldPlayable = playable(cold, "Start");
   const repeatPlayable = playable(repeat, "Continue");
   if (!coldPlayable.ok) problems.push(`cold playable: ${coldPlayable.reason}`);
@@ -176,8 +198,8 @@ function tapsTiming(result, cell, problems) {
 }
 
 /**
- * A keep trial: a hiding (handler and completion trials) and each ended transaction's commit after its start, then the
- * outcome from those records. A page that never reported hidden gave no evidence (Sol code r5, R5-02).
+ * A keep trial: a hiding (handler and completion trials) and its transactions complete, then the outcome from those
+ * records. A page that never reported hidden gave no evidence (Sol code r5, R5-02).
  */
 function keepTiming(trial) {
   return (result) => {
@@ -188,10 +210,7 @@ function keepTiming(trial) {
         )
       )
         throw new MissingEvidence("row.result.lifecycle: a visibilitychange to hidden");
-      for (const transaction of result.transactions) {
-        const end = nullable(transaction, "end");
-        if (end !== null) span(transaction.start, end, "a transaction's start → its end");
-      }
+      transactionsComplete(result.transactions, "the trial's");
     }
     const derived = keepOutcome(trial, result);
     return { outcome: derived.outcome, hiddenToCommitMs: derived.hiddenToCommitMs ?? null };
@@ -243,7 +262,7 @@ const PARTS = {
     timing: {
       sections: ["timing"],
       derive: (result, cell, problems) => {
-        noDropped(result.probe, "the");
+        gateComplete(result.probe, "the");
         const cold = playable(result.probe, "Start");
         if (!cold.ok) problems.push(`cold playable: ${cold.reason}`);
         return { cold };
@@ -774,6 +793,16 @@ export function validateSample(cell, handle) {
     out.values.push({ label, unit, value });
   }
   for (const out of Object.values(cells))
-    if (out !== null) out.problems = [...new Set(out.problems)];
+    if (out !== null) {
+      out.problems = Object.freeze([...new Set(out.problems)]);
+      out.values.forEach(Object.freeze);
+      Object.freeze(out.values);
+      Object.freeze(out);
+    }
+  VALIDATED.add(Object.freeze(cells));
   return cells;
 }
+
+/** The results `validateSample` made, frozen: the report aggregates no other. */
+const VALIDATED = new WeakSet();
+export const isValidated = (cells) => VALIDATED.has(cells);

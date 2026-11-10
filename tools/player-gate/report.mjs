@@ -7,7 +7,7 @@
 //   node tools/player-gate/report.mjs --phase r0|r1 [--json FILE] [--artifacts FILE]... RESULTS.jsonl...
 import { readFileSync, writeFileSync } from "node:fs";
 import { allCells, cellName, classify } from "./cells.mjs";
-import { PASS_FAIL, validateSample } from "./validate.mjs";
+import { isValidated, PASS_FAIL, validateSample } from "./validate.mjs";
 import { isParsedRow, parseRow } from "./lib/records.mjs";
 import { summarize } from "./lib/measure.mjs";
 
@@ -172,7 +172,11 @@ export function buildReport(rows, phase, artifacts = []) {
     const data = byCell.get(name)?.rows ?? [];
     // The invariant (`validate.mjs` `validateSample`): a sample that fails the shared validation makes its cell
     // incomplete; it is never left out to let the others stand for the cell. Each of a cell's parts is its own boundary.
-    const derived = data.map((row) => ({ header: row.header, ...validateSample(cell, row) }));
+    const derived = data.map((row) => {
+      const cells = validateSample(cell, row);
+      if (!isValidated(cells)) throw new Error("a sample validateSample did not validate");
+      return { header: row.header, ...cells };
+    });
     const conditions = [
       ...new Set(
         data.map(

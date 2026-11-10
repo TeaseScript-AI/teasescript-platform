@@ -7,7 +7,7 @@ import { buildReport } from "./report.mjs";
 import { isParsedRow, parseRow, sectionsOf } from "./lib/records.mjs";
 import { SHAPES } from "./lib/row-shapes.mjs";
 import { NULLABLE, strictRecord } from "./lib/evidence.mjs";
-import { cellOf, NUMBERS, validateSample } from "./validate.mjs";
+import { cellOf, isValidated, NUMBERS, validateSample } from "./validate.mjs";
 
 const clone = (value) => structuredClone(value);
 const axes = (row) => ({
@@ -323,6 +323,24 @@ const BASES = {
     tapsResult(),
   ),
   "keepHandler chromium": row("keepHandler", {}, keepResult()),
+  // A capture committed while hidden, beside an aborted one and one still open: a complete trial.
+  "keepHandler chromium, an aborted and an open transaction": row(
+    "keepHandler",
+    {},
+    {
+      ...keepResult(),
+      transactions: [
+        ...keepResult().transactions,
+        {
+          start: 310,
+          end: 320,
+          outcome: "abort",
+          puts: [{ store: "sessions", scope: "s", observedMs: 9, length: 20 }],
+        },
+        { start: 350, end: null, outcome: null, puts: [] },
+      ],
+    },
+  ),
   "keepCompletion pixel": row("keepCompletion", { engine: "pixel" }, keepResult()),
   "keepDurable pixel": row(
     "keepDurable",
@@ -663,9 +681,23 @@ const RELATIONS = [
   [
     "playable: the input → the first control's frame",
     "session chromium main",
-    (r) => (r.result.probe.cold.states[1].frame = 554),
+    (r) => (r.result.probe.cold.inputs[0].ts = 717),
     ["counts", "timing"],
-    "the first control: its event → its frame",
+    "Start's input → the first control's frame",
+  ],
+  [
+    "playable: Start's frame → its input",
+    "session chromium main",
+    (r) => (r.result.probe.cold.inputs[0].ts = 505),
+    ["counts", "timing"],
+    "Start's frame → its input",
+  ],
+  [
+    "session: a page's ended transaction has its outcome",
+    "session chromium main",
+    (r) => (r.result.probe.repeat.transactions[0].outcome = null),
+    ["counts", "timing"],
+    "the repeat page's transaction 0: its outcome, beside its end",
   ],
   [
     "turn: the input → its feedback frame",
@@ -689,18 +721,11 @@ const RELATIONS = [
     "the settling control: its event → its frame",
   ],
   [
-    "first save: the press → its commit",
-    "session chromium main",
-    (r) => (r.result.probe.cold.transactions[0].end = 550),
-    ["counts", "timing"],
-    "Start's input → the first save's commit",
-  ],
-  [
     "first save: its start → its commit",
     "session chromium main",
     (r) => (r.result.probe.cold.transactions[0].end = 599),
     ["counts", "timing"],
-    "the first save's transaction",
+    "the cold page's transaction 0: its start → its end",
   ],
   [
     "Worker start: construction → ready",
@@ -809,7 +834,32 @@ const RELATIONS = [
     "keepHandler chromium",
     (r) => (r.result.transactions[0].end = 150),
     ["timing"],
-    "a transaction's start → its end",
+    "transaction 0: its start → its end",
+  ],
+  [
+    // Sol code r1's witness: an aborted capture without its end, its cached outcome agreeing.
+    "keep: a transaction with an outcome has its end",
+    "keepHandler chromium",
+    (r) => {
+      r.result.outcome = "aborted";
+      r.result.transactions = [{ ...r.result.transactions[0], end: null, outcome: "abort" }];
+    },
+    ["timing"],
+    "transaction 0: its end, beside its outcome",
+  ],
+  [
+    "keep: an ended transaction has its outcome",
+    "keepHandler chromium, an aborted and an open transaction",
+    (r) => (r.result.transactions[1].outcome = null),
+    ["timing"],
+    "transaction 1: its outcome, beside its end",
+  ],
+  [
+    "keep: a committed capture has its end",
+    "keepHandler chromium, an aborted and an open transaction",
+    (r) => (r.result.transactions[0].end = null),
+    ["timing"],
+    "transaction 0: its end, beside its outcome",
   ],
   [
     "keep: the page reported hidden (R5-02)",
@@ -870,12 +920,16 @@ const FIELD_RELATIONS = {
   ],
   "navigation → the frame after": ["playable: a state's event → its frame"],
   "input → the frame after the first control": ["playable: the input → the first control's frame"],
-  "enabled → its input": ["playable: Start enabled → its input"],
+  "enabled → its input": [
+    "playable: Start enabled → its input",
+    "playable: Start's frame → its input",
+  ],
   "Worker: construction → ready": [
     "Worker start: construction → ready",
     "bridge: Worker construction → ready",
   ],
-  "first save: Start's input → commit": ["first save: the press → its commit"],
+  // The first save is the first transaction to start after the press (`firstSave`), so its start → end orders it.
+  "first save: Start's input → commit": ["first save: its start → its commit"],
   "first save: long tasks in that span": ["first save: its start → its commit"],
   "turn: input → feedback frame": ["turn: the input → its feedback frame"],
   "turn: input → settled frame": ["turn: the settling event → its frame"],
@@ -945,6 +999,10 @@ test("the report takes parsed rows only, and a parsed row hands out its frozen h
   assert.deepEqual(Object.keys(handle), ["header"]);
   assert.ok(Object.isFrozen(handle) && Object.isFrozen(handle.header));
   assert.throws(() => sectionsOf({ header: handle.header }), /not a row parseRow made/u);
+  // A validated sample is frozen and branded; a copy of it is no validated sample.
+  const cells = validateSample(axes(raw), handle);
+  assert.ok(isValidated(cells) && Object.isFrozen(cells.timing.values[0]));
+  assert.ok(!isValidated({ ...cells }));
 });
 
 test("the strict reader refuses every write, and a reflective read of a parsed copy reaches validated data only", () => {

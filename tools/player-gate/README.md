@@ -26,7 +26,8 @@ cell incomplete and is never a value in a median. Every cell stays labelled `mea
   refused. `buildReport` takes no row the parser did not make, so no derivation can reach a raw row, whatever form a
   read takes.
 - **Each scenario's parts** (`validate.mjs` `PARTS`) check their order relations and the evidence a trial needs before
-  they derive. Examples: each reply after its request, a tap's handler after its event, a keep trial's hiding.
+  they derive. Examples: each reply after its request, a tap's handler after its event, a keep trial's hiding, a
+  transaction's end with its outcome.
 - **Three cells per scenario**, each its own failure boundary:
   - the timing cell (`ms`, `boolean`): the only one in the headline, the summary (`--json`) and the R0 comparison;
   - `<cell> / bytes and counts`;
