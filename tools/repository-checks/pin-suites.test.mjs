@@ -8,9 +8,15 @@ import { fileURLToPath } from "node:url";
 import { NOT_PINS, PIN_SUITES, builtOf, pinFormsOf, suitesFor, testFiles } from "./pin-suites.mjs";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
+/** Each declared suite once, in the list's order. */
+const SUITES = [...new Set(PIN_SUITES.map((suite) => suite.file))];
+const WORK_B = "tests/type-core/type-core-work-b.test.ts";
 
 test("a core change lists every pinning suite; another change lists none, a suite's own change or its pins' file itself", () => {
-  assert.deepEqual(suitesFor(["src/type-inference/core/admission/literals/join.ts"]), PIN_SUITES);
+  assert.deepEqual(
+    suitesFor(["src/type-inference/core/admission/literals/join.ts"]).map((suite) => suite.file),
+    SUITES,
+  );
   // (the published answers' digests move with the core too: #2074 passed the local check and failed CI on
   // one, #2086)
   assert.ok(
@@ -26,7 +32,26 @@ test("a core change lists every pinning suite; another change lists none, a suit
   );
   assert.deepEqual(
     suitesFor(["tests/helpers/type-core/families/output-bound.ts"]).map((suite) => suite.file),
-    ["tests/type-core/type-core-work-b.test.ts"],
+    [WORK_B],
+  );
+  // (work-b's pins are in two files: either lists it, and both list it once, with each declaration's pins)
+  assert.deepEqual(
+    suitesFor(["tests/helpers/type-core/families/w34-links.ts"]).map((suite) => suite.file),
+    [WORK_B],
+  );
+  assert.deepEqual(
+    suitesFor([
+      "tests/helpers/type-core/families/w34-links.ts",
+      "tests/helpers/type-core/families/output-bound.ts",
+    ]),
+    [
+      {
+        file: WORK_B,
+        pins: PIN_SUITES.filter((suite) => suite.file === WORK_B)
+          .map((suite) => suite.pins)
+          .join("; "),
+      },
+    ],
   );
   assert.equal(
     builtOf("tests/type-core/type-core-closure.test.ts"),
@@ -120,7 +145,7 @@ test("a file moved out of the core lists every pinning suite (#2049)", { timeout
     assert.equal(run.status, 0, run.stderr);
     assert.match(
       run.stdout,
-      new RegExp(`1 core file changed .*; ${PIN_SUITES.length} pinning suites:`, "u"),
+      new RegExp(`1 core file changed .*; ${SUITES.length} pinning suites:`, "u"),
     );
   } finally {
     rmSync(directory, { recursive: true, force: true });
