@@ -7,7 +7,7 @@ import { effectScope, ref, shallowRef, type Ref, type ShallowRef } from "vue";
 import { compilePlayerProject } from "../../player/runtime/compile-project.js";
 import type { StartOptions } from "../../player/engine-bridge/ops/session.js";
 import type { PrepareResult } from "../../player/engine-bridge/player-ops.js";
-import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
+import type { PlayerBridge, SessionRequestOptions } from "../../player/runtime/player-bridge.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 import {
   observePlayerRuntimeTime,
@@ -21,7 +21,7 @@ import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import type { ClockTicket } from "../../player/runtime/clock-ticket.js";
 import { clockTicket } from "../helpers/clock-ticket.js";
-import { untypedClient } from "../helpers/bridge/untyped.js";
+import { untypedBridge, untypedClient } from "../helpers/bridge/untyped.js";
 
 /*
  * L5i.5: session work that must follow the scene clock posts what it needs into the shown session's queue first
@@ -1064,12 +1064,17 @@ test("a failed observation that no caller awaits leaves its passed deadline obse
 test("an older observation's completion does not release the admission of a newer one that waits", async (context) => {
   const player = await mount(context, false);
   const bridge = await player.host.bridge;
-  const request = bridge.request.bind(bridge);
+  const raw = untypedBridge(bridge);
+  const request = raw.request.bind(raw);
   let begins = 0;
-  context.mock.method(bridge, "request", (...args: Parameters<typeof request>) => {
-    if (args[1] === "beginCatchUp") begins++;
-    return request(...args);
-  });
+  context.mock.method(
+    raw,
+    "request",
+    (session: PlayerSession, op: string, args: unknown, options?: SessionRequestOptions) => {
+      if (op === "beginCatchUp") begins++;
+      return request(session, op, args, options);
+    },
+  );
   player.gate.hold("observeTime", 2);
   const first = player.host.observe();
   await settle();
