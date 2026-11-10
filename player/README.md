@@ -45,7 +45,7 @@ This is a local inspection route, not the production cross-origin Player/host pr
   `media/image-file.ts` checks a chosen file before it is stored. These shapes are implementation details rather
   than an accepted author-facing API.
 - `persistence/transfer-encoding.ts` holds the base64url and gzip encoding of the files players move by hand: saved-data transfers
-  (`persistence/storage-transfer.ts`), session transfers (`persistence/session-transfer.ts`), and debug exports (`debug/debug-export.ts`, read offline by `tools/debug-export.mjs`; see
+  (`persistence/storage-transfer.ts`), session transfers (`persistence/session-transfer.ts`), and debug exports (written by `debug/debug-export-file.ts`, read and replayed by `debug/debug-export.ts`, offline by `tools/debug-export.mjs`; see
   [`DEBUGGER.md`](../docs/DEBUGGER.md#debug-export)). `debug/debug-recorder.ts` records each session's engine calls, and
   `debug/debug-export-assembly.ts` builds an export from the player's choices. `debug/debug-history.ts` keeps Debug's rewind
   history and `debug/debug-history-indexeddb.ts` the database it spills to (see

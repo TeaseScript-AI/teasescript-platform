@@ -15,7 +15,7 @@ import {
   debugExportJson,
   measuredDebugExportFile,
   type DebugExport,
-} from "../../../../debug/debug-export.js";
+} from "../../../../debug/debug-export-file.js";
 import { gzipSupported } from "../../../../persistence/transfer-encoding.js";
 import type { PlayerSession } from "../../../../runtime/runtime-view.js";
 import type { PlayerSessionHost } from "../../session/usePlayerSession";

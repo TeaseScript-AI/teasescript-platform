@@ -107,12 +107,12 @@ export interface RewindHost {
   }): Promise<{ readonly kind: string }>;
   observe(): Promise<PlayerRuntimeSession | null>;
   demandCallView(): { release(): void };
-  debugRecording(): {
+  debugRecording(): Promise<{
     readonly anchorSnapshot: RuntimeSnapshot;
     readonly endSnapshot: RuntimeSnapshot;
     readonly operations: readonly unknown[];
     readonly complete: boolean;
-  } | null;
+  } | null>;
   debugExportCandidate(
     details: () => Record<string, never>,
     wanted: AbortSignal,

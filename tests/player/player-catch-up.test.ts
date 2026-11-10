@@ -112,7 +112,7 @@ interface SessionHost {
   setDebugTracing(on: boolean): void;
   setRandomControl(control: { readonly sites: readonly [] } | null): void;
   resolveRandomDraw(drawId: number, outcome: "natural"): Promise<{ readonly kind: string } | null>;
-  debugRecording(): DebugRecording | null;
+  debugRecording(): Promise<DebugRecording | null>;
 }
 let usePlayerSession: () => SessionHost;
 
@@ -192,14 +192,15 @@ async function caughtUp(host: SessionHost, atLeastMs: number) {
 }
 
 /** Checks that the debug export's recording replays exactly to the session shown. */
-function replays(host: SessionHost) {
-  const recording = host.debugRecording()!;
+async function replays(host: SessionHost) {
+  const shown = playerRuntimeSnapshot(host.session.value!);
+  const recording = (await host.debugRecording())!;
   const rebuilt = rebuildRecordedSession(
     recording.plan,
     recording.anchorSnapshot,
     recording.operations,
   );
-  assert.deepEqual(rebuilt.exportSnapshot(), playerRuntimeSnapshot(host.session.value!));
+  assert.deepEqual(rebuilt.exportSnapshot(), shown);
 }
 
 // A block every 10 ms while the script waits for the player.
@@ -219,7 +220,7 @@ test("a late observation catches up over several tasks and then shows one late o
     canonical(session),
     canonical(observedLate(rounds, session.state.observedSessionTimeMs)),
   );
-  replays(host);
+  await replays(host);
 });
 
 test("in a hidden page, a catch-up a late wake-up starts goes on without timers", async (context) => {
@@ -250,7 +251,7 @@ test("input during a catch-up lands at the scene time it arrives at, after the w
     canonical(answered),
     canonical(activatePlayerRuntimeButton(observedLate(rounds, atMs))!.session),
   );
-  replays(host);
+  await replays(host);
 });
 
 test("an operation on the session during a catch-up drops the copy, and the session observes in one go", async (context) => {
@@ -271,7 +272,7 @@ test("an operation on the session during a catch-up drops the copy, and the sess
       observePlayerRuntimeTime(skipped.session, session.state.observedSessionTimeMs).session,
     ),
   );
-  replays(host);
+  await replays(host);
 });
 
 test("a script that fails during a catch-up fails as one late observation fails it, also in its recording", async (context) => {
@@ -286,7 +287,7 @@ test("a script that fails during a catch-up fails as one late observation fails 
     canonical(session),
     canonical(observedLate(source, session.state.observedSessionTimeMs)),
   );
-  replays(host);
+  await replays(host);
 });
 
 test("leaving the Player ends a catch-up, also one that several opportunities stepped", async (context) => {
@@ -306,7 +307,7 @@ test("while Debug runs, a late observation is one observation", async (context) 
   // One observation over the bridge, which publishes once its reply arrives.
   await caughtUp(host, 1_000);
   assert.ok(host.session.value!.state.observedSessionTimeMs >= 1_000);
-  replays(host);
+  await replays(host);
 });
 
 test("while Debug decides random draws, a late observation pauses at the draw with all of it observed", async (context) => {
@@ -343,5 +344,5 @@ test("turning Debug's random draws on during a catch-up finishes it first with n
   await caughtUp(host, 1_000);
   assert.ok(host.session.value!.state.observedSessionTimeMs >= 1_000);
   assert.equal(host.session.value!.state.randomDraw, null);
-  replays(host);
+  await replays(host);
 });

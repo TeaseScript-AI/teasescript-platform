@@ -168,7 +168,7 @@ async function handoffRow(
       release = held;
       reached = held.reached;
     }
-    const recordingBefore = host.debugRecording();
+    const recordingBefore = await host.debugRecording();
     const epochBefore = hostTrace(bridge)!.status().epoch;
     // What each identity is before the operation, and the events a step restores as the history names them: Back's
     // first point, or the state Forward restores.
@@ -406,8 +406,9 @@ async function handoffRow(
       if (id === null) assert.equal(held, false, `${identity} was never made`);
       else assert.equal(await heldInHost(bridge, id), held, `the host holds ${identity}`);
     }
-    // The recording begun once at the shown session, with nothing recorded since; or the one before, unchanged.
-    const recording = host.debugRecording();
+    // The recording begun once at the shown session, with nothing recorded since; or the one before, unchanged. Read
+    // only in rows that compare one: a row that ends the connection has no host to read from.
+    const recording = want.recording === null ? null : await host.debugRecording();
     // Read only where a recording is compared: the Player's end takes the trace with it.
     const epochs = () => hostTrace(bridge)!.status().epoch - epochBefore;
     if (want.recording === "shown") {
@@ -729,7 +730,7 @@ test("Sol r2 B6: an adoption that succeeds while Debug off waits keeps the recor
   assert.equal(await backTo(rewind, 0), true);
   const trace = hostTrace(await host.bridge)!;
   const epoch = trace.status().epoch;
-  const anchor = host.debugRecording()?.anchorSnapshot;
+  const anchor = (await host.debugRecording())?.anchorSnapshot;
   let gates = 0;
   const original = host.rewind.beforeRestart.bind(host.rewind);
   host.rewind.beforeRestart = () => {
@@ -744,7 +745,7 @@ test("Sol r2 B6: an adoption that succeeds while Debug off waits keeps the recor
   assert.equal(await resumed, true);
   await settle(context);
   assert.deepEqual({ epoch: trace.status().epoch, gates }, { epoch, gates: 0 });
-  assert.deepEqual(host.debugRecording()?.anchorSnapshot, anchor);
+  assert.deepEqual((await host.debugRecording())?.anchorSnapshot, anchor);
 });
 
 test("Sol r2 S1: a renewal that fails on a live connection is reported", async (context) => {

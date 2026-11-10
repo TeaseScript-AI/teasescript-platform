@@ -5,15 +5,18 @@ import {
   DEBUG_EXPORT_VERSION,
   debugBuildRevisions,
   type DebugBuild,
-  type DebugEditedWhileDebugging,
-  type DebugRewoundWhileDebugging,
   type DebugExport,
   type DebugIncident,
   type DebugPackage,
   type DebugPhoto,
   type DebugPhotoUse,
   type DebugSelection,
-} from "./debug-export.js";
+} from "./debug-export-file.js";
+import {
+  DebugExportError,
+  type DebugEditedWhileDebugging,
+  type DebugRewoundWhileDebugging,
+} from "./debug-history-marks.js";
 import type { DebugRecording } from "./debug-recorder.js";
 import type { PreparedExport } from "../engine-bridge/recording/export-replay.js";
 import { capturedMediaReferencesIn } from "../persistence/kept-sessions.js";
@@ -259,6 +262,14 @@ export async function assembleDebugExport(
         "Replay data was left out because it contains text that looks like a credential or a file path; removing it would change the replay.",
       );
     }
+    // Replay data the export keeps needs an anchor the engine checkpointed; one left out above does not.
+    if (
+      prepared.anchorRefused &&
+      checkpoint !== null &&
+      replay !== null &&
+      replay.anchorSnapshot !== null
+    )
+      throw new DebugExportError("invalid", "The replay anchor could not be checkpointed.");
     if (checkpoint !== null)
       parts.push({
         name: "Engine replay data",

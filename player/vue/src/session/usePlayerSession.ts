@@ -1184,8 +1184,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     discardSessionReview,
     importSession,
     /**
-     * The recorded engine calls the host holds (`heldDebugRecording`): after a Player error whose capture is held, those
-     * up to it until the next Start; else the recorder's current ones, or `null` before any Start.
+     * For tests, the recorded engine calls the host holds, read from it (`heldDebugRecording`): after a Player error
+     * whose capture is held, those up to it until the next Start; else the recorder's current ones, or `null` before
+     * any Start.
      */
     debugRecording: heldDebugRecording,
     /** The error name of an exception of the Player itself, or `null`. */

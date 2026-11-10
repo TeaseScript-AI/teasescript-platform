@@ -140,6 +140,21 @@ function recordingRunOps(context: PlayerOpsContext) {
         return { result: null };
       },
     } satisfies BridgeOp<{ readonly ticket: string }, null, "none">,
+    // A read for the composable's test API (`debugRecording()`), with no production caller: the recording held under a
+    // recording ticket, or with `null` the recorder's current one, as they stand when the host dispatches it; `null` for
+    // an unknown, released or export ticket, and before any recording. It changes nothing.
+    readRecording: {
+      session: "none",
+      checkArguments: (args): args is { readonly ticket: string | null } =>
+        isRecord(args) &&
+        exactly(args, ["ticket"]) &&
+        (args.ticket === null || typeof args.ticket === "string"),
+      run: (args) => {
+        if (args.ticket === null) return { result: context.recorder.recording() };
+        const held = context.recordings.get(args.ticket);
+        return { result: held?.kind === "recording" ? held.recording : null };
+      },
+    } satisfies BridgeOp<{ readonly ticket: string | null }, DebugRecording | null, "none">,
   } satisfies BridgeOps;
 }
 

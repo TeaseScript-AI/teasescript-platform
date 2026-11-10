@@ -1,7 +1,7 @@
 import { ref, shallowRef, type Ref } from "vue";
 import { NO_MARKS, type HistoryMarks } from "../../../../debug/debug-history-marks.js";
 import type { DebugRecording } from "../../../../debug/debug-recorder.js";
-import { heldRecording, introduceNow } from "../../../../engine-bridge/in-process.js";
+import { introduceNow } from "../../../../engine-bridge/in-process.js";
 import type { PlayerRuntimeSession } from "../../../../runtime/runtime-adapter.js";
 import { playerTemporalContext, type PlayerSession } from "../../../../runtime/runtime-view.js";
 import { bridgeOf, endsQuietly, type PlayerBridge } from "../../../../runtime/player-bridge.js";
@@ -123,15 +123,16 @@ export function useSessionActivation({
     report: (origin, error) => reportActivationError(origin, error),
   });
   /**
-   * The recording the host holds for diagnostics and tests: a Player error's, while its captured ticket is held, else
-   * the recorder's current one. Not a debug export's selection (the failure recording's `selection()`), which waits for
-   * a pending capture and selects none where it settled unavailable.
+   * The recording the host holds, for tests (`readRecording`): a Player error's, while its captured ticket is held, else
+   * the recorder's current one, chosen now and read when the host dispatches the read. Not a debug export's selection
+   * (the failure recording's `selection()`), which waits for a pending capture and selects none where it settled
+   * unavailable.
    */
-  const heldDebugRecording = (): DebugRecording | null => {
+  const heldDebugRecording = async (): Promise<DebugRecording | null> => {
     const live = activationRun.current();
     const failed = live.kind === "run" ? live.failure.ticket() : null;
-    if (failed !== null) return heldRecording(failed.bridge, failed.ticket);
-    return bridgeNow() === null ? null : heldRecording(bridgeNow()!);
+    if (failed !== null) return failed.bridge.readRecording(failed.ticket);
+    return (await bridgeNow()?.readRecording(null)) ?? null;
   };
   // The error name of an exception of the Player itself, such as one at Start; it stays until the next Start. Such an
   // exception stops the session where it stands (see `stopped`).

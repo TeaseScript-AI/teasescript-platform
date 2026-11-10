@@ -911,7 +911,7 @@ let bundled: Promise<{
 }> | null = null;
 /** The composable's test API this family reads beside the harness's. */
 interface RecordingComposable extends LiveComposable {
-  debugRecording(): Parameters<typeof plainRecording>[0];
+  debugRecording(): Promise<Parameters<typeof plainRecording>[0]>;
 }
 const bundle = () =>
   (bundled ??= (async () => {
@@ -1071,10 +1071,10 @@ async function composableRun(control: ControlRun): Promise<JudgedRun> {
     async ({ host, player, bridge, tracker, session, before, adapter, facade }) => {
       const cutRevision = session.revision;
       const cutEvents = session.events.length;
-      const atCut = plainRecording(player.debugRecording());
+      const atCut = plainRecording(await player.debugRecording());
       assert.ok(atCut !== null);
       const cut = await cutAndRecover(bridge, session, tracker, host);
-      const frozen = plainRecording(player.debugRecording());
+      const frozen = plainRecording(await player.debugRecording());
       assert.ok(frozen !== null);
       cut.effects.push(await host.effects());
       const requests = await cut.recover();

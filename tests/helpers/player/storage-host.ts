@@ -41,7 +41,7 @@ interface StorageHost {
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   prepare(create: (recording: { readonly recorder: DebugRecorder }) => PlayerRuntimeSession): void;
   toStartPage(): Promise<void>;
-  debugRecording(): { readonly operations: readonly { readonly kind: string }[] } | null;
+  debugRecording(): Promise<{ readonly operations: readonly { readonly kind: string }[] } | null>;
   prepareRestore(restored: PlayerRuntimeSession): void;
   activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;

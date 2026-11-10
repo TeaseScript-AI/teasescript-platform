@@ -160,6 +160,8 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     reportActivationError: SESSION,
     "reportActivationError.haltObsolete": SESSION,
     supersede: SESSION,
+    heldDebugRecording:
+      "the composable's test read of the recording the host holds: it writes no store",
   },
   "session/activation/work/draw.ts": { resolveDrawFor: SESSION },
   "session/activation/work/stop.ts": { stopAt: SESSION },
@@ -340,6 +342,7 @@ const BRIDGE = {
   historyTimeline: "host",
   historyStep: "host",
   releaseRecording: "host",
+  readRecording: "host",
   captureExport: "host",
   exportPrepare: "host",
   retireRun: "host",

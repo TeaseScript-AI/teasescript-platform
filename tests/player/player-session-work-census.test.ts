@@ -213,6 +213,11 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "read",
     ["BridgeClient.request"],
   ],
+  // The composable's test read of the recording the host holds (`readRecording`).
+  "player/vue/src/session/usePlayerSession.ts usePlayerSession > debugRecording": [
+    "read",
+    ["BridgeClient.request"],
+  ],
   "player/encryption/lock-service.ts LockService > request > later:callback": [
     "own observation",
     ["BridgeClient.request"],
@@ -726,6 +731,9 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/session/usePlayerSession.ts usePlayerSession {importSession}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession {readTransfer}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession {reviewSessionImport}",
+  "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > heldDebugRecording {heldDebugRecording}",
+  "player/vue/src/session/usePlayerSession.ts usePlayerSession > debugRecording {heldDebugRecording}",
+  "player/vue/src/session/usePlayerSession.ts usePlayerSession {heldDebugRecording}",
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > activate {activate}",
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > prepare {prepare}",
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > prepareRestore > begin {begin}",
@@ -908,6 +916,7 @@ const ADOPTION_ESCAPES: readonly string[] = [
   "player/engine-bridge/ops/recording.ts recordingRunOps > commitIncident > run {run}",
   "player/engine-bridge/ops/recording.ts exportCaptureOps > exportPrepare > run {run}",
   "player/engine-bridge/ops/recording.ts recordingRunOps > releaseRecording > run {run}",
+  "player/engine-bridge/ops/recording.ts recordingRunOps > readRecording > run {run}",
   "player/engine-bridge/ops/recording.ts recordingRunOps > retireRun > run {run}",
   "player/engine-bridge/ops/transfer.ts transferOps > readTransfer > run {run}",
   "player/engine-bridge/ops/transfer.ts transferOps > releaseTransfer > run {run}",

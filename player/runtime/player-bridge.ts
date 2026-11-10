@@ -355,6 +355,16 @@ export class PlayerBridge {
     return reply.result;
   }
 
+  /**
+   * The recording held under recording `ticket`, or with `null` the recorder's current one (`readRecording`), as the host
+   * holds it when it dispatches the read: a copy, in-process as across a Worker. A read for the composable's test API,
+   * with no production caller; it rejects when the connection is lost.
+   */
+  async readRecording(ticket: string | null): Promise<OpResult<"readRecording">> {
+    const reply = await this.#client.request("readRecording", { ticket });
+    return reply.result;
+  }
+
   /** Lets go of the recording or export held under `ticket` (`releaseRecording`); an unknown one changes nothing. */
   async releaseRecording(ticket: string): Promise<void> {
     await this.#client.request("releaseRecording", { ticket });

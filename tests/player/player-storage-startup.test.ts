@@ -252,14 +252,14 @@ test("Vue host records every session from Start and from Continue for a debug ex
     replace: async () => {},
     clear: async () => {},
   });
-  assert.equal(host.debugRecording(), null, "nothing is recorded before Start");
+  assert.equal(await host.debugRecording(), null, "nothing is recorded before Start");
   await host.loadScriptStorage();
   host.prepare((recording) =>
     createPlayerRuntimeSession('let name = askText "Name"\nexit', recording),
   );
   await host.activate();
   assert.deepEqual(
-    host.debugRecording()?.operations.map((operation) => operation.kind),
+    (await host.debugRecording())?.operations.map((operation) => operation.kind),
     ["run"],
   );
   const started = host.session.value;
@@ -267,7 +267,7 @@ test("Vue host records every session from Start and from Continue for a debug ex
   host.prepareRestore(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(started)));
   await host.activate();
   assert.deepEqual(
-    host.debugRecording()?.operations.map((operation) => operation.kind),
+    (await host.debugRecording())?.operations.map((operation) => operation.kind),
     ["recordContinueCapture", "run"],
     "a Continue starts a new recording from the restored state",
   );

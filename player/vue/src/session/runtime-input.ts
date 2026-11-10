@@ -1,4 +1,4 @@
-import type { DebugAnswerInput } from "../../../debug/debug-export.js";
+import type { DebugAnswerInput } from "../../../debug/debug-export-file.js";
 import type { OpArgs, OpResult, SessionOp } from "../../../engine-bridge/op-catalogue.js";
 import type { PlayerSession } from "../../../runtime/runtime-view.js";
 import type { SectionWork } from "./useRuntimeSceneClock.js";

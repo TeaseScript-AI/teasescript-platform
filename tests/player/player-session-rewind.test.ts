@@ -70,7 +70,10 @@ test("Back shows an earlier state paused, and Forward and Return restore the sta
       .rewoundWhileDebugging,
     { restoredSceneTimeMs: inspected!.state.observedSessionTimeMs, rewindCount: 1 },
   );
-  assert.deepEqual(host.debugRecording()?.anchorSnapshot, playerRuntimeSnapshot(inspected!));
+  assert.deepEqual(
+    (await host.debugRecording())?.anchorSnapshot,
+    playerRuntimeSnapshot(inspected!),
+  );
 
   assert.equal(await rewind.forward(), true);
   assert.deepEqual(playerRuntimeSnapshot(host.session.value!), playerRuntimeSnapshot(tip));
@@ -420,7 +423,7 @@ test("input to an inspected state is evaluated only once it is adopted, so a fai
   assert.equal(host.session.value, inspected);
   assert.deepEqual(said(host), []);
   assert.equal(inspected.events.length, events);
-  assert.deepEqual(host.debugRecording()?.endSnapshot, playerRuntimeSnapshot(inspected));
+  assert.deepEqual((await host.debugRecording())?.endSnapshot, playerRuntimeSnapshot(inspected));
 });
 
 test("a second input while the state is being adopted is refused, and the first applies once", async (context) => {

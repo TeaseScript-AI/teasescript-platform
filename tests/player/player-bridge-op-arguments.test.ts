@@ -603,6 +603,7 @@ const ROWS = {
   ),
   captureRecording: SESSION,
   releaseRecording: TICKET,
+  readRecording: record({ ticket: null }, { ticket: NS }, { also: [{ ticket: "r1" }] }),
   captureExport: record(
     { session: null, recording: "current" },
     { session: NS, recording: ["string", "object"] },
@@ -932,7 +933,7 @@ test("the rows are the catalogue's ops, each named once", () => {
     [],
     "rows of no op",
   );
-  assert.equal(names.length, 73);
+  assert.equal(names.length, 74);
 });
 
 test("each row's forms give every field a kind, and every required field a value", () => {

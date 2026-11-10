@@ -46,6 +46,10 @@ export const HOST_OPS = {
     read: true,
   },
   releaseRecording: { planJson: "cleanup of a ticket, which holds no plan JSON", read: false },
+  readRecording: {
+    planJson: "a held recording, which carries its compiled plan as data; no plan JSON",
+    read: false,
+  },
   captureExport: {
     planJson:
       "a debug export's capture under a ticket; its reply's recording carries its compiled plan as data, with no plan JSON",
