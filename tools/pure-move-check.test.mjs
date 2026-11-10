@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import { helper, main, moveOf, split, splitFamily } from "./pure-move-check-fixture.mjs";
 import { RESIDUAL } from "./pure-move-check.mjs";
+
+const tool = fileURLToPath(new URL("./pure-move-check.mjs", import.meta.url));
 
 test("a true pure split passes, and its shape is printed", { timeout: 60_000 }, () => {
   const move = moveOf({ "a.ts": main }, split);
@@ -525,5 +529,66 @@ test(
     );
     assert.equal(configured.status, 0, configured.out);
     assert.doesNotMatch(configured.out, /expected/u);
+  },
+);
+
+test(
+  "an argument the check cannot use is refused, and a check that looked at nothing has not passed",
+  { timeout: 60_000 },
+  () => {
+    const usage =
+      "usage: node tools/pure-move-check.mjs BASE [--declare FILE] [--renames FILE] [PATH…]\n";
+    const kept = { "src/kept.ts": "export const kept = 1;\n" };
+    const move = moveOf(
+      { ...kept, "src/a.ts": main },
+      { ...kept, "src/a.ts": split["a.ts"], "src/b.ts": split["b.ts"] },
+    );
+    try {
+      const git = (...args) =>
+        execFileSync("git", args, { cwd: move.root, encoding: "utf8" }).trim();
+      const base = git("rev-parse", "HEAD~1");
+      const refused = (args, out) => {
+        const result = move.run(...args);
+        assert.deepEqual(result, { status: 2, out }, args.join(" "));
+      };
+      // a flag of `structure-report.mjs`, once read as a PATH that limited the change to nothing: "moved +0 -0", exit 0
+      refused(["--moved"], `pure-move-check: unknown option --moved\n${usage}`);
+      refused(["src", "-x"], `pure-move-check: unknown option -x\n${usage}`);
+      const nothing = (file) =>
+        `pure-move-check: ${file} matches no file of the change ${base.slice(0, 12)}..HEAD\n`;
+      refused(["missing.ts"], nothing("missing.ts"));
+      // a file in both trees that the change leaves as it is
+      refused(["src/kept.ts"], nothing("src/kept.ts"));
+      refused(["src/a.ts", "missing.ts", "src/b.ts"], nothing("missing.ts"));
+      // the change from HEAD to itself
+      const empty = spawnSync(process.execPath, [tool, "HEAD"], {
+        cwd: move.root,
+        encoding: "utf8",
+      });
+      assert.equal(empty.status, 2, empty.stdout);
+      assert.equal(
+        empty.stderr,
+        `pure-move-check: the change ${git("rev-parse", "HEAD").slice(0, 12)}..HEAD is empty: nothing to check (the check reads committed trees: commit first)\n`,
+      );
+      assert.equal(empty.stdout, "");
+      // a run that compares something keeps its output
+      const family = move.renames({ "src/a.ts": ["src/a.ts", "src/b.ts"] });
+      const passed = (args) => {
+        const result = move.run("--renames", family, ...args);
+        assert.deepEqual(
+          result,
+          {
+            status: 0,
+            out: `pure-move check of ${base}..HEAD (merge base ${base.slice(0, 12)}):\nshape: moved +5 -5; admitted import 1, export 2, whitespace 0, header comment 0; declared 0; unadmitted 0; bindings differing 0; refused 0\n`,
+          },
+          args.join(" "),
+        );
+      };
+      passed([]);
+      passed(["src"]);
+      passed(["src/a.ts", "src/b.ts"]);
+    } finally {
+      move.done();
+    }
   },
 );
