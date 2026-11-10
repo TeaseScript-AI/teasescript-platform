@@ -5,11 +5,11 @@ import type { WorkCounter, WorkLedger } from "./budget.js";
  * The one way stage 3b's narrowing modules walk anything ("List construction, filtering and every visit
  * are charged"): every item taken, every step of a search and every element a copy or a test visits charges one unit
  * of a named counter as it happens, and every function body of `narrowing/`'s `narrowings.ts`, `laminar.ts`,
- * `events.ts`, `routes.ts` and `statement-tree.ts` charges a unit on entry (an arrow handed straight to these
- * functions is charged by them). `tools/oxlint/check-charged-iteration.mjs` guards the ordinary forms of any other
- * repetition there (loops, array walks, a body whose first statement does not charge, and any call into the rest of
- * the core or the library that its list does not give a reason for); the forms it does not see are named in its
- * header. The code as written has no uncharged walk (S10 part 1's review); the lint keeps it so for those forms.
+ * `events.ts`, `routes.ts`, `route-tests.ts` and `statement-tree.ts` charges a unit on entry (an arrow handed
+ * straight to these functions is charged by them). `tools/oxlint/check-charged-iteration.mjs` guards the ordinary forms
+ * of any other repetition there (loops, array walks, a body whose first statement does not charge, and any call into
+ * the rest of the core or the library that its list does not give a reason for); the forms it does not see are named in
+ * its header. The code as written has no uncharged walk (S10 part 1's review); the lint keeps it so for those forms.
  */
 
 /** Each item, one unit of `counter` charged as it is taken. */
