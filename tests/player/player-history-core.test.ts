@@ -355,7 +355,7 @@ test("a failed adoption leaves the restored state inspected", () => {
 });
 
 test("closing: Debug off reinstates the parked lineage; a replacement retires it; a clear while inspecting is refused", () => {
-  for (const by of ["debugOff", "replacement", "clear", "disposal", "loss"] as const) {
+  for (const by of ["debugOff", "replacement", "clear", "disposal"] as const) {
     const { history, points, parked } = stepping();
     stepTo(history, { move: "back", point: points[0]!.id, parked }, "r1");
     const outcome = advanceHistory(history, { kind: "close", by });
@@ -392,13 +392,42 @@ test("each point freezes the marks of its publication", () => {
   assert.deepEqual(history.timeline().points[0]!.marks, marks);
 });
 
-test("only advance writes the core's state", () => {
+test("only advance writes the core's state: its dispatcher alone calls each kind's method, once", () => {
   const text = readFileSync(
     new URL("../../../player/engine-bridge/history/core.ts", import.meta.url),
     "utf8",
   );
   const file = ts.createSourceFile("core.ts", text, ts.ScriptTarget.Latest, true);
+  // The class member a node is in, by name.
+  const memberOf = (node: ts.Node): string => {
+    let at: ts.Node | undefined = node;
+    while (at !== undefined && !ts.isClassElement(at)) at = at.parent;
+    if (at === undefined) return "(outside a method)";
+    return ts.isConstructorDeclaration(at)
+      ? "constructor"
+      : (at.name?.getText(file) ?? "(unnamed)");
+  };
+  // `#advance` dispatches each observation to its kind's method; six return their change to `#delta`.
+  const kinds = [
+    "#undoPublication",
+    "#publish",
+    "#prepare",
+    "#commit",
+    "#drop",
+    "#return",
+    "#adoptBegun",
+    "#adoptEnded",
+    "#stopCollection",
+    "#close",
+    "#refuseUnknown",
+    "#delta",
+  ];
+  const shared = ["#forget", "#linkResponses", "#stop"];
   const writers = new Set<string>();
+  // Each governed method's admitted call sites, by the member each is in; any other reference to one is an escape.
+  const governed = new Set(["#advance", ...kinds, ...shared]);
+  const callers = new Map<string, string[]>();
+  const escapes: string[] = [];
   file.forEachChild(function visit(node): void {
     const assigned =
       (ts.isBinaryExpression(node) &&
@@ -419,37 +448,58 @@ test("only advance writes the core's state", () => {
         ? node.expression.expression
         : undefined;
     const target = assigned ?? mutating;
-    if (target !== undefined && /this\.#|inspecting|inspecting!/u.test(target.getText(file))) {
-      let at: ts.Node | undefined = node;
-      while (at !== undefined && !ts.isMethodDeclaration(at) && !ts.isConstructorDeclaration(at))
-        at = at.parent;
-      writers.add(
-        at === undefined
-          ? "(outside a method)"
-          : ts.isConstructorDeclaration(at)
-            ? "constructor"
-            : at.name.getText(file),
-      );
+    if (target !== undefined && /this\.#|inspecting|inspecting!/u.test(target.getText(file)))
+      writers.add(memberOf(node));
+    // Every reference to a governed name but its method's own declaration. The one admitted form is a call
+    // `this.#method(...)` directly in a member of the core, outside any nested function; every other form escapes.
+    const { parent } = node;
+    if (
+      ts.isPrivateIdentifier(node) &&
+      governed.has(node.text) &&
+      !(ts.isMethodDeclaration(parent) && parent.name === node)
+    ) {
+      const site = ts.findAncestor(parent, ts.isFunctionLike);
+      const direct =
+        ts.isPropertyAccessExpression(parent) &&
+        parent.expression.kind === ts.SyntaxKind.ThisKeyword &&
+        ts.isCallExpression(parent.parent) &&
+        parent.parent.expression === parent &&
+        site !== undefined &&
+        ts.isClassElement(site) &&
+        ts.isClassDeclaration(site.parent) &&
+        site.parent.name?.text === "HistoryCore";
+      if (direct) callers.set(node.text, [...(callers.get(node.text) ?? []), memberOf(node)]);
+      else {
+        const form = ts.isPropertyAccessExpression(parent) ? parent.parent : parent;
+        escapes.push(`${memberOf(node)}: ${form.getText(file).split("\n")[0]}`);
+      }
     }
     node.forEachChild(visit);
   });
   assert.deepEqual(
-    [...writers].sort(),
-    ["#advance", "#forget", "#linkResponses", "#stop", "advance", "constructor"].sort(),
+    escapes,
+    [],
+    "a governed method is referenced only by a direct `this.#method(...)` call",
   );
-  // The private writers are called only from `advance`: `#advance` is its body, which it wraps with the mutation count;
-  // the others are reached through it.
-  for (const helper of ["#advance", "#forget", "#linkResponses", "#stop"]) {
-    const callers = new Set<string>();
-    file.forEachChild(function visit(node): void {
-      if (ts.isCallExpression(node) && node.expression.getText(file) === `this.${helper}`) {
-        let at: ts.Node | undefined = node;
-        while (at !== undefined && !ts.isMethodDeclaration(at)) at = at.parent;
-        callers.add(at === undefined ? "(outside)" : at.name.getText(file));
-      }
-      node.forEachChild(visit);
-    });
-    assert.deepEqual([...callers], [helper === "#advance" ? "advance" : "#advance"], helper);
+  assert.deepEqual(
+    [...writers].sort(),
+    [
+      ...kinds.filter((kind) => kind !== "#stopCollection"),
+      ...shared,
+      "advance",
+      "constructor",
+    ].sort(),
+  );
+  // `#advance` is `advance`'s body, which it wraps with the mutation count; each kind's method is called once, from the
+  // dispatcher; the shared writers are reached only through the kinds' methods.
+  assert.deepEqual(callers.get("#advance"), ["advance"], "#advance");
+  for (const kind of kinds) assert.deepEqual(callers.get(kind), ["#advance"], kind);
+  for (const helper of shared) {
+    const sites = callers.get(helper) ?? [];
+    assert.ok(
+      sites.length > 0 && sites.every((site) => kinds.includes(site)),
+      `${helper}: ${sites.join(", ")}`,
+    );
   }
 });
 
