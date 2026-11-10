@@ -143,7 +143,7 @@ interface RewindPlayer {
         readonly history: number | null;
       };
       /** A clear's or an import's retirement of the history, as the Player reports it. */
-      retired(by: "clear" | "import"): unknown;
+      retired(by: "clear" | "import"): readonly { readonly kind: string }[];
     };
   };
   prepare(create: (recording: PlayerRuntimeSessionOptions) => PlayerRuntimeSession): void;
