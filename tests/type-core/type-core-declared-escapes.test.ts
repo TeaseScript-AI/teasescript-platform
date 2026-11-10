@@ -46,9 +46,10 @@ import { hostValues } from "../helpers/type-core-stop-oracle.js";
 //   at efbd7fdee, made before #2203's gate.
 // Inside a window a stopped compile of either tree may differ from the other's in anything two stopped compiles of main
 // differ in between two allowances (ruling 18): a check's order and form, and whether the gate refuses the program. For
-// two first-asker sources (#2218's class) the second test holds the head to what holds there on both trees: each tree
-// publishes or refuses for its limit, and where both publish the runs agree in outcome, code and span and pass nothing
-// the natural run rejects. `FIRST_ASKER_MAIN` is main's side for it, recorded at 5a1461a1c (`probe42.mjs`).
+// two pairs of first-asker sources (#2218's class) the second test holds the head to what holds there on both trees:
+// each tree publishes or refuses for its limit, a published plan passes nothing the natural run rejects, and where both
+// publish the runs agree in outcome, code and span. `FIRST_ASKER_MAIN` is main's side for it, recorded at 5a1461a1c
+// (`probe42.mjs`, `probe43.mjs`).
 
 /**
  * Codex round 7's reachable sources and Sol round 10's two-copy form (#2116): a place holding `count` settled whole
@@ -868,17 +869,18 @@ test("#2116's declared difference under #2080: at every recorded window's edges 
 });
 
 /**
- * Sol re-check 3's first-asker source on #2116 (#2218's class) and a variant of it whose last store holds the host value
- * one level down, which between them show inside a window what two stopped compiles of main show between two of its
- * allowances: another order and form of a store's check, and a program refused on one tree and compiled on the other.
+ * Sol re-check 3's first-asker source on #2116 (#2218's class), `root`'s whole stores in `order`, and a variant whose last
+ * store holds the host value one level down. Between them they show inside a window what two stopped compiles of main
+ * show between two of its allowances: another order and form of a store's check, and a program refused on one tree and
+ * compiled on the other. With `f1` stored last, `root` holds `f1` at the last store, so a value that fits succeeds.
  */
-const firstAsker = (last: string) =>
+const firstAsker = (last: string, order: readonly number[] = [1, 2, 3, 4, 5, 6, 7, 8]) =>
   [
     "let value:integer=1",
     "let u={f1:{n:value}}",
     'u={g:"s"}',
     "let root={f0:{n:{a:value,b:value}}}",
-    ...Array.from({ length: 8 }, (_, i) => `root={f${i + 1}:{n:{a:value,b:value}}}`),
+    ...order.map((i) => `root={f${i}:{n:{a:value,b:value}}}`),
     "if hostOther is integer {",
     ...Array.from({ length: 18 }, (_, i) => `let r${i}=root.f${i % 9}.n.a`),
     "root.f1={n:{a:hostValue,b:hostValue}}",
@@ -887,9 +889,12 @@ const firstAsker = (last: string) =>
     'say "accepted"',
     "exit",
   ].join("\n");
+const F1_LAST = [2, 3, 4, 5, 6, 7, 8, 1];
 const FIRST_ASKER_SOURCES: Readonly<Record<string, string>> = {
   "first-asker-field-9": firstAsker("root.f1={n:{b:hostValue,a:hostValue}}"),
   "first-asker-field-9-n-host": firstAsker("root.f1={n:hostValue}"),
+  "first-asker-field-9-f1-last": firstAsker("root.f1={n:{b:hostValue,a:hostValue}}", F1_LAST),
+  "first-asker-field-9-f1-last-n-host": firstAsker("root.f1={n:hostValue}", F1_LAST),
 };
 
 /** A host value as JSON writes it. */
@@ -909,6 +914,8 @@ const FIRST_ASKER_HOSTS: readonly Json[] = [
   { n: { a: "s", b: 1 } },
   { n: { a: 1, b: "s" } },
   { n: { a: 1, b: 1 } },
+  { a: 1, b: 1 },
+  { a: "s", b: 1 },
   "bad",
 ];
 
@@ -919,69 +926,145 @@ const FIRST_ASKER_HOSTS: readonly Json[] = [
 const LIMIT = "a store whose check was lost at the budget";
 
 /**
- * Main's side of the first-asker sources, held mode 2: the natural plan's runs and, at each allowance from 298 to 303
- * where both trees settle, whether main publishes, with its runs, or refuses, with its reason. Each run is its outcome,
- * code and span (`status code start:end`), over `FIRST_ASKER_HOSTS`. Recorded at 5a1461a1c by lane 2b's recorder
- * (`probe42.mjs` in #2116's evidence); it is re-recorded as the file header says.
+ * Main's side of the first-asker sources, each in its held mode: the natural plan's runs and, at each allowance of its
+ * window (298 to 303 in mode 2, 243 to 250 with `f1` last, in mode 3) where both trees settle, whether main publishes,
+ * with its runs, or refuses, with its reason. Each run is its outcome, code and span (`status code start:end`), over
+ * `FIRST_ASKER_HOSTS`. Recorded at 5a1461a1c by lane 2b's recorders (`probe42.mjs`, `probe43.mjs` in #2116's evidence);
+ * it is re-recorded as the file header says. Every natural run of the first two fails (a value that fits meets TSR017:
+ * `root` holds no `f1` at the last store), so only the `f1`-last pair can show a published plan passing what the natural
+ * run rejects.
  */
 const FIRST_ASKER_MAIN: Readonly<
   Record<
     string,
     {
+      readonly mode: number;
       readonly natural: string;
       readonly at: Readonly<Record<number, readonly ["published" | "refused", string]>>;
     }
   >
 > = {
   "first-asker-field-9": {
+    mode: 2,
     natural:
-      "failed TSR017 759:766; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+      "failed TSR017 759:766; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
     at: {
       299: [
         "published",
-        "failed TSR017 759:766; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+        "failed TSR017 759:766; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
       ],
       300: [
         "published",
-        "failed TSR017 759:766; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+        "failed TSR017 759:766; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
       ],
       301: [
         "published",
-        "failed TSR017 759:766; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+        "failed TSR017 759:766; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
       ],
       302: [
         "published",
-        "failed TSR017 759:766; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+        "failed TSR017 759:766; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
       ],
       303: [
         "published",
-        "failed TSR017 759:766; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+        "failed TSR017 759:766; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
       ],
     },
   },
   "first-asker-field-9-n-host": {
+    mode: 2,
     natural:
-      "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR058 767:780",
+      "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR058 767:780; failed TSR058 767:780",
     at: {
       299: [
         "published",
-        "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR058 767:780",
+        "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR058 767:780; failed TSR058 767:780",
       ],
       300: [
         "published",
-        "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR058 767:780",
+        "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR058 767:780; failed TSR058 767:780",
       ],
       301: [
         "published",
-        "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR058 767:780",
+        "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR058 767:780; failed TSR058 767:780",
       ],
       302: [
         "published",
-        "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR058 767:780",
+        "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR058 767:780; failed TSR058 767:780",
       ],
       303: [
         "published",
-        "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR058 767:780",
+        "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR017 759:766; failed TSR058 767:780; failed TSR058 767:780",
+      ],
+    },
+  },
+  "first-asker-field-9-f1-last": {
+    mode: 3,
+    natural:
+      "halted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+    at: {
+      244: [
+        "published",
+        "halted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+      ],
+      245: [
+        "published",
+        "halted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+      ],
+      246: [
+        "published",
+        "halted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+      ],
+      247: [
+        "published",
+        "halted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+      ],
+      248: [
+        "published",
+        "halted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+      ],
+      249: [
+        "published",
+        "halted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+      ],
+      250: [
+        "published",
+        "halted; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796; failed TSR058 767:796",
+      ],
+    },
+  },
+  "first-asker-field-9-f1-last-n-host": {
+    mode: 3,
+    natural:
+      "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; halted; halted; halted; halted; halted; halted; halted; halted; halted; failed TSR058 767:780; failed TSR058 767:780",
+    at: {
+      244: [
+        "refused",
+        "The candidate type analysis does not cover a store whose check was lost at the budget yet (main.tease, offset 767).",
+      ],
+      245: [
+        "refused",
+        "The candidate type analysis does not cover a store whose check was lost at the budget yet (main.tease, offset 767).",
+      ],
+      246: [
+        "refused",
+        "The candidate type analysis does not cover a store whose check was lost at the budget yet (main.tease, offset 767).",
+      ],
+      247: [
+        "refused",
+        "The candidate type analysis does not cover a store whose check was lost at the budget yet (main.tease, offset 767).",
+      ],
+      248: [
+        "refused",
+        "The candidate type analysis does not cover a store whose check was lost at the budget yet (main.tease, offset 767).",
+      ],
+      249: [
+        "refused",
+        "The candidate type analysis does not cover a store whose check was lost at the budget yet (main.tease, offset 767).",
+      ],
+      250: [
+        "published",
+        "failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; failed TSR058 767:780; halted; halted; halted; halted; halted; halted; halted; halted; halted; failed TSR058 767:780; failed TSR058 767:780",
       ],
     },
   },
@@ -1009,10 +1092,10 @@ const firstAskerRuns = (plan: InstructionPlan): string[] =>
 
 test("#2116's declared difference inside a window, first-asker sources: each tree publishes or refuses for its limit, and where both publish the runs agree in outcome, code and span and pass nothing the natural run rejects (rulings 18 and 19)", () => {
   assert.deepEqual(Object.keys(FIRST_ASKER_MAIN).sort(), Object.keys(FIRST_ASKER_SOURCES).sort());
-  const held = HELD_MODES[2]!;
   for (const [label, source] of Object.entries(FIRST_ASKER_SOURCES)) {
     const files = [{ path: "main.tease", source }];
     const main = FIRST_ASKER_MAIN[label]!;
+    const held = HELD_MODES[main.mode]!;
     const compiled = (demand: number | null): InstructionPlan | string => {
       try {
         const { plan } = held.run(() =>
