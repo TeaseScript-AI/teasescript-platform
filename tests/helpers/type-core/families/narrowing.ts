@@ -440,7 +440,7 @@ export const NARROWING_FAMILIES: readonly WorkFamily[] = [
 ];
 
 /**
- * The route rule's narrowed default (#1938, the lead's R8 and R12): in a program that holds an `if` arm no run enters,
+ * The route rule's narrowed default (#1938): in a program that holds an `if` arm no run enters,
  * each route query passes only entered arms and leavable loops, over one feasibility layer built per program. Each
  * family asks k route queries beside k such arms, through the analysis.
  */

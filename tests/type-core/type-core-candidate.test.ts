@@ -3920,7 +3920,7 @@ test("the tested-producer rule admits its closed set of forms over every axis, a
 });
 
 test("a route through an arm its entry narrowing leaves no kind does not promote, and a route around it does (AD-1, #1938)", () => {
-  // (Sol's F2 on #1937, the lead's default (Codex r6, r7), narrowed by #1938 (the lead's R8): the expected outcome from
+  // (Sol's F2 on #1937, the lead's default (Codex r6, r7), narrowed by #1938: the expected outcome from
   // the rule's own table, never the engine's. A writer of a possible null; an `if` whose one arm overwrites the key; its
   // test of `other` gives an arm no run enters where `other` holds no kind that arm's entry narrowing keeps. The route
   // past the `if` takes the arm without the overwrite: the use errs where a run enters that arm, and keeps the warning
@@ -4104,7 +4104,7 @@ test("a route through an arm its entry narrowing leaves no kind does not promote
       wrong.push(`${expected ? "error" : "warning"} expected (${name}): ${source}`);
     covered.add(`unavailable | ${name}`);
   }
-  // (the default narrowed (#1938, the lead's R8 and design round 1): beside an arm no run enters, only a certificate its
+  // (the default narrowed (#1938 and its design round): beside an arm no run enters, only a certificate its
   // own value proves promotes, through arms runs enter and loops they leave. The round's sources, each the warning where
   // no run reaches the use with null, and the under-offers the narrowing releases, each the error)
   const gate = "let n=1\nif hostValue is boolean { n=null }\n";
