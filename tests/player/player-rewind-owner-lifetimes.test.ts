@@ -18,6 +18,8 @@ import {
   settle,
   shownView,
   start,
+  choose,
+  holdRead,
   useDebugRewind,
   type Rewind,
   type RewindHost,
@@ -113,6 +115,15 @@ const MAKERS: Readonly<Record<Case["resource"], readonly Case["maker"][]>> = {
   "close in flight": ["Debug off", "replacement", "clear", "import", "disposal"],
 };
 
+/** The ends that end the open history, and its view with it (`clearView`). */
+const HISTORY_ENDS: readonly Case["end"][] = [
+  "replace",
+  "Debug off",
+  "disposal by the Player",
+  "disposal by Debug's scope",
+  "clear",
+  "import",
+];
 const STEP_ENDS: readonly Case["end"][] = [
   "drop",
   "commit",
@@ -187,7 +198,7 @@ function infeasible(c: Case): string | null {
     if ((end === "Return" || end.startsWith("adoption")) && !inspecting)
       return "Return and an adoption act only on an inspected state";
     if (resource === "problem" && end !== "drop" && end !== "commit")
-      return "a problem ends at the next step; whether Return or an adoption clears it is #2229's decision";
+      return "a problem ends at the next step or with its history: Return and an adoption leave it, unshown";
     if (
       (resource === "candidate" || resource === "pending ask") &&
       (end === "Return" || end.startsWith("adoption")) &&
@@ -197,8 +208,8 @@ function infeasible(c: Case): string | null {
     if (resource === "pending ask" && maker === "Return" && (end === "drop" || end === "commit"))
       return "a Return holds no step to drop or commit";
   }
-  if (resource === "problem" && !STEP_ENDS.includes(end))
-    return "a problem ends at the next step; whether another end clears it is #2229's decision";
+  if (resource === "problem" && !STEP_ENDS.includes(end) && !HISTORY_ENDS.includes(end))
+    return "a problem ends at the next step or with its history: the loss and a stop leave it, unshown";
   if ((SEALING.includes(end) || maker === "disposal") && after !== "quiescent")
     return "a sealed owner decides nothing more, so quiescence stands for every later request";
   return null;
@@ -871,9 +882,7 @@ function heldAfter(c: Case): boolean | undefined {
 /** The pending ask's settlement: whether its step or Return went. */
 function askedAfter(c: Case): boolean | undefined {
   if (c.resource !== "pending ask" && c.resource !== "candidate") return undefined;
-  // Debug off's reinstatement settles a step pending meanwhile as gone ahead (a finding, outside this family).
-  if (c.end === "Debug off" && c.inspection === "inspecting" && c.maker !== "Return")
-    return undefined;
+  // Debug off's reinstatement answers a Return; a step it abandons settles `false` at its own exit (#2232).
   if (c.maker === "Return") return c.end === "Return" || c.end === "Debug off" || c.end === "stop";
   return c.end === "commit" || c.end === "stop";
 }
@@ -1060,4 +1069,21 @@ test("the rewind owner's lifetime family completed every feasible full tuple, an
   // #2150 PR 2 took ten tuples out: an import's held renewal cannot fail as the one asked for (8), and the host refuses
   // no disposal of its current Player (2).
   assert.equal(FEASIBLE.length, 751);
+});
+
+test("#2232: a step committed before Debug off's reinstatement resolves true", async (context) => {
+  const made = createHost(context, memoryStorage().provider);
+  await start(context, made.host);
+  await choose(context, made.host, "One");
+  await choose(context, made.host, "Red");
+  const bridge = await made.host.bridge;
+  // The commit is sent, its acknowledgement held, when Debug off reinstates the parked session.
+  const held = holdRead(context, bridge, "rewindCommit", "reply", false);
+  const stepped = backTo(made.rewind, 0);
+  await held.arrived;
+  made.debug.stop();
+  await settle(context);
+  held.release();
+  assert.equal(await stepped, true);
+  assert.equal(made.host.rewind.inspecting.value, false, "the parked session is reinstated");
 });
