@@ -716,13 +716,16 @@ export function exactOperationEscapes(overrides: Readonly<Record<string, string>
   // file, not only in the closure: code outside it could otherwise change what the closure reads.
   for (const symbol of [...constants, ...functions]) {
     const declaration = symbol.declarations![0]!;
+    const declaredName =
+      ts.isFunctionDeclaration(declaration) || ts.isVariableDeclaration(declaration)
+        ? declaration.name
+        : undefined;
     const visit = (node: ts.Node): void => {
       if (
         ts.isIdentifier(node) &&
         !isName(node) &&
         checker.getSymbolAtLocation(node) === symbol &&
-        // EVIDENCE: invariant: a module constant's or function's declaration is a variable or function declaration, both named.
-        node !== (declaration as ts.NamedDeclaration).name
+        node !== declaredName
       ) {
         let use: ts.Node = node;
         while (
