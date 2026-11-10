@@ -2,6 +2,7 @@
 // `lib/row-shapes.mjs`), read through the strict reader, each scenario's parts and relations (`validate.mjs`). The
 // fixtures hold every declared leaf between them; the families mutate them, and every expected outcome is written here.
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 import { buildReport } from "./report.mjs";
 import { isParsedRow, parseRow, sectionsOf } from "./lib/records.mjs";
@@ -661,7 +662,7 @@ test("family (a): an optional leaf may be absent or null without a parse problem
 /**
  * Family (b): the order relations and evidence rules the validation checks, written here: each with the fixture it
  * applies to, the change that reverses or removes its evidence, the cells that change must fail, and the reason each
- * of them must give.
+ * of them must give (or the cells named sixth, for a field's own reason).
  */
 const RELATIONS = [
   [
@@ -756,7 +757,7 @@ const RELATIONS = [
     "session chromium main",
     (r) => (r.result.bytes.requests[0].beforeStartEnabled = false),
     ["counts"],
-    "its cached beforeStartEnabled (false) is not its start",
+    "/player/: its cached beforeStartEnabled (false) is not its start against the mark (true)",
   ],
   [
     // An open request has no length: its served bytes are no count, which the output domain refuses.
@@ -764,14 +765,14 @@ const RELATIONS = [
     "session chromium main",
     (r) => Object.assign(r.result.bytes.requests[0], { finished: false, encodedBytes: null }),
     ["counts"],
-    "is no safe integer ≥ 0",
+    "served the whole cold page, page, encoded: NaN is no safe integer ≥ 0",
   ],
   [
     "probe records: none dropped",
     "session chromium main",
     (r) => (r.result.probe.repeat.dropped = 1),
     ["counts", "timing"],
-    "1 probe records dropped",
+    "the repeat page: 1 probe records dropped",
   ],
   [
     "instrumented: a post → its reply",
@@ -866,14 +867,14 @@ const RELATIONS = [
     "keepHandler chromium",
     (r) => (r.result.lifecycle = [r.result.lifecycle[1]]),
     ["timing"],
-    "a visibilitychange to hidden",
+    "row.result.lifecycle: a visibilitychange to hidden",
   ],
   [
     "keep: the cached outcome",
     "keepHandler chromium",
     (r) => (r.result.outcome = "aborted"),
     ["timing"],
-    "the recorded outcome (aborted)",
+    "the recorded outcome (aborted) is not its records' (completed)",
   ],
   [
     "durable: the baseline present (R6)",
@@ -887,21 +888,21 @@ const RELATIONS = [
     "keepDurable pixel",
     (r) => (r.result.outcome = "not durable after 1 s"),
     ["timing"],
-    "the recorded outcome (not durable after 1 s)",
+    "the recorded outcome (not durable after 1 s) is not its records' (durable after 1 s)",
   ],
   [
     "demo: the cached pass",
     "demo chromium",
     (r) => (r.result.ok = false),
     ["counts", "timing"],
-    "the recorded ok (false)",
+    "the recorded ok (false) is not its records' (true)",
   ],
   [
     "smoke: the cached pass against the exit (R6)",
     "delayedSmoke chromium",
     (r) => (r.result.exit = 1),
     ["timing"],
-    "the recorded ok (true)",
+    "the recorded ok (true) is not its records' (false)",
   ],
   [
     "a sample that must complete and failed",
@@ -909,6 +910,166 @@ const RELATIONS = [
     (r) => (r.ok = false),
     ["counts", "timing"],
     "the sample failed",
+  ],
+  // The rows the check sites' coverage demands (orchestrator 2's ruling (B)); each reason is its site's message.
+  [
+    "session: a turn without its records",
+    "session chromium main",
+    (r) => r.result.turns.push({ turn: 1 }),
+    ["counts", "timing"],
+    "turn 1: no records of the turn",
+  ],
+  [
+    "session: no turn",
+    "session chromium main",
+    (r) => (r.result.turns = []),
+    ["counts", "timing"],
+    "a turn",
+  ],
+  [
+    "playable: Start never shown enabled",
+    "session chromium main",
+    (r) => (r.result.probe.cold.states[0].start = null),
+    ["counts", "timing"],
+    "cold playable: Start was never shown enabled",
+  ],
+  [
+    "playable: Start enabled has no frame",
+    "session chromium main",
+    (r) => (r.result.probe.cold.states[0].frame = null),
+    ["counts", "timing"],
+    "cold playable: Start enabled has no frame",
+  ],
+  [
+    "playable: no trusted input after Start",
+    "session chromium main",
+    (r) => r.result.probe.cold.inputs.forEach((input) => (input.trusted = false)),
+    ["counts", "timing"],
+    "cold playable: no trusted input after Start was enabled",
+  ],
+  [
+    "playable: no control after the input",
+    "session chromium main",
+    (r) => (r.result.probe.cold.states = [r.result.probe.cold.states[0]]),
+    ["counts", "timing"],
+    "cold playable: no enabled control after Start's input",
+  ],
+  [
+    "playable: the first control has no frame",
+    "session chromium main",
+    (r) => (r.result.probe.cold.states[1].frame = null),
+    ["counts", "timing"],
+    "cold playable: the first control has no frame",
+  ],
+  [
+    "playable: Continue never shown enabled",
+    "session chromium main",
+    (r) => (r.result.probe.repeat.states[0].start = null),
+    ["counts", "timing"],
+    "repeat playable: Continue was never shown enabled",
+  ],
+  [
+    "turn: no input recorded",
+    "session chromium main",
+    (r) => r.result.probe.repeat.inputs.pop(),
+    ["counts", "timing"],
+    "turn 0: no input recorded",
+  ],
+  [
+    "turn: no DOM change after the input",
+    "session chromium main",
+    (r) => (r.result.probe.repeat.changes = []),
+    ["counts", "timing"],
+    "turn 0: no DOM change after the input",
+  ],
+  [
+    "turn: no feedback frame",
+    "session chromium main",
+    (r) => (r.result.probe.repeat.changes[0].frame = null),
+    ["counts", "timing"],
+    "turn 0: no feedback frame after the input",
+  ],
+  [
+    "turn: neither settled nor ended",
+    "session chromium main",
+    (r) => {
+      r.result.probe.repeat.states.pop();
+      r.result.probe.repeat.rowChanges = [];
+    },
+    ["counts", "timing"],
+    "turn 0: neither settled nor ended",
+  ],
+  [
+    // Sol code r2's witness: feedback (961 → 1000) and the settling control (950 → 960) in order, the input after it.
+    "turn: the input → its settlement",
+    "session chromium main",
+    (r) => {
+      r.result.probe.repeat.inputs[1].ts = 961;
+      r.result.probe.repeat.changes[0].frame = 1000;
+    },
+    ["counts", "timing"],
+    "the turn's input → its settlement",
+  ],
+  [
+    "turn: the input → the first script row shown",
+    "session chromium main",
+    (r) =>
+      r.result.probe.repeat.rows.push({
+        id: "m2",
+        speaker: "system",
+        t: 905,
+        frame: 906,
+        shownFrame: 898,
+      }),
+    ["counts", "timing"],
+    "the turn's input → the first script row shown",
+  ],
+  [
+    "first save: no publish",
+    "session chromium main",
+    (r) => (r.result.probe.cold.transactions = []),
+    ["counts", "timing"],
+    "first save: no publish with a session and a plan record after Start",
+  ],
+  [
+    "first save: not complete",
+    "session chromium main",
+    (r) => (r.result.probe.cold.transactions[0].outcome = "abort"),
+    ["counts", "timing"],
+    "first save: the first save abort",
+  ],
+  [
+    "a required field without a value",
+    "session chromium worker",
+    (r) => (r.result.probe.cold.workers[0].ready = null),
+    ["counts", "timing"],
+    "Worker: construction → ready (ms)",
+    // The field's own cell gives its reason; the counts cell fails with the part it reads.
+    ["timing"],
+  ],
+  [
+    "instrumented: the start request's reply",
+    "sessionInstrumented chromium worker",
+    (r) =>
+      (r.result.diagnostics.bridgeLogs.cold = r.result.diagnostics.bridgeLogs.cold.filter(
+        (entry) => entry.id !== 2 || entry.dir !== "reply",
+      )),
+    ["counts", "crossClock", "timing"],
+    "a start request with its reply in the cold log",
+  ],
+  [
+    "taps: a CDP send error",
+    "taps chromium main",
+    (r) => (r.result.cdpErrors = ["Input.dispatchTouchEvent: closed"]),
+    ["counts", "timing"],
+    "1 CDP send errors",
+  ],
+  [
+    "taps: a tap off its grid point",
+    "taps chromium main",
+    (r) => (r.result.deliveries[1].x = 40),
+    ["counts", "timing"],
+    "1 taps off their grid point",
   ],
 ];
 
@@ -948,12 +1109,12 @@ const FIELD_RELATIONS = {
 };
 
 test("family (b): each relation reversed or its evidence removed fails exactly its cells", () => {
-  for (const [what, base, change, failing, reason] of RELATIONS) {
+  for (const [what, base, change, failing, reason, reasonIn = failing] of RELATIONS) {
     const fixture = clone(BASES[base]);
     change(fixture);
     const cells = cellsOf(fixture);
     assert.deepEqual(failingCells(cells), failing, what);
-    for (const name of failing)
+    for (const name of reasonIn)
       assert.ok(
         cells[name].problems.some((problem) => problem.includes(reason)),
         `${what}: ${cells[name].problems}`,
@@ -1042,4 +1203,298 @@ test("every NULLABLE name is an optional leaf of some section, never of the head
   };
   for (const { result } of Object.values(SHAPES)) walk(result, "result", false);
   for (const name of Object.keys(NULLABLE)) assert.ok(optionalKeys.has(name), name);
+});
+
+/*
+ * The check sites' coverage (orchestrator 2's ruling (B) on the family report after Sol code r2). The claim: every
+ * check site of these kinds in these modules (`MODULES`) has a relation row (`RELATIONS`) whose asserted reason is
+ * that site's message, so the row fails when the site is weakened. The kinds:
+ *   - a call of `span` (its third argument, the interval's label);
+ *   - an object with `ok: false` (its `reason`);
+ *   - `problems.push(…)` (its message);
+ *   - `throw new MissingEvidence | ContradictoryEvidence | ReversedInterval | MalformedEvidence(…)` (its message).
+ * The rule is "all occurrences equal the readable ones": every occurrence of `span`, `ok: false`, `problems.push` and
+ * `throw` in a module's code (its comments and the text of its strings blanked) is one of the readable forms above, a
+ * named import of `span`, a pass-through (`PASS_THROUGH`), `throw new Error(…)` (a defect of the kit or a live run's
+ * failure, no evidence check) or a rethrow; any other occurrence fails, naming its file and line. Sites whose
+ * messages share one pattern are one site. A message with little literal text (`WEAK`) is witnessed only by the rows
+ * named for it. The limit: a check written in another form (a bare comparison that throws, a new module) is outside
+ * the claim until its kind is added here.
+ */
+const MODULES = ["validate.mjs", "lib/measure.mjs", "scenarios/keep.mjs", "scenarios/taps.mjs"];
+const PASS_THROUGH = new Set(["error.message", "...problems"]);
+const EVIDENCE_ERRORS = [
+  "MissingEvidence",
+  "ContradictoryEvidence",
+  "ReversedInterval",
+  "MalformedEvidence",
+];
+
+/** `text` with its comments, and the text of its strings, templates and regular expressions, blanked; lines kept. */
+function codeOf(text) {
+  const out = [...text];
+  const blank = (from, to) => {
+    for (let k = from; k < to; k += 1) if (out[k] !== "\n") out[k] = " ";
+  };
+  const templates = [];
+  let depth = 0;
+  let last = "";
+  let i = 0;
+  const templateText = () => {
+    const start = i;
+    for (; i < text.length; i += 1) {
+      if (text[i] === "\\") i += 1;
+      else if (text[i] === "`") {
+        blank(start, i);
+        i += 1;
+        last = "`";
+        return;
+      } else if (text[i] === "$" && text[i + 1] === "{") {
+        blank(start, i);
+        i += 2;
+        templates.push(depth);
+        depth = 0;
+        last = "{";
+        return;
+      }
+    }
+  };
+  while (i < text.length) {
+    const c = text[i];
+    if (c === "/" && text[i + 1] === "/") {
+      const end = text.indexOf("\n", i);
+      const stop = end === -1 ? text.length : end;
+      blank(i, stop);
+      i = stop;
+    } else if (c === "/" && text[i + 1] === "*") {
+      const stop = text.indexOf("*/", i + 2) + 2;
+      blank(i, stop);
+      i = stop;
+    } else if (c === '"' || c === "'") {
+      const start = i;
+      for (i += 1; text[i] !== c; i += 1) if (text[i] === "\\") i += 1;
+      blank(start + 1, i);
+      i += 1;
+      last = c;
+    } else if (c === "`") {
+      i += 1;
+      templateText();
+    } else if (c === "/" && (last === "" || "(,=:[!&|?{};".includes(last))) {
+      const start = i;
+      let inClass = false;
+      for (i += 1; text[i] !== "/" || inClass; i += 1)
+        if (text[i] === "\\") i += 1;
+        else if (text[i] === "[") inClass = true;
+        else if (text[i] === "]") inClass = false;
+      blank(start + 1, i);
+      for (i += 1; /[a-z]/u.test(text[i] ?? ""); i += 1);
+      last = "/";
+    } else if (c === "}" && depth === 0 && templates.length > 0) {
+      depth = templates.pop();
+      i += 1;
+      templateText();
+    } else {
+      if (c === "{") depth += 1;
+      if (c === "}") depth -= 1;
+      if (!/\s/u.test(c)) last = c;
+      i += 1;
+    }
+  }
+  return out.join("");
+}
+
+/** The top-level arguments of the call whose `(` is at `open` in `code`: `[from, to]` ranges, and the `)`'s index. */
+function argumentsAt(code, open) {
+  const ranges = [];
+  let depth = 0;
+  let from = open + 1;
+  for (let i = open; i < code.length; i += 1) {
+    const c = code[i];
+    if ("([{".includes(c)) depth += 1;
+    else if (")]}".includes(c)) {
+      depth -= 1;
+      if (depth === 0) {
+        if (code.slice(from, i).trim() !== "") ranges.push([from, i]);
+        return { ranges, close: i };
+      }
+    } else if (c === "," && depth === 1) {
+      ranges.push([from, i]);
+      from = i + 1;
+    }
+  }
+  throw new Error(`no closing parenthesis for the call at ${open}`);
+}
+
+/**
+ * A message expression's pattern, when the test can read it: a string literal, a template (each `${…}` any text), or
+ * `<expression> ?? <literal>` (the literal is the site's own message). `null` otherwise.
+ */
+function messagePattern(source) {
+  const text = source.trim();
+  const fallback = /\?\?\s*("(?:[^"\\]|\\.)*"|`[^`]*`)$/u.exec(text);
+  if (fallback !== null && !/^["'`]/u.test(text)) return messagePattern(fallback[1]);
+  if (/^"(?:[^"\\]|\\.)*"$/u.test(text) || /^'(?:[^'\\]|\\.)*'$/u.test(text))
+    return { parts: [text.slice(1, -1)], text };
+  if (!/^`[\s\S]*`$/u.test(text) || codeOf(text).slice(1, -1).includes("`")) return null;
+  const parts = [];
+  let literal = "";
+  for (let i = 1; i < text.length - 1; i += 1)
+    if (text[i] === "$" && text[i + 1] === "{") {
+      parts.push(literal);
+      literal = "";
+      const { close } = argumentsAt(codeOf(text).replaceAll("$", " "), i + 1);
+      i = close;
+    } else literal += text[i];
+  parts.push(literal);
+  return { parts, text };
+}
+const escape = (literal) => literal.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+
+/** Every check site in `MODULES`, and every occurrence of the kinds' words that is no readable site. */
+function checkSites() {
+  const sites = new Map();
+  const unreadable = [];
+  for (const file of MODULES) {
+    const text = readFileSync(new URL(`./${file}`, import.meta.url), "utf8");
+    const code = codeOf(text);
+    const lineOf = (index) => text.slice(0, index).split("\n").length;
+    const imports = [...code.matchAll(/import\s*\{[^}]*\}\s*from/gu)].map((m) => [
+      m.index,
+      m.index + m[0].length,
+    ]);
+    const site = (kind, index, source) => {
+      const pattern = messagePattern(source);
+      if (pattern === null) {
+        unreadable.push(`${file}:${lineOf(index)}: ${kind} with the message ${source.trim()}`);
+        return;
+      }
+      const regex = new RegExp(pattern.parts.map(escape).join(".+?"), "u");
+      const key = regex.source;
+      if (!sites.has(key))
+        sites.set(key, {
+          kind,
+          regex,
+          literal: pattern.parts.join("").length,
+          at: [],
+          text: pattern.text,
+        });
+      sites.get(key).at.push(`${file}:${lineOf(index)}`);
+    };
+    for (const m of code.matchAll(/\bspan\b/gu)) {
+      if (imports.some(([from, to]) => m.index >= from && m.index < to)) continue;
+      const open = /^\s*\(/u.exec(code.slice(m.index + 4));
+      if (open === null) {
+        unreadable.push(`${file}:${lineOf(m.index)}: span, not called`);
+        continue;
+      }
+      const { ranges } = argumentsAt(code, m.index + 4 + open[0].length - 1);
+      if (ranges.length !== 3)
+        unreadable.push(`${file}:${lineOf(m.index)}: span with ${ranges.length} arguments`);
+      else site("span", m.index, text.slice(...ranges[2]));
+    }
+    for (const m of code.matchAll(/\bok\s*:\s*false\b/gu)) {
+      let open = m.index;
+      for (let depth = 0; open >= 0; open -= 1)
+        if (code[open] === "}") depth += 1;
+        else if (code[open] === "{") {
+          if (depth === 0) break;
+          depth -= 1;
+        }
+      const { ranges } = argumentsAt(code, open);
+      const reason = ranges.find(([from]) => /^\s*reason\s*:/u.test(code.slice(from)));
+      if (reason === undefined)
+        unreadable.push(`${file}:${lineOf(m.index)}: ok: false without a reason`);
+      else
+        site("ok: false", m.index, text.slice(reason[0], reason[1]).replace(/^\s*reason\s*:/u, ""));
+    }
+    for (const m of code.matchAll(/\bproblems\s*\.\s*push\s*\(/gu)) {
+      const { ranges } = argumentsAt(code, m.index + m[0].length - 1);
+      const source = ranges.length === 1 ? text.slice(...ranges[0]).trim() : "";
+      if (PASS_THROUGH.has(source)) continue;
+      site("problems.push", m.index, ranges.length === 1 ? source : "(not one argument)");
+    }
+    for (const m of code.matchAll(/\bthrow\b/gu)) {
+      const after = code.slice(m.index + 5);
+      // A kit defect or a live run's failure, and a rethrow of a caught error: no evidence check.
+      if (/^\s*new\s+Error\s*\(/u.test(after) || /^\s*[\w$]+(?:\.[\w$]+)*\s*;/u.test(after))
+        continue;
+      const evidence = new RegExp(`^\\s*new\\s+(${EVIDENCE_ERRORS.join("|")})\\s*\\(`, "u").exec(
+        after,
+      );
+      if (evidence === null) {
+        unreadable.push(`${file}:${lineOf(m.index)}: a throw of another form`);
+        continue;
+      }
+      const { ranges } = argumentsAt(code, m.index + 5 + evidence[0].length - 1);
+      site(
+        `throw ${evidence[1]}`,
+        m.index,
+        ranges.length > 0 ? text.slice(...ranges[0]) : "(none)",
+      );
+    }
+  }
+  return { sites: [...sites.values()], unreadable };
+}
+
+/**
+ * The sites whose message has little literal text, witnessed only by the rows named here (their own reasons), so a
+ * loose pattern cannot be matched by another site's message.
+ */
+const WEAK = {
+  "`${request.op}'s round trip`": [
+    "bridge: a request → its reply",
+    "instrumented: a post → its reply",
+  ],
+  "`the sends ${index - 1} → ${index}`": ["taps: the sends in order"],
+  '"the taps window"': ["taps: the window"],
+  "`cold playable: ${coldPlayable.reason}`": ["playable: Start enabled has no frame"],
+  '`first save: ${save?.reason ?? "no playable cold page"}`': ["first save: no publish"],
+  '"a turn"': ["session: no turn"],
+  "`turn ${index}: ${turn.reason}`": ["session: a turn without its records"],
+  "`${label} (${unit})`": ["a required field without a value"],
+  "`${label}: ${found} is ${what}`": ["byte account: every request finished or failed"],
+  '`the first save ${outcome ?? "never ended"}`': ["first save: not complete"],
+  '"no input recorded"': ["turn: no input recorded"],
+};
+
+/**
+ * The sites an earlier check of the same records always precedes, so that no row can reach them, each with the site
+ * whose row witnesses it and why: weakening such a site lets no wrong value through.
+ */
+const IMPLIED = {
+  // `between` reads the marks `bridgeTiming` has ordered.
+  "`the bridge page's ${from} → ${to}`": '"the bridge page\'s Worker start"',
+  // The first save is the first transaction to start after the press, and every transaction is ordered first.
+  "\"Start's input → the first save's commit\"":
+    "`${where} transaction ${index}: its start → its end`",
+  '"the first save\'s transaction"': "`${where} transaction ${index}: its start → its end`",
+  // A capture counts only when it started after the hiding (`hiddenCapture`), and every transaction is ordered first.
+  '"hidden → the commit"': "`${where} transaction ${index}: its start → its end`",
+  // `tapCounts` refuses only an unordered window, which the taps window's span refuses first.
+  '"the send ledger, the deliveries and the window"': '"the taps window"',
+};
+
+test("every check site in the derivation modules is readable and has a row that fails when it is weakened", () => {
+  const { sites, unreadable } = checkSites();
+  assert.deepEqual(unreadable, [], "occurrences that are no readable site");
+  const rows = new Map(RELATIONS.map((row) => [row[0], row]));
+  const texts = new Set(sites.map((site) => site.text));
+  for (const text of [...Object.keys(WEAK), ...Object.keys(IMPLIED), ...Object.values(IMPLIED)])
+    assert.ok(texts.has(text), `no site ${text}`);
+  const witnessed = (site) =>
+    Object.hasOwn(WEAK, site.text)
+      ? WEAK[site.text].every((name) => rows.has(name) && site.regex.test(rows.get(name)[4]))
+      : site.literal >= 16 && RELATIONS.some((row) => site.regex.test(row[4]));
+  const missing = sites.filter(
+    (site) =>
+      !(Object.hasOwn(IMPLIED, site.text)
+        ? witnessed(sites.find((other) => other.text === IMPLIED[site.text]))
+        : witnessed(site)),
+  );
+  assert.deepEqual(
+    missing.map((site) => `${site.at.join(", ")}: ${site.kind} ${site.text}`),
+    [],
+    "check sites without a row",
+  );
+  assert.ok(sites.length > 40, `only ${sites.length} sites`);
 });

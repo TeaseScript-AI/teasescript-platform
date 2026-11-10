@@ -28,6 +28,10 @@ cell incomplete and is never a value in a median. Every cell stays labelled `mea
 - **Each scenario's parts** (`validate.mjs` `PARTS`) check their order relations and the evidence a trial needs before
   they derive. Examples: each reply after its request, a tap's handler after its event, a keep trial's hiding, a
   transaction's end with its outcome.
+- **Every check has a witness.** A kit test (`records.test.mjs`) reads every `span` call, `ok: false` return,
+  `problems.push` and evidence-error `throw` in the derivation modules. Each must have a row whose reason is its
+  message, so the row fails when the check is weakened. A check written in another form, or in another module, is
+  outside that test until its kind is added.
 - **Three cells per scenario**, each its own failure boundary:
   - the timing cell (`ms`, `boolean`): the only one in the headline, the summary (`--json`) and the R0 comparison;
   - `<cell> / bytes and counts`;
