@@ -96,7 +96,6 @@ function required(
 ): boolean {
   if (
     walk.finishing ||
-    item.guarded === true ||
     item.tested === true ||
     (item.reasons & REASON.budget) !== 0 ||
     item.tag === "unknown" ||

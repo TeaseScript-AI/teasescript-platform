@@ -302,8 +302,6 @@ export class NarrowingRoutes {
         (yield* this.#valueProduces(value, node, [], tag))
         ? site
         : null;
-    if (some(program.work, "exactQueries", path.steps, (step) => step.kind !== "property"))
-      return null;
     const d = yield* this.witness(pathKey(path, program.work), tag, node, others);
     const writer = d?.value === undefined ? null : (program.places[d.value]?.site ?? null);
     // (a test of the needed form after the writer on every route to the use, `while n == null { … }`: the check on that
@@ -612,8 +610,7 @@ export class NarrowingRoutes {
     const path = keyPath(key);
     // (`keyPath` walks the key's text)
     program.work.charge("eventSteps", path.length + 1);
-    if (holds(program.work, "eventSteps", path, "element") || (yield* contract.refReceiver(key)))
-      return null;
+    if (yield* contract.refReceiver(key)) return null;
     const chain = this.#chainOf(node);
     if (chain === null) return null;
     const body = chain[0]!.block;
