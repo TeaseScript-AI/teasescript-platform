@@ -198,7 +198,7 @@ function infeasible(c: Case): string | null {
     if ((end === "Return" || end.startsWith("adoption")) && !inspecting)
       return "Return and an adoption act only on an inspected state";
     if (resource === "problem" && end !== "drop" && end !== "commit")
-      return "a problem ends at the next step or with its history: Return and an adoption leave it, unshown";
+      return "a problem ends at the next step or with its history: Return and an adoption leave it";
     if (
       (resource === "candidate" || resource === "pending ask") &&
       (end === "Return" || end.startsWith("adoption")) &&
@@ -209,7 +209,7 @@ function infeasible(c: Case): string | null {
       return "a Return holds no step to drop or commit";
   }
   if (resource === "problem" && !STEP_ENDS.includes(end) && !HISTORY_ENDS.includes(end))
-    return "a problem ends at the next step or with its history: the loss and a stop leave it, unshown";
+    return "a problem ends at the next step or with its history: the loss and a stop leave it";
   if ((SEALING.includes(end) || maker === "disposal") && after !== "quiescent")
     return "a sealed owner decides nothing more, so quiescence stands for every later request";
   return null;
