@@ -1,3 +1,5 @@
+import type { TypePlan } from "../../src/plan/model.js";
+
 /** The plan's fields that each hold a check the script runs (`src/plan/model.ts`). */
 const CHECK_FIELDS = new Set([
   "typeCheck",
@@ -28,4 +30,15 @@ export function planChecks(plan: unknown): number {
       }
   }
   return count;
+}
+
+/** A checked type in full, its unions' members sorted: the plan's side of `derivedText`. */
+export function planText(type: TypePlan | null): string {
+  if (type === null) return "any";
+  if (type.kind === "union") return type.members.map(planText).sort().join("|");
+  if (type.kind === "list" || type.kind === "set" || type.kind === "dict")
+    return `${type.kind}<${planText(type.element)}>`;
+  if (type.kind === "object")
+    return `{${[...type.properties.map(({ name, type: of }) => `${name}: ${planText(of)}`), ...(type.keepExtra === true ? ["..."] : [])].join(", ")}}`;
+  return type.kind;
 }
