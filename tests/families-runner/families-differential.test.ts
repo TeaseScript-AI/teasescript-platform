@@ -297,6 +297,13 @@ test("the differential record keeps every case's columns, its four modes, refusa
   const repeated = joinRun("repeated", ["--base", all.out, all.out]);
   assert.equal(repeated.ran.status, 1);
   assert.match(repeated.ran.stderr, /base: "modal" recorded twice/);
+  // (a line cut short, as by a run that ended while writing it, is no record)
+  const cut = join(folder, "cut.jsonl");
+  writeFileSync(cut, all.text!.slice(0, -2));
+  const truncated = joinRun("truncated", ["--base", cut]);
+  assert.equal(truncated.ran.status, 2);
+  assert.match(truncated.ran.stderr, /cut\.jsonl:6: no whole record of differential\.mjs/);
+  assert.equal(truncated.text, null);
 });
 
 test("the plan's check list lists each check planChecks counts, with its site and type (#2298)", () => {

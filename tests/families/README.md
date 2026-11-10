@@ -468,7 +468,9 @@ A record is `{name, case, checker, core, candidate}`:
 
 `join --cases <cases.jsonl> --base <records>... [--head <records>...] --out <file>` checks every case recorded once on
 each side and no other record (else exit 1, nothing written) and writes them in the cases' order: the record, or
-`{name, base, head}`. A batch of an item pool is itself a cases file, so the queue sizes the jobs; the plan's check
+`{name, base, head}`. It reads each record's name from the start of its line and copies the line as bytes, so a record
+longer than V8's longest string still joins; a line cut short is refused (exit 2). Writing a record that long ends
+the run with an error instead, and `join` then finds its case missing. A batch of an item pool is itself a cases file, so the queue sizes the jobs; the plan's check
 list comes from the tool's own build, so the tool's tree may be newer than the tree it reads:
 
 ```sh

@@ -14,7 +14,16 @@
 // Exit 0: every case recorded and nothing threw; 1: a record holds `threw`, or `join` found a case missing, repeated
 // or unknown (it then writes nothing); 2: a refused usage, cases file or tree, before any record is written.
 import { createHash } from "node:crypto";
-import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  closeSync,
+  existsSync,
+  openSync,
+  readFileSync,
+  readSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { distOf, unitResolver } from "./units.mjs";
@@ -23,6 +32,9 @@ const refuse = (why) => {
   process.stderr.write(`differential.mjs: ${why}\n`);
   process.exit(2);
 };
+/** The start of a record's line: the tool writes each record with its name first. */
+const NAME_FIELD = Buffer.from('{"name":"');
+
 const CASE_KEYS = new Set(["name", "source", "files", "globals", "runs", "set", "unit", "key"]);
 const isObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 const isTexts = (value) => Array.isArray(value) && value.every((each) => typeof each === "string");
@@ -270,6 +282,25 @@ async function record() {
   process.exitCode = threw === 0 ? 0 : 1;
 }
 
+/** The name of the record on bytes `[start, end)`, or `null` where they are no whole record of this tool's form. */
+function nameOf(bytes, start, end) {
+  if (
+    end - start <= NAME_FIELD.length ||
+    bytes[end - 1] !== 0x7d ||
+    bytes.compare(NAME_FIELD, 0, NAME_FIELD.length, start, start + NAME_FIELD.length) !== 0
+  )
+    return null;
+  for (let at = start + NAME_FIELD.length; at < end; at += 1)
+    if (bytes[at] === 0x5c) at += 1;
+    else if (bytes[at] === 0x22)
+      try {
+        return JSON.parse(bytes.toString("utf8", start + NAME_FIELD.length - 1, at + 1));
+      } catch {
+        return null;
+      }
+  return null;
+}
+
 function join() {
   const casesFile = option("--cases");
   const out = option("--out");
@@ -284,28 +315,28 @@ function join() {
   const cases = readCases(casesFile);
   const wanted = new Set(cases.map((c) => c.name));
   const problems = [];
+  // (each record by where its line is, so that no record is held as text: one can pass V8's longest string)
   const read = sides.map(([side, files]) => {
     const records = new Map();
     for (const file of files) {
-      let text;
+      let bytes;
       try {
-        text = readFileSync(file, "utf8");
+        bytes = readFileSync(file);
       } catch (error) {
         refuse(`cannot read ${file}: ${error.message}`);
       }
-      for (const [at, line] of text.split("\n").entries()) {
-        if (line === "") continue;
-        let row;
-        try {
-          row = JSON.parse(line);
-        } catch (error) {
-          refuse(`${file}:${at + 1}: no JSON: ${error.message}`);
+      for (let start = 0, line = 1; start < bytes.length; line += 1) {
+        const newline = bytes.indexOf(0x0a, start);
+        const end = newline < 0 ? bytes.length : newline;
+        if (end > start) {
+          const name = newline < 0 ? null : nameOf(bytes, start, end);
+          if (name === null) refuse(`${file}:${line}: no whole record of differential.mjs`);
+          if (!wanted.has(name)) problems.push(`${side}: ${JSON.stringify(name)} is no case`);
+          else if (records.has(name))
+            problems.push(`${side}: ${JSON.stringify(name)} recorded twice`);
+          else records.set(name, { file, start, end });
         }
-        if (!wanted.has(row?.name))
-          problems.push(`${side}: ${JSON.stringify(row?.name)} is no case`);
-        else if (records.has(row.name))
-          problems.push(`${side}: ${JSON.stringify(row.name)} recorded twice`);
-        else records.set(row.name, line);
+        start = end + 1;
       }
     }
     for (const c of cases)
@@ -316,15 +347,26 @@ function join() {
     process.stderr.write(`${problems.join("\n")}\n`);
     process.exit(1);
   }
-  writeFileSync(
-    out,
-    cases
-      .map((c) =>
-        read.length === 1
-          ? `${read[0].get(c.name)}\n`
-          : `{"name":${JSON.stringify(c.name)},"base":${read[0].get(c.name)},"head":${read[1].get(c.name)}}\n`,
-      )
-      .join(""),
-  );
+  const inputs = new Map();
+  const output = openSync(out, "w");
+  const write = (text) => writeSync(output, text);
+  const copy = ({ file, start, end }) => {
+    if (!inputs.has(file)) inputs.set(file, openSync(file, "r"));
+    const bytes = Buffer.alloc(end - start);
+    readSync(inputs.get(file), bytes, 0, bytes.length, start);
+    writeSync(output, bytes);
+  };
+  for (const c of cases) {
+    if (read.length === 1) copy(read[0].get(c.name));
+    else {
+      write(`{"name":${JSON.stringify(c.name)},"base":`);
+      copy(read[0].get(c.name));
+      write(`,"head":`);
+      copy(read[1].get(c.name));
+      write("}");
+    }
+    write("\n");
+  }
+  for (const fd of [output, ...inputs.values()]) closeSync(fd);
   process.stdout.write(`${JSON.stringify({ cases: cases.length, sides: read.length })}\n`);
 }
