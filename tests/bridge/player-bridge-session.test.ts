@@ -16,6 +16,7 @@ import {
   beginRecordingNow,
   heldPlan,
   heldRecording,
+  introduceNow,
 } from "../../player/engine-bridge/in-process.js";
 import { nodeWorkerPort } from "../../player/engine-bridge/node-client.js";
 import type { PrepareResult } from "../../player/engine-bridge/player-ops.js";
@@ -28,10 +29,15 @@ import {
   restorePlayerRuntimeSessionAt,
   stepPlayerRuntimeTime,
 } from "../../player/runtime/runtime-adapter.js";
-import type { PlayerSession } from "../../player/runtime/runtime-view.js";
+import {
+  activePlayerRuntimeInteraction,
+  playerRuntimeForeground,
+  type PlayerSession,
+} from "../../player/runtime/runtime-view.js";
 import { PublicationGapError, SessionStore } from "../../player/persistence/session-store.js";
 import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../../src/temporal.js";
+import { listRandomSites } from "../../src/playback.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import { cloneGraphDifference } from "../helpers/clone-graph.js";
 import { viewCalls, viewed, withoutViews } from "../helpers/debug-readers.js";
@@ -352,7 +358,6 @@ test("each transitional factory gets a new session, its plan's token, its histor
   assert.deepEqual(restored.transcriptEntries, adapterRestored.transcriptEntries);
   assert.equal(restored.liveEventSequence, adapterRestored.liveEventSequence);
   // A factory receives the connection's recorder.
-  const { introduceNow } = await import("../../player/engine-bridge/in-process.js");
   introduceNow(
     bridge,
     (host) => {
@@ -750,4 +755,166 @@ test("start's options are a plain record: a Date or a Map is refused, in-process
   } finally {
     worker.client.terminate();
   }
+});
+
+/*
+ * F3 (L5i.7): a Start's two routes give the same session. (a) is the transitional factory as the activation ran it, in
+ * the host before its first run (`introduceNow`), with the Player's tracing and random intents as its only carriers;
+ * (b) is the plan form: the tracing intent posted when Debug changed it, a source `prepare`, then `start`.
+ */
+const F3_OPTIONS = { wallClockMs: 0, temporalContext: TEMPORAL };
+const F3_RUN = { run: 1, retires: null };
+
+/** The Player's development scenarios as written (`runtimeScenario.ts`, which only the Player's build compiles). */
+function developmentScenarios(): Record<string, string> {
+  const file = ts.createSourceFile(
+    "runtimeScenario.ts",
+    readFileSync(
+      new URL("../../../player/vue/src/development/runtimeScenario.ts", import.meta.url),
+      "utf8",
+    ),
+    ts.ScriptTarget.Latest,
+  );
+  const sources: Record<string, string> = {};
+  for (const statement of file.statements)
+    if (ts.isVariableStatement(statement))
+      for (const { name, initializer } of statement.declarationList.declarations)
+        if (ts.isIdentifier(name) && initializer && ts.isNoSubstitutionTemplateLiteral(initializer))
+          sources[name.text] = initializer.text;
+  assert.deepEqual(Object.keys(sources), [
+    "openingScenario",
+    "cameraScenarioSource",
+    "viewfinderScenarioSource",
+    "permanentButtonsScenarioSource",
+  ]);
+  return sources;
+}
+
+/** What Debug's trace view reads: recent chat, the newest message selected, all variables, and the Stage image. */
+const traceRequest = (epoch: number, sequence: number | null) => ({
+  messages: { limit: 20, openNewest: true },
+  selected: sequence === null ? null : { sequence, epoch },
+  variables: { filter: "", pages: {} },
+  image: true,
+  trees: {},
+});
+
+/** The trace's view of `session` at its newest message, through the host's `debugView` read. */
+async function traceView(bridge: PlayerBridge, session: PlayerSession) {
+  const head = await bridge.read(session, "debugView", { request: traceRequest(0, null) });
+  if (head.status === null) return head;
+  const newest = session.events.findLast((event) => event.kind === "say")?.sequence ?? null;
+  return bridge.read(session, "debugView", { request: traceRequest(head.status.epoch, newest) });
+}
+
+/** Plays `session` on as a player would: time on, then the presented choice's or button's first answer. */
+async function playedOn(bridge: PlayerBridge, start: PlayerSession): Promise<PlayerSession> {
+  let session = start;
+  for (let step = 1; step <= 8 && session.state.status !== "halted"; step += 1) {
+    await bridge.request(session, "observeTime", { atMs: step * 2_000, media: [] });
+    session = bridge.latest(session)!;
+    const action = activePlayerRuntimeInteraction(session.state);
+    const foreground = playerRuntimeForeground(session);
+    if (action === null) continue;
+    if (foreground?.kind === "choose")
+      await untypedBridge(bridge).request(session, "selectChoice", {
+        actionId: action.actionId,
+        optionId: foreground.options[0]!.id,
+        input: "button",
+      });
+    else if (foreground?.kind === "show-button")
+      await untypedBridge(bridge).request(session, "activateButton", {
+        actionId: action.actionId,
+        input: "button",
+      });
+    session = bridge.latest(session)!;
+  }
+  return session;
+}
+
+/** A Start of `source` by `route` on a new connection, and what it shows, records and traces. */
+async function startedBy(
+  route: "factory" | "plan",
+  source: string,
+  debug: boolean,
+  random: boolean,
+) {
+  const bridge = await inProcessBridge();
+  const tracing = debug ? { on: true, intent: 1 } : undefined;
+  // An owned random control decides every site of the source: the same decided draw on either route.
+  const sites = listRandomSites(compilePlayerProject(source).plan!).map(
+    (site) => [site.id, "untried"] as const,
+  );
+  const owned = random
+    ? { owner: 1, intent: { owner: 1, control: { sites }, resetAt: 0, intent: 1 } }
+    : undefined;
+  let session: PlayerSession;
+  if (route === "factory")
+    session = introduceNow(
+      bridge,
+      (made) =>
+        createPlayerRuntimeSession(source, {
+          ...F3_OPTIONS,
+          debugMode: debug,
+          recorder: made.recorder,
+          ...(made.debugTrace === null ? {} : { debugTrace: made.debugTrace }),
+          ...(made.randomControl === null ? {} : { randomControl: made.randomControl }),
+        }),
+      NO_MARKS,
+      tracing,
+      owned,
+      F3_RUN,
+    );
+  else {
+    if (tracing !== undefined) await bridge.client.request("debugTracing", tracing);
+    const reply = await bridge.client.request("prepare", {
+      source: { kind: "source", script: source },
+    });
+    // EVIDENCE: validation: `prepare` replies from the same build with its result.
+    const result = reply.result as PrepareResult;
+    assert.equal(result.kind, "prepared");
+    session = await bridge.start(
+      result.kind === "prepared" ? result.plan : "",
+      { ...F3_OPTIONS, debugMode: debug },
+      true,
+      owned,
+      F3_RUN,
+    );
+  }
+  const first = {
+    ...shown(session),
+    marks: session.marks,
+    diagnostic: session.diagnostic,
+    history: session.history,
+  };
+  const atStart = await traceView(bridge, session);
+  const played = await playedOn(bridge, session);
+  return {
+    first,
+    atStart,
+    snapshot: hatch(played, (held) => JSON.stringify(playerRuntimeSnapshot(held))),
+    recording: heldRecording(bridge),
+    played: await traceView(bridge, played),
+  };
+}
+
+test("a Start of the factory route and of a held plan give the same session, recording and trace", async () => {
+  const sources = { ...developmentScenarios(), random: SCRIPT };
+  const traced: string[] = [];
+  for (const [name, source] of Object.entries(sources))
+    for (const debug of [false, true])
+      for (const random of [false, true]) {
+        const plan = await startedBy("plan", source, debug, random);
+        assert.deepEqual(
+          plan,
+          await startedBy("factory", source, debug, random),
+          `${name}, Debug ${debug ? "on" : "off"}, random ${random ? "owned" : "none"}`,
+        );
+        if (plan.atStart.status !== null) traced.push(name);
+      }
+  // Every source ran traced with Debug on: the trace oracle compared records, not two empty views.
+  assert.deepEqual(
+    traced,
+    Object.keys(sources).flatMap((name) => [name, name]),
+  );
 });
