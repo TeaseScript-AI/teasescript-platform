@@ -44,6 +44,9 @@ import {
 import type { InstructionPlan, TypeCheckPlan } from "../../src/plan/model.js";
 import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import { hostValues, stopRuns } from "../helpers/type-core-stop-oracle.js";
+
+/** The plain gate's decline (#2080 part 2): a stop before admission settled left a store's check undecided. */
+const UNDECIDED = "a store whose check was left undecided at the budget";
 import { DOUBLING } from "../helpers/type-core/type-core-work.js";
 
 /*
@@ -857,8 +860,9 @@ test("a stop's runs catch the design round's controls: a false branch, a nested 
   );
   // (no natural plan; the stop's plan checked at the erring store: the false run fails there, the true run never reaches
   // it, so no run passes it, which the oracle claimed open before the design round)
-  // (#2080 part 1 declines a settled stop's no-plan store that a rejection lost, so the no-plan cases stop on the work
-  // allowance, before admission settles, where the settled gate does not apply)
+  // (#2080 part 1 declines a settled stop's no-plan store that a rejection lost; before admission settles the plain gate
+  // declines the inferred store, #2080 part 2: the stopped compile publishes nothing to plant in, and the runs read it
+  // declined, never open)
   const planted = stopRuns(
     unit('let flag: boolean = hostValue\nlet n = 1\nif flag {} else { n = "bad" }\nexit\n'),
     ["hostValue"],
@@ -875,8 +879,7 @@ test("a stop's runs catch the design round's controls: a false branch, a nested 
     "work",
   );
   assert.equal(planted.natural.plan, false);
-  // (no run passes the store, and nothing without a natural plan is ever closed)
-  assert.equal(planted.kind, "unwitnessed");
+  assert.deepEqual([planted.kind, planted.stopped.declined], ["declined", UNDECIDED]);
   // (no natural plan; the erring store under a guard no pool value takes: untested, never open)
   const unreached = stopRuns(
     unit('let n = 1\nif hostValue is duration { n = "bad" }\nexit\n'),
@@ -887,7 +890,7 @@ test("a stop's runs catch the design round's controls: a false branch, a nested 
     "work",
   );
   assert.equal(unreached.natural.plan, false);
-  assert.equal(unreached.kind, "unwitnessed");
+  assert.deepEqual([unreached.kind, unreached.stopped.declined], ["declined", UNDECIDED]);
 });
 
 test("a stop's runs read #2116's final witness closed on main at demand 64, and open with its store checks dropped, in every held mode (#2080 part 1, PR #2116's final, comment 6736629257)", () => {
@@ -912,7 +915,7 @@ test("a stop's runs read #2116's final witness closed on main at demand 64, and 
   }
 });
 
-test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, part, cap, ancestor, file and loop cases stay unwitnessed, a store's absent property is read at the store, and a genuine escape stays open (#2080, Codex r3 on #2142)", () => {
+test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, part, cap and loop cases stay unwitnessed, and its no-plan cases, a store's absent property and a genuine escape are declined (#2080, Codex r3 on #2142)", () => {
   const unit = (source: string) => [{ path: "main.tease", source }];
   const loosened = (type: TypeCheckPlan["type"]): TypeCheckPlan["type"] =>
     type.kind === "list" && type.element?.kind === "list"
@@ -997,7 +1000,7 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
         'let n = 1\nif hostValue is boolean {\n  let gate: duration = hostOther\n  n = "bad"\n}\nexit\n',
       ),
       globals: ["hostValue", "hostOther"],
-      // (#2080 part 1 declines it at a settled stop: the work allowance stops before admission settles)
+      // (#2080 part 1 declines it at a settled stop and the plain gate before admission settles, #2080 part 2)
       demand: 1,
       stop: "work",
     },
@@ -1015,7 +1018,7 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
         },
       ],
       globals: ["hostValue"],
-      // (#2080 part 1 declines it at a settled stop: the work allowance stops before admission settles)
+      // (#2080 part 1 declines it at a settled stop and the plain gate before admission settles, #2080 part 2)
       demand: 1,
       stop: "work",
     },
@@ -1033,11 +1036,12 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
         ),
     },
   ];
+  // (a work stop's no-plan case is declined, never read open)
   for (const mode of HELD_MODES)
     for (const { name, files, globals, demand, planted, stop } of cases)
       assert.equal(
         stopRuns(files, globals, (make) => mode.run(make), demand, planted, stop).kind,
-        "unwitnessed",
+        stop === "work" ? "declined" : "unwitnessed",
         `${name} (${mode.name})`,
       );
   // (the two campaign items Codex r3 took for genuine escapes: C5c reports a store's absent property at the object that
@@ -1056,14 +1060,16 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
       globals: ["hostValue", "hostOther", "hostInit"],
     },
   ];
-  // (both stop settled at demand 16, where #2080 part 1 declines them: the work allowance keeps them escapes)
+  // (both stop settled at demand 16, where #2080 part 1 declines them, and before admission settles the plain gate
+  // declines them, #2080 part 2: no stop publishes them)
   for (const { mode, source, globals } of controls) {
     const found = stopRuns(unit(source), globals, (make) => mode.run(make), 1, undefined, "work");
     assert.equal(found.natural.plan, false, source);
-    assert.equal(found.kind, "unwitnessed", source);
+    assert.deepEqual([found.kind, found.stopped.declined], ["declined", UNDECIDED], source);
   }
   // (a campaign item with both: an absent property's store and a store the stop moved to a check against `unknown`,
-  // neither passed; `all:new-cases-3::graph/899`)
+  // neither passed; `all:new-cases-3::graph/899`. Its decision stops in the restarted pass, which stops the analysis
+  // before admission settled: the plain gate declines it, #2080 part 2)
   const both = stopRuns(
     unit(
       'let typed:object={x:1}\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\na.q=b\nc=c\nc=b\nb=b\nlet out=c\nexit\n',
@@ -1072,14 +1078,10 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
     (make) => HELD_MODES[2]!.run(make),
     64,
   );
-  assert.deepEqual(
-    both.sites.map(({ code, site }) => `${code} ${site}`),
-    ["TSV043 0:155:158", "TSV041 0:167:168"],
-  );
-  assert.equal(both.kind, "unwitnessed");
-  // (two stores lacking properties of one object share its site, each its own error, at a stop before admission settles
-  // as #2080 part 1 declines it at a settled one: with the first store's
-  // `requireExisting` dropped, a run passes it and fails at the second, so the first's escape is open; Codex r1 on #2185)
+  assert.deepEqual([both.kind, both.stopped.declined], ["declined", UNDECIDED]);
+  // (two stores lacking properties of one object share its site, each its own error, Codex r1 on #2185: #2080 part 1
+  // declines it at a settled stop and the plain gate before admission settles, #2080 part 2, so no stop publishes a plan
+  // to drop the first store's `requireExisting` from, and nothing is read open)
   for (const mode of HELD_MODES) {
     let dropped = false;
     const found = stopRuns(
@@ -1099,15 +1101,11 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
       }),
       "work",
     );
-    assert.deepEqual(
-      found.sites.map(({ code, site }) => `${code} ${site}`),
-      ["TSV043 0:15:21", "TSV043 0:24:30"],
-      mode.name,
-    );
-    assert.equal(found.kind, "open", mode.name);
+    assert.deepEqual([found.kind, found.stopped.declined], ["declined", UNDECIDED], mode.name);
   }
-  // (a genuine escape: the stop's plan stores a text the natural compile rejects, under a guard the pool's boolean takes;
-  // #2080 part 1 declines it at a settled stop, so the work allowance stops before admission settles)
+  // (a genuine escape: the stop's plan stored a text the natural compile rejects, under a guard the pool's boolean takes;
+  // #2080 part 1 declines it at a settled stop, and the plain gate before admission settles, #2080 part 2: closed by
+  // declining)
   for (const mode of HELD_MODES) {
     const found = stopRuns(
       unit('let n = 1\nif hostValue is boolean { n = "bad" }\nexit\n'),
@@ -1118,10 +1116,11 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
       "work",
     );
     assert.equal(found.natural.plan, false, mode.name);
-    assert.equal(found.kind, "open", mode.name);
+    assert.deepEqual([found.kind, found.stopped.declined], ["declined", UNDECIDED], mode.name);
   }
-  // (one of the nine `later` campaign items: the stopped run passes the store the natural plan rejects and fails at the
-  // loop's own start, which takes no round)
+  // (one of the nine `later` campaign items, where the stopped run passed the store the natural plan rejects and failed
+  // at the loop's own start: its decision stops in the restarted pass, which stops the analysis before admission
+  // settled, and the plain gate declines it, #2080 part 2)
   const later = stopRuns(
     unit(
       "let t:integer?=null\nlet root={n:t,nest:{n:t,keep:1},spare:t}\nlet other={n:2.5,nest:{n:2.5,keep:1},spare:1}\nlet a=root\nif other != null { a=other }\nlet b=a\nrepeat b.n {}\nexit\n",
@@ -1130,5 +1129,5 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
     (make) => HELD_MODES[2]!.run(make),
     64,
   );
-  assert.equal(later.kind, "later");
+  assert.deepEqual([later.kind, later.stopped.declined], ["declined", UNDECIDED]);
 });

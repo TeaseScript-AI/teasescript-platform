@@ -16,7 +16,7 @@ import {
   type SerializableRuntimeValue,
 } from "../../src/runtime/values/serializable-values.js";
 import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
-import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { withTestDemandAllowance } from "../../src/type-inference/core/budget.js";
 import { withoutRecords } from "../../src/type-inference/core/consumers.js";
 import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
@@ -341,6 +341,7 @@ test("at every stop a store's parts are the natural store's or fewer, never unco
   // natural whole check covers, of the type that check has there)
   const covered: string[] = [];
   let parts = 0;
+  let declined = 0;
   for (const source of [
     'let seed: integer = 7\nlet copy = hostInit\ncopy.a.b = seed\ncopy = hostValue\nsay "REACHED"\nexit\n',
     'let s: integer = 7\nlet t: string = "x"\nlet copy = hostInit\ncopy.one = s\ncopy.two = t\ncopy = hostValue\nsay "REACHED"\nexit\n',
@@ -355,7 +356,26 @@ test("at every stop a store's parts are the natural store's or fewer, never unco
     const natural = plan(source);
     for (const mode of HELD_MODES)
       for (const demand of DEMANDS) {
-        const planned = mode.run(() => withTestDemandAllowance(demand, () => plan(source)));
+        let planned: InstructionPlan;
+        try {
+          planned = mode.run(() => withTestDemandAllowance(demand, () => plan(source)));
+        } catch (error) {
+          // (a decision stopping in the restarted pass stops the analysis before admission settled: the stop leaves an
+          // inferred store's check undecided and the plain gate declines, #2080 part 2)
+          if (
+            !(error instanceof CandidateOutsideSlice) ||
+            error.what !== "a store whose check was left undecided at the budget"
+          )
+            throw error;
+          const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
+          assert.ok(request !== null);
+          const { budget } = mode.run(() =>
+            withTestDemandAllowance(demand, () => analyseCore(request)),
+          );
+          assert.ok(budget.exhausted !== null && !budget.settled, `${source} (${mode.name})`);
+          declined += 1;
+          continue;
+        }
         const found = partProblems(natural, planned);
         assert.deepEqual(found.problems, [], `${source} (${mode.name}, demand ${demand})`);
         covered.push(...found.covered);
@@ -364,6 +384,7 @@ test("at every stop a store's parts are the natural store's or fewer, never unco
   }
   assert.ok(parts > 0);
   assert.ok(covered.length > 0);
+  assert.ok(declined > 0, `${declined} declined`);
   assert.ok(
     covered.every((line) => line.endsWith(" =")),
     covered.join("; "),

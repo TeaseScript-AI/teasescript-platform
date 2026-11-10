@@ -933,6 +933,48 @@ function marksAt(answers: Answers, site: EnclosingCase["site"], target: string):
 }
 
 /**
+ * #2080 part 2: a decline before admission settled stands only at the store of an own mark against `unknown` that no
+ * complete store check carries. Read where the gate reads: the analysis inside `asked`, and the published contract and
+ * store check `runtimeChecks` gives the gate.
+ */
+function undecidedProblems(
+  request: NonNullable<ReturnType<typeof coreRequest>>,
+  capped: <T>(make: () => T) => T,
+  site: { readonly file: number; readonly start: number; readonly end: number },
+): string[] {
+  const read = capped(() =>
+    asked(analyseCore(request), (answers) => {
+      const index = new SliceIndex(request.files.map((file) => file.program));
+      const { checks, contracts } = runtimeChecks(answers, index, request);
+      const at = [...answers.diagnostics, ...answers.budget.deferred].flatMap((d) => {
+        if (d.class !== "warning-runtime-check" || d.kind === "budget") return [];
+        const { obligation } = d;
+        if (obligation.boundary || obligation.against.join("|") !== "unknown") return [];
+        if (obligation.site.file !== site.file) return [];
+        const expression = index.expressionAt(obligation.site);
+        const store = index.storeOf(expression);
+        const value =
+          store === undefined
+            ? expression
+            : store.kind === "letStatement"
+              ? store.initializer
+              : store.value;
+        if (value.span.start.offset !== site.start || value.span.end.offset !== site.end) return [];
+        return [
+          store !== undefined && contracts.get(store)?.state === "complete" && checks.has(store),
+        ];
+      });
+      return { undecided: at.length > 0, carried: at.some((carried) => carried) };
+    }),
+  );
+  if (!read.undecided)
+    return [`declined at ${site.start}:${site.end} with no undecided mark there`];
+  if (read.carried)
+    return [`declined at ${site.start}:${site.end} where a complete store check carries it`];
+  return [];
+}
+
+/**
  * #1440: a store at or below a stop the source leaves unproved (`EnclosingCase.certified`) keeps its mark, its type
  * undecided, beside no requirement; so does every store into an inferred place before admission settled (#1252,
  * docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-135: the fresh pass decides no inferred
@@ -1024,6 +1066,35 @@ export function enclosingProblems(
   );
   // (one owned mark at a store above a stop, none beside its rejection)
   const owned = (marks: number): boolean => marks === (rejects ? 0 : 1);
+  // (the analysis's own verdict at a compiled store, with a plan or declined: its marks, requirement and proofs)
+  const analysisProblems = (): string[] => {
+    const found: string[] = [];
+    if (relation === "above" || (relation === "at" && judged === "domain")) {
+      const marks = marksAt(answers, c.site, target);
+      if (judged === "domain" ? !owned(marks) : marks < 1 && !rejects)
+        found.push(`${marks} owned marks at the store ${relation} the stop`);
+    }
+    if (relation === "at" && judged === "domain") {
+      const required = answers.requirement(place, c.into.path);
+      if (required === null || typeText(termText(required)) !== typeText(checkedText(c.form!)))
+        found.push(`requirement ${required === null ? "none" : termText(required)}`);
+    }
+    if (unsettledInferred && relation !== "at" && marksAt(answers, c.site, target) < 1)
+      found.push("no mark at a store into an inferred place before admission settled");
+    found.push(
+      ...unprovedProblems(
+        answers,
+        c,
+        relation,
+        unproved,
+        unsettledInferred,
+        rejects,
+        target,
+        place,
+      ),
+    );
+    return found;
+  };
   if (!c.slice) {
     // (at the analysis: a literal's error uncapped, and above a stop the mark and the complete type its check carries)
     if (phase === "unstopped" && !c.host && errors > 0 !== !c.values[0]!.fits)
@@ -1062,6 +1133,24 @@ export function enclosingProblems(
       compileSourceWithBackend(c.source, { globals: ["hostValue"] }, CORE_BACKEND),
     );
   } catch (error) {
+    // (#2080 part 2: before admission settled, a stop's own mark against `unknown` that no complete store check carries
+    // declines at its store, publishing nothing; the analysis is judged as with a plan)
+    if (
+      error instanceof CandidateOutsideSlice &&
+      error.what === "a store whose check was left undecided at the budget" &&
+      phase === "unsettled"
+    ) {
+      problems.push(...undecidedProblems(request, capped, error.site), ...analysisProblems());
+      return {
+        allowance,
+        stops: stopped.map((path) => path.join(".")),
+        relation,
+        phase,
+        judged,
+        problems,
+        declined: true,
+      };
+    }
     // (#2080 part 1: a settled stop whose stopped mark's completion result was lost or is absent declines at that mark
     // where no complete store check carries it, publishing nothing; any other decline is a problem. Read where the gate
     // reads: the registry inside `asked`, and the published contract and store check `runtimeChecks` gives the gate)
@@ -1142,21 +1231,7 @@ export function enclosingProblems(
     if (planned === undefined && c.values.some((each) => !each.fits))
       problems.push(`no planned check at ${site}`);
   }
-  if (relation === "above" || (relation === "at" && judged === "domain")) {
-    const marks = marksAt(answers, c.site, target);
-    if (judged === "domain" ? !owned(marks) : marks < 1 && !rejects)
-      problems.push(`${marks} owned marks at the store ${relation} the stop`);
-  }
-  if (relation === "at" && judged === "domain") {
-    const required = answers.requirement(place, c.into.path);
-    if (required === null || typeText(termText(required)) !== typeText(checkedText(c.form!)))
-      problems.push(`requirement ${required === null ? "none" : termText(required)}`);
-  }
-  if (unsettledInferred && relation !== "at" && marksAt(answers, c.site, target) < 1)
-    problems.push("no mark at a store into an inferred place before admission settled");
-  problems.push(
-    ...unprovedProblems(answers, c, relation, unproved, unsettledInferred, rejects, target, place),
-  );
+  problems.push(...analysisProblems());
   return {
     allowance,
     stops: stopped.map((path) => path.join(".")),
