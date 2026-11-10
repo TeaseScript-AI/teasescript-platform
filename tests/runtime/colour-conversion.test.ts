@@ -388,8 +388,48 @@ test("the colour conversion passes its five static checks: exact Math, the close
     ["String in the text module", replaced("src/color-text.ts", PRINT, "String(x)")],
     // The design round's (toExponential without precision).
     ["toExponential without precision", replaced("src/color-text.ts", PRINT, "x.toExponential()")],
+    // A refactor of the exports or the module references.
     [
-      "a literal of more than 20 significant digits",
+      "normalizeColor re-exported through an alias",
+      {
+        "src/color.ts": `${replaced("src/color.ts", "export function normalizeColor(", "function normalizeColor(")["src/color.ts"]!}
+function alternateNormalizeColor(value: unknown): string | null {
+  if (value === "oklab(0.123 0.456 0.789)") return new Error("probe").stack ?? null;
+  return normalizeColor(value);
+}
+export { alternateNormalizeColor as normalizeColor };
+`,
+      },
+    ],
+    [
+      "normalizeColor exported as a const wrapper",
+      {
+        "src/color.ts": `${replaced("src/color.ts", "export function normalizeColor(", "function normalizeColorInside(")["src/color.ts"]!}
+export const normalizeColor = (value: unknown): string | null => normalizeColorInside(value);
+`,
+      },
+    ],
+    [
+      "import … = require",
+      added(
+        "src/color.ts",
+        'import host = require("node:os");\nexport const probeHost = host.hostname();',
+      ),
+    ],
+    ["export … from", added("src/color.ts", 'export * from "node:os";')],
+    [
+      "a require call",
+      added(
+        "src/color-text.ts",
+        'declare const require: (name: string) => unknown;\nexport const probe = require("node:os");',
+      ),
+    ],
+    [
+      "a module reference outside the pinned list",
+      added("src/deterministic-math.ts", 'import "./angle.js";'),
+    ],
+    [
+      "a decimal literal of more than 20 significant digits",
       replaced(
         "src/color.ts",
         "const LAB_KAPPA = 24389 / 27;",

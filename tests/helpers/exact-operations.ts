@@ -8,15 +8,19 @@ import ts from "typescript";
  * rests on beyond the conversion as it stands, whose evidence is the four-engine job over the sample, not a guard that
  * runs. The checks, over `color.ts`, `color-text.ts`, `deterministic-math.ts` and `numeric-functions.ts`:
  * 1. `Math` only as a direct call of an exact member or a read of `PI`; no `**` on numbers; no `globalThis`, `window`
- *    or `self`; each file's imports equal to `PINNED_IMPORTS`, and no dynamic `import()`;
+ *    or `self`; each file's module references, as the compiler collects them, equal to `PINNED_IMPORTS`, its import
+ *    declarations equal to it, and no `import()` or `require` call;
  * 2. `src/color-text.ts` closed as a whole: numbers become text only by `toPrecision(15)` or `toPrecision(17)`;
- * 3. every return of `normalizeColor` is `null` or the one template of three calls of that module's `formatNumber`,
- *    resolved by symbol;
- * 4. every numeric literal has at most 20 significant digits, which ECMAScript reads exactly.
+ * 3. the exported `normalizeColor` is one exported function declaration whose every return is `null` or the one
+ *    template of three calls of the text module's exported `formatNumber`, itself one exported function declaration,
+ *    all resolved through the exports by the compiler;
+ * 4. every decimal numeric literal has at most 20 significant digits, which ECMAScript reads exactly; non-decimal
+ *    integer literals have exactly specified values.
  * Not checked (the residual): a callable reached by property and called (`Number.constructor`); float storage
  * (`DataView` writes and their NaN bits); aliased writes to support data; an implicit number-to-text conversion or a
  * read of host state inside the conversion, which cannot reach the output as text (check 3) but could enter the
- * arithmetic as a value; colorjs.io's parser beyond 20 significant digits; and that a finite argument to the four
+ * arithmetic as a value; string-to-number parsing or coercion of a long decimal inside the conversion; colorjs.io's
+ * parser beyond 20 significant digits; and that a finite argument to the four
  * deterministic functions the colour path calls never brings a non-finite value to `decompose`.
  */
 
@@ -184,6 +188,12 @@ export function exactOperationEscapes(overrides: Readonly<Record<string, string>
       }
       if (ts.isCallExpression(node) && node.expression.kind === K.ImportKeyword)
         escape(node, "a dynamic import");
+      if (
+        ts.isCallExpression(node) &&
+        ts.isIdentifier(node.expression) &&
+        node.expression.text === "require"
+      )
+        escape(node, "a require call");
       if (ts.isIdentifier(node) && !isName(node)) {
         const parent = node.parent;
         if (["globalThis", "window", "self"].includes(node.text)) escape(node, node.text);
@@ -217,7 +227,9 @@ export function exactOperationEscapes(overrides: Readonly<Record<string, string>
         !(typeName(node.left) === "bigint" && typeName(node.right) === "bigint")
       )
         escape(node, "** on numbers");
-      if (ts.isNumericLiteral(node)) {
+      // A non-decimal integer literal (0x, 0o, 0b) has an exactly specified value; decimals are read exactly up to 20
+      // significant digits.
+      if (ts.isNumericLiteral(node) && !/^0[box]/iu.test(node.getText())) {
         const digits = node
           .getText()
           .toLowerCase()
@@ -226,13 +238,26 @@ export function exactOperationEscapes(overrides: Readonly<Record<string, string>
           .replace(/^0+/u, "")
           .replace(/0+$/u, "");
         if (digits.length > 20)
-          escape(node, `a literal of ${digits.length} significant digits: ${node.getText()}`);
+          escape(
+            node,
+            `a decimal literal of ${digits.length} significant digits: ${node.getText()}`,
+          );
       }
       ts.forEachChild(node, visit);
     };
     visit(source);
     if (JSON.stringify(imports) !== JSON.stringify(PINNED_IMPORTS[file]))
       escape(source, `imports ${JSON.stringify(imports)}`);
+    // Every module the file references, as the compiler collects them (import, import … = require, export … from,
+    // import(), require): the pinned modules exactly.
+    const referenced = ts
+      .preProcessFile(source.getFullText(), true, true)
+      .importedFiles.map((reference) => reference.fileName);
+    const pinned = PINNED_IMPORTS[file]!.map(
+      (entry) => entry.replace(/^type /u, "").split(": ")[0]!,
+    );
+    if (JSON.stringify(referenced) !== JSON.stringify(pinned))
+      escape(source, `module references ${JSON.stringify(referenced)}`);
   }
 
   // Check 2: the text module, whole.
@@ -303,16 +328,44 @@ export function exactOperationEscapes(overrides: Readonly<Record<string, string>
     if (!ts.isFunctionDeclaration(statement) && !ts.isVariableStatement(statement))
       escape(statement, "a statement outside a function in the text module");
 
-  // Check 3: `normalizeColor`'s output.
-  const color = sources["src/color.ts"]!;
-  const normalize = color.statements.find(
-    (statement): statement is ts.FunctionDeclaration =>
-      ts.isFunctionDeclaration(statement) && statement.name?.text === "normalizeColor",
-  )!;
-  const formatter = text.statements.find(
-    (statement): statement is ts.FunctionDeclaration =>
-      ts.isFunctionDeclaration(statement) && statement.name?.text === "formatNumber",
-  );
+  // Check 3: the output of the exported `normalizeColor`, through the exports as the compiler resolves them. Each of the
+  // two exports must be the one function declaration that carries `export` itself; any other shape fails, named.
+  const exported = (file: string, name: string): ts.FunctionDeclaration | undefined => {
+    const source = sources[file]!;
+    const module = checker.getSymbolAtLocation(source);
+    const symbol =
+      module === undefined
+        ? undefined
+        : checker.getExportsOfModule(module).find((each) => each.name === name);
+    if (symbol === undefined) {
+      escape(source, `no export ${name}`);
+      return undefined;
+    }
+    const declarations = symbol.declarations ?? [];
+    const declaration = declarations[0];
+    const direct =
+      !(symbol.flags & ts.SymbolFlags.Alias) &&
+      declarations.length === 1 &&
+      declaration !== undefined &&
+      ts.isFunctionDeclaration(declaration) &&
+      declaration.body !== undefined &&
+      declaration.parent === source &&
+      (ts.getCombinedModifierFlags(declaration) & ts.ModifierFlags.Export) !== 0;
+    if (!direct) {
+      const shape =
+        symbol.flags & ts.SymbolFlags.Alias
+          ? "an alias or re-export"
+          : declarations.map((each) => K[each.kind]).join(", ");
+      escape(
+        declaration ?? source,
+        `the export ${name} is ${shape}, not one exported function declaration`,
+      );
+      return undefined;
+    }
+    return declaration;
+  };
+  const normalize = exported("src/color.ts", "normalizeColor");
+  const formatter = exported(TEXT_MODULE, "formatNumber");
   const formatterSymbol =
     formatter?.name === undefined ? undefined : checker.getSymbolAtLocation(formatter.name);
   const returns = (node: ts.Node): void => {
@@ -336,6 +389,6 @@ export function exactOperationEscapes(overrides: Readonly<Record<string, string>
     }
     ts.forEachChild(node, returns);
   };
-  ts.forEachChild(normalize, returns);
+  if (normalize !== undefined) ts.forEachChild(normalize, returns);
   return escapes;
 }
