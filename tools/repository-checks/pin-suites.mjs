@@ -25,10 +25,14 @@ import { suiteTestFiles } from "../test-shards.mjs";
 // way (`strictEqual`, `deepEqual` of a short tuple or an object, a total under four digits, a helper's table, a nested
 // table such as work-a's) is not found; that test is a net for a forgotten suite, and `NOT_PINS` declares the files it
 // finds that pin no work. Under `tests/helpers/type-core/families/` it also requires every recorded bound to be a line
-// some declaration's `pin` finds in that file: a `main:` property whose value is an object literal (block or one line)
-// or a `measured:` property whose value is a number, read from the files' syntax, so a program's text or a comment is
-// not one. Any other value of those two properties fails, except `measured` passed on unchanged from a parameter's
-// destructured `measured`. A bound recorded under a third property name, or outside that folder, is not seen.
+// some declaration's `pin` finds in that file. It classifies every occurrence of `main` or `measured` as a name
+// (identifier, private name or string) by its syntactic position, and an unknown position fails. Recorded: `main:
+// <object literal>` (block or one line) and `measured: <numeric literal>`. Admitted without a record: a type's
+// property signature, a read, a variable so named where it is declared, imported, exported, a parameter or called, a
+// string elsewhere, and a `measured` shorthand an arrow returns unchanged from its parameter's destructured
+// `measured`. Every other occurrence fails, naming its file, line and form, and so does every object spread and every
+// computed name but a literal other than those two. Not seen: a bound recorded under a third property name, a bound
+// outside that folder, and a key built at run time in an element access (`family[key]`).
 
 /** The core, whose every file can move a pin. */
 const CORE = "src/type-inference/core/";

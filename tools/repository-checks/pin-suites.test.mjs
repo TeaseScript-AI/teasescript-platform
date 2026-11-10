@@ -23,61 +23,121 @@ const WORK_B = "tests/type-core/type-core-work-b.test.ts";
 /** The folder whose families record `main`'s bounds (`WorkFamily.main`, `KnownProduct.measured`). */
 const FAMILIES = "tests/helpers/type-core/families/";
 
+/** The two property names a family records a bound under. */
+const BOUND_NAMES = new Set(["main", "measured"]);
+
 /**
- * The bounds a family module's `text` records, by line: each object literal's `main:` property whose value is an object
- * literal and `measured:` property whose value is a number. Every other value of those two properties is an escape,
- * named by its form, except a `measured` shorthand that an arrow returns as its object literal from its parameter's
- * destructured `measured` (whose records the walk reads where they are written).
+ * The bounds a family module's `text` records, by line, and every other occurrence of `main` or `measured` as a property
+ * name (`escapes`, each with its form). Every identifier, private name and string literal spelled so is classified by
+ * its position, and an unknown position is an escape. Recorded: `main: <object literal>` and `measured: <numeric
+ * literal>`. Admitted without a record: a type's property signature; a read (property or literal element access, a
+ * destructuring without a rename or default); a variable so named where it is declared, imported, exported, a
+ * parameter or called; a string elsewhere; and one forwarding shape (`forwardBroken`). Every object spread and every
+ * computed name that is not a literal other than the two names is an escape too, since either can carry them unseen.
  */
 function recordedBoundsOf(text) {
   const source = ts.createSourceFile("family.ts", text, ts.ScriptTarget.Latest, true);
   const lineOf = (node) => source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1;
   const recorded = [];
   const escapes = [];
-  const forwarded = (property) => {
-    let arrow = property.parent;
-    while (arrow !== undefined && !ts.isFunctionLike(arrow)) arrow = arrow.parent;
-    return (
-      arrow !== undefined &&
-      ts.isArrowFunction(arrow) &&
-      ts.skipParentheses(arrow.body) === property.parent &&
-      arrow.parameters.some(
-        ({ name }) =>
-          ts.isObjectBindingPattern(name) &&
-          name.elements.some(
-            (element) =>
-              element.propertyName === undefined &&
-              element.initializer === undefined &&
-              element.dotDotDotToken === undefined &&
-              ts.isIdentifier(element.name) &&
-              element.name.text === "measured",
-          ),
+  const escape = (node, form) => escapes.push({ line: lineOf(node), form });
+  const nameOf = (node) => (ts.isPrivateIdentifier(node) ? node.text.slice(1) : node.text);
+  const isLiteralName = (node) => ts.isStringLiteralLike(node) || ts.isNumericLiteral(node);
+  const classify = (node) => {
+    const parent = node.parent;
+    if (ts.isPropertyAssignment(parent) && parent.name === node) {
+      const value = ts.skipParentheses(parent.initializer);
+      if (
+        nameOf(node) === "main" ? ts.isObjectLiteralExpression(value) : ts.isNumericLiteral(value)
       )
-    );
+        recorded.push(lineOf(node));
+      else escape(node, `a non-literal value (${ts.SyntaxKind[value.kind]})`);
+    } else if (ts.isShorthandPropertyAssignment(parent)) {
+      const broken = nameOf(node) === "measured" ? forwardBroken(parent) : "a shorthand of main";
+      if (broken !== undefined) escape(node, broken);
+    } else if (ts.isPropertySignature(parent) && parent.name === node) return;
+    else if (
+      (ts.isPropertyAccessExpression(parent) && parent.name === node) ||
+      (ts.isElementAccessExpression(parent) && parent.argumentExpression === node)
+    ) {
+      if (ts.isAssignmentTarget(parent)) escape(node, "an assignment");
+      else if (ts.isDeleteExpression(ts.walkUpParenthesizedExpressions(parent.parent)))
+        escape(node, "a delete");
+    } else if (ts.isBindingElement(parent)) {
+      if (parent.propertyName === node) escape(node, "a renaming destructuring");
+      else if (parent.propertyName === undefined && parent.initializer !== undefined)
+        escape(node, "a destructuring default");
+    } else if (ts.isMethodDeclaration(parent) || ts.isMethodSignature(parent))
+      escape(node, "a method");
+    else if (ts.isGetAccessorDeclaration(parent) || ts.isSetAccessorDeclaration(parent))
+      escape(node, "an accessor");
+    else if (ts.isPropertyDeclaration(parent)) escape(node, "a class member");
+    else if (ts.isStringLiteralLike(node)) return;
+    else if (
+      ts.isVariableDeclaration(parent) ||
+      ts.isImportSpecifier(parent) ||
+      ts.isExportSpecifier(parent) ||
+      ts.isParameter(parent) ||
+      (ts.isCallExpression(parent) && parent.expression === node)
+    )
+      return;
+    else escape(node, `an occurrence in a ${ts.SyntaxKind[parent.kind]}`);
+  };
+  /**
+   * Why a shorthand `measured` is not passed on unchanged, or `undefined` when it is: an arrow returns its object
+   * literal as its concise body, no parameter has an initializer, and `measured` occurs in the arrow only as one
+   * element of a parameter's destructuring, without a rename, and this shorthand.
+   */
+  const forwardBroken = (shorthand) => {
+    const literal = shorthand.parent;
+    const arrow = ts.walkUpParenthesizedExpressions(literal.parent);
+    const outside = "a shorthand outside the forwarding shape";
+    if (!ts.isArrowFunction(arrow) || ts.skipParentheses(arrow.body) !== literal)
+      return `${outside}: not an arrow's returned literal`;
+    let initializer = false;
+    const initialized = (node) => {
+      if ((ts.isParameter(node) || ts.isBindingElement(node)) && node.initializer !== undefined)
+        initializer = true;
+      ts.forEachChild(node, initialized);
+    };
+    arrow.parameters.forEach(initialized);
+    if (initializer) return `${outside}: a parameter initializer`;
+    let elements = 0;
+    let others = 0;
+    const occurrences = (node) => {
+      if (ts.isIdentifier(node) && node.text === "measured" && node !== shorthand.name) {
+        const element = node.parent;
+        if (
+          ts.isBindingElement(element) &&
+          element.name === node &&
+          element.propertyName === undefined &&
+          ts.isObjectBindingPattern(element.parent) &&
+          ts.isParameter(element.parent.parent) &&
+          element.parent.parent.parent === arrow
+        )
+          elements += 1;
+        else others += 1;
+      }
+      ts.forEachChild(node, occurrences);
+    };
+    occurrences(arrow);
+    if (elements !== 1 || others > 0)
+      return `${outside}: measured elsewhere than one destructured parameter and the shorthand`;
+    return undefined;
   };
   const visit = (node) => {
-    if (
-      (ts.isPropertyAssignment(node) || ts.isShorthandPropertyAssignment(node)) &&
-      ts.isObjectLiteralExpression(node.parent)
-    ) {
-      const computed = ts.isComputedPropertyName(node.name);
-      const name = computed ? node.name.expression : node.name;
-      const key = ts.isIdentifier(name) || ts.isStringLiteralLike(name) ? name.text : undefined;
-      if (key === "main" || key === "measured") {
-        const value = ts.isPropertyAssignment(node)
-          ? ts.skipParentheses(node.initializer)
-          : undefined;
-        if (computed) escapes.push({ line: lineOf(node), form: "computed name" });
-        else if (value === undefined) {
-          if (key !== "measured" || !forwarded(node))
-            escapes.push({ line: lineOf(node), form: "shorthand" });
-        } else if (
-          key === "main" ? ts.isObjectLiteralExpression(value) : ts.isNumericLiteral(value)
-        )
-          recorded.push(lineOf(node));
-        else escapes.push({ line: lineOf(node), form: ts.SyntaxKind[value.kind] });
-      }
-    }
+    if (ts.isSpreadAssignment(node)) escape(node, "an object spread");
+    else if (
+      ts.isComputedPropertyName(node) &&
+      (!isLiteralName(node.expression) || BOUND_NAMES.has(node.expression.text))
+    )
+      escape(node, "a computed name");
+    else if (
+      (ts.isIdentifier(node) || ts.isPrivateIdentifier(node) || ts.isStringLiteralLike(node)) &&
+      BOUND_NAMES.has(nameOf(node)) &&
+      !ts.isComputedPropertyName(node.parent)
+    )
+      classify(node);
     ts.forEachChild(node, visit);
   };
   visit(source);
@@ -179,9 +239,7 @@ test("every bound a family records is a line some declaration's pin finds in tha
     const lines = text.split("\n");
     const { recorded, escapes } = recordedBoundsOf(text);
     for (const { line, form } of escapes)
-      failures.push(
-        `${file}:${line}: main or measured with a ${form} value, not a bound the net can read`,
-      );
+      failures.push(`${file}:${line}: ${form}, not a bound the net can read`);
     for (const line of recorded) {
       const declarations = PIN_SUITES.filter(
         (suite) => suite.in === file && suite.pin.test(lines[line - 1]),
@@ -203,30 +261,68 @@ test("every bound a family records is a line some declaration's pin finds in tha
   );
 });
 
-test("a family's bounds are read from its syntax, and another value of main or measured is an escape", () => {
+test("a family's bounds are read from every occurrence of main or measured, and another form is an escape", () => {
   const text = [
     "const a = { main: {",
     "  16: [[1, 2, 3]],",
     "} };",
     "const b = { main: { total: 2.7, invSteps: 3.8 } };",
     "const c = { measured: 3.37 };",
-    "const d = [{ n: 8, measured: 2.78 }].map(({ n, measured }) => ({ n, measured }));",
+    'const d = { "measured": 3.1 };',
+    "const e = [{ n: 8, measured: 2.78 }].map(({ n, measured }) => ({ n, measured }));",
+    "interface F { readonly main?: { total: number }; measured: number }",
+    'const g = (f: F) => f.main?.total ?? f["measured"];',
     "// main: { total: 1 }, measured: 2",
-    "const e = main(`let r = {main: {f: 1}, measured: 2}`);",
-    'const f = { "measured": 3.1 };',
-    "const g = { measured: M, main: MAIN };",
-    "const h = { measured: 2 * x };",
-    "const i = (measured) => ({ measured });",
-    'const j = { ["measured"]: 3 };',
+    "export const main = (s: string) => [s];",
+    'import { main as m } from "./builders.js";',
+    "const h = main(`let r = {main: {f: 1}, measured: 2}`);",
+    "const i = { measured: M, main: MAIN };",
+    "const j = { measured: 2 * x };",
+    "const k = { main() { return { total: 1, invSteps: 1 }; } };",
+    "const l = { get main() { return { total: 3.9, invSteps: 4.1 }; } };",
+    "const o = { ...p };",
+    'const q = { [key]: 3, ["measured"]: 3 };',
+    "p.measured = 4;",
+    "delete p.main;",
+    "const { measured: r } = p;",
+    "const { measured = 2 } = p;",
+    "class S { main = 1; #measured = 2 }",
+    "const t = ({ name, measured }: K): K => ({ name: (measured = 9, name), measured });",
+    "const u = ({ measured }) => { return { measured }; };",
+    "const v = ({ n = 1, measured }) => ({ measured });",
+    "const w = (measured) => ({ measured });",
+    "const x = { main };",
   ].join("\n");
+  const outside = "a shorthand outside the forwarding shape";
   assert.deepEqual(recordedBoundsOf(text), {
-    recorded: [1, 4, 5, 6, 9],
+    recorded: [1, 4, 5, 6, 7],
     escapes: [
-      { line: 10, form: "Identifier" },
-      { line: 10, form: "Identifier" },
-      { line: 11, form: "BinaryExpression" },
-      { line: 12, form: "shorthand" },
-      { line: 13, form: "computed name" },
+      { line: 14, form: "a non-literal value (Identifier)" },
+      { line: 14, form: "a non-literal value (Identifier)" },
+      { line: 15, form: "a non-literal value (BinaryExpression)" },
+      { line: 16, form: "a method" },
+      { line: 17, form: "an accessor" },
+      { line: 18, form: "an object spread" },
+      { line: 19, form: "a computed name" },
+      { line: 19, form: "a computed name" },
+      { line: 20, form: "an assignment" },
+      { line: 21, form: "a delete" },
+      { line: 22, form: "a renaming destructuring" },
+      { line: 23, form: "a destructuring default" },
+      { line: 24, form: "a class member" },
+      { line: 24, form: "a class member" },
+      { line: 25, form: "an occurrence in a BinaryExpression" },
+      {
+        line: 25,
+        form: `${outside}: measured elsewhere than one destructured parameter and the shorthand`,
+      },
+      { line: 26, form: `${outside}: not an arrow's returned literal` },
+      { line: 27, form: `${outside}: a parameter initializer` },
+      {
+        line: 28,
+        form: `${outside}: measured elsewhere than one destructured parameter and the shorthand`,
+      },
+      { line: 29, form: "a shorthand of main" },
     ],
   });
 });
