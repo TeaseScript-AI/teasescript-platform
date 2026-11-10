@@ -4,10 +4,13 @@ import { createHash } from "node:crypto";
 import {
   cpSync,
   existsSync,
+  linkSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -289,13 +292,6 @@ test("the differential record keeps every case's columns, its four modes, refusa
   };
   const reversed = join(folder, "reversed.jsonl");
   writeFileSync(reversed, `${all.text!.trim().split("\n").reverse().join("\n")}\n`);
-  const joined = joinRun("both", ["--base", all.out, "--head", reversed]);
-  assert.equal(joined.ran.status, 0, joined.ran.stderr);
-  const pairs = lines<{ name: string; base: Row; head: Row }>(joined.text!);
-  assert.deepEqual(
-    pairs.map((p) => [p.name, p.base.name, p.head.name]),
-    all.rows.map((r) => [r.name, r.name, r.name]),
-  );
   const one = joinRun("one", ["--base", reversed]);
   assert.equal(one.text, all.text);
   const short = join(folder, "short.jsonl");
@@ -319,6 +315,76 @@ test("the differential record keeps every case's columns, its four modes, refusa
   assert.equal(truncated.ran.status, 2);
   assert.match(truncated.ran.stderr, /cut\.jsonl:7: no whole record of differential\.mjs/);
   assert.equal(truncated.text, null);
+});
+
+/** A join of hand-written records (`join` reads each line's name and copies its bytes): its run and its output. */
+function joinOf(
+  folder: string,
+  sides: Record<string, string[]>,
+  out = join(folder, "joined.jsonl"),
+) {
+  const cases = join(folder, "cases.jsonl");
+  writeFileSync(
+    cases,
+    ["a", "b", "c"].map((name) => `${JSON.stringify({ name, source: "" })}\n`).join(""),
+  );
+  const files = Object.entries(sides).flatMap(([side, rows]) => {
+    const file = join(folder, `${side}.jsonl`);
+    if (!existsSync(file)) writeFileSync(file, rows.map((row) => `${row}\n`).join(""));
+    return [`--${side}`, file];
+  });
+  const ran = spawnSync(
+    process.execPath,
+    [tool, "join", "--cases", cases, ...files, "--out", out],
+    { encoding: "utf8" },
+  );
+  return { ran, text: existsSync(out) ? readFileSync(out, "utf8") : null };
+}
+
+test("join pairs each case with its own base and head records, whatever their order in each side (#2298)", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "families-differential-pairs-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  const row = (name: string, side: string) =>
+    JSON.stringify({ name, side, payload: `${side} of ${name}` });
+  // (each side's own content, in an order of its own and unlike the cases' a, b, c)
+  const ran = joinOf(folder, {
+    base: ["c", "a", "b"].map((name) => row(name, "base")),
+    head: ["b", "c", "a"].map((name) => row(name, "head")),
+  });
+  assert.equal(ran.ran.status, 0, ran.ran.stderr);
+  assert.deepEqual(
+    lines<{ name: string; base: unknown; head: unknown }>(ran.text!),
+    ["a", "b", "c"].map((name) => ({
+      name,
+      base: { name, side: "base", payload: `base of ${name}` },
+      head: { name, side: "head", payload: `head of ${name}` },
+    })),
+  );
+});
+
+test("join refuses an output that is one of its inputs, by path or link, and leaves that input whole (#2298)", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "families-differential-alias-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  const rows = ["a", "b", "c"].map((name) => JSON.stringify({ name, payload: name }));
+  const base = join(folder, "base.jsonl");
+  const before = `${rows.join("\n")}\n`;
+  writeFileSync(base, before);
+  linkSync(base, join(folder, "hard.jsonl"));
+  symlinkSync(base, join(folder, "soft.jsonl"));
+  for (const alias of ["base.jsonl", "hard.jsonl", "soft.jsonl", "cases.jsonl"]) {
+    const ran = joinOf(folder, { base: rows }, join(folder, alias));
+    assert.equal(ran.ran.status, 2, `${alias}: ${ran.ran.stderr}`);
+    assert.match(ran.ran.stderr, /the output .* is the input /);
+    assert.equal(readFileSync(base, "utf8"), before, alias);
+  }
+  // (and a distinct output is written whole, nothing left beside it)
+  const ran = joinOf(folder, { base: rows }, join(folder, "out.jsonl"));
+  assert.equal(ran.ran.status, 0, ran.ran.stderr);
+  assert.equal(ran.text, before);
+  assert.deepEqual(
+    readdirSync(folder).filter((file) => file.includes(".partial-")),
+    [],
+  );
 });
 
 test("the plan's check list lists each check planChecks counts, with its site and type (#2298)", () => {

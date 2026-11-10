@@ -21,6 +21,9 @@ import {
   openSync,
   readFileSync,
   readSync,
+  renameSync,
+  statSync,
+  unlinkSync,
   writeFileSync,
   writeSync,
 } from "node:fs";
@@ -359,6 +362,13 @@ function join() {
     refuse(
       "usage: differential.mjs join --cases <cases.jsonl> --base <records>... [--head <records>...] --out <file>",
     );
+  // (an output that is an input, by any path or link, would be emptied before it is read)
+  if (existsSync(out)) {
+    const { dev, ino } = statSync(out);
+    for (const file of [casesFile, ...sides.flatMap(([, files]) => files)])
+      if (existsSync(file) && statSync(file).dev === dev && statSync(file).ino === ino)
+        refuse(`the output ${out} is the input ${file}`);
+  }
   const cases = readCases(casesFile);
   const wanted = new Set(cases.map((c) => c.name));
   const problems = [];
@@ -394,26 +404,40 @@ function join() {
     process.stderr.write(`${problems.join("\n")}\n`);
     process.exit(1);
   }
+  // (written beside the output and renamed onto it once whole, so that a failed copy leaves no output)
+  const partial = `${out}.partial-${process.pid}`;
   const inputs = new Map();
-  const output = openSync(out, "w");
+  const output = openSync(partial, "w");
   const write = (text) => writeSync(output, text);
   const copy = ({ file, start, end }) => {
     if (!inputs.has(file)) inputs.set(file, openSync(file, "r"));
     const bytes = Buffer.alloc(end - start);
-    readSync(inputs.get(file), bytes, 0, bytes.length, start);
+    for (let done = 0; done < bytes.length;) {
+      const got = readSync(inputs.get(file), bytes, done, bytes.length - done, start + done);
+      if (got === 0) throw new Error(`${file} ended inside the record at ${start}`);
+      done += got;
+    }
     writeSync(output, bytes);
   };
-  for (const c of cases) {
-    if (read.length === 1) copy(read[0].get(c.name));
-    else {
-      write(`{"name":${JSON.stringify(c.name)},"base":`);
-      copy(read[0].get(c.name));
-      write(`,"head":`);
-      copy(read[1].get(c.name));
-      write("}");
+  try {
+    for (const c of cases) {
+      if (read.length === 1) copy(read[0].get(c.name));
+      else {
+        write(`{"name":${JSON.stringify(c.name)},"base":`);
+        copy(read[0].get(c.name));
+        write(`,"head":`);
+        copy(read[1].get(c.name));
+        write("}");
+      }
+      write("\n");
     }
-    write("\n");
+  } catch (error) {
+    for (const fd of [output, ...inputs.values()]) closeSync(fd);
+    unlinkSync(partial);
+    process.stderr.write(`differential.mjs: ${error.message}\n`);
+    process.exit(1);
   }
   for (const fd of [output, ...inputs.values()]) closeSync(fd);
+  renameSync(partial, out);
   process.stdout.write(`${JSON.stringify({ cases: cases.length, sides: read.length })}\n`);
 }
