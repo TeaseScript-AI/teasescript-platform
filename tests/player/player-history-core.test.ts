@@ -9,6 +9,7 @@ import {
   HistoryCore,
   advanceHistory,
   decideAdmission,
+  newestActionId,
   transferLineages,
   type HistoryDelta,
   type HistoryObservation,
@@ -344,6 +345,15 @@ test("an adoption truncates the future by point ID and links later answers to th
   );
   // Back by ID after the truncation restores the same point.
   assert.equal(history.pointBefore(points[0]!.id)?.id, points[0]!.id);
+});
+
+// An adoption keeps the newest action ID of the points it keeps by this fold. A spread of that many points into
+// `Math.max` threw from 125,237 on Node 26 and left the history half-changed (#2297's review). The row holds the fold;
+// that `#adoptEnded` uses it is read at its call.
+test("the newest action ID of more kept points than an argument spread allows is their fold's", () => {
+  const points = Array.from({ length: 125_237 }, (_, actionId) => ({ actionId }));
+  assert.equal(newestActionId(points), 125_236);
+  assert.equal(newestActionId([]), -1);
 });
 
 test("a failed adoption leaves the restored state inspected", () => {

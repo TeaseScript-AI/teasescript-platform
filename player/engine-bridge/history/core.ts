@@ -187,6 +187,14 @@ export type AdmissionDecision =
   | { readonly kind: "stop"; readonly reason: string };
 
 /**
+ * The newest action ID among `points`, or -1 for none. A fold, not a spread into `Math.max`: a spread passes each point
+ * as an argument, and past the engine's argument limit (125,237 points on Node 26) it throws.
+ */
+export function newestActionId(points: readonly Pick<HistoryPoint, "actionId">[]): number {
+  return points.reduce((newest, point) => Math.max(newest, point.actionId), -1);
+}
+
+/**
  * The history's one admission and stop policy: a point is taken while the history collects and inspects nothing, for
  * a newly presented interaction (an action ID past the retained branch's newest) that has a foreground, from that same
  * publication's state. A state too large to save, or one the store cannot admit, stops collection; the points taken
@@ -768,7 +776,7 @@ export class HistoryCore {
     this.#forget(this.#unkeptIds(inspecting, kept));
     const retained = kept.length !== this.#points.length ? kept.length : null;
     this.#points = kept;
-    this.#newestActionId = Math.max(-1, ...kept.map((point) => point.actionId));
+    this.#newestActionId = newestActionId(kept);
     this.#scanned = this.#lastSequence.get(inspecting.shown.id) ?? -1;
     return changeOf(
       {
