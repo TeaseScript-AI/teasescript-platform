@@ -156,6 +156,8 @@ export class NarrowingRoutes extends RouteTests {
    * first `required` there; `null` elsewhere, where every route query is main's.
    */
   #feasible: Feasibility | null = null;
+  /** (#1938 cut B counters, throwaway: the stops a warned use met) */
+  #tags: Set<string> | null = null;
   /** The keys the program saves under, and whether it saves under a computed one (`#ownLoad`), made on first use. */
   #saves: { readonly keys: ReadonlySet<string>; readonly computed: boolean } | null = null;
 
@@ -213,7 +215,10 @@ export class NarrowingRoutes extends RouteTests {
         : null;
     if (some(program.work, "exactQueries", path.steps, (step) => step.kind !== "property"))
       return null;
+    this.#tags = new Set<string>();
     const d = yield* this.witness(pathKey(path, program.work), tag, node, others);
+    if (d === null) yield* this.#count(pathKey(path, program.work), tag, node, others, site);
+    this.#tags = null;
     const writer = d?.value === undefined ? null : (program.places[d.value]?.site ?? null);
     // (a test of the needed form after the writer on every route to the use, `while n == null { … }`: the check on that
     // route the compiler cannot keep, the warning; Codex r1 F1 on #1937)
@@ -352,6 +357,7 @@ export class NarrowingRoutes extends RouteTests {
     this.#work.charge("exactQueries");
     const { program, lists } = this.pass;
     const d = found.def;
+    if (d.how === "argument") this.#tags?.add("B8");
     // X3's exact definitions N3 certifies: a declaration, an assignment with a certain receiver, a parameter's default;
     // never a weak store, an element or dict key, a loop variable, a return or an argument
     if (
@@ -578,6 +584,10 @@ export class NarrowingRoutes extends RouteTests {
     this.#work.charge("eventSteps");
     const { program } = this.pass;
     const d = found.def;
+    if (program.live(d.node) && program.dom.edom(d.node) !== program.dom.edom(node)) {
+      const e = program.dom.edom(node) as { statement?: { kind: string } } | null;
+      if (e?.statement?.kind === "labelStatement") this.#tags?.add("B6");
+    }
     if (!program.live(d.node) || program.dom.edom(d.node) !== program.dom.edom(node)) return false;
     // (in a program the default holds, the writer and the use stand where a route may promote: `#plain`)
     if (this.#feasible !== null && (!this.#plain(d.node, found.chain) || !this.#plain(node, chain)))
@@ -604,7 +614,10 @@ export class NarrowingRoutes extends RouteTests {
     for (const _ of steps(this.#work, "eventSteps", () => up - 1 > level)) {
       up -= 1;
       const { block, index } = writer[up]!;
-      if (this.#closed(block, index + 1, block.statements.length, layer, layer.calls)) return false;
+      if (this.#closed(block, index + 1, block.statements.length, layer, layer.calls)) {
+        this.#breakLoop(block, index + 1, block.statements.length);
+        return false;
+      }
       if (block.owner !== null && !this.#leaves(block.owner, layer.calls)) return false;
       // (in a program the default holds, nothing after the writer in its block that a run might not pass, #1938)
       if (
@@ -619,13 +632,18 @@ export class NarrowingRoutes extends RouteTests {
         return false;
     }
     // (c): the statements between
-    if (this.#closed(shared, writer[level]!.index + 1, chain[level]!.index, layer, layer.calls))
+    if (this.#closed(shared, writer[level]!.index + 1, chain[level]!.index, layer, layer.calls)) {
+      this.#breakLoop(shared, writer[level]!.index + 1, chain[level]!.index);
       return false;
+    }
     // (d): each entered block's statements before the read's
     let down = level + 1;
     for (const _ of steps(this.#work, "eventSteps", () => down < chain.length)) {
       const { block, index } = chain[down]!;
-      if (this.#closed(block, 0, index, layer, layer.calls)) return false;
+      if (this.#closed(block, 0, index, layer, layer.calls)) {
+        this.#breakLoop(block, 0, index);
+        return false;
+      }
       down += 1;
     }
     // (d), (e): a compulsory call before the read inside its top statement (a header entered, an earlier operand)
@@ -728,6 +746,60 @@ export class NarrowingRoutes extends RouteTests {
     keepText(this.#work, memo.length);
     this.#layers.set(memo, layer);
     return layer;
+  }
+
+  /** (#1938 cut B counters, throwaway) B7: a loop only a live `break` leaves, closed by the shared layer in a segment. */
+  #breakLoop(block: TreeBlock, low: number, high: number): void {
+    const program = this.pass.program;
+    for (let i = low; i < high; i += 1) {
+      const statement = block.statements[i]!;
+      const exit = statement.loop?.exit;
+      if (exit === undefined || statement.exits || !statement.leaves) continue;
+      if (
+        exit.predecessors.some(
+          (before) =>
+            program.live(before) &&
+            !program.flow.isDeadEdge(before, exit) &&
+            before.statement?.kind === "breakStatement",
+        )
+      )
+        this.#tags?.add("B7");
+    }
+  }
+
+  /** (#1938 cut B counters, throwaway) B5's lookup and the emitted record of a warned stable read. */
+  *#count(key: Key, tag: ItemTag, node: FlowNode, others: readonly ItemTag[], site: SourceSite): Work<void> {
+    const g = globalThis as any;
+    const file = g.process?.env?.I1938_COUNTERS;
+    if (file === undefined || this.#tags === null) return;
+    const chain = this.chainOf(node);
+    if (chain !== null && node.span !== null) {
+      const at = node.span.start.offset;
+      const lists = (yield* this.#ownCandidates(key, tag, others)).get(chain[0]!.block);
+      for (const place of chain)
+        if (place.block.owner?.loop !== null && place.block.owner !== null && lists !== undefined)
+          for (const candidate of lists.list)
+            if (
+              candidate.start > at &&
+              candidate.start < place.block.end &&
+              candidate.chain.some((c) => c.block === place.block)
+            )
+              this.#tags.add("B5");
+    }
+    if (this.#tags.size === 0) return;
+    const fs = g.process.getBuiltinModule("node:fs");
+    fs.appendFileSync(
+      file,
+      JSON.stringify({
+        source: g.I1938_SOURCE ?? null,
+        tags: [...this.#tags].sort(),
+        start: site.start,
+        end: site.end,
+        text: this.pass.program.textAt(site),
+        key,
+        tag,
+      }) + "\n",
+    );
   }
 
   /**
