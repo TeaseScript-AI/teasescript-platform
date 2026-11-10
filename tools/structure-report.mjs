@@ -131,7 +131,10 @@ function longFunctionsOf(file, text) {
       const start = lineOf(node.getStart(source));
       const span = lineOf(node.getEnd()) - start + 1;
       if (span > SIGNALS.functionLines) {
-        const name = node.name && ts.isIdentifier(node.name) ? node.name.text : "(anonymous)";
+        const name =
+          node.name && (ts.isIdentifier(node.name) || ts.isPrivateIdentifier(node.name))
+            ? node.name.text
+            : "(anonymous)";
         found.push({ file, name, line: start, lines: span });
       }
     }

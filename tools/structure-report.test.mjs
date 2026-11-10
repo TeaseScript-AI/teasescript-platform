@@ -327,6 +327,27 @@ test("--diff places a function by Git's lines, and keeps a name's leading U+FEFF
   }
 });
 
+test("a private method over 150 lines reports under its name, as a public one does", () => {
+  const method = (name) =>
+    longFunction(name, 160)
+      .replace(/^export function /u, "  ")
+      .replace(/\n/gu, "\n  ");
+  const core = `export class Core {\n${method("#advance")}\n${method("advance")}\n}\n`;
+  // a body line of each method
+  const { root, base } = history(
+    { "src/core.ts": core },
+    { "src/core.ts": core.replaceAll("const v5 = 5;", "const v5 = 55;") },
+  );
+  try {
+    assert.deepEqual(changeOf(root, base), [
+      "function over 150 lines that the change writes into: src/core.ts:2 #advance (160 lines)",
+      "function over 150 lines that the change writes into: src/core.ts:162 advance (160 lines)",
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a name that is not UTF-8, and hunks that --numstat does not count, stop the report", () => {
   const named = history(
     { "src/x.ts": "export const x = 1;\n" },
