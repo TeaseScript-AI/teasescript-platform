@@ -72,8 +72,6 @@ import {
   declineOf,
   heldDemands,
   heldFamily,
-  stopDeclineProblem,
-  unsettledStop,
   heldProblems,
   heldRun,
   heldStops,
@@ -113,7 +111,9 @@ import { plannedContent, runGlobals } from "../helpers/type-core-route.js";
 import {
   repeatedDecisions,
   standsForNullCheck,
+  stopDeclineProblem,
   stopProblems,
+  unsettledStop,
   type Globals,
   type StopRun,
 } from "../helpers/type-core-stop-oracle.js";

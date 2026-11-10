@@ -6,11 +6,6 @@ import {
 import { analyseCore, type Answers, type CorePass } from "../../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import {
-  LIMIT_REASONS,
-  OPEN_BY_STOP,
-  UNDECIDED_AT_BUDGET,
-} from "../../src/type-inference/core/check-result/slice-index.js";
-import {
   pathText,
   withTestAllowance,
   withTestDemandAllowance,
@@ -45,7 +40,14 @@ import {
   type DiagnosticRule,
   type Obligation,
 } from "../../src/type-inference/core/result.js";
-import { stopProblems, type Globals, type StopRun } from "./type-core-stop-oracle.js";
+import { LIMIT_REASONS } from "../../src/type-inference/core/check-result/slice-index.js";
+import {
+  stopDeclineProblem,
+  stopProblems,
+  unsettledStop,
+  type Globals,
+  type StopRun,
+} from "./type-core-stop-oracle.js";
 import { sampled } from "./sweep.js";
 
 /*
@@ -631,30 +633,6 @@ const declinedRun = (run: StopRun): boolean => declined.has(run.result);
 export const declineOf = (run: Pick<StopRun, "result">): string | null =>
   declined.get(run.result) ?? null;
 
-/** Whether an analysis stopped before admission settled, where the plain gate reads (#2080 part 2). */
-export const unsettledStop = (budget: Answers["budget"]): boolean =>
-  budget.exhausted !== null && !budget.settled;
-
-/**
- * Why a compile's decline at a stop does not stand, or `null` where it does (#2080 part 2, Codex r2, r3): a decline a
- * limit causes, at the phase it belongs to ("a store whose check was left undecided at the budget" before admission
- * settled; the lost and unestablished checks only after it; an open typed default at any stop), whatever the unstopped
- * compile gave; or, for a construct outside the slice, the reason the unstopped compile gives too (`natural`). Any other
- * decline would hide a wrong reason as no plan.
- */
-export function stopDeclineProblem(
-  what: string,
-  unsettled: boolean,
-  natural: string | null,
-): string | null {
-  if (!LIMIT_REASONS.includes(what))
-    return what === natural
-      ? null
-      : `declined at a stop with "${what}", unstopped ${natural ?? "compiled"}`;
-  if (what === UNDECIDED_AT_BUDGET ? unsettled : what === OPEN_BY_STOP || !unsettled) return null;
-  return `declined with "${what}" ${unsettled ? "before" : "after"} admission settled`;
-}
-
 /**
  * A case's analysis and, in the slice, its compile, unstopped or at an allowance, in a mode, its `without` at the same
  * allowance and mode (`StopRun.without`; drivers outside CI build their stopped runs with it, #1594). A compile the
@@ -688,9 +666,31 @@ export function heldRun(c: HeldCase, mode: HeldMode, allowance?: number, demand?
     const result = compiled();
     return { result, ...recordingReads(() => ({ answers: analyseCore(request) })) };
   };
+  // (a decline stands only with a limit's reason at its stop's phase, or a slice reason the unstopped compile gives too,
+  // `stopDeclineProblem`: no run returns a decline whose reason nothing checked, #2080 part 2, Codex r1–r3)
+  const natural = (): string | null => {
+    try {
+      mode.run(() => compileSourceWithBackend(c.source, { globals: GLOBALS }, CORE_BACKEND));
+      return null;
+    } catch (error) {
+      if (!(error instanceof CandidateOutsideSlice)) throw error;
+      return error.what;
+    }
+  };
+  const checked = <T extends Pick<StopRun, "result" | "answers">>(run: T): T => {
+    const what = declined.get(run.result);
+    if (what === undefined) return run;
+    const problem = stopDeclineProblem(
+      what,
+      unsettledStop(run.answers.budget),
+      LIMIT_REASONS.includes(what) ? null : natural(),
+    );
+    if (problem !== null) throw new Error(`${c.name}: ${problem}`);
+    return run;
+  };
   return {
-    ...allowed(demand === undefined ? both : recorded),
-    without: (omit) => allowed(() => withoutRecords(omit, both)),
+    ...checked(allowed(demand === undefined ? both : recorded)),
+    without: (omit) => checked(allowed(() => withoutRecords(omit, both))),
   };
 }
 
@@ -2335,16 +2335,8 @@ export function heldProblems(
   const rule =
     demand === undefined ? undefined : combinedStopRule(c, mode, unstopped, stopped.answers);
   const problems = ownership(unstopped.answers, stopped.answers, rule);
-  if (!c.slice) return problems;
-  const decline = declineOf(stopped);
-  if (decline !== null) {
-    const problem = stopDeclineProblem(
-      decline,
-      unsettledStop(stopped.answers.budget),
-      declineOf(unstopped),
-    );
-    return problem === null ? problems : [...problems, problem];
-  }
+  // (a decline it returns has a reason `heldRun` checked)
+  if (!c.slice || declinedRun(stopped)) return problems;
   // (a stopped plan runs its fitting and forbidden values whatever the reference's compile did; the two compiles are
   // compared where both are had)
   if (declinedRun(unstopped)) return [...problems, ...runProblems(c, stopped)];
@@ -2405,15 +2397,9 @@ export function heldUnstopped(
   mode: HeldMode,
   demand?: number,
 ): { run: StopRun; problems: string[] } {
+  // (a decline it returns has a reason `heldRun` checked)
   const run = heldRun(c, mode, undefined, demand);
-  if (!c.slice) return { run, problems: [] };
-  const decline = declineOf(run);
-  if (decline === null) return { run, problems: runProblems(c, run) };
-  // (an unstopped run may decline outside the slice, or at the work allowance's own stop, as any stop does)
-  const problem = LIMIT_REASONS.includes(decline)
-    ? stopDeclineProblem(decline, unsettledStop(run.answers.budget), null)
-    : null;
-  return { run, problems: problem === null ? [] : [problem] };
+  return { run, problems: c.slice && !declinedRun(run) ? runProblems(c, run) : [] };
 }
 
 /**

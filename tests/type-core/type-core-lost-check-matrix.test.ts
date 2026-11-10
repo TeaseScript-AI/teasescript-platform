@@ -13,12 +13,8 @@ import {
   withTestDemandAllowance,
 } from "../../src/type-inference/core/budget.js";
 import { coreRequest } from "../helpers/type-core-analysis.js";
-import {
-  HELD_MODES,
-  heldStops,
-  stopDeclineProblem,
-  unsettledStop,
-} from "../helpers/type-core-held-host.js";
+import { HELD_MODES, heldStops } from "../helpers/type-core-held-host.js";
+import { stopDeclineProblem, unsettledStop } from "../helpers/type-core-stop-oracle.js";
 import { runGlobals } from "../helpers/type-core-route.js";
 import {
   DECLINES,

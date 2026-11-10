@@ -10,6 +10,11 @@ import {
   withTestDemandAllowance,
 } from "../../src/type-inference/core/budget.js";
 import { withMessagesInWords } from "../../src/type-inference/core/check-result/check-result.js";
+import {
+  LIMIT_REASONS,
+  OPEN_BY_STOP,
+  UNDECIDED_AT_BUDGET,
+} from "../../src/type-inference/core/check-result/slice-index.js";
 import type { Omission } from "../../src/type-inference/core/consumers.js";
 import { withoutRecords } from "../../src/type-inference/core/consumers/left-out.js";
 import type { CoreDiagnostic, Obligation } from "../../src/type-inference/core/result.js";
@@ -90,6 +95,30 @@ function spanOf(value: unknown): Span | null {
 
 /** The decline of a compile that would lose a check its store owes (#1526 decision 2, condition 1). */
 const LOST_CHECK = "a store whose check was lost at the budget";
+
+/** Whether an analysis stopped before admission settled, where the plain gate reads (#2080 part 2). */
+export const unsettledStop = (budget: Answers["budget"]): boolean =>
+  budget.exhausted !== null && !budget.settled;
+
+/**
+ * Why a compile's decline at a stop does not stand, or `null` where it does (#2080 part 2, Codex r2, r3): a decline a
+ * limit causes, at the phase it belongs to ("a store whose check was left undecided at the budget" before admission
+ * settled; the lost and unestablished checks only after it; an open typed default at any stop), whatever the unstopped
+ * compile gave; or, for a construct outside the slice, the reason the unstopped compile gives too (`natural`). Any other
+ * decline would hide a wrong reason as no plan.
+ */
+export function stopDeclineProblem(
+  what: string,
+  unsettled: boolean,
+  natural: string | null,
+): string | null {
+  if (!LIMIT_REASONS.includes(what))
+    return what === natural
+      ? null
+      : `declined at a stop with "${what}", unstopped ${natural ?? "compiled"}`;
+  if (what === UNDECIDED_AT_BUDGET ? unsettled : what === OPEN_BY_STOP || !unsettled) return null;
+  return `declined with "${what}" ${unsettled ? "before" : "after"} admission settled`;
+}
 
 /**
  * What a record stands for in a plan, between the compile with it and the one without it (`rerun`): where they differ;
@@ -1018,6 +1047,16 @@ export function stopRuns(
   };
   const natural = runAt(null);
   const made = runAt(demand);
+  // (each side's decline carries its reason, `StopRunSide.declined`, for its reader to compare; a limit's reason stands
+  // only at the phase it belongs to, `stopDeclineProblem`, #2080 part 2)
+  for (const [side, each] of [
+    ["natural", natural],
+    ["stopped", made],
+  ] as const) {
+    if (each.declined === null || !LIMIT_REASONS.includes(each.declined)) continue;
+    const problem = stopDeclineProblem(each.declined, unsettledStop(each.answers.budget), null);
+    if (problem !== null) throw new Error(`${side} run: ${problem}`);
+  }
   const stopped =
     planted === undefined || made.result.plan === null
       ? made
