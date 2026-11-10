@@ -42,7 +42,8 @@ Inspect proportionately for:
 - source-to-plan/state amplification, unnecessary temporary/frame growth, and large throwaway
   collections, strings, or copies created only to count, inspect, or immediately discard them;
 - setup or invariant work repeated at a lifecycle frequency when once per enclosing operation would
-  preserve the same behavior;
+  preserve the same behavior, and long-lived callbacks, subscriptions, or objects retaining large data
+  beyond its needed lifetime; check captured references and release paths;
 - caller-specific expensive work in shared helpers that sibling callers do not need; keep it on the requiring
   ownership/lifecycle path; and
 - input-controlled recursion, dynamic argument spreading, large materialization/stringification,
@@ -254,8 +255,10 @@ exclusions, criteria, and authority. An assigned review is read-only by default:
 findings, and necessary review comments. Do not push fixes, resolve another reviewer's thread, change
 pull-request state, merge, or modify the implementation branch unless a separate repair assignment is
 accepted and the handoff is visible. Examine the complete current diff and enough surrounding code,
-tests, documentation, and behavior to find every material consequence. Changed-file lists, green CI,
-author claims, and earlier approval are evidence, not proof.
+tests, documentation, and behavior to find every material consequence. For removed or replaced
+behavior, identify the obligation it served and where the new result preserves it, or why the change
+is authorized; apply test admission to removed coverage. Changed-file lists, green CI, author claims,
+and earlier approval are evidence, not proof.
 
 Treat review as a proportional, change-scoped examination. Inspect every material part deeply enough
 to support the landing decision without audit-only ceremony or unrelated cleanup. Apply the relevant
@@ -301,7 +304,9 @@ clean checks.
 
 Use the existing finding classes and blocking-evidence rules. Each finding gives the governing
 requirement, supported path, real boundary, or class-appropriate rationale; evidence where
-applicable; practical impact; and the smallest complete repair or follow-up.
+applicable; practical impact; and the smallest complete repair or follow-up. For reuse or
+simplification, check nearby and shared code, then name the existing helper or simpler equivalent
+and the concrete cost removed.
 The review comment records the exact head SHA, comparison base, scope, blockers and non-blocking
 findings, from the second round on whether each earlier finding is closed, checks and outcomes,
 including failures, warnings, skips, unavailable checks, remaining uncertainty, and whether the
