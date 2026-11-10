@@ -348,6 +348,102 @@ test("a private method over 150 lines reports under its name, as a public one do
   }
 });
 
+test("a function over 150 lines names its longest nested function, and an initialized one takes its variable's name", () => {
+  /** `count` statements named after `prefix`, at `indent`. */
+  const body = (prefix, count, indent) =>
+    Array.from({ length: count }, (_, i) => `${indent}const ${prefix}${i} = ${i};`);
+  /** A block of `count` lines: `head`, statements, then `tail` at `indent`. */
+  const block = (head, count, indent, tail = "}") => [
+    `${indent}${head}`,
+    ...body(`v${head.replace(/\W/gu, "")}`, count - 2, `${indent}  `),
+    `${indent}${tail}`,
+  ];
+  const text = [
+    // two nested functions, the longer an arrow initializing a variable that holds a function of its own
+    "export function outer() {",
+    ...block("function short() {", 5, "  "),
+    "  const helper = () => {",
+    ...block("function inner() {", 3, "    "),
+    ...body("helper", 15, "    "),
+    "  };",
+    ...body("outer", 133, "  "),
+    "}",
+    // none
+    ...block("export function plain() {", 160, ""),
+    // a nested class's members: a private method and a shorter public one
+    "export class Host {",
+    "  run() {",
+    "    class Inner {",
+    ...block("#step() {", 30, "      "),
+    ...block("go() {", 10, "      "),
+    "    }",
+    ...body("run", 116, "    "),
+    "  }",
+    "}",
+    // a tie: the first
+    "export function tied() {",
+    ...block("function first() {", 10, "  "),
+    ...block("function second() {", 10, "  "),
+    ...body("tied", 138, "  "),
+    "}",
+    // an anonymous callback, longer than a named function
+    "export function mapped() {",
+    ...block("[1].map(() => {", 25, "  ", "});"),
+    ...block("function named() {", 5, "  "),
+    ...body("mapped", 128, "  "),
+    "}",
+    // over 150 lines itself an arrow initializing a variable, holding one initializing a property
+    "export const arrowed = () => {",
+    "  const parts = {",
+    ...block("piece: () => {", 12, "    ", "},"),
+    "  };",
+    ...body("arrowed", 144, "  "),
+    "};",
+    "",
+  ].join("\n");
+  const at = (marker) => text.split("\n").findIndex((line) => line.includes(marker)) + 1;
+  const { root, base } = history(
+    { "src/parts.ts": text },
+    { "src/parts.ts": text.replace("const outer5 = 5;", "const outer5 = 55;") },
+  );
+  try {
+    const nested = (name, lines, marker) => ({ name, line: at(marker), lines });
+    const rows = [
+      ["outer", "function outer(", nested("helper", 20, "const helper")],
+      ["plain", "function plain(", undefined],
+      ["run", "run() {", nested("#step", 30, "#step()")],
+      ["tied", "function tied(", nested("first", 10, "function first")],
+      ["mapped", "function mapped(", nested("(anonymous)", 25, "[1].map")],
+      ["arrowed", "arrowed = () =>", nested("piece", 12, "piece:")],
+    ].map(([name, marker, longestNested]) => ({
+      file: "src/parts.ts",
+      name,
+      line: at(marker),
+      lines: 160,
+      ...(longestNested && { longestNested }),
+    }));
+    const json = join(root, "tree.json");
+    const out = execFileSync(process.execPath, [tool, "--json", json], {
+      cwd: root,
+      encoding: "utf8",
+    }).split("\n");
+    assert.deepEqual(JSON.parse(readFileSync(json, "utf8")).longFunctions, rows);
+    const from = out.indexOf("Functions over 150 lines: 6") + 1;
+    assert.deepEqual(
+      out.slice(from, from + rows.length),
+      rows.map(
+        ({ line, name, longestNested: n }) =>
+          `  160  src/parts.ts:${line} ${name}${n ? `, longest nested function: ${n.name} (${n.lines} lines, line ${n.line})` : ""}`,
+      ),
+    );
+    assert.deepEqual(changeOf(root, base), [
+      `function over 150 lines that the change writes into: src/parts.ts:1 outer (160 lines), longest nested function: helper (20 lines, line ${at("const helper")})`,
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("a name that is not UTF-8, and hunks that --numstat does not count, stop the report", () => {
   const named = history(
     { "src/x.ts": "export const x = 1;\n" },
