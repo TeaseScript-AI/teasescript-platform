@@ -63,10 +63,16 @@ export function postRenew(
     if (host.decide({ kind: "renewFailed", intent, stage }) && !endsQuietly(error))
       host.reportPageError(error);
   };
-  bridge
-    .historyRenew(intent, shown, action.closes)
+  const sent = bridge.historyRenew(intent, shown, action.closes);
+  // Not posted: the host never saw the renewal, nor the closes it carries. A close that could not be posted fails
+  // here, before any later decision posts; a lost connection's is the loss's.
+  if (!sent.posted) {
+    if (!endsQuietly(sent.error)) fail(action.closes.length > 0 ? "close" : "open", sent.error);
+    return;
+  }
+  sent.reply
     .then(
-      (renewed) => {
+      ({ result: renewed }) => {
         switch (renewed.kind) {
           case "renewed": {
             const { history } = renewed.timeline;

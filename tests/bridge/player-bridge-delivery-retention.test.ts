@@ -25,11 +25,12 @@ import { runRetentionChild } from "../helpers/retention-witness.js";
  * The residual: a plan-text slot (`preparePlanText`) shares its payload with its prerequisite plan (its JSON is the
  * plan's, written in a later task), so it is decided by weak references to the slot and its waiting task, and its plan's
  * marker decides it at `closed`; what it would keep only behind a private field, a closure or a promise's result is not
- * observed. A rewind history (`historyRenew`) takes only a serial, which carries no marker: it is decided by weak
- * references to its whole payload the op made, its registry entry and all it reaches but what a warm-up history holds,
- * with a negative control (`control/history`) that keeps its core after the open's reply failed. What its core keeps
- * behind its private fields is not observed; at its open it keeps no point, snapshot or log, which later publications
- * and steps make. Also
+ * observed. A rewind history (`historyRenew`), renewed here with no session to enroll, takes only a serial, which
+ * carries no marker: it is decided by weak references to its whole payload the op made, its registry entry and all it
+ * reaches but what a warm-up history holds, with a negative control (`control/history`) that keeps its core after the
+ * renewal's reply failed. What its core keeps behind its private fields is not observed; renewed with no session, it
+ * keeps no point, snapshot or log, which later publications and steps make. A renewal that enrolls a session takes its
+ * first point and snapshot in the same delivery; this fixture does not witness that allocation. Also
  * the witness's own limits (`retention-witness.ts`: a marker-free copy is not an original), and the
  * diagnostic state the connection keeps by design (the recorder, the value trace, the random control), which these
  * cases record none of.

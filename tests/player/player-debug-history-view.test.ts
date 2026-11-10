@@ -59,7 +59,9 @@ async function answer(bridge: PlayerBridge, session: PlayerSession, atMs: number
 /** A history the host took three points in, with the publications that carried its deltas. */
 async function hosted() {
   const bridge = await inProcessBridge();
-  const result = await bridge.historyRenew(1, null, []);
+  const sent = bridge.historyRenew(1, null, []);
+  assert.ok(sent.posted);
+  const { result } = await sent.reply;
   assert.ok(result.kind === "renewed");
   const session = await started(bridge);
   const publications = [

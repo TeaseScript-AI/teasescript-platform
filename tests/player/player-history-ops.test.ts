@@ -453,7 +453,9 @@ test("over a Worker, the timeline the page builds from the publications' deltas 
     ),
   );
   try {
-    const opened = await bridge.historyRenew(bridge.nextHistoryIntent(), null, []);
+    const sent = bridge.historyRenew(bridge.nextHistoryIntent(), null, []);
+    assert.ok(sent.posted);
+    const opened = (await sent.reply).result;
     assert.ok(opened.kind === "renewed");
     const session = await started(bridge);
     const view = new DebugHistoryView(
@@ -1106,10 +1108,10 @@ test("over a Worker, a renewal posted after a close the host refuses opens nothi
     const before = bridge.historyRenew(1, session, []);
     const refused = bridge.historyClose({ history: 7, by: "debugOff" });
     const after = bridge.historyRenew(2, session, []);
-    assert.ok(refused.posted);
-    assert.equal((await before).kind, "renewed");
+    assert.ok(before.posted && refused.posted && after.posted);
+    assert.equal((await before.reply).result.kind, "renewed");
     assert.equal((await refused.reply).result.kind, "refused");
-    assert.equal((await after).kind, "closeFailed");
+    assert.equal((await after.reply).result.kind, "closeFailed");
     assert.notEqual(await timeline(bridge, 1), null, "the earlier history stays");
     assert.equal(await timeline(bridge, 2), null);
   } finally {

@@ -676,7 +676,7 @@ const FOREIGN_CALLS: Record<string, (a: PlayerBridge, foreign: PlayerSession) =>
   captureExport: async (a, foreign) => void (await a.captureExport(foreign, "current", () => null)),
   frozen: async (a, foreign) => void a.frozen(foreign),
   release: async (a, foreign) => void a.release(foreign),
-  historyRenew: async (a, foreign) => void (await a.historyRenew(1, foreign, [])),
+  historyRenew: async (a, foreign) => void a.historyRenew(1, foreign, []),
 };
 
 test("every PlayerBridge method that takes a PlayerSession checks it is the bridge's own", () => {

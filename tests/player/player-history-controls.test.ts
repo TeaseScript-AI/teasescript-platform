@@ -136,7 +136,15 @@ interface RewindPlayer {
   readonly bridge: Promise<PlayerBridge>;
   readonly inputSection: unknown;
   readonly rewind: {
-    readonly owner: { readonly state: { readonly blocked: boolean; readonly debug: boolean } };
+    readonly owner: {
+      readonly state: {
+        readonly blocked: boolean;
+        readonly debug: boolean;
+        readonly history: number | null;
+      };
+      /** A clear's or an import's retirement of the history, as the Player reports it. */
+      retired(by: "clear" | "import"): unknown;
+    };
   };
   prepare(create: (recording: PlayerRuntimeSessionOptions) => PlayerRuntimeSession): void;
   activate(): Promise<void>;
@@ -579,3 +587,44 @@ test("#2150: Debug turned on posts its renewal in that turn, behind the shown se
   await until(() => mounted.rewind().state.value.points.length === 1, "the first point");
   healthy(mounted);
 });
+
+for (const by of ["clear", "import"] as const)
+  test(`#2150 R1-01: a ${by}'s renewal whose carried close could not be posted blocks before anything else posts`, async (context) => {
+    const mounted = await mount(context);
+    const { owner } = mounted.player.rewind;
+    const held = owner.state.history;
+    assert.notEqual(held, null);
+    const renewals: unknown[] = [];
+    const clone = globalThis.structuredClone;
+    context.after(() => void (globalThis.structuredClone = clone));
+    let fail = true;
+    globalThis.structuredClone = <T>(value: T, options?: StructuredSerializeOptions): T => {
+      if (
+        typeof value === "object" &&
+        value !== null &&
+        "kind" in value &&
+        value.kind === "request" &&
+        "op" in value &&
+        value.op === "historyRenew" &&
+        "args" in value
+      ) {
+        renewals.push(value.args);
+        if (fail) {
+          fail = false;
+          throw new Error(`injected: the ${by}'s renewal could not be posted`);
+        }
+      }
+      return clone(value, options);
+    };
+    owner.retired(by);
+    assert.equal(owner.state.blocked, true, "blocked in the deciding turn");
+    // A later Debug on renews nothing: its renewal would pass the close the host never saw.
+    mounted.toggle();
+    await until(() => mounted.reported.length === 1, "the failure reported once");
+    assert.equal(owner.state.blocked, true);
+    assert.equal(owner.state.history, null);
+    // The one renewal tried carried the close; none was posted after it.
+    assert.equal(renewals.length, 1);
+    assert.ok(typeof renewals[0] === "object" && renewals[0] !== null && "closes" in renewals[0]);
+    assert.deepEqual(renewals[0].closes, [{ history: held, by }]);
+  });

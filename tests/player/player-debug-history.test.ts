@@ -41,7 +41,9 @@ async function connection(
   options: Parameters<typeof createInProcessBackend>[1] = {},
 ): Promise<{ readonly bridge: PlayerBridge; readonly history: number }> {
   const bridge = createInProcessBackend(BUILD, options);
-  const opened = await bridge.historyRenew(bridge.nextHistoryIntent(), null, []);
+  const sent = bridge.historyRenew(bridge.nextHistoryIntent(), null, []);
+  assert.ok(sent.posted);
+  const opened = (await sent.reply).result;
   assert.ok(opened.kind === "renewed");
   return { bridge, history: opened.timeline.history };
 }

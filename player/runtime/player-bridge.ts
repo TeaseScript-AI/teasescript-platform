@@ -363,24 +363,30 @@ export class PlayerBridge {
   /**
    * Renews Debug's rewind history as `intent` on this connection (`historyRenew`), posted now: it closes `closes` and
    * every older history, opens the new one and enrolls `session` as it is, when one is shown. It carries this bridge's
-   * claim generation (`claim`), which only the Player holding the bridge posts with. The sessions its closes released
-   * are forgotten here.
+   * claim generation (`claim`), which only the Player holding the bridge posts with. Whether it was posted is decided
+   * before this returns, as `historyClose`'s is: a renewal carrying a close that could not be posted blocks the next one
+   * before anything else posts. The sessions its closes released are forgotten as its reply settles.
    */
-  async historyRenew(
+  historyRenew(
     intent: number,
     session: PlayerSession | null,
     closes: readonly HistoryCloseObligation[],
-  ): Promise<HistoryRenewed> {
+  ): PostDisposition<HistoryRenewed> {
     const target = session === null ? null : this.#own(session).id;
-    const reply = await this.#control("historyRenew", {
+    const sent = this.#client.post("historyRenew", {
       intent,
       owner: this.#owner,
       session: target,
       closes,
     });
-    const renewed = reply.result;
-    if (renewed.kind !== "stale") this.#forget(renewed.released);
-    return renewed;
+    if (!sent.posted) return sent;
+    return {
+      posted: true,
+      reply: sent.reply.then((reply) => {
+        if (reply.result.kind !== "stale") this.#forget(reply.result.released);
+        return reply;
+      }),
+    };
   }
 
   /**
