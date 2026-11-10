@@ -3,6 +3,7 @@ import test, { type TestContext } from "node:test";
 import { effectScope, type EffectScope } from "vue";
 import type { DebugHistoryView } from "../../player/debug/debug-history.js";
 import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
+import type { BridgeResult } from "../../player/engine-bridge/client.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import { playerRuntimeForeground, type PlayerSession } from "../../player/runtime/runtime-view.js";
 import { coverageGaps, product, type Coordinates } from "../helpers/family-coverage.js";
@@ -21,6 +22,7 @@ import {
   type Rewind,
   type RewindHost,
 } from "../helpers/player/rewind-host.js";
+import { interceptSends } from "../helpers/bridge/sends.js";
 
 /*
  * The lifetimes of what the Player's rewind owner holds (`player/vue/src/session/rewindOwner.ts`), through the real
@@ -224,21 +226,15 @@ function traffic(context: TestContext, bridge: PlayerBridge) {
       settled(outcome: string): void;
     }
   >();
-  const request = bridge.client.request.bind(bridge.client);
-  type Reply = ReturnType<typeof request>;
-  const post = (op: string, args: Parameters<typeof request>): Reply =>
-    request(...args).then((reply) => {
+  type Reply = Promise<BridgeResult>;
+  const post = (op: string, send: () => Reply): Reply =>
+    send().then((reply) => {
       if ((op === "rewindBack" || op === "rewindForward") && typeof reply.session === "string")
         candidates.push(reply.session);
       return reply;
     });
-  const answer = (
-    op: string,
-    how: Settlement,
-    args: Parameters<typeof request>,
-    posted?: Reply,
-  ): Reply => {
-    if (how === "pass") return posted ?? post(op, args);
+  const answer = (op: string, how: Settlement, send: () => Reply, posted?: Reply): Reply => {
+    if (how === "pass") return posted ?? post(op, send);
     // A history op's refusal (`HistoryOpResult`), in the bridge's reply.
     const refused = (): Awaited<Reply> => ({
       session: null,
@@ -247,25 +243,24 @@ function traffic(context: TestContext, bridge: PlayerBridge) {
       result: { kind: "refused", reason: `${op} refused` },
       view: null,
     });
-    if (how === "refuse after") return (posted ?? post(op, args)).then(refused);
+    if (how === "refuse after") return (posted ?? post(op, send)).then(refused);
     const fail = () =>
       how === "reject"
         ? Promise.reject(new Error(`A host failure of ${op}.`))
         : Promise.resolve(refused());
     return posted === undefined ? fail() : posted.then(fail);
   };
-  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
-    const op = String(args[0]);
+  interceptSends(context, bridge.client, (op, _args, send) => {
     if (/^(history|rewind)/.test(op)) sent.push(op);
     const hold = holds.get(op);
     const next = once.get(op);
     once.delete(op);
-    if (hold === undefined) return answer(op, next ?? answers.get(op) ?? "pass", args);
+    if (hold === undefined) return answer(op, next ?? answers.get(op) ?? "pass", send);
     holds.delete(op);
-    const posted = hold.at === "reply" ? post(op, args) : undefined;
+    const posted = hold.at === "reply" ? post(op, send) : undefined;
     if (posted === undefined) hold.reached();
     else void posted.then(hold.reached, hold.reached);
-    const answered = hold.gate.then((how) => answer(op, how, args, posted));
+    const answered = hold.gate.then((how) => answer(op, how, send, posted));
     answered.then(
       () => hold.settled("answered"),
       (error: unknown) => hold.settled(error instanceof Error ? error.name : String(error)),

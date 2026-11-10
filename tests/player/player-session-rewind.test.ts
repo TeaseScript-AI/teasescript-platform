@@ -10,6 +10,7 @@ import { playerRuntimeForeground } from "../../player/runtime/runtime-view.js";
 import { memoryKeptRoomStore } from "../../player/persistence/kept-sessions.js";
 import { coverageGaps, product, type Coordinates } from "../helpers/family-coverage.js";
 import { hostTrace, onHost } from "../helpers/player/host-sessions.js";
+import { interceptSends } from "../helpers/bridge/sends.js";
 import {
   selectPlayerRuntimeChoice,
   playerRuntimeSnapshot,
@@ -248,9 +249,8 @@ test("a rewind reply that rejects on a live connection is reported as a host fai
       const failure = lost
         ? new BridgeLostError("The engine Worker failed: injected.")
         : new Error("A host failure.");
-      const request = bridge.client.request.bind(bridge.client);
-      subtest.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) =>
-        args[0] === "rewindReturn" ? Promise.reject(failure) : request(...args),
+      interceptSends(subtest, bridge.client, (op, _args, send) =>
+        op === "rewindReturn" ? Promise.reject(failure) : send(),
       );
       const reported: unknown[] = [];
       reportsInto(subtest, reported);

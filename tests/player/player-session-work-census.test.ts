@@ -78,7 +78,7 @@ const CLOCK = "player/vue/src/session/useRuntimeSceneClock.ts";
 
 /** Every public member of `BridgeClient`: what sends to the host unguarded, what takes the clock's ticket, and what does not send. */
 const CLIENT_MEMBERS = {
-  sending: ["request", "signal"],
+  sending: ["request", "post", "signal"],
   // A section takes a `ClockTicket`: leaving it out fails type-checking, so the walk does not follow it (#1983).
   // Where a ticket came from it does not decide: a check-disabling construct, or one a `BridgeClient` wrapper kept.
   ticketed: ["section"],
@@ -131,49 +131,49 @@ type Policy =
 const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = {
   "player/vue/src/session/rewindOwner.ts createRewindOwner > apply > finally:callback#2": [
     "lifecycle",
-    ["BridgeClient.request", "BridgeClient.signal"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/session/rewindOwner.ts createRewindOwner > back > step:callback": [
     "resume",
-    ["BridgeClient.request"],
+    ["BridgeClient.post"],
   ],
   "player/vue/src/session/rewindOwner.ts createRewindOwner > close > then:callback#1.1": [
     "lifecycle",
-    ["BridgeClient.request", "BridgeClient.signal"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/session/rewindOwner.ts createRewindOwner > close > then:callback#1.2": [
     "lifecycle",
-    ["BridgeClient.request", "BridgeClient.signal"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/session/rewindOwner.ts createRewindOwner > enroll > DebugHistoryView:callback": [
     "read",
-    ["BridgeClient.request"],
+    ["BridgeClient.post"],
   ],
   "player/vue/src/session/rewindOwner.ts createRewindOwner > enroll > DebugHistoryView:callback > catch:callback":
     ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/session/rewindOwner.ts createRewindOwner > forward > step:callback": [
     "resume",
-    ["BridgeClient.request"],
+    ["BridgeClient.post"],
   ],
   "player/vue/src/session/rewindOwner.ts createRewindOwner > gate > then:callback.1": [
     "resume",
-    ["BridgeClient.request", "BridgeClient.signal"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/session/rewindOwner.ts createRewindOwner > gate > then:callback.2": [
     "resume",
-    ["BridgeClient.request", "BridgeClient.signal"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/session/rewindOwner.ts createRewindOwner > apply > then:callback#1": [
     "lifecycle",
-    ["BridgeClient.request", "BridgeClient.signal"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/session/rewindOwner.ts createRewindOwner > open > function": [
     "lifecycle",
-    ["BridgeClient.request", "BridgeClient.signal"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/session/rewindOwner.ts createRewindOwner > retryReturn": [
     "resume",
-    ["BridgeClient.request", "BridgeClient.signal"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/session/rewindOwner.ts createRewindOwner > reportUnless > function": [
     "lifecycle",
@@ -181,20 +181,20 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/debug/history/useDebugRewind.ts useDebugRewind > tryOnScopeDispose:callback": [
     "lifecycle",
-    ["BridgeClient.request", "BridgeClient.signal"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > clearScriptStorage": [
     "lifecycle",
-    ["BridgeClient.request", "BridgeClient.signal"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > showSession": [
     "resume",
     ["BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/session/useSessionRewind.ts useSessionRewind > followSessions > watch:callback#1":
-    ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
+    ["lifecycle", ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/session/useSessionRewind.ts useSessionRewind > followSessions > tryOnScopeDispose:callback":
-    ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
+    ["lifecycle", ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/session/persistence/useSavedDataTransfer.ts useSavedDataTransfer > importSavedData > owned:callback > commit:callback#2":
     ["creation", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/session/persistence/useSessionTransfer.ts useSessionTransfer > importSession > owned:callback > replaceSession > admit:callback#1":
@@ -252,7 +252,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/main.ts setup": [
     "composition",
-    ["BridgeClient.request", "BridgeClient.signal", "introduceNow"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal", "introduceNow"],
   ],
   "player/vue/src/session/useCallView.ts useCallView > demandCallView > release": [
     "lifecycle",
@@ -315,23 +315,23 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/debug/history/useDebugRewind.ts useDebugRewind > back": [
     "resume",
-    ["BridgeClient.request", "BridgeClient.signal"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/debug/history/useDebugRewind.ts useDebugRewind > forward": [
     "resume",
-    ["BridgeClient.request", "BridgeClient.signal"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/debug/history/useDebugRewind.ts useDebugRewind > resume": [
     "resume",
-    ["BridgeClient.request", "BridgeClient.signal"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/debug/history/useDebugRewind.ts useDebugRewind > returnToSession": [
     "resume",
-    ["BridgeClient.request", "BridgeClient.signal"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/debug/history/useDebugRewind.ts useDebugRewind > then:callback.1": [
     "lifecycle",
-    ["BridgeClient.request", "BridgeClient.signal"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/debug/useDebugView.ts useDebugView": [
     "read",
@@ -343,17 +343,17 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/debug/useDevelopmentTime.ts useDevelopmentTime > advanceBy": [
     "own observation",
-    ["BridgeClient.request", "BridgeClient.signal"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/debug/useDevelopmentTime.ts useDevelopmentTime > skip": [
     "own observation",
-    ["BridgeClient.request", "BridgeClient.signal"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/debug/useDevelopmentTime.ts useDevelopmentTime > watch:callback#2 > setTimeout:callback":
     ["own observation", ["BridgeClient.request"]],
   "player/vue/src/debug/usePlayerDebug.ts usePlayerDebug": [
     "composition",
-    ["BridgeClient.request", "BridgeClient.signal", "introduceNow"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal", "introduceNow"],
   ],
   "player/vue/src/debug/usePlayerDebug.ts usePlayerDebug > explain": [
     "read",
@@ -369,7 +369,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/debug/usePlayerDebug.ts usePlayerDebug > watch:callback#3.2 > run:callback": [
     "composition",
-    ["BridgeClient.request", "BridgeClient.signal"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/session/useSessionMedia.ts useSessionMedia > MediaLoadQueue:callback.1": [
     "own observation",
@@ -408,11 +408,11 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > importSavedData": [
     "none",
-    ["BridgeClient.request", "BridgeClient.signal"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > importSession": [
     "creation",
-    ["BridgeClient.request", "BridgeClient.signal", "introduceNow"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal", "introduceNow"],
   ],
   "player/vue/src/session/persistence/useSessionTransfer.ts useSessionTransfer > importSession > owned:callback":
     ["creation", ["BridgeClient.request", "BridgeClient.signal", "introduceNow"]],
@@ -448,7 +448,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > pressPermanentButton": [
     "own observation",
-    ["BridgeClient.request", "BridgeClient.signal"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/session/activation/work/stop.ts stopLateStart > then:callback.1": [
     "lifecycle",
@@ -559,6 +559,9 @@ const ESCAPES: Readonly<Record<string, Policy>> = {
   // The reply hooks a request passes on: a debug export's capture releases its ticket from its hook.
   "player/engine-bridge/client.ts openBridge > Promise:callback > request > exclusive:callback {onReply}":
     "bridge plumbing",
+  // A request of no session passes its hook to the post it makes at once.
+  "player/engine-bridge/client.ts openBridge > Promise:callback > request {onReply}":
+    "bridge plumbing",
   "player/runtime/player-bridge.ts PlayerBridge > request > #send:callback {onReply}":
     "bridge plumbing",
   "player/encryption/lock-service.ts LockService > #present > wake {wake}": "own observation",
@@ -585,6 +588,7 @@ const FOLLOWED: readonly string[] = [
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > readTransfer {readTransfer}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > reviewSessionImport {reviewSessionImport}",
   "player/engine-bridge/client.ts openBridge > Promise:callback > request {request}",
+  "player/engine-bridge/client.ts openBridge > Promise:callback > post {post}",
   "player/runtime/player-bridge.ts PlayerBridge > captureExport > onReply {onReply}",
   "player/runtime/player-bridge.ts PlayerBridge > request > #send:callback > onReply {onReply}",
   "player/runtime/player-bridge.ts PlayerBridge > viewCalls > #send:callback > onReply {onReply}",

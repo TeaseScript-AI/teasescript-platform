@@ -572,6 +572,11 @@ function postsOf(context: TestContext, bridge: PlayerBridge) {
     posts.push({ op: args[0], args: args[1], phase: state.phase });
     return request(...args);
   });
+  const post = bridge.client.post.bind(bridge.client);
+  context.mock.method(bridge.client, "post", (...args: Parameters<typeof post>) => {
+    posts.push({ op: args[0], args: args[1], phase: state.phase });
+    return post(...args);
+  });
   const signal = bridge.client.signal.bind(bridge.client);
   context.mock.method(bridge.client, "signal", (...args: Parameters<typeof signal>) => {
     posts.push({ op: args[0], args: args[1], phase: state.phase });

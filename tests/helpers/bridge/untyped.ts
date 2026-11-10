@@ -2,6 +2,7 @@ import type {
   BridgeClient,
   BridgeLostError,
   BridgeResult,
+  PostDisposition,
   ReplyHook,
   RequestOptions,
 } from "../../../player/engine-bridge/client.js";
@@ -31,6 +32,7 @@ export interface UntypedClient {
     ticket: ClockTicket,
     body: (send: UntypedSend) => Promise<T>,
   ): Promise<T>;
+  post(op: string, args: unknown): PostDisposition;
   signal(op: string, args: unknown, session: string, onReply?: ReplyHook): Promise<BridgeResult>;
   terminate(): void;
   onLoss(listener: (error: BridgeLostError) => void): void;

@@ -7,7 +7,15 @@ import {
   sameBuild,
 } from "./protocol.js";
 import type { ClockTicket } from "../runtime/clock-ticket.js";
-import type { HaltArgs, HaltResult, OpArgs, OpName, OpResult, RequestOp } from "./op-catalogue.js";
+import type {
+  HaltArgs,
+  HaltResult,
+  OpArgs,
+  OpName,
+  OpResult,
+  RequestOp,
+  WorkerOp,
+} from "./op-catalogue.js";
 import { decodeMessage, encodeMessage } from "./transport.js";
 
 /** How the Player side reaches its engine Worker, whatever runs it: a browser Worker, a Node worker or a test port. */
@@ -69,6 +77,11 @@ export type SectionSend = <O extends OpName>(
     : never
 ) => Promise<BridgeResult<OpResult<O>>>;
 
+/** Whether `post` posted its request: then its reply, else why it did not, decided before `post` returns. */
+export type PostDisposition<R = unknown> =
+  | { readonly posted: true; readonly reply: Promise<BridgeResult<R>> }
+  | { readonly posted: false; readonly error: Error };
+
 /** A request's options (`BridgeClient.request`), its hook given its op's result. */
 export interface RequestOptions<R = unknown> {
   readonly session?: string | null;
@@ -77,11 +90,16 @@ export interface RequestOptions<R = unknown> {
   readonly after?: string;
 }
 
+/**
+ * How requests reach the host. Requests of no session reach it in the order the page made them: each is posted when it
+ * is made. A session's requests (its own ops, and the reads of it sent `after` it) each wait for that session's earlier
+ * replies. Not promised: any order between a session's queued request and a connection request made later.
+ */
 export interface BridgeClient {
   /**
-   * Sends one request after every earlier request for the same session (or for the Worker itself) has its reply. With
-   * `after`, an op on the Worker itself waits instead for the earlier requests of session `after`, and holds that
-   * session's turn: a read of the session that follows what was posted before it.
+   * Sends one request. Of a session, or of none `after` a session: once that session's earlier requests have their
+   * replies, holding its turn (a read of the session follows what was posted before it). Of no session otherwise: at
+   * once (`post`).
    */
   request<O extends RequestOp>(
     ...call: O extends unknown
@@ -106,6 +124,15 @@ export interface BridgeClient {
     ticket: ClockTicket,
     body: (send: SectionSend) => Promise<T>,
   ): Promise<T>;
+  /**
+   * Posts op `op` of no session now, behind no earlier request's reply, as `request` sends it, and says before it
+   * returns whether it was posted: not on a lost client, nor with arguments that cannot cross. The host runs it in
+   * arrival order, after every request posted before it and before every ordinary one posted after it (a `halt` is
+   * dispatched on receipt, ahead of work the host still awaits).
+   */
+  post<O extends WorkerOp>(
+    ...call: O extends unknown ? [op: O, args: OpArgs<O>] : never
+  ): PostDisposition<OpResult<O>>;
   /**
    * Sends one request at once, ahead of the requests waiting for its session, as `halt` must be: the host handles it on
    * receipt too.
@@ -245,6 +272,33 @@ export function openBridge(
       });
     }
 
+    /** `BridgeClient.post`: the request of no session posted now, or why it was not. */
+    function post(op: string, args: unknown, onReply?: ReplyHook): PostDisposition {
+      if (lost !== null) return { posted: false, error: lost };
+      const id = nextId++;
+      let entry!: { resolve: (result: BridgeResult) => void; reject: (error: Error) => void };
+      const reply = new Promise<BridgeResult>((resolve, reject) => (entry = { resolve, reject }));
+      pending.set(id, { ...entry, onReply });
+      try {
+        port.post(
+          encodeMessage({
+            v: BRIDGE_VERSION,
+            kind: "request",
+            id,
+            session: null,
+            basis: null,
+            op,
+            args,
+          }),
+        );
+      } catch (error) {
+        // Arguments that cannot cross never reach the Worker; the request is not posted, without effect.
+        pending.delete(id);
+        return { posted: false, error: error instanceof Error ? error : new Error(String(error)) };
+      }
+      return { posted: true, reply };
+    }
+
     /**
      * Runs `body` once every earlier holder of `key` is done, and holds `key` until `body` settles. With no holder,
      * `body` starts at once, so a request posts before `request` returns.
@@ -271,7 +325,12 @@ export function openBridge(
     const client = {
       request: (op: string, args: unknown, options: RequestOptions = {}) => {
         const session = options.session ?? null;
-        return exclusive(session ?? options.after ?? "", () =>
+        const turn = session ?? options.after;
+        if (turn === undefined) {
+          const sent = post(op, args, options.onReply);
+          return sent.posted ? sent.reply : Promise.reject(sent.error);
+        }
+        return exclusive(turn, () =>
           send(op, args, session, options.basis ?? null, options.onReply),
         );
       },
@@ -290,6 +349,7 @@ export function openBridge(
         exclusive(session, () =>
           body((op, args, basis, onReply) => send(op, args, session, basis, onReply)),
         ),
+      post: (op: string, args: unknown) => post(op, args),
       signal: (op: string, args: unknown, session: string, onReply?: ReplyHook) =>
         send(op, args, session, null, onReply),
       terminate: () => lose("The engine Worker was terminated.", true),

@@ -68,6 +68,22 @@ export async function senderRows(
   // @ts-expect-error -- `release` is a request.
   await client.signal("release", null, "s1");
 
+  // `BridgeClient.post` sends the ops of no session alone (`WorkerOp`).
+  const posted = client.post("historyTimeline", { history: 1 });
+  if (posted.posted) await posted.reply;
+  // An input goes to its session; well-formed, it is still no op of no session.
+  await client.request(
+    "selectChoice",
+    { actionId: 1, optionId: "o1", input: "button" },
+    { session: "s1", basis: 0 },
+  );
+  // @ts-expect-error -- `selectChoice` is an op of a session, which `post` does not send.
+  client.post("selectChoice", { actionId: 1, optionId: "o1", input: "button" });
+  // @ts-expect-error -- `halt` is sent ahead of the queue (`signal`), not in arrival order.
+  client.post("halt", null);
+  // @ts-expect-error -- `historyTimeline` takes a history serial.
+  client.post("historyTimeline", { history: "1" });
+
   // A client section's send (`SectionSend`).
   const sent: TimeObservationOutcome = (await send("observeTime", observed, 0)).result;
   // @ts-expect-error -- no op of that name.
