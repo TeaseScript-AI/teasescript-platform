@@ -131,7 +131,8 @@ export function useSessionRewind({
   // Debug's rewind does one thing at a time: restoring a state (a step, which may read a spilled snapshot) or adopting
   // the inspected one (which replaces the saved data). Each holds this until it is done, and neither starts meanwhile.
   const rewindWork = ref<"step" | "adopt" | null>(null);
-  let adoption: Promise<boolean> | null = null;
+  /** `rewindWork` as returned: read outside, changed only here. */
+  const returnedRewindWork: Readonly<typeof rewindWork> = rewindWork;
   /** Whether the session may be left for a restored state now: nothing waits for the host or the player. */
   const rewindReady = computed(
     () =>
@@ -164,8 +165,7 @@ export function useSessionRewind({
     // A stopped session is not adopted: its saved data are not replaced either.
     if (stopped.value || !inspecting.value || rewindWork.value !== null || session.value === null)
       return Promise.resolve(false);
-    adoption = adoptShown(session.value).finally(() => (adoption = null));
-    return adoption;
+    return adoptShown(session.value);
   }
   /**
    * Whether the adoption that began in generation `owner` on the shown session `shown` still owns the page: it is mounted,
@@ -252,7 +252,7 @@ export function useSessionRewind({
     retireRewind,
     rewound,
     prepareInput,
-    rewindWork,
+    rewindWork: returnedRewindWork,
     rewindReady,
     canRewind,
     beginRewindStep,
