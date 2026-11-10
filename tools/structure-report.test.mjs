@@ -504,7 +504,11 @@ test(
       git("init", "-q");
       git("config", "user.email", "t@t");
       git("config", "user.name", "t");
-      const big = longFunction("big", 400);
+      // holding a 3-line function at lines 3-5
+      const big = longFunction("big", 400).replace(
+        "  const v1 = 1;\n  const v2 = 2;\n  const v3 = 3;",
+        "  function nested() {\n    return 1;\n  }",
+      );
       write(root, { "src/a.ts": `${big}\nexport const small = 1;\n` });
       git("add", "-A");
       git("commit", "-q", "-m", "base");
@@ -526,7 +530,7 @@ test(
       );
       assert.match(
         moved,
-        /suppressed \(moved\): function over 150 lines that the change writes into: src\/b\.ts:1 big \(400 lines\), 400 moved lines discounted/u,
+        /^ {2}suppressed \(moved\): function over 150 lines that the change writes into: src\/b\.ts:1 big \(400 lines\), 400 moved lines discounted, longest nested function: nested \(3 lines, line 3\)$/mu,
       );
       assert.doesNotMatch(moved, /^ {2}file gaining over 300 lines/mu);
       // one line edited inside the moved function still counts as written into it
@@ -536,7 +540,7 @@ test(
       const edited = report("--diff", base, "--moved");
       assert.match(
         edited,
-        /^ {2}function over 150 lines that the change writes into: src\/b\.ts:1 big \(400 lines\)$/mu,
+        /^ {2}function over 150 lines that the change writes into: src\/b\.ts:1 big \(400 lines\), longest nested function: nested \(3 lines, line 3\)$/mu,
       );
     } finally {
       rmSync(root, { recursive: true, force: true });

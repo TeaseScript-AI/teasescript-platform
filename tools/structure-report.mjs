@@ -10,9 +10,11 @@
 // files Git tracks are read. Lines are Git's, for files and functions alike: a newline (LF) alone ends one, and a final
 // newline ends the last line.
 // Functions are measured in TypeScript and JavaScript files; the script blocks of .vue files are not parsed.
-// A function is named by its own name, else by the variable or property it initializes, else `(anonymous)`. A function
-// over 150 lines that holds other functions, at any depth, also names the longest of them, with its lines and first
-// line (the first in source order on a tie); --json gives it as `longestNested`.
+// A function is named by its own name when that is an identifier or a private name; else, when it is an arrow function
+// or function expression that directly initializes a variable or a property with such a name, by that name; else
+// `(anonymous)`. A function over 150 lines that holds other functions, at any depth, also names the longest of them,
+// with its lines and first line (the first in source order on a tie), at the end of its line; the whole-tree --json
+// gives it as the row's `longestNested`.
 //
 // Without --diff: the whole tree's signals, the top N of each (files over 1000 lines, folders over 20 files, top levels
 // over 12, functions over 150 lines, names a letter apart). --json writes them all; --compare counts each against an
@@ -111,8 +113,8 @@ const lineCount = (text) =>
 
 /**
  * The name the report gives the function `node` (whose parent is `parent`): its own name, an identifier or a private
- * name; else, for an arrow function or function expression that initializes a variable or a property with such a
- * name, that name; else `(anonymous)`.
+ * name; else, for an arrow function or function expression that directly initializes a variable or a property with
+ * such a name, that name; else `(anonymous)`.
  */
 function functionName(node, parent) {
   if (node.name && (ts.isIdentifier(node.name) || ts.isPrivateIdentifier(node.name)))
@@ -366,12 +368,13 @@ function addedLinesSignals(file, text, added, moved, growth) {
   if (PARSED.test(file))
     for (const fn of longFunctionsOf(file, text)) {
       const end = fn.line + fn.lines - 1;
-      const what = `function over ${SIGNALS.functionLines} lines that the change writes into: ${shown(file)}:${fn.line} ${fn.name} (${fn.lines} lines)${nestedOf(fn)}`;
-      if (holdsLineIn(counted, fn.line, end)) found.push({ signal: "function", line: what });
+      const what = `function over ${SIGNALS.functionLines} lines that the change writes into: ${shown(file)}:${fn.line} ${fn.name} (${fn.lines} lines)`;
+      if (holdsLineIn(counted, fn.line, end))
+        found.push({ signal: "function", line: `${what}${nestedOf(fn)}` });
       else if (holdsLineIn(added, fn.line, end))
         found.push({
           signal: "suppressed",
-          line: `suppressed (moved): ${what}, ${discounted(fn.line, end)} moved lines discounted`,
+          line: `suppressed (moved): ${what}, ${discounted(fn.line, end)} moved lines discounted${nestedOf(fn)}`,
         });
     }
   if (growth.growth > SIGNALS.addedLines)
