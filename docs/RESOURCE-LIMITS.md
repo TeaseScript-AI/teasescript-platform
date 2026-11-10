@@ -189,10 +189,12 @@ checks, (d) (#2080 part 2); that is no claim that every path to a missing check 
 case re-assessed before V2 replaces the legacy compiler, is open; its cases open at the time of writing (2026-11-10) are
 #1832, #1845 (with #1846), #1838 and #1836, #1772, a typed read a settled stop moved to `unknown` (#2183), the claim
 (c)'s NoCheck rests on (#2184), #1781's conservative natural-outside declines (128 rows in 8 sources, as reported in PR
-#1781's work-stop set sweep), and (d)'s natural declines: 106 compiles in the families and the corpus that stop at the
-work allowance or the read depth before admission settled, which ADR 0021 rule 1.10 ("never rejects a script because
-it is too large or too deeply nested", [ADR 0021](decisions/0021-static-types.md)) decides at the re-assessment
-(PR #2227's measurement). Recorded for that re-assessment, open and not accepted design (the Owner, 2026-11-10): what a
+#1781's work-stop set sweep), and (d)'s natural declines: 106 compiles, each in one of the four modes, that stop at the
+work allowance or the read depth before admission settled (PR #2227's compiler replay against main 664f1183f, campaign
+`lane1a/2080-part2-replay`, over the areas of `tests/families` and `tools/corpus/fixture`, 51,749 sources, and the
+corpus set, 15,406: 102 in 15 families and 4 in the corpus), which ADR 0021 rule 1.10 ("never rejects a script
+because it is too large or too deeply nested", [ADR 0021](decisions/0021-static-types.md)) decides at the
+re-assessment. Recorded for that re-assessment, open and not accepted design (the Owner, 2026-11-10): what a
 maker gets on such a decline; one code for (a) to (d), with the reason in its message; and a limit field in
 `src/diagnostic-codes.ts` naming the limit's ID in this document, carried by that code and by `TSV076`, so that a later
 report can read the group from the registry.
