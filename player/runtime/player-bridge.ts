@@ -3,11 +3,10 @@ import {
   BridgeRequestError,
   type BridgeClient,
   type BridgeResult,
-  type HistoryControlOp,
   type ReplyHook,
   type SectionSend,
 } from "../engine-bridge/client.js";
-import type { OpArgs, OpResult, SessionOp } from "../engine-bridge/op-catalogue.js";
+import type { OpArgs, OpResult, SessionOp, WorkerOp } from "../engine-bridge/op-catalogue.js";
 import type { InterpreterEvent } from "../../src/runtime/events.js";
 import type { ClockTicket } from "./clock-ticket.js";
 import type { HistoryTimeline } from "../engine-bridge/history/core.js";
@@ -397,11 +396,10 @@ export class PlayerBridge {
   }
 
   /**
-   * Posts history control `op` now (`BridgeClient.post`), in the turn its caller decided it: the host runs the history
-   * controls in the order the Player decided them, behind no unrelated request's reply. One that was not posted rejects
-   * with its reason.
+   * Posts history control `op` now (`BridgeClient.post`), in the turn its caller decided it, so the host runs the
+   * Player's requests of no session in the order it made them. One that was not posted rejects with its reason.
    */
-  #control<O extends HistoryControlOp>(
+  #control<O extends WorkerOp>(
     ...call: O extends unknown ? [op: O, args: OpArgs<O>] : never
   ): Promise<BridgeResult<OpResult<O>>> {
     const sent = this.#client.post(...call);

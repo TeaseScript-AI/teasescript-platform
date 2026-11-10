@@ -3,14 +3,7 @@ import { readFileSync } from "node:fs";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, type EffectScope, type Ref } from "vue";
 
-import {
-  BridgeLostError,
-  HISTORY_CONTROL_OPS,
-  openBridge,
-  type ClientPort,
-} from "../../player/engine-bridge/client.js";
-import { historyOps } from "../../player/engine-bridge/ops/history.js";
-import { playerOpsContext } from "../../player/engine-bridge/player-ops.js";
+import { BridgeLostError, openBridge, type ClientPort } from "../../player/engine-bridge/client.js";
 import { decodeMessage } from "../../player/engine-bridge/transport.js";
 import type * as CompileProject from "../../player/runtime/compile-project.js";
 import type * as InProcess from "../../player/engine-bridge/in-process.js";
@@ -70,34 +63,10 @@ function heldPort() {
   return { port, posted, reply };
 }
 
-test("the history controls are the host's connection ops of Debug's rewind, but for the adoption's read", () => {
-  const host = historyOps(playerOpsContext());
-  // `captureStorage` reads a held session's saved values for an adoption, after that session's earlier work.
-  const reads = new Set(["captureStorage"]);
-  const connectionOps = Object.entries(host)
-    .filter(([name, op]) => op.session === "none" && !reads.has(name))
-    .map(([name]) => name)
-    .sort();
-  assert.deepEqual([...HISTORY_CONTROL_OPS].sort(), connectionOps);
-});
-
-test("post sends the history controls alone, refuses on a lost client, and says so before it returns", () => {
+test("post says before it returns that it did not post, on a lost client or with arguments that cannot cross", () => {
   const { port, posted } = heldPort();
   const { client } = openBridge(port, BUILD);
-  const raw = untypedClient(client);
-  for (const op of [
-    "selectChoice",
-    "observeTime",
-    "observeInput",
-    "halt",
-    "planMetadata",
-    "noSuchOp",
-  ]) {
-    const sent = raw.post(op, {});
-    assert.equal(sent.posted, false, op);
-  }
-  assert.deepEqual(posted, []);
-  const unclonable = raw.post("historyTimeline", { history: () => 1 });
+  const unclonable = untypedClient(client).post("historyTimeline", { history: () => 1 });
   assert.equal(unclonable.posted, false, "arguments that cannot cross");
   assert.deepEqual(posted, []);
   client.terminate();
@@ -106,24 +75,30 @@ test("post sends the history controls alone, refuses on a lost client, and says 
   assert.ok(!lost.posted && lost.error instanceof BridgeLostError);
 });
 
-test("a history control is posted at once, ahead of a connection request still waiting for an earlier reply", () => {
+test("requests of no session are posted in the order made, none behind a reply; a session's wait for its replies", () => {
   const { port, posted, reply } = heldPort();
   const { client } = openBridge(port, BUILD);
-  void client.request("planMetadata", { plan: "p1" }).catch(() => {});
-  // Waits for the first one's reply on the connection's queue.
-  void client.request("planMetadata", { plan: "p1" }).catch(() => {});
+  const raw = untypedClient(client);
+  for (const each of [
+    raw.request("planMetadata", { plan: "p1" }),
+    raw.request("stepTime", { targetMs: 1 }, { session: "s1", basis: 0 }),
+    raw.request("stepTime", { targetMs: 2 }, { session: "s1", basis: 0 }),
+    raw.request("planMetadata", { plan: "p1" }),
+    raw.request("captureKeep", { session: "s1", plan: null }, { after: "s1" }),
+  ])
+    void each.catch(() => {});
   const sent = client.post("historyClose", { history: 1, by: "debugOff" });
-  assert.equal(sent.posted, true);
   if (sent.posted) void sent.reply.catch(() => {});
   assert.deepEqual(
     posted.map((each) => each.op),
-    ["planMetadata", "historyClose"],
+    ["planMetadata", "stepTime", "planMetadata", "historyClose"],
   );
-  reply(posted[0]!.id);
+  reply(posted[1]!.id);
   return new Promise<void>((resolve) => setImmediate(resolve)).then(() => {
     assert.deepEqual(
-      posted.map((each) => each.op),
-      ["planMetadata", "historyClose", "planMetadata"],
+      posted.slice(4).map((each) => each.op),
+      ["stepTime"],
+      "the session's next request, once its first has its reply",
     );
     client.terminate();
   });
@@ -144,6 +119,8 @@ interface RewindPlayer {
   loadScriptStorage(): Promise<void>;
   /** Adopts an inspected state as the session before input, as the Player's controls do. */
   prepareInput(): true | Promise<boolean>;
+  setDebugTracing(on: boolean): void;
+  setDebugMode(on: boolean): void;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
 }
 interface DebugRewind {
@@ -382,5 +359,81 @@ test("an adoption of an inspected state behind a busy connection queue goes on a
   const answered = await mounted.answer();
   assert.equal(answered.kind, "answered");
   await until(() => mounted.rewind().state.value.inspection === null, "the adoption");
+  healthy(mounted);
+});
+
+test("Round 1 R1-01: Debug turned on, Back and Return behind a busy queue end on the trace Return began", async (context) => {
+  const mounted = await mount(context, false);
+  const plan = mounted.player.session.value!.planToken;
+  const queued = Promise.allSettled(
+    Array.from({ length: 60 }, () => mounted.bridge.client.request("planMetadata", { plan })),
+  );
+  // The order of `usePlayerDebug`'s enabled watcher: the features, then tracing, then Debug mode.
+  mounted.toggle();
+  mounted.player.setDebugTracing(true);
+  mounted.player.setDebugMode(true);
+  await until(() => mounted.rewind().state.value.points.length === 1, "the first point");
+  await mounted.answer();
+  await until(() => mounted.rewind().state.value.points.length === 2, "the second point");
+  assert.equal(await mounted.rewind().back(mounted.rewind().state.value.points[0]!.id), true);
+  assert.equal(await mounted.rewind().returnToSession(), true);
+  await queued;
+  await until(() => facade.heldTrace(mounted.bridge) !== null, "the trace");
+  const status = facade.heldTrace(mounted.bridge)!.status();
+  // Variables reads the origin as "Recording since Continue" (`DebugVariables.vue`).
+  assert.deepEqual({ epoch: status.epoch, origin: status.origin }, { epoch: 3, origin: "restore" });
+  healthy(mounted);
+});
+
+test("the in-process host holds a request made while it awaits another in its arrival order", async (context) => {
+  const mounted = await mount(context);
+  await mounted.answer();
+  await until(() => mounted.rewind().state.value.points.length === 2, "the second point");
+  const replies: number[] = [];
+  const requests: { readonly op: string; readonly id: number }[] = [];
+  const clone = globalThis.structuredClone;
+  context.after(() => void (globalThis.structuredClone = clone));
+  globalThis.structuredClone = <T>(value: T, options?: StructuredSerializeOptions): T => {
+    if (typeof value === "object" && value !== null && "kind" in value && "id" in value) {
+      // EVIDENCE: fixture: the bridge's envelopes carry a numeric ID, and a request its op.
+      const envelope = value as {
+        readonly kind: string;
+        readonly id: number;
+        readonly op?: string;
+      };
+      if (envelope.kind === "request" && envelope.op !== undefined)
+        requests.push({ op: envelope.op, id: envelope.id });
+      if (envelope.kind === "reply") replies.push(envelope.id);
+    }
+    return clone(value, options);
+  };
+  // Back reads its snapshot asynchronously: the host awaits it while the next request arrives.
+  const back = mounted.rewind().back(mounted.rewind().state.value.points[0]!.id);
+  const metadata = mounted.bridge.client.request("planMetadata", {
+    plan: mounted.player.session.value!.planToken,
+  });
+  // A request made from a reply's hook, as a publication's reaction makes one.
+  let nested: Promise<unknown> | null = null;
+  await mounted.bridge.client.request(
+    "planMetadata",
+    { plan: mounted.player.session.value!.planToken },
+    {
+      onReply: () =>
+        void (nested = mounted.bridge.client.request("planMetadata", {
+          plan: mounted.player.session.value!.planToken,
+        })),
+    },
+  );
+  assert.equal(await back, true);
+  await metadata;
+  await nested;
+  const backAt = requests.findIndex((each) => each.op === "rewindBack");
+  const after = requests.slice(backAt + 1).find((each) => each.op === "planMetadata")!;
+  const backReply = replies.indexOf(requests[backAt]!.id);
+  // Posted before Back's reply, the request is answered only after it: the host held it in its queue.
+  assert.ok(
+    backReply >= 0 && replies.indexOf(after.id) > backReply,
+    JSON.stringify({ requests, replies }),
+  );
   healthy(mounted);
 });

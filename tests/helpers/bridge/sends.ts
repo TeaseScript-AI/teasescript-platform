@@ -19,9 +19,8 @@ export type Intercept = (
 ) => Promise<BridgeResult>;
 
 /**
- * Routes every request `client` sends through `intercept`: those `request` sends and the history controls `post` sends
- * at once (`HISTORY_CONTROL_OPS`). An intercepted control's disposition says it was posted; it reaches the host when
- * `intercept` calls `send`, and a control the client refuses rejects there.
+ * Routes every request `client` sends through `intercept`, by `request` or by `post`. A request `post` sends counts as
+ * posted; it reaches the host when `intercept` calls `send`, and one the client does not post rejects there.
  */
 export function interceptSends(
   context: TestContext,

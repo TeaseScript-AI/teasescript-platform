@@ -68,7 +68,7 @@ export async function senderRows(
   // @ts-expect-error -- `release` is a request.
   await client.signal("release", null, "s1");
 
-  // `BridgeClient.post` sends the history controls alone (`HISTORY_CONTROL_OPS`).
+  // `BridgeClient.post` sends the ops of no session alone (`WorkerOp`).
   const posted = client.post("historyTimeline", { history: 1 });
   if (posted.posted) await posted.reply;
   // @ts-expect-error -- `selectChoice` is an input, no history control.
