@@ -1047,8 +1047,10 @@ const REWIND_OWNER = "player/vue/src/session/rewindOwner.ts";
  * admission: each use, found by symbol (a shadowing binding of the same name is another symbol), is one admitted shape
  * or an escape. `state` is written once, in `dispatch`, with `advanceLifecycle`'s decision
  * (`player/debug/rewind-lifecycle.ts`); it is otherwise decided from and compared with the decision there, read by
- * property, or returned by the `state` getter. The stamp moves by `retirements++`, the first statement of `retired`
- * and of `lost`; only `current()` reads it, to take and compare it.
+ * property, or returned by the `state` getter. The stamp moves by `retirements++`, the first statement of the `retired`
+ * and `lost` arrows of the one object literal the factory returns, found by node; a second return, a spread, a computed
+ * name, a duplicate, or a `retired` or `lost` there that is not an arrow is an escape. Only `current()` reads the
+ * stamp, to take and compare it.
  */
 const OWNER_WRITES = ["retirements: lost", "retirements: retired", "state: dispatch"];
 
@@ -1099,6 +1101,63 @@ function ownerUses(overrides: Readonly<Record<string, string>> = {}): {
       return "(module)";
     };
     const text = (node: ts.Node) => node.getText(file);
+    const brief = (node: ts.Node) => {
+      const shown = text(node).replace(/\s+/g, " ");
+      return shown.length > 80 ? `${shown.slice(0, 79)}…` : shown;
+    };
+    const line = (node: ts.Node) =>
+      file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1;
+    const escapes: string[] = [];
+    const escape = (subject: string, node: ts.Node, shown: ts.Node) =>
+      escapes.push(`${subject} \`${brief(shown)}\` in ${enclosing(node)}:${line(node)}`);
+    // The writers, by node: the factory's one return of an object literal, and in it the first statement of its own
+    // `retired` and `lost` arrows. A return inside a nested function is that function's.
+    const factory = factories[0]!;
+    const returns: ts.ReturnStatement[] = [];
+    factory.body!.forEachChild(function find(node): void {
+      if (ts.isReturnStatement(node)) returns.push(node);
+      else if (!ts.isFunctionLike(node) && !ts.isClassLike(node)) node.forEachChild(find);
+    });
+    const writers = new Map<ts.Node, string>();
+    const owner = returns.length === 1 ? returns[0]!.expression : undefined;
+    if (returns.length > 1)
+      for (const each of returns) escape(`owner: one of ${returns.length} returns`, each, each);
+    else if (owner === undefined || !ts.isObjectLiteralExpression(owner)) {
+      const site = returns[0] ?? factory.name!;
+      escape("owner: not a returned object literal", site, site);
+    } else {
+      const members = new Map<string, ts.ObjectLiteralElementLike[]>();
+      for (const member of owner.properties)
+        if (ts.isSpreadAssignment(member)) escape("owner: a spread", member, member);
+        else if (ts.isComputedPropertyName(member.name))
+          escape("owner: a computed name", member, member);
+        else members.set(member.name.text, [...(members.get(member.name.text) ?? []), member]);
+      for (const name of ["retired", "lost"]) {
+        const [member, ...duplicates] = members.get(name) ?? [];
+        for (const duplicate of duplicates)
+          escape(`owner: a duplicate ${name}`, duplicate, duplicate);
+        if (member === undefined || duplicates.length > 0) continue;
+        if (!ts.isPropertyAssignment(member) || !ts.isArrowFunction(member.initializer)) {
+          const kind = ts.isShorthandPropertyAssignment(member)
+            ? "a shorthand"
+            : ts.isPropertyAssignment(member)
+              ? "not an arrow"
+              : "a method or accessor";
+          escape(`owner: ${name}, ${kind}`, member, member);
+          continue;
+        }
+        const { body } = member.initializer;
+        const first = ts.isBlock(body) ? body.statements[0] : undefined;
+        if (
+          first !== undefined &&
+          ts.isExpressionStatement(first) &&
+          ts.isPostfixUnaryExpression(first.expression) &&
+          first.expression.operator === ts.SyntaxKind.PlusPlusToken &&
+          ts.isIdentifier(first.expression.operand)
+        )
+          writers.set(first.expression.operand, `retirements: ${name}`);
+      }
+    }
     // The admitted shape of a use, or `undefined`; a write's shape is its `OWNER_WRITES` entry.
     const admitted = (name: string, use: ts.Identifier): string | undefined => {
       const at = use.parent;
@@ -1143,19 +1202,8 @@ function ownerUses(overrides: Readonly<Record<string, string>> = {}): {
           return "returned by the getter";
         return undefined;
       }
-      const statement = at.parent;
-      const body = statement.parent;
-      if (
-        ts.isPostfixUnaryExpression(at) &&
-        at.operator === ts.SyntaxKind.PlusPlusToken &&
-        ts.isExpressionStatement(statement) &&
-        ts.isBlock(body) &&
-        body.statements[0] === statement &&
-        ts.isArrowFunction(body.parent) &&
-        ts.isPropertyAssignment(body.parent.parent) &&
-        ["retired", "lost"].includes(text(body.parent.parent.name))
-      )
-        return `retirements: ${text(body.parent.parent.name)}`;
+      const writer = writers.get(use);
+      if (writer !== undefined) return writer;
       if (within !== "current") return undefined;
       if (
         ts.isShorthandPropertyAssignment(at) &&
@@ -1173,7 +1221,7 @@ function ownerUses(overrides: Readonly<Record<string, string>> = {}): {
       return undefined;
     };
     // An escape's form: the operation it is in, above any literal, spread or parentheses that carry it.
-    const form = (use: ts.Node): string => {
+    const form = (use: ts.Node): ts.Node => {
       let at = use;
       while (
         ts.isArrayLiteralExpression(at.parent) ||
@@ -1185,10 +1233,8 @@ function ownerUses(overrides: Readonly<Record<string, string>> = {}): {
         ts.isShorthandPropertyAssignment(at.parent)
       )
         at = at.parent;
-      const shown = text(at.parent).replace(/\s+/g, " ");
-      return shown.length > 80 ? `${shown.slice(0, 79)}…` : shown;
+      return at.parent;
     };
-    const escapes: string[] = [];
     const writes: string[] = [];
     file.forEachChild(function visit(node): void {
       if (ts.isIdentifier(node)) {
@@ -1199,10 +1245,8 @@ function ownerUses(overrides: Readonly<Record<string, string>> = {}): {
         const name = symbol && bindings.get(symbol);
         if (name !== undefined) {
           const shape = admitted(name, node);
-          if (shape === undefined) {
-            const line = file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1;
-            escapes.push(`${name} \`${form(node)}\` in ${enclosing(node)}:${line}`);
-          } else if (shape.includes(": ")) writes.push(shape);
+          if (shape === undefined) escape(name, node, form(node));
+          else if (shape.includes(": ")) writes.push(shape);
         }
       }
       node.forEachChild(visit);
@@ -1225,15 +1269,19 @@ test("the rewind owner uses its lifecycle state and its stamp only in admitted s
   check();
   const { readFile } = await import("node:fs/promises");
   const source = await readFile(resolve(process.cwd(), REWIND_OWNER), "utf8");
-  const replaced = (from: string, to: string) => {
-    assert.equal(source.split(from).length, 2, `the control's anchor: ${from}`);
-    return source.replace(from, to);
-  };
+  const edited = (...edits: readonly (readonly [string, string])[]) =>
+    edits.reduce((at, [from, to]) => {
+      assert.equal(at.split(from).length, 2, `the control's anchor: ${from}`);
+      return at.replace(from, to);
+    }, source);
+  const replaced = (from: string, to: string) => edited([from, to]);
   const debugOn = "    debugOn: (): LifecycleDisposition => {\n";
   const inDebugOn = (inserted: string) => replaced(debugOn, `${debugOn}      ${inserted}\n`);
   const retired = '    retired: (by: "clear" | "import"): LifecycleDisposition => {\n';
   const bridge = "      const bridge = host.bridge();\n";
   const lost = "    lost: (): LifecycleDisposition => {\n";
+  const lostBody = `${lost}      retirements++;\n      return dispatch({ kind: "lost" }).actions;\n    },\n`;
+  const ownerReturn = "  return {\n    view: computed(";
   // Controls: each use outside an admitted shape fails, with its form and the function it is in.
   const controls = [
     [
@@ -1265,6 +1313,29 @@ test("the rewind owner uses its lifecycle state and its stamp only in admitted s
       "retirements `retirements++` in retired",
     ],
     [inDebugOn("void JSON.stringify(state);"), "state `JSON.stringify(state)` in debugOn"],
+    // The writers are the returned object's own: a decoy `lost` elsewhere, or a writer the walk cannot resolve, fails.
+    [
+      edited(
+        [lostBody, `${lost}      return dispatch({ kind: "lost" }).actions;\n    },\n`],
+        [ownerReturn, `  const unused = {\n${lostBody}  };\n  void unused;\n${ownerReturn}`],
+      ),
+      "retirements `retirements++` in lost",
+    ],
+    [
+      replaced(ownerReturn, `  if (Math.random() < 0) return undefined as never;\n${ownerReturn}`),
+      "owner: one of 2 returns `return undefined as never;` in createRewindOwner",
+    ],
+    [
+      edited(
+        [lostBody, "    lost: lostImpl,\n"],
+        [
+          ownerReturn,
+          `  const lostImpl = (): LifecycleDisposition => {\n    retirements++;\n    return dispatch({ kind: "lost" }).actions;\n  };\n${ownerReturn}`,
+        ],
+      ),
+      "owner: lost, not an arrow `lost: lostImpl` in createRewindOwner",
+    ],
+    [replaced(lostBody, `${lostBody}    ...{},\n`), "owner: a spread `...{}` in createRewindOwner"],
   ] as const;
   for (const [patched, named] of controls)
     assert.throws(
