@@ -234,13 +234,16 @@ test("prints each coordinate as Number::toString with its recommended choice, al
 
 test("converts with no host transcendental, colorjs.io's parsing included", () => {
   const exact = new Set(["abs", "ceil", "floor", "max", "min", "round", "sign", "sqrt", "trunc"]);
-  const saved = new Map<string, unknown>();
+  const saved = new Map<string, PropertyDescriptor>();
   for (const name of Object.getOwnPropertyNames(Math)) {
-    const member: unknown = Reflect.get(Math, name);
-    if (typeof member === "function" && !exact.has(name)) {
-      saved.set(name, member);
-      Reflect.set(Math, name, () => {
-        throw new Error(`Math.${name} was called`);
+    const descriptor = Object.getOwnPropertyDescriptor(Math, name)!;
+    if (typeof descriptor.value === "function" && !exact.has(name)) {
+      saved.set(name, descriptor);
+      Object.defineProperty(Math, name, {
+        ...descriptor,
+        value: () => {
+          throw new Error(`Math.${name} was called`);
+        },
       });
     }
   }
@@ -260,7 +263,7 @@ test("converts with no host transcendental, colorjs.io's parsing included", () =
     for (const input of [...Object.values(NOTATION_FAMILIES).flat(), ...EXTREME_INPUTS, ...parsing])
       normalizeColor(input);
   } finally {
-    for (const [name, value] of saved) Reflect.set(Math, name, value);
+    for (const [name, descriptor] of saved) Object.defineProperty(Math, name, descriptor);
   }
 });
 
