@@ -194,7 +194,7 @@ export class NarrowingRoutes extends RouteTests {
         (node === null || program.live(node)) &&
         (this.#feasible === null
           ? yield* this.#valueProduces(value, node, [], tag)
-          : this.#ownLoad(value, tag, []))
+          : this.#inlineLoad(value, node, tag))
         ? site
         : null;
     }
@@ -208,7 +208,7 @@ export class NarrowingRoutes extends RouteTests {
         !this.checked(node, this.text(site), tag, -1) &&
         (this.#feasible === null
           ? yield* this.#valueProduces(value, node, [], tag)
-          : this.#ownLoad(value, tag, []))
+          : this.#inlineLoad(value, node, tag))
         ? site
         : null;
     if (some(program.work, "exactQueries", path.steps, (step) => step.kind !== "property"))
@@ -559,7 +559,13 @@ export class NarrowingRoutes extends RouteTests {
   /** Whether a round of a loop's body reaches the code after it: its header leaves it, and calls in it are open. */
   #leaves(owner: TreeStatement, calls: boolean): boolean {
     this.#work.charge("eventSteps");
-    return owner.loop === null || (owner.exits && !(calls && owner.called));
+    // (in a program the default holds, a loop no run is proved to leave by its header keeps a round in it, #1938)
+    return (
+      owner.loop === null ||
+      (owner.exits &&
+        !(calls && owner.called) &&
+        (this.#feasible === null || !this.#feasible.unleft.has(owner)))
+    );
   }
 
   /**
@@ -720,19 +726,21 @@ export class NarrowingRoutes extends RouteTests {
   }
 
   /**
-   * In a program the default holds, the layer beneath every root kill layer (#1938): the arms no run is
-   * proved to enter and the bodies of loops only a `break` leaves closed (`Feasibility.closed`), and every compound
-   * statement whose live arms they and the shared layer close; built once per applicability.
+   * In a program the default holds, the layers beneath every root kill layer (#1938): the loops no run is proved to
+   * leave by their header closed (`Feasibility.unleft`), then over them the arms no run is proved to enter
+   * (`Feasibility.unentered`), and every compound statement whose live arms these and the shared layer close; built
+   * once per applicability.
    */
   #feasibilityLayer(calls: boolean): Layer {
     this.#work.charge("indexSteps");
     const memo = joinParts("feasibility", calls ? "calls" : "leaves");
     const known = this.#layers.get(memo);
     if (known !== undefined) return known;
-    const { closed, owners } = this.#feasible!;
-    const layer = this.#build(null, calls, owners, (arm) => {
+    const { unentered, owners, unleft } = this.#feasible!;
+    const loops = this.#build(null, calls, copied(this.#work, "indexSteps", unleft), null);
+    const layer = this.#build(loops, calls, owners, (arm) => {
       this.#work.charge("indexSteps");
-      return closed.has(arm);
+      return unentered.has(arm);
     });
     keepText(this.#work, memo.length);
     this.#layers.set(memo, layer);
@@ -744,6 +752,16 @@ export class NarrowingRoutes extends RouteTests {
     this.#work.charge("eventSteps");
     const unentered = this.#feasible!.unentered;
     return !some(this.#work, "eventSteps", chain, (place) => unentered.has(place.block));
+  }
+
+  /**
+   * A `load` read where it is used, in a program the default holds (#1938): its literal default (`#ownLoad`) where every
+   * arm of the use's chain is one a run enters; the warning where the use has no node or no chain.
+   */
+  #inlineLoad(value: PlaceId, node: FlowNode | null, tag: ItemTag): boolean {
+    this.#work.charge("exactQueries");
+    const chain = node === null ? null : this.chainOf(node);
+    return chain !== null && this.#entered(chain) && this.#ownLoad(value, tag, []);
   }
 
   /**

@@ -4156,10 +4156,78 @@ test("a route through an arm its entry narrowing leaves no kind does not promote
       `${gate}repeat n {}\nlet o={k:1}\nif o != null { say "guard" }\nexit\n`,
       true,
     ],
+    [
+      "a loop whose header no run leaves",
+      `${gate}let o = {k: 1}\nif o != null { say "guard" }\nwhile o != null {}\nrepeat n {}\nexit\n`,
+      false,
+    ],
+    [
+      "a loop whose header a run leaves",
+      `${gate}let o = {k: 1}\nif o != null { say "guard" }\nwhile hostValue != null { say "w" }\nrepeat n {}\nexit\n`,
+      true,
+    ],
+    [
+      "a writer in a loop whose header no run leaves",
+      'let n=1\nlet o = {k: 1}\nif o != null { say "guard" }\nwhile o != null { if hostValue is boolean { n=null } }\nrepeat n {}\nexit\n',
+      false,
+    ],
+    [
+      "a use in a loop body no run enters",
+      `${gate}let o = {k: 1}\nif o != null { say "guard" }\nwhile o == null { repeat n {} }\nexit\n`,
+      false,
+    ],
+    [
+      "a use in an arm no run enters",
+      `${gate}let o = {k: 1}\nif o == null { repeat n {} }\nexit\n`,
+      false,
+    ],
+    [
+      "a writer in an arm no run enters",
+      "let n=1\nlet o = {k: 1}\nif o == null { n=null }\nrepeat n {}\nexit\n",
+      false,
+    ],
+    [
+      "a scalar copy of a literal's witness",
+      `${gate}let o = {k: 1}\nif o != null { say "guard" }\nlet m = n\nrepeat m {}\nexit\n`,
+      true,
+    ],
+    [
+      "a stored fallback whose left side's own null reaches it",
+      'let a = null\nif hostValue is boolean { a = 1 }\nlet o = {k: 1}\nif o != null { say "guard" }\n' +
+        "let m = a otherwise null\nrepeat m {}\nexit\n",
+      true,
+    ],
+    [
+      "an inline load in an arm no run enters",
+      'let declared: integer? = load("k", default: 1)\nlet o = {k: 1}\nif o != null { say "guard" }\n' +
+        'if o == null { repeat load("k", default: null) {} }\nexit\n',
+      false,
+    ],
+    [
+      "an inline load in an unavailable arm",
+      'let box = {first: {k: 1}}\nif box.first != null { repeat load("k", default: null) {} }\nexit\n',
+      false,
+    ],
+    [
+      "an inline load in an entered arm",
+      'let declared: integer? = load("k", default: 1)\nlet o = {k: 1}\nif o != null { say "guard" }\n' +
+        'if o != null { repeat load("k", default: null) {} }\nexit\n',
+      true,
+    ],
     ["a load's literal default beside an unavailable arm", pasted(""), true],
     [
       "a load's literal default where the program saves its key",
       pasted('if askBoolean("Keep?") { save 2 as "beta" }\n'),
+      false,
+    ],
+    [
+      "a load's literal default where a function saves its key",
+      pasted('function keep { save 2 as "beta" }\nif askBoolean("Keep?") { keep() }\n'),
+      false,
+    ],
+    [
+      "a load's literal default where a timer saves its key",
+      pasted('timer async 1 s { save 2 as "beta" }\n'),
       false,
     ],
     [
