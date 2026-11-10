@@ -168,10 +168,10 @@ export class NarrowingRoutes extends RouteTests {
    * reference member, which the route query does not follow (#1073 PR 4, decision (A)).
    *
    * In a program that holds an arm no run is proved to enter (`holdsInfeasible`), a route promotes only through arms
-   * runs enter and loops they leave (`#open`), and only by a certificate its own value proves: a literal, a scalar copy
+   * runs enter, between a writer and a use that stand in the session's first file's top level with nothing on their
+   * chains a run might not pass (`#plain`), and only by a certificate its own value proves: a literal, a scalar copy
    * of one, an `otherwise` selected by its left side's own witness, a `load` whose literal default a run selects
-   * (`#ownLoad`). Every other certificate there keeps the warning: a value read through items an infeasible arm may
-   * have merged (#1938).
+   * (`#ownLoad`). Everything else there keeps the warning (#1938).
    */
   public *required(
     value: PlaceId,
@@ -559,13 +559,7 @@ export class NarrowingRoutes extends RouteTests {
   /** Whether a round of a loop's body reaches the code after it: its header leaves it, and calls in it are open. */
   #leaves(owner: TreeStatement, calls: boolean): boolean {
     this.#work.charge("eventSteps");
-    // (in a program the default holds, a loop no run is proved to leave by its header keeps a round in it, #1938)
-    return (
-      owner.loop === null ||
-      (owner.exits &&
-        !(calls && owner.called) &&
-        (this.#feasible === null || !this.#feasible.unleft.has(owner)))
-    );
+    return owner.loop === null || (owner.exits && !(calls && owner.called));
   }
 
   /**
@@ -585,8 +579,8 @@ export class NarrowingRoutes extends RouteTests {
     const { program } = this.pass;
     const d = found.def;
     if (!program.live(d.node) || program.dom.edom(d.node) !== program.dom.edom(node)) return false;
-    // (in a program the default holds, every arm of the writer's and the use's chains is one a run enters)
-    if (this.#feasible !== null && (!this.#entered(found.chain) || !this.#entered(chain)))
+    // (in a program the default holds, the writer and the use stand where a route may promote: `#plain`)
+    if (this.#feasible !== null && (!this.#plain(d.node, found.chain) || !this.#plain(node, chain)))
       return false;
     const layer = this.#testLayer(key, tag);
     const writer = found.chain;
@@ -612,6 +606,17 @@ export class NarrowingRoutes extends RouteTests {
       const { block, index } = writer[up]!;
       if (this.#closed(block, index + 1, block.statements.length, layer, layer.calls)) return false;
       if (block.owner !== null && !this.#leaves(block.owner, layer.calls)) return false;
+      // (in a program the default holds, nothing after the writer in its block that a run might not pass, #1938)
+      if (
+        this.#feasible !== null &&
+        countIn(
+          this.#work,
+          this.#feasible.hazards.get(block.id) ?? [],
+          index + 1,
+          block.statements.length,
+        ) > 0
+      )
+        return false;
     }
     // (c): the statements between
     if (this.#closed(shared, writer[level]!.index + 1, chain[level]!.index, layer, layer.calls))
@@ -726,19 +731,17 @@ export class NarrowingRoutes extends RouteTests {
   }
 
   /**
-   * In a program the default holds, the layers beneath every root kill layer (#1938): the loops no run is proved to
-   * leave by their header closed (`Feasibility.unleft`), then over them the arms no run is proved to enter
-   * (`Feasibility.unentered`), and every compound statement whose live arms these and the shared layer close; built
-   * once per applicability.
+   * In a program the default holds, the layer beneath every root kill layer (#1938): the arms no run is proved to enter
+   * closed (`Feasibility.unentered`), and every compound statement whose live arms they and the shared layer close;
+   * built once per applicability.
    */
   #feasibilityLayer(calls: boolean): Layer {
     this.#work.charge("indexSteps");
     const memo = joinParts("feasibility", calls ? "calls" : "leaves");
     const known = this.#layers.get(memo);
     if (known !== undefined) return known;
-    const { unentered, owners, unleft } = this.#feasible!;
-    const loops = this.#build(null, calls, copied(this.#work, "indexSteps", unleft), null);
-    const layer = this.#build(loops, calls, owners, (arm) => {
+    const { unentered, owners } = this.#feasible!;
+    const layer = this.#build(null, calls, owners, (arm) => {
       this.#work.charge("indexSteps");
       return unentered.has(arm);
     });
@@ -747,21 +750,46 @@ export class NarrowingRoutes extends RouteTests {
     return layer;
   }
 
-  /** Whether every arm of a chain, from its callable's body down, is one a run is proved to enter. */
-  #entered(chain: readonly Place[]): boolean {
+  /**
+   * Whether a node stands where, in a program the default holds, a route may promote (#1938): in the top level of the
+   * file the session starts in (no boundary dominates it, and its chain starts at a file's body), with every arm of its
+   * chain one a run is proved to enter and none a loop's body, before it in each block of its chain only statements
+   * `PASSABLE` admits that hold no call and no handler's declaration (`Feasibility.hazards`), and its own statement
+   * holding no call or handler's declaration. Anything else keeps the warning: that a run reaches it there is not
+   * proved.
+   */
+  #plain(node: FlowNode, chain: readonly Place[]): boolean {
     this.#work.charge("eventSteps");
-    const unentered = this.#feasible!.unentered;
-    return !some(this.#work, "eventSteps", chain, (place) => unentered.has(place.block));
+    const work = this.#work;
+    const { unentered, files, hazards, calling } = this.#feasible!;
+    const last = chain[chain.length - 1];
+    return (
+      last !== undefined &&
+      files.has(chain[0]!.block) &&
+      this.pass.program.dom.edom(node) === null &&
+      !(last.index >= 0 && calling.has(last.block.statements[last.index]!)) &&
+      !some(
+        work,
+        "eventSteps",
+        chain,
+        (place) =>
+          unentered.has(place.block) ||
+          (place.block.owner !== null && place.block.owner.loop !== null) ||
+          countIn(work, hazards.get(place.block.id) ?? [], 0, place.index) > 0,
+      )
+    );
   }
 
   /**
-   * A `load` read where it is used, in a program the default holds (#1938): its literal default (`#ownLoad`) where every
-   * arm of the use's chain is one a run enters; the warning where the use has no node or no chain.
+   * A `load` read where it is used, in a program the default holds (#1938): its literal default (`#ownLoad`) where the
+   * use stands where a route may promote (`#plain`); the warning where the use has no node or no chain.
    */
   #inlineLoad(value: PlaceId, node: FlowNode | null, tag: ItemTag): boolean {
     this.#work.charge("exactQueries");
     const chain = node === null ? null : this.chainOf(node);
-    return chain !== null && this.#entered(chain) && this.#ownLoad(value, tag, []);
+    return (
+      node !== null && chain !== null && this.#plain(node, chain) && this.#ownLoad(value, tag, [])
+    );
   }
 
   /**

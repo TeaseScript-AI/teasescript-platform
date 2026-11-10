@@ -4162,9 +4162,61 @@ test("a route through an arm its entry narrowing leaves no kind does not promote
       false,
     ],
     [
-      "a loop whose header a run leaves",
+      "a loop whose header a run leaves, beside an arm no run enters (the claim's residual)",
       `${gate}let o = {k: 1}\nif o != null { say "guard" }\nwhile hostValue != null { say "w" }\nrepeat n {}\nexit\n`,
-      true,
+      false,
+    ],
+    ...[
+      "while o != null or p != null {}",
+      "while o != null and p != null {}",
+      "while not (o == null and p == null) {}",
+    ].map((loop): readonly [string, string, boolean] => [
+      `a compound header no run leaves: ${loop}`,
+      `${gate}let o = {k: 1}\nif o != null { say "guard" }\nlet p = {k: 2}\n${loop}\nrepeat n {}\nexit\n`,
+      false,
+    ]),
+    [
+      "an inline load after a loop no run leaves",
+      'let declared: integer? = load("k", default: 1)\nlet o = {k: 1}\nif o != null { say "guard" }\n' +
+        'while o != null {}\nrepeat load("k", default: null) {}\nexit\n',
+      false,
+    ],
+    [
+      "a stored writer after a loop no run leaves",
+      'let o = {k: 1}\nif o != null { say "guard" }\nwhile o != null {}\n' +
+        "let n=1\nif hostValue is boolean { n=null }\nrepeat n {}\nexit\n",
+      false,
+    ],
+    [
+      "a function whose only call is in an arm no run enters",
+      "let o = {k: 1}\nfunction f { let n = 1\nif hostValue is boolean { n = null }\nrepeat n {} }\n" +
+        "if o == null { f() }\nexit\n",
+      false,
+    ],
+    [
+      "a label between the writer and the use",
+      `${gate}let o = {k: 1}\nif o != null { say "guard" }\nlabel again\nrepeat n {}\nexit\n`,
+      false,
+    ],
+    [
+      "a goto past the use",
+      `${gate}let o = {k: 1}\nif o == null { goto skip }\nrepeat n {}\nlabel skip\nexit\n`,
+      false,
+    ],
+    [
+      "a backward goto around the use",
+      `${gate}let o = {k: 1}\nlabel top\nif o != null { say "guard" }\nrepeat n {}\nif o == null { goto top }\nexit\n`,
+      false,
+    ],
+    [
+      "a conditional exit before the use",
+      `${gate}let o = {k: 1}\nif o != null { say "guard" }\nif askBoolean("q") { exit }\nrepeat n {}\nexit\n`,
+      false,
+    ],
+    [
+      "a timer declared before the use",
+      `${gate}let o = {k: 1}\nif o != null { say "guard" }\ntimer async 1 ms { exit }\nwait 2 ms\nrepeat n {}\nexit\n`,
+      false,
     ],
     [
       "a writer in a loop whose header no run leaves",
@@ -4250,6 +4302,43 @@ test("a route through an arm its entry narrowing leaves no kind does not promote
       wrong.push(`${expected ? "error" : "warning"} expected (${name}): ${source}`);
     covered.add(`narrowed | ${name}`);
   }
+  // (an unconditional exit before the use: no run reaches it, so it is never the route rule's error, #1938)
+  {
+    const request = coreRequest([
+      {
+        path: "main.tease",
+        source: `${gate}let o = {k: 1}\nif o != null { say "guard" }\nexit\nrepeat n {}\nexit\n`,
+      },
+    ]);
+    assert.ok(request !== null, "the unconditional exit's program");
+    const error = inBothOrders(() =>
+      analyseCore(request).diagnostics.some((d) => d.class === "compile-error"),
+    );
+    if (error) wrong.push("no error expected (an unconditional exit before the use)");
+    covered.add("narrowed | an unconditional exit before the use");
+  }
+  // (a called file's top level is entered by its `call`, here only in an arm no run enters, #1938)
+  const calledFile = [
+    { path: "main.tease", source: 'let o = {k: 1}\nif o == null { call "part.tease" }\nexit\n' },
+    {
+      path: "part.tease",
+      source: "let n = 1\nif hostValue is boolean { n = null }\nrepeat n {}\n",
+    },
+  ];
+  {
+    const request = coreRequest(calledFile);
+    assert.ok(request !== null, "the called file's project");
+    const [error, warning] = inBothOrders(() => {
+      const diagnostics = analyseCore(request).diagnostics;
+      return [
+        diagnostics.some((d) => d.class === "compile-error"),
+        diagnostics.some((d) => d.class === "warning-runtime-check"),
+      ] as const;
+    });
+    if (error || !warning)
+      wrong.push("warning expected (a file called only in an arm no run enters)");
+    covered.add("narrowed | a file called only in an arm no run enters");
+  }
   assert.deepEqual(wrong, []);
   // (the coverage check: every feasibility, form, polarity and position, every sibling, every unavailable cell and every
   // case of the narrowed default)
@@ -4258,7 +4347,8 @@ test("a route through an arm its entry narrowing leaves no kind does not promote
     Object.keys(FEASIBILITY).length * FORMS.length * 2 * 2 +
       SIBLINGS.length +
       UNAVAILABLE.length +
-      NARROWED.length,
+      NARROWED.length +
+      2,
   );
 });
 
