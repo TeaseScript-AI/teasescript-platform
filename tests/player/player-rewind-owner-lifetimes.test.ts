@@ -238,13 +238,13 @@ function traffic(context: TestContext, bridge: PlayerBridge) {
     "structuredClone",
     (value: unknown, options?: StructuredSerializeOptions) => {
       if (typeof value === "object" && value !== null && "kind" in value && "id" in value) {
-        const { kind, id } = value as { kind: unknown; id: unknown };
-        const op = "op" in value ? (value as { op: unknown }).op : null;
+        const { kind, id } = value;
+        const op = "op" in value ? value.op : null;
         if (kind === "request" && typeof op === "string" && failing.get(op) === "reject") {
           failing.delete(op);
           if (typeof id === "number") failingReplies.add(id);
         }
-        const ok = "ok" in value && (value as { ok: unknown }).ok === true;
+        const ok = "ok" in value && value.ok === true;
         if (kind === "reply" && ok && typeof id === "number" && failingReplies.delete(id))
           throw new Error("injected: the success reply cannot cross");
       }
