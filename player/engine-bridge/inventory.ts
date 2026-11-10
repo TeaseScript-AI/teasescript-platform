@@ -144,6 +144,7 @@ export const WORKER_MODULES: readonly string[] = [
   "player/engine-bridge/player-ops.ts",
   "player/runtime/compile-project.ts",
   "player/debug/debug-recorder.ts",
+  "player/debug/debug-export.ts",
   "player/debug/debug-view.ts",
   "player/debug/random-decisions.ts",
   "player/engine-bridge/in-process.ts",
@@ -160,102 +161,6 @@ export interface RatchetEntry {
 export const RATCHET: readonly RatchetEntry[] = [
   // L5i
   {
-    importer: "player/debug/debug-export.ts",
-    target: "src/playback.ts",
-    name: "applyExternalStorageEdit",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug/debug-export.ts",
-    target: "src/playback.ts",
-    name: "completeAction",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug/debug-export.ts",
-    target: "src/playback.ts",
-    name: "createCheckpoint",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug/debug-export.ts",
-    target: "src/playback.ts",
-    name: "createRuntimeSession",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug/debug-export.ts",
-    target: "src/playback.ts",
-    name: "observeTime",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug/debug-export.ts",
-    target: "src/playback.ts",
-    name: "pendingRandomDraw",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug/debug-export.ts",
-    target: "src/playback.ts",
-    name: "pressPermanentButton",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug/debug-export.ts",
-    target: "src/playback.ts",
-    name: "recordContinueCapture",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug/debug-export.ts",
-    target: "src/playback.ts",
-    name: "replayRandomChoices",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug/debug-export.ts",
-    target: "src/playback.ts",
-    name: "reportMediaLoad",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug/debug-export.ts",
-    target: "src/playback.ts",
-    name: "restoreCheckpoint",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug/debug-export.ts",
-    target: "src/playback.ts",
-    name: "resumeRandomDraw",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug/debug-export.ts",
-    target: "src/playback.ts",
-    name: "run",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug/debug-export.ts",
-    target: "src/playback.ts",
-    name: "serializeCheckpoint",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug/debug-export.ts",
-    target: "src/playback.ts",
-    name: "setDebugMode",
-    family: "L5i",
-  },
-  {
-    importer: "player/debug/debug-export.ts",
-    target: "src/playback.ts",
-    name: "updateInteraction",
-    family: "L5i",
-  },
-  {
     importer: "player/vue/src/development/DevelopmentPreview.vue",
     target: "player/runtime/compile-project.ts",
     name: "createPlayerRuntimeSession",
@@ -265,12 +170,6 @@ export const RATCHET: readonly RatchetEntry[] = [
     importer: "player/vue/src/session/usePlayerSession.ts",
     target: "player/engine-bridge/in-process.ts",
     name: "heldPlan",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/session/activation/useSessionActivation.ts",
-    target: "player/engine-bridge/in-process.ts",
-    name: "heldRecording",
     family: "L5i",
   },
   {

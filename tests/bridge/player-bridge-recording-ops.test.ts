@@ -7,7 +7,7 @@ import {
   createPlayerRuntimeSession,
 } from "../../player/runtime/compile-project.js";
 import { NO_MARKS } from "../../player/debug/debug-history-marks.js";
-import { heldRuns, introduceNow } from "../../player/engine-bridge/in-process.js";
+import { heldRecording, heldRuns, introduceNow } from "../../player/engine-bridge/in-process.js";
 import { connectBridge, openBridge, type ClientPort } from "../../player/engine-bridge/client.js";
 import {
   closeConnection,
@@ -98,6 +98,7 @@ const ARGUMENTS = {
   captureExport: [{ required: { session: "nullableString", recording: "selector" } }],
   exportPrepare: [{ required: { ticket: "string", replay: "boolean" } }],
   releaseRecording: [{ required: { ticket: "string" } }],
+  readRecording: [{ required: { ticket: "nullableString" } }],
 } as const satisfies Record<string, readonly ArgumentForm[]>;
 type RecordingOp = keyof typeof ARGUMENTS;
 // EVIDENCE: invariant: the keys of `ARGUMENTS`, declared literally above.
@@ -664,4 +665,117 @@ test("an answer whose reply failed to post leaves the host ahead: an export of t
   // could apply, so the export stays refused, never of a state the page did not show.
   assert.deepEqual(await answerOf("two"), { kind: "staleAction", actionId: 1 });
   assert.deepEqual(await exportOf(), { kind: "refused", reason: "identity", revision: 1 });
+});
+
+/** A recorded session waiting for an answer, then for its time. */
+async function recordedSession(bridge: PlayerBridge) {
+  const plan = await preparedPlan(
+    Promise.resolve(bridge),
+    compilePlayerProject('let name = askText "Name"\nwait 10 s\nexit').plan!,
+  );
+  return bridge.start(plan, { wallClockMs: 0 }, true);
+}
+
+test("readRecording reads a held recording ticket, the recorder's current recording, or none, in-process and in a Worker", async () => {
+  for (const inProcess of [true, false]) {
+    const bridge = inProcess ? await inProcessBridge() : await worker();
+    try {
+      assert.equal(await bridge.readRecording(null), null, "none before any Start");
+      const session = await recordedSession(bridge);
+      const captured = await bridge.read(session, "captureRecording");
+      assert.equal(captured.kind, "captured");
+      const held = captured.kind === "captured" ? captured.ticket : "";
+      const atCapture = await bridge.readRecording(held);
+      assert.ok(atCapture !== null);
+      const exportTicket = await bridge.client.request("captureExport", {
+        session: session.id,
+        recording: "current",
+      });
+      // EVIDENCE: fixture: a capture of a held session with its current recording is `captured`, with its ticket.
+      const exported = (exportTicket.result as { ticket: string }).ticket;
+      assert.equal(
+        await bridge.readRecording(exported),
+        null,
+        "an export ticket holds no recording",
+      );
+      assert.equal(await bridge.readRecording("r0"), null, "an unknown ticket");
+      const actionId = activePlayerRuntimeInteraction(session.state)?.actionId;
+      assert.ok(actionId !== undefined);
+      await bridge.request(session, "submitComposer", { actionId, text: "Ann", input: null });
+      const current = await bridge.readRecording(null);
+      assert.deepEqual(
+        await bridge.readRecording(held),
+        atCapture,
+        "the held recording stays as captured",
+      );
+      assert.ok(current !== null && current.operations.length > atCapture.operations.length);
+      if (inProcess) {
+        assert.deepEqual(current, heldRecording(bridge), "the recorder's, as the facade reads it");
+        assert.deepEqual(
+          atCapture,
+          heldRecording(bridge, held),
+          "the ticket's, as the facade reads it",
+        );
+      }
+      await bridge.releaseRecording(held);
+      assert.equal(await bridge.readRecording(held), null, "a released ticket");
+      await bridge.client.request("beginRecording", null, { session: session.id });
+      const begun = await bridge.readRecording(null);
+      assert.deepEqual(begun?.operations, [], "a recorder restart begins a new recording");
+    } finally {
+      bridge.client.terminate();
+    }
+    await assert.rejects(
+      bridge.readRecording(null),
+      { name: "BridgeLostError" },
+      "a lost connection",
+    );
+  }
+});
+
+test("readRecording reads the host when it dispatches the read: after the requests posted before it, before those the client holds", async () => {
+  const bridge = await inProcessBridge();
+  const session = await recordedSession(bridge);
+  const exportTicket = await bridge.client.request("captureExport", {
+    session: session.id,
+    recording: "current",
+  });
+  // EVIDENCE: fixture: a capture of a held session with its current recording is `captured`, with its ticket.
+  const exported = (exportTicket.result as { ticket: string }).ticket;
+  // The plan's hash, awaited by the preparation, holds the host's queue until it is released.
+  const crypto = Object.getOwnPropertyDescriptor(globalThis, "crypto");
+  const hold: { release?: () => void } = {};
+  const digest = () =>
+    new Promise<ArrayBuffer>((resolve) => {
+      hold.release = () => resolve(new ArrayBuffer(32));
+    });
+  Object.defineProperty(globalThis, "crypto", {
+    configurable: true,
+    value: { subtle: { digest } },
+  });
+  try {
+    const preparing = bridge.exportPrepare(exported, true);
+    assert.ok(hold.release !== undefined, "the preparation waits for its hash");
+    // The session's first observation is posted and waits in the host behind the preparation; its second waits in the
+    // client for the first's reply.
+    const first = bridge.client.request(
+      "observeTime",
+      { atMs: 1, media: [] },
+      { session: session.id },
+    );
+    const second = bridge.client.request(
+      "observeTime",
+      { atMs: 2, media: [] },
+      { session: session.id },
+    );
+    const atCall = heldRecording(bridge)!.operations.length;
+    const reading = bridge.readRecording(null);
+    hold.release();
+    const read = (await reading)!.operations.length;
+    await Promise.all([preparing, first, second]);
+    const after = heldRecording(bridge)!.operations.length;
+    assert.ok(atCall < read && read < after, `${atCall} < ${read} < ${after}`);
+  } finally {
+    if (crypto !== undefined) Object.defineProperty(globalThis, "crypto", crypto);
+  }
 });

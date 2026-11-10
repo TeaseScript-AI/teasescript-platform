@@ -1,7 +1,7 @@
 import { computed, ref, watch, type Ref } from "vue";
 import { tryOnScopeDispose } from "@vueuse/core";
 import type { StorageCapture } from "../../../engine-bridge/ops/history.js";
-import type { DebugRewoundWhileDebugging } from "../../../debug/debug-export.js";
+import type { DebugRewoundWhileDebugging } from "../../../debug/debug-history-marks.js";
 import { bridgeOf, type PlayerBridge } from "../../../runtime/player-bridge.js";
 import {
   playerNoticeKeys,

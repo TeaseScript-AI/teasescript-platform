@@ -54,6 +54,17 @@ test("each scenario's export file is the one the base's assembler wrote", async 
     ...debugExport,
     ...compileProject,
     smallRecorder: (limit: number) => new recorder.DebugRecorder({ argumentCodeUnits: limit }),
+    // The Player writes through `measuredDebugExportFile`: each file here is also written that way, to the same text
+    // and its UTF-8 size, and is read again by the head's reader, which validates a file (L5i.1).
+    debugExportFile: async (exported: debugExport.DebugExport, gzip: boolean) => {
+      const file = await debugExport.debugExportFile(exported, gzip);
+      const text = await file.text();
+      const measured = await debugExport.measuredDebugExportFile(exported, gzip);
+      assert.equal(await measured.file.text(), text, "the measured file is the same file");
+      assert.equal(measured.jsonBytes, new TextEncoder().encode(text).length, "its measured size");
+      debugExport.parseDebugExport(text);
+      return file;
+    },
   };
   const candidateOf = (made: Made) => ({
     build: scenarios.BUILD,

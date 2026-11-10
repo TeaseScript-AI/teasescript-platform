@@ -1,6 +1,6 @@
 import { computed, onScopeDispose, shallowRef, watch, type Ref } from "vue";
 import type { CapturedMediaStore } from "../../../media/captured-media.js";
-import type { DebugAnswerInput } from "../../../debug/debug-export.js";
+import type { DebugAnswerInput } from "../../../debug/debug-export-file.js";
 import { heldMedia } from "../../../engine-bridge/held-media.js";
 import {
   activePlayerRuntimeInteraction,

@@ -56,6 +56,11 @@ test("the main realm loads no reader of an exported file: the engine host reads 
   assert.equal(graph.modules.includes("player/engine-bridge/ops/transfer.ts"), false);
 });
 
+test("the main realm writes a debug export without its reader and replay, which run in the Worker (L5i.1)", () => {
+  assert.equal(graph.modules.includes("player/debug/debug-export-file.ts"), true);
+  assert.equal(graph.modules.includes("player/debug/debug-export.ts"), false);
+});
+
 test("the main realm loads exactly the src modules ALLOWED_SOURCE lists", () => {
   assert.equal(new Set(allowed).size, allowed.length, "ALLOWED_SOURCE lists a module twice");
   assert.deepEqual(

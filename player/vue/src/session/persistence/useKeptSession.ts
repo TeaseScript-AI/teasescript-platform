@@ -44,7 +44,7 @@ import type { InterpreterEvent } from "../../../../../src/index.js";
 import type {
   DebugRewoundWhileDebugging,
   DebugEditedWhileDebugging,
-} from "../../../../debug/debug-export.js";
+} from "../../../../debug/debug-history-marks.js";
 import type { Problem } from "../../start-and-end/ProblemCard.vue";
 import type { PlayerSessionOptions, PlayerSessionStart } from "../usePlayerSession.js";
 import type { useRuntimeSceneClock } from "../useRuntimeSceneClock";

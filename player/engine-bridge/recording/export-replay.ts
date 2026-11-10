@@ -17,6 +17,12 @@ export interface PreparedExport {
   readonly checkpoint: RuntimeCheckpoint | null;
   readonly checkpointRole: DebugExport["checkpointRole"];
   readonly replay: DebugReplay | null;
+  /**
+   * Whether checkpointing the replay's anchor threw, for whatever cause; `replay.anchorSnapshot` is then the recorder's
+   * anchor as it was, so the main side's checks read what it holds, and an export that keeps this replay data fails
+   * (`assembleDebugExport`). Otherwise the anchor is the checkpointed one, or `null`.
+   */
+  readonly anchorRefused: boolean;
   /** Why parts of the replay data were left out, in the order the export lists them. */
   readonly omissions: readonly string[];
 }
@@ -44,20 +50,20 @@ export async function prepareExport(
   const parts =
     replay && plan !== null
       ? replayData(plan, snapshot, recording, omissions)
-      : { checkpoint: null, checkpointRole: null, replay: null };
+      : { checkpoint: null, checkpointRole: null, replay: null, anchorRefused: false };
   return { contentHash: plan === null ? null : await planHash(plan), ...parts, omissions };
 }
 
 /**
  * The checkpoint and recorded calls, or the last good state when the current one cannot be checkpointed, also when it
- * could not be exported (`null`).
+ * could not be exported (`null`). The anchor is checkpointed here, where the engine is, and the file is written as given.
  */
 function replayData(
   plan: InstructionPlan,
   snapshot: RuntimeSnapshot | null,
   recording: DebugRecording | null,
   omissions: string[],
-): Pick<DebugExport, "checkpoint" | "checkpointRole" | "replay"> {
+): Pick<PreparedExport, "checkpoint" | "checkpointRole" | "replay" | "anchorRefused"> {
   const calls = (anchorSnapshot: RuntimeSnapshot | null): DebugReplay | null =>
     recording === null
       ? null
@@ -69,15 +75,18 @@ function replayData(
         };
   if (recording === null) omissions.push("No engine calls were recorded for this session.");
   const current = snapshot === null ? null : checkpointOrNull(plan, snapshot);
-  if (current !== null)
+  if (current !== null) {
+    const anchor = recording === null ? null : checkpointOrNull(plan, recording.anchorSnapshot);
     return {
       checkpoint: current,
       checkpointRole: "current",
-      replay: calls(recording?.anchorSnapshot ?? null),
+      replay: calls(anchor?.snapshot ?? recording?.anchorSnapshot ?? null),
+      anchorRefused: recording !== null && anchor === null,
     };
+  }
   if (recording === null) {
     omissions.push("The current state could not be checkpointed.");
-    return { checkpoint: null, checkpointRole: null, replay: null };
+    return { checkpoint: null, checkpointRole: null, replay: null, anchorRefused: false };
   }
   omissions.push(
     "The current state could not be checkpointed; the export carries the last good state instead.",
@@ -86,6 +95,7 @@ function replayData(
     checkpoint: createCheckpoint(plan, recording.anchorSnapshot),
     checkpointRole: "lastGood",
     replay: calls(null),
+    anchorRefused: false,
   };
 }
 

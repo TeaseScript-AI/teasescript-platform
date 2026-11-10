@@ -248,7 +248,7 @@ previewed before download; a selected photo carries its original bytes and links
 The technical report, always included, locates the failure without runtime values. Replay data discloses state that
 copies saved values, answers, and session text, so it requires all three.
 
-`player/debug/debug-export.ts` owns the format: a versioned JSON document (`format: "teasescript-debug-export"`,
+`player/debug/debug-export-file.ts` owns the format and writes the file; `player/debug/debug-export.ts` reads and replays it, in the engine's Worker and in `tools/debug-export.mjs`. The format is a versioned JSON document (`format: "teasescript-debug-export"`,
 `version: 6`) with the build and its checkpoint, plan, and snapshot revisions; what the host knows of the package
 (unknown fields are `null`); the incident (code and one-based source location, or a Player exception's error name);
 `editedWhileDebugging`, the Debug storage editor's mark (`firstEditSceneTimeMs` and `editCount`, or `null`), which also

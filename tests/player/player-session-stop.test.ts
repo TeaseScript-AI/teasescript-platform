@@ -52,7 +52,7 @@ interface StopHost {
     readonly expected: SerializableRuntimeValue | undefined;
   }): Promise<{ readonly kind: string; readonly live?: boolean }>;
   setDebugTracing(on: boolean): void;
-  debugRecording(): DebugRecording | null;
+  debugRecording(): Promise<DebugRecording | null>;
   debugExportCandidate(
     details: () => Pick<DebugExportCandidate, "player" | "host">,
     wanted: AbortSignal,
@@ -616,14 +616,14 @@ test("after a Player error, a debug export keeps the recording up to the error t
   await settle();
   host.reportHostError(new TypeError("A component failed."));
   // The start, the answer, and the run that continued it.
-  const atError = host.debugRecording();
+  const atError = await host.debugRecording();
   assert.deepEqual(
     atError?.operations.map((operation) => operation.kind),
     ["run", "completeAction", "run"],
   );
   // Back shows an earlier state, from which the recorder begins anew; the export still shows the error's recording.
   assert.equal(await backTo(rewind, 0), true);
-  assert.deepEqual(host.debugRecording(), atError);
+  assert.deepEqual(await host.debugRecording(), atError);
   assert.deepEqual(
     (await host.debugExportCandidate(() => shown, new AbortController().signal)).recording,
     atError,
@@ -633,7 +633,7 @@ test("after a Player error, a debug export keeps the recording up to the error t
   await host.activate();
   assert.equal(host.hostError.value, null);
   assert.deepEqual(
-    host.debugRecording()?.operations.map((operation) => operation.kind),
+    (await host.debugRecording())?.operations.map((operation) => operation.kind),
     ["run"],
   );
 });

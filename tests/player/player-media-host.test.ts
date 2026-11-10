@@ -33,7 +33,7 @@ interface MediaHost {
   readonly session: Readonly<Ref<PlayerSession | null>>;
   readonly bridge: Promise<PlayerBridge>;
   readonly inputSection: import("../../player/vue/src/session/runtime-input.js").InputSectionHost;
-  debugRecording(): import("../../player/debug/debug-recorder.js").DebugRecording | null;
+  debugRecording(): Promise<import("../../player/debug/debug-recorder.js").DebugRecording | null>;
   prepare(create: (recording: PlayerRuntimeSessionOptions) => PlayerRuntimeSession): void;
   activate(): Promise<void>;
 }
@@ -439,7 +439,21 @@ for (const delay of [0, 50, 250])
       player.queued.maximum <= 2,
       "no periodic backlog beyond startup/media service section",
     );
-    const recording = player.player.debugRecording()!;
+    // The host's session as shown now, and its recording, whose reply comes on mock time.
+    const shownOnHost = onHost(playerRuntimeSnapshot)(hostSession(player.player.session.value!));
+    const reading = player.player.debugRecording();
+    let replied = false;
+    void reading.then(
+      () => {
+        replied = true;
+      },
+      () => {
+        replied = true;
+      },
+    );
+    for (let n = 0; !replied && n < 1000; n++) await advance(1);
+    assert.equal(replied, true, "the recording's read replies on mock time");
+    const recording = (await reading)!;
     const rebuilt = rebuildRecordedSession(
       recording.plan,
       recording.anchorSnapshot,
@@ -447,7 +461,7 @@ for (const delay of [0, 50, 250])
     );
     assert.deepEqual(
       rebuilt.exportSnapshot(),
-      onHost(playerRuntimeSnapshot)(hostSession(player.player.session.value!)),
+      shownOnHost,
       "delayed loaded-media recording replays",
     );
     const input = await runtimeInput();

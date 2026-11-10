@@ -27,6 +27,7 @@ import {
   applyPlayerRuntimeStorageEdit,
   beginPlayerRuntimeRecording,
   completePlayerRuntimeStorageWrite,
+  observePlayerRuntimeTime,
   playerRuntimeSnapshotJson,
   restorePlayerRuntimeSessionAt,
   selectPlayerRuntimeChoice,
@@ -442,6 +443,44 @@ test("credential- and path-like text is removed from readable sections, and repl
     exported.omissions.some((omission) => /looks like a credential or a file path/.test(omission)),
   );
   assert.ok(JSON.stringify(exported.sections["answers"]).includes("[removed]"));
+});
+
+test("replay data whose anchor cannot be checkpointed fails the export, unless its text already left it out", async (context) => {
+  // V8 cannot enumerate an array past its limit; a list of 1,500 stands for such a list. The recorder's log rolls over
+  // at its call limit while the list is full, then the script empties it: the current state is checkpointed, the
+  // anchor is not.
+  const ownKeys = Reflect.ownKeys;
+  context.mock.method(Reflect, "ownKeys", (target: Parameters<typeof Reflect.ownKeys>[0]) => {
+    if (Array.isArray(target) && target.length > 1_000)
+      throw new RangeError("Too many properties to enumerate");
+    return ownKeys(target);
+  });
+  const exported = async (answer: string) => {
+    const recorder = new DebugRecorder();
+    let session = createPlayerRuntimeSession(
+      'let xs = (1..=1500).toList()\nlet name = askText "Name"\nxs = []\nwait 1 s\nexit',
+      { recorder, wallClockMs: 0 },
+    );
+    for (let atMs = 1; atMs <= 2047; atMs++)
+      session = observePlayerRuntimeTime(session, atMs).session;
+    session = answeredByPlayerInput(session, "send", () =>
+      submitPlayerRuntimeComposer(session, answer),
+    )!.session;
+    const frozen = candidate(session, recorder);
+    const prepared = await frozen.prepare(true);
+    assert.deepEqual(
+      { role: prepared.checkpointRole, anchorRefused: prepared.anchorRefused },
+      { role: "current", anchorRefused: true },
+    );
+    return assembleDebugExport(frozen, all(frozen));
+  };
+  // Credential-like text leaves the replay data out first, so the export is written without it.
+  const left = await exported("Bearer abcdefghijklmnopqrstuvwx");
+  assert.equal(left.exported.replay, null);
+  assert.ok(left.exported.omissions.some((omission) => /looks like a credential/.test(omission)));
+  assert.equal(parseDebugExport(await fileText(left.exported)).replay, null);
+  // Replay data kept with that anchor fails the export, as its file could not be written with a valid anchor.
+  await assert.rejects(exported("Ann"), /The replay anchor could not be checkpointed\./);
 });
 
 test("a state that cannot be checkpointed is exported as the last good state, which replays", async () => {
