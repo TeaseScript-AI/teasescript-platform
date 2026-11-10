@@ -399,6 +399,16 @@ const VARIANTS = {
     })(),
     failing: [],
   },
+  "a tied pending tail after every drawn record": {
+    row: (() => {
+      const base = clone(BASES["session chromium main"]);
+      const gate = base.result.probe.repeat;
+      gate.rowChanges.push({ id: "m1", t: 2000 }, { id: "m1", t: 2000 });
+      gate.changes.push({ t: 2000 });
+      return base;
+    })(),
+    failing: [],
+  },
   "a demo with an error: a measured failure": {
     row: row(
       "demo",
@@ -1297,6 +1307,33 @@ const RELATIONS = [
     ["counts", "timing"],
     "the repeat page's rowChanges 0: its frame, before a later record's",
   ],
+  // Sol code r9: a list's order is its records' request order, so a tie in time still orders them; the frame missing
+  // before a later drawn record of the same list was lost.
+  [
+    "turn: a tied control state's frame lost before the next one's (Sol code r9)",
+    "session chromium main",
+    (r) => {
+      const gate = r.result.probe.repeat;
+      gate.rowChanges = [];
+      gate.states.push({ ...gate.states[2], control: 4, frame: 975 });
+      gate.states[2] = { ...gate.states[2], frame: null };
+    },
+    ["counts", "timing"],
+    "the repeat page's states 2: its frame, before a later record's",
+  ],
+  [
+    "turn: a tied row update's frame lost before the next one's (Sol code r9)",
+    "session chromium main",
+    (r) => {
+      const gate = r.result.probe.repeat;
+      gate.states[2] = { ...gate.states[2], control: 2 };
+      gate.rows.push({ id: "m2", speaker: "system", t: 610, frame: 615, shownFrame: 620 });
+      gate.rowChanges.push({ ...gate.rowChanges[0], id: "m2", frame: 990 });
+      gate.rowChanges[0] = { ...gate.rowChanges[0], frame: null };
+    },
+    ["counts", "timing"],
+    "the repeat page's rowChanges 0: its frame, before a later record's",
+  ],
 ];
 
 /** Each `ms` field's relations, written here: a field that reports an interval names the relation that orders it. */
@@ -1818,16 +1855,29 @@ function absenceSites() {
  * permitted (Sol final r1, F1, and orchestrator 2's ruling).
  */
 const ABSENCE = {
-  'validate.mjs framesComplete nullable: gate[list].filter((record) => nullable(record, "frame") !== null).map((record) => record.t),':
-    { permitted: "the drawn records' times: an absent frame is the next site's to judge" },
-  'validate.mjs framesComplete nullable: if (nullable(record, "frame") === null && record.t < last)':
-    {
-      rows: [
-        "turn: a control state's frame lost before a later one (Sol code r8)",
-        "turn: a control state's frame deleted before a later one",
-        "turn: a row update's frame lost before a later one (Sol code r8)",
-      ],
-    },
+  'validate.mjs framesComplete nullable: const drawn = (list) => gate[list].filter((record) => nullable(record, "frame") !== null);':
+    { permitted: "the drawn records of a list: an absent frame is the rule's to judge" },
+  'validate.mjs framesComplete nullable: const lastIndex = gate[list].findLastIndex((record) => nullable(record, "frame") !== null);':
+    { permitted: "the last drawn record of a list: an absent frame is the rule's to judge" },
+  'validate.mjs framesComplete nullable: nullable(record, "frame") === null &&': {
+    rows: [
+      "turn: a control state's frame lost before a later one (Sol code r8)",
+      "turn: a control state's frame deleted before a later one",
+      "turn: a row update's frame lost before a later one (Sol code r8)",
+      "turn: a tied control state's frame lost before the next one's (Sol code r9)",
+      "turn: a tied row update's frame lost before the next one's (Sol code r9)",
+    ],
+  },
+  "validate.mjs framesComplete ||: (index < lastIndex || others.some((t) => t >= record.t))": {
+    rows: [
+      "turn: a control state's frame lost before a later one (Sol code r8)",
+      "turn: a control state's frame deleted before a later one",
+      "turn: a row update's frame lost before a later one (Sol code r8)",
+      "turn: a tied control state's frame lost before the next one's (Sol code r9)",
+      "turn: a tied row update's frame lost before the next one's (Sol code r9)",
+    ],
+  },
+
   "validate.mjs validateSample read: const found = read(sample);": {
     permitted:
       "a field's reader (`NUMBERS`), no record read: an absent result fails a required field",
@@ -1847,6 +1897,8 @@ const ABSENCE = {
       "turn: a control state's frame lost before a later one (Sol code r8)",
       "turn: a control state's frame deleted before a later one",
       "turn: a row update's frame lost before a later one (Sol code r8)",
+      "turn: a tied control state's frame lost before the next one's (Sol code r9)",
+      "turn: a tied row update's frame lost before the next one's (Sol code r9)",
     ],
   },
   'lib/measure.mjs turnSettlement read: .map((state) => ({ by: "control", t: state.t, at: read(state, "frame") })),':
@@ -1866,6 +1918,8 @@ const ABSENCE = {
       "turn: a control state's frame lost before a later one (Sol code r8)",
       "turn: a control state's frame deleted before a later one",
       "turn: a row update's frame lost before a later one (Sol code r8)",
+      "turn: a tied control state's frame lost before the next one's (Sol code r9)",
+      "turn: a tied row update's frame lost before the next one's (Sol code r9)",
     ],
   },
   'lib/measure.mjs turnSettlement read: .map((change) => ({ by: "row update", t: change.t, at: read(change, "frame") })),':

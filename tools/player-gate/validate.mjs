@@ -67,24 +67,33 @@ function stateComplete(state, where) {
 const FRAMED = ["states", "changes", "rowChanges", "rows"];
 
 /**
- * The frames of one page's records: `requestAnimationFrame` runs callbacks in the order they were requested, and the
- * probe asks for each record's frame as it records it, so a record without its frame before a later record that has
- * one is a frame lost, not one pending, and no evidence (Sol code r8, F7). Only the records after the last drawn one
- * may still wait for theirs.
+ * The frames of one page's records (Sol code r8 and r9, F7). The probe asks for each record's frame as it records it
+ * (`probe.mjs` `frameAfter`), and `requestAnimationFrame` runs callbacks in the order they were requested; the
+ * callbacks one observer task requested all run in the same frame. So a record without its frame lost it, and is no
+ * evidence, when a record requested after it has one:
+ *   - a later record of its own list, whose order is the request order (a tie in time included: one batch stamps all
+ *     its row updates with one time);
+ *   - a record of another list stamped at or after its time. Across lists no request order is recorded within one
+ *     time, so a tie is refused too: it can only leave a cell incomplete, never admit a value.
+ * Only the records after every drawn one may still wait for their frames.
  */
 function framesComplete(gate, page) {
-  const drawn = FRAMED.flatMap((list) =>
-    gate[list].filter((record) => nullable(record, "frame") !== null).map((record) => record.t),
-  );
-  if (drawn.length === 0) return;
-  const last = Math.max(...drawn);
-  for (const list of FRAMED)
+  const drawn = (list) => gate[list].filter((record) => nullable(record, "frame") !== null);
+  for (const list of FRAMED) {
+    const lastIndex = gate[list].findLastIndex((record) => nullable(record, "frame") !== null);
+    const others = FRAMED.filter((other) => other !== list).flatMap((other) =>
+      drawn(other).map((record) => record.t),
+    );
     gate[list].forEach((record, index) => {
-      if (nullable(record, "frame") === null && record.t < last)
+      if (
+        nullable(record, "frame") === null &&
+        (index < lastIndex || others.some((t) => t >= record.t))
+      )
         throw new MissingEvidence(
           `${page} page's ${list} ${index}: its frame, before a later record's`,
         );
     });
+  }
 }
 
 /**
