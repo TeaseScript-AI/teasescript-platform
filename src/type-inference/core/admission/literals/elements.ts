@@ -457,6 +457,8 @@ function laterKinds(
   )
     return { kinds: own, written: false };
   const decider = drive(admission, earliestDecider(admission, d.value!, d.node, path, null));
+  // (no test pins dropping the written type's `null`: it keeps the sentence from naming it once a `!= null` test marks
+  // a typed host value, #1847)
   return decider?.term == null
     ? { kinds: own, written: false }
     : { kinds: typeTags(decider.term).filter((tag) => tag !== "null"), written: true };
