@@ -22,7 +22,7 @@ import {
 // A compiler pull request's replay of its base against its head, through the queue, in these steps:
 //
 //   node tools/compiler-replay.mjs submit <base> <head> --owner <owner> [--campaign <prefix>] [--baseline]
-//     [--costs <results folder>] [--target <seconds>] [--dry]
+//     [--costs <results folder>] [--target <seconds>] [--priority <level>] [--dry]
 //   node tools/compiler-replay.mjs collect <prefix> --owner <owner> [--results <folder>] [--json <file>] [--replace <job>=<job>]...
 //   node tools/compiler-replay.mjs rerun-shard <prefix> <base> <head> <job> --owner <owner> [--baseline] [--host <host>] [--dry]
 //   node tools/compiler-replay.mjs rerun-stalls <prefix> <base> <head> --owner <owner> [--memory <MB>] [--host <host>]
@@ -41,7 +41,8 @@ import {
 // costs.json`). Every shard is queued in one `sx-job submit-batch`, the areas' shards longest first by `countOf`'s
 // estimate, and each of the areas' shards asks one `--mem` (4 GB with `--baseline`, else 8 GB). Where the fill left no
 // record, and for an area the costs do not hold, an area runs 16 shards by index, as it prints. The prefix defaults to
-// `replay-<head>`. It prints each area's count of shards and each job's id.
+// `replay-<head>`; `--priority` sets every job's level (`sx-job submit --priority`). It prints each area's count of
+// shards and each job's id.
 //
 // `collect` reads the campaigns' results (`~/jobs/results/<owner>/<campaign>/<job>/out`, or `--results`): per area its
 // shards, sources, runs, differences and what did not compare; the set's records; the stall verdicts of
@@ -287,7 +288,8 @@ function submit({ positional: [base, head], options }) {
     split: sized,
   });
   // (one batch, one process: the queue keeps its lines' order among one owner's jobs)
-  const shards = batchOf(all, sized);
+  const level = options.priority === undefined ? [] : ["--priority", options.priority];
+  const shards = batchOf(all, sized).map((args) => [...level, ...args]);
   if (options.dry)
     for (const args of shards) process.stdout.write(`${JSON.stringify(["submit", ...args])}\n`);
   else {
