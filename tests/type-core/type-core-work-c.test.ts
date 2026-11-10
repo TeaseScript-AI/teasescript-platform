@@ -18,7 +18,10 @@ import {
 } from "../helpers/type-core/families/admission-products.js";
 import { DECISION_HOLDER_FAMILIES } from "../helpers/type-core/families/copy-chains.js";
 import { LAYER_FAMILIES } from "../helpers/type-core/families/property-names.js";
-import { NARROWING_FAMILIES } from "../helpers/type-core/families/narrowing.js";
+import {
+  NARROWING_FAMILIES,
+  ROUTE_FEASIBILITY_FAMILIES,
+} from "../helpers/type-core/families/narrowing.js";
 import { type WorkFamily } from "../helpers/type-core/families/builders.js";
 import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import { narrowingPass } from "../helpers/type-core/type-core-narrowing.js";
@@ -274,6 +277,15 @@ test("stage 3b's N5 families grow with the program through the analysis too, in 
     steepCounters(NARROWING_FAMILIES.filter((family) => family.name.startsWith("W29"))),
     [],
   );
+});
+
+/**
+ * The route rule's narrowed default (#1938): in a program holding an arm no run enters, every use's route query passes
+ * one feasibility layer and its chains' arms; the same gate, in either order. The series to k = 1,024 is the step's
+ * evidence, outside CI.
+ */
+test("the route rule's queries beside arms no run enters grow with the program in either order (#1938)", () => {
+  assert.deepEqual(steepCounters(ROUTE_FEASIBILITY_FAMILIES), []);
 });
 
 /**
