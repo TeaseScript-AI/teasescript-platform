@@ -8,6 +8,7 @@ import { compilePlayerProject } from "../../player/runtime/compile-project.js";
 import type { StartOptions } from "../../player/engine-bridge/ops/session.js";
 import type { PrepareResult } from "../../player/engine-bridge/player-ops.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
+import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 import {
   observePlayerRuntimeTime,
   type PlayerRuntimeSession,
@@ -324,13 +325,13 @@ async function mount(context: TestContext, held: boolean, source?: string, delay
   const scope = effectScope();
   const transport =
     delayMs === undefined ? null : await loadPlayerModule("player/engine-bridge/in-process.ts");
+  // EVIDENCE: validation: the bundle's in-process backend, whose `createInProcessBackend` makes a `PlayerBridge`.
+  const create = transport?.createInProcessBackend as
+    ((build: unknown, options: unknown) => PlayerBridge) | undefined;
   const backend =
-    transport === null
+    create === undefined
       ? null
-      : (transport.createInProcessBackend as (build: unknown, options: unknown) => PlayerBridge)(
-          { commit: null, dirty: null, mode: null, appVersion: null },
-          { delayMs },
-        );
+      : create({ commit: null, dirty: null, mode: null, appVersion: null }, { delayMs });
   const host = scope.run(() =>
     usePlayerSession({
       ...(backend === null ? {} : { bridge: Promise.resolve(backend) }),
@@ -514,7 +515,7 @@ test("an observation behind an earlier section that published succeeds, at its o
   let open!: () => void;
   const opened = new Promise<void>((resolve) => (open = resolve));
   // EVIDENCE: fixture: the shown session is a publication of this bridge.
-  const earlier = bridge.section(shown as never, clockTicket(), async (section) => {
+  const earlier = bridge.section(asShown(shown), clockTicket(), async (section) => {
     await opened;
     // A publication that moves the revision, not the time.
     await section.send("setDebugMode", { on: true });
@@ -582,7 +583,7 @@ test("a newer publication of the session during an observation is what the obser
   await settle();
   assert.equal(observed, player.host.session.value, "the newest shown");
   // EVIDENCE: fixture: as above.
-  assert.equal(observed?.revision, bridge.latest(shown as never)?.revision);
+  assert.equal(observed?.revision, bridge.latest(asShown(shown))?.revision);
 });
 
 test("an unmount or a replacement with an observation in flight publishes nothing", async (context) => {
@@ -761,7 +762,7 @@ for (const { row, state, name } of SECTION_CASES) {
     let open!: () => void;
     const opened = new Promise<void>((resolve) => (open = resolve));
     // EVIDENCE: fixture: the shown session is a publication of this bridge.
-    const earlier = bridge.section(shown as never, clockTicket(), () => opened);
+    const earlier = bridge.section(asShown(shown), clockTicket(), () => opened);
     let owned = true;
     if (state === "basis refused") player.gate.refuse(ROW_OBSERVES[row]!, 1, "basis");
     const from = { posts: player.posts.length, attempts: player.attempts.length };
@@ -863,7 +864,7 @@ test("a later observation does not take the hidden page's observation from the k
   let open!: () => void;
   const opened = new Promise<void>((resolve) => (open = resolve));
   // EVIDENCE: fixture: the shown session is a publication of this bridge.
-  const earlier = bridge.section(shown as never, clockTicket(), () => opened);
+  const earlier = bridge.section(asShown(shown), clockTicket(), () => opened);
   const from = player.posts.length;
   player.hide();
   // The keep's capture is queued behind the hidden page's observation; then another observation retires that one.
@@ -1007,7 +1008,7 @@ for (const work of ["randomControl", "debugMode"] as const)
     const shown = player.host.session.value!;
     let open!: () => void;
     const opened = new Promise<void>((resolve) => (open = resolve));
-    const earlier = bridge.section(shown as never, clockTicket(), () => opened);
+    const earlier = bridge.section(asShown(shown), clockTicket(), () => opened);
     const from = player.posts.length;
     window.dispatchEvent(new Event("pagehide"));
     player.late(1000);
@@ -1067,7 +1068,7 @@ test("an older observation's completion does not release the admission of a newe
   let begins = 0;
   context.mock.method(bridge, "request", (...args: Parameters<typeof request>) => {
     if (args[1] === "beginCatchUp") begins++;
-    return Reflect.apply(request, bridge, args);
+    return request(...args);
   });
   player.gate.hold("observeTime", 2);
   const first = player.host.observe();
@@ -1157,20 +1158,21 @@ test("an observation reads time and media progress at its turn, and again for it
   const player = await mount(context, false);
   const bridge = await player.host.bridge;
   const shown = player.host.session.value!;
-  await bridge.request(shown as never, "reportMediaLoad", {
+  await bridge.request(asShown(shown), "reportMediaLoad", {
     mediaId: 1,
     report: { kind: "loaded", durationMs: 1000 },
   });
   const module = await loadPlayerModule("player/vue/src/session/useRuntimeSceneClock.ts");
+  // EVIDENCE: validation: Vite loaded the real source module; this is the composable's own signature, its first two inputs.
   const useClock = module.useRuntimeSceneClock as (
     session: ShallowRef<unknown>,
     reports: () => readonly unknown[],
-  ) => { observe(): Promise<unknown> };
+  ) => { observe(): Promise<PlayerSession | null> };
   let progress = 100;
   const scope = effectScope();
   context.after(() => scope.stop());
   const clock = scope.run(() =>
-    useClock(shallowRef(bridge.latest(shown as never)), () => [
+    useClock(shallowRef(bridge.latest(asShown(shown))), () => [
       { mediaId: 1, segment: 1, progressMs: progress },
     ]),
   )!;
@@ -1183,6 +1185,7 @@ test("an observation reads time and media progress at its turn, and again for it
       section(session, ticket, (send) =>
         body((op, args, basis, onReply) => {
           if (op === "observeTime") {
+            // EVIDENCE: fixture: `observeTime`'s arguments, as the clock sends them.
             argumentsSent.push(args as { atMs: number; media: { progressMs: number }[] });
             if (argumentsSent.length === 1) {
               progress = 400;
@@ -1196,7 +1199,7 @@ test("an observation reads time and media progress at its turn, and again for it
   );
   let open!: () => void;
   const wait = new Promise<void>((resolve) => (open = resolve));
-  const earlier = bridge.section(shown as never, clockTicket(), () => wait);
+  const earlier = bridge.section(asShown(shown), clockTicket(), () => wait);
   const observed = clock.observe();
   progress = 200;
   player.elapse(200);
@@ -1214,9 +1217,15 @@ test("an observation reads time and media progress at its turn, and again for it
   );
 });
 
+/** A session the host shows, as the bridge's methods take it. */
+function asShown(session: unknown): PlayerSession {
+  // EVIDENCE: test: `usePlayerSession` shows the bridge's `PlayerSession`s, which `SessionHost` types loosely.
+  return session as PlayerSession;
+}
+
 /** The real clock on its own over a session the Player started, with the timers and sends the tests drive and count. */
 interface ClockFixture {
-  observe(): Promise<unknown>;
+  observe(): Promise<PlayerSession | null>;
   before(work: string): void;
   catchUp(): void;
 }
@@ -1235,15 +1244,16 @@ async function mountClock(context: TestContext, media: boolean, source?: string)
   player.scope.stop();
   await settle();
   if (media)
-    await bridge.request(initial as never, "reportMediaLoad", {
+    await bridge.request(asShown(initial), "reportMediaLoad", {
       mediaId: 1,
       report: { kind: "loaded", durationMs: 10000 },
     });
-  const shown = shallowRef(bridge.latest(initial as never)!);
+  const shown = shallowRef(bridge.latest(asShown(initial))!);
   const paused = ref(false);
   let now = 0;
   context.mock.method(performance, "now", () => now);
   const module = await loadPlayerModule("player/vue/src/session/useRuntimeSceneClock.ts");
+  // EVIDENCE: validation: Vite loaded the real source module; this is the composable's own signature, its first four inputs.
   const useClock = module.useRuntimeSceneClock as (
     shown: unknown,
     samples: () => readonly unknown[],
@@ -1315,7 +1325,7 @@ for (const row of firstCompletionRows) {
     const player = await mountClock(context, row.media === "on");
     let open!: () => void;
     const waiting = new Promise<void>((resolve) => (open = resolve));
-    const earlier = player.bridge.section(player.initial as never, clockTicket(), () => waiting);
+    const earlier = player.bridge.section(asShown(player.initial), clockTicket(), () => waiting);
     let observed: Promise<unknown>;
     if (row.outcome === "recovery") {
       player.clock.before("pageHide");
@@ -1402,7 +1412,7 @@ test("an observation of a replaced session schedules nothing for the session tha
   const player = await mountClock(context, false);
   let open!: () => void;
   const waiting = new Promise<void>((resolve) => (open = resolve));
-  const earlier = player.bridge.section(player.initial as never, clockTicket(), () => waiting);
+  const earlier = player.bridge.section(asShown(player.initial), clockTicket(), () => waiting);
   const observed = player.clock.observe();
   player.clock.catchUp();
   const next = await player.bridge.start(player.shown.value!.planToken, {}, false);
@@ -1447,7 +1457,7 @@ test("a joined barrier with no deadline left sends nothing more", async (context
   const bridge = await player.host.bridge;
   let open!: () => void;
   const waiting = new Promise<void>((resolve) => (open = resolve));
-  const earlier = bridge.section(player.host.session.value! as never, clockTicket(), () => waiting);
+  const earlier = bridge.section(asShown(player.host.session.value!), clockTicket(), () => waiting);
   window.dispatchEvent(new Event("pagehide"));
   window.dispatchEvent(new Event("pagehide"));
   open();
@@ -1468,7 +1478,7 @@ for (const delayMs of [undefined, 0])
     let open!: () => void;
     const waiting = new Promise<void>((resolve) => (open = resolve));
     const earlier = bridge.section(
-      player.host.session.value! as never,
+      asShown(player.host.session.value!),
       clockTicket(),
       () => waiting,
     );
@@ -1510,7 +1520,7 @@ for (const refusals of [2, 4])
     const player = await mountClock(context, false);
     let open!: () => void;
     const waiting = new Promise<void>((resolve) => (open = resolve));
-    const earlier = player.bridge.section(player.initial as never, clockTicket(), () => waiting);
+    const earlier = player.bridge.section(asShown(player.initial), clockTicket(), () => waiting);
     const client = untypedClient(player.bridge.client);
     const section = client.section.bind(client);
     let left = refusals;
@@ -1635,7 +1645,7 @@ for (const row of chainRows) {
     }
     let open!: () => void;
     const held = new Promise<void>((resolve) => (open = resolve));
-    const earlier = player.bridge.section(player.initial as never, clockTicket(), () => held);
+    const earlier = player.bridge.section(asShown(player.initial), clockTicket(), () => held);
     const client = untypedClient(player.bridge.client);
     const section = client.section.bind(client);
     let entered = 0,
@@ -1647,7 +1657,7 @@ for (const row of chainRows) {
       "section",
       (id: string, ticket: ClockTicket, body: Parameters<typeof section>[2]) =>
         section(id, ticket, async (send) => {
-          if (id !== player.bridge.latest(player.initial as never)!.id) return body(send);
+          if (id !== player.bridge.latest(asShown(player.initial))!.id) return body(send);
           const index = ++entered;
           const outcome = index === 1 ? row.first : index === 2 ? row.second : "publish";
           if (outcome === "retirement") explicit.push(player.clock.observe().catch(() => null));
@@ -1784,7 +1794,7 @@ test("a basis refused on every attempt bounds the clock's own observations", asy
 
 test("a session the host halted gets no more of the clock's own observations", async (context) => {
   const player = await mountClock(context, false);
-  await player.bridge.halt(player.initial as never);
+  await player.bridge.halt(asShown(player.initial));
   assert.equal(await player.clock.observe(), null);
   const attempts = player.attempts.length,
     armed = player.timeouts.armed;
@@ -1803,7 +1813,7 @@ test("an explicit observation's publication lifts the wait on an unchanged basis
   );
   let open!: () => void;
   const earlier = player.bridge.section(
-    player.initial as never,
+    asShown(player.initial),
     clockTicket(),
     () => new Promise<void>((resolve) => (open = resolve)),
   );

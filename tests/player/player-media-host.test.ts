@@ -359,6 +359,18 @@ for (const { settles, change, name } of REPLY_CASES)
     scope.stop();
   });
 
+/** `observeTime`'s arguments, as the clock posts them. */
+function observeArgs(args: unknown): { readonly atMs: number; readonly media: readonly unknown[] } {
+  // EVIDENCE: fixture: the posts this reads are `observeTime` requests, whose arguments the host checks.
+  return args as { readonly atMs: number; readonly media: readonly unknown[] };
+}
+
+/** The shown session as `onHost` takes it: the bridge's view of the host session it reads. */
+function hostSession(shown: PlayerSession): never {
+  // EVIDENCE: test: `onHost` finds the host session by the shown session's ID; its parameter type is the adapter's.
+  return shown as never;
+}
+
 /** Lets the replies, publications and scheduling a mock-clock step caused run to their end. */
 async function drainTasks() {
   for (let n = 0; n < 30; n++) await new Promise<void>((resolve) => setImmediate(resolve));
@@ -412,7 +424,7 @@ for (const delay of [0, 50, 250])
     const shown = player.player.session.value!;
     const observations = player.posted
       .filter((p) => p.op === "observeTime")
-      .map((p) => ({ wall: p.wall, ...(p.args as { atMs: number; media: unknown[] }) }));
+      .map((p) => ({ wall: p.wall, ...observeArgs(p.args) }));
     const lags = observations.map((p) => p.wall - p.atMs);
     assert.ok(
       observations.filter((p) => p.media.length > 0).length >= 5,
@@ -435,7 +447,7 @@ for (const delay of [0, 50, 250])
     );
     assert.deepEqual(
       rebuilt.exportSnapshot(),
-      onHost(playerRuntimeSnapshot)(player.player.session.value! as never),
+      onHost(playerRuntimeSnapshot)(hostSession(player.player.session.value!)),
       "delayed loaded-media recording replays",
     );
     const input = await runtimeInput();
