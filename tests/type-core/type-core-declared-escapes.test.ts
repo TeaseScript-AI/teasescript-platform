@@ -24,19 +24,21 @@ import { hostValues } from "../helpers/type-core-stop-oracle.js";
 // decision index's charges can move a stop. Inside each recorded window of a source and held mode, the head:
 // - stops unsettled in admission where main settles (`adverse`): #2080's fail-open path, a store's check lost;
 // - settles where main stops unsettled in admission (`favourable`): the check restored;
-// - settles stopping every decision main stops and one more (`settled`): the plan identical once object types'
-//   properties are in name order, the runs identical but for the property a TSR058 message names (`planDigest`,
-//   `runsDigest`), and an occurrence answer surer than main's only where it is the head's natural one.
+// - settles stopping every decision main stops and one more (`settled`): the plan and the runs raw-identical
+//   (`planDigest`, `runsDigest`), and an occurrence answer surer than main's only where it is the head's natural one.
 // At each window's edges outside it, the head's stop state, stopped decisions and plan are main's. #2080's unsettled side
 // closes the adverse windows; the settled class stays declared while the index is charged. The windows are measured over
 // every integer allowance on both trees (#2116's sweep); this file reads their edges.
-// `MAIN` is main's side: recorded at efbd7fdee by lane 2b's recorders (`probe24.mjs`, `probe26.mjs` in #2116's evidence),
-// per source and mode, the natural plan's and answers' digests and, at each edge, main's stop state, its `typeCheck`
-// count, its plan's digest, its stopped decisions (a digest outside a window, the list inside a settled one) and, in a
-// settled window, its runs' digest over the stop oracle's host values and its answers that differ from the natural
-// ones. A change that moves a recorded value re-records it
-// with its ground here: the source, mode and allowance that moved, how, and the change that moved it (docs/TESTING.md,
-// "Pinned work").
+// `MAIN` is main's side: recorded at 664f1183f by lane 2b's recorder (`probe33.mjs` in #2116's evidence), per source and
+// mode, the natural plan's and answers' digests and, at each edge, main's stop state, its `typeCheck` count, its plan's
+// digest, its stopped decisions (a digest outside a window, the list inside a settled one) and, in a settled window, its
+// runs' digest over the stop oracle's host values and its answers that differ from the natural ones. A change that
+// moves a recorded value re-records it with its ground here: the source, mode and allowance that moved, how, and the
+// change that moved it (docs/TESTING.md, "Pinned work").
+// - 664f1183f, every value re-recorded: #2216 lists a completion's check by its store's own records, so the plan and
+//   runs digests are raw, no longer with properties sorted and the named property masked (ruling 12 (5)). Every edge's
+//   stop state, `typeCheck` count, stopped decisions and answers, every window and the natural answers equal the record
+//   at efbd7fdee, made before #2203's gate.
 
 /**
  * Codex round 7's reachable sources and Sol round 10's two-copy form (#2116): a place holding `count` settled whole
@@ -134,7 +136,7 @@ const MAIN: Readonly<
 > = {
   "direct-distinct-whole-8": [
     {
-      natural: "b05268124090db9e",
+      natural: "800ba00b6c777d1d",
       naturalAnswers: "a3549cf84d6f2af8",
       windows: [
         ["adverse", 74, 91],
@@ -146,34 +148,34 @@ const MAIN: Readonly<
       ],
       at: {
         73: ["admission", 0, "1cba611a9289e04b", null, "e3b0c44298fc1c14", null],
-        74: ["settled", 1, "b05268124090db9e", null, null, null],
-        90: ["settled", 1, "b05268124090db9e", null, null, null],
+        74: ["settled", 1, "800ba00b6c777d1d", null, null, null],
+        90: ["settled", 1, "800ba00b6c777d1d", null, null, null],
         91: ["admission", 0, "1cba611a9289e04b", null, "e3b0c44298fc1c14", null],
         93: ["admission", 0, "1cba611a9289e04b", null, "e3b0c44298fc1c14", null],
-        94: ["settled", 1, "b05268124090db9e", null, null, null],
-        105: ["settled", 1, "b05268124090db9e", null, null, null],
+        94: ["settled", 1, "800ba00b6c777d1d", null, null, null],
+        105: ["settled", 1, "800ba00b6c777d1d", null, null, null],
         106: ["admission", 0, "1cba611a9289e04b", null, "e3b0c44298fc1c14", null],
         108: ["admission", 0, "1cba611a9289e04b", null, "e3b0c44298fc1c14", null],
-        109: ["settled", 1, "b05268124090db9e", null, null, null],
-        120: ["settled", 1, "b05268124090db9e", null, null, null],
+        109: ["settled", 1, "800ba00b6c777d1d", null, null, null],
+        120: ["settled", 1, "800ba00b6c777d1d", null, null, null],
         121: ["admission", 0, "1cba611a9289e04b", null, "e3b0c44298fc1c14", null],
         123: ["admission", 0, "1cba611a9289e04b", null, "e3b0c44298fc1c14", null],
-        124: ["settled", 1, "b05268124090db9e", null, null, null],
-        135: ["settled", 1, "b05268124090db9e", null, null, null],
+        124: ["settled", 1, "800ba00b6c777d1d", null, null, null],
+        135: ["settled", 1, "800ba00b6c777d1d", null, null, null],
         136: ["admission", 0, "1cba611a9289e04b", null, "e3b0c44298fc1c14", null],
         138: ["admission", 0, "1cba611a9289e04b", null, "e3b0c44298fc1c14", null],
-        139: ["settled", 1, "b05268124090db9e", null, null, null],
-        150: ["settled", 1, "b05268124090db9e", null, null, null],
+        139: ["settled", 1, "800ba00b6c777d1d", null, null, null],
+        150: ["settled", 1, "800ba00b6c777d1d", null, null, null],
         151: ["admission", 0, "1cba611a9289e04b", null, "e3b0c44298fc1c14", null],
         153: ["admission", 0, "1cba611a9289e04b", null, "e3b0c44298fc1c14", null],
-        154: ["settled", 1, "b05268124090db9e", null, null, null],
-        165: ["settled", 1, "b05268124090db9e", null, null, null],
+        154: ["settled", 1, "800ba00b6c777d1d", null, null, null],
+        165: ["settled", 1, "800ba00b6c777d1d", null, null, null],
         166: ["admission", 0, "1cba611a9289e04b", null, "e3b0c44298fc1c14", null],
       },
     },
-    { natural: "b05268124090db9e", naturalAnswers: "a3549cf84d6f2af8", windows: [], at: {} },
+    { natural: "800ba00b6c777d1d", naturalAnswers: "a3549cf84d6f2af8", windows: [], at: {} },
     {
-      natural: "b05268124090db9e",
+      natural: "800ba00b6c777d1d",
       naturalAnswers: "a3549cf84d6f2af8",
       windows: [
         ["adverse", 74, 91],
@@ -183,24 +185,24 @@ const MAIN: Readonly<
       ],
       at: {
         73: ["admission", 0, "1cba611a9289e04b", null, "e3b0c44298fc1c14", null],
-        74: ["settled", 1, "b05268124090db9e", null, null, null],
-        90: ["settled", 1, "b05268124090db9e", null, null, null],
+        74: ["settled", 1, "800ba00b6c777d1d", null, null, null],
+        90: ["settled", 1, "800ba00b6c777d1d", null, null, null],
         91: ["admission", 0, "1cba611a9289e04b", null, "e3b0c44298fc1c14", null],
         93: ["admission", 0, "1cba611a9289e04b", null, "e3b0c44298fc1c14", null],
-        94: ["settled", 1, "b05268124090db9e", null, null, null],
-        105: ["settled", 1, "b05268124090db9e", null, null, null],
+        94: ["settled", 1, "800ba00b6c777d1d", null, null, null],
+        105: ["settled", 1, "800ba00b6c777d1d", null, null, null],
         106: ["admission", 0, "1cba611a9289e04b", null, "e3b0c44298fc1c14", null],
         108: ["admission", 0, "1cba611a9289e04b", null, "e3b0c44298fc1c14", null],
-        109: ["settled", 1, "b05268124090db9e", null, null, null],
-        120: ["settled", 1, "b05268124090db9e", null, null, null],
+        109: ["settled", 1, "800ba00b6c777d1d", null, null, null],
+        120: ["settled", 1, "800ba00b6c777d1d", null, null, null],
         121: ["admission", 0, "1cba611a9289e04b", null, "e3b0c44298fc1c14", null],
         200: ["admission", 0, "1cba611a9289e04b", null, "e3b0c44298fc1c14", null],
-        201: ["settled", 1, "b05268124090db9e", null, null, null],
-        275: ["settled", 1, "b05268124090db9e", null, null, null],
-        276: ["settled", 1, "b05268124090db9e", null, "e3b0c44298fc1c14", null],
+        201: ["settled", 1, "800ba00b6c777d1d", null, null, null],
+        275: ["settled", 1, "800ba00b6c777d1d", null, null, null],
+        276: ["settled", 1, "800ba00b6c777d1d", null, "e3b0c44298fc1c14", null],
       },
     },
-    { natural: "b05268124090db9e", naturalAnswers: "a3549cf84d6f2af8", windows: [], at: {} },
+    { natural: "800ba00b6c777d1d", naturalAnswers: "a3549cf84d6f2af8", windows: [], at: {} },
   ],
   "copy-every-whole-4": [
     {
@@ -236,7 +238,7 @@ const MAIN: Readonly<
         302: ["admission", 0, "52ca0a26c47a4735", null, "e3b0c44298fc1c14", null],
         303: ["settled", 1, "56020da3a9c542ae", null, null, null],
         336: ["settled", 1, "56020da3a9c542ae", null, null, null],
-        337: ["settled", 1, "56020da3a9c542ae", "2cffa010e13585df", [], ""],
+        337: ["settled", 1, "56020da3a9c542ae", "1bbef63e9f21c6c0", [], ""],
         338: ["settled", 1, "56020da3a9c542ae", null, null, null],
         368: ["settled", 1, "56020da3a9c542ae", null, null, null],
         369: ["settled", 1, "56020da3a9c542ae", null, "e3b0c44298fc1c14", null],
@@ -281,7 +283,7 @@ const MAIN: Readonly<
           "settled",
           1,
           "012be07dc9275048",
-          "5f3db1b9a5ebbb15",
+          "b9985386ba67536d",
           [
             "18|f0",
             "18|f0.n",
@@ -306,7 +308,7 @@ const MAIN: Readonly<
           "settled",
           1,
           "012be07dc9275048",
-          "5f3db1b9a5ebbb15",
+          "b9985386ba67536d",
           [
             "18|f0",
             "18|f0.n",
@@ -334,7 +336,7 @@ const MAIN: Readonly<
           "settled",
           1,
           "012be07dc9275048",
-          "5f3db1b9a5ebbb15",
+          "b9985386ba67536d",
           [
             "18|f1",
             "18|f1.n",
@@ -356,7 +358,7 @@ const MAIN: Readonly<
           "settled",
           1,
           "012be07dc9275048",
-          "5f3db1b9a5ebbb15",
+          "b9985386ba67536d",
           [
             "18|f1",
             "18|f1.n",
@@ -378,7 +380,7 @@ const MAIN: Readonly<
           "settled",
           1,
           "012be07dc9275048",
-          "5f3db1b9a5ebbb15",
+          "b9985386ba67536d",
           [
             "18|f1",
             "18|f1.n",
@@ -398,7 +400,7 @@ const MAIN: Readonly<
           "settled",
           1,
           "012be07dc9275048",
-          "5f3db1b9a5ebbb15",
+          "b9985386ba67536d",
           ["18|f1", "18|f1.n", "18|f2", "18|f2.n", "18|f3", "18|f3.n", "9|f1", "9|f1.n", "9|g"],
           "24=unknown:pos:16 25=unknown:pos:16 27=unknown:pos:16 28=unknown:pos:16 30=unknown:pos:16 31=unknown:pos:16 36=unknown:pos:16 37=unknown:pos:16 39=unknown:pos:16 40=unknown:pos:16 42=unknown:pos:16 43=unknown:pos:16",
         ],
@@ -437,7 +439,7 @@ const MAIN: Readonly<
           "settled",
           1,
           "012be07dc9275048",
-          "5f3db1b9a5ebbb15",
+          "b9985386ba67536d",
           [
             "18|f0",
             "18|f0.n",
@@ -461,7 +463,7 @@ const MAIN: Readonly<
           "settled",
           1,
           "012be07dc9275048",
-          "5f3db1b9a5ebbb15",
+          "b9985386ba67536d",
           [
             "18|f0",
             "18|f0.n",
@@ -485,7 +487,7 @@ const MAIN: Readonly<
           "settled",
           1,
           "012be07dc9275048",
-          "5f3db1b9a5ebbb15",
+          "b9985386ba67536d",
           [
             "18|f0",
             "18|f0.n",
@@ -507,7 +509,7 @@ const MAIN: Readonly<
           "settled",
           1,
           "012be07dc9275048",
-          "5f3db1b9a5ebbb15",
+          "b9985386ba67536d",
           [
             "18|f0",
             "18|f0.n",
@@ -529,7 +531,7 @@ const MAIN: Readonly<
           "settled",
           1,
           "012be07dc9275048",
-          "5f3db1b9a5ebbb15",
+          "b9985386ba67536d",
           [
             "18|f0",
             "18|f0.n",
@@ -549,7 +551,7 @@ const MAIN: Readonly<
           "settled",
           1,
           "012be07dc9275048",
-          "5f3db1b9a5ebbb15",
+          "b9985386ba67536d",
           [
             "18|f0",
             "18|f0.n",
@@ -593,7 +595,7 @@ const MAIN: Readonly<
           "settled",
           1,
           "012be07dc9275048",
-          "5f3db1b9a5ebbb15",
+          "b9985386ba67536d",
           [
             "18|f0",
             "18|f0.n",
@@ -616,7 +618,7 @@ const MAIN: Readonly<
           "settled",
           1,
           "012be07dc9275048",
-          "5f3db1b9a5ebbb15",
+          "b9985386ba67536d",
           [
             "18|f0",
             "18|f0.n",
@@ -638,28 +640,28 @@ const MAIN: Readonly<
   ],
   "two-whole-copies-five-settled": [
     {
-      natural: "e3b7e6883d646348",
+      natural: "656e979f7285fa0e",
       naturalAnswers: "a457f7ca5528620c",
       windows: [["favourable", 48, 49]],
       at: {
-        47: ["settled", 1, "e3b7e6883d646348", null, "4cb63cdff2f4eda3", null],
+        47: ["settled", 1, "656e979f7285fa0e", null, "4cb63cdff2f4eda3", null],
         48: ["admission", 0, "9f0fb9063726c25e", null, null, null],
         49: ["admission", 0, "9f0fb9063726c25e", null, "e3b0c44298fc1c14", null],
       },
     },
     {
-      natural: "e3b7e6883d646348",
+      natural: "656e979f7285fa0e",
       naturalAnswers: "a457f7ca5528620c",
       windows: [["adverse", 44, 54]],
       at: {
-        43: ["settled", 1, "e3b7e6883d646348", null, "4cb63cdff2f4eda3", null],
-        44: ["settled", 1, "e3b7e6883d646348", null, null, null],
-        53: ["settled", 1, "e3b7e6883d646348", null, null, null],
+        43: ["settled", 1, "656e979f7285fa0e", null, "4cb63cdff2f4eda3", null],
+        44: ["settled", 1, "656e979f7285fa0e", null, null, null],
+        53: ["settled", 1, "656e979f7285fa0e", null, null, null],
         54: ["admission", 0, "9f0fb9063726c25e", null, "e3b0c44298fc1c14", null],
       },
     },
     {
-      natural: "e3b7e6883d646348",
+      natural: "656e979f7285fa0e",
       naturalAnswers: "a457f7ca5528620c",
       windows: [
         ["favourable", 68, 70],
@@ -668,24 +670,24 @@ const MAIN: Readonly<
         ["adverse", 334, 341],
       ],
       at: {
-        67: ["settled", 1, "e3b7e6883d646348", null, "4cb63cdff2f4eda3", null],
+        67: ["settled", 1, "656e979f7285fa0e", null, "4cb63cdff2f4eda3", null],
         68: ["admission", 0, "9f0fb9063726c25e", null, null, null],
         69: ["admission", 0, "9f0fb9063726c25e", null, null, null],
         70: ["admission", 0, "9f0fb9063726c25e", null, "e3b0c44298fc1c14", null],
-        71: ["settled", 1, "e3b7e6883d646348", null, null, null],
-        72: ["settled", 1, "e3b7e6883d646348", null, null, null],
-        73: ["settled", 1, "e3b7e6883d646348", null, "d746ce95202cf0a7", null],
-        75: ["settled", 1, "e3b7e6883d646348", null, "d746ce95202cf0a7", null],
+        71: ["settled", 1, "656e979f7285fa0e", null, null, null],
+        72: ["settled", 1, "656e979f7285fa0e", null, null, null],
+        73: ["settled", 1, "656e979f7285fa0e", null, "d746ce95202cf0a7", null],
+        75: ["settled", 1, "656e979f7285fa0e", null, "d746ce95202cf0a7", null],
         76: ["admission", 0, "9f0fb9063726c25e", null, null, null],
         77: ["admission", 0, "9f0fb9063726c25e", null, "e3b0c44298fc1c14", null],
         333: ["admission", 0, "9f0fb9063726c25e", null, "e3b0c44298fc1c14", null],
-        334: ["settled", 1, "e3b7e6883d646348", null, null, null],
-        340: ["settled", 1, "e3b7e6883d646348", null, null, null],
-        341: ["settled", 1, "e3b7e6883d646348", null, "e3b0c44298fc1c14", null],
+        334: ["settled", 1, "656e979f7285fa0e", null, null, null],
+        340: ["settled", 1, "656e979f7285fa0e", null, null, null],
+        341: ["settled", 1, "656e979f7285fa0e", null, "e3b0c44298fc1c14", null],
       },
     },
     {
-      natural: "e3b7e6883d646348",
+      natural: "656e979f7285fa0e",
       naturalAnswers: "a457f7ca5528620c",
       windows: [
         ["adverse", 43, 53],
@@ -693,12 +695,12 @@ const MAIN: Readonly<
       ],
       at: {
         42: ["admission", 0, "9f0fb9063726c25e", null, "e3b0c44298fc1c14", null],
-        43: ["settled", 1, "e3b7e6883d646348", null, null, null],
-        52: ["settled", 1, "e3b7e6883d646348", null, null, null],
+        43: ["settled", 1, "656e979f7285fa0e", null, null, null],
+        52: ["settled", 1, "656e979f7285fa0e", null, null, null],
         53: ["admission", 0, "9f0fb9063726c25e", null, "e3b0c44298fc1c14", null],
         335: ["admission", 0, "9f0fb9063726c25e", null, "e3b0c44298fc1c14", null],
-        336: ["settled", 1, "e3b7e6883d646348", null, null, null],
-        337: ["settled", 1, "e3b7e6883d646348", null, "e3b0c44298fc1c14", null],
+        336: ["settled", 1, "656e979f7285fa0e", null, null, null],
+        337: ["settled", 1, "656e979f7285fa0e", null, "e3b0c44298fc1c14", null],
       },
     },
   ],
