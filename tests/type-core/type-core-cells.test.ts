@@ -5943,7 +5943,8 @@ test("the carrier design's witnesses give their exact records, in both orders (S
  *   (Astra's recheck r3 F1); a fed cycle whose feeder's store is rejected takes none of the rejected value (her N1);
  * - a merge place deciding by its first copy, beside its second copy in a literal that decides by that copy: the
  *   literal's check, as the meeting is hot only where the literal decides (§2.4 (d));
- * - a live nested union, whose outer list now errs where its elements disagree;
+ * - a live nested union, whose outer list now errs where its elements disagree, and whose `grid` errs at its later
+ *   element, whose written union holds no boolean, as the current checker's does (#1906; it was a runtime check);
  * - a whole-copy ring whose members decide two properties differently, two of them in a list, with a plain or a written
  *   union decider: the list's rejection in the first pass leaves the ring's last copy a possibility, a warning and its
  *   check (Astra's review B1 of #1311: the ring's shared trie still owes its meetings to the list);
