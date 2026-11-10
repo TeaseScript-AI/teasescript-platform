@@ -169,24 +169,38 @@ typed parse's or load's reader type that a stop left open (`OPEN_BY_STOP`, #1767
 that reads a place unless the value lands in a written scalar, and in `Contracts.#answerTask` a level of the call's
 answer, or of its default's below a written `object`, that the stop left unproven; (b) after a settled stop, where the
 obligations cannot be found (`Answers.gated()` gives `null`), "a store whose required checks could not be established at
-the budget" (`lostCheck`); (c) after a settled stop, a store whose required check the published plan would not keep, "a
+the budget" (`lostCheck`), a decline no compile reaches (#2228); (c) after a settled stop, a store whose required check the published plan would not keep, "a
 store whose check was lost at the budget" (`lostCheck`), a stopped decision's own marks among them (#2080): one whose
 completion result is complete owes nothing where the completion owes no check at its store (a declared claim, #2184),
 else it is kept only by a check that carries its contract, and one whose result was lost or is absent only by a complete
 store check (a proved-open result, and a shape result not lost, need no further check at their extent, as for every
-obligation); (d) after a stop before admission settled, `lostCheck` declines nothing. Production compiles with the legacy type checker until the switch, which none of these bounds or declines
-govern.
+obligation); (d) after a stop before admission settled, which decides nothing after the stop, the first owed obligation
+against `unknown`, a store's, a literal's or a typed call's mark, "a store whose check was left undecided at the budget"
+(`lostCheck`, #2080 part 2). (a) to (d), the reasons the gates and rule (R) decline with, carry
+`CandidateOutsideSlice.limit` (`LIMIT_REASONS`); a refusal the slice makes from a diagnostic only a stop produces, such
+as "this operand" from a stop's TSV043 warning, carries its coverage reason and not the marker (#2236). Production compiles with the legacy type checker until the switch, which none of these bounds or
+declines govern.
 
 The requirement is #1526's
 [Owner decision 2](https://github.com/TeaseScript-AI/teasescript-platform/issues/1526#issuecomment-6656976508)
 (2026-11-05, TABLE r4.390), provisional. Condition 1, no executable candidate plan that lets a value through while a
 required check is missing, is built as one gate, `lostCheck` over `Answers.gated()`, declining on unknown obligations
-and lost checks, (b) and (c) above (#1781, `1ec334b94`; a stopped decision's own marks, #2080 part 1); that is no claim that every path to a missing check is
-repaired. Condition 2, every remaining case re-assessed before V2 replaces the legacy compiler, is open; its cases open
-at the time of writing (2026-11-06) are #1832, #1845 (with #1846), the unsettled stops of option (a) (#1252; #1767,
-closed; #2080's unsettled side, 476 of its census's owed items), #1838 and #1836, #1772, a typed read a settled stop
-moved to `unknown` (#2183), the claim (c)'s NoCheck rests on (#2184), and #1781's conservative natural-outside declines
-(128 rows in 8 sources, as reported in PR #1781's work-stop set sweep).
+and lost checks, (b) and (c) above (#1781, `1ec334b94`; a stopped decision's own marks, #2080 part 1), and on undecided
+checks, (d) (#2080 part 2); that is no claim that every path to a missing check is repaired. Condition 2, every remaining
+case re-assessed before V2 replaces the legacy compiler, is open; its cases open at the time of writing (2026-11-10) are
+#1832, #1845 (with #1846), #1838 and #1836, #1772, a typed read a settled stop moved to `unknown` (#2183), the claim
+(c)'s NoCheck rests on (#2184), #1781's conservative natural-outside declines (128 rows in 8 sources, as reported in PR
+#1781's work-stop set sweep), and (d)'s natural declines: 106 compiles, each in one of the four modes, that stop at the
+work allowance or the read depth before admission settled (PR #2227's compiler replay against main 664f1183f, campaign
+`lane1a/2080-part2-replay`, over the areas of `tests/families` and `tools/corpus/fixture`, 51,749 sources, and the
+corpus set, 15,406: 102 in 15 families and 4 in the corpus), which ADR 0021 rule 1.10 ("never rejects a script
+because it is too large or too deeply nested", [ADR 0021](decisions/0021-static-types.md)) decides at the
+re-assessment. Recorded for that re-assessment, open and not accepted design (the Owner, 2026-11-10): what a
+maker gets on such a decline; one code for (a) to (d), with the reason in its message; and a limit field in
+`src/diagnostic-codes.ts` naming the limit's ID in this document, carried by that code and by `TSV076`, so that a later
+report can read the group from the registry. Also open: whether a refusal the slice makes from a diagnostic or a
+contract only a stop produces ("this operand" from a stop's TSV043 warning; "a default whose collection the value it
+stands in for does not type") is a refusal a limit causes, and which others there are (#2236).
 
 How a repair of the type core's work is accepted against `main` (its growth gate) is a testing rule:
 [Scaling diagnostics](TESTING.md#scaling-diagnostics).

@@ -19,7 +19,7 @@ import {
 } from "../../src/type-inference/core/items.js";
 import { compileSourceWithBackend } from "../../src/compiler.js";
 import { analyseCore } from "../../src/type-inference/core/answers.js";
-import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { withLabelRecords } from "../../src/type-inference/core/contract/labels.js";
 import { Consumers, withConsumerOrder } from "../../src/type-inference/core/consumers.js";
 import { operationItems } from "../../src/type-inference/core/operator-table.js";
@@ -839,8 +839,14 @@ test("the stop's warning counts the plan's checks only the stop owes, not the wa
       inMode(mode, () => {
         const compile = () =>
           compileSourceWithBackend(source, { globals: ["hostValue"] }, CORE_BACKEND);
-        const { plan, diagnostics } =
-          allowance === null ? compile() : withTestAllowance(allowance, compile);
+        let compiled;
+        try {
+          compiled = allowance === null ? compile() : withTestAllowance(allowance, compile);
+        } catch (error) {
+          if (!(error instanceof CandidateOutsideSlice)) throw error;
+          return `declined: ${error.what}`;
+        }
+        const { plan, diagnostics } = compiled;
         const stop = diagnostics.find((d) => d.code === "TSV076" && d.severity === "warning");
         if (stop === undefined) return "no stop";
         const count = /(\d+) checks? runs? while it plays instead/u.exec(stop.message)?.[1];
@@ -848,39 +854,55 @@ test("the stop's warning counts the plan's checks only the stop owes, not the wa
       }),
     );
   const typed = (n: number) => `integer${"[]".repeat(n)}`;
-  const copy = (n: number, ...more: string[]) =>
-    [`let typed:${typed(n)}=[]`, "let out=typed", ...more, "exit", ""].join("\n");
+  // (a copy into an inferred place, the issue's, or a written one)
+  const copy = (n: number, out: string, ...more: string[]) =>
+    [`let typed:${typed(n)}=[]`, `let out${out}=typed`, ...more, "exit", ""].join("\n");
+  // (the issue's witness, the #1405 copies' `typed-empty-copy@64`, 60 and 62 warnings at one store before (#2081): its
+  // natural stop in the reversed orders is before admission settled, where the copy's check is left undecided and the
+  // plain gate declines, #2080 part 2)
+  const undecided = `declined: a store whose check was left undecided at the budget`;
+  assert.deepEqual(stops(copy(64, "")), ["no stop", "no stop", undecided, undecided]);
   // the invariant: without a boundary or a published warning, the count is every check of the plan, in every mode
   for (const [name, source, expected] of [
-    // the issue's witness, the #1405 copies' `typed-empty-copy@64`: 60 and 62 warnings at one store before (#2081)
-    ["one deep typed store and its copy", copy(64), ["no stop", "no stop", "1 of 1", "1 of 1"]],
     [
-      "three deep typed stores and their copies",
+      "one deep typed store and its written copy",
+      copy(64, `:${typed(64)}`),
+      ["no stop", "no stop", "2 of 2", "2 of 2"],
+    ],
+    [
+      "three deep typed stores and their written copies",
       [
         ...["a", "b", "c"].map((name) => `let ${name}:${typed(64)}=[]`),
-        "let o1=a",
-        "let o2=b",
-        "let o3=c",
+        `let o1:${typed(64)}=a`,
+        `let o2:${typed(64)}=b`,
+        `let o3:${typed(64)}=c`,
         "exit",
         "",
       ].join("\n"),
-      ["no stop", "no stop", "3 of 3", "3 of 3"],
+      ["no stop", "no stop", "6 of 6", "6 of 6"],
     ],
-    ["a natural run that does not stop", copy(8), ["no stop", "no stop", "no stop", "no stop"]],
+    ["a natural run that does not stop", copy(8, ""), ["no stop", "no stop", "no stop", "no stop"]],
   ] as const)
     assert.deepEqual(stops(source), expected, name);
   // deferred warnings that the plan checks nowhere: the index reads of host data are the runtime's own checks, and its
   // boundary runs anyway (the #1241 shadow-classify witness's 1,025 at its natural stop), so the warning names no count
-  const reads = `let v = hostValue\nsay v${"[0]".repeat(64)}\nexit\n`;
+  // (`v` written: inferred, its store is left undecided before admission settled, and the plain gate declines)
+  const reads = `let v: list = hostValue\nsay v${"[0]".repeat(64)}\nexit\n`;
   const request = coreRequest([{ path: "main.tease", source: reads }]);
   assert.ok(request !== null);
   const total = analyseCore(request).budget.total;
   const half = Math.floor(total / 2);
   assert.ok(withTestAllowance(half, () => analyseCore(request)).budget.deferred.length > 0);
-  assert.deepEqual(stops(reads, half), ["none of 0", "none of 0", "none of 0", "none of 0"]);
+  assert.deepEqual(stops(reads, half), ["none of 1", "none of 1", "none of 1", "none of 1"]);
   // a check a boundary also owes is not one the stop moved: at the deep typed store itself, and at another store
-  const host = `let typed:${typed(64)}=hostValue\nlet out=typed\nexit\n`;
+  const host = `let typed:${typed(64)}=hostValue\nexit\n`;
   assert.deepEqual(stops(host), ["no stop", "no stop", "none of 1", "none of 1"]);
+  assert.deepEqual(stops(`let typed:${typed(64)}=hostValue\nlet out:${typed(64)}=typed\nexit\n`), [
+    "no stop",
+    "no stop",
+    "1 of 2",
+    "1 of 2",
+  ]);
   const at = host.indexOf("hostValue");
   const reversed = MODES.at(-1)!;
   const answers = inMode(reversed, () =>
@@ -888,10 +910,10 @@ test("the stop's warning counts the plan's checks only the stop owes, not the wa
   );
   assert.ok(answers.checks.some((check) => check.boundary && check.site.start === at));
   assert.ok(answers.budget.deferred.some((d) => d.obligation.site.start === at));
-  assert.deepEqual(stops(copy(64, `let m:integer=hostValue`)), [
+  assert.deepEqual(stops(copy(64, `:${typed(64)}`, `let m:integer=hostValue`)), [
     "no stop",
     "no stop",
-    "1 of 2",
-    "1 of 2",
+    "2 of 3",
+    "2 of 3",
   ]);
 });

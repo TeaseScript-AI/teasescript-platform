@@ -10,6 +10,11 @@
 // files Git tracks are read. Lines are Git's, for files and functions alike: a newline (LF) alone ends one, and a final
 // newline ends the last line.
 // Functions are measured in TypeScript and JavaScript files; the script blocks of .vue files are not parsed.
+// A function is named by its own name when that is an identifier or a private name; else, when it is an arrow function
+// or function expression that directly initializes a variable or a property with such a name, by that name; else
+// `(anonymous)`. A function over 150 lines that holds other functions, at any depth, also names the longest of them,
+// with its lines and first line (the first in source order on a tie), at the end of its line; the whole-tree --json
+// gives it as the row's `longestNested`.
 //
 // Without --diff: the whole tree's signals, the top N of each (files over 1000 lines, folders over 20 files, top levels
 // over 12, functions over 150 lines, names a letter apart). --json writes them all; --compare counts each against an
@@ -143,9 +148,34 @@ const lineCount = (text) =>
   (text.match(/\n/gu)?.length ?? 0) + (text === "" || text.endsWith("\n") ? 0 : 1);
 
 /**
- * Each function of `text` (a `file` of a parsed language) over the signal's length: its name, first line and lines,
- * Git's lines. TypeScript also ends a line at a lone carriage return, U+2028 and U+2029, so its own line numbers are
- * not used.
+ * The name the report gives the function `node` (whose parent is `parent`): its own name, an identifier or a private
+ * name; else, for an arrow function or function expression that directly initializes a variable or a property with
+ * such a name, that name; else `(anonymous)`.
+ */
+function functionName(node, parent) {
+  if (node.name && (ts.isIdentifier(node.name) || ts.isPrivateIdentifier(node.name)))
+    return node.name.text;
+  const initializes =
+    (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) &&
+    (ts.isVariableDeclaration(parent) ||
+      ts.isPropertyAssignment(parent) ||
+      ts.isPropertyDeclaration(parent)) &&
+    parent.initializer === node &&
+    (ts.isIdentifier(parent.name) || ts.isPrivateIdentifier(parent.name));
+  return initializes ? parent.name.text : "(anonymous)";
+}
+
+/** How a function row's line ends: its longest nested function, or nothing when it has none. */
+const nestedOf = ({ longestNested: nested }) =>
+  nested === undefined
+    ? ""
+    : `, longest nested function: ${nested.name} (${nested.lines} lines, line ${nested.line})`;
+
+/**
+ * Each function of `text` (a `file` of a parsed language) over the signal's length: its name (`functionName`), first
+ * line and lines, Git's lines, and when it holds other functions, at any depth, the longest of them as
+ * `longestNested`, by the same measures (the first in source order on a tie). TypeScript also ends a line at a lone
+ * carriage return, U+2028 and U+2029, so its own line numbers are not used.
  */
 function longFunctionsOf(file, text) {
   const found = [];
@@ -162,18 +192,28 @@ function longFunctionsOf(file, text) {
     return low;
   };
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false);
-  const visit = (node) => {
+  /** Walks `node`, whose parent is `parent`: the longest function at or below it, the first on a tie, or `null`. */
+  const visit = (node, parent) => {
+    let self = null;
+    let row = null;
     if (ts.isFunctionLike(node) && "body" in node && node.body) {
-      const start = lineOf(node.getStart(source));
-      const span = lineOf(node.getEnd()) - start + 1;
-      if (span > SIGNALS.functionLines) {
-        const name = node.name && ts.isIdentifier(node.name) ? node.name.text : "(anonymous)";
-        found.push({ file, name, line: start, lines: span });
+      const line = lineOf(node.getStart(source));
+      self = { name: functionName(node, parent), line, lines: lineOf(node.getEnd()) - line + 1 };
+      if (self.lines > SIGNALS.functionLines) {
+        row = { file, ...self };
+        found.push(row);
       }
     }
-    ts.forEachChild(node, visit);
+    let nested = null;
+    ts.forEachChild(node, (child) => {
+      const longest = visit(child, node);
+      if (longest !== null && (nested === null || longest.lines > nested.lines)) nested = longest;
+    });
+    if (row !== null && nested !== null) row.longestNested = nested;
+    // a function holds only functions no longer than itself, and it comes first
+    return self ?? nested;
   };
-  visit(source);
+  visit(source, undefined);
   return found;
 }
 
@@ -398,11 +438,12 @@ function addedLinesSignals(file, text, added, moved, growth) {
     for (const fn of longFunctionsOf(file, text)) {
       const end = fn.line + fn.lines - 1;
       const what = `function over ${SIGNALS.functionLines} lines that the change writes into: ${shown(file)}:${fn.line} ${fn.name} (${fn.lines} lines)`;
-      if (holdsLineIn(counted, fn.line, end)) found.push({ signal: "function", line: what });
+      if (holdsLineIn(counted, fn.line, end))
+        found.push({ signal: "function", line: `${what}${nestedOf(fn)}` });
       else if (holdsLineIn(added, fn.line, end))
         found.push({
           signal: "suppressed",
-          line: `suppressed (moved): ${what}, ${discounted(fn.line, end)} moved lines discounted`,
+          line: `suppressed (moved): ${what}, ${discounted(fn.line, end)} moved lines discounted${nestedOf(fn)}`,
         });
     }
   if (growth.growth > SIGNALS.addedLines)
@@ -786,7 +827,7 @@ function main() {
     show(
       `Functions over ${SIGNALS.functionLines} lines`,
       report.longFunctions,
-      (r) => `${r.lines}  ${r.file}:${r.line} ${r.name}`,
+      (r) => `${r.lines}  ${r.file}:${r.line} ${r.name}${nestedOf(r)}`,
     );
     show("Names a letter apart", report.nearNames, (r) => `${r.dir}/: ${r.names.join("  ")}`);
 

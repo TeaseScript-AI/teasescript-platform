@@ -578,8 +578,11 @@ test("the capture ends at the first store whose contract leaves the slice's dept
   assert.equal(budget.stoppedIn, null);
   assert.deepEqual(contracts, []);
   // (16 units more since #1073 PR 4: the route rule asks a possible null's route at its use, AD-1; 460 more since
-  // #1072 A2 checkpoint 2a, #2098: A4's inherited types are solver proofs, 98 frames, 301 yields and 61 literal units)
-  assert.equal(budget.total, 22_963_051);
+  // #1072 A2 checkpoint 2a, #2098: A4's inherited types are solver proofs, 98 frames, 301 yields and 61 literal units;
+  // 18 more since #2065: one prefix's decision index counts its two settled stores' two names, 4 steps and 4 kept units,
+  // costs its three whole stores' classes, 3, keeps its state from then on, 6, and one decided path then looks it up,
+  // 1: `holdersOf`)
+  assert.equal(budget.total, 22_963_069);
 });
 
 test("each analysis's captured contracts are its own final pass's", () => {

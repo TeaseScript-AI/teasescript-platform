@@ -531,7 +531,9 @@ test("a completion past its allowance ends and keeps no result, the analysis at 
   for (const [name, body] of [
     ["a directed copy chain at 4", directed(4)],
     ["W15 at 256", w15(256)],
-    ["whole stores into one place at 64", fields(64)],
+    // (#2065: at 256; at 64 and 128 the reversed order's completion now ends within its allowance, each decision
+    // reading the stores that hold its field, `holdersOf`)
+    ["whole stores into one place at 256", fields(256)],
   ] as const) {
     const source = body + ending;
     const request = coreRequest([{ path: "main.tease", source }], [...GLOBALS, "hostFlag"]);
