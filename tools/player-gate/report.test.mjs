@@ -617,7 +617,7 @@ test("clearing the run's origins attempts each origin and the cache after an ear
   assert.deepEqual(sent, ["http://localhost:1", "http://localhost:2", "Network.clearBrowserCache"]);
 });
 
-test("every scenario's timing cell is in the headline summary; no cell claims validation before #2122 closes", () => {
+test("every scenario's timing cell is in the headline summary, and every cell says what its validation claims", () => {
   const cell = { scenario: "keepHandler", engine: "chromium" };
   const report = reportOf(
     [
@@ -643,16 +643,15 @@ test("every scenario's timing cell is in the headline summary; no cell claims va
   assert.ok(named in report.summary);
   assert.match(
     report.text,
-    /## Declared gaps\n\nEvery cell is unvalidated until #2122 closes, before the activation PR's R1 run/u,
+    /Validated: each value derives from records whose structure, domains, order relations and needed evidence passed the kit's validation; it does not say that a derivation pairs the right records or computes the right formula/u,
   );
-  // No validation claim (orchestrator 2's fallback after Sol code r12): every cell is measured and unvalidated.
-  assert.ok(!/\bvalidated\b/iu.test(report.text), "a validation claim in the report");
+  assert.ok(!/\bunvalidated\b/iu.test(report.text), "a cell labelled unvalidated");
   assert.match(
     report.text,
-    /The kit's values are read from its retained rows without a validation claim; the validation obligation is #2122\./u,
+    /does not say that a derivation pairs the right records or computes the right formula \(`tools\/player-gate\/README\.md`\)\./u,
   );
   for (const heading of report.text.match(/^## .+ \/ .+$/gmu) ?? [])
-    assert.match(heading, /\(measured, unvalidated\)$/u, heading);
+    assert.match(heading, /\(measured, validated\)$/u, heading);
 });
 
 test("a measured failure is a value: the delayed smoke failing at 50 and 250 ms is a complete cell with its findings", () => {

@@ -1122,8 +1122,7 @@ smoke does not predetermine that later tooling decision.
 `tools/player-gate/` measures what the L5 gate's cost report needs to decide whether the Player's engine moves into its
 Worker: real browsers and the Pixel 4a, outside CI, never a threshold; it changes no product file. Every value a cell
 reports derives from records that passed the kit's shared validation: each row is parsed once against its scenario's
-closed shape, and the derivations read only those validated copies. Every cell stays `measured, unvalidated` until
-#2122 closes before the activation PR's R1 run. The headline, the summary and the R0 comparison hold timings and
+closed shape, and the derivations read only those validated copies; every cell is `measured, validated`. The headline, the summary and the R0 comparison hold timings and
 pass/fail only. The kit's README ([`tools/player-gate/README.md`](../tools/player-gate/README.md)) has what the
 validation covers and what it leaves to review, what the kit measures, the files and how to run R0.
 

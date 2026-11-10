@@ -15,9 +15,6 @@ const format = ({ n, median, min, max }) =>
   n === 0 ? "—" : `${round(median)} [${round(min)}–${round(max)}] (n=${n})`;
 const round = (value) => (Math.abs(value) >= 100 ? Math.round(value) : Math.round(value * 10) / 10);
 
-/** The issue that holds the validation obligation until it closes. */
-const GAP_ISSUE = "#2122";
-
 /**
  * The known measured failures of the pass/fail scenarios, each with its finding and issue; a failure not listed here is
  * reported as unexplained, a finding still to be made.
@@ -153,7 +150,7 @@ export function buildReport(rows, phase, artifacts = []) {
   const lines = [
     `# L5 gate cost report (${phase})`,
     "",
-    `The kit's values are read from its retained rows without a validation claim; the validation obligation is ${GAP_ISSUE}.`,
+    "Validated: each value derives from records whose structure, domains, order relations and needed evidence passed the kit's validation; it does not say that a derivation pairs the right records or computes the right formula (`tools/player-gate/README.md`).",
     "",
   ];
   const incomplete = [];
@@ -198,9 +195,9 @@ export function buildReport(rows, phase, artifacts = []) {
       }
       const table = (outsideHeadline[subName] = {});
       outsideLines.push(
-        `## ${subName} (measured, unvalidated)`,
+        `## ${subName} (measured, validated)`,
         "",
-        `${derived.length} samples, measured, unvalidated.`,
+        `${derived.length} samples, measured, validated.`,
         "",
       );
       if (SUB_NOTES[sub]) outsideLines.push(SUB_NOTES[sub], "");
@@ -221,10 +218,6 @@ export function buildReport(rows, phase, artifacts = []) {
     "Outside the headline and the R0 comparison, which are timings and pass/fail only.",
     "",
     ...(outsideLines.length === 0 ? ["None with samples.", ""] : outsideLines),
-    "## Declared gaps",
-    "",
-    `Every cell is unvalidated until ${GAP_ISSUE} closes, before the activation PR's R1 run, since the gate's decision is R1's.`,
-    "",
   );
   // The build's files and their sizes: byte evidence too, outside the headline, which is timings only.
   const files = artifactLines(artifacts);
@@ -270,9 +263,9 @@ function timingCell(cell, name, derived, conditions, { lines, incomplete, summar
   }
   const table = (summary[name] = {});
   lines.push(
-    `## ${name} (measured, unvalidated)`,
+    `## ${name} (measured, validated)`,
     "",
-    `${derived.length} samples, measured, unvalidated. ${conditions.join(" | ")}`,
+    `${derived.length} samples, measured, validated. ${conditions.join(" | ")}`,
     "",
   );
   if (NOTES[cell.scenario]) lines.push(NOTES[cell.scenario], "");

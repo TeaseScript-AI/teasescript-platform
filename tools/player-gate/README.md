@@ -14,7 +14,8 @@ exits 2.
 ## Validation (#2122)
 
 Every value a cell reports derives from records that passed the kit's shared validation; a sample that fails makes its
-cell incomplete and is never a value in a median. Every cell stays labelled `measured, unvalidated` until #2122 closes.
+cell incomplete and is never a value in a median. Every cell is labelled `measured, validated`, and the report
+says beside the label what that claims.
 
 - **One parse.** `report.mjs` parses each row once (`lib/records.mjs`) against its scenario's closed shape
   (`lib/row-shapes.mjs`). Every path is declared, with its type and domain. An undeclared path, a missing required
