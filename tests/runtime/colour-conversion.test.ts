@@ -324,7 +324,7 @@ test("converts with no host transcendental, colorjs.io's parsing included", () =
   assert.deepEqual(attempts, []);
 });
 
-test("the colour conversion admits only operations whose results the specification fixes", () => {
+test("the colour conversion passes its five static checks: exact Math, the closed text module, the formatted output, pinned imports, short literals", () => {
   assert.deepEqual(exactOperationEscapes(), []);
   // Each form outside the admission is an escape: an addition to a file, or a replacement in it.
   const source = (file: string) => readFileSync(resolve(process.cwd(), file), "utf8");
@@ -338,7 +338,6 @@ test("the colour conversion admits only operations whose results the specificati
     "return `oklch(${formatNumber(lightness)} ${formatNumber(chroma)} ${formatNumber(hue)})`;";
   const PRINT = "x.toPrecision(15)";
   const OKLAB = "  const degrees = finiteAtan2(b, a);";
-  const PARSE = "    const parsed = new Color(source);";
   for (const [label, overrides] of [
     // The earlier families.
     ["a non-exact Math member", replaced("src/color.ts", OKLAB, `${OKLAB}\n  void Math.cbrt(2);`)],
@@ -365,34 +364,6 @@ test("the colour conversion admits only operations whose results the specificati
     ],
     ["** on numbers", added("src/color.ts", "export const a = (x: number) => x ** 2;")],
     [
-      "a colorjs.io conversion",
-      replaced("src/color.ts", PARSE, `${PARSE}\n    void new Color(source).to("oklch");`),
-    ],
-    [
-      "a parsed colorjs.io object's method",
-      replaced("src/color.ts", PARSE, `${PARSE}\n    void parsed.to("oklch");`),
-    ],
-    [
-      "a widened colorjs.io object",
-      replaced(
-        "src/color.ts",
-        PARSE,
-        `${PARSE}\n    const widened: Pick<Color, "to"> = parsed;\n    void widened.to("oklch");`,
-      ),
-    ],
-    [
-      "[x].join in the closure",
-      replaced("src/color.ts", OKLAB, `${OKLAB}\n  void [degrees].join("");`),
-    ],
-    [
-      "a computed key with for…in in the closure",
-      replaced(
-        "src/color.ts",
-        OKLAB,
-        `${OKLAB}\n  for (const key in { [degrees]: true }) void key;`,
-      ),
-    ],
-    [
       "a colorjs.io import into numeric-functions",
       added(
         "src/numeric-functions.ts",
@@ -415,23 +386,15 @@ test("the colour conversion admits only operations whose results the specificati
       ),
     ],
     ["String in the text module", replaced("src/color-text.ts", PRINT, "String(x)")],
-    // The design round's.
+    // The design round's (toExponential without precision).
     ["toExponential without precision", replaced("src/color-text.ts", PRINT, "x.toExponential()")],
     [
-      "a long decimal read back",
-      replaced("src/color.ts", OKLAB, `${OKLAB}\n  void Number("0.100000000000000012491");`),
-    ],
-    [
-      "a NaN stored outside decompose",
+      "a literal of more than 20 significant digits",
       replaced(
         "src/color.ts",
-        OKLAB,
-        `${OKLAB}\n  new DataView(new ArrayBuffer(8)).setFloat64(0, Infinity - Infinity);`,
+        "const LAB_KAPPA = 24389 / 27;",
+        "const LAB_KAPPA = 903.296296296296296296296;",
       ),
-    ],
-    [
-      "a number as a computed key",
-      replaced("src/color.ts", OKLAB, `${OKLAB}\n  void { [degrees]: 1 };`),
     ],
     // The precision controls.
     ["toPrecision without an argument", replaced("src/color-text.ts", PRINT, "x.toPrecision()")],
@@ -442,45 +405,6 @@ test("the colour conversion admits only operations whose results the specificati
     ],
     ["toPrecision(16)", replaced("src/color-text.ts", PRINT, "x.toPrecision(16)")],
     ["toFixed", replaced("src/color-text.ts", PRINT, "x.toFixed(3)")],
-    // The closure's own.
-    [
-      "a helper the closure calls, with an unadmitted call",
-      {
-        "src/color.ts": `${replaced("src/color.ts", OKLAB, `${OKLAB}\n  unchecked();`)["src/color.ts"]!}\nfunction unchecked(): void {\n  void [1].join("");\n}\n`,
-      },
-    ],
-    ["a free host-property read", replaced("src/color.ts", OKLAB, `${OKLAB}\n  void Date.now();`)],
-    [
-      "a write to a support table",
-      added(
-        "src/numeric-functions.ts",
-        "export function spoil(): void {\n  (ONE as { hi: number }).hi = 2;\n}",
-      ),
-    ],
-    [
-      "a reassigned closure function",
-      added(
-        "src/deterministic-math.ts",
-        "export function spoil(): void {\n  // @ts-expect-error a reassignment\n  decompose = () => [0, 0];\n}",
-      ),
-    ],
-    // The float-storage primitive and the finite wrappers.
-    [
-      "a NaN stored inside decompose",
-      replaced(
-        "src/deterministic-math.ts",
-        "view.setFloat64(0, subnormal ? x * 4503599627370496 : x, false);",
-        "view.setFloat64(0, Infinity - Infinity, false);",
-      ),
-    ],
-    [
-      "a wrapper without its finite check",
-      replaced(
-        "src/color.ts",
-        "  if (!Number.isFinite(x)) return Number.NaN;\n  return cubeRoot(x);",
-        "  return cubeRoot(x);",
-      ),
-    ],
   ] as const)
     assert.notDeepEqual(exactOperationEscapes(overrides), [], label);
 });

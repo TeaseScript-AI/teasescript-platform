@@ -1,8 +1,8 @@
-// The text of a normalized colour's coordinates (#2147): 15 significant digits, so a decimal written with at most 15
-// digits prints as written, and every engine prints the same text for the same double. A closed module: it imports
-// nothing, and `tests/runtime/colour-conversion.test.ts` checks it whole.
+// The text of a normalized colour's coordinates (#2147). Fixed precision: 15 significant digits, or 17 above the
+// conservative overflow cutoff. A closed module: it imports nothing, and `tests/runtime/colour-conversion.test.ts`
+// checks it whole.
 
-/** The magnitude above which 15 digits can round past the largest double: 17 digits always read back. */
+/** A conservative cutoff: above it, 15 digits could round past the largest double, so 17 are printed; 17 always read back. */
 const FIFTEEN_DIGITS_READ_BACK = 1.79769313486231e308;
 
 /**
@@ -12,7 +12,7 @@ const FIFTEEN_DIGITS_READ_BACK = 1.79769313486231e308;
  */
 export function formatNumber(x: number): string {
   if (x === 0) return "0";
-  // Every double above this literal can round at 15 digits to a decimal beyond the largest double.
+  // Near the largest double, 15 digits can round to a decimal beyond it; the cutoff is conservative.
   const text = Math.abs(x) > FIFTEEN_DIGITS_READ_BACK ? x.toPrecision(17) : x.toPrecision(15);
   const parts = text.split("e");
   let mantissa = parts[0]!;
