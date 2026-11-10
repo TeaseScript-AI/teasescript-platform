@@ -675,6 +675,6 @@ test("a store's part checks keep a stopped mark only where the stored value's ow
   assert.ok(store?.kind === "assign");
   assert.deepEqual(
     [store.typeCheck, store.partChecks?.map((part) => part.place)],
-    [undefined, ["b.f.n"]],
+    [undefined, ["'b.f.n'"]],
   );
 });
