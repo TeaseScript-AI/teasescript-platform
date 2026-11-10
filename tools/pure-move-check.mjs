@@ -3,9 +3,11 @@
 //
 //   node tools/pure-move-check.mjs BASE [--declare FILE] [--renames FILE] [PATH…]
 //
-// The change is the one from `git merge-base BASE HEAD` to `HEAD`, both Git's committed trees (commit first); PATHs
-// limit it. Git's moved-line detection is read once over the whole change (`moved-lines.mjs`), so a block moved from
-// one file into another counts as moved.
+// The change is the one from `git merge-base BASE HEAD` to `HEAD`, both Git's committed trees (commit first), renames
+// included; PATHs limit it, as Git's literal pathspecs. A check that looked at nothing has not passed: a PATH that
+// matches no file of the change, on either side, is refused (an unchanged file matches none), and so is an empty
+// change, as is an argument that begins with `-` and is no option above. Git's moved-line detection is read once over
+// the whole change (`moved-lines.mjs`), so a block moved from one file into another counts as moved.
 //
 // An added or removed line Git does not mark as moved is admitted only as one of these forms, nothing else; each form
 // holds the whole line, by that side's blob parsed as TypeScript (TypeScript and JavaScript files; comments are the
@@ -65,8 +67,8 @@
 //
 // Exit status: 0 when every line is moved, admitted or declared and no binding differs; 1 otherwise (each printed with
 // its file and line); 2 when Git's output or the declarations cannot be read, a file name Git quotes, or a binary change, whose
-// content the check cannot inspect.
-import { execFileSync } from "node:child_process";
+// content the check cannot inspect, and for a refused argument or an empty change.
+import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -777,7 +779,44 @@ export function checkMove(
   const git = (...args) =>
     execFileSync("git", args, { cwd, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 });
   const mergeBase = git("merge-base", base, "HEAD").trim();
+  // each PATH by Git's own pathspec matching, with `movedLinesOf`'s settings that decide which files a diff shows: the
+  // change limited to it is empty or not (exit 0 or 1)
+  const unmatched = paths.filter((file) => {
+    const { status, stderr } = spawnSync(
+      "git",
+      [
+        "diff",
+        "--quiet",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--no-relative",
+        mergeBase,
+        "HEAD",
+        "--",
+        `:(literal)${file}`,
+      ],
+      { cwd, encoding: "utf8" },
+    );
+    if (status !== 0 && status !== 1)
+      throw new CannotRun(
+        `pure-move-check: Git cannot limit the change to ${file}: ${stderr.trim()}`,
+      );
+    return status === 0;
+  });
+  if (unmatched.length > 0)
+    throw new CannotRun(
+      unmatched
+        .map(
+          (file) =>
+            `pure-move-check: ${file} matches no file of the change ${mergeBase.slice(0, 12)}..HEAD`,
+        )
+        .join("\n"),
+    );
   const files = movedLinesOf(mergeBase, "HEAD", paths, cwd);
+  if (files.length === 0)
+    throw new CannotRun(
+      `pure-move-check: the change ${mergeBase.slice(0, 12)}..HEAD is empty: nothing to check (the check reads committed trees: commit first)`,
+    );
   const binary = files.filter((change) => change.binary);
   if (binary.length > 0)
     throw new CannotRun(
@@ -949,7 +988,9 @@ function main() {
     args.splice(renamesAt, 2);
   }
   const [base, ...paths] = args;
-  if (base === undefined || base.startsWith("--")) {
+  const unknown = args.find((arg) => arg.startsWith("-"));
+  if (base === undefined || unknown !== undefined) {
+    if (unknown !== undefined) console.error(`pure-move-check: unknown option ${unknown}`);
     console.error(
       "usage: node tools/pure-move-check.mjs BASE [--declare FILE] [--renames FILE] [PATH…]",
     );
