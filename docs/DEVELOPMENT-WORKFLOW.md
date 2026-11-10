@@ -225,7 +225,8 @@ choosing the cheapest candidate that makes the claim true: a narrower claim (one
 open set](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#rules-over-an-open-set), with the fact that supports it shown in
 the pull request: the forms actually used, a log, a count), one systematic structure, an invariant, a design round; a
 scope cut to an issue is possible at any candidate. A later candidate is owed only when the earlier one leaves a sibling
-live. The second sibling of one family starts the choice: the implementer stops repairing instances and reports the
+live. The second sibling of one family starts the choice, in the builder's reply to the round that found it: the
+implementer stops repairing instances and reports the
 narrower claim and the structure, each with its cost, and a third instance is not repaired on its own. When the family's
 mechanism is another tool's or the runtime's semantics (a linter's configuration, a renderer, runtime provenance read by
 a static check are illustrations, not the list), the narrower claim names what the repository owns and the residual, and
@@ -472,9 +473,12 @@ On the light route, a short plan goes in the pull-request description; it needs 
 and the coordinator may redirect at any review. On the full route, the plan is a document in the coordinators'
 repository that the pull request links, and the coordinator accepts it before code. On either route, the plan names
 every tool, check, proof or generator the change builds whose verdict an acceptance claim rests on, wherever it lives,
-an evidence folder included: what it decides, the maintained tool that already does that job (the language's own parser
-or compiler, an existing checker, differ or test runner, a helper under `shared/`) and the reason the plan does not use
-it; such a tool lives under the script boundary in [Report what cost a wrong
+an evidence folder included: what it decides, the set it closes and what an input outside that set does, the maintained
+tool that already does that job (the language's own parser or compiler, an existing checker, differ or test runner, a
+helper under `shared/`) and the reason the plan does not use it.
+[Rules over an open set](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#rules-over-an-open-set) holds for such a check
+as for the code it checks: a check over code forms fails every form it does not name, or the plan narrows its claim to
+what the check resolves. Such a tool lives under the script boundary in [Report what cost a wrong
 turn](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#report-what-cost-a-wrong-turn) (a shared helper with its header
 until a rule names its output, then a repository tool with tests), never loose in an evidence folder. A probe that only
 collects figures an existing tool prints needs no entry. Anything a later reader needs from it, or from the reports it
@@ -482,7 +486,11 @@ links, is summarised in the pull request. A full-route plan states:
 
 - the files and the expected size of each change (lines changed per file), and where new code goes: its module and
   folder, per [Code structure](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-structure);
-- what must stay identical and what may differ;
+- what must stay identical and what may differ. "Identical to the base" is the bar only for a change meant to change
+  nothing (a speed-up, a clean-up, a move), and only for normal compiles and runs: those that reach no limit of the
+  [resource-limit registry](RESOURCE-LIMITS.md), failing ones included. Every difference outside that bar is named with
+  its judgement (an improvement, neutral, or a regression) and its extent: the set it was measured over, how that set
+  was chosen, and the case that would break the claim;
 - the evidence level;
 - the growth bar, when it applies;
 - the construction, its clauses, and a mutant for each clause;
@@ -548,11 +556,15 @@ section listing each one with its issue number.
 
 On the full route, the before/after comparison is classified. Each difference is in one class: identical; cost only
 (work, time, memory, or size); limit behavior moved (what completes, stops, or fails under a limit); output added or
-lost (a diagnostic, check, message, or field); or result changed. A lost check is always a blocker. Other lost output,
-and a changed result, are blockers unless the plan declared them. Added output, and moved limit behavior (a trigger 1
-change), are blockers unless the plan or the pull-request body declares them. A cost-only difference is a blocker only
-when the growth bar applies and is exceeded. The pull-request body's comparison ledger records
-every difference as declared or as a loss, with the case that shows it, and includes the known differences.
+lost (a diagnostic, check, message, or field); or result changed. Each difference is also judged: an improvement,
+neutral, or a regression. The plan or the pull-request body proposes the judgement and a reviewer contests it with a
+case. A difference that departs from accepted syntax, semantics or a recorded decision is a regression whatever its
+merit, and one that restores them is an improvement. A lost check is always a regression and a blocker. Any other
+difference is a blocker only when it is a regression, or when the change was meant to change nothing and the difference
+is in a normal compile or run. A review asks for no improvement to be undone, and no round is spent on a difference
+judged neutral. A cost-only difference is a regression only when the growth bar applies and is exceeded. The
+pull-request body's comparison ledger records every difference, one a review found included, with its class, its
+judgement, its extent and the case that shows it, and includes the known differences.
 
 The **growth bar** applies when the change alters a path whose work grows with input and an amplification risk is
 credible; its method is in [Scaling diagnostics](TESTING.md#scaling-diagnostics).
@@ -578,7 +590,8 @@ The builder starts each code review round as a new reviewer session with a compa
 earlier findings and their answers, the diff since the last round, and the scope. The reviewer's only write is one
 comment on the pull request, with the content in
 [Findings and outcome](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#findings-and-outcome): the comment names the
-exact head SHA and, from the second round on, states for each earlier finding whether it is closed. Rounds after the
+exact head SHA and, where evidence contradicts what the brief assumes, says so first; from the second round on it
+states for each earlier finding whether it is closed. Rounds after the
 first are scoped to the open findings. Findings follow [Review convergence](#review-convergence).
 
 - **Full:** rounds until the reviewer states that every finding from every round is closed, then the final review.
@@ -592,8 +605,15 @@ request holds. Never move a review to another role's model, except under a fallb
 
 The builder sends one complete message per event to the coordinator, through the channel the assignment names: the
 plan; READY; a question, with the options and a recommendation, continuing meanwhile on whatever the answer does not
-block; a blocker; or a family report ([Review convergence](#review-convergence)). There are no progress notes between
-events, and stopping work does not deliver a message.
+block; a finding or a ruling the builder contests, with the reason, before it is repaired or built; a blocker; or a
+family report ([Review convergence](#review-convergence)). There are no progress notes between events, and stopping
+work does not deliver a message.
+
+A critical question is asked when something deserves asking, by a builder, a reviewer or a coordinator alike, of a
+plan, a brief, a ruling or a finding, in the message its author already sends; the number is whatever is worth asking,
+and none is invented to fill a place. A plan, a READY, a review comment and a coordinator's brief each carry one line,
+`Critical questions:`, with those questions or `none`: the line records that its author considered it, and is no duty
+to find one.
 
 READY contains:
 
@@ -610,7 +630,8 @@ READY contains:
   and the line "Worked around or repeated by hand:", with "none" when there was nothing;
 - each lint disable, `@ts-expect-error` or `@ts-ignore`, skipped test and allowlist entry the change adds, with its
   reason;
-- on the full route, what the final review should cover.
+- the claim the builder holds weakest, and the command behind each count and each "none" in this message;
+- on the full route, what the final review should cover, starting with that claim.
 
 After any repair, the builder sends READY again at the new head.
 
@@ -620,7 +641,8 @@ The coordinator writes the final reviewer's brief. It contains:
 
 - the exact head and base, and what to read;
 - numbered items, each with the claim, the cases to construct beyond the pull request's own tests, and what counts as
-  a blocker;
+  a blocker; the builder's weakest claim comes first, and where the coordinator doubts a claim the item asks the
+  reviewer to break it;
 - the clarity and structure item: does anything the change adds or touches mislead, or sit outside the module and
   folder its owner names, as in [Code that does not mislead](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-that-does-not-mislead)
   and [Code structure](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-structure);
