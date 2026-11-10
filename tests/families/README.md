@@ -64,8 +64,9 @@ What `run.mjs`, `stalls.mjs` and the stored baselines (`baselines.mjs`) promise;
   `sx-job status` shows each but 0 as "failed".
 
 - **The evidence total** of a replay is `stalls.mjs`'s total over the shards' `--work` records. It names each area
-  complete only with its shards `0/N` to `N-1/N` of one plan, counts a repeated place once and refuses a shard given
-  twice; a sum of the shards' own totals counts each repeat. Its growth lines are advisory.
+  complete only with its shards `0/N` to `N-1/N` of one plan, shared out alike (all by index, or all by one costs file,
+  `--split`), counts a repeated place once and refuses a shard given twice; a sum of the shards' own totals counts each
+  repeat. Its growth lines are advisory.
 - **A stored baseline's identity:** its MANIFEST (the `src/` tree, the oracle library, the lockfile, Node) and each
   area's PLAN (the limits above, the allowances, each generator's checks, each shard's places, each by its generator's
   id). The runner's own source, `--work` records and `--out` files are no part of it, nor are peaks, `nearCap`,
@@ -78,7 +79,7 @@ Build both trees (`npm run build:typescript`; each needs `dist/tests/helpers/typ
 
 ```sh
 node tests/families/run.mjs <area> <base checkout or dist> <head checkout or dist> [--sizes 4,8] \
-  [--allowances natural,16,256] [--shard i/N] [--units 4] [--timeout 1800] [--memory 2048] \
+  [--allowances natural,16,256] [--shard i/N [--split <costs file>]] [--units 4] [--timeout 1800] [--memory 2048] \
   [--out differences.jsonl] [--work <area>-<i>of<N>.work.jsonl] [--only <stall index>] [--items <sources> | --items-from-env]
 node tests/families/run.mjs <area> <head> --baseline ~/work/baselines/<base src tree>/<area> [the same options]
 node tests/families/run.mjs <area> <base tree> --store ~/work/baselines [--shard i/N]
@@ -163,6 +164,12 @@ the area's every source once, and a job runs its batch with `run.mjs <area> <bas
 whose record names the batch, so the queue's `--target` balances sources rather than shards. A replay's per-area report is `stalls.mjs`'s area lines and total, counted
 in sources, not a sum of the shards' log lines, whose `unansweredAlike` counts runs; a pool's shards run with `--work`,
 whose records it reads.
+
+A replay (`tools/compiler-replay.mjs submit`) shares each area out by its sources' recorded seconds (#2272): with
+`--split <costs file>`, shard `i/N` runs the sources `split.mjs`'s `binsOf` gives shard `i`, longest first to the
+least-loaded shard, by a costs file `split.mjs`'s `costsOf` makes from `--work` records (a baseline fill's or a
+replay's). The record names the file's sha256; `--store` refuses `--split`, as a baseline's PLAN binds its shards by
+index.
 
 With `--baseline`, the head alone runs, against a stored run of the base: each run is judged as above against the stored
 result of the same source (its generator, name and key, so an edited source is new), mode and check (unanswered alike
@@ -321,9 +328,9 @@ compile charges and the questions it asks its answers, exactly; `--demands 16,64
 analysis of the held family's stop search, or that search's work between them) stalls by the runner's rule above: its
 units past `--units` (4) times its program's allowance, the allowance of the source's natural compile for a run at a
 test allowance; a run past the safety net, `--timeout` (1,800 s), makes its source `uncharged`, never a stall. One JSON
-line per source goes to `--out`, whose sources a rerun with it counts as recorded without running them again, and a
-summary to stdout; `plans.mjs summary <records>...` classifies the records (identical, work only, questions,
-publication, stops) and lists each difference, stall and uncharged source. A builder runs the head tree's copy instead
+line per source (its set, name and `key`) goes to `--out`, whose sources, by name and key, a rerun with it counts as
+recorded without running them again, and a summary to stdout; `plans.mjs summary <records>...` classifies the records
+(identical, work only, questions, publication, stops) and lists each difference, stall and uncharged source. A builder runs the head tree's copy instead
 of copying a kit, and extends it here where a comparison needs more:
 
 ```sh
@@ -405,9 +412,12 @@ round put it: positive escapes are the blockers; an unwitnessed cell is unresolv
   each natural error's site; it and the type-derived values find escapes and never decide `closed`.
 - `declined`, `natural declined`, `no plan`: a refusal, or nothing to run.
 
-An item is a `plans.mjs` record's `{set, name, mode, demand}` or a records row's `{files, globals, label, demand}`.
-The tool writes `rows.jsonl` and `summary.json` to `--out`, a missing unit's row marked `missing`.
-- Exit 1: any `open` or `later` item, a missing unit, or an exception.
+An item is a `plans.mjs` record's `{set, name, key?, mode, demand}` or a records row's `{files, globals, label, demand}`.
+A set's item runs the unit of its name and, given one, its `key` (`sourceKey`, which `units.mjs` gives every unit):
+units of one name with one key are one unit, and an item matching units with different keys is never resolved by a
+pick (#2254). The tool writes `rows.jsonl` (each with the `key` it ran) and `summary.json` to `--out`, a missing unit's
+row marked `missing`, an ambiguous item's `ambiguous` with the keys it matches.
+- Exit 1: any `open` or `later` item, a missing or ambiguous unit, or an exception.
 - Exit 2: a usage error or a bad `--shard`.
 - `unwitnessed` is counted, not failed.
 

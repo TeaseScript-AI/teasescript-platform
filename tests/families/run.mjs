@@ -1,6 +1,6 @@
-// node tests/families/run.mjs <area> <base> <head> [--sizes 4,8] [--allowances natural,16,256] [--shard i/N]
-//   [--units 4] [--timeout 1800] [--memory 2048] [--out differences.jsonl] [--work <area>-<i>of<N>.work.jsonl]
-//   [--only <index>] [--items <file> | --items-from-env]
+// node tests/families/run.mjs <area> <base> <head> [--sizes 4,8] [--allowances natural,16,256] [--shard i/N
+//   [--split <costs file>]] [--units 4] [--timeout 1800] [--memory 2048] [--out differences.jsonl]
+//   [--work <area>-<i>of<N>.work.jsonl] [--only <index>] [--items <file> | --items-from-env]
 // node tests/families/run.mjs <area> <head> --baseline <folder> [options]
 // node tests/families/run.mjs <area> <tree> --store <folder> [--shard i/N]
 // Runs every generator of tests/families/<area>/ (or of the folder an absolute <area> names) against two built trees (a
@@ -31,7 +31,9 @@
 // stalled run's up to the stall, and what the source counted (#1564), which `stalls.mjs` reads; `--only` runs the
 // sources of the area that a stall index lists; `--items` (or `--items-from-env`, an item pool's batch in `$SX_ITEMS`)
 // the sources whose places its file lists (`items.mjs sources`, #1826), its `--work` record named `items <hash>` in
-// place of a shard. A run whose peak heap passes `NEAR_CAP` of a source's process's heap limit is near the cap: counted
+// place of a shard. `--split` (#2272) makes shard i/N the sources `split.mjs`'s `binsOf` gives shard i by the costs
+// file's recorded seconds, in place of those whose index is i modulo N; its `--work` record names the file's sha256.
+// A run whose peak heap passes `NEAR_CAP` of a source's process's heap limit is near the cap: counted
 // (`nearCap`) and named in `--out`, advisory only (`run-contract.mjs`). Prints one JSON line per generator and a total:
 // sources, unparsed, stalled, exceptions, unanswered, unansweredAlike, uncompared, uncharged, modes, runs, differences,
 // and what each tree's build lacks of what the runner reads (`capabilities`).
@@ -73,6 +75,7 @@ import {
   UNKNOWN_REASON,
 } from "./run-contract.mjs";
 import { generatorsOf, placeOf, sourceKey } from "./sources.mjs";
+import { binsOf, costsHash, parseCosts } from "./split.mjs";
 
 /** A tree's oracle library, from its `dist/`. */
 async function oracles(root) {
@@ -568,6 +571,20 @@ if (process.argv[2] === "--child") {
     refused("--items runs the sources it lists: drop --store, --shard and --only");
   if (options.has("items") && options.has("items-from-env"))
     refused("--items and --items-from-env: give one");
+  // `--split`: a shard of the area shared out by recorded seconds (#2272); a baseline's PLAN binds its shards by index
+  let split;
+  if (options.has("split")) {
+    if (store !== undefined || itemized || options.has("only") || !options.has("shard"))
+      refused(
+        "--split shares out a replay's --shard i/N: drop --store, --items and --only, give --shard",
+      );
+    try {
+      const text = readFileSync(option("split"), "utf8");
+      split = { hash: costsHash(text), costs: parseCosts(text) };
+    } catch (error) {
+      refused(`--split ${option("split")}: ${error.message}`);
+    }
+  }
   // the runner's own files (`--out`, and `--work`'s record of each source, #1564) lie outside every baseline: not in the
   // folder it stores into or reads, nor in the folder of baselines of the baseline it reads, nor in any baseline (#1542
   // r4, r5), all as the system resolves them; each is a new file, never the old one truncated, so that another link to
@@ -829,7 +846,7 @@ if (process.argv[2] === "--child") {
   }
   // with `--work` or `--only`, every source's place in the area's order, before a shard or `--only` selects any
   const places =
-    work === undefined && !options.has("only") && !itemized
+    work === undefined && !options.has("only") && !itemized && split === undefined
       ? []
       : every.flatMap(({ name, sources }) => sources.map((source) => placeOf(name, source)));
   // `--only`: of this area, the sources a stall index lists (`stalls.mjs`), each of which the area must hold
@@ -886,11 +903,18 @@ if (process.argv[2] === "--child") {
     const missing = [...items].filter((place) => !held.has(place));
     if (missing.length > 0) refused(`--items names sources the area does not hold: ${missing}`);
   }
+  // `--split`: each place's shard by the area's costs, the area named by its folder as a costs file names it
+  const costs = split?.costs.areas[path.basename(folder)];
+  if (split !== undefined && costs === undefined)
+    refused(`--split ${option("split")} holds no costs of ${path.basename(folder)}`);
+  const bins = costs === undefined ? undefined : binsOf(places, costs, shards);
   const generators = every.map(({ sources, ...generator }) => ({
     ...generator,
     sources: sources.filter(
       (source, index) =>
-        index % shards === shard &&
+        (bins === undefined
+          ? index % shards === shard
+          : bins.get(placeOf(generator.name, source)) === shard) &&
         (only === undefined || only.has(placeOf(generator.name, source))) &&
         (items === undefined || items.has(placeOf(generator.name, source))),
     ),
@@ -1031,6 +1055,8 @@ if (process.argv[2] === "--child") {
               .slice(0, 16)}`,
       // (a batch names the area's count of sources, so that its pool's batches together are known whole: `stalls.mjs`)
       ...(items === undefined ? {} : { places: new Set(places).size }),
+      // (the costs file a split shard was shared out by, `--split`: an area's shards are whole under one, `stalls.mjs`)
+      ...(split === undefined ? {} : { split: split.hash }),
       roots,
       ...(baseline === undefined ? {} : { baseline }),
       ...(store === undefined ? {} : { store: option("store") }),

@@ -2,11 +2,13 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
+import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   areasOf,
+  batchOf,
   declarations,
   ranOut,
   report,
@@ -55,31 +57,62 @@ test("submit queues the set and every area in 16 shards, the fixture by its fold
   assert.doesNotMatch(copies.at(-1), /--memory|SX_TREE_base/u);
 });
 
-test("submit hands each submission to the queue and prints the ids it returns", () => {
-  const bin = mkdtempSync(join(tmpdir(), "compiler-replay-bin-"));
+/** A stand-in `sx-job` in `bin` that logs each call's arguments, a batch's lines after them, and prints an id a job. */
+function standInQueue(bin, id = "11111111111111") {
   const log = join(bin, "calls.jsonl");
   writeFileSync(
     join(bin, "sx-job"),
-    `#!/bin/sh\nnode -e 'require("fs").appendFileSync(process.argv[1], JSON.stringify(process.argv.slice(2)) + "\\n")' "${log}" "$@"\necho 11111111111111\n`,
+    `#!/bin/sh
+node -e 'const fs = require("fs"); const [log, ...args] = process.argv.slice(1);
+const lines = args[0] === "submit-batch" ? fs.readFileSync(args[1], "utf8").trim().split("\\n") : [];
+fs.appendFileSync(log, JSON.stringify({ args, lines }) + "\\n");
+for (const _ of args[0] === "submit-batch" ? lines : [0]) console.log("${id}");' "${log}" "$@"
+`,
   );
   chmodSync(join(bin, "sx-job"), 0o755);
-  try {
-    const run = spawnSync(
-      process.execPath,
-      [tool, "submit", "b".repeat(40), "h".repeat(40), "--owner", "o", "--campaign", "p"],
-      { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } },
-    );
-    assert.equal(run.status, 0, run.stderr);
-    const calls = readFileSync(log, "utf8")
+  return () =>
+    readFileSync(log, "utf8")
       .trim()
       .split("\n")
       .map((line) => JSON.parse(line));
-    assert.equal(calls.length, 1 + areasOf(ROOT).length);
-    assert.ok(calls.every((args) => args[0] === "submit"));
+}
+
+test("submit hands every shard to the queue in one batch and prints the ids it returns", () => {
+  const bin = mkdtempSync(join(tmpdir(), "compiler-replay-bin-"));
+  const calls = standInQueue(bin);
+  try {
+    const run = spawnSync(
+      process.execPath,
+      [
+        tool,
+        "submit",
+        "b".repeat(40),
+        "h".repeat(40),
+        "--owner",
+        "o",
+        "--campaign",
+        "p",
+        "--priority",
+        "background",
+      ],
+      { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } },
+    );
+    assert.equal(run.status, 0, run.stderr);
+    const [batch, ...more] = calls();
+    assert.ok(batch.lines.every((line) => line.startsWith("'--priority' 'background' ")));
+    assert.deepEqual([batch.args[0], more.length], ["submit-batch", 0]);
+    assert.equal(batch.lines.length, 16 * (1 + areasOf(ROOT).length));
+    // (each line one shard's own submission, its index written in, shell-quoted)
+    assert.match(batch.lines[0], /^'--priority' 'background' '--name' 'set-0of16' /u);
+    assert.ok(batch.lines.every((line) => !line.includes("--shards") && !line.includes("{i}")));
     assert.equal(
       run.stdout.split("\n").filter((line) => line === "11111111111111").length,
-      calls.length,
+      batch.lines.length,
     );
+    // (the count of jobs, printed before the batch is queued)
+    const printed = run.stdout.split("\n");
+    const total = printed.indexOf(`jobs: ${batch.lines.length} in one batch`);
+    assert.ok(total !== -1 && total < printed.indexOf("11111111111111"), run.stdout);
   } finally {
     rmSync(bin, { recursive: true, force: true });
   }
@@ -278,7 +311,7 @@ test("collect: an area with no shard, a stall verdict stalls.mjs refuses, an unc
     // (an area `submit` queued that left no shard at all: not run)
     assert.deepEqual(
       verdict(report("p", root, ["rings", "property"])).reasons.includes(
-        "not run: property: 0 of 16",
+        "not run: property: no shard",
       ),
       true,
     );
@@ -722,5 +755,218 @@ test("rerun-stalls reads the standing attempts' work records only, and a record 
     assert.match(refused.stderr, /stalls\.mjs refused the work records/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("submit runs each area it has costs for in their count of shards by the costs file, longest first, one --mem; the rest 16 by index (#2272)", () => {
+  const split = {
+    file: "/c/x.json",
+    areas: {
+      joins: { count: 3, seconds: [1500, 400, 400] },
+      copies: { count: 2, seconds: [900, 900] },
+    },
+  };
+  const all = submissions("b".repeat(40), "h".repeat(40), { owner: "o", prefix: "p", split });
+  const named = (name) => all.find((args) => args[1] === `${name}-{i}of{n}`);
+  for (const [name, count] of [
+    ["copies", "2"],
+    ["joins", "3"],
+  ]) {
+    const args = named(name);
+    assert.equal(args[args.indexOf("--shards") + 1], count);
+    assert.equal(args[args.indexOf("--in") + 1], "costs.json=/c/x.json");
+    assert.match(args.at(-1), /--shard \{i\}\/\{n\} --split "\$SX_IN\/costs\.json"/u);
+  }
+  const rings = named("rings");
+  assert.equal(rings[rings.indexOf("--shards") + 1], "16");
+  assert.ok(!rings.includes("--in") && !rings.at(-1).includes("--split"), rings.at(-1));
+  // (every area shard of a campaign asks one --mem, so the longest is never passed over for asking more)
+  const mems = (campaign) =>
+    new Set(all.filter((a) => a.includes(campaign)).map((a) => a[a.indexOf("--mem") + 1]));
+  assert.deepEqual([...mems("p-areas")], ["8G"]);
+  // (the batch: the sized areas' shards longest first, then the set and the other areas in submit's order)
+  const names = batchOf(all, split).map((args) => args[1]);
+  assert.deepEqual(names.slice(0, 7), [
+    "joins-0of3",
+    "copies-0of2",
+    "copies-1of2",
+    "joins-1of3",
+    "joins-2of3",
+    "set-0of16",
+    "set-1of16",
+  ]);
+  assert.equal(names.length, new Set(names).size);
+  assert.equal(names.length, 16 + 3 + 2 + 16 * (areasOf(ROOT).length - 2));
+});
+
+test("submit makes the costs file from the records, keeps it by its sha256, and says where it falls back to 16 by index (#2272)", () => {
+  const home = mkdtempSync(join(tmpdir(), "compiler-replay-home-"));
+  const bin = join(home, "bin");
+  mkdirSync(bin);
+  const calls = standInQueue(bin);
+  const submit = (...more) =>
+    spawnSync(
+      process.execPath,
+      [tool, "submit", "b".repeat(40), "h".repeat(40), "--owner", "o", "--campaign", "p", ...more],
+      { encoding: "utf8", env: { ...process.env, HOME: home, PATH: `${bin}:${process.env.PATH}` } },
+    );
+  try {
+    const costs = join(home, "fill");
+    write(join(costs, jobId("f", 0), "out", "rings.0of16.work.jsonl"), [
+      { work: { area: "/t/tests/families/rings" } },
+      { generator: "g.mjs", source: "s", key: "k", runs: [{ ms: [2_000_000] }] },
+    ]);
+    const sized = submit("--costs", costs, "--target", "600");
+    assert.equal(sized.status, 0, sized.stderr);
+    const [, file] = /^costs: (.+)$/mu.exec(sized.stdout) ?? [];
+    const text = readFileSync(file, "utf8");
+    assert.equal(
+      file,
+      join(home, "work", "replay-costs", `${createHash("sha256").update(text).digest("hex")}.json`),
+    );
+    assert.match(sized.stdout, /^rings: 1 shards by recorded seconds, the largest about 4000 s$/mu);
+    assert.match(sized.stdout, /^joins: 16 shards by index \(no recorded seconds\)$/mu);
+    const [{ lines }] = calls();
+    const rings = lines.filter((line) => line.includes("'rings-0of1'"));
+    assert.equal(rings.length, 1);
+    assert.ok(rings[0].includes(`'--in' 'costs.json=${file}'`), rings[0]);
+    // (no fill of a base this clone cannot name: today's 16 by index, said so; a --costs without records is refused)
+    const fell = submit();
+    assert.equal(fell.status, 0, fell.stderr);
+    assert.match(
+      fell.stdout,
+      /^no recorded seconds \(this clone has no src\/ tree of b{40}\): 16 shards an area by index$/mu,
+    );
+    assert.equal(submit("--costs", join(home, "none")).status, 2);
+    assert.equal(submit("--costs", costs, "--target", "0").status, 2);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("collect takes an area's count of shards from its jobs' names: all of one count stand, or it did not run (#2272)", () => {
+  const areas = (counts) => {
+    const root = results("p", () => ({}));
+    rmSync(join(root, "p-areas"), { recursive: true, force: true });
+    for (const [i, n] of counts.entries())
+      if (n !== null) areaAttempt(root, jobId("a", i), i, { record: { name: `rings-${i}of${n}` } });
+    return root;
+  };
+  const whole = areas([5, 5, 5, 5, 5]);
+  const short = areas([5, 5, 5, null, 5]);
+  const mixed = areas([5, 5, 16, 5, 5]);
+  try {
+    const r = report("p", whole, ["rings"]);
+    assert.deepEqual(verdict(r), { status: 0, reasons: [] });
+    assert.equal(r.counts.rings, "5");
+    assert.deepEqual(verdict(report("p", short, ["rings"])).reasons, ["not run: rings: 4 of 5"]);
+    assert.deepEqual(verdict(report("p", mixed, ["rings"])).reasons, [
+      "not run: rings: shards named with 5 and 16 shards",
+    ]);
+  } finally {
+    for (const root of [whole, short, mixed]) rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("rerun-shard reruns a split shard by the costs file its record names, refused where that file is not there (#2272)", () => {
+  const home = mkdtempSync(join(tmpdir(), "compiler-replay-home-"));
+  const root = join(home, "results");
+  const text = '{"version":1,"areas":{}}\n';
+  const hash = createHash("sha256").update(text).digest("hex");
+  const file = join(home, "work", "replay-costs", `${hash}.json`);
+  const commits = { base: "b".repeat(40), head: "h".repeat(40) };
+  const [script] = submissions(commits.base, commits.head, {
+    owner: "o",
+    prefix: "p",
+    split: { file, areas: { rings: { count: 5, seconds: [] } } },
+  })
+    .filter((args) => args[1] === "rings-{i}of{n}")
+    .map((args) => args.at(-1).replaceAll("{i}", "3").replaceAll("{n}", "5"));
+  write(join(root, "p-areas", jobId("a", 3), "meta.json"), [
+    ran("rings-3of5", {
+      ...killed,
+      commits,
+      inputs: { "costs.json": hash },
+      command: ["bash", "-c", script],
+    }),
+  ]);
+  const rerun = () =>
+    spawnSync(
+      process.execPath,
+      [
+        tool,
+        "rerun-shard",
+        "p",
+        commits.base,
+        commits.head,
+        jobId("a", 3),
+        "--owner",
+        "o",
+        "--results",
+        root,
+        "--dry",
+      ],
+      { encoding: "utf8", env: { ...process.env, HOME: home } },
+    );
+  try {
+    assert.match(script, /--shard 3\/5 --split /u);
+    assert.equal(rerun().status, 2);
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, text.replace("{}", '{"rings":{}}'));
+    assert.match(rerun().stderr, /was split by the costs file/u);
+    writeFileSync(file, text);
+    const again = rerun();
+    assert.equal(again.status, 0, again.stderr);
+    const args = JSON.parse(again.stdout);
+    assert.equal(args[args.indexOf("--in") + 1], `costs.json=${file}`);
+    assert.equal(args.at(-2), `: replaces ${jobId("a", 3)}; ${script}`);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("submit orders the batch by the shards the recorded costs fill, not by an area's mean (#2272, review round 1)", () => {
+  const home = mkdtempSync(join(tmpdir(), "compiler-replay-home-"));
+  try {
+    // (copies: 800 and 200 s a tree; joins: 600 and 600; two trees each: copies' shards 1,600 and 400 s, joins' 1,200)
+    const record = (area, costs) =>
+      write(join(home, "fill", jobId("f", area.length), "out", `${area}.0of1.work.jsonl`), [
+        { work: { area: `/t/tests/families/${area}` } },
+        ...costs.map((ms, k) => ({
+          generator: "g.mjs",
+          source: `s${k}`,
+          key: "k",
+          runs: [{ ms: [ms] }],
+        })),
+      ]);
+    record("copies", [800_000, 200_000]);
+    record("joins", [600_000, 600_000]);
+    const run = spawnSync(
+      process.execPath,
+      [
+        tool,
+        "submit",
+        "b".repeat(40),
+        "h".repeat(40),
+        "--owner",
+        "o",
+        "--costs",
+        join(home, "fill"),
+        "--dry",
+      ],
+      { encoding: "utf8", env: { ...process.env, HOME: home } },
+    );
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /^copies: 2 shards by recorded seconds, the largest about 1600 s$/mu);
+    const jobs = 16 + 2 + 2 + 16 * (areasOf(ROOT).length - 2);
+    assert.match(run.stdout, new RegExp(`^jobs: ${jobs} in one batch\\n\\[`, "mu"));
+    const names = run.stdout
+      .split("\n")
+      .filter((line) => line.startsWith("["))
+      .map((line) => JSON.parse(line))
+      .map((args) => args[args.indexOf("--name") + 1]);
+    assert.deepEqual(names.slice(0, 4), ["copies-0of2", "joins-0of2", "joins-1of2", "copies-1of2"]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
   }
 });
