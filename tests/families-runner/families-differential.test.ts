@@ -133,15 +133,15 @@ test("the differential record keeps every case's columns, its four modes, refusa
   const folder = mkdtempSync(join(tmpdir(), "families-differential-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
   const tree = standIn(folder);
-  const run = (name: string, lines: string[], tree_ = tree) => {
+  const run = (name: string, caseLines: string[], tree_ = tree) => {
     const cases = join(folder, `${name}.jsonl`);
-    writeFileSync(cases, lines.map((line) => `${line}\n`).join(""));
+    writeFileSync(cases, caseLines.map((line) => `${line}\n`).join(""));
     const out = join(folder, `${name}.records.jsonl`);
     const ran = spawnSync(process.execPath, [tool, tree_, cases, "--out", out], {
       encoding: "utf8",
     });
     const text = existsSync(out) ? readFileSync(out, "utf8") : null;
-    const rows = text === null ? [] : lines<Row>(text);
+    const rows: Row[] = text === null ? [] : lines<Row>(text);
     return { ran, text, rows, cases, out };
   };
   const cases = [
@@ -172,7 +172,7 @@ test("the differential record keeps every case's columns, its four modes, refusa
 
   // (every mode once, in order, by its name; their answers differ, so they disagree)
   assert.deepEqual(
-    modal.core.modes.map((m) => [m.mode, m.diagnostics[0].code]),
+    modal.core.modes.map((m) => [m.mode, m.diagnostics[0]?.code]),
     [
       ["first", "TSV000"],
       ["second", "TSV001"],
@@ -194,7 +194,7 @@ test("the differential record keeps every case's columns, its four modes, refusa
   });
   assert.equal(outside.core.agree, true);
   assert.deepEqual(
-    modal.candidate.modes.map((m) => m.diagnostics[0].code),
+    modal.candidate.modes.map((m) => m.diagnostics[0]?.code),
     ["TSV00", "TSV01", "TSV02", "TSV03"],
   );
   // (the plan's checks and hash, and each named run's end on each plan)
@@ -231,16 +231,16 @@ test("the differential record keeps every case's columns, its four modes, refusa
 
   assert.deepEqual(unparsed.core, { unparsed: true });
   assert.deepEqual(set.case.globals, ["g"]);
-  assert.equal(set.case.files[0].source, "from a set");
-  assert.match(set.case.key, /^[0-9a-f]{64}$/);
+  assert.equal(set.case.files[0]?.source, "from a set");
+  assert.match(set.case.key ?? "", /^[0-9a-f]{64}$/);
   assert.deepEqual(throws.checker, { threw: "TypeError: the stand-in throws" });
 
   // (the same tree and cases give the same bytes)
   assert.equal(run("again", cases).text, all.text);
 
   // (a refused cases file or tree writes no record)
-  const refused = (name: string, lines: string[], why: RegExp, tree_ = tree) => {
-    const r = run(name, lines, tree_);
+  const refused = (name: string, caseLines: string[], why: RegExp, tree_ = tree) => {
+    const r = run(name, caseLines, tree_);
     assert.equal(r.ran.status, 2, `${name}: ${r.ran.stderr}`);
     assert.match(r.ran.stderr, why);
     assert.equal(r.text, null, name);
