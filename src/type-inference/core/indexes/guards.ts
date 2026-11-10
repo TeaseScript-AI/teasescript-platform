@@ -1,8 +1,8 @@
-import type { Expression } from "../../ast.js";
-import { expressionChildren, unwrap } from "../../expression-children.js";
-import type { PlaceId } from "../graph.js";
-import { conditionShape } from "../narrowing-shapes.js";
-import { keepText, keptText, pathText } from "./budget.js";
+import type { Expression } from "../../../ast.js";
+import { expressionChildren, unwrap } from "../../../expression-children.js";
+import type { PlaceId } from "../../graph.js";
+import { conditionShape } from "../../narrowing-shapes.js";
+import { keepText, keptText, pathText } from "../budget.js";
 import {
   isCursor,
   keptKey,
@@ -15,15 +15,15 @@ import {
   recordKey,
   sortCost,
   type Key,
-} from "./definitions.js";
-import type { Callable, FlowNode } from "./flow-graph.js";
-import type { Item } from "./items.js";
-import type { CorePass } from "./answers.js";
-import { NarrowingIndex } from "./narrowing/narrowings.js";
-import { NarrowingEvents } from "./narrowing/events.js";
-import { NarrowingRoutes } from "./narrowing/routes.js";
-import type { StatementTree } from "./narrowing/statement-tree.js";
-import { siteKey, stepName, type CoreProgram } from "./program.js";
+} from "../definitions.js";
+import type { Callable, FlowNode } from "../flow-graph.js";
+import type { Item } from "../items.js";
+import type { CorePass } from "../answers.js";
+import { NarrowingIndex } from "../narrowing/narrowings.js";
+import { NarrowingEvents } from "../narrowing/events.js";
+import { NarrowingRoutes } from "../narrowing/routes.js";
+import type { StatementTree } from "../narrowing/statement-tree.js";
+import { siteKey, stepName, type CoreProgram } from "../program.js";
 
 /*
  * The guard index of the coarse core (checkpoint 9, §3.2): a read of key k is guarded inside a branch

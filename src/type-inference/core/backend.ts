@@ -43,8 +43,9 @@ import { outsideSyntax, sliceCall, type Outside } from "./slice-syntax.js";
  * store whose check the stop leaves uncarried or undecided declines the program (#1526 decision 2, condition 1,
  * `check-result/runtime-plan.ts` `lostCheck`): where admission settled, "a store whose check was lost at the budget";
  * where it had not, "a store whose check was left undecided at the budget" (#2080). These, the unestablished checks
- * and rule (R)'s open typed default carry `limit` (`LIMIT_REASONS`); a refusal made from a diagnostic only a stop
- * produces carries its coverage reason and does not (#2236).
+ * and rule (R)'s open typed default carry `limit` (`LIMIT_REASONS`); a refusal made from a diagnostic or a contract a
+ * stop shaped carries its coverage reason and does not, since nothing here tells it from the same refusal without a stop
+ * (#2236).
  */
 
 /** Test-only: a program outside the candidate's slice, at the first refusal the route establishes (see above). */

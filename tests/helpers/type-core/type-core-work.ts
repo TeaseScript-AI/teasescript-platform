@@ -5,7 +5,7 @@ import type { CoreAnalysisRequest } from "../../../src/type-inference/core/progr
 import { withoutSharing } from "../../../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../../../src/type-inference/core/solver.js";
 import { coreRequest } from "../type-core-analysis.js";
-import { type WorkFamily } from "./type-core-families.js";
+import { type WorkFamily } from "./families/builders.js";
 
 /**
  * The work of the coarse core (checkpoint 9 and §10.1's W rows) as a sampled regression oracle: every

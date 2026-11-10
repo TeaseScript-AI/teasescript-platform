@@ -10,19 +10,22 @@ import { withSolverSeam } from "../../src/type-inference/core/solver.js";
 import { coreRequest } from "../helpers/type-core-analysis.js";
 import {
   ADMISSION_FAMILIES,
+  JOIN_REACH_FAMILIES,
+} from "../helpers/type-core/families/admission.js";
+import {
   COPY_RING_FAMILIES,
   HOT_CANDIDATE_FAMILIES,
-  INHERITED_FIELD_FAMILIES,
-  JOIN_REACH_FAMILIES,
-  OUTPUT_BOUND_FAMILIES,
   NESTED_OBJECT_SELECTIONS,
-  W34_KNOWN_PRODUCTS,
-  W34_VARIANTS,
+} from "../helpers/type-core/families/candidates.js";
+import { INHERITED_FIELD_FAMILIES } from "../helpers/type-core/families/inherited.js";
+import { OUTPUT_BOUND_FAMILIES } from "../helpers/type-core/families/output-bound.js";
+import { W34_KNOWN_PRODUCTS, W34_VARIANTS } from "../helpers/type-core/families/w34-links.js";
+import {
   W44_VARIANTS,
   W45_VARIANTS,
   WORK_FAMILIES,
-  type WorkFamily,
-} from "../helpers/type-core/type-core-families.js";
+} from "../helpers/type-core/families/work-gates.js";
+import { type WorkFamily } from "../helpers/type-core/families/builders.js";
 import {
   DOUBLING,
   sized,
