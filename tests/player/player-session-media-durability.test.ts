@@ -14,11 +14,8 @@ import {
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../../player/runtime/runtime-adapter.js";
-import {
-  compilePlayerProject,
-  createPlayerRuntimeSession,
-} from "../../player/runtime/compile-project.js";
-import { preparedPlan } from "../helpers/prepared-plan.js";
+import { compilePlayerProject } from "../../player/runtime/compile-project.js";
+import { preparedPlan, type PlanStart } from "../helpers/prepared-plan.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import {
   createLocalScriptStorage,
@@ -55,10 +52,7 @@ interface Host {
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   readonly bridge: Promise<PlayerBridge>;
-  prepareScript(
-    plan: string,
-    create: (options: PlayerRuntimeSessionOptions) => PlayerRuntimeSession,
-  ): Promise<void>;
+  prepareScript(plan: string, create: PlanStart): Promise<void>;
   activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
   readonly inputSection: unknown;
@@ -242,9 +236,11 @@ function page(context: TestContext, at: Browser, room?: "debug") {
 async function opened(context: TestContext, at: Browser, plan: InstructionPlan, room?: "debug") {
   const made = page(context, at, room);
   await made.host.loadScriptStorage();
-  await made.host.prepareScript(await preparedPlan(made.host.bridge, plan), (options) =>
-    createPlayerRuntimeSession(plan, { ...options, ...made.host.scriptStorageOptions() }),
-  );
+  const held = await preparedPlan(made.host.bridge, plan);
+  await made.host.prepareScript(held, {
+    plan: held,
+    options: () => made.host.scriptStorageOptions(),
+  });
   return made;
 }
 

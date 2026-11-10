@@ -8,10 +8,7 @@ import {
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../../player/runtime/runtime-adapter.js";
-import {
-  compilePlayerProject,
-  createPlayerRuntimeSession,
-} from "../../player/runtime/compile-project.js";
+import { compilePlayerProject } from "../../player/runtime/compile-project.js";
 import { preparedPlan } from "../helpers/prepared-plan.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import type { BuildIdentity } from "../../player/engine-bridge/protocol.js";
@@ -191,9 +188,8 @@ async function settle(context: TestContext) {
 
 async function prepare(context: TestContext, host: RoomHost, plan: InstructionPlan) {
   await host.loadScriptStorage();
-  await host.prepareScript(await preparedPlan(host.bridge, plan), (recording) =>
-    createPlayerRuntimeSession(plan, { ...recording, ...host.scriptStorageOptions() }),
-  );
+  const held = await preparedPlan(host.bridge, plan);
+  await host.prepareScript(held, { plan: held, options: () => host.scriptStorageOptions() });
   await settle(context);
 }
 

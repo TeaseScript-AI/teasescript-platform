@@ -13,11 +13,8 @@ import {
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../../player/runtime/runtime-adapter.js";
-import {
-  compilePlayerProject,
-  createPlayerRuntimeSession,
-} from "../../player/runtime/compile-project.js";
-import { preparedPlan } from "../helpers/prepared-plan.js";
+import { compilePlayerProject } from "../../player/runtime/compile-project.js";
+import { preparedPlan, type PlanStart } from "../helpers/prepared-plan.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import { playerRuntimeForeground } from "../../player/runtime/runtime-view.js";
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
@@ -72,10 +69,7 @@ interface TransferHost {
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   readonly bridge: Promise<PlayerBridge>;
-  prepareScript(
-    plan: string,
-    create: (options: PlayerRuntimeSessionOptions) => PlayerRuntimeSession,
-  ): Promise<void>;
+  prepareScript(plan: string, create: PlanStart): Promise<void>;
   activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
   readonly inputSection: unknown;
@@ -162,9 +156,8 @@ async function page(context: TestContext, at: ReturnType<typeof browser>, plan: 
   assert.ok(host);
   context.after(() => scope.stop());
   await host.loadScriptStorage();
-  await host.prepareScript(await preparedPlan(host.bridge, plan), (options) =>
-    createPlayerRuntimeSession(plan, { ...options, ...host.scriptStorageOptions() }),
-  );
+  const held = await preparedPlan(host.bridge, plan);
+  await host.prepareScript(held, { plan: held, options: () => host.scriptStorageOptions() });
   return host;
 }
 

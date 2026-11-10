@@ -6,12 +6,19 @@ import type { RuntimeDebugContext } from "../../src/index.js";
 import type * as Adapter from "../../player/runtime/runtime-adapter.js";
 import type * as CompileProject from "../../player/runtime/compile-project.js";
 import type { PlayerRuntimeSession } from "../../player/runtime/runtime-adapter.js";
-import type { DebugRecorder } from "../../player/debug/debug-recorder.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import type { DebugView, DebugViewRequest } from "../../player/debug/debug-view.js";
 import type * as InProcess from "../../player/engine-bridge/in-process.js";
-import { hostTrace, loadHostFacade, onHost, onHostAll } from "../helpers/player/host-sessions.js";
+import {
+  hostTrace,
+  loadHostFacade,
+  onHost,
+  onHostAll,
+  hostIntroduced,
+} from "../helpers/player/host-sessions.js";
+import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
+import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 
 /** The value trace the host's session runs with, as the host holds it. */
 const sessionTrace = (session: PlayerRuntimeSession | null | undefined) =>
@@ -28,13 +35,8 @@ interface TraceHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly bridge: Promise<PlayerBridge>;
   setDebugTracing(on: boolean): void;
-  prepare(
-    create: (recording: {
-      readonly recorder: DebugRecorder;
-      readonly debugTrace?: RuntimeDebugContext;
-    }) => PlayerRuntimeSession,
-  ): void;
-  prepareRestore(restored: PlayerRuntimeSession): void;
+  prepare(create: PlanStart): void;
+  prepareRestore(restored: PlayerSession): void;
   activate(): void;
   update(session: PlayerRuntimeSession): void;
   reportHostError(error: unknown): void;
@@ -154,7 +156,7 @@ test("Start traces from the first statement, off drops the trace, and on again a
   host.setDebugTracing(true);
   const trace = await traceOf(host);
   assert.ok(trace);
-  host.prepare((recording) => adapter.createPlayerRuntimeSession(SOURCE, { ...recording }));
+  host.prepare(await sourceStart(host.bridge, SOURCE));
   await host.activate();
   assert.equal(sessionTrace(host.session.value), trace);
   assert.deepEqual([trace.status().origin, trace.status().epoch], ["start", 1]);
@@ -180,12 +182,15 @@ test("Continue of a restored session begins a new trace epoch", async (context) 
   const host = createHost(context);
   host.setDebugTracing(true);
   const trace = (await traceOf(host))!;
-  host.prepare((recording) => adapter.createPlayerRuntimeSession(SOURCE, { ...recording }));
+  host.prepare(await sourceStart(host.bridge, SOURCE));
   await host.activate();
   const epoch = trace.status().epoch;
   host.prepareRestore(
-    adapter.restorePlayerRuntimeSession(
-      adapter.createPlayerRuntimeRestorePoint(host.session.value!),
+    hostIntroduced(
+      await host.bridge,
+      adapter.restorePlayerRuntimeSession(
+        adapter.createPlayerRuntimeRestorePoint(host.session.value!),
+      ),
     ),
   );
   await host.activate();
@@ -221,6 +226,20 @@ const recent = (trees: DebugViewRequest["trees"] = {}): DebugViewRequest => ({
   trees,
 });
 
+/** `pending`, settled while the mock clock moves on 50 ms a turn, as replies of a backend on mock time need. */
+async function ticking<T>(context: TestContext, pending: Promise<T>): Promise<T> {
+  let settled = false;
+  void pending.then(
+    () => (settled = true),
+    () => (settled = true),
+  );
+  while (!settled) {
+    await new Promise((resolve) => setImmediate(resolve));
+    context.mock.timers.tick(50);
+  }
+  return pending;
+}
+
 /**
  * A host on a backend whose replies wait 50 ms of mock time, traced, with a view of recent chat that records every view
  * it shows.
@@ -240,7 +259,7 @@ async function viewed(context: TestContext) {
     for (let turn = 0; turn < 5; turn += 1) await nextTick();
   };
   host.setDebugTracing(true);
-  host.prepare((recording) => adapter.createPlayerRuntimeSession(VIEWED, { ...recording }));
+  host.prepare(await ticking(context, sourceStart(host.bridge, VIEWED)));
   host.activate();
   await settle();
   const request = ref(recent());

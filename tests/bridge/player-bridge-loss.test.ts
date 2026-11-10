@@ -10,10 +10,7 @@ import type * as Client from "../../player/engine-bridge/client.js";
 import type * as InProcess from "../../player/engine-bridge/in-process.js";
 import { LockService } from "../../player/encryption/lock-service.js";
 import type { PlayerBridge, ServiceSection } from "../../player/runtime/player-bridge.js";
-import type {
-  PlayerRuntimeSession,
-  PlayerRuntimeSessionOptions,
-} from "../../player/runtime/runtime-adapter.js";
+import type { PlayerRuntimeSessionOptions } from "../../player/runtime/runtime-adapter.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 import { CaptureService } from "../../player/media/session-camera.js";
 import { FileStoreService } from "../../player/media/stored-files.js";
@@ -23,7 +20,7 @@ import {
   type KeptSessionStore,
 } from "../../player/persistence/kept-sessions.js";
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
-import { preparedPlan } from "../helpers/prepared-plan.js";
+import { preparedPlan, sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { serviceSection } from "../helpers/service-section.js";
 import { clockTicket } from "../helpers/clock-ticket.js";
@@ -268,7 +265,7 @@ interface LossHost {
     plan: string,
     create: { readonly plan: string; readonly options: () => PlayerRuntimeSessionOptions },
   ): Promise<void>;
-  prepare(create: (recording: PlayerRuntimeSessionOptions) => PlayerRuntimeSession): void;
+  prepare(create: PlanStart): void;
   activate(): Promise<void>;
   demandCallView(): { release(): void };
   inputSection<T>(
@@ -378,10 +375,11 @@ async function mount(context: TestContext, delayMs: number) {
   )!;
   context.after(() => scope.stop());
   await player.bridge;
-  player.prepare((recording) =>
-    compiler.createPlayerRuntimeSession(
+  player.prepare(
+    await sourceStart(
+      player.bridge,
       'playAudio async "bell.mp3"\nlet pick = askChoice "Go"\nexit',
-      { ...recording, wallClockMs: 0 },
+      () => ({ wallClockMs: 0 }),
     ),
   );
   await player.activate();

@@ -11,18 +11,20 @@ import {
   type PlayerRuntimeSessionOptions,
   playerRuntimeSnapshot as rawPlayerRuntimeSnapshot,
 } from "../../../player/runtime/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../../../player/runtime/compile-project.js";
-import type { DebugRecorder } from "../../../player/debug/debug-recorder.js";
 import type { ScriptStorageProvider } from "../../../player/persistence/script-storage.js";
 import type { InterpreterEvent, SerializableRuntimeValue } from "../../../src/index.js";
 import type { TemporalContext } from "../../../src/temporal.js";
 import { loadPlayerModule } from "../player-modules.js";
 import { loadHostFacade, onHost } from "./host-sessions.js";
+import { sourceStart, type PlanStart } from "../prepared-plan.js";
+import type { PlayerSession } from "../../../player/runtime/runtime-view.js";
+import type { PlayerBridge } from "../../../player/runtime/player-bridge.js";
 
 export const playerRuntimeSnapshot = onHost(rawPlayerRuntimeSnapshot);
 
 // Load the real Vue composable through the existing build tool: its browser-source imports use Vite resolution.
 interface StorageHost {
+  readonly bridge: Promise<PlayerBridge>;
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly canClearScriptStorage: Readonly<Ref<boolean>>;
   readonly activation: Readonly<Ref<"start" | "continue" | null>>;
@@ -39,10 +41,10 @@ interface StorageHost {
   withdrawNotice(key: string): void;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
-  prepare(create: (recording: { readonly recorder: DebugRecorder }) => PlayerRuntimeSession): void;
+  prepare(create: PlanStart): void;
   toStartPage(): Promise<void>;
   debugRecording(): Promise<{ readonly operations: readonly { readonly kind: string }[] } | null>;
-  prepareRestore(restored: PlayerRuntimeSession): void;
+  prepareRestore(restored: PlayerSession): void;
   activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
   temporalCapture(): { temporalContext: TemporalContext; wallClockMs: number };
@@ -135,7 +137,7 @@ export function createHost(
 }
 
 export async function start(host: StorageHost, source: string) {
-  host.prepare(() => createPlayerRuntimeSession(source, host.scriptStorageOptions()));
+  host.prepare(await sourceStart(host.bridge, source, () => host.scriptStorageOptions()));
   await host.activate();
   assert.ok(host.session.value);
   return host.session.value;

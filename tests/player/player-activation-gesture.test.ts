@@ -14,6 +14,8 @@ import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 import type { StartOptions } from "../../player/engine-bridge/ops/session.js";
 import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkpoint-json.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
+import { sourceStart } from "../helpers/prepared-plan.js";
+import { hostIntroduced, loadHostFacade } from "../helpers/player/host-sessions.js";
 
 /*
  * What the browser allows only within the player's click runs within it, also when the session shows only once the
@@ -30,7 +32,7 @@ interface GestureHost {
       | { readonly plan: string; readonly options: () => StartOptions }
       | ((recording: { readonly recorder: never }) => PlayerRuntimeSession),
   ): void;
-  prepareRestore(restored: PlayerRuntimeSession): void;
+  prepareRestore(restored: PlayerSession): void;
   activate(): Promise<void>;
 }
 let usePlayerSession: (options: {
@@ -41,6 +43,7 @@ let createInProcessBackend: typeof InProcess.createInProcessBackend;
 let heldRecording: typeof InProcess.heldRecording;
 
 before(async () => {
+  await loadHostFacade();
   const module = await loadPlayerModule("player/vue/src/session/usePlayerSession.ts");
   const facade = await loadPlayerModule("player/engine-bridge/in-process.ts");
   assert.equal(typeof module.usePlayerSession, "function");
@@ -155,8 +158,8 @@ test("a Start of a held plan unlocks audio and keeps the screen on within the cl
 
 test("a Continue unlocks audio and keeps the screen on within the click, before the host replies", async (context) => {
   const calls = stubBrowser(context);
-  const { host } = await mountSlow(context, calls.order);
-  host.prepareRestore(createPlayerRuntimeSession(SCRIPT));
+  const { host, bridge } = await mountSlow(context, calls.order);
+  host.prepareRestore(hostIntroduced(bridge, createPlayerRuntimeSession(SCRIPT)));
   const activating = host.activate();
   assert.deepEqual(
     calls.order.filter((call, index, all) => call !== all[index - 1]),
@@ -184,16 +187,16 @@ test("a Continue a new Start replaced cannot take over the recording, even from 
   const host = scope.run(() => usePlayerSession({}))!;
   context.after(() => scope.stop());
   const bridge = await host.bridge;
-  host.prepareRestore(createPlayerRuntimeSession('say "restored", instant\nwait 10 s\nexit'));
+  host.prepareRestore(
+    hostIntroduced(bridge, createPlayerRuntimeSession('say "restored", instant\nwait 10 s\nexit')),
+  );
   // The host awaits a source prepare, so the Continue's first request waits behind it.
   const compiling = bridge.client.request("prepare", {
     source: { kind: "source", script: 'say "x"\nexit' },
   });
   const continuing = host.activate();
   // A new Start replaces the Continue while its request still waits.
-  host.prepare(({ recorder }) =>
-    createPlayerRuntimeSession('say "new", instant\nwait 10 s\nexit', { recorder }),
-  );
+  host.prepare(await sourceStart(host.bridge, 'say "new", instant\nwait 10 s\nexit'));
   await host.activate();
   await compiling;
   await continuing;

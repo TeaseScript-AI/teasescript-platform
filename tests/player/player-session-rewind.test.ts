@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { before } from "node:test";
 import { effectScope } from "vue";
 import {
   restorePlayerRuntimeSessionAt,
@@ -9,7 +9,12 @@ import { createPlayerRuntimeSession } from "../../player/runtime/compile-project
 import { playerRuntimeForeground } from "../../player/runtime/runtime-view.js";
 import { memoryKeptRoomStore } from "../../player/persistence/kept-sessions.js";
 import { coverageGaps, product, type Coordinates } from "../helpers/family-coverage.js";
-import { hostTrace, onHost } from "../helpers/player/host-sessions.js";
+import {
+  hostTrace,
+  onHost,
+  hostIntroduced,
+  loadHostFacade,
+} from "../helpers/player/host-sessions.js";
 import { interceptSends } from "../helpers/bridge/sends.js";
 import {
   selectPlayerRuntimeChoice,
@@ -30,7 +35,12 @@ import {
   ExitCase,
   holdRead,
   heldInHost,
+  untilShown,
 } from "../helpers/player/rewind-host.js";
+import { sourceStart } from "../helpers/prepared-plan.js";
+
+// `hostIntroduced` registers adapter sessions through the facade of the bundle the composable runs in.
+before(loadHostFacade);
 
 /** The value trace the host's session runs with, as the host holds it. */
 const traceOf = (session: PlayerRuntimeSession | null | undefined) =>
@@ -112,8 +122,12 @@ test("after an engine call throws, the export, Back, Forward, and Return work fr
     ...playerRuntimeSnapshot(started),
     nextScopeId: Number.MAX_SAFE_INTEGER,
   });
-  host.prepare(({ recorder }) =>
-    restorePlayerRuntimeSessionAt(started.plan, usedUp, started.events, recorder),
+  // The used-up state, restored outside the host and registered there, goes on as a Continue, which begins the recording.
+  host.prepareRestore(
+    hostIntroduced(
+      await host.bridge,
+      restorePlayerRuntimeSessionAt(started.plan, usedUp, started.events),
+    ),
   );
   host.activate();
   await settle(context);
@@ -128,6 +142,9 @@ test("after an engine call throws, the export, Back, Forward, and Return work fr
   assert.deepEqual(
     candidate.recording?.operations.map((operation) => [operation.kind, operation.thrown]),
     [
+      // A Continue's recording begins with its capture and the run that resumes the restored state.
+      ["recordContinueCapture", null],
+      ["run", null],
       ["completeAction", null],
       ["run", null],
       ["completeAction", null],
@@ -593,11 +610,13 @@ test("a step whose prepared state arrives after Start or Continue began is dropp
       if (step === "forward") assert.equal(await backTo(rewind, 0), true);
       const shown = host.session.value;
       const before = rewind.state.value.inspection;
+      // Prepared before the hold: a source prepare posted behind the held read would wait for it.
+      const replacement = await sourceStart(host.bridge, script, () => ({
+        ...host.scriptStorageOptions(),
+      }));
       const release = holdGets();
       const pending = step === "back" ? backTo(rewind, 0) : rewind.forward();
-      host.prepare((recording) =>
-        createPlayerRuntimeSession(script, { ...host.scriptStorageOptions(), ...recording }),
-      );
+      host.prepare(replacement);
       release();
       assert.equal(await pending, false);
       await settle(subtest);
@@ -627,8 +646,9 @@ test("a session-local state that rewind adopted leaves Play again session-local"
     clear: async () => {},
   });
   await host.loadScriptStorage();
-  host.prepare((recording) =>
-    createPlayerRuntimeSession(
+  host.prepare(
+    await sourceStart(
+      host.bridge,
       [
         'let k = load("k", default: 0) + 1',
         'save k as "k"',
@@ -636,11 +656,11 @@ test("a session-local state that rewind adopted leaves Play again session-local"
         'say "${k}", instant',
         "exit",
       ].join("\n"),
-      { ...host.scriptStorageOptions(), ...recording },
+      () => ({ ...host.scriptStorageOptions() }),
     ),
   );
   host.activate();
-  await settle(context);
+  await untilShown(context, host);
   await choose(context, host, "Go");
   assert.equal(host.session.value?.state.status, "halted");
   assert.equal(await backTo(rewind, 0), true);
@@ -799,8 +819,8 @@ for (const each of exitCases())
       await settle(context);
       assert.notEqual(shownView(host).revision, shown.revision, "a newer publication shows");
     } else if (each.lifecycle === "replaced") {
-      host.prepare((recording) =>
-        createPlayerRuntimeSession(script, { ...host.scriptStorageOptions(), ...recording }),
+      host.prepare(
+        await sourceStart(host.bridge, script, () => ({ ...host.scriptStorageOptions() })),
       );
       host.activate();
     } else if (each.lifecycle === "debugOff") made.debug.stop();

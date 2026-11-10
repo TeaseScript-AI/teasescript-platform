@@ -17,7 +17,6 @@ import {
   type PlayerRuntimeSessionOptions,
   playerRuntimeSnapshot as rawPlayerRuntimeSnapshot,
 } from "../../../player/runtime/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../../../player/runtime/compile-project.js";
 import {
   playerRuntimeForeground,
   type PlayerSession,
@@ -32,6 +31,7 @@ import { loadHostFacade, onHost } from "./host-sessions.js";
 import { interceptSends } from "../bridge/sends.js";
 import type { PlayerBridge } from "../../../player/runtime/player-bridge.js";
 import type * as ClientModule from "../../../player/engine-bridge/client.js";
+import { sourceStart } from "../prepared-plan.js";
 
 // The adapter's functions, also on the sessions the composables' host holds (`helpers/player/host-sessions.ts`).
 export const selectPlayerRuntimeChoice = onHost(rawSelectPlayerRuntimeChoice);
@@ -76,7 +76,7 @@ export interface RewindHost {
       | { readonly plan: string; readonly options: () => PlayerRuntimeSessionOptions },
   ): void;
   activate(): void;
-  prepareRestore(given: PlayerRuntimeSession): void;
+  prepareRestore(given: PlayerSession): void;
   reportHostError(error: unknown): void;
   setDebugTracing(on: boolean): void;
   readonly hostError: Readonly<Ref<string | null>>;
@@ -433,11 +433,17 @@ export const script = [
 
 export async function start(context: TestContext, host: RewindHost) {
   await host.loadScriptStorage();
-  host.prepare((recording) =>
-    createPlayerRuntimeSession(script, { ...host.scriptStorageOptions(), ...recording }),
-  );
+  host.prepare(await sourceStart(host.bridge, script, () => ({ ...host.scriptStorageOptions() })));
   host.activate();
-  await settle(context);
+  await untilShown(context, host);
+}
+
+/** Settles until the prepared session shows: a Start of a held plan shows once its reply is applied, a few turns after the click. */
+export async function untilShown(context: TestContext, host: RewindHost) {
+  const before = host.session.value;
+  for (let round = 0; round < 20 && host.session.value === before; round += 1)
+    await settle(context);
+  assert.notEqual(host.session.value, before, "the activation shows its session");
 }
 
 // Chooses as the Player's interaction does: the session is readied for input first, and only then is input evaluated.

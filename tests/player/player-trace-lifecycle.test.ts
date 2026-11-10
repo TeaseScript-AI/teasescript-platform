@@ -7,15 +7,13 @@ import type * as CompileProject from "../../player/runtime/compile-project.js";
 import type * as InProcess from "../../player/engine-bridge/in-process.js";
 import type { DebugView, DebugViewRequest } from "../../player/debug/debug-view.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
-import type {
-  PlayerRuntimeSession,
-  PlayerRuntimeSessionOptions,
-} from "../../player/runtime/runtime-adapter.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 import type { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js";
 import { listRandomSites } from "../../src/playback.js";
 import { coverageGaps, product, type Coordinates } from "../helpers/family-coverage.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
+import { decodeMessage } from "../../player/engine-bridge/transport.js";
+import { preparedSource, type PlanStart } from "../helpers/prepared-plan.js";
 
 /*
  * L5i.3, the trace-ordering family (Sol r1 R2, r2 R2.1, r3 R2.2, r4 R2.3) over the Player's lifetime, and L5i.4's random
@@ -31,7 +29,7 @@ interface TracingPlayer {
   readonly bridge: Promise<PlayerBridge>;
   readonly debugTracing: Readonly<Ref<boolean>>;
   readonly traceId: Readonly<Ref<number | null>>;
-  prepare(create: (recording: PlayerRuntimeSessionOptions) => PlayerRuntimeSession): void;
+  prepare(create: PlanStart): void;
   activate(): Promise<void>;
   setDebugTracing(on: boolean): void;
   setRandomControl(
@@ -286,24 +284,81 @@ function mounted(context: TestContext, bridge: Promise<PlayerBridge>) {
 const namedNoStaleTrace = (context: TestContext, name: string) =>
   assert.deepEqual(staleNames.get(context) ?? [], [], `${name}: no older reply names a trace`);
 
-/** The Starts a test's factories began, in order: whose, their script, and the trace and random control each began with. */
+/** The Starts a test began, in order: whose, their script, and the trace and random control each began with. */
 type Starts = {
   readonly by: TracingPlayer;
   readonly script: string;
   readonly trace: RuntimeDebugContext | null;
   readonly controlled: boolean;
 }[];
-const starting =
-  (starts: Starts, by: TracingPlayer, script: string) =>
-  (recording: PlayerRuntimeSessionOptions): PlayerRuntimeSession => {
-    starts.push({
-      by,
-      script,
-      trace: recording.debugTrace ?? null,
-      controlled: recording.randomControl !== undefined,
-    });
-    return compiler.createPlayerRuntimeSession(script, { ...recording, wallClockMs: 0 });
-  };
+/** Begins a Start of `script` for `by`: `starting`'s mark, given by `recordStarts`. */
+type MarkStart = (by: TracingPlayer, script: string) => void;
+
+/**
+ * Records in `starts` each Start the host makes on `bridge`: the trace its session began with and whether its Player's
+ * random control decides its draws, read from the host as it posts `start`'s reply, which it does at the end of the op's
+ * own dispatch, before any later request runs. Whose Start and which script come from its `MarkStart`, given as its
+ * begin reads its options, just before it posts `start`.
+ */
+function recordStarts(context: TestContext, bridge: PlayerBridge, starts: Starts): MarkStart {
+  let next: { readonly by: TracingPlayer; readonly script: string } | null = null;
+  const begun = new Map<
+    number,
+    { readonly by: TracingPlayer; readonly script: string; readonly owner: number | null }
+  >();
+  const clone = globalThis.structuredClone;
+  context.mock.method(
+    globalThis,
+    "structuredClone",
+    (value: unknown, options?: StructuredSerializeOptions) => {
+      const data = decodeMessage(value);
+      if (isRecord(data) && data.kind === "request" && data.op === "start" && next !== null) {
+        const random =
+          isRecord(data.args) && isRecord(data.args.random) ? data.args.random.owner : null;
+        begun.set(Number(data.id), { ...next, owner: typeof random === "number" ? random : null });
+        next = null;
+      } else if (isRecord(data) && data.kind === "reply" && begun.has(Number(data.id))) {
+        const start = begun.get(Number(data.id))!;
+        begun.delete(Number(data.id));
+        const random = facade.heldRandom(bridge);
+        starts.push({
+          by: start.by,
+          script: start.script,
+          trace: facade.heldTrace(bridge),
+          controlled:
+            start.owner !== null && random.owner === start.owner && random.control !== null,
+        });
+      }
+      return clone(value, options);
+    },
+  );
+  return (by, script) => void (next = { by, script });
+}
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null;
+
+/** A Start of the plan `tokens` holds for `script`, which marks itself as its begin reads its options. */
+const starting = (
+  mark: MarkStart,
+  tokens: ReadonlyMap<string, string>,
+  by: TracingPlayer,
+  script: string,
+) => ({
+  plan: tokens.get(script)!,
+  options: () => {
+    mark(by, script);
+    return { wallClockMs: 0 };
+  },
+});
+
+/** The plans of the test's scripts, prepared in the host of `bridge` from source before anything is timed. */
+async function preparedScripts(bridge: PlayerBridge): Promise<ReadonlyMap<string, string>> {
+  const tokens = new Map<string, string>();
+  for (const script of [SCRIPT, OBSOLETE, RANDOM_SCRIPT])
+    tokens.set(script, await preparedSource(Promise.resolve(bridge), script));
+  return tokens;
+}
 
 /** The host's state of a setting, as a next Player's ended predecessor must leave it. */
 type Snapshot =
@@ -457,6 +512,7 @@ async function play(context: TestContext, each: Case) {
   const setting = SETTINGS[each.setting];
   const { bridge, minted } = backend(context, setting);
   await lived(context, bridge, each.history, setting);
+  const tokens = await preparedScripts(bridge);
   const { lifecycle } = each;
   const waiting = lifecycle.startsWith("waiting");
   const handover = lifecycle.endsWith("handover");
@@ -475,10 +531,11 @@ async function play(context: TestContext, each: Case) {
   // while its bridge is ready; else once ready, as its latest change; an ended or replaced Player's waiting Start never
   // begins.
   const starts: Starts = [];
+  const mark = recordStarts(context, bridge, starts);
   const expected: { script: string; on: boolean }[] = [];
   const activations: Promise<void>[] = [];
   const start = (script: string, on: boolean) => {
-    current.player.prepare(starting(starts, current.player, script));
+    current.player.prepare(starting(mark, tokens, current.player, script));
     activations.push(current.player.activate());
     if (!waiting) expected.push({ script, on });
   };
@@ -504,7 +561,7 @@ async function play(context: TestContext, each: Case) {
     const next = mounted(context, Promise.resolve(bridge));
     await next.player.bridge;
     setting.set(next.player, !asked);
-    next.player.prepare(starting(starts, next.player, setting.script));
+    next.player.prepare(starting(mark, tokens, next.player, setting.script));
     expected.push({ script: setting.script, on: !asked });
     handedOver = next.player.activate();
     activations.push(handedOver);
@@ -635,14 +692,16 @@ for (const settingName of SETTING_NAMES)
           const name = `${settingName}: ${history}; ${sequence}; ${order}`;
           const { bridge, minted } = backend(context, setting);
           await lived(context, bridge, history, setting);
+          const tokens = await preparedScripts(bridge);
           const changes = SEQUENCES[sequence];
           const asked = changes.at(-1) ?? false;
           const starts: Starts = [];
+          const mark = recordStarts(context, bridge, starts);
           if (order === "refused while live") {
             const live = mounted(context, Promise.resolve(bridge));
             await live.player.bridge;
             for (const on of changes) setting.set(live.player, on);
-            live.player.prepare(starting(starts, live.player, setting.script));
+            live.player.prepare(starting(mark, tokens, live.player, setting.script));
             await live.player.activate();
             await settleFixtureQueues(bridge);
             const sent = minted();
@@ -672,7 +731,7 @@ for (const settingName of SETTING_NAMES)
             const live = mounted(context, Promise.resolve(bridge));
             await live.player.bridge;
             setting.set(live.player, !asked);
-            live.player.prepare(starting(starts, live.player, setting.script));
+            live.player.prepare(starting(mark, tokens, live.player, setting.script));
             await live.player.activate();
             await settleFixtureQueues(bridge);
             const sent = minted();

@@ -6,7 +6,6 @@ import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 import { nextTick } from "vue";
 import { activatePlayerRuntimeButton as rawActivatePlayerRuntimeButton } from "../../player/runtime/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
 import { pendingPlayerRuntimeStorageWrite } from "../../player/runtime/runtime-view.js";
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
 import type { SerializableRuntimeValue } from "../../src/index.js";
@@ -22,6 +21,7 @@ import {
   memoryStorage,
   said,
 } from "../helpers/player/storage-host.js";
+import { sourceStart } from "../helpers/prepared-plan.js";
 
 // The adapter's functions, also on the sessions the composables' host holds (`helpers/player/host-sessions.ts`).
 const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
@@ -147,7 +147,9 @@ test("an edit of a session that was replaced or unmounted meanwhile changes neit
   const edit = host.editSavedData({ key: "k", value: 2, expected: 1 });
   for (let turn = 0; turn < 5; turn += 1) await nextTick();
   assert.equal(reads, 2);
-  host.prepare(() => createPlayerRuntimeSession(loadsAroundButton, host.scriptStorageOptions()));
+  host.prepare(
+    await sourceStart(host.bridge, loadsAroundButton, () => host.scriptStorageOptions()),
+  );
   await host.activate();
   const replaced = host.session.value!;
   firstRead.resolve();
@@ -161,9 +163,8 @@ test("an edit stored while Start is prepared is what that Start loads", async (c
   const storage = memoryStorage({ k: 1 });
   const { host } = createHost(context, storage.provider);
   await host.loadScriptStorage();
-  host.prepare(() =>
-    createPlayerRuntimeSession(
-      'let k = load("k", default: 0)\nsay "${k}", instant\nexit',
+  host.prepare(
+    await sourceStart(host.bridge, 'let k = load("k", default: 0)\nsay "${k}", instant\nexit', () =>
       host.scriptStorageOptions(),
     ),
   );
@@ -286,8 +287,8 @@ test("a new run releases an edit that waits for the old run's write, also while 
   holds.get(2)!.resolve();
   await settleTasks(context);
   assert.equal(result, undefined);
-  host.prepare(() =>
-    createPlayerRuntimeSession('save 3 as "newer"\nexit', host.scriptStorageOptions()),
+  host.prepare(
+    await sourceStart(host.bridge, 'save 3 as "newer"\nexit', () => host.scriptStorageOptions()),
   );
   await host.activate();
   for (let turn = 0; turn < 5 && result === undefined; turn += 1) await settleTasks(context);

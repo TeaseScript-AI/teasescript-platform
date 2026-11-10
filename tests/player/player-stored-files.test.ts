@@ -6,10 +6,8 @@ import { effectScope, type Ref } from "vue";
 import { CapturedMediaStore } from "../../player/media/captured-media.js";
 import {
   playerRuntimeSnapshot,
-  type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../../player/runtime/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
 import type * as InProcess from "../../player/engine-bridge/in-process.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
@@ -22,6 +20,7 @@ import type {
 } from "../../src/index.js";
 import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
+import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
 
 /*
  * The Player's file store for fileFromBase64, fileToBase64, hashFile, and toJson and fromJson with files (V30 §13 and
@@ -154,11 +153,12 @@ test("a stored file of no recognized type is kept and read back from durable sto
 });
 
 interface FileHost {
+  readonly bridge: Promise<PlayerBridge>;
   readonly session: Readonly<Ref<PlayerSession | null>>;
   resolveAsset(path: string): string | null;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
-  prepare(create: (options: PlayerRuntimeSessionOptions) => PlayerRuntimeSession): void;
+  prepare(create: PlanStart): void;
   activate(): Promise<void>;
 }
 // The transition facade of the composable's own bundle: its host holds the sessions the host shows.
@@ -255,7 +255,7 @@ async function playInPlayer(
   assert.ok(host);
   context.after(() => scope.stop());
   await host.loadScriptStorage();
-  host.prepare(() => createPlayerRuntimeSession(source, host.scriptStorageOptions()));
+  host.prepare(await sourceStart(host.bridge, source, () => host.scriptStorageOptions()));
   await host.activate();
   const deadline = Date.now() + 2_000;
   while (host.session.value?.state.status !== "halted") {

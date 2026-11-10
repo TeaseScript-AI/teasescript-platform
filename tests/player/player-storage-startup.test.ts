@@ -3,14 +3,13 @@
  */
 
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { before } from "node:test";
 import { nextTick } from "vue";
 import {
   createPlayerRuntimeRestorePoint as rawCreatePlayerRuntimeRestorePoint,
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
 } from "../../player/runtime/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
 import { pendingPlayerRuntimeStorageWrite } from "../../player/runtime/runtime-view.js";
 import {
   compileSource,
@@ -21,7 +20,7 @@ import {
 } from "../../src/index.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../../src/temporal.js";
 import { AMSTERDAM, utc } from "../helpers/temporal-fixtures.js";
-import { onHost } from "../helpers/player/host-sessions.js";
+import { onHost, hostIntroduced, loadHostFacade } from "../helpers/player/host-sessions.js";
 import {
   playerRuntimeSnapshot,
   acknowledged,
@@ -31,6 +30,10 @@ import {
   memoryStorage,
   said,
 } from "../helpers/player/storage-host.js";
+import { sourceStart } from "../helpers/prepared-plan.js";
+
+// `hostIntroduced` registers adapter sessions through the facade of the bundle the composable runs in.
+before(loadHostFacade);
 
 const createPlayerRuntimeRestorePoint = onHost(rawCreatePlayerRuntimeRestorePoint);
 
@@ -110,9 +113,8 @@ test("Vue host clears once, and no Start begins until the clear settles", async 
     },
   });
   await host.loadScriptStorage();
-  host.prepare(() =>
-    createPlayerRuntimeSession(
-      'let answer: string? = load "answer", default: null\nexit',
+  host.prepare(
+    await sourceStart(host.bridge, 'let answer: string? = load "answer", default: null\nexit', () =>
       host.scriptStorageOptions(),
     ),
   );
@@ -153,11 +155,12 @@ test("Vue host resolves the player's zone and presentation again at Start and at
   );
   context.mock.method(Date, "now", () => utc("2026-10-04T16:00:00"));
   await host.loadScriptStorage();
-  host.prepare(() =>
-    createPlayerRuntimeSession('let day = askChoice [toDate("2026-10-04")]\nsay day\nexit', {
-      ...host.scriptStorageOptions(),
-      ...host.temporalCapture(),
-    }),
+  host.prepare(
+    await sourceStart(
+      host.bridge,
+      'let day = askChoice [toDate("2026-10-04")]\nsay day\nexit',
+      () => ({ ...host.scriptStorageOptions(), ...host.temporalCapture() }),
+    ),
   );
   await host.activate();
   const started = host.session.value;
@@ -170,7 +173,12 @@ test("Vue host resolves the player's zone and presentation again at Start and at
   // The account setting changed before the player continued the saved session.
   account = DEFAULT_TEMPORAL_CONTEXT;
   context.mock.method(Date, "now", () => utc("2026-10-05T09:00:00"));
-  host.prepareRestore(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(started)));
+  host.prepareRestore(
+    hostIntroduced(
+      await host.bridge,
+      restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(started)),
+    ),
+  );
   await host.activate();
   const continued = playerRuntimeSnapshot(host.session.value!);
   assert.ok(continued);
@@ -202,10 +210,15 @@ test("Vue host's Continue resumes a restored ready session from the activation a
   const { plan } = compileSource('say "Resumed", instant\nexit');
   assert.ok(plan);
   host.prepareRestore(
-    restorePlayerRuntimeSession({
-      checkpointJson: serializeCheckpoint(createCheckpoint(plan, createFreshRuntimeSnapshot(plan))),
-      events: [],
-    }),
+    hostIntroduced(
+      await host.bridge,
+      restorePlayerRuntimeSession({
+        checkpointJson: serializeCheckpoint(
+          createCheckpoint(plan, createFreshRuntimeSnapshot(plan)),
+        ),
+        events: [],
+      }),
+    ),
   );
   const beforeActivation = host.session.value;
   assert.equal(host.activation.value, "continue");
@@ -254,9 +267,7 @@ test("Vue host records every session from Start and from Continue for a debug ex
   });
   assert.equal(await host.debugRecording(), null, "nothing is recorded before Start");
   await host.loadScriptStorage();
-  host.prepare((recording) =>
-    createPlayerRuntimeSession('let name = askText "Name"\nexit', recording),
-  );
+  host.prepare(await sourceStart(host.bridge, 'let name = askText "Name"\nexit'));
   await host.activate();
   assert.deepEqual(
     (await host.debugRecording())?.operations.map((operation) => operation.kind),
@@ -264,7 +275,12 @@ test("Vue host records every session from Start and from Continue for a debug ex
   );
   const started = host.session.value;
   assert.ok(started);
-  host.prepareRestore(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(started)));
+  host.prepareRestore(
+    hostIntroduced(
+      await host.bridge,
+      restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(started)),
+    ),
+  );
   await host.activate();
   assert.deepEqual(
     (await host.debugRecording())?.operations.map((operation) => operation.kind),
@@ -317,10 +333,11 @@ test("each Start loads what another tab saved since the page opened or the previ
   const storage = memoryStorage({});
   const { host } = createHost(context, storage.provider);
   await host.loadScriptStorage();
-  host.prepare(() =>
-    createPlayerRuntimeSession(
+  host.prepare(
+    await sourceStart(
+      host.bridge,
       'let value = load("value", default: "empty")\nsay "Loaded: ${value}", instant\nexit',
-      host.scriptStorageOptions(),
+      () => host.scriptStorageOptions(),
     ),
   );
   // Another tab's save reaches only the provider.

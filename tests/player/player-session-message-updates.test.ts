@@ -6,7 +6,10 @@ import type * as Adapter from "../../player/runtime/runtime-adapter.js";
 import type * as CompileProject from "../../player/runtime/compile-project.js";
 import type { PlayerRuntimeSession } from "../../player/runtime/runtime-adapter.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
-import { loadHostFacade, onHostAll } from "../helpers/player/host-sessions.js";
+import { loadHostFacade, onHostAll, hostIntroduced } from "../helpers/player/host-sessions.js";
+import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
+import type { PlayerSession } from "../../player/runtime/runtime-view.js";
+import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 
 /*
  * The Player speaks messages changed in place from a status region (PLAYER-UI.md "Message presentation and provenance"):
@@ -14,10 +17,11 @@ import { loadHostFacade, onHostAll } from "../helpers/player/host-sessions.js";
  */
 
 interface MessageHost {
+  readonly bridge: Promise<PlayerBridge>;
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly generation: Readonly<Ref<number>>;
-  prepare(create: () => PlayerRuntimeSession): void;
-  prepareRestore(restored: PlayerRuntimeSession): void;
+  prepare(create: PlanStart): void;
+  prepareRestore(restored: PlayerSession): void;
   activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
 }
@@ -121,7 +125,7 @@ const SOURCE = [
 
 test("a change that live play publishes is spoken, and a restored or new session speaks none of its history", async (context) => {
   const { host, spoken } = createHost(context);
-  host.prepare(() => adapter.createPlayerRuntimeSession(SOURCE));
+  host.prepare(await sourceStart(host.bridge, SOURCE));
   await host.activate();
   await settle(context, 0);
   // The message itself is no change.
@@ -133,14 +137,16 @@ test("a change that live play publishes is spoken, and a restored or new session
 
   // Continue of a restored state begins again from the messages as they are.
   const restorePoint = adapter.createPlayerRuntimeRestorePoint(host.session.value!);
-  host.prepareRestore(adapter.restorePlayerRuntimeSession(restorePoint));
+  host.prepareRestore(
+    hostIntroduced(await host.bridge, adapter.restorePlayerRuntimeSession(restorePoint)),
+  );
   await host.activate();
   await settle(context, 10_000);
   assert.equal(spoken.value, "");
 
   // A change made before a new generation is never spoken after it.
   host.update(adapter.submitPlayerRuntimeComposer(host.session.value!, "yes")!.session);
-  host.prepare(() => adapter.createPlayerRuntimeSession(SOURCE));
+  host.prepare(await sourceStart(host.bridge, SOURCE));
   await host.activate();
   await settle(context, 10_000);
   assert.equal(spoken.value, "");

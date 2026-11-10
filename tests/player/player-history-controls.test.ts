@@ -14,10 +14,7 @@ import { decodeMessage } from "../../player/engine-bridge/transport.js";
 import type * as CompileProject from "../../player/runtime/compile-project.js";
 import type * as InProcess from "../../player/engine-bridge/in-process.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
-import type {
-  PlayerRuntimeSession,
-  PlayerRuntimeSessionOptions,
-} from "../../player/runtime/runtime-adapter.js";
+import type { PlayerRuntimeSessionOptions } from "../../player/runtime/runtime-adapter.js";
 import { playerRuntimeForeground, type PlayerSession } from "../../player/runtime/runtime-view.js";
 import {
   presentedAction,
@@ -28,6 +25,7 @@ import { loadPlayerModule } from "../helpers/player-modules.js";
 import { memoryStorage } from "../helpers/player/rewind-host.js";
 import { untypedClient } from "../helpers/bridge/untyped.js";
 import { interceptSends } from "../helpers/bridge/sends.js";
+import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
 
 /*
  * #2150 PR 1: Debug's rewind history controls are posted when the Player's rewind lifecycle decides them, in the host's
@@ -153,7 +151,7 @@ interface RewindPlayer {
       retired(by: "clear" | "import"): readonly { readonly kind: string }[];
     };
   };
-  prepare(create: (recording: PlayerRuntimeSessionOptions) => PlayerRuntimeSession): void;
+  prepare(create: PlanStart): void;
   activate(): Promise<void>;
   /** Ends the session and shows the start page, as the Player's Start page control does. */
   toStartPage(): void | Promise<void>;
@@ -280,12 +278,11 @@ async function mount(
   await player.bridge;
   if (debug) await until(() => rewind!.state.value.history !== null, "the first history's open");
   await player.loadScriptStorage();
-  player.prepare((recording) =>
-    compiler.createPlayerRuntimeSession(REWIND, {
+  player.prepare(
+    await sourceStart(player.bridge, REWIND, () => ({
       ...player.scriptStorageOptions(),
-      ...recording,
       wallClockMs: 0,
-    }),
+    })),
   );
   await player.activate();
   if (debug) await until(() => rewind!.state.value.points.length === 1, "the first point");
@@ -536,12 +533,11 @@ test("#2150: a new Start's choice answered before its renewal's reply is the new
   const renewals = holdRenewals(context, mounted.bridge);
   const first = mounted.player.session.value!.lineage;
   await mounted.player.toStartPage();
-  mounted.player.prepare((recording) =>
-    compiler.createPlayerRuntimeSession(REWIND, {
+  mounted.player.prepare(
+    await sourceStart(mounted.player.bridge, REWIND, () => ({
       ...mounted.player.scriptStorageOptions(),
-      ...recording,
       wallClockMs: 0,
-    }),
+    })),
   );
   await mounted.player.activate();
   await until(

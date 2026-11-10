@@ -4,7 +4,6 @@
 
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
-import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 import {
   obligations as transferObligations,
@@ -27,6 +26,7 @@ import {
   heldInHost,
 } from "../helpers/player/rewind-host.js";
 import { untypedClient } from "../helpers/bridge/untyped.js";
+import { sourceStart } from "../helpers/prepared-plan.js";
 
 /*
  * L5i.6: every lineage transfer of Debug's rewind (`transferLineages`), as the declared domain generates its obligations
@@ -93,8 +93,8 @@ async function runTransfer(
   const guard = each.case.endsWith("guard fails") ? each.case.split(" ")[0] : null;
   if (guard === "readiness")
     // A Start being prepared: the session may not be left now.
-    host.prepare((recording) =>
-      createPlayerRuntimeSession(script, { ...host.scriptStorageOptions(), ...recording }),
+    host.prepare(
+      await sourceStart(host.bridge, script, () => ({ ...host.scriptStorageOptions() })),
     );
   if (guard === "read") made.failGets();
   const settleAdoption = async () => {

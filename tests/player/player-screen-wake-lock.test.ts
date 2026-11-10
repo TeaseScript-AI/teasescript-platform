@@ -8,17 +8,18 @@ import type { PlayerRuntimeSession } from "../../player/runtime/runtime-adapter.
 import type { RandomDrawResolutionOutcome } from "../../src/index.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { loadHostFacade, onHostAll } from "../helpers/player/host-sessions.js";
+import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
+import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 
 // The Player keeps the screen on while a session plays (PLAYER-UI "Session start and user activation"): from the Start
 // click until the script exits, ends with an error, or a Player error stops it. These tests fake the browser's screen
 // wake lock, which releases every held lock when the page is hidden, as browsers do.
 interface WakeLockHost {
+  readonly bridge: Promise<PlayerBridge>;
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly stopped: Readonly<Ref<boolean>>;
   readonly randomDraw: Readonly<Ref<{ readonly drawId: number } | null>>;
-  prepare(
-    create: (options: RuntimeAdapter.PlayerRuntimeSessionOptions) => PlayerRuntimeSession,
-  ): void;
+  prepare(create: PlanStart): void;
   activate(): Promise<void>;
   toStartPage(): Promise<void>;
   reportHostError(error: unknown): void;
@@ -176,7 +177,7 @@ const waitThenExit = 'say "Stare at the screen.", instant\nwait 10 s\nexit';
 test("the screen stays on from Start until the script exits, and again once the hidden page is shown", async (context) => {
   const browser = stubBrowser(context, "granting");
   const { host, time } = mountPlayer(context);
-  host.prepare(() => runtime.createPlayerRuntimeSession(waitThenExit));
+  host.prepare(await sourceStart(host.bridge, waitThenExit));
   await settle();
   assert.equal(browser.requests(), 0, "the start page keeps no lock");
 
@@ -216,8 +217,9 @@ test("the screen stays on from Start until the script exits, and again once the 
 test("a script error and a Player error release the lock", async (context) => {
   const browser = stubBrowser(context, "granting");
   const { host, time } = mountPlayer(context);
-  host.prepare(() =>
-    runtime.createPlayerRuntimeSession(
+  host.prepare(
+    await sourceStart(
+      host.bridge,
       'let zero = dynamic(0)\nwait 10 s\nsay "${1 / zero}"\nexit\nfunction dynamic(value) {\n    return value\n}',
     ),
   );
@@ -229,7 +231,7 @@ test("a script error and a Player error release the lock", async (context) => {
   assert.equal(status(host), "failed");
   assert.equal(browser.held(), 0);
 
-  host.prepare(() => runtime.createPlayerRuntimeSession(waitThenExit));
+  host.prepare(await sourceStart(host.bridge, waitThenExit));
   await host.activate();
   await settle();
   assert.deepEqual([browser.requests(), browser.held()], [2, 1]);
@@ -252,9 +254,7 @@ test("a random draw Debug pauses at keeps the lock, also in the first statement"
   // Debug's Choose outcomes: the session pauses at every draw until it is decided. Paused in its first statement, the
   // session has not completed one yet.
   host.setRandomControl({ sites: [] });
-  host.prepare((options) =>
-    runtime.createPlayerRuntimeSession("let roll = randomInteger(1..=6)\nexit", options),
-  );
+  host.prepare(await sourceStart(host.bridge, "let roll = randomInteger(1..=6)\nexit"));
   await host.activate();
   await settle();
   const draw = host.randomDraw.value;
@@ -270,7 +270,7 @@ test("the lock is asked for at the Start click, before the camera opens", async 
   // Safari grants the first lock of a page only right after the player's click, which a camera prompt can outlast.
   const browser = stubBrowser(context, "granting");
   const { host } = mountPlayer(context, true);
-  host.prepare(() => runtime.createPlayerRuntimeSession(waitThenExit));
+  host.prepare(await sourceStart(host.bridge, waitThenExit));
   const activating = host.activate();
   await settle();
   assert.equal(host.session.value, null, "the camera has not answered yet");
@@ -287,7 +287,7 @@ test("without a wake lock, or when the browser refuses it, the session plays as 
     await context.test(wakeLock, async (context) => {
       const browser = stubBrowser(context, wakeLock);
       const { host, time } = mountPlayer(context);
-      host.prepare(() => runtime.createPlayerRuntimeSession(waitThenExit));
+      host.prepare(await sourceStart(host.bridge, waitThenExit));
       await host.activate();
       await settle();
       assert.equal(status(host), "waiting");
@@ -307,7 +307,7 @@ test("without a wake lock, or when the browser refuses it, the session plays as 
 test("a request under way when the page was hidden and shown is made again, and one granted after the end is released", async (context) => {
   const browser = stubBrowser(context, "answering");
   const { host, time } = mountPlayer(context);
-  host.prepare(() => runtime.createPlayerRuntimeSession(waitThenExit));
+  host.prepare(await sourceStart(host.bridge, waitThenExit));
   await host.activate();
   await settle();
   assert.equal(browser.requests(), 1);

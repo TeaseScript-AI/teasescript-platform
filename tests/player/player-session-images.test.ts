@@ -9,13 +9,14 @@ import {
   type PlayerRuntimeSessionOptions,
   playerRuntimeSnapshot as rawPlayerRuntimeSnapshot,
 } from "../../player/runtime/runtime-adapter.js";
-import {
-  compilePlayerProject,
-  createPlayerRuntimeSession,
-} from "../../player/runtime/compile-project.js";
-import { preparedPlan } from "../helpers/prepared-plan.js";
+import { compilePlayerProject } from "../../player/runtime/compile-project.js";
+import { preparedPlan, sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
-import { playerRuntimeForeground, playerRuntimeMedia } from "../../player/runtime/runtime-view.js";
+import {
+  playerRuntimeForeground,
+  playerRuntimeMedia,
+  type PlayerSession,
+} from "../../player/runtime/runtime-view.js";
 import {
   assembleDebugExport,
   chooseDebugCategory,
@@ -61,12 +62,9 @@ interface ImageHost {
   readonly imageCapture: { choose(reference: string): boolean; answer(input: "button"): Intent };
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
-  prepare(create: (options: PlayerRuntimeSessionOptions) => PlayerRuntimeSession): void;
+  prepare(create: PlanStart): void;
   readonly bridge: Promise<PlayerBridge>;
-  prepareScript(
-    plan: string,
-    create: (options: PlayerRuntimeSessionOptions) => PlayerRuntimeSession,
-  ): Promise<void>;
+  prepareScript(plan: string, create: PlanStart): Promise<void>;
   readonly activation: Readonly<Ref<"start" | "continue" | null>>;
   debugExportCandidate(
     details: () => Pick<DebugExportCandidate, "player" | "host">,
@@ -79,7 +77,7 @@ interface ImageHost {
   forgetRandomHistory(): void;
   readonly randomRevision: Readonly<Ref<number>>;
   readonly hostError: Readonly<Ref<string | null>>;
-  prepareRestore(given: PlayerRuntimeSession): void;
+  prepareRestore(given: PlayerSession): void;
   setDebugMode(on: boolean): void;
   readonly stopped: Readonly<Ref<boolean>>;
 }
@@ -92,6 +90,15 @@ let usePlayerSession: (options: {
 }) => ImageHost;
 
 // Load the real Vue composable through the existing build tool: its browser-source imports use Vite resolution.
+
+/**
+ * The session the composable shows, as the host's session it is: this file declares it as an adapter session for its
+ * adapter calls, which reach the host through `onHost`.
+ */
+const shown = (host: { readonly session: Readonly<Ref<unknown>> }) => {
+  // EVIDENCE: invariant: the composable's `session` holds the host's sessions (`PlayerSession`), whatever this file declares.
+  return host.session.value as PlayerSession;
+};
 before(async () => {
   await loadHostFacade();
   const module: Record<string, unknown> = await loadPlayerModule(
@@ -184,10 +191,11 @@ test("a chosen image is session media: kept durably only when saved, and release
   assert.ok(host);
   context.after(() => scope.stop());
   await host.loadScriptStorage();
-  host.prepare(() =>
-    createPlayerRuntimeSession(
+  host.prepare(
+    await sourceStart(
+      host.bridge,
       'let first = askImage("First")\nlet second = askImage("Second")\nsave second as "kept"\nexit',
-      host.scriptStorageOptions(),
+      () => host.scriptStorageOptions(),
     ),
   );
   await host.activate();
@@ -222,10 +230,10 @@ test("a debug export candidate is the state when it was asked for, while play co
   );
   assert.ok(host);
   context.after(() => scope.stop());
-  host.prepare((options) =>
-    createPlayerRuntimeSession(
+  host.prepare(
+    await sourceStart(
+      host.bridge,
       'let pick = askImage("Picture")\nlet name = askText "Name"\nsay "After ${name}", instant\nexit',
-      options,
     ),
   );
   await host.activate();
@@ -290,9 +298,8 @@ test("after a reload, Continue's debug export offers the photo its state holds, 
     assert.ok(host);
     context.after(() => scope.stop());
     await host.loadScriptStorage();
-    await host.prepareScript(await preparedPlan(host.bridge, plan), (options) =>
-      createPlayerRuntimeSession(plan, { ...options, ...host.scriptStorageOptions() }),
-    );
+    const held = await preparedPlan(host.bridge, plan);
+    await host.prepareScript(held, { plan: held, options: () => host.scriptStorageOptions() });
     return { host, scope };
   };
   const before = await page();
@@ -345,7 +352,7 @@ test("an image that never became the preview can be dropped, and Use image answe
   );
   assert.ok(host);
   context.after(() => scope.stop());
-  host.prepare(() => createPlayerRuntimeSession("let pick = askImage()\nshowImage pick\nexit"));
+  host.prepare(await sourceStart(host.bridge, "let pick = askImage()\nshowImage pick\nexit"));
   await host.activate();
   const reference = await chosen(host, "late.png");
   host.images.discard(reference);
@@ -366,7 +373,7 @@ test("each image request that allows only the camera is reported as a Player not
   const keys = () => host.notices.value.map((notice) => notice.key);
   const cameraOnly =
     'timer async 2 s {\n  let late = askImage("Timer", allowFile: false)\n}\nlet pick = askImage(allowFile: false)\nexit';
-  host.prepare(() => createPlayerRuntimeSession(cameraOnly));
+  host.prepare(await sourceStart(host.bridge, cameraOnly));
   await host.activate();
   await until(() => keys().includes("image-needs-camera"), "the notice was not published");
   // A dismissal holds for its request, while the session goes on.
@@ -379,7 +386,7 @@ test("each image request that allows only the camera is reported as a Player not
   await until(() => keys().includes("image-needs-camera"), "the timer's request was not reported");
   // So is the same request in a new run of the same story.
   host.dismissNotice("image-needs-camera");
-  host.prepare(() => createPlayerRuntimeSession(cameraOnly));
+  host.prepare(await sourceStart(host.bridge, cameraOnly));
   await host.activate();
   await until(
     () => keys().includes("image-needs-camera"),
@@ -389,8 +396,8 @@ test("each image request that allows only the camera is reported as a Player not
     host.notices.value.find((notice) => notice.key === "image-needs-camera")?.message;
   assert.equal(message(), "This image request needs a camera, which cannot be used here.");
   // A request the player may skip can still be answered, which the notice says.
-  host.prepare(() =>
-    createPlayerRuntimeSession("let pick = askImage(allowFile: false, allowSkip: true)\nexit"),
+  host.prepare(
+    await sourceStart(host.bridge, "let pick = askImage(allowFile: false, allowSkip: true)\nexit"),
   );
   await host.activate();
   await until(
@@ -398,7 +405,7 @@ test("each image request that allows only the camera is reported as a Player not
     "the skippable request's notice does not name Skip",
   );
   // A new session without such a request withdraws it.
-  host.prepare(() => createPlayerRuntimeSession('let pick = askImage("Add an image")\nexit'));
+  host.prepare(await sourceStart(host.bridge, 'let pick = askImage("Add an image")\nexit'));
   await host.activate();
   await until(() => !keys().includes("image-needs-camera"), "the notice was not withdrawn");
 });
@@ -414,7 +421,7 @@ test("audio that loaded and then fails while it plays is a 'could not be played'
   );
   assert.ok(host);
   context.after(() => scope.stop());
-  host.prepare(() => createPlayerRuntimeSession('playAudio "sounds/chime.wav"\nsay "after"\nexit'));
+  host.prepare(await sourceStart(host.bridge, 'playAudio "sounds/chime.wav"\nsay "after"\nexit'));
   await host.activate();
   const chime = () => audioElements.find((element) => element.src.endsWith("sounds/chime.wav"));
   await until(() => chime() !== undefined, "the chime did not play");
@@ -446,7 +453,7 @@ test("audio a Continue restores as loaded that then fails while it plays is also
   );
   assert.ok(host);
   context.after(() => scope.stop());
-  host.prepare(() => createPlayerRuntimeSession('playAudio "sounds/chime.wav"\nsay "after"\nexit'));
+  host.prepare(await sourceStart(host.bridge, 'playAudio "sounds/chime.wav"\nsay "after"\nexit'));
   await host.activate();
   const chime = () => audioElements.findLast((element) => element.src.endsWith("sounds/chime.wav"));
   await until(() => chime() !== undefined, "the chime did not play");
@@ -455,7 +462,7 @@ test("audio a Continue restores as loaded that then fails while it plays is also
   const loaded = () => playerRuntimeMedia(host.session.value!.state).media[0]?.loaded === true;
   await until(loaded, "the chime's load did not show");
   // A Continue restores the session with the chime already loaded: its new element reports no load of its own.
-  host.prepareRestore(host.session.value!);
+  host.prepareRestore(shown(host));
   await host.activate();
   await until(
     () => chime()?.src.endsWith("sounds/chime.wav") === true && loaded(),
@@ -503,7 +510,7 @@ test("media the script refers to but the Player cannot use is a warning, once pe
     "let third = askImage()",
     "exit",
   ].join("\n");
-  host.prepare(() => createPlayerRuntimeSession(script));
+  host.prepare(await sourceStart(host.bridge, script));
   await host.activate();
   // An async play waits for its load: the missing sound is reported while the run waits for the next one.
   await until(() => messages().length === 2, "the missing image and sound were not reported");
@@ -538,7 +545,7 @@ test("media the script refers to but the Player cannot use is a warning, once pe
   assert.deepEqual(messages(), []);
 
   // A new session reports it again.
-  host.prepare(() => createPlayerRuntimeSession(script));
+  host.prepare(await sourceStart(host.bridge, script));
   await host.activate();
   await until(() => messages().length === 2, "the new session did not report the missing media");
 });
@@ -572,7 +579,7 @@ test("a speaker's avatar that is no package file is a warning when a message fir
     'let third = askText "Done?"',
     "exit",
   ].join("\n");
-  host.prepare(() => createPlayerRuntimeSession(script));
+  host.prepare(await sourceStart(host.bridge, script));
   await host.activate();
   await nextTick();
   assert.deepEqual(messages(), []);
@@ -592,7 +599,7 @@ test("a package image the Stage cannot load is reported while the Stage shows it
   assert.ok(host);
   context.after(() => scope.stop());
   const script = 'showImage "images/corrupt.png"\nlet pick = askImage()\nexit';
-  host.prepare(() => createPlayerRuntimeSession(script));
+  host.prepare(await sourceStart(host.bridge, script));
   await host.activate();
   // A late failure of an image the Stage no longer shows is not reported.
   host.stageImageFailure("/files/images/replaced.png");
@@ -605,7 +612,7 @@ test("a package image the Stage cannot load is reported while the Stage shows it
   );
   // A new session showing it on the same Stage gets no new browser error, but is reported again.
   host.dismissNotice("unusable-media:images/corrupt.png");
-  host.prepare(() => createPlayerRuntimeSession(script));
+  host.prepare(await sourceStart(host.bridge, script));
   await host.activate();
   await nextTick();
   assert.deepEqual(
@@ -615,7 +622,7 @@ test("a package image the Stage cannot load is reported while the Stage shows it
   // Once the Stage shows another source, such as a development override, the failure no longer describes it.
   host.dismissNotice("unusable-media:images/corrupt.png");
   host.stageImageFailure(null);
-  host.prepare(() => createPlayerRuntimeSession(script));
+  host.prepare(await sourceStart(host.bridge, script));
   await host.activate();
   await nextTick();
   assert.equal(host.notices.value.length, 0);
@@ -630,10 +637,10 @@ test("a debug export whose photo read waits while a new Start retires its activa
     usePlayerSession({ decodeImage: async () => ({ width: 1, height: 1 }) }),
   )!;
   context.after(() => scope.stop());
-  host.prepare((options) =>
-    createPlayerRuntimeSession(
+  host.prepare(
+    await sourceStart(
+      host.bridge,
       'let image = askImage("Photo")\nlet second = askImage("Second photo")\nlet name = askText "Name"\nexit',
-      options,
     ),
   );
   await host.activate();
@@ -672,9 +679,7 @@ test("a debug export whose photo read waits while a new Start retires its activa
   );
   await until(() => state.reached, "the candidate reads its first photo");
   assert.deepEqual(heldTickets(bridge), ["r1"]);
-  host.prepare((options) =>
-    createPlayerRuntimeSession('let next = askText "Replacement"\nexit', options),
-  );
+  host.prepare(await sourceStart(host.bridge, 'let next = askText "Replacement"\nexit'));
   await host.activate();
   const replacement = host.session.value;
   state.retired = true;
@@ -720,9 +725,7 @@ async function heldAdoption(
   host.setRandomControl({ sites: [] });
   await new Promise((resolve) => setTimeout(resolve, 0));
   if (before === "continue") {
-    host.prepare((options) =>
-      createPlayerRuntimeSession('let restored = askText "Restored"\nexit', options),
-    );
+    host.prepare(await sourceStart(host.bridge, 'let restored = askText "Restored"\nexit'));
     await host.activate();
   }
   const request = bridge.client.request.bind(bridge.client);
@@ -742,14 +745,11 @@ async function heldAdoption(
       return reply;
     });
   });
-  if (before === "continue") host.prepareRestore(host.session.value!);
-  else
-    host.prepare((options) => createPlayerRuntimeSession('let old = askText "Old"\nexit', options));
+  if (before === "continue") host.prepareRestore(shown(host));
+  else host.prepare(await sourceStart(host.bridge, 'let old = askText "Old"\nexit'));
   await host.activate();
   await until(() => held.adoption, "the activation adopts its session");
-  host.prepare((options) =>
-    createPlayerRuntimeSession('let next = askText "Successor"\nexit', options),
-  );
+  host.prepare(await sourceStart(host.bridge, 'let next = askText "Successor"\nexit'));
   await host.activate();
   host.forgetRandomHistory();
   const successor = host.session.value;
@@ -807,7 +807,7 @@ test("a Debug mode change whose failure arrives after a Continue of the same lin
     heldRuns: (bridge: PlayerBridge) => number[];
     heldTickets: (bridge: PlayerBridge) => string[];
   };
-  host.prepare((options) => createPlayerRuntimeSession('let old = askText "Old"\nexit', options));
+  host.prepare(await sourceStart(host.bridge, 'let old = askText "Old"\nexit'));
   await host.activate();
   const request = bridge.client.request.bind(bridge.client);
   let open!: () => void;
@@ -835,7 +835,7 @@ test("a Debug mode change whose failure arrives after a Continue of the same lin
   const predecessor = identityOf(host.session.value);
   host.setDebugMode(true);
   await until(() => held.completed, "the host ran the Debug mode change");
-  host.prepareRestore(host.session.value!);
+  host.prepareRestore(shown(host));
   await host.activate();
   const successor = identityOf(host.session.value);
   const state = JSON.stringify(host.session.value?.state);

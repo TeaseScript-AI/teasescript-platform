@@ -7,7 +7,6 @@ import {
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
 } from "../../player/runtime/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
 import { pendingPlayerRuntimeStorageWrite } from "../../player/runtime/runtime-view.js";
 import type { SavedDataHost } from "../../player/persistence/saved-data.js";
 import {
@@ -28,6 +27,8 @@ import type {
 } from "../../src/index.js";
 import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
+import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
+import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 
 interface ImportScript {
   readonly scope: string;
@@ -41,6 +42,7 @@ interface ImportReview {
   readonly scripts: readonly ImportScript[];
 }
 interface ImportHost {
+  readonly bridge: Promise<PlayerBridge>;
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly activation: Readonly<Ref<"start" | "continue" | null>>;
   readonly sessionInProgress: Readonly<Ref<boolean>>;
@@ -50,7 +52,7 @@ interface ImportHost {
   importSavedData(review: ImportReview, chosen: ReadonlySet<string>): Promise<void>;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
-  prepare(create: () => PlayerRuntimeSession): void;
+  prepare(create: PlanStart): void;
   activate(): Promise<void>;
 }
 let usePlayerSession: (options: {
@@ -227,7 +229,7 @@ async function until(condition: () => boolean, message: string) {
 
 async function start(host: ImportHost, source: string) {
   await host.loadScriptStorage();
-  host.prepare(() => createPlayerRuntimeSession(source, host.scriptStorageOptions()));
+  host.prepare(await sourceStart(host.bridge, source, () => host.scriptStorageOptions()));
   await host.activate();
 }
 
@@ -360,10 +362,11 @@ test("a bundle that includes the shown script ends its session, and the next Sta
   assert.equal((await values(other(OTHER))).get("score"), 3);
 
   // A new session loads the imported values.
-  host.prepare(() =>
-    createPlayerRuntimeSession(
+  host.prepare(
+    await sourceStart(
+      host.bridge,
       'let photo: string = load("photo", default: "")\nsave photo as "copy"\nsave load("score", default: 0) + 1 as "score"\nexit',
-      host.scriptStorageOptions(),
+      () => host.scriptStorageOptions(),
     ),
   );
   await host.activate();

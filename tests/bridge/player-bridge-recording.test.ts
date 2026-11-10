@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { before } from "node:test";
 
 import {
   compilePlayerProject,
@@ -69,6 +69,10 @@ import type * as RuntimeAdapter from "../../player/runtime/runtime-adapter.js";
 import type { RuntimeSnapshot } from "../../src/index.js";
 import { NO_MARKS } from "../../player/debug/debug-history-marks.js";
 import { asMalformed, untypedBridge, untypedClient } from "../helpers/bridge/untyped.js";
+import { hostIntroduced, loadHostFacade } from "../helpers/player/host-sessions.js";
+
+// `hostIntroduced` registers adapter sessions through the facade of the bundle the composable runs in.
+before(loadHostFacade);
 
 /*
  * L5g's B-record evidence: the recording of every engine call, made by the connection's recorder, is the same in-process
@@ -986,7 +990,9 @@ async function liveRun<T>(
       await player.bridge;
       await player.loadScriptStorage();
       const plan = compilePlayerProject(REPLAYED).plan!;
-      player.prepareRestore(adapter.restorePlayerRuntimeSessionAt(plan, restoredJson(), []));
+      player.prepareRestore(
+        hostIntroduced(bridge, adapter.restorePlayerRuntimeSessionAt(plan, restoredJson(), [])),
+      );
       await player.activate();
       const until = async (done: () => boolean, what: string) => {
         for (let turn = 0; !done(); turn++) {

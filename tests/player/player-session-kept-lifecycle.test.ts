@@ -13,11 +13,8 @@ import type {
   PlayerRuntimeSession,
   PlayerRuntimeSessionOptions,
 } from "../../player/runtime/runtime-adapter.js";
-import {
-  compilePlayerProject,
-  createPlayerRuntimeSession,
-} from "../../player/runtime/compile-project.js";
-import { preparedPlan } from "../helpers/prepared-plan.js";
+import { compilePlayerProject } from "../../player/runtime/compile-project.js";
+import { preparedPlan, type PlanStart } from "../helpers/prepared-plan.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import type { SavedDataHost } from "../../player/persistence/saved-data.js";
 import {
@@ -64,11 +61,8 @@ interface Host {
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   readonly bridge: Promise<PlayerBridge>;
-  prepareScript(
-    plan: string,
-    create: (options: PlayerRuntimeSessionOptions) => PlayerRuntimeSession,
-  ): Promise<void>;
-  prepare(create: () => PlayerRuntimeSession): void;
+  prepareScript(plan: string, create: PlanStart): Promise<void>;
+  prepare(create: PlanStart): void;
   activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
   readonly inputSection: unknown;
@@ -255,11 +249,9 @@ function page(context: TestContext, at: Browser, options: { scope?: string; room
 
 /** The token under which `host`'s bridge holds `plan`, prepared there from its text as a host does. */
 const token = (host: Host, plan = PLAN) => preparedPlan(host.bridge, plan);
-/** Prepares the held plan `held`, of the test plan `plan`, at once: `prepareScript`'s ownership begins with the call. */
-const prepare = (host: Host, held: string, plan = PLAN) =>
-  host.prepareScript(held, (options) =>
-    createPlayerRuntimeSession(plan, { ...options, ...host.scriptStorageOptions() }),
-  );
+/** Prepares the held plan `held` at once: `prepareScript`'s ownership begins with the call. */
+const prepare = (host: Host, held: string) =>
+  host.prepareScript(held, { plan: held, options: () => host.scriptStorageOptions() });
 
 async function until(condition: () => boolean | Promise<boolean>, message: string) {
   const deadline = Date.now() + 2_000;
@@ -373,7 +365,7 @@ test("a kept photo read answered after the import is not put back, and one answe
   async function keepPhoto(at: Browser): Promise<string> {
     const { host, close } = page(context, at);
     await host.loadScriptStorage();
-    await prepare(host, await token(host, PHOTO), PHOTO);
+    await prepare(host, await token(host, PHOTO));
     await host.activate();
     await until(() => host.session.value?.state.status === "waiting", "the session did not ask");
     const stored = await host.images.store(new File([PNG], "photo.png"), {
@@ -395,7 +387,7 @@ test("a kept photo read answered after the import is not put back, and one answe
     const opened = page(context, at);
     await opened.host.loadScriptStorage();
     at.holds.photo.arm();
-    const preparing = prepare(opened.host, await token(opened.host, PHOTO), PHOTO);
+    const preparing = prepare(opened.host, await token(opened.host, PHOTO));
     await until(() => at.holds.photo.reached === 1, "the photo was not read");
     return { ...opened, preparing };
   }
@@ -425,8 +417,9 @@ test("a prepared script that a newer Start replaced while the host got ready off
   await keepAtFirst(context, at);
   const { host } = page(context, at);
   await host.loadScriptStorage();
+  const other = await token(host, OTHER_START);
   const preparing = prepare(host, await token(host));
-  host.prepare(() => createPlayerRuntimeSession(OTHER_START, host.scriptStorageOptions()));
+  host.prepare({ plan: other, options: () => host.scriptStorageOptions() });
   await preparing;
   await settle();
   assert.equal(host.activation.value, "start");
@@ -498,7 +491,7 @@ test("the start page's own read offers Start, and a read answered after unmount 
   const at = await browser();
   const { host } = page(context, at);
   await host.loadScriptStorage();
-  await prepare(host, await token(host, ENDS), ENDS);
+  await prepare(host, await token(host, ENDS));
   await host.activate();
   await until(() => host.session.value?.state.status === "halted", "the session did not end");
   at.holds.session.arm();

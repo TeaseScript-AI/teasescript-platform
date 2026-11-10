@@ -6,7 +6,6 @@
 import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 import { effectScope } from "vue";
-import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
 import { playerRuntimeForeground, type PlayerSession } from "../../player/runtime/runtime-view.js";
 import type { RuntimeSnapshot } from "../../src/index.js";
 import { coverageGaps, product, type Coordinates } from "../helpers/family-coverage.js";
@@ -38,6 +37,7 @@ import {
   heldInHost,
   MutableOwner,
 } from "../helpers/player/rewind-host.js";
+import { sourceStart } from "../helpers/prepared-plan.js";
 
 /*
  * L5i.6's handoff, by the lifecycle grammar (`tests/helpers/player/rewind-lifecycle.ts`): each schedule holds one step or
@@ -105,6 +105,12 @@ async function handoffRow(
       capture();
     }
     const bridge = await host.bridge;
+    // The event's Start is prepared before anything is held: a held read can hold the host's queue, behind which a
+    // `prepare` would wait for the hold that the event comes before.
+    const eventStart =
+      each.event === "Start prepared" || each.event === "replacement"
+        ? await sourceStart(host.bridge, script, () => ({ ...host.scriptStorageOptions() }))
+        : null;
     const live = shownView(host);
     let restored: PlayerSession | null = null;
     if (each.operation !== "back") {
@@ -248,9 +254,7 @@ async function handoffRow(
         atError = playerRuntimeSnapshot(host.session.value!);
         break;
       case "Start prepared":
-        host.prepare((recording) =>
-          createPlayerRuntimeSession(script, { ...host.scriptStorageOptions(), ...recording }),
-        );
+        host.prepare(eventStart!);
         break;
       case "Debug off":
         made.debug.stop();
@@ -265,9 +269,7 @@ async function handoffRow(
       case "replacement":
         // A Start that shows its session before the hold is let go.
         await host.loadScriptStorage();
-        host.prepare((recording) =>
-          createPlayerRuntimeSession(script, { ...host.scriptStorageOptions(), ...recording }),
-        );
+        host.prepare(eventStart!);
         event = Promise.resolve(host.activate());
         break;
       case "import ending the session": {
@@ -792,8 +794,8 @@ for (const gateA of ["succeeds", "fails"] as const)
     assert.equal(gates.length, 1);
     // A replacement session, Debug on again, and a later inspection of the new history.
     await host.loadScriptStorage();
-    host.prepare((recording) =>
-      createPlayerRuntimeSession(script, { ...host.scriptStorageOptions(), ...recording }),
+    host.prepare(
+      await sourceStart(host.bridge, script, () => ({ ...host.scriptStorageOptions() })),
     );
     await host.activate();
     await settle(context);
@@ -845,9 +847,7 @@ test("an obsolete Back gate's failure leaves no problem on the replacement's his
   // Debug off abandons it; a replacement session takes the page.
   made.debug.stop();
   await host.loadScriptStorage();
-  host.prepare((recording) =>
-    createPlayerRuntimeSession(script, { ...host.scriptStorageOptions(), ...recording }),
-  );
+  host.prepare(await sourceStart(host.bridge, script, () => ({ ...host.scriptStorageOptions() })));
   await host.activate();
   await settle(context);
   reject(new Error("obsolete Back gate"));

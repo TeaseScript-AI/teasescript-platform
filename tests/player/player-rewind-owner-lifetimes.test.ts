@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test, { type TestContext } from "node:test";
 import { effectScope, type EffectScope } from "vue";
 import type { DebugHistoryView } from "../../player/debug/debug-history.js";
-import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
 import type { BridgeResult } from "../../player/engine-bridge/client.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import { playerRuntimeForeground, type PlayerSession } from "../../player/runtime/runtime-view.js";
@@ -24,6 +23,7 @@ import {
 } from "../helpers/player/rewind-host.js";
 import { interceptSends } from "../helpers/bridge/sends.js";
 import { untypedClient } from "../helpers/bridge/untyped.js";
+import { sourceStart } from "../helpers/prepared-plan.js";
 
 /*
  * The lifetimes of what the Player's rewind owner holds (`player/vue/src/session/rewindOwner.ts`), through the real
@@ -406,9 +406,7 @@ interface World {
 async function replace(world: World) {
   const { host, context } = world;
   await host.loadScriptStorage();
-  host.prepare((recording) =>
-    createPlayerRuntimeSession(script, { ...host.scriptStorageOptions(), ...recording }),
-  );
+  host.prepare(await sourceStart(host.bridge, script, () => ({ ...host.scriptStorageOptions() })));
   host.activate();
   await settle(context);
 }

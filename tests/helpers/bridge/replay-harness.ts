@@ -559,7 +559,7 @@ export interface LiveComposable {
   readonly session: Readonly<Ref<PlayerSession | null>>;
   readonly bridge: Promise<PlayerBridge>;
   loadScriptStorage(): Promise<void>;
-  prepareRestore(restored: PlayerRuntimeSession): void;
+  prepareRestore(restored: PlayerSession): void;
   activate(): Promise<void>;
   update(next: PlayerSession): void;
 }
