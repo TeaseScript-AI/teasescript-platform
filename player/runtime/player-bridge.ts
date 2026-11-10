@@ -364,8 +364,8 @@ export class PlayerBridge {
    * Renews Debug's rewind history as `intent` on this connection (`historyRenew`), posted now: it closes `closes` and
    * every older history, opens the new one and enrolls `session` as it is, when one is shown. It carries this bridge's
    * claim generation (`claim`), which only the Player holding the bridge posts with. Whether it was posted is decided
-   * before this returns, as `historyClose`'s is: a renewal carrying a close that could not be posted blocks the next one
-   * before anything else posts. The sessions its closes released are forgotten as its reply settles.
+   * before this returns, as `historyClose`'s is, so that its caller can post the closes of one that was not before anything
+   * else posts (`rewindControls.ts`). The sessions its closes released are forgotten as its reply settles.
    */
   historyRenew(
     intent: number,

@@ -35,8 +35,9 @@ export interface LifecycleState {
    */
   readonly awaiting: boolean;
   /**
-   * The newest renewal posted to the host (0 before any), as its posting said (`renewPosted`): it replaces every history
-   * opened before it there. A renewal that could not be posted moves nothing.
+   * The newest renewal posted to the host (0 before any), as its posting said (`renewPosted`): the host closes every
+   * history opened before it as it runs, unless a close is refused there, which latches and is reported. A renewal that
+   * could not be posted moves nothing.
    */
   readonly sent: number;
   /** The open history, or `null`. */
@@ -308,7 +309,8 @@ export function advanceLifecycle(state: LifecycleState, event: LifecycleEvent): 
       // Each close it carried is still owed: posted alone now, with its reason, before any later decision posts.
       return done(state, ...event.closes.map((close) => ({ kind: "close", ...close }) as const));
     case "renewed": {
-      // A newer renewal was posted since: the host ran it after this one, and it replaced this history there.
+      // A newer renewal was posted since: closing this history is its part on the host, which runs it after this one (a
+      // refused close there latches and is reported).
       if (event.intent < state.sent) return done(state);
       // Asked for by no one any more, the history this opened closes.
       if (event.intent !== state.opening || !state.debug)

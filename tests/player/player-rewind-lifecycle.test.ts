@@ -37,10 +37,11 @@ import {
  * histories: a renewal run there closes every earlier one (carried closes included) and opens its own, or, refused
  * after its closes, opens none; a close run there ends its history; a refused close ends none. On that ledger:
  *
- * - at quiescence (every posted control answered, nothing left to post), a history open on the host is one the page
- *   owns (its history, or its opening's, which then has none yet), or one whose close was refused or could not be
- *   posted, reported once, with the Player blocked. Nothing else: a renewal that could not be posted replaced nothing,
- *   and a close it carried is still owed.
+ * - while the Player is live, at quiescence (every posted control answered, nothing left to post), a history open on
+ *   the host is one the page owns (its history, or its opening's, which then has none yet), or one whose close was
+ *   refused or could not be posted, reported once, with the Player blocked. Nothing else: a renewal that could not be
+ *   posted replaced nothing, and a close it carried is still owed. A sealed Player is outside this rule: its disposal's
+ *   close, when posted, takes every history on the host, and a lost connection takes them with it.
  */
 
 type Move =
@@ -437,8 +438,8 @@ function postingRow(
 }
 
 /**
- * The ledger's rule at quiescence (the header's last rule): every history open on the host is the page's, or owed with
- * the Player blocked. `null`, or the rule broken.
+ * The ledger's rule at quiescence, while the Player is live (the header's last rule): every history open on the host is
+ * the page's, or owed with the Player blocked. `null`, or the rule broken.
  */
 function unowned(world: Draft): string | null {
   if (world.sealed !== null || world.sent.length > 0 || world.posting.length > 0) return null;
