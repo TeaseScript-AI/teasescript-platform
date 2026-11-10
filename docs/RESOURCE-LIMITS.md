@@ -237,14 +237,16 @@ changed warning or wording applies to the same change, the entry is its report:
   from the same reasons a program outside the slice gets: a host value copied into a variable and used as a condition is
   refused with "this operand" whether or not a stop falls. What the code holds is a sign that a limit may be the cause,
   not that it is: the operator warning behind "this operand" is in `budget` context at every stop-only refusal measured
-  (184 of 184) and at that natural one too. A maker would notice, for a script too large for its budget, a refusal
-  naming a construct as not covered, where the same script compiles when it fits; which code it carries is the open item
-  above. Measured on main c42d6a6c5, for "this operand": 184 stop-only refusals, all after admission settled, 180 on
-  #2116's 15 sources (a type-test condition at demand allowances 1–3, four modes) and 4 on #2080's 6,379 moved stops (a
-  `get` default's key at demand 16). By that reading, only its `boolean` and `key` rules reach it inside the slice at
-  that commit; a slice step admitting their syntax would open `shown`, C4's `operator` and `choice`. The default's
-  refusal has no stop-only instance on those sets: it is known from #2227's matrix cells, and its throw site keeps no
-  record of the stop.
+  (184 of 184), and also when a stop falls in the program above, which the natural compile refuses as well. Publishing
+  instead was measured over the 196 such settings (#2116's 192 oracle settings and the stop corpus's 4) and not chosen:
+  4 of them publish a plan that passes a value the natural run rejects, #2183's defect, which this refusal covers there.
+  A maker would notice, for a script too large for its budget, a refusal naming a construct as not covered, where the
+  same script compiles when it fits; which code it carries is the open item above. Measured on main c42d6a6c5, for "this
+  operand": 184 stop-only refusals, all after admission settled, 180 on #2116's 15 sources (a type-test condition at
+  demand allowances 1–3, four modes) and 4 on #2080's 6,379 moved stops (a `get` default's key at demand 16). By that
+  reading, only its `boolean` and `key` rules reach it inside the slice at that commit; a slice step admitting their
+  syntax would open `shown`, C4's `operator` and `choice`. The default's refusal has no stop-only instance on those
+  sets: it is known from #2227's matrix cells, and its throw site keeps no record of the stop.
 
 How a repair of the type core's work is accepted against `main` (its growth gate) is a testing rule:
 [Scaling diagnostics](TESTING.md#scaling-diagnostics).
