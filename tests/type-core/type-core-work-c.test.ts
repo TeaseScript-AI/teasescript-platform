@@ -322,7 +322,8 @@ test("a deep literal's decision grows with its depth, never with its square (#14
  * A): a regression check on the 64 → 128 step only, at its measured doubling, not a bound at larger sizes; a change to
  * admission's passes re-measures and proposes the gate with its counts, never retunes it. Copies interleaved with
  * conditional stores below their path (S6-CARRIERS §4.7, condition (b)) are gated in the same form, a known limit by
- * the owner's decision too, and so are copies separated by calls storing their source.
+ * the owner's decision too, and so are copies separated by calls storing their source and the dormant meetings a
+ * fitting ring makes owed again (#1338).
  */
 test("every admission family's work and each of its counters grow with the program in either order", () => {
   assert.deepEqual(steepCounters(ADMISSION_FAMILIES), []);
