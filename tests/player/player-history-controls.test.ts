@@ -549,3 +549,33 @@ test("#2150: Debug turned on, with the choice answered before its renewal's repl
   assert.ok(mounted.rewind().state.value.points[0]!.response !== null);
   healthy(mounted);
 });
+
+test("#2150: Debug turned on posts its renewal in that turn, behind the shown session's queued work", async (context) => {
+  const mounted = await mount(context, false);
+  const session = mounted.player.session.value!;
+  // The session's own requests, each waiting for the one before it.
+  const queued = Promise.allSettled(
+    [1, 2, 3, 4].map(() => mounted.bridge.request(session, "observeTime", { atMs: 0, media: [] })),
+  );
+  const posted: string[] = [];
+  const clone = globalThis.structuredClone;
+  context.after(() => void (globalThis.structuredClone = clone));
+  globalThis.structuredClone = <T>(value: T, options?: StructuredSerializeOptions): T => {
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      "kind" in value &&
+      value.kind === "request" &&
+      "op" in value
+    )
+      posted.push(String(value.op));
+    return clone(value, options);
+  };
+  mounted.toggle();
+  // The renewal is posted in the turn the lifecycle decides it, before the session's queued replies come back.
+  await until(() => mounted.player.rewind.owner.state.debug, "the renewal's decision");
+  assert.ok(posted.includes("historyRenew"), `posted in the deciding turn: ${posted.join(", ")}`);
+  await queued;
+  await until(() => mounted.rewind().state.value.points.length === 1, "the first point");
+  healthy(mounted);
+});
