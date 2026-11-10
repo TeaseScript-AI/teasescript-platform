@@ -505,8 +505,8 @@ test("a mixed-list error's work grows as its dimensions do (#1765)", async () =>
  * #1906: a later element whose value holds no definite kind at a path, a join's elements (which may be either operand's)
  * or a typed host value (which the script cannot know), is a copy of what decides it, as the earliest element is (A4):
  * its decider's written type. So the mixed-list error is the current checker's in either order, in four modes. Its own
- * definite kinds still win (a narrowed union), a value proved to hold only `null` decides nothing, and a typed host value
- * whose written type fits stays valid.
+ * definite kinds still win (a narrowed union), a value proved to hold only `null` decides nothing, a written union
+ * offends where none of its kinds fits, and a typed host value whose written type fits stays valid.
  */
 test("a later element without a definite kind is compared by its decider's written type (#1906)", () => {
   const orders = (before: string, earlier: string, later: string): string[] => [
@@ -524,7 +524,11 @@ test("a later element without a definite kind is compared by its decider's writt
     // (the later order alone: the earliest's own `or null` from the host is #1843's)
     `${host("integer?")}let xs = ["x", atom]\nexit\n`,
     ...orders("let ys: string[] = hostValue\n", "[1]", "ys"),
+    ...orders(host("boolean | string"), "1", "atom"),
+    ...orders(host("boolean | string"), "{v: 1}", "{v: atom}"),
     `${host("string")}let xs = [1, atom, atom]\nexit\n`,
+    // (a repeated identity below the root: its later copy is described by the paths the first one offends at, `known`)
+    `${host("string")}let h = {v: atom}\nlet xs = [{v: 1}, h, h]\nexit\n`,
     `${host("integer | string")}if atom is string {\n  let xs = [1, atom]\n}\nexit\n`,
   ];
   const valid = [
