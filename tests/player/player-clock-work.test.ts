@@ -900,7 +900,10 @@ test("a retired observation's reply publishes nothing, while the next one's wait
   assert.equal(player.host.session.value, shown, "the retired one publishes nothing");
   // A healthy reply still reaches the store: stored, not shown, and its successor owns what shows next (P's provenance).
   const bridge = await player.host.bridge;
-  assert.ok(bridge.latest(asShown(shown))!.revision > shown.revision, "the retired one's reply is stored");
+  assert.ok(
+    bridge.latest(asShown(shown))!.revision > shown.revision,
+    "the retired one's reply is stored",
+  );
   player.gate.release();
   assert.notEqual(await second, null);
   assert.notEqual(player.host.session.value, shown, "the live one publishes");
