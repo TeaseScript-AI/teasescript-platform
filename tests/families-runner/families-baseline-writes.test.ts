@@ -55,6 +55,7 @@ test("the stored baselines' tools show no plain write outside the gate in their 
     "tests/families/run-contract.mjs",
     "tests/families/run.mjs",
     "tests/families/sources.mjs",
+    "tests/families/split.mjs",
   ]);
   // (advisory: the sandbox each store runs in enforces where it writes; this catches the plain forms of a write outside
   // the gate) each write is in the gate, makes a baseline's MANIFEST, or is of a path checked to lie outside every
@@ -127,6 +128,7 @@ test("the stored baselines' tools show no plain write outside the gate in their 
       "tests/families/run-contract.mjs",
       "tests/families/run.mjs",
       "tests/families/sources.mjs",
+      "tests/families/split.mjs",
     ]) {
       mkdirSync(join(directory, file, ".."), { recursive: true });
       writeFileSync(join(directory, file), readFileSync(file, "utf8"));

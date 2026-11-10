@@ -524,7 +524,7 @@ test("a baseline plans copies in 64 shards where it first plans it, keeps a coun
     writeFileSync(join(built, "package.json"), '{ "type": "module" }\n');
     writeFileSync(join(built, "package-lock.json"), "{}\n");
     writeFileSync(join(built, ".sha"), `${"1".repeat(40)}\n`);
-    for (const tool of ["baselines.mjs", "run-contract.mjs", "run.mjs", "sources.mjs"])
+    for (const tool of ["baselines.mjs", "run-contract.mjs", "run.mjs", "sources.mjs", "split.mjs"])
       cpSync(join("tests", "families", tool), join(built, "tests", "families", tool));
     const cases = (names: string[]) =>
       `export const cases = ${JSON.stringify(names.map((name) => [name, name]))};\n`;

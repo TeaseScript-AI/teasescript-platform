@@ -920,3 +920,47 @@ test("rerun-shard reruns a split shard by the costs file its record names, refus
     rmSync(home, { recursive: true, force: true });
   }
 });
+
+test("submit orders the batch by the shards the recorded costs fill, not by an area's mean (#2272, review round 1)", () => {
+  const home = mkdtempSync(join(tmpdir(), "compiler-replay-home-"));
+  try {
+    // (copies: 800 and 200 s a tree; joins: 600 and 600; two trees each: copies' shards 1,600 and 400 s, joins' 1,200)
+    const record = (area, costs) =>
+      write(join(home, "fill", jobId("f", area.length), "out", `${area}.0of1.work.jsonl`), [
+        { work: { area: `/t/tests/families/${area}` } },
+        ...costs.map((ms, k) => ({
+          generator: "g.mjs",
+          source: `s${k}`,
+          key: "k",
+          runs: [{ ms: [ms] }],
+        })),
+      ]);
+    record("copies", [800_000, 200_000]);
+    record("joins", [600_000, 600_000]);
+    const run = spawnSync(
+      process.execPath,
+      [
+        tool,
+        "submit",
+        "b".repeat(40),
+        "h".repeat(40),
+        "--owner",
+        "o",
+        "--costs",
+        join(home, "fill"),
+        "--dry",
+      ],
+      { encoding: "utf8", env: { ...process.env, HOME: home } },
+    );
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /^copies: 2 shards by recorded seconds, the largest about 1600 s$/mu);
+    const names = run.stdout
+      .split("\n")
+      .filter((line) => line.startsWith("["))
+      .map((line) => JSON.parse(line))
+      .map((args) => args[args.indexOf("--name") + 1]);
+    assert.deepEqual(names.slice(0, 4), ["copies-0of2", "joins-0of2", "joins-1of2", "copies-1of2"]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});

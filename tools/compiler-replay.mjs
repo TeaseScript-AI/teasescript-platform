@@ -276,7 +276,7 @@ function submit({ positional: [base, head], options }) {
     process.stdout.write(
       sized === undefined
         ? `${name}: ${SHARDS} shards by index${split.fellBack === undefined ? " (no recorded seconds)" : ""}\n`
-        : `${name}: ${sized.count} shards by recorded seconds, the largest about ${Math.round(sized.seconds[0])} s\n`,
+        : `${name}: ${sized.count} shards by recorded seconds, the largest about ${Math.round(Math.max(...sized.seconds))} s\n`,
     );
   }
   const sized = split.fellBack === undefined ? split : undefined;

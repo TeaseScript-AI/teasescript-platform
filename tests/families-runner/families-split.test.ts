@@ -54,7 +54,7 @@ test("a split puts every place in one shard, by the places' order and the costs 
   ]);
   // one shard a source at or over the target, the rest at the target; seconds per tree times the trees
   const seconds = { rest: { count: 10, ms: 50_000 }, sources: { big: 2_000_000, mid: 600_000 } };
-  assert.deepEqual(countOf(seconds, 900, 1), { count: 3, seconds: [2000, 550, 550] });
+  assert.deepEqual(countOf(seconds, 900, 1), { count: 3, seconds: [2000, 600, 500] });
   assert.deepEqual(countOf(seconds, 900, 2), { count: 4, seconds: [4000, 1200, 500, 500] });
   assert.equal(countOf({ rest: { count: 0, ms: 0 }, sources: {} }, 900, 2).count, 1);
 });

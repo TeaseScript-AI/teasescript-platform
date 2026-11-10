@@ -11,7 +11,8 @@
 //   the area's total over N is alone in its shard: the loads never add up to more than the total, so some shard's load
 //   is under that source's and the least-loaded shard is never the one that holds it.
 // - `countOf` is the count of shards for a target of seconds a shard: one for each recorded source at or over the target,
-//   and enough for the others' seconds at the target, at least one; with each shard's estimated seconds.
+//   and enough for the others' seconds at the target, at least one; with each shard's seconds as `binsOf`'s rule fills
+//   it from the record.
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
@@ -98,37 +99,47 @@ export function parseCosts(text) {
 /** The sha256 of a costs file's text, which names it. */
 export const costsHash = (text) => createHash("sha256").update(text).digest("hex");
 
+/**
+ * Each cost of `costs` longest first (ties in their order) to the least-loaded of `n` shards (ties to the lowest index):
+ * each one's shard, by its index, and each shard's load.
+ */
+function fill(costs, n) {
+  const loads = Array(n).fill(0);
+  const shards = Array(costs.length);
+  const byCost = costs.map((cost, index) => ({ cost, index }));
+  byCost.sort((a, b) => b.cost - a.cost || a.index - b.index);
+  for (const { cost, index } of byCost) {
+    let least = 0;
+    for (let shard = 1; shard < n; shard += 1) if (loads[shard] < loads[least]) least = shard;
+    loads[least] += cost;
+    shards[index] = least;
+  }
+  return { shards, loads };
+}
+
 /** Each place of `places` (in the area's order; a repeat is one place) to its shard of `n` by `area`'s costs. */
 export function binsOf(places, area, n) {
   const order = [...new Set(places)];
-  const cost = (place) => area.sources[place] ?? area.rest.ms;
-  const loads = Array(n).fill(0);
-  const bins = new Map();
-  const byCost = order.map((place, index) => ({ place, index, ms: cost(place) }));
-  byCost.sort((a, b) => b.ms - a.ms || a.index - b.index);
-  for (const { place, ms } of byCost) {
-    let least = 0;
-    for (let bin = 1; bin < n; bin += 1) if (loads[bin] < loads[least]) least = bin;
-    loads[least] += ms;
-    bins.set(place, least);
-  }
-  return bins;
+  const { shards } = fill(
+    order.map((place) => area.sources[place] ?? area.rest.ms),
+    n,
+  );
+  return new Map(order.map((place, index) => [place, shards[index]]));
 }
 
 /**
  * The count of shards of `area` for `target` seconds a shard on `trees` trees: its recorded sources at or over the target
- * one each, the rest at the target, at least one; and each shard's seconds as `binsOf` fills it, estimated from the
- * record, longest first: those sources in the first shards, longest first (each the next empty shard), then the rest
- * shared alike.
+ * one each, the rest at the target, at least one; and each shard's seconds, by its index, as `binsOf`'s rule fills the
+ * shards with the recorded sources and the others at their mean (the area's places, and so its ties, are the head's).
  */
 export function countOf(area, target, trees) {
   const seconds = (ms) => (ms * trees) / 1000;
-  const recorded = Object.values(area.sources).map(seconds);
-  const alone = recorded.filter((s) => s >= target).sort((a, b) => b - a);
-  const rest =
-    recorded.filter((s) => s < target).reduce((a, b) => a + b, 0) +
-    seconds(area.rest.ms) * area.rest.count;
-  const count = Math.max(1, alone.length + Math.ceil(rest / target));
-  const others = count - alone.length;
-  return { count, seconds: [...alone, ...Array(others).fill(others === 0 ? 0 : rest / others)] };
+  const costs = [
+    ...Object.values(area.sources).map(seconds),
+    ...Array(area.rest.count).fill(seconds(area.rest.ms)),
+  ];
+  const alone = costs.filter((s) => s >= target).length;
+  const rest = costs.filter((s) => s < target).reduce((a, b) => a + b, 0);
+  const count = Math.max(1, alone + Math.ceil(rest / target));
+  return { count, seconds: fill(costs, count).loads };
 }

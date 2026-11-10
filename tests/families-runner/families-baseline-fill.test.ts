@@ -41,7 +41,13 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
       writeFileSync(join(folder, "package.json"), '{ "type": "module" }\n');
       writeFileSync(join(folder, "package-lock.json"), "{}\n");
       writeFileSync(join(folder, ".sha"), `${sha.repeat(40)}\n`);
-      for (const tool of ["baselines.mjs", "run-contract.mjs", "run.mjs", "sources.mjs"])
+      for (const tool of [
+        "baselines.mjs",
+        "run-contract.mjs",
+        "run.mjs",
+        "sources.mjs",
+        "split.mjs",
+      ])
         cpSync(join("tests", "families", tool), join(folder, "tests", "families", tool));
       writeFileSync(
         join(folder, "tests", "families", "area", "stored.mjs"),
