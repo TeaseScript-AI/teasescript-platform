@@ -54,7 +54,7 @@ export async function loadHostFacade(): Promise<void> {
 
 /**
  * `session`, an adapter session a test restored or made, as a session the composable's in-process host on `bridge` now
- * holds, with `marks` (none by default): what `prepareRestore` did for such a session before it took only the host's.
+ * holds, with `marks` (none by default), before the test passes it to `prepareRestore`.
  */
 export function hostIntroduced(
   bridge: PlayerBridge,

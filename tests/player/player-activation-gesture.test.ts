@@ -9,12 +9,10 @@ import {
 import type * as InProcess from "../../player/engine-bridge/in-process.js";
 import type { PrepareResult } from "../../player/engine-bridge/player-ops.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
-import type { PlayerRuntimeSession } from "../../player/runtime/runtime-adapter.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
-import type { StartOptions } from "../../player/engine-bridge/ops/session.js";
 import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkpoint-json.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
-import { sourceStart } from "../helpers/prepared-plan.js";
+import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
 import { hostIntroduced, loadHostFacade } from "../helpers/player/host-sessions.js";
 
 /*
@@ -27,11 +25,7 @@ import { hostIntroduced, loadHostFacade } from "../helpers/player/host-sessions.
 interface GestureHost {
   readonly session: Readonly<Ref<PlayerSession | null>>;
   readonly bridge: Promise<PlayerBridge>;
-  prepare(
-    create:
-      | { readonly plan: string; readonly options: () => StartOptions }
-      | ((recording: { readonly recorder: never }) => PlayerRuntimeSession),
-  ): void;
+  prepare(create: PlanStart): void;
   prepareRestore(restored: PlayerSession): void;
   activate(): Promise<void>;
 }
@@ -190,13 +184,16 @@ test("a Continue a new Start replaced cannot take over the recording, even from 
   host.prepareRestore(
     hostIntroduced(bridge, createPlayerRuntimeSession('say "restored", instant\nwait 10 s\nexit')),
   );
+  // The replacement's plan, prepared first: preparing it inside the window would let the Continue's request run.
+  const replacement = await sourceStart(host.bridge, 'say "new", instant\nwait 10 s\nexit');
   // The host awaits a source prepare, so the Continue's first request waits behind it.
   const compiling = bridge.client.request("prepare", {
     source: { kind: "source", script: 'say "x"\nexit' },
   });
   const continuing = host.activate();
-  // A new Start replaces the Continue while its request still waits.
-  host.prepare(await sourceStart(host.bridge, 'say "new", instant\nwait 10 s\nexit'));
+  // A new Start replaces the Continue while its request still waits: its recording has not begun.
+  assert.equal(heldRecording(bridge), null, "the Continue's recording waits behind the prepare");
+  host.prepare(replacement);
   await host.activate();
   await compiling;
   await continuing;

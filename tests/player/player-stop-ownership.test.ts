@@ -5,22 +5,23 @@ import { effectScope, nextTick, watch, type Ref } from "vue";
 import type * as CompileProject from "../../player/runtime/compile-project.js";
 import type * as InProcess from "../../player/engine-bridge/in-process.js";
 import type * as RuntimeAdapter from "../../player/runtime/runtime-adapter.js";
-import type { StartOptions } from "../../player/engine-bridge/ops/session.js";
 import { startBridgeHost, type HostSession } from "../../player/engine-bridge/worker-host.js";
 import { BRIDGE_VERSION } from "../../player/engine-bridge/protocol.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import type { DebugView, DebugViewRequest } from "../../player/debug/debug-view.js";
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
-import type {
-  PlayerRuntimeSession,
-  PlayerRuntimeSessionOptions,
-} from "../../player/runtime/runtime-adapter.js";
+import type { PlayerRuntimeSessionOptions } from "../../player/runtime/runtime-adapter.js";
 import type * as RuntimeView from "../../player/runtime/runtime-view.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 import { DEFAULT_TEMPORAL_CONTEXT, type TemporalContext } from "../../src/temporal.js";
 import { clockTicket } from "../helpers/clock-ticket.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
-import { preparedPlan, preparedSource, sourceStart } from "../helpers/prepared-plan.js";
+import {
+  preparedPlan,
+  preparedSource,
+  sourceStart,
+  type PlanStart,
+} from "../helpers/prepared-plan.js";
 import { deliveryOwner } from "../../player/engine-bridge/delivery.js";
 import type { UntypedBridge } from "../helpers/bridge/untyped.js";
 import { untypedBridge } from "../helpers/bridge/untyped.js";
@@ -37,11 +38,7 @@ interface StopHost {
   readonly hostError: Readonly<Ref<string | null>>;
   readonly stopped: Readonly<Ref<boolean>>;
   readonly bridge: Promise<PlayerBridge>;
-  prepare(
-    create:
-      | { readonly plan: string; readonly options: () => StartOptions }
-      | ((recording: PlayerRuntimeSessionOptions) => PlayerRuntimeSession),
-  ): void;
+  prepare(create: PlanStart): void;
   prepareRestore(restored: PlayerSession): void;
   activate(): Promise<void>;
   temporalCapture(): PlayerRuntimeSessionOptions;

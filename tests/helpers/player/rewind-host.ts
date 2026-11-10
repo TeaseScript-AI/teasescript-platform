@@ -10,7 +10,6 @@ import type { HistoryPoint } from "../../../player/engine-bridge/history/core.js
 import type { DebugHistorySpill } from "../../../player/engine-bridge/history/snapshots.js";
 import type { DebugHistoryView } from "../../../player/debug/debug-history.js";
 import type { LifecycleAction } from "../../../player/debug/rewind-lifecycle.js";
-import type { DebugRecorder } from "../../../player/debug/debug-recorder.js";
 import {
   selectPlayerRuntimeChoice as rawSelectPlayerRuntimeChoice,
   type PlayerRuntimeSession,
@@ -24,14 +23,13 @@ import {
 import type { ScriptStorageProvider } from "../../../player/persistence/script-storage.js";
 import type { KeptRoomStore } from "../../../player/persistence/kept-sessions.js";
 import type { RuntimeSnapshot, SerializableRuntimeValue } from "../../../src/index.js";
-import type { RuntimeDebugContext } from "../../../src/runtime/debug/debug-trace.js";
 import { published } from "../debug-readers.js";
 import { loadPlayerModule } from "../player-modules.js";
 import { loadHostFacade, onHost } from "./host-sessions.js";
 import { interceptSends } from "../bridge/sends.js";
 import type { PlayerBridge } from "../../../player/runtime/player-bridge.js";
 import type * as ClientModule from "../../../player/engine-bridge/client.js";
-import { sourceStart } from "../prepared-plan.js";
+import { sourceStart, type PlanStart } from "../prepared-plan.js";
 
 // The adapter's functions, also on the sessions the composables' host holds (`helpers/player/host-sessions.ts`).
 export const selectPlayerRuntimeChoice = onHost(rawSelectPlayerRuntimeChoice);
@@ -67,14 +65,7 @@ export interface RewindHost {
   };
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
-  prepare(
-    create:
-      | ((recording: {
-          readonly recorder: DebugRecorder;
-          readonly debugTrace?: RuntimeDebugContext;
-        }) => PlayerRuntimeSession)
-      | { readonly plan: string; readonly options: () => PlayerRuntimeSessionOptions },
-  ): void;
+  prepare(create: PlanStart): void;
   activate(): void;
   prepareRestore(given: PlayerSession): void;
   reportHostError(error: unknown): void;

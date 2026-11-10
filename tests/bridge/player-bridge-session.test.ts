@@ -807,7 +807,11 @@ async function traceView(bridge: PlayerBridge, session: PlayerSession) {
   return bridge.read(session, "debugView", { request: traceRequest(head.status.epoch, newest) });
 }
 
-/** Plays `session` on as a player would: time on, then the presented choice's or button's first answer. */
+/**
+ * Plays `session` on as a player would: time on, then the presented choice's or button's first answer. It answers no
+ * media load, camera capture or permanent button: a scenario that waits for one stays there, so F3 compares what comes
+ * before (the opening and camera scenarios stay at their media load, the viewfinder at its capture).
+ */
 async function playedOn(bridge: PlayerBridge, start: PlayerSession): Promise<PlayerSession> {
   let session = start;
   for (let step = 1; step <= 8 && session.state.status !== "halted"; step += 1) {
@@ -900,7 +904,6 @@ async function startedBy(
 
 test("a Start of the factory route and of a held plan give the same session, recording and trace", async () => {
   const sources = { ...developmentScenarios(), random: SCRIPT };
-  const traced: string[] = [];
   for (const [name, source] of Object.entries(sources))
     for (const debug of [false, true])
       for (const random of [false, true]) {
@@ -910,11 +913,11 @@ test("a Start of the factory route and of a held plan give the same session, rec
           await startedBy("factory", source, debug, random),
           `${name}, Debug ${debug ? "on" : "off"}, random ${random ? "owned" : "none"}`,
         );
-        if (plan.atStart.status !== null) traced.push(name);
+        // A traced row compared records, not two empty views; an untraced one has no trace.
+        assert.equal(
+          (plan.atStart.status?.records ?? 0) > 0,
+          debug,
+          `${name}: a trace with records exactly when Debug is on`,
+        );
       }
-  // Every source ran traced with Debug on: the trace oracle compared records, not two empty views.
-  assert.deepEqual(
-    traced,
-    Object.keys(sources).flatMap((name) => [name, name]),
-  );
 });

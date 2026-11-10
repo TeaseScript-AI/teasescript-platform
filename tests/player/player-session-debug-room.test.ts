@@ -9,7 +9,7 @@ import {
   type PlayerRuntimeSessionOptions,
 } from "../../player/runtime/runtime-adapter.js";
 import { compilePlayerProject } from "../../player/runtime/compile-project.js";
-import { preparedPlan } from "../helpers/prepared-plan.js";
+import { preparedPlan, type PlanStart } from "../helpers/prepared-plan.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import type { BuildIdentity } from "../../player/engine-bridge/protocol.js";
 import type { CapturedMediaRepository } from "../../player/media/captured-media.js";
@@ -20,7 +20,6 @@ import {
   type KeptRoomStore,
   type KeptSessionStore,
 } from "../../player/persistence/kept-sessions.js";
-import type { DebugRecorder } from "../../player/debug/debug-recorder.js";
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
 import type {
   InstructionPlan,
@@ -50,15 +49,7 @@ interface RoomHost {
   };
   setDebugMode(enabled: boolean): void;
   readonly bridge: Promise<PlayerBridge>;
-  prepareScript(
-    plan: string,
-    create:
-      | ((recording: {
-          readonly recorder: DebugRecorder;
-          readonly debugMode: boolean;
-        }) => PlayerRuntimeSession)
-      | { readonly plan: string; readonly options: () => PlayerRuntimeSessionOptions },
-  ): Promise<void>;
+  prepareScript(plan: string, create: PlanStart): Promise<void>;
   inputSection<T>(
     work: "inputAnswer",
     body: (

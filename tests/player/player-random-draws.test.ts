@@ -16,18 +16,16 @@ import {
   compilePlayerProject,
   createPlayerRuntimeSession,
 } from "../../player/runtime/compile-project.js";
-import { preparedPlan } from "../helpers/prepared-plan.js";
+import { preparedPlan, type PlanStart } from "../helpers/prepared-plan.js";
 import { playerRuntimeAwaitsHost, type PlayerSession } from "../../player/runtime/runtime-view.js";
 import {
   memoryKeptRoomStore,
   memoryKeptSessionStore,
 } from "../../player/persistence/kept-sessions.js";
-import type { DebugRecorder } from "../../player/debug/debug-recorder.js";
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
 import {
   listRandomSites,
   type InstructionPlan,
-  type RandomControlOptions,
   type RandomDrawView,
   type RandomOutcome,
   type RandomSite,
@@ -55,16 +53,7 @@ interface RandomHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly rooms: { readonly current: Readonly<Ref<"normal" | "debug">> };
   readonly bridge: Promise<PlayerBridge>;
-  prepareScript(
-    plan: string,
-    create:
-      | ((recording: {
-          readonly recorder: DebugRecorder;
-          readonly debugMode: boolean;
-          readonly randomControl?: RandomControlOptions;
-        }) => PlayerRuntimeSession)
-      | { readonly plan: string; readonly options: () => object },
-  ): Promise<void>;
+  prepareScript(plan: string, create: PlanStart): Promise<void>;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   activate(): Promise<void>;
