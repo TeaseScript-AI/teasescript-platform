@@ -65,7 +65,10 @@ export async function preparedSource(
   return (result as { readonly plan: string }).plan;
 }
 
-/** A Start of a plan the host holds, as `PlayerSessionStart`'s plan form gives it: its token and its Start options. */
+/**
+ * A Start of a plan the host holds, as `PlayerSessionStart`'s plan form gives it: its token and its Start options. The
+ * test loaders take only this form; `player-factory-start.test.ts`, held until PR B, alone admits a factory.
+ */
 export interface PlanStart {
   readonly plan: string;
   readonly options: () => Omit<StartOptions, "debugMode">;

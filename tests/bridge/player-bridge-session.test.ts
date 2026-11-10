@@ -37,7 +37,6 @@ import {
 import { PublicationGapError, SessionStore } from "../../player/persistence/session-store.js";
 import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkpoint-json.js";
 import { DEFAULT_TEMPORAL_CONTEXT } from "../../src/temporal.js";
-import { listRandomSites } from "../../src/playback.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import { cloneGraphDifference } from "../helpers/clone-graph.js";
 import { viewCalls, viewed, withoutViews } from "../helpers/debug-readers.js";
@@ -845,12 +844,10 @@ async function startedBy(
 ) {
   const bridge = await inProcessBridge();
   const tracing = debug ? { on: true, intent: 1 } : undefined;
-  // An owned random control decides every site of the source: the same decided draw on either route.
-  const sites = listRandomSites(compilePlayerProject(source).plan!).map(
-    (site) => [site.id, "untried"] as const,
-  );
+  // An owned random control with no site settings asks at each draw, so the session pauses there; without the control
+  // the draw goes on by itself.
   const owned = random
-    ? { owner: 1, intent: { owner: 1, control: { sites }, resetAt: 0, intent: 1 } }
+    ? { owner: 1, intent: { owner: 1, control: { sites: [] }, resetAt: 0, intent: 1 } }
     : undefined;
   let session: PlayerSession;
   if (route === "factory")
@@ -902,8 +899,12 @@ async function startedBy(
   };
 }
 
+// Each axis's effect has a mutant of the `start` op that the comparison kills: the trace not attached (Debug on rows),
+// `debugMode` dropped (Debug on), the random intent ignored (the random source, random owned), the recorder not attached
+// (every row). The sources are its inputs, not an effect.
 test("a Start of the factory route and of a held plan give the same session, recording and trace", async () => {
-  const sources = { ...developmentScenarios(), random: SCRIPT };
+  // The random source says something first: with Debug on, the trace has a record before an owned control pauses it.
+  const sources = { ...developmentScenarios(), random: `say "before", instant\n${SCRIPT}` };
   for (const [name, source] of Object.entries(sources))
     for (const debug of [false, true])
       for (const random of [false, true]) {

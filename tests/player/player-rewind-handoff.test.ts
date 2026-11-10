@@ -267,7 +267,7 @@ async function handoffRow(
         break;
       }
       case "replacement":
-        // A Start that shows its session before the hold is let go.
+        // A replacement Start begins while the operation is held.
         await host.loadScriptStorage();
         host.prepare(eventStart!);
         event = Promise.resolve(host.activate());
