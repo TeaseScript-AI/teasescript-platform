@@ -1332,7 +1332,7 @@ const firstCompletionRows = product(FIRST_COMPLETION_AXES).filter(
 const firstCompletionRegistered: Readonly<Record<string, string>>[] = [];
 for (const row of firstCompletionRows) {
   firstCompletionRegistered.push(row);
-  test(`a first completion of every outcome leaves the deadline observed: ${Object.values(row).join("; ")}`, async (context) => {
+  test(`a first completion of every outcome ends as written: a due deadline observed, a future one pending, a hold held, an end ended: ${Object.values(row).join("; ")}`, async (context) => {
     const player = await mountClock(context, row.media === "on");
     let open!: () => void;
     const waiting = new Promise<void>((resolve) => (open = resolve));
@@ -1365,7 +1365,7 @@ for (const row of firstCompletionRows) {
     await observed;
     await settle(30);
     if (row.deadline === "no") {
-      // No newly due work: C4 may re-arm the existing future deadline, but must not send now.
+      // No newly due work: the release may re-arm the existing future deadline, but must not send now.
       const expectedInitialAttempts =
         row.outcome === "basis refused twice" || row.outcome === "retirement"
           ? 2
