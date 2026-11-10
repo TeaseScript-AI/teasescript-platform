@@ -19,7 +19,8 @@ import { SliceIndex, type Store, nodeOf, unwrap } from "./slice-index.js";
  * analysis, only a complete store check keeps it, else it declines (#1832). A stricter reader is never a lost check: it
  * accepts no more values than the natural reader. A check against bare `unknown` where the contract owes a domain carries
  * nothing. A stopped decision's own mark is kept as NoCheck where the completion owes nothing at its store (#2080):
- * its result complete, no completed check at the stored value and no completion C1 warning at the store (`warned`).
+ * its result complete, this pass's completion ran its own C1 at the obligation's path, no completed check at the stored
+ * value and no completion C1 warning at the store (`warned`).
  */
 export function keeps(
   answers: Answers,
