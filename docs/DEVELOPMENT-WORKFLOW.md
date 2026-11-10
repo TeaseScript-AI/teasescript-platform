@@ -81,6 +81,9 @@ Use words such as `must`, `exact`, `versioned`, `authoritative`, and
 boundary, or owner decision that requires that strength. A stricter
 implementation being technically possible is not sufficient.
 
+Where a rule's wording falls short of its evident intent, the intent is followed, and the corrected wording is proposed,
+with the case that showed it, for the approval that applies (owner, 2026-11-10).
+
 Before declaring a project limitation, proposing infrastructure, or presenting
 owner options, verify the relevant existing capability through the smallest
 authoritative evidence set. Do not generalize one API action, connector method,
@@ -559,7 +562,9 @@ On the full route, the before/after comparison is classified. Each difference is
 lost (a diagnostic, check, message, or field); or result changed. Each difference is also judged: an improvement,
 neutral, or a regression. The plan or the pull-request body proposes the judgement and a reviewer contests it with a
 case. A difference that departs from accepted syntax, semantics or a recorded decision is a regression whatever its
-merit, and one that restores them is an improvement. A lost check is always a regression and a blocker. Any other
+merit; when the merit is worth changing the decision (not for a nitpick), the coordinator proposes that change to the
+owner, with the case and what it improves, and work the answer does not block continues meanwhile (owner, 2026-11-10).
+A difference that restores them is an improvement. A lost check is always a regression and a blocker. Any other
 difference is a blocker only when it is a regression, or when the change was meant to change nothing and the difference
 is in a normal compile or run. A review asks for no improvement to be undone, and no round is spent on a difference
 judged neutral. A cost-only difference is a regression only when the growth bar applies and is exceeded. The
