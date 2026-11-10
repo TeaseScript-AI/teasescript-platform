@@ -90,8 +90,21 @@ interface Endings {
   readonly labels: Map<number, number[]>;
 }
 
-/** An `if` arm's feasibility for the route rule's default (`RouteTests.#infeasible`). */
+/** An `if` arm's or a `while` body's feasibility for the route rule's default (`RouteTests.#infeasible`). */
 type ArmFeasibility = "feasible" | "infeasible" | "unavailable";
+
+/**
+ * In a program that holds an arm no run is proved to enter, the arms the route rule's corridor passes through none of
+ * (#1938, `RouteTests.feasibility`).
+ */
+export interface Feasibility {
+  /** The live arms of tested `if`s and `while` bodies that are `infeasible` or `unavailable`: no chain enters one. */
+  readonly unentered: ReadonlySet<TreeBlock>;
+  /** Those arms, and the body of each loop that neither a live header exit nor a skip edge leaves (a `break` only). */
+  readonly closed: ReadonlySet<TreeBlock>;
+  /** The statements that own a closed arm. */
+  readonly owners: readonly TreeStatement[];
+}
 
 /** A condition's own guards of a text and kind (`#ownGuarded`): their starts sorted, and the furthest end by each. */
 interface OwnGuards {
@@ -111,6 +124,10 @@ export class RouteTests {
   #endings: Endings | null = null;
   /** The program's `if`s whose conditions hold a test (`#testing`). */
   readonly #ifs: TreeStatement[] = [];
+  /** The program's `while`s whose conditions hold a test (`#testing`). */
+  readonly #whiles: TreeStatement[] = [];
+  /** The arms the corridor passes through none of, made on the first query of a program the default holds. */
+  #feasibility: Feasibility | null = null;
   /** Whether the program holds an `if` arm infeasible or unavailable (`holdsInfeasible`), made on the first query. */
   #holds: boolean | null = null;
   /** Per arm, its feasibility: infeasible, unavailable evidence, or feasible (`#infeasible`). */
@@ -311,6 +328,8 @@ export class RouteTests {
         if (facts === null) continue;
         if (statement.statement.kind === "ifStatement" && facts.list.length > 0)
           this.#ifs.push(statement);
+        if (statement.statement.kind === "whileStatement" && facts.list.length > 0)
+          this.#whiles.push(statement);
         for (const [text] of each(work, "indexSteps", facts.byText)) {
           const list = made.get(text);
           if (list === undefined) made.set(text, [statement]);
@@ -359,13 +378,13 @@ export class RouteTests {
   }
 
   /**
-   * The route rule's default (Sol's F2 on #1937, then Codex r6 and r7; the lead's ruling): the certificate promotes to
-   * an error only where no live `if` arm of the program's admitted callables is infeasible by entry narrowing (N1's
-   * forms over the core's items, `#infeasible`) or has a stopped tested read, so none on the use's witness chain or
-   * among the callables whose results or defaults reach it does; otherwise the use keeps the warning. An uncalled
-   * function contributes no live arm. An arm it does not prove counts as feasible: a comparison that is constant
-   * outside N1's forms (`o.k == 1`), a loop's exit, a `switch` case, another location's test. One answer per program,
-   * from the `if`s `#testing` finds once.
+   * The route rule's default (Sol's F2 on #1937, then Codex r6 and r7; the lead's ruling, narrowed by #1938): whether a
+   * live `if` arm of the program's admitted callables is infeasible by entry narrowing (N1's forms over the core's
+   * items, `#infeasible`) or has a stopped tested read. Where one is, `NarrowingRoutes.required` promotes only routes
+   * through arms runs enter (`feasibility`), by a certificate its own value proves; every other use keeps the warning.
+   * An uncalled function contributes no live arm. An arm it does not prove counts as feasible: a comparison that is
+   * constant outside N1's forms (`o.k == 1`), a loop's exit, a `switch` case, another location's test. One answer per
+   * program, from the `if`s `#testing` finds once.
    */
   protected *holdsInfeasible(): Work<boolean> {
     this.#work.charge("eventSteps");
@@ -386,7 +405,43 @@ export class RouteTests {
   }
 
   /**
-   * Whether an `if`'s arm is one no run enters (`infeasible`): a test of its condition (N1's form, `atEntry`) whose
+   * The arms a corridor passes through none of, in a program the default holds (#1938, the lead's R8 and R16): each live
+   * arm of a tested `if` and each tested `while`'s body that `#infeasible` does not answer `feasible` (A1, A2), and the
+   * body of each loop that neither a live header exit nor a skip edge leaves, whose only way out is a `break` (A3). One
+   * walk of the program's statements, on the first query.
+   */
+  protected *feasibility(): Work<Feasibility> {
+    this.#work.charge("eventSteps");
+    if (this.#feasibility !== null) return this.#feasibility;
+    const work = this.#work;
+    this.#testing();
+    const unentered = new Set<TreeBlock>();
+    const closed = new Set<TreeBlock>();
+    const owners: TreeStatement[] = [];
+    for (const list of each(work, "eventSteps", [this.#ifs, this.#whiles]))
+      for (const statement of each(work, "eventSteps", list)) {
+        let owns = false;
+        for (const arm of each(work, "eventSteps", statement.arms))
+          if (arm.live && (yield* this.#infeasible(arm)) !== "feasible") {
+            unentered.add(arm);
+            closed.add(arm);
+            owns = true;
+          }
+        if (owns) owners.push(statement);
+      }
+    for (const block of each(work, "eventSteps", this.tree.blocks))
+      for (const statement of each(work, "eventSteps", block.statements)) {
+        const body = statement.loop === null ? undefined : statement.arms[0];
+        if (body === undefined || !body.live || statement.exits || statement.skip) continue;
+        if (!closed.has(body)) owners.push(statement);
+        closed.add(body);
+      }
+    this.#feasibility = { unentered, closed, owners };
+    return this.#feasibility;
+  }
+
+  /**
+   * Whether an `if`'s arm or a `while`'s body is one no run enters (`infeasible`): a test of its condition (N1's form, `atEntry`) whose
    * narrowing removes every kind its read holds at the condition. `unavailable`, which blocks the route rule's promotion
    * (Sol's final F1 on #1937, the lead's ruling), where a tested read's answer is missing: a stopped decision's (the
    * `budget` reason), an `unknown` without the `external` reason (admission lacking items, #2009, #2011), or empty.
@@ -400,7 +455,10 @@ export class RouteTests {
     const work = this.#work;
     const owner = arm.owner;
     let answer: ArmFeasibility = "feasible";
-    const facts = owner?.statement.kind === "ifStatement" ? this.#conditionFacts(owner) : null;
+    const facts =
+      owner?.statement.kind === "ifStatement" || owner?.statement.kind === "whileStatement"
+        ? this.#conditionFacts(owner)
+        : null;
     // (each location's narrowings at the entry once: a condition may test one location many times)
     const seen = new Set<string>();
     if (arm.entry !== null && facts !== null)
