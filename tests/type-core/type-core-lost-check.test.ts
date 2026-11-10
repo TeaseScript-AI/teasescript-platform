@@ -10,9 +10,13 @@ import {
   createSerializableObject,
   type SerializableRuntimeValue,
 } from "../../src/runtime/values/serializable-values.js";
-import { analyseCore } from "../../src/type-inference/core/answers.js";
+import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { narrower } from "../../src/type-inference/core/check-result/kept-checks.js";
+import {
+  OutsideContract,
+  UNESTABLISHED_AT_BUDGET,
+} from "../../src/type-inference/core/check-result/slice-index.js";
 import {
   withTestAllowance,
   withTestDemandAllowance,
@@ -434,4 +438,106 @@ test("a settled stop's check from the receiving completion lists an object's pro
     );
     assert.deepEqual(failure(compiled(demand).plan), natural, `demand ${demand}`);
   }
+});
+
+// #2080 part 2, the owner's decision (no inference after the stop): before admission settled, each own mark the stop left
+// against `unknown` owes a check no completion decided, and the first that no complete store check carries declines the
+// program at its store.
+const UNDECIDED = "a store whose check was left undecided at the budget";
+
+/** A compile of `source` at program allowance 1, where the analysis stops before admission settles, in `mode`. */
+const atFirstUnit = (source: string, mode: (typeof MODES)[number]) =>
+  inMode(mode, () =>
+    withTestAllowance(1, () =>
+      compileSourceWithBackend(source, { globals: GLOBALS }, CORE_BACKEND),
+    ),
+  );
+
+test("before admission settled a store into an inferred place declines at its store, where the natural plan rejects the forbidden value it would run (#2080 part 2)", () => {
+  const source = `let n = 1\nn = hostValue${END}`;
+  const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
+  assert.ok(request !== null);
+  for (const mode of MODES) {
+    const where = JSON.stringify(mode);
+    const natural = inMode(mode, () => compiled(source, null));
+    assert.ok(natural.plan !== null, where);
+    assert.equal(said(runGlobals(natural.plan, { hostValue: "bad" })), false, where);
+    const stopped: Answers = inMode(mode, (): Answers =>
+      withTestAllowance(1, () => analyseCore(request)),
+    );
+    const { budget } = stopped;
+    assert.deepEqual([budget.exhausted, budget.settled], ["work", false], where);
+    assert.throws(
+      () => atFirstUnit(source, mode),
+      (error) =>
+        error instanceof CandidateOutsideSlice &&
+        error.what === UNDECIDED &&
+        error.limit &&
+        error.site.start === source.indexOf("1"),
+      where,
+    );
+  }
+});
+
+test("before admission settled a program whose stores are all into written places publishes, its checks and a host read's boundary rejecting forbidden input (#2080 part 2)", () => {
+  for (const [source, fitting, forbidden] of [
+    [`let n: integer = 1\nn = hostValue${END}`, { hostValue: 2 }, { hostValue: "bad" }],
+    [
+      `say hostValue\nlet n: integer = hostOther${END}`,
+      { hostValue: 2, hostOther: 2 },
+      { hostValue: 2, hostOther: "bad" },
+    ],
+  ] as const)
+    for (const mode of MODES) {
+      const where = `${source} (mode ${JSON.stringify(mode)})`;
+      const { plan } = atFirstUnit(source, mode);
+      assert.ok(plan !== null, where);
+      assert.equal(said(runGlobals(plan, fitting)), true, where);
+      assert.equal(said(runGlobals(plan, forbidden)), false, where);
+    }
+});
+
+/**
+ * The limit marker (the owner's go, 2026-11-10): a decline the budget causes carries `limit`, one the slice does not cover
+ * yet does not. A compile for each reason a compile reaches; "a store whose required checks could not be established at
+ * the budget" has none (`Answers.gated()` gives `null` only at a settled stop with no seed, which admission saves before
+ * anything of it can stop, #2228), so its marker is read off a `CandidateOutsideSlice` built directly.
+ */
+test("a decline the budget causes carries the limit marker, one the slice does not cover yet does not (#2080 part 2)", () => {
+  const mode = MODES[0]!;
+  const reasonOf = (make: () => void): CandidateOutsideSlice => {
+    try {
+      make();
+    } catch (error) {
+      assert.ok(error instanceof CandidateOutsideSlice, String(error));
+      return error;
+    }
+    assert.fail("published");
+  };
+  const typed = `let d = {m: 1}\nlet result = fromJson(hostValue, default: {n: d}, files: false)\nsay result.n.m${END}`;
+  const lost = DECLINED.find((each) => each.name === "1645-whole-object")!.source;
+  for (const [what, error] of [
+    [OPEN_BY_STOP, reasonOf(() => atFirstUnit(typed, mode))],
+    [LOST, reasonOf(() => inMode(mode, () => compiled(lost, 16)))],
+    [UNDECIDED, reasonOf(() => atFirstUnit(`let n = 1\nn = hostValue${END}`, mode))],
+    [
+      "a store whose required checks could not be established at the budget",
+      new CandidateOutsideSlice(
+        "main.tease",
+        { file: 0, start: 0, end: 1 },
+        "a store whose required checks could not be established at the budget",
+      ),
+    ],
+  ] as const)
+    assert.deepEqual([error.what, error.limit], [what, true]);
+  const outside = reasonOf(() => compiled(`function f {\n  say 1\n}\nf()${END}`, null));
+  assert.equal(outside.limit, false, outside.what);
+  // (the slice's own error, which the route turns into `CandidateOutsideSlice`, carries the same marker)
+  const request = coreRequest([{ path: "main.tease", source: `let n = 1${END}` }], GLOBALS);
+  assert.ok(request !== null);
+  const [statement] = request.files[0]!.program.statements;
+  assert.ok(statement?.kind === "letStatement");
+  for (const what of [OPEN_BY_STOP, LOST, UNDECIDED, UNESTABLISHED_AT_BUDGET])
+    assert.equal(new OutsideContract(statement.initializer, what).limit, true, what);
+  assert.equal(new OutsideContract(statement.initializer, outside.what).limit, false, outside.what);
 });

@@ -44,6 +44,9 @@ import {
 import type { InstructionPlan, TypeCheckPlan } from "../../src/plan/model.js";
 import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import { hostValues, stopRuns } from "../helpers/type-core-stop-oracle.js";
+
+/** The plain gate's decline (#2080 part 2): a stop before admission settled left a store's check undecided. */
+const UNDECIDED = "a store whose check was left undecided at the budget";
 import { DOUBLING } from "../helpers/type-core/type-core-work.js";
 
 /*
@@ -657,6 +660,35 @@ function withoutTypeChecks(plan: InstructionPlan, firstOnly = false): Instructio
   });
 }
 
+/**
+ * A no-plan unit at the work allowance 1 (#2080 part 2): its own stopped compile, which the plain gate declines, and the
+ * same stopped analysis with its plan compiled from a sibling, `let n = 1` written as text (`let n="s"`, the same spans),
+ * unstopped, then `planted`: the oracle's no-plan readings, driven by a plan the test builds.
+ */
+function stopNoPlan(
+  source: string,
+  globals: readonly string[],
+  run: <T>(make: () => T) => T,
+  planted?: (plan: InstructionPlan) => InstructionPlan,
+  files: (text: string) => readonly { readonly path: string; readonly source: string }[] = (
+    text,
+  ) => [{ path: "main.tease", source: text }],
+): readonly [ReturnType<typeof stopRuns>, ReturnType<typeof stopRuns>] {
+  const own = stopRuns(files(source), globals, run, 1, planted, "work");
+  assert.deepEqual([own.natural.plan, own.stopped.declined], [false, UNDECIDED], source);
+  const sibling = files(source).map((file) => ({
+    ...file,
+    source: file.source.replace("let n = 1", 'let n="s"'),
+  }));
+  assert.notDeepEqual(sibling, files(source));
+  const built = stopRuns(files(source), globals, run, 1, planted, "work", {
+    files: sibling,
+    globals,
+  });
+  assert.equal(built.natural.plan, false, source);
+  return [own, built];
+}
+
 test("a stop's runs take host data made from the source's own property names: one pool per global it reads, the same each time (#2080)", () => {
   const files = [
     { path: "main.tease", source: 'let a = {box: {f: hostValue}}\nsay "${a.box.f}"\nexit\n' },
@@ -856,38 +888,29 @@ test("a stop's runs catch the design round's controls: a false branch, a nested 
     "later",
   );
   // (no natural plan; the stop's plan checked at the erring store: the false run fails there, the true run never reaches
-  // it, so no run passes it, which the oracle claimed open before the design round)
-  // (#2080 part 1 declines a settled stop's no-plan store that a rejection lost, so the no-plan cases stop on the work
-  // allowance, before admission settles, where the settled gate does not apply)
-  const planted = stopRuns(
-    unit('let flag: boolean = hostValue\nlet n = 1\nif flag {} else { n = "bad" }\nexit\n'),
-    ["hostValue"],
-    run,
-    1,
-    (plan) => ({
-      ...plan,
-      instructions: plan.instructions.map((instruction) =>
-        JSON.stringify(instruction).includes('"bad"')
-          ? { ...instruction, typeCheck: { type: { kind: "integer" }, place: "'n'" } }
-          : instruction,
-      ),
-    }),
-    "work",
+  // it, so no run passes it, which the oracle claimed open before the design round. #2080 part 1 declines a settled
+  // stop's no-plan store that a rejection lost, and the plain gate a stop before admission settled, #2080 part 2: no stop
+  // of these units publishes, so the stopped plan is a sibling's, `n` written as text, with the unit's own spans)
+  const planted = 'let flag: boolean = hostValue\nlet n = 1\nif flag {} else { n = "bad" }\nexit\n';
+  const checkedAtBad = (plan: InstructionPlan): InstructionPlan => ({
+    ...plan,
+    instructions: plan.instructions.map((instruction) =>
+      JSON.stringify(instruction).includes('"bad"')
+        ? { ...instruction, typeCheck: { type: { kind: "integer" }, place: "'n'" } }
+        : instruction,
+    ),
+  });
+  assert.deepEqual(
+    stopNoPlan(planted, ["hostValue"], run, checkedAtBad).map((found) => found.kind),
+    ["declined", "unwitnessed"],
   );
-  assert.equal(planted.natural.plan, false);
-  // (no run passes the store, and nothing without a natural plan is ever closed)
-  assert.equal(planted.kind, "unwitnessed");
   // (no natural plan; the erring store under a guard no pool value takes: untested, never open)
-  const unreached = stopRuns(
-    unit('let n = 1\nif hostValue is duration { n = "bad" }\nexit\n'),
-    ["hostValue"],
-    run,
-    1,
-    undefined,
-    "work",
+  assert.deepEqual(
+    stopNoPlan('let n = 1\nif hostValue is duration { n = "bad" }\nexit\n', ["hostValue"], run).map(
+      (found) => found.kind,
+    ),
+    ["declined", "unwitnessed"],
   );
-  assert.equal(unreached.natural.plan, false);
-  assert.equal(unreached.kind, "unwitnessed");
 });
 
 test("a stop's runs read #2116's final witness closed on main at demand 64, and open with its store checks dropped, in every held mode (#2080 part 1, PR #2116's final, comment 6736629257)", () => {
@@ -927,7 +950,6 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
     readonly globals: readonly string[];
     readonly demand: number;
     readonly planted?: (plan: InstructionPlan) => InstructionPlan;
-    readonly stop?: "work";
   }[] = [
     // (a retained index check fails where the dropped store check is never reached)
     {
@@ -990,35 +1012,6 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
             : check,
         ),
     },
-    // (no natural plan; the erring store behind a check no pool value passes, inside a block the runs enter)
-    {
-      name: "ancestor",
-      files: unit(
-        'let n = 1\nif hostValue is boolean {\n  let gate: duration = hostOther\n  n = "bad"\n}\nexit\n',
-      ),
-      globals: ["hostValue", "hostOther"],
-      // (#2080 part 1 declines it at a settled stop: the work allowance stops before admission settles)
-      demand: 1,
-      stop: "work",
-    },
-    // (no natural plan; the erring store in another file, at offsets of a store of the main file)
-    {
-      name: "file",
-      files: [
-        {
-          path: "main.tease",
-          source: `${" ".repeat("let n = 1\nif hostValue is duration { ".length)}let x = 1\nexit\n`,
-        },
-        {
-          path: "other.tease",
-          source: 'let n = 1\nif hostValue is duration { n = "bad" }\nexit\n',
-        },
-      ],
-      globals: ["hostValue"],
-      // (#2080 part 1 declines it at a settled stop: the work allowance stops before admission settles)
-      demand: 1,
-      stop: "work",
-    },
     // (a stricter check in a loop: the stopped plan fails in the second round, before the natural failure)
     {
       name: "loop",
@@ -1034,56 +1027,171 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
     },
   ];
   for (const mode of HELD_MODES)
-    for (const { name, files, globals, demand, planted, stop } of cases)
+    for (const { name, files, globals, demand, planted } of cases)
       assert.equal(
-        stopRuns(files, globals, (make) => mode.run(make), demand, planted, stop).kind,
+        stopRuns(files, globals, (make) => mode.run(make), demand, planted).kind,
         "unwitnessed",
         `${name} (${mode.name})`,
       );
-  // (the two campaign items Codex r3 took for genuine escapes: C5c reports a store's absent property at the object that
-  // lacks it, which every run passes, while every run fails at the store itself, TSR017; read at the store, unwitnessed)
-  const controls = [
-    {
-      mode: HELD_MODES[3]!,
-      source:
-        "let typed: list = [1]\nlet root = {h: {f: typed}}\nroot.q = root\nlet a = root.q\nlet seen = a.h.f\nexit\n",
-      globals: ["hostValue", "hostInit"],
-    },
-    {
-      mode: HELD_MODES[0]!,
-      source:
-        "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.spare = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n",
-      globals: ["hostValue", "hostOther", "hostInit"],
-    },
-  ];
-  // (both stop settled at demand 16, where #2080 part 1 declines them: the work allowance keeps them escapes)
-  for (const { mode, source, globals } of controls) {
-    const found = stopRuns(unit(source), globals, (make) => mode.run(make), 1, undefined, "work");
-    assert.equal(found.natural.plan, false, source);
-    assert.equal(found.kind, "unwitnessed", source);
+  // (no natural plan: #2080 part 1 declines a settled stop's no-plan store that a rejection lost, and the plain gate a
+  // stop before admission settled, #2080 part 2, so these units' stopped plans are their siblings', `stopNoPlan`)
+  for (const mode of HELD_MODES) {
+    const run = <T>(make: () => T): T => mode.run(make);
+    // (the erring store behind a check no pool value passes, inside a block the runs enter)
+    const ancestor = stopNoPlan(
+      'let n = 1\nif hostValue is boolean {\n  let gate: duration = hostOther\n  n = "bad"\n}\nexit\n',
+      ["hostValue", "hostOther"],
+      run,
+    );
+    assert.deepEqual(
+      ancestor.map((found) => found.kind),
+      ["declined", "unwitnessed"],
+      `ancestor (${mode.name})`,
+    );
+    // (the erring store in another file, at offsets of a store of the main file)
+    const file = stopNoPlan(
+      'let n = 1\nif hostValue is duration { n = "bad" }\nexit\n',
+      ["hostValue"],
+      run,
+      undefined,
+      (text) => [
+        {
+          path: "main.tease",
+          source: `${" ".repeat("let n = 1\nif hostValue is duration { ".length)}let x = 1\nexit\n`,
+        },
+        { path: "other.tease", source: text },
+      ],
+    );
+    assert.deepEqual(
+      file.map((found) => found.kind),
+      ["declined", "unwitnessed"],
+      `file (${mode.name})`,
+    );
+    // (a genuine escape: the stopped plan stores a text the natural compile rejects, under a guard the pool's boolean
+    // takes)
+    const escape = stopNoPlan(
+      'let n = 1\nif hostValue is boolean { n = "bad" }\nexit\n',
+      ["hostValue"],
+      run,
+    );
+    assert.deepEqual(
+      escape.map((found) => found.kind),
+      ["declined", "open"],
+      `escape (${mode.name})`,
+    );
   }
-  // (a campaign item with both: an absent property's store and a store the stop moved to a check against `unknown`,
-  // neither passed; `all:new-cases-3::graph/899`)
-  const both = stopRuns(
-    unit(
-      'let typed:object={x:1}\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\na.q=b\nc=c\nc=b\nb=b\nlet out=c\nexit\n',
-    ),
-    ["hostValue", "hostOther", "hostInit"],
-    (make) => HELD_MODES[2]!.run(make),
+  // (compiled no-plan stops that still publish, settled, from the census of #2080 part 2: a store moved to a check against
+  // `unknown` that every run fails, unwitnessed, and open with its checks dropped; two errors, each read at its own site;
+  // C5c's absent property read at the store, `s8b-r3-astra-cases.mjs/case/storenull`; and the typed read #2183 names,
+  // open as compiled)
+  const corpus = (
+    source: string,
+    mode: (typeof HELD_MODES)[number],
+    demand: number,
+    planted?: (plan: InstructionPlan) => InstructionPlan,
+  ) =>
+    stopRuns(
+      unit(source),
+      ["hostValue", "hostOther", "hostInit"],
+      (make) => mode.run(make),
+      demand,
+      planted,
+    );
+  const operation = (value: string, declared = "integer") =>
+    `let t:${declared}=${declared === "integer" ? "7" : "null"}\nlet root={n:t,nest:{n:t,keep:1},spare:t}\nlet a=root\nlet b={p:a}\nb.p.nest.n=${value}\nlet out=[b.p,root].get(0, default: root)\nrepeat out.nest.n {}\nexit\n`;
+  for (const mode of HELD_MODES) {
+    const moved = corpus(operation('"bad"'), mode, 64);
+    assert.deepEqual(
+      [
+        moved.natural.plan,
+        moved.stopped.plan,
+        moved.kind,
+        moved.sites.map(({ code, site, checks }) => `${code} ${site} ${checks}`),
+      ],
+      [false, true, "unwitnessed", ["TSV041 0:91:96 unknown"]],
+      mode.name,
+    );
+    assert.equal(
+      corpus(operation('"bad"'), mode, 64, (plan) => withoutTypeChecks(plan)).kind,
+      "open",
+      mode.name,
+    );
+  }
+  const two = corpus(
+    'let typed:null=null\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\na.f=hostValue\na={f:typed,g:num}\na=b\na=b\nlet out=c\nexit\n',
+    HELD_MODES[0]!,
     64,
   );
   assert.deepEqual(
-    both.sites.map(({ code, site }) => `${code} ${site}`),
-    ["TSV043 0:155:158", "TSV041 0:167:168"],
+    [two.kind, two.sites.map(({ code, site }) => `${code} ${site}`)],
+    ["unwitnessed", ["TSV041 0:186:187", "TSV041 0:190:191"]],
   );
-  assert.equal(both.kind, "unwitnessed");
-  // (two stores lacking properties of one object share its site, each its own error, at a stop before admission settles
-  // as #2080 part 1 declines it at a settled one: with the first store's
-  // `requireExisting` dropped, a run passes it and fails at the second, so the first's escape is open; Codex r1 on #2185)
+  for (const mode of HELD_MODES) {
+    const absent = stopRuns(
+      unit("let blank: object? = null\nlet mirror = blank\nmirror.field = hostValue\nexit\n"),
+      ["hostValue", "hostOther"],
+      (make) => mode.run(make),
+      16,
+    );
+    assert.deepEqual(
+      [
+        absent.natural.plan,
+        absent.stopped.plan,
+        absent.kind,
+        absent.sites.map(({ code, site }) => `${code} ${site}`),
+      ],
+      [false, true, "unwitnessed", ["TSV043 0:45:57"]],
+      mode.name,
+    );
+  }
+  for (const mode of [HELD_MODES[1]!, HELD_MODES[3]!])
+    assert.equal(corpus(operation("hostValue", "integer?"), mode, 64).kind, "open", mode.name);
+  // (the two campaign items Codex r3 took for genuine escapes, C5c's, the two stores lacking properties of one object
+  // (Codex r1 on #2185) and `all:new-cases-3::graph/899`: no stop of theirs publishes now, #2080 part 1 at their settled
+  // stops and the plain gate before admission settled, #2080 part 2)
+  for (const [source, globals, mode, demand, stop] of [
+    [
+      "let typed: list = [1]\nlet root = {h: {f: typed}}\nroot.q = root\nlet a = root.q\nlet seen = a.h.f\nexit\n",
+      ["hostValue", "hostInit"],
+      HELD_MODES[3]!,
+      1,
+      "work",
+    ],
+    [
+      "let leaf: integer? = null\nlet root = {cell: leaf}\nlet lower = {left: root}\nlet upper = {right: lower}\nlower.spare = hostOther\nlet result = upper.right.left.cell\nsay result\nexit\n",
+      ["hostValue", "hostOther", "hostInit"],
+      HELD_MODES[0]!,
+      1,
+      "work",
+    ],
+    ["let root={x:1}\nroot.q=2\nroot.z=3\nexit\n", ["hostValue"], HELD_MODES[0]!, 1, "work"],
+    [
+      'let typed:object={x:1}\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\na.q=b\nc=c\nc=b\nb=b\nlet out=c\nexit\n',
+      ["hostValue", "hostOther", "hostInit"],
+      HELD_MODES[2]!,
+      64,
+      "demand",
+    ],
+  ] as const) {
+    const found = stopRuns(
+      unit(source),
+      globals,
+      (make) => mode.run(make),
+      demand,
+      undefined,
+      stop,
+    );
+    assert.deepEqual([found.kind, found.stopped.declined], ["declined", UNDECIDED], source);
+  }
+  // (two stores lacking properties of one object share its site, each its own error, Codex r1 on #2185: with the first
+  // store's `requireExisting` dropped from the sibling's plan, a run passes it and fails at the second, so the first's
+  // escape is open)
   for (const mode of HELD_MODES) {
     let dropped = false;
+    const source = "let root={x:hostValue}\nroot.q=2\nroot.z=3\nexit\n";
+    // (the sibling stores into the host value's properties, the same spans)
     const found = stopRuns(
-      unit("let root={x:1}\nroot.q=2\nroot.z=3\nexit\n"),
+      unit(source),
       ["hostValue"],
       (make) => mode.run(make),
       1,
@@ -1098,37 +1206,36 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
         }),
       }),
       "work",
+      { files: unit(source.replace("{x:hostValue}", "hostValue    ")), globals: ["hostValue"] },
     );
+    assert.ok(dropped, mode.name);
     assert.deepEqual(
-      found.sites.map(({ code, site }) => `${code} ${site}`),
-      ["TSV043 0:15:21", "TSV043 0:24:30"],
+      [found.kind, found.sites.map(({ code, site }) => `${code} ${site}`)],
+      ["open", ["TSV043 0:23:29", "TSV043 0:32:38"]],
       mode.name,
     );
-    assert.equal(found.kind, "open", mode.name);
   }
-  // (a genuine escape: the stop's plan stores a text the natural compile rejects, under a guard the pool's boolean takes;
-  // #2080 part 1 declines it at a settled stop, so the work allowance stops before admission settles)
-  for (const mode of HELD_MODES) {
-    const found = stopRuns(
-      unit('let n = 1\nif hostValue is boolean { n = "bad" }\nexit\n'),
-      ["hostValue"],
-      (make) => mode.run(make),
-      1,
-      undefined,
-      "work",
-    );
-    assert.equal(found.natural.plan, false, mode.name);
-    assert.equal(found.kind, "open", mode.name);
-  }
-  // (one of the nine `later` campaign items: the stopped run passes the store the natural plan rejects and fails at the
-  // loop's own start, which takes no round)
+  // (one of the nine `later` campaign items, where the stopped run passed the store the natural plan rejects and failed
+  // at the loop's own start: its decision stops in the restarted pass, which stops the analysis before admission
+  // settled, and the plain gate declines it, #2080 part 2; the natural plan with its checks dropped passes the store and
+  // fails at the loop's start, which takes no round)
+  const looping =
+    "let t:integer?=null\nlet root={n:t,nest:{n:t,keep:1},spare:t}\nlet other={n:2.5,nest:{n:2.5,keep:1},spare:1}\nlet a=root\nif other != null { a=other }\nlet b=a\nrepeat b.n {}\nexit\n";
   const later = stopRuns(
-    unit(
-      "let t:integer?=null\nlet root={n:t,nest:{n:t,keep:1},spare:t}\nlet other={n:2.5,nest:{n:2.5,keep:1},spare:1}\nlet a=root\nif other != null { a=other }\nlet b=a\nrepeat b.n {}\nexit\n",
-    ),
+    unit(looping),
     ["hostValue", "hostOther", "hostInit"],
     (make) => HELD_MODES[2]!.run(make),
     64,
   );
-  assert.equal(later.kind, "later");
+  assert.deepEqual([later.kind, later.stopped.declined], ["declined", UNDECIDED]);
+  assert.equal(
+    stopRuns(
+      unit(looping),
+      ["hostValue", "hostOther", "hostInit"],
+      (make) => HELD_MODES[2]!.run(make),
+      1_000_000,
+      (plan) => withoutTypeChecks(plan),
+    ).kind,
+    "later",
+  );
 });

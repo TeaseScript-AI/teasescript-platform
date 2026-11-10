@@ -31,6 +31,7 @@ import { type ItemTag, REASON, type Item } from "../items.js";
 import { propertyName, propertyStep } from "../program.js";
 import { type RequiredKind } from "../result.js";
 import {
+  OPEN_BY_STOP,
   OutsideContract,
   SliceIndex,
   type Store,
@@ -665,9 +666,6 @@ function defaultOf(call: CallExpression): Expression | null {
 
 /** The kinds whose levels below a typed call's answer its default answers (#1767). */
 const STRUCTURED: ReadonlySet<ItemTag> = new Set(["list", "set", "dict", "object", "unknown"]);
-
-/** The exclusion of a typed call's answer a stop left open (#1767). */
-const OPEN_BY_STOP = "a typed parse's or load's default that a stop left open";
 
 /**
  * Whether a default reads anything but literal data at any level: a variable, a property or an element of one, any

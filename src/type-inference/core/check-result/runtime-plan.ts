@@ -25,8 +25,11 @@ import { type CoreAnalysisRequest, propertyName } from "../program.js";
 import { pathPhrase } from "../messages.js";
 import { type Obligation, type RequiredKind } from "../result.js";
 import {
+  LOST_AT_BUDGET,
   OutsideContract,
   SliceIndex,
+  UNDECIDED_AT_BUDGET,
+  UNESTABLISHED_AT_BUDGET,
   type Store,
   declarations,
   nodeOf,
@@ -320,8 +323,9 @@ export function runtimeChecks(
  * declines the program at its store
  * (`OutsideContract`): the stopped plan would otherwise run past a check the natural plan makes (ADR 0021 §1.10
  * column (2)). A program the analysis rejects has no plan and is not asked. Where admission did not settle there is no
- * registry and nothing is declined here: an unsettled stop is #1767's and #1252's. One visit per obligation of the
- * registry, whose making charged each one.
+ * registry: each owed obligation against `unknown` is a check no completion decided, and the first, in the owed order
+ * `runtimeChecks` reads, declines the program at its site (#2080, the owner's decision: no inference after the stop).
+ * One visit per obligation, whose making charged each one.
  */
 export function lostCheck(
   answers: Answers,
@@ -340,9 +344,29 @@ export function lostCheck(
     if (first === undefined) return;
     throw new OutsideContract(
       first.kind === "letStatement" ? first.initializer : first.value,
-      "a store whose required checks could not be established at the budget",
+      UNESTABLISHED_AT_BUDGET,
     );
   }
+  // (#2080: before admission settled, a store's, a literal's or an ingress's mark against `unknown`. None was found to be
+  // a boundary obligation or carried by a complete store check, 11,034 at 1,606 such stops (campaign
+  // lane1a/2080-part2-owed), so neither is excepted)
+  if (answers.budget.exhausted !== null && !answers.budget.settled)
+    for (const diagnostic of [...answers.diagnostics, ...answers.budget.deferred]) {
+      if (diagnostic.class !== "warning-runtime-check" || diagnostic.kind === "budget") continue;
+      if (leftOutWarning(diagnostic)) continue;
+      const { obligation } = diagnostic;
+      if (obligation.against.length !== 1 || obligation.against[0] !== "unknown") continue;
+      const expression = index.expressionAt(obligation.site);
+      const store = index.storeOf(expression);
+      throw new OutsideContract(
+        store === undefined
+          ? expression
+          : store.kind === "letStatement"
+            ? store.initializer
+            : store.value,
+        UNDECIDED_AT_BUDGET,
+      );
+    }
   // (the stores the completion's own C1 owes a check at, each once: a stopped mark there is never NoCheck, `keeps`)
   const warned = new Set<Store>();
   for (const warning of answers.completedWarnings()) {
@@ -360,7 +384,7 @@ export function lostCheck(
       continue;
     throw new OutsideContract(
       store.kind === "letStatement" ? store.initializer : store.value,
-      "a store whose check was lost at the budget",
+      LOST_AT_BUDGET,
     );
   }
 }

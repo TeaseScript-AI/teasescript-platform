@@ -1061,15 +1061,31 @@ test("a check that owes the runtime nothing reaches every reader, and a stop aft
     const total = analyseCore(request).budget.total;
     for (let allowance = 1; allowance <= total + 400; allowance += 1) {
       let made: CompactRecord;
-      let codes: string[];
+      // (the route's diagnostics' codes, or `null` where it declines)
+      let codes: string[] | null;
       try {
         made = withTestAllowance(allowance, () => compactAnalysis(request));
-        withTestAllowance(allowance, () =>
-          publishedAnswers(analyseCore(request), bindings, request),
-        );
-        codes = withTestAllowance(allowance, () =>
-          compileSourceWithBackend(source, { globals: ["hostValue"] }, CORE_BACKEND),
-        ).diagnostics.map((d) => d.code);
+        const { budget } = withTestAllowance(allowance, () => {
+          const answers = analyseCore(request);
+          publishedAnswers(answers, bindings, request);
+          return answers;
+        });
+        try {
+          codes = withTestAllowance(allowance, () =>
+            compileSourceWithBackend(source, { globals: ["hostValue"] }, CORE_BACKEND),
+          ).diagnostics.map((d) => d.code);
+        } catch (error) {
+          // (before admission settled the stop leaves the loop variable's store undecided, and the plain gate
+          // declines, #2080 part 2: the route's answer, beside the readers')
+          if (
+            !(error instanceof CandidateOutsideSlice) ||
+            error.what !== "a store whose check was left undecided at the budget" ||
+            budget.exhausted === null ||
+            budget.settled
+          )
+            throw error;
+          codes = null;
+        }
       } catch (error) {
         failures.push(`${source} at ${allowance}: ${String(error)}`);
         break;
@@ -1078,7 +1094,7 @@ test("a check that owes the runtime nothing reaches every reader, and a stop aft
         failures.push(`${source} at ${allowance}: neither the check nor a stop`);
         break;
       }
-      if (!codes.includes(code) && !codes.includes("TSV076")) {
+      if (codes !== null && !codes.includes(code) && !codes.includes("TSV076")) {
         failures.push(`${source} at ${allowance}: the route has neither the check nor a stop`);
         break;
       }
