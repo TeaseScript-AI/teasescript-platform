@@ -33,8 +33,9 @@ says beside the label what that claims.
   `problems.push` and evidence-error `throw` in the derivation modules. Each named check site needs a witness at that
   position or an explicit implication from an earlier check. An implied site has an ordering row instead of an
   independently killing one: the row breaks both checks and expects the earlier one's reason, so a reorder fails a
-  test. Every `nullable(` read and every `??` or `||` default there either has a row where its absence, in a context
-  that requires the value, makes the cell incomplete, or a stated reason the absence is permitted. A check written in
+  test. Every read of a value that may be absent there (`nullable`, also through the reader passed on as `read`) and
+  every `??` or `||` default either has a row where its absence, in a context that requires the value, makes the cell
+  incomplete, or a stated reason the absence is permitted. A check written in
   another form, or in another module, is outside that test until its kind is added.
 - **Three cells per scenario**, each its own failure boundary:
   - the timing cell (`ms`, `boolean`): the only one in the headline, the summary (`--json`) and the R0 comparison;

@@ -1218,6 +1218,40 @@ const RELATIONS = [
     ["counts", "crossClock", "timing"],
     "the cold log's entry 1: a posted request's ID",
   ],
+  // Sol code r7, F6: a state that shows buttons holds its controls root's serial; without it an unchanged action reads
+  // as another one, and the turn settles early.
+  [
+    "turn: the state before without its controls' serial (Sol code r7)",
+    "session chromium main",
+    (r) => {
+      const again = { ...r.result.turns[0].before, t: 910, frame: 915 };
+      again.buttons = [{ ...again.buttons[0], label: "Go again" }];
+      r.result.probe.repeat.states.splice(2, 0, again);
+      r.result.probe.repeat.changes.unshift({ t: 909, frame: 915 });
+      r.result.turns[0].before = { ...r.result.turns[0].before, control: null };
+    },
+    ["counts", "timing"],
+    "turn 0's state before: a state with buttons, its controls' serial",
+  ],
+  [
+    "turn: the state before with its controls' serial deleted",
+    "session chromium main",
+    (r) => {
+      const before = { ...r.result.turns[0].before };
+      delete before.control;
+      r.result.turns[0].before = before;
+    },
+    ["counts", "timing"],
+    "turn 0's state before: a state with buttons, its controls' serial",
+  ],
+  [
+    "probe: a page's state with buttons without its controls' serial",
+    "session chromium main",
+    (r) =>
+      (r.result.probe.repeat.states[2] = { ...r.result.probe.repeat.states[2], control: null }),
+    ["counts", "timing"],
+    "the repeat page's state 2: a state with buttons, its controls' serial",
+  ],
 ];
 
 /** Each `ms` field's relations, written here: a field that reports an interval names the relation that orders it. */
@@ -1452,9 +1486,10 @@ test("every NULLABLE name is an optional leaf of some section, never of the head
  * reason can tell apart, is witnessed per position (`SHARED`), by the rows that reach that position or the position
  * whose check always precedes it. A message with little literal text (`WEAK`) is witnessed only by the rows named for
  * it. A site an earlier check always precedes (`IMPLIED`) has an ordering row that breaks both and expects the earlier
- * one's reason. A second claim covers absence (Sol final r1, F1): every `nullable(` read and every `??` or `||` in
- * these modules (`absenceSites`, by position) has rows where its absence, in a context that requires the value, makes
- * the cell incomplete, or a stated reason the absence is permitted (`ABSENCE`). The limit: a check written in another
+ * one's reason. A second claim covers absence (Sol final r1, F1): every occurrence of `nullable` (a call, or the
+ * reader passed as a value), every `read(` call through such a value, and every `??` or `||` in these modules
+ * (`absenceSites`, by position) has rows where its absence, in a context that requires the value, makes the cell
+ * incomplete, or a stated reason the absence is permitted (`ABSENCE`). The limit: a check written in another
  * form (a bare comparison that throws, a new module) is outside both claims until its kind is added here.
  */
 const MODULES = ["validate.mjs", "lib/measure.mjs", "scenarios/keep.mjs", "scenarios/taps.mjs"];
@@ -1684,8 +1719,9 @@ function checkSites() {
 }
 
 /**
- * Every read of a value that may be absent, and every default applied where one may be, in `MODULES`: each `nullable(`
- * call and each `??` and `||` in a module's code (comments and string text blanked). Each is a position: its file, its
+ * Every read of a value that may be absent, and every default applied where one may be, in `MODULES`: each occurrence
+ * of `nullable` (a call, or the reader passed as a value), each `read(` call through such a value, and each `??` and
+ * `||` in a module's code (comments and string text blanked). Each is a position: its file, its
  * top-level declaration and its line's text (`#n` for a second on one line).
  */
 function absenceSites() {
@@ -1701,11 +1737,22 @@ function absenceSites() {
     ].map((m) => ({ index: m.index, name: m[1] ?? m[2] }));
     const declarationOf = (index) =>
       declarations.findLast((declaration) => declaration.index <= index)?.name ?? "(module)";
-    for (const m of code.matchAll(/\bnullable\s*\(|\?\?|\|\|/gu)) {
-      if (/^import\b/mu.test(code.slice(code.lastIndexOf("\n", m.index) + 1, m.index + 1)))
-        continue;
+    const imports = [...code.matchAll(/import\s*\{[^}]*\}\s*from/gu)].map((m) => [
+      m.index,
+      m.index + m[0].length,
+    ]);
+    // `nullable` called, `nullable` passed as a value (its reader's alias), a `read(` call through such an alias, `??`
+    // and `||`.
+    for (const m of code.matchAll(/\bnullable\b(?:\s*\()?|\bread\s*\(|\?\?|\|\|/gu)) {
+      if (imports.some(([from, to]) => m.index >= from && m.index < to)) continue;
       const line = text.slice(0, m.index).split("\n").length;
-      const kind = m[0].startsWith("nullable") ? "nullable" : m[0];
+      const kind = m[0].startsWith("nullable")
+        ? m[0].endsWith("(")
+          ? "nullable"
+          : "nullable as a value"
+        : m[0].startsWith("read")
+          ? "read"
+          : m[0];
       const base = `${file} ${declarationOf(m.index)} ${kind}: ${lines[line - 1].trim()}`;
       const repeats = found.filter(
         (site) => site.key === base || site.key.startsWith(`${base} #`),
@@ -1726,6 +1773,57 @@ function absenceSites() {
  * permitted (Sol final r1, F1, and orchestrator 2's ruling).
  */
 const ABSENCE = {
+  "validate.mjs validateSample read: const found = read(sample);": {
+    permitted:
+      "a field's reader (`NUMBERS`), no record read: an absent result fails a required field",
+  },
+  'lib/measure.mjs turnSettlement read: const composer = read(state, "composer");': {
+    permitted: "the page shows no composer",
+  },
+  'lib/measure.mjs turnSettlement read: read(state, "start") === null &&': {
+    permitted: "no start button is shown",
+  },
+  'lib/measure.mjs turnSettlement read: read(state, "control") !== beforeControl &&': {
+    rows: ["probe: a page's state with buttons without its controls' serial"],
+  },
+  'lib/measure.mjs turnSettlement read: read(state, "frame") !== null,': {
+    permitted:
+      "`requestAnimationFrame` callbacks run in the order they were requested, so a candidate without its frame beside a drawn later one cannot occur; one not yet drawn settles nothing",
+  },
+  'lib/measure.mjs turnSettlement read: .map((state) => ({ by: "control", t: state.t, at: read(state, "frame") })),':
+    { permitted: "the candidates were filtered to those holding the value just above" },
+  'lib/measure.mjs turnSettlement read: .filter((row) => row.speaker !== "user" && row.t > after && read(row, "shownFrame") !== null)':
+    {
+      permitted:
+        "a row not yet drawn with a positive opacity is not yet shown, so it settles nothing (H's rule)",
+    },
+  'lib/measure.mjs turnSettlement read: .map((row) => ({ by: "row", t: row.t, at: read(row, "shownFrame") })),':
+    { permitted: "the candidates were filtered to those holding the value just above" },
+  'lib/measure.mjs turnSettlement read: const shown = row === undefined ? null : read(row, "shownFrame");':
+    { permitted: "a row not yet shown before the input: its update settles nothing" },
+  'lib/measure.mjs turnSettlement read: read(change, "frame") !== null': {
+    permitted:
+      "`requestAnimationFrame` callbacks run in the order they were requested, so a candidate without its frame beside a drawn later one cannot occur; one not yet drawn settles nothing",
+  },
+  'lib/measure.mjs turnSettlement read: .map((change) => ({ by: "row update", t: change.t, at: read(change, "frame") })),':
+    { permitted: "the candidates were filtered to those holding the value just above" },
+  'lib/measure.mjs turnTimes nullable as a value: const { submission, event } = turnSettlement(gate, sentAt, nullable(before, "control"), nullable);':
+    {
+      permitted:
+        "`turnSettlement`'s reader: its reads through `read` are listed as sites of their own",
+    },
+  'validate.mjs stateComplete nullable: if (state.buttons.length > 0 && nullable(state, "control") === null)':
+    {
+      rows: [
+        "turn: the state before without its controls' serial (Sol code r7)",
+        "turn: the state before with its controls' serial deleted",
+        "probe: a page's state with buttons without its controls' serial",
+      ],
+    },
+  'validate.mjs sessionTiming nullable: if (nullable(turn, "sentAt") !== null)': {
+    permitted:
+      'a turn the driver could not send has no state before it; its absent send time fails the turn ("session: a turn without its records")',
+  },
   'validate.mjs transactionsComplete nullable: const end = nullable(transaction, "end");': {
     rows: [
       "keep: a transaction with an outcome has its end",
@@ -1868,8 +1966,12 @@ const ABSENCE = {
     { permitted: "the page's wait reads `settledAt`; `turnTimes` reads the event itself" },
   'lib/measure.mjs turnTimes nullable: const { submission, event } = turnSettlement(gate, sentAt, nullable(before, "control"), nullable);':
     {
-      permitted:
-        "a state before the turn with no foreground controls root, such as one still showing Start (a complete variant)",
+      // A state with buttons must hold its serial (`stateComplete`, F6); one without buttons, such as a state still
+      // showing Start, has no controls root (the complete variant "a turn sent from a state that still showed Start").
+      rows: [
+        "turn: the state before without its controls' serial (Sol code r7)",
+        "turn: the state before with its controls' serial deleted",
+      ],
     },
   'lib/measure.mjs turnTimes nullable: nullable(record, "shownFrame") !== null,': {
     permitted: "a row not yet drawn; the first row's time is no reported field",

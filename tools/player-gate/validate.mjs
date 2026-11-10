@@ -54,12 +54,23 @@ function transactionsComplete(transactions, where) {
 }
 
 /**
- * One page's probe records as evidence: none dropped past the probe's limit (its lists would be cut short), and its
- * transactions complete.
+ * A probe state that shows a button had a foreground controls root, whose serial it holds (`probe.mjs` `readState`):
+ * one without it cannot tell one action from the next, so it is no evidence (Sol code r7, F6). A state without
+ * buttons may have no root.
+ */
+function stateComplete(state, where) {
+  if (state.buttons.length > 0 && nullable(state, "control") === null)
+    throw new MissingEvidence(`${where}: a state with buttons, its controls' serial`);
+}
+
+/**
+ * One page's probe records as evidence: none dropped past the probe's limit (its lists would be cut short), its states
+ * and its transactions complete.
  */
 function gateComplete(gate, page) {
   if (gate.dropped !== 0)
     throw new MissingEvidence(`${page} page: ${gate.dropped} probe records dropped`);
+  gate.states.forEach((state, index) => stateComplete(state, `${page} page's state ${index}`));
   transactionsComplete(gate.transactions, `${page} page's`);
 }
 
@@ -78,6 +89,11 @@ function sessionTiming(result, cell, problems) {
   const worker = workerStart(cold);
   if (cell.backend === "worker" && (worker === null || worker.readyMs === null))
     problems.push("the engine Worker reaching ready");
+  // A sent turn's state before it is the turn's own record of the controls it answered.
+  result.turns.forEach((turn, index) => {
+    if (nullable(turn, "sentAt") !== null)
+      stateComplete(turn.before, `turn ${index}'s state before`);
+  });
   const turns = result.turns.map((turn) =>
     nullable(turn, "sentAt") === null
       ? { ok: false, reason: nullable(turn, "reason") ?? "no records of the turn" }
