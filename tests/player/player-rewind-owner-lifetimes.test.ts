@@ -882,7 +882,7 @@ function heldAfter(c: Case): boolean | undefined {
 /** The pending ask's settlement: whether its step or Return went. */
 function askedAfter(c: Case): boolean | undefined {
   if (c.resource !== "pending ask" && c.resource !== "candidate") return undefined;
-  // Debug off's reinstatement answers a Return; a step it abandons settles `false` at its own exit (#2232).
+  // Debug off's reinstatement answers a Return `true`, and a step it abandons before its commit `false` (#2232).
   if (c.maker === "Return") return c.end === "Return" || c.end === "Debug off" || c.end === "stop";
   return c.end === "commit" || c.end === "stop";
 }
@@ -1071,19 +1071,32 @@ test("the rewind owner's lifetime family completed every feasible full tuple, an
   assert.equal(FEASIBLE.length, 861);
 });
 
-test("#2232: a step committed before Debug off's reinstatement resolves true", async (context) => {
-  const made = createHost(context, memoryStorage().provider);
-  await start(context, made.host);
-  await choose(context, made.host, "One");
-  await choose(context, made.host, "Red");
-  const bridge = await made.host.bridge;
-  // The commit is sent, its acknowledgement held, when Debug off reinstates the parked session.
-  const held = holdRead(context, bridge, "rewindCommit", "reply", false);
-  const stepped = backTo(made.rewind, 0);
-  await held.arrived;
-  made.debug.stop();
-  await settle(context);
-  held.release();
-  assert.equal(await stepped, true);
-  assert.equal(made.host.rewind.inspecting.value, false, "the parked session is reinstated");
-});
+// Debug off's reinstatement of the parked session answers a later pending step at once, by whether it committed
+// (#2232): its own exit, still held, comes later and finds no ask.
+for (const held of ["its gate", "its commit's acknowledgement"] as const)
+  test(`#2232: Debug off's reinstatement answers a step held at ${held} at once`, async (context) => {
+    const made = createHost(context, memoryStorage().provider);
+    await start(context, made.host);
+    await choose(context, made.host, "One");
+    await choose(context, made.host, "Red");
+    const bridge = await made.host.bridge;
+    assert.equal(await backTo(made.rewind, 1), true, "the first Back, which parks the session");
+    await settle(context);
+    const committed = held === "its commit's acknowledgement";
+    const acknowledgement = committed
+      ? holdRead(context, bridge, "rewindCommit", "reply", false)
+      : null;
+    const gate = committed ? null : holdGate(made.host);
+    let answer: boolean | null = null;
+    const stepped = backTo(made.rewind, 0).then((went) => (answer = went));
+    await (acknowledgement ?? gate)?.arrived;
+    made.debug.stop();
+    await settle(context);
+    assert.equal(made.host.rewind.inspecting.value, false, "the parked session is reinstated");
+    assert.equal(answer, committed, "the step is answered at the reinstatement");
+    assert.equal(made.host.rewind.owner.busy.value, false, "the step's work ended with it");
+    acknowledgement?.release();
+    gate?.release(true);
+    await stepped;
+    assert.equal(answer, committed, "its later exit changes nothing");
+  });

@@ -66,8 +66,8 @@ export function createRewindOwner(host: RewindOwnerHost) {
   let reinstated: PlayerSession | null = null;
   // Set while this rewind shows a session, which is no new session.
   let showing = false;
-  // Settles the operation that asked (a step, Return) with whether it went ahead. A reinstatement answers only a Return:
-  // a step it abandons settles at its own exit.
+  // Settles the operation that asked (a step, Return) with whether it went ahead. A reinstatement answers every pending
+  // ask: a Return `true`, a step by whether it committed.
   let settleAsk: {
     readonly kind: "step" | "return";
     readonly settle: (went: boolean) => void;
@@ -238,7 +238,8 @@ export function createRewindOwner(host: RewindOwnerHost) {
           show(left.connection.latest(left) ?? left, false);
           reinstated = left;
         }
-        if (settleAsk?.kind === "return") settle(true);
+        if (settleAsk !== null)
+          settle(settleAsk.kind === "return" || state.step?.phase === "committed");
         return;
       }
       case "adoptBegin":
