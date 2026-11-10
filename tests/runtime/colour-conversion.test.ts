@@ -844,6 +844,13 @@ test("accepts an lch() colour that colorjs.io refused only for a trigonometric r
     assert.ok(Math.abs(Number(hue) % 90) === 0, input);
   }
   assert.equal(changes.length, 432);
-  const result = compileSource('say prose(color: "lch(50 1e308 90)") "x"\nexit', {});
-  assert.deepEqual(result.diagnostics, []);
+  // Both sides of the line, through the compiler: a colour of the class compiles, and a neighbouring overflow that
+  // exact arithmetic reproduces (a hue whose radians are not finite) is still refused.
+  const accepted = compileSource('say prose(color: "lch(50 1e308 90)") "x"\nexit', {});
+  assert.deepEqual(accepted.diagnostics, []);
+  const refused = compileSource('say prose(color: "lch(50 20 1e308)") "x"\nexit', {});
+  assert.deepEqual(
+    refused.diagnostics.map((diagnostic) => diagnostic.code),
+    ["TSC008"],
+  );
 });
