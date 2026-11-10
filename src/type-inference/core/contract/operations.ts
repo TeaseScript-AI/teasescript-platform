@@ -16,7 +16,7 @@ import {
   shownResult,
 } from "../method-categories.js";
 import { operationItems, type Operator } from "../operator-table.js";
-import { indexedPlus } from "../plus-index.js";
+import { indexedPlus } from "../indexes/plus-index.js";
 import type { ValueConstraint } from "../program.js";
 import type { Work } from "../solver.js";
 import { heldAsIs, otherwiseKeeps, type FlowSink } from "./contributions.js";
