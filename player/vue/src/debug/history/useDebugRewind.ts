@@ -49,7 +49,7 @@ export function useDebugRewind(player: PlayerSessionHost) {
     future: owner.future,
     /** Whether a rewind step runs now. */
     busy: owner.busy,
-    /** Why the last rewind step changed nothing, or `null`. */
+    /** The last rewind step's problem, or `null`: cleared when another step begins or its history ends. */
     problem: owner.problem,
     /** Restores the point `point` (its ID); the state left stays for Forward. Resolves to whether it was restored. */
     back: (point: number) => owner.back(point),

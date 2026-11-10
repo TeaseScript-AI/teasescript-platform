@@ -66,8 +66,12 @@ export function createRewindOwner(host: RewindOwnerHost) {
   let reinstated: PlayerSession | null = null;
   // Set while this rewind shows a session, which is no new session.
   let showing = false;
-  // Settles the operation that asked (a step, Return) with whether it went ahead.
-  let settleAsk: ((went: boolean) => void) | null = null;
+  // Settles the operation that asked (a step, Return) with whether it went ahead. A reinstatement answers every pending
+  // ask: a Return `true`, a step by whether it committed.
+  let settleAsk: {
+    readonly kind: "step" | "return";
+    readonly settle: (went: boolean) => void;
+  } | null = null;
   // The deltas that arrived before the timeline did, and the publication whose deltas were applied last.
   let early: HistoryDelta[] = [];
   let applied: { readonly lineage: object; readonly revision: number } | null = null;
@@ -119,7 +123,7 @@ export function createRewindOwner(host: RewindOwnerHost) {
   function settle(went: boolean) {
     const waiting = settleAsk;
     settleAsk = null;
-    waiting?.(went);
+    waiting?.settle(went);
   }
 
   // What the history controls need of this owner (`rewindControls.ts`).
@@ -148,8 +152,10 @@ export function createRewindOwner(host: RewindOwnerHost) {
         // Applied by the open or the gate whose failure it is, which holds the error (`failed`, `gate`).
         return;
       case "clearView":
+        // The history ends, and the problem of a step sent to it with it.
         view.value?.close();
         view.value = null;
+        problem.value = null;
         parked = null;
         candidate = null;
         early = [];
@@ -232,7 +238,8 @@ export function createRewindOwner(host: RewindOwnerHost) {
           show(left.connection.latest(left) ?? left, false);
           reinstated = left;
         }
-        settle(true);
+        if (settleAsk !== null)
+          settle(settleAsk.kind === "return" || state.step?.phase === "committed");
         return;
       }
       case "adoptBegin":
@@ -326,7 +333,7 @@ export function createRewindOwner(host: RewindOwnerHost) {
     const history = state.history!;
     const generation = host.generation();
     const holds = current();
-    const went = new Promise<boolean>((resolve) => (settleAsk = resolve));
+    const went = new Promise<boolean>((resolve) => (settleAsk = { kind: "step", settle: resolve }));
     busy.value = true;
     problem.value = null;
     try {
@@ -478,7 +485,9 @@ export function createRewindOwner(host: RewindOwnerHost) {
     /** Reinstates the session Back first left, through the restart gate; resolves to whether it was. */
     returnToSession: (): Promise<boolean> => {
       if (settleAsk !== null || parked === null) return Promise.resolve(false);
-      const went = new Promise<boolean>((resolve) => (settleAsk = resolve));
+      const went = new Promise<boolean>(
+        (resolve) => (settleAsk = { kind: "return", settle: resolve }),
+      );
       dispatch({ kind: "return" });
       return went;
     },
