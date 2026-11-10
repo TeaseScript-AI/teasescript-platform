@@ -100,10 +100,13 @@ type ArmFeasibility = "feasible" | "infeasible" | "unavailable";
 export interface Feasibility {
   /** The live arms of tested `if`s and `while` bodies that are `infeasible` or `unavailable`: no chain enters one. */
   readonly unentered: ReadonlySet<TreeBlock>;
-  /** Those arms, and the body of each loop that neither a live header exit nor a skip edge leaves (a `break` only). */
-  readonly closed: ReadonlySet<TreeBlock>;
-  /** The statements that own a closed arm. */
+  /** The statements that own such an arm. */
   readonly owners: readonly TreeStatement[];
+  /**
+   * The loops no run is proved to leave by their header: neither a live header exit nor a skip edge (a `break` only),
+   * or a `while` whose condition, where it fails, leaves a tested read no kind or has no answer for it (`#exit`).
+   */
+  readonly unleft: ReadonlySet<TreeStatement>;
 }
 
 /** A condition's own guards of a text and kind (`#ownGuarded`): their starts sorted, and the furthest end by each. */
@@ -416,7 +419,6 @@ export class RouteTests {
     const work = this.#work;
     this.#testing();
     const unentered = new Set<TreeBlock>();
-    const closed = new Set<TreeBlock>();
     const owners: TreeStatement[] = [];
     for (const list of each(work, "eventSteps", [this.#ifs, this.#whiles]))
       for (const statement of each(work, "eventSteps", list)) {
@@ -424,20 +426,63 @@ export class RouteTests {
         for (const arm of each(work, "eventSteps", statement.arms))
           if (arm.live && (yield* this.#infeasible(arm)) !== "feasible") {
             unentered.add(arm);
-            closed.add(arm);
             owns = true;
           }
         if (owns) owners.push(statement);
       }
+    const unleft = new Set<TreeStatement>();
     for (const block of each(work, "eventSteps", this.tree.blocks))
       for (const statement of each(work, "eventSteps", block.statements)) {
-        const body = statement.loop === null ? undefined : statement.arms[0];
-        if (body === undefined || !body.live || statement.exits || statement.skip) continue;
-        if (!closed.has(body)) owners.push(statement);
-        closed.add(body);
+        if (statement.loop === null) continue;
+        if (!(statement.exits || statement.skip) || (yield* this.#exit(statement)) !== "feasible")
+          unleft.add(statement);
       }
-    this.#feasibility = { unentered, closed, owners };
+    this.#feasibility = { unentered, owners, unleft };
     return this.#feasibility;
+  }
+
+  /**
+   * Whether a run leaves a `while` by its header (#1938): `infeasible` where a test of its condition that guards the
+   * way past (N1's form, `#conditionFacts`) removes every kind its read holds, `unavailable` where that read has no
+   * answer, as `#infeasible` decides an arm. No narrowing is defined at a loop's exit, so the read is the one the
+   * body's entry narrows at the same location. Another loop, a condition without such a test, or a location the body's
+   * entry does not narrow: `feasible`.
+   */
+  *#exit(statement: TreeStatement): Work<ArmFeasibility> {
+    this.#work.charge("eventSteps");
+    const work = this.#work;
+    const body = statement.arms[0];
+    const facts =
+      statement.statement.kind === "whileStatement" ? this.#conditionFacts(statement) : null;
+    if (facts === null || body?.entry === null || body === undefined) return "feasible";
+    for (const fact of each(work, "eventSteps", facts.list)) {
+      if (!fact.otherwise || fact.location === null) continue;
+      for (const g of each(work, "eventSteps", this.index.atEntry(body.entry, fact.location))) {
+        const items = yield* this.pass.values.keyItems(g.key, g.input);
+        if (
+          items.length === 0 ||
+          some(
+            work,
+            "eventSteps",
+            items,
+            (item) =>
+              (item.reasons & REASON.budget) !== 0 ||
+              (item.tag === "unknown" && (item.reasons & REASON.external) === 0),
+          )
+        )
+          return "unavailable";
+        if (
+          !some(
+            work,
+            "eventSteps",
+            items,
+            (item) => item.tag === "unknown" || !removes(fact.form, item.tag, work),
+          )
+        )
+          return "infeasible";
+      }
+    }
+    return "feasible";
   }
 
   /**
