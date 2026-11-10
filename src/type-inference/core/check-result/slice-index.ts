@@ -471,8 +471,9 @@ export const LOST_AT_BUDGET = "a store whose check was lost at the budget";
 export const UNDECIDED_AT_BUDGET = "a store whose check was left undecided at the budget";
 
 /**
- * The declines a limit of the analysis causes, apart from what the slice does not cover yet (#2080, the owner's go,
- * 2026-11-10): tests count them by `limit`, which reads this list, so no site marks one without its reason.
+ * The reasons the stop's gates (`lostCheck`) and rule (R) (`OPEN_BY_STOP`) decline with (#2080, the owner's go,
+ * 2026-11-10): tests count them by `limit`, which reads this list, so no site marks one without its reason. A refusal the
+ * slice makes from a diagnostic only a stop produces carries its coverage reason and is not here (#2236).
  */
 export const LIMIT_REASONS: readonly string[] = [
   OPEN_BY_STOP,
@@ -488,7 +489,7 @@ export const LIMIT_REASONS: readonly string[] = [
  * less than the core decided.
  */
 export class OutsideContract extends Error {
-  /** Whether a limit of the analysis caused it (`LIMIT_REASONS`). */
+  /** Whether its reason is one the stop's gates or rule (R) decline with (`LIMIT_REASONS`). */
   readonly limit: boolean;
   public constructor(
     readonly expression: Expression,

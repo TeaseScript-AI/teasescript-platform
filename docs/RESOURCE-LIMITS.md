@@ -176,8 +176,9 @@ else it is kept only by a check that carries its contract, and one whose result 
 store check (a proved-open result, and a shape result not lost, need no further check at their extent, as for every
 obligation); (d) after a stop before admission settled, which decides nothing after the stop, the first owed obligation
 against `unknown`, a store's, a literal's or a typed call's mark, "a store whose check was left undecided at the budget"
-(`lostCheck`, #2080 part 2). (a) to (d) are the declines a limit causes and carry `CandidateOutsideSlice.limit`
-(`LIMIT_REASONS`). Production compiles with the legacy type checker until the switch, which none of these bounds or
+(`lostCheck`, #2080 part 2). (a) to (d), the reasons the gates and rule (R) decline with, carry
+`CandidateOutsideSlice.limit` (`LIMIT_REASONS`); a refusal the slice makes from a diagnostic only a stop produces, such
+as "this operand" from a stop's TSV043 warning, carries its coverage reason and not the marker (#2236). Production compiles with the legacy type checker until the switch, which none of these bounds or
 declines govern.
 
 The requirement is #1526's
@@ -197,7 +198,9 @@ because it is too large or too deeply nested", [ADR 0021](decisions/0021-static-
 re-assessment. Recorded for that re-assessment, open and not accepted design (the Owner, 2026-11-10): what a
 maker gets on such a decline; one code for (a) to (d), with the reason in its message; and a limit field in
 `src/diagnostic-codes.ts` naming the limit's ID in this document, carried by that code and by `TSV076`, so that a later
-report can read the group from the registry.
+report can read the group from the registry. Also open: whether a refusal the slice makes from a diagnostic or a
+contract only a stop produces ("this operand" from a stop's TSV043 warning; "a default whose collection the value it
+stands in for does not type") is a refusal a limit causes, and which others there are (#2236).
 
 How a repair of the type core's work is accepted against `main` (its growth gate) is a testing rule:
 [Scaling diagnostics](TESTING.md#scaling-diagnostics).

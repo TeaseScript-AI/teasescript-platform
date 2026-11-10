@@ -42,8 +42,9 @@ import { outsideSyntax, sliceCall, type Outside } from "./slice-syntax.js";
  * (`leftSlice`), the analysis ended there. A stop compiles with its warning and its checks at runtime (D4 a′), but a
  * store whose check the stop leaves uncarried or undecided declines the program (#1526 decision 2, condition 1,
  * `check-result/runtime-plan.ts` `lostCheck`): where admission settled, "a store whose check was lost at the budget";
- * where it had not, "a store whose check was left undecided at the budget" (#2080). These and the other declines a
- * limit causes carry `limit` (`LIMIT_REASONS`).
+ * where it had not, "a store whose check was left undecided at the budget" (#2080). These, the unestablished checks
+ * and rule (R)'s open typed default carry `limit` (`LIMIT_REASONS`); a refusal made from a diagnostic only a stop
+ * produces carries its coverage reason and does not (#2236).
  */
 
 /** Test-only: a program outside the candidate's slice, at the first refusal the route establishes (see above). */
@@ -62,7 +63,7 @@ export class CandidateOutsideSlice extends Error {
     this.name = "CandidateOutsideSlice";
     this.limit = LIMIT_REASONS.includes(what);
   }
-  /** Whether a limit of the analysis caused it, not the slice (`LIMIT_REASONS`, #2080). */
+  /** Whether its reason is one the stop's gates or rule (R) decline with (`LIMIT_REASONS`, #2080). */
   readonly limit: boolean;
 }
 
