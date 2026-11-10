@@ -72,6 +72,11 @@ test("a split puts every place in one shard, by the places' order and the costs 
   const fraction: Area = { rest: { count: 0, ms: 0 }, sources: { a: 900_000, b: 124_003 } };
   assert.equal(countOf(fraction, 1024.003, 1).count, 1);
   assert.equal(countOf(fraction, 2048.006, 2).count, 1);
+  // the count's own property, not a cap: never more shards than the costs file's places, however small the target, as
+  // each source under the target adds less than a shard; an area of none gets one
+  const few: Area = { rest: { count: 2, ms: 500 }, sources: { x: 3000, y: 2000, z: 1500 } };
+  assert.equal(countOf(few, 0.001, 1).count, 5);
+  assert.equal(countOf({ rest: { count: 0, ms: 0 }, sources: {} }, 0.001, 2).count, 1);
 });
 
 test("a costs file is a function of the records: per tree, the largest of a place's records, the short ones as their mean (#2272)", async () => {

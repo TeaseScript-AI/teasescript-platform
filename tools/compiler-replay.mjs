@@ -42,7 +42,7 @@ import {
 // estimate, and each of the areas' shards asks one `--mem` (4 GB with `--baseline`, else 8 GB). Where the fill left no
 // record, and for an area the costs do not hold, an area runs 16 shards by index, as it prints. The prefix defaults to
 // `replay-<head>`; `--priority` sets every job's level (`sx-job submit --priority`). It prints each area's count of
-// shards and each job's id.
+// shards, the count of jobs before it queues them (`--dry` too) and each job's id.
 //
 // `collect` reads the campaigns' results (`~/jobs/results/<owner>/<campaign>/<job>/out`, or `--results`): per area its
 // shards, sources, runs, differences and what did not compare; the set's records; the stall verdicts of
@@ -291,6 +291,7 @@ function submit({ positional: [base, head], options }) {
   // (one batch, one process: the queue keeps its lines' order among one owner's jobs)
   const level = options.priority === undefined ? [] : ["--priority", options.priority];
   const shards = batchOf(all, sized).map((args) => [...level, ...args]);
+  process.stdout.write(`jobs: ${shards.length} in one batch\n`);
   if (options.dry)
     for (const args of shards) process.stdout.write(`${JSON.stringify(["submit", ...args])}\n`);
   else {

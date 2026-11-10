@@ -11,8 +11,8 @@
 //   the area's total over N is alone in its shard: the loads never add up to more than the total, so some shard's load
 //   is under that source's and the least-loaded shard is never the one that holds it.
 // - `countOf` is the count of shards for a target of seconds a shard: one for each recorded source at or over the target,
-//   and enough for the others' seconds at the target, at least one; with each shard's seconds as `binsOf`'s rule fills
-//   it from the costs file: an estimate, not the shards the head fills.
+//   and enough for the others' seconds at the target, at least one; with each shard's seconds as `binsOf`'s rule
+//   fills it from the costs file: an estimate, not the shards the head fills.
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
@@ -128,11 +128,12 @@ export function binsOf(places, area, n) {
 }
 
 /**
- * The count of shards of `area` for `target` seconds a shard on `trees` trees: its recorded sources at or over the target
- * one each, the rest at the target, at least one; and each shard's seconds, by its index, as `binsOf`'s rule fills the
- * shards with the costs file's milliseconds (the recorded sources in its order, the others at their mean). That is an
- * estimate, not the shards the head fills: the head fills its own places in their order, so a tie can order two shards
- * the other way.
+ * The count of shards of `area` for `target` seconds a shard on `trees` trees: its recorded sources at or over the
+ * target one each, the rest at the target, at least one. It never passes the costs file's places of the area
+ * (`sources` and `rest.count`), as each source under the target adds less than a shard. And each shard's seconds, by
+ * its index, as `binsOf`'s rule fills the shards with the costs file's milliseconds (the recorded sources in its order,
+ * the others at their mean). That is an estimate, not the shards the head fills: the head fills its own places in
+ * their order, so a tie can order two shards the other way.
  */
 export function countOf(area, target, trees) {
   const costs = [...Object.values(area.sources), ...Array(area.rest.count).fill(area.rest.ms)].map(

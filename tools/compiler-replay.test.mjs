@@ -109,6 +109,10 @@ test("submit hands every shard to the queue in one batch and prints the ids it r
       run.stdout.split("\n").filter((line) => line === "11111111111111").length,
       batch.lines.length,
     );
+    // (the count of jobs, printed before the batch is queued)
+    const printed = run.stdout.split("\n");
+    const total = printed.indexOf(`jobs: ${batch.lines.length} in one batch`);
+    assert.ok(total !== -1 && total < printed.indexOf("11111111111111"), run.stdout);
   } finally {
     rmSync(bin, { recursive: true, force: true });
   }
@@ -954,6 +958,8 @@ test("submit orders the batch by the shards the recorded costs fill, not by an a
     );
     assert.equal(run.status, 0, run.stderr);
     assert.match(run.stdout, /^copies: 2 shards by recorded seconds, the largest about 1600 s$/mu);
+    const jobs = 16 + 2 + 2 + 16 * (areasOf(ROOT).length - 2);
+    assert.match(run.stdout, new RegExp(`^jobs: ${jobs} in one batch\\n\\[`, "mu"));
     const names = run.stdout
       .split("\n")
       .filter((line) => line.startsWith("["))
