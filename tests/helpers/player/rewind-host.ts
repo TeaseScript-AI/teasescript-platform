@@ -52,10 +52,14 @@ export interface RewindHost {
     readonly canRewind: Readonly<Ref<boolean>>;
     readonly adopting: Readonly<Ref<boolean>>;
     beforeRestart(): void | Promise<void>;
-    /** The Player's rewind owner (`rewindOwner.ts`): the history view it shows. */
+    /** The Player's rewind owner (`rewindOwner.ts`): the history view it shows, and its public state. */
     readonly owner: {
       readonly view: Readonly<Ref<DebugHistoryView | null>>;
-      readonly state: { readonly sealed: "disposal" | "loss" | null };
+      readonly problem: Readonly<Ref<string | null>>;
+      readonly busy: Readonly<Ref<boolean>>;
+      readonly inspecting: Readonly<Ref<boolean>>;
+      readonly showing: boolean;
+      readonly state: { readonly sealed: "disposal" | "loss" | null; readonly blocked: boolean };
       readonly reinstatement: Readonly<Ref<"pending" | "failed" | null>>;
       retryReturn(): boolean;
     } & MutableOwner;
