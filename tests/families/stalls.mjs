@@ -11,7 +11,8 @@
 // (`configuration`: the sources' sizes, the area's plan (the hash of every source's place in its order), the stop runs'
 // allowances, the unit limit's multiple, each generator's checks, each tree's identity): an area's shards and every
 // rerun record merged into it must share it (another is refused, exit 2, never closed), and the area is complete only
-// with its shards 0/N to N-1/N, one N, of that plan. A
+// with its shards 0/N to N-1/N, one N, of that plan, all shared out by index or all by one costs file (`run.mjs
+// --split`, #2272; a shard of another split is refused, exit 2). A
 // plan may list one source more than once: its repeats (one place, each run and counted by the runner, and each shard's
 // lines checked against its total) are one source where they record the same counts, stall and runs, milliseconds apart
 // (`repeats` counts the others), and are refused (exit 2, naming the place) where they differ, in a replay and in a
@@ -572,7 +573,12 @@ const replay = new Map();
 const areas = new Map();
 const areaNamed = (name) => {
   if (!areas.has(name))
-    areas.set(name, { shards: new Set(), places: new Set(), configuration: undefined });
+    areas.set(name, {
+      shards: new Set(),
+      places: new Set(),
+      configuration: undefined,
+      split: undefined,
+    });
   return areas.get(name);
 };
 const replayShards = replayFiles.map(shardOf);
@@ -609,6 +615,13 @@ for (const shard of replayShards) {
   area.configuration = shard.ran.configuration;
   if (area.shards.has(shard.ran.shard))
     refused(`${shard.file} records a shard another record holds`);
+  // (shards shared out otherwise than each other, by index or by another costs file, may hold a source twice or never)
+  const split = shard.ran.split ?? "no costs file";
+  if (area.split !== undefined && area.split !== split)
+    refused(
+      `${shard.file} shares out its area otherwise than its other shards (split: ${split}, theirs: ${area.split})`,
+    );
+  area.split = split;
   area.shards.add(shard.ran.shard);
   if (shard.ran.places !== undefined) area.places.add(shard.ran.places);
 }
@@ -708,7 +721,8 @@ for (const [place, was] of replay) {
 const total = zeros();
 let closed = true;
 for (const [area, row] of rows) {
-  // complete: shards 0/N to N-1/N of one N, each once (a shard's sources are those whose index is i modulo N); or an
+  // complete: shards 0/N to N-1/N of one N, each once, of one split (a shard's sources are those whose index is i modulo
+  // N, or `binsOf`'s shard i of one costs file); or an
   // item pool's batches alone (`items <hash>`, #1826), each naming the area's count of sources, which they hold
   const { shards, places } = areas.get(area);
   const batches = [...shards].filter((shard) => shard.startsWith("items "));

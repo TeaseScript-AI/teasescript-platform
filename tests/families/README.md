@@ -64,7 +64,8 @@ What `run.mjs`, `stalls.mjs` and the stored baselines (`baselines.mjs`) promise;
   `sx-job status` shows each but 0 as "failed".
 
 - **The evidence total** of a replay is `stalls.mjs`'s total over the shards' `--work` records. It names each area
-  complete only with its shards `0/N` to `N-1/N` of one plan, counts a repeated place once and refuses a shard given
+  complete only with its shards `0/N` to `N-1/N` of one plan, shared out alike (all by index, or all by one costs file,
+  `--split`), counts a repeated place once and refuses a shard given
   twice; a sum of the shards' own totals counts each repeat. Its growth lines are advisory.
 - **A stored baseline's identity:** its MANIFEST (the `src/` tree, the oracle library, the lockfile, Node) and each
   area's PLAN (the limits above, the allowances, each generator's checks, each shard's places, each by its generator's
@@ -78,7 +79,7 @@ Build both trees (`npm run build:typescript`; each needs `dist/tests/helpers/typ
 
 ```sh
 node tests/families/run.mjs <area> <base checkout or dist> <head checkout or dist> [--sizes 4,8] \
-  [--allowances natural,16,256] [--shard i/N] [--units 4] [--timeout 1800] [--memory 2048] \
+  [--allowances natural,16,256] [--shard i/N [--split <costs file>]] [--units 4] [--timeout 1800] [--memory 2048] \
   [--out differences.jsonl] [--work <area>-<i>of<N>.work.jsonl] [--only <stall index>] [--items <sources> | --items-from-env]
 node tests/families/run.mjs <area> <head> --baseline ~/work/baselines/<base src tree>/<area> [the same options]
 node tests/families/run.mjs <area> <base tree> --store ~/work/baselines [--shard i/N]
@@ -163,6 +164,12 @@ the area's every source once, and a job runs its batch with `run.mjs <area> <bas
 whose record names the batch, so the queue's `--target` balances sources rather than shards. A replay's per-area report is `stalls.mjs`'s area lines and total, counted
 in sources, not a sum of the shards' log lines, whose `unansweredAlike` counts runs; a pool's shards run with `--work`,
 whose records it reads.
+
+A replay (`tools/compiler-replay.mjs submit`) shares each area out by its sources' recorded seconds (#2272): with
+`--split <costs file>`, shard `i/N` runs the sources `split.mjs`'s `binsOf` gives shard `i`, longest first to the
+least-loaded shard, by a costs file `split.mjs`'s `costsOf` makes from `--work` records (a baseline fill's or a
+replay's). The record names the file's sha256; `--store` refuses `--split`, as a baseline's PLAN binds its shards by
+index.
 
 With `--baseline`, the head alone runs, against a stored run of the base: each run is judged as above against the stored
 result of the same source (its generator, name and key, so an edited source is new), mode and check (unanswered alike
