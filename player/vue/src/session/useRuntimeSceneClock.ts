@@ -101,6 +101,31 @@ export function useRuntimeSceneClock(
   let generation = 0;
   let nextTask: MessagePort | null = null;
   let disposed = false;
+  // The latest observation admitted (`observing`) and not yet settled: the session it observes, and whether its section
+  // has reached its turn. Its release, by itself alone, re-derives the wake (`observing`'s `finally`).
+  let requested: { readonly id: string; phase: "waiting" | "sent" } | null = null;
+  // A session the host refused as stopped or lost, which no automatic observation or wake asks for any more.
+  let unavailable: string | null = null;
+  // The basis an automatic observation found at its turn and left unchanged: no automatic observation is sent from it
+  // again. A refused basis means a publication of the session is on its way, which changes the basis and lifts this.
+  let failedAutomaticBasis: { readonly id: string; readonly revision: number } | null = null;
+
+  /**
+   * Whether an opportunity (`catchUp`) or a barrier (`before`, `end`, a recovery) opens an observation of its own, the
+   * clock's one admission decision. While the shown session's admitted observation is unsettled, an opportunity opens
+   * none: that observation reads the clock at its turn, and its release schedules what is due. A barrier opens none
+   * only while that observation still waits for its turn and no catch-up is under way, for then it stands in the
+   * queue ahead of the work posted next and reads the clock after the barrier was asked; otherwise it opens its own.
+   * `observe()` always opens one.
+   */
+  function admits(kind: "opportunity" | "barrier"): boolean {
+    const own = requested;
+    if (own === null || own.id !== session.value?.id) return true;
+    return kind === "barrier" && (own.phase !== "waiting" || pending !== null);
+  }
+
+  /** The newest publication of `shown`'s session that the page holds. */
+  const basisOf = (shown: PlayerSession) => bridgeOf(shown).latest(shown) ?? shown;
 
   function sceneTimeMs(current: PlayerSession): number {
     if (paused.value) return current.state.observedSessionTimeMs;
@@ -163,10 +188,10 @@ export function useRuntimeSceneClock(
   /**
    * Observes the clock's now and media samples in the shown session, inside a section of it, so its basis is read at
    * its own queue turn: it follows whatever the session's queue holds before it. A catch-up under way is dropped: this
-   * observation covers its time. Resolves with the latest publication of the session it observed while that session
-   * still owns the UI, else `null`; a refusal of the basis at its turn is retried once from the store's latest
-   * revision, and a second one is no observation (`null`), with nothing published or scheduled. A stopped or lost
-   * session gives `null`. While the clock is paused (an inspected state, a waiting draw), nothing is observed and the
+   * observation covers its time, which it reads at its turn. Resolves with the latest publication of the session it
+   * observed while that session still owns the UI, else `null`; a refusal of the basis at its turn is retried once from
+   * the store's latest revision, and a second one is no observation (`null`), with nothing published. A stopped or lost
+   * session gives `null`, and no automatic observation of it follows. While the clock is paused (an inspected state, a waiting draw), nothing is observed and the
    * shown session is the result. What the reply applies reaches the session's store; it shows only while the session
    * owns the UI (`publishLater`), so a caller rechecks that after it awaits.
    */
@@ -176,58 +201,85 @@ export function useRuntimeSceneClock(
 
   /**
    * Observes as `observe` does, for a caller that needs no result: a failure of a live observation is recovered from
-   * here, as a late observation's is, and the clock goes on from the latest session.
+   * here, as a late observation's is, and the clock goes on from the latest session. A barrier the admitted observation
+   * already stands for (`admits`) opens none of its own.
    */
-  function requestObservation(): void {
-    void observing(() => scheduleWakeUp(session.value));
+  function requestObservation(automatic = false): void {
+    if (admits("barrier")) void observing(() => scheduleWakeUp(session.value), automatic);
   }
 
   /**
-   * An observation, with `recover` for its failure, or `null` to reject with it. A later observation, `cancel`, a new
-   * session or disposal retires it, which withdraws its effects (`whileLive`) but never its barrier: once admitted, it
+   * An observation, with `recover` for its failure, or `null` to reject with it; the admitted one (`requested`) until it
+   * settles. A later observation, `cancel`, a new session or disposal retires it, which withdraws its effects (`whileLive`) but never its barrier: once admitted, it
    * sends at its turn unless the Player was disposed, the clock holds, or its session is no longer shown, so the work
    * queued behind it (as the keep's capture behind the hidden page's observation) follows an observation.
    */
-  async function observing(recover: (() => void) | null): Promise<PlayerSession | null> {
+  async function observing(
+    recover: (() => void) | null,
+    /** Whether the clock asked for it itself (a deadline, media sampling, a dropped catch-up), not a caller. */
+    automatic = false,
+  ): Promise<PlayerSession | null> {
     const shown = session.value;
-    if (!shown || disposed) return null;
+    if (!shown || disposed || unavailable === shown.id) return null;
     if (paused.value) return shown;
-    cancel();
-    const observation: Observation = { generation, session: shown };
-    let outcome: TimeObservationOutcome | "skipped" | null;
-    // With `recover`, nothing below rejects: every failure, the media samples' too, is decided here.
+    const admitted: NonNullable<typeof requested> = { id: shown.id, phase: "waiting" };
+    requested = admitted;
+    let basisAtTurn: number | null = null;
     try {
-      const args = { atMs: sceneTimeMs(shown), media: mediaReports() };
-      outcome = await bridgeOf(shown).section(shown, mintClockTicket(), async (section) => {
-        if (disposed || paused.value || owned(shown) === null) return "skipped";
-        try {
-          return await section.send("observeTime", args);
-        } catch (error) {
-          if (refusalCode(error) !== "basis") throw error;
-          // Another publication applied before this turn: once more, from the store's latest revision.
+      cancel();
+      const observation: Observation = { generation, session: shown };
+      let outcome: TimeObservationOutcome | "skipped" | null;
+      // With `recover`, nothing below rejects: every failure, the media samples' too, is decided here.
+      try {
+        outcome = await bridgeOf(shown).section(shown, mintClockTicket(), async (section) => {
+          admitted.phase = "sent";
+          if (disposed || paused.value || owned(shown) === null) return "skipped";
+          basisAtTurn = section.session.revision;
+          // The time and media this observation covers are read as it is sent, at its turn: a slow reply delays the
+          // observation, not the time it reports.
+          const now = () => ({ atMs: sceneTimeMs(section.session), media: mediaReports() });
           try {
-            return await section.send("observeTime", args);
-          } catch (again) {
-            if (refusalCode(again) === "basis") return null;
-            throw again;
+            return await section.send("observeTime", now());
+          } catch (error) {
+            if (refusalCode(error) !== "basis") throw error;
+            // Another publication applied before this turn: once more, from the store's latest revision.
+            try {
+              return await section.send("observeTime", now());
+            } catch (again) {
+              if (refusalCode(again) === "basis") return null;
+              throw again;
+            }
           }
-        }
-      });
-    } catch (error) {
-      if (endsQuietly(error)) return null;
-      return whileLive(
-        observation,
-        () => {
-          if (recover === null) throw error;
-          recover();
+        });
+      } catch (error) {
+        if (endsQuietly(error)) {
+          if (owned(shown) !== null) unavailable = shown.id;
           return null;
-        },
-        null,
-      );
+        }
+        return whileLive(
+          observation,
+          () => {
+            if (recover === null) throw error;
+            recover();
+            return null;
+          },
+          null,
+        );
+      }
+      if (outcome === null) return null;
+      if (outcome === "skipped" || outcome.kind !== "observed") return owned(shown);
+      return whileLive(observation, () => publishLater(shown), owned(shown));
+    } finally {
+      // The release of the admitted observation, however it ended: unless a newer one was admitted since, the clock
+      // re-derives the wake from the session it shows now, so every opportunity it consumed has a successor (a
+      // publication, a wake, or the session's end) without anything remembering it.
+      if (requested === admitted) {
+        requested = null;
+        if (automatic && basisAtTurn !== null && basisOf(shown).revision === basisAtTurn)
+          failedAutomaticBasis = { id: shown.id, revision: basisAtTurn };
+        if (admitted.id === session.value?.id) scheduleWakeUp(session.value);
+      }
     }
-    if (outcome === null) return null;
-    if (outcome === "skipped" || outcome.kind !== "observed") return owned(shown);
-    return whileLive(observation, () => publishLater(shown), owned(shown));
   }
 
   /**
@@ -294,17 +346,21 @@ export function useRuntimeSceneClock(
    */
   function catchUp() {
     const shown = session.value;
-    if (!shown || paused.value || disposed) return;
+    if (!shown || paused.value || disposed || unavailable === shown.id || !admits("opportunity"))
+      return;
     if (pending !== null) {
       if (copies()) return void step(pending);
       // Debug started meanwhile: Debug follows every observation as it happens.
-      return requestObservation();
+      return requestObservation(true);
     }
+    const basis = basisOf(shown);
+    if (failedAutomaticBasis?.id === basis.id && failedAutomaticBasis.revision === basis.revision)
+      return;
     const targetMs = sceneTimeMs(shown);
     const reports = mediaReports();
     const stepMs = nextPlayerRuntimeCatchUpStepMs(shown.state);
     if (reports.length > 0 || !copies() || stepMs === null || targetMs - stepMs <= CATCH_UP_TASK_MS)
-      return requestObservation();
+      return requestObservation(true);
     const own = { generation, session: shown };
     pending = own;
     void (async () => {
@@ -357,7 +413,7 @@ export function useRuntimeSceneClock(
     nextTask = null;
     if (disposed || session.value?.lineage !== own.session.lineage) return;
     if (adopted) publishLater(own.session);
-    else requestObservation();
+    else requestObservation(true);
   }
 
   let wakeUp: ReturnType<typeof setTimeout> | undefined;
@@ -369,9 +425,18 @@ export function useRuntimeSceneClock(
     // A catch-up belongs to its session and runs only while nothing holds; any other publication leaves it to notice
     // whether the session was used meanwhile.
     if (pending !== null && (paused.value || pending.session.id !== current?.id)) cancel();
-    if (!current) return;
+    if (unavailable !== null && unavailable !== current?.id) unavailable = null;
+    if (!current || unavailable === current.id) return;
     displayTimeMs.value = sceneTimeMs(current);
     if (paused.value || pending !== null) return;
+    // An automatic observation failed on this basis: the publication that changes it schedules again.
+    const basis = basisOf(current);
+    if (
+      failedAutomaticBasis !== null &&
+      (failedAutomaticBasis.id !== basis.id || failedAutomaticBasis.revision !== basis.revision)
+    )
+      failedAutomaticBasis = null;
+    if (failedAutomaticBasis !== null) return;
     // A queued timer or media block waits for a pending storage write, and catch-up holds at its due time: an overdue
     // deadline cannot progress until the acknowledgement, whose published session schedules again. Without a queued
     // block, deadlines are observed as usual.
@@ -384,6 +449,9 @@ export function useRuntimeSceneClock(
   watch([session, paused], () => scheduleWakeUp(session.value), { immediate: true });
   tryOnScopeDispose(() => {
     disposed = true;
+    requested = null;
+    unavailable = null;
+    failedAutomaticBasis = null;
     generation += 1;
     if (wakeUp !== undefined) clearTimeout(wakeUp);
     wakeUp = undefined;
