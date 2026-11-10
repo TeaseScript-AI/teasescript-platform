@@ -157,7 +157,13 @@ async function record() {
       c.globals = c.globals ?? ["hostValue"];
       continue;
     }
-    const { unit, keys } = await unitOf({ set: c.set, name: c.unit, key: c.key });
+    let found;
+    try {
+      found = await unitOf({ set: c.set, name: c.unit, key: c.key });
+    } catch (error) {
+      refuse(`${c.where}: cannot read the set ${c.set}: ${error.message}`);
+    }
+    const { unit, keys } = found;
     if (keys !== undefined) refuse(`${c.where}: ${c.unit} names units of keys ${keys.join(", ")}`);
     if (unit === undefined) refuse(`${c.where}: ${c.set} has no unit ${c.unit}`);
     Object.assign(c, { files: unit.files, globals: unit.globals, key: unit.key });
@@ -235,42 +241,46 @@ async function record() {
       row.checker = { threw: thrown(error) };
     }
     // (a request of its own in each mode, as each analysis is made)
-    row.core =
-      coreRequest(files, globals) === null
-        ? { unparsed: true }
-        : modes((mode) =>
-            mode.run(() => {
-              const request = coreRequest(files, globals);
-              const result = checkedResult(analyseCore(request), request);
-              const paths = request.files.map((file) => file.path);
-              const sources = request.files.map((file) => file.source);
-              const shown = messageSource(sources, result.diagnostics);
-              const site = (file, offset, end) => ({
-                path: paths[file],
-                line: lineOf(sources[file], offset),
-                offset,
-                end,
-                text: sources[file].slice(offset, end),
-              });
-              return {
-                outcome: result.outcome,
-                diagnostics: result.diagnostics.map((d) => ({
-                  class: d.class,
-                  kind: d.kind,
-                  code: d.code,
-                  ...site(d.site.file, d.site.start, d.site.end),
-                  message: coreMessage(d, shown),
-                })),
-                checks: coreRecord(result, paths).runtimeChecks.map((check) => ({
-                  kind: check.kind,
-                  target: check.target,
-                  against: check.against,
-                  boundary: check.boundary === true,
-                  ...site(paths.indexOf(check.site.file), check.site.offset, check.site.end),
-                })),
-              };
-            }),
-          );
+    try {
+      row.core =
+        coreRequest(files, globals) === null
+          ? { unparsed: true }
+          : modes((mode) =>
+              mode.run(() => {
+                const request = coreRequest(files, globals);
+                const result = checkedResult(analyseCore(request), request);
+                const paths = request.files.map((file) => file.path);
+                const sources = request.files.map((file) => file.source);
+                const shown = messageSource(sources, result.diagnostics);
+                const site = (file, offset, end) => ({
+                  path: paths[file],
+                  line: lineOf(sources[file], offset),
+                  offset,
+                  end,
+                  text: sources[file].slice(offset, end),
+                });
+                return {
+                  outcome: result.outcome,
+                  diagnostics: result.diagnostics.map((d) => ({
+                    class: d.class,
+                    kind: d.kind,
+                    code: d.code,
+                    ...site(d.site.file, d.site.start, d.site.end),
+                    message: coreMessage(d, shown),
+                  })),
+                  checks: coreRecord(result, paths).runtimeChecks.map((check) => ({
+                    kind: check.kind,
+                    target: check.target,
+                    against: check.against,
+                    boundary: check.boundary === true,
+                    ...site(paths.indexOf(check.site.file), check.site.offset, check.site.end),
+                  })),
+                };
+              }),
+            );
+    } catch (error) {
+      row.core = { threw: thrown(error) };
+    }
     row.candidate = modes((mode) => {
       const route = mode.run(() => publishedRoute(files, globals));
       if (route.plan === "outside") return { outside: JSON.parse(route.text).outside };
@@ -307,7 +317,7 @@ function join() {
   const sides = [
     ["base", values("--base")],
     ["head", values("--head")],
-  ].filter(([, files]) => files.length > 0);
+  ].filter(([side]) => args.includes(`--${side}`));
   if (casesFile === undefined || out === undefined || values("--base").length === 0)
     refuse(
       "usage: differential.mjs join --cases <cases.jsonl> --base <records>... [--head <records>...] --out <file>",

@@ -463,11 +463,12 @@ A record is `{name, case, checker, core, candidate}`:
 - `core` is `{unparsed: true}` where the files do not parse or resolve, else each mode's `outcome`, `diagnostics` (class,
   kind, code, path, line, offsets, the site's text, `coreMessage`) and `checks` (`coreRecord`'s run-time checks: kind,
   target, against, boundary, site);
-- `core` and `candidate` hold `modes`, always four, each with its `mode` name, and `agree`, whether they are equal but
-  for that name. A part that throws is `{threw: "<name>: <message>"}` in its place, and the run exits 1.
+- `candidate`, and `core` where the files parse and resolve, hold `modes`, always four, each with its `mode` name, and
+  `agree`, whether they are equal but for that name. A part that throws is `{threw: "<name>: <message>"}` in its place
+  (a mode, a run, the checker, or the whole `core` where its request throws), and the run exits 1.
 
 `join --cases <cases.jsonl> --base <records>... [--head <records>...] --out <file>` checks every case recorded once on
-each side and no other record (else exit 1, nothing written) and writes them in the cases' order: the record, or
+each side and no other record (else exit 1, nothing written; a side given with no files has every case missing) and writes them in the cases' order: the record, or
 `{name, base, head}`. It reads each record's name from the start of its line and copies the line as bytes, so a record
 longer than V8's longest string still joins; a line cut short is refused (exit 2). Writing a record that long ends
 the run with an error instead, and `join` then finds its case missing. A batch of an item pool is itself a cases file, so the queue sizes the jobs; the plan's check

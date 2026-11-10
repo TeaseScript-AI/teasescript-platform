@@ -52,8 +52,10 @@ const MODULES: Record<string, string> = {
   "src/type-inference/core/messages.js": `export const messageSource = (sources) => sources;
 export const coreMessage = (d, sources) => d.code + " in " + sources.length;
 `,
-  "tests/helpers/type-core-analysis.js": `export const coreRequest = (files) =>
-  files[0].source.includes("UNPARSED") ? null : { files: files.map((f) => ({ path: f.path, source: f.source })) };
+  "tests/helpers/type-core-analysis.js": `export const coreRequest = (files) => {
+  if (files[0].source.includes("REQUEST")) throw new Error("request");
+  return files[0].source.includes("UNPARSED") ? null : { files: files.map((f) => ({ path: f.path, source: f.source })) };
+};
 `,
   "tests/helpers/type-core-held-host.js": `export const HELD_MODES = ["first", "second", "third", "fourth"].map((name, index) => ({
   name,
@@ -149,6 +151,7 @@ test("the differential record keeps every case's columns, its four modes, refusa
     { name: "outside", source: "OUTSIDE" },
     { name: "error", source: "ERROR", runs: [{ hostValue: 2 }] },
     { name: "unparsed", source: "UNPARSED" },
+    { name: "request", source: "REQUEST" },
     { name: "set", set: "area", unit: "cases.mjs/one" },
     { name: "throws", source: "THROW" },
   ].map((c) => JSON.stringify(c));
@@ -157,7 +160,7 @@ test("the differential record keeps every case's columns, its four modes, refusa
   assert.equal(all.ran.status, 1, all.ran.stderr);
   assert.deepEqual(
     all.rows.map((r) => r.name),
-    ["modal", "outside", "error", "unparsed", "set", "throws"],
+    ["modal", "outside", "error", "unparsed", "request", "set", "throws"],
   );
   const named = (name: string): Row =>
     all.rows.find((r) => r.name === name) ?? assert.fail(`no record of ${name}`);
@@ -230,6 +233,8 @@ test("the differential record keeps every case's columns, its four modes, refusa
   assert.equal("runs" in error.checker, false);
 
   assert.deepEqual(unparsed.core, { unparsed: true });
+  // (the core's request throwing is that case's core, and the cases after it are recorded)
+  assert.deepEqual(named("request").core, { threw: "Error: request" });
   assert.deepEqual(set.case.globals, ["g"]);
   assert.equal(set.case.files[0]?.source, "from a set");
   assert.match(set.case.key ?? "", /^[0-9a-f]{64}$/);
@@ -253,6 +258,11 @@ test("the differential record keeps every case's columns, its four modes, refusa
     /unknown keys global/,
   );
   refused("neither", [JSON.stringify({ name: "x" })], /exactly one of source, files and set/);
+  refused(
+    "no set",
+    [JSON.stringify({ name: "x", set: "absent", unit: "u" })],
+    /no set\.jsonl:1: cannot read the set absent/,
+  );
   refused(
     "no unit",
     [JSON.stringify({ name: "x", set: "area", unit: "cases.mjs/none" })],
@@ -297,12 +307,17 @@ test("the differential record keeps every case's columns, its four modes, refusa
   const repeated = joinRun("repeated", ["--base", all.out, all.out]);
   assert.equal(repeated.ran.status, 1);
   assert.match(repeated.ran.stderr, /base: "modal" recorded twice/);
+  // (a side given with no files has every case missing)
+  const noHead = joinRun("no head", ["--base", all.out, "--head"]);
+  assert.equal(noHead.ran.status, 1);
+  assert.match(noHead.ran.stderr, /head: "modal" missing/);
+  assert.equal(noHead.text, null);
   // (a line cut short, as by a run that ended while writing it, is no record)
   const cut = join(folder, "cut.jsonl");
   writeFileSync(cut, all.text!.slice(0, -2));
   const truncated = joinRun("truncated", ["--base", cut]);
   assert.equal(truncated.ran.status, 2);
-  assert.match(truncated.ran.stderr, /cut\.jsonl:6: no whole record of differential\.mjs/);
+  assert.match(truncated.ran.stderr, /cut\.jsonl:7: no whole record of differential\.mjs/);
   assert.equal(truncated.text, null);
 });
 
