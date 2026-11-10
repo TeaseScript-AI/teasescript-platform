@@ -71,7 +71,7 @@ const CONSTANT = [
     "DefinitionLists.live",
     "DefinitionLists.spanBetween",
   ]),
-  ...core("type-inference/core/dominators.ts", ["Dominators.dominates", "Dominators.edom"]),
+  ...core("type-inference/core/flow-graph/dominators.ts", ["Dominators.dominates", "Dominators.edom"]),
   ...core("type-inference/core/flow-graph/model.ts", [
     "FlowGraph.isDeadEdge",
     "FlowGraph.ownerOf",
@@ -132,7 +132,7 @@ const STEP = [
   ...core("type-inference/core/budget.ts", ["joinParts"]),
   ...core("type-inference/core/definitions.ts", ["keyBelow", "keyOf", "keyPath", "keyPlace"]),
   ...core("type-inference/core/exact-path.ts", ["withoutEmpty"]),
-  ...core("type-inference/core/handlers.ts", ["HandlerIndex.afterSomeCreation"]),
+  ...core("type-inference/core/indexes/handlers.ts", ["HandlerIndex.afterSomeCreation"]),
   // (a site's source text, kept as charged text at the call: `NarrowingRoutes.#text`)
   ...core("type-inference/core/program.ts", [
     "CoreProgram.targetRoot",
@@ -146,7 +146,7 @@ const STEP = [
 const FILED = [
   // the prefixes of a key, copied at once and charged one unit each (#1220)
   ...core("type-inference/core/definitions.ts", ["DefinitionIndex.ownedAway", "keptPrefixes"]),
-  ...core("type-inference/core/handlers.ts", ["HandlerIndex.handlerTouches"]),
+  ...core("type-inference/core/indexes/handlers.ts", ["HandlerIndex.handlerTouches"]),
   // the event search's binary search, charged two units whatever its length (#1221)
   ...core("type-inference/core/definitions.ts", ["DefinitionLists.certain"]),
 ];

@@ -14,7 +14,7 @@ import {
   type Key,
 } from "./definitions.js";
 import type { Callable, FlowNode } from "./flow-graph.js";
-import { marked } from "./guards.js";
+import { marked } from "./indexes/guards.js";
 import { sharing } from "./sharing.js";
 import {
   alternatives,

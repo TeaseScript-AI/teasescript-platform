@@ -11,7 +11,7 @@ import type {
   SourceSite,
 } from "../graph.js";
 import { ledgerFor, NESTING_LIMIT, type WorkLedger } from "./budget.js";
-import { dominators, type Dominators } from "./dominators.js";
+import { dominators, type Dominators } from "./flow-graph/dominators.js";
 import {
   buildFlowGraph,
   type Callable,

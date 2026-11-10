@@ -29,7 +29,7 @@ import {
   WorkLedger,
 } from "../../src/type-inference/core/budget.js";
 import { inMode, MODES, publication, settledAnswers } from "../helpers/type-core-oracles.js";
-import { marked } from "../../src/type-inference/core/guards.js";
+import { marked } from "../../src/type-inference/core/indexes/guards.js";
 import { itemScope } from "../helpers/type-core-items.js";
 import {
   CONTEXT_WORDS,

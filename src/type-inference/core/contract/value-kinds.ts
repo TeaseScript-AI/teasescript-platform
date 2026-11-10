@@ -5,7 +5,7 @@ import type { Contract } from "../contract.js";
 import { heldAsIs, type FlowSink } from "./contributions.js";
 import { keyOf } from "../definitions.js";
 import { belowSelected, withoutEmpty } from "../exact-path.js";
-import { marked } from "../guards.js";
+import { marked } from "../indexes/guards.js";
 import { EMPTY, makeItem, mergeItems, REASON, spelledBy, STOPPED, type Item } from "../items.js";
 import {
   declaredProperty,

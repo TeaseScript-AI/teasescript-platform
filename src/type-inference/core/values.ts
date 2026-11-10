@@ -54,7 +54,7 @@ import {
 } from "./definitions.js";
 import { belowSelected, withoutEmpty, withWriter } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
-import { marked } from "./guards.js";
+import { marked } from "./indexes/guards.js";
 import {
   builtinResult,
   clockResult,
@@ -95,7 +95,7 @@ import {
   type NarrowingForm,
 } from "./narrowing/narrowings.js";
 import { operationItems } from "./operator-table.js";
-import { indexedPlus } from "./plus-index.js";
+import { indexedPlus } from "./indexes/plus-index.js";
 import { stepName, type CoreProgram, type ValueConstraint } from "./program.js";
 import { Position, positions, UNPOSITIONED } from "./positions.js";
 import type { Proof, ProofDemand, Proven, Work } from "./solver.js";
