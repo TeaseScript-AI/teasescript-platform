@@ -968,6 +968,8 @@ export interface StopRuns {
  * `StopRuns`. Both compiles and analyses are made here, each with its `without` for `stopProblems`; `planted` (for the
  * oracle's own tests) replaces the stopped plan before it runs. `stop` names the allowance `demand` sets on the stopped
  * side: a demand allowance, or (for the oracle's own tests) the work allowance, which stops before admission settles.
+ * `standIn` (for the oracle's own tests, where no stop of a unit publishes a plan, #2080 part 2) compiles the stopped
+ * plan from a sibling unit whose instructions have the unit's own spans, unstopped; the stopped analysis is the unit's.
  */
 export function stopRuns(
   files: readonly SourceFile[],
@@ -976,9 +978,17 @@ export function stopRuns(
   demand: number,
   planted?: (plan: InstructionPlan) => InstructionPlan,
   stop: "demand" | "work" = "demand",
+  standIn?: { readonly files: readonly SourceFile[]; readonly globals: readonly string[] },
 ): StopRuns {
   const request = coreRequest(files, globals);
   if (request === null) throw new Error("The unit does not resolve.");
+  // (the sibling's compile, unstopped, in the run's mode)
+  const sibling: Compiled | null =
+    standIn === undefined
+      ? null
+      : run(() =>
+          compileProjectWithBackend(standIn.files, { globals: standIn.globals }, CORE_BACKEND),
+        );
   const runAt = (at: number | null): StopRun & { readonly declined: string | null } => {
     const allowed = <T>(make: () => T): T =>
       run(() =>
@@ -992,7 +1002,10 @@ export function stopRuns(
     const both = () => {
       let result: Compiled;
       try {
-        result = compileProjectWithBackend(files, { globals }, CORE_BACKEND);
+        result =
+          at !== null && sibling !== null
+            ? sibling
+            : compileProjectWithBackend(files, { globals }, CORE_BACKEND);
       } catch (error) {
         if (!(error instanceof CandidateOutsideSlice)) throw error;
         declined = error.what;

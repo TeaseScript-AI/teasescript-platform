@@ -2355,7 +2355,7 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
  * the marks, doubled; r5's, a further copy of a boundary both runs owe; r6's, the reference losing its own check; and a further copy of a
  * check the stopped run alone owns. Before admission settled the stores into inferred places leave their checks
  * undecided, so the plain gate declines those stopped runs (#2080 part 2): the ledger is compared without a plan, and r1's
- * guard alone, a plan change, has no stopped plan to change.
+ * guard alone, a plan change, is made on the stopped analysis with the reference's plan.
  */
 test("the stop oracle counts each check's content on both sides, a further copy an extra and a missing one lost (#1642)", () => {
   const source =
@@ -2416,8 +2416,7 @@ test("the stop oracle counts each check's content on both sides, a further copy 
       (problem) => problem !== "no plan",
     );
   assert.deepEqual(judge(stopped), []);
-  // (the check left out of the answers, and the guard it gives the store, `requireExisting`, out of the plan: the
-  // plan's part changes nothing where the gate published none)
+  // (the check left out of the answers, and the guard it gives the store, `requireExisting`, out of the plan)
   const unguarded = (plan: StopRun["result"]["plan"]): StopRun["result"]["plan"] => {
     const copy = structuredClone(plan);
     const pending: unknown[] = [copy];
@@ -2455,6 +2454,68 @@ test("the stop oracle counts each check's content on both sides, a further copy 
       without: (omit, key) => dropped(stopped.without(omit, key)),
     }).includes(`lost check ${text}`),
   );
+  // (the guard alone: a plan change at the store whose mark owes the reference's own check there is a plan problem, never
+  // that mark's content. The plain gate declines the stopped compile, and the reference's too, its decision stopping in
+  // the restarted pass, #2080 part 2: each side is its own analysis, the reference's owing the check, with the natural
+  // run's plan, each rerun likewise; equal as built, and the store's guard, `requireExisting`, toggled in the stopped
+  // plan is a plan problem)
+  assert.equal(reference.result.plan, null);
+  const naturalRun = heldRun(o, mode);
+  assert.ok(naturalRun.result.plan !== null);
+  const built: StopRun = {
+    ...stopped,
+    result: naturalRun.result,
+    without: (omit, key) => ({
+      ...stopped.without(omit, key),
+      result: naturalRun.without(omit, `${key} naturalRun`).result,
+    }),
+  };
+  const builtReference: StopRun = {
+    ...reference,
+    result: naturalRun.result,
+    without: (omit, key) => ({
+      ...reference.without(omit, key),
+      result: naturalRun.without(omit, `${key} naturalRun`).result,
+    }),
+  };
+  const judgeAgainstNatural = (run: StopRun): string[] =>
+    stopProblems({ unstopped: builtReference, stopped: run, fitting: [], violating: [] });
+  assert.deepEqual(judgeAgainstNatural(built), []);
+  let toggled = 0;
+  const toggle = (plan: StopRun["result"]["plan"]): StopRun["result"]["plan"] => {
+    const copy = structuredClone(plan);
+    const pending: unknown[] = [copy];
+    while (pending.length > 0) {
+      const node = pending.pop();
+      if (node === null || typeof node !== "object") continue;
+      if (
+        "kind" in node &&
+        node.kind === "assign" &&
+        "span" in node &&
+        typeof node.span === "object" &&
+        node.span !== null &&
+        "so" in node.span &&
+        node.span.so === check.site.start
+      ) {
+        if ("requireExisting" in node) Reflect.deleteProperty(node, "requireExisting");
+        else Reflect.set(node, "requireExisting", true);
+        toggled += 1;
+      }
+      pending.push(...Object.values(node));
+    }
+    return copy;
+  };
+  const guardChanged = <T extends { readonly result: StopRun["result"] }>(each: T): T => ({
+    ...each,
+    result: { ...each.result, plan: toggle(each.result.plan) },
+  });
+  assert.ok(
+    judgeAgainstNatural({
+      ...guardChanged(built),
+      without: (omit, key) => guardChanged(built.without(omit, key)),
+    }).some((problem) => problem.startsWith("plan ")),
+  );
+  assert.ok(toggled > 0);
   // (a further copy of the owned check where a run publishes it is an extra: what forms with the marks credits no content
   // a record owns, Codex r3's control on #1663)
   const again = <T extends { readonly answers: Answers }>(each: T): T => ({
