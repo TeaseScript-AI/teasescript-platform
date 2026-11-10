@@ -50,8 +50,9 @@ export const PIN_SUITES = [
   },
   {
     file: "tests/type-core/type-core-declared-escapes.test.ts",
-    pins: "main's stop states and plan and runs digests at the declared difference's window edges",
-    pin: /^const MAIN: /u,
+    pins: "main's stop states and plan and runs digests at the declared difference's window edges, and main's publication and runs at the first-asker windows",
+    pin: /^export const MAIN: /u,
+    in: "tests/helpers/type-core/type-core-declared-escapes-main.ts",
   },
   {
     file: "tests/type-core/type-core-f18.test.ts",
