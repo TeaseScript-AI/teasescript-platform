@@ -156,8 +156,12 @@ export interface Feasibility {
    * that holds, at any depth, such a statement, a call of a function or a file, or a handler's declaration.
    */
   readonly hazards: ReadonlyMap<number, readonly number[]>;
-  /** The statements that hold, at any depth, a call of a function or a file or a handler's declaration. */
-  readonly calling: ReadonlySet<TreeStatement>;
+  /**
+   * The statements whose own expressions, not their arms', hold a call of a function or a file or a handler's
+   * declaration: a condition, a subject, a stored value, a statement's call. A route evaluates the own expressions of
+   * every statement of its chains before going on (`NarrowingRoutes.#plain`).
+   */
+  readonly headed: ReadonlySet<TreeStatement>;
 }
 
 /** A condition's own guards of a text and kind (`#ownGuarded`): their starts sorted, and the furthest end by each. */
@@ -514,6 +518,7 @@ export class RouteTests {
         if (statement.block.owner !== null) pending.push(statement.block.owner);
       }
     };
+    const headed = new Set<TreeStatement>(calls);
     const calling = new Set<TreeStatement>();
     above(calls, calling);
     for (const statement of each(work, "eventSteps", calling)) marked.push(statement);
@@ -527,7 +532,7 @@ export class RouteTests {
     }
     for (const list of each(work, "eventSteps", hazards.values()))
       sorted(work, "eventSteps", list, (a, b) => a - b);
-    this.#feasibility = { unentered, owners, files, hazards, calling };
+    this.#feasibility = { unentered, owners, files, hazards, headed };
     return this.#feasibility;
   }
 

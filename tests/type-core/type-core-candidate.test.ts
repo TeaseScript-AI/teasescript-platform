@@ -4209,6 +4209,26 @@ test("a route through an arm its entry narrowing leaves no kind does not promote
       false,
     ],
     [
+      "a call in the condition of the arm holding the use",
+      `${gate}function stop {\n  let box = {k: 1}\n  if box != null { exit }\n  return true\n}\nif stop() { repeat n {} }\nexit\n`,
+      false,
+    ],
+    [
+      "a handler declared in the condition of the arm holding the use",
+      `${gate}let o = {k: 1}\nif o != null { say "guard" }\nif (timer async 1 ms { exit }) != null {\nwait 2 ms\nrepeat n {}\n}\nexit\n`,
+      false,
+    ],
+    [
+      "a call in the subject of the switch holding the use",
+      `${gate}let o = {k: 1}\nif o != null { say "guard" }\nfunction pick {\n  let box = {k: 1}\n  if box != null { exit }\n  return 1\n}\nswitch pick() { case 2 { say "two" } default { repeat n {} } }\nexit\n`,
+      false,
+    ],
+    [
+      "a call in the condition of the arm holding the writer",
+      'let n=1\nlet o = {k: 1}\nif o != null { say "guard" }\nfunction stop {\n  let box = {k: 1}\n  if box != null { exit }\n  return true\n}\nif stop() { n=null }\nrepeat n {}\nexit\n',
+      false,
+    ],
+    [
       "a conditional exit before the use",
       `${gate}let o = {k: 1}\nif o != null { say "guard" }\nif askBoolean("q") { exit }\nrepeat n {}\nexit\n`,
       false,

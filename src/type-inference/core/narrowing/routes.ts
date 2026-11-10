@@ -754,20 +754,18 @@ export class NarrowingRoutes extends RouteTests {
    * Whether a node stands where, in a program the default holds, a route may promote (#1938): in the top level of the
    * file the session starts in (no boundary dominates it, and its chain starts at a file's body), with every arm of its
    * chain one a run is proved to enter and none a loop's body, before it in each block of its chain only statements
-   * `PASSABLE` admits that hold no call and no handler's declaration (`Feasibility.hazards`), and its own statement
-   * holding no call or handler's declaration. Anything else keeps the warning: that a run reaches it there is not
-   * proved.
+   * `PASSABLE` admits that hold no call and no handler's declaration (`Feasibility.hazards`), and no statement of its
+   * chain whose own expressions a run evaluates before going on, its own included, holding a call or a handler's
+   * declaration (`Feasibility.headed`). Anything else keeps the warning: that a run reaches it there is not proved.
    */
   #plain(node: FlowNode, chain: readonly Place[]): boolean {
     this.#work.charge("eventSteps");
     const work = this.#work;
-    const { unentered, files, hazards, calling } = this.#feasible!;
-    const last = chain[chain.length - 1];
+    const { unentered, files, hazards, headed } = this.#feasible!;
     return (
-      last !== undefined &&
+      chain.length > 0 &&
       files.has(chain[0]!.block) &&
       this.pass.program.dom.edom(node) === null &&
-      !(last.index >= 0 && calling.has(last.block.statements[last.index]!)) &&
       !some(
         work,
         "eventSteps",
@@ -775,6 +773,7 @@ export class NarrowingRoutes extends RouteTests {
         (place) =>
           unentered.has(place.block) ||
           (place.block.owner !== null && place.block.owner.loop !== null) ||
+          (place.index >= 0 && headed.has(place.block.statements[place.index]!)) ||
           countIn(work, hazards.get(place.block.id) ?? [], 0, place.index) > 0,
       )
     );
