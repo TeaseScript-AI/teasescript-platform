@@ -108,12 +108,9 @@ const option = (name) => values(name)[0];
 if (args[0] === "join") join();
 else await record();
 
-async function record() {
-  const [root, casesFile] = args;
-  const out = option("--out");
-  if (root === undefined || casesFile === undefined || out === undefined || root.startsWith("--"))
-    refuse("usage: differential.mjs <tree> <cases.jsonl> --out <records.jsonl>");
-  const cases = readCases(casesFile);
+/** The modules a record reads: the compiler's and the core's from the tree at `root`, the plan's check list from this
+ * tool's own build. A module or export missing refuses the tree. */
+async function loadTree(root) {
   const ownRoot = fileURLToPath(new URL("../..", import.meta.url));
   const own = async (file) => {
     const at = path.join(ownRoot, "dist", file);
@@ -148,8 +145,24 @@ async function record() {
   ]);
   const { runGlobals } = await load("tests/helpers/type-core-route.js", ["runGlobals"]);
   const { planCheckList } = await own("tests/helpers/plan-checks.js");
+  return {
+    compileProject,
+    analyseCore,
+    checkedResult,
+    coreRecord,
+    coreMessage,
+    messageSource,
+    coreRequest,
+    HELD_MODES,
+    publishedRoute,
+    jsonText,
+    runGlobals,
+    planCheckList,
+  };
+}
 
-  // (the cases resolved before anything runs: a set's unit missing or ambiguous refuses the file)
+/** Each case's files and globals, a set's from its unit; a set unreadable, or its unit missing or ambiguous, refuses the file. */
+async function resolveCases(cases, root) {
   const unitOf = unitResolver(root);
   for (const c of cases) {
     if (c.set === undefined) {
@@ -168,6 +181,30 @@ async function record() {
     if (unit === undefined) refuse(`${c.where}: ${c.set} has no unit ${c.unit}`);
     Object.assign(c, { files: unit.files, globals: unit.globals, key: unit.key });
   }
+}
+
+async function record() {
+  const [root, casesFile] = args;
+  const out = option("--out");
+  if (root === undefined || casesFile === undefined || out === undefined || root.startsWith("--"))
+    refuse("usage: differential.mjs <tree> <cases.jsonl> --out <records.jsonl>");
+  const cases = readCases(casesFile);
+  const {
+    compileProject,
+    analyseCore,
+    checkedResult,
+    coreRecord,
+    coreMessage,
+    messageSource,
+    coreRequest,
+    HELD_MODES,
+    publishedRoute,
+    jsonText,
+    runGlobals,
+    planCheckList,
+  } = await loadTree(root);
+  // (the cases resolved before anything runs)
+  await resolveCases(cases, root);
 
   let threw = 0;
   const thrown = (error) => {
