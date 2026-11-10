@@ -12,7 +12,7 @@ import { exactOperationEscapes } from "../helpers/exact-operations.js";
  * Colours normalize to the same text in every JavaScript engine (#2147): `src/color.ts` converts with operations
  * ECMAScript specifies exactly and prints with its own formatter. Clause by clause: agreement with colorjs.io's own
  * conversion within its accurate domain and the same rejections (2, 7), the pinned stored text (5), the formatter (6),
- * and the closed admission over the conversion's files with a run under throwing `Math` members (1).
+ * and four static checks with the counted run under throwing `Math` members (1).
  */
 
 function oklchCoordinates(color: string): number[] {
@@ -220,7 +220,7 @@ function printsAgain(component: string): boolean {
 }
 
 test("prints 15 significant digits (17 near the largest double), each reading back finite and printing again the same", () => {
-  // Value rows: authored decimals of at most 15 digits print as written; the rest round at 15 digits.
+  // Value rows: they exercise the fixed precision of 15 significant digits, and 17 above the cutoff.
   const rows: readonly (readonly [string, string])[] = [
     ["oklch(0.5 0.1 120)", "oklch(0.5 0.1 120)"],
     ["oklch(0 0 2.9802322387695312e-8)", "oklch(0 0 2.98023223876953e-8)"],
@@ -229,7 +229,7 @@ test("prints 15 significant digits (17 near the largest double), each reading ba
     ["oklch(0.5 1e-7 30)", "oklch(0.5 1e-7 30)"],
     ["oklch(0 0 -0)", "oklch(0 0 0)"],
     ["oklch(0 0 5e-324)", "oklch(0 0 4.94065645841247e-324)"],
-    // Above 1.79769313486231e308, 15 digits would read back as Infinity; 17 always read back.
+    // Near the largest double, 15 digits can overflow to Infinity; the cutoff is conservative, and 17 always read back.
     ["oklch(0.5 1.7976931348623157e308 0)", "oklch(0.5 1.7976931348623157e+308 0)"],
     ["oklch(0.5 1.79769313486231e308 0)", "oklch(0.5 1.79769313486231e+308 0)"],
     // Values a reader sees at the 16th digit (judged neutral): a huge hue, and two neutral thresholds of the Player.
@@ -494,8 +494,9 @@ export const normalizeColor = (value: unknown): string | null => normalizeColorI
 /**
  * Clause 7's family: each channel of each notation over a ladder of magnitudes, at hues up to the largest finite
  * radians. The bound 1e100 is derived: below it no intermediate can overflow (Lab's cube needs |a|/500 or |b|/200
- * above about 5.6e102, so a coordinate of about 1e105; the matrices' row sums stay under 1.4; OKLab's square needs about
- * 1.3e154), so both conversions accept; the smallest difference measured (26,544 inputs) is at 1e106. It is the
+ * above about 5.6e102, so a coordinate of about 1e105; the matrices before the cube root have row sums under 1.4, and the
+ * last, LMS to OKLab, sums to about 4.86 in absolute value after it, still far from overflow; OKLab's square needs
+ * about 1.3e154), so both conversions accept; the smallest difference measured (26,544 inputs) is at 1e106. It is the
  * claim's edge, not a limit on what a script may write: beyond it, acceptance follows the exact arithmetic, the same in
  * every engine, and may differ from colorjs.io's either way.
  */
