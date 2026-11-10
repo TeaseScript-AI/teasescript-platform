@@ -321,6 +321,25 @@ const NO_EFFECTS: HistoryEffects = Object.freeze({
   recording: null,
 });
 
+/** A refused observation's outcome. */
+type Refusal = Extract<HistoryOutcome, { kind: "refused" }>;
+
+/** What a kind's change does to the timeline, which `#delta` turns into the delta, and its effects. */
+interface Change {
+  readonly appended: readonly HistoryPoint[];
+  readonly responses: readonly { readonly point: number; readonly response: HistoryResponse }[];
+  /** How many points remain after a truncation, or `null`. */
+  readonly retained: number | null;
+  readonly effects: HistoryEffects;
+}
+
+const changeOf = (effects: HistoryEffects, retained: number | null = null): Change => ({
+  appended: [],
+  responses: [],
+  retained,
+  effects,
+});
+
 interface Inspecting {
   readonly parked: { readonly lineage: string; readonly marks: HistoryMarks };
   readonly parkedScanned: number;
@@ -483,7 +502,7 @@ export class HistoryCore {
     return !this.#closed && this.#mutations === after;
   }
 
-  /** The one writer of the core's state; see `advanceHistory`. */
+  /** The one path the core's state changes by: `#advance` gives each observation to its kind's method. */
   advance(observation: HistoryObservation): HistoryOutcome {
     if (this.#closed) return { kind: "refused", reason: "the history is closed" };
     const outcome = this.#advance(observation);
@@ -500,305 +519,352 @@ export class HistoryCore {
   #advance(observation: HistoryObservation): HistoryOutcome {
     const from = this.#revision;
     const wasComplete = this.#complete;
-    const appended: HistoryPoint[] = [];
-    const responses: { point: number; response: HistoryResponse }[] = [];
-    let retained: number | null = null;
-    let effects = NO_EFFECTS;
+    // Six kinds return their change of the timeline, which `#delta` turns into the delta; the others decide their own
+    // outcome.
+    let change: Change | Refusal;
     switch (observation.kind) {
-      case "undoPublication": {
-        // The publication's fields restored as one unit, and the points it added forgotten with their snapshots, only
-        // if nothing changed them since: one history core restoring its own state whole, guarded by its mutation
-        // count. No precedent for an owned registry's entry, whose undo never restores (`delivery.ts`). Point IDs are
-        // not taken again, and the delta already sent is not withdrawn: the page, which never received it, resyncs.
-        const { before, after } = observation;
-        if (!this.unchangedSince(after))
-          return { kind: "refused", reason: "the history changed since that publication" };
-        const kept = new Set(before.points.map((point) => point.id));
-        const added = this.#points.filter((point) => !kept.has(point.id)).map((point) => point.id);
-        this.#points = before.points;
-        this.#newestActionId = before.newestActionId;
-        this.#scanned = before.scanned;
-        this.#live = before.live;
-        this.#complete = before.complete;
-        this.#forget(added);
-        return { kind: "advanced", delta: null, effects: NO_EFFECTS };
-      }
+      case "undoPublication":
+        return this.#undoPublication(observation);
       case "publication":
-      case "enrollCurrent": {
-        if (this.#inspecting !== null) break;
-        this.#live = observation.candidate.log;
-        this.#linkResponses(observation.candidate.session.events, responses);
-        const decision = decideAdmission(
-          {
-            collecting: this.#complete,
-            newestActionId: this.#newestActionId,
-            fits: (units) => this.#store.memoryChars + units <= this.#store.budget,
-          },
-          observation.candidate,
-        );
-        if (decision.kind === "stop") this.#stop();
-        if (decision.kind !== "admit") break;
-        const id = this.#nextId++;
-        if (!this.#store.add(id, decision.json)) {
-          this.#stop();
-          break;
-        }
-        const point: HistoryPoint = Object.freeze({ id, ...decision.point });
-        const events = observation.candidate.session.events;
-        this.#lastSequence.set(id, events[events.length - 1]?.sequence ?? -1);
-        this.#newestActionId = point.actionId;
-        this.#points = [...this.#points, point];
-        appended.push(point);
+      case "enrollCurrent":
+        change = this.#publish(observation.candidate);
         break;
-      }
-      case "prepare": {
-        if (this.#pending !== null) return { kind: "refused", reason: "another step is pending" };
-        const decided = transferLineages({ transition: observation.move }, this.inspectionState);
-        if (decided.kind !== "transfer")
-          return { kind: "refused", reason: `${observation.move} is refused now` };
-        const inspecting = this.#inspecting;
-        let point: HistoryPoint | null = null;
-        let parked: PendingStep["parked"] = null;
-        let marks: HistoryMarks;
-        if (observation.move === "forward") {
-          marks = restoredMarks(inspecting!.parked.marks, inspecting!.forward.at(-1)!.position);
-        } else {
-          point = observation.point === undefined ? null : this.pointBefore(observation.point);
-          if (point === null)
-            return { kind: "refused", reason: "Back needs a point before the state shown" };
-          if (inspecting === null) {
-            const given = observation.parked;
-            if (given === undefined)
-              return { kind: "refused", reason: "the first Back needs the parked state" };
-            // The state Back leaves is reserved as any point is: within the admission bound, written through to the
-            // spill, before anything restores.
-            const id = this.#nextId;
-            if (!this.#store.add(id, given.json)) return { kind: "refused", reason: CANNOT_KEEP };
-            this.#nextId += 1;
-            this.#lastSequence.set(id, given.lastSequence);
-            parked = { id, lineage: given.lineage, position: given.position };
-          }
-          marks = restoredMarks(inspecting?.parked.marks ?? parked!.position.marks, point);
-        }
-        const step = this.#nextStep++;
-        this.#pending = {
-          step,
-          move: observation.move,
-          point,
-          index: point === null ? -1 : this.#points.indexOf(point),
-          points: this.#points.length,
-          parked,
-        };
-        // Nothing shows, nothing is released and the timeline is as it was, until the page commits.
-        return { kind: "advanced", delta: null, effects: { ...NO_EFFECTS, marks }, step };
-      }
-      case "commit": {
-        const pending = this.#pending;
-        if (pending === null || pending.step !== observation.step)
-          return { kind: "refused", reason: "no such step is pending" };
-        this.#pending = null;
-        const restored = observation.candidate;
-        const inspecting = this.#inspecting;
-        if (pending.move === "forward") {
-          const next = inspecting!.forward.pop()!;
-          // The restored lineage shown until now goes: every state Forward or Back shows is restored anew.
-          const left = inspecting!.shownLineage;
-          inspecting!.shown = next.position;
-          inspecting!.shownLineage = restored;
-          inspecting!.points = next.points;
-          effects = {
-            show: restored,
-            live: null,
-            release: [left],
-            marks: this.#restoredMarks(inspecting!, next.position),
-            recording: restored,
-          };
-          break;
-        }
-        const point = pending.point!;
-        if (inspecting === null) {
-          const parked = pending.parked!;
-          this.#inspecting = {
-            parked: { lineage: parked.lineage, marks: parked.position.marks },
-            parkedScanned: this.#scanned,
-            shown: point,
-            shownLineage: restored,
-            points: pending.index + 1,
-            forward: [
-              {
-                position: Object.freeze({ id: parked.id, ...parked.position }),
-                points: pending.points,
-              },
-            ],
-            adopting: false,
-          };
-        }
-        // A later Back leaves the restored lineage shown until now, which goes.
-        const left = inspecting === null ? [] : [inspecting.shownLineage];
-        if (inspecting !== null) {
-          inspecting.forward.push({ position: inspecting.shown, points: inspecting.points });
-          inspecting.shown = point;
-          inspecting.shownLineage = restored;
-          inspecting.points = pending.index + 1;
-        }
-        effects = {
-          show: restored,
-          live: null,
-          release: left,
-          marks: this.#restoredMarks(this.#inspecting!, point),
-          recording: restored,
-        };
+      case "prepare":
+        return this.#prepare(observation);
+      case "commit":
+        change = this.#commit(observation);
         break;
-      }
-      case "drop": {
-        const pending = this.#pending;
-        // A consumed or foreign token drops nothing: a drop of a step already settled is harmless.
-        if (pending === null || pending.step !== observation.step)
-          return { kind: "advanced", delta: null, effects: NO_EFFECTS };
-        this.#pending = null;
-        if (pending.parked !== null) this.#forget([pending.parked.id]);
-        return {
-          kind: "advanced",
-          delta: null,
-          effects: {
-            ...NO_EFFECTS,
-            release: observation.candidate === null ? [] : [observation.candidate],
-          },
-        };
-      }
-      case "return": {
-        if (this.#pending !== null) return { kind: "refused", reason: "a step is pending" };
-        const decided = transferLineages({ transition: "return" }, this.inspectionState);
-        if (decided.kind !== "transfer")
-          return { kind: "refused", reason: "Return needs a parked session" };
-        const inspecting = this.#inspecting!;
-        this.#inspecting = null;
-        this.#live = inspecting.parked.lineage;
-        this.#scanned = inspecting.parkedScanned;
-        this.#forget(this.#unkeptIds(inspecting, this.#points));
-        effects = {
-          show: null,
-          live: inspecting.parked.lineage,
-          release: [inspecting.shownLineage],
-          marks: inspecting.parked.marks,
-          recording: inspecting.parked.lineage,
-        };
+      case "drop":
+        return this.#drop(observation);
+      case "return":
+        change = this.#return();
         break;
-      }
-      case "adoptBegun": {
-        if (this.#pending !== null) return { kind: "refused", reason: "a step is pending" };
-        const decided = transferLineages({ transition: "adopt begun" }, this.inspectionState);
-        if (decided.kind !== "transfer")
-          return { kind: "refused", reason: "no restored state to adopt" };
-        this.#inspecting!.adopting = true;
+      case "adoptBegun":
+        change = this.#adoptBegun();
         break;
-      }
-      case "adoptEnded": {
-        if (this.#pending !== null) return { kind: "refused", reason: "a step is pending" };
-        const decided = transferLineages(
-          { transition: "adopt ended", succeeded: observation.succeeded },
-          this.inspectionState,
-        );
-        if (decided.kind !== "transfer")
-          return { kind: "refused", reason: "no adoption under way" };
-        const inspecting = this.#inspecting!;
-        if (!observation.succeeded) {
-          inspecting.adopting = false;
-          break;
-        }
-        this.#inspecting = null;
-        this.#live = inspecting.shownLineage;
-        const kept = this.#points.slice(0, inspecting.points);
-        this.#forget(this.#unkeptIds(inspecting, kept));
-        if (kept.length !== this.#points.length) retained = kept.length;
-        this.#points = kept;
-        this.#newestActionId = Math.max(-1, ...kept.map((point) => point.actionId));
-        this.#scanned = this.#lastSequence.get(inspecting.shown.id) ?? -1;
-        effects = {
-          show: null,
-          live: inspecting.shownLineage,
-          release: [inspecting.parked.lineage],
-          marks: null,
-          // An adoption keeps the recording: the adopted state's began at its commit.
-          recording: null,
-        };
+      case "adoptEnded":
+        change = this.#adoptEnded(observation);
         break;
-      }
-      case "stopCollection": {
-        if (!this.#complete) break;
-        this.#stop();
+      case "stopCollection":
+        change = this.#stopCollection();
         break;
-      }
-      case "close": {
-        const decided = transferLineages(
-          {
-            transition: "close",
-            by: observation.by,
-            ...(observation.adoptionSucceeded === undefined
-              ? {}
-              : { adoptionSucceeded: observation.adoptionSucceeded }),
-          },
-          this.inspectionState,
-        );
-        if (decided.kind === "refused")
-          return { kind: "refused", reason: `closing by ${observation.by} is refused now` };
-        const inspecting = this.#inspecting;
-        const release: string[] = [];
-        let live: string | null = null;
-        // A pending step goes with its history: its candidate is released, and its reservation with the store.
-        if (this.#pending !== null && observation.candidate !== undefined)
-          release.push(observation.candidate);
-        this.#pending = null;
-        if (inspecting !== null && decided.kind === "transfer") {
-          if (decided.parked === "live") live = inspecting.parked.lineage;
-          else release.push(inspecting.parked.lineage);
-          if (decided.shown === "live") live = inspecting.shownLineage;
-          else release.push(inspecting.shownLineage);
-        } else if (
-          decided.kind === "transfer" &&
-          decided.parked === "released" &&
-          this.#live !== null
-        )
-          release.push(this.#live);
-        this.#closed = true;
-        this.#inspecting = null;
-        this.#points = [];
-        void this.#store.destroy();
-        this.#revision += 1;
-        return {
-          kind: "advanced",
-          delta: null,
-          effects: {
-            show: null,
-            live,
-            release: [...new Set(release)],
-            marks:
-              live !== null && live === inspecting?.parked.lineage ? inspecting.parked.marks : null,
-            // Only the parked session's reinstatement begins the recording anew; an adoption's success keeps it.
-            recording: live !== null && live === inspecting?.parked.lineage ? live : null,
-          },
-        };
-      }
-      default: {
-        // An observation outside the closed set: collection stops with the prefix kept, and it is refused with its
-        // kind; the view sees the stop at its next delta's gap.
-        // EVIDENCE: validation: every observation is a record with a kind; this one names no kind of the union.
-        const { kind } = observation as { readonly kind: unknown };
-        if (this.#complete) {
-          this.#stop();
-          this.#revision += 1;
-        }
-        return {
-          kind: "refused",
-          reason: `an unknown observation (${String(kind)}) stopped collection`,
-        };
-      }
+      case "close":
+        return this.#close(observation);
+      default:
+        return this.#refuseUnknown(observation);
     }
+    if ("kind" in change) return change;
     const inspectionChanged =
       observation.kind === "commit" ||
       observation.kind === "return" ||
       observation.kind === "adoptBegun" ||
       observation.kind === "adoptEnded";
+    return this.#delta(from, wasComplete, inspectionChanged, change);
+  }
+
+  #undoPublication({
+    before,
+    after,
+  }: Extract<HistoryObservation, { kind: "undoPublication" }>): HistoryOutcome {
+    // The publication's fields restored as one unit, and the points it added forgotten with their snapshots, only
+    // if nothing changed them since: one history core restoring its own state whole, guarded by its mutation
+    // count. No precedent for an owned registry's entry, whose undo never restores (`delivery.ts`). Point IDs are
+    // not taken again, and the delta already sent is not withdrawn: the page, which never received it, resyncs.
+    if (!this.unchangedSince(after))
+      return { kind: "refused", reason: "the history changed since that publication" };
+    const kept = new Set(before.points.map((point) => point.id));
+    const added = this.#points.filter((point) => !kept.has(point.id)).map((point) => point.id);
+    this.#points = before.points;
+    this.#newestActionId = before.newestActionId;
+    this.#scanned = before.scanned;
+    this.#live = before.live;
+    this.#complete = before.complete;
+    this.#forget(added);
+    return { kind: "advanced", delta: null, effects: NO_EFFECTS };
+  }
+
+  #publish(candidate: PublicationCandidate): Change {
+    const appended: HistoryPoint[] = [];
+    const responses: { point: number; response: HistoryResponse }[] = [];
+    const change: Change = { appended, responses, retained: null, effects: NO_EFFECTS };
+    if (this.#inspecting !== null) return change;
+    this.#live = candidate.log;
+    this.#linkResponses(candidate.session.events, responses);
+    const decision = decideAdmission(
+      {
+        collecting: this.#complete,
+        newestActionId: this.#newestActionId,
+        fits: (units) => this.#store.memoryChars + units <= this.#store.budget,
+      },
+      candidate,
+    );
+    if (decision.kind === "stop") this.#stop();
+    if (decision.kind !== "admit") return change;
+    const id = this.#nextId++;
+    if (!this.#store.add(id, decision.json)) {
+      this.#stop();
+      return change;
+    }
+    const point: HistoryPoint = Object.freeze({ id, ...decision.point });
+    const events = candidate.session.events;
+    this.#lastSequence.set(id, events[events.length - 1]?.sequence ?? -1);
+    this.#newestActionId = point.actionId;
+    this.#points = [...this.#points, point];
+    appended.push(point);
+    return change;
+  }
+
+  #prepare(observation: Extract<HistoryObservation, { kind: "prepare" }>): HistoryOutcome {
+    if (this.#pending !== null) return { kind: "refused", reason: "another step is pending" };
+    const decided = transferLineages({ transition: observation.move }, this.inspectionState);
+    if (decided.kind !== "transfer")
+      return { kind: "refused", reason: `${observation.move} is refused now` };
+    const inspecting = this.#inspecting;
+    let point: HistoryPoint | null = null;
+    let parked: PendingStep["parked"] = null;
+    let marks: HistoryMarks;
+    if (observation.move === "forward") {
+      marks = restoredMarks(inspecting!.parked.marks, inspecting!.forward.at(-1)!.position);
+    } else {
+      point = observation.point === undefined ? null : this.pointBefore(observation.point);
+      if (point === null)
+        return { kind: "refused", reason: "Back needs a point before the state shown" };
+      if (inspecting === null) {
+        const given = observation.parked;
+        if (given === undefined)
+          return { kind: "refused", reason: "the first Back needs the parked state" };
+        // The state Back leaves is reserved as any point is: within the admission bound, written through to the
+        // spill, before anything restores.
+        const id = this.#nextId;
+        if (!this.#store.add(id, given.json)) return { kind: "refused", reason: CANNOT_KEEP };
+        this.#nextId += 1;
+        this.#lastSequence.set(id, given.lastSequence);
+        parked = { id, lineage: given.lineage, position: given.position };
+      }
+      marks = restoredMarks(inspecting?.parked.marks ?? parked!.position.marks, point);
+    }
+    const step = this.#nextStep++;
+    this.#pending = {
+      step,
+      move: observation.move,
+      point,
+      index: point === null ? -1 : this.#points.indexOf(point),
+      points: this.#points.length,
+      parked,
+    };
+    // Nothing shows, nothing is released and the timeline is as it was, until the page commits.
+    return { kind: "advanced", delta: null, effects: { ...NO_EFFECTS, marks }, step };
+  }
+
+  #commit(observation: Extract<HistoryObservation, { kind: "commit" }>): Change | Refusal {
+    const pending = this.#pending;
+    if (pending === null || pending.step !== observation.step)
+      return { kind: "refused", reason: "no such step is pending" };
+    this.#pending = null;
+    const restored = observation.candidate;
+    const inspecting = this.#inspecting;
+    if (pending.move === "forward") {
+      const next = inspecting!.forward.pop()!;
+      // The restored lineage shown until now goes: every state Forward or Back shows is restored anew.
+      const left = inspecting!.shownLineage;
+      inspecting!.shown = next.position;
+      inspecting!.shownLineage = restored;
+      inspecting!.points = next.points;
+      return changeOf({
+        show: restored,
+        live: null,
+        release: [left],
+        marks: this.#restoredMarks(inspecting!, next.position),
+        recording: restored,
+      });
+    }
+    const point = pending.point!;
+    if (inspecting === null) {
+      const parked = pending.parked!;
+      this.#inspecting = {
+        parked: { lineage: parked.lineage, marks: parked.position.marks },
+        parkedScanned: this.#scanned,
+        shown: point,
+        shownLineage: restored,
+        points: pending.index + 1,
+        forward: [
+          {
+            position: Object.freeze({ id: parked.id, ...parked.position }),
+            points: pending.points,
+          },
+        ],
+        adopting: false,
+      };
+    }
+    // A later Back leaves the restored lineage shown until now, which goes.
+    const left = inspecting === null ? [] : [inspecting.shownLineage];
+    if (inspecting !== null) {
+      inspecting.forward.push({ position: inspecting.shown, points: inspecting.points });
+      inspecting.shown = point;
+      inspecting.shownLineage = restored;
+      inspecting.points = pending.index + 1;
+    }
+    return changeOf({
+      show: restored,
+      live: null,
+      release: left,
+      marks: this.#restoredMarks(this.#inspecting!, point),
+      recording: restored,
+    });
+  }
+
+  #drop(observation: Extract<HistoryObservation, { kind: "drop" }>): HistoryOutcome {
+    const pending = this.#pending;
+    // A consumed or foreign token drops nothing: a drop of a step already settled is harmless.
+    if (pending === null || pending.step !== observation.step)
+      return { kind: "advanced", delta: null, effects: NO_EFFECTS };
+    this.#pending = null;
+    if (pending.parked !== null) this.#forget([pending.parked.id]);
+    return {
+      kind: "advanced",
+      delta: null,
+      effects: {
+        ...NO_EFFECTS,
+        release: observation.candidate === null ? [] : [observation.candidate],
+      },
+    };
+  }
+
+  #return(): Change | Refusal {
+    if (this.#pending !== null) return { kind: "refused", reason: "a step is pending" };
+    const decided = transferLineages({ transition: "return" }, this.inspectionState);
+    if (decided.kind !== "transfer")
+      return { kind: "refused", reason: "Return needs a parked session" };
+    const inspecting = this.#inspecting!;
+    this.#inspecting = null;
+    this.#live = inspecting.parked.lineage;
+    this.#scanned = inspecting.parkedScanned;
+    this.#forget(this.#unkeptIds(inspecting, this.#points));
+    return changeOf({
+      show: null,
+      live: inspecting.parked.lineage,
+      release: [inspecting.shownLineage],
+      marks: inspecting.parked.marks,
+      recording: inspecting.parked.lineage,
+    });
+  }
+
+  #adoptBegun(): Change | Refusal {
+    if (this.#pending !== null) return { kind: "refused", reason: "a step is pending" };
+    const decided = transferLineages({ transition: "adopt begun" }, this.inspectionState);
+    if (decided.kind !== "transfer")
+      return { kind: "refused", reason: "no restored state to adopt" };
+    this.#inspecting!.adopting = true;
+    return changeOf(NO_EFFECTS);
+  }
+
+  #adoptEnded(observation: Extract<HistoryObservation, { kind: "adoptEnded" }>): Change | Refusal {
+    if (this.#pending !== null) return { kind: "refused", reason: "a step is pending" };
+    const decided = transferLineages(
+      { transition: "adopt ended", succeeded: observation.succeeded },
+      this.inspectionState,
+    );
+    if (decided.kind !== "transfer") return { kind: "refused", reason: "no adoption under way" };
+    const inspecting = this.#inspecting!;
+    if (!observation.succeeded) {
+      inspecting.adopting = false;
+      return changeOf(NO_EFFECTS);
+    }
+    this.#inspecting = null;
+    this.#live = inspecting.shownLineage;
+    const kept = this.#points.slice(0, inspecting.points);
+    this.#forget(this.#unkeptIds(inspecting, kept));
+    const retained = kept.length !== this.#points.length ? kept.length : null;
+    this.#points = kept;
+    this.#newestActionId = Math.max(-1, ...kept.map((point) => point.actionId));
+    this.#scanned = this.#lastSequence.get(inspecting.shown.id) ?? -1;
+    return changeOf(
+      {
+        show: null,
+        live: inspecting.shownLineage,
+        release: [inspecting.parked.lineage],
+        marks: null,
+        // An adoption keeps the recording: the adopted state's began at its commit.
+        recording: null,
+      },
+      retained,
+    );
+  }
+
+  #stopCollection(): Change {
+    if (this.#complete) this.#stop();
+    return changeOf(NO_EFFECTS);
+  }
+
+  #close(observation: Extract<HistoryObservation, { kind: "close" }>): HistoryOutcome {
+    const decided = transferLineages(
+      {
+        transition: "close",
+        by: observation.by,
+        ...(observation.adoptionSucceeded === undefined
+          ? {}
+          : { adoptionSucceeded: observation.adoptionSucceeded }),
+      },
+      this.inspectionState,
+    );
+    if (decided.kind === "refused")
+      return { kind: "refused", reason: `closing by ${observation.by} is refused now` };
+    const inspecting = this.#inspecting;
+    const release: string[] = [];
+    let live: string | null = null;
+    // A pending step goes with its history: its candidate is released, and its reservation with the store.
+    if (this.#pending !== null && observation.candidate !== undefined)
+      release.push(observation.candidate);
+    this.#pending = null;
+    if (inspecting !== null && decided.kind === "transfer") {
+      if (decided.parked === "live") live = inspecting.parked.lineage;
+      else release.push(inspecting.parked.lineage);
+      if (decided.shown === "live") live = inspecting.shownLineage;
+      else release.push(inspecting.shownLineage);
+    } else if (decided.kind === "transfer" && decided.parked === "released" && this.#live !== null)
+      release.push(this.#live);
+    this.#closed = true;
+    this.#inspecting = null;
+    this.#points = [];
+    void this.#store.destroy();
+    this.#revision += 1;
+    return {
+      kind: "advanced",
+      delta: null,
+      effects: {
+        show: null,
+        live,
+        release: [...new Set(release)],
+        marks:
+          live !== null && live === inspecting?.parked.lineage ? inspecting.parked.marks : null,
+        // Only the parked session's reinstatement begins the recording anew; an adoption's success keeps it.
+        recording: live !== null && live === inspecting?.parked.lineage ? live : null,
+      },
+    };
+  }
+
+  #refuseUnknown(observation: unknown): HistoryOutcome {
+    // An observation outside the closed set: collection stops with the prefix kept, and it is refused with its
+    // kind; the view sees the stop at its next delta's gap.
+    // EVIDENCE: validation: every observation is a record with a kind; this one names no kind of the union.
+    const { kind } = observation as { readonly kind: unknown };
+    if (this.#complete) {
+      this.#stop();
+      this.#revision += 1;
+    }
+    return {
+      kind: "refused",
+      reason: `an unknown observation (${String(kind)}) stopped collection`,
+    };
+  }
+
+  /** The delta of a change, from revision `from`, or `null` when the timeline is as it was. */
+  #delta(
+    from: number,
+    wasComplete: boolean,
+    inspectionChanged: boolean,
+    { appended, responses, retained, effects }: Change,
+  ): HistoryOutcome {
     if (
       appended.length === 0 &&
       responses.length === 0 &&

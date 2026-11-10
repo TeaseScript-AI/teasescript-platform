@@ -392,13 +392,24 @@ test("each point freezes the marks of its publication", () => {
   assert.deepEqual(history.timeline().points[0]!.marks, marks);
 });
 
-test("only advance writes the core's state", () => {
+test("only advance writes the core's state: its dispatcher alone calls each kind's method, once", () => {
   const text = readFileSync(
     new URL("../../../player/engine-bridge/history/core.ts", import.meta.url),
     "utf8",
   );
   const file = ts.createSourceFile("core.ts", text, ts.ScriptTarget.Latest, true);
+  // The class member a node is in, by name.
+  const memberOf = (node: ts.Node): string => {
+    let at: ts.Node | undefined = node;
+    while (at !== undefined && !ts.isClassElement(at)) at = at.parent;
+    if (at === undefined) return "(outside a method)";
+    return ts.isConstructorDeclaration(at)
+      ? "constructor"
+      : (at.name?.getText(file) ?? "(unnamed)");
+  };
   const writers = new Set<string>();
+  // Each private method's call sites, by the member each is in.
+  const callers = new Map<string, string[]>();
   file.forEachChild(function visit(node): void {
     const assigned =
       (ts.isBinaryExpression(node) &&
@@ -419,37 +430,54 @@ test("only advance writes the core's state", () => {
         ? node.expression.expression
         : undefined;
     const target = assigned ?? mutating;
-    if (target !== undefined && /this\.#|inspecting|inspecting!/u.test(target.getText(file))) {
-      let at: ts.Node | undefined = node;
-      while (at !== undefined && !ts.isMethodDeclaration(at) && !ts.isConstructorDeclaration(at))
-        at = at.parent;
-      writers.add(
-        at === undefined
-          ? "(outside a method)"
-          : ts.isConstructorDeclaration(at)
-            ? "constructor"
-            : at.name.getText(file),
-      );
+    if (target !== undefined && /this\.#|inspecting|inspecting!/u.test(target.getText(file)))
+      writers.add(memberOf(node));
+    if (
+      ts.isCallExpression(node) &&
+      ts.isPropertyAccessExpression(node.expression) &&
+      node.expression.expression.kind === ts.SyntaxKind.ThisKeyword &&
+      ts.isPrivateIdentifier(node.expression.name)
+    ) {
+      const name = node.expression.name.text;
+      callers.set(name, [...(callers.get(name) ?? []), memberOf(node)]);
     }
     node.forEachChild(visit);
   });
+  // `#advance` dispatches each observation to its kind's method; six return their change to `#delta`.
+  const kinds = [
+    "#undoPublication",
+    "#publish",
+    "#prepare",
+    "#commit",
+    "#drop",
+    "#return",
+    "#adoptBegun",
+    "#adoptEnded",
+    "#stopCollection",
+    "#close",
+    "#refuseUnknown",
+    "#delta",
+  ];
+  const shared = ["#forget", "#linkResponses", "#stop"];
   assert.deepEqual(
     [...writers].sort(),
-    ["#advance", "#forget", "#linkResponses", "#stop", "advance", "constructor"].sort(),
+    [
+      ...kinds.filter((kind) => kind !== "#stopCollection"),
+      ...shared,
+      "advance",
+      "constructor",
+    ].sort(),
   );
-  // The private writers are called only from `advance`: `#advance` is its body, which it wraps with the mutation count;
-  // the others are reached through it.
-  for (const helper of ["#advance", "#forget", "#linkResponses", "#stop"]) {
-    const callers = new Set<string>();
-    file.forEachChild(function visit(node): void {
-      if (ts.isCallExpression(node) && node.expression.getText(file) === `this.${helper}`) {
-        let at: ts.Node | undefined = node;
-        while (at !== undefined && !ts.isMethodDeclaration(at)) at = at.parent;
-        callers.add(at === undefined ? "(outside)" : at.name.getText(file));
-      }
-      node.forEachChild(visit);
-    });
-    assert.deepEqual([...callers], [helper === "#advance" ? "advance" : "#advance"], helper);
+  // `#advance` is `advance`'s body, which it wraps with the mutation count; each kind's method is called once, from the
+  // dispatcher; the shared writers are reached only through the kinds' methods.
+  assert.deepEqual(callers.get("#advance"), ["advance"], "#advance");
+  for (const kind of kinds) assert.deepEqual(callers.get(kind), ["#advance"], kind);
+  for (const helper of shared) {
+    const sites = callers.get(helper) ?? [];
+    assert.ok(
+      sites.length > 0 && sites.every((site) => kinds.includes(site)),
+      `${helper}: ${sites.join(", ")}`,
+    );
   }
 });
 
