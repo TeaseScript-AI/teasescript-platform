@@ -81,7 +81,16 @@ interface Holder {
   readonly integer: boolean;
   /** The value the read gives for the host data's, where it is another (a fallback's for `null`). */
   readonly gives?: (value: SerializableRuntimeValue) => SerializableRuntimeValue;
+  /** The slice's refusals its cases expect at a stop but not unstopped (`HeldCase.stopReasons`). */
+  readonly stopReasons?: readonly string[];
 }
+
+/**
+ * The slice's refusal of an operand a stop left a warning at: a `get` default's key read, whose TSV043 warning in budget
+ * context only a demand stop makes, refused by `outsideAnswers` (#2236; Codex r4 on #2227, `getDefault-1-say-plain` at
+ * demand 19).
+ */
+const STOP_OPERAND = "this operand";
 
 const nest = (
   depth: number,
@@ -143,6 +152,7 @@ const HOLDERS: Readonly<Record<string, (depth: number) => Holder>> = {
     ],
     read: `root${fields(depth - 1, "g")}.f`,
     integer: true,
+    stopReasons: [STOP_OPERAND],
   }),
   field: (depth) => ({
     lines: [
@@ -334,6 +344,7 @@ const HOLDERS: Readonly<Record<string, (depth: number) => Holder>> = {
     lines: ["let items = [1]"],
     read: nest(depth, "hostValue", (text) => `items.get(4, default: ${text})`),
     integer: true,
+    stopReasons: [STOP_OPERAND],
   }),
   // (the owner reviewer's `addAll` texts, #1445 review of 2026-10-30, at depth 1 alone: host data stored below the
   // source list's element, in a field, a deeper field, a nested list and an object copied into the list, and the
@@ -554,6 +565,7 @@ export function heldFamily(few = false): HeldCase[] {
             holderName === "member" ? hostObject : (value: SerializableRuntimeValue) => value;
           cases.push({
             name: `${holderName}-${depth}-${consumerName}-${variant}`,
+            ...(held.stopReasons === undefined ? {} : { stopReasons: held.stopReasons }),
             source: `${lines.join("\n")}\n`,
             slice,
             values: (consumerName === "say" ? SAID : VALUES).map((value) => {
