@@ -1,7 +1,9 @@
+import type { Expression } from "../../src/ast.js";
 import { compileProjectWithBackend, type CompilationResult } from "../../src/compiler.js";
 import type { InstructionPlan, TypePlan } from "../../src/plan/model.js";
-import { run } from "../../src/runtime/engine.js";
+import { executeInstruction, run } from "../../src/runtime/engine.js";
 import { assertValueType } from "../../src/runtime/values/value-types.js";
+import { valueKindOf } from "../../src/value-kinds.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
 import { CORE_BACKEND, CandidateOutsideSlice } from "../../src/type-inference/core/backend.js";
@@ -13,10 +15,12 @@ import { withMessagesInWords } from "../../src/type-inference/core/check-result/
 import {
   LIMIT_REASONS,
   OPEN_BY_STOP,
+  SliceIndex,
   UNDECIDED_AT_BUDGET,
 } from "../../src/type-inference/core/check-result/slice-index.js";
 import type { Omission } from "../../src/type-inference/core/consumers.js";
 import { withoutRecords } from "../../src/type-inference/core/consumers/left-out.js";
+import type { ItemTag } from "../../src/type-inference/core/items.js";
 import type { CoreDiagnostic, Obligation } from "../../src/type-inference/core/result.js";
 import type { SourceSite } from "../../src/type-inference/graph.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
@@ -201,6 +205,114 @@ function tracedRun(
     ).length,
   };
 }
+
+/**
+ * A natural compile error's requirement and its site's value path, where both resolve (#2183): the error's
+ * rule names the kinds the consumer takes (`count`: an integer, `integerOnly`; `argument`: its `domain`; `iterable`: a
+ * list, set, dict or range, a dict for entries), and its site is a binding read or a chain of property reads and literal
+ * integer indexes off one. Else `null`, and the error reads as before: any run that passes its instruction is `open`.
+ */
+function resolvedError(
+  answers: Answers,
+  request: NonNullable<ReturnType<typeof coreRequest>>,
+  code: string,
+  site: SourceSite,
+): { readonly requires: readonly ItemTag[]; readonly path: ValuePath } | null {
+  const error = answers.diagnostics.find(
+    (d) => d.class === "compile-error" && d.code === code && siteKey(d.site) === siteKey(site),
+  );
+  if (error === undefined || error.class !== "compile-error" || !("rule" in error)) return null;
+  const { rule } = error;
+  const requires: readonly ItemTag[] | null =
+    rule.rule === "count"
+      ? ["integer"]
+      : rule.rule === "argument"
+        ? rule.domain
+        : rule.rule === "iterable"
+          ? rule.entries
+            ? ["dict"]
+            : ["list", "set", "dict", "range"]
+          : null;
+  if (requires === null) return null;
+  const expression = new SliceIndex(request.files.map((file) => file.program)).findExpressionAt(
+    site,
+  );
+  const path = expression === undefined ? null : valuePath(expression);
+  return path === null ? null : { requires, path };
+}
+
+/** A binding and the property names and element positions read below it. */
+interface ValuePath {
+  readonly name: string;
+  readonly steps: readonly (string | number)[];
+}
+
+/** `expression` as a binding read below which only property reads and literal integer indexes follow, or `null`. */
+function valuePath(expression: Expression): ValuePath | null {
+  if (expression.kind === "identifier") return { name: expression.name, steps: [] };
+  if (expression.kind === "parenthesizedExpression") return valuePath(expression.expression);
+  if (expression.kind === "propertyAccessExpression") {
+    const below = valuePath(expression.object);
+    return below === null ? null : { ...below, steps: [...below.steps, expression.property.name] };
+  }
+  if (
+    expression.kind === "indexExpression" &&
+    expression.index.kind === "numberLiteral" &&
+    expression.index.numericType === "integer"
+  ) {
+    const below = valuePath(expression.object);
+    return below === null ? null : { ...below, steps: [...below.steps, expression.index.value] };
+  }
+  return null;
+}
+
+/**
+ * The value at `path` just before a run of `plan` with `globals` first reaches the instruction whose span is `own`,
+ * stepping with the public `executeInstruction` (#2183: not the engine-owned observer entry); `undefined` where
+ * the run fails or ends first, a step bound passes, or the path does not resolve in its frames and globals.
+ */
+function valueBefore(
+  plan: InstructionPlan,
+  globals: Globals,
+  own: Span,
+  path: ValuePath,
+): SerializableRuntimeValue | undefined {
+  const target = plan.instructions.findIndex((instruction) => {
+    const span = spanOf(instruction);
+    return span !== null && span.start === own.start && span.end === own.end;
+  });
+  if (target < 0) return undefined;
+  let snapshot = createImmediatePacingRuntimeSnapshot(plan, { globals });
+  for (let steps = 0; snapshot.nextInstruction !== target; steps += 1) {
+    if (steps >= VALUE_STEPS) return undefined;
+    const result = executeInstruction(plan, snapshot);
+    if (result.events.some((event) => event.kind === "runtimeFailure" || event.kind === "exit"))
+      return undefined;
+    snapshot = result.snapshot;
+  }
+  const bindings = [...snapshot.frames].reverse().flatMap((frame) => frame.bindings);
+  let value: SerializableRuntimeValue | undefined = [...bindings, ...snapshot.globals].find(
+    (binding) => binding.name === path.name,
+  )?.value;
+  for (const step of path.steps) {
+    if (value === null || value === undefined || typeof value !== "object") return undefined;
+    value =
+      typeof step === "number"
+        ? value.kind === "list"
+          ? value.items[step]
+          : undefined
+        : value.kind === "object"
+          ? value.properties.find((property) => property.name === step)?.value
+          : undefined;
+  }
+  return value;
+}
+
+/** The instructions `valueBefore` steps at most before it reads nothing (a run that loops past them). */
+const VALUE_STEPS = 10_000;
+
+/** A runtime value's kind as the core names it. */
+const kindOf = (value: SerializableRuntimeValue): ItemTag => valueKindOf(value);
 
 /** The span of the innermost instruction of `plan` whose span holds `site`, or `null`. */
 function instructionHolding(plan: InstructionPlan, site: Span): Span | null {
@@ -950,13 +1062,16 @@ export interface StopRunSide {
  * - `open`: a run where the natural plan fails at runtime and the stopped plan runs to its end; with no natural plan (a
  *   compile error the stop turned into runtime checks), a run in a single-file unit that executes the error's own store
  *   instruction (the innermost holding the error's site; a store's absent property, C5c, at the store, not the object the
- *   diagnostic names) and passes it: it ends, or it fails elsewhere with no loop round in its trace;
+ *   diagnostic names) and passes it: it ends, or it fails elsewhere with no loop round in its trace. Where the error's
+ *   requirement and its site's value resolve (`resolvedError`), only a run whose value there violates the requirement
+ *   (#2183); a run whose value fits is no escape;
  * - `later`: a run where both fail at different sites and the stopped run executed the natural failure's exact
  *   instruction and passed it, in a single-file unit with no loop round in its trace (the instruction trace,
  *   `docs/RUNTIME.md#instruction-trace`);
  * - `closed`: the two plans are equal. Nothing else is `closed`, and nothing without a natural plan ever is;
  * - `unwitnessed`: plans that differ with no `open` or `later` run: multi-file units, loops, an earlier or stricter
- *   failure, a failure of a sibling or of another check, a no-plan error not shown passed. Unresolved evidence, never
+ *   failure, a failure of a sibling or of another check, a no-plan error not shown passed or passed only by values that
+ *   fit its requirement (`resolved`). Unresolved evidence, never
  *   proof that no check is owed; `untested` (below) and the type-derived values serve to find escapes, never to decide
  *   `closed`;
  * - `declined`: the stop's compile declined (a refusal, never a missing check);
@@ -983,6 +1098,12 @@ export interface StopRuns {
    * natural plan, each natural error's site. Escape-finding evidence, never a decision.
    */
   readonly untested?: readonly string[];
+  /**
+   * Where `unwitnessed` with no natural plan: each error whose requirement and site value resolve (`resolvedError`), by
+   * its code and site, and whether a run failed at its own instruction (`failed`: a violating host ran and failed there)
+   * or none did (no violating host was run).
+   */
+  readonly resolved?: readonly { readonly site: string; readonly failed: boolean }[];
   /**
    * With no natural plan: each error of the natural compile, by its code and site (a store's absent property at the
    * store), and what the stopped analysis checks there (`typed`, `unknown`, or `none`): the site rule of #2098's ledger.
@@ -1131,21 +1252,38 @@ export function stopRuns(
           : at.some((c) => !c.against.includes("unknown"))
             ? "typed"
             : "unknown";
-      return { code, site, key: siteKey(site), checks, own: instructionHolding(got, site) };
+      const resolved = single ? resolvedError(natural.answers, request, code, site) : null;
+      return {
+        code,
+        site,
+        key: siteKey(site),
+        checks,
+        own: instructionHolding(got, site),
+        resolved,
+      };
     });
     const sites = errors.map(({ code, key, checks }) => ({ code, site: key, checks }));
+    // (a resolved error's runs: whether one failed at its own instruction)
+    const failedAt = new Set<string>();
     if (single)
       for (const each of pool) {
         const ran = tracedRun(got, each);
-        for (const { own } of errors)
-          if (own !== null && passed(got, ran, own) && (ran.failure === null || !looped(ran)))
-            return {
-              ...none,
-              kind: "open",
-              runs: pool.length,
-              first: { globals: each, natural: null, stopped: ran },
-              sites,
-            };
+        for (const { own, resolved, key } of errors) {
+          if (own === null) continue;
+          if (resolved !== null && ran.failure !== null && within(ran.failure, own))
+            failedAt.add(key);
+          if (!passed(got, ran, own) || (ran.failure !== null && looped(ran))) continue;
+          // (a value read at the instruction that fits the requirement passes it rightly; an unread one stays open)
+          const value = resolved === null ? undefined : valueBefore(got, each, own, resolved.path);
+          if (value !== undefined && resolved!.requires.includes(kindOf(value))) continue;
+          return {
+            ...none,
+            kind: "open",
+            runs: pool.length,
+            first: { globals: each, natural: null, stopped: ran },
+            sites,
+          };
+        }
       }
     return {
       ...none,
@@ -1153,6 +1291,9 @@ export function stopRuns(
       runs: pool.length,
       sites,
       untested: errors.map(({ key }) => key),
+      resolved: errors.flatMap(({ code, key, resolved }) =>
+        resolved === null ? [] : [{ site: `${code} ${key}`, failed: failedAt.has(key) }],
+      ),
     };
   }
   const violating = stopProblems({
