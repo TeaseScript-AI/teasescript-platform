@@ -267,7 +267,8 @@ export function cubeRoot(x: number): number {
   const third = Math.floor(exponent / 3);
   // exponent - 3 * third is 0, 1 or 2, so this product is exact and in [1, 8).
   const m = mantissa * powerOfTwo(exponent - 3 * third);
-  // The chord from (1, 1) to (8, 2) is within 0.15 of the root; five steps take that below 2^-52, a sixth is spare.
+  // The chord from (1, 1) to (8, 2) is within 0.17 of the root (most at m = (7/3)^(3/2)); each step squares the error
+  // over the root, so five take it below 2^-52 and a sixth is spare.
   let y = 1 + (m - 1) / 7;
   for (let step = 0; step < 6; step += 1) y -= (y * y * y - m) / (3 * y * y);
   const square = multiply([y, 0], [y, 0]);

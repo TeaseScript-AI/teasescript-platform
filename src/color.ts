@@ -127,8 +127,10 @@ export function isSeeThroughColor(value: unknown): boolean {
 
 /**
  * Concrete opaque CSS colours only; no host variables, relative colours or executable CSS. The text is the same in
- * every JavaScript engine: the conversion uses only operations ECMAScript specifies exactly (`+ - * /`, `Math.sqrt`,
- * the engine-independent functions of `deterministic-math.ts` and `positivePower`), and `formatNumber` prints it.
+ * every JavaScript engine for an authored colour whose numbers have at most 20 significant digits (ECMAScript lets an
+ * engine read a longer number either way): the conversion uses only operations ECMAScript specifies exactly
+ * (`+ - * /`, `Math.sqrt`, the engine-independent functions of `deterministic-math.ts` and `positivePower`), and
+ * `formatNumber` prints it.
  * The formulas are colorjs.io 0.7.1's, in its order of operations.
  */
 export function normalizeColor(value: unknown): string | null {

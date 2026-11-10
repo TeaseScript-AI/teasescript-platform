@@ -235,6 +235,8 @@ test("prints each coordinate as Number::toString with its recommended choice, al
 test("converts with no host transcendental, colorjs.io's parsing included", () => {
   const exact = new Set(["abs", "ceil", "floor", "max", "min", "round", "sign", "sqrt", "trunc"]);
   const saved = new Map<string, PropertyDescriptor>();
+  // Counted as well as thrown: colorjs.io's parse and `parseColor` catch exceptions, which would hide an attempt.
+  const attempts: string[] = [];
   for (const name of Object.getOwnPropertyNames(Math)) {
     const descriptor = Object.getOwnPropertyDescriptor(Math, name)!;
     if (typeof descriptor.value === "function" && !exact.has(name)) {
@@ -242,6 +244,7 @@ test("converts with no host transcendental, colorjs.io's parsing included", () =
       Object.defineProperty(Math, name, {
         ...descriptor,
         value: () => {
+          attempts.push(name);
           throw new Error(`Math.${name} was called`);
         },
       });
@@ -265,6 +268,7 @@ test("converts with no host transcendental, colorjs.io's parsing included", () =
   } finally {
     for (const [name, descriptor] of saved) Object.defineProperty(Math, name, descriptor);
   }
+  assert.deepEqual(attempts, []);
 });
 
 const CONVERSION_FILES = ["src/color.ts", "src/deterministic-math.ts", "src/numeric-functions.ts"];

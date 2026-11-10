@@ -40,6 +40,7 @@ export const ALLOWED_SOURCE: readonly {
       "src/dict-operations.ts",
       "src/duration.ts",
       "src/list-methods.ts",
+      "src/numeric-functions.ts",
       "src/runtime/errors.ts",
       "src/runtime/values/plain-data.ts",
       "src/runtime/values/serializable-values.ts",

@@ -810,8 +810,8 @@ only in incomplete tapes, and picks the browser and Pixel cohorts.
 In a browser, `node tools/player-gate/tapes/browser.mjs --engine E --bridge DIR --tapes DIR --census FILE --out FILE`
 replays the census's pinned cohort, each tape checked against its pinned hash, on the bridge page's replay mode
 (`tools/player-gate/bridge/replay.mjs`) through both backends, with the same comparison and no tolerance. A tape that
-differs in one engine is a measured value; colours are the same text in every engine since #2147, which converts them
-with engine-independent arithmetic.
+differs in one engine is a measured value. Since #2147 an authored colour whose numbers have at most 20 significant
+digits normalizes to the same text in every engine, which converts it with engine-independent arithmetic.
 
 ## Implemented Phase 1 deterministic property harness
 
