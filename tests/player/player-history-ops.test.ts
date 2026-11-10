@@ -1091,3 +1091,28 @@ test("a Player's disposal closes every history, an unanswered renewal's included
   assert.equal((await closeRaw(bridge, 3, "debugOff", 1)).kind, "refused");
   assert.equal((await renewRaw(bridge, 4, { owner: 2 })).kind, "renewed");
 });
+
+test("over a Worker, a renewal posted after a close the host refuses opens nothing, and one posted before it is untouched", async () => {
+  const build = { commit: null, dirty: null, mode: null, appVersion: null };
+  const bridge = new Bridge(
+    await connectBridge(
+      nodeWorkerPort(new URL("../../player/engine-bridge/node-worker.js", import.meta.url), build),
+      build,
+    ),
+  );
+  try {
+    const session = await started(bridge);
+    // Posted in one turn, with no reply awaited between them: the Worker's host runs them in that order.
+    const before = bridge.historyRenew(1, session, []);
+    const refused = bridge.historyClose({ history: 7, by: "debugOff" });
+    const after = bridge.historyRenew(2, session, []);
+    assert.ok(refused.posted);
+    assert.equal((await before).kind, "renewed");
+    assert.equal((await refused.reply).result.kind, "refused");
+    assert.equal((await after).kind, "closeFailed");
+    assert.notEqual(await timeline(bridge, 1), null, "the earlier history stays");
+    assert.equal(await timeline(bridge, 2), null);
+  } finally {
+    bridge.client.terminate();
+  }
+});
