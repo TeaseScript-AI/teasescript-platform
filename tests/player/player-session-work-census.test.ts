@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import test, { before, type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
 import { isDeepStrictEqual } from "node:util";
+import ts from "typescript";
 import { registerActivationWorkChecks } from "../helpers/player/activation-work-checks.js";
 
 /*
@@ -1038,6 +1039,352 @@ test("the census fails a new caller of a forwarder, a new BridgeClient member, a
     escape.escapes.some((each) => !followed(each) && !Object.hasOwn(ESCAPES, keyOf(each))),
     "a callback escape is unclassified",
   );
+});
+
+const REWIND_OWNER = "player/vue/src/session/rewindOwner.ts";
+/**
+ * Who writes the rewind owner's lifecycle state and retirement stamp, two `let` bindings of `createRewindOwner`: each
+ * use, found by symbol (a shadowing binding of the same name is another symbol), is one admitted shape or an escape.
+ * `state` is assigned once, `state = outcome.state` in the body of the factory's one top-level `function dispatch`;
+ * the stamp moves by `retirements++`, the first statement of the `retired` and `lost` arrows of the one object literal
+ * the factory returns. Both are found by node: a missing `dispatch` or any other declaration in its symbol, a second
+ * return, a spread, a computed name, a duplicate, or a `retired` or `lost` there that is not an arrow is an escape. A
+ * read is admitted by its shape wherever it stands: it cannot change a `let` binding, and neither value changes in
+ * place, the stamp being a number and `LifecycleState` `readonly` at every level (`player/debug/rewind-lifecycle.ts`);
+ * a cast that defeats `readonly` is outside this claim.
+ */
+const OWNER_WRITES = ["retirements: lost", "retirements: retired", "state: dispatch"];
+
+/**
+ * The uses of the owner's two bindings that no admitted shape holds, as `name \`form\` in function:line`, and its
+ * admitted writes, as `name: function`.
+ */
+function ownerUses(overrides: Readonly<Record<string, string>> = {}): {
+  readonly escapes: string[];
+  readonly writes: string[];
+} {
+  census.setOverrides(overrides);
+  try {
+    const { program, root } = census.program();
+    // EVIDENCE: validation: the census's program is the TypeScript program it builds (`createSessionWorkCensus`).
+    const typed = program as ts.Program;
+    const file = typed.getSourceFile(resolve(root, REWIND_OWNER));
+    assert.ok(file, REWIND_OWNER);
+    const checker = typed.getTypeChecker();
+    // A declaration found by name must be its symbol's whole declaration set: TypeScript merges each same-named
+    // declaration of the scope into that symbol, so any other one there, or no symbol, fails.
+    const sole = (declaration: ts.Declaration, name: ts.Identifier) => {
+      const declarations = checker.getSymbolAtLocation(name)?.declarations ?? [];
+      return declarations.length === 1 && declarations[0] === declaration;
+    };
+    const factories = file.statements.filter(
+      (each): each is ts.FunctionDeclaration =>
+        ts.isFunctionDeclaration(each) && each.name?.text === "createRewindOwner",
+    );
+    assert.ok(
+      factories.length === 1 && sole(factories[0]!, factories[0]!.name!),
+      "one createRewindOwner declaration",
+    );
+    const bindings = new Map<ts.Symbol, string>();
+    for (const statement of factories[0]!.body!.statements)
+      if (
+        ts.isVariableStatement(statement) &&
+        (statement.declarationList.flags & ts.NodeFlags.Let) !== 0
+      )
+        for (const declaration of statement.declarationList.declarations) {
+          const { name } = declaration;
+          if (ts.isIdentifier(name) && (name.text === "state" || name.text === "retirements")) {
+            assert.ok(sole(declaration, name), `one ${name.text} declaration`);
+            bindings.set(checker.getSymbolAtLocation(name)!, name.text);
+          }
+        }
+    assert.deepEqual([...bindings.values()].sort(), ["retirements", "state"], "the two lets");
+    // The nearest named function a node is in: a declaration, or the variable or property that holds it.
+    const enclosing = (node: ts.Node): string => {
+      for (let at = node.parent; at !== undefined; at = at.parent) {
+        if (ts.isFunctionDeclaration(at) && at.name) return at.name.text;
+        if (ts.isMethodDeclaration(at) || ts.isGetAccessorDeclaration(at))
+          return at.name.getText(file);
+        const holder = at.parent;
+        if (
+          (ts.isArrowFunction(at) || ts.isFunctionExpression(at)) &&
+          (ts.isVariableDeclaration(holder) || ts.isPropertyAssignment(holder))
+        )
+          return holder.name.getText(file);
+      }
+      return "(module)";
+    };
+    const text = (node: ts.Node) => node.getText(file);
+    const brief = (node: ts.Node) => {
+      const shown = text(node).replace(/\s+/g, " ");
+      return shown.length > 80 ? `${shown.slice(0, 79)}…` : shown;
+    };
+    const line = (node: ts.Node) =>
+      file.getLineAndCharacterOfPosition(node.getStart(file)).line + 1;
+    const escapes: string[] = [];
+    const escape = (subject: string, node: ts.Node, shown: ts.Node) =>
+      escapes.push(`${subject} \`${brief(shown)}\` in ${enclosing(node)}:${line(node)}`);
+    // The writers, by node: the factory's one return of an object literal, and in it the first statement of its own
+    // `retired` and `lost` arrows. A return inside a nested function is that function's.
+    const factory = factories[0]!;
+    const returns: ts.ReturnStatement[] = [];
+    factory.body!.forEachChild(function find(node): void {
+      if (ts.isReturnStatement(node)) returns.push(node);
+      else if (!ts.isFunctionLike(node) && !ts.isClassLike(node)) node.forEachChild(find);
+    });
+    const writers = new Map<ts.Node, string>();
+    // `state`'s writer, by node: a function declaration `dispatch` of the factory's body, its symbol's one declaration.
+    const named = factory.body!.statements.find(
+      (each): each is ts.FunctionDeclaration =>
+        ts.isFunctionDeclaration(each) && each.name?.text === "dispatch",
+    );
+    const dispatch = named && sole(named, named.name!) ? named : undefined;
+    if (dispatch === undefined) {
+      const declarations = (named && checker.getSymbolAtLocation(named.name!)?.declarations) || [];
+      for (const each of declarations.length === 0 ? [factory.name!] : declarations)
+        escape(`owner: one of ${declarations.length} dispatch declarations`, each, each);
+    }
+    const owner = returns.length === 1 ? returns[0]!.expression : undefined;
+    if (returns.length > 1)
+      for (const each of returns) escape(`owner: one of ${returns.length} returns`, each, each);
+    else if (owner === undefined || !ts.isObjectLiteralExpression(owner)) {
+      const site = returns[0] ?? factory.name!;
+      escape("owner: not a returned object literal", site, site);
+    } else {
+      const members = new Map<string, ts.ObjectLiteralElementLike[]>();
+      for (const member of owner.properties)
+        if (ts.isSpreadAssignment(member)) escape("owner: a spread", member, member);
+        else if (ts.isComputedPropertyName(member.name))
+          escape("owner: a computed name", member, member);
+        else members.set(member.name.text, [...(members.get(member.name.text) ?? []), member]);
+      for (const name of ["retired", "lost"]) {
+        const [member, ...duplicates] = members.get(name) ?? [];
+        for (const duplicate of duplicates)
+          escape(`owner: a duplicate ${name}`, duplicate, duplicate);
+        if (member === undefined || duplicates.length > 0) continue;
+        if (!ts.isPropertyAssignment(member) || !ts.isArrowFunction(member.initializer)) {
+          const kind = ts.isShorthandPropertyAssignment(member)
+            ? "a shorthand"
+            : ts.isPropertyAssignment(member)
+              ? "not an arrow"
+              : "a method or accessor";
+          escape(`owner: ${name}, ${kind}`, member, member);
+          continue;
+        }
+        const { body } = member.initializer;
+        const first = ts.isBlock(body) ? body.statements[0] : undefined;
+        if (
+          first !== undefined &&
+          ts.isExpressionStatement(first) &&
+          ts.isPostfixUnaryExpression(first.expression) &&
+          first.expression.operator === ts.SyntaxKind.PlusPlusToken &&
+          ts.isIdentifier(first.expression.operand)
+        )
+          writers.set(first.expression.operand, `retirements: ${name}`);
+      }
+    }
+    // The admitted shape of a use, or `undefined`; a write's shape is its `OWNER_WRITES` entry.
+    const admitted = (name: string, use: ts.Identifier): string | undefined => {
+      const at = use.parent;
+      if (ts.isVariableDeclaration(at) && at.name === use)
+        return name === "state" || (at.initializer && text(at.initializer) === "0")
+          ? "declaration"
+          : undefined;
+      if (name === "state") {
+        if (
+          ts.isBinaryExpression(at) &&
+          at.left === use &&
+          at.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+          text(at.right) === "outcome.state" &&
+          ts.isExpressionStatement(at.parent) &&
+          ts.findAncestor(at, ts.isFunctionLike) === dispatch
+        )
+          return "state: dispatch";
+        if (ts.isPropertyAccessExpression(at) && at.expression === use) return "property read";
+        if (
+          ts.isCallExpression(at) &&
+          at.arguments[0] === use &&
+          text(at.expression) === "advanceLifecycle"
+        )
+          return "decided from";
+        if (
+          ts.isBinaryExpression(at) &&
+          at.right === use &&
+          at.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken &&
+          text(at.left) === "outcome.state"
+        )
+          return "compared with the decision";
+        return ts.isReturnStatement(at) ? "returned" : undefined;
+      }
+      const writer = writers.get(use);
+      if (writer !== undefined) return writer;
+      if (
+        ts.isShorthandPropertyAssignment(at) &&
+        ts.isVariableDeclaration(at.parent.parent) &&
+        text(at.parent.parent.name) === "at"
+      )
+        return "taken";
+      if (
+        ts.isBinaryExpression(at) &&
+        at.left === use &&
+        at.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken &&
+        text(at.right) === "at.retirements"
+      )
+        return "compared";
+      return undefined;
+    };
+    // An escape's form: the operation it is in, above any literal, spread or parentheses that carry it.
+    const form = (use: ts.Node): ts.Node => {
+      let at = use;
+      while (
+        ts.isArrayLiteralExpression(at.parent) ||
+        ts.isObjectLiteralExpression(at.parent) ||
+        ts.isSpreadElement(at.parent) ||
+        ts.isSpreadAssignment(at.parent) ||
+        ts.isParenthesizedExpression(at.parent) ||
+        ts.isPropertyAssignment(at.parent) ||
+        ts.isShorthandPropertyAssignment(at.parent)
+      )
+        at = at.parent;
+      return at.parent;
+    };
+    const writes: string[] = [];
+    file.forEachChild(function visit(node): void {
+      if (ts.isIdentifier(node)) {
+        const symbol =
+          ts.isShorthandPropertyAssignment(node.parent) && node.parent.name === node
+            ? checker.getShorthandAssignmentValueSymbol(node.parent)
+            : checker.getSymbolAtLocation(node);
+        const name = symbol && bindings.get(symbol);
+        if (name !== undefined) {
+          const shape = admitted(name, node);
+          if (shape === undefined) escape(name, node, form(node));
+          else if (shape.includes(": ")) writes.push(shape);
+        }
+      }
+      node.forEachChild(visit);
+    });
+    return { escapes, writes: writes.sort() };
+  } finally {
+    census.setOverrides({});
+  }
+}
+
+test("the rewind owner uses its lifecycle state and its stamp only in admitted shapes", async () => {
+  const check = (overrides?: Readonly<Record<string, string>>) => {
+    const { escapes, writes } = ownerUses(overrides);
+    assert.deepEqual(
+      { escapes, writes },
+      { escapes: [], writes: OWNER_WRITES },
+      `the owner's escapes: ${escapes.join("; ") || "none"}; its writes: ${writes.join(", ")}`,
+    );
+  };
+  check();
+  const { readFile } = await import("node:fs/promises");
+  const source = await readFile(resolve(process.cwd(), REWIND_OWNER), "utf8");
+  const edited = (...edits: readonly (readonly [string, string])[]) =>
+    edits.reduce((at, [from, to]) => {
+      assert.equal(at.split(from).length, 2, `the control's anchor: ${from}`);
+      return at.replace(from, to);
+    }, source);
+  const replaced = (from: string, to: string) => edited([from, to]);
+  const debugOn = "    debugOn: (): LifecycleDisposition => {\n";
+  const inDebugOn = (inserted: string) => replaced(debugOn, `${debugOn}      ${inserted}\n`);
+  const retired = '    retired: (by: "clear" | "import"): LifecycleDisposition => {\n';
+  const bridge = "      const bridge = host.bridge();\n";
+  const lost = "    lost: (): LifecycleDisposition => {\n";
+  const lostBody = `${lost}      retirements++;\n      return dispatch({ kind: "lost" }).actions;\n    },\n`;
+  const ownerReturn = "  return {\n    view: computed(";
+  const dispatch = "  function dispatch(event: LifecycleEvent): LifecycleOutcome {\n";
+  // Controls: each use outside an admitted shape fails, with its form and the function it is in.
+  const controls = [
+    [
+      replaced(
+        "  function settle(went: boolean) {\n",
+        "  function settle(went: boolean) {\n    state = INITIAL_LIFECYCLE;\n",
+      ),
+      "state `state = INITIAL_LIFECYCLE` in settle",
+    ],
+    [inDebugOn("retirements += 1;"), "retirements `retirements += 1` in debugOn"],
+    [
+      inDebugOn("for (retirements of [retirements + 1]) {}"),
+      "retirements `for (retirements of [retirements + 1]) {}` in debugOn",
+    ],
+    [
+      replaced(`${lost}      retirements++;\n`, `${lost}      retirements = 0;\n`),
+      "retirements `retirements = 0` in lost",
+    ],
+    [
+      inDebugOn("[retirements] = [retirements];"),
+      "retirements `[retirements] = [retirements]` in debugOn",
+    ],
+    [inDebugOn("void retirements;"), "retirements `void retirements` in debugOn"],
+    [
+      replaced(
+        `${retired}      retirements++;\n${bridge}`,
+        `${retired}${bridge}      if (bridge === null) return NOTHING;\n      retirements++;\n`,
+      ),
+      "retirements `retirements++` in retired",
+    ],
+    [inDebugOn("void JSON.stringify(state);"), "state `JSON.stringify(state)` in debugOn"],
+    // The writers are the returned object's own: a decoy `lost` elsewhere, or a writer the walk cannot resolve, fails.
+    [
+      edited(
+        [lostBody, `${lost}      return dispatch({ kind: "lost" }).actions;\n    },\n`],
+        [ownerReturn, `  const unused = {\n${lostBody}  };\n  void unused;\n${ownerReturn}`],
+      ),
+      "retirements `retirements++` in lost",
+    ],
+    [
+      replaced(ownerReturn, `  if (Math.random() < 0) return undefined as never;\n${ownerReturn}`),
+      "owner: one of 2 returns `return undefined as never;` in createRewindOwner",
+    ],
+    [
+      edited(
+        [lostBody, "    lost: lostImpl,\n"],
+        [
+          ownerReturn,
+          `  const lostImpl = (): LifecycleDisposition => {\n    retirements++;\n    return dispatch({ kind: "lost" }).actions;\n  };\n${ownerReturn}`,
+        ],
+      ),
+      "owner: lost, not an arrow `lost: lostImpl` in createRewindOwner",
+    ],
+    [replaced(lostBody, `${lostBody}    ...{},\n`), "owner: a spread `...{}` in createRewindOwner"],
+    // `state`'s writer is the factory's own `dispatch`: a decoy one elsewhere, or a second declaration, fails.
+    [
+      edited(
+        ["    state = outcome.state;\n", ""],
+        [
+          ownerReturn,
+          `  const unused = {\n    dispatch: (outcome: LifecycleOutcome) => {\n      state = outcome.state;\n    },\n  };\n  void unused;\n${ownerReturn}`,
+        ],
+      ),
+      "state `state = outcome.state` in dispatch",
+    ],
+    [
+      replaced(
+        dispatch,
+        `  function dispatch(event: LifecycleEvent): LifecycleOutcome;\n${dispatch}`,
+      ),
+      "owner: one of 2 dispatch declarations",
+    ],
+    [
+      replaced(dispatch, `  type dispatch = unknown;\n${dispatch}`),
+      "owner: one of 2 dispatch declarations `type dispatch = unknown;`",
+    ],
+  ] as const;
+  for (const [patched, named] of controls)
+    assert.throws(
+      () => check({ [REWIND_OWNER]: patched }),
+      (error: unknown) => error instanceof assert.AssertionError && error.message.includes(named),
+      named,
+    );
+  // A binding of the same name in another closure is another symbol, written freely.
+  check({
+    [REWIND_OWNER]: inDebugOn(
+      "void ((retirements: number) => { retirements += 1; let state = retirements; state++; return state; });",
+    ),
+  });
 });
 
 test("every host path that adopts an op's result is classified (item 15)", () => {
