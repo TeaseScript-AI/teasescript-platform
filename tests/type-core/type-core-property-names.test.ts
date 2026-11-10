@@ -14,7 +14,7 @@ import { coreMessage, messageSource } from "../../src/type-inference/core/messag
 import { CoreProgram, propertyStep } from "../../src/type-inference/core/program.js";
 import { withFlatListings, withNameRecords } from "../../src/type-inference/core/property-names.js";
 import { coreRequest } from "../helpers/type-core-analysis.js";
-import { LAYER_FAMILIES, SEARCH_FAMILIES } from "../helpers/type-core/type-core-families.js";
+import { LAYER_FAMILIES, SEARCH_FAMILIES } from "../helpers/type-core/families/property-names.js";
 import { MODES, inMode, orderedNames } from "../helpers/type-core-oracles.js";
 
 /*

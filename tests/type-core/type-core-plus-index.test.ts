@@ -6,7 +6,7 @@ import { analyseCore, solveDemands, type CorePass } from "../../src/type-inferen
 import { withTestAllowance } from "../../src/type-inference/core/budget.js";
 import { Consumers } from "../../src/type-inference/core/consumers.js";
 import { firstWriter, type Item, type Writer } from "../../src/type-inference/core/items.js";
-import type { PlusIndex } from "../../src/type-inference/core/plus-index.js";
+import type { PlusIndex } from "../../src/type-inference/core/indexes/plus-index.js";
 import type { CoreAnalysisRequest } from "../../src/type-inference/core/program.js";
 import { withoutSharing } from "../../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../../src/type-inference/core/solver.js";

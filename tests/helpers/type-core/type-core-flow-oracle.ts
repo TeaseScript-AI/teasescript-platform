@@ -8,7 +8,7 @@ import { PlanControlFlow } from "../../../src/plan/control-flow.js";
 import type { InstructionPlan } from "../../../src/plan/model.js";
 import { compareProjectPaths } from "../../../src/project-paths.js";
 import { validateProjectSemantics } from "../../../src/semantic.js";
-import { dominators } from "../../../src/type-inference/core/dominators.js";
+import { dominators } from "../../../src/type-inference/core/flow-graph/dominators.js";
 import {
   buildFlowGraph,
   type FlowGraph,

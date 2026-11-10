@@ -3,7 +3,7 @@ import { joinParts } from "../budget.js";
 import type { Contract } from "../contract.js";
 import { withWriter } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
-import { marked } from "../guards.js";
+import { marked } from "../indexes/guards.js";
 import {
   differsIn,
   holdsLeaves,

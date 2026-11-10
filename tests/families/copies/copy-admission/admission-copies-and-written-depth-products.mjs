@@ -2,7 +2,7 @@
 export const id = "sol-admission-recon-shapes.mjs";
 // Sol's admission reconnaissance: its shapes in the quick run (31 at 4 and 8) and the attribution runs (22 at 8 and 16,
 // and deep-type-many-copies at 8 and 16), as #1319's small set copied them (R/sol-m4-admission-recon-r1-evidence/probe.mjs).
-// `preset-objects` is the repository's A5-presets family (tests/helpers/type-core/type-core-families.ts) and is not copied.
+// `preset-objects` is the repository's A5-presets family (tests/helpers/type-core/families/) and is not copied.
 export const cases = [
   [
     "nested-selection-variable-4.tease",

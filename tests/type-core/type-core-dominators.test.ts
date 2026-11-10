@@ -9,7 +9,7 @@ import {
   dominators,
   insideLoopsOf,
   type Dominators,
-} from "../../src/type-inference/core/dominators.js";
+} from "../../src/type-inference/core/flow-graph/dominators.js";
 import {
   buildFlowGraph,
   type FlowGraph,
