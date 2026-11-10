@@ -83,15 +83,27 @@ test("submit hands every shard to the queue in one batch and prints the ids it r
   try {
     const run = spawnSync(
       process.execPath,
-      [tool, "submit", "b".repeat(40), "h".repeat(40), "--owner", "o", "--campaign", "p"],
+      [
+        tool,
+        "submit",
+        "b".repeat(40),
+        "h".repeat(40),
+        "--owner",
+        "o",
+        "--campaign",
+        "p",
+        "--priority",
+        "background",
+      ],
       { encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH}` } },
     );
     assert.equal(run.status, 0, run.stderr);
     const [batch, ...more] = calls();
+    assert.ok(batch.lines.every((line) => line.startsWith("'--priority' 'background' ")));
     assert.deepEqual([batch.args[0], more.length], ["submit-batch", 0]);
     assert.equal(batch.lines.length, 16 * (1 + areasOf(ROOT).length));
     // (each line one shard's own submission, its index written in, shell-quoted)
-    assert.match(batch.lines[0], /^'--name' 'set-0of16' /u);
+    assert.match(batch.lines[0], /^'--priority' 'background' '--name' 'set-0of16' /u);
     assert.ok(batch.lines.every((line) => !line.includes("--shards") && !line.includes("{i}")));
     assert.equal(
       run.stdout.split("\n").filter((line) => line === "11111111111111").length,
