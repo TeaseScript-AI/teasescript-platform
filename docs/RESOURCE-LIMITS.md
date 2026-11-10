@@ -198,7 +198,8 @@ and so is a contract a settled stop left incomplete that a natural producer read
 no source, not shown impossible, #2183); and the gates do not test for a stop that shows only at a consumer read
 (`budget.exhausted` null, no decision stopped, #2256): none publishes a plan the natural one does not over the measured
 sets (0 of #2080's moved stops; 16 natural compiles, each its unstopped form; 688 of #2183's sweep settings, 448 equal
-to the natural plan and 240 refused in both compiles). Condition 2, every remaining case re-assessed before V2 replaces the legacy
+to the natural plan and 240 refused in both compiles); one built outside them publishes where the natural compile
+refuses (a `get` default at demand 16, as on the base; #2256). Condition 2, every remaining case re-assessed before V2 replaces the legacy
 compiler, is open; its cases open at the time of writing (2026-11-10) are #1832, #1845 (with #1846), #1838 and #1836,
 #1772, the claim (c)'s NoCheck still rests on (#2184, in the list below), #1781's conservative natural-outside declines (128 rows in 8 sources, as reported in PR
 #1781's work-stop set sweep), and (d)'s natural declines: 106 compiles, each in one of the four modes, that stop at the
