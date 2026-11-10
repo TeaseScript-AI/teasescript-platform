@@ -138,9 +138,10 @@ export function countOf(area, target, trees) {
   const costs = [...Object.values(area.sources), ...Array(area.rest.count).fill(area.rest.ms)].map(
     (ms) => ms * trees,
   );
-  const limit = target * 1000;
-  const alone = costs.filter((ms) => ms >= limit).length;
-  const rest = costs.filter((ms) => ms < limit).reduce((a, b) => a + b, 0);
-  const count = Math.max(1, alone + Math.ceil(rest / limit));
+  // (counted in seconds, as the target is given; filled in the milliseconds `binsOf` fills)
+  const seconds = costs.map((ms) => ms / 1000);
+  const alone = seconds.filter((s) => s >= target).length;
+  const rest = seconds.filter((s) => s < target).reduce((a, b) => a + b, 0);
+  const count = Math.max(1, alone + Math.ceil(rest / target));
   return { count, seconds: fill(costs, count).loads.map((ms) => ms / 1000) };
 }
