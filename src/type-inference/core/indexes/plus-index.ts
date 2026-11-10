@@ -1,8 +1,8 @@
-import type { PlaceId } from "../graph.js";
-import type { CorePass } from "./answers.js";
-import { unknownItem } from "./contract/kinds.js";
-import { keyOf, keyPlace, sortCost } from "./definitions.js";
-import type { FlowNode } from "./flow-graph.js";
+import type { PlaceId } from "../../graph.js";
+import type { CorePass } from "../answers.js";
+import { unknownItem } from "../contract/kinds.js";
+import { keyOf, keyPlace, sortCost } from "../definitions.js";
+import type { FlowNode } from "../flow-graph.js";
 import {
   firstWriter,
   makeItem,
@@ -11,10 +11,10 @@ import {
   weaken,
   type Item,
   type Writer,
-} from "./items.js";
-import type { CoreProgram, ValueConstraint } from "./program.js";
-import { sharing } from "./sharing.js";
-import type { Work } from "./solver.js";
+} from "../items.js";
+import type { CoreProgram, ValueConstraint } from "../program.js";
+import { sharing } from "../sharing.js";
+import type { Work } from "../solver.js";
 
 // #1384: a run of `+`'s terms by the properties their objects hold, read below its elements one property at a time.
 

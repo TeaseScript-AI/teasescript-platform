@@ -16,7 +16,7 @@ import {
 import { SliceIndex } from "../../src/type-inference/core/check-result/slice-index.js";
 import { withConsumerOrder } from "../../src/type-inference/core/consumers.js";
 import { DefinitionIndex } from "../../src/type-inference/core/definitions.js";
-import { isPlusValue, plusIndexVisits } from "../../src/type-inference/core/plus-index.js";
+import { isPlusValue, plusIndexVisits } from "../../src/type-inference/core/indexes/plus-index.js";
 import { withFlatListings, withNameRecords } from "../../src/type-inference/core/property-names.js";
 import { coreRecord } from "../../src/type-inference/core/result.js";
 import type { CoreAnalysisRequest } from "../../src/type-inference/core/program.js";
