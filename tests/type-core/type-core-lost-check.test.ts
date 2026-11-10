@@ -12,11 +12,18 @@ import {
 } from "../../src/runtime/values/serializable-values.js";
 import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
-import { narrower } from "../../src/type-inference/core/check-result/kept-checks.js";
+import { asked, coreCheckResult } from "../../src/type-inference/core/check-result/check-result.js";
 import {
+  builtContainers,
+  narrower,
+} from "../../src/type-inference/core/check-result/kept-checks.js";
+import {
+  DEFAULT_LOST_AT_BUDGET,
   OutsideContract,
+  SliceIndex,
   UNESTABLISHED_AT_BUDGET,
 } from "../../src/type-inference/core/check-result/slice-index.js";
+import { CoreProgram } from "../../src/type-inference/core/program.js";
 import {
   withTestAllowance,
   withTestDemandAllowance,
@@ -537,7 +544,224 @@ test("a decline the budget causes carries the limit marker, one the slice does n
   assert.ok(request !== null);
   const [statement] = request.files[0]!.program.statements;
   assert.ok(statement?.kind === "letStatement");
-  for (const what of [OPEN_BY_STOP, LOST, UNDECIDED, UNESTABLISHED_AT_BUDGET])
+  for (const what of [
+    OPEN_BY_STOP,
+    LOST,
+    UNDECIDED,
+    UNESTABLISHED_AT_BUDGET,
+    DEFAULT_LOST_AT_BUDGET,
+  ])
     assert.equal(new OutsideContract(statement.initializer, what).limit, true, what);
   assert.equal(new OutsideContract(statement.initializer, outside.what).limit, false, outside.what);
+});
+
+/** A binding's place in a request's program, by name. */
+const bindingPlace = (request: NonNullable<ReturnType<typeof coreRequest>>, name: string): number =>
+  new CoreProgram(request).places.find(({ kind }) => kind.kind === "binding" && kind.name === name)!
+    .id;
+
+/** The answers of `source` in held mode `mode` at a demand allowance, and its compile through the gate from them. */
+function throughGate(
+  source: string,
+  mode: number,
+  demand: number,
+  read: (answers: Answers) => Answers = (a) => a,
+) {
+  const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
+  assert.ok(request !== null);
+  const index = new SliceIndex(request.files.map((file) => file.program));
+  let answers: Answers | null = null;
+  const compile = () =>
+    HELD_MODES[mode]!.run(() =>
+      withTestDemandAllowance(demand, () => {
+        answers = analyseCore(request);
+        return asked(read(answers), (each) => coreCheckResult(each, index, request));
+      }),
+    );
+  return { request, compile, answers: () => answers! };
+}
+
+test("the receiving completion's C1 checks a decision retargeting pulls after the frontier, to the fixed point (#2184)", () => {
+  // (Codex's research on #2184: in reversed order without sharing, demand 256, retargeting reads `r`'s receiver after the
+  // frontier's decisions are made; C1 ran only at those before, so NoCheck read no C1 at `r`)
+  const source = `let a = {f: {n: [[1]]}}\nlet b = a\nb = {f: {n: [[2]]}}\nb = {f: {n: [[3]]}}\nlet r = {first:{v:1}}\nr.first.v = 2\nexit\n`;
+  const run = throughGate(source, 3, 256);
+  run.compile();
+  const answers = run.answers();
+  const epoch = answers.gated()![0]!.obligation.epoch;
+  assert.equal(answers.completionRan(bindingPlace(run.request, "r"), [], epoch), true);
+  assert.equal(answers.completionRan(bindingPlace(run.request, "b"), [], epoch), true);
+  // (another pass's record is none of this one's)
+  assert.equal(answers.completionRan(bindingPlace(run.request, "r"), [], epoch + 1), false);
+});
+
+test("NoCheck keeps a stopped mark only where the completion's own C1 ran at its path: without that record its store declines (#2184)", () => {
+  // (the design round's `quiet-foreign`, held mode 0, demand 24: the completion's C1 runs at `foreign`, whose one candidate
+  // is its own decider at its own level, which C1 passes over and which stays declared; NoCheck keeps the stopped mark,
+  // and the plan publishes without the natural plan's whole check of `foreign`)
+  const source = `let typed:integer=1\nlet foreign={f:hostValue,g:typed}\nlet b=foreign\nb.f=2${END}`;
+  const kept = throughGate(source, 0, 24);
+  assert.doesNotThrow(() => kept.compile());
+  const epoch = kept.answers().gated()![0]!.obligation.epoch;
+  assert.equal(
+    kept.answers().completionRan(bindingPlace(kept.request, "foreign"), [], epoch),
+    true,
+  );
+  // (the same answers with no record of where the completion's C1 ran: the mark falls through to a carrying check, and
+  // there is none, so the program declines at `foreign`'s store)
+  const without = throughGate(
+    source,
+    0,
+    24,
+    (answers) =>
+      new Proxy(answers, {
+        get: (target, key) => {
+          if (key === "completionRan") return () => false;
+          // EVIDENCE: a proxy's `get` receives the names the gate reads off `Answers`, each one of its members.
+          const value: unknown = target[key as keyof Answers];
+          return typeof value === "function" ? value.bind(target) : value;
+        },
+      }),
+  );
+  assert.throws(
+    () => without.compile(),
+    (error) =>
+      error instanceof OutsideContract &&
+      error.what === LOST &&
+      error.expression.span.start.offset === source.indexOf("{f:hostValue"),
+  );
+});
+
+test("a store's part checks keep a stopped mark only where the stored value's own literal builds each level they pass over (#2231)", () => {
+  const valueOf = (source: string, name: string) => {
+    const request = coreRequest([{ path: "main.tease", source: `${source}${END}` }], GLOBALS);
+    assert.ok(request !== null);
+    const statement = request.files[0]!.program.statements.find(
+      (each) => each.kind === "letStatement" && each.name.name === name,
+    );
+    assert.ok(statement?.kind === "letStatement");
+    return statement.initializer;
+  };
+  const path = (...steps: string[]) =>
+    steps.map((step) => (step === "[]" ? { element: true as const } : { property: step }));
+  // (built by the literal at every level a part passes over, parentheses included)
+  assert.equal(builtContainers(valueOf("let b = {f: {n: hostValue}}", "b"), path("f", "n")), true);
+  assert.equal(
+    builtContainers(valueOf("let b = ({f: ({n: hostValue})})", "b"), path("f", "n")),
+    true,
+  );
+  assert.equal(
+    builtContainers(valueOf("let b = [{n: hostValue}, {n: 1}]", "b"), path("[]", "n")),
+    true,
+  );
+  // (a level the literal does not build: a variable there, a property it lacks, or a list element that is not one)
+  assert.equal(
+    builtContainers(valueOf("let c = hostOther\nlet b = {f: c}", "b"), path("f", "n")),
+    false,
+  );
+  assert.equal(builtContainers(valueOf("let b = {g: {n: 1}}", "b"), path("f", "n")), false);
+  // (a part the literal leaves out passes, as the whole check lets an object without a listed property pass)
+  assert.equal(builtContainers(valueOf("let b = {f: {m: 1}}", "b"), path("f", "n")), true);
+  // (the part's parent a variable: the part check would pass it over where it holds no object)
+  assert.equal(
+    builtContainers(valueOf("let c = hostOther\nlet b = {f: {n: c}}", "b"), path("f", "n", "m")),
+    false,
+  );
+  assert.equal(
+    builtContainers(valueOf("let b = [{n: 1}, hostValue]", "b"), path("[]", "n")),
+    false,
+  );
+  // (the design round's `part-minimal`, held mode 0, demand 1: its last store keeps the stopped and ingress marks by the
+  // part check at `f.n`, which its own literal builds, and the plan publishes with that part check)
+  const source = "let a={f:{n:1}}\nlet b=a\nb=a\nb={f:{n:hostValue}}\nexit\n";
+  const plan = HELD_MODES[0]!.run(() => compiled(source, 1)).plan;
+  assert.ok(plan !== null);
+  const store = plan.instructions.find(
+    (each) => each.kind === "assign" && each.span.so === source.lastIndexOf("b={f:"),
+  );
+  assert.ok(store?.kind === "assign");
+  assert.deepEqual(
+    [store.typeCheck, store.partChecks?.map((part) => part.place)],
+    [undefined, ["'b.f.n'"]],
+  );
+});
+
+// #2183: after a settled stop, a fallback's obligation against `unknown` is the requirement
+// the stop lost, which no `fallbackCheck` carries, so the program declines at the default.
+const LOST_DEFAULT: readonly {
+  readonly name: string;
+  readonly source: string;
+  readonly demands: readonly number[];
+  readonly forbidden: Readonly<Record<string, SerializableRuntimeValue>>;
+  readonly at: string;
+}[] = [
+  {
+    name: "a get default",
+    source: `let xs: integer[] = [1]\nsay xs.get(4, default: hostValue)${END}`,
+    demands: [16],
+    forbidden: { hostValue: "bad", hostOther: 1 },
+    at: "hostValue)",
+  },
+  {
+    name: "an otherwise fallback",
+    source: `let xs: integer?[] = [hostValue]\nsay xs[0] otherwise hostOther${END}`,
+    demands: [16],
+    forbidden: { hostValue: null, hostOther: "bad" },
+    at: "hostOther\n",
+  },
+  {
+    // (#2245's witness: the stop also removes `let v`'s own check, which no obligation owes; the fallback's declines it)
+    name: "#2245's otherwise fallback into an inferred binding",
+    source: `let ws: integer?[] = [1]\nlet xs = ws\n${lines(8, () => "xs = ws")}\nxs = hostOther\nsay "BEFORE"\nlet v = xs[0] otherwise hostValue\nsay v${END}`,
+    demands: [1, 2, 3, 4],
+    forbidden: { hostValue: 2.5, hostOther: list([null]) },
+    at: "hostValue\nsay v",
+  },
+];
+
+test("after a settled stop a default whose requirement the stop lost declines at the default, where the natural plan rejects the value it would return (#2183)", () => {
+  for (const { name, source, demands, forbidden, at } of LOST_DEFAULT) {
+    const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
+    assert.ok(request !== null, name);
+    for (const mode of MODES) {
+      const natural = inMode(mode, () => compiled(source, null));
+      assert.ok(natural.plan !== null, name);
+      assert.equal(
+        said(runGlobals(natural.plan, forbidden)),
+        false,
+        `${name}: the natural plan rejects`,
+      );
+      for (const demand of demands) {
+        const where = `${name} at demand ${demand} (mode ${JSON.stringify(mode)})`;
+        const { budget, diagnostics } = inMode(mode, () =>
+          withTestDemandAllowance(demand, () => analyseCore(request)),
+        );
+        // (a settled stop that owes the fallback's obligation against `unknown`)
+        assert.ok(
+          budget.decisions.some((decision) => decision.stopped),
+          where,
+        );
+        assert.ok(budget.exhausted === null || budget.settled, where);
+        assert.ok(
+          [...diagnostics, ...budget.deferred].some(
+            (d) =>
+              d.class === "warning-runtime-check" &&
+              d.kind !== "budget" &&
+              d.rule.rule === "fallback" &&
+              d.obligation.against.join() === "unknown",
+          ),
+          where,
+        );
+        assert.throws(
+          () => inMode(mode, () => compiled(source, demand)),
+          (error) =>
+            error instanceof CandidateOutsideSlice &&
+            error.what === DEFAULT_LOST_AT_BUDGET &&
+            error.limit &&
+            error.site.start === source.indexOf(at),
+          where,
+        );
+      }
+    }
+  }
 });

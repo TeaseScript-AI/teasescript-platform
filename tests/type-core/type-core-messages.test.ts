@@ -3920,6 +3920,176 @@ test("a store's check tests an argument or an index target by its whole receivin
 });
 
 /**
+ * #1827: a value in a dict literal's value, a set literal's element or a set literal's selected element lands as a list
+ * literal's does, by the literal's step (a key is no value of it), so a store's check tests the whole receiving type
+ * there, as #1763's does; the walk to it is charged as a list's or an object's is (#1730). Each pasted check compiles
+ * under both checkers (the candidate route refuses a dict or set literal). In four modes.
+ */
+test("a store's check inside a dict or set literal tests its whole receiving type (#1827)", () => {
+  const warned = (into: string, fix: string) =>
+    `${into}, but 'hostValue' may be a value of another type here. ${STOPS} ${fix} ${OUTSIDE("hostValue")}`;
+  const check = (code: string) => `Check 'hostValue' first, as in '${code}'.`;
+  const deep = (name: string) =>
+    `An element of an element of '${name}' is declared as a whole number (integer) or null`;
+  const deeper = (name: string) =>
+    `An element of an element of an element of '${name}' is declared as a whole number (integer) or null`;
+  const cases: readonly (readonly [source: string, message: string])[] = [
+    // (a dict literal's value, also by a written name, after another entry, through parentheses and either
+    // operand of `otherwise`; a set literal's element; nested in a list, a dict or a set; an argument's; a `let`'s, in
+    // words; a property below a dict's value, its own test)
+    ...[
+      'd=dict {"k":hostValue}',
+      "d=dict {k:hostValue}",
+      'd=dict {"a":[1], "k":hostValue}',
+      'd=(dict {"k":hostValue})',
+      'd=dict {"k":hostValue otherwise [1]}',
+    ].map((store): readonly [string, string] => [
+      `let d:integer?[] dict=dict {}\n${store}\nexit\n`,
+      warned(deep("d"), check(`if hostValue is integer?[] { ${store} }`)),
+    ]),
+    [
+      "let s:integer?[] set=set []\ns=set [hostValue]\nexit\n",
+      warned(deep("s"), check("if hostValue is integer?[] { s=set [hostValue] }")),
+    ],
+    [
+      'let a:integer?[] dict[]=[]\na=[dict {"k":hostValue}]\nexit\n',
+      warned(deeper("a"), check('if hostValue is integer?[] { a=[dict {"k":hostValue}] }')),
+    ],
+    [
+      'let d:integer?[] dict dict=dict {}\nd=dict {"a":dict {"k":hostValue}}\nexit\n',
+      warned(
+        deeper("d"),
+        check('if hostValue is integer?[] { d=dict {"a":dict {"k":hostValue}} }'),
+      ),
+    ],
+    [
+      'let d:integer?[] set dict=dict {}\nd=dict {"a":set [hostValue]}\nexit\n',
+      warned(deeper("d"), check('if hostValue is integer?[] { d=dict {"a":set [hostValue]} }')),
+    ],
+    [
+      'function f(p: integer?[] dict) {\n  say "x"\n}\nf(dict {"k":hostValue})\nexit\n',
+      warned(deep("p"), check('if hostValue is integer?[] { f(dict {"k":hostValue}) }')),
+    ],
+    [
+      'let d:integer?[] dict=dict {"k":hostValue}\nexit\n',
+      warned(deep("d"), "Check that 'hostValue' is a list (integer?[]) first."),
+    ],
+    [
+      'let d=dict {"k":{x:1}}\nd=dict {"k":{x:hostValue}}\nexit\n',
+      warned(
+        "'x' of an element of 'd' holds a whole number (integer) since line 1",
+        check('if hostValue is integer { d=dict {"k":{x:hostValue}} }'),
+      ),
+    ],
+    // (a set literal's selected element is the place itself, as a list literal's)
+    [
+      "let x:integer?[]=[1]\nx=set [hostValue, [2]].random\nexit\n",
+      warned(
+        "'x' holds whole numbers or null (integer?[])",
+        check("if hostValue is integer?[] { x=set [hostValue, [2]].random }"),
+      ),
+    ],
+    // (unchanged: a flat dict's value, a key, an element of a set's element, a list's and an object's)
+    [
+      'let d:integer dict=dict {}\nd=dict {"k":hostValue}\nexit\n',
+      warned(
+        "'d' holds whole numbers (integer dict)",
+        check('if hostValue is integer { d=dict {"k":hostValue} }'),
+      ),
+    ],
+    [
+      "let d:integer?[] dict=dict {}\nd=dict {[hostValue]:[1]}\nexit\n",
+      warned(
+        "A dict key is text (string)",
+        check("if hostValue is string { d=dict {[hostValue]:[1]} }"),
+      ),
+    ],
+    [
+      "let s:integer?[] set=set []\ns=set [[hostValue]]\nexit\n",
+      warned(deep("s"), check("if hostValue is integer { s=set [[hostValue]] }")),
+    ],
+    [
+      "let a:integer?[][]=[[1]]\na=[hostValue]\nexit\n",
+      warned(deep("a"), check("if hostValue is integer?[] { a=[hostValue] }")),
+    ],
+    [
+      "let o={p:[1]}\no={p:[hostValue]}\nexit\n",
+      warned(
+        "'o.p' holds whole numbers (integer[]) since line 1",
+        check("if hostValue is integer { o={p:[hostValue]} }"),
+      ),
+    ],
+  ];
+  for (const mode of MODES)
+    for (const [source, message] of cases) {
+      const found = inMode(mode, () => reported(main(source))).filter(
+        (each) => each.site === "hostValue" && each.message === message,
+      );
+      assert.equal(found.length, 1, `${JSON.stringify(mode)} ${source}: ${message}`);
+    }
+  // (each pasted check compiles under both checkers)
+  const errors = (source: string) => [
+    ...compileProject([{ path: "main.tease", source }], { globals: ["hostValue"] })
+      .diagnostics.filter((diagnostic) => diagnostic.severity === "error")
+      .map((diagnostic) => `current ${diagnostic.code}`),
+    ...reported(main(source))
+      .filter((each) => each.error)
+      .map((each) => `core ${each.code}`),
+  ];
+  for (const followed of [
+    ...[
+      'd=dict {"k":hostValue}',
+      "d=dict {k:hostValue}",
+      'd=dict {"a":[1], "k":hostValue}',
+      'd=(dict {"k":hostValue})',
+      'd=dict {"k":hostValue otherwise [1]}',
+    ].map(
+      (store) => `let d:integer?[] dict=dict {}\nif hostValue is integer?[] { ${store} }\nexit\n`,
+    ),
+    "let s:integer?[] set=set []\nif hostValue is integer?[] { s=set [hostValue] }\nexit\n",
+    'let a:integer?[] dict[]=[]\nif hostValue is integer?[] { a=[dict {"k":hostValue}] }\nexit\n',
+    'let d:integer?[] dict dict=dict {}\nif hostValue is integer?[] { d=dict {"a":dict {"k":hostValue}} }\nexit\n',
+    'let d:integer?[] set dict=dict {}\nif hostValue is integer?[] { d=dict {"a":set [hostValue]} }\nexit\n',
+    'function f(p: integer?[] dict) {\n  say "x"\n}\nif hostValue is integer?[] { f(dict {"k":hostValue}) }\nexit\n',
+    'let d=dict {"k":{x:1}}\nif hostValue is integer { d=dict {"k":{x:hostValue}} }\nexit\n',
+    "let x:integer?[]=[1]\nif hostValue is integer?[] { x=set [hostValue, [2]].random }\nexit\n",
+  ])
+    assert.deepEqual(errors(followed), [], followed);
+});
+
+/**
+ * #1827: the walk into a dict literal's value and a set literal's element is charged as a list's and an object's is
+ * (#1730): one unit per value compared, per entry or element compared and per expression walked.
+ */
+test("a message's walk into a dict or set literal charges its work (#1827)", () => {
+  const units = (source: string): number => {
+    const given = parse(source).program.statements.flatMap((statement) => givenBy(statement) ?? []);
+    const start = source.lastIndexOf("hostValue");
+    let charged = 0;
+    const landing = landingOf(
+      given,
+      { file: 0, start, end: start + "hostValue".length },
+      (more) => {
+        charged += more;
+      },
+    );
+    assert.ok(landing !== null && landing.steps.length === 1, source);
+    return charged;
+  };
+  // (one of the two values compared, the literal walked, two of its four parts compared, the value walked)
+  assert.equal(
+    units(
+      'let d:integer?[] dict=dict {}\nd=dict {"a":[1], "b":[2], "c":[3], "k":hostValue}\nexit\n',
+    ),
+    1 + 1 + 2 + 1,
+  );
+  assert.equal(
+    units("let s:integer?[] set=set []\ns=set [[1], [2], [3], hostValue]\nexit\n"),
+    1 + 1 + 2 + 1,
+  );
+});
+
+/**
  * #1828: a mixed join names its leaf with the null this occurrence may hold, by #1765's walk one depth more, as the
  * current checker's first sentence does: not the null its decided domain allows. In four modes.
  */

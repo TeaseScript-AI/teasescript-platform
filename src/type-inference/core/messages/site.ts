@@ -1,11 +1,13 @@
 import type {
   CallExpression,
+  DictEntry,
   Expression,
   FunctionDeclaration,
   FunctionParameter,
   ListLiteral,
   ObjectLiteral,
   ObjectProperty,
+  SetLiteral,
   Statement,
   TypeAnnotation,
 } from "../../../ast.js";
@@ -454,10 +456,11 @@ const NO_CHARGE: Charge = () => {};
 
 /**
  * The value at `site` among the values statements give (in their start order), with the statement's variable and the
- * steps down to it: in the last value that starts at or before it, each list literal's element and object literal's
- * property down to it, through parentheses, a list literal's selected element and either operand of `otherwise`, each
- * found by its start (#1730 Codex r1 B1: no warning scans the values or a literal's parts before it); `null` inside any
- * other expression, or outside that value (a site after a statement in a handler block that a value holds).
+ * steps down to it: in the last value that starts at or before it, each list or set literal's element, object literal's
+ * property and dict literal's value down to it (#1827), through parentheses, a list or set literal's selected element
+ * and either operand of `otherwise`, each found by its start (#1730 Codex r1 B1: no warning scans the values or a
+ * literal's parts before it); `null` inside any other expression (#2255), in a dict literal's key, or outside that value
+ * (a site after a statement in a handler block that a value holds).
  */
 function valueAt(
   given: readonly Given[],
@@ -502,14 +505,30 @@ function descend(
       if (property === undefined || !holds(property.value)) return null;
       steps.push({ property: property.name.name });
       at = property.value;
+    } else if (at.kind === "setLiteral") {
+      // (#1827)
+      steps.push({ collection: "set" });
+      at = within(at.elements);
+    } else if (at.kind === "dictLiteral") {
+      // (a dict literal's value, found by its start as an object's property is; a key is no value of it, #1827)
+      const entry: DictEntry | undefined = lastStartingBy(
+        at.entries,
+        site.start,
+        (each) => each.value.span,
+        charge,
+      );
+      if (entry === undefined || !holds(entry.value)) return null;
+      steps.push({ collection: "dict" });
+      at = entry.value;
     } else if (at.kind === "binaryExpression" && at.operator === "otherwise")
       // (either operand of `otherwise` is the value there, no step more)
       at = within([at.left, at.right]);
     else {
-      // (a list literal's selected element, `[a, b].random` or `[a, b][0]`: that element is the place, no step more)
-      const list = selectedList(at, charge);
-      if (list === null) return null;
-      at = within(list.elements);
+      // (a list or set literal's selected element, `[a, b].random`, `set [a, b].random` or `[a, b][0]`: that element
+      // is the place, no step more)
+      const literal = selectedFrom(at, charge);
+      if (literal === null) return null;
+      at = within(literal.elements);
     }
   }
   return null;
@@ -554,14 +573,18 @@ function argumentAt(
   return null;
 }
 
-/** The list literal a selection of one element reads (`.random`, `.first`, `.last`, an index), through parentheses. */
-function selectedList(expression: Expression, charge: Charge): ListLiteral | null {
-  const object =
-    expression.kind === "propertyAccessExpression" && selectsElement(expression.property.name)
+/**
+ * The list or set literal a selection of one element reads (`.random`, `.first`, `.last`; a list's index, as a set has
+ * none, V30), through parentheses.
+ */
+function selectedFrom(expression: Expression, charge: Charge): ListLiteral | SetLiteral | null {
+  const property =
+    expression.kind === "propertyAccessExpression" && selectsElement(expression.property.name);
+  const object = property
+    ? expression.object
+    : expression.kind === "indexExpression"
       ? expression.object
-      : expression.kind === "indexExpression"
-        ? expression.object
-        : null;
+      : null;
   if (object === null) return null;
   let inner = object;
   while (inner.kind === "parenthesizedExpression") {
@@ -569,7 +592,7 @@ function selectedList(expression: Expression, charge: Charge): ListLiteral | nul
     charge(1);
     inner = inner.expression;
   }
-  return inner.kind === "listLiteral" ? inner : null;
+  return inner.kind === "listLiteral" || (property && inner.kind === "setLiteral") ? inner : null;
 }
 
 /** Each object literal's properties by name, made on its first lookup (`ownerOf`), one unit per property it holds. */

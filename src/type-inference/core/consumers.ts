@@ -919,6 +919,7 @@ export class Consumers {
       units,
       counts: { ...(this.completion?.counts ?? closureCounts()), capped: 1, cappedAt: units },
       decisions: [],
+      ran: null,
     };
     return null;
   }
@@ -946,18 +947,32 @@ export class Consumers {
     } finally {
       // (its counters kept wherever it ended, its records only where it ran to its end: `receive` drops them past its
       // allowance)
-      this.completion = { units: work.total - since, counts: { ...closure.counts }, decisions: [] };
+      this.completion = {
+        units: work.total - since,
+        counts: { ...closure.counts },
+        decisions: [],
+        ran: null,
+      };
       closure.close();
     }
     for (const site of completer.completedChecks) this.completedChecks.add(site);
     this.completedWarnings.push(...completer.completedWarnings);
     const local = demandAllowanceFor(pass.program.flow.nodes.length);
-    this.completion = {
-      ...this.completion,
-      decisions: closure.decisions.map(({ key, units, allowance }) => ({
+    const records = closure.decisions.map(({ key, units, allowance }) => ({
+      key: keyed(key),
+      work: {
         ...completer.admission.decisionWork(decidedAt(keyed(key)), units, allowance, false),
         completion: { local },
-      })),
+      },
+    }));
+    // (the decisions C1 ran at, bound to the epoch of the pass it completed: none where it left the slice)
+    this.completion = {
+      ...this.completion,
+      decisions: records.map(({ work }) => work),
+      ran: {
+        epoch: epochOf(this.pass),
+        checked: records.filter(({ key }) => completer.#ran.has(key)).map(({ work }) => work),
+      },
     };
     const index = new Map<string, number>();
     requirements.forEach((r, at) => index.set(keptParts(work, r.place, r.path), at));
@@ -1005,13 +1020,17 @@ export class Consumers {
     }
     // A6, #1275: a completion decision that would reject a store or give a selecting store another target than the
     // settled pass's inputs leaves every obligation whose proof read it lost with that cause: never a refusal, a
-    // widening or a changed settled answer (decision 2 is deferred). Each decision the frontier made is checked as C1
-    // checks it (`admittedStores`), its rejections heard against the stores the settled pass rejected there.
-    const made = closure.decisions.map(({ key }) => keyed(key));
+    // widening or a changed settled answer (decision 2 is deferred). Each decision the completion made is checked as C1
+    // checks it (`admittedStores`), its rejections heard against the stores the settled pass rejected there: the
+    // frontier's, and each one made after them, as retargeting's reads pull a receiver's decision, to the fixed point
+    // (#2184). The keys checked are the record NoCheck reads (`#ran`, `completion.ran`).
     const { receivers, moved } = retargeted(this.admission);
     for (const key of receivers) closure.mark(key, "retarget");
     const rejected = new Set<number>();
-    for (const key of made) {
+    for (let at = 0; at < closure.decisions.length; at += 1) {
+      const key = keyed(closure.decisions[at]!.key);
+      if (this.#ran.has(key)) continue;
+      this.#ran.add(key);
       rejected.clear();
       this.admission.hearingRejections(
         (d) => rejected.add(d.uid),
@@ -1167,13 +1186,20 @@ export class Consumers {
 
   /**
    * The receiving closure's completion where one ran (`receive`): the units it charged to the total from its start (its
-   * obligations found, its completion pass and the questions asked again), its counters and decisions, else `null`.
+   * obligations found, its completion pass and the questions asked again), its counters and decisions, else `null`; and
+   * `ran`, the decisions its own C1 ran at, with the epoch of the pass it completed, which NoCheck reads
+   * (`Answers.completionRan`, #2184): `null` where it reached its allowance, wherever in it; none where it left the
+   * slice.
    */
   completion: {
     readonly units: number;
     readonly counts: ClosureCounts;
     readonly decisions: readonly DecisionWork[];
+    readonly ran: { readonly epoch: number; readonly checked: readonly DecisionWork[] } | null;
   } | null = null;
+
+  /** The keys the completion's own C1 ran at (`#completeIn`), each once. */
+  readonly #ran = new Set<CanonicalKey>();
 
   /**
    * The sites at which the receiving completion's own check of its decisions' stores (C1, `#completeIn`) owes a runtime

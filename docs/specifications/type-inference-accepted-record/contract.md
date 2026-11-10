@@ -222,7 +222,7 @@ earlier narrowing.
 parse, void exit or written type; a never-selected fallback certifies nothing. Null that another callable or handler may
 store and a use tested against the same producer stay warning cases. Answer whole-copy descendants by value rather than
 one route per field; a called function's written union proves itself at its use, with C1's copy rule applied at a store.
-`NarrowingRoutes.#checked` alone decides the closed tested-producer set: N1 tests under and/or/not, uses in guarded
+`RouteTests.checked` alone decides the closed tested-producer set: N1 tests under and/or/not, uses in guarded
 arms, later conjuncts and uses after passed statements with no intervening label. A guard held inside a loop or switch
 does not propagate past it; a `while` whose false condition proves the test and that no `break` leaves can pass. An
 unproved exit kind or arm shape counts as not tested, including the under-offers of a loop holding a guard and a guard

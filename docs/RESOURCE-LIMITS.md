@@ -171,12 +171,17 @@ answer, or of its default's below a written `object`, that the stop left unprove
 obligations cannot be found (`Answers.gated()` gives `null`), "a store whose required checks could not be established at
 the budget" (`lostCheck`), a decline no compile reaches (#2228); (c) after a settled stop, a store whose required check the published plan would not keep, "a
 store whose check was lost at the budget" (`lostCheck`), a stopped decision's own marks among them (#2080): one whose
-completion result is complete owes nothing where the completion owes no check at its store (a declared claim, #2184),
-else it is kept only by a check that carries its contract, and one whose result was lost or is absent only by a complete
+completion result is complete owes nothing where the completion's own C1 ran at its path, over every decision the
+completion made to the fixed point, and left no check at its store (what stays declared is in the list below, #2184),
+else it is kept only by a check that carries its contract, its store's part checks only where the stored value's own
+literal builds each level they pass over (#2231), and one whose result was lost or is absent only by a complete
 store check (a proved-open result, and a shape result not lost, need no further check at their extent, as for every
 obligation); (d) after a stop before admission settled, which decides nothing after the stop, the first owed obligation
 against `unknown`, a store's, a literal's or a typed call's mark, "a store whose check was left undecided at the budget"
-(`lostCheck`, #2080 part 2). (a) to (d), the reasons the gates and rule (R) decline with, carry
+(`lostCheck`, #2080 part 2); (e) after a settled stop, the first owed obligation against `unknown` that is not a store's
+(`settledOwed`, #2183): a fallback's, whose requirement the stop lost and no `fallbackCheck` carries, "a default whose
+check was lost at the budget", and any other rule's, which no set shows, as (b). (a) to (e), the reasons the gates and
+rule (R) decline with, carry
 `CandidateOutsideSlice.limit` (`LIMIT_REASONS`); a refusal the slice makes from a diagnostic or a contract a stop
 shaped, such as "this operand" from a stop's TSV043 warning, carries its coverage reason and not the marker, since the
 route cannot tell it from the same refusal without a stop (#2236, in the list below). Production compiles with the legacy type checker until the switch, which none of these bounds or
@@ -187,10 +192,16 @@ The requirement is #1526's
 (2026-11-05, TABLE r4.390), provisional. Condition 1, no executable candidate plan that lets a value through while a
 required check is missing, is built as one gate, `lostCheck` over `Answers.gated()`, declining on unknown obligations
 and lost checks, (b) and (c) above (#1781, `1ec334b94`; a stopped decision's own marks, #2080 part 1), and on undecided
-checks, (d) (#2080 part 2); that is no claim that every path to a missing check is repaired. Condition 2, every remaining
-case re-assessed before V2 replaces the legacy compiler, is open; its cases open at the time of writing (2026-11-10) are
-#1832, #1845 (with #1846), #1838 and #1836, #1772, a typed read a settled stop moved to `unknown` (#2183), the claim
-(c)'s NoCheck rests on (#2184), #1781's conservative natural-outside declines (128 rows in 8 sources, as reported in PR
+checks, (d) (#2080 part 2), and on a settled stop's lost defaults, (e) (#2183); that is no claim that every path to a
+missing check is repaired: a store whose C1 check a settled stop removed, where no obligation is owed, is open (#2245),
+and so is a contract a settled stop left incomplete that a natural producer reads, where C10 owes nothing (measured on
+no source, not shown impossible, #2183); and the gates do not test for a stop that shows only at a consumer read
+(`budget.exhausted` null, no decision stopped, #2256): none publishes a plan the natural one does not over the measured
+sets (0 of #2080's moved stops; 16 natural compiles, each its unstopped form; 688 of #2183's sweep settings, 448 equal
+to the natural plan and 240 refused in both compiles); one built outside them publishes where the natural compile
+refuses (a `get` default at demand 16, as on the base; #2256). Condition 2, every remaining case re-assessed before V2 replaces the legacy
+compiler, is open; its cases open at the time of writing (2026-11-10) are #1832, #1845 (with #1846), #1838 and #1836,
+#1772, the claim (c)'s NoCheck still rests on (#2184, in the list below), #1781's conservative natural-outside declines (128 rows in 8 sources, as reported in PR
 #1781's work-stop set sweep), and (d)'s natural declines: 106 compiles, each in one of the four modes, that stop at the
 work allowance or the read depth before admission settled (PR #2227's compiler replay against main 664f1183f, campaign
 `lane1a/2080-part2-replay`, over the areas of `tests/families` and `tools/corpus/fixture`, 51,749 sources, and the
@@ -222,13 +233,22 @@ changed warning or wording applies to the same change, the entry is its report:
   would notice, for a too-large script and a value wrong in more than one property, another property named in the same
   runtime error at the same place. Measured: 476 stopped plans changed over 186,428 forced settings; the remaining class
   reached at 16 settings in six sources built for it.
-- **The form of a store's check after a settled stop (open #2231).** A store the natural plan checks whole can be checked
-  by its parts, where the completion makes no check at the stored value. Where the claim #2184 records holds, a maker
-  would notice another wording of the same runtime error. It is not shown that a store checked by its parts has a part
-  at every level where its value may not be an object; a failure there would be a missing check, condition 1's defect
-  and not this entry. Measured: 4 settings on one source built for it, with equal outcomes over 678 host values; an
-  attempt to make the two forms disagree reached no part-checked store in 6,040 stops (343 published settled stops, each
-  checked whole).
+- **The form of a store's check after a settled stop (#2231).** A store the natural plan checks whole can be checked by
+  its parts, where the completion makes no check at the stored value. Its part checks keep the store's obligations only
+  where the stored value's own literal builds every level they pass over, so no level a part check skips can hold a
+  value that is no object or collection. A maker would notice another wording of the same runtime error. Measured on
+  main d62856a1a, every demand allowance, four held modes: 752 published settled stops on six first-asker sources and
+  5,165 on three alias sources built for it keep by parts, 13,338 keeps, each skipped level a literal container.
+- **What NoCheck still rests on after a settled stop (#2184).** A stopped decision's store owes no check where the
+  receiving completion's own C1 ran at its path, on one completion pass, and left none there (#2231). Two things stay
+  declared. First, that this pass, deciding on the settled pass's rejections and store targets, covers what the natural
+  final pass checks at the store: a bounded attempt found the two passes' inputs equal at 5,955 published settled stops,
+  and the written type's fast path decides some stores with no C1 decision (140 settings in sources built for it), each
+  carried there by its literal's own structure. Second, the decider's own level, which C1 passes over: on #2080's stop
+  corpus, 122 settings publish without the natural plan's whole check of a store whose one candidate is its own decider;
+  every path that check inspects is fixed by a typed binding or the store's own literal, none by host data. A maker
+  would notice nothing unless one of the two fails, which would be a missing check, condition 1's defect and not this
+  entry.
 - **A refusal a stop causes can name a construct the slice does not cover (#2236).** Where a stop leaves a condition's
   or a dict key's operand undecided, or a default's collection untyped, the candidate route refuses with the slice's
   coverage reason ("this operand"; "a default whose collection the value it stands in for does not type"), without the
@@ -247,6 +267,36 @@ changed warning or wording applies to the same change, the entry is its report:
   reading, only its `boolean` and `key` rules reach it inside the slice at that commit; a slice step admitting their
   syntax would open `shown`, C4's `operator` and `choice`. The default's refusal has no stop-only instance on those
   sets: it is known from #2227's matrix cells, and its throw site keeps no record of the stop.
+
+- **A typed read a settled stop moved to `unknown` is checked when the script runs, not at compile time (#2183).** Where
+  a settled stop leaves the value a consumer reads as `unknown`, a value the natural compile rejects (TSV043, TSV010,
+  TSV011) compiles: a `repeat` count, a list index, a `for` collection or range bound, a receiver, a `get` index, a method
+  argument. The runtime's own validation rejects every excluded value before the consumer runs, so a maker would notice,
+  for a script too large for its budget, a runtime error where the same script fitting its budget is refused when it
+  compiles. Measured on main c42d6a6c5 at demand 64, four modes, on witnesses built for it (the repeat count, index,
+  `for`, receiver, `get` index and range bound), with 31 values over the 19 kinds without identity: no excluded value
+  reached the next statement; the argument validators are total for text methods, `join`, the set operations, `get`'s
+  index while its `indexCheck` stands, and dict keys. Outside the slice today, and so not asked: `take`, `removeAt`,
+  `addAll`, `add`, the numeric, random and statistics arguments, and the defaulting builtins (`toInteger`, `toNumber`,
+  `toBoolean`, the temporal conversions, `fromJson`, `fileFromBase64`), whose excluded values pick the default instead of
+  failing; a slice step that admits one asks the question again. The stop oracle (`stopRuns`) reads such a compile
+  `open` wherever a run passes the consumer's instruction, whatever the value there: with no natural plan it cannot tell
+  a value the consumer admits from one it rejects. Those readings are not escapes, and this entry rests on the witnesses
+  and the validators above, not on the oracle: 2 of #2080's 6,379 moved stops read so (a `repeat` count, held modes 1 and
+  3, demand 64). A refined reading is its own item (#2274). A `get` default and an `otherwise` fallback are not in this
+  entry: their checks are a plan's, which (e) declines when the stop loses them.
+- **(e) declines some defaults the natural plan does not check (#2183).** A settled stop leaves a fallback's requirement
+  `unknown` wherever the receiving value's kinds were the stop's, also where the natural plan makes no `fallbackCheck`,
+  so (e) refuses there too. A maker would notice, for a script too large for its budget, a refusal where the script that
+  fits compiles. None of the 260,684 sampled natural compiles (the corpus and the families, four modes, 40 settled stops
+  among them) is refused under (e). A read 1,030 wrappers deep that ends in a `get` default (20,514 bytes) is refused
+  naturally, at the read depth after admission settled, in all four modes; before (e) it published with `TSV076` and
+  ran an unchecked default (PR #2257's final review). Measured: over #2080's 6,379 moved stops, 24 published settled
+  settings move from equal plans (`closed`) to declined, 6 sources with an object-literal default in four modes. Over
+  #2183's sweep (510 sources built for fallbacks, 21,410 settings, main c42d6a6c5), 1,471 published settled settings
+  with no natural `fallbackCheck` decline: 303 `closed`, the false declines; 1,152 `unwitnessed`; 16 `open`, #2245's
+  witness, an escape (e) stops. A literal default is not excepted: one that does not fit is a natural compile error, and
+  at the stop the receiver's requirement is gone.
 
 How a repair of the type core's work is accepted against `main` (its growth gate) is a testing rule:
 [Scaling diagnostics](TESTING.md#scaling-diagnostics).
