@@ -174,9 +174,6 @@ test("normalizes each notation as colorjs.io does, rejects exactly what it rejec
         assert.ok(Math.abs(value - found[index]!) <= 1e-12, `${input}: ${normalized}`),
       );
     }
-  // Today's rejections of inputs whose conversion overflows stay rejections, so the compiler's TSC008 does not move.
-  for (const input of EXTREME_INPUTS)
-    assert.equal(normalizeColor(input) === null, colorjsOklch(input) === null, input);
   // Beyond two turns the reference loses accuracy; degrees reduce exactly, so a whole hue gives its remainder's colour.
   for (const hue of [721, 1e6 + 7, 2 ** 40 + 90, 1e15 + 270, 9007199254740991])
     assert.equal(
@@ -272,7 +269,14 @@ test("converts with no host transcendental, colorjs.io's parsing included", () =
   assert.deepEqual(attempts, []);
 });
 
-const CONVERSION_FILES = ["src/color.ts", "src/deterministic-math.ts", "src/numeric-functions.ts"];
+const CONVERSION_FILES = [
+  "src/color.ts",
+  "src/color-text.ts",
+  "src/deterministic-math.ts",
+  "src/numeric-functions.ts",
+];
+/** The closed module that makes a normalized colour's text. */
+const TEXT_MODULE = "src/color-text.ts";
 const EXACT_MATH = new Set([
   "abs",
   "ceil",
@@ -289,8 +293,10 @@ const PINNED_IMPORTS: Readonly<Record<string, readonly string[]>> = {
   "src/color.ts": [
     "colorjs.io: Color {}",
     "./deterministic-math.js: {atan2Degrees, cosDegrees, cubeRoot, sinDegrees}",
+    "./color-text.js: {formatNumber}",
     "./numeric-functions.js: {positivePower}",
   ],
+  "src/color-text.ts": [],
   "src/deterministic-math.ts": [],
   "src/numeric-functions.ts": [
     "./angle.js: {angleValue, formatAngle, type StoredAngle}",
@@ -299,25 +305,31 @@ const PINNED_IMPORTS: Readonly<Record<string, readonly string[]>> = {
     "type ./language-facts.js: {NumericFunctionName}",
   ],
 };
-/** Methods `src/color.ts` may call, by the receiver's type; `toExponential` and `String` only in `formatNumber`. */
-const COLOR_METHODS: Readonly<Record<string, readonly string[]>> = {
-  string: ["endsWith", "repeat", "replace", "slice", "split", "toLowerCase", "trim"],
-  RegExp: ["exec", "test"],
-  array: ["every", "push", "slice"],
-  RegExpExecArray: ["slice"],
-  DataView: ["getBigUint64", "setFloat64"],
+/** Methods each checked module may call, by the receiver's type. */
+const METHODS: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
+  "src/color.ts": {
+    string: ["toLowerCase", "trim"],
+    RegExp: ["exec", "test"],
+    array: ["every", "slice"],
+    RegExpExecArray: ["slice"],
+  },
+  [TEXT_MODULE]: {
+    string: ["endsWith", "repeat", "replace", "slice", "split"],
+    number: ["toExponential"],
+    array: ["push", "slice"],
+    DataView: ["getBigUint64", "setFloat64"],
+  },
 };
-const COLOR_GLOBALS = new Set(["ArrayBuffer", "BigInt", "DataView", "Error", "Number", "RegExp"]);
-/** The functions that make a normalized colour's text. */
-const FORMATTER = new Set([
-  "formatNumber",
-  "significantDigits",
-  "binaryParts",
-  "decimalDistance",
-  "layout",
-]);
-/** The syntax the formatter's functions are written in; any other kind there is an escape. */
-const FORMATTER_KINDS = new Set<ts.SyntaxKind>([
+/** Globals each checked module may call; `String` only in the text module, which reads its digit count. */
+const GLOBALS: Readonly<Record<string, ReadonlySet<string>>> = {
+  "src/color.ts": new Set(["Number", "RegExp"]),
+  [TEXT_MODULE]: new Set(["ArrayBuffer", "BigInt", "DataView", "Error", "Number", "String"]),
+};
+/** The syntax the text module is written in; any other kind there is an escape. */
+const TEXT_MODULE_KINDS = new Set<ts.SyntaxKind>([
+  ts.SyntaxKind.EndOfFileToken,
+  ts.SyntaxKind.ExportKeyword,
+  ts.SyntaxKind.FunctionDeclaration,
   ts.SyntaxKind.AmpersandAmpersandToken,
   ts.SyntaxKind.AmpersandToken,
   ts.SyntaxKind.ArrayBindingPattern,
@@ -385,18 +397,20 @@ const FORMATTER_KINDS = new Set<ts.SyntaxKind>([
 
 /**
  * Clause 1's closed admission, as `file:line form` for each use outside it. Its purposes: the conversion reaches no host
- * transcendental, and the text of a normalized colour is made only by the formatter, from the three components, while
- * the formatter makes text only from strings and bigints (and the two exactly specified readings of a number:
+ * transcendental, and the text of a normalized colour is made only by `src/color-text.ts`, from the three components,
+ * a module that makes text only from strings and bigints (and the two exactly specified readings of a number:
  * `toExponential`'s digits and `String`'s digit count).
- * - In all three files, every reference to the global `Math` is a direct call of an exact member or a read of `PI`;
- *   `globalThis`, `window`, `self`, a binding named `Math`, and `**` or `**=` other than between bigints are refused;
- *   each file's import declarations equal `PINNED_IMPORTS`, and a dynamic `import()` is refused.
- * - In `src/color.ts`, colorjs.io's binding is only `new Color(…)`, read for `.alpha` or the initializer of one `const`
+ * - In all four files, every reference to the global `Math` is a direct call of an exact member or a read of `PI`;
+ *   `globalThis`, `window` and `self` are refused wherever they occur, as is a binding named `Math` and `**` or `**=`
+ *   other than between bigints; each file's import declarations equal `PINNED_IMPORTS`, and a dynamic `import()` is
+ *   refused.
+ * - `src/color-text.ts` imports nothing and is checked whole: only `TEXT_MODULE_KINDS`, its own functions and the
+ *   admitted globals and methods as callees, and template spans and string `+` operands that are strings or bigints.
+ * - In `src/color.ts`, every return of `normalizeColor` is `null` or the one template
+ *   `oklch(${formatNumber(…)} ${formatNumber(…)} ${formatNumber(…)})` whose callees resolve to the text module's
+ *   `formatNumber`; colorjs.io's binding is only `new Color(…)`, read for `.alpha` or the initializer of one `const`
  *   read only for `.space.id`, `.coords[0]` to `[2]` or `.alpha`; every call's callee is one of the file's own
  *   functions, an imported one, an admitted global or method.
- * - The output: every return of `normalizeColor` is `null` or the one template `oklch(${formatNumber(…)} …)` with three
- *   direct `formatNumber` calls; the formatter's functions use only `FORMATTER_KINDS`, and their template spans and
- *   string `+` operands are strings or bigints.
  * Not claimed: a number turned into text elsewhere in `color.ts`, which by the output rule cannot reach a normalized
  * colour. colorjs.io's parsing is outside it; the throwing-`Math` run covers it.
  */
@@ -440,11 +454,8 @@ function conversionEscapes(overrides: Readonly<Record<string, string>> = {}): st
     const colorBindings = new Set<ts.Symbol>();
     const parsedBindings = new Set<ts.Symbol>();
     const imports: string[] = [];
-    const inFormatter = (node: ts.Node) =>
-      ts.findAncestor(
-        node,
-        (a) => ts.isFunctionDeclaration(a) && a.name?.text === "formatNumber",
-      ) !== undefined;
+    const textModule = name === TEXT_MODULE;
+    let formatterBinding: ts.Symbol | undefined;
     const typeName = (node: ts.Expression) => {
       const type = checker.getTypeAtLocation(node);
       const all = (flag: ts.TypeFlags) =>
@@ -476,8 +487,14 @@ function conversionEscapes(overrides: Readonly<Record<string, string>> = {}): st
           clause?.namedBindings !== undefined &&
           ts.isNamedImports(clause.namedBindings)
         )
-          for (const element of clause.namedBindings.elements)
+          for (const element of clause.namedBindings.elements) {
             ownFunctions.add(checker.getSymbolAtLocation(element.name)!);
+            if (
+              node.moduleSpecifier.text === "./color-text.js" &&
+              element.name.text === "formatNumber"
+            )
+              formatterBinding = checker.getSymbolAtLocation(element.name);
+          }
       }
       if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword)
         escape(node, "a dynamic import");
@@ -495,24 +512,16 @@ function conversionEscapes(overrides: Readonly<Record<string, string>> = {}): st
     collect(file);
     if (JSON.stringify(imports) !== JSON.stringify(PINNED_IMPORTS[name]))
       escape(file, `imports ${JSON.stringify(imports)}`);
-    const inFormatterFunctions = (node: ts.Node) =>
-      ts.findAncestor(
-        node,
-        (a) => ts.isFunctionDeclaration(a) && FORMATTER.has(a.name?.text ?? ""),
-      ) !== undefined;
+    if (textModule) {
+      const kinds = (node: ts.Node): void => {
+        if (!TEXT_MODULE_KINDS.has(node.kind)) escape(node, `${ts.SyntaxKind[node.kind]}`);
+        ts.forEachChild(node, kinds);
+      };
+      ts.forEachChild(file, kinds);
+    }
     if (color)
-      for (const statement of file.statements) {
-        if (!ts.isFunctionDeclaration(statement)) continue;
-        const declared = statement.name?.text ?? "";
-        if (FORMATTER.has(declared)) {
-          const kinds = (node: ts.Node): void => {
-            if (!FORMATTER_KINDS.has(node.kind))
-              escape(node, `${ts.SyntaxKind[node.kind]} in ${declared}`);
-            ts.forEachChild(node, kinds);
-          };
-          ts.forEachChild(statement, kinds);
-        }
-        if (declared === "normalizeColor") {
+      for (const statement of file.statements)
+        if (ts.isFunctionDeclaration(statement) && statement.name?.text === "normalizeColor") {
           const returns = (node: ts.Node): void => {
             if (ts.isFunctionLike(node) && node !== statement) return;
             if (ts.isReturnStatement(node)) {
@@ -526,11 +535,8 @@ function conversionEscapes(overrides: Readonly<Record<string, string>> = {}): st
                   (span, index) =>
                     span.literal.text === (index === 2 ? ")" : " ") &&
                     ts.isCallExpression(span.expression) &&
-                    ts.isIdentifier(span.expression.expression) &&
-                    span.expression.expression.text === "formatNumber" &&
-                    checker
-                      .getSymbolAtLocation(span.expression.expression)
-                      ?.declarations?.[0]?.getSourceFile() === file,
+                    formatterBinding !== undefined &&
+                    checker.getSymbolAtLocation(span.expression.expression) === formatterBinding,
                 );
               if (!(value?.kind === ts.SyntaxKind.NullKeyword || formatted))
                 escape(node, "a normalizeColor return that is not null or the formatted template");
@@ -539,7 +545,6 @@ function conversionEscapes(overrides: Readonly<Record<string, string>> = {}): st
           };
           ts.forEachChild(statement, returns);
         }
-      }
     const visit = (node: ts.Node): void => {
       const parent = node.parent;
       if (ts.isIdentifier(node)) {
@@ -553,7 +558,11 @@ function conversionEscapes(overrides: Readonly<Record<string, string>> = {}): st
             ts.isBindingElement(parent)) &&
           parent.name === node;
         if (declaresName && node.text === "Math") escape(node, "a binding named Math");
-        if (["globalThis", "window", "self"].includes(node.text) && isGlobal(node))
+        // By text, whatever the symbol: `globalThis` has no declaration in the default library.
+        if (
+          ["globalThis", "window", "self"].includes(node.text) &&
+          !(ts.isPropertyAccessExpression(parent) && parent.name === node)
+        )
           escape(node, node.text);
         if (
           node.text === "Math" &&
@@ -625,11 +634,11 @@ function conversionEscapes(overrides: Readonly<Record<string, string>> = {}): st
                 !assigned(grand)));
           if (!admitted) escape(node, "a parsed colorjs.io object's use");
         }
+        // `String` reads a number's digit count, in the text module only, and only as a callee.
         if (
-          color &&
           node.text === "String" &&
           isGlobal(node) &&
-          !(ts.isCallExpression(parent) && parent.expression === node && inFormatter(node))
+          !(textModule && ts.isCallExpression(parent) && parent.expression === node)
         )
           escape(node, "String");
       }
@@ -642,29 +651,23 @@ function conversionEscapes(overrides: Readonly<Record<string, string>> = {}): st
         !(typeName(node.left) === "bigint" && typeName(node.right) === "bigint")
       )
         escape(node, node.operatorToken.getText());
-      if (color && (ts.isCallExpression(node) || ts.isNewExpression(node))) {
+      if ((color || textModule) && (ts.isCallExpression(node) || ts.isNewExpression(node))) {
         const callee = node.expression;
         const symbol = ts.isIdentifier(callee) ? checker.getSymbolAtLocation(callee) : undefined;
         const admitted =
           (symbol !== undefined && (ownFunctions.has(symbol) || colorBindings.has(symbol))) ||
-          (ts.isIdentifier(callee) &&
-            isGlobal(callee) &&
-            (COLOR_GLOBALS.has(callee.text) || (callee.text === "String" && inFormatter(node)))) ||
+          (ts.isIdentifier(callee) && isGlobal(callee) && GLOBALS[name]!.has(callee.text)) ||
           (ts.isPropertyAccessExpression(callee) &&
             ((ts.isIdentifier(callee.expression) && callee.expression.text === "Math") ||
               (ts.isIdentifier(callee.expression) &&
                 callee.expression.text === "Number" &&
                 callee.name.text === "isFinite" &&
                 isGlobal(callee.expression)) ||
-              (COLOR_METHODS[typeName(callee.expression)] ?? []).includes(callee.name.text) ||
-              (callee.name.text === "toExponential" &&
-                typeName(callee.expression) === "number" &&
-                inFormatter(node))));
+              (METHODS[name]![typeName(callee.expression)] ?? []).includes(callee.name.text)));
         if (!admitted) escape(node, `a call of ${callee.getText()}`);
       }
       if (
-        color &&
-        inFormatterFunctions(node) &&
+        textModule &&
         (ts.isTemplateSpan(node) ||
           (ts.isBinaryExpression(node) &&
             [ts.SyntaxKind.PlusToken, ts.SyntaxKind.PlusEqualsToken].includes(
@@ -698,7 +701,7 @@ test("the colour conversion admits only exact operations, and a normalized colou
   };
   const RETURN =
     "return `oklch(${formatNumber(lightness)} ${formatNumber(chroma)} ${formatNumber(hue)})`;";
-  const FORMATTER_START = "function formatNumber(x: number): string {\n";
+  const FORMATTER_START = "export function formatNumber(x: number): string {\n";
   for (const [label, overrides] of [
     ["a non-exact Math member", added("src/color.ts", "export const a = () => Math.cbrt(2);")],
     ["an element access of Math", added("src/color.ts", 'export const a = () => Math["sqrt"](2);')],
@@ -774,9 +777,39 @@ test("the colour conversion admits only exact operations, and a normalized colou
     [
       "a computed key and for…in in the formatter",
       replaced(
-        "src/color.ts",
+        "src/color-text.ts",
         FORMATTER_START,
         `${FORMATTER_START}  for (const key in { [x]: true }) return key;\n`,
+      ),
+    ],
+    [
+      "a local formatNumber shadowing the text module's",
+      replaced(
+        "src/color.ts",
+        RETURN,
+        `function formatNumber(x: number): string {\n    for (const text in { [x]: true }) return text;\n    return "";\n  }\n  ${RETURN}`,
+      ),
+    ],
+    [
+      "an import into the text module",
+      added(
+        "src/color-text.ts",
+        'import { cubeRoot } from "./deterministic-math.js";\nexport const a = (x: number) => cubeRoot(x);',
+      ),
+    ],
+    [
+      "a helper in the text module that makes text from a number",
+      added(
+        "src/color-text.ts",
+        "export function helper(x: number): string {\n  return `${x}`;\n}",
+      ),
+    ],
+    [
+      "globalThis in cubeRoot",
+      replaced(
+        "src/deterministic-math.ts",
+        "  return sign * rounded(root, third)!;",
+        "  return globalThis.Math.cbrt(x);",
       ),
     ],
     [
@@ -799,58 +832,164 @@ test("the colour conversion admits only exact operations, and a normalized colou
     assert.notDeepEqual(conversionEscapes(overrides), [], label);
 });
 
-/** Every `lch()` grid input on which the head and colorjs.io's own conversion disagree about whether it is a colour. */
-function lchAcceptanceChanges(): string[] {
-  const chromas = Array.from({ length: 78 }, (_, index) => `1e${index * 4}`).concat(
-    "1.7976931348623157e308",
-  );
-  const hues = [
-    "0",
-    "30",
-    "45",
-    "90",
-    "180",
-    "270",
-    "360",
-    "450",
-    "540",
-    "-90",
-    "-180",
-    "1000",
-    "123.456",
-    "89.99999999999999",
-    "90.00000000000001",
-    "1e15",
-    "1e100",
-  ];
-  const changes: string[] = [];
-  for (const lightness of ["0", "50", "100"])
-    for (const chroma of chromas)
-      for (const hue of hues) {
-        const input = `lch(${lightness} ${chroma} ${hue})`;
-        if ((normalizeColor(input) === null) !== (colorjsOklch(input) === null))
-          changes.push(input);
-      }
-  return changes;
-}
+/**
+ * Clause 7's family: each channel of each notation over a ladder of magnitudes, at hues up to the largest finite
+ * radians. The bound 1e100 is derived: below it no intermediate can overflow (Lab's cube needs |a|/500 or |b|/200
+ * above about 5.6e102, so a coordinate of about 1e105; the matrices' row sums stay under 1.4; OKLab's square needs about
+ * 1.3e154), so both conversions accept; the smallest difference measured (26,544 inputs) is at 1e106. It is the
+ * claim's edge, not a limit on what a script may write: beyond it, acceptance follows the exact arithmetic, the same in
+ * every engine, and may differ from colorjs.io's either way.
+ */
+const BOUND = 1e100;
+const WITHIN = ["0", "5e-324", "1e-320", "1e-300", "1e-15", "1", "1e15", "1e50", "1e100"].flatMap(
+  (m) => (m === "0" ? [m] : [m, `-${m}`]),
+);
+const BEYOND = ["1e102", "1e106", "1e124", "1e200", "1e300", "1.7976931348623157e308"].flatMap(
+  (m) => [m, `-${m}`],
+);
+const HUES = [
+  "30",
+  "90",
+  "192",
+  "1e17",
+  "100000000000001000",
+  "1e20",
+  "1e100",
+  "1e300",
+  "5.7e307",
+  "5.8e307",
+];
+/** Each notation's channels as [name, base value, unit]; the hue channel is the one named `hue`. */
+const NOTATIONS: readonly (readonly [string, readonly (readonly [string, string, string])[]])[] = [
+  [
+    "rgb",
+    [
+      ["red", "128", ""],
+      ["green", "64", ""],
+      ["blue", "32", ""],
+    ],
+  ],
+  [
+    "rgb",
+    [
+      ["red", "50", "%"],
+      ["green", "25", "%"],
+      ["blue", "10", "%"],
+    ],
+  ],
+  [
+    "hsl",
+    [
+      ["hue", "30", ""],
+      ["saturation", "50", "%"],
+      ["lightness", "50", "%"],
+    ],
+  ],
+  [
+    "hwb",
+    [
+      ["hue", "30", ""],
+      ["whiteness", "10", "%"],
+      ["blackness", "10", "%"],
+    ],
+  ],
+  [
+    "lab",
+    [
+      ["lightness", "50", ""],
+      ["a", "20", ""],
+      ["b", "-30", ""],
+    ],
+  ],
+  [
+    "lch",
+    [
+      ["lightness", "50", ""],
+      ["chroma", "40", ""],
+      ["hue", "30", ""],
+    ],
+  ],
+  [
+    "oklab",
+    [
+      ["lightness", "0.5", ""],
+      ["a", "0.1", ""],
+      ["b", "-0.1", ""],
+    ],
+  ],
+  [
+    "oklch",
+    [
+      ["lightness", "0.5", ""],
+      ["chroma", "0.1", ""],
+      ["hue", "30", ""],
+    ],
+  ],
+];
 
-test("accepts an lch() colour that colorjs.io refused only for a trigonometric residue, and changes no other acceptance", () => {
-  // colorjs.io turns a hue into radians, where the cosine of 90° or the sine of 180° is about 1e-16 instead of 0; times
-  // a chroma of 1e124 or more, that overflows Lab's cube. In exact degrees the colour is finite, so it is accepted.
-  const changes = lchAcceptanceChanges();
-  for (const input of changes) {
-    const [, , , hue] = /^lch\((\S+) (\S+) (\S+)\)$/u.exec(input)!;
-    assert.ok(normalizeColor(input) !== null && colorjsOklch(input) === null, input);
-    assert.ok(Math.abs(Number(hue) % 90) === 0, input);
+test("accepts what colorjs.io accepts wherever no intermediate can overflow, and only differs beyond 1e100", () => {
+  const covered = new Set<string>();
+  const differences: { readonly input: string; readonly accepted: boolean }[] = [];
+  for (const [notation, channels] of NOTATIONS) {
+    const hueIndex = channels.findIndex(([channel]) => channel === "hue");
+    for (const [index, [channel]] of channels.entries())
+      for (const magnitude of [...WITHIN, ...BEYOND])
+        for (const hue of hueIndex < 0 || hueIndex === index ? [null] : HUES) {
+          const values = channels.map(([, value, unit], at) =>
+            at === index
+              ? `${magnitude}${unit}`
+              : at === hueIndex && hue !== null
+                ? hue
+                : `${value}${unit}`,
+          );
+          const input = `${notation}(${values.join(" ")})`;
+          const nonHue = values
+            .filter((_, at) => at !== hueIndex)
+            .map((value) => Math.abs(Number.parseFloat(value)));
+          const same = (normalizeColor(input) === null) === (colorjsOklch(input) === null);
+          if (nonHue.every((value) => value <= BOUND)) {
+            assert.ok(same, input);
+            covered.add(`${notation} ${channel} ${magnitude} ${hue ?? "-"}`);
+          } else if (!same) differences.push({ input, accepted: normalizeColor(input) !== null });
+        }
   }
-  assert.equal(changes.length, 432);
-  // Both sides of the line, through the compiler: a colour of the class compiles, and a neighbouring overflow that
-  // exact arithmetic reproduces (a hue whose radians are not finite) is still refused.
-  const accepted = compileSource('say prose(color: "lch(50 1e308 90)") "x"\nexit', {});
-  assert.deepEqual(accepted.diagnostics, []);
-  const refused = compileSource('say prose(color: "lch(50 20 1e308)") "x"\nexit', {});
-  assert.deepEqual(
-    refused.diagnostics.map((diagnostic) => diagnostic.code),
-    ["TSC008"],
-  );
+  // Coverage: every notation and channel at every magnitude within the bound, the hue channels over the hue set.
+  for (const [notation, channels] of NOTATIONS)
+    for (const [channel] of channels)
+      for (const magnitude of WITHIN)
+        assert.ok(
+          [...covered].some((key) => key.startsWith(`${notation} ${channel} ${magnitude} `)),
+          `${notation} ${channel} ${magnitude}`,
+        );
+  for (const hue of HUES)
+    assert.ok(
+      [...covered].some((key) => key.endsWith(` ${hue}`)),
+      hue,
+    );
+  // Beyond the bound, where every input above has a non-hue coordinate, the two differ in both directions.
+  assert.ok(differences.some(({ accepted }) => accepted));
+  assert.ok(differences.some(({ accepted }) => !accepted));
+});
+
+test("pins the acceptance line through the compiler: the bound, and both directions beyond it", () => {
+  const diagnostics = (color: string) =>
+    compileSource(`say prose(color: "${color}") "x"\nexit`, {}).diagnostics.map(
+      (diagnostic) => diagnostic.code,
+    );
+  // At the bound, each notation that can overflow accepts, as colorjs.io's conversion does.
+  for (const color of [
+    "lab(50 1e100 0)",
+    "lab(50 0 -1e100)",
+    "lch(50 1e100 30)",
+    "oklab(0.5 1e100 0)",
+    "oklab(0.5 0 -1e100)",
+    "oklch(0.5 1e100 30)",
+  ]) {
+    assert.notEqual(colorjsOklch(color), null, color);
+    assert.deepEqual(diagnostics(color), [], color);
+  }
+  // Beyond it: refused before and accepted now; accepted before and refused now; a hue whose radians are not finite.
+  assert.deepEqual(diagnostics("lch(50 1e308 90)"), []);
+  assert.deepEqual(diagnostics("lch(50 1e106 100000000000001000)"), ["TSC008"]);
+  assert.deepEqual(diagnostics("lch(50 20 1e308)"), ["TSC008"]);
 });
