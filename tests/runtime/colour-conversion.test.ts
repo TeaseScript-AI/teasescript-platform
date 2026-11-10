@@ -213,9 +213,19 @@ test("normalizes each notation as colorjs.io does, rejects exactly what it rejec
 
 test("prints each coordinate as Number::toString with its recommended choice, also at ties and powers of two", () => {
   // An OKLCH hue is not converted, so the hue channel carries any finite double to the formatter.
+  // Two of Sol r2's witnesses are written as text: one is a tie, the other has a shorter neighbour that reads back too.
   const doubles = [
-    0.30000000000000004, 2.9802322387695312e-8, 7.120236347223045e-307, 5e-324,
-    1.7976931348623157e308, 1e21, 1e-7, 123e-20, 0.1, 100, 1.0000000000000002,
+    0.30000000000000004,
+    Number("2.9802322387695312e-8"),
+    Number("7.120236347223045e-307"),
+    5e-324,
+    1.7976931348623157e308,
+    1e21,
+    1e-7,
+    123e-20,
+    0.1,
+    100,
+    1.0000000000000002,
   ];
   for (let exponent = -1074; exponent <= 1023; exponent += 1) doubles.push(2 ** exponent);
   for (const value of doubles.flatMap((x) => [x, -x]))
@@ -224,15 +234,16 @@ test("prints each coordinate as Number::toString with its recommended choice, al
 
 test("converts with no host transcendental, colorjs.io's parsing included", () => {
   const exact = new Set(["abs", "ceil", "floor", "max", "min", "round", "sign", "sqrt", "trunc"]);
-  const host = Math as unknown as Record<string, unknown>;
   const saved = new Map<string, unknown>();
-  for (const name of Object.getOwnPropertyNames(Math))
-    if (typeof host[name] === "function" && !exact.has(name)) {
-      saved.set(name, host[name]);
-      host[name] = () => {
+  for (const name of Object.getOwnPropertyNames(Math)) {
+    const member: unknown = Reflect.get(Math, name);
+    if (typeof member === "function" && !exact.has(name)) {
+      saved.set(name, member);
+      Reflect.set(Math, name, () => {
         throw new Error(`Math.${name} was called`);
-      };
+      });
     }
+  }
   const parsing = [
     "hsl(1rad 50% 50%)",
     "hsl(200grad 50% 50%)",
@@ -249,7 +260,7 @@ test("converts with no host transcendental, colorjs.io's parsing included", () =
     for (const input of [...Object.values(NOTATION_FAMILIES).flat(), ...EXTREME_INPUTS, ...parsing])
       normalizeColor(input);
   } finally {
-    for (const [name, value] of saved) host[name] = value;
+    for (const [name, value] of saved) Reflect.set(Math, name, value);
   }
 });
 
