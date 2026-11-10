@@ -286,3 +286,35 @@ test("the saved data's revision family ran every member's outcomes, and nothing 
   assert.deepEqual(coverageGaps(FEASIBLE, completed, { tuples: true }), []);
   assert.equal(FEASIBLE.length, 11);
 });
+
+// Nothing after the Player's unmount moves the revision: a Start whose read of the saved values completes after it.
+test("the saved data's revision: a Start read that completes after unmount moves nothing", async (context) => {
+  stubBrowser(context);
+  const at = browser();
+  let holdNext = false;
+  let reached = false;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const provider: ScriptStorageProvider = {
+    ...at.provider,
+    load: async () => {
+      if (holdNext) {
+        holdNext = false;
+        reached = true;
+        await gate;
+      }
+      return [];
+    },
+  };
+  const { host, scope } = await page(context, { ...at, provider }, ASKS);
+  const before = host.savedDataRevision.value;
+  holdNext = true;
+  const activating = host.activate();
+  await until(() => reached, "the Start's read is not held");
+  scope.stop();
+  release();
+  await activating;
+  await tasks();
+  assert.equal(host.session.value, null, "the unmounted Start began no session");
+  assert.equal(host.savedDataRevision.value, before, "the revision did not move");
+});

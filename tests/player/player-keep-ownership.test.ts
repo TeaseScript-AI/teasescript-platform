@@ -88,9 +88,10 @@ import {
  * store, its photos, the saved values' provider, the media store, the debug rooms and the host: its admission, with the
  * store it went to and the async context that made it, and its settlement apart. It fails a call no context owns, and a
  * write in the move's context the move does not make itself (`MOVE_WRITES`). Every row also asserts that a stale
- * operation changes nothing of the page (activation, the loaded saved values and the stored files they name,
- * `savedDataRevision`, the notices, the importing mark, the room and the debug room's marks) but releasing its own
- * importing mark, that its failure is neither shown nor thrown, and that no rejection goes unhandled; a current one
+ * operation changes nothing of the page (activation, the loaded saved values and the stored files they name, the
+ * notices, the importing mark, the room and the debug room's marks) but releasing its own importing mark; that the saved
+ * data's revision, which is no state of the page, moves once where its change landed on the route shown, and not
+ * otherwise (`persistence-ownership.ts`); that its failure is neither shown nor thrown, and that no rejection goes unhandled; a current one
  * goes on, and a current failure surfaces. Each read of the saved values gives values of its own, so a stale read's
  * values are seen if shown.
  */
@@ -1152,20 +1153,24 @@ async function ownershipRun(
   for (const change of log.changes.slice(changesAtMark).filter((made) => made.by === OPERATION)) {
     const {
       importing: markFrom,
-      activation: _from,
+      activation: activationFrom,
       savedDataRevision: revisionFrom,
       ...restFrom
     } = change.from;
     const {
       importing: markTo,
-      activation: _to,
+      activation: activationTo,
       savedDataRevision: revisionTo,
       ...restTo
     } = change.to;
     const moved = revisionTo - revisionFrom;
     revisionMoves += moved;
+    // Each change releases the importing mark or moves the revision once, the activation as it was; nothing else.
     assert.ok(
-      ((markFrom && !markTo) || moved === 1) && JSON.stringify(restFrom) === JSON.stringify(restTo),
+      (moved === 0 || moved === 1) &&
+        ((markFrom && !markTo) ||
+          (markFrom === markTo && moved === 1 && activationFrom === activationTo)) &&
+        JSON.stringify(restFrom) === JSON.stringify(restTo),
       `the stale ${producer} changed the page: ${JSON.stringify(change)}`,
     );
   }

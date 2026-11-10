@@ -152,7 +152,8 @@ export function useSavedValues({
   }
   /** Shows what `readScriptStorage` read, at once. */
   function applyScriptStorage(read: Awaited<ReturnType<typeof readScriptStorage>>): void {
-    if (read === undefined) return;
+    // A read that completes after the Player's unmount has no page to show it.
+    if (isDisposed() || read === undefined) return;
     if (read === null) {
       storedEntries.value = null;
       notices().publish(playerNotices.storageUnavailable());
