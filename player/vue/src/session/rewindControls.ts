@@ -48,8 +48,8 @@ export function postClose(
 }
 
 /**
- * Posts `action`'s renewal now, enrolling `shown`, or none. Its reply decides `renewed` or `renewFailed`, with the
- * timeline a current one installs (`timelines`, taken by `install`).
+ * Posts `action`'s renewal now, enrolling `shown`, or none, and decides its posting (`renewPosted`, `renewUnposted`). Its
+ * reply decides `renewed` or `renewFailed`, with the timeline a current one installs (`timelines`, taken by `install`).
  */
 export function postRenew(
   bridge: PlayerBridge,
@@ -64,12 +64,14 @@ export function postRenew(
       host.reportPageError(error);
   };
   const sent = bridge.historyRenew(intent, shown, action.closes);
-  // Not posted: the host never saw the renewal, nor the closes it carries. A close that could not be posted fails
-  // here, before any later decision posts; a lost connection's is the loss's.
+  // Not posted: the host never saw the renewal, nor the closes it carries; a lost connection's are the loss's. Each
+  // close is posted alone now, before any later decision posts, and what is left is the open's failure.
   if (!sent.posted) {
-    if (!endsQuietly(sent.error)) fail(action.closes.length > 0 ? "close" : "open", sent.error);
-    return;
+    if (endsQuietly(sent.error)) return;
+    host.decide({ kind: "renewUnposted", intent, closes: action.closes });
+    return fail("open", sent.error);
   }
+  host.decide({ kind: "renewPosted", intent });
   sent.reply
     .then(
       ({ result: renewed }) => {

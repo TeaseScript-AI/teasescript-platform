@@ -34,7 +34,10 @@ export interface LifecycleState {
    * session's, or a reinstated one's), before it is posted.
    */
   readonly awaiting: boolean;
-  /** The newest renewal posted to the host (0 before any): it replaced every history opened before it there. */
+  /**
+   * The newest renewal posted to the host (0 before any), as its posting said (`renewPosted`): it replaces every history
+   * opened before it there. A renewal that could not be posted moves nothing.
+   */
   readonly sent: number;
   /** The open history, or `null`. */
   readonly history: number | null;
@@ -93,7 +96,18 @@ export type LifecycleEvent =
   /** The session the page shows changed: the generation's first one is a pending renewal's target. */
   | { readonly kind: "follow" }
   | { readonly kind: "renewed"; readonly intent: number; readonly history: number }
-  /** A renewal failed: at a close (`close`, which blocks) or after its closes (`open`). */
+  /** A renewal was posted: the host runs it before any decided after it. */
+  | { readonly kind: "renewPosted"; readonly intent: number }
+  /** A renewal could not be posted: the host saw neither it nor the closes it carries. */
+  | {
+      readonly kind: "renewUnposted";
+      readonly intent: number;
+      readonly closes: readonly LifecycleCloseObligation[];
+    }
+  /**
+   * A renewal failed: the host refused a close (`close`, which blocks), or nothing opened after its closes, or it could
+   * not be posted (`open`).
+   */
   | { readonly kind: "renewFailed"; readonly intent: number; readonly stage: "close" | "open" }
   | { readonly kind: "newSession"; readonly intent: number }
   | { readonly kind: "retired"; readonly by: "clear" | "import"; readonly intent: number }
@@ -201,7 +215,7 @@ function ask(state: LifecycleState, which: LifecycleGate): [LifecycleState, Life
 
 /**
  * The renewal of `state`'s opening, posted now with the closes it carries: a Debug on asked for it while Debug off still
- * closed its history. `null` when none is due.
+ * closed its history. `null` when none is due. Its posting, not this decision, moves `sent` (`renewPosted`).
  */
 function renewNow(
   state: LifecycleState,
@@ -209,7 +223,7 @@ function renewNow(
 ): [LifecycleState, LifecycleAction] | null {
   if (!state.debug || state.blocked || state.opening === null) return null;
   return [
-    { ...state, awaiting: false, sent: state.opening },
+    { ...state, awaiting: false },
     { kind: "renew", intent: state.opening, closes },
   ];
 }
@@ -288,8 +302,13 @@ export function advanceLifecycle(state: LifecycleState, event: LifecycleEvent): 
         ? done({ ...state, opening: null, awaiting: false })
         : done(...renewal);
     }
+    case "renewPosted":
+      return done({ ...state, sent: event.intent });
+    case "renewUnposted":
+      // Each close it carried is still owed: posted alone now, with its reason, before any later decision posts.
+      return done(state, ...event.closes.map((close) => ({ kind: "close", ...close }) as const));
     case "renewed": {
-      // A newer renewal was posted since: the host replaced this history with it already.
+      // A newer renewal was posted since: the host ran it after this one, and it replaced this history there.
       if (event.intent < state.sent) return done(state);
       // Asked for by no one any more, the history this opened closes.
       if (event.intent !== state.opening || !state.debug)

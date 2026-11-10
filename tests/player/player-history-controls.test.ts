@@ -3,7 +3,13 @@ import { readFileSync } from "node:fs";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, type EffectScope, type Ref } from "vue";
 
-import { BridgeLostError, openBridge, type ClientPort } from "../../player/engine-bridge/client.js";
+import {
+  BridgeLostError,
+  openBridge,
+  type ClientPort,
+  type PostDisposition,
+} from "../../player/engine-bridge/client.js";
+import type { DebugHistorySpill } from "../../player/engine-bridge/history/snapshots.js";
 import { decodeMessage } from "../../player/engine-bridge/transport.js";
 import type * as CompileProject from "../../player/runtime/compile-project.js";
 import type * as InProcess from "../../player/engine-bridge/in-process.js";
@@ -141,6 +147,7 @@ interface RewindPlayer {
         readonly blocked: boolean;
         readonly debug: boolean;
         readonly history: number | null;
+        readonly sent: number;
       };
       /** A clear's or an import's retirement of the history, as the Player reports it. */
       retired(by: "clear" | "import"): readonly { readonly kind: string }[];
@@ -151,6 +158,8 @@ interface RewindPlayer {
   /** Ends the session and shows the start page, as the Player's Start page control does. */
   toStartPage(): void | Promise<void>;
   loadScriptStorage(): Promise<void>;
+  /** Removes the script's saved data, as the Player's Clear control does; resolves to whether it was cleared. */
+  clearScriptStorage(): Promise<boolean>;
   /** Adopts an inspected state as the session before input, as the Player's controls do. */
   prepareInput(): true | Promise<boolean>;
   setDebugTracing(on: boolean): void;
@@ -214,9 +223,14 @@ async function until(check: () => boolean, what: string) {
 
 /**
  * The Player on a host replying after 5 ms, started on the rewind fixture: with Debug's rewind and its first point, or,
- * `debug` false, with Debug off until `toggle`.
+ * `debug` false, with Debug off until `toggle`. `historySpill` stores each history's snapshots, as the browser's
+ * database does.
  */
-async function mount(context: TestContext, debug = true) {
+async function mount(
+  context: TestContext,
+  debug = true,
+  historySpill?: () => Promise<DebugHistorySpill | null>,
+) {
   for (const [name, value] of Object.entries({
     document: Object.assign(new EventTarget(), { visibilityState: "visible" }),
     window: new EventTarget(),
@@ -241,7 +255,10 @@ async function mount(context: TestContext, debug = true) {
     if (args[0] === "[player] host error") reported.push(args[1]);
     else write(...args);
   });
-  const bridge = facade.createInProcessBackend(BUILD, { delayMs: 5 });
+  const bridge = facade.createInProcessBackend(BUILD, {
+    delayMs: 5,
+    ...(historySpill && { historySpill }),
+  });
   const scope = effectScope();
   // Saved data an adoption can replace.
   const storage = memoryStorage();
@@ -588,43 +605,161 @@ test("#2150: Debug turned on posts its renewal in that turn, behind the shown se
   healthy(mounted);
 });
 
+/** Each history's spill store in memory, a database of its own as in the browser: its rows, and whether it went. */
+function trackedSpill() {
+  const stores: { readonly rows: Map<number, string>; destroyed: boolean }[] = [];
+  const open = async (): Promise<DebugHistorySpill> => {
+    const store = { rows: new Map<number, string>(), destroyed: false };
+    stores.push(store);
+    return {
+      put: async (id, json) => void store.rows.set(id, json),
+      get: async (id) => store.rows.get(id),
+      delete: async (ids) => ids.forEach((id) => store.rows.delete(id)),
+      destroy: async () => {
+        store.rows.clear();
+        store.destroyed = true;
+      },
+    };
+  };
+  return { open, stores, rows: () => stores.reduce((sum, store) => sum + store.rows.size, 0) };
+}
+
+/**
+ * Fails the posting of the next requests of `ops`, as many as each says, where the client posts them (arguments that
+ * cannot cross), and records every request posted or tried, in order, with its arguments.
+ */
+function failPostings(context: TestContext, ops: Record<string, number>) {
+  const tried: { readonly op: string; readonly args: unknown; readonly posted: boolean }[] = [];
+  const left = new Map(Object.entries(ops));
+  const clone = globalThis.structuredClone;
+  context.after(() => void (globalThis.structuredClone = clone));
+  globalThis.structuredClone = <T>(value: T, options?: StructuredSerializeOptions): T => {
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      "kind" in value &&
+      value.kind === "request" &&
+      "op" in value &&
+      typeof value.op === "string" &&
+      "args" in value
+    ) {
+      const failing = left.get(value.op) ?? 0;
+      tried.push({ op: value.op, args: value.args, posted: failing === 0 });
+      if (failing > 0) {
+        left.set(value.op, failing - 1);
+        throw new Error(`injected: ${value.op} could not be posted`);
+      }
+    }
+    return clone(value, options);
+  };
+  return tried;
+}
+
+/** The host's timeline of `history`, or `null` once it closed there. */
+async function hostTimeline(mounted: Awaited<ReturnType<typeof mount>>, history: number) {
+  const { result } = await mounted.bridge.client.request("historyTimeline", { history });
+  return result;
+}
+
 for (const by of ["clear", "import"] as const)
-  test(`#2150 R1-01: a ${by}'s renewal whose carried close could not be posted blocks before anything else posts`, async (context) => {
+  test(`#2150 R1-01, R3-01: a ${by}'s renewal that could not be posted posts its carried close alone, before anything else posts`, async (context) => {
     const mounted = await mount(context);
     const { owner } = mounted.player.rewind;
     const held = owner.state.history;
     assert.notEqual(held, null);
-    const renewals: unknown[] = [];
-    const clone = globalThis.structuredClone;
-    context.after(() => void (globalThis.structuredClone = clone));
-    let fail = true;
-    globalThis.structuredClone = <T>(value: T, options?: StructuredSerializeOptions): T => {
-      if (
-        typeof value === "object" &&
-        value !== null &&
-        "kind" in value &&
-        value.kind === "request" &&
-        "op" in value &&
-        value.op === "historyRenew" &&
-        "args" in value
-      ) {
-        renewals.push(value.args);
-        if (fail) {
-          fail = false;
-          throw new Error(`injected: the ${by}'s renewal could not be posted`);
-        }
-      }
-      return clone(value, options);
-    };
+    const tried = failPostings(context, { historyRenew: 1 });
     owner.retired(by);
-    assert.equal(owner.state.blocked, true, "blocked in the deciding turn");
-    // A later Debug on renews nothing: its renewal would pass the close the host never saw.
-    mounted.toggle();
-    await until(() => mounted.reported.length === 1, "the failure reported once");
-    assert.equal(owner.state.blocked, true);
+    // In the deciding turn: the renewal carrying the close, not posted, then the close alone, posted.
+    const controls = tried.filter(({ op }) => op.startsWith("history"));
+    assert.deepEqual(
+      controls.map(({ op, posted }) => [op, posted]),
+      [
+        ["historyRenew", false],
+        ["historyClose", true],
+      ],
+    );
+    const [renewal, close] = controls.map(({ args }) => args);
+    assert.ok(typeof renewal === "object" && renewal !== null && "closes" in renewal);
+    assert.deepEqual(renewal.closes, [{ history: held, by }]);
+    assert.ok(typeof close === "object" && close !== null && "history" in close && "by" in close);
+    assert.deepEqual([close.history, close.by], [held, by]);
+    await until(() => mounted.reported.length === 1, "the open's failure reported");
+    assert.equal(await hostTimeline(mounted, held!), null, "the history closed on the host");
+    assert.equal(owner.state.blocked, false, "a close that was posted blocks nothing");
     assert.equal(owner.state.history, null);
-    // The one renewal tried carried the close; none was posted after it.
-    assert.equal(renewals.length, 1);
-    assert.ok(typeof renewals[0] === "object" && renewals[0] !== null && "closes" in renewals[0]);
-    assert.deepEqual(renewals[0].closes, [{ history: held, by }]);
+    await later(30);
+    assert.equal(mounted.reported.length, 1, "reported once");
+  });
+
+test("#2150 R3-01 witness 1: a renewal that could not be posted replaced nothing; the late history of the renewal before it closes, with its stored snapshot", async (context) => {
+  const spill = trackedSpill();
+  const mounted = await mount(context, false, spill.open);
+  const { owner } = mounted.player.rewind;
+  // The first renewal's reply waits until `release`; the renewal itself is posted, and the host runs it.
+  const raw = untypedClient(mounted.bridge.client);
+  const post = raw.post.bind(raw);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let first: number | null = null;
+  context.mock.method(raw, "post", (op: string, args: unknown): PostDisposition => {
+    const sent = post(op, args);
+    if (op !== "historyRenew" || first !== null || !sent.posted) return sent;
+    assert.ok(typeof args === "object" && args !== null && "intent" in args);
+    assert.ok(typeof args.intent === "number");
+    first = args.intent;
+    return { posted: true, reply: gate.then(() => sent.reply) };
+  });
+  mounted.toggle();
+  await until(() => first !== null, "the first renewal's post");
+  await until(() => spill.rows() === 1, "the first renewal's point stored");
+  mounted.debugOff();
+  // Debug on again: its renewal cannot be posted, and is reported.
+  failPostings(context, { historyRenew: 1 });
+  mounted.toggle();
+  await until(() => mounted.reported.length === 1, "the successor's failure reported");
+  assert.equal(owner.state.sent, first, "the newest renewal posted is still the first");
+  release();
+  await until(
+    () => spill.stores.every((store) => store.destroyed),
+    "the first history's store gone",
+  );
+  assert.equal(await hostTimeline(mounted, first!), null, "the first history closed on the host");
+  assert.equal(spill.rows(), 0);
+  assert.equal(owner.state.history, null);
+  assert.equal(owner.state.blocked, false);
+  assert.equal(mounted.reported.length, 1, "reported once");
+});
+
+for (const closePosts of [true, false])
+  test(`#2150 R3-01 witness 2: Clear whose renewal could not be posted ${closePosts ? "deletes the history's stored snapshots by its close alone" : "blocks and reports once when its close cannot be posted either; the host keeps the history until disposal, as at the base"}`, async (context) => {
+    const spill = trackedSpill();
+    const mounted = await mount(context, true, spill.open);
+    const { owner } = mounted.player.rewind;
+    // To the script's end, so that Clear may run.
+    assert.equal((await mounted.answer()).kind, "answered");
+    await until(
+      () => mounted.rewind().state.value.points.length === 2,
+      "the second choice's point",
+    );
+    assert.equal((await mounted.answer()).kind, "answered");
+    await until(() => mounted.player.session.value?.state.status === "halted", "the script's end");
+    const held = owner.state.history;
+    assert.notEqual(held, null);
+    const stored = spill.rows();
+    assert.ok(stored > 0, "the history's snapshots are stored");
+    failPostings(context, closePosts ? { historyRenew: 1 } : { historyRenew: 1, historyClose: 1 });
+    assert.equal(await mounted.player.clearScriptStorage(), true);
+    await until(() => mounted.reported.length === 1, "the failure reported");
+    await later(30);
+    assert.equal(mounted.reported.length, 1, "reported once");
+    assert.equal(owner.state.history, null);
+    if (closePosts) {
+      assert.equal(await hostTimeline(mounted, held!), null, "the history closed on the host");
+      assert.equal(spill.rows(), 0, "its stored snapshots deleted, as at the base");
+      assert.equal(owner.state.blocked, false);
+    } else {
+      assert.notEqual(await hostTimeline(mounted, held!), null, "the host keeps the history");
+      assert.equal(spill.rows(), stored, "and its stored snapshots, until the Player's disposal");
+      assert.equal(owner.state.blocked, true);
+    }
   });
