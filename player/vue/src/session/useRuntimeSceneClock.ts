@@ -106,10 +106,11 @@ export function useRuntimeSceneClock(
   let requested: { readonly id: string; phase: "waiting" | "sent" } | null = null;
   // A session the host refused as stopped or lost, which no automatic observation or wake asks for any more.
   let unavailable: string | null = null;
-  // The basis an automatic observation's retry carried when the host refused it, after refusing its first send too.
-  // The session is parked only while the page's latest basis equals it: no automatic observation is sent from it again,
-  // and a changed publication clears it. A refusal of the basis means the host
-  // published newer than the page holds, which a reply on its way normally brings (#2263 is when none comes).
+  // P: the basis an automatic observation's retry carried, read once before it was posted, when the host refused both
+  // its sends on their basis. While the latest stored basis still equals it, no automatic observation is sent: work is
+  // bounded to two sends. Scheduling resumes when a newer publication is shown (`scheduleWakeUp`), or at an existing
+  // opportunity that finds a newer basis. A refusal promises no reply: a publication applied to the store only, after
+  // the release, schedules nothing by itself, and a lost delivery is not recovered here (#2263).
   let failedAutomaticBasis: { readonly id: string; readonly revision: number } | null = null;
 
   /**
@@ -277,8 +278,8 @@ export function useRuntimeSceneClock(
     } finally {
       // The release of the admitted observation, however it ended: unless a newer one was admitted since, the clock
       // reconciles the wake with the session it shows now, without anything remembering what it consumed. What was due
-      // gets a wake, unless the session ended, holds, or its own observation was refused twice on the basis it still
-      // holds: that one waits for a changed publication.
+      // gets a wake, unless the session ended or holds, or both sends of its own automatic observation were refused on
+      // their basis and the latest stored basis still equals the retry's (P).
       if (requested === admitted) {
         requested = null;
         if (automatic && refusedBasis !== null && basisOf(shown).revision === refusedBasis)
@@ -435,7 +436,8 @@ export function useRuntimeSceneClock(
     if (!current || unavailable === current.id) return;
     displayTimeMs.value = sceneTimeMs(current);
     if (paused.value || pending !== null) return;
-    // An automatic observation failed on this basis: the publication that changes it schedules again.
+    // P: parked while the latest stored basis equals the refused retry's; a shown publication that changes it schedules
+    // again.
     const basis = basisOf(current);
     if (
       failedAutomaticBasis !== null &&

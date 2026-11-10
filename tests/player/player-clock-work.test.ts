@@ -893,11 +893,14 @@ test("a retired observation's reply publishes nothing, while the next one's wait
   await settle();
   const second = player.host.observe();
   await settle();
-  const shown = player.host.session.value;
+  const shown = player.host.session.value!;
   player.gate.releaseFirst();
   await first;
   await settle();
   assert.equal(player.host.session.value, shown, "the retired one publishes nothing");
+  // A healthy reply still reaches the store: stored, not shown, and its successor owns what shows next (P's provenance).
+  const bridge = await player.host.bridge;
+  assert.ok(bridge.latest(asShown(shown))!.revision > shown.revision, "the retired one's reply is stored");
   player.gate.release();
   assert.notEqual(await second, null);
   assert.notEqual(player.host.session.value, shown, "the live one publishes");
@@ -1907,11 +1910,24 @@ test("an explicit observation's publication lifts the wait on an unchanged basis
 });
 
 /*
- * What the basis fence names (P): the session is parked only while the page's latest basis equals the basis an
- * automatic observation's retry carried when the host refused it, after refusing its first send. The page's store is
- * left stale first (one success reply that cannot cross, #2263's precondition), so the host refuses the page's basis
- * genuinely. A publication then arrives at one moment of the automatic attempt, or never; the attempt's sends fail as
- * the failure kind says, with a send that cannot cross as the failure that is no refusal.
+ * The shown-publication family (P): automatic work parks only if both sends of an automatic observation were refused on
+ * their basis and the latest stored basis still equals the retry's submitted basis; a newer publication shown resumes
+ * it. The page's store is left stale first by an injected failed delivery (one success reply that cannot cross), so the
+ * host refuses the page's basis genuinely. A publication, applied to the store and shown, then arrives at one moment of
+ * the automatic attempt, or never; the attempt's sends fail as the failure kind says, with a send that cannot cross as
+ * the failure that is no refusal.
+ *
+ * P's provenance, one case each:
+ * - a healthy retired publication, stored and not shown, whose successor shows: "a retired observation's reply
+ *   publishes nothing, while the next one's waits";
+ * - an injected orphaned reply: this family's precondition;
+ * - a publication stored only, after the parked release: P promises no recovery from it; one existing opportunity
+ *   reaches the deadline (the test after this family);
+ * - a missing event segment against no gap: the store refuses a publication whose events do not continue its cursor
+ *   (`player-bridge-session.test.ts`, "a store applies publications by revision and requires their events to continue
+ *   its cursor"). No recovery is claimed;
+ * - terminal or replaced ownership: "a session the host halted gets no more of the clock's own observations" and "an
+ *   observation of a replaced session schedules nothing for the session that replaced it".
  */
 const PUBLICATION_AXES = {
   moment: [
@@ -1940,7 +1956,7 @@ const publicationRows = product(PUBLICATION_AXES).filter(
 const publicationRegistered: PublicationRow[] = [];
 for (const row of publicationRows) {
   publicationRegistered.push(row);
-  test(`the basis fence holds only when no publication came after the refused basis was sent: ${Object.values(row).join("; ")}`, async (context) => {
+  test(`the basis fence holds only when no shown publication came after the refused basis was sent: ${Object.values(row).join("; ")}`, async (context) => {
     const player = await mountClock(context, row.media === "on");
     player.stopSampling();
     const clone = globalThis.structuredClone;
@@ -2014,7 +2030,7 @@ for (const row of publicationRows) {
     );
     await player.advance(100);
     if (row.moment === "after release") {
-      // Parked: the clock's own observations stopped on the refused basis, until the publication.
+      // Parked: the clock's own observations stopped on the refused basis, until the shown publication.
       const parked = player.attempts.length;
       await player.advance(50);
       assert.equal(player.attempts.length, parked, "nothing is sent while the basis is unchanged");
@@ -2023,7 +2039,8 @@ for (const row of publicationRows) {
     }
     const reached = player.shown.value?.state.foregroundAction?.kind;
     if (row.moment === "never") {
-      // Written expectation: with no publication, the host refuses every basis the page holds; the clock parks.
+      // Written expectation: with no publication, the host refuses every basis the page holds; the clock parks, its
+      // work bounded.
       assert.notEqual(reached, "interaction", "parked");
       const parked = player.attempts.length;
       await player.advance(100);
@@ -2032,15 +2049,61 @@ for (const row of publicationRows) {
       assert.equal(
         reached,
         "interaction",
-        "a publication after the refused basis lifts or prevents the fence",
+        "a shown publication after the refused basis lifts or prevents the fence",
       );
   });
 }
-test("the publication-order family covers every feasible row and states why each other is excluded", () => {
+test("the shown-publication family covers every feasible row and states why each other is excluded", () => {
   assert.equal(product(PUBLICATION_AXES).length, 36);
   assert.deepEqual(coverageGaps(publicationRows, publicationRegistered, { tuples: true }), []);
   const feasible = new Set(publicationRows.map((row) => JSON.stringify(row)));
   for (const row of product(PUBLICATION_AXES))
     assert.equal(feasible.has(JSON.stringify(row)), publicationInfeasible(row) === null);
   assert.equal(publicationRows.length, 32);
+});
+
+test("after an injected failed delivery parks automatic work, one opportunity reaches the deadline once a publication is stored only", async (context) => {
+  const player = await mountClock(context, false);
+  player.stopSampling();
+  const clone = globalThis.structuredClone;
+  let failedReply = 0;
+  context.mock.method(
+    globalThis,
+    "structuredClone",
+    (value: unknown, options?: StructuredSerializeOptions) => {
+      const observedReply =
+        typeof value === "object" &&
+        value !== null &&
+        "kind" in value &&
+        value.kind === "reply" &&
+        "ok" in value &&
+        value.ok === true &&
+        "result" in value &&
+        typeof value.result === "object" &&
+        value.result !== null &&
+        "kind" in value.result &&
+        value.result.kind === "observed";
+      if (observedReply && failedReply === 0) {
+        failedReply += 1;
+        throw new Error("The success reply could not cross.");
+      }
+      return clone(value, options);
+    },
+  );
+  await assert.rejects(
+    player.bridge.request(asShown(player.initial), "observeTime", { atMs: 0, media: [] }),
+    /could not cross/,
+  );
+  await player.advance(100);
+  const parked = player.attempts.length;
+  await player.advance(50);
+  assert.equal(player.attempts.length, parked, "parked: both sends were refused on their basis");
+  // A publication applied to the store only: the shown reference stays.
+  const shown = player.shown.value!;
+  assert.equal(observeOnHost(shown, 0, []).outcome.kind, "observed");
+  assert.ok(player.bridge.latest(shown)!.revision > shown.revision);
+  assert.equal(player.shown.value, shown);
+  player.clock.catchUp();
+  await player.advance(100);
+  assert.equal(player.shown.value?.state.foregroundAction?.kind, "interaction");
 });
