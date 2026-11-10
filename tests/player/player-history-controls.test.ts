@@ -24,8 +24,8 @@ import { untypedClient } from "../helpers/bridge/untyped.js";
 
 /*
  * #2150 PR 1: Debug's rewind history controls are posted when the Player's rewind lifecycle decides them, in the host's
- * arrival order, behind no unrelated request's reply (`BridgeClient.post`). The sender sends the history controls and
- * nothing else. With a busy connection queue, Debug turned on during a session takes the choice shown then as its first
+ * arrival order, behind no unrelated request's reply, as every request of no session now is (`BridgeClient.request` and
+ * `post`). With a busy connection queue, Debug turned on during a session takes the choice shown then as its first
  * point even when it is answered at once, and each rewind step and Debug's end and return settle as with an idle queue.
  */
 
