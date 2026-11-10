@@ -111,9 +111,9 @@ export class RouteTests {
   #endings: Endings | null = null;
   /** The program's `if`s whose conditions hold a test (`#testing`). */
   readonly #ifs: TreeStatement[] = [];
-  /** Whether the program holds an `if` arm infeasible by entry narrowing (`#holdsInfeasible`), made on the first query. */
+  /** Whether the program holds an `if` arm infeasible or unavailable (`holdsInfeasible`), made on the first query. */
   #holds: boolean | null = null;
-  /** Per arm, whether its entry's narrowing leaves a tested read no kind (`#infeasible`). */
+  /** Per arm, its feasibility: infeasible, unavailable evidence, or feasible (`#infeasible`). */
   readonly #infeasibleArms = new Map<TreeBlock, ArmFeasibility>();
   /** Per `if` or `while`, its condition's tests as facts (`#conditionFacts`). */
   readonly #conditions = new Map<TreeStatement, ConditionFacts | null>();
@@ -359,13 +359,13 @@ export class RouteTests {
   }
 
   /**
-   * The route rule's default (Sol's F2 on #1937, then Codex r6 and r7; the lead's ruling; #1938 designs the precise
-   * rule): the certificate promotes to an error only where no live `if` arm of the program's admitted callables is
-   * infeasible by entry narrowing (N1's forms over the core's items, `#infeasible`) or has a stopped tested read, so none
-   * on the use's witness chain or among the callables whose results or defaults reach it does; otherwise the use keeps
-   * main's warning. An uncalled function contributes no live arm. An arm it does not prove counts as feasible: a
-   * comparison that is constant outside N1's forms (`o.k == 1`), a loop's exit, a `switch` case, another location's
-   * test. One answer per program, from the `if`s `#testing` finds once.
+   * The route rule's default (Sol's F2 on #1937, then Codex r6 and r7; the lead's ruling): the certificate promotes to
+   * an error only where no live `if` arm of the program's admitted callables is infeasible by entry narrowing (N1's
+   * forms over the core's items, `#infeasible`) or has a stopped tested read, so none on the use's witness chain or
+   * among the callables whose results or defaults reach it does; otherwise the use keeps the warning. An uncalled
+   * function contributes no live arm. An arm it does not prove counts as feasible: a comparison that is constant
+   * outside N1's forms (`o.k == 1`), a loop's exit, a `switch` case, another location's test. One answer per program,
+   * from the `if`s `#testing` finds once.
    */
   protected *holdsInfeasible(): Work<boolean> {
     this.#work.charge("eventSteps");

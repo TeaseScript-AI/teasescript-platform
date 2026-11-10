@@ -137,7 +137,7 @@ const STEP = [
   ...core("type-inference/core/definitions.ts", ["keyBelow", "keyOf", "keyPath", "keyPlace"]),
   ...core("type-inference/core/exact-path.ts", ["withoutEmpty"]),
   ...core("type-inference/core/indexes/handlers.ts", ["HandlerIndex.afterSomeCreation"]),
-  // (a site's source text, kept as charged text at the call: `NarrowingRoutes.#text`)
+  // (a site's source text, kept as charged text at the call: `RouteTests.text`)
   ...core("type-inference/core/program.ts", [
     "CoreProgram.targetRoot",
     "CoreProgram.textAt",
