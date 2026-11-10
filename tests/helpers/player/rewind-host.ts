@@ -305,28 +305,34 @@ export function memoryStorage() {
   };
 }
 
+/**
+ * Each history's spill store in memory, a database of its own as in the browser (DEBUGGER.md "Rewind"): a history that
+ * closes destroys only its own rows, also while a newer history writes. Reads of every store can be held or failed.
+ */
 function memorySpill() {
   const state = { destroyed: 0 };
-  const rows = new Map<number, string>();
   let getHeld: Promise<void> | null = null;
   let getReached = false;
   let getFails = false;
-  const spill: DebugHistorySpill = {
-    put: async (id, json) => void rows.set(id, json),
-    get: async (id) => {
-      if (getHeld !== null) getReached = true;
-      await getHeld;
-      if (getFails) throw new Error("The read failed.");
-      return rows.get(id);
-    },
-    delete: async (ids) => ids.forEach((id) => rows.delete(id)),
-    destroy: async () => {
-      rows.clear();
-      state.destroyed += 1;
-    },
+  const open = (): DebugHistorySpill => {
+    const rows = new Map<number, string>();
+    return {
+      put: async (id, json) => void rows.set(id, json),
+      get: async (id) => {
+        if (getHeld !== null) getReached = true;
+        await getHeld;
+        if (getFails) throw new Error("The read failed.");
+        return rows.get(id);
+      },
+      delete: async (ids) => ids.forEach((id) => rows.delete(id)),
+      destroy: async () => {
+        rows.clear();
+        state.destroyed += 1;
+      },
+    };
   };
   return {
-    spill,
+    open,
     state,
     /** Holds every read until `release` is called; `reached` says whether one arrived at the hold. */
     holdGets() {
@@ -379,7 +385,7 @@ export function createHost(
     usePlayerSession({
       ...(lossy && { bridge: Promise.resolve(lossy.bridge) }),
       scriptStorage: provider,
-      debugHistorySpill: async () => spill.spill,
+      debugHistorySpill: async () => spill.open(),
       ...(options.debugRooms && { debugRooms: options.debugRooms }),
     }),
   );

@@ -23,6 +23,7 @@ import {
   type RewindHost,
 } from "../helpers/player/rewind-host.js";
 import { interceptSends } from "../helpers/bridge/sends.js";
+import { untypedClient } from "../helpers/bridge/untyped.js";
 
 /*
  * The lifetimes of what the Player's rewind owner holds (`player/vue/src/session/rewindOwner.ts`), through the real
@@ -35,9 +36,14 @@ import { interceptSends } from "../helpers/bridge/sends.js";
  *
  * Residuals no row can see through that surface, each with its bound: a candidate reference kept past `clearView` or
  * its drop (one session reference, overwritten by the next step's candidate, never shown); early deltas kept past
- * `clearView` (`enroll` applies only its own history's deltas); the parked reference kept past a loss (a lost owner
- * decides nothing more, and `returnToSession` settles `false`); an answered open's timeline kept (one map entry per
- * open, for the Player's life); and a close the loss rejects reported and blocking. Its rows show the close's request
+ * `clearView` (`install` applies only its own history's deltas); the parked reference kept past a loss (a lost owner
+ * decides nothing more, and `returnToSession` settles `false`); an answered renewal's timeline kept (one map entry per
+ * renewal, for the Player's life); and a close the loss rejects reported and blocking.
+ *
+ * A close in flight (#2150): the maker's close, or the renewal that carries a retirement's close, is posted at its
+ * decision, and a replacement's renewal right after it at its session's follow; the host runs them in that order. Their
+ * replies are held until the end has come. A close settlement is the host's own: a close of a history it does not hold
+ * (`close refused`), or a success reply that cannot cross (`close rejected live`), each failing the close there. Its rows show the close's request
  * rejected by the loss (`closeSettled`), so the owner's handler runs; the loss reported first, a lost Player drops
  * every later report (`activationRun.revoke()`), and a lost owner decides nothing more.
  */
@@ -165,6 +171,10 @@ function infeasible(c: Case): string | null {
   if (end === "open failure" && !debugAtEnd(c)) return "Debug off asks for no open";
   if (maker === "disposal" && !CLOSE_SETTLEMENTS.includes(end))
     return "the Player is unmounted: only its close's settlement comes after its disposal";
+  if (maker === "import" && resource === "close in flight" && end === "open failure")
+    return "an import's own renewal replaces the one its ended session's follow posted: the held one is obsolete";
+  if (maker === "disposal" && end === "close refused")
+    return "the host refuses no disposal of its current Player: it closes every history there is";
   if (!debugAtEnd(c) && (end === "Debug off" || end === "disposal by Debug's scope"))
     return "Debug off already ended Debug's scope";
   if (!debugAtEnd(c) && STEP_ENDS.includes(end))
@@ -212,7 +222,51 @@ type Release = Settlement | "fail gate";
  * The bridge's rewind requests: each op sent, in order; the next request of an op held before it is posted, or with
  * its answer held, until its release; and an op's answers replaced.
  */
+type Reply = Promise<BridgeResult>;
+
 function traffic(context: TestContext, bridge: PlayerBridge) {
+  // The client's own post, taken before `interceptSends` routes it, for a request the host is to refuse.
+  const raw = untypedClient(bridge.client);
+  const realPost = raw.post.bind(raw);
+  /** The host failure the next request of an op meets (`hostFails`). */
+  const failing = new Map<string, "refuse" | "reject">();
+  // A request whose success reply is not to cross, by its ID, which the outgoing request names.
+  const failingReplies = new Set<number>();
+  const clone = globalThis.structuredClone;
+  context.mock.method(
+    globalThis,
+    "structuredClone",
+    (value: unknown, options?: StructuredSerializeOptions) => {
+      if (typeof value === "object" && value !== null && "kind" in value && "id" in value) {
+        const { kind, id } = value as { kind: unknown; id: unknown };
+        const op = "op" in value ? (value as { op: unknown }).op : null;
+        if (kind === "request" && typeof op === "string" && failing.get(op) === "reject") {
+          failing.delete(op);
+          if (typeof id === "number") failingReplies.add(id);
+        }
+        const ok = "ok" in value && (value as { ok: unknown }).ok === true;
+        if (kind === "reply" && ok && typeof id === "number" && failingReplies.delete(id))
+          throw new Error("injected: the success reply cannot cross");
+      }
+      return clone(value, options);
+    },
+  );
+  /** The request of `op` as the host is to meet it: a close of a history it does not hold, when it is to refuse. */
+  const sending = (op: string, args: unknown, send: () => Reply): (() => Reply) => {
+    if (failing.get(op) !== "refuse") return send;
+    failing.delete(op);
+    // EVIDENCE: fixture: the Player sends these two ops with these fields.
+    const each = args as { readonly closes?: readonly object[] };
+    const missing = { history: 999_999 };
+    const mutated =
+      op === "historyRenew"
+        ? { ...each, closes: (each.closes ?? []).map((close) => ({ ...close, ...missing })) }
+        : { ...each, ...missing };
+    return () => {
+      const posted = realPost(op, mutated);
+      return posted.posted ? posted.reply : Promise.reject(posted.error);
+    };
+  };
   const sent: string[] = [];
   const candidates: string[] = [];
   const answers = new Map<string, Settlement>();
@@ -226,7 +280,6 @@ function traffic(context: TestContext, bridge: PlayerBridge) {
       settled(outcome: string): void;
     }
   >();
-  type Reply = Promise<BridgeResult>;
   const post = (op: string, send: () => Reply): Reply =>
     send().then((reply) => {
       if ((op === "rewindBack" || op === "rewindForward") && typeof reply.session === "string")
@@ -250,7 +303,8 @@ function traffic(context: TestContext, bridge: PlayerBridge) {
         : Promise.resolve(refused());
     return posted === undefined ? fail() : posted.then(fail);
   };
-  interceptSends(context, bridge.client, (op, _args, send) => {
+  interceptSends(context, bridge.client, (op, args, given) => {
+    const send = sending(op, args, given);
     if (/^(history|rewind)/.test(op)) sent.push(op);
     const hold = holds.get(op);
     const next = once.get(op);
@@ -273,6 +327,8 @@ function traffic(context: TestContext, bridge: PlayerBridge) {
     answer: (op: string, how: Settlement) => void answers.set(op, how),
     /** Answers the next request of `op` as `how`, and later ones as the host does. */
     answerNext: (op: string, how: Settlement) => void once.set(op, how),
+    /** Has the host fail the next request of `op`: refuse it, or abort its delivery as its success reply cannot cross. */
+    hostFails: (op: string, how: "refuse" | "reject") => void failing.set(op, how),
     /**
      * Holds the next request of `op`, before it is posted or with the host's answer, until `release`, which says how it
      * is answered; `outcome` is how the page's request settled.
@@ -343,6 +399,8 @@ interface World {
   release: ((how: Release) => void) | null;
   /** How the held close's request settled. */
   closeOutcome: Promise<string> | null;
+  /** Where the maker's history controls begin in the traffic, for a close in flight. */
+  postedFrom: number | null;
 }
 
 async function replace(world: World) {
@@ -395,6 +453,12 @@ async function inspect(world: World) {
   await settle(world.context);
 }
 
+/** The host failure a close settlement end has the maker's `op` meet, before it is posted. */
+function hostFailure(world: World, c: Case, op: string) {
+  if (c.end === "close refused") world.traffic.hostFails(op, "refuse");
+  if (c.end === "close rejected live") world.traffic.hostFails(op, "reject");
+}
+
 /** The host's answer that fails each problem's step, but for the restart gate's failure. */
 const FAILURES: Partial<Record<Case["maker"], readonly [string, Settlement]>> = {
   "step refused": ["rewindBack", "refuse"],
@@ -410,7 +474,7 @@ async function make(world: World, c: Case) {
   if (c.resource === "early deltas") {
     // A replacement's new history, whose open the host answered: the page has its reply only after the session
     // published deltas of that history.
-    const held = requests.hold("historyOpen", "reply");
+    const held = requests.hold("historyRenew", "reply");
     await replace(world);
     await held.arrived;
     await play(world, halted);
@@ -420,7 +484,12 @@ async function make(world: World, c: Case) {
   if (c.maker === "new session") await replace(world);
   if (c.maker === "Debug off" && c.resource === "close in flight") {
     await play(world, halted);
-    const held = requests.hold("historyClose");
+    hostFailure(world, c, "historyClose");
+    const held = requests.hold(
+      "historyClose",
+      c.end === "close rejected by loss" ? "request" : "reply",
+    );
+    world.postedFrom = requests.sent.length;
     world.debug.stop();
     await held.arrived;
     world.release = (how) => held.release(how === "fail gate" ? "pass" : how);
@@ -430,13 +499,33 @@ async function make(world: World, c: Case) {
   await play(world, halted);
   if (c.resource === "close in flight") {
     if (inspecting) await inspect(world);
-    const held = requests.hold("historyClose");
+    // A clear's close rides on its renewal. A replacement's, or an import's that ends the running session, is posted at
+    // the new generation, and its renewal follows at that generation's follow; an import then renews once more.
+    // An import over an ended session (the clear end's rows play the session to its end) does not end it: its close
+    // rides on its renewal, as a clear's does.
+    const carried = c.maker === "clear" || (c.maker === "import" && c.end === "clear");
+    const op = carried ? "historyRenew" : "historyClose";
+    hostFailure(world, c, op);
+    // A close the loss rejects has not reached the host: its request waits; any other is posted, its reply held.
+    const held = requests.hold(op, c.end === "close rejected by loss" ? "request" : "reply");
+    const renewal =
+      c.maker === "replacement" || (c.maker === "import" && !carried)
+        ? requests.hold("historyRenew", "reply")
+        : null;
+    world.postedFrom = requests.sent.length;
     if (c.maker === "replacement") await replace(world);
     else if (c.maker === "clear") await clear(world);
     else if (c.maker === "import") await importOwn(world);
     else world.scope.stop();
     await held.arrived;
-    world.release = (how) => held.release(how === "fail gate" ? "pass" : how);
+    await renewal?.arrived;
+    world.release = (how) => {
+      const answer = how === "fail gate" ? "pass" : how;
+      // The close goes first, as the host ran it; a renewal's own failure is its reply's.
+      if (renewal === null) return held.release(answer);
+      held.release("pass");
+      renewal.release(answer);
+    };
     world.closeOutcome = held.outcome;
     return;
   }
@@ -579,14 +668,12 @@ async function end(world: World, c: Case) {
       assert.equal(await world.rewind.resume(), false, "the failed adoption");
       break;
     case "open failure":
-      if (c.resource === "early deltas") release("reject");
-      else world.traffic.answerNext("historyOpen", "reject");
+      release("reject");
       break;
     case "close refused":
-      release("refuse");
-      break;
     case "close rejected live":
-      release("reject");
+      // The host failed the close already; its reply carries that.
+      release("pass");
       break;
     case "stop":
       host.reportHostError(new Error("A Player error."));
@@ -604,8 +691,10 @@ interface EndRecord {
   readonly problem: string | null;
   readonly closes: number;
   readonly opens: number;
-  /** The opens sent while the maker's close or open was still held. */
+  /** The renewals sent while the maker's close or renewal was still held. */
   readonly opensWhileHeld?: number;
+  /** The history controls the maker posted, in order, for a close in flight. */
+  readonly posted?: readonly string[];
   readonly reports: number;
   readonly held?: boolean;
   readonly asked?: boolean;
@@ -636,8 +725,17 @@ function expectedEnd(c: Case): EndRecord {
       : c.end === "loss" || c.end === "close rejected by loss"
         ? "loss"
         : null;
-  // A sealed owner decides nothing on a close's settlement.
-  const blocked = (c.end === "close refused" || c.end === "close rejected live") && sealed === null;
+  // The maker's close or renewal is in flight; a retirement's close rides on its renewal.
+  const carried =
+    c.resource === "close in flight" &&
+    (c.maker === "clear" || (c.maker === "import" && c.end === "clear"));
+  // An import ends a running or inspected session first (`useSavedDataTransfer.ts`); one that ended stays.
+  const halted = c.end === "clear" || c.maker === "retirement" || c.maker === "clear";
+  const importEnds = !halted || inspecting;
+  const hostFailed = c.end === "close refused" || c.end === "close rejected live";
+  // A sealed owner decides nothing on a close's settlement. A renewal whose reply cannot cross failed after its closes,
+  // so its carried close blocks nothing.
+  const blocked = hostFailed && sealed === null && !(carried && c.end === "close rejected live");
   // A history is open when the end comes: not while one opens or closes, nor after Debug off.
   const open = debug && c.resource !== "early deltas" && c.resource !== "close in flight";
   // The ends that close the open history and, with Debug on, open the next one.
@@ -648,42 +746,68 @@ function expectedEnd(c: Case): EndRecord {
   if (open && closing) view = "none";
   if (reopens) view = "new";
   if (open && sealed === "loss") view = "kept, closed";
-  let closes = open && closing ? 1 : 0;
-  let opens = reopens ? 1 : 0;
+  // A clear's close rides on the renewal that follows it, with Debug on, and so does an import's of an ended session. An
+  // import that ends the session first closes the history as replaced at its new generation, whose `null` follow renews
+  // an empty history, which the import's own renewal then replaces. The disposal closes every history once any renewal
+  // was posted, which every row did.
+  const endsFirst = c.end === "import" && importEnds;
+  const carriedByRenewal = reopens && (c.end === "clear" || (c.end === "import" && !importEnds));
+  let closes = (open && closing && !carriedByRenewal) || sealed === "disposal" ? 1 : 0;
+  if (disposed) closes = 0;
+  let opens = reopens ? (endsFirst ? 2 : 1) : 0;
   let reports = 0;
   if (sealed === "loss") reports += 1;
   if (c.end === "stop") reports += 1;
   let opensWhileHeld: number | undefined;
+  let posted: readonly string[] | undefined;
   let closeSettled: string | undefined;
   if (c.resource === "close in flight") {
-    // The maker sent its close, which holds: no open is sent before it settles.
-    opensWhileHeld = 0;
-    if (c.end === "stop" || c.end === "open failure") {
-      // Nothing ends the close: the open its maker asked for goes once it settles.
-      opens = c.maker === "Debug off" ? 0 : 1;
-      view = c.end === "open failure" || c.maker === "Debug off" ? "none" : "new";
-    }
-    if (c.end === "Debug off") opens = 0;
-    if ((c.end === "close refused" || c.end === "close rejected live") && !disposed) reports += 1;
-    if (blocked) {
-      opens = 0;
+    // The maker's controls, in the order the host runs them: its close, or the renewal that carries it, then a
+    // replacement's renewal, posted at its session's follow without waiting for the close's reply.
+    posted =
+      c.maker === "replacement"
+        ? ["historyClose", "historyRenew"]
+        : c.maker === "import" && !carried
+          ? ["historyClose", "historyRenew", "historyRenew"]
+          : carried
+            ? ["historyRenew"]
+            : ["historyClose"];
+    const renews = c.maker !== "Debug off" && c.maker !== "disposal";
+    // The maker's renewal went before the end; its reply, held, installs its history unless it failed.
+    if (c.end === "stop") view = renews ? "new" : "none";
+    if (c.end === "open failure") view = "none";
+    // Debug off before that reply: the history it opened closes.
+    if (c.end === "Debug off" && renews) closes = 1;
+    if (hostFailed && !disposed) {
+      reports += 1;
       view = "none";
     }
-    if (sealed !== null) {
-      opens = 0;
-      view = "none";
+    if (sealed !== null) view = "none";
+    if (c.maker === "import" && !carried && sealed === "loss") view = "kept, closed";
+    if (c.maker === "import" && !carried && sealed === null) {
+      // The import's own renewal is not held: its history shows before the end, or its host refusal blocked the page
+      // then, already reported.
+      if (hostFailed) reports -= 1;
+      else if (c.end === "stop") view = "kept";
+      else if (["replace", "Debug off", "clear", "import"].includes(c.end)) {
+        // With no session shown, a clear's or an import's close rides on its renewal.
+        closes = c.end === "clear" || c.end === "import" ? 0 : 1;
+        if (c.end === "import") opens = 1;
+        view = c.end === "Debug off" ? "none" : "new";
+      }
     }
+    opensWhileHeld = opens;
     closeSettled =
       c.end === "close rejected by loss"
         ? "BridgeLostError"
-        : c.end === "close rejected live"
+        : c.end === "close rejected live" || (carried && c.end === "open failure")
           ? "Error"
           : "answered";
   }
   if (c.resource === "early deltas") {
     // The held open is answered after the end: an open still asked for enrolls; a newer open replaced it, unanswered;
     // an obsolete one closes the history it opened.
-    opensWhileHeld = reopens ? 1 : 0;
+    opensWhileHeld = opens;
     if (c.end === "stop") view = "new";
     if (c.end === "Debug off" || sealed === "disposal") closes = 1;
   }
@@ -699,6 +823,7 @@ function expectedEnd(c: Case): EndRecord {
     closes,
     opens,
     ...(opensWhileHeld !== undefined && { opensWhileHeld }),
+    ...(posted !== undefined && { posted }),
     reports,
     ...(closeSettled !== undefined && { closeSettled }),
   };
@@ -776,8 +901,11 @@ async function readEnd(
     blocked: owner.state.blocked,
     problem: owner.problem.value,
     closes: since.filter((op) => op === "historyClose").length,
-    opens: since.filter((op) => op === "historyOpen").length,
+    opens: since.filter((op) => op === "historyRenew").length,
     ...(whileHeld !== undefined && { opensWhileHeld: whileHeld }),
+    ...(world.postedFrom !== null && {
+      posted: requests.sent.slice(world.postedFrom, from).filter((op) => op.startsWith("history")),
+    }),
     reports: world.reported.length - reportsFrom,
     ...(world.closeOutcome !== null && { closeSettled: await world.closeOutcome }),
     ...(held !== undefined && heldAfter(c) !== undefined && { held }),
@@ -825,7 +953,7 @@ async function runAfter(world: World, c: Case): Promise<AfterRecord> {
       await settle(context);
       return {
         after: c.after,
-        opens: world.traffic.sent.slice(from).filter((op) => op === "historyOpen").length,
+        opens: world.traffic.sent.slice(from).filter((op) => op === "historyRenew").length,
         view: owner.view.value !== null,
       };
     }
@@ -840,7 +968,8 @@ function expectedAfter(c: Case, ended: EndRecord): AfterRecord {
     c.end === "replace" ||
     (c.maker !== "retirement" &&
       !["clear", "import", "open failure"].includes(c.end) &&
-      !(c.resource === "close in flight" && c.end === "stop"));
+      // A retirement's renewal enrolls an ended session, or none: no point to go Back to.
+      !(c.resource === "close in flight" && c.end === "stop" && c.maker !== "replacement"));
   const steps =
     ended.sealed === null &&
     !ended.blocked &&
@@ -892,6 +1021,7 @@ for (const coordinates of FEASIBLE) {
       ask: null,
       release: null,
       closeOutcome: null,
+      postedFrom: null,
     };
     await make(world, c);
     const before = world.owner.view.value;
@@ -899,7 +1029,7 @@ for (const coordinates of FEASIBLE) {
     const reportsFrom = reported.length;
     await end(world, c);
     // The opens sent while the maker's open or close still held.
-    const whileHeld = world.traffic.sent.slice(from).filter((op) => op === "historyOpen").length;
+    const whileHeld = world.traffic.sent.slice(from).filter((op) => op === "historyRenew").length;
     if (world.release !== null) {
       const held = world.release;
       world.release = null;
@@ -927,5 +1057,7 @@ for (const coordinates of FEASIBLE) {
 
 test("the rewind owner's lifetime family completed every feasible full tuple, and nothing else", () => {
   assert.deepEqual(coverageGaps(FEASIBLE, completed, { tuples: true }), []);
-  assert.equal(FEASIBLE.length, 761);
+  // #2150 PR 2 took ten tuples out: an import's held renewal cannot fail as the one asked for (8), and the host refuses
+  // no disposal of its current Player (2).
+  assert.equal(FEASIBLE.length, 751);
 });

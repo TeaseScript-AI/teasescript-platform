@@ -487,7 +487,6 @@ const SESSION_OPS: Readonly<
   answerCapture: "ends a catch-up",
   answerFileStore: "ends a catch-up",
   answerLock: "ends a catch-up",
-  historyEnroll: "runs through sessionForOperation",
 };
 
 test("every session op is classified, and only adoptCatchUp reads a session past its attach", () => {

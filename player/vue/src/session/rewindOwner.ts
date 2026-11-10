@@ -2,6 +2,7 @@ import { computed, ref, shallowRef } from "vue";
 import { DebugHistoryView, rewindFutureOf } from "../../../debug/debug-history.js";
 import type { HistoryDelta, HistoryTimeline } from "../../../engine-bridge/history/core.js";
 import { endsQuietly, type PlayerBridge } from "../../../runtime/player-bridge.js";
+import { postClose, postRenew, type RewindControlHost } from "./rewindControls.js";
 import {
   INITIAL_LIFECYCLE,
   advanceLifecycle,
@@ -41,9 +42,10 @@ export interface RewindOwnerHost {
  * and the actions it returns, applied here. It outlives each Debug scope, which only opens and ends its features
  * (`debugOn`, `debugOff`) and presents what this holds: the history's view, the step's progress, and its problem.
  *
- * Requests go to the host in the order the function decided them; an open waits until every close before it settled,
- * so a close the host refused or rejected on a live connection blocks it. A session this rewind showed is held here
- * while the history names it: the parked session, a prepared candidate, and the event logs of both.
+ * Requests are posted to the host in the order the function decided them, and the host runs them in that order: a
+ * renewal never passes a close decided before it, and one the host refused or rejected blocks every later renewal there
+ * and here. A session this rewind showed is held here while the history names it: the parked session, a prepared
+ * candidate, and the event logs of both.
  */
 export function createRewindOwner(host: RewindOwnerHost) {
   let state: LifecycleState = INITIAL_LIFECYCLE;
@@ -55,15 +57,13 @@ export function createRewindOwner(host: RewindOwnerHost) {
   const busy = ref(false);
   const problem = ref<string | null>(null);
   // The session Back first left, parked in the host while a restored state shows; the prepared candidate; the
-  // timelines `historyOpen` replied with, until the history they open is enrolled.
+  // timelines `historyRenew` replied with, until the history they open is installed.
   let parked: PlayerSession | null = null;
   let candidate: PlayerSession | null = null;
   const timelines = new Map<number, HistoryTimeline>();
   // The session the last Return or Debug-off close reinstated (`showParked`), which the Player's disposal releases
   // while it shows.
   let reinstated: PlayerSession | null = null;
-  // Every close in flight: an open waits for them, and a failed one blocks it.
-  let closes: Promise<void> = Promise.resolve();
   // Set while this rewind shows a session, which is no new session.
   let showing = false;
   // Settles the operation that asked (a step, Return) with whether it went ahead.
@@ -122,21 +122,27 @@ export function createRewindOwner(host: RewindOwnerHost) {
     waiting?.(went);
   }
 
+  // What the history controls need of this owner (`rewindControls.ts`).
+  const controls: RewindControlHost = {
+    decide: (event) => dispatch(event).actions.some((action) => action.kind === "reportFailure"),
+    reportPageError: (error) => host.reportPageError(error),
+  };
+
   function apply(action: LifecycleAction): void {
     const bridge = host.bridge();
     switch (action.kind) {
-      case "open":
-        // Due once every close before it settled; the function decides then whether it is sent (`openDue`).
-        void closes.then(() => dispatch({ kind: "openDue", intent: action.intent }));
+      case "renew": {
+        if (bridge === null) return;
+        // The session shown now is the new history's first: a new session's, at its generation's first `follow`.
+        const shown = host.shown();
+        postRenew(bridge, action, shown?.connection === bridge ? shown : null, timelines, controls);
         return;
-      case "sendOpen":
-        if (bridge !== null) open(bridge, action.intent);
-        return;
-      case "enroll":
-        if (bridge !== null) enroll(bridge, action.history);
+      }
+      case "install":
+        if (bridge !== null) install(bridge, action.history);
         return;
       case "close":
-        if (bridge !== null) close(bridge, action);
+        if (bridge !== null) postClose(bridge, action, controls);
         return;
       case "reportFailure":
         // Applied by the open or the gate whose failure it is, which holds the error (`failed`, `gate`).
@@ -252,35 +258,8 @@ export function createRewindOwner(host: RewindOwnerHost) {
     }
   }
 
-  /** A failed open: reported when the deciding function says so (`reportFailure`). */
-  function failed(intent: number, error: unknown) {
-    const { actions } = dispatch({ kind: "openFailed", intent });
-    if (actions.some((action) => action.kind === "reportFailure") && !endsQuietly(error))
-      host.reportPageError(error);
-  }
-
-  function open(bridge: PlayerBridge, intent: number) {
-    void (async () => {
-      let opened;
-      try {
-        opened = await bridge.historyOpen(intent);
-      } catch (error) {
-        failed(intent, error);
-        return;
-      }
-      if (opened.kind === "stale") {
-        failed(intent, new Error(`The engine's host answered the open ${intent} as replaced.`));
-        return;
-      }
-      const { history } = opened.timeline;
-      timelines.set(history, opened.timeline);
-      dispatch({ kind: "opened", intent, history });
-      // Enrolled, it was taken; else it is not shown.
-      timelines.delete(history);
-    })().catch(reportUnless(() => state.sealed !== null));
-  }
-
-  function enroll(bridge: PlayerBridge, history: number) {
+  /** Shows the history a current renewal opened, enrolled already, with the timeline its reply brought. */
+  function install(bridge: PlayerBridge, history: number) {
     const timeline = timelines.get(history);
     timelines.delete(history);
     if (timeline === undefined) return;
@@ -299,44 +278,6 @@ export function createRewindOwner(host: RewindOwnerHost) {
       if (delta.history === history && delta.from >= timeline.revision) made.apply(delta);
     early = [];
     changed();
-    const shown = host.shown();
-    if (shown === null || shown.connection !== bridge || state.inspecting) return;
-    const holds = current();
-    void bridge
-      .request(shown, "historyEnroll", { history })
-      .then((enrolled) => {
-        if (holds() && enrolled.kind === "done" && enrolled.delta !== null)
-          made.apply(enrolled.delta);
-      })
-      .catch(reportUnless(() => !holds()));
-  }
-
-  function close(
-    bridge: PlayerBridge,
-    action: Extract<LifecycleAction, { readonly kind: "close" }>,
-  ) {
-    const sent = bridge.historyStep("historyClose", {
-      history: action.history,
-      by: action.by,
-      ...(action.adoptionSucceeded === undefined
-        ? {}
-        : { adoptionSucceeded: action.adoptionSucceeded }),
-    });
-    const settled = sent.then(
-      ({ result }) => {
-        if (result.kind === "refused") {
-          host.reportPageError(new Error(`The rewind history could not close: ${result.reason}`));
-          dispatch({ kind: "closeSettled", ok: false });
-        } else dispatch({ kind: "closeSettled", ok: true });
-      },
-      (error: unknown) => {
-        // A lost connection takes its history with it; any other failure on a live one blocks every later open.
-        if (endsQuietly(error)) return;
-        host.reportPageError(error);
-        dispatch({ kind: "closeSettled", ok: false });
-      },
-    );
-    closes = closes.then(() => settled);
   }
 
   function gate(which: "step" | "return" | "reinstate", id: number) {
@@ -501,8 +442,12 @@ export function createRewindOwner(host: RewindOwnerHost) {
       if (state.closing === "failed") return "failed";
       return state.closing !== null || state.returning ? "pending" : null;
     }),
-    /** Applies the deltas `session`'s publication carries, once per publication. */
+    /**
+     * Applies the deltas `session`'s publication carries, once per publication. The generation's first session, or its
+     * `null`, posts the renewal that waits for it.
+     */
     follow(session: PlayerSession | null) {
+      if (state.awaiting) dispatch({ kind: "follow" });
       if (session === null) return;
       if (applied?.lineage === session.lineage && applied.revision >= session.revision) return;
       applied = { lineage: session.lineage, revision: session.revision };

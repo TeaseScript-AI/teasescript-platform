@@ -137,19 +137,23 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "resume",
     ["BridgeClient.post"],
   ],
-  "player/vue/src/session/rewindOwner.ts createRewindOwner > close > then:callback#1.1": [
+  "player/vue/src/session/rewindControls.ts postClose > then:callback": [
     "lifecycle",
     ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
-  "player/vue/src/session/rewindOwner.ts createRewindOwner > close > then:callback#1.2": [
+  "player/vue/src/session/rewindControls.ts postRenew > then:callback.1": [
     "lifecycle",
     ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
-  "player/vue/src/session/rewindOwner.ts createRewindOwner > enroll > DebugHistoryView:callback": [
+  "player/vue/src/session/rewindControls.ts postRenew > then:callback.2": [
+    "lifecycle",
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
+  ],
+  "player/vue/src/session/rewindOwner.ts createRewindOwner > install > DebugHistoryView:callback": [
     "read",
     ["BridgeClient.post"],
   ],
-  "player/vue/src/session/rewindOwner.ts createRewindOwner > enroll > DebugHistoryView:callback > catch:callback":
+  "player/vue/src/session/rewindOwner.ts createRewindOwner > install > DebugHistoryView:callback > catch:callback":
     ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/session/rewindOwner.ts createRewindOwner > forward > step:callback": [
     "resume",
@@ -161,14 +165,6 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/session/rewindOwner.ts createRewindOwner > gate > then:callback.2": [
     "resume",
-    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
-  ],
-  "player/vue/src/session/rewindOwner.ts createRewindOwner > apply > then:callback#1": [
-    "lifecycle",
-    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
-  ],
-  "player/vue/src/session/rewindOwner.ts createRewindOwner > open > function": [
-    "lifecycle",
     ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/session/rewindOwner.ts createRewindOwner > retryReturn": [
@@ -192,6 +188,9 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     ["BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/session/useSessionRewind.ts useSessionRewind > followSessions > watch:callback#1":
+    ["lifecycle", ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"]],
+  // The session's follow posts the renewal that waits for the generation's first session (#2150).
+  "player/vue/src/session/useSessionRewind.ts useSessionRewind > followSessions > watch:callback#2":
     ["lifecycle", ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/session/useSessionRewind.ts useSessionRewind > followSessions > tryOnScopeDispose:callback":
     ["lifecycle", ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"]],
@@ -580,6 +579,10 @@ const ESCAPES: Readonly<Record<string, Policy>> = {
     "clock scheduling",
   "player/vue/src/session/useRuntimeSceneClock.ts useRuntimeSceneClock {catchUp}":
     "clock scheduling",
+  // A history control's failure, which decides `closeSettled` or reports, at its reply's settlement.
+  "player/vue/src/session/rewindControls.ts postClose {failed}": "lifecycle",
+  "player/vue/src/session/rewindControls.ts postClose {reportPageError}": "lifecycle",
+  "player/vue/src/session/rewindControls.ts postRenew {reportPageError}": "lifecycle",
 };
 
 /** The escapes the census follows: an object literal's property, or a destructured binding, that holds a forwarder. */
@@ -894,8 +897,7 @@ const ADOPTION_ESCAPES: readonly string[] = [
   "player/engine-bridge/ops/history.ts historyControlOps > historyClose > run {run}",
   "player/engine-bridge/ops/history.ts rewindSettleOps > rewindCommit > run {run}",
   "player/engine-bridge/ops/history.ts rewindSettleOps > rewindDrop > run {run}",
-  "player/engine-bridge/ops/history.ts historyControlOps > historyEnroll > run {run}",
-  "player/engine-bridge/ops/history.ts historyControlOps > historyOpen > run {run}",
+  "player/engine-bridge/ops/history.ts historyControlOps > historyRenew > run {run}",
   "player/engine-bridge/ops/history.ts historyControlOps > historyTimeline > run {run}",
   "player/engine-bridge/ops/history.ts rewindSettleOps > rewindAdopt > run {run}",
   "player/engine-bridge/ops/history.ts rewindStepOps > rewindBack > run {run}",

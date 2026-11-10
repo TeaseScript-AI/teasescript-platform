@@ -44,25 +44,71 @@ export type HistoryOpResult =
       readonly released: readonly string[];
     };
 
-/** What `historyOpen` replies: the opened history's whole timeline, or that a newer one is open. */
-export type HistoryOpened =
+/**
+ * What `historyRenew` replies: the new history's whole timeline, after its enrollment; that its owner or its intent is
+ * no longer current (`stale`); that a close failed, now or earlier for this Player (`closeFailed`: nothing opened); or
+ * why it did not open after its closes (`refused`). Each but `stale` names the host sessions its closes released.
+ */
+export type HistoryRenewed =
   | { readonly kind: "stale" }
   | {
-      readonly kind: "opened";
+      readonly kind: "renewed";
       readonly timeline: HistoryTimeline;
-      /** The host sessions an earlier history, closed as replaced, released. */
+      readonly released: readonly string[];
+    }
+  | {
+      readonly kind: "closeFailed" | "refused";
+      readonly reason: string;
       readonly released: readonly string[];
     };
 
 const CLOSE_REASONS: readonly string[] = ["debugOff", "replacement", "import", "clear", "disposal"];
+const OBLIGATION_REASONS: readonly string[] = ["debugOff", "import", "clear"];
 const isSerial = (value: unknown): value is number =>
   typeof value === "number" && Number.isSafeInteger(value) && value > 0;
+const isOwner = (value: unknown): value is number =>
+  typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+/*
+ * A close a renewal carries: a retirement's, or Debug off's after an adoption that succeeded. Neither reinstates the
+ * parked session, so no carried close begins the recording anew; that stays with the gated controls (`restartAt`).
+ */
+const isObligation = (value: unknown): value is HistoryCloseObligation =>
+  isRecord(value) &&
+  exactly(value, ["history", "by"], ["adoptionSucceeded"]) &&
+  isSerial(value.history) &&
+  typeof value.by === "string" &&
+  OBLIGATION_REASONS.includes(value.by) &&
+  (value.by === "debugOff"
+    ? value.adoptionSucceeded === true
+    : value.adoptionSucceeded === undefined);
 
-/** What `historyClose`'s check admits. */
+/** A close a renewal carries: the history, why it closes, and the outcome of an adoption Debug off waited for. */
+export interface HistoryCloseObligation {
+  readonly history: number;
+  readonly by: "debugOff" | "import" | "clear";
+  readonly adoptionSucceeded?: boolean | undefined;
+}
+
+/**
+ * What `historyClose`'s check admits: the history, why it closes, an adoption's outcome, and the Player claim generation
+ * that sends it (`PlayerBridge.claim`). A close by `disposal` closes every history of the connection.
+ */
 export interface HistoryCloseArguments {
   readonly history: number;
   readonly by: "debugOff" | "replacement" | "import" | "clear" | "disposal";
   readonly adoptionSucceeded?: boolean | undefined;
+  readonly owner: number;
+}
+
+/**
+ * What `historyRenew`'s check admits: the new history's intent, the Player claim generation that sends it, the session
+ * it enrolls (or none), and the closes it carries.
+ */
+export interface HistoryRenewArguments {
+  readonly intent: number;
+  readonly owner: number;
+  readonly session: string | null;
+  readonly closes: readonly HistoryCloseObligation[];
 }
 
 /** What `rewindBack`'s check admits: the history, its point, the live session, and the point's events. */
@@ -174,61 +220,133 @@ function historyControlOps(context: PlayerOpsContext) {
         return { result };
       },
     } satisfies BridgeOp<{ readonly session: string }, StorageCapture, "none">,
-    // Opens a rewind history for the Player's newest control serial; an older serial changes nothing.
-    historyOpen: {
+    /*
+     * Renews the Player's rewind history in one delivery: the closes it carries, with their reasons, then every older
+     * history as replaced, then the new history, which enrolls `session` as it is now, when one is given. Nothing opens
+     * for an older owner or intent (`stale`), or after a failed close of this Player, now or earlier (`closeFailed`); and
+     * nothing has an effect before those checks. The closes are releases, never undone; the new history is its
+     * delivery's (`HistoryRegistry.entries`), so one whose reply is never posted closes again.
+     */
+    historyRenew: {
       session: "none",
-      checkArguments: (args): args is { readonly intent: number } =>
-        isRecord(args) && exactly(args, ["intent"]) && isSerial(args.intent),
+      checkArguments: (args): args is HistoryRenewArguments =>
+        isRecord(args) &&
+        exactly(args, ["intent", "owner", "session", "closes"]) &&
+        isSerial(args.intent) &&
+        isOwner(args.owner) &&
+        (args.session === null || typeof args.session === "string") &&
+        Array.isArray(args.closes) &&
+        args.closes.every(isObligation),
       run: (args, sessions) => {
-        const { intent } = args;
+        const { intent, owner, session, closes } = args;
+        const renewed = (result: HistoryRenewed) => ({ result });
+        if (!history.admits(owner) || !history.fresh(intent)) return renewed({ kind: "stale" });
+        const released: string[] = [];
+        if (history.refusesOpen())
+          return renewed({
+            kind: "closeFailed",
+            reason: "an earlier close of the rewind history failed",
+            released,
+          });
+        const holds = () => session === null || sessions.get(session) instanceof HeldSession;
+        if (!holds())
+          return renewed({
+            kind: "refused",
+            reason: "the session to enroll is not held",
+            released,
+          });
+        const closing: readonly {
+          readonly history: number;
+          readonly by: HistoryCloseArguments["by"];
+          readonly adoptionSucceeded?: boolean | undefined;
+        }[] = [
+          ...closes,
+          ...[...history.entries.keys()]
+            .filter((id) => !closes.some((each) => each.history === id))
+            .map((id) => ({ history: id, by: "replacement" as const })),
+        ];
+        for (const { history: id, by, adoptionSucceeded } of closing) {
+          let closed;
+          try {
+            closed = history.close(owner, id, {
+              kind: "close",
+              by,
+              ...(adoptionSucceeded === undefined ? {} : { adoptionSucceeded }),
+            });
+          } catch (error) {
+            // A close that threw failed: nothing opens, now or later for this Player.
+            history.failClose(owner);
+            const reason = error instanceof Error ? error.message : String(error);
+            return renewed({
+              kind: "closeFailed",
+              reason: `history ${id} could not close: ${reason}`,
+              released,
+            });
+          }
+          const { outcome, applied } = closed;
+          if (outcome.kind === "refused")
+            return renewed({
+              kind: "closeFailed",
+              reason: `history ${id} could not close: ${outcome.reason}`,
+              released,
+            });
+          // EVIDENCE: invariant: no close a renewal admits reinstates the parked session (`isObligation`).
+          if (applied.recording !== null)
+            throw new Error("A renewal's close reinstated a session.");
+          releaseAll(sessions, applied.released);
+          released.push(...applied.released);
+        }
+        if (!holds())
+          return renewed({
+            kind: "refused",
+            reason: "a close released the session to enroll",
+            released,
+          });
         const opened = history.open(intent);
-        if (opened === null) return { result: { kind: "stale" } satisfies HistoryOpened };
-        releaseAll(sessions, opened.released);
-        const result: HistoryOpened = {
-          kind: "opened",
-          timeline: opened.timeline,
-          released: opened.released,
-        };
-        return { result };
+        // EVIDENCE: invariant: `fresh` admitted `intent`, and every earlier history closed above.
+        if (opened === null || opened.released.length > 0)
+          throw new Error("The rewind history could not open after its closes.");
+        if (session !== null) {
+          const held = heldSession(sessions, session);
+          if (!history.follow(intent, held.historyKey, session))
+            throw new Error("The new rewind history could not follow its session.");
+          const current = held.sessionForOperation();
+          history.advance(intent, {
+            kind: "enrollCurrent",
+            candidate: {
+              session: current,
+              log: held.historyKey,
+              marks: held.marks,
+              snapshotJson: () => playerRuntimeSnapshotJson(current),
+            },
+          });
+        }
+        return renewed({ kind: "renewed", timeline: history.core(intent)!.timeline(), released });
       },
-    } satisfies BridgeOp<{ readonly intent: number }, HistoryOpened, "none">,
-    // Takes the history's session as it is now: the history follows it, with a point for an interaction it presents.
-    historyEnroll: {
-      session: "existing",
-      readsBasis: false,
-      checkArguments: (args): args is { readonly history: number } =>
-        isRecord(args) && exactly(args, ["history"]) && isSerial(args.history),
-      run: (args, sessions, session) => {
-        const { history: id } = args;
-        const held = heldSession(sessions, session!.id);
-        if (!history.follow(id, held.historyKey, session!.id))
-          return refused("the history is not open, or follows another session");
-        const current = held.sessionForOperation();
-        const { outcome, applied } = history.advance(id, {
-          kind: "enrollCurrent",
-          candidate: {
-            session: current,
-            log: held.historyKey,
-            marks: held.marks,
-            snapshotJson: () => playerRuntimeSnapshotJson(current),
-          },
-        });
-        return { result: done(outcome, applied) };
-      },
-    } satisfies BridgeOp<{ readonly history: number }, HistoryOpResult, "existing">,
+    } satisfies BridgeOp<HistoryRenewArguments, HistoryRenewed, "none">,
     // Closes the history: Debug off reinstates a parked session; a replacement, an import and disposal retire them.
     historyClose: {
       session: "none",
       checkArguments: (args): args is HistoryCloseArguments =>
         isRecord(args) &&
-        exactly(args, ["history", "by"], ["adoptionSucceeded"]) &&
+        exactly(args, ["history", "by", "owner"], ["adoptionSucceeded"]) &&
         isSerial(args.history) &&
         typeof args.by === "string" &&
         CLOSE_REASONS.includes(args.by) &&
-        (args.adoptionSucceeded === undefined || typeof args.adoptionSucceeded === "boolean"),
+        (args.adoptionSucceeded === undefined || typeof args.adoptionSucceeded === "boolean") &&
+        isOwner(args.owner),
       run: (args, sessions) => {
-        const { history: id, by, adoptionSucceeded } = args;
-        const { outcome, applied } = history.advance(id, {
+        const { history: id, by, adoptionSucceeded, owner } = args;
+        // An older or a disposed Player's late close changes nothing; its history closed with its disposal.
+        if (!history.admits(owner)) return refused("the Player that sent the close is gone");
+        // The Player's disposal: every history goes, an unacknowledged one's included, and its admission ends.
+        if (by === "disposal") {
+          const released = history.dispose(owner);
+          releaseAll(sessions, released);
+          return { result: { kind: "done", delta: null, live: null, released } };
+        }
+        history.closeUnlessDelivered(owner);
+        const { outcome, applied } = history.close(owner, id, {
           kind: "close",
           by,
           ...(adoptionSucceeded === undefined ? {} : { adoptionSucceeded }),

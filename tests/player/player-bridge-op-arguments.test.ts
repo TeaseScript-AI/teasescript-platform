@@ -627,26 +627,91 @@ const ROWS = {
     { also: [{ ticket: "r1", replay: false }] },
   ),
   captureStorage: SESSION,
-  historyOpen: record({ intent: 1 }, { intent: N }, { rejected: SERIAL_REJECTED("intent", {}) }),
-  historyEnroll: HISTORY,
+  historyRenew: record(
+    { intent: 1, owner: 0, session: null, closes: [] },
+    { intent: N, owner: N, session: NS, closes: A },
+    {
+      also: [
+        { intent: 2, owner: 1, session: "s1", closes: [] },
+        ...(["import", "clear"] as const).map((by) => ({
+          intent: 2,
+          owner: 1,
+          session: null,
+          closes: [{ history: 1, by }],
+        })),
+        {
+          intent: 2,
+          owner: 1,
+          session: null,
+          closes: [{ history: 1, by: "debugOff", adoptionSucceeded: true }],
+        },
+      ],
+      rejected: {
+        ...SERIAL_REJECTED("intent", { owner: 0, session: null, closes: [] }),
+        "a negative owner": { intent: 1, owner: -1, session: null, closes: [] },
+        "a fractional owner": { intent: 1, owner: 0.5, session: null, closes: [] },
+        // A renewal carries the closes decided with it; the disposal and a replacement are never among them.
+        "a close by the disposal": {
+          intent: 2,
+          owner: 0,
+          session: null,
+          closes: [{ history: 1, by: "disposal" }],
+        },
+        "a close by a replacement": {
+          intent: 2,
+          owner: 0,
+          session: null,
+          closes: [{ history: 1, by: "replacement" }],
+        },
+        "a close of history 0": {
+          intent: 2,
+          owner: 0,
+          session: null,
+          closes: [{ history: 0, by: "clear" }],
+        },
+        "a close with an unknown key": {
+          intent: 2,
+          owner: 0,
+          session: null,
+          closes: [{ history: 1, by: "clear", more: true }],
+        },
+        "a close of no record": { intent: 2, owner: 0, session: null, closes: [1] },
+        // Debug off's close rides on a renewal only after its adoption succeeded: it reinstates nothing.
+        "a Debug-off close with no adoption": {
+          intent: 2,
+          owner: 0,
+          session: null,
+          closes: [{ history: 1, by: "debugOff" }],
+        },
+        "a retirement's close with an adoption": {
+          intent: 2,
+          owner: 0,
+          session: null,
+          closes: [{ history: 1, by: "clear", adoptionSucceeded: true }],
+        },
+      },
+    },
+  ),
   historyClose: record(
-    { history: 1, by: "debugOff" },
-    { history: N, by: S, adoptionSucceeded: B },
+    { history: 1, by: "debugOff", owner: 0 },
+    { history: N, by: S, adoptionSucceeded: B, owner: N },
     {
       optional: ["adoptionSucceeded"],
       also: [
         ...(["replacement", "import", "clear", "disposal"] as const).map((by) => ({
           history: 1,
           by,
+          owner: 1,
         })),
-        { history: 1, by: "import", adoptionSucceeded: true },
-        { history: 1, by: "import", adoptionSucceeded: false },
+        { history: 1, by: "import", adoptionSucceeded: true, owner: 1 },
+        { history: 1, by: "import", adoptionSucceeded: false, owner: 1 },
       ],
       rejected: {
-        ...SERIAL_REJECTED("history", { by: "debugOff" }),
+        ...SERIAL_REJECTED("history", { by: "debugOff", owner: 0 }),
         // No request closes by a loss: the Player only seals the history; a lost Worker's histories go with it.
-        "closed by a loss": { history: 1, by: "loss" },
-        "closed for no reason": { history: 1, by: "other" },
+        "closed by a loss": { history: 1, by: "loss", owner: 0 },
+        "closed for no reason": { history: 1, by: "other", owner: 0 },
+        "a negative owner": { history: 1, by: "debugOff", owner: -1 },
       },
     },
   ),
@@ -867,7 +932,7 @@ test("the rows are the catalogue's ops, each named once", () => {
     [],
     "rows of no op",
   );
-  assert.equal(names.length, 74);
+  assert.equal(names.length, 73);
 });
 
 test("each row's forms give every field a kind, and every required field a value", () => {

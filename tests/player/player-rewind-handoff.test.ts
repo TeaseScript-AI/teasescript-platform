@@ -697,16 +697,26 @@ test("Sol r2 B5: a clear's close that fails on a live connection is reported, an
   assert.equal(host.session.value?.state.status, "halted");
   const bridge = await host.bridge;
   const sent: string[] = [];
+  // The clear's renewal carries its close (`historyRenew`); the host answers that the close failed.
   interceptSends(context, bridge.client, (op, _args, send) => {
     if (op.startsWith("history")) sent.push(op);
-    return op === "historyClose" ? Promise.reject(new Error("A host failure.")) : send();
+    if (op !== "historyRenew") return send();
+    return Promise.resolve({
+      session: null,
+      revision: null,
+      eventsThrough: null,
+      result: { kind: "closeFailed", reason: "a host failure", released: [] },
+      view: null,
+    });
   });
   const reported: unknown[] = [];
   reportsInto(context, reported);
   assert.equal(await host.clearScriptStorage(), true);
   await settle(context);
-  assert.deepEqual(sent, ["historyClose"]);
+  assert.deepEqual(sent, ["historyRenew"]);
   assert.equal(reported.length, 1);
+  assert.equal(host.rewind.owner.state.blocked, true);
+  assert.equal(host.rewind.owner.view.value, null);
 });
 
 test("Sol r2 B6: an adoption that succeeds while Debug off waits keeps the recording and the trace's epoch", async (context) => {
@@ -737,15 +747,14 @@ test("Sol r2 B6: an adoption that succeeds while Debug off waits keeps the recor
   assert.deepEqual(host.debugRecording()?.anchorSnapshot, anchor);
 });
 
-test("Sol r2 S1: an enrollment that fails on a live connection is reported", async (context) => {
+test("Sol r2 S1: a renewal that fails on a live connection is reported", async (context) => {
   const made = createHost(context, memoryStorage().provider);
   const { host } = made;
   await start(context, host);
   const bridge = await host.bridge;
-  const request = bridge.client.request.bind(bridge.client);
   const failure = new Error("A host failure.");
-  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) =>
-    args[0] === "historyEnroll" ? Promise.reject(failure) : request(...args),
+  interceptSends(context, bridge.client, (op, _args, send) =>
+    op === "historyRenew" ? Promise.reject(failure) : send(),
   );
   const reported: unknown[] = [];
   reportsInto(context, reported);

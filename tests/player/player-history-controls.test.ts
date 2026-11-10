@@ -21,12 +21,16 @@ import {
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { memoryStorage } from "../helpers/player/rewind-host.js";
 import { untypedClient } from "../helpers/bridge/untyped.js";
+import { interceptSends } from "../helpers/bridge/sends.js";
 
 /*
  * #2150 PR 1: Debug's rewind history controls are posted when the Player's rewind lifecycle decides them, in the host's
  * arrival order, behind no unrelated request's reply, as every request of no session now is (`BridgeClient.request` and
  * `post`). With a busy connection queue, Debug turned on during a session takes the choice shown then as its first
  * point even when it is answered at once, and each rewind step and Debug's end and return settle as with an idle queue.
+ *
+ * #2150 PR 2: every opener renews the history in one host operation (`historyRenew`) posted before the new session's
+ * work, so an answer given before the renewal's reply is a point of the new history.
  */
 
 const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
@@ -89,7 +93,7 @@ test("requests of no session are posted in the order made, none behind a reply; 
     void each.catch(() => {});
   // Consecutive posts, and posts and requests mixed, all while every earlier reply is withheld.
   for (const sent of [
-    client.post("historyClose", { history: 1, by: "debugOff" }),
+    client.post("historyClose", { history: 1, by: "debugOff", owner: 0 }),
     client.post("historyTimeline", { history: 1 }),
   ])
     if (sent.posted) void sent.reply.catch(() => {});
@@ -136,6 +140,8 @@ interface RewindPlayer {
   };
   prepare(create: (recording: PlayerRuntimeSessionOptions) => PlayerRuntimeSession): void;
   activate(): Promise<void>;
+  /** Ends the session and shows the start page, as the Player's Start page control does. */
+  toStartPage(): void | Promise<void>;
   loadScriptStorage(): Promise<void>;
   /** Adopts an inspected state as the session before input, as the Player's controls do. */
   prepareInput(): true | Promise<boolean>;
@@ -147,7 +153,7 @@ interface DebugRewind {
   readonly state: Readonly<
     Ref<{
       readonly history: number | null;
-      readonly points: readonly { readonly id: number }[];
+      readonly points: readonly { readonly id: number; readonly response: unknown }[];
       readonly inspection: unknown;
     }>
   >;
@@ -481,4 +487,65 @@ test("Round 2 R2-01: Debug turned on behind a busy queue traces from the moment 
   const records = facade.heldTrace(mounted.bridge)?.status().records ?? 0;
   assert.ok(records > 0, `records of the first answer: ${records}`);
   await queued;
+});
+
+/**
+ * Holds the reply of every renewal (`historyRenew`) the Player posts: the host runs it at once, and the page receives
+ * its reply only at `release`.
+ */
+function holdRenewals(context: TestContext, bridge: PlayerBridge) {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let held = 0;
+  interceptSends(context, bridge.client, (op, _args, send) => {
+    if (op !== "historyRenew") return send();
+    held += 1;
+    const reply = send();
+    return gate.then(() => reply);
+  });
+  return { release, held: () => held };
+}
+
+test("#2150: a new Start's choice answered before its renewal's reply is the new history's first point", async (context) => {
+  const mounted = await mount(context);
+  const renewals = holdRenewals(context, mounted.bridge);
+  const first = mounted.player.session.value!.lineage;
+  await mounted.player.toStartPage();
+  mounted.player.prepare((recording) =>
+    compiler.createPlayerRuntimeSession(REWIND, {
+      ...mounted.player.scriptStorageOptions(),
+      ...recording,
+      wallClockMs: 0,
+    }),
+  );
+  await mounted.player.activate();
+  await until(
+    () =>
+      mounted.player.session.value?.lineage !== first &&
+      playerRuntimeForeground(mounted.player.session.value!) !== null,
+    "the new session's choice",
+  );
+  assert.equal(renewals.held(), 1, "its renewal was posted, and its reply waits");
+  assert.equal(mounted.rewind().state.value.history, null, "no history shows yet");
+  const answered = await mounted.answer();
+  assert.equal(answered.kind, "answered");
+  renewals.release();
+  await until(() => mounted.rewind().state.value.points.length === 2, "both points");
+  const [point] = mounted.rewind().state.value.points;
+  assert.ok(point!.response !== null, "the answered choice is the first point, with its answer");
+  assert.equal(await mounted.rewind().back(point!.id), true, "Back to it");
+  healthy(mounted);
+});
+
+test("#2150: Debug turned on, with the choice answered before its renewal's reply, keeps that choice as its first point", async (context) => {
+  const mounted = await mount(context, false);
+  const renewals = holdRenewals(context, mounted.bridge);
+  mounted.toggle();
+  await until(() => renewals.held() === 1, "the renewal's post");
+  const answered = await mounted.answer();
+  assert.equal(answered.kind, "answered");
+  renewals.release();
+  await until(() => mounted.rewind().state.value.points.length === 2, "both points");
+  assert.ok(mounted.rewind().state.value.points[0]!.response !== null);
+  healthy(mounted);
 });

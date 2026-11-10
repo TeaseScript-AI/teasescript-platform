@@ -3,6 +3,7 @@ import {
   BridgeRequestError,
   type BridgeClient,
   type BridgeResult,
+  type PostDisposition,
   type ReplyHook,
   type SectionSend,
 } from "../engine-bridge/client.js";
@@ -10,7 +11,12 @@ import type { OpArgs, OpResult, SessionOp, WorkerOp } from "../engine-bridge/op-
 import type { InterpreterEvent } from "../../src/runtime/events.js";
 import type { ClockTicket } from "./clock-ticket.js";
 import type { HistoryTimeline } from "../engine-bridge/history/core.js";
-import type { HistoryOpened, HistoryOpResult } from "../engine-bridge/ops/history.js";
+import type {
+  HistoryCloseArguments,
+  HistoryCloseObligation,
+  HistoryOpResult,
+  HistoryRenewed,
+} from "../engine-bridge/ops/history.js";
 import type { StartOptions, StartRandom } from "../engine-bridge/ops/session.js";
 import type {
   Introduction,
@@ -152,7 +158,7 @@ export class PlayerBridge {
     return this.#randomIntents;
   }
   #historyIntents = 0;
-  /** The next serial of a rewind history on this connection (`historyOpen`), counted as tracing changes are. */
+  /** The next serial of a rewind history on this connection (`historyRenew`), counted as tracing changes are. */
   nextHistoryIntent(): number {
     this.#historyIntents += 1;
     return this.#historyIntents;
@@ -355,14 +361,43 @@ export class PlayerBridge {
   }
 
   /**
-   * Opens Debug's rewind history `intent` on this connection (`historyOpen`), unless a newer one is open (`stale`). The
-   * sessions an earlier history released with its close are forgotten here.
+   * Renews Debug's rewind history as `intent` on this connection (`historyRenew`), posted now: it closes `closes` and
+   * every older history, opens the new one and enrolls `session` as it is, when one is shown. It carries this bridge's
+   * claim generation (`claim`), which only the Player holding the bridge posts with. The sessions its closes released
+   * are forgotten here.
    */
-  async historyOpen(intent: number): Promise<HistoryOpened> {
-    const reply = await this.#control("historyOpen", { intent });
-    const opened = reply.result;
-    if (opened.kind === "opened") this.#forget(opened.released);
-    return opened;
+  async historyRenew(
+    intent: number,
+    session: PlayerSession | null,
+    closes: readonly HistoryCloseObligation[],
+  ): Promise<HistoryRenewed> {
+    const target = session === null ? null : this.#own(session).id;
+    const reply = await this.#control("historyRenew", {
+      intent,
+      owner: this.#owner,
+      session: target,
+      closes,
+    });
+    const renewed = reply.result;
+    if (renewed.kind !== "stale") this.#forget(renewed.released);
+    return renewed;
+  }
+
+  /**
+   * Closes a rewind history (`historyClose`), posted now with this bridge's claim generation. Whether it was posted is
+   * decided before this returns, so a close that could not be posted blocks the next open before anything else posts.
+   * The sessions it released are forgotten as its reply settles.
+   */
+  historyClose(args: Omit<HistoryCloseArguments, "owner">): PostDisposition<HistoryOpResult> {
+    const sent = this.#client.post("historyClose", { ...args, owner: this.#owner });
+    if (!sent.posted) return sent;
+    return {
+      posted: true,
+      reply: sent.reply.then((reply) => {
+        if (reply.result.kind === "done") this.#forget(reply.result.released);
+        return reply;
+      }),
+    };
   }
 
   /** The whole timeline of history `history` (`historyTimeline`), or `null` once it closed. */
@@ -572,13 +607,7 @@ export class PlayerBridge {
 
 /** The ops `historyStep` sends: the rewind and history ops of no session (`ops/history.ts`). */
 type HistoryStepOp =
-  | "historyClose"
-  | "rewindBack"
-  | "rewindForward"
-  | "rewindCommit"
-  | "rewindDrop"
-  | "rewindReturn"
-  | "rewindAdopt";
+  "rewindBack" | "rewindForward" | "rewindCommit" | "rewindDrop" | "rewindReturn" | "rewindAdopt";
 
 /** The bridge a main-side session belongs to. */
 export function bridgeOf(session: PlayerSession): PlayerBridge {

@@ -25,7 +25,7 @@ import { runRetentionChild } from "../helpers/retention-witness.js";
  * The residual: a plan-text slot (`preparePlanText`) shares its payload with its prerequisite plan (its JSON is the
  * plan's, written in a later task), so it is decided by weak references to the slot and its waiting task, and its plan's
  * marker decides it at `closed`; what it would keep only behind a private field, a closure or a promise's result is not
- * observed. A rewind history (`historyOpen`) takes only a serial, which carries no marker: it is decided by weak
+ * observed. A rewind history (`historyRenew`) takes only a serial, which carries no marker: it is decided by weak
  * references to its whole payload the op made, its registry entry and all it reaches but what a warm-up history holds,
  * with a negative control (`control/history`) that keeps its core after the open's reply failed. What its core keeps
  * behind its private fields is not observed; at its open it keeps no point, snapshot or log, which later publications

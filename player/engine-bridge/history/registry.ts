@@ -85,6 +85,14 @@ export class HistoryRegistry {
   readonly #spill: () => Promise<DebugHistorySpill | null>;
   readonly #budget: number | undefined;
   #intent = 0;
+  /*
+   * The close admission (`renew`): the Player claim generation whose history controls this follows, the newest one
+   * disposed, and whether a close of the current one failed. One latch per live Player: a newer generation's first
+   * control replaces it, and that Player's disposal ends it.
+   */
+  #owner = 0;
+  #disposed: number | null = null;
+  #closeFailed = false;
 
   constructor(
     delivery: DeliveryOwner,
@@ -105,8 +113,65 @@ export class HistoryRegistry {
   }
 
   /**
+   * Whether the history controls of Player claim generation `owner` are current: a newer generation takes the admission
+   * over, with no failed close; an older or a disposed one changes nothing.
+   */
+  admits(owner: number): boolean {
+    if (owner < this.#owner || (this.#disposed !== null && owner <= this.#disposed)) return false;
+    if (owner > this.#owner) {
+      this.#owner = owner;
+      this.#closeFailed = false;
+    }
+    return true;
+  }
+
+  /** Whether a close of the current Player failed: it opens nothing any more. */
+  refusesOpen(): boolean {
+    return this.#closeFailed;
+  }
+
+  /** Whether `intent` is newer than every history opened: an older one opens nothing. */
+  fresh(intent: number): boolean {
+    return intent > this.#intent;
+  }
+
+  /** Closes history `history` for `owner` (`observation`); a refusal latches the close admission (`failClose`). */
+  close(
+    owner: number,
+    history: number,
+    observation: Extract<HistoryObservation, { readonly kind: "close" }>,
+  ): { readonly outcome: HistoryOutcome; readonly applied: AppliedEffects } {
+    const closed = this.advance(history, observation);
+    if (closed.outcome.kind === "refused") this.failClose(owner);
+    return closed;
+  }
+
+  /**
+   * Latches the close admission of the op running now unless its success reply is posted: an undo registered with its
+   * delivery runs on a throw, or on a reply that could not be built, encoded or posted (`historyClose`).
+   */
+  closeUnlessDelivered(owner: number): void {
+    const delivery = this.#scope();
+    if (delivery !== null) this.#delivery.own(delivery, () => this.failClose(owner));
+  }
+
+  /** The Player `owner`'s disposal: every history closes, and its admission ends; returns the sessions to release. */
+  dispose(owner: number): readonly string[] {
+    const released = this.closeAll("disposal");
+    this.#disposed = Math.max(this.#disposed ?? owner, owner);
+    if (owner === this.#owner) this.#closeFailed = false;
+    return released;
+  }
+
+  /** A close of `owner` failed: while it is the current Player, nothing opens any more. */
+  failClose(owner: number): void {
+    if (owner === this.#owner) this.#closeFailed = true;
+  }
+
+  /**
    * Opens history `intent`, unless a newer one was opened already (`null`). An earlier history still open closes as
-   * replaced; the host sessions it released are returned, for the caller to release.
+   * replaced; the host sessions it released are returned, for the caller to release. `renew` closes every earlier one
+   * first, with its reasons, and admits the open only then.
    */
   open(
     intent: number,

@@ -184,6 +184,7 @@ const MODULE_STATE: Readonly<Record<string, string>> = {
   "ops/session.ts › nextHistoryKey":
     "the realm's lineage-key serial: a scalar, which holds no allocation",
   "ops/history.ts › CLOSE_REASONS": "a constant table",
+  "ops/history.ts › OBLIGATION_REASONS": "a constant table",
   "history/core.ts › NO_EFFECTS": "a frozen constant",
   "history/core.ts › HistoryCore.#points":
     "a history's points, private to its core, which the registry owns",
