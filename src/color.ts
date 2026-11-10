@@ -175,6 +175,29 @@ const LAB_KAPPA = 24389 / 27;
 /** colorjs.io's achromatic bound for OKLCH: a 100,000th of OKLab's `a` reference range. */
 const ACHROMATIC = (0.4 - -0.4) / 100000;
 
+// The colour path's only calls into `deterministic-math.ts`. Each passes on finite arguments alone, so no non-finite
+// value reaches that module's float storage, where a NaN's bits are the engine's choice; a NaN result makes the colour
+// not finite, which `normalizeColor` rejects, as an overflowing conversion always was.
+function finiteCubeRoot(x: number): number {
+  if (!Number.isFinite(x)) return Number.NaN;
+  return cubeRoot(x);
+}
+
+function finiteAtan2(y: number, x: number): number {
+  if (!Number.isFinite(y) || !Number.isFinite(x)) return Number.NaN;
+  return atan2Degrees(y, x);
+}
+
+function finiteCos(degrees: number): number {
+  if (!Number.isFinite(degrees)) return Number.NaN;
+  return cosDegrees(degrees);
+}
+
+function finiteSin(degrees: number): number {
+  if (!Number.isFinite(degrees)) return Number.NaN;
+  return sinDegrees(degrees);
+}
+
 /** The OKLCH coordinates of a parsed colour, or null for a space this module does not convert. */
 function toOklch(spaceId: string, coords: Coordinates): Coordinates | null {
   switch (spaceId) {
@@ -275,19 +298,22 @@ function labToXyz([lightness, a, b]: Coordinates): Coordinates {
 function lchToLab([lightness, chroma, hue]: Coordinates): Coordinates | null {
   if (!Number.isFinite((hue * Math.PI) / 180)) return null;
   const c = chroma < 0 ? 0 : chroma;
-  return [lightness, c * cosDegrees(hue), c * sinDegrees(hue)];
+  return [lightness, c * finiteCos(hue), c * finiteSin(hue)];
 }
 
 function xyzToOklch(xyz: Coordinates): Coordinates {
   const lms = multiply(xyz, XYZ_TO_LMS);
   return oklabToOklch(
-    multiply([cubeRoot(lms[0]), cubeRoot(lms[1]), cubeRoot(lms[2])], LMS_TO_OKLAB),
+    multiply(
+      [finiteCubeRoot(lms[0]), finiteCubeRoot(lms[1]), finiteCubeRoot(lms[2])],
+      LMS_TO_OKLAB,
+    ),
   );
 }
 
 function oklabToOklch([lightness, a, b]: Coordinates): Coordinates {
   if (Math.abs(a) < ACHROMATIC && Math.abs(b) < ACHROMATIC) return [lightness, 0, 0];
-  const degrees = atan2Degrees(b, a);
+  const degrees = finiteAtan2(b, a);
   return [lightness, Math.sqrt(a * a + b * b), ((degrees % 360) + 360) % 360];
 }
 

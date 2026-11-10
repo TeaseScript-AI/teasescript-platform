@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { relative, resolve } from "node:path";
+import { resolve } from "node:path";
 import test from "node:test";
 import Color from "colorjs.io";
-import ts from "typescript";
 import { compileSource } from "../../src/compiler.js";
-import { normalizeColor } from "../../src/color.js";
+import { isNormalizedColor, isNormalizedOpaqueColor, normalizeColor } from "../../src/color.js";
+import { authoredColorToOklch } from "../../player/theme/color.js";
+import { exactOperationEscapes } from "../helpers/exact-operations.js";
 
 /*
  * Colours normalize to the same text in every JavaScript engine (#2147): `src/color.ts` converts with operations
@@ -196,38 +197,92 @@ test("normalizes each notation as colorjs.io does, rejects exactly what it rejec
       "oklch(0.5 0.1 30)",
     ].map(normalizeColor),
     [
-      "oklch(0.05194463737839829 0.03599405766936659 264.0520226163699)",
-      "oklch(0.45201371817442365 0.3132143886344849 264.0520226163699)",
-      "oklch(0.6156434314975948 0.20500812504392163 257.64866865149116)",
-      "oklch(0.5406060090640484 0.08629251387284617 233.32890230157605)",
-      "oklch(0.7345181665611441 0.24219119551665366 142.60820861392733)",
-      "oklch(0.5802084112971143 0.0972230595785066 301.7691583636796)",
-      "oklch(0.6670748543068091 0.1073439269940544 297.2471691165158)",
-      "oklch(0.5 0.14142135623730953 315)",
+      "oklch(0.0519446373783983 0.0359940576693666 264.05202261637)",
+      "oklch(0.452013718174424 0.313214388634485 264.05202261637)",
+      "oklch(0.615643431497595 0.205008125043922 257.648668651491)",
+      "oklch(0.540606009064048 0.0862925138728462 233.328902301576)",
+      "oklch(0.734518166561144 0.242191195516654 142.608208613927)",
+      "oklch(0.580208411297114 0.0972230595785066 301.76915836368)",
+      "oklch(0.667074854306809 0.107343926994054 297.247169116516)",
+      "oklch(0.5 0.14142135623731 315)",
       "oklch(0.5 0.1 30)",
     ],
   );
 });
 
-test("prints each coordinate as Number::toString with its recommended choice, also at ties and powers of two", () => {
-  // An OKLCH hue is not converted, so the hue channel carries any finite double to the formatter.
-  // Two of Sol r2's witnesses are written as text: one is a tie, the other has a shorter neighbour that reads back too.
-  const doubles = [
-    0.30000000000000004,
-    Number("2.9802322387695312e-8"),
-    Number("7.120236347223045e-307"),
-    5e-324,
-    1.7976931348623157e308,
-    1e21,
-    1e-7,
-    123e-20,
-    0.1,
-    100,
-    1.0000000000000002,
+/** Whether a printed component reads back as a finite double that prints the same text again (as an OKLCH hue, which
+ * is printed without conversion). */
+function printsAgain(component: string): boolean {
+  return (
+    Number.isFinite(Number(component)) &&
+    normalizeColor(`oklch(0 0 ${component})`) === `oklch(0 0 ${component})`
+  );
+}
+
+test("prints 15 significant digits (17 near the largest double), each reading back finite and printing again the same", () => {
+  // Value rows: authored decimals of at most 15 digits print as written; the rest round at 15 digits.
+  const rows: readonly (readonly [string, string])[] = [
+    ["oklch(0.5 0.1 120)", "oklch(0.5 0.1 120)"],
+    ["oklch(0 0 2.9802322387695312e-8)", "oklch(0 0 2.98023223876953e-8)"],
+    ["oklch(0 0 7.120236347223045e-307)", "oklch(0 0 7.12023634722304e-307)"],
+    ["oklch(0.5 1e124 30)", "oklch(0.5 1e+124 30)"],
+    ["oklch(0.5 1e-7 30)", "oklch(0.5 1e-7 30)"],
+    ["oklch(0 0 -0)", "oklch(0 0 0)"],
+    ["oklch(0 0 5e-324)", "oklch(0 0 4.94065645841247e-324)"],
+    // Above 1.79769313486231e308, 15 digits would read back as Infinity; 17 always read back.
+    ["oklch(0.5 1.7976931348623157e308 0)", "oklch(0.5 1.7976931348623157e+308 0)"],
+    ["oklch(0.5 1.79769313486231e308 0)", "oklch(0.5 1.79769313486231e+308 0)"],
+    // Values a reader sees at the 16th digit (judged neutral): a huge hue, and two neutral thresholds of the Player.
+    ["oklch(0.5 0.1 1.0000000000000002e20)", "oklch(0.5 0.1 1e+20)"],
+    ["oklch(0.9999999999999999 0.1 30)", "oklch(1 0.1 30)"],
+    ["oklch(0.5 9.999999999999998e-8 30)", "oklch(0.5 1e-7 30)"],
   ];
-  for (let exponent = -1074; exponent <= 1023; exponent += 1) doubles.push(2 ** exponent);
-  for (const value of doubles.flatMap((x) => [x, -x]))
-    assert.equal(normalizeColor(`oklch(0 0 ${value})`), `oklch(0 0 ${value})`, String(value));
+  for (const [input, printed] of rows) assert.equal(normalizeColor(input), printed, input);
+  // The property, over notation × component × magnitude, both signs: each printed component reads back finite and prints
+  // again the same, and each printed colour passes the validators and the Player's reader.
+  const magnitudes = [
+    "5e-324",
+    "1e-320",
+    "2.2250738585072014e-308",
+    "1e-300",
+    "1e-100",
+    "1e-15",
+    "1e-7",
+    "0.1",
+    "1",
+    "1e15",
+    "1e21",
+    "1e100",
+    "1e300",
+    "1.79769313486231e308",
+    "1.7976931348623101e308",
+    "1.797693134862315e308",
+    "1.7976931348623157e308",
+  ];
+  const covered = new Set<string>();
+  for (const [notation, channels] of NOTATIONS)
+    for (const [index, [channel]] of channels.entries())
+      for (const magnitude of magnitudes)
+        for (const sign of ["", "-"]) {
+          const values = channels.map(([, value, unit], at) =>
+            at === index ? `${sign}${magnitude}${unit}` : `${value}${unit}`,
+          );
+          const printed = normalizeColor(`${notation}(${values.join(" ")})`);
+          if (printed === null) continue;
+          covered.add(`${notation} ${channel}`);
+          for (const component of /^oklch\((.*)\)$/u.exec(printed)![1]!.split(" "))
+            assert.ok(printsAgain(component), `${printed}: ${component}`);
+          assert.ok(isNormalizedColor(printed) && isNormalizedOpaqueColor(printed), printed);
+          assert.doesNotThrow(() => authoredColorToOklch(printed), printed);
+        }
+  for (const [notation, channels] of NOTATIONS)
+    for (const [channel] of channels)
+      assert.ok(covered.has(`${notation} ${channel}`), `${notation} ${channel}`);
+  // Whole-colour re-normalization is not claimed: a converted lightness outside [0, 1] is clamped when the text is
+  // parsed again (#2280).
+  const below = normalizeColor("lab(0 10 20)")!;
+  assert.ok(oklchCoordinates(below)[0]! < 0);
+  assert.notEqual(normalizeColor(below), below);
 });
 
 test("converts with no host transcendental, colorjs.io's parsing included", () => {
@@ -269,429 +324,8 @@ test("converts with no host transcendental, colorjs.io's parsing included", () =
   assert.deepEqual(attempts, []);
 });
 
-const CONVERSION_FILES = [
-  "src/color.ts",
-  "src/color-text.ts",
-  "src/deterministic-math.ts",
-  "src/numeric-functions.ts",
-];
-/** The closed module that makes a normalized colour's text. */
-const TEXT_MODULE = "src/color-text.ts";
-const EXACT_MATH = new Set([
-  "abs",
-  "ceil",
-  "floor",
-  "max",
-  "min",
-  "round",
-  "sign",
-  "sqrt",
-  "trunc",
-]);
-/** Each file's import declarations, pinned: a module, its default binding, its named bindings (`type` marked). */
-const PINNED_IMPORTS: Readonly<Record<string, readonly string[]>> = {
-  "src/color.ts": [
-    "colorjs.io: Color {}",
-    "./deterministic-math.js: {atan2Degrees, cosDegrees, cubeRoot, sinDegrees}",
-    "./color-text.js: {formatNumber}",
-    "./numeric-functions.js: {positivePower}",
-  ],
-  "src/color-text.ts": [],
-  "src/deterministic-math.ts": [],
-  "src/numeric-functions.ts": [
-    "./angle.js: {angleValue, formatAngle, type StoredAngle}",
-    "./conversions.js: {withoutNegativeZero}",
-    "./deterministic-math.js: {acosDegrees, asinDegrees, atan2Degrees, atanDegrees, cosDegrees, degreesToRadians, exp, ln, log10, sinDegrees, tanDegrees}",
-    "type ./language-facts.js: {NumericFunctionName}",
-  ],
-};
-/** Methods each checked module may call, by the receiver's type. */
-const METHODS: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
-  "src/color.ts": {
-    string: ["toLowerCase", "trim"],
-    RegExp: ["exec", "test"],
-    array: ["every", "slice"],
-    RegExpExecArray: ["slice"],
-  },
-  [TEXT_MODULE]: {
-    string: ["endsWith", "repeat", "replace", "slice", "split"],
-    number: ["toExponential"],
-    array: ["push", "slice"],
-    DataView: ["getBigUint64", "setFloat64"],
-  },
-};
-/** Globals each checked module may call; `String` only in the text module, which reads its digit count. */
-const GLOBALS: Readonly<Record<string, ReadonlySet<string>>> = {
-  "src/color.ts": new Set(["Number", "RegExp"]),
-  [TEXT_MODULE]: new Set(["ArrayBuffer", "BigInt", "DataView", "Error", "Number", "String"]),
-};
-/** The syntax the text module is written in; any other kind there is an escape. */
-const TEXT_MODULE_KINDS = new Set<ts.SyntaxKind>([
-  ts.SyntaxKind.EndOfFileToken,
-  ts.SyntaxKind.ExportKeyword,
-  ts.SyntaxKind.FunctionDeclaration,
-  ts.SyntaxKind.AmpersandAmpersandToken,
-  ts.SyntaxKind.AmpersandToken,
-  ts.SyntaxKind.ArrayBindingPattern,
-  ts.SyntaxKind.ArrayLiteralExpression,
-  ts.SyntaxKind.ArrayType,
-  ts.SyntaxKind.AsteriskAsteriskToken,
-  ts.SyntaxKind.AsteriskToken,
-  ts.SyntaxKind.BarBarToken,
-  ts.SyntaxKind.BigIntKeyword,
-  ts.SyntaxKind.BigIntLiteral,
-  ts.SyntaxKind.BinaryExpression,
-  ts.SyntaxKind.BindingElement,
-  ts.SyntaxKind.Block,
-  ts.SyntaxKind.CallExpression,
-  ts.SyntaxKind.ColonToken,
-  ts.SyntaxKind.ConditionalExpression,
-  ts.SyntaxKind.ElementAccessExpression,
-  ts.SyntaxKind.EqualsEqualsEqualsToken,
-  ts.SyntaxKind.EqualsToken,
-  ts.SyntaxKind.ExpressionStatement,
-  ts.SyntaxKind.ForOfStatement,
-  ts.SyntaxKind.GreaterThanGreaterThanToken,
-  ts.SyntaxKind.GreaterThanToken,
-  ts.SyntaxKind.Identifier,
-  ts.SyntaxKind.IfStatement,
-  ts.SyntaxKind.LessThanEqualsToken,
-  ts.SyntaxKind.LessThanLessThanToken,
-  ts.SyntaxKind.LessThanToken,
-  ts.SyntaxKind.MinusEqualsToken,
-  ts.SyntaxKind.MinusToken,
-  ts.SyntaxKind.NewExpression,
-  ts.SyntaxKind.NonNullExpression,
-  ts.SyntaxKind.NumberKeyword,
-  ts.SyntaxKind.NumericLiteral,
-  ts.SyntaxKind.ObjectLiteralExpression,
-  ts.SyntaxKind.Parameter,
-  ts.SyntaxKind.ParenthesizedExpression,
-  ts.SyntaxKind.PercentToken,
-  ts.SyntaxKind.PlusEqualsToken,
-  ts.SyntaxKind.PlusToken,
-  ts.SyntaxKind.PrefixUnaryExpression,
-  ts.SyntaxKind.PropertyAccessExpression,
-  ts.SyntaxKind.PropertyAssignment,
-  ts.SyntaxKind.PropertySignature,
-  ts.SyntaxKind.QuestionToken,
-  ts.SyntaxKind.ReadonlyKeyword,
-  ts.SyntaxKind.RegularExpressionLiteral,
-  ts.SyntaxKind.ReturnStatement,
-  ts.SyntaxKind.ShorthandPropertyAssignment,
-  ts.SyntaxKind.SlashEqualsToken,
-  ts.SyntaxKind.StringKeyword,
-  ts.SyntaxKind.StringLiteral,
-  ts.SyntaxKind.TemplateExpression,
-  ts.SyntaxKind.TemplateHead,
-  ts.SyntaxKind.TemplateMiddle,
-  ts.SyntaxKind.TemplateSpan,
-  ts.SyntaxKind.TemplateTail,
-  ts.SyntaxKind.ThrowStatement,
-  ts.SyntaxKind.TypeLiteral,
-  ts.SyntaxKind.VariableDeclaration,
-  ts.SyntaxKind.VariableDeclarationList,
-  ts.SyntaxKind.VariableStatement,
-  ts.SyntaxKind.WhileStatement,
-]);
-
-/**
- * Clause 1's closed admission, as `file:line form` for each use outside it. Its purposes: the conversion reaches no host
- * transcendental, and the text of a normalized colour is made only by `src/color-text.ts`, from the three components,
- * a module that makes text only from strings and bigints (and the two exactly specified readings of a number:
- * `toExponential`'s digits and `String`'s digit count).
- * - In all four files, every reference to the global `Math` is a direct call of an exact member or a read of `PI`;
- *   `globalThis`, `window` and `self` are refused wherever they occur, as is a binding named `Math` and `**` or `**=`
- *   other than between bigints; each file's import declarations equal `PINNED_IMPORTS`, and a dynamic `import()` is
- *   refused.
- * - `src/color-text.ts` imports nothing and is checked whole: only `TEXT_MODULE_KINDS`, its own functions and the
- *   admitted globals and methods as callees, and template spans and string `+` operands that are strings or bigints.
- * - In `src/color.ts`, every return of `normalizeColor` is `null` or the one template
- *   `oklch(${formatNumber(…)} ${formatNumber(…)} ${formatNumber(…)})` whose callees resolve to the text module's
- *   `formatNumber`; colorjs.io's binding is only `new Color(…)`, read for `.alpha` or the initializer of one `const`
- *   read only for `.space.id`, `.coords[0]` to `[2]` or `.alpha`; every call's callee is one of the file's own
- *   functions, an imported one, an admitted global or method.
- * Not claimed: a number turned into text elsewhere in `color.ts`, which by the output rule cannot reach a normalized
- * colour. colorjs.io's parsing is outside it; the throwing-`Math` run covers it.
- */
-function conversionEscapes(overrides: Readonly<Record<string, string>> = {}): string[] {
-  const config = ts.readConfigFile(resolve(process.cwd(), "tsconfig.json"), (file) =>
-    readFileSync(file, "utf8"),
-  );
-  const options = {
-    ...ts.parseJsonConfigFileContent(config.config, ts.sys, process.cwd()).options,
-    noEmit: true,
-  };
-  const host = ts.createCompilerHost(options);
-  const read = host.readFile.bind(host);
-  host.readFile = (file) => overrides[relative(process.cwd(), file)] ?? read(file);
-  const getSource = host.getSourceFile.bind(host);
-  host.getSourceFile = (file, language) => {
-    const text = overrides[relative(process.cwd(), file)];
-    return text === undefined
-      ? getSource(file, language)
-      : ts.createSourceFile(file, text, language, true);
-  };
-  const program = ts.createProgram(
-    CONVERSION_FILES.map((file) => resolve(process.cwd(), file)),
-    options,
-    host,
-  );
-  const checker = program.getTypeChecker();
-  const escapes: string[] = [];
-  const isGlobal = (node: ts.Node) =>
-    (checker.getSymbolAtLocation(node)?.declarations ?? []).some((declaration) =>
-      program.isSourceFileDefaultLibrary(declaration.getSourceFile()),
-    );
-  for (const name of CONVERSION_FILES) {
-    const file = program.getSourceFile(resolve(process.cwd(), name))!;
-    const color = name === "src/color.ts";
-    const escape = (node: ts.Node, form: string) =>
-      escapes.push(
-        `${name}:${file.getLineAndCharacterOfPosition(node.getStart()).line + 1} ${form}`,
-      );
-    const ownFunctions = new Set<ts.Symbol>();
-    const colorBindings = new Set<ts.Symbol>();
-    const parsedBindings = new Set<ts.Symbol>();
-    const imports: string[] = [];
-    const textModule = name === TEXT_MODULE;
-    let formatterBinding: ts.Symbol | undefined;
-    const typeName = (node: ts.Expression) => {
-      const type = checker.getTypeAtLocation(node);
-      const all = (flag: ts.TypeFlags) =>
-        (type.isUnion() ? type.types : [type]).every((member) => (member.flags & flag) !== 0);
-      if (all(ts.TypeFlags.StringLike)) return "string";
-      if (all(ts.TypeFlags.NumberLike)) return "number";
-      if (all(ts.TypeFlags.BigIntLike)) return "bigint";
-      if (checker.isArrayType(type) || checker.isTupleType(type)) return "array";
-      return type.getSymbol()?.name ?? "unknown";
-    };
-    const collect = (node: ts.Node): void => {
-      if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
-        const clause = node.importClause;
-        const named =
-          clause?.namedBindings !== undefined && ts.isNamedImports(clause.namedBindings)
-            ? clause.namedBindings.elements.map(
-                (element) =>
-                  `${element.isTypeOnly ? "type " : ""}${element.propertyName ? `${element.propertyName.text} as ` : ""}${element.name.text}`,
-              )
-            : clause?.namedBindings !== undefined
-              ? ["* namespace"]
-              : [];
-        const form = `${clause?.isTypeOnly ? "type " : ""}${node.moduleSpecifier.text}: ${clause?.name ? `${clause.name.text} ` : ""}{${named.join(", ")}}`;
-        imports.push(form);
-        if (color && node.moduleSpecifier.text === "colorjs.io" && clause?.name)
-          colorBindings.add(checker.getSymbolAtLocation(clause.name)!);
-        else if (
-          color &&
-          clause?.namedBindings !== undefined &&
-          ts.isNamedImports(clause.namedBindings)
-        )
-          for (const element of clause.namedBindings.elements) {
-            ownFunctions.add(checker.getSymbolAtLocation(element.name)!);
-            if (
-              node.moduleSpecifier.text === "./color-text.js" &&
-              element.name.text === "formatNumber"
-            )
-              formatterBinding = checker.getSymbolAtLocation(element.name);
-          }
-      }
-      if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword)
-        escape(node, "a dynamic import");
-      if (ts.isFunctionDeclaration(node) && node.name)
-        ownFunctions.add(checker.getSymbolAtLocation(node.name)!);
-      if (
-        ts.isVariableDeclaration(node) &&
-        ts.isIdentifier(node.name) &&
-        node.initializer &&
-        (ts.isArrowFunction(node.initializer) || ts.isFunctionExpression(node.initializer))
-      )
-        ownFunctions.add(checker.getSymbolAtLocation(node.name)!);
-      ts.forEachChild(node, collect);
-    };
-    collect(file);
-    if (JSON.stringify(imports) !== JSON.stringify(PINNED_IMPORTS[name]))
-      escape(file, `imports ${JSON.stringify(imports)}`);
-    if (textModule) {
-      const kinds = (node: ts.Node): void => {
-        if (!TEXT_MODULE_KINDS.has(node.kind)) escape(node, `${ts.SyntaxKind[node.kind]}`);
-        ts.forEachChild(node, kinds);
-      };
-      ts.forEachChild(file, kinds);
-    }
-    if (color)
-      for (const statement of file.statements)
-        if (ts.isFunctionDeclaration(statement) && statement.name?.text === "normalizeColor") {
-          const returns = (node: ts.Node): void => {
-            if (ts.isFunctionLike(node) && node !== statement) return;
-            if (ts.isReturnStatement(node)) {
-              const value = node.expression;
-              const formatted =
-                value !== undefined &&
-                ts.isTemplateExpression(value) &&
-                value.head.text === "oklch(" &&
-                value.templateSpans.length === 3 &&
-                value.templateSpans.every(
-                  (span, index) =>
-                    span.literal.text === (index === 2 ? ")" : " ") &&
-                    ts.isCallExpression(span.expression) &&
-                    formatterBinding !== undefined &&
-                    checker.getSymbolAtLocation(span.expression.expression) === formatterBinding,
-                );
-              if (!(value?.kind === ts.SyntaxKind.NullKeyword || formatted))
-                escape(node, "a normalizeColor return that is not null or the formatted template");
-            }
-            ts.forEachChild(node, returns);
-          };
-          ts.forEachChild(statement, returns);
-        }
-    const visit = (node: ts.Node): void => {
-      const parent = node.parent;
-      if (ts.isIdentifier(node)) {
-        const declaresName =
-          parent !== undefined &&
-          (ts.isVariableDeclaration(parent) ||
-            ts.isParameter(parent) ||
-            ts.isFunctionDeclaration(parent) ||
-            ts.isImportSpecifier(parent) ||
-            ts.isImportClause(parent) ||
-            ts.isBindingElement(parent)) &&
-          parent.name === node;
-        if (declaresName && node.text === "Math") escape(node, "a binding named Math");
-        // By text, whatever the symbol: `globalThis` has no declaration in the default library.
-        if (
-          ["globalThis", "window", "self"].includes(node.text) &&
-          !(ts.isPropertyAccessExpression(parent) && parent.name === node)
-        )
-          escape(node, node.text);
-        if (
-          node.text === "Math" &&
-          !declaresName &&
-          !(ts.isPropertyAccessExpression(parent) && parent.name === node)
-        ) {
-          const member =
-            ts.isPropertyAccessExpression(parent) && parent.expression === node
-              ? parent.name.text
-              : null;
-          const called =
-            member !== null &&
-            ts.isCallExpression(parent.parent) &&
-            parent.parent.expression === parent;
-          if (
-            !isGlobal(node) ||
-            member === null ||
-            !(member === "PI" ? !called : called && EXACT_MATH.has(member))
-          )
-            escape(node, member === null ? "Math as a value" : `Math.${member}`);
-        }
-        const symbol = checker.getSymbolAtLocation(node);
-        if (
-          color &&
-          symbol !== undefined &&
-          colorBindings.has(symbol) &&
-          !ts.isImportClause(parent)
-        ) {
-          const created = ts.isNewExpression(parent) && parent.expression === node;
-          const alpha =
-            created &&
-            ts.isPropertyAccessExpression(parent.parent) &&
-            parent.parent.name.text === "alpha";
-          const declaration =
-            created &&
-            ts.isVariableDeclaration(parent.parent) &&
-            ts.isIdentifier(parent.parent.name) &&
-            (ts.getCombinedNodeFlags(parent.parent) & ts.NodeFlags.Const) !== 0
-              ? parent.parent
-              : null;
-          if (declaration !== null)
-            parsedBindings.add(checker.getSymbolAtLocation(declaration.name)!);
-          else if (!alpha) escape(node, "a colorjs.io use");
-        }
-        if (
-          color &&
-          symbol !== undefined &&
-          parsedBindings.has(symbol) &&
-          !(ts.isVariableDeclaration(parent) && parent.name === node)
-        ) {
-          const read =
-            ts.isPropertyAccessExpression(parent) && parent.expression === node ? parent : null;
-          const grand = read?.parent;
-          const assigned = (target: ts.Node) =>
-            ts.isBinaryExpression(target.parent) &&
-            target.parent.left === target &&
-            target.parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment &&
-            target.parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment;
-          const admitted =
-            read !== null &&
-            ((read.name.text === "alpha" && !assigned(read)) ||
-              (read.name.text === "space" &&
-                ts.isPropertyAccessExpression(grand!) &&
-                grand.name.text === "id") ||
-              (read.name.text === "coords" &&
-                ts.isElementAccessExpression(grand!) &&
-                ts.isNumericLiteral(grand.argumentExpression) &&
-                ["0", "1", "2"].includes(grand.argumentExpression.text) &&
-                !assigned(grand)));
-          if (!admitted) escape(node, "a parsed colorjs.io object's use");
-        }
-        // `String` reads a number's digit count, in the text module only, and only as a callee.
-        if (
-          (color || textModule) &&
-          node.text === "String" &&
-          isGlobal(node) &&
-          !(textModule && ts.isCallExpression(parent) && parent.expression === node)
-        )
-          escape(node, "String");
-      }
-      // `**` is admitted between bigints only, where it is exact.
-      if (
-        ts.isBinaryExpression(node) &&
-        [ts.SyntaxKind.AsteriskAsteriskToken, ts.SyntaxKind.AsteriskAsteriskEqualsToken].includes(
-          node.operatorToken.kind,
-        ) &&
-        !(typeName(node.left) === "bigint" && typeName(node.right) === "bigint")
-      )
-        escape(node, node.operatorToken.getText());
-      if ((color || textModule) && (ts.isCallExpression(node) || ts.isNewExpression(node))) {
-        const callee = node.expression;
-        const symbol = ts.isIdentifier(callee) ? checker.getSymbolAtLocation(callee) : undefined;
-        const admitted =
-          (symbol !== undefined && (ownFunctions.has(symbol) || colorBindings.has(symbol))) ||
-          (ts.isIdentifier(callee) && isGlobal(callee) && GLOBALS[name]!.has(callee.text)) ||
-          (ts.isPropertyAccessExpression(callee) &&
-            ((ts.isIdentifier(callee.expression) && callee.expression.text === "Math") ||
-              (ts.isIdentifier(callee.expression) &&
-                callee.expression.text === "Number" &&
-                callee.name.text === "isFinite" &&
-                isGlobal(callee.expression)) ||
-              (METHODS[name]![typeName(callee.expression)] ?? []).includes(callee.name.text)));
-        if (!admitted) escape(node, `a call of ${callee.getText()}`);
-      }
-      if (
-        textModule &&
-        (ts.isTemplateSpan(node) ||
-          (ts.isBinaryExpression(node) &&
-            [ts.SyntaxKind.PlusToken, ts.SyntaxKind.PlusEqualsToken].includes(
-              node.operatorToken.kind,
-            )))
-      ) {
-        const operands = ts.isTemplateSpan(node) ? [node.expression] : [node.left, node.right];
-        const types = operands.map(typeName);
-        if (
-          (ts.isTemplateSpan(node) || types.includes("string")) &&
-          !types.every((type) => type === "string" || type === "bigint")
-        )
-          escape(node, `text from ${types.join(" and ")}`);
-      }
-      ts.forEachChild(node, visit);
-    };
-    visit(file);
-  }
-  return escapes;
-}
-
-test("the colour conversion admits only exact operations, and a normalized colour's text comes only from the formatter", () => {
-  assert.deepEqual(conversionEscapes(), []);
+test("the colour conversion admits only operations whose results the specification fixes", () => {
+  assert.deepEqual(exactOperationEscapes(), []);
   // Each form outside the admission is an escape: an addition to a file, or a replacement in it.
   const source = (file: string) => readFileSync(resolve(process.cwd(), file), "utf8");
   const added = (file: string, addition: string) => ({ [file]: `${source(file)}\n${addition}\n` });
@@ -702,9 +336,12 @@ test("the colour conversion admits only exact operations, and a normalized colou
   };
   const RETURN =
     "return `oklch(${formatNumber(lightness)} ${formatNumber(chroma)} ${formatNumber(hue)})`;";
-  const FORMATTER_START = "export function formatNumber(x: number): string {\n";
+  const PRINT = "x.toPrecision(15)";
+  const OKLAB = "  const degrees = finiteAtan2(b, a);";
+  const PARSE = "    const parsed = new Color(source);";
   for (const [label, overrides] of [
-    ["a non-exact Math member", added("src/color.ts", "export const a = () => Math.cbrt(2);")],
+    // The earlier families.
+    ["a non-exact Math member", replaced("src/color.ts", OKLAB, `${OKLAB}\n  void Math.cbrt(2);`)],
     ["an element access of Math", added("src/color.ts", 'export const a = () => Math["sqrt"](2);')],
     [
       "an alias of Math",
@@ -718,119 +355,134 @@ test("the colour conversion admits only exact operations, and a normalized colou
       "a Math member as a value",
       added("src/color.ts", "export const a = () => [1].map(Math.floor);"),
     ],
-    ["globalThis", added("src/color.ts", "export const a = () => globalThis.Math.sqrt(2);")],
-    ["**", added("src/color.ts", "export const a = (x: number) => x ** 2;")],
     [
-      "**=",
-      added(
-        "src/color.ts",
-        "export const a = (x: number) => {\n  let y = x;\n  y **= 2;\n  return y;\n};",
+      "globalThis",
+      replaced(
+        "src/deterministic-math.ts",
+        "  const third = Math.floor(exponent / 3);",
+        "  const third = globalThis.Math.floor(exponent / 3);",
       ),
     ],
+    ["** on numbers", added("src/color.ts", "export const a = (x: number) => x ** 2;")],
     [
       "a colorjs.io conversion",
-      added("src/color.ts", 'export const a = (s: string) => new Color(s).to("oklch");'),
+      replaced("src/color.ts", PARSE, `${PARSE}\n    void new Color(source).to("oklch");`),
+    ],
+    [
+      "a parsed colorjs.io object's method",
+      replaced("src/color.ts", PARSE, `${PARSE}\n    void parsed.to("oklch");`),
     ],
     [
       "a widened colorjs.io object",
-      added(
+      replaced(
         "src/color.ts",
-        'export const a = (s: string) => {\n  const c = new Color(s);\n  const n: Pick<Color, "to"> = c;\n  return n.to("oklch");\n};',
+        PARSE,
+        `${PARSE}\n    const widened: Pick<Color, "to"> = parsed;\n    void widened.to("oklch");`,
       ),
     ],
     [
-      "a colorjs.io object's coordinates",
-      added(
+      "[x].join in the closure",
+      replaced("src/color.ts", OKLAB, `${OKLAB}\n  void [degrees].join("");`),
+    ],
+    [
+      "a computed key with for…in in the closure",
+      replaced(
         "src/color.ts",
-        "export const a = (s: string) => {\n  const c = new Color(s);\n  return c.coords;\n};",
+        OKLAB,
+        `${OKLAB}\n  for (const key in { [degrees]: true }) void key;`,
       ),
-    ],
-    [
-      "a call outside the admitted ones",
-      added("src/color.ts", 'export const a = (x: number) => [x].join("");'),
-    ],
-    [
-      "String outside the formatter",
-      added("src/color.ts", "export const a = (x: number) => String(x);"),
-    ],
-    [
-      "an import outside the pinned ones",
-      added(
-        "src/color.ts",
-        'import { exp } from "./deterministic-math.js";\nexport const a = () => exp(1);',
-      ),
-    ],
-    [
-      "a non-exact Math member in deterministic-math",
-      added("src/deterministic-math.ts", "export const a = (x: number) => Math.exp(x);"),
-    ],
-    [
-      "** in numeric-functions",
-      added("src/numeric-functions.ts", "export const a = (x: number) => x ** 0.5;"),
     ],
     [
       "a colorjs.io import into numeric-functions",
       added(
         "src/numeric-functions.ts",
-        'import Color from "colorjs.io";\nexport const escaped = (source: string) => new Color(source).to("oklch");',
+        'import Color from "colorjs.io";\nexport const escaped = (s: string) => new Color(s).to("oklch");',
       ),
     ],
     [
-      "a computed key and for…in in the formatter",
-      replaced(
-        "src/color-text.ts",
-        FORMATTER_START,
-        `${FORMATTER_START}  for (const key in { [x]: true }) return key;\n`,
-      ),
-    ],
-    [
-      "a local formatNumber shadowing the text module's",
+      "a local formatNumber shadow",
       replaced(
         "src/color.ts",
         RETURN,
-        `function formatNumber(x: number): string {\n    for (const text in { [x]: true }) return text;\n    return "";\n  }\n  ${RETURN}`,
+        `function formatNumber(x: number): string {\n    return x === 0 ? '0' : '1';\n  }\n  ${RETURN}`,
       ),
     ],
     [
-      "an import into the text module",
-      added(
-        "src/color-text.ts",
-        'import { cubeRoot } from "./deterministic-math.js";\nexport const a = (x: number) => cubeRoot(x);',
-      ),
-    ],
-    [
-      "a helper in the text module that makes text from a number",
+      "a helper in the text module",
       added(
         "src/color-text.ts",
         "export function helper(x: number): string {\n  return `${x}`;\n}",
       ),
     ],
+    ["String in the text module", replaced("src/color-text.ts", PRINT, "String(x)")],
+    // The design round's.
+    ["toExponential without precision", replaced("src/color-text.ts", PRINT, "x.toExponential()")],
     [
-      "globalThis in cubeRoot",
+      "a long decimal read back",
+      replaced("src/color.ts", OKLAB, `${OKLAB}\n  void Number("0.100000000000000012491");`),
+    ],
+    [
+      "a NaN stored outside decompose",
+      replaced(
+        "src/color.ts",
+        OKLAB,
+        `${OKLAB}\n  new DataView(new ArrayBuffer(8)).setFloat64(0, Infinity - Infinity);`,
+      ),
+    ],
+    [
+      "a number as a computed key",
+      replaced("src/color.ts", OKLAB, `${OKLAB}\n  void { [degrees]: 1 };`),
+    ],
+    // The precision controls.
+    ["toPrecision without an argument", replaced("src/color-text.ts", PRINT, "x.toPrecision()")],
+    ["toPrecision(undefined)", replaced("src/color-text.ts", PRINT, "x.toPrecision(undefined)")],
+    [
+      "toPrecision with a variable",
+      replaced("src/color-text.ts", PRINT, "x.toPrecision(x > 1 ? 15 : 16)"),
+    ],
+    ["toPrecision(16)", replaced("src/color-text.ts", PRINT, "x.toPrecision(16)")],
+    ["toFixed", replaced("src/color-text.ts", PRINT, "x.toFixed(3)")],
+    // The closure's own.
+    [
+      "a helper the closure calls, with an unadmitted call",
+      {
+        "src/color.ts": `${replaced("src/color.ts", OKLAB, `${OKLAB}\n  unchecked();`)["src/color.ts"]!}\nfunction unchecked(): void {\n  void [1].join("");\n}\n`,
+      },
+    ],
+    ["a free host-property read", replaced("src/color.ts", OKLAB, `${OKLAB}\n  void Date.now();`)],
+    [
+      "a write to a support table",
+      added(
+        "src/numeric-functions.ts",
+        "export function spoil(): void {\n  (ONE as { hi: number }).hi = 2;\n}",
+      ),
+    ],
+    [
+      "a reassigned closure function",
+      added(
+        "src/deterministic-math.ts",
+        "export function spoil(): void {\n  // @ts-expect-error a reassignment\n  decompose = () => [0, 0];\n}",
+      ),
+    ],
+    // The float-storage primitive and the finite wrappers.
+    [
+      "a NaN stored inside decompose",
       replaced(
         "src/deterministic-math.ts",
-        "  return sign * rounded(root, third)!;",
-        "  return globalThis.Math.cbrt(x);",
+        "view.setFloat64(0, subnormal ? x * 4503599627370496 : x, false);",
+        "view.setFloat64(0, Infinity - Infinity, false);",
       ),
     ],
     [
-      "a bare span in the output",
+      "a wrapper without its finite check",
       replaced(
         "src/color.ts",
-        RETURN,
-        "return `oklch(${formatNumber(lightness)} ${formatNumber(chroma)} ${hue})`;",
-      ),
-    ],
-    [
-      "concatenated output",
-      replaced(
-        "src/color.ts",
-        RETURN,
-        'return "oklch(" + formatNumber(lightness) + " " + formatNumber(chroma) + " " + formatNumber(hue) + ")";',
+        "  if (!Number.isFinite(x)) return Number.NaN;\n  return cubeRoot(x);",
+        "  return cubeRoot(x);",
       ),
     ],
   ] as const)
-    assert.notDeepEqual(conversionEscapes(overrides), [], label);
+    assert.notDeepEqual(exactOperationEscapes(overrides), [], label);
 });
 
 /**
