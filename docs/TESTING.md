@@ -810,9 +810,8 @@ only in incomplete tapes, and picks the browser and Pixel cohorts.
 In a browser, `node tools/player-gate/tapes/browser.mjs --engine E --bridge DIR --tapes DIR --census FILE --out FILE`
 replays the census's pinned cohort, each tape checked against its pinned hash, on the bridge page's replay mode
 (`tools/player-gate/bridge/replay.mjs`) through both backends, with the same comparison and no tolerance. A tape that
-differs in one engine is a measured value: WebKit replays F `OwlSays` with a colour whose last digits differ from
-Node's, on both backends, because `normalizeColor` prints colorjs.io's OKLCH conversion as full doubles and the JS
-engines' `Math.cbrt`, `atan2` and `pow` differ in their last bits (#2147).
+differs in one engine is a measured value. Since #2147 an authored colour whose numbers have at most 20 significant
+digits normalizes to the same text in every engine, which converts it with engine-independent arithmetic.
 
 ## Implemented Phase 1 deterministic property harness
 
