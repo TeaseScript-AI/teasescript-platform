@@ -171,8 +171,10 @@ answer, or of its default's below a written `object`, that the stop left unprove
 obligations cannot be found (`Answers.gated()` gives `null`), "a store whose required checks could not be established at
 the budget" (`lostCheck`), a decline no compile reaches (#2228); (c) after a settled stop, a store whose required check the published plan would not keep, "a
 store whose check was lost at the budget" (`lostCheck`), a stopped decision's own marks among them (#2080): one whose
-completion result is complete owes nothing where the completion owes no check at its store (a declared claim, #2184),
-else it is kept only by a check that carries its contract, and one whose result was lost or is absent only by a complete
+completion result is complete owes nothing where the completion's own C1 ran at its path, over every decision the
+completion made to the fixed point, and left no check at its store (what stays declared is in the list below, #2184),
+else it is kept only by a check that carries its contract, its store's part checks only where the stored value's own
+literal builds each level they pass over (#2231), and one whose result was lost or is absent only by a complete
 store check (a proved-open result, and a shape result not lost, need no further check at their extent, as for every
 obligation); (d) after a stop before admission settled, which decides nothing after the stop, the first owed obligation
 against `unknown`, a store's, a literal's or a typed call's mark, "a store whose check was left undecided at the budget"
@@ -190,7 +192,7 @@ and lost checks, (b) and (c) above (#1781, `1ec334b94`; a stopped decision's own
 checks, (d) (#2080 part 2); that is no claim that every path to a missing check is repaired. Condition 2, every remaining
 case re-assessed before V2 replaces the legacy compiler, is open; its cases open at the time of writing (2026-11-10) are
 #1832, #1845 (with #1846), #1838 and #1836, #1772, a typed read a settled stop moved to `unknown` (#2183), the claim
-(c)'s NoCheck rests on (#2184), #1781's conservative natural-outside declines (128 rows in 8 sources, as reported in PR
+(c)'s NoCheck still rests on (#2184, in the list below), #1781's conservative natural-outside declines (128 rows in 8 sources, as reported in PR
 #1781's work-stop set sweep), and (d)'s natural declines: 106 compiles, each in one of the four modes, that stop at the
 work allowance or the read depth before admission settled (PR #2227's compiler replay against main 664f1183f, campaign
 `lane1a/2080-part2-replay`, over the areas of `tests/families` and `tools/corpus/fixture`, 51,749 sources, and the
@@ -222,13 +224,22 @@ changed warning or wording applies to the same change, the entry is its report:
   would notice, for a too-large script and a value wrong in more than one property, another property named in the same
   runtime error at the same place. Measured: 476 stopped plans changed over 186,428 forced settings; the remaining class
   reached at 16 settings in six sources built for it.
-- **The form of a store's check after a settled stop (open #2231).** A store the natural plan checks whole can be checked
-  by its parts, where the completion makes no check at the stored value. Where the claim #2184 records holds, a maker
-  would notice another wording of the same runtime error. It is not shown that a store checked by its parts has a part
-  at every level where its value may not be an object; a failure there would be a missing check, condition 1's defect
-  and not this entry. Measured: 4 settings on one source built for it, with equal outcomes over 678 host values; an
-  attempt to make the two forms disagree reached no part-checked store in 6,040 stops (343 published settled stops, each
-  checked whole).
+- **The form of a store's check after a settled stop (#2231).** A store the natural plan checks whole can be checked by
+  its parts, where the completion makes no check at the stored value. Its part checks keep the store's obligations only
+  where the stored value's own literal builds every level they pass over, so no level a part check skips can hold a
+  value that is no object or collection. A maker would notice another wording of the same runtime error. Measured on
+  main d62856a1a, every demand allowance, four held modes: 752 published settled stops on six first-asker sources and
+  5,165 on three alias sources built for it keep by parts, 13,338 keeps, each skipped level a literal container.
+- **What NoCheck still rests on after a settled stop (#2184).** A stopped decision's store owes no check where the
+  receiving completion's own C1 ran at its path, on one completion pass, and left none there (#2231). Two things stay
+  declared. First, that this pass, deciding on the settled pass's rejections and store targets, covers what the natural
+  final pass checks at the store: a bounded attempt found the two passes' inputs equal at 5,955 published settled stops,
+  and the written type's fast path decides some stores with no C1 decision (140 settings in sources built for it), each
+  carried there by its literal's own structure. Second, the decider's own level, which C1 passes over: on #2080's stop
+  corpus, 122 settings publish without the natural plan's whole check of a store whose one candidate is its own decider;
+  every path that check inspects is fixed by a typed binding or the store's own literal, none by host data. A maker
+  would notice nothing unless one of the two fails, which would be a missing check, condition 1's defect and not this
+  entry.
 - **A refusal a stop causes can name a construct the slice does not cover (#2236).** Where a stop leaves a condition's
   or a dict key's operand undecided, or a default's collection untyped, the candidate route refuses with the slice's
   coverage reason ("this operand"; "a default whose collection the value it stands in for does not type"), without the
