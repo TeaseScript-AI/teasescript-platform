@@ -41,7 +41,12 @@ import {
   withQuestionBound,
   withQuestionMemory,
 } from "../helpers/type-core-oracles.js";
-import type { InstructionPlan, TypeCheckPlan } from "../../src/plan/model.js";
+import type {
+  ExpressionPlan,
+  IndexExpressionPlan,
+  InstructionPlan,
+  TypeCheckPlan,
+} from "../../src/plan/model.js";
 import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import { hostValues, stopRuns } from "../helpers/type-core-stop-oracle.js";
 
@@ -1309,4 +1314,42 @@ test("a stop's runs read a no-plan error passed only by values its requirement a
       "open",
       mode.name,
     );
+  // (Codex r1 on #2257: in a loop the site holds `0`, then `null`. Each visit is read: unchecked, the second visit's `null`
+  // passes, `open`; checked, the run fails there on it, a violating host failing; with the index made a literal, the run
+  // fails on another value at a site whose own value fits, which shows no violating host)
+  const looped =
+    'let t:integer?=null\nlet root={n:t,nest:{n:t,keep:1},spare:t}\nlet a=root\nlet b={p:a}\nb.p.nest.n=0\nlet out=[b.p,root].get(0, default: root)\nrepeat 2 {\nsay [4][out.nest.n]\nout.nest.n=null\n}\nsay "AFTER"\nexit\n';
+  const at = looped.indexOf("say [4]");
+  const edited =
+    (edit: (value: IndexExpressionPlan) => ExpressionPlan) =>
+    (plan: InstructionPlan): InstructionPlan => ({
+      ...plan,
+      instructions: plan.instructions.map((instruction) =>
+        instruction.kind === "say" &&
+        instruction.span.so === at &&
+        instruction.value.kind === "index"
+          ? { ...instruction, value: edit(instruction.value) }
+          : instruction,
+      ),
+    });
+  for (const mode of HELD_MODES)
+    for (const [planted, kind, failed] of [
+      [undefined, "unwitnessed", [true]],
+      [edited((value) => value.index), "open", undefined],
+      [
+        edited((value) => ({
+          ...value,
+          index: { kind: "literal", value: 2, span: value.index.span },
+        })),
+        "unwitnessed",
+        [false],
+      ],
+    ] as const) {
+      const found = stopRuns(unit(looped), [], (make) => mode.run(make), 64, planted);
+      assert.deepEqual(
+        [found.kind, found.resolved?.map((each) => each.failed)],
+        [kind, failed],
+        mode.name,
+      );
+    }
 });

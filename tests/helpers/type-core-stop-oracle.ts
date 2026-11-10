@@ -1,6 +1,6 @@
 import type { Expression } from "../../src/ast.js";
 import { compileProjectWithBackend, type CompilationResult } from "../../src/compiler.js";
-import type { InstructionPlan, TypePlan } from "../../src/plan/model.js";
+import type { Instruction, InstructionPlan, TypePlan } from "../../src/plan/model.js";
 import { executeInstruction, run } from "../../src/runtime/engine.js";
 import { assertValueType } from "../../src/runtime/values/value-types.js";
 import { valueKindOf } from "../../src/value-kinds.js";
@@ -177,6 +177,65 @@ function ranWith(
   };
 }
 
+/**
+ * How each instruction kind moves control, for `tracedRun`'s `repeats` (#2183, the lead's note on Codex r1): `straight`
+ * runs once and goes on to the next instruction; `forward` jumps only to its `target`, so it runs straight where that
+ * lies after it; `repeats` may run an instruction again (a loop, a call, a transfer, a block started later, an
+ * instruction a Player's answer or a pause runs again). Keyed by every kind of `Instruction`, so a kind the plan gains
+ * is a type error here until it is classified.
+ */
+const CONTROL: Readonly<Record<Instruction["kind"], "straight" | "forward" | "repeats">> = {
+  declareGlobal: "straight",
+  declareSpeaker: "straight",
+  setDefaultSpeaker: "straight",
+  copyPlayerProfile: "straight",
+  enterScope: "straight",
+  leaveScope: "straight",
+  declareBinding: "straight",
+  prepareReference: "straight",
+  validateAssignmentTarget: "straight",
+  assign: "straight",
+  validateCallReceiver: "straight",
+  evaluate: "straight",
+  storeTemporary: "straight",
+  prepareSaySpeaker: "straight",
+  prepareSayContextualSpeaker: "straight",
+  prepareSayText: "straight",
+  prepareInteractionSpeaker: "straight",
+  clearTemporary: "straight",
+  clearTemporaries: "straight",
+  say: "straight",
+  showImage: "straight",
+  showCamera: "straight",
+  hideCamera: "straight",
+  storageWrite: "straight",
+  stopAudio: "straight",
+  exit: "straight",
+  jumpIfFalse: "forward",
+  jump: "forward",
+  wait: "repeats",
+  loopStart: "repeats",
+  loopControl: "repeats",
+  callFunction: "repeats",
+  bindSuppliedParameter: "repeats",
+  beginFunctionDefaults: "repeats",
+  prepareParameterDefault: "repeats",
+  bindDefaultParameter: "repeats",
+  enterFunctionBody: "repeats",
+  returnValue: "repeats",
+  returnVoid: "repeats",
+  startTimer: "repeats",
+  showPermanentButton: "repeats",
+  playMedia: "repeats",
+  interaction: "repeats",
+  capture: "repeats",
+  fileStore: "repeats",
+  lock: "repeats",
+  goto: "repeats",
+  transfer: "repeats",
+  end: "repeats",
+};
+
 /** A run of a plan as `ranWith` gives it, with the plan indices of the instructions it executed (`instructionTrace`). */
 function tracedRun(
   plan: InstructionPlan,
@@ -185,6 +244,11 @@ function tracedRun(
   readonly executed: ReadonlySet<number>;
   /** How many loops took a round (a `loopStart` continuing into its body), each loop once. */
   readonly rounds: number;
+  /**
+   * Whether the run may have run an instruction more than once: it executed an instruction that is not `straight`, or a
+   * `forward` one whose target is at or before its own (`CONTROL`).
+   */
+  readonly repeats: boolean;
 } {
   const result = run(
     plan,
@@ -193,16 +257,30 @@ function tracedRun(
     { instructionTrace: true },
   );
   const failure = result.events.find((event) => event.kind === "runtimeFailure");
+  const executed = new Set(result.instructionTrace?.instructions ?? []);
   return {
     said: result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
     failure:
       failure?.kind === "runtimeFailure"
         ? { code: failure.code, start: failure.span.start.offset, end: failure.span.end.offset }
         : null,
-    executed: new Set(result.instructionTrace?.instructions ?? []),
+    executed,
     rounds: (result.instructionTrace?.branches ?? []).filter(
       ([at, next]) => plan.instructions[at]?.kind === "loopStart" && next === at + 1,
     ).length,
+    repeats: [...executed].some((at) => {
+      const instruction = plan.instructions[at];
+      if (instruction === undefined) return true;
+      const control = CONTROL[instruction.kind];
+      if (control === "straight") return false;
+      // (a forward kind runs straight only with a target after it; one without a target repeats)
+      return !(
+        control === "forward" &&
+        "target" in instruction &&
+        typeof instruction.target === "number" &&
+        instruction.target > at
+      );
+    }),
   };
 }
 
@@ -267,29 +345,47 @@ function valuePath(expression: Expression): ValuePath | null {
 }
 
 /**
- * The value at `path` just before a run of `plan` with `globals` first reaches the instruction whose span is `own`,
- * stepping with the public `executeInstruction` (#2183: not the engine-owned observer entry); `undefined` where
- * the run fails or ends first, a step bound passes, or the path does not resolve in its frames and globals.
+ * The value at `path` just before each time a run of `plan` with `globals` reaches an instruction whose span is `own`,
+ * in order, stepping with the public `executeInstruction` until the run fails or ends (#2183: not the engine-owned
+ * observer entry), or, where its traced run cannot have repeated an instruction (`once`, not `repeats`), until the
+ * first visit, its only one;
+ * `undefined` for a visit where the path does not resolve in the frames and globals; `null` where no instruction has
+ * that span or the run passes a step bound.
  */
-function valueBefore(
+function siteValues(
   plan: InstructionPlan,
   globals: Globals,
   own: Span,
   path: ValuePath,
-): SerializableRuntimeValue | undefined {
-  const target = plan.instructions.findIndex((instruction) => {
+  once: boolean,
+): (SerializableRuntimeValue | undefined)[] | null {
+  const targets = new Set<number>();
+  plan.instructions.forEach((instruction, index) => {
     const span = spanOf(instruction);
-    return span !== null && span.start === own.start && span.end === own.end;
+    if (span !== null && span.start === own.start && span.end === own.end) targets.add(index);
   });
-  if (target < 0) return undefined;
+  if (targets.size === 0) return null;
+  const values: (SerializableRuntimeValue | undefined)[] = [];
   let snapshot = createImmediatePacingRuntimeSnapshot(plan, { globals });
-  for (let steps = 0; snapshot.nextInstruction !== target; steps += 1) {
-    if (steps >= VALUE_STEPS) return undefined;
+  for (let steps = 0; snapshot.nextInstruction < plan.instructions.length; steps += 1) {
+    if (steps >= VALUE_STEPS) return null;
+    if (targets.has(snapshot.nextInstruction)) {
+      values.push(valueAt(snapshot, path));
+      if (once) break;
+    }
     const result = executeInstruction(plan, snapshot);
     if (result.events.some((event) => event.kind === "runtimeFailure" || event.kind === "exit"))
-      return undefined;
+      break;
     snapshot = result.snapshot;
   }
+  return values;
+}
+
+/** The value at `path` in a snapshot's frames, the innermost first, then its globals; `undefined` where none. */
+function valueAt(
+  snapshot: ReturnType<typeof createImmediatePacingRuntimeSnapshot>,
+  path: ValuePath,
+): SerializableRuntimeValue | undefined {
   const bindings = [...snapshot.frames].reverse().flatMap((frame) => frame.bindings);
   let value: SerializableRuntimeValue | undefined = [...bindings, ...snapshot.globals].find(
     (binding) => binding.name === path.name,
@@ -308,7 +404,7 @@ function valueBefore(
   return value;
 }
 
-/** The instructions `valueBefore` steps at most before it reads nothing (a run that loops past them). */
+/** The instructions `siteValues` steps at most before it reads nothing (a run that loops past them). */
 const VALUE_STEPS = 10_000;
 
 /** A runtime value's kind as the core names it. */
@@ -1063,8 +1159,8 @@ export interface StopRunSide {
  *   compile error the stop turned into runtime checks), a run in a single-file unit that executes the error's own store
  *   instruction (the innermost holding the error's site; a store's absent property, C5c, at the store, not the object the
  *   diagnostic names) and passes it: it ends, or it fails elsewhere with no loop round in its trace. Where the error's
- *   requirement and its site's value resolve (`resolvedError`), only a run whose value there violates the requirement
- *   (#2183); a run whose value fits is no escape;
+ *   requirement and its site's value resolve (`resolvedError`), not a run whose value read there at every visit fits the
+ *   requirement (#2183); a run with any visit unread or excluded stays open;
  * - `later`: a run where both fail at different sites and the stopped run executed the natural failure's exact
  *   instruction and passed it, in a single-file unit with no loop round in its trace (the instruction trace,
  *   `docs/RUNTIME.md#instruction-trace`);
@@ -1100,8 +1196,8 @@ export interface StopRuns {
   readonly untested?: readonly string[];
   /**
    * Where `unwitnessed` with no natural plan: each error whose requirement and site value resolve (`resolvedError`), by
-   * its code and site, and whether a run failed at its own instruction (`failed`: a violating host ran and failed there)
-   * or none did (no violating host was run).
+   * its code and site, and whether a run failed at its own instruction on a value read there that the requirement
+   * excludes (`failed`: a violating host ran and failed there) or none did (no violating host was shown run).
    */
   readonly resolved?: readonly { readonly site: string; readonly failed: boolean }[];
   /**
@@ -1263,19 +1359,29 @@ export function stopRuns(
       };
     });
     const sites = errors.map(({ code, key, checks }) => ({ code, site: key, checks }));
-    // (a resolved error's runs: whether one failed at its own instruction)
+    // (a resolved error's runs: whether one failed at its own instruction on a value its requirement excludes)
     const failedAt = new Set<string>();
     if (single)
       for (const each of pool) {
         const ran = tracedRun(got, each);
         for (const { own, resolved, key } of errors) {
           if (own === null) continue;
-          if (resolved !== null && ran.failure !== null && within(ran.failure, own))
-            failedAt.add(key);
-          if (!passed(got, ran, own) || (ran.failure !== null && looped(ran))) continue;
-          // (a value read at the instruction that fits the requirement passes it rightly; an unread one stays open)
-          const value = resolved === null ? undefined : valueBefore(got, each, own, resolved.path);
-          if (value !== undefined && resolved!.requires.includes(kindOf(value))) continue;
+          const failedThere = ran.failure !== null && within(ran.failure, own);
+          const passes = passed(got, ran, own) && (ran.failure === null || !looped(ran));
+          if (!failedThere && !passes) continue;
+          const visits =
+            resolved === null ? null : siteValues(got, each, own, resolved.path, !ran.repeats);
+          const fits = (value: SerializableRuntimeValue | undefined): boolean =>
+            value !== undefined && resolved!.requires.includes(kindOf(value));
+          // (the visit the run failed at is its last: a violating host ran and failed there only where its value is read
+          // and excluded)
+          if (failedThere) {
+            const last = visits === null ? undefined : visits[visits.length - 1];
+            if (last !== undefined && !fits(last)) failedAt.add(key);
+            continue;
+          }
+          // (every visit's value read and fitting passes the instruction rightly; any other stays open)
+          if (visits !== null && visits.length > 0 && visits.every(fits)) continue;
           return {
             ...none,
             kind: "open",
