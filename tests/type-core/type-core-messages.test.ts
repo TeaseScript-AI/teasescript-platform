@@ -3770,10 +3770,8 @@ test("a mixed element's type names its dict layers as dicts (#1762)", () => {
  * also inside a literal or another value) and an index target's (one list or dict step per index), tests the value by
  * its whole receiving type, as #1753's does where the landing is known, and a storing method's argument (`add`, `addAll`)
  * by its receiver's (`addAll`'s never null), or no check where its receiver is off the place's path; a flat index store
- * keeps its element's test. #1827: a value in a dict literal's value, a set literal's element or a set literal's selected
- * element lands as a list literal's does, by the literal's step (a key is no value of it), so its check tests the whole
- * receiving type there too, and the walk to it is charged as a list's or an object's is (#1730).
- * Each pasted check compiles under both checkers (the candidate route refuses a dict or set literal). In four modes.
+ * keeps its element's test.
+ * Each pasted check compiles under both checkers. In four modes.
  */
 test("a store's check tests an argument or an index target by its whole receiving type (#1763)", () => {
   const warned = (into: string, fix: string) =>
@@ -3782,8 +3780,6 @@ test("a store's check tests an argument or an index target by its whole receivin
   const p = "'p' holds whole numbers or null (integer?[])";
   const deep = (name: string) =>
     `An element of an element of '${name}' is declared as a whole number (integer) or null`;
-  const deeper = (name: string) =>
-    `An element of an element of an element of '${name}' is declared as a whole number (integer) or null`;
   const f = (parameters: string, call: string) =>
     `function f(${parameters}) {\n  say "\${p.length}"\n}\n${call}\nexit\n`;
   const g = (call: string) => `function g(p: integer?[]) {\n  return p.length\n}\n${call}\nexit\n`;
@@ -3870,7 +3866,75 @@ test("a store's check tests an argument or an index target by its whole receivin
         check("if hostValue is integer { a[0]=hostValue }"),
       ),
     ],
-    // (#1827: a dict literal's value, also by a written name, after another entry, through parentheses and either
+  ];
+  for (const mode of MODES)
+    for (const [source, message] of cases) {
+      const found = inMode(mode, () => reported(main(source))).filter(
+        (each) => each.site === "hostValue" && each.message === message,
+      );
+      assert.equal(found.length, 1, `${JSON.stringify(mode)} ${source}: ${message}`);
+    }
+  // (a call names its own file's function, where another file declares one of the same name, Codex r1 on #1817)
+  for (const mode of MODES) {
+    const files = [
+      {
+        path: "main.tease",
+        source:
+          'function f(p:integer?[]) { return p.length }\nf(hostValue)\ncall "other.tease"\nexit\n',
+      },
+      {
+        path: "other.tease",
+        source: "function f(p:string?[]) { return p.length }\nf(hostValue)\nend\n",
+      },
+    ];
+    const fixes = inMode(mode, () => reported(files))
+      .map((each) => /as in '([^']*)'/u.exec(each.message)?.[1])
+      .filter((each) => each !== undefined)
+      .sort();
+    assert.deepEqual(
+      fixes,
+      ["if hostValue is integer?[] { f(hostValue) }", "if hostValue is string?[] { f(hostValue) }"],
+      JSON.stringify(mode),
+    );
+  }
+  // (each pasted check compiles under both checkers)
+  const errors = (source: string) => [
+    ...compileProject([{ path: "main.tease", source }], { globals: ["hostValue"] })
+      .diagnostics.filter((diagnostic) => diagnostic.severity === "error")
+      .map((diagnostic) => `current ${diagnostic.code}`),
+    ...reported(main(source))
+      .filter((each) => each.error)
+      .map((each) => `core ${each.code}`),
+  ];
+  for (const followed of [
+    f("p: integer?[]", "if hostValue is integer?[] { f(hostValue) }"),
+    f("p: integer?[][]", "if hostValue is integer?[] { f([hostValue]) }"),
+    "let a:integer?[][]=[[1]]\nif hostValue is integer?[] { a[0]=hostValue }\nexit\n",
+    'let d:integer?[] dict=dict {}\nif hostValue is integer?[] { d["k"]=hostValue }\nexit\n',
+    "let a:integer?[][]=[[1]]\nif hostValue is integer?[] { a.add(hostValue) }\nexit\n",
+    "let a:integer?[][]=[[1]]\nif hostValue is integer?[][] { a.addAll(hostValue) }\nexit\n",
+    "let a:integer?[][]=[[1]]\nif hostValue is integer?[] { (a.add)(hostValue) }\nexit\n",
+    "let a:integer?[][]?=[[1]]\nif a == null { exit }\nif hostValue is integer?[][] { a.addAll(hostValue) }\nexit\n",
+  ])
+    assert.deepEqual(errors(followed), [], followed);
+});
+
+/**
+ * #1827: a value in a dict literal's value, a set literal's element or a set literal's selected element lands as a list
+ * literal's does, by the literal's step (a key is no value of it), so a store's check tests the whole receiving type
+ * there, as #1763's does; the walk to it is charged as a list's or an object's is (#1730). Each pasted check compiles
+ * under both checkers (the candidate route refuses a dict or set literal). In four modes.
+ */
+test("a store's check inside a dict or set literal tests its whole receiving type (#1827)", () => {
+  const warned = (into: string, fix: string) =>
+    `${into}, but 'hostValue' may be a value of another type here. ${STOPS} ${fix} ${OUTSIDE("hostValue")}`;
+  const check = (code: string) => `Check 'hostValue' first, as in '${code}'.`;
+  const deep = (name: string) =>
+    `An element of an element of '${name}' is declared as a whole number (integer) or null`;
+  const deeper = (name: string) =>
+    `An element of an element of an element of '${name}' is declared as a whole number (integer) or null`;
+  const cases: readonly (readonly [source: string, message: string])[] = [
+    // (a dict literal's value, also by a written name, after another entry, through parentheses and either
     // operand of `otherwise`; a set literal's element; nested in a list, a dict or a set; an argument's; a `let`'s, in
     // words; a property below a dict's value, its own test)
     ...[
@@ -3963,29 +4027,6 @@ test("a store's check tests an argument or an index target by its whole receivin
       );
       assert.equal(found.length, 1, `${JSON.stringify(mode)} ${source}: ${message}`);
     }
-  // (a call names its own file's function, where another file declares one of the same name, Codex r1 on #1817)
-  for (const mode of MODES) {
-    const files = [
-      {
-        path: "main.tease",
-        source:
-          'function f(p:integer?[]) { return p.length }\nf(hostValue)\ncall "other.tease"\nexit\n',
-      },
-      {
-        path: "other.tease",
-        source: "function f(p:string?[]) { return p.length }\nf(hostValue)\nend\n",
-      },
-    ];
-    const fixes = inMode(mode, () => reported(files))
-      .map((each) => /as in '([^']*)'/u.exec(each.message)?.[1])
-      .filter((each) => each !== undefined)
-      .sort();
-    assert.deepEqual(
-      fixes,
-      ["if hostValue is integer?[] { f(hostValue) }", "if hostValue is string?[] { f(hostValue) }"],
-      JSON.stringify(mode),
-    );
-  }
   // (each pasted check compiles under both checkers)
   const errors = (source: string) => [
     ...compileProject([{ path: "main.tease", source }], { globals: ["hostValue"] })
@@ -3996,15 +4037,6 @@ test("a store's check tests an argument or an index target by its whole receivin
       .map((each) => `core ${each.code}`),
   ];
   for (const followed of [
-    f("p: integer?[]", "if hostValue is integer?[] { f(hostValue) }"),
-    f("p: integer?[][]", "if hostValue is integer?[] { f([hostValue]) }"),
-    "let a:integer?[][]=[[1]]\nif hostValue is integer?[] { a[0]=hostValue }\nexit\n",
-    'let d:integer?[] dict=dict {}\nif hostValue is integer?[] { d["k"]=hostValue }\nexit\n',
-    "let a:integer?[][]=[[1]]\nif hostValue is integer?[] { a.add(hostValue) }\nexit\n",
-    "let a:integer?[][]=[[1]]\nif hostValue is integer?[][] { a.addAll(hostValue) }\nexit\n",
-    "let a:integer?[][]=[[1]]\nif hostValue is integer?[] { (a.add)(hostValue) }\nexit\n",
-    "let a:integer?[][]?=[[1]]\nif a == null { exit }\nif hostValue is integer?[][] { a.addAll(hostValue) }\nexit\n",
-    // (#1827)
     ...[
       'd=dict {"k":hostValue}',
       "d=dict {k:hostValue}",
@@ -4023,8 +4055,13 @@ test("a store's check tests an argument or an index target by its whole receivin
     "let x:integer?[]=[1]\nif hostValue is integer?[] { x=set [hostValue, [2]].random }\nexit\n",
   ])
     assert.deepEqual(errors(followed), [], followed);
-  // (#1827: the walk into a dict's value and a set's element charged as a list's and an object's: one unit per value
-  // compared, per entry or element compared and per expression walked)
+});
+
+/**
+ * #1827: the walk into a dict literal's value and a set literal's element is charged as a list's and an object's is
+ * (#1730): one unit per value compared, per entry or element compared and per expression walked.
+ */
+test("a message's walk into a dict or set literal charges its work (#1827)", () => {
   const units = (source: string): number => {
     const given = parse(source).program.statements.flatMap((statement) => givenBy(statement) ?? []);
     const start = source.lastIndexOf("hostValue");
