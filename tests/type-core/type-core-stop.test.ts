@@ -73,6 +73,7 @@ import {
   heldDemands,
   heldFamily,
   stopDeclineProblem,
+  unsettledStop,
   heldProblems,
   heldRun,
   heldStops,
@@ -1975,7 +1976,8 @@ test("a store at a stopped decision's key keeps an obligation, whichever pass st
             what = error.what;
           }
           const answers = analyseCore(request);
-          const problem = what === null ? null : stopDeclineProblem(what, answers.budget, null);
+          const problem =
+            what === null ? null : stopDeclineProblem(what, unsettledStop(answers.budget), null);
           if (problem !== null) throw new Error(`${source}: ${problem}`);
           return { result, answers };
         };

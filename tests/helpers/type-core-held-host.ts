@@ -631,21 +631,26 @@ const declinedRun = (run: StopRun): boolean => declined.has(run.result);
 export const declineOf = (run: Pick<StopRun, "result">): string | null =>
   declined.get(run.result) ?? null;
 
+/** Whether an analysis stopped before admission settled, where the plain gate reads (#2080 part 2). */
+export const unsettledStop = (budget: Answers["budget"]): boolean =>
+  budget.exhausted !== null && !budget.settled;
+
 /**
- * Why a compile's decline at a stop does not stand, or `null` where it does (#2080 part 2, Codex r2): a decline a limit
- * causes, at the phase it belongs to ("a store whose check was left undecided at the budget" before admission settled;
- * the lost and unestablished checks only after it; an open typed default at any stop), or the reason the unstopped
- * compile gives (`natural`), a construct outside the slice. Any other decline would hide a wrong reason as no plan.
+ * Why a compile's decline at a stop does not stand, or `null` where it does (#2080 part 2, Codex r2, r3): a decline a
+ * limit causes, at the phase it belongs to ("a store whose check was left undecided at the budget" before admission
+ * settled; the lost and unestablished checks only after it; an open typed default at any stop), whatever the unstopped
+ * compile gave; or, for a construct outside the slice, the reason the unstopped compile gives too (`natural`). Any other
+ * decline would hide a wrong reason as no plan.
  */
 export function stopDeclineProblem(
   what: string,
-  budget: Answers["budget"],
+  unsettled: boolean,
   natural: string | null,
 ): string | null {
-  if (what === natural) return null;
   if (!LIMIT_REASONS.includes(what))
-    return `declined at a stop with "${what}", unstopped ${natural ?? "compiled"}`;
-  const unsettled = budget.exhausted !== null && !budget.settled;
+    return what === natural
+      ? null
+      : `declined at a stop with "${what}", unstopped ${natural ?? "compiled"}`;
   if (what === UNDECIDED_AT_BUDGET ? unsettled : what === OPEN_BY_STOP || !unsettled) return null;
   return `declined with "${what}" ${unsettled ? "before" : "after"} admission settled`;
 }
@@ -2333,7 +2338,11 @@ export function heldProblems(
   if (!c.slice) return problems;
   const decline = declineOf(stopped);
   if (decline !== null) {
-    const problem = stopDeclineProblem(decline, stopped.answers.budget, declineOf(unstopped));
+    const problem = stopDeclineProblem(
+      decline,
+      unsettledStop(stopped.answers.budget),
+      declineOf(unstopped),
+    );
     return problem === null ? problems : [...problems, problem];
   }
   // (a stopped plan runs its fitting and forbidden values whatever the reference's compile did; the two compiles are
@@ -2402,7 +2411,7 @@ export function heldUnstopped(
   if (decline === null) return { run, problems: runProblems(c, run) };
   // (an unstopped run may decline outside the slice, or at the work allowance's own stop, as any stop does)
   const problem = LIMIT_REASONS.includes(decline)
-    ? stopDeclineProblem(decline, run.answers.budget, null)
+    ? stopDeclineProblem(decline, unsettledStop(run.answers.budget), null)
     : null;
   return { run, problems: problem === null ? [] : [problem] };
 }

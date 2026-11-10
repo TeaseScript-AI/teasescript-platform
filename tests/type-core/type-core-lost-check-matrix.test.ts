@@ -13,7 +13,12 @@ import {
   withTestDemandAllowance,
 } from "../../src/type-inference/core/budget.js";
 import { coreRequest } from "../helpers/type-core-analysis.js";
-import { HELD_MODES, heldStops, stopDeclineProblem } from "../helpers/type-core-held-host.js";
+import {
+  HELD_MODES,
+  heldStops,
+  stopDeclineProblem,
+  unsettledStop,
+} from "../helpers/type-core-held-host.js";
 import { runGlobals } from "../helpers/type-core-route.js";
 import {
   DECLINES,
@@ -34,11 +39,15 @@ test("over the matrix of destinations, value forms and stops, a stopped plan nev
   for (const run of runs) {
     const where = `${run.cell} (${run.mode}) ${run.at}: ${run.stop}`;
     const { outcome } = run;
-    // (a decline publishes nothing: the gate's, rule (R)'s, or a refusal of the slice the unstopped route makes too, as
-    // a stopped default's collection; an unsettled stop has no registry, option (a), #1767 and #1252, counted in the
-    // evidence, never gated here)
-    if (outcome.kind === "published" && run.stop !== "unsettled program stop")
-      assert.equal(outcome.escapes, false, where);
+    // (a decline publishes nothing, and stands only with a limit's reason at its stop's phase, #2080 part 2: the gate's
+    // or rule (R)'s, the natural compile here publishing; a published plan, at every stop, lets nothing through)
+    if (outcome.kind === "declined")
+      assert.equal(
+        stopDeclineProblem(outcome.what, run.stop === "unsettled program stop", null),
+        null,
+        where,
+      );
+    else assert.equal(outcome.escapes, false, where);
   }
   // (a typed call that is the whole value of an element of a stored literal keeps the obligation for that element: at
   // every completed decision stop a literal of a parse publishes, and the escape check above holds it to the natural
@@ -104,7 +113,11 @@ test("Codex r4's rows: a cap while the completion finds its obligations is gated
       } catch (error) {
         if (!(error instanceof CandidateOutsideSlice)) throw error;
         // (only a limit's reason at the phase it belongs to, #2080 part 2)
-        assert.equal(stopDeclineProblem(error.what, budget, null), null, `${source} @${allowance}`);
+        assert.equal(
+          stopDeclineProblem(error.what, unsettledStop(budget), null),
+          null,
+          `${source} @${allowance}`,
+        );
         declined += 1;
         continue;
       }
@@ -217,7 +230,13 @@ test("Astra r1's B1: a settled stop in the capture's extraction is gated, in fou
           ),
         ).plan;
       } catch (error) {
+        // (a settled stop: only a limit's reason after admission settled, #2080 part 2)
         assert.ok(error instanceof CandidateOutsideSlice, `${mode.name} ${phase} @${allowance}`);
+        assert.equal(
+          stopDeclineProblem(error.what, false, null),
+          null,
+          `${mode.name} ${phase} @${allowance}`,
+        );
         if (phase === "extraction") declined += 1;
         continue;
       }
