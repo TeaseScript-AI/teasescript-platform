@@ -278,8 +278,12 @@ changed warning or wording applies to the same change, the entry is its report:
   index while its `indexCheck` stands, and dict keys. Outside the slice today, and so not asked: `take`, `removeAt`,
   `addAll`, `add`, the numeric, random and statistics arguments, and the defaulting builtins (`toInteger`, `toNumber`,
   `toBoolean`, the temporal conversions, `fromJson`, `fileFromBase64`), whose excluded values pick the default instead of
-  failing; a slice step that admits one asks the question again. A `get` default and an `otherwise` fallback are not in
-  this entry: their checks are a plan's, which (e) declines when the stop loses them.
+  failing; a slice step that admits one asks the question again. The stop oracle (`stopRuns`) reads such a compile
+  `open` wherever a run passes the consumer's instruction, whatever the value there: with no natural plan it cannot tell
+  a value the consumer admits from one it rejects. Those readings are not escapes, and this entry rests on the witnesses
+  and the validators above, not on the oracle: 2 of #2080's 6,379 moved stops read so (a `repeat` count, held modes 1 and
+  3, demand 64). A refined reading is its own item (#2274). A `get` default and an `otherwise` fallback are not in this
+  entry: their checks are a plan's, which (e) declines when the stop loses them.
 - **(e) declines some defaults the natural plan does not check (#2183).** A settled stop leaves a fallback's requirement
   `unknown` wherever the receiving value's kinds were the stop's, also where the natural plan makes no `fallbackCheck`,
   so (e) refuses there too. A maker would notice, for a script too large for its budget, a refusal where the script that
