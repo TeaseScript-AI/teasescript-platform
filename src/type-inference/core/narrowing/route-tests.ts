@@ -518,7 +518,8 @@ export class RouteTests {
         if (statement.block.owner !== null) pending.push(statement.block.owner);
       }
     };
-    const headed = new Set<TreeStatement>(calls);
+    const headed = new Set<TreeStatement>();
+    for (const statement of each(work, "eventSteps", calls)) headed.add(statement);
     const calling = new Set<TreeStatement>();
     above(calls, calling);
     for (const statement of each(work, "eventSteps", calling)) marked.push(statement);
