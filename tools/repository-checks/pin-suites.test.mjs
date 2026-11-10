@@ -25,7 +25,7 @@ test("a core change lists every pinning suite; another change lists none, a suit
     ["tests/type-core/type-core-kept.test.ts"],
   );
   assert.deepEqual(
-    suitesFor(["tests/helpers/type-core/type-core-families.ts"]).map((suite) => suite.file),
+    suitesFor(["tests/helpers/type-core/families/output-bound.ts"]).map((suite) => suite.file),
     ["tests/type-core/type-core-work-b.test.ts"],
   );
   assert.equal(

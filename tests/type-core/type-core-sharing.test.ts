@@ -30,26 +30,29 @@ import { withoutSharing } from "../../src/type-inference/core/sharing.js";
 import type { PlaceId } from "../../src/type-inference/graph.js";
 import { VALUE_KIND_NAMES } from "../../src/value-kinds.js";
 import { coreRequest, type SourceFile } from "../helpers/type-core-analysis.js";
+import { ADMISSION_FAMILIES } from "../helpers/type-core/families/admission.js";
+import { HOT_CANDIDATE_FAMILIES } from "../helpers/type-core/families/candidates.js";
 import {
-  ADMISSION_FAMILIES,
-  HOT_CANDIDATE_FAMILIES,
   ADMISSION_INGRESS_PRESETS,
   ADMISSION_KNOWN_PRODUCTS,
   ADMISSION_SAME_SOURCES,
+  MIXED_ADD_PRODUCTS,
+  READ_CHAIN_PRODUCTS,
+  VALUE_CLASS_SITES,
+} from "../helpers/type-core/families/admission-products.js";
+import {
   DIRECT_INGRESS_PROGRAMS,
   REORDERING_SHARING_FAULTS,
-  MIXED_ADD_PRODUCTS,
   ORACLE_PROGRAMS,
-  READ_CHAIN_PRODUCTS,
   REPAIRED_SHARING_FAULTS,
-  VALUE_CLASS_SITES,
-  VALUE_SHARING_PROGRAMS,
-  W34_KNOWN_PRODUCTS,
-  W34_VARIANTS,
+} from "../helpers/type-core/families/sharing-faults.js";
+import { VALUE_SHARING_PROGRAMS } from "../helpers/type-core/families/value-sharing.js";
+import { W34_KNOWN_PRODUCTS, W34_VARIANTS } from "../helpers/type-core/families/w34-links.js";
+import {
   W44_VARIANTS,
   W45_VARIANTS,
   WORK_FAMILIES,
-} from "../helpers/type-core/type-core-families.js";
+} from "../helpers/type-core/families/work-gates.js";
 import { readFixture } from "../helpers/type-core/type-core-fixture.js";
 import { COMPOSITIONS, roleClasses } from "../helpers/type-core/type-core-roles.js";
 import { shapesOf } from "../helpers/type-core/type-core-rule.js";

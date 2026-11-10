@@ -9,17 +9,17 @@ import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { withTestDemandAllowance, type WorkCounter } from "../../src/type-inference/core/budget.js";
 import { CoreProgram, propertyStep } from "../../src/type-inference/core/program.js";
 import { coreRequest, type SourceFile } from "../helpers/type-core-analysis.js";
+import { ADMISSION_FAMILIES } from "../helpers/type-core/families/admission.js";
 import {
-  ADMISSION_FAMILIES,
   ADMISSION_INGRESS_PRESETS,
   ADMISSION_KNOWN_PRODUCTS,
   ADMISSION_SAME_SOURCES,
-  DECISION_HOLDER_FAMILIES,
-  LAYER_FAMILIES,
-  NARROWING_FAMILIES,
   VALUE_CLASS_SITES,
-  type WorkFamily,
-} from "../helpers/type-core/type-core-families.js";
+} from "../helpers/type-core/families/admission-products.js";
+import { DECISION_HOLDER_FAMILIES } from "../helpers/type-core/families/copy-chains.js";
+import { LAYER_FAMILIES } from "../helpers/type-core/families/property-names.js";
+import { NARROWING_FAMILIES } from "../helpers/type-core/families/narrowing.js";
+import { type WorkFamily } from "../helpers/type-core/families/builders.js";
 import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import { narrowingPass } from "../helpers/type-core/type-core-narrowing.js";
 import { inMode, MODES } from "../helpers/type-core-oracles.js";
