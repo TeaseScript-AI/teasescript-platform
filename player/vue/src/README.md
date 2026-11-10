@@ -66,8 +66,9 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   values, photos, and session; `debug/DebugRoomMark.vue` marks it in the title pill, and `shell/ConfirmDialog.vue` asks before Debug
   on overwrites its session. Start and Continue record the wall clock and the player's zone and presentation, which the host-supplied
   `temporalContext` resolves (the browser's by default). The host also owns the framework-independent `player/media/media-device.ts`: it reconciles the session's media
-  projection onto `Audio` elements, reports loading through the adapter, and contributes measured progress to every
-  clock observation, which runs every 100 ms while media loads or plays. Start and Continue first open the
+  projection onto `Audio` elements, reports loading through the adapter, and measures progress. Media progress is
+  included in every clock observation; while media loads or plays, sampling offers an observation opportunity every
+  100 ms. Start and Continue first open the
   session camera (`player/media/session-camera.ts`) when the Player has the camera capability, and a Start with script
   storage, which `main.ts` always gives, then reads the script's saved values again
   ([`DATA-AND-API.md`](../../../docs/DATA-AND-API.md#script-storage-in-the-browser)). The session is created after these

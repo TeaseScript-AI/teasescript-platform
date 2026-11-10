@@ -11,6 +11,10 @@ import type {
   PlayerRuntimeSessionOptions,
 } from "../../player/runtime/runtime-adapter.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
+import { runtimeInput, presentedAction } from "../helpers/player/player-input.js";
+import { rebuildRecordedSession } from "../../player/debug/debug-export.js";
+import { playerRuntimeSnapshot } from "../../player/runtime/runtime-adapter.js";
+import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import type { BridgeResult } from "../../player/engine-bridge/client.js";
 
@@ -28,6 +32,8 @@ interface PlanPhotoSource {
 interface MediaHost {
   readonly session: Readonly<Ref<PlayerSession | null>>;
   readonly bridge: Promise<PlayerBridge>;
+  readonly inputSection: import("../../player/vue/src/session/runtime-input.js").InputSectionHost;
+  debugRecording(): import("../../player/debug/debug-recorder.js").DebugRecording | null;
   prepare(create: (recording: PlayerRuntimeSessionOptions) => PlayerRuntimeSession): void;
   activate(): Promise<void>;
 }
@@ -45,6 +51,7 @@ let facade: typeof InProcess;
 let compiler: typeof CompileProject;
 
 before(async () => {
+  await loadHostFacade();
   const module = await loadPlayerModule("player/vue/src/session/usePlayerSession.ts");
   // EVIDENCE: validation: Vite loaded the real source module; this is its host API.
   usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
@@ -62,7 +69,12 @@ const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
 const later = (ms = 5) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Audio elements the composable made, which a test makes load. */
-type FakeAudio = EventTarget & { src: string; duration: number };
+type FakeAudio = EventTarget & {
+  src: string;
+  duration: number;
+  currentTime: number;
+  paused: boolean;
+};
 
 /** The real composable on an in-process host that replies after `delayMs`, in a surface with fake audio. */
 async function mount(context: TestContext, delayMs: number) {
@@ -74,7 +86,7 @@ async function mount(context: TestContext, delayMs: number) {
       src = "";
       preload = "";
       volume = 1;
-      duration = 3;
+      duration = 30;
       paused = true;
       ended = false;
       currentTime = 0;
@@ -103,7 +115,12 @@ async function mount(context: TestContext, delayMs: number) {
     });
   }
   // Every request the Player posts, as posted.
-  const posted: { readonly op: string; readonly session: string | null }[] = [];
+  const posted: {
+    readonly op: string;
+    readonly session: string | null;
+    readonly args: unknown;
+    readonly wall: number;
+  }[] = [];
   const clone = globalThis.structuredClone;
   context.after(() => void (globalThis.structuredClone = clone));
   globalThis.structuredClone = <T>(value: T, options?: StructuredSerializeOptions): T => {
@@ -118,11 +135,25 @@ async function mount(context: TestContext, delayMs: number) {
     )
       posted.push({
         op: value.op,
+        args: "args" in value ? value.args : null,
+        wall: performance.now(),
         session: typeof value.session === "string" ? value.session : null,
       });
     return clone(value, options);
   };
   const bridge = facade.createInProcessBackend(BUILD, { delayMs });
+  const queued = { current: 0, maximum: 0 };
+  const openSection = bridge.client.section.bind(bridge.client);
+  context.mock.method(bridge.client, "section", (...args: Parameters<typeof openSection>) => {
+    const [id, ticket, body] = args;
+    queued.current += 1;
+    const result = openSection(id, ticket, (send) => {
+      queued.current -= 1;
+      return body(send);
+    });
+    queued.maximum = Math.max(queued.maximum, queued.current);
+    return result;
+  });
   const scope = effectScope();
   const player = scope.run(() =>
     usePlayerSession({
@@ -143,7 +174,7 @@ async function mount(context: TestContext, delayMs: number) {
     await player.activate();
   };
   const reports = () => posted.filter((request) => request.op === "reportMediaLoad");
-  return { player, elements, start, reports };
+  return { player, elements, start, reports, posted, queued };
 }
 
 const transcript = (player: MediaHost) =>
@@ -326,4 +357,124 @@ for (const { settles, change, name } of REPLY_CASES)
     await flush();
     assert.deepEqual(log, [], "the old plan's images are not preloaded");
     scope.stop();
+  });
+
+/** `observeTime`'s arguments, as the clock posts them. */
+function observeArgs(args: unknown): { readonly atMs: number; readonly media: readonly unknown[] } {
+  // EVIDENCE: fixture: the posts this reads are `observeTime` requests, whose arguments the host checks.
+  return args as { readonly atMs: number; readonly media: readonly unknown[] };
+}
+
+/** The shown session as `onHost` takes it: the bridge's view of the host session it reads. */
+function hostSession(shown: PlayerSession): never {
+  // EVIDENCE: test: `onHost` finds the host session by the shown session's ID; its parameter type is the adapter's.
+  return shown as never;
+}
+
+/** Lets the replies, publications and scheduling a mock-clock step caused run to their end. */
+async function drainTasks() {
+  for (let n = 0; n < 30; n++) await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+for (const delay of [0, 50, 250])
+  test(`with media sampling and late replies, scene time follows the clock and the session advances: ${delay} ms`, async (context) => {
+    context.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+    let now = 0;
+    context.mock.method(performance, "now", () => now);
+    const player = await mount(context, delay);
+    let started = false;
+    let startError: unknown;
+    void player.start('playAudio async "clock.mp3"\nwait 1.5 s\nshowButton "Done"\nexit').then(
+      () => {
+        started = true;
+      },
+      (e) => {
+        startError = e;
+      },
+    );
+    const advance = async (ms: number) => {
+      for (let i = 0; i < ms; i++) {
+        now++;
+        for (const audio of player.elements) if (!audio.paused) audio.currentTime += 0.001;
+        context.mock.timers.tick(1);
+        await drainTasks();
+      }
+    };
+    for (let n = 0; !started && !startError && n < 2000; n++) await advance(1);
+    if (startError) throw startError;
+    assert.equal(started, true, "start reply releases on mock time");
+    for (let n = 0; !player.elements.some((a) => a.src.endsWith("clock.mp3")) && n < 1000; n++)
+      await advance(1);
+    const audio = player.elements.find((a) => a.src.endsWith("clock.mp3"));
+    assert.ok(audio, "audio created");
+    audio.dispatchEvent(new Event("loadedmetadata"));
+    let buttonAt: number | null = null;
+    let waitDeadline: number | null = null;
+    for (let n = 0; n < 3500; n++) {
+      await advance(1);
+      const foreground = player.player.session.value?.state.foregroundAction;
+      if (waitDeadline === null && foreground?.kind === "delay")
+        waitDeadline = foreground.deadlineMs;
+      if (
+        buttonAt === null &&
+        player.player.session.value?.state.foregroundAction?.kind === "interaction"
+      )
+        buttonAt = now;
+    }
+    const shown = player.player.session.value!;
+    const observations = player.posted
+      .filter((p) => p.op === "observeTime")
+      .map((p) => ({ wall: p.wall, ...observeArgs(p.args) }));
+    const lags = observations.map((p) => p.wall - p.atMs);
+    assert.ok(
+      observations.filter((p) => p.media.length > 0).length >= 5,
+      "multiple loaded-media observations",
+    );
+    assert.ok(
+      buttonAt !== null && waitDeadline !== null && buttonAt <= waitDeadline + 3 * delay,
+      "shown button by wait plus three replies",
+    );
+    assert.ok(Math.max(...lags) - Math.min(...lags) < 0.001, "turn freshness");
+    assert.ok(
+      player.queued.maximum <= 2,
+      "no periodic backlog beyond startup/media service section",
+    );
+    const recording = player.player.debugRecording()!;
+    const rebuilt = rebuildRecordedSession(
+      recording.plan,
+      recording.anchorSnapshot,
+      recording.operations,
+    );
+    assert.deepEqual(
+      rebuilt.exportSnapshot(),
+      onHost(playerRuntimeSnapshot)(hostSession(player.player.session.value!)),
+      "delayed loaded-media recording replays",
+    );
+    const input = await runtimeInput();
+    const beganInput = now;
+    let inputResult: string | null = null;
+    let inputError: unknown;
+    void input
+      .runInput(
+        player.player.inputSection,
+        presentedAction(shown),
+        presentedAction,
+        input.intents.choice(null, "button"),
+      )
+      .then(
+        (result) => {
+          inputResult = result.kind;
+        },
+        (error) => {
+          inputError = error;
+        },
+      );
+    for (let i = 0; inputResult === null && !inputError && i < 4 * Math.max(1, delay); i++)
+      await advance(1);
+    if (inputError) throw inputError;
+    assert.equal(inputResult, "answered", "real input remains responsive during sampling");
+    assert.ok(
+      now - beganInput <= 3 * Math.max(1, delay),
+      "input waits at most one periodic reply, its observation, and its answer",
+    );
   });
