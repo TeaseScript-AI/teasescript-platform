@@ -1086,7 +1086,7 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
   // (compiled no-plan stops that still publish, settled, from the census of #2080 part 2: a store moved to a check against
   // `unknown` that every run fails, unwitnessed, and open with its checks dropped; two errors, each read at its own site;
   // C5c's absent property read at the store, `s8b-r3-astra-cases.mjs/case/storenull`; and the typed read #2183 names,
-  // open as compiled)
+  // unwitnessed as compiled: every value that passes the count is an integer, and `null` fails there, #2183)
   const corpus = (
     source: string,
     mode: (typeof HELD_MODES)[number],
@@ -1147,8 +1147,14 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
       mode.name,
     );
   }
-  for (const mode of [HELD_MODES[1]!, HELD_MODES[3]!])
-    assert.equal(corpus(operation("hostValue", "integer?"), mode, 64).kind, "open", mode.name);
+  for (const mode of [HELD_MODES[1]!, HELD_MODES[3]!]) {
+    const typed = corpus(operation("hostValue", "integer?"), mode, 64);
+    assert.deepEqual(
+      [typed.kind, typed.resolved?.map(({ failed }) => failed)],
+      ["unwitnessed", [true]],
+      mode.name,
+    );
+  }
   // (the two campaign items Codex r3 took for genuine escapes, C5c's, the two stores lacking properties of one object
   // (Codex r1 on #2185) and `all:new-cases-3::graph/899`: no stop of theirs publishes now, #2080 part 1 at their settled
   // stops and the plain gate before admission settled, #2080 part 2)
@@ -1241,4 +1247,66 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
     ).kind,
     "later",
   );
+});
+
+/**
+ * #2183: with no natural plan, a run that passes the error's own instruction is `open` only where the
+ * value there violates the requirement the error's rule names (`count`: an integer; `argument`: its domain; `iterable`:
+ * a collection or range), read by stepping to the instruction. W1–W6, the typed reads a settled stop moved to
+ * `unknown`, pass only fitting values and fail the rest at the consumer: `unwitnessed`, a violating host having run and
+ * failed. W7's rule (`member`) names no kinds, so it reads as before: `open`. A planted plan whose consumer runs nothing
+ * (a runtime that does not validate) is `open` at a violating value.
+ */
+test("a stop's runs read a no-plan error passed only by values its requirement admits as unwitnessed, by the error's rule (#2183)", () => {
+  const base = (type: string, consumer: string) =>
+    `let t:${type}=null\nlet root={n:t,nest:{n:t,keep:1},spare:t}\nlet a=root\nlet b={p:a}\nb.p.nest.n=hostValue\nlet out=[b.p,root].get(0, default: root)\n${consumer}\nsay "AFTER"\nexit\n`;
+  const witnesses = [
+    ["W1 repeat", base("integer?", "repeat out.nest.n {}"), "unwitnessed"],
+    ["W2 index", base("integer?", "say [4][out.nest.n]"), "unwitnessed"],
+    ["W3 get index", base("integer?", "say [4].get(out.nest.n, default: 1)"), "unwitnessed"],
+    ["W4 range bound", base("integer?", "for e in out.nest.n..=0 {}"), "unwitnessed"],
+    ["W5 for", base("list?", "for e in out.nest.n {}"), "unwitnessed"],
+    ["W6 argument", base("integer?", 'say "a".repeat(out.nest.n)'), "unwitnessed"],
+    ["W7 receiver", base("string?", "say out.nest.n.trim()"), "open"],
+  ] as const;
+  const unit = (source: string) => [{ path: "main.tease", source }];
+  for (const mode of HELD_MODES)
+    for (const [name, source, kind] of witnesses) {
+      const found = stopRuns(
+        unit(source),
+        ["hostValue", "hostOther"],
+        (make) => mode.run(make),
+        64,
+      );
+      const where = `${name} (${mode.name})`;
+      assert.deepEqual(
+        [found.natural.plan, found.stopped.plan, found.kind],
+        [false, true, kind],
+        where,
+      );
+      if (kind === "unwitnessed")
+        assert.deepEqual(
+          found.resolved?.map(({ failed }) => failed),
+          [true],
+          where,
+        );
+    }
+  // (the consumer's `say` made to show a literal: nothing checks the index, and `null` passes it)
+  const [, index] = witnesses[1];
+  const consumer = index.indexOf("say [4]");
+  const unchecked = (plan: InstructionPlan): InstructionPlan => ({
+    ...plan,
+    instructions: plan.instructions.map((instruction) =>
+      instruction.kind === "say" && instruction.span.so === consumer
+        ? { ...instruction, value: { kind: "literal", value: "x", span: instruction.value.span } }
+        : instruction,
+    ),
+  });
+  for (const mode of HELD_MODES)
+    assert.equal(
+      stopRuns(unit(index), ["hostValue", "hostOther"], (make) => mode.run(make), 64, unchecked)
+        .kind,
+      "open",
+      mode.name,
+    );
 });
