@@ -497,11 +497,11 @@ test("before admission settled a program whose stores are all into written place
  * The limit marker (the owner's go, 2026-11-10): a decline the budget causes carries `limit`, one the slice does not cover
  * yet does not. A compile for each reason a compile reaches; "a store whose required checks could not be established at
  * the budget" has none (`Answers.gated()` gives `null` only at a settled stop with no seed, which admission saves before
- * anything of it can stop), so its marker is read off the error as the route builds it.
+ * anything of it can stop, #2228), so its marker is read off a `CandidateOutsideSlice` built directly.
  */
 test("a decline the budget causes carries the limit marker, one the slice does not cover yet does not (#2080 part 2)", () => {
   const mode = MODES[0]!;
-  const reasonOf = (make: () => unknown): CandidateOutsideSlice => {
+  const reasonOf = (make: () => void): CandidateOutsideSlice => {
     try {
       make();
     } catch (error) {

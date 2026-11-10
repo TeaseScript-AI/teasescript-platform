@@ -667,8 +667,6 @@ function defaultOf(call: CallExpression): Expression | null {
 /** The kinds whose levels below a typed call's answer its default answers (#1767). */
 const STRUCTURED: ReadonlySet<ItemTag> = new Set(["list", "set", "dict", "object", "unknown"]);
 
-/** The exclusion of a typed call's answer a stop left open (#1767). */
-
 /**
  * Whether a default reads anything but literal data at any level: a variable, a property or an element of one, any
  * operation but a typed parse or load, or one whose own default does (#1755's test, read after a stop alone and through

@@ -460,12 +460,6 @@ export function unwrap(expression: Expression): Expression {
   return current;
 }
 
-/**
- * A contract the plan cannot carry exactly as the core decided it: one deeper than the slice follows (`SLICE_DEPTH`), a
- * record field that some records of a list lack, a typed parse or load into a copy of a written type, a typed parse's or
- * load's default a stop left open (#1767). The candidate route rejects its program, at `expression`, rather than check
- * less than the core decided.
- */
 /** A typed parse's or load's default whose level a stop left unproven (#1767). */
 export const OPEN_BY_STOP = "a typed parse's or load's default that a stop left open";
 /** After a settled stop, obligations the analysis cannot find (`lostCheck`). */
@@ -487,6 +481,12 @@ export const LIMIT_REASONS: readonly string[] = [
   UNDECIDED_AT_BUDGET,
 ];
 
+/**
+ * A contract the plan cannot carry exactly as the core decided it: one deeper than the slice follows (`SLICE_DEPTH`), a
+ * record field that some records of a list lack, a typed parse or load into a copy of a written type, a typed parse's or
+ * load's default a stop left open (#1767). The candidate route rejects its program, at `expression`, rather than check
+ * less than the core decided.
+ */
 export class OutsideContract extends Error {
   /** Whether a limit of the analysis caused it (`LIMIT_REASONS`). */
   readonly limit: boolean;
