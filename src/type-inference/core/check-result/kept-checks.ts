@@ -111,13 +111,14 @@ export function keeps(
 
 /**
  * Whether the stored expression itself builds every level a part check at `path` passes over (#2231): from the stored
- * value to the part's parent, an object literal holding the next property, or a list literal each of whose elements
- * does. A part check passes a value that is no object or collection at such a level, so a keep by part checks rests on
- * the value's own source there, never on a kind the analysis reports for it.
+ * value to the part's parent, an object literal at each property step, holding the property where the path goes on
+ * below it, and a list literal at each element step, the next level being each of its elements. A part check passes a
+ * value that is no object or collection at such a level, so a keep by part checks rests on the value's own source
+ * there, never on a kind the analysis reports for it; a part the literal leaves out passes, as the whole check lets it.
  */
 export function builtContainers(value: Expression, path: PartCheckPlan["path"]): boolean {
   let nodes: readonly Expression[] = [value];
-  for (const step of path.slice(0, -1)) {
+  for (const [at, step] of path.entries()) {
     const next: Expression[] = [];
     for (const node of nodes.map(unwrap)) {
       if ("element" in step) {
@@ -126,8 +127,8 @@ export function builtContainers(value: Expression, path: PartCheckPlan["path"]):
       } else {
         if (node.kind !== "objectLiteral") return false;
         const property = node.properties.find((each) => each.name.name === step.property);
-        if (property === undefined) return false;
-        next.push(property.value);
+        if (property !== undefined) next.push(property.value);
+        else if (at < path.length - 1) return false;
       }
     }
     nodes = next;
