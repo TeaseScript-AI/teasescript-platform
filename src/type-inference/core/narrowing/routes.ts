@@ -145,6 +145,10 @@ export class NarrowingRoutes extends RouteTests {
   readonly #candidates = new Map<string, ReadonlyMap<TreeBlock, Candidates>>();
   /** Per (key, node, offending kind): the witness found, or `null`. */
   readonly #witnesses = new Map<string, Definition | null>();
+  /** THROWAWAY (#1938 R33 counters): each witness step's writer chain, query node and its source's memo. */
+  readonly #links = new Map<string, { readonly chain: readonly Place[]; readonly node: FlowNode; readonly next: string | null }>();
+  /** THROWAWAY: the current `required` query's first witness memo. */
+  #first: { readonly memo: string; readonly node: FlowNode } | null = null;
   /** Per object literal: its properties' places by name, made on its first projection. */
   readonly #properties = new Map<PlaceId, ReadonlyMap<string, PlaceId>>();
   /** The program's ledger. */
@@ -163,6 +167,17 @@ export class NarrowingRoutes extends RouteTests {
     tag: ItemTag,
     others: readonly ItemTag[] = [],
   ): Work<SourceSite | null> {
+    const result = yield* this.#requiredInner(value, tag, others);
+    if (result !== null) this.#n3Count(value, result);
+    return result;
+  }
+
+  *#requiredInner(
+    value: PlaceId,
+    tag: ItemTag,
+    others: readonly ItemTag[] = [],
+  ): Work<SourceSite | null> {
+    this.#first = null;
     this.#work.charge("exactQueries");
     const program = this.pass.program;
     const site = program.places[value]?.site ?? null;
@@ -193,7 +208,9 @@ export class NarrowingRoutes extends RouteTests {
         : null;
     if (some(program.work, "exactQueries", path.steps, (step) => step.kind !== "property"))
       return null;
-    const d = yield* this.witness(pathKey(path, program.work), tag, node, others);
+    const key0 = pathKey(path, program.work);
+    this.#first = { memo: joinParts(key0, node.id, tag, this.#othersText(others)), node };
+    const d = yield* this.witness(key0, tag, node, others);
     const writer = d?.value === undefined ? null : (program.places[d.value]?.site ?? null);
     // (a test of the needed form after the writer on every route to the use, `while n == null { … }`: the check on that
     // route the compiler cannot keep, the warning; Codex r1 F1 on #1937)
@@ -234,6 +251,11 @@ export class NarrowingRoutes extends RouteTests {
         answer = null;
         break;
       }
+      this.#links.set(memo, {
+        chain: found.chain,
+        node,
+        next: source === true ? null : joinParts(source.key, source.node.id, source.tag, ""),
+      });
       if (source === true) {
         this.#witnesses.set(memo, found.def);
         answer = found.def;
@@ -916,4 +938,98 @@ export class NarrowingRoutes extends RouteTests {
     const found = search(1, 0, size);
     return found < 0 ? null : candidates.list[found]!;
   }
+
+  /** THROWAWAY (#1938 R33): one JSON line per N3 error, its witness's conditional arms and their complements. */
+  #n3Count(value: PlaceId, writer: SourceSite): void {
+    const g = globalThis as any;
+    const out = g.process?.env?.I1938_N3;
+    if (out === undefined) return;
+    const program = this.pass.program;
+    const site = program.places[value]?.site ?? null;
+    const links: { readonly chain: readonly Place[]; readonly node: FlowNode }[] = [];
+    let unknown = false;
+    if (this.#first !== null) {
+      let memo: string | null = this.#first.memo;
+      let guard = 0;
+      while (memo !== null && guard < 10000) {
+        guard += 1;
+        const link = this.#links.get(memo);
+        if (link === undefined) {
+          unknown = true;
+          break;
+        }
+        links.push(link);
+        memo = link.next;
+      }
+    }
+    const conditional = (b: TreeBlock): boolean => {
+      const k = (b.owner?.statement as any)?.kind;
+      return k === "ifStatement" || k === "switchStatement";
+    };
+    const blocksOf = (chain: readonly Place[]): Set<TreeBlock> => new Set(chain.map((p) => p.block));
+    const entered = new Set<TreeBlock>();
+    let sharedLoop = false;
+    for (const link of links) {
+      const w = blocksOf(link.chain);
+      const u = blocksOf(this.chainOf(link.node) ?? []);
+      for (const b of w) if (!u.has(b) && conditional(b)) entered.add(b);
+      for (const b of u) if (!w.has(b) && conditional(b)) entered.add(b);
+      for (const b of w) if (u.has(b) && b.owner !== null && b.owner.loop !== null) sharedLoop = true;
+    }
+    const textOf = (file: number, e: any): string =>
+      program.textAt({ file, start: e.span.start.offset, end: e.span.end.offset } as any).replace(/\s+/g, " ");
+    const fact = (file: number, e: any, pol: boolean): { text: string; pol: boolean; form: string } => {
+      for (let i = 0; i < 100; i += 1) {
+        if (e.kind === "parenthesizedExpression") e = e.expression;
+        else if (e.kind === "unaryExpression" && e.operator === "not") {
+          e = e.operand;
+          pol = !pol;
+        } else break;
+      }
+      if (e.kind === "typeTestExpression")
+        return { text: `${textOf(file, e.value)} is ${textOf(file, e.type)}`, pol: e.negated ? !pol : pol, form: "is" };
+      if (e.kind === "binaryExpression" && (e.operator === "==" || e.operator === "!=")) {
+        const l = textOf(file, e.left);
+        const r = textOf(file, e.right);
+        const nul = l === "null" || r === "null";
+        return { text: `${l} == ${r}`, pol: e.operator === "!=" ? !pol : pol, form: nul ? "null" : "eq" };
+      }
+      return { text: textOf(file, e), pol, form: "bool" };
+    };
+    const facts: { text: string; pol: boolean; form: string; owner: TreeStatement }[] = [];
+    let switches = 0;
+    for (const b of entered) {
+      const owner = b.owner!;
+      const s = owner.statement as any;
+      if (s.kind !== "ifStatement") {
+        switches += 1;
+        continue;
+      }
+      const arm = owner.arms.indexOf(b);
+      facts.push({ ...fact(owner.file, s.condition, arm === 0), owner });
+    }
+    const complements: { text: string; form: string; same: boolean }[] = [];
+    for (let i = 0; i < facts.length; i += 1)
+      for (let j = i + 1; j < facts.length; j += 1)
+        if (facts[i]!.text === facts[j]!.text && facts[i]!.pol !== facts[j]!.pol && facts[i]!.owner.file === facts[j]!.owner.file)
+          complements.push({ text: facts[i]!.text, form: facts[i]!.form, same: facts[i]!.owner === facts[j]!.owner });
+    const fs = g.process.getBuiltinModule("node:fs");
+    fs.appendFileSync(
+      out,
+      JSON.stringify({
+        source: g.I1938_SOURCE ?? null,
+        use: site === null ? null : [site.file, site.start, site.end],
+        text: site === null ? null : program.textAt(site),
+        writer: [writer.file, writer.start, writer.end],
+        own: this.#first === null,
+        links: links.length,
+        unknown,
+        arms: entered.size,
+        switches,
+        sharedLoop,
+        complements,
+      }) + "\n",
+    );
+  }
+
 }
