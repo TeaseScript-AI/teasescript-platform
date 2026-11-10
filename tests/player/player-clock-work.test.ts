@@ -1905,3 +1905,141 @@ test("an explicit observation's publication lifts the wait on an unchanged basis
     "the later deadline resumes automatically on the new basis",
   );
 });
+
+/*
+ * What the basis fence names (P): the session is parked only while the page's latest basis equals the basis an
+ * automatic observation's retry carried when the host refused it, after refusing its first send. The page's store is
+ * left stale first (one success reply that cannot cross, #2263's precondition), so the host refuses the page's basis
+ * genuinely. A publication then arrives at one moment of the automatic attempt, or never; the attempt's sends fail as
+ * the failure kind says, with a send that cannot cross as the failure that is no refusal.
+ */
+const PUBLICATION_AXES = {
+  moment: [
+    "before first send",
+    "between sends",
+    "before catch",
+    "between catch and release",
+    "after release",
+    "never",
+  ],
+  media: ["on", "off"],
+  failure: ["two basis refusals", "a refusal, then another failure", "another failure first"],
+} as const;
+type PublicationRow = {
+  readonly [Axis in keyof typeof PUBLICATION_AXES]: (typeof PUBLICATION_AXES)[Axis][number];
+};
+function publicationInfeasible(row: PublicationRow): string | null {
+  if (
+    row.failure === "another failure first" &&
+    (row.moment === "between sends" || row.moment === "before catch")
+  )
+    return "a first send that fails other than by its basis is not retried: there is no second send or second catch";
+  return null;
+}
+const publicationRows = product(PUBLICATION_AXES).filter(
+  (row) => publicationInfeasible(row) === null,
+);
+const publicationRegistered: PublicationRow[] = [];
+for (const row of publicationRows) {
+  publicationRegistered.push(row);
+  test(`the basis fence holds only when no publication came after the refused basis was sent: ${Object.values(row).join("; ")}`, async (context) => {
+    const player = await mountClock(context, row.media === "on");
+    player.stopSampling();
+    const clone = globalThis.structuredClone;
+    let failedReply = 0;
+    context.mock.method(
+      globalThis,
+      "structuredClone",
+      (value: unknown, options?: StructuredSerializeOptions) => {
+        const observedReply =
+          typeof value === "object" &&
+          value !== null &&
+          "kind" in value &&
+          value.kind === "reply" &&
+          "ok" in value &&
+          value.ok === true &&
+          "result" in value &&
+          typeof value.result === "object" &&
+          value.result !== null &&
+          "kind" in value.result &&
+          value.result.kind === "observed";
+        if (observedReply && failedReply === 0) {
+          failedReply += 1;
+          throw new Error("The success reply could not cross.");
+        }
+        return clone(value, options);
+      },
+    );
+    await assert.rejects(
+      player.bridge.request(asShown(player.initial), "observeTime", { atMs: 0, media: [] }),
+      /could not cross/,
+    );
+    let published = false;
+    const publish = () => {
+      if (published) return;
+      published = true;
+      assert.equal(observeOnHost(player.shown.value!, 0, []).outcome.kind, "observed");
+      player.shown.value = player.bridge.latest(asShown(player.initial))!;
+    };
+    const client = untypedClient(player.bridge.client);
+    const section = client.section.bind(client);
+    let sends = 0;
+    context.mock.method(
+      client,
+      "section",
+      (id: string, ticket: ClockTicket, body: Parameters<typeof section>[2]) =>
+        section(id, ticket, async (send) => {
+          const first = sends === 0;
+          if (first && row.moment === "before first send") publish();
+          const result = await body(async (op, args, basis, onReply) => {
+            if (op !== "observeTime") return send(op, args, basis, onReply);
+            sends += 1;
+            const attempt = first ? sends : 0;
+            const fails =
+              (row.failure === "another failure first" && attempt === 1) ||
+              (row.failure === "a refusal, then another failure" && attempt === 2);
+            try {
+              if (fails) throw new Error("The request could not cross.");
+              return await send(op, args, basis, onReply);
+            } catch (error) {
+              if (attempt === 1 && row.moment === "between sends") publish();
+              if (attempt === 2 && row.moment === "before catch") publish();
+              throw error;
+            }
+          });
+          if (first && row.moment === "between catch and release") publish();
+          return result;
+        }),
+    );
+    await player.advance(100);
+    if (row.moment === "after release") {
+      // Parked: the clock's own observations stopped on the refused basis, until the publication.
+      const parked = player.attempts.length;
+      await player.advance(50);
+      assert.equal(player.attempts.length, parked, "nothing is sent while the basis is unchanged");
+      publish();
+      await player.advance(100);
+    }
+    const reached = player.shown.value?.state.foregroundAction?.kind;
+    if (row.moment === "never") {
+      // Written expectation: with no publication, the host refuses every basis the page holds; the clock parks.
+      assert.notEqual(reached, "interaction", "parked");
+      const parked = player.attempts.length;
+      await player.advance(100);
+      assert.equal(player.attempts.length, parked, "and sends nothing more");
+    } else
+      assert.equal(
+        reached,
+        "interaction",
+        "a publication after the refused basis lifts or prevents the fence",
+      );
+  });
+}
+test("the publication-order family covers every feasible row and states why each other is excluded", () => {
+  assert.equal(product(PUBLICATION_AXES).length, 36);
+  assert.deepEqual(coverageGaps(publicationRows, publicationRegistered, { tuples: true }), []);
+  const feasible = new Set(publicationRows.map((row) => JSON.stringify(row)));
+  for (const row of product(PUBLICATION_AXES))
+    assert.equal(feasible.has(JSON.stringify(row)), publicationInfeasible(row) === null);
+  assert.equal(publicationRows.length, 32);
+});

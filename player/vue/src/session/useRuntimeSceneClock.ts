@@ -106,8 +106,9 @@ export function useRuntimeSceneClock(
   let requested: { readonly id: string; phase: "waiting" | "sent" } | null = null;
   // A session the host refused as stopped or lost, which no automatic observation or wake asks for any more.
   let unavailable: string | null = null;
-  // The basis on which the host refused an automatic observation twice, while the page's basis is still that one: no
-  // automatic observation is sent from it again. A changed publication clears it. A refusal of the basis means the host
+  // The basis an automatic observation's retry carried when the host refused it, after refusing its first send too.
+  // The session is parked only while the page's latest basis equals it: no automatic observation is sent from it again,
+  // and a changed publication clears it. A refusal of the basis means the host
   // published newer than the page holds, which a reply on its way normally brings (#2263 is when none comes).
   let failedAutomaticBasis: { readonly id: string; readonly revision: number } | null = null;
 
@@ -225,7 +226,7 @@ export function useRuntimeSceneClock(
     if (paused.value) return shown;
     const admitted: NonNullable<typeof requested> = { id: shown.id, phase: "waiting" };
     requested = admitted;
-    // The basis the host refused twice, when it did.
+    // The basis the refused retry carried, when the host refused both sends.
     let refusedBasis: number | null = null;
     try {
       cancel();
@@ -243,12 +244,14 @@ export function useRuntimeSceneClock(
             return await section.send("observeTime", now());
           } catch (error) {
             if (refusalCode(error) !== "basis") throw error;
-            // Another publication applied before this turn: once more, from the store's latest revision.
+            // Another publication applied before this turn: once more, from the store's latest revision, read once here
+            // as the basis this request carries and its refusal names, whatever a publication changes meanwhile.
+            const basis = section.session.revision;
             try {
-              return await section.send("observeTime", now());
+              return await section.send("observeTime", now(), { basis });
             } catch (again) {
               if (refusalCode(again) !== "basis") throw again;
-              refusedBasis = section.session.revision;
+              refusedBasis = basis;
               return null;
             }
           }
