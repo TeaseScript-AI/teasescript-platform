@@ -207,7 +207,14 @@ for (const each of TRANSFERS)
       const raw = expect.kind === "refused" ? rawTransfer(each, history, parked) : null;
       if (raw !== null) {
         // The raw op as the test picks it, sent past the page.
-        const reply = await untypedClient(bridge.client).request(raw.op, raw.args);
+        // A close carries the Player's claim generation, which `historyClose` stamps.
+        const closing =
+          raw.op === "historyClose" ? bridge.historyClose({ history, by: "clear" }) : null;
+        if (closing !== null) assert.ok(closing.posted);
+        const reply =
+          closing?.posted === true
+            ? await closing.reply
+            : await untypedClient(bridge.client).request(raw.op, raw.args);
         // EVIDENCE: validation: the history ops reply from the same build with a `HistoryOpResult`.
         assert.equal(
           (reply.result as { readonly kind: string }).kind,

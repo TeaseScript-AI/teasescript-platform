@@ -4,7 +4,6 @@ import test from "node:test";
 import { compilePlayerProject } from "../../player/runtime/compile-project.js";
 import { DebugHistoryView, rewindFutureOf } from "../../player/debug/debug-history.js";
 import type { HistoryDelta, HistoryTimeline } from "../../player/engine-bridge/history/core.js";
-import type { HistoryOpened } from "../../player/engine-bridge/ops/history.js";
 import type { PrepareResult } from "../../player/engine-bridge/player-ops.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import { playerRuntimeForeground, type PlayerSession } from "../../player/runtime/runtime-view.js";
@@ -60,10 +59,10 @@ async function answer(bridge: PlayerBridge, session: PlayerSession, atMs: number
 /** A history the host took three points in, with the publications that carried its deltas. */
 async function hosted() {
   const bridge = await inProcessBridge();
-  const opened = await bridge.client.request("historyOpen", { intent: 1 });
-  // EVIDENCE: validation: `historyOpen` replies from the same build with `HistoryOpened`.
-  const result = opened.result as HistoryOpened;
-  assert.ok(result.kind === "opened");
+  const sent = bridge.historyRenew(1, null, []);
+  assert.ok(sent.posted);
+  const { result } = await sent.reply;
+  assert.ok(result.kind === "renewed");
   const session = await started(bridge);
   const publications = [
     bridge.latest(session)!,

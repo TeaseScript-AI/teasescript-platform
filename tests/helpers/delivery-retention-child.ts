@@ -39,7 +39,7 @@ import { untypedClient } from "./bridge/untyped.js";
  * - `committed`: the op's reply is posted, and the connection stays open: its allocation is the connection's;
  * - `aborted`: on the same connection, the op's success post fails, so its delivery aborts;
  * - `closed`: on a connection of its own, the op commits, then the client ends, which closes the connection.
- * A rewind history (`historyOpen`) and a step's candidate (`rewindBack`, its prepared Back) are classes too: the
+ * A rewind history (`historyRenew`) and a step's candidate (`rewindBack`, its prepared Back) are classes too: the
  * candidate's own marker is in the events its Back gives, which only the candidate keeps.
  * A test-side wrapper of the op takes weak references to what the op added, before its reply goes. The parent scans the
  * snapshot for each case's marker; this reports how many of the weak references still hold.
@@ -56,7 +56,7 @@ const OPS = {
   transfer: "readTransfer",
   slot: "preparePlanText",
   cache: "drawCode",
-  history: "historyOpen",
+  history: "historyRenew",
   candidate: "rewindBack",
   point: "submitComposer",
 } as const;
@@ -157,7 +157,7 @@ function connection(): Connection {
           const payload = created === undefined ? [] : [created, ...publication];
           // A history's whole payload the op made: its entry and all it reaches, but what every history holds.
           const entry =
-            name === "historyOpen" ? context.history.entries.get(lastIntent) : undefined;
+            name === "historyRenew" ? context.history.entries.get(lastIntent) : undefined;
           if (entry !== undefined)
             payload.push(
               ...[...reach(entry)].filter(
@@ -290,7 +290,7 @@ let lastIntent = 0;
  */
 async function backArgs(link: Connection, plan: string, marker: string) {
   const history = ++lastIntent;
-  await link.request("historyOpen", { intent: history });
+  await link.request("historyRenew", { intent: history, owner: 0, session: null, closes: [] });
   const session = await link.bridge.start(plan, START, false);
   const shown = link.bridge.latest(session)!;
   const foreground = playerRuntimeForeground(shown);
@@ -370,7 +370,7 @@ async function allocate(
         return { plan, path: site.path, site };
       }
       case "history":
-        return { intent: ++lastIntent };
+        return { intent: ++lastIntent, owner: 0, session: null, closes: [] };
       case "candidate":
         return backArgs(
           link,
@@ -380,7 +380,12 @@ async function allocate(
       case "point": {
         // A followed session at its text, whose answer carries the marker.
         const plan = await prepared({ kind: "source", script: pointProject(planMarker) });
-        await link.request("historyOpen", { intent: ++lastIntent });
+        await link.request("historyRenew", {
+          intent: ++lastIntent,
+          owner: 0,
+          session: null,
+          closes: [],
+        });
         const session = await link.bridge.start(plan, START, false);
         pointSession = session.id;
         return {
@@ -432,7 +437,7 @@ async function historySharedReach(): Promise<void> {
   const link = connection();
   connections.push(link);
   const intent = ++lastIntent;
-  await link.request("historyOpen", { intent });
+  await link.request("historyRenew", { intent, owner: 0, session: null, closes: [] });
   const entry = link.context.history.entries.get(intent)!;
   for (const value of reach(entry))
     if (value !== entry && value !== entry.core) historyShared.add(value);
@@ -448,10 +453,12 @@ const kept: (() => WeakKey)[] = [];
 async function historyControl(): Promise<readonly WeakRef<WeakKey>[]> {
   const link = connection();
   connections.push(link);
-  const watched = link.watch("historyOpen");
+  const watched = link.watch("historyRenew");
   const intent = ++lastIntent;
-  link.failPost("historyOpen");
-  await link.request("historyOpen", { intent }).catch(() => {});
+  link.failPost("historyRenew");
+  await link
+    .request("historyRenew", { intent, owner: 0, session: null, closes: [] })
+    .catch(() => {});
   const refs = await watched;
   // The open's core, which its delivery undid: kept by a closure the connection does not own.
   const undone = refs

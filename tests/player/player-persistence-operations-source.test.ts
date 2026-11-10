@@ -29,8 +29,12 @@ import {
 /** The host's modules, under this folder: the composable and its `session/` folder's modules but `NOT_HOST`. */
 const HOST_ROOT = "player/vue/src";
 const MAIN = "session/usePlayerSession.ts";
-/** Modules in `session/` this check does not read: the scene clock, the wake lock, runtime input and the rewind owner. */
+/**
+ * Modules in `session/` this check does not read: the scene clock, the wake lock, runtime input and the rewind owner,
+ * with its history controls.
+ */
 const NOT_HOST = new Set([
+  "rewindControls.ts",
   "rewindOwner.ts",
   "runtime-input.ts",
   "useRuntimeSceneClock.ts",
@@ -331,7 +335,8 @@ const BRIDGE = {
   start: "host",
   read: "host",
   restoreKept: "host",
-  historyOpen: "host",
+  historyRenew: "host",
+  historyClose: "host",
   historyTimeline: "host",
   historyStep: "host",
   releaseRecording: "host",

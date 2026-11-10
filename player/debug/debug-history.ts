@@ -11,7 +11,7 @@ import type {
 import { playerRuntimeTranscript } from "../runtime/runtime-view.js";
 
 /**
- * The main side's view of the host's rewind history (`player/engine-bridge/history/`): its timeline, as `historyOpen`
+ * The main side's view of the host's rewind history (`player/engine-bridge/history/`): its timeline, as `historyRenew`
  * or a resync sent it and as the deltas since changed it, and the event logs its positions name.
  *
  * A delta applies only when it is the open history's and enrollment's and continues the view's revision; any other is

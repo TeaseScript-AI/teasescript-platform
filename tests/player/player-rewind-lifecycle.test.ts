@@ -13,31 +13,44 @@ import {
 /*
  * L5i.6: the page side's deciding function (`player/debug/rewind-lifecycle.ts`), driven over every schedule of its event
  * grammar to a fixed depth. A driver plays the Player and the host: it answers only what was sent, the host's replies
- * in the order the opens were sent, and sends a decided open only as `rewindOwner.ts` does, once every close before it
- * settled. The oracle keeps its own ledgers of histories, tokens, gates and adoptions from the actions alone, and checks
- * the rules of DEBUGGER.md "Rewind" and of the page side's handoff (`player/debug/rewind-lifecycle.ts`) on them, independently of
- * how the function decides:
+ * in the order the renewals were posted, and follows a new session as `rewindOwner.ts` does, while a renewal waits for
+ * it. The oracle keeps its own ledgers of histories, tokens, gates and adoptions from the actions alone, and checks the
+ * rules of DEBUGGER.md "Rewind" and of the page side's handoff (`player/debug/rewind-lifecycle.ts`) on them,
+ * independently of how the function decides:
  *
- * - at most one history is held; an opened history is enrolled or closed at once unless a newer open replaced it in the
- *   host; none is enrolled with Debug off, none closed twice, and none is left held by a new session, a retirement, the
- *   disposal, or Debug off unless Debug off still waits for its adoption or gate, or its gate failed;
- * - no open while a history is held, after a failed close, or after the Player was sealed;
+ * - at most one history is held; a renewed history is installed or closed at once unless a newer renewal replaced it in
+ *   the host; none is installed with Debug off, none closed twice, and none is left held by a new session, a
+ *   retirement, the disposal, or Debug off unless Debug off still waits for its adoption or gate, or its gate failed;
+ * - no renewal while a history is held (unless it carries that history's close), after a failed close, with Debug off,
+ *   or after the Player was sealed; a new session's renewal waits for its session and is posted at its first follow;
  * - a prepared token ends at most once, to its own history: dropped when its step does not reach its commit, unless its
  *   history closed meanwhile; committed only at its gate's success, followed at once by its show;
  * - a failed reinstatement gate sends no close and shows nothing; the parked session shows only from a gate's success;
  * - a Debug-off close of a history whose adoption was under way waits for it and carries its outcome;
  * - a step and Return are refused while a step, Return, an adoption, or Debug off's close is under way, and go
  *   otherwise when a history is held (and, for Return, a restored state shows);
- * - the failure of an open still wanted is reported, and an obsolete one's is not;
+ * - the failure of a renewal still wanted is reported, and an obsolete one's is not; a failed close is reported once;
  * - after the disposal only `disposal` closes are sent; after a loss nothing is.
+ *
+ * Each renewal and close the function decides is posted, or cannot be posted, in the turn it is decided (`post`,
+ * `unpost`), as `rewindControls.ts` reports it; nothing else happens in between. The driver keeps the host's open
+ * histories: a renewal run there closes every earlier one (carried closes included) and opens its own, or, refused
+ * after its closes, opens none; a close run there ends its history; a refused close ends none. On that ledger:
+ *
+ * - while the Player is live, at quiescence (every posted control answered, nothing left to post), a history open on
+ *   the host is one the page owns (its history, or its opening's, which then has none yet), or one whose close was
+ *   refused or could not be posted, reported once, with the Player blocked. Nothing else: a renewal that could not be
+ *   posted replaced nothing, and a close it carried is still owed. A sealed Player is outside this rule: its disposal's
+ *   close, when posted, takes every history on the host, and a lost connection takes them with it.
  */
 
 type Move =
   | "debugOn"
   | "debugOff"
-  | "openDue"
-  | "opened"
-  | "openFailed"
+  | "follow"
+  | "renewed"
+  | "renewFailedOpen"
+  | "renewFailedClose"
   | "newSession"
   | "retiredClear"
   | "retiredImport"
@@ -65,13 +78,16 @@ type Move =
   | "reinstateGateRejectedNewest"
   | "closeOk"
   | "closeFails"
-  | "retryReinstate";
+  | "retryReinstate"
+  | "post"
+  | "unpost";
 const MOVES: readonly Move[] = [
   "debugOn",
   "debugOff",
-  "openDue",
-  "opened",
-  "openFailed",
+  "follow",
+  "renewed",
+  "renewFailedOpen",
+  "renewFailedClose",
   "newSession",
   "retiredClear",
   "retiredImport",
@@ -100,7 +116,33 @@ const MOVES: readonly Move[] = [
   "closeOk",
   "closeFails",
   "retryReinstate",
+  "post",
+  "unpost",
 ];
+
+/** The posting moves: forced in the deciding turn, so they take no depth of a schedule (`explore`). */
+const POSTING: ReadonlySet<Move> = new Set(["post", "unpost"]);
+
+/**
+ * A control decided and not yet posted, with the row of R3-01's table that decided it: a renewal, a close, or the open's
+ * failure that follows an unposted renewal's carried closes.
+ */
+type Posting =
+  | {
+      readonly kind: "renew";
+      readonly intent: number;
+      readonly closes: Extract<LifecycleAction, { kind: "renew" }>["closes"];
+      readonly row: string;
+    }
+  | {
+      readonly kind: "close";
+      readonly history: number;
+      readonly disposal: boolean;
+      readonly row: string;
+      /** The row of the unposted renewal that carried it, when it did. */
+      readonly carriedBy: string | null;
+    }
+  | { readonly kind: "failOpen"; readonly intent: number };
 
 type Decide = (state: LifecycleState, event: LifecycleEvent) => LifecycleOutcome;
 
@@ -108,14 +150,21 @@ type Decide = (state: LifecycleState, event: LifecycleEvent) => LifecycleOutcome
 interface World {
   readonly state: LifecycleState;
   readonly moves: readonly Move[];
-  // The driver: what was sent and is unanswered.
+  // The driver: what was posted and is unanswered, renewals by their intents and closes posted alone, in posting order,
+  // which is the order the host runs them and its replies come back in; and whether a close failed there, after which
+  // the host refuses every later renewal (its close admission).
   readonly serial: number;
-  readonly queued: readonly { readonly intent: number; readonly after: number }[];
-  readonly sent: readonly number[];
+  readonly posting: readonly Posting[];
+  readonly sent: readonly (number | { readonly close: number; readonly disposal: boolean })[];
+  /** The histories open on the host. */
+  readonly host: ReadonlySet<number>;
+  /** The histories whose close the host refused, or that could not be posted. */
+  readonly owed: ReadonlySet<number>;
+  /** R3-01's rows met at their posting: see `postingRow`. */
+  readonly met: readonly string[];
+  readonly latched: boolean;
   readonly newestSent: number;
   readonly newestOpen: number;
-  readonly closes: number;
-  readonly settled: number;
   readonly stepSent: number | null;
   /** The gates asked and unanswered, by their identities, oldest first. */
   readonly gates: {
@@ -157,12 +206,14 @@ function start(): World {
     state: INITIAL_LIFECYCLE,
     moves: [],
     serial: 10,
-    queued: [],
+    posting: [],
     sent: [],
+    host: new Set(),
+    owed: new Set(),
+    met: [],
+    latched: false,
     newestSent: 0,
     newestOpen: 0,
-    closes: 0,
-    settled: 0,
     stepSent: null,
     gates: { step: [], return: [], reinstate: [] },
     current: { return: null, reinstate: null },
@@ -187,15 +238,21 @@ function start(): World {
 /** Mutable working copy of a world for one move. */
 type Draft = {
   -readonly [
-    K in Exclude<keyof World, "tokens" | "closed" | "gates" | "current" | "sent" | "queued">
+    K in Exclude<
+      keyof World,
+      "tokens" | "closed" | "gates" | "current" | "sent" | "posting" | "host" | "owed" | "met"
+    >
   ]: World[K];
 } & {
+  posting: Posting[];
+  host: Set<number>;
+  owed: Set<number>;
+  met: string[];
   tokens: Map<number, { history: number; ended: "drop" | "commit" | null }>;
   closed: Set<number>;
   gates: { step: number[]; return: number[]; reinstate: number[] };
   current: { return: number | null; reinstate: number | null };
-  sent: number[];
-  queued: { intent: number; after: number }[];
+  sent: (number | { close: number; disposal: boolean })[];
 };
 
 function draftOf(world: World): Draft {
@@ -210,13 +267,44 @@ function draftOf(world: World): Draft {
     },
     current: { ...world.current },
     sent: [...world.sent],
-    queued: [...world.queued],
+    posting: [...world.posting],
+    host: new Set(world.host),
+    owed: new Set(world.owed),
+    met: [],
   };
 }
 
 /** The event `move` is in `world`, or `null` when nothing the Player or the host would do produces it now. */
-function eventOf(world: Draft, move: Move): LifecycleEvent | null {
+function eventOf(world: Draft, move: Move): LifecycleEvent | "posted" | null {
   const next = () => (world.serial += 1);
+  // A control decided is posted, or not, before anything else happens.
+  if (POSTING.has(move) !== world.posting.length > 0) return null;
+  if (POSTING.has(move)) {
+    const head = world.posting.shift()!;
+    const posted = move === "post";
+    switch (head.kind) {
+      case "renew": {
+        const held = world.sent.some((each) => typeof each === "number");
+        world.met.push(`${head.row}:${move}`);
+        if (held) world.met.push(`${head.row}:${move}, an earlier reply held`);
+        if (!posted) return { kind: "renewUnposted", intent: head.intent, closes: head.closes };
+        world.sent.push(head.intent);
+        world.newestSent = head.intent;
+        return { kind: "renewPosted", intent: head.intent };
+      }
+      case "close":
+        world.met.push(`${head.row}:${move}`);
+        if (head.carriedBy !== null) world.met.push(`${head.carriedBy}'s carried close:${move}`);
+        if (!posted) {
+          world.owed.add(head.history);
+          return { kind: "closeSettled", ok: false };
+        }
+        world.sent.push({ close: head.history, disposal: head.disposal });
+        return "posted";
+      case "failOpen":
+        return posted ? { kind: "renewFailed", intent: head.intent, stage: "open" } : null;
+    }
+  }
   switch (move) {
     case "debugOn":
     case "newSession":
@@ -224,20 +312,27 @@ function eventOf(world: Draft, move: Move): LifecycleEvent | null {
     case "retiredClear":
     case "retiredImport":
       return { kind: "retired", by: move === "retiredClear" ? "clear" : "import", intent: next() };
-    case "openDue": {
-      // The Player answers an open once every close before it settled.
-      const due = world.queued[0];
-      if (due === undefined || due.after > world.settled) return null;
-      world.queued.shift();
-      return { kind: "openDue", intent: due.intent };
-    }
-    case "opened":
-    case "openFailed": {
-      const intent = world.sent.shift();
-      if (intent === undefined) return null;
-      return move === "opened"
-        ? { kind: "opened", intent, history: next() }
-        : { kind: "openFailed", intent };
+    case "follow":
+      // The Player follows its session at every publication; the owner reports it while a renewal waits for one.
+      return world.state.awaiting ? { kind: "follow" } : null;
+    case "renewed":
+    case "renewFailedOpen":
+    case "renewFailedClose": {
+      const intent = world.sent[0];
+      if (typeof intent !== "number") return null;
+      // After a failed close the host refuses it at its close admission.
+      if (world.latched && move !== "renewFailedClose") return null;
+      world.sent.shift();
+      // The host runs it: its closes and every earlier history's, then its own history opens; or, refused after its
+      // closes, none opens; or a close was refused, and what it would have closed stays, owed.
+      if (move === "renewFailedClose") for (const history of world.host) world.owed.add(history);
+      else world.host.clear();
+      if (move === "renewed") {
+        const history = next();
+        world.host.add(history);
+        return { kind: "renewed", intent, history };
+      }
+      return { kind: "renewFailed", intent, stage: move === "renewFailedOpen" ? "open" : "close" };
     }
     case "stepPrepared":
     case "stepPreparedUnready":
@@ -296,13 +391,64 @@ function eventOf(world: Draft, move: Move): LifecycleEvent | null {
       world.adopting = false;
       return { kind: "adoptionSettled", succeeded: move === "adoptionSucceeds" };
     case "closeOk":
-    case "closeFails":
-      if (world.settled === world.closes) return null;
-      world.settled += 1;
+    case "closeFails": {
+      const close = world.sent[0];
+      if (close === undefined || typeof close === "number") return null;
+      world.sent.shift();
+      if (move === "closeFails") world.owed.add(close.close);
+      else if (close.disposal) world.host.clear();
+      else world.host.delete(close.close);
       return { kind: "closeSettled", ok: move === "closeOk" };
+    }
+    // Decided above, while a control waits for its posting.
+    case "post":
+    case "unpost":
+      return null;
     default:
       return { kind: move };
   }
+}
+
+/** R3-01's table: the row of a renewal or a close, by the event that decided it. */
+function postingRow(
+  kind: "renew" | "close",
+  event: LifecycleEvent,
+  closes: readonly unknown[] = [],
+): string {
+  const rows: Partial<Record<LifecycleEvent["kind"], string>> =
+    kind === "renew"
+      ? {
+          debugOn: "R1",
+          follow: "R2",
+          adoptionSettled: closes.length === 0 ? "R3" : "R4",
+          retired: "R5",
+          gateSettled: "R6",
+        }
+      : {
+          debugOff: "C1",
+          adoptionSettled: "C2",
+          renewed: "C3",
+          newSession: "C4",
+          retired: "C5",
+          disposal: "C6",
+          gateSettled: "C7",
+          renewUnposted: "carried",
+        };
+  return rows[event.kind] ?? `a ${kind} decided at ${event.kind}`;
+}
+
+/**
+ * The ledger's rule at quiescence, while the Player is live (the header's last rule): every history open on the host is
+ * the page's, or owed with the Player blocked. `null`, or the rule broken.
+ */
+function unowned(world: Draft): string | null {
+  if (world.sealed !== null || world.sent.length > 0 || world.posting.length > 0) return null;
+  for (const history of world.host) {
+    if (history === world.held) continue;
+    if (world.owed.has(history) && world.state.blocked) continue;
+    return "a history open on the host that the page neither owns nor failed to close";
+  }
+  return null;
 }
 
 /** One move: the world after it and the first rule its batch broke, or `null` when the move cannot happen now. */
@@ -319,6 +465,8 @@ function advance(
   const event = eventOf(w, move);
   if (event === null) return null;
   w.moves = [...world.moves, move];
+  // A close posted: the host runs it later, and the page decides nothing now.
+  if (event === "posted") return { world: w, actions: [], broken: unowned(w) };
   const decision = decide(world.state, event);
   const { state, actions } = decision;
   if (event.kind === "adoptionBegun" && decision.admitted === true) w.adopting = true;
@@ -335,6 +483,13 @@ function advance(
   if (event.kind === "adoptionSettled" && w.adoption !== null && w.adoption.outcome === null)
     w.adoption = { ...w.adoption, outcome: event.succeeded };
   if (event.kind === "closeSettled" && !event.ok) w.closeFailed = true;
+  if (event.kind === "renewFailed" && event.stage === "close") w.closeFailed = true;
+  if (w.closeFailed) w.latched = true;
+  // A renewal decided now supersedes every earlier one, posted or waiting for its session.
+  const deciding =
+    (event.kind === "debugOn" && !world.debug) ||
+    ((event.kind === "newSession" || event.kind === "retired") && world.debug);
+  if (deciding && w.sealed === null) w.newestOpen = event.intent;
   // A settlement of the current Return or reinstatement gate ends it; an obsolete one's changes nothing.
   const settling =
     event.kind !== "gateSettled" || event.gate === "step"
@@ -347,9 +502,9 @@ function advance(
     if (settling.gate === "return") w.returnBusy = false;
   }
   if (event.kind === "stepFailed" || event.kind === "commitAcknowledged") w.stepPhase = null;
-  const opened = event.kind === "opened" ? event.history : null;
+  const opened = event.kind === "renewed" ? event.history : null;
   const obsolete =
-    (event.kind === "opened" || event.kind === "openFailed") && w.newestSent > event.intent;
+    (event.kind === "renewed" || event.kind === "renewFailed") && w.newestSent > event.intent;
   const prepared = event.kind === "stepPrepared" ? event.token : null;
   const atGate = event.kind === "gateSettled" && event.gate === "step" ? world.gateToken : null;
   // Whether a step or Return may go now, as the rules say.
@@ -397,66 +552,104 @@ function advance(
   if (settling !== null && !currentGate && w.sealed === null && actions.length > 0)
     return fail("an obsolete gate decided something");
   let enrolled = false;
+  let renewing = false;
   let closedOpened = false;
+  /** A close, posted alone or carried by a renewal: the history it names ends; `null`, or the rule it broke. */
+  const closing = (close: {
+    readonly history: number;
+    readonly by: string;
+    readonly adoptionSucceeded?: boolean;
+  }): string | null => {
+    const { history } = close;
+    if (failedCurrent && settling.gate === "reinstate")
+      return "a failed reinstatement gate restarted the page";
+    if (w.sealed === "disposal" && close.by !== "disposal")
+      return "a non-disposal close after disposal";
+    // The disposal's close takes every history of the connection, one whose renewal is unanswered included.
+    if (close.by === "disposal") w.held = null;
+    else if (history === opened) {
+      if (obsolete) return "a close of a replaced history";
+      closedOpened = true;
+    } else if (w.held !== history) return "a close of a history not held";
+    else w.held = null;
+    if (w.adoption !== null && (w.adoption.history === history || close.by === "disposal")) {
+      if (close.by === "debugOff") {
+        if (w.adoption.outcome === null) return "a Debug-off close before its adoption settled";
+        if (w.adoption.offDuring && close.adoptionSucceeded !== w.adoption.outcome)
+          return "a Debug-off close without its adoption's outcome";
+      }
+      w.adoption = null;
+    }
+    w.closed.add(history);
+    if (w.held === null) {
+      w.inspecting = false;
+      w.offHold = false;
+      w.failedHold = false;
+      // A Return or a reinstatement still waiting at its gate is obsolete with the history.
+      w.current = { return: null, reinstate: null };
+      w.returnBusy = false;
+    }
+    return null;
+  };
   let reported = false;
   let gate = false;
   let committed = false;
+  // The controls this batch decides, posted in its turn in this order, before any decided earlier and not yet posted.
+  const emitted: Posting[] = [];
+  const carriedBy =
+    event.kind === "renewUnposted"
+      ? (w.met.find((each) => each.endsWith(":unpost"))?.split(":")[0] ?? null)
+      : null;
   for (const [index, action] of actions.entries()) {
     switch (action.kind) {
-      case "open":
-        if (w.sealed !== null) return fail("an open after the Player was sealed");
-        if (w.closeFailed) return fail("an open after a failed close");
-        if (w.held !== null) return fail("an open while a history is held");
-        w.queued.push({ intent: action.intent, after: w.closes });
+      case "renew": {
+        if (w.sealed !== null) return fail("a renewal after the Player was sealed");
+        if (w.closeFailed) return fail("a renewal after a failed close");
+        if (!w.debug) return fail("a renewal with Debug off");
+        for (const close of action.closes) {
+          const broken = closing(close);
+          if (broken !== null) return fail(broken);
+        }
+        if (w.held !== null) return fail("a renewal while a history is held");
+        emitted.push({
+          kind: "renew",
+          intent: action.intent,
+          closes: action.closes,
+          row: postingRow("renew", event, action.closes),
+        });
         w.newestOpen = action.intent;
+        renewing = true;
         break;
-      case "sendOpen":
-        if (move !== "openDue") return fail("an open sent before it was due");
-        if (w.sealed !== null || w.closeFailed)
-          return fail("an open sent after the Player was sealed or a close failed");
-        if (w.held !== null) return fail("an open sent while a history is held");
-        w.sent.push(action.intent);
-        w.newestSent = action.intent;
-        break;
-      case "enroll":
-        if (action.history !== opened) return fail("an enrollment of a history not just opened");
-        if (obsolete) return fail("an enrollment of a replaced history");
-        if (!w.debug || w.sealed !== null) return fail("an enrollment with Debug off");
+      }
+      case "install":
+        if (action.history !== opened) return fail("an installation of a history not just renewed");
+        if (obsolete) return fail("an installation of a replaced history");
+        if (!w.debug || w.sealed !== null) return fail("an installation with Debug off");
         if (w.held !== null) return fail("two histories held");
         w.held = action.history;
         w.inspecting = false;
         enrolled = true;
         break;
       case "close": {
-        const { history } = action;
-        if (failedCurrent && settling.gate === "reinstate")
-          return fail("a failed reinstatement gate restarted the page");
-        if (w.sealed === "disposal" && action.by !== "disposal")
-          return fail("a non-disposal close after disposal");
-        if (history === opened) {
-          if (obsolete) return fail("a close of a replaced history");
-          closedOpened = true;
-        } else if (w.held !== history) return fail("a close of a history not held");
-        else w.held = null;
-        if (w.adoption?.history === history) {
-          if (action.by === "debugOff") {
-            if (w.adoption.outcome === null)
-              return fail("a Debug-off close before its adoption settled");
-            if (w.adoption.offDuring && action.adoptionSucceeded !== w.adoption.outcome)
-              return fail("a Debug-off close without its adoption's outcome");
-          }
-          w.adoption = null;
+        // An unposted renewal's carried close was taken from the page at its decision; it is only posted now.
+        if (event.kind === "renewUnposted") {
+          if (
+            !event.closes.some(
+              (close) => close.history === action.history && close.by === action.by,
+            )
+          )
+            return fail("a close the unposted renewal did not carry");
+        } else {
+          const broken = closing(action);
+          if (broken !== null) return fail(broken);
         }
-        w.closed.add(history);
-        w.closes += 1;
-        if (w.held === null) {
-          w.inspecting = false;
-          w.offHold = false;
-          w.failedHold = false;
-          // A Return or a reinstatement still waiting at its gate is obsolete with the history.
-          w.current = { return: null, reinstate: null };
-          w.returnBusy = false;
-        }
+        emitted.push({
+          kind: "close",
+          history: action.history,
+          disposal: action.by === "disposal",
+          row: postingRow("close", event),
+          carriedBy,
+        });
         break;
       }
       case "sendStep":
@@ -557,7 +750,8 @@ function advance(
         // A step's failed gate is reported only for the step the page still asks for: Debug runs, and its history
         // is still open.
         if (
-          move !== "openFailed" &&
+          event.kind !== "renewFailed" &&
+          !(event.kind === "closeSettled" && !event.ok) &&
           !failedCurrent &&
           !(
             move === "gateRejected" &&
@@ -575,24 +769,39 @@ function advance(
     }
   }
 
+  w.posting = [
+    ...emitted,
+    ...(event.kind === "renewUnposted"
+      ? [{ kind: "failOpen", intent: event.intent } as const]
+      : []),
+    ...w.posting,
+  ];
   // The batch's obligations.
-  if (
-    event.kind === "openDue" &&
-    event.intent === w.newestOpen &&
-    w.debug &&
-    w.held === null &&
-    w.sealed === null &&
-    !w.closeFailed &&
-    !actions.some((action) => action.kind === "sendOpen")
-  )
-    return fail("a wanted open not sent when due");
-  if (opened !== null && !obsolete && !enrolled && !closedOpened)
-    return fail("an opened history neither enrolled nor closed");
-  if (event.kind === "openFailed") {
+  const wantsRenewal = w.debug && w.held === null && w.sealed === null && !w.closeFailed;
+  if (move === "follow" && wantsRenewal && !renewing)
+    return fail("a renewal waiting for its session not posted at its follow");
+  if (event.kind === "debugOn" && !world.debug && !world.offHold && wantsRenewal && !renewing)
+    return fail("a Debug on that renews nothing");
+  if (event.kind === "newSession" && wantsRenewal && (!state.awaiting || renewing))
+    return fail("a new session's renewal does not wait for its session");
+  if (opened !== null && !obsolete && !enrolled && !closedOpened && w.sealed === null)
+    return fail("a renewed history neither installed nor closed");
+  if (event.kind === "renewFailed" && event.stage === "open") {
     if (reported && (obsolete || w.sealed !== null))
-      return fail("an obsolete open's failure reported");
-    const wanted = !obsolete && event.intent === w.newestOpen && w.sealed === null && w.debug;
-    if (!reported && wanted) return fail("a wanted open's failure not reported");
+      return fail("an obsolete renewal's failure reported");
+    // After a failed close, which was reported, a renewal's failure is its consequence: nothing more is reported.
+    const wanted =
+      !obsolete && event.intent === w.newestOpen && w.sealed === null && w.debug && !w.closeFailed;
+    if (!reported && wanted) return fail("a wanted renewal's failure not reported");
+    if (reported && world.closeFailed)
+      return fail("a renewal's failure reported after a failed close");
+  }
+  const closeFailing =
+    (event.kind === "renewFailed" && event.stage === "close") ||
+    (event.kind === "closeSettled" && !event.ok);
+  if (closeFailing && w.sealed === null) {
+    if (reported && world.closeFailed) return fail("a failed close reported twice");
+    if (!reported && !world.closeFailed) return fail("a failed close not reported");
   }
 
   if (
@@ -696,33 +905,46 @@ function advance(
     w.offHold = false;
   }
 
-  return { world: w, actions, broken: null };
+  return { world: w, actions, broken: unowned(w) };
 }
 
-/** Plays `moves` from `world`; every move must be possible. */
+/**
+ * Plays `moves` from `world`; every move must be possible. Controls decided and not yet posted are posted before a move
+ * that is not a posting move, and at the end.
+ */
 function play(world: World, moves: readonly Move[], decide: Decide = advanceLifecycle) {
   let at = world;
   const batches: { readonly move: Move; readonly actions: readonly LifecycleAction[] }[] = [];
-  for (const move of moves) {
+  const step = (move: Move) => {
     const next = advance(at, move, decide);
     assert.ok(next !== null, `${[...at.moves, move].join(" → ")}: not possible`);
     assert.equal(next.broken, null, `${next.world.moves.join(" → ")}`);
     at = next.world;
     batches.push({ move, actions: next.actions });
+  };
+  for (const move of moves) {
+    if (!POSTING.has(move)) while (at.posting.length > 0) step("post");
+    step(move);
   }
+  while (at.posting.length > 0) step("post");
   return { world: at, batches };
 }
 
-/** Every schedule of up to `depth` moves from `from`: the count, and the first breaches (or the first matching `stop`). */
+/**
+ * Every schedule of up to `depth` moves from `from`, the posting moves its controls take besides: the count, the first
+ * breaches (or the first matching `stop`), and R3-01's rows each met.
+ */
 function explore(from: World, depth: number, decide: Decide = advanceLifecycle, stop?: string) {
   let schedules = 0;
   const failures: string[] = [];
+  const met = new Set<string>();
   const walk = (world: World, left: number): boolean => {
-    if (left === 0) return false;
+    if (left === 0 && world.posting.length === 0) return false;
     for (const move of MOVES) {
       const next = advance(world, move, decide);
       if (next === null) continue;
       schedules += 1;
+      for (const row of next.world.met) met.add(row);
       if (next.broken !== null) {
         const line = `${next.world.moves.join(" → ")}: ${next.broken}`;
         if (stop === undefined) {
@@ -733,16 +955,16 @@ function explore(from: World, depth: number, decide: Decide = advanceLifecycle, 
         }
         continue;
       }
-      if (walk(next.world, left - 1)) return true;
+      if (walk(next.world, POSTING.has(move) ? left : left - 1)) return true;
     }
     return false;
   };
   walk(from, depth);
-  return { schedules, failures };
+  return { schedules, failures, met };
 }
 
 const INITIAL = start();
-const OPEN = play(INITIAL, ["debugOn", "openDue", "opened"]).world;
+const OPEN = play(INITIAL, ["debugOn", "renewed"]).world;
 const INSPECTING = play(OPEN, ["stepAsked", "stepPrepared", "gateOk", "commitAcknowledged"]).world;
 /** Debug off's gate A, a new session, a later inspection of its history, and Debug off's gate B: A obsolete, B current. */
 const TWO_GATES = play(INSPECTING, [
@@ -750,8 +972,7 @@ const TWO_GATES = play(INSPECTING, [
   "newSession",
   "closeOk",
   "debugOn",
-  "openDue",
-  "opened",
+  "renewed",
   "stepAsked",
   "stepPrepared",
   "gateOk",
@@ -759,10 +980,15 @@ const TWO_GATES = play(INSPECTING, [
   "debugOff",
 ]).world;
 
+/** The exhaustive runs, shared by the rules' test and the posting axis's coverage check. */
+let exhaustiveRuns: ReturnType<typeof explore>[] | null = null;
+const exhaustive = () =>
+  (exhaustiveRuns ??= [explore(INITIAL, 6), explore(OPEN, 5), explore(INSPECTING, 5)]);
+
 test("the deciding function keeps every rule over every schedule of its grammar", () => {
   assert.equal(OPEN.held, 12);
   assert.equal(INSPECTING.inspecting, true);
-  const runs = [explore(INITIAL, 6), explore(OPEN, 5), explore(INSPECTING, 5)];
+  const runs = exhaustive();
   assert.deepEqual(
     runs.flatMap(({ failures }) => failures),
     [],
@@ -806,12 +1032,42 @@ const mutants: readonly { readonly rule: string; readonly from: World; readonly 
       },
     },
     {
-      rule: "an opened history neither enrolled nor closed",
+      rule: "a renewed history neither installed nor closed",
       from: INITIAL,
       decide: (state, event) => {
         const outcome = advanceLifecycle(state, event);
-        return event.kind === "opened" && !state.debug ? { ...outcome, actions: [] } : outcome;
+        return event.kind === "renewed" && !state.debug ? { ...outcome, actions: [] } : outcome;
       },
+    },
+    {
+      rule: "a renewal after a failed close",
+      from: OPEN,
+      // The defect design-r1 D-03 named on the page side: a failed close does not block the next renewal.
+      decide: (state, event) =>
+        advanceLifecycle(
+          event.kind === "closeSettled" ? state : { ...state, blocked: false },
+          event,
+        ),
+    },
+    {
+      rule: "a new session's renewal does not wait for its session",
+      from: OPEN,
+      // The defect design-r1 D-02 named: a new session's renewal posted at once, before its session is known.
+      decide: (state, event) => {
+        const outcome = advanceLifecycle(state, event);
+        if (event.kind !== "newSession" || !outcome.state.awaiting) return outcome;
+        return {
+          state: { ...outcome.state, awaiting: false, sent: event.intent },
+          actions: [...outcome.actions, { kind: "renew", intent: event.intent, closes: [] }],
+        };
+      },
+    },
+    {
+      rule: "a renewal waiting for its session not posted at its follow",
+      from: OPEN,
+      // The defect design-r1 D-02 named: an ended generation's `null` follow leaves its renewal waiting.
+      decide: (state, event) =>
+        event.kind === "follow" ? { state, actions: [] } : advanceLifecycle(state, event),
     },
     {
       rule: "a history left held by a new session, retirement, or disposal",
@@ -834,7 +1090,7 @@ const mutants: readonly { readonly rule: string; readonly from: World; readonly 
         ),
     },
     {
-      rule: "a wanted open's failure not reported",
+      rule: "a wanted renewal's failure not reported",
       from: INITIAL,
       decide: (state, event) => {
         const outcome = advanceLifecycle(state, event);
@@ -926,7 +1182,72 @@ const mutants: readonly { readonly rule: string; readonly from: World; readonly 
             : event,
         ),
     },
+    {
+      rule: "a renewed history neither installed nor closed",
+      from: INITIAL,
+      // R3-01's M1: the watermark taken from the decision, not from the posting. The reply of the renewal posted before
+      // an unposted one is taken as replaced, which only a renewal posted after it does (witness 1).
+      decide: (state, event) => {
+        if (event.kind === "renewPosted") return { state, actions: [] };
+        const outcome = advanceLifecycle(state, event);
+        const renewal = outcome.actions.find((action) => action.kind === "renew");
+        return renewal?.kind === "renew"
+          ? { ...outcome, state: { ...outcome.state, sent: renewal.intent } }
+          : outcome;
+      },
+    },
+    {
+      rule: "a history open on the host that the page neither owns nor failed to close",
+      from: OPEN,
+      // R3-01's M2: an unposted renewal's carried closes dropped.
+      decide: (state, event) =>
+        event.kind === "renewUnposted" ? { state, actions: [] } : advanceLifecycle(state, event),
+    },
   ];
+
+/** R3-01's rows, by their table: the renewals R1 to R6 and the closes C1 to C7. */
+const RENEWAL_ROWS = ["R1", "R2", "R3", "R4", "R5", "R6"] as const;
+const CLOSE_ROWS = ["C1", "C2", "C3", "C4", "C5", "C6", "C7"] as const;
+
+/**
+ * The table's rows no schedule of the grammar decides, and why: the coverage check below holds that none is ever met, so
+ * a change that reaches one fails it.
+ */
+const UNREACHED: Readonly<Record<string, string>> = {
+  // `closing` waits for an adoption or a gate only while a history is held: Debug off's close, a new session and a
+  // retirement each end the wait (`closing` null) as they take the history, so it never settles with none.
+  R3: "an adoption Debug off waited for never settles with no history",
+  R6: "a reinstatement gate Debug off waited for never settles with no history",
+  // A history is held only once every renewal posted before it was answered (the host's order), and none is posted
+  // while it is held but the one carrying its close.
+  "R4:unpost, an earlier reply held": "no renewal is unanswered while a history is held",
+};
+
+test("the posting axis meets every row of R3-01's table unposted, and the orders of both witnesses", () => {
+  const met = new Set(exhaustive().flatMap((run) => [...run.met]));
+  const unreached = (row: string) =>
+    Object.keys(UNREACHED).some((gap) => row === gap || row.startsWith(`${gap}:`));
+  assert.deepEqual([...met].filter(unreached), [], "a row the table holds unreached was met");
+  const wanted = [
+    ...[...RENEWAL_ROWS, ...CLOSE_ROWS].map((row) => `${row}:unpost`),
+    // Witness 1's order: an unposted renewal while an earlier renewal's reply is still held.
+    ...RENEWAL_ROWS.map((row) => `${row}:unpost, an earlier reply held`),
+    // Witness 2's order: a carried close posted alone after its renewal could not be, then posted or not.
+    ...["R4", "R5"].flatMap((row) => [
+      `${row}'s carried close:post`,
+      `${row}'s carried close:unpost`,
+    ]),
+  ];
+  assert.deepEqual(
+    wanted.filter((row) => !met.has(row) && !unreached(row)),
+    [],
+  );
+  // No control is decided outside the table.
+  assert.deepEqual(
+    [...met].filter((row) => row.startsWith("a ")),
+    [],
+  );
+});
 
 test("the oracle finds each rule's defect (negative controls)", () => {
   for (const { rule, from, decide } of mutants) {
@@ -963,11 +1284,18 @@ test("Sol r2 B3: a step whose gate rejects is dropped, and a later step may go",
 });
 
 test("Sol r2 B5: a clear's close that fails blocks the history it would reopen", () => {
-  const { world, batches } = play(OPEN, ["retiredClear", "closeFails", "openDue"]);
-  assert.deepEqual(kinds(batches), ["close:clear", "clearView", "open"]);
+  const { world, batches } = play(OPEN, ["retiredClear", "renewFailedClose"]);
+  // The renewal carries the clear's close; its failure is reported once, and blocks.
+  assert.deepEqual(kinds(batches), ["clearView", "renew", "reportFailure"]);
+  const renewal = batches[0]!.actions.find((action) => action.kind === "renew");
+  assert.deepEqual(renewal?.kind === "renew" && renewal.closes, [{ history: 12, by: "clear" }]);
   assert.equal(world.state.blocked, true);
-  // That open is not sent when due, and a later Debug on opens nothing.
-  assert.deepEqual(kinds(play(world, ["debugOn"]).batches), []);
+  // A later Debug on and a new session renew nothing.
+  assert.deepEqual(kinds(play(world, ["debugOff", "debugOn", "newSession"]).batches), [
+    "clearView",
+    "clearView",
+  ]);
+  assert.equal(play(world, ["debugOff", "debugOn", "newSession"]).world.state.awaiting, false);
 });
 
 test("Sol r2 S2 (page side): Debug off during an adoption carries its outcome", () => {
@@ -1006,9 +1334,9 @@ test("Sol r3 B1: a new session or a retirement during Debug off's gate closes th
   }
 });
 
-test("Sol r3 B2: Debug off before the open's reply closes the history the reply opened", () => {
-  const { batches } = play(INITIAL, ["debugOn", "openDue", "debugOff", "opened"]);
-  assert.deepEqual(kinds(batches), ["open", "sendOpen", "clearView", "close:debugOff"]);
+test("Sol r3 B2: Debug off before the renewal's reply closes the history the reply opened", () => {
+  const { batches } = play(INITIAL, ["debugOn", "debugOff", "renewed"]);
+  assert.deepEqual(kinds(batches), ["renew", "clearView", "close:debugOff"]);
 });
 
 test("Sol r3 B3: a failed reinstatement gate keeps the history and its sessions until a new session closes it", () => {
@@ -1020,39 +1348,63 @@ test("Sol r3 B3: a failed reinstatement gate keeps the history and its sessions 
   ]);
   assert.deepEqual(kinds(batches), ["gate", "reportFailure", "refuse"]);
   assert.equal(world.held, OPEN.held);
-  assert.deepEqual(kinds(play(world, ["newSession"]).batches), [
+  assert.deepEqual(kinds(play(world, ["newSession", "follow"]).batches), [
     "close:replacement",
     "clearView",
-    "open",
+    "renew",
   ]);
 });
 
-test("Sol r3 S1: the failure of the open asked for now is reported, an obsolete one's is not", () => {
-  assert.deepEqual(kinds(play(INITIAL, ["debugOn", "openDue", "openFailed"]).batches), [
-    "open",
-    "sendOpen",
+test("Sol r3 S1: the failure of the renewal asked for now is reported, an obsolete one's is not", () => {
+  assert.deepEqual(kinds(play(INITIAL, ["debugOn", "renewFailedOpen"]).batches), [
+    "renew",
     "reportFailure",
   ]);
-  const moves: Move[] = ["debugOn", "openDue", "newSession", "openDue", "openFailed", "openFailed"];
+  const moves: Move[] = ["debugOn", "newSession", "follow", "renewFailedOpen", "renewFailedOpen"];
   assert.deepEqual(kinds(play(INITIAL, moves).batches), [
-    "open",
-    "sendOpen",
+    "renew",
     "clearView",
-    "open",
-    "sendOpen",
+    "renew",
     "reportFailure",
   ]);
+});
+
+test("a new session's renewal waits for its session's follow, and an ended generation's null follow posts it", () => {
+  const { world, batches } = play(OPEN, ["newSession"]);
+  assert.deepEqual(kinds(batches), ["close:replacement", "clearView"]);
+  assert.equal(world.state.awaiting, true);
+  const followed = play(world, ["follow"]);
+  assert.deepEqual(kinds(followed.batches), ["renew"]);
+  assert.equal(followed.world.state.awaiting, false);
+  // Debug off before the follow: the renewal not posted yet goes.
+  const off = play(world, ["debugOff"]).world;
+  assert.equal(off.state.opening, null);
+  assert.equal(off.state.awaiting, false);
+});
+
+test("Debug on during Debug off's reinstatement renews at the reinstated session's follow", () => {
+  const { world, batches } = play(INSPECTING, ["debugOff", "debugOn", "reinstateGateOk", "follow"]);
+  assert.deepEqual(kinds(batches), ["gate", "close:debugOff", "showParked", "clearView", "renew"]);
+  assert.equal(world.state.awaiting, false);
+});
+
+test("the disposal closes every history once a renewal was posted, an unanswered one's included", () => {
+  assert.deepEqual(kinds(play(INITIAL, ["debugOn", "disposal", "renewed"]).batches), [
+    "renew",
+    "close:disposal",
+    "clearView",
+  ]);
+  assert.deepEqual(kinds(play(INITIAL, ["disposal"]).batches), []);
 });
 
 test("a step's drop goes to the history it was sent to, and none once that history closed", () => {
-  const moves: Move[] = ["stepAsked", "newSession", "closeOk", "openDue", "opened", "stepPrepared"];
+  const moves: Move[] = ["stepAsked", "newSession", "closeOk", "follow", "renewed", "stepPrepared"];
   assert.deepEqual(kinds(play(OPEN, moves).batches), [
     "sendStep",
     "close:replacement",
     "clearView",
-    "open",
-    "sendOpen",
-    "enroll",
+    "renew",
+    "install",
   ]);
 });
 
@@ -1083,4 +1435,32 @@ test("Sol r5 B1: an obsolete reinstatement gate decides nothing; only the curren
       `${settle}: B decides`,
     );
   }
+});
+
+test("R3-01 witness 1: a renewal that could not be posted replaced nothing, so an earlier renewal's late history closes", () => {
+  const { world, batches } = play(INITIAL, ["debugOn", "debugOff", "debugOn", "unpost", "renewed"]);
+  assert.deepEqual(kinds(batches), [
+    "renew",
+    "clearView",
+    "renew",
+    "reportFailure",
+    "close:debugOff",
+  ]);
+  assert.equal(world.state.sent, 11, "the newest renewal posted");
+  const closed = play(world, ["closeOk"]).world;
+  assert.deepEqual([...closed.host], [], "nothing stays open on the host");
+  assert.equal(closed.state.blocked, false);
+});
+
+test("R3-01 witness 2: a clear's renewal that could not be posted posts its carried close alone", () => {
+  // Posted: the history closes on the host, and the open's failure is the one report.
+  const posted = play(OPEN, ["retiredClear", "unpost", "post", "closeOk"]);
+  assert.deepEqual(kinds(posted.batches), ["clearView", "renew", "close:clear", "reportFailure"]);
+  assert.deepEqual([...posted.world.host], []);
+  assert.equal(posted.world.state.blocked, false);
+  // Not posted either: the failed close blocks and is the one report; the host keeps the history, owed, as at the base.
+  const unposted = play(OPEN, ["retiredClear", "unpost", "unpost"]);
+  assert.deepEqual(kinds(unposted.batches), ["clearView", "renew", "close:clear", "reportFailure"]);
+  assert.deepEqual([...unposted.world.host], [12]);
+  assert.equal(unposted.world.state.blocked, true);
 });

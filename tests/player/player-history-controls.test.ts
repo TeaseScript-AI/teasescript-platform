@@ -3,7 +3,13 @@ import { readFileSync } from "node:fs";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, type EffectScope, type Ref } from "vue";
 
-import { BridgeLostError, openBridge, type ClientPort } from "../../player/engine-bridge/client.js";
+import {
+  BridgeLostError,
+  openBridge,
+  type ClientPort,
+  type PostDisposition,
+} from "../../player/engine-bridge/client.js";
+import type { DebugHistorySpill } from "../../player/engine-bridge/history/snapshots.js";
 import { decodeMessage } from "../../player/engine-bridge/transport.js";
 import type * as CompileProject from "../../player/runtime/compile-project.js";
 import type * as InProcess from "../../player/engine-bridge/in-process.js";
@@ -21,12 +27,16 @@ import {
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { memoryStorage } from "../helpers/player/rewind-host.js";
 import { untypedClient } from "../helpers/bridge/untyped.js";
+import { interceptSends } from "../helpers/bridge/sends.js";
 
 /*
  * #2150 PR 1: Debug's rewind history controls are posted when the Player's rewind lifecycle decides them, in the host's
  * arrival order, behind no unrelated request's reply, as every request of no session now is (`BridgeClient.request` and
  * `post`). With a busy connection queue, Debug turned on during a session takes the choice shown then as its first
  * point even when it is answered at once, and each rewind step and Debug's end and return settle as with an idle queue.
+ *
+ * #2150 PR 2: every opener renews the history in one host operation (`historyRenew`) posted before the new session's
+ * work, so an answer given before the renewal's reply is a point of the new history.
  */
 
 const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
@@ -89,7 +99,7 @@ test("requests of no session are posted in the order made, none behind a reply; 
     void each.catch(() => {});
   // Consecutive posts, and posts and requests mixed, all while every earlier reply is withheld.
   for (const sent of [
-    client.post("historyClose", { history: 1, by: "debugOff" }),
+    client.post("historyClose", { history: 1, by: "debugOff", owner: 0 }),
     client.post("historyTimeline", { history: 1 }),
   ])
     if (sent.posted) void sent.reply.catch(() => {});
@@ -132,11 +142,24 @@ interface RewindPlayer {
   readonly bridge: Promise<PlayerBridge>;
   readonly inputSection: unknown;
   readonly rewind: {
-    readonly owner: { readonly state: { readonly blocked: boolean; readonly debug: boolean } };
+    readonly owner: {
+      readonly state: {
+        readonly blocked: boolean;
+        readonly debug: boolean;
+        readonly history: number | null;
+        readonly sent: number;
+      };
+      /** A clear's or an import's retirement of the history, as the Player reports it. */
+      retired(by: "clear" | "import"): readonly { readonly kind: string }[];
+    };
   };
   prepare(create: (recording: PlayerRuntimeSessionOptions) => PlayerRuntimeSession): void;
   activate(): Promise<void>;
+  /** Ends the session and shows the start page, as the Player's Start page control does. */
+  toStartPage(): void | Promise<void>;
   loadScriptStorage(): Promise<void>;
+  /** Removes the script's saved data, as the Player's Clear control does; resolves to whether it was cleared. */
+  clearScriptStorage(): Promise<boolean>;
   /** Adopts an inspected state as the session before input, as the Player's controls do. */
   prepareInput(): true | Promise<boolean>;
   setDebugTracing(on: boolean): void;
@@ -147,7 +170,7 @@ interface DebugRewind {
   readonly state: Readonly<
     Ref<{
       readonly history: number | null;
-      readonly points: readonly { readonly id: number }[];
+      readonly points: readonly { readonly id: number; readonly response: unknown }[];
       readonly inspection: unknown;
     }>
   >;
@@ -200,9 +223,14 @@ async function until(check: () => boolean, what: string) {
 
 /**
  * The Player on a host replying after 5 ms, started on the rewind fixture: with Debug's rewind and its first point, or,
- * `debug` false, with Debug off until `toggle`.
+ * `debug` false, with Debug off until `toggle`. `historySpill` stores each history's snapshots, as the browser's
+ * database does.
  */
-async function mount(context: TestContext, debug = true) {
+async function mount(
+  context: TestContext,
+  debug = true,
+  historySpill?: () => Promise<DebugHistorySpill | null>,
+) {
   for (const [name, value] of Object.entries({
     document: Object.assign(new EventTarget(), { visibilityState: "visible" }),
     window: new EventTarget(),
@@ -227,7 +255,10 @@ async function mount(context: TestContext, debug = true) {
     if (args[0] === "[player] host error") reported.push(args[1]);
     else write(...args);
   });
-  const bridge = facade.createInProcessBackend(BUILD, { delayMs: 5 });
+  const bridge = facade.createInProcessBackend(BUILD, {
+    delayMs: 5,
+    ...(historySpill && { historySpill }),
+  });
   const scope = effectScope();
   // Saved data an adoption can replace.
   const storage = memoryStorage();
@@ -482,3 +513,253 @@ test("Round 2 R2-01: Debug turned on behind a busy queue traces from the moment 
   assert.ok(records > 0, `records of the first answer: ${records}`);
   await queued;
 });
+
+/**
+ * Holds the reply of every renewal (`historyRenew`) the Player posts: the host runs it at once, and the page receives
+ * its reply only at `release`.
+ */
+function holdRenewals(context: TestContext, bridge: PlayerBridge) {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let held = 0;
+  interceptSends(context, bridge.client, (op, _args, send) => {
+    if (op !== "historyRenew") return send();
+    held += 1;
+    const reply = send();
+    return gate.then(() => reply);
+  });
+  return { release, held: () => held };
+}
+
+test("#2150: a new Start's choice answered before its renewal's reply is the new history's first point", async (context) => {
+  const mounted = await mount(context);
+  const renewals = holdRenewals(context, mounted.bridge);
+  const first = mounted.player.session.value!.lineage;
+  await mounted.player.toStartPage();
+  mounted.player.prepare((recording) =>
+    compiler.createPlayerRuntimeSession(REWIND, {
+      ...mounted.player.scriptStorageOptions(),
+      ...recording,
+      wallClockMs: 0,
+    }),
+  );
+  await mounted.player.activate();
+  await until(
+    () =>
+      mounted.player.session.value?.lineage !== first &&
+      playerRuntimeForeground(mounted.player.session.value!) !== null,
+    "the new session's choice",
+  );
+  assert.equal(renewals.held(), 1, "its renewal was posted, and its reply waits");
+  assert.equal(mounted.rewind().state.value.history, null, "no history shows yet");
+  const answered = await mounted.answer();
+  assert.equal(answered.kind, "answered");
+  renewals.release();
+  await until(() => mounted.rewind().state.value.points.length === 2, "both points");
+  const [point] = mounted.rewind().state.value.points;
+  assert.ok(point!.response !== null, "the answered choice is the first point, with its answer");
+  assert.equal(await mounted.rewind().back(point!.id), true, "Back to it");
+  healthy(mounted);
+});
+
+test("#2150: Debug turned on, with the choice answered before its renewal's reply, keeps that choice as its first point", async (context) => {
+  const mounted = await mount(context, false);
+  const renewals = holdRenewals(context, mounted.bridge);
+  mounted.toggle();
+  await until(() => renewals.held() === 1, "the renewal's post");
+  const answered = await mounted.answer();
+  assert.equal(answered.kind, "answered");
+  renewals.release();
+  await until(() => mounted.rewind().state.value.points.length === 2, "both points");
+  assert.ok(mounted.rewind().state.value.points[0]!.response !== null);
+  healthy(mounted);
+});
+
+test("#2150: Debug turned on posts its renewal in that turn, behind the shown session's queued work", async (context) => {
+  const mounted = await mount(context, false);
+  const session = mounted.player.session.value!;
+  // The session's own requests, each waiting for the one before it.
+  const queued = Promise.allSettled(
+    [1, 2, 3, 4].map(() => mounted.bridge.request(session, "observeTime", { atMs: 0, media: [] })),
+  );
+  const posted: string[] = [];
+  const clone = globalThis.structuredClone;
+  context.after(() => void (globalThis.structuredClone = clone));
+  globalThis.structuredClone = <T>(value: T, options?: StructuredSerializeOptions): T => {
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      "kind" in value &&
+      value.kind === "request" &&
+      "op" in value
+    )
+      posted.push(String(value.op));
+    return clone(value, options);
+  };
+  mounted.toggle();
+  // The renewal is posted in the turn the lifecycle decides it, before the session's queued replies come back.
+  await until(() => mounted.player.rewind.owner.state.debug, "the renewal's decision");
+  assert.ok(posted.includes("historyRenew"), `posted in the deciding turn: ${posted.join(", ")}`);
+  await queued;
+  await until(() => mounted.rewind().state.value.points.length === 1, "the first point");
+  healthy(mounted);
+});
+
+/** Each history's spill store in memory, a database of its own as in the browser: its rows, and whether it went. */
+function trackedSpill() {
+  const stores: { readonly rows: Map<number, string>; destroyed: boolean }[] = [];
+  const open = async (): Promise<DebugHistorySpill> => {
+    const store = { rows: new Map<number, string>(), destroyed: false };
+    stores.push(store);
+    return {
+      put: async (id, json) => void store.rows.set(id, json),
+      get: async (id) => store.rows.get(id),
+      delete: async (ids) => ids.forEach((id) => store.rows.delete(id)),
+      destroy: async () => {
+        store.rows.clear();
+        store.destroyed = true;
+      },
+    };
+  };
+  return { open, stores, rows: () => stores.reduce((sum, store) => sum + store.rows.size, 0) };
+}
+
+/**
+ * Fails the posting of the next requests of `ops`, as many as each says, where the client posts them (arguments that
+ * cannot cross), and records every request posted or tried, in order, with its arguments.
+ */
+function failPostings(context: TestContext, ops: Record<string, number>) {
+  const tried: { readonly op: string; readonly args: unknown; readonly posted: boolean }[] = [];
+  const left = new Map(Object.entries(ops));
+  const clone = globalThis.structuredClone;
+  context.after(() => void (globalThis.structuredClone = clone));
+  globalThis.structuredClone = <T>(value: T, options?: StructuredSerializeOptions): T => {
+    if (
+      typeof value === "object" &&
+      value !== null &&
+      "kind" in value &&
+      value.kind === "request" &&
+      "op" in value &&
+      typeof value.op === "string" &&
+      "args" in value
+    ) {
+      const failing = left.get(value.op) ?? 0;
+      tried.push({ op: value.op, args: value.args, posted: failing === 0 });
+      if (failing > 0) {
+        left.set(value.op, failing - 1);
+        throw new Error(`injected: ${value.op} could not be posted`);
+      }
+    }
+    return clone(value, options);
+  };
+  return tried;
+}
+
+/** The host's timeline of `history`, or `null` once it closed there. */
+async function hostTimeline(mounted: Awaited<ReturnType<typeof mount>>, history: number) {
+  const { result } = await mounted.bridge.client.request("historyTimeline", { history });
+  return result;
+}
+
+for (const by of ["clear", "import"] as const)
+  test(`#2150 R1-01, R3-01: a ${by}'s renewal that could not be posted posts its carried close alone, before anything else posts`, async (context) => {
+    const mounted = await mount(context);
+    const { owner } = mounted.player.rewind;
+    const held = owner.state.history;
+    assert.notEqual(held, null);
+    const tried = failPostings(context, { historyRenew: 1 });
+    owner.retired(by);
+    // In the deciding turn: the renewal carrying the close, not posted, then the close alone, posted.
+    const controls = tried.filter(({ op }) => op.startsWith("history"));
+    assert.deepEqual(
+      controls.map(({ op, posted }) => [op, posted]),
+      [
+        ["historyRenew", false],
+        ["historyClose", true],
+      ],
+    );
+    const [renewal, close] = controls.map(({ args }) => args);
+    assert.ok(typeof renewal === "object" && renewal !== null && "closes" in renewal);
+    assert.deepEqual(renewal.closes, [{ history: held, by }]);
+    assert.ok(typeof close === "object" && close !== null && "history" in close && "by" in close);
+    assert.deepEqual([close.history, close.by], [held, by]);
+    await until(() => mounted.reported.length === 1, "the open's failure reported");
+    assert.equal(await hostTimeline(mounted, held!), null, "the history closed on the host");
+    assert.equal(owner.state.blocked, false, "a close that was posted blocks nothing");
+    assert.equal(owner.state.history, null);
+    await later(30);
+    assert.equal(mounted.reported.length, 1, "reported once");
+  });
+
+test("#2150 R3-01 witness 1: a renewal that could not be posted replaced nothing; the late history of the renewal before it closes, with its stored snapshot", async (context) => {
+  const spill = trackedSpill();
+  const mounted = await mount(context, false, spill.open);
+  const { owner } = mounted.player.rewind;
+  // The first renewal's reply waits until `release`; the renewal itself is posted, and the host runs it.
+  const raw = untypedClient(mounted.bridge.client);
+  const post = raw.post.bind(raw);
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let first: number | null = null;
+  context.mock.method(raw, "post", (op: string, args: unknown): PostDisposition => {
+    const sent = post(op, args);
+    if (op !== "historyRenew" || first !== null || !sent.posted) return sent;
+    assert.ok(typeof args === "object" && args !== null && "intent" in args);
+    assert.ok(typeof args.intent === "number");
+    first = args.intent;
+    return { posted: true, reply: gate.then(() => sent.reply) };
+  });
+  mounted.toggle();
+  await until(() => first !== null, "the first renewal's post");
+  await until(() => spill.rows() === 1, "the first renewal's point stored");
+  mounted.debugOff();
+  // Debug on again: its renewal cannot be posted, and is reported.
+  failPostings(context, { historyRenew: 1 });
+  mounted.toggle();
+  await until(() => mounted.reported.length === 1, "the successor's failure reported");
+  assert.equal(owner.state.sent, first, "the newest renewal posted is still the first");
+  release();
+  await until(
+    () => spill.stores.every((store) => store.destroyed),
+    "the first history's store gone",
+  );
+  assert.equal(await hostTimeline(mounted, first!), null, "the first history closed on the host");
+  assert.equal(spill.rows(), 0);
+  assert.equal(owner.state.history, null);
+  assert.equal(owner.state.blocked, false);
+  assert.equal(mounted.reported.length, 1, "reported once");
+});
+
+for (const closePosts of [true, false])
+  test(`#2150 R3-01 witness 2: Clear whose renewal could not be posted ${closePosts ? "deletes the history's stored snapshots by its close alone" : "blocks and reports once when its close cannot be posted either; the host keeps the history until disposal, as at the base"}`, async (context) => {
+    const spill = trackedSpill();
+    const mounted = await mount(context, true, spill.open);
+    const { owner } = mounted.player.rewind;
+    // To the script's end, so that Clear may run.
+    assert.equal((await mounted.answer()).kind, "answered");
+    await until(
+      () => mounted.rewind().state.value.points.length === 2,
+      "the second choice's point",
+    );
+    assert.equal((await mounted.answer()).kind, "answered");
+    await until(() => mounted.player.session.value?.state.status === "halted", "the script's end");
+    const held = owner.state.history;
+    assert.notEqual(held, null);
+    const stored = spill.rows();
+    assert.ok(stored > 0, "the history's snapshots are stored");
+    failPostings(context, closePosts ? { historyRenew: 1 } : { historyRenew: 1, historyClose: 1 });
+    assert.equal(await mounted.player.clearScriptStorage(), true);
+    await until(() => mounted.reported.length === 1, "the failure reported");
+    await later(30);
+    assert.equal(mounted.reported.length, 1, "reported once");
+    assert.equal(owner.state.history, null);
+    if (closePosts) {
+      assert.equal(await hostTimeline(mounted, held!), null, "the history closed on the host");
+      assert.equal(spill.rows(), 0, "its stored snapshots deleted, as at the base");
+      assert.equal(owner.state.blocked, false);
+    } else {
+      assert.notEqual(await hostTimeline(mounted, held!), null, "the host keeps the history");
+      assert.equal(spill.rows(), stored, "and its stored snapshots, until the Player's disposal");
+      assert.equal(owner.state.blocked, true);
+    }
+  });

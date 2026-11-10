@@ -51,7 +51,7 @@ export interface HistoryInspection {
   readonly adopting: boolean;
 }
 
-/** The whole timeline, as `historyOpen` and a resync send it. */
+/** The whole timeline, as `historyRenew` and a resync send it. */
 export interface HistoryTimeline {
   readonly history: number;
   readonly enrollment: number;

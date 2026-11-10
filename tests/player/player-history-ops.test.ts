@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { compilePlayerProject } from "../../player/runtime/compile-project.js";
 import { CANNOT_KEEP, type HistoryTimeline } from "../../player/engine-bridge/history/core.js";
-import type { HistoryOpened, HistoryOpResult } from "../../player/engine-bridge/ops/history.js";
+import type { HistoryOpResult, HistoryRenewed } from "../../player/engine-bridge/ops/history.js";
 import type { PrepareResult } from "../../player/engine-bridge/player-ops.js";
 import type { Introduction } from "../../player/engine-bridge/session-protocol.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
@@ -73,6 +73,21 @@ async function op(bridge: PlayerBridge, name: string, args: unknown) {
   return { result: settled, reply };
 }
 
+/** Renews the history as `intent` on `bridge`, enrolling `session` when given, as a Player of no claim would. */
+async function renew(
+  bridge: PlayerBridge,
+  intent: number,
+  session: PlayerSession | null = null,
+): Promise<HistoryRenewed> {
+  const reply = await bridge.client.request("historyRenew", {
+    intent,
+    owner: 0,
+    session: session?.id ?? null,
+    closes: [],
+  });
+  return reply.result;
+}
+
 async function timeline(bridge: PlayerBridge, history: number): Promise<HistoryTimeline | null> {
   const reply = await bridge.client.request("historyTimeline", { history });
   // EVIDENCE: validation: `historyTimeline` replies from the same build with a timeline or `null`.
@@ -112,9 +127,7 @@ async function committed(
 /** A Player's history with three points on its started session, on `bridge` (the in-process one by default). */
 async function withPoints(on?: PlayerBridge) {
   const bridge = on ?? (await inProcessBridge());
-  const opened = await bridge.client.request("historyOpen", { intent: 1 });
-  // EVIDENCE: validation: `historyOpen` replies from the same build with `HistoryOpened`.
-  assert.equal((opened.result as HistoryOpened).kind, "opened");
+  assert.equal((await renew(bridge, 1)).kind, "renewed");
   const session = await started(bridge);
   await answer(bridge, session, 1_000);
   await answer(bridge, session, 2_000);
@@ -136,8 +149,7 @@ function restoredOf(
 
 test("a history opens for the newest serial only, and takes a point at each newly presented interaction", async () => {
   const { bridge, shown, points } = await withPoints();
-  const stale = await bridge.client.request("historyOpen", { intent: 1 });
-  assert.deepEqual(stale.result, { kind: "stale" });
+  assert.deepEqual(await renew(bridge, 1), { kind: "stale" });
   assert.deepEqual(
     points.map((point) => point.sceneTimeMs),
     [0, 1_000, 2_000],
@@ -253,33 +265,43 @@ test("Debug off while inspecting reinstates the parked session and ends the hist
   });
   const restored = restoredOf(bridge, back.reply);
   assert.equal(
-    (await op(bridge, "historyClose", { history: 1, by: "clear" })).result.kind,
+    (await op(bridge, "historyClose", { history: 1, by: "clear", owner: 0 })).result.kind,
     "refused",
   );
-  const closed = await op(bridge, "historyClose", { history: 1, by: "debugOff" });
+  const closed = await op(bridge, "historyClose", { history: 1, by: "debugOff", owner: 0 });
   assert.ok(closed.result.kind === "done");
   assert.equal(closed.result.live, session.id);
   assert.deepEqual(closed.result.released, [restored.id]);
   assert.equal(await timeline(bridge, 1), null);
 });
 
-test("enrolling takes the session's current interaction as a point once, and refuses another session", async () => {
+test("a renewal enrolls its session's current interaction as one point; with no session, its history is empty", async () => {
   const bridge = await inProcessBridge();
   const session = await started(bridge);
-  await bridge.client.request("historyOpen", { intent: 1 });
-  const enrolled = await bridge.request(session, "historyEnroll", { history: 1 });
-  assert.equal(enrolled.kind, "done");
-  assert.equal((await timeline(bridge, 1))!.points.length, 1);
-  const other = await started(bridge);
-  assert.equal((await bridge.request(other, "historyEnroll", { history: 1 })).kind, "refused");
+  const renewed = await renew(bridge, 1, session);
+  assert.ok(renewed.kind === "renewed");
+  // The reply's timeline is the history's after its enrollment.
+  assert.equal(renewed.timeline.points.length, 1);
+  assert.deepEqual(renewed.timeline, await timeline(bridge, 1));
+  const empty = await renew(bridge, 2);
+  assert.ok(empty.kind === "renewed");
+  assert.equal(empty.timeline.points.length, 0);
+  // The older history closed as replaced.
+  assert.equal(await timeline(bridge, 1), null);
 });
 
 test("malformed history arguments are refused", async () => {
   const bridge = await inProcessBridge();
   for (const [name, args] of [
-    ["historyOpen", { intent: 0 }],
-    ["historyOpen", { intent: 1, more: true }],
-    ["historyClose", { history: 1, by: "later" }],
+    ["historyRenew", { intent: 0, owner: 0, session: null, closes: [] }],
+    ["historyRenew", { intent: 1, owner: 0, session: null, closes: [], more: true }],
+    ["historyRenew", { intent: 1, owner: -1, session: null, closes: [] }],
+    [
+      "historyRenew",
+      { intent: 1, owner: 0, session: null, closes: [{ history: 1, by: "disposal" }] },
+    ],
+    ["historyClose", { history: 1, by: "later", owner: 0 }],
+    ["historyClose", { history: 1, by: "debugOff" }],
     ["rewindAdopt", { history: 1, phase: "begin", succeeded: true }],
     ["rewindBack", { history: 1, point: 1, live: 3, events: [] }],
     [
@@ -304,8 +326,7 @@ test("an interaction answered before the history enrolled has no point; the one 
   const bridge = await inProcessBridge();
   const session = await started(bridge);
   await answer(bridge, session, 1_000);
-  await bridge.client.request("historyOpen", { intent: 1 });
-  await bridge.request(session, "historyEnroll", { history: 1 });
+  await renew(bridge, 1, session);
   await answer(bridge, session, 2_000);
   const { points } = (await timeline(bridge, 1))!;
   assert.deepEqual(
@@ -323,7 +344,7 @@ test("#1981: a point's state and position are its own publication's, also while 
     { commit: null, dirty: null, mode: null, appVersion: null },
     { delayMs: 5 },
   );
-  await bridge.client.request("historyOpen", { intent: 1 });
+  await renew(bridge, 1);
   const session = await started(bridge);
   // The interaction's own publication, captured as the page received it.
   const presented = bridge.latest(session)!;
@@ -347,7 +368,7 @@ test("#1981: a point's state and position are its own publication's, also while 
 
 test("#1981: a publication with no interaction takes no point; the next interaction is one, at its own time", async () => {
   const bridge = await inProcessBridge();
-  await bridge.client.request("historyOpen", { intent: 1 });
+  await renew(bridge, 1);
   const reply = await bridge.client.request("prepare", {
     source: {
       kind: "plan",
@@ -432,8 +453,10 @@ test("over a Worker, the timeline the page builds from the publications' deltas 
     ),
   );
   try {
-    const opened = await bridge.historyOpen(bridge.nextHistoryIntent());
-    assert.ok(opened.kind === "opened");
+    const sent = bridge.historyRenew(bridge.nextHistoryIntent(), null, []);
+    assert.ok(sent.posted);
+    const opened = (await sent.reply).result;
+    assert.ok(opened.kind === "renewed");
     const session = await started(bridge);
     const view = new DebugHistoryView(
       opened.timeline,
@@ -561,7 +584,7 @@ test("the state the first Back leaves is kept as a point is: one that does not f
     historySpill: async () => null,
     historyBudget: memoryChars + 1,
   });
-  await bridge.client.request("historyOpen", { intent: 1 });
+  await renew(bridge, 1);
   const session = await started(bridge);
   await answer(bridge, session, 1_000);
   await answer(bridge, session, 2_000);
@@ -588,7 +611,7 @@ test("the state the first Back leaves is kept as a point is: one that does not f
     }),
     historyBudget: memoryChars + 1,
   });
-  await withSpill.client.request("historyOpen", { intent: 1 });
+  await renew(withSpill, 1);
   const spilled = await started(withSpill);
   await answer(withSpill, spilled, 1_000);
   await answer(withSpill, spilled, 2_000);
@@ -690,8 +713,9 @@ test("Sol r2 S2: Debug off of an adopting history with no known outcome is refus
   });
   const restored = restoredOf(bridge, back.reply);
   await op(bridge, "rewindAdopt", { history: 1, phase: "begin" });
-  const closed = await bridge.historyStep("historyClose", { history: 1, by: "debugOff" });
-  assert.equal(closed.result.kind, "refused");
+  const sent = bridge.historyClose({ history: 1, by: "debugOff" });
+  assert.ok(sent.posted);
+  assert.equal((await sent.reply).result.kind, "refused");
   for (const held of [session, restored])
     assert.equal(
       (await bridge.read(held, "captureStorage")).revision,
@@ -839,7 +863,7 @@ async function publicationRow(op: Publishing): Promise<void> {
   for (const then of ["Back", "next publication"] as const) {
     const link = failingConnection();
     const { bridge } = link;
-    await bridge.client.request("historyOpen", { intent: 1 });
+    await renew(bridge, 1);
     const reply = await bridge.client.request("prepare", {
       source: {
         kind: "plan",
@@ -946,5 +970,151 @@ test("a publishing op's undo is the history's: without it, its rows fail (negati
       await assert.rejects(publicationRow(op), assert.AssertionError, op);
   } finally {
     Object.defineProperty(HistoryCore.prototype, "advance", advance);
+  }
+});
+
+/*
+ * #2150's close admission (`historyRenew`, `HistoryRegistry.admits`): a renewal checks its Player and its intent before
+ * any effect, closes what it carries with its reasons and every older history, and opens nothing after a failed close
+ * of its Player, however the close failed.
+ */
+
+/** A renewal past the page, with its owner, session and closes. */
+async function renewRaw(
+  bridge: PlayerBridge,
+  intent: number,
+  {
+    owner = 0,
+    session = null,
+    closes = [],
+  }: {
+    readonly owner?: number;
+    readonly session?: string | null;
+    readonly closes?: readonly { readonly history: number; readonly by: string }[];
+  } = {},
+): Promise<HistoryRenewed> {
+  const reply = await untypedClient(bridge.client).request("historyRenew", {
+    intent,
+    owner,
+    session,
+    closes,
+  });
+  // EVIDENCE: validation: `historyRenew` replies from the same build with `HistoryRenewed`.
+  return reply.result as HistoryRenewed;
+}
+
+/** A close past the page, with its owner. */
+async function closeRaw(bridge: PlayerBridge, history: number, by: string, owner = 0) {
+  return (await op(bridge, "historyClose", { history, by, owner })).result;
+}
+
+test("a refused close blocks its Player's later renewals before any effect; a newer Player renews again", async () => {
+  const bridge = await inProcessBridge();
+  assert.equal((await renew(bridge, 1)).kind, "renewed");
+  assert.equal((await closeRaw(bridge, 7, "debugOff")).kind, "refused");
+  const blocked = await renewRaw(bridge, 2);
+  assert.equal(blocked.kind, "closeFailed");
+  assert.notEqual(await timeline(bridge, 1), null, "the older history did not close");
+  assert.equal(await timeline(bridge, 2), null, "nothing opened");
+  assert.equal((await renewRaw(bridge, 3, { owner: 1 })).kind, "renewed");
+  assert.equal(await timeline(bridge, 1), null, "the newer Player's renewal replaced it");
+  assert.deepEqual(await renewRaw(bridge, 4, { owner: 0 }), { kind: "stale" });
+});
+
+test("a close that threw, or whose success reply was never posted, blocks its Player's later renewals", async (context) => {
+  for (const failure of ["threw", "not delivered"] as const) {
+    const link = failingConnection();
+    await renew(link.bridge, 1);
+    if (failure === "threw")
+      context.mock.method(link.context.history, "close", () => {
+        throw new Error("injected: the close throws");
+      });
+    else link.failPost("historyClose");
+    await assert.rejects(closeRaw(link.bridge, 1, "debugOff"), failure);
+    context.mock.restoreAll();
+    const blocked = await renewRaw(link.bridge, 2);
+    assert.equal(blocked.kind, "closeFailed", failure);
+    assert.equal(await timeline(link.bridge, 2), null, failure);
+  }
+});
+
+test("a renewal checks its owner, intent and session before any effect", async () => {
+  const bridge = await inProcessBridge();
+  await renew(bridge, 2);
+  const carried = [{ history: 2, by: "clear" }];
+  assert.deepEqual(await renewRaw(bridge, 1, { closes: carried }), { kind: "stale" });
+  const missing = await renewRaw(bridge, 3, { session: "s99", closes: carried });
+  assert.equal(missing.kind, "refused");
+  assert.notEqual(await timeline(bridge, 2), null, "no close ran");
+  assert.equal(await timeline(bridge, 3), null);
+});
+
+test("a renewal closes what it carries with its reason, stopping at a refusal, then opens and enrolls", async () => {
+  const { bridge, session, shown, points } = await withPoints();
+  const back = await op(bridge, "rewindBack", {
+    history: 1,
+    point: points[0]!.id,
+    live: session.id,
+    events: shown.events.slice(0, points[0]!.eventCount),
+  });
+  const restored = restoredOf(bridge, back.reply);
+  // A clear is refused while a restored state shows: nothing opens, and the history stays.
+  const cleared = await renewRaw(bridge, 2, { closes: [{ history: 1, by: "clear" }] });
+  assert.equal(cleared.kind, "closeFailed");
+  assert.notEqual(await timeline(bridge, 1), null);
+  // A newer Player's import releases the parked and the restored sessions, then opens empty.
+  const imported = await renewRaw(bridge, 3, { owner: 1, closes: [{ history: 1, by: "import" }] });
+  assert.ok(imported.kind === "renewed");
+  assert.deepEqual(imported.released.toSorted(), [session.id, restored.id].toSorted());
+  assert.equal(imported.timeline.points.length, 0);
+  assert.equal(await timeline(bridge, 1), null);
+});
+
+test("a renewal whose reply is never posted leaves no history; the closes it made stay made", async () => {
+  const link = failingConnection();
+  await renew(link.bridge, 1);
+  link.failPost("historyRenew");
+  await assert.rejects(renewRaw(link.bridge, 2));
+  assert.equal(await timeline(link.bridge, 1), null, "the older history closed, and stays closed");
+  assert.equal(await timeline(link.bridge, 2), null, "the new one went with its delivery");
+  assert.equal(link.context.history.entries.size, 0);
+  // That was no close failure: a later renewal opens.
+  assert.equal((await renewRaw(link.bridge, 3)).kind, "renewed");
+});
+
+test("a Player's disposal closes every history, an unanswered renewal's included, and ends its controls", async () => {
+  const bridge = await inProcessBridge();
+  assert.equal((await renewRaw(bridge, 1, { owner: 1 })).kind, "renewed");
+  assert.equal((await renewRaw(bridge, 2, { owner: 1 })).kind, "renewed");
+  // The page knows neither history; its disposal names the newest renewal it posted.
+  assert.equal((await closeRaw(bridge, 2, "disposal", 1)).kind, "done");
+  assert.equal(await timeline(bridge, 2), null);
+  assert.deepEqual(await renewRaw(bridge, 3, { owner: 1 }), { kind: "stale" });
+  assert.equal((await closeRaw(bridge, 3, "debugOff", 1)).kind, "refused");
+  assert.equal((await renewRaw(bridge, 4, { owner: 2 })).kind, "renewed");
+});
+
+test("over a Worker, a renewal posted after a close the host refuses opens nothing, and one posted before it is untouched", async () => {
+  const build = { commit: null, dirty: null, mode: null, appVersion: null };
+  const bridge = new Bridge(
+    await connectBridge(
+      nodeWorkerPort(new URL("../../player/engine-bridge/node-worker.js", import.meta.url), build),
+      build,
+    ),
+  );
+  try {
+    const session = await started(bridge);
+    // Posted in one turn, with no reply awaited between them: the Worker's host runs them in that order.
+    const before = bridge.historyRenew(1, session, []);
+    const refused = bridge.historyClose({ history: 7, by: "debugOff" });
+    const after = bridge.historyRenew(2, session, []);
+    assert.ok(before.posted && refused.posted && after.posted);
+    assert.equal((await before.reply).result.kind, "renewed");
+    assert.equal((await refused.reply).result.kind, "refused");
+    assert.equal((await after.reply).result.kind, "closeFailed");
+    assert.notEqual(await timeline(bridge, 1), null, "the earlier history stays");
+    assert.equal(await timeline(bridge, 2), null);
+  } finally {
+    bridge.client.terminate();
   }
 });

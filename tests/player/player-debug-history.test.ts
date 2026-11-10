@@ -41,8 +41,10 @@ async function connection(
   options: Parameters<typeof createInProcessBackend>[1] = {},
 ): Promise<{ readonly bridge: PlayerBridge; readonly history: number }> {
   const bridge = createInProcessBackend(BUILD, options);
-  const opened = await bridge.historyOpen(bridge.nextHistoryIntent());
-  assert.ok(opened.kind === "opened");
+  const sent = bridge.historyRenew(bridge.nextHistoryIntent(), null, []);
+  assert.ok(sent.posted);
+  const opened = (await sent.reply).result;
+  assert.ok(opened.kind === "renewed");
   return { bridge, history: opened.timeline.history };
 }
 
@@ -251,7 +253,9 @@ test("each point is written to the spill store and read back from it; an adoptio
   await bridge.historyStep("rewindAdopt", { history, phase: "end", succeeded: true });
   await settle();
   assert.deepEqual([...rows.keys()], [1]);
-  await bridge.historyStep("historyClose", { history, by: "debugOff" });
+  const closed = bridge.historyClose({ history, by: "debugOff" });
+  assert.ok(closed.posted);
+  await closed.reply;
   await settle();
   assert.equal(state.destroyed, true);
 });
