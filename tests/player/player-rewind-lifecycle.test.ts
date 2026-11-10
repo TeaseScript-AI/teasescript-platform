@@ -715,7 +715,9 @@ function advance(
         w.inspecting = false;
         break;
       case "showParked":
-        if (!(currentGate && settling.ok)) return fail("the parked session shown without its gate");
+        // From a successful Return gate, or Debug off's reinstatement gate, opened or failed (#2230).
+        if (!(currentGate && (settling.ok || settling.gate === "reinstate")))
+          return fail("the parked session shown without its gate");
         if (w.sealed !== null) return fail("the parked session shown after the Player was sealed");
         if (
           settling.gate === "reinstate" &&

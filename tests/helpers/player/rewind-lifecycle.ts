@@ -178,7 +178,8 @@ export function expectation(each: LifecycleCase): LifecycleExpectation {
       };
     // A replacement's Start is still beginning when the gate settles: once the return went, the Start shows its
     // session. A failed gate is the Player's host failure (`reportHostError`), which ends the Start in flight and stops
-    // the shown session: none shows, and the history keeps what it held.
+    // the shown session: none shows. A failed Return's history keeps what it held; Debug off's reinstatement closed its
+    // own (#2230).
     if (event === "replacement" && outcome === "fails")
       return {
         shows: "none",
@@ -187,7 +188,7 @@ export function expectation(each: LifecycleCase): LifecycleExpectation {
         recording: null,
         rewound: false,
         clears,
-        history: true,
+        history: operation === "Return",
       };
     if (event === "replacement" && outcome === "succeeds")
       return {
