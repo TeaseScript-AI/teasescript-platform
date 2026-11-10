@@ -1,6 +1,7 @@
 // Writes the export equivalence fixture (L5h.3b, §21.4 family 5) with the base's assembler: run in a built checkout of
 // the base commit, with this folder's `scenarios.mjs`, as `node generate.mjs <base checkout> <base commit> <out file>`.
-// The fixture is never re-blessed: a later change of the export's output is a new row with its reason, in the test.
+// The fixture is not regenerated: its format revision fields follow the format revisions (#2147 moved them), and any
+// other change of the export's output is a new row with its reason, in the test.
 
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
