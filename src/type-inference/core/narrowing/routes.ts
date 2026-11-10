@@ -146,7 +146,7 @@ export class NarrowingRoutes extends RouteTests {
   /** Per (key, node, offending kind): the witness found, or `null`. */
   readonly #witnesses = new Map<string, Definition | null>();
   /** THROWAWAY (#1938 R33 counters): each witness step's writer chain, query node and its source's memo. */
-  readonly #links = new Map<string, { readonly chain: readonly Place[]; readonly node: FlowNode; readonly next: string | null }>();
+  readonly #links = new Map<string, { readonly chain: readonly Place[]; readonly node: FlowNode; readonly next: string | null; readonly key: Key; readonly def: Definition }>();
   /** THROWAWAY: the current `required` query's first witness memo. */
   #first: { readonly memo: string; readonly node: FlowNode } | null = null;
   /** Per object literal: its properties' places by name, made on its first projection. */
@@ -254,6 +254,8 @@ export class NarrowingRoutes extends RouteTests {
       this.#links.set(memo, {
         chain: found.chain,
         node,
+        key,
+        def: found.def,
         next: source === true ? null : joinParts(source.key, source.node.id, source.tag, ""),
       });
       if (source === true) {
@@ -946,7 +948,7 @@ export class NarrowingRoutes extends RouteTests {
     if (out === undefined) return;
     const program = this.pass.program;
     const site = program.places[value]?.site ?? null;
-    const links: { readonly chain: readonly Place[]; readonly node: FlowNode }[] = [];
+    const links: { readonly chain: readonly Place[]; readonly node: FlowNode; readonly key: Key; readonly def: Definition }[] = [];
     let unknown = false;
     if (this.#first !== null) {
       let memo: string | null = this.#first.memo;
@@ -976,6 +978,31 @@ export class NarrowingRoutes extends RouteTests {
       for (const b of u) if (!w.has(b) && conditional(b)) entered.add(b);
       for (const b of w) if (u.has(b) && b.owner !== null && b.owner.loop !== null) sharedLoop = true;
     }
+    // the ways past an `if` between a link's writer and its query node whose arm holds another definition of the key
+    const passed = new Map<TreeStatement, Set<number>>();
+    for (const link of links) {
+      const last = link.chain[link.chain.length - 1];
+      const ws = last === undefined || last.index < 0 ? undefined : last.block.statements[last.index];
+      const from = ws === undefined ? -1 : ws.end;
+      const to = link.node.span === null ? -1 : link.node.span.start.offset;
+      const root = link.chain[0]?.block;
+      for (const d of this.pass.definitions.byKey.get(link.key) ?? []) {
+        if (d === link.def || d.node.span === null) continue;
+        const dc = this.chainOf(d.node) ?? [];
+        if (dc[0]?.block !== root) continue;
+        for (let i = dc.length - 1; i >= 0; i -= 1) {
+          const b = dc[i]!.block;
+          if (!conditional(b)) continue;
+          const s = b.owner!;
+          if (s.start >= from && s.end <= to) {
+            const set = passed.get(s) ?? new Set<number>();
+            set.add(s.arms.indexOf(b));
+            passed.set(s, set);
+          }
+          break;
+        }
+      }
+    }
     const textOf = (file: number, e: any): string =>
       program.textAt({ file, start: e.span.start.offset, end: e.span.end.offset } as any).replace(/\s+/g, " ");
     const fact = (file: number, e: any, pol: boolean): { text: string; pol: boolean; form: string } => {
@@ -996,7 +1023,14 @@ export class NarrowingRoutes extends RouteTests {
       }
       return { text: textOf(file, e), pol, form: "bool" };
     };
-    const facts: { text: string; pol: boolean; form: string; owner: TreeStatement }[] = [];
+    const facts: { text: string; pol: boolean; form: string; owner: TreeStatement; passed: boolean }[] = [];
+    let passes = 0;
+    for (const [s, killed] of passed) {
+      const st = s.statement as any;
+      if (st.kind !== "ifStatement" || killed.size !== 1 || entered.has(s.arms[0]!) || entered.has(s.arms[1]!)) continue;
+      passes += 1;
+      facts.push({ ...fact(s.file, st.condition, killed.has(0) ? false : true), owner: s, passed: true });
+    }
     let switches = 0;
     for (const b of entered) {
       const owner = b.owner!;
@@ -1006,13 +1040,18 @@ export class NarrowingRoutes extends RouteTests {
         continue;
       }
       const arm = owner.arms.indexOf(b);
-      facts.push({ ...fact(owner.file, s.condition, arm === 0), owner });
+      facts.push({ ...fact(owner.file, s.condition, arm === 0), owner, passed: false });
     }
-    const complements: { text: string; form: string; same: boolean }[] = [];
+    const complements: { text: string; form: string; same: boolean; passed: number }[] = [];
     for (let i = 0; i < facts.length; i += 1)
       for (let j = i + 1; j < facts.length; j += 1)
         if (facts[i]!.text === facts[j]!.text && facts[i]!.pol !== facts[j]!.pol && facts[i]!.owner.file === facts[j]!.owner.file)
-          complements.push({ text: facts[i]!.text, form: facts[i]!.form, same: facts[i]!.owner === facts[j]!.owner });
+          complements.push({
+            text: facts[i]!.text,
+            form: facts[i]!.form,
+            same: facts[i]!.owner === facts[j]!.owner,
+            passed: (facts[i]!.passed ? 1 : 0) + (facts[j]!.passed ? 1 : 0),
+          });
     const fs = g.process.getBuiltinModule("node:fs");
     fs.appendFileSync(
       out,
@@ -1026,6 +1065,7 @@ export class NarrowingRoutes extends RouteTests {
         unknown,
         arms: entered.size,
         switches,
+        passes,
         sharedLoop,
         complements,
       }) + "\n",
