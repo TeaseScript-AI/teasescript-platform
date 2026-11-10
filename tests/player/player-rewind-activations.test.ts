@@ -562,12 +562,19 @@ function holdTransport(context: TestContext) {
 
 /** What the page posts over `bridge`, in order, with the retirement count it was posted after. */
 function postsOf(context: TestContext, bridge: PlayerBridge) {
-  const posts: { readonly op: string; readonly args: unknown; readonly phase: number }[] = [];
+  const posts: {
+    readonly op: string;
+    readonly args: unknown;
+    readonly phase: number;
+    /** A request's reply, as the page receives it; none for a post or a signal. */
+    readonly reply?: Promise<unknown>;
+  }[] = [];
   const state = { phase: 0 };
   const request = bridge.client.request.bind(bridge.client);
   context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
-    posts.push({ op: args[0], args: args[1], phase: state.phase });
-    return request(...args);
+    const reply = request(...args);
+    posts.push({ op: args[0], args: args[1], phase: state.phase, reply });
+    return reply;
   });
   const post = bridge.client.post.bind(bridge.client);
   context.mock.method(bridge.client, "post", (...args: Parameters<typeof post>) => {
@@ -610,6 +617,13 @@ function runOfShown(host: RewindHost): number | null {
     readonly diagnostic?: { readonly run: number | null };
   } | null;
   return shown?.diagnostic?.run ?? null;
+}
+
+/** The host's ID of the session the Player shows, or `null` before one shows. */
+function shownId(host: RewindHost): string | null {
+  // EVIDENCE: fixture: a host session's publication carries its host ID (`PlayerSession.id`).
+  const shown = host.session.value as { readonly id?: string } | null;
+  return shown?.id ?? null;
 }
 
 /** Starts `host` on `plan`, prepared before any hold: under a held transport (`held`) its show waits for the release. */
@@ -820,16 +834,23 @@ test("an activation's completions act only while it lives, whichever reply is in
       await begin2();
       if (c.order === "afterSuccessor") {
         // The successor's own replies, its Start's too, wait behind the stale ones and then show: stale work that acted
-        // would show another run or the page's error in place of the successor's own run.
-        const successorRun = startRun(
-          traffic.posts.findLast((post) => post.op === "start")!.args,
-        ).run;
+        // would show another session, another run or the page's error in place of the successor's own.
+        const successorStart = traffic.posts.findLast((post) => post.op === "start")!;
+        const successorRun = startRun(successorStart.args).run;
         transport.release();
         for (let round = 0; round < 20 && runOfShown(live!.host) !== successorRun; round += 1)
           await settle(subtest);
+        // EVIDENCE: fixture: a `start` reply names the session it began.
+        const { session: successorSession } = (await successorStart.reply) as {
+          readonly session: string;
+        };
         untouched = isDeepStrictEqual(
-          { run: runOfShown(live!.host), error: live!.host.hostError.value },
-          { run: successorRun, error: null },
+          {
+            session: shownId(live!.host),
+            run: runOfShown(live!.host),
+            error: live!.host.hostError.value,
+          },
+          { session: successorSession, run: successorRun, error: null },
         );
       }
       const runsWhileLive = heldRuns(bridge);
