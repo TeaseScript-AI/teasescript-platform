@@ -1047,11 +1047,11 @@ const REWIND_OWNER = "player/vue/src/session/rewindOwner.ts";
  * use, found by symbol (a shadowing binding of the same name is another symbol), is one admitted shape or an escape.
  * `state` is assigned once, `state = outcome.state` in the body of the factory's one top-level `function dispatch`;
  * the stamp moves by `retirements++`, the first statement of the `retired` and `lost` arrows of the one object literal
- * the factory returns. Both are found by node: a missing, duplicate or other-kind `dispatch`, a second return, a
- * spread, a computed name, a duplicate, or a `retired` or `lost` there that is not an arrow is an escape. A read is
- * admitted by its shape wherever it stands: it cannot change a `let` binding, and neither value changes in place, the
- * stamp being a number and `LifecycleState` `readonly` at every level (`player/debug/rewind-lifecycle.ts`); a cast that
- * defeats `readonly` is outside this claim.
+ * the factory returns. Both are found by node: a missing `dispatch` or any other declaration in its symbol, a second
+ * return, a spread, a computed name, a duplicate, or a `retired` or `lost` there that is not an arrow is an escape. A
+ * read is admitted by its shape wherever it stands: it cannot change a `let` binding, and neither value changes in
+ * place, the stamp being a number and `LifecycleState` `readonly` at every level (`player/debug/rewind-lifecycle.ts`);
+ * a cast that defeats `readonly` is outside this claim.
  */
 const OWNER_WRITES = ["retirements: lost", "retirements: retired", "state: dispatch"];
 
@@ -1071,20 +1071,33 @@ function ownerUses(overrides: Readonly<Record<string, string>> = {}): {
     const file = typed.getSourceFile(resolve(root, REWIND_OWNER));
     assert.ok(file, REWIND_OWNER);
     const checker = typed.getTypeChecker();
+    // A declaration found by name must be its symbol's whole declaration set: TypeScript merges each same-named
+    // declaration of the scope into that symbol, so any other one there, or no symbol, fails.
+    const sole = (declaration: ts.Declaration, name: ts.Identifier) => {
+      const declarations = checker.getSymbolAtLocation(name)?.declarations ?? [];
+      return declarations.length === 1 && declarations[0] === declaration;
+    };
     const factories = file.statements.filter(
       (each): each is ts.FunctionDeclaration =>
         ts.isFunctionDeclaration(each) && each.name?.text === "createRewindOwner",
     );
-    assert.equal(factories.length, 1, "one createRewindOwner");
+    assert.ok(
+      factories.length === 1 && sole(factories[0]!, factories[0]!.name!),
+      "one createRewindOwner declaration",
+    );
     const bindings = new Map<ts.Symbol, string>();
     for (const statement of factories[0]!.body!.statements)
       if (
         ts.isVariableStatement(statement) &&
         (statement.declarationList.flags & ts.NodeFlags.Let) !== 0
       )
-        for (const { name } of statement.declarationList.declarations)
-          if (ts.isIdentifier(name) && (name.text === "state" || name.text === "retirements"))
+        for (const declaration of statement.declarationList.declarations) {
+          const { name } = declaration;
+          if (ts.isIdentifier(name) && (name.text === "state" || name.text === "retirements")) {
+            assert.ok(sole(declaration, name), `one ${name.text} declaration`);
             bindings.set(checker.getSymbolAtLocation(name)!, name.text);
+          }
+        }
     assert.deepEqual([...bindings.values()].sort(), ["retirements", "state"], "the two lets");
     // The nearest named function a node is in: a declaration, or the variable or property that holds it.
     const enclosing = (node: ts.Node): string => {
@@ -1120,16 +1133,17 @@ function ownerUses(overrides: Readonly<Record<string, string>> = {}): {
       else if (!ts.isFunctionLike(node) && !ts.isClassLike(node)) node.forEachChild(find);
     });
     const writers = new Map<ts.Node, string>();
-    // `state`'s writer, by node: the factory's one top-level declaration named `dispatch`, a function declaration.
-    const dispatches = factory.body!.statements.filter((each) =>
-      ts.isVariableStatement(each)
-        ? each.declarationList.declarations.some(({ name }) => text(name) === "dispatch")
-        : ts.isFunctionDeclaration(each) && each.name?.text === "dispatch",
+    // `state`'s writer, by node: a function declaration `dispatch` of the factory's body, its symbol's one declaration.
+    const named = factory.body!.statements.find(
+      (each): each is ts.FunctionDeclaration =>
+        ts.isFunctionDeclaration(each) && each.name?.text === "dispatch",
     );
-    const [dispatch] = dispatches.length === 1 ? dispatches.filter(ts.isFunctionDeclaration) : [];
-    if (dispatch === undefined)
-      for (const each of dispatches.length === 0 ? [factory.name!] : dispatches)
-        escape(`owner: one of ${dispatches.length} dispatch declarations`, each, each);
+    const dispatch = named && sole(named, named.name!) ? named : undefined;
+    if (dispatch === undefined) {
+      const declarations = (named && checker.getSymbolAtLocation(named.name!)?.declarations) || [];
+      for (const each of declarations.length === 0 ? [factory.name!] : declarations)
+        escape(`owner: one of ${declarations.length} dispatch declarations`, each, each);
+    }
     const owner = returns.length === 1 ? returns[0]!.expression : undefined;
     if (returns.length > 1)
       for (const each of returns) escape(`owner: one of ${returns.length} returns`, each, each);
@@ -1353,6 +1367,10 @@ test("the rewind owner uses its lifecycle state and its stamp only in admitted s
         `  function dispatch(event: LifecycleEvent): LifecycleOutcome;\n${dispatch}`,
       ),
       "owner: one of 2 dispatch declarations",
+    ],
+    [
+      replaced(dispatch, `  type dispatch = unknown;\n${dispatch}`),
+      "owner: one of 2 dispatch declarations `type dispatch = unknown;`",
     ],
   ] as const;
   for (const [patched, named] of controls)
