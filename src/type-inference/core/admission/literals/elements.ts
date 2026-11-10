@@ -23,7 +23,7 @@ import {
 } from "../../definitions.js";
 import { withoutEmpty } from "../../exact-path.js";
 import { drive } from "../../inherited/inherited.js";
-import { type ItemTag, MIXED_LEAF, REASON } from "../../items.js";
+import { type Item, type ItemTag, MIXED_LEAF, REASON } from "../../items.js";
 import { conversionCategory } from "../../method-categories.js";
 import type { MixedSteps } from "../../result.js";
 import { refText, type Touch, Touches, type TouchRef } from "../../touch.js";
@@ -311,7 +311,11 @@ export function literalElements(
       );
     };
     // the error at the innermost offending expression, the element rejected (A6)
-    const offended = (d: Definition, path: readonly string[]): void => {
+    const offended = (
+      d: Definition,
+      path: readonly string[],
+      decided?: readonly ItemTag[],
+    ): void => {
       const at = pathText(path);
       const inner =
         path.length > 0
@@ -336,7 +340,7 @@ export function literalElements(
       // operand may be null. Codex r1–r4, Astra r1 on #1819; the null decides nothing, #1753)
       const later = layersAt(admission, d.value!, d.node, path, [...depths, path.length]);
       const optional = mixedOptional(earliest.layers, later.slice(0, -1));
-      const own = [...new Set(deciding(admission.valueAt(d, path)).map((item) => item.tag))];
+      const own = decided ?? laterKinds(admission, d, path, admission.valueAt(d, path));
       const kinds = later.at(-1)! ? [...own, "null" as const] : own;
       error(inner === null ? d.site : (program.place(inner.value!).site ?? d.site), {
         d,
@@ -419,13 +423,40 @@ export function literalElements(
           }
           continue;
         }
-        if (!offends(at, own)) continue;
-        offended(d, path);
+        const kinds = laterKinds(admission, d, path, items);
+        if (!offends(at, kinds)) continue;
+        offended(d, path, kinds);
         if (path.length > 0) found.push(path);
       }
       for (const path of known ?? []) offended(d, path);
     }
   }
+}
+
+/**
+ * A later element's kinds at a path below it (`literalElements`): its value's definite kinds there; where it has none,
+ * a named element whose value may hold a kind there (a join's elements, `pos`) or holds what the script cannot know
+ * (a typed host value, `unknown`) is a copy of what decides it, as the earliest element is (A4): its decider's written
+ * type, without `null`, which decides nothing (#1753, #1906). A value proved to hold only `null` there, and an
+ * `unknown` a stop left (`REASON.budget`), keep their own kinds, none.
+ */
+function laterKinds(
+  admission: Admission,
+  d: Definition,
+  path: readonly string[],
+  items: readonly Item[],
+): readonly ItemTag[] {
+  const own = [...new Set(deciding(items).map((item) => item.tag))];
+  if (
+    own.length > 0 ||
+    !holdsSource(admission, d.value!) ||
+    !items.some(
+      (item) => concrete(item) || (item.tag === "unknown" && (item.reasons & REASON.budget) === 0),
+    )
+  )
+    return own;
+  const decider = drive(admission, earliestDecider(admission, d.value!, d.node, path, null));
+  return decider?.term == null ? own : typeTags(decider.term).filter((tag) => tag !== "null");
 }
 
 /**

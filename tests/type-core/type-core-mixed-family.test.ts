@@ -500,3 +500,47 @@ test("a mixed-list error's work grows as its dimensions do (#1765)", async () =>
     assert.ok(large! <= bound * small!, `${shape}: ${small}, ${large}`);
   }
 });
+
+/**
+ * #1906: a later element whose value holds no definite kind at a path, a join's elements (which may be either operand's)
+ * or a typed host value (which the script cannot know), is a copy of what decides it, as the earliest element is (A4):
+ * its decider's written type. So the mixed-list error is the current checker's in either order, in four modes. Its own
+ * definite kinds still win (a narrowed union), a value proved to hold only `null` decides nothing, and a typed host value
+ * whose written type fits stays valid.
+ */
+test("a later element without a definite kind is compared by its decider's written type (#1906)", () => {
+  const orders = (before: string, earlier: string, later: string): string[] => [
+    `${before}let xs = [${earlier}, ${later}]\nexit\n`,
+    `${before}let xs = [${later}, ${earlier}]\nexit\n`,
+  ];
+  const host = (type: string): string => `let atom: ${type} = hostValue\n`;
+  const reported = [
+    ...orders("let d: integer[]?[] = [[1]]\nlet held = d + [[2]]\n", '[["x"]]', "held"),
+    ...orders("let d: integer?[] = [1]\nlet held = d + [2]\n", '["x"]', "held"),
+    ...orders('let d: string[] = ["a"]\nlet held = d + ["b"]\n', "[1]", "held"),
+    ...orders(host("string"), "1", "atom"),
+    ...orders(`${host("string")}let h = {v: atom}\n`, "{v: 1}", "h"),
+    ...orders(host("string"), "{v: 1}", "{v: atom}"),
+    // (the later order alone: the earliest's own `or null` from the host is #1843's)
+    `${host("integer?")}let xs = ["x", atom]\nexit\n`,
+    ...orders("let ys: string[] = hostValue\n", "[1]", "ys"),
+    `${host("string")}let xs = [1, atom, atom]\nexit\n`,
+    `${host("integer | string")}if atom is string {\n  let xs = [1, atom]\n}\nexit\n`,
+  ];
+  const valid = [
+    `${host("number")}let xs = [1, atom]\nexit\n`,
+    `${host("integer")}let xs = [1, atom]\nexit\n`,
+    `${host("integer | string")}let xs = [1, atom]\nexit\n`,
+    "let xs = [1, hostValue]\nexit\n",
+    'let t: integer? = null\nlet root = {g: t}\nlet copy = root\nlet xs = [{g: "text"}, copy]\nexit\n',
+  ];
+  for (const source of reported) {
+    const { current, core } = mixedSentences(source);
+    assert.notEqual(current.length, 0, source);
+    for (const each of core) assert.deepEqual(each, current, source);
+  }
+  for (const source of valid) {
+    const { current, core } = mixedSentences(source);
+    assert.deepEqual([current, ...core], [[], [], [], [], []], source);
+  }
+});
