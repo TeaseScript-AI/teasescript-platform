@@ -2356,7 +2356,8 @@ test("the stop oracle refuses a stopped run whose without leaves the run's deman
  * the marks, doubled; r5's, a further copy of a boundary both runs owe; r6's, the reference losing its own check; and a further copy of a
  * check the stopped run alone owns. Before admission settled the stores into inferred places leave their checks
  * undecided, so the plain gate declines those stopped runs (#2080 part 2): the ledger is compared without a plan, and r1's
- * guard alone, a plan change, is made on the stopped analysis with the reference's plan.
+ * guard alone, a plan change, is made on the stopped and reference analyses carrying the natural run's plan. The
+ * `dict-path` witness's written dict type is outside the slice, so its compiles decline, on main as here.
  */
 test("the stop oracle counts each check's content on both sides, a further copy an extra and a missing one lost (#1642)", () => {
   const source =
@@ -2382,16 +2383,15 @@ test("the stop oracle counts each check's content on both sides, a further copy 
       ),
       mode.name,
     );
-    // (stopped before admission settled, the plain gate declines it: its ledger is compared)
+    // (the written dict type is outside the candidate slice, so both compiles decline, on main as here: the ledger is
+    // what is compared)
     assert.deepEqual(
-      [stopped.answers.budget.settled, stopped.result.plan, declineOf(stopped)],
-      [false, null, UNDECIDED],
+      [declineOf(reference), declineOf(stopped)],
+      ["this written type", "this written type"],
       mode.name,
     );
     assert.deepEqual(
-      stopProblems({ unstopped: reference, stopped, fitting: [], violating: [] }).filter(
-        (problem) => problem !== "no plan",
-      ),
+      stopProblems({ unstopped: reference, stopped, fitting: [], violating: [] }),
       [],
       mode.name,
     );
