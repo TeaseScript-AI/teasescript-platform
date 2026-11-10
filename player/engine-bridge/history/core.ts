@@ -13,6 +13,7 @@ import { SnapshotStore, type DebugHistorySpill } from "./snapshots.js";
  * Debug's rewind history in the engine's host (docs/DEBUGGER.md "Rewind"): one core per history, beside the held
  * sessions. It takes each point at its own publication, so a point's state and its position come from one value; it
  * owns the points, their snapshots and spill, the response links, the inspection and the parked and restored lineages.
+ * The lineage it follows is the registry's (`Entry.bound`, `registry.ts`), which gives it to the close.
  * Its state changes only in `advance` (`advanceHistory`); each change returns the timeline's delta and the effects on
  * the lineages, which the op adapter applies. The main side receives the deltas and never captures a point.
  */
@@ -285,6 +286,12 @@ export type HistoryObservation =
       readonly adoptionSucceeded?: boolean;
       /** A pending step's candidate lineage, which goes with its history. */
       readonly candidate?: string;
+      /**
+       * The lineage the history follows (the registry's `Entry.bound`), or `null`: not the one shown while inspecting,
+       * and not `HistoryEffects.live`, the lineage a transition makes live. A disposal while nothing is inspected
+       * releases it.
+       */
+      readonly bound: string | null;
     };
 
 /** What the op adapter does after a change: the lineage to show, to make live, and those to release. */
@@ -372,7 +379,6 @@ export interface PublicationRecord {
   readonly points: readonly HistoryPoint[];
   readonly newestActionId: number;
   readonly scanned: number;
-  readonly live: string | null;
   readonly complete: boolean;
   readonly mutations: number;
 }
@@ -391,9 +397,6 @@ export class HistoryCore {
   #inspecting: Inspecting | null = null;
   #complete = true;
   #closed = false;
-  // The lineage the history follows while it inspects nothing: its publications', then the one a Return or an
-  // adoption makes live. A disposal releases it with the rest.
-  #live: string | null = null;
   // The step prepared and not yet committed or dropped, at most one; tokens are never taken again.
   #pending: PendingStep | null = null;
   #nextStep = 1;
@@ -485,7 +488,6 @@ export class HistoryCore {
       points: this.#points,
       newestActionId: this.#newestActionId,
       scanned: this.#scanned,
-      live: this.#live,
       complete: this.#complete,
       mutations: this.#mutations,
     });
@@ -571,7 +573,6 @@ export class HistoryCore {
     this.#points = before.points;
     this.#newestActionId = before.newestActionId;
     this.#scanned = before.scanned;
-    this.#live = before.live;
     this.#complete = before.complete;
     this.#forget(added);
     return { kind: "advanced", delta: null, effects: NO_EFFECTS };
@@ -582,7 +583,6 @@ export class HistoryCore {
     const responses: { point: number; response: HistoryResponse }[] = [];
     const change: Change = { appended, responses, retained: null, effects: NO_EFFECTS };
     if (this.#inspecting !== null) return change;
-    this.#live = candidate.log;
     this.#linkResponses(candidate.session.events, responses);
     const decision = decideAdmission(
       {
@@ -731,7 +731,6 @@ export class HistoryCore {
       return { kind: "refused", reason: "Return needs a parked session" };
     const inspecting = this.#inspecting!;
     this.#inspecting = null;
-    this.#live = inspecting.parked.lineage;
     this.#scanned = inspecting.parkedScanned;
     this.#forget(this.#unkeptIds(inspecting, this.#points));
     return changeOf({
@@ -765,7 +764,6 @@ export class HistoryCore {
       return changeOf(NO_EFFECTS);
     }
     this.#inspecting = null;
-    this.#live = inspecting.shownLineage;
     const kept = this.#points.slice(0, inspecting.points);
     this.#forget(this.#unkeptIds(inspecting, kept));
     const retained = kept.length !== this.#points.length ? kept.length : null;
@@ -815,8 +813,12 @@ export class HistoryCore {
       else release.push(inspecting.parked.lineage);
       if (decided.shown === "live") live = inspecting.shownLineage;
       else release.push(inspecting.shownLineage);
-    } else if (decided.kind === "transfer" && decided.parked === "released" && this.#live !== null)
-      release.push(this.#live);
+    } else if (
+      decided.kind === "transfer" &&
+      decided.parked === "released" &&
+      observation.bound !== null
+    )
+      release.push(observation.bound);
     this.#closed = true;
     this.#inspecting = null;
     this.#points = [];

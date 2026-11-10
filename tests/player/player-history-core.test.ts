@@ -358,7 +358,7 @@ test("closing: Debug off reinstates the parked lineage; a replacement retires it
   for (const by of ["debugOff", "replacement", "clear", "disposal"] as const) {
     const { history, points, parked } = stepping();
     stepTo(history, { move: "back", point: points[0]!.id, parked }, "r1");
-    const outcome = advanceHistory(history, { kind: "close", by });
+    const outcome = advanceHistory(history, { kind: "close", by, bound: "s1" });
     if (by === "clear") {
       assert.equal(outcome.kind, "refused");
       assert.equal(history.closed, false);
@@ -584,7 +584,7 @@ for (const each of GRAMMAR_CASES)
       if (each.terminal === "stop")
         advanced(advanceHistory(history, { kind: "stopCollection", reason: "a stop" }));
       if (each.terminal === "close")
-        advanced(advanceHistory(history, { kind: "close", by: "debugOff" }));
+        advanced(advanceHistory(history, { kind: "close", by: "debugOff", bound: "s1" }));
     };
     if (each.order === "terminal first") terminal();
     const outcome = advanceHistory(history, { kind: "publication", candidate: subjectCandidate });
@@ -747,7 +747,7 @@ test("a close takes a pending step's candidate with it", () => {
     advanceHistory(history, { kind: "prepare", move: "back", point: points[1]!.id, parked }),
   );
   const closed = advanced(
-    advanceHistory(history, { kind: "close", by: "debugOff", candidate: "r1" }),
+    advanceHistory(history, { kind: "close", by: "debugOff", candidate: "r1", bound: "s1" }),
   );
   assert.deepEqual(closed.effects.release, ["r1"]);
   assert.equal(history.closed, true);
