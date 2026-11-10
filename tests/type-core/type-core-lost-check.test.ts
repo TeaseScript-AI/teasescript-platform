@@ -653,6 +653,13 @@ test("a store's part checks keep a stopped mark only where the stored value's ow
     false,
   );
   assert.equal(builtContainers(valueOf("let b = {g: {n: 1}}", "b"), path("f", "n")), false);
+  // (a part the literal leaves out passes, as the whole check lets an object without a listed property pass)
+  assert.equal(builtContainers(valueOf("let b = {f: {m: 1}}", "b"), path("f", "n")), true);
+  // (the part's parent a variable: the part check would pass it over where it holds no object)
+  assert.equal(
+    builtContainers(valueOf("let c = hostOther\nlet b = {f: {n: c}}", "b"), path("f", "n", "m")),
+    false,
+  );
   assert.equal(
     builtContainers(valueOf("let b = [{n: 1}, hostValue]", "b"), path("[]", "n")),
     false,
