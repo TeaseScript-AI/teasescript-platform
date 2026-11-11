@@ -269,16 +269,6 @@ test("the differential record keeps every case's columns, its four modes, refusa
   );
   refused("neither", [JSON.stringify({ name: "x" })], /exactly one of source, files and set/);
   refused(
-    "storage alone",
-    [JSON.stringify({ name: "x", source: "", storage: { k: 1 } })],
-    /storage alone\.jsonl:1: storage is for runs/,
-  );
-  refused(
-    "storage listed",
-    [JSON.stringify({ name: "x", source: "", runs: [{}], storage: [{ key: "k", value: 1 }] })],
-    /storage is an object of the stored values by key/,
-  );
-  refused(
     "no set",
     [JSON.stringify({ name: "x", set: "absent", unit: "u" })],
     /no set\.jsonl:1: cannot read the set absent/,
@@ -702,4 +692,18 @@ test("a case's storage is what each run's load reads, on the checker and the cor
     rows.map((row) => row.case.storage),
     [{ k: 2 }, undefined],
   );
+  // (storage without runs, or not an object of values by key, refuses the cases file before any record)
+  for (const [storage, why] of [
+    [{ k: 1 }, /bad\.jsonl:1: storage is for runs/],
+    [[{ key: "k", value: 1 }], /bad\.jsonl:1: storage is an object of the stored values by key/],
+  ] as const) {
+    const bad = join(folder, "bad.jsonl");
+    const given = { name: "x", source, storage, ...(Array.isArray(storage) ? { runs } : {}) };
+    writeFileSync(bad, `${JSON.stringify(given)}\n`);
+    const refused = spawnSync(process.execPath, [tool, resolve("."), bad, "--out", out], {
+      encoding: "utf8",
+    });
+    assert.equal(refused.status, 2, refused.stderr);
+    assert.match(refused.stderr, why);
+  }
 });
