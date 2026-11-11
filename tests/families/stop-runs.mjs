@@ -18,8 +18,7 @@
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
-import { sourceKey } from "./sources.mjs";
-import { unitsOf } from "./units.mjs";
+import { unitResolver } from "./units.mjs";
 
 const args = process.argv.slice(2);
 const option = (name) => {
@@ -56,28 +55,7 @@ const items = readFileSync(itemsFile, "utf8")
   .filter((line) => line !== "")
   .map((line) => JSON.parse(line))
   .filter((_, at) => at % shards === shard);
-// (an area of the tree's tests/families by its name, as `plans.mjs` reads a set)
-const setOf = (set) =>
-  ["corpus", "fixture", "held"].includes(set) || set.includes("/")
-    ? set
-    : path.join(root, "tests", "families", set);
-const units = new Map();
-// (the item's unit, or the keys of every unit it matches when they differ; units with one key are one unit)
-const unitOf = async (item) => {
-  if (item.files !== undefined)
-    return { unit: { files: item.files, globals: item.globals, key: sourceKey(item) } };
-  if (!units.has(item.set)) {
-    const byName = new Map();
-    for (const unit of await unitsOf(setOf(item.set), root, root))
-      byName.set(unit.name, [...(byName.get(unit.name) ?? []), unit]);
-    units.set(item.set, byName);
-  }
-  const matched = (units.get(item.set).get(item.name) ?? []).filter(
-    (unit) => item.key === undefined || unit.key === item.key,
-  );
-  const keys = [...new Set(matched.map((unit) => unit.key))];
-  return keys.length > 1 ? { keys } : { unit: matched[0] };
-};
+const unitOf = unitResolver(root);
 const modeOf = (item) => {
   if (item.label === undefined) return (make) => HELD_MODES[item.mode].run(make);
   const mode = MODES.find(

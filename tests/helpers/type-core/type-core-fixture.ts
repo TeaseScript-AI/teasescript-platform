@@ -54,6 +54,7 @@ const RELEASED_ADAPTER_RECORDS: ReadonlySet<string> = new Set([
  */
 const CORRIDOR_REASON = "the route rule's corridor across locations (#1938)";
 const N1173_REASON = "a written optional load's definite number error (#1173, listed in #1938)";
+const RECEIVER_REASON = "a method no member of a receiver's union supports (#2258)";
 const TSV062_REASON = "a static warning of S9b's otherwise (#1737)";
 const U4_REASON = "U4's consumer remainder (#2025)";
 const OUTLIER_REASON = "a fixture expectation awaiting its ruling (#2025)";
@@ -273,7 +274,7 @@ export const HELD_S10_RECORDS: ReadonlyMap<string, S10Hold> = new Map([
   [
     "cp9-cells/r46/m3/astra-m3/routes/method-null-kind",
     {
-      reason: CORRIDOR_REASON,
+      reason: RECEIVER_REASON,
       differences: [
         "missing diagnostic member-read compile-error main.tease:90-103 ×2",
         "extra diagnostic member-read warning-runtime-check main.tease:90-103 ×2",

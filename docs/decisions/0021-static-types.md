@@ -108,7 +108,9 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
    it is before the store (rule 1.1).
 8. Operations are checked by the same principle: an operator, condition, index, member, or command operand of a known
    type that does not support it is a compile error, because it would fail at runtime. Type checks apply to all code,
-   reachable or not. Conditions and the operands of `and`, `or`, and `not` must be `true` or `false`; there is no
+   reachable or not. One accepted limit: in code that no run reaches, a use of a parameter or a result against its
+   written type gives the warning with its check, not the error. Conditions and the operands of `and`, `or`, and
+   `not` must be `true` or `false`; there is no
    truthiness. A list index is a whole number and a dict key is text; an object, whose properties have fixed names, is
    not indexed. Reading or storing a property that no object in its place has is a compile error that names the
    properties it can have (rule 1.4). A read or store that may reach an object without that property, or an object the
@@ -126,7 +128,9 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
     time, the check moves to the runtime, and the compiler warns at that place, saying how to let the compiler check it
     now. The compiler gives an exact answer, an error or acceptance without a warning, only where it has a proof, and
     warns everywhere else, so it never gives a false error and never accepts silently: an error means that the code is
-    certainly wrong, and a warning that it may go wrong. A run that makes a value unfit for a later use is an error only
+    certainly wrong, and a warning that it may go wrong. A type test elsewhere in the script on the same value can leave
+    the compiler without its proof of a known violation; it then gives the warning and the check there, not the error.
+    A run that makes a value unfit for a later use is an error only
     where the run can really happen and the compiler proves it, as for `copy.add(3)` after `let backpack = []`, an
     unconditional `backpack.add("key")`, and `let copy = backpack`. A `number` where an integer is required breaks a
     type rule (rule 1.2), so it is an error even where the value would be whole when the script runs. Which cases the
@@ -250,7 +254,10 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
    version of the script, a debugging edit, or an import. A value that does not fit is treated as absent for that
    `load`, with a developer warning, and stays stored (V30 §25). With an object default, `load` works per field, as
    `fromJson` does (rule 2.6): a missing or wrong-typed field takes that field's value from the default, and `TSW016`
-   names the field. A saved value that the compiler cannot know is checked when the script runs against the type every
+   names the field. An undeclared `load` keeps stored properties its default lacks, and reading one is checked when
+   the script runs; this difference from `fromJson`, which ignores extra keys (rule 2.6), is deliberate, so that
+   loading a value and saving it back keeps those properties. A saved value that the compiler cannot know is
+   checked when the script runs against the type every
    load of its key accepts.
 
 ### 7. Fallbacks and defaults
