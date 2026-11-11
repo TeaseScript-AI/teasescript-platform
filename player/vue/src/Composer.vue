@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { usePlayerConditions } from "./usePlayerConditions";
 import { playerKeys } from "./playerKeys";
+import { keepOneLine, passwordAttributes } from "./passwordText";
 
 const props = withDefaults(
   defineProps<{
@@ -96,18 +97,6 @@ const value = computed({
   set: (text: string) => emit("update:modelValue", text),
 });
 
-/**
- * A password has one line: a line break pasted or dropped into its field goes before the field's text is read, as a
- * text input strips it, with the caret where it was. Enter and Shift+Enter never type one (`handleKeydown`).
- */
-function keepOneLine(event: Event): void {
-  const field = event.target;
-  if (!props.password || !(field instanceof HTMLTextAreaElement) || !/[\r\n]/u.test(field.value))
-    return;
-  const caret = field.value.slice(0, field.selectionEnd).replace(/[\r\n]/gu, "").length;
-  field.value = field.value.replace(/[\r\n]/gu, "");
-  field.setSelectionRange(caret, caret);
-}
 const feedbackId = useId();
 const capsLockId = useId();
 useTextareaAutosize({ element: textareaElement, input: value });
@@ -202,14 +191,6 @@ function releaseOnBlur(): void {
   capsLock.value = false;
   if (!replacingField) allowSoftwareKeyboard();
 }
-
-// What keeps a phone from capitalising, correcting, suggesting or completing a password as it is typed.
-const passwordAttributes = {
-  autocomplete: "off",
-  autocapitalize: "off",
-  autocorrect: "off",
-  spellcheck: "false",
-} as const;
 
 // The password fields' eye buttons, one each, and their Caps Lock warning. Only a key event says whether Caps Lock is
 // on; a field that has seen none shows no warning.
@@ -371,7 +352,7 @@ defineExpose({ focusInput, selectInput, openPicker });
           v-else
           class="composer-text-field"
           :data-composer-password="password ? '' : undefined"
-          @input.capture="keepOneLine"
+          @input.capture="password && keepOneLine($event)"
         >
           <div class="composer-text-row">
             <Textarea

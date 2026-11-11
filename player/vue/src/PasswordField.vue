@@ -2,7 +2,8 @@
 import { ref, useId } from "vue";
 import { Eye, EyeOff } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { keepOneLine, passwordAttributes } from "./passwordText";
 
 // A password field (V30 §13 and §20): masked, with an eye button that shows the text while the person typing chooses
 // to, a warning while Caps Lock is on, and the field's error under it, which the field names as its description. What it
@@ -23,14 +24,20 @@ const statusId = useId();
 const descriptionId = useId();
 const shown = ref(false);
 const capsLock = ref(false);
-const input = ref<InstanceType<typeof Input> | null>(null);
+const input = ref<InstanceType<typeof Textarea> | null>(null);
 
 // Only a key event says whether Caps Lock is on; a field that has seen none shows no warning.
 function readCapsLock(event: KeyboardEvent) {
   capsLock.value = event.getModifierState("CapsLock");
 }
 function focus() {
-  (input.value?.$el as HTMLInputElement | undefined)?.focus();
+  (input.value?.$el as HTMLTextAreaElement | undefined)?.focus();
+}
+// Enter submits the dialog's form, as in a text input; it never types a line break. A held Enter is the form's to stop.
+function submitOnEnter(event: KeyboardEvent) {
+  if (event.key !== "Enter" || event.isComposing) return;
+  event.preventDefault();
+  if (!event.repeat) (event.currentTarget as HTMLTextAreaElement).form?.requestSubmit();
 }
 defineExpose({ focus });
 </script>
@@ -42,23 +49,26 @@ defineExpose({ focus });
       {{ props.description }}
     </p>
     <div class="flex items-center gap-2">
-      <!-- No saved or suggested passwords: a browser offers, fills or saves passwords only in a password-type field, so the
-      mask is a style. -->
-      <Input
+      <!-- A one-line textarea masked by style, as the composer's: see passwordText.ts. -->
+      <Textarea
         :id="id"
         ref="input"
         v-model="model"
-        type="text"
-        :class="shown ? undefined : '[-webkit-text-security:disc]'"
-        autocomplete="off"
+        rows="1"
+        :class="[
+          'min-h-11 min-w-0 resize-none overflow-hidden py-2.5 whitespace-pre aria-invalid:border-destructive',
+          shown ? undefined : '[-webkit-text-security:disc]',
+        ]"
+        v-bind="passwordAttributes"
         :readonly="props.busy"
         :aria-invalid="props.error ? 'true' : undefined"
         :aria-describedby="props.description ? `${descriptionId} ${statusId}` : statusId"
-        autocapitalize="off"
-        autocorrect="off"
-        spellcheck="false"
         data-password-input
-        @keydown="readCapsLock"
+        @input.capture="keepOneLine"
+        @keydown="
+          submitOnEnter($event);
+          readCapsLock($event);
+        "
         @keyup="readCapsLock"
         @blur="capsLock = false"
       />

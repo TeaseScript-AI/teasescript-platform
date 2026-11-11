@@ -1970,17 +1970,15 @@ function noLoginField(element) {
   return `(${element} instanceof HTMLTextAreaElement || ${element}?.type === 'text') && ${element}.autocomplete === 'off' && getComputedStyle(${element}).webkitTextSecurity === 'disc'`;
 }
 
-/** Pastes `text` from the clipboard into the focused field, as Ctrl+V does. */
-async function pasteText(cdp, text) {
-  const field = await value(cdp, `document.activeElement?.matches('[data-composer-input]')`);
-  assertEqual(field, true, "No composer field to paste into");
+/** Pastes `text` from the clipboard into the field `selector`, as Ctrl+V does. */
+async function pasteText(cdp, selector, text) {
   await value(
     cdp,
     `(() => { const source = document.createElement('textarea'); source.id = 'smoke-clipboard'; source.value = ${JSON.stringify(text)}; document.body.append(source); source.select(); return true; })()`,
   );
   await key(cdp, "c", { modifiers: 2, commands: ["copy"] });
   await value(cdp, `(document.getElementById('smoke-clipboard').remove(), true)`);
-  await physicalClick(cdp, "[data-composer-input]");
+  await physicalClick(cdp, selector);
   await key(cdp, "v", { modifiers: 2, commands: ["paste"] });
 }
 
@@ -2030,8 +2028,14 @@ async function lockScenario(cdp, origin) {
         true,
         "A login field",
       );
-      await typeInto(cdp, "[data-unlock-password] [data-password-input]", password);
-      await physicalClick(cdp, "[data-unlock-submit]");
+      // A password pasted with a line break opens without it, and Enter in the field submits the dialog.
+      await pasteText(cdp, "[data-unlock-password] [data-password-input]", `${password}\n`);
+      assertEqual(
+        await value(cdp, `${field("[data-unlock-password]")}.value`),
+        password,
+        "A pasted line break stayed in the password",
+      );
+      await pressEnter(cdp);
       await waitFor(cdp, said(opened), 15_000, `The password did not open it: ${opened}`);
     };
 
@@ -2207,8 +2211,7 @@ async function passwordScenario(cdp, origin) {
 
     // A password has one line: one pasted with a line break answers without it.
     await waitFor(cdp, fieldOpen("Your code?"), 8_000, "askPassword did not open a password field");
-    await physicalClick(cdp, "[data-composer-input]");
-    await pasteText(cdp, "corner\n");
+    await pasteText(cdp, "[data-composer-input]", "corner\n");
     assertEqual(
       await value(cdp, `${field}.value`),
       "corner",
