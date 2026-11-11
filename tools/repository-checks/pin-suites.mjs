@@ -26,15 +26,17 @@ import { suiteTestFiles } from "../test-shards.mjs";
 //
 // The marks are the authority; each mark's regex must find a line of its file other than the mark, and every line it
 // finds must hold a numeric or hex digest literal in its code (`valueLines`: a digit in a comment, a name, a type or
-// another string is none), so that a mark whose values are deleted finds nothing. Their test (`pin-suites.test.mjs`)
-// finds four pin forms by their text (`PIN_FORMS`): an `assert.equal` of `.total` to a literal of four or more digits,
-// a table of four or more such literals, a `[count, "reason"]` record, and, in the type core's tests only
-// (`FORM_SCOPES`), a property set to a hex digest of 16 or more digits: a digest pin written in another test file is
-// not found. A pin written another way (`strictEqual`, `deepEqual` of a short tuple or an object, a total under four
-// digits, a helper's table, a nested table such as work-a's) is not found; that test is a net over every `.ts` file
-// under `tests/`, helpers included, for a file holding pins with no mark, and `NOT_PINS` declares the files it finds
-// that pin no work. Under `tests/helpers/type-core/families/` it also requires every recorded bound to be a line a mark
-// of that file finds, and claims a position, not a meaning: in the code of that folder, neither `main` nor `measured`
+// another string is none, and a marked file that does not parse is a fault), so that a mark whose values are deleted
+// finds nothing. Their test (`pin-suites.test.mjs`) finds four pin forms by their text (`PIN_FORMS`): an `assert.equal`
+// of `.total` to a literal of four or more digits, a table of four or more such literals, a `[count, "reason"]` record,
+// and, in the type core's tests only (`FORM_SCOPES`), a property set to a hex digest of 16 or more digits: a digest pin
+// written in another test file is not found. A pin written another way (`strictEqual`, `deepEqual` of a short tuple or
+// an object, a total under four digits, a helper's table, a nested table such as work-a's) is not found; that test is a
+// net over every `.ts` file under `tests/`, helpers included, for a file holding pins with no mark, and `NOT_PINS`
+// declares the files it finds that pin no work. A suite whose pins take a form the net lacks is protected by a count,
+// not by the net: the test holds the number of marked files and of the suites they name, so a mark lost from a file's
+// head fails it. Under `tests/helpers/type-core/families/` it also requires every recorded bound to be a line a mark of
+// that file finds, and claims a position, not a meaning: in the code of that folder, neither `main` nor `measured`
 // occurs outside the admitted positions. Comments, JSDoc and marks included, are not code and are not read there: they
 // cannot record or change a bound. The code is every node `forEachChild` reaches from a file's source; every
 // identifier, private name, string and template without substitutions spelled so is classified by its role. Admitted
@@ -54,12 +56,15 @@ const CORE = "src/type-inference/core/";
 const MARK = /^\/\/ pins(?: for ([^:]+))?: (.+?) \| line \/(.+)\/([a-z]*)$/u;
 /**
  * The lines of `text` (counted from 1) that hold a literal value in its code: a numeric literal, or a string literal
- * that is a hex digest of 16 or more digits. Digits in a comment, a name, a type or another string are no value.
+ * that is a hex digest of 16 or more digits. Digits in a comment, a name, a type or another string are no value;
+ * `null` where `text` does not parse.
  */
 function valueLines(text, file) {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false);
+  if (source.parseDiagnostics.length > 0) return null;
   const lines = new Set();
   const visit = (node) => {
+    if (ts.isLiteralTypeNode(node)) return;
     if (
       ts.isNumericLiteral(node) ||
       (ts.isStringLiteralLike(node) && /^[0-9a-f]{16,}$/u.test(node.text))
@@ -116,6 +121,10 @@ export function readMarks(root) {
     // (a pin's line holds its value, so that a mark whose values are gone finds nothing: a declaration line would stay)
     const matched = lines.slice(1).flatMap((line, at) => (pin.test(line) ? [at + 2] : []));
     const values = matched.length === 0 ? new Set() : valueLines(text, file);
+    if (values === null) {
+      faults.push(`${file}:1: the file does not parse, so its values cannot be read`);
+      continue;
+    }
     const bare = matched.find((at) => !values.has(at));
     if (matched.length === 0 || bare !== undefined) {
       faults.push(

@@ -217,6 +217,18 @@ test("the marks are kept true: each reads, and each test file a pin form finds i
   assert.deepEqual(netOf(ROOT, MARKS, NOT_PINS), []);
 });
 
+test("the marked files and the suites they name are counted: a mark lost from a file's head fails here (#2094)", () => {
+  // (the net finds a pin only by a form it knows, and some suites pin by none: candidate's and f18's, among others)
+  assert.deepEqual(
+    {
+      "marked files": new Set(MARKED.map((suite) => suite.in ?? suite.file)).size,
+      suites: SUITES.length,
+    },
+    { "marked files": 14, suites: 11 },
+    "a `// pins` mark was added or removed; if that is meant, change the count here",
+  );
+});
+
 test("the net names an unmarked pin, a marked file declared no pin, and a declaration with no pin form", (t) => {
   const root = mkdtempSync(join(tmpdir(), "pin-suites-net-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
@@ -269,7 +281,7 @@ test("a mark is read from a file's first line only, whole, naming test files, an
     "tests/a.test.ts": "import x from 'x';\n",
     // (a helper's mark names the suites its pins run in, each once, in path order)
     "tests/helpers/h.ts":
-      "// pins for tests/b.test.ts, tests/a.test.ts: shared bounds | line /^\\s*measured: \\d/u\n  measured: 3,\n",
+      "// pins for tests/b.test.ts, tests/a.test.ts: shared bounds | line /^\\s*measured: \\d/u\nconst h = {\n  measured: 3,\n};\n",
     "tests/helpers/late.ts": "// a header\n  // pins: moved below it | line /x/u\nx\n",
     "tests/c.test.ts": "// pins a total, no line\nconst C = 1;\n",
     "tests/d.test.ts": "// pins: a bad line | line /(/u\n(\n",
@@ -283,6 +295,9 @@ test("a mark is read from a file's first line only, whole, naming test files, an
     "tests/v2.test.ts": "// pins: a type | line /^type T2\\b/u\ntype T2 = Array<number>;\n",
     "tests/v3.test.ts": "// pins: a name | line /^const T/u\nconst Tα2 = x;\n",
     "tests/v4.test.ts": '// pins: a text | line /^const S\\b/u\nconst S = "version 64";\n',
+    "tests/v5.test.ts": "// pins: a literal type | line /^type W\\b/u\ntype W = 1234;\n",
+    // (a marked file that does not parse, whose values cannot be read)
+    "tests/v6.test.ts": "// pins: a broken file | line /^const B\\b/u\nconst B = ;\n",
     // (a file with CRLF line ends reads as one with LF, its mark and its pin line alike)
     "tests/crlf.test.ts": "// pins: a crlf total | line /^const A=1;$/u\r\nconst A=1;\r\n",
     "tests/g.test.ts": "// pins: a stateful line | line /x/gu\nx\n",
@@ -325,6 +340,8 @@ test("a mark is read from a file's first line only, whole, naming test files, an
     "tests/v2.test.ts:1: /^type T2\\b/u finds line 2, which holds no numeric or hex digest literal",
     "tests/v3.test.ts:1: /^const T/u finds line 2, which holds no numeric or hex digest literal",
     "tests/v4.test.ts:1: /^const S\\b/u finds line 2, which holds no numeric or hex digest literal",
+    "tests/v5.test.ts:1: /^type W\\b/u finds line 2, which holds no numeric or hex digest literal",
+    "tests/v6.test.ts:1: the file does not parse, so its values cannot be read",
   ]);
 });
 
@@ -337,7 +354,7 @@ test("every bound a family records is a line some declaration's pin finds in tha
   const finding = new Set();
   for (const file of files) {
     const text = readFileSync(join(ROOT, file), "utf8");
-    const lines = text.split("\n");
+    const lines = text.split(/\r?\n/u);
     const { recorded, escapes } = recordedBoundsOf(text);
     for (const { line, form } of escapes)
       failures.push(`${file}:${line}: ${form}, not a position a family may name it at`);
