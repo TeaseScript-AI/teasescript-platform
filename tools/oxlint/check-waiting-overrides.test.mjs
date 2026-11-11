@@ -350,19 +350,22 @@ async function interrupt(root, signal) {
   const ended = new Promise((resolve) =>
     run.on("close", (status, signal) => resolve({ status, signal })),
   );
+  // oxlint's pid, whole, before the signal: the plugin publishes it by a rename
   const deadline = Date.now() + 30_000;
   while (!existsSync(join(root, "started")) && Date.now() < deadline)
     await new Promise((resolve) => setTimeout(resolve, 20));
+  const oxlint = existsSync(join(root, "started"))
+    ? Number(readFileSync(join(root, "started"), "utf8"))
+    : 0;
+  if (!(Number.isSafeInteger(oxlint) && oxlint > 0)) {
+    run.kill("SIGKILL");
+    await ended;
+    assert.fail(`oxlint did not start: ${oxlint}`);
+  }
   const held = probes(root);
   run.kill(signal);
   const end = await ended;
-  return {
-    pid: run.pid,
-    end,
-    stdout,
-    held,
-    oxlint: Number(readFileSync(join(root, "started"), "utf8")),
-  };
+  return { pid: run.pid, end, stdout, held, oxlint };
 }
 
 test(
@@ -371,9 +374,10 @@ test(
   async () => {
     // a plugin that marks the run as started with its process, then holds it
     const root = project({
-      "slow.mjs": `import { writeFileSync } from "node:fs";
+      "slow.mjs": `import { renameSync, writeFileSync } from "node:fs";
 export default { meta: { name: "slow" }, rules: { hold: { create: () => ({ Program() {
-  writeFileSync(${JSON.stringify("started")}, String(process.pid));
+  writeFileSync("started.tmp", String(process.pid));
+  renameSync("started.tmp", ${JSON.stringify("started")});
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000);
 } }) } } };
 `,
