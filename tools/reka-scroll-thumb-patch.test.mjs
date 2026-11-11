@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   copyFileSync,
   mkdirSync,
+  readFileSync,
   mkdtempSync,
   realpathSync,
   rmSync,
@@ -12,16 +13,17 @@ import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { build } from "vite";
+import { build, optimizeDeps, resolveConfig } from "vite";
 import { rekaScrollThumbPatch } from "../player/vue/reka-scroll-thumb-patch.ts";
 
 // `player/vue/reka-scroll-thumb-patch.ts` claims: a module is reka-ui's when the nearest `package.json` with a `name`
 // above its real path names `reka-ui`, and a build that bundles a module of a reka-ui root patches that root's
 // `dist/ScrollArea/ScrollAreaThumb.js` or fails naming the root. A build that bundles no reka-ui module passes: the
 // development server's dependency scan runs the plugin with every package external, and refusing it skipped the
-// pre-bundling, so the server optimized dependencies while a page loaded and reloaded it (#2123). The tests below
-// generate the install shapes, thumb placements and spellings of a module's ID, and derive each expected result from that
-// claim.
+// pre-bundling, so the server optimized dependencies while a page loaded and reloaded it (#2123). A module's file is
+// whichever of its ID's two readings (whole, or cut at the first `?` or `#`) names a regular file, and the plugin judges
+// only the ID shapes the Player's builds give it: an absolute path, perhaps with a query. The tests below generate the
+// install shapes, thumb placements, ID shapes and both loaders, and derive each expected result from that claim.
 const installed = (path) =>
   fileURLToPath(new URL(`../node_modules/reka-ui/${path}`, import.meta.url));
 const PATCHED = /function settlingScrollListener/gu;
@@ -140,14 +142,8 @@ const SHAPES = {
   ],
 };
 
-/** How an import spells a module: Vite reads the file up to the first `?` or `#` and keeps the rest in its ID. */
-const SPELLINGS = {
-  "a plain path": "",
-  "a query": "?probe",
-  "a fragment": "#probe",
-  "a fragment, then a query": "#probe?x",
-  "a query, then a fragment": "?x#probe",
-};
+/** The ID shapes the Player's builds give the plugin (queue job 111108091160ff): a plain path, and one with a query. */
+const SPELLINGS = { "a plain path": "", "a query": "?probe" };
 
 for (const [shape, layout] of Object.entries(SHAPES))
   for (const thumb of ["present", "moved", "absent"])
@@ -194,3 +190,62 @@ test("one plugin judges each build alone: a patched build does not admit a later
     /reka-ui at .* was bundled without its ScrollAreaThumb/u,
   );
 });
+
+// Both loaders, a file name that holds a `?` or none, and what lies at the reading cut at that `?`. A reka-ui copy is
+// linked into `node_modules`, so each loader reaches it by its real path; its thumb holds the lines the plugin patches.
+const THUMB = `export function thumb(viewport, scrollbarContextVisible, removeUnlinkedScrollListenerRef, addUnlinkedScrollListener) {
+  const listener = addUnlinkedScrollListener(viewport.value, scrollbarContextVisible.onThumbPositionChange);
+  removeUnlinkedScrollListenerRef.value = listener;
+  scrollbarContextVisible.onThumbPositionChange();
+}
+`;
+const THUMB_PATH = "dist/ScrollArea/ScrollAreaThumb.js";
+const LOADERS = {
+  "the production build": async (root, plugin) =>
+    bundle(root, importing([`./node_modules/reka-ui/${THUMB_PATH}`]), plugin),
+  "the forced dependency optimizer": async (root, plugin) => {
+    const config = await resolveConfig(
+      {
+        root,
+        configFile: false,
+        logLevel: "silent",
+        cacheDir: join(root, ".vite"),
+        optimizeDeps: {
+          include: [`reka-ui/${THUMB_PATH}`],
+          noDiscovery: true,
+          rolldownOptions: { plugins: [plugin] },
+        },
+      },
+      "serve",
+    );
+    const metadata = await optimizeDeps(config, true);
+    return Object.values(metadata.optimized)
+      .map((dependency) => readFileSync(dependency.file, "utf8"))
+      .join("\n");
+  },
+};
+for (const [loader, load] of Object.entries(LOADERS))
+  for (const name of ["reka-literal", "reka?literal"])
+    for (const prefix of ["absent", "a file", "a folder"])
+      test(`${loader}, a reka-ui copy in vendor/${name}, vendor/reka ${prefix}`, async (t) => {
+        const root = scratch(t);
+        write(join(root, "package.json"), JSON.stringify({ name: "fixture" }));
+        const copy = join(root, "vendor", name);
+        write(join(copy, "package.json"), JSON.stringify({ name: "reka-ui", version: "2.10.4" }));
+        write(join(copy, THUMB_PATH), THUMB);
+        if (prefix === "a file") write(join(root, "vendor/reka"), "export const marker = 1;\n");
+        if (prefix === "a folder") mkdirSync(join(root, "vendor/reka/other"), { recursive: true });
+        link(copy, join(root, "node_modules/reka-ui"));
+        const id = join(copy, THUMB_PATH);
+        // The rule: both readings name a regular file, so the build fails naming the ID; else the one is the thumb, which
+        // is patched, unless the loader cannot reach that file at all and fails the build itself. Never silently unpatched.
+        const ambiguous = name.includes("?") && prefix === "a file";
+        const outcome = await load(root, rekaScrollThumbPatch()).then(
+          (code) => (/function settlingScrollListener/u.test(code) ? "patched" : "not patched"),
+          (error) => `failed: ${String(error.message)}`,
+        );
+        if (ambiguous) assert.ok(outcome.includes(`${id} names two files`), outcome);
+        else if (loader === "the production build" || !name.includes("?"))
+          assert.equal(outcome, "patched");
+        else assert.match(outcome, /^(?:patched|failed: )/u);
+      });
