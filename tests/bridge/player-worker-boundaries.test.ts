@@ -105,7 +105,6 @@ interface Host {
 }
 let usePlayerSession: (options: {
   readonly bridge: Promise<PlayerBridge>;
-  readonly debugHistorySpill?: () => Promise<null>;
   readonly scriptStorage?: ScriptStorageProvider;
   readonly keptSessions?: KeptSessionStore;
   readonly capabilities?: { readonly camera: boolean };
@@ -176,7 +175,6 @@ async function mount(
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
-      debugHistorySpill: async () => null,
       decodeImage: async () => ({ width: 1, height: 1 }),
       ...options,
       bridge: Promise.resolve(transport.bridge),
@@ -779,7 +777,6 @@ async function mountDebug(context: TestContext, transport: TopologyBridge, scrip
   const mounted = scope.run(() => {
     const host = usePlayerSession({
       bridge: Promise.resolve(transport.bridge),
-      debugHistorySpill: async () => null,
       scriptStorage: at.provider,
       keptSessions: at.kept,
       debugRooms: memoryKeptRoomStore(),

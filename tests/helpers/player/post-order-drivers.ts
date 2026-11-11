@@ -41,7 +41,6 @@ interface DriverRewind {
 }
 let usePlayerSession: (options: {
   readonly bridge: Promise<PlayerBridge>;
-  readonly debugHistorySpill: () => Promise<null>;
   readonly scriptStorage: ScriptStorageProvider;
   readonly keptSessions: KeptSessionStore;
   readonly capturedMedia: { readonly repository: ReturnType<typeof browser>["repository"] };
@@ -90,7 +89,6 @@ async function page(context: TestContext, at: ReturnType<typeof browser>, debug:
   const player = scope.run(() =>
     usePlayerSession({
       bridge: Promise.resolve(transport.bridge),
-      debugHistorySpill: async () => null,
       scriptStorage: at.provider,
       keptSessions: at.kept,
       capturedMedia: { repository: at.repository },

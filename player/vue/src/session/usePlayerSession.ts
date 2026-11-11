@@ -28,8 +28,6 @@ import {
 } from "../../../runtime/player-bridge.js";
 import type { SessionOp } from "../../../engine-bridge/op-catalogue.js";
 import { RETIRED, type InputSection, type InputSectionHost } from "./runtime-input";
-import { sweepDebugHistories } from "../../../debug/debug-history-indexeddb.js";
-import type { DebugHistorySpill } from "../../../engine-bridge/history/snapshots.js";
 import {
   keptPhotoReferences,
   type KeptRoomStore,
@@ -68,16 +66,15 @@ import { useSavedValues } from "./persistence/useSavedValues.js";
 
 export interface PlayerSessionOptions {
   /**
-   * The engine's host; the in-process backend by default. One live Player per
-   * bridge, which a later Player may reuse after the previous Player scope is disposed; while another holds it, this
-   * Player never becomes ready.
+   * The engine's host: in a page, the engine's module Worker (`openEngineWorker`); in tests, a backend they build. One
+   * live Player per bridge, which a later Player may reuse after the previous Player scope is disposed; while another
+   * holds it, this Player never becomes ready.
    */
-  bridge?: Promise<PlayerBridge>;
+  bridge: Promise<PlayerBridge>;
   /**
    * Opens a fresh connection to the engine's host, ready, when the player chooses to go on after the connection was lost
-   * (PLAYER-UI "Session end and failure"); called only from that click, never to revive the lost one. Without `bridge` a
-   * new in-process backend is the default; with `bridge` and without this, a lost connection stays the Player's error
-   * stop.
+   * (PLAYER-UI "Session end and failure"); called only from that click, never to revive the lost one. In a page, a fresh
+   * engine Worker (`openEngineWorker`); without it, a lost connection stays the Player's error stop.
    */
   nextConnection?: () => Promise<PlayerBridge>;
   /**
@@ -131,16 +128,6 @@ export interface PlayerSessionOptions {
   debugRooms?: KeptRoomStore;
   /** The room the page opens (DEBUGGER.md "Debug room"): the script's own, `normal` by default, or its debug room. */
   room?: "normal" | "debug";
-  /**
-   * Opens where Debug's rewind history in the composable's own host spills snapshots; IndexedDB by default, `null`
-   * keeps them in memory. An injected `bridge`'s host has its own.
-   */
-  debugHistorySpill?: () => Promise<DebugHistorySpill | null>;
-  /**
-   * UTF-16 code units of snapshot JSON a rewind history in the composable's own host admits in memory, pending spill
-   * writes included (`DEBUG_HISTORY_ADMITTED_SNAPSHOT_CHARS` by default); diagnostic tuning for tests.
-   */
-  debugHistoryMemoryBudget?: number;
 }
 
 export type { PlayerSessionStart } from "./sessionStart.js";
@@ -148,7 +135,7 @@ export type { PlayerSessionStart } from "./sessionStart.js";
 // Presentation lifecycle around the shown session. It holds the shown `PlayerSession` publication; the engine's host
 // owns the canonical runtime state. This host records which session is shown, when presentation must reset, maps
 // browser time onto the session's scene time, and plays the session's media on browser elements.
-export function usePlayerSession(options: PlayerSessionOptions = {}) {
+export function usePlayerSession(options: PlayerSessionOptions) {
   const resolvePackageAsset = options.resolveAsset ?? (() => null);
   const diagnostics = shallowRef<readonly PlayerDiagnostic[]>([]);
   const reportDiagnostic = (diagnostic: PlayerDiagnostic) => {
@@ -188,9 +175,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     claimed: (generation) => random.claimed(generation),
     lost: (error) => bridgeLost(error),
     ready(ready) {
-      // An injected bridge with a tracing serial allocated: only an earlier Player can have allocated it, as this one
-      // could send nothing to the bridge before now.
-      if (options.bridge !== undefined && ready.hasAllocatedTracingIntent) debug.pendTracing();
+      // A bridge with a tracing serial allocated: only an earlier Player can have allocated it, as this one could send
+      // nothing to the bridge before now.
+      if (ready.hasAllocatedTracingIntent) debug.pendTracing();
       flushTracing(ready);
       flushRandom(ready, null);
     },
@@ -255,8 +242,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     random: { issuedRandom: () => random.issuedRandom() },
     resolveTemporalContext: () => resolveTemporalContext(),
   });
-  // Rewind histories that pages which ended without deleting theirs left behind go now.
-  if (options.debugHistorySpill === undefined) void sweepDebugHistories();
   /**
    * The engine Worker was lost: the path of an exception of the Player that cannot be recovered, the error stop. What
    * the player sees then is the owner's open decision (#1897). An intentional `terminate()` is no loss and never reaches
