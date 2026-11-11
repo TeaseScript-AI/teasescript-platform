@@ -140,7 +140,9 @@ jobs:
         env:
           BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
         run: node tools/reading-route-size.mjs ${BASE:+--base "$BASE"}
+      # (also after a failed check before the tests, as `npm run check` does: #2106)
       - name: Build and run tests, shard 3 of 3
+        if: ${{ !cancelled() }}
         env:
           NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
           BUILD_SOURCEMAPS: "0"

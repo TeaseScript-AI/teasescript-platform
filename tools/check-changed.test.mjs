@@ -113,6 +113,7 @@ test(
       });
       assert.equal(result.status, 2, result.stderr);
       assert.doesNotMatch(result.stdout, /PASS|FAIL/u);
+      assert.equal(result.stdout, "check-changed: ran: none; failed: none; not run: every check\n");
       assert.equal(
         result.stderr,
         `check-changed: no node_modules, and ${main} has no node_modules folder (ENOENT): run \`npm ci\`, or set TEASESCRIPT_MAIN to a checkout of main that has node_modules\n`,
@@ -543,3 +544,34 @@ test("it links the node_modules main's checkout has, replaces only a stale link,
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test(
+  "its last line names what ran, what failed, and what it did not run: the checks no changed path needs and the compiled suite (#2106)",
+  { timeout: 30_000 },
+  () => {
+    for (const fails of [false, true]) {
+      const { directory } = repository({
+        core: "added",
+        passing: true,
+        mapper: fails ? "process.exitCode = 1;\n" : "",
+      });
+      try {
+        const result = spawnSync(process.execPath, [tool, "--base", "main"], {
+          cwd: directory,
+          encoding: "utf8",
+          env: environment,
+        });
+        assert.equal(result.status, fails ? 1 : 0, result.stdout + result.stderr);
+        assert.equal(
+          result.stdout.trimEnd().split("\n").at(-1),
+          "check-changed: ran: diff --check, format, oxlint, knip, doc links, imports, pin suites, tsc; " +
+            `failed: ${fails ? "pin suites" : "none"}; ` +
+            "not run: test:families, typecheck:player, lint:design, test:lint, test:verification, format:check, " +
+            "test:lint:design, the compiled test suite (CI runs it)",
+        );
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+  },
+);

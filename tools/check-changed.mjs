@@ -12,6 +12,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { costlyTestSeconds } from "./costly-test-files.mjs";
+import { summaryLine } from "./run-parallel.mjs";
 import { isSuiteTestPath, isTypeCoreTestFile } from "./test-shards.mjs";
 
 // Runs, before a push, the checks CI fails on for what changed since a base, in parallel, and prints one line per check
@@ -30,7 +31,8 @@ import { isSuiteTestPath, isTypeCoreTestFile } from "./test-shards.mjs";
 // its published answers, as `tools/repository-checks/pin-suites.mjs` lists them: the focused list such a change runs
 // before review (`docs/TESTING.md`, "Pinned work"), which it does not run itself. When a changed type-core test file has
 // no entry in `tools/costly-test-files.mjs`, it prints one line saying so: the file runs in full, as every file does,
-// and the entry lands from CI at merge.
+// and the entry lands from CI at merge. Its last line, also when the checks cannot run, names what ran, failed and did
+// not run, the compiled suite and the checks no changed path needs included (`summaryLine`, #2106).
 //
 // `--merged` checks what CI tests after a squash instead: HEAD merged into the base's current commit, in a temporary
 // detached worktree (`git merge --no-commit --no-ff`) with this worktree's `node_modules` linked in. Uncommitted
@@ -112,6 +114,9 @@ export function projectsFor(paths) {
 export function checksOf(projects) {
   return [...new Set([...projects].flatMap((project) => PROJECTS[project].checks))];
 }
+
+/** What it never runs, named in its last line. */
+export const NEVER_RUN = "the compiled test suite (CI runs it)";
 
 /** The core, a change to which prints the suites that pin its work. */
 const CORE = "src/type-inference/core/";
@@ -405,6 +410,17 @@ async function check(cleanups) {
     );
   for (const { name, passed, output, shown } of results)
     if (!passed || shown) process.stdout.write(`\n--- ${name} ---\n${output}`);
+  // (the last line, so that a passing run cannot be read as one that ran more: #2106)
+  const selected = checksOf(projects);
+  process.stdout.write(
+    `\ncheck-changed: ${summaryLine([
+      ...results.map(({ name, passed }) => ({ name, status: passed ? "PASS" : "FAIL" })),
+      ...checksOf(Object.keys(PROJECTS))
+        .filter((check) => !selected.includes(check))
+        .map((name) => ({ name, status: "NOT RUN" })),
+      { name: NEVER_RUN, status: "NOT RUN" },
+    ])}\n`,
+  );
   process.exitCode = results.every(({ passed }) => passed) ? 0 : 1;
 }
 
@@ -431,6 +447,9 @@ async function main() {
   } catch (error) {
     if (!(error instanceof CannotRun)) throw error;
     process.stderr.write(`check-changed: ${error.message}\n`);
+    process.stdout.write(
+      `check-changed: ${summaryLine([{ name: "every check", status: "NOT RUN" }])}\n`,
+    );
     process.exitCode = 2;
   } finally {
     cleanup();
