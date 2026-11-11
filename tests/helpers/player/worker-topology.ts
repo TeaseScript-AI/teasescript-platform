@@ -9,6 +9,10 @@ import type * as Bridge from "../../../player/runtime/player-bridge.js";
 import type { PlayerBridge } from "../../../player/runtime/player-bridge.js";
 import { coverageGaps, type Coordinates } from "../family-coverage.js";
 import { loadPlayerModule } from "../player-modules.js";
+import { untypedClient } from "../bridge/untyped.js";
+import { restorePlayerRuntimeSessionAt } from "../../../player/runtime/runtime-adapter.js";
+import { NO_MARKS } from "../../../player/debug/debug-history-marks.js";
+import type { Introduction } from "../../../player/engine-bridge/session-protocol.js";
 import { deserializeCheckpoint } from "../../../src/runtime/snapshot/checkpoint.js";
 import type { RuntimeSnapshot } from "../../../src/index.js";
 import type { PlayerSession } from "../../../player/runtime/runtime-view.js";
@@ -55,7 +59,12 @@ export interface TopologyBridge {
 }
 
 const BUILD: BuildIdentity = { commit: null, dirty: null, mode: null, appVersion: null };
-const WORKER = new URL("../../../player/engine-bridge/node-worker.js", import.meta.url);
+const WORKERS = {
+  // The engine's Worker entry, as the Player runs it.
+  engine: new URL("../../../player/engine-bridge/node-worker.js", import.meta.url),
+  // The same, with the maintained test ops (`restoreForTest`), for rows that restore a state on the Worker.
+  restore: new URL("../bridge-restore-worker.js", import.meta.url),
+};
 
 let client: typeof Client | null = null;
 let bridgeModule: typeof Bridge | null = null;
@@ -139,10 +148,13 @@ const postOf = (request: {
 export async function topologyBridge(
   context: TestContext,
   topology: Topology,
-  { delayMs }: { readonly delayMs?: number } = {},
+  {
+    delayMs,
+    entry = "engine",
+  }: { readonly delayMs?: number; readonly entry?: keyof typeof WORKERS } = {},
 ): Promise<TopologyBridge> {
   assert.ok(client && bridgeModule && facade, "call loadTopology first");
-  const made = topology === "worker" ? await onWorker() : inProcess(context, delayMs);
+  const made = topology === "worker" ? await onWorker(WORKERS[entry]) : inProcess(context, delayMs);
   context.after(() => made.bridge.client.terminate());
   return {
     ...made,
@@ -225,8 +237,8 @@ function inProcess(
   };
 }
 
-async function onWorker(): Promise<Omit<TopologyBridge, "topology" | "assertTopology">> {
-  const worker = new Worker(WORKER, { workerData: { build: BUILD } });
+async function onWorker(entry: URL): Promise<Omit<TopologyBridge, "topology" | "assertTopology">> {
+  const worker = new Worker(entry, { workerData: { build: BUILD } });
   const exited = new Promise<number>((resolve) => worker.once("exit", resolve));
   const posts: Posted[] = [];
   const gate = {
@@ -330,4 +342,28 @@ export async function checkpointSnapshot(
 ): Promise<RuntimeSnapshot> {
   const { checkpointJson } = await bridge.read(session, "captureCheckpoint");
   return deserializeCheckpoint(checkpointJson).snapshot;
+}
+
+/**
+ * A session restored from `snapshotJson` against the held plan `token`, held by the host of `transport` with no events
+ * before it, as a test restores one: in-process through the facade, on a Worker through the test entry's
+ * `restoreForTest` (open the bridge with `entry: "restore"`).
+ */
+export async function restoredSession(
+  transport: TopologyBridge,
+  token: string,
+  snapshotJson: string,
+): Promise<PlayerSession> {
+  if (transport.topology === "in-process")
+    return facade!.introduceNow(
+      transport.bridge,
+      (host) => restorePlayerRuntimeSessionAt(host.plan(token), snapshotJson, []),
+      NO_MARKS,
+    );
+  const reply = await untypedClient(transport.bridge.client).request("restoreForTest", {
+    plan: token,
+    snapshotJson,
+  });
+  // EVIDENCE: validation: the test op replies with the new session's introduction.
+  return transport.bridge.open(reply.session!, reply.view as Introduction);
 }
