@@ -32,7 +32,6 @@ import {
 } from "../charged-iteration.js";
 import { StatementTree } from "./statement-tree.js";
 import { Laminar } from "./laminar.js";
-import { Retained, retainedModule } from "../retained/retained.js";
 
 /*
  * Stage 3b's narrowing definitions (checkpoint 9): a test is a definition. A null test or a
@@ -595,7 +594,7 @@ interface PathNode {
 }
 
 /** Each program's narrowing index, made by the first pass that asks for it. */
-const INDEXES = retainedModule("narrowings.INDEXES", Retained.weakMap<CoreProgram, NarrowingIndex>);
+const INDEXES = new WeakMap<CoreProgram, NarrowingIndex>();
 
 /**
  * The narrowing index of a program (N1, N2): its definitions per refined location and its invalidation lists, with the
@@ -606,10 +605,10 @@ export class NarrowingIndex {
   /** The program's index, made and charged on its first ask. */
   public static of(program: CoreProgram): NarrowingIndex {
     program.work.charge("indexSteps");
-    let index = INDEXES().get(program);
+    let index = INDEXES.get(program);
     if (index === undefined) {
       index = new NarrowingIndex(program, new StatementTree(program));
-      INDEXES().set(program, index);
+      INDEXES.set(program, index);
     }
     return index;
   }

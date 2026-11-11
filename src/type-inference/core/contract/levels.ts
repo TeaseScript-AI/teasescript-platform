@@ -41,7 +41,7 @@ import type {
   PropertyIndex,
   PropertySource,
 } from "./model.js";
-import { Retained, retainedModule } from "../retained/retained.js";
+import { amend, Retained, retainedModule } from "../retained/retained.js";
 
 // A prefix's levels (§4.6): its entries grouped at a path, and a literal's structure by path.
 
@@ -207,6 +207,7 @@ export function* propertyItems(
   if (index === undefined || !("holders" in index)) {
     // (its first property read: the levels answer it at their own cost, nothing kept for it)
     levels.reads += 1;
+    amend(levels);
     if (levels.reads === 1) return null;
     const groups = sharing() ? groupsAt(contract, asked, levels.base, stepsRest([])) : null;
     const sources = groups ?? stores.list;
