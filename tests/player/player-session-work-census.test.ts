@@ -167,10 +167,6 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "resume",
     ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
-  "player/vue/src/session/rewindOwner.ts createRewindOwner > retryReturn": [
-    "resume",
-    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
-  ],
   "player/vue/src/session/rewindOwner.ts createRewindOwner > reportUnless > function": [
     "lifecycle",
     ["BridgeClient.request", "BridgeClient.signal"],

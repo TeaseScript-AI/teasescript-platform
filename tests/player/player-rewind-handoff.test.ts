@@ -470,22 +470,9 @@ async function handoffRow(
           `the log at ${JSON.stringify(position)} resolves`,
         );
     } else assert.equal(view, null, "no history is open");
-    // The return's state, which the Player shows, and a failed reinstatement retried through the same gate.
-    if (gated && !want.lost && (want.shows === "live" || want.shows === "restored")) {
-      const failed = each.operation === "reinstate" && each.outcome === "fails";
-      assert.equal(
-        host.rewind.owner.reinstatement.value,
-        failed ? "failed" : null,
-        "the return's state",
-      );
-      if (failed) {
-        host.rewind.beforeRestart = async () => {};
-        assert.equal(host.rewind.owner.retryReturn(), true, "retried");
-        await settle(context);
-        assert.equal(shownView(host).lineage, live.lineage, "reinstated on the retry");
-        assert.equal(host.rewind.inspecting.value, false, "no longer inspected");
-      }
-    }
+    // The owner's return state: nothing waits once the gate settled, opened or failed.
+    if (gated && !want.lost && (want.shows === "live" || want.shows === "restored"))
+      assert.equal(host.rewind.owner.reinstatement.value, null, "the return's state");
     if (mutate === undefined) lifecycleRun.push(each);
   }
 }
@@ -767,6 +754,26 @@ test("Sol r2 S1: a renewal that fails on a live connection is reported", async (
   context.after(() => again.stop());
   await settle(context);
   assert.deepEqual(reported, [failure]);
+});
+
+test("#2230: Debug off's reinstatement whose gate fails is reported once and reinstates the parked session", async (context) => {
+  const reported: unknown[] = [];
+  reportsInto(context, reported);
+  const made = createHost(context, memoryStorage().provider);
+  const { host } = made;
+  await start(context, host);
+  await choose(context, host, "One");
+  const live = shownView(host);
+  assert.equal(await backTo(made.rewind, 0), true);
+  await settle(context);
+  const failure = new Error("The gate failed.");
+  host.rewind.beforeRestart = () => Promise.reject(failure);
+  made.debug.stop();
+  await settle(context);
+  assert.deepEqual(reported, [failure], "the failure, reported once");
+  assert.equal(host.rewind.inspecting.value, false, "no longer inspected");
+  assert.equal(shownView(host).lineage, live.lineage, "the parked session shows");
+  assert.equal(host.rewind.owner.reinstatement.value, null, "nothing waits");
 });
 
 for (const gateA of ["succeeds", "fails"] as const)

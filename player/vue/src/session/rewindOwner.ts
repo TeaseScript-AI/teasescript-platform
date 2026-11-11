@@ -431,9 +431,6 @@ export function createRewindOwner(host: RewindOwnerHost) {
     adoptionBegun: (): boolean => dispatch({ kind: "adoptionBegun" }).admitted === true,
     adoptionSettled: (succeeded: boolean): boolean =>
       dispatch({ kind: "adoptionSettled", succeeded }).admitted === true,
-    /** Retries a reinstatement whose gate failed, through the same gate; resolves to whether one began. */
-    retryReturn: (): boolean =>
-      dispatch({ kind: "retryReinstate" }).actions.some((action) => action.kind === "gate"),
     /** Whether the page shows a restored state for inspection: the function's state, the one account of it. */
     inspecting: computed(() => {
       void revision.value;
@@ -441,12 +438,11 @@ export function createRewindOwner(host: RewindOwnerHost) {
     }),
     /**
      * The return to the session for presentation: `pending` while a Return or Debug off's reinstatement waits (for its
-     * gate, or for an adoption), `failed` once Debug off's reinstatement gate failed, which `retryReturn` retries.
+     * gate, or for an adoption).
      */
-    reinstatement: computed((): "pending" | "failed" | null => {
+    reinstatement: computed((): "pending" | null => {
       void revision.value;
       if (state.sealed !== null) return null;
-      if (state.closing === "failed") return "failed";
       return state.closing !== null || state.returning ? "pending" : null;
     }),
     /**

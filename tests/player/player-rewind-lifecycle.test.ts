@@ -20,12 +20,13 @@ import {
  *
  * - at most one history is held; a renewed history is installed or closed at once unless a newer renewal replaced it in
  *   the host; none is installed with Debug off, none closed twice, and none is left held by a new session, a
- *   retirement, the disposal, or Debug off unless Debug off still waits for its adoption or gate, or its gate failed;
+ *   retirement, the disposal, or Debug off unless Debug off still waits for its adoption or gate;
  * - no renewal while a history is held (unless it carries that history's close), after a failed close, with Debug off,
  *   or after the Player was sealed; a new session's renewal waits for its session and is posted at its first follow;
  * - a prepared token ends at most once, to its own history: dropped when its step does not reach its commit, unless its
  *   history closed meanwhile; committed only at its gate's success, followed at once by its show;
- * - a failed reinstatement gate sends no close and shows nothing; the parked session shows only from a gate's success;
+ * - a current reinstatement gate closes the history and shows the parked session, whether it opens or fails; a failed
+ *   one is reported once (#2230); the parked session shows only from that gate or a successful Return gate;
  * - a Debug-off close of a history whose adoption was under way waits for it and carries its outcome;
  * - a step and Return are refused while a step, Return, an adoption, or Debug off's close is under way, and go
  *   otherwise when a history is held (and, for Return, a restored state shows);
@@ -78,7 +79,6 @@ type Move =
   | "reinstateGateRejectedNewest"
   | "closeOk"
   | "closeFails"
-  | "retryReinstate"
   | "post"
   | "unpost";
 const MOVES: readonly Move[] = [
@@ -115,7 +115,6 @@ const MOVES: readonly Move[] = [
   "reinstateGateRejectedNewest",
   "closeOk",
   "closeFails",
-  "retryReinstate",
   "post",
   "unpost",
 ];
@@ -195,10 +194,8 @@ interface World {
     readonly outcome: boolean | null;
     readonly offDuring: boolean;
   } | null;
-  /** Debug off's close is under way: waiting for an adoption, for its gate, or held after its gate failed. */
+  /** Debug off's close is under way: waiting for an adoption or for its gate. */
   readonly offHold: boolean;
-  /** Debug off's reinstatement gate failed, and its history is still held: a retry may ask the gate again. */
-  readonly failedHold: boolean;
 }
 
 function start(): World {
@@ -231,7 +228,6 @@ function start(): World {
     returnBusy: false,
     adoption: null,
     offHold: false,
-    failedHold: false,
   };
 }
 
@@ -561,8 +557,6 @@ function advance(
     readonly adoptionSucceeded?: boolean;
   }): string | null => {
     const { history } = close;
-    if (failedCurrent && settling.gate === "reinstate")
-      return "a failed reinstatement gate restarted the page";
     if (w.sealed === "disposal" && close.by !== "disposal")
       return "a non-disposal close after disposal";
     // The disposal's close takes every history of the connection, one whose renewal is unanswered included.
@@ -584,7 +578,6 @@ function advance(
     if (w.held === null) {
       w.inspecting = false;
       w.offHold = false;
-      w.failedHold = false;
       // A Return or a reinstatement still waiting at its gate is obsolete with the history.
       w.current = { return: null, reinstate: null };
       w.returnBusy = false;
@@ -679,15 +672,10 @@ function advance(
           w.current = { ...w.current, return: action.id };
           w.returnBusy = true;
         } else {
-          if (
-            move !== "debugOff" &&
-            move !== "adoptionFails" &&
-            !(move === "retryReinstate" && world.failedHold)
-          )
+          if (move !== "debugOff" && move !== "adoptionFails")
             return fail("a reinstatement gate no Debug off asked for");
           w.gates.reinstate.push(action.id);
           w.current = { ...w.current, reinstate: action.id };
-          w.failedHold = false;
         }
         break;
       case "drop":
@@ -727,7 +715,9 @@ function advance(
         w.inspecting = false;
         break;
       case "showParked":
-        if (!(currentGate && settling.ok)) return fail("the parked session shown without its gate");
+        // From a successful Return gate, or Debug off's reinstatement gate, opened or failed (#2230).
+        if (!(currentGate && (settling.ok || settling.gate === "reinstate")))
+          return fail("the parked session shown without its gate");
         if (w.sealed !== null) return fail("the parked session shown after the Player was sealed");
         if (
           settling.gate === "reinstate" &&
@@ -835,19 +825,24 @@ function advance(
       return fail("a step's gate left its token");
     if (!committed) w.stepPhase = null;
   }
-  // A current gate's failure is the Player's to report, and restarts nothing.
+  // A current gate's failure is the Player's to report. A failed reinstatement gate is reported once and reinstates
+  // (below); any other restarts nothing.
   if (failedCurrent && w.sealed === null) {
     if (!actions.some((a) => a.kind === "reportFailure"))
       return fail("a current gate's failure not reported");
-    if (actions.some((a) => a.kind === "showParked" || a.kind === "sendReturn"))
-      return fail(
-        settling.gate === "reinstate"
-          ? "a failed reinstatement gate restarted the page"
-          : "a failed Return gate restarted the page",
-      );
+    if (
+      settling.gate === "reinstate" &&
+      actions.filter((a) => a.kind === "reportFailure").length !== 1
+    )
+      return fail("a failed reinstatement gate not reported once");
+    if (
+      settling.gate !== "reinstate" &&
+      actions.some((a) => a.kind === "showParked" || a.kind === "sendReturn")
+    )
+      return fail("a failed Return gate restarted the page");
   }
-  // A successful gate still current transfers: Return reinstates the parked session; Debug off's reinstatement closes
-  // the history it holds, then shows the parked session.
+  // A successful gate still current transfers: Return reinstates the parked session. Debug off's reinstatement gate
+  // still current, opened or failed, closes the history it holds, then shows the parked session.
   const succeeded = currentGate && settling.ok;
   if (succeeded && settling.gate === "return" && asked.ret) {
     if (
@@ -863,7 +858,7 @@ function advance(
   )
     return fail("a Return gate no longer current not refused");
   if (
-    succeeded &&
+    currentGate &&
     settling.gate === "reinstate" &&
     world.offHold &&
     world.held !== null &&
@@ -873,7 +868,11 @@ function advance(
       (a) => a.kind === "close" && a.history === world.held && a.by === "debugOff",
     );
     if (!closed || !actions.some((a) => a.kind === "showParked"))
-      return fail("a successful reinstatement gate did not reinstate");
+      return fail(
+        settling.ok
+          ? "a successful reinstatement gate did not reinstate"
+          : "a failed reinstatement gate did not reinstate",
+      );
   }
   if (
     (event.kind === "newSession" || event.kind === "retired" || event.kind === "disposal") &&
@@ -890,13 +889,6 @@ function advance(
   }
   if (!w.debug && w.held !== null && !w.offHold && w.sealed === null)
     return fail("a history held with Debug off");
-  if (failedCurrent && settling.gate === "reinstate" && world.offHold && w.held !== null)
-    w.failedHold = true;
-  if (move === "retryReinstate" && world.failedHold && w.sealed === null) {
-    if (!actions.some((a) => a.kind === "gate" && a.gate === "reinstate"))
-      return fail("a retry that did not ask the gate again");
-  } else if (move === "retryReinstate" && actions.length > 0)
-    return fail("a retry with nothing to retry");
   // The page's inspection is the function's state: it says what the oracle's ledgers show.
   if (w.sealed === null && state.inspecting !== w.inspecting)
     return fail("the page's inspection is not what shows");
@@ -1079,8 +1071,9 @@ const mutants: readonly { readonly rule: string; readonly from: World; readonly 
       },
     },
     {
-      rule: "a failed reinstatement gate restarted the page",
+      rule: "a current gate's failure not reported",
       from: INSPECTING,
+      // A failed reinstatement gate taken for a success: it reinstates, unreported.
       decide: (state, event) =>
         advanceLifecycle(
           state,
@@ -1088,6 +1081,17 @@ const mutants: readonly { readonly rule: string; readonly from: World; readonly 
             ? { ...event, ok: true }
             : event,
         ),
+    },
+    {
+      rule: "a failed reinstatement gate not reported once",
+      from: INSPECTING,
+      // Its failure reported twice.
+      decide: (state, event) => {
+        const outcome = advanceLifecycle(state, event);
+        return event.kind === "gateSettled" && event.gate === "reinstate" && !event.ok
+          ? { ...outcome, actions: [...outcome.actions, { kind: "reportFailure" }] }
+          : outcome;
+      },
     },
     {
       rule: "a wanted renewal's failure not reported",
@@ -1140,7 +1144,19 @@ const mutants: readonly { readonly rule: string; readonly from: World; readonly 
         event.gate === "reinstate" &&
         event.ok &&
         state.closing === "gate"
-          ? { state: { ...state, closing: "failed" }, actions: [] }
+          ? { state, actions: [] }
+          : advanceLifecycle(state, event),
+    },
+    {
+      rule: "a failed reinstatement gate did not reinstate",
+      from: INSPECTING,
+      // The base's hold (#2230): the failure reported, the history and the restored state kept.
+      decide: (state, event) =>
+        event.kind === "gateSettled" &&
+        event.gate === "reinstate" &&
+        !event.ok &&
+        state.closing === "gate"
+          ? { state, actions: [{ kind: "reportFailure" }] }
           : advanceLifecycle(state, event),
     },
     {
@@ -1339,20 +1355,18 @@ test("Sol r3 B2: Debug off before the renewal's reply closes the history the rep
   assert.deepEqual(kinds(batches), ["renew", "clearView", "close:debugOff"]);
 });
 
-test("Sol r3 B3: a failed reinstatement gate keeps the history and its sessions until a new session closes it", () => {
-  const { world, batches } = play(INSPECTING, [
-    "debugOff",
-    "reinstateGateRejected",
-    "debugOn",
-    "stepAsked",
-  ]);
-  assert.deepEqual(kinds(batches), ["gate", "reportFailure", "refuse"]);
-  assert.equal(world.held, OPEN.held);
-  assert.deepEqual(kinds(play(world, ["newSession", "follow"]).batches), [
-    "close:replacement",
+test("#2230: a failed reinstatement gate is reported once and reinstates the parked session, as its success does", () => {
+  const { world, batches } = play(INSPECTING, ["debugOff", "reinstateGateRejected"]);
+  assert.deepEqual(kinds(batches), [
+    "gate",
+    "close:debugOff",
+    "showParked",
     "clearView",
-    "renew",
+    "reportFailure",
   ]);
+  assert.equal(world.held, null, "the history is closed");
+  assert.equal(world.state.inspecting, false, "the parked session shows");
+  assert.deepEqual(kinds(play(world, ["debugOn"]).batches), ["renew"], "the next Debug on renews");
 });
 
 test("Sol r3 S1: the failure of the renewal asked for now is reported, an obsolete one's is not", () => {
@@ -1431,7 +1445,7 @@ test("Sol r5 B1: an obsolete reinstatement gate decides nothing; only the curren
       kinds(current.batches),
       settle === "reinstateGateOk"
         ? ["close:debugOff", "showParked", "clearView"]
-        : ["reportFailure"],
+        : ["close:debugOff", "showParked", "clearView", "reportFailure"],
       `${settle}: B decides`,
     );
   }
