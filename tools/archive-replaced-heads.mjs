@@ -1,18 +1,22 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync, readlinkSync } from "node:fs";
-import { basename } from "node:path";
+import { readFileSync } from "node:fs";
 
 // A `pre-push` hook: before a push replaces a branch's head on the remote with one that does not contain it (a
 // force-push) or deletes the branch, it pushes that old head to `refs/archive/<full sha>` on the same remote, so a
-// commit a report or review cites stays readable there (`tools/check-shas.mjs` reads such refs on origin). A
-// fast-forward, a new branch and any other ref outside `refs/archive/` cost nothing. A push that would delete or move
-// an archive ref is refused: archives are kept. So is a pruning push (`--mirror`, `--prune`, or a remote with
-// `remote.<name>.mirror`): git lists the refs it prunes to no hook, so it could delete an archive unseen. The pruning
-// options are read from the git process this hook runs under (`/proc`), as git parses them; where `/proc` cannot be
-// read, they are not checked.
+// commit a report or review cites stays readable there (`tools/check-shas.mjs` reads such refs on origin), and keeps
+// the same ref in this clone. A fast-forward, a new branch and any other ref outside `refs/archive/` cost nothing.
 //
 //   node tools/archive-replaced-heads.mjs <remote name> <remote URL>     (git's pre-push arguments; its ref lines on
 //                                                                        standard input)
+//
+// Archives are written once and kept:
+// - An archive ref that already holds the old head is left; one that holds anything else refuses the push. The new
+//   ones are pushed with a lease that they do not exist yet, so a race refuses too.
+// - Each archive is also a ref in this clone, and git prunes on the remote only a ref this clone lacks: a `--mirror`
+//   or `--prune` push, which lists the refs it prunes to no hook, therefore leaves every archive this clone has.
+// - A push that lists a deletion or move of an archive ref is refused.
+// Limit: an archive made from another clone and not yet fetched here (`+refs/archive/*:refs/archive/*`) can be pruned
+// by a pruning push from this clone.
 //
 // It prints each head it archived. When an old head cannot be archived (this clone lacks it, or the archive push
 // fails), it exits 1 and git refuses the whole push. The archive push runs with `--no-verify`, so it never runs this
@@ -20,54 +24,6 @@ import { basename } from "node:path";
 
 const ZERO = /^0+$/u;
 const git = (...args) => spawnSync("git", args, { encoding: "utf8" });
-
-/** The `git push` options a long option `arg` names, by git's own table and its unique-prefix rule, or `null`. */
-function pushOption(arg, options) {
-  const name = `--${arg.slice(2).split("=")[0]}`;
-  if (options.includes(name)) return name;
-  const candidates = options.filter((option) => option.startsWith(name));
-  return candidates.length === 1 ? candidates[0] : null;
-}
-
-/**
- * Whether the push this hook runs under prunes: `remote.<remote>.mirror`, or `--mirror` or `--prune` (in any spelling
- * git accepts, the last of `--x` and `--no-x` winning) on the nearest ancestor process whose executable is git,
- * whatever name invoked it. `null` when `/proc` cannot be read or no git ancestor is found; `true` when that ancestor
- * shows no `push`, as its options cannot be read.
- */
-function pruningPush(remote) {
-  if (git("config", "--bool", `remote.${remote}.mirror`).stdout.trim() === "true") return true;
-  for (let pid = process.ppid; pid > 1;) {
-    let argv;
-    let stat;
-    let executable;
-    try {
-      executable = readlinkSync(`/proc/${pid}/exe`);
-      argv = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0");
-      stat = readFileSync(`/proc/${pid}/stat`, "utf8");
-    } catch {
-      return null;
-    }
-    if (basename(executable) === "git") {
-      const push = argv.indexOf("push", 1);
-      if (push < 0) return true;
-      // (git's own table of push's long options, hidden ones included)
-      const options = git("push", "--git-completion-helper-all").stdout.trim().split(/\s+/u);
-      const set = new Map();
-      for (const arg of argv.slice(push + 1)) {
-        if (arg === "--") break;
-        const option = arg.startsWith("--") ? pushOption(arg, options) : null;
-        for (const pruning of ["mirror", "prune"])
-          if (option === `--${pruning}`) set.set(pruning, true);
-          else if (option === `--no-${pruning}`) set.set(pruning, false);
-      }
-      return set.get("mirror") === true || set.get("prune") === true;
-    }
-    // (the parent's id: the second field after the parenthesized command name)
-    pid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
-  }
-  return null;
-}
 
 /** The archive refs the pushed `lines` would delete or move. */
 export function movedArchives(lines) {
@@ -94,15 +50,13 @@ export function replacedHeads(lines) {
 }
 
 function main() {
-  const [remote, url] = process.argv.slice(2);
+  const [, url] = process.argv.slice(2);
   const fail = (message) => {
     process.stderr.write(`archive-replaced-heads: ${message}; push refused\n`);
     process.exit(1);
   };
   if (url === undefined) fail("usage: node tools/archive-replaced-heads.mjs <remote> <url>");
   const lines = readFileSync(0, "utf8");
-  if (pruningPush(remote))
-    fail("a pruning push (--mirror or --prune) can delete archive refs unseen: push without it");
   const moved = movedArchives(lines);
   if (moved.length > 0)
     fail(`${moved.join(", ")} would be deleted or moved, and archives are kept`);
@@ -117,16 +71,50 @@ function main() {
         .map(({ ref, old }) => `${ref} is ${old} there, which this clone lacks: fetch it`)
         .join("; "),
     );
-  const pushed = git(
-    "push",
-    "--no-verify",
-    "--quiet",
-    url,
-    // (each old head once: branches that shared it share its archive)
-    ...new Set(replaced.map(({ old }) => `${old}:refs/archive/${old}`)),
+  // (each old head once: branches that shared it share its archive)
+  const olds = [...new Set(replaced.map(({ old }) => old))];
+  const refs = olds.map((old) => `refs/archive/${old}`);
+  const listed = git("ls-remote", url, ...refs);
+  if (listed.status !== 0)
+    fail(`cannot list the remote's archives (${listed.stderr.trim().split("\n").at(-1)})`);
+  // (`ls-remote` matches its patterns at the end of a ref's name: keep only the exact refs)
+  const there = new Map(
+    listed.stdout
+      .trim()
+      .split("\n")
+      .filter(Boolean)
+      .map((line) => line.split("\t").reverse())
+      .filter(([ref]) => refs.includes(ref)),
   );
-  if (pushed.status !== 0)
-    fail(`cannot archive the replaced heads (${pushed.stderr.trim().split("\n").at(-1)})`);
+  const here = new Map(
+    refs.map((ref) => [ref, git("rev-parse", "--verify", "--quiet", ref).stdout.trim()]),
+  );
+  const wrong = refs.filter(
+    (ref) =>
+      (there.has(ref) && there.get(ref) !== ref.slice(13)) ||
+      (here.get(ref) !== "" && here.get(ref) !== ref.slice(13)),
+  );
+  if (wrong.length > 0) fail(`${wrong.join(", ")} holds another commit`);
+  const toPush = olds.filter((old) => !there.has(`refs/archive/${old}`));
+  if (toPush.length > 0) {
+    const pushed = git(
+      "push",
+      "--no-verify",
+      "--quiet",
+      ...toPush.map((old) => `--force-with-lease=refs/archive/${old}:`),
+      url,
+      ...toPush.map((old) => `${old}:refs/archive/${old}`),
+    );
+    if (pushed.status !== 0)
+      fail(`cannot archive the replaced heads (${pushed.stderr.trim().split("\n").at(-1)})`);
+  }
+  // (the clone's own archive refs, so that a pruning push from it never deletes them on the remote)
+  for (const old of olds)
+    if (here.get(`refs/archive/${old}`) === "") {
+      const kept = git("update-ref", `refs/archive/${old}`, old, "");
+      if (kept.status !== 0)
+        fail(`cannot keep refs/archive/${old} in this clone (${kept.stderr.trim()})`);
+    }
   for (const { ref, old } of replaced)
     process.stderr.write(
       `archive-replaced-heads: ${ref} was ${old}: archived as refs/archive/${old}\n`,
