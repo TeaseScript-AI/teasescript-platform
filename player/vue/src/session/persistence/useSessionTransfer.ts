@@ -40,6 +40,8 @@ interface SessionTransferHost {
   readonly bridgeNow: () => PlayerBridge | null;
   /** The current connection once it is ready. */
   readonly currentConnection: () => Promise<PlayerBridge>;
+  /** How many engine connections this Player lost: a session read before a loss is no longer in a live host. */
+  readonly losses: () => number;
   readonly session: Readonly<Ref<PlayerSession | null>>;
   readonly room: Readonly<Ref<"normal" | "debug">>;
   readonly scriptStorage: ScriptStorageProvider | undefined;
@@ -74,6 +76,7 @@ export function useSessionTransfer({
   options,
   bridgeNow,
   currentConnection,
+  losses,
   session,
   room,
   scriptStorage,
@@ -180,6 +183,7 @@ export function useSessionTransfer({
     }
   }
   async function reviewedImport(transfer: SessionTransferRead): Promise<SessionImportReview> {
+    const host = liveIssuer(transfer);
     if (room.value === "debug")
       throw new StorageTransferError(
         "A session cannot be imported into the debug room. Open this script outside the debug room and import it there.",
@@ -192,8 +196,8 @@ export function useSessionTransfer({
       throw new StorageTransferError(
         "This Player does not keep sessions, so it cannot import one.",
       );
-    // Restored in the host against the held plan, as Continue would find it after a reload; its state stays there.
-    const host = await currentConnection();
+    // Restored in the host that read it, against the held plan, as Continue would find it after a reload; its state
+    // stays there.
     await asTransferError(
       host.client.request("reviewTransfer", {
         ticket: transfer.ticket,
@@ -203,6 +207,7 @@ export function useSessionTransfer({
         plan: keptOwner.scriptPlanNow()!,
       }),
     );
+    liveIssuer(transfer);
     const saved = new Set(storedValueReferences(transfer.entries));
     // Without durable captured media, a saved value's photo would not outlive this page.
     if (
@@ -229,6 +234,7 @@ export function useSessionTransfer({
         "This browser's saved data cannot be read, so nothing can be imported.",
       );
     }
+    liveIssuer(transfer);
     return {
       transfer,
       name: transfer.name ?? options.savedData?.name(keptOwner.keptScopeNow()!) ?? null,
@@ -243,29 +249,47 @@ export function useSessionTransfer({
     input: { readonly bytes: Uint8Array<ArrayBuffer> } | { readonly text: string },
   ): Promise<PlayerTransferRead> {
     const host = await currentConnection();
+    const losing = losses();
     const read = (await asTransferError(host.client.request("readTransfer", input))).result;
-    if ("ticket" in read) issuedBy.set(read.ticket, host);
+    if ("ticket" in read) issuedBy.set(read, { host, losses: losing });
     return read;
   }
   /**
-   * The connection that read each session still held for an import: its ticket names the session in that host only, so
-   * it is released there, and a connection that replaced a lost one imports nothing of it.
+   * The connection that read each session still held for an import, with this Player's count of lost connections then.
+   * Its ticket names the session in that host only, and another host may issue the same ticket: it is released there,
+   * and a read from before a loss is reviewed and imported nowhere.
    */
-  const issuedBy = new Map<string, PlayerBridge>();
-  /** The tickets of the session imports under way, which `discardSessionReview` refuses. */
-  const importedTickets = new Set<string>();
+  const issuedBy = new WeakMap<SessionTransferRead, { host: PlayerBridge; losses: number }>();
+  /**
+   * The live connection that read `transfer`; throws when a loss since then took the session it holds, or no
+   * connection of this Player read it.
+   */
+  function liveIssuer(transfer: SessionTransferRead): PlayerBridge {
+    const issued = issuedBy.get(transfer);
+    if (issued === undefined || issued.losses !== losses() || issued.host !== bridgeNow())
+      throw new StorageTransferError(
+        "The session read for this import was lost with the engine's connection. Read the file again.",
+      );
+    return issued.host;
+  }
+  /** The session reads whose imports are under way, which `discardSessionReview` refuses. */
+  const importedTickets = new Set<SessionTransferRead>();
   /**
    * Lets go of a session read for an import that will not be imported: cancelled, replaced, or refused. Throws for one
    * whose import runs: that import still needs it, and lets the dialog go of it once it settles.
    */
   function discardSessionReview(transfer: SessionTransferRead): void {
-    if (importedTickets.has(transfer.ticket))
+    if (importedTickets.has(transfer))
       throw new Error(
         "A review being imported cannot be discarded: its import still needs the session read for it.",
       );
-    const host = issuedBy.get(transfer.ticket) ?? bridgeNow();
-    issuedBy.delete(transfer.ticket);
-    void host?.client.request("releaseTransfer", { ticket: transfer.ticket }).catch(() => {});
+    const issued = issuedBy.get(transfer);
+    issuedBy.delete(transfer);
+    // Released only in a host that still holds it: a lost host's tickets went with it, and another may reuse one.
+    if (issued !== undefined && issued.losses === losses())
+      void issued.host.client
+        .request("releaseTransfer", { ticket: transfer.ticket })
+        .catch(() => {});
   }
   /**
    * Imports a reviewed session. A session of this script in progress ends first; the session's saved values replace the
@@ -286,10 +310,8 @@ export function useSessionTransfer({
         "A session cannot be imported right now. Try again in a moment.",
       );
     const { transfer } = review;
-    // A session read by a connection since lost is not in the host now: nothing of it is imported.
-    const issuer = issuedBy.get(transfer.ticket);
-    if (issuer !== undefined && issuer !== bridgeNow())
-      throw new Error("The session read for this import was lost with the engine's connection.");
+    // A session read before a loss is in no live host: nothing of it is imported.
+    liveIssuer(transfer);
     const scope = keptOwner.keptScopeNow()!;
     const plan = keptOwner.scriptPlanNow()!;
     const releaseImporting = holdImporting();
@@ -307,13 +329,15 @@ export function useSessionTransfer({
     const sessions = ctx.kept(keptOwner.keptSessionsNow());
     let failure: string | null = null;
     let ranToEnd = false;
-    importedTickets.add(transfer.ticket);
+    importedTickets.add(transfer);
     try {
       ranToEnd = await owned(ctx, async () => {
         const replaceSession = async (): Promise<void> => {
           // A session being kept is kept before the import replaces it.
           while (keptOwner.keepingNow() !== null) await keptOwner.keepingNow();
           ctx.check();
+          // Nothing is written for a session a loss took meanwhile.
+          liveIssuer(transfer);
           // Each photo and file is held under the reference the session and the values hold, as a restored kept
           // session's are; a value's is stored when the values are. One held already is the same (`reviewSessionImport`).
           const added = transfer.media.filter((medium) => !capturedMedia.knows(medium.reference));
@@ -341,9 +365,9 @@ export function useSessionTransfer({
             await sessions.discard(scope);
             discarded = true;
             ctx.check();
-            // The state as the kept session stores it, and its events as the engine writes them, from the host.
-            const host = await currentConnection();
-            ctx.check();
+            // The state as the kept session stores it, and its events as the engine writes them, from the host that read
+            // it.
+            const host = liveIssuer(transfer);
             const committed = (
               await ctx.admit(() =>
                 host.client.request("transferCommit", { ticket: transfer.ticket }),
@@ -396,7 +420,7 @@ export function useSessionTransfer({
         if (unexpected !== null) throw unexpected.error;
       });
     } finally {
-      importedTickets.delete(transfer.ticket);
+      importedTickets.delete(transfer);
       releaseImporting();
     }
     // A stale import says nothing: the page moved on.
