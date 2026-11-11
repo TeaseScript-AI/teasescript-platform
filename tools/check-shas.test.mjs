@@ -105,12 +105,6 @@ test(
         out,
         /10 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 10 skipped/u,
       );
-      // A version label before a SHA is no number: the SHA is checked.
-      for (const label of ["v", "β", "\u{1d463}"]) {
-        const version = check(`tagged ${label}1.210e785`, [directory]);
-        assert.equal(version.status, 1, `${label}: ${version.out}`);
-        assert.match(version.out, /unresolved +210e785 /u, label);
-      }
       // A commit URL is checked; a path that holds a real SHA still reports it.
       const url = check("https://github.com/o/r/commit/0123abc4567", [directory]);
       assert.equal(url.status, 1, url.out);
@@ -131,15 +125,6 @@ test(
         ["02214076e23", "about 6.02214076e23", "a float's digits"],
         ["7976931348623157e", "1.7976931348623157e is cut", null],
         ["7976931348623157e", "v7976931348623157e+308", null],
-        ["210e785", "release v1.210e785", null],
-        ["210e785", "x_1.210e785", null],
-        ["210e785", "1.1.210e785", null],
-        ["210e785", "(-1.210e785)", "a float's digits"],
-        ["210e785", "x=1.210e785", "a float's digits"],
-        ["210e785", "#1.210e785", null],
-        ["210e785", "β1.210e785", null],
-        ["210e785", "版1.210e785", null],
-        ["210e785", "\u{1d463}1.210e785", null],
         ["4322b2e0e668", "the runner's sha256 4322b2e0e668", "a file's sha256"],
         ["7ce49d8d3ba1", "(sha256: 7ce49d8d3ba1)", "a file's sha256"],
         ["7ce49d8d3ba1", "SHA256=7ce49d8d3ba1", "a file's sha256"],
@@ -150,6 +135,73 @@ test(
         ["0123abc4567", "merged as 0123abc4567", null],
       ])
         assert.equal(excuse(token, text, text.indexOf(token)), why, text);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "a float's digits are skipped only when no word character touches the number: every ASCII character and each Unicode category, on both sides",
+  { timeout: 30_000 },
+  () => {
+    const { directory } = repository();
+    try {
+      // One character of every ASCII code and one of each Unicode general category (a lone surrogate, category Cs, cannot be
+      // written as UTF-8 text). Pc and Nd beyond ASCII, and an astral letter, are named too.
+      const characters = [
+        ...Array.from({ length: 95 }, (_, n) => String.fromCharCode(32 + n)),
+        "\t",
+        "\n",
+        ..."AaǅʰĀ版\u0301\u0903\u20dd\u0663\u216b\u00b2\u203f\u2010“”‘’·±€ˆ©\u00a0\u2028\u2029\u0085\u200b\ue000\u0378",
+        "\u{1d463}",
+      ];
+      const word = /^[\p{L}\p{M}\p{N}\p{Pc}]/u;
+      // The claim, applied independently: the integer part is the ASCII digits (and a sign) before the `.`; the number
+      // stands alone when the character before them is neither a word character nor a `.`, and the one after the
+      // exponent's digits is no word character.
+      const cases = [];
+      for (const [n, character] of characters.entries()) {
+        const exponent = 100 + n;
+        const left = `${character}1.2100e${exponent}`;
+        const before = left.slice(0, left.indexOf("1.2100e")).replace(/[+-]?\d*$/u, "");
+        const leftChar = [...before].at(-1) ?? "";
+        cases.push({
+          text: left,
+          token: `2100e${exponent}`,
+          skipped: leftChar !== "." && !word.test(leftChar),
+        });
+        const mantissa = 2_100_000 + n;
+        const right = `1.${mantissa}e+${exponent}${character}`;
+        const after = right.slice(right.indexOf("+") + 1).replace(/^\d+/u, "");
+        cases.push({
+          text: right,
+          token: `${mantissa}e`,
+          skipped: !word.test([...after][0] ?? " "),
+        });
+      }
+      // (each on its own line, so that no case's text reaches another's; every token differs, so each is reported)
+      const { out } = check(cases.map((found) => `\n${found.text}\n`).join(""), [directory]);
+      for (const found of cases)
+        assert.equal(
+          !new RegExp(`unresolved +${found.token} `, "u").test(out),
+          found.skipped,
+          JSON.stringify(found.text),
+        );
+      assert.ok(cases.length > 2 * 120, `${cases.length} cases`);
+      // The issue's two numbers, in backticks and in curly quotes, and the forms earlier rounds named.
+      for (const [text, skipped] of [
+        ["`1.7976931348623157e+308`", true],
+        ["“6.02214076e23”", true],
+        ["tagged v1.210e785", false],
+        ["tagged β1.210e785", false],
+        ["tagged \u{1d463}1.210e785", false],
+        ["version 1.2.210e785", false],
+        ["1.1234567e+8oops", false],
+      ]) {
+        const { out } = check(text, [directory]);
+        assert.equal(/^unresolved /mu.test(out), !skipped, text);
+      }
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
