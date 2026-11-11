@@ -12,7 +12,8 @@ import type { Plugin } from "vite";
  *    unmounted, so a page with a scroll area, such as the transcript, never went frame-idle. The loop now stops once the
  *    position has not changed for {@link SETTLED_FRAMES} frames, and the next scroll starts it again.
  *
- * A module belongs to reka-ui when the nearest `package.json` with a `name` above its real path names `reka-ui`; that
+ * A module belongs to reka-ui when the nearest `package.json` with a `name` above its real path names `reka-ui` (its file
+ * being its ID up to the first `?` or `#`, as Vite reads it); that
  * manifest's folder is the package's root, and `dist/ScrollArea/ScrollAreaThumb.js` under it is its thumb. A build that
  * bundles a module of a reka-ui root patches that root's thumb, or fails naming the root; a build that bundles no
  * reka-ui module, as the development server's dependency scan, passes. It fails too when either patched line is not
@@ -50,7 +51,8 @@ export function rekaScrollThumbPatch(): Plugin {
     },
     transform(code, id) {
       if (id.startsWith("\0")) return;
-      const file = id.split("?")[0] ?? id;
+      // A module's file is its ID up to the first `?` or `#`, as Vite reads it; an ID that names no file is no package's.
+      const file = id.replace(/[?#].*$/su, "");
       if (!existsSync(file)) return;
       const real = realpathSync(file);
       const found = owner(dirname(real));

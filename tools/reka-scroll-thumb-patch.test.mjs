@@ -20,7 +20,8 @@ import { rekaScrollThumbPatch } from "../player/vue/reka-scroll-thumb-patch.ts";
 // `dist/ScrollArea/ScrollAreaThumb.js` or fails naming the root. A build that bundles no reka-ui module passes: the
 // development server's dependency scan runs the plugin with every package external, and refusing it skipped the
 // pre-bundling, so the server optimized dependencies while a page loaded and reloaded it (#2123). The tests below
-// generate the install shapes and thumb placements and derive each expected result from that claim.
+// generate the install shapes, thumb placements and spellings of a module's ID, and derive each expected result from that
+// claim.
 const installed = (path) =>
   fileURLToPath(new URL(`../node_modules/reka-ui/${path}`, import.meta.url));
 const PATCHED = /function settlingScrollListener/gu;
@@ -139,31 +140,41 @@ const SHAPES = {
   ],
 };
 
+/** How an import spells a module: Vite reads the file up to the first `?` or `#` and keeps the rest in its ID. */
+const SPELLINGS = {
+  "a plain path": "",
+  "a query": "?probe",
+  "a fragment": "#probe",
+  "a fragment, then a query": "#probe?x",
+  "a query, then a fragment": "?x#probe",
+};
+
 for (const [shape, layout] of Object.entries(SHAPES))
   for (const thumb of ["present", "moved", "absent"])
-    test(`${shape}, thumb ${thumb}`, async (t) => {
-      const root = scratch(t);
-      write(join(root, "package.json"), JSON.stringify({ name: "fixture" }));
-      const copies = layout(root, thumb);
-      const imports = copies.flatMap((copy) =>
-        rekaCopy(copy.lives ?? join(root, copy.via), copy.thumb, copy).map(
-          (path) => `./${copy.via}/${path}`,
-        ),
-      );
-      const packages = copies.filter((copy) => copy.lives !== null);
-      const unpatched = packages.filter((copy) => copy.thumb !== "present");
-      const built = bundle(root, importing(imports));
-      if (unpatched.length > 0) {
-        const message = await built.then(
-          () => "",
-          (error) => String(error.message),
+    for (const [spelling, suffix] of Object.entries(SPELLINGS))
+      test(`${shape}, thumb ${thumb}, imported by ${spelling}`, async (t) => {
+        const root = scratch(t);
+        write(join(root, "package.json"), JSON.stringify({ name: "fixture" }));
+        const copies = layout(root, thumb);
+        const imports = copies.flatMap((copy) =>
+          rekaCopy(copy.lives ?? join(root, copy.via), copy.thumb, copy).map(
+            (path) => `./${copy.via}/${path}${suffix}`,
+          ),
         );
-        assert.ok(
-          unpatched.some((copy) => message.includes(`reka-ui at ${copy.lives} was bundled`)),
-          `the failure names an unpatched root: ${message || "the build passed"}`,
-        );
-      } else assert.equal((await built).match(PATCHED)?.length ?? 0, packages.length);
-    });
+        const packages = copies.filter((copy) => copy.lives !== null);
+        const unpatched = packages.filter((copy) => copy.thumb !== "present");
+        const built = bundle(root, importing(imports));
+        if (unpatched.length > 0) {
+          const message = await built.then(
+            () => "",
+            (error) => String(error.message),
+          );
+          assert.ok(
+            unpatched.some((copy) => message.includes(`reka-ui at ${copy.lives} was bundled`)),
+            `the failure names an unpatched root: ${message || "the build passed"}`,
+          );
+        } else assert.equal((await built).match(PATCHED)?.length ?? 0, packages.length);
+      });
 
 test("a build that bundles no reka-ui module, as the dependency scan, passes", async (t) => {
   const code = await bundle(scratch(t), 'import { Label } from "reka-ui";\nconsole.log(Label);\n');
