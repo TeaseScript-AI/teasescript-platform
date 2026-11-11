@@ -78,7 +78,7 @@ const REPRESENTATIVES = {
   "package manifest": ["package.json", Object.keys(PROJECTS)],
 };
 
-test("each changed path needs its project's checks and, but for documentation, test:lint's; an unknown path every project's", () => {
+test("each changed path needs its project's checks and, but for documentation, test:lint's and typecheck:player's; an unknown path every project's", () => {
   // Every project has a representative, so a new project cannot go unchecked here.
   for (const name of Object.keys(PROJECTS))
     assert.ok(name in REPRESENTATIVES, `${name} has a representative`);
