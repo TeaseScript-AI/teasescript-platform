@@ -61,9 +61,10 @@
 // holding `import(` or `@import`. A changed file of any other type, `.vue` and `.html` among them, is outside the rule:
 // the report lists it as `not compared (unparsed)`, and `vue-tsc` and the move's compiler run are its witness. A side
 // that is no regular file (a gitlink, mode 160000, or a symbolic link, 120000), whose content is no file's text, is
-// never read: it gives no bindings, the resolver sees no such file (a linked `tsconfig.json` or `package.json` is
-// none), each of its added or removed lines is unadmitted unless declared, whether Git marks it moved or it is
-// whitespace (a submodule's new commit is no move), and the report lists it as `not compared (not a regular file)`.
+// never parsed or resolved (a link's blob is read only to check a declaration of it is UTF-8): it gives no bindings,
+// the resolver sees no such file (a linked `tsconfig.json` or `package.json` is none), each of its added or removed
+// lines is unadmitted unless declared, whether Git marks it moved or it is whitespace (a submodule's new commit is no
+// move), and the report lists it as `not compared (not a regular file)`.
 //
 // The report always ends with the change's shape: the moved lines, the admitted lines by form, the declared lines, the
 // bindings differing and the refused specifiers.
@@ -891,7 +892,8 @@ export function checkMove(
       ["cat-file", "blob", `${side === "removed" ? mergeBase : "HEAD"}:${file}`],
       { cwd, maxBuffer: 256 * 1024 * 1024 },
     );
-    // (a file not on that side, or a gitlink, has no blob: its declarations are reported as matching nothing)
+    // (a file not on that side has no blob and stays unmatched; a gitlink has none either, but Git's line for it,
+    // `Subproject commit …`, can be declared)
     if (read.status !== 0) continue;
     try {
       decoder.decode(read.stdout);
