@@ -2,19 +2,21 @@
 // `tests/helpers/player-modules.ts` refuses a bundle whose stamp differs from the checkout's walk, so a compiled test
 // cannot run against Player or engine code older than its own.
 //
-// The stamp covers locations, not the bundle's module graph: every file under `src/` and `player/` (no folder named
-// `node_modules` is entered) and every root entry except the checkout's own bookkeeping (`ROOT_BOOKKEEPING`). A root
-// entry is a regular file, or a link to one, directly in the repository root; a folder, or a link to a folder (such as
-// the `node_modules` that `check-changed` links into a worktree), is not. Each is recorded by its path from the root with `/`: a file by the SHA-256 of its content; a
-// symlink to a file by its target's identity (its path from the root, or its absolute path outside it) and that content;
-// a symlink to a folder, a broken symlink, or an unreadable entry by what it is, which fails the build. The set of paths
-// is part of the stamp, so an added, removed or renamed file is a change.
+// The stamp covers locations, not the bundle's module graph: every file under `src/` and `player/` (a folder named
+// `node_modules`, or a link to one, is not entered; a file of that name is an entry) and every root entry except the
+// checkout's own bookkeeping (`ROOT_BOOKKEEPING`). A root entry is a regular file, or a link to one, directly in the
+// repository root; a folder, or a link to a folder (such as the `node_modules` that `check-changed` links into a
+// worktree), is not. Each is recorded by its path from the root with `/`: a file by the SHA-256 of its content; a
+// symlink to a file by its target's identity (its path from the root, or its absolute path outside it) and that
+// content; a symlink to a folder, a broken symlink, or an unreadable entry by what it is, which fails the build. The
+// set of paths is part of the stamp, so an added, removed or renamed file is a change.
 //
 // The build also fails, so that no input of another kind passes unstamped, on: a bundled module outside the area that
-// is neither under `node_modules` nor a bundler module (`\0`); a configuration file or a file it imports outside the
-// area; a bundled module with a query or of a type other than `.ts`, `.mts`, `.cts`, `.js`, `.mjs`, `.cjs` or `.json`;
-// a `tsconfig*.json` in the area, or a file it reaches by local `extends` or `references`, that cannot be read, has a
-// malformed edge, or reaches outside the area.
+// is neither under `node_modules` nor a bundler module (`\0`); an `envDir` outside the area; a configuration file or a
+// file it imports outside the area; a bundled module with a query or of a type other than `.ts`, `.mts`, `.cts`, `.js`,
+// `.mjs`, `.cjs` or `.json`; a `tsconfig*.json` in the area, or a file it reaches by `extends` or `references` as
+// TypeScript resolves them, that TypeScript reports a diagnostic on, cannot be read, or lies outside the area (an
+// `extends` target may be a package's).
 //
 // The check attests the stamped file set, contents and link identities under the canonical build invocation
 // (`npm run build:player-test-modules`). Not attested: another CLI or API mode or inline options; files that
@@ -75,26 +77,29 @@ function entry(root: string, path: string): string {
   }
 }
 
+const folderLink = (path: string) =>
+  lstatSync(path).isSymbolicLink() && existsSync(path) && statSync(path).isDirectory();
+
 /** The stamp of the area under `root`: path from the root to entry, in path order. */
 export function walkSources(checkout: string): Map<string, string> {
   // Link targets are named from the root's real path, as whichever path reached the checkout.
   const root = realpathSync(checkout);
   const stamp = new Map<string, string>();
   const add = (path: string) => stamp.set(slashes(relative(root, path)), entry(root, path));
+  // Only a folder named `node_modules`, or a link to one, is not entered; a file of that name is an entry like any other.
   const walk = (folder: string) => {
     for (const item of readdirSync(folder, { withFileTypes: true })) {
       const path = join(folder, item.name);
-      if (item.name === "node_modules") continue;
-      if (item.isDirectory()) walk(path);
-      else add(path);
+      if (item.isDirectory()) {
+        if (item.name !== "node_modules") walk(path);
+      } else if (item.name !== "node_modules" || !folderLink(path)) add(path);
     }
   };
   // The root's folders, and its links to folders (a linked `node_modules`), are not its files.
   for (const item of readdirSync(root, { withFileTypes: true })) {
     const path = join(root, item.name);
     if (item.isDirectory() || ROOT_BOOKKEEPING.has(item.name)) continue;
-    if (item.isSymbolicLink() && existsSync(path) && statSync(path).isDirectory()) continue;
-    add(path);
+    if (!folderLink(path)) add(path);
   }
   // An area folder is walked when it is a folder; a link in its place is judged as any entry, so a link to a folder fails.
   for (const folder of AREA_FOLDERS) {
@@ -111,53 +116,64 @@ function inArea(root: string, file: string): boolean {
   const path = relative(root, file);
   const parts = slashes(path).split("/");
   const first = parts[0] ?? "";
-  if (isAbsolute(path) || first === "" || first === ".." || parts.includes("node_modules"))
+  // A folder named `node_modules` on the way is a dependency's; a file of that name is not.
+  if (
+    isAbsolute(path) ||
+    first === "" ||
+    first === ".." ||
+    parts.slice(0, -1).includes("node_modules")
+  )
     return false;
   return parts.length === 1 ? !ROOT_BOOKKEEPING.has(first) : AREA_FOLDERS.includes(first);
 }
 
+/** Whether `file` lies in a folder named `node_modules`: a dependency's. */
 const dependency = (file: string) => slashes(file).includes("/node_modules/");
 
+/** The files a parsed `tsconfig*.json` extends, as TypeScript resolved them (its `configFile`, typed only internally). */
+export function extendedFiles(options: Record<string, unknown>): string[] {
+  const { configFile } = options;
+  const files: unknown =
+    typeof configFile === "object" && configFile !== null && "extendedSourceFiles" in configFile
+      ? configFile.extendedSourceFiles
+      : undefined;
+  return Array.isArray(files) ? files.filter((file) => typeof file === "string") : [];
+}
+
 /**
- * The local files a `tsconfig*.json` reaches by `extends` and `references`, recursively; throws on a file that cannot
- * be read, a malformed edge, or a target outside the area. A reference is always a local path; an `extends` that is no
- * relative or absolute path names a package, a dependency, and ends the walk.
+ * Checks the files a `tsconfig*.json` reaches by `extends` and `references`, recursively, as TypeScript itself resolves
+ * them (`getParsedCommandLineOfConfigFile`, `resolveProjectReferencePath`); throws on a diagnostic of the file, or on a
+ * target that cannot be read or lies outside the area. An `extends` target may be a package's, under `node_modules`.
  */
-async function tsconfigClosure(root: string, start: string, seen: Set<string>): Promise<void> {
+export async function tsconfigClosure(
+  root: string,
+  start: string,
+  seen = new Set<string>(),
+): Promise<void> {
   if (seen.has(start)) return;
   seen.add(start);
   const { default: ts } = await import("typescript-vue");
-  const parsed = ts.parseConfigFileTextToJson(start, readFileSync(start, "utf8"));
-  if (parsed.error !== undefined || typeof parsed.config !== "object" || parsed.config === null)
-    throw new Error(`${start} cannot be read as a tsconfig`);
-  const config: Record<string, unknown> = parsed.config;
-  const edges: string[] = [];
-  const local = (edge: string) => edge.startsWith(".") || isAbsolute(edge);
-  const extendsValue = config.extends;
-  if (typeof extendsValue === "string") edges.push(...[extendsValue].filter(local));
-  else if (Array.isArray(extendsValue) && extendsValue.every((each) => typeof each === "string"))
-    edges.push(...extendsValue.filter(local));
-  else if (extendsValue !== undefined) throw new Error(`${start} has a malformed "extends"`);
-  const references = config.references;
-  if (references !== undefined) {
-    if (!Array.isArray(references)) throw new Error(`${start} has malformed "references"`);
-    for (const reference of references) {
-      const path: unknown =
-        typeof reference === "object" && reference !== null && "path" in reference
-          ? reference.path
-          : undefined;
-      if (typeof path !== "string") throw new Error(`${start} has a malformed reference`);
-      edges.push(path);
-    }
-  }
-  for (const edge of edges) {
-    const base = resolve(dirname(start), edge);
-    const target = [base, `${base}.json`, join(base, "tsconfig.json")].find(
-      (candidate) => existsSync(candidate) && statSync(candidate).isFile(),
-    );
-    if (target === undefined) throw new Error(`${start} reaches ${edge}, which does not resolve`);
-    if (!inArea(root, realpathSync(target)) || !inArea(root, target))
-      throw new Error(`${start} reaches ${target}, outside the stamped area`);
+  const diagnostics: string[] = [];
+  const parsed = ts.getParsedCommandLineOfConfigFile(start, undefined, {
+    ...ts.sys,
+    onUnRecoverableConfigFileDiagnostic: (diagnostic) =>
+      diagnostics.push(ts.flattenDiagnosticMessageText(diagnostic.messageText, " ")),
+  });
+  // "No inputs were found" (18003) concerns the files the configuration compiles, not the configuration.
+  for (const diagnostic of parsed?.errors ?? [])
+    if (diagnostic.category === ts.DiagnosticCategory.Error && diagnostic.code !== 18003)
+      diagnostics.push(ts.flattenDiagnosticMessageText(diagnostic.messageText, " "));
+  if (parsed === undefined || diagnostics.length > 0)
+    throw new Error(`${start} cannot be read as a tsconfig: ${diagnostics.join("; ")}`);
+  const readable = (target: string) => existsSync(target) && statSync(target).isFile();
+  const inside = (target: string) => inArea(root, realpathSync(target)) && inArea(root, target);
+  for (const target of extendedFiles(parsed.options))
+    if (!readable(target) || !(inside(target) || dependency(realpathSync(target))))
+      throw new Error(`${start} extends ${target}, outside the stamped area or unreadable`);
+  for (const reference of parsed.projectReferences ?? []) {
+    const target = ts.resolveProjectReferencePath(reference);
+    if (!readable(target) || !inside(target))
+      throw new Error(`${start} references ${target}, outside the stamped area or unreadable`);
     await tsconfigClosure(root, target, seen);
   }
 }
@@ -183,6 +199,11 @@ export function testModulesSources(): Plugin {
           this.error(
             `test-modules-sources: the configuration reads ${file}, outside the stamped area`,
           );
+      // Vite reads the `.env` files of `envDir` (`false` reads none); they are stamped as files of that folder.
+      if (config.envDir !== false && !inArea(root, join(config.envDir, ".env")))
+        this.error(
+          `test-modules-sources: the configuration reads .env files from ${config.envDir}, outside the stamped area`,
+        );
       const seen = new Set<string>();
       for (const path of stamp.keys())
         if (/(?:^|\/)tsconfig[^/]*\.json$/u.test(path))
