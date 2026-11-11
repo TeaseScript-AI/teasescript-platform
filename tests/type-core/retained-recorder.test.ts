@@ -431,6 +431,28 @@ test("an accessor at an array's index, or a class's `constructor` getter, is nev
   assert.equal(reads, 0);
 });
 
+test("a value deeper than the call stack is walked whole: a change at its bottom is named unless amended", () => {
+  const { unmarked, marked } = controlled((mark) => {
+    interface Link {
+      value: number;
+      next: Link | null;
+    }
+    const bottom: Link = { value: 1, next: null };
+    let top = bottom;
+    for (let depth = 0; depth < 100_000; depth += 1) top = { value: 0, next: top };
+    const map = Retained.map<string, Link>("T.deep");
+    return [
+      () => map.set("d", top),
+      () => {
+        bottom.value = 2;
+        mark(bottom);
+      },
+    ];
+  });
+  assert.deepEqual(unmarked, ['unrecorded change: T.deep at "d"']);
+  assert.deepEqual(marked, []);
+});
+
 test("a demand's factory runs as its own run: its caller's amend does not cover the change it makes", () => {
   // (an eager factory, `make` an ordinary function, and a generator one change the payload alike)
   for (const eager of [true, false]) {

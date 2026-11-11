@@ -163,6 +163,26 @@ export interface RecorderReport {
   readonly exercised: ReadonlyMap<string, Exercised>;
 }
 
+/** A value's fingerprint and whether it reaches an object the run amended (`Recorder.#value`). */
+interface Fingerprint {
+  readonly hash: string;
+  readonly amended: boolean;
+}
+
+/** One part of an object's fingerprint: a text of its own, or a child walked in its place. */
+type Item =
+  | { readonly text: string; readonly child?: undefined }
+  | { readonly text?: undefined; readonly child: unknown };
+
+/** An object on the walk's stack: its parts so far, and its next item (`Recorder.#value`). */
+interface Frame {
+  readonly value: object;
+  readonly items: readonly Item[];
+  at: number;
+  readonly parts: string[];
+  reached: boolean;
+}
+
 /** The recorded changes of one owner field or collection (`RecorderReport.exercised`). */
 export interface Exercised {
   written: number;
@@ -204,7 +224,7 @@ export class Recorder implements RetainedRecorder {
   readonly #locate: boolean;
   readonly #census: boolean;
   /** Each object's fingerprint at the last checkpoint, kept only where `locate` asks for it. */
-  #lastMemo = new Map<WeakKey, { readonly hash: string; readonly amended: boolean }>();
+  #lastMemo = new Map<WeakKey, Fingerprint>();
   readonly #ids = new WeakMap<WeakKey, number>();
   readonly #symbols = new Map<symbol, number>();
   #next = 1;
@@ -466,7 +486,7 @@ export class Recorder implements RetainedRecorder {
   public checkpoint(): void {
     this.#checkpoints += 1;
     const marks = this.#marksOf(this.#run);
-    const memo = new Map<WeakKey, { readonly hash: string; readonly amended: boolean }>();
+    const memo = new Map<WeakKey, Fingerprint>();
     const after = new Map<string, string>();
     const changed = (
       entry: string,
@@ -489,7 +509,7 @@ export class Recorder implements RetainedRecorder {
         seen.amended += 1;
         return;
       }
-      const where = this.#locate ? ` (changed at ${this.#where(value, memo, "")})` : "";
+      const where = this.#locate ? ` (changed at ${this.#where(value, memo)})` : "";
       const text = `unrecorded change: ${label}${where}`;
       if (!this.#seen.has(text)) {
         this.#seen.add(text);
@@ -511,7 +531,7 @@ export class Recorder implements RetainedRecorder {
       // (a map's value at each key, a set's member itself: each its own entry, by value)
       for (const [key, value, keyed] of listed) {
         const held = keyed ? value : key;
-        const node = this.#value(held, memo, marks.amended, []);
+        const node = this.#value(held, memo, marks.amended);
         changed(
           this.#keyEntry(collection.id, key),
           node.hash,
@@ -536,7 +556,7 @@ export class Recorder implements RetainedRecorder {
         `${record.name}'s fields`,
       );
       for (const [field, value] of fields) {
-        const node = this.#value(value, memo, marks.amended, []);
+        const node = this.#value(value, memo, marks.amended);
         changed(
           `O${record.id}.${field}`,
           node.hash,
@@ -553,69 +573,117 @@ export class Recorder implements RetainedRecorder {
     this.#fresh = false;
   }
 
-  /** A value's fingerprint, and whether it reaches an object the run amended. */
-  #value(
-    value: unknown,
-    memo: Map<WeakKey, { readonly hash: string; readonly amended: boolean }>,
-    amended: WeakSet<WeakKey>,
-    stack: WeakKey[],
-  ): { readonly hash: string; readonly amended: boolean } {
+  /**
+   * A value's fingerprint, and whether it reaches an object the run amended: walked depth first with a stack of its
+   * own, so a value of any depth fits, each object's parts its items' (`#items`) in order.
+   */
+  #value(root: unknown, memo: Map<WeakKey, Fingerprint>, amended: WeakSet<WeakKey>): Fingerprint {
+    const leaf = this.#leaf(root, memo);
+    if (leaf !== null) return leaf;
+    const onPath = new Set<object>();
+    const frames: Frame[] = [];
+    const open = <T extends object>(value: T): void => {
+      onPath.add(value);
+      frames.push({
+        value,
+        items: this.#items(value),
+        at: 0,
+        parts: [],
+        reached: amended.has(value),
+      });
+    };
+    // EVIDENCE: invariant: `#leaf` answers every primitive and function, so `root` is an object here.
+    open(root as object);
+    let result: Fingerprint | null = null;
+    while (frames.length > 0) {
+      const frame = frames.at(-1)!;
+      const item = frame.items[frame.at];
+      if (item === undefined) {
+        frames.pop();
+        onPath.delete(frame.value);
+        const node = { hash: hashText(frame.parts.join("|")), amended: frame.reached };
+        memo.set(frame.value, node);
+        const parent = frames.at(-1);
+        if (parent === undefined) result = node;
+        else {
+          parent.parts.push(node.hash);
+          parent.reached ||= node.amended;
+        }
+        continue;
+      }
+      frame.at += 1;
+      if (item.text !== undefined) {
+        frame.parts.push(item.text);
+        continue;
+      }
+      const known = this.#leaf(item.child, memo);
+      if (known !== null) {
+        frame.parts.push(known.hash);
+        frame.reached ||= known.amended;
+        continue;
+      }
+      // EVIDENCE: invariant: `#leaf` answers every primitive and function, so the child is an object here.
+      const child = item.child as object;
+      // (an object on the walk's own path is a cycle: its identity only)
+      if (onPath.has(child)) frame.parts.push(`^${this.#id(child)}`);
+      else open(child);
+    }
+    return result!;
+  }
+
+  /** A value's fingerprint where no walk is needed: a primitive, a function, a registered object, or one walked already. */
+  #leaf(value: unknown, memo: Map<WeakKey, Fingerprint>): Fingerprint | null {
     if ((typeof value !== "object" && typeof value !== "function") || value === null)
       return { hash: this.#atom(value), amended: false };
     if (typeof value === "function") return { hash: `F${this.#id(value)}`, amended: false };
-    // (a retained collection or owner met inside a value is compared as its own entries; here only its identity)
+    // (a retained collection or owner met inside a value is compared as its own entries: here its identity only, so its
+    // mark covers its own entries, never this one's)
     const reference = this.#registered.get(value);
-    // (its identity only, so its mark covers its own entries, never this one's)
     if (reference !== undefined) return { hash: reference, amended: false };
-    if (stack.includes(value)) return { hash: `^${this.#id(value)}`, amended: false };
-    const known = memo.get(value);
-    if (known !== undefined) return known;
-    let reached = amended.has(value);
-    const parts: string[] = [];
-    const part = (child: unknown): void => {
-      const node = this.#value(child, memo, amended, stack);
-      reached ||= node.amended;
-      parts.push(node.hash);
-    };
-    stack.push(value);
+    return memo.get(value) ?? null;
+  }
+
+  /** An object's parts in order: its kind's texts and the children walked after them (`#value`). */
+  #items<T extends object>(value: T): Item[] {
+    const items: Item[] = [];
     const prototype: unknown = Object.getPrototypeOf(value);
     const listed = IDENTITY_CLASSES.get(constructorOf(value));
     // (a built-in's own fields beyond its contents are walked too: an array's elements are its index fields)
     const fields = (indices: boolean): void => {
       for (const [key, field] of this.#ownFields(value)) {
         if (!indices && INDEX.test(key)) continue;
-        parts.push(JSON.stringify(key));
-        part(field);
+        items.push({ text: JSON.stringify(key) }, { child: field });
       }
     };
     if (prototype === Array.prototype) {
       // EVIDENCE: invariant: an object whose prototype is `Array.prototype` is an array.
-      parts.push(`[${(value as unknown[]).length}`);
+      const { length } = value as unknown[];
+      items.push({ text: `[${length}` });
       fields(true);
     } else if (TYPED.has(prototype)) {
       // (a typed array's or a data view's bytes are plain data)
       // EVIDENCE: invariant: an object whose prototype is a built-in view's is that view.
       const view = value as ArrayBufferView;
-      parts.push(`T${new Uint8Array(view.buffer, view.byteOffset, view.byteLength).join(",")}`);
+      items.push({
+        text: `T${new Uint8Array(view.buffer, view.byteOffset, view.byteLength).join(",")}`,
+      });
       fields(false);
     } else if (prototype === Map.prototype) {
-      parts.push("M");
+      items.push({ text: "M" });
       // EVIDENCE: invariant: an object whose prototype is `Map.prototype` is a map.
-      for (const [key, element] of value as Map<unknown, unknown>) {
-        part(key);
-        part(element);
-      }
+      for (const [key, element] of value as Map<unknown, unknown>)
+        items.push({ child: key }, { child: element });
       fields(true);
     } else if (prototype === Set.prototype) {
-      parts.push("S");
+      items.push({ text: "S" });
       // EVIDENCE: invariant: an object whose prototype is `Set.prototype` is a set.
-      for (const element of value as Set<unknown>) part(element);
+      for (const element of value as Set<unknown>) items.push({ child: element });
       fields(true);
     } else if (prototype === WeakMap.prototype || prototype === WeakSet.prototype) {
       this.#violation(`a native weak collection in retained state, which cannot be listed`);
-      parts.push(`W${this.#id(value)}`);
+      items.push({ text: `W${this.#id(value)}` });
     } else if (PLAIN.has(prototype) || (this.#census && listed?.census === true)) {
-      parts.push("{");
+      items.push({ text: "{" });
       fields(true);
     } else {
       const name = listed?.name ?? className(value);
@@ -624,36 +692,46 @@ export class Recorder implements RetainedRecorder {
         this.#violation(
           `an instance of ${name}, a class not in IDENTITY_CLASSES, in retained state`,
         );
-      parts.push(`C${name}#${this.#id(value)}`);
+      items.push({ text: `C${name}#${this.#id(value)}` });
     }
-    stack.pop();
-    const node = { hash: hashText(parts.join("|")), amended: reached };
-    memo.set(value, node);
-    return node;
+    return items;
   }
 
   /**
    * Where within `value` its change stands: down the children whose fingerprints changed since the last checkpoint, to
    * the object whose own fields changed (`locate`).
    */
-  #where(value: unknown, memo: Map<WeakKey, { readonly hash: string }>, path: string): string {
-    if (typeof value !== "object" || value === null) return path || "(the value itself)";
-    const children: [string, unknown][] = [
-      ...(value instanceof Map
-        ? [...value].map(([key, each]): [string, unknown] => [`.get(${this.#atom(key)})`, each])
-        : value instanceof Set
-          ? [...value].map((each, index): [string, unknown] => [`{${index}}`, each])
-          : []),
-      ...this.#ownFields(value).map(([key, each]): [string, unknown] => [`.${key}`, each]),
-    ];
-    for (const [step, child] of children) {
-      if (typeof child !== "object" || child === null || this.#registered.has(child)) continue;
-      const now = memo.get(child)?.hash;
-      const then = this.#lastMemo.get(child)?.hash;
-      if (now !== undefined && then !== undefined && now !== then)
-        return this.#where(child, memo, path + step);
+  #where(start: unknown, memo: Map<WeakKey, { readonly hash: string }>): string {
+    let value = start;
+    let path = "";
+    const seen = new Set<unknown>();
+    for (;;) {
+      if (typeof value !== "object" || value === null) return path || "(the value itself)";
+      seen.add(value);
+      const children: [string, unknown][] = [
+        ...(value instanceof Map
+          ? [...value].map(([key, each]): [string, unknown] => [`.get(${this.#atom(key)})`, each])
+          : value instanceof Set
+            ? [...value].map((each, index): [string, unknown] => [`{${index}}`, each])
+            : []),
+        ...this.#ownFields(value).map(([key, each]): [string, unknown] => [`.${key}`, each]),
+      ];
+      const next = children.find(([, child]) => {
+        if (
+          typeof child !== "object" ||
+          child === null ||
+          this.#registered.has(child) ||
+          seen.has(child)
+        )
+          return false;
+        const now = memo.get(child)?.hash;
+        const then = this.#lastMemo.get(child)?.hash;
+        return now !== undefined && then !== undefined && now !== then;
+      });
+      if (next === undefined) return `${path || "(the value)"} (${className(value)})`;
+      path += next[0];
+      value = next[1];
     }
-    return `${path || "(the value)"} (${className(value)})`;
   }
 
   /**
