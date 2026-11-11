@@ -183,29 +183,35 @@ export function copySentence(
   const numbers = typeText(rule.type.map((kind) => (kind === "integer" ? "number" : kind)));
   if (declared === null || numbers === null) return null;
   const from = `'${copied.name}', declared '${declared}' on line ${source.line(copied.site)}.`;
-  if (copied.form === "value" && rule.steps.length === 0) {
-    const code = typeAt(numbers, diagnosed);
-    const fix = code === null ? null : declarationCode(root, code, source, diagnosed);
-    return fix === null
-      ? null
-      : `${capitalized(rule.into)} holds ${described(rule.type)} because it is a copy of ${from} ` +
-          `To store other numbers in it, write '${fix}'.`;
+  // (one row per form a copy reaches the place by; a form without one does not compile)
+  switch (copied.form) {
+    case "value": {
+      // (the variable itself is the copy: no step below it)
+      if (rule.steps.length > 0) return null;
+      const code = typeAt(numbers, diagnosed);
+      const fix = code === null ? null : declarationCode(root, code, source, diagnosed);
+      return fix === null
+        ? null
+        : `${capitalized(rule.into)} holds ${described(rule.type)} because it is a copy of ${from} ` +
+            `To store other numbers in it, write '${fix}'.`;
+    }
+    case "elements": {
+      // (the list's or set's own elements are the copies: no dict, no property or collection above them)
+      const collection = elementOf(rule);
+      if (collection === null || !collection.root || collection.kind === "dict") return null;
+      const held = typeText(rule.type);
+      const code = typeAt(collectionText(collection.kind, numbers), diagnosed);
+      const fix = code === null ? null : declarationCode(root, code, source, diagnosed);
+      return held === null || fix === null
+        ? null
+        : `'${collection.name}' holds ${plural(rule.type)} (${collectionText(collection.kind, held)}) because ` +
+            `its elements are copies of ${from} To add other numbers to it, write '${fix}'.`;
+    }
+    default: {
+      const unknown: never = copied.form;
+      return unknown;
+    }
   }
-  const collection = elementOf(rule);
-  if (
-    copied.form !== "elements" ||
-    collection === null ||
-    !collection.root ||
-    collection.kind === "dict"
-  )
-    return null;
-  const held = typeText(rule.type);
-  const code = typeAt(collectionText(collection.kind, numbers), diagnosed);
-  const fix = code === null ? null : declarationCode(root, code, source, diagnosed);
-  return held === null || fix === null
-    ? null
-    : `'${collection.name}' holds ${plural(rule.type)} (${collectionText(collection.kind, held)}) because its ` +
-        `elements are copies of ${from} To add other numbers to it, write '${fix}'.`;
 }
 
 /**
