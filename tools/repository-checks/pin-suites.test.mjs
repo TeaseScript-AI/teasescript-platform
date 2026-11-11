@@ -277,6 +277,11 @@ test("a mark is read from a file's first line only, whole, naming test files, an
     // (a regex that also finds a declaration, which outlives the values below it)
     "tests/decl.test.ts":
       "// pins: a table | line /^const T\\b|^\\s+\\d+,$/u\nconst T = [\n  1,\n];\n",
+    // (digits that are no literal value: in a comment, a type's name, a name, a text that is no digest)
+    "tests/v1.test.ts": "// pins: a comment | line /^const C\\b/u\nconst C = []; // 64\n",
+    "tests/v2.test.ts": "// pins: a type | line /^type T2\\b/u\ntype T2 = Array<number>;\n",
+    "tests/v3.test.ts": "// pins: a name | line /^const T/u\nconst Tα2 = x;\n",
+    "tests/v4.test.ts": '// pins: a text | line /^const S\\b/u\nconst S = "version 64";\n',
     // (a file with CRLF line ends reads as one with LF, its mark and its pin line alike)
     "tests/crlf.test.ts": "// pins: a crlf total | line /^const A=1;$/u\r\nconst A=1;\r\n",
     "tests/g.test.ts": "// pins: a stateful line | line /x/gu\nx\n",
@@ -310,9 +315,13 @@ test("a mark is read from a file's first line only, whole, naming test files, an
   assert.deepEqual(faults, [
     "tests/c.test.ts:1: no mark: use // pins[ for <suite>, ...]: <what> | line /<regex>/",
     "tests/d.test.ts:1: the mark's line is no regex: Invalid regular expression: /(/u: Unterminated group",
-    "tests/decl.test.ts:1: /^const T\\b|^\\s+\\d+,$/u finds line 2, which holds no number or digest",
+    "tests/decl.test.ts:1: /^const T\\b|^\\s+\\d+,$/u finds line 2, which holds no numeric or hex digest literal",
     "tests/e.test.ts:1: no line of the file but the mark's own is a line /only itself/u finds",
     "tests/g.test.ts:1: the mark's line takes no g or y flag",
+    "tests/v1.test.ts:1: /^const C\\b/u finds line 2, which holds no numeric or hex digest literal",
+    "tests/v2.test.ts:1: /^type T2\\b/u finds line 2, which holds no numeric or hex digest literal",
+    "tests/v3.test.ts:1: /^const T/u finds line 2, which holds no numeric or hex digest literal",
+    "tests/v4.test.ts:1: /^const S\\b/u finds line 2, which holds no numeric or hex digest literal",
     "tests/helpers/f.ts:1: tests/none.test.ts is no test file",
     "tests/helpers/late.ts:2: a mark is a file's first line",
   ]);

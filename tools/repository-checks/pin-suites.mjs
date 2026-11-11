@@ -2,6 +2,7 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ts } from "ts-morph";
 import { suiteTestFiles } from "../test-shards.mjs";
 
 // The suites that pin the type core's exact work or its published answers, and the focused list a change needs:
@@ -24,20 +25,21 @@ import { suiteTestFiles } from "../test-shards.mjs";
 // faults.
 //
 // The marks are the authority; each mark's regex must find a line of its file other than the mark, and every line it
-// finds must hold a number or hex digest literal, so that a mark whose values are deleted finds nothing. Their test
-// (`pin-suites.test.mjs`) finds four pin forms by their text (`PIN_FORMS`): an `assert.equal` of `.total` to a literal
-// of four or more digits, a table of four or more such literals, a `[count, "reason"]` record, and, in the type core's
-// tests only (`FORM_SCOPES`), a property set to a hex digest of 16 or more digits: a digest pin written in another test
-// file is not found. A pin written another way (`strictEqual`, `deepEqual` of a short tuple or an object, a total under
-// four digits, a helper's table, a nested table such as work-a's) is not found; that test is a net over every `.ts`
-// file under `tests/`, helpers included, for a file holding pins with no mark, and `NOT_PINS` declares the files it
-// finds that pin no work. Under `tests/helpers/type-core/families/` it also requires every recorded bound to be a line
-// a mark of that file finds, and claims a position, not a meaning: in the code of that folder, neither `main` nor
-// `measured` occurs outside the admitted positions. Comments, JSDoc and marks included, are not code and are not read
-// there: they cannot record or change a bound. The code is every node `forEachChild` reaches from a file's source;
-// every identifier, private name, string and template without substitutions spelled so is classified by its role.
-// Admitted are `main: <object literal>` and `measured: <numeric literal>` (the two records), a property signature, and
-// the identifier `main` as a declared, imported or exported binding or as a callee (the program builder). Any other
+// finds must hold a numeric or hex digest literal in its code (`valueLines`: a digit in a comment, a name, a type or
+// another string is none), so that a mark whose values are deleted finds nothing. Their test (`pin-suites.test.mjs`)
+// finds four pin forms by their text (`PIN_FORMS`): an `assert.equal` of `.total` to a literal of four or more digits,
+// a table of four or more such literals, a `[count, "reason"]` record, and, in the type core's tests only
+// (`FORM_SCOPES`), a property set to a hex digest of 16 or more digits: a digest pin written in another test file is
+// not found. A pin written another way (`strictEqual`, `deepEqual` of a short tuple or an object, a total under four
+// digits, a helper's table, a nested table such as work-a's) is not found; that test is a net over every `.ts` file
+// under `tests/`, helpers included, for a file holding pins with no mark, and `NOT_PINS` declares the files it finds
+// that pin no work. Under `tests/helpers/type-core/families/` it also requires every recorded bound to be a line a mark
+// of that file finds, and claims a position, not a meaning: in the code of that folder, neither `main` nor `measured`
+// occurs outside the admitted positions. Comments, JSDoc and marks included, are not code and are not read there: they
+// cannot record or change a bound. The code is every node `forEachChild` reaches from a file's source; every
+// identifier, private name, string and template without substitutions spelled so is classified by its role. Admitted
+// are `main: <object literal>` and `measured: <numeric literal>` (the two records), a property signature, and the
+// identifier `main` as a declared, imported or exported binding or as a callee (the program builder). Any other
 // occurrence fails, naming its file, line and role, and so does every object spread and every computed name that is not
 // a literal. Not claimed: a bound recorded under a third property name, a bound outside that folder, and a bound
 // changed at run time by code that names neither property (a key built at run time, a write through an alias).
@@ -50,8 +52,24 @@ const CORE = "src/type-inference/core/";
  * suite, or `// pins for <suite>, <suite>: <what> | line /<regex>/<flags>` in a file holding pins those suites run.
  */
 const MARK = /^\/\/ pins(?: for ([^:]+))?: (.+?) \| line \/(.+)\/([a-z]*)$/u;
-/** A literal value on a line: a number that is no part of a name, or a hex digest. */
-const VALUE = /(?<![\w$])\d|"[0-9a-f]{16,}"/u;
+/**
+ * The lines of `text` (counted from 1) that hold a literal value in its code: a numeric literal, or a string literal
+ * that is a hex digest of 16 or more digits. Digits in a comment, a name, a type or another string are no value.
+ */
+function valueLines(text, file) {
+  const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, false);
+  const lines = new Set();
+  const visit = (node) => {
+    if (
+      ts.isNumericLiteral(node) ||
+      (ts.isStringLiteralLike(node) && /^[0-9a-f]{16,}$/u.test(node.text))
+    )
+      lines.add(source.getLineAndCharacterOfPosition(node.getStart(source)).line + 1);
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return lines;
+}
 /** A line that begins a mark, wherever it stands. */
 const MARK_START = /^\s*\/\/\s*pins\b/u;
 
@@ -72,7 +90,8 @@ export function readMarks(root) {
     .map((name) => `tests/${name.split(sep).join("/")}`)
     .sort();
   for (const file of files) {
-    const lines = readFileSync(join(root, file), "utf8").split(/\r?\n/u);
+    const text = readFileSync(join(root, file), "utf8");
+    const lines = text.split(/\r?\n/u);
     for (const [at, line] of lines.entries())
       if (at > 0 && MARK_START.test(line))
         faults.push(`${file}:${at + 1}: a mark is a file's first line`);
@@ -96,12 +115,13 @@ export function readMarks(root) {
     }
     // (a pin's line holds its value, so that a mark whose values are gone finds nothing: a declaration line would stay)
     const matched = lines.slice(1).flatMap((line, at) => (pin.test(line) ? [at + 2] : []));
-    const bare = matched.find((at) => !VALUE.test(lines[at - 1]));
+    const values = matched.length === 0 ? new Set() : valueLines(text, file);
+    const bare = matched.find((at) => !values.has(at));
     if (matched.length === 0 || bare !== undefined) {
       faults.push(
         matched.length === 0
           ? `${file}:1: no line of the file but the mark's own is a line ${pin} finds`
-          : `${file}:1: ${pin} finds line ${bare}, which holds no number or digest`,
+          : `${file}:1: ${pin} finds line ${bare}, which holds no numeric or hex digest literal`,
       );
       continue;
     }
