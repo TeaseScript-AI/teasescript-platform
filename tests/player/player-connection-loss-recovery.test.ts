@@ -135,6 +135,8 @@ interface RecoveryHost {
   ): Promise<void>;
   activate(): Promise<void>;
   toStartPage(): Promise<void>;
+  setDebugTracing(on: boolean): void;
+  setRandomControl(control: { readonly sites: readonly [] } | null): void;
 }
 let usePlayerSession: (options: {
   readonly bridge: Promise<PlayerBridge>;
@@ -271,6 +273,8 @@ const RERUN = rerunRegistry({
   "after exit": TOPOLOGIES,
   "a second loss during the preparation": TOPOLOGIES,
   "unmounted during the replacement": TOPOLOGIES,
+  "the trace and random control go again": TOPOLOGIES,
+  "the trace and random control turned off while lost": TOPOLOGIES,
 });
 
 RERUN.rows(
@@ -517,3 +521,41 @@ RERUN.rows(
     return end();
   },
 );
+
+for (const [id, name, offWhileLost] of [
+  [
+    "the trace and random control go again",
+    "the value trace and Debug's random control asked for go to the fresh connection before its session starts",
+    false,
+  ],
+  [
+    "the trace and random control turned off while lost",
+    "the value trace and Debug's random control turned off while lost do not go to the fresh connection",
+    true,
+  ],
+] as const)
+  RERUN.rows(id, name, async (context, topology, end) => {
+    const { connections, player, kept } = await page(context, topology);
+    player.setDebugTracing(true);
+    player.setRandomControl({ sites: [] });
+    await player.activate();
+    await keptAtTheQuestion(player, kept);
+    const first = connections.first.posts.map((post) => post.op);
+    assert.ok(first.includes("debugTracing") && first.includes("randomControl"), first.join());
+    await connections.first.lose();
+    await until(() => player.recovery.value !== null, "the offer");
+    if (offWhileLost) {
+      player.setDebugTracing(false);
+      player.setRandomControl(null);
+    }
+    await player.activate();
+    await until(() => player.session.value?.state.foregroundAction != null, "the question again");
+    await onTheFreshConnection(player, connections);
+    // Only the settings are compared: the fresh connection also prepares, restores and continues the session.
+    const settings = connections
+      .current()
+      .posts.map((post) => post.op)
+      .filter((op) => op === "debugTracing" || op === "randomControl");
+    assert.deepEqual(settings, offWhileLost ? [] : ["debugTracing", "randomControl"]);
+    return end();
+  });
