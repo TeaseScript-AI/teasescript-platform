@@ -219,7 +219,7 @@ test("a default's written type is none outside the forms the rule admits, the de
     // cells that disagree, by syntax or by their written types; a written type silent at the level
     "let w: number = 0\nlet fb = [w, 1]\n@",
     "let w: number = 0\nlet u: integer = 1\nlet fb = [w, u]\n@",
-    ["let fb: list = [1]\n@", ["element"]],
+    ["let fb: list = [1]\n@", [["element"]]],
     // a loop variable, a part of a written list, a computed default, an unwritten parameter
     "let xs: number[] = [0]\nfor fb in xs {\n  @\n}",
     "let xs: number[] = [0]\nlet fb = xs[0]\n@",
