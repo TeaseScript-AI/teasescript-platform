@@ -16,19 +16,19 @@ import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 
 // A compiled-only run after a Player or engine edit used the bundle of the code before it, and passed (#2141). The
-// fixture is a checkout with the real bundle plugin and the compiled loader: a two-module Player, its imported module a
-// symlink, whose sources and build configuration change after its bundle was built.
+// fixture is a checkout with the real stamp plugin, the compiled loader and its compiled walk: a two-module Player, its
+// imported module a symlink, compiled under a tsconfig that extends a root file.
 const repository = fileURLToPath(new URL("../../../", import.meta.url));
 
-const config = (plugins = "testModulesSources()") => `import { fileURLToPath, URL } from "node:url";
+const config = (head = "") => `import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vite";
 import { testModulesSources } from "./test-modules-sources.ts";
-
+${head}
 export default defineConfig({
   root: fileURLToPath(new URL("../..", import.meta.url)),
   logLevel: "warn",
   publicDir: false,
-  plugins: [${plugins}],
+  plugins: [testModulesSources()],
   build: {
     ssr: true,
     outDir: "dist/player-test-modules",
@@ -38,8 +38,8 @@ export default defineConfig({
 });
 `;
 const CLOCK = `import { round } from "./rounding.ts";\nexport const minutes = (seconds: number): number => round(seconds / 60);\n`;
-const STALE =
-  "The Player test bundle is older than its sources (player/rounding.ts): run `npm run build:player-test-modules`, or `npm test -- dist/tests/<file>.test.js`, before a compiled-only run.";
+const STALE = (paths: string) =>
+  `The Player test bundle is older than its sources (${paths}): run \`npm run build:player-test-modules\`, or \`npm test -- dist/tests/<file>.test.js\`, before a compiled-only run.`;
 
 function checkout(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), "player-test-modules-"));
@@ -50,15 +50,18 @@ function checkout(t: TestContext) {
     writeFileSync(path(name), text);
   };
   write("package.json", JSON.stringify({ type: "module" }));
-  write("tsconfig.json", JSON.stringify({ compilerOptions: { useDefineForClassFields: true } }));
+  write("tsconfig.json", JSON.stringify({ extends: "./compiler-options.json" }));
+  write("compiler-options.json", JSON.stringify({ compilerOptions: { strict: true } }));
   write("player/vue/vite.test-modules.config.ts", config());
   write("player/clock.ts", CLOCK);
   write("player/round.ts", "export const round = Math.round;\n");
-  write("player/ceil.ts", "export const round = Math.ceil;\n");
+  write("player/round-copy.ts", "export const round = Math.round;\n");
+  write("tools/options.json", "{}\n");
   symlinkSync("round.ts", path("player/rounding.ts"));
   for (const name of [
     "player/vue/test-modules-sources.ts",
     "dist/tests/helpers/player-modules.js",
+    "dist/player/vue/test-modules-sources.js",
   ]) {
     mkdirSync(dirname(path(name)), { recursive: true });
     copyFileSync(join(repository, name), path(name));
@@ -99,25 +102,39 @@ for (let load = 0; load < ${loads}; load++) {
   return { path, write, build, minutesOf90 };
 }
 
-test("a Player test bundle is refused once a file it was built from or by changes", (t) => {
-  const { path, build, minutesOf90 } = checkout(t);
+test("a Player test bundle is refused once a file in the stamped area changes", (t) => {
+  const { path, write, build, minutesOf90 } = checkout(t);
   assert.equal(build().status, 0);
   assert.equal(minutesOf90(), "2");
 
   // the imported module, edited through its symlink's target, then rebuilt: the new code loads
-  writeFileSync(path("player/round.ts"), "export const round = Math.floor;\n");
-  assert.equal(minutesOf90(), STALE);
+  write("player/round.ts", "export const round = Math.floor;\n");
+  assert.equal(minutesOf90(), STALE("player/round.ts, player/rounding.ts"));
+  write("player/round-copy.ts", "export const round = Math.floor;\n");
   assert.equal(build().status, 0);
   assert.equal(minutesOf90(), "1");
 
-  // each change is refused, naming its file alone, so the change before it was undone
-  const original = (name: string) => readFileSync(path(name), "utf8");
+  // each change is refused, naming its path alone, so the change before it was undone
+  const text = (name: string) => readFileSync(path(name), "utf8");
+  const edit = (name: string) => () => {
+    const before = text(name);
+    write(
+      name,
+      name.endsWith(".json") ? before.replace("{", '{"edited":1,') : `${before}// edited\n`,
+    );
+    return () => write(name, before);
+  };
+  const add = (name: string) => () => {
+    write(name, "export const added = 1;\n");
+    return () => unlinkSync(path(name));
+  };
   const changes: readonly (readonly [string, () => () => void])[] = [
+    // a link retargeted to another file of the same content
     [
       "player/rounding.ts",
       () => {
         unlinkSync(path("player/rounding.ts"));
-        symlinkSync("ceil.ts", path("player/rounding.ts"));
+        symlinkSync("round-copy.ts", path("player/rounding.ts"));
         return () => {
           unlinkSync(path("player/rounding.ts"));
           symlinkSync("round.ts", path("player/rounding.ts"));
@@ -129,50 +146,25 @@ test("a Player test bundle is refused once a file it was built from or by change
       "player/vue/vite.test-modules.config.ts",
       "player/vue/test-modules-sources.ts",
       "tsconfig.json",
+      "compiler-options.json",
       "package.json",
-    ].map(
-      (name) =>
-        [
-          name,
-          () => {
-            const text = original(name);
-            writeFileSync(
-              path(name),
-              name.endsWith(".json") ? text.replace("{", '{"edited":1,') : `${text}\n// edited\n`,
-            );
-            return () => writeFileSync(path(name), text);
-          },
-        ] as const,
-    ),
-    ...["player/tsconfig.json", "player/package.json", ".env"].map(
-      (name) =>
-        [
-          name,
-          () => {
-            writeFileSync(path(name), name === ".env" ? "VITE_EDITED=1\n" : "{}\n");
-            return () => unlinkSync(path(name));
-          },
-        ] as const,
+    ].map((name) => [name, edit(name)] as const),
+    // a file the resolver could choose now, a file in `src/`, a root file of any kind
+    ...["player/clock.js", "src/unrelated.ts", ".env", "README.md"].map(
+      (name) => [name, add(name)] as const,
     ),
     [
       "player/clock.ts",
       () => {
-        const text = original("player/clock.ts");
+        const before = text("player/clock.ts");
         unlinkSync(path("player/clock.ts"));
-        return () => writeFileSync(path("player/clock.ts"), text);
+        return () => write("player/clock.ts", before);
       },
     ],
   ];
   for (const [name, change] of changes) {
     const undo = change();
-    assert.match(
-      minutesOf90(),
-      new RegExp(
-        `^The Player test bundle is older than its sources \\(${name.replaceAll(".", "\\.")}\\)`,
-        "u",
-      ),
-      name,
-    );
+    assert.equal(minutesOf90(), STALE(name), name);
     undo();
   }
 
@@ -181,7 +173,7 @@ test("a Player test bundle is refused once a file it was built from or by change
     minutesOf90(2, 'writeFileSync("player/clock.ts", "// edited\\n", { flag: "a" });'),
     "1\n1",
   );
-  writeFileSync(path("player/clock.ts"), CLOCK);
+  write("player/clock.ts", CLOCK);
   unlinkSync(path("dist/player-test-modules/sources.json"));
   assert.match(
     minutesOf90(),
@@ -189,21 +181,44 @@ test("a Player test bundle is refused once a file it was built from or by change
   );
 });
 
-test("a Player test bundle is not built from a module the stamp does not cover", (t) => {
-  const { write, build } = checkout(t);
+test("a Player test bundle is not built from an input the stamp does not cover", (t) => {
+  const { path, write, build } = checkout(t);
+  const refused = (expected: RegExp, change: () => () => void) => {
+    const undo = change();
+    assert.match(build().stderr, expected);
+    undo();
+  };
+  const clock = (text: string) => () => {
+    write("player/clock.ts", text);
+    return () => write("player/clock.ts", CLOCK);
+  };
   write("player/note.txt", "a note\n");
-  write("player/clock.ts", `import note from "./note.txt?raw";\n${CLOCK}export { note };\n`);
-  assert.match(build().stderr, /player\/note\.txt\?raw is a form the stamp does not cover/u);
   write("player/style.css", "p { color: red; }\n");
-  write("player/clock.ts", `import "./style.css";\n${CLOCK}`);
-  assert.match(build().stderr, /player\/style\.css is a form the stamp does not cover/u);
-  // A module another plugin loads before this one is bundled without being read here.
-  write("player/clock.ts", CLOCK);
-  write(
-    "player/vue/vite.test-modules.config.ts",
-    config(
-      '{ name: "earlier", enforce: "pre", load: (id) => (id.endsWith("/rounding.ts") ? "export const round = Math.ceil;" : null) }, testModulesSources()',
-    ),
+  refused(
+    /player\/note\.txt\?raw is a form the stamp does not cover/u,
+    clock(`import note from "./note.txt?raw";\n${CLOCK}export { note };\n`),
   );
-  assert.match(build().stderr, /player\/rounding\.ts was bundled without being hashed/u);
+  refused(
+    /player\/style\.css is a form the stamp does not cover/u,
+    clock(`import "./style.css";\n${CLOCK}`),
+  );
+  write("tools/round.ts", "export const round = Math.ceil;\n");
+  refused(
+    /tools\/round\.ts is bundled from outside the stamped area/u,
+    clock(CLOCK.replace("./rounding.ts", "../tools/round.ts")),
+  );
+  refused(/the configuration reads .*tools\/round\.ts, outside the stamped area/u, () => {
+    write("player/vue/vite.test-modules.config.ts", config('import "../../tools/round.ts";\n'));
+    return () => write("player/vue/vite.test-modules.config.ts", config());
+  });
+  refused(/reaches .*tools\/options\.json, outside the stamped area/u, () => {
+    write("compiler-options.json", JSON.stringify({ extends: "./tools/options.json" }));
+    return () =>
+      write("compiler-options.json", JSON.stringify({ compilerOptions: { strict: true } }));
+  });
+  refused(/player\/tools cannot be stamped \(folder link /u, () => {
+    symlinkSync("../tools", path("player/tools"));
+    return () => unlinkSync(path("player/tools"));
+  });
+  assert.equal(build().status, 0);
 });

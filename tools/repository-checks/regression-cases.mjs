@@ -40,9 +40,10 @@ import { ts } from "ts-morph";
 // 5. A detached worktree of the base gets the head's `tests/` in place of its own and the head's `node_modules`. It is
 //    compiled with `tsc` (which emits despite type errors, as a test naming what the fix adds has one at the base), and
 //    its Player test bundles, which `tests/helpers/player-modules.ts` loads, are built from
-//    `player/vue/vite.test-modules.config.ts` with the head's stamping plugin (`player/vue/test-modules-sources.ts`),
-//    also at a base from before it. Its compiled files run in base mode, the selected ids alone (`only`); the helper
-//    records when each starts and how it ends, and a case its runner cancelled as not finished.
+//    `player/vue/vite.test-modules.config.ts` with the head's stamping plugin (`player/vue/test-modules-sources.ts`,
+//    copied into the base before it is compiled, as the head's loader imports it), also at a base from before it. Its
+//    compiled files run in base mode, the selected ids alone (`only`); the helper records when each starts and how it
+//    ends, and a case its runner cancelled as not finished.
 // 6. `verdict` judges each selected case: a witness when it threw an error whose message's first line (cut at the first
 //    CR LF, LF, CR, U+2028 or U+2029) `atBase` matches whole. Anything else is not: it passed, failed for another
 //    reason, did not finish (it started and did not end, or was cancelled), or did not run (it did not start: its file
@@ -64,6 +65,9 @@ import { ts } from "ts-morph";
 // or bundle).
 
 const root = process.cwd();
+
+/** The Player test bundles' source stamp (`player/vue/test-modules-sources.ts`), which the base gets from the head. */
+const STAMP = "player/vue/test-modules-sources.ts";
 
 /** Why a run cannot go on: exit 2. */
 class CannotRun extends Error {}
@@ -323,6 +327,8 @@ async function main(argv) {
     git("worktree", "add", "--quiet", "--detach", worktree, base);
     rmSync(join(worktree, "tests"), { recursive: true, force: true });
     cpSync(join(root, "tests"), join(worktree, "tests"), { recursive: true });
+    // and the head's source stamp, which the head's Player test loader imports and the bundles' build adds
+    cpSync(join(root, STAMP), join(worktree, STAMP));
     if (!existsSync(join(worktree, "node_modules")))
       symlinkSync(resolve(root, "node_modules"), join(worktree, "node_modules"));
     const build = spawnSync(
@@ -342,7 +348,7 @@ async function main(argv) {
         "--input-type=module",
         "--eval",
         `const { build } = await import("vite");
-const { testModulesSources } = await import(${JSON.stringify(pathToFileURL(join(root, "player/vue/test-modules-sources.ts")).href)});
+const { testModulesSources } = await import(${JSON.stringify(pathToFileURL(join(worktree, STAMP)).href)});
 await build({ configFile: "player/vue/vite.test-modules.config.ts", plugins: [testModulesSources()] });`,
       ],
       { cwd: worktree, encoding: "utf8" },
