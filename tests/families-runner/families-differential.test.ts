@@ -395,16 +395,16 @@ test("join --ignore names the cases whose base and head differ with those fields
       message,
       core: { modes: [{ diagnostics: [{ code, message, messageKind }] }] },
     });
-  // a: only `message` differs, at the top and nested, its keys in another order; b: only `messageKind`, a field whose
-  // name holds the ignored one; c: a nested `code` beside a differing `message`
+  // a: only `message` differs, at the top and nested, the keys after its name in another order; b: only
+  // `messageKind`, a field whose name holds the ignored one; c: a nested `code` beside a differing `message`
   const base = [record("a", "old"), record("b", "same"), record("c", "old")];
   const head = [
     JSON.stringify({
+      name: "a",
       core: {
         modes: [{ diagnostics: [{ messageKind: "plain", message: "new", code: "TSV001" }] }],
       },
       message: "new",
-      name: "a",
     }),
     record("b", "same", "TSV001", "framed"),
     record("c", "new", "TSV002"),
