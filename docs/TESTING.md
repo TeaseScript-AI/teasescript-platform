@@ -147,7 +147,8 @@ Per set, its manifest from a built tree of that commit, then its shards on the c
 
 ```shell
 node <tree>/tests/families/shadow.mjs <tree> <set> --manifest > expect-<set>.jsonl
-sx-job submit --commit <main sha> --shards 16 --mem 6G --timeout 2h --campaign <T>-<set> -- bash -c \
+sx-job submit --owner <lane tag> --commit <main sha> --shards 16 --mem 6G --timeout 2h --campaign <T>-<set> \
+  -- bash -c \
   'node "$SX_TREE/tests/families/shadow.mjs" "$SX_TREE" <set> --shard {i}/{n} --demands 16 --out "$SX_OUT/shadow.jsonl" \
   > "$SX_OUT/shadow.log"'
 ```
