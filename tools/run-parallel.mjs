@@ -10,6 +10,10 @@ import { join } from "node:path";
 // not run (`summaryLine`):
 //
 //   node tools/run-parallel.mjs <npm script>...
+//   node tools/run-parallel.mjs --list <key>
+//
+// `--list` runs the npm scripts that `package.json`'s `<key>` lists, one per line, so that two branches adding a step at
+// different places merge by themselves (`listedSteps`; `check:pretest`'s steps, in `checkPretest`).
 //
 // Exit status: the first failed step's, or 130 or 143 for a signal that came first, else 0. `runSteps` does the same for another tool, and
 // leaves the last line to it.
@@ -141,8 +145,27 @@ export async function runSteps(names, { serial = false } = {}) {
   return { steps: names.map((name) => ({ name, status: status.get(name) })), exitCode };
 }
 
+/**
+ * The npm scripts `pkg[key]` lists: a list of the names of scripts `pkg` has, at least one. Throws naming what is wrong.
+ */
+export function listedSteps(pkg, key) {
+  const names = pkg[key];
+  if (!Array.isArray(names) || names.length === 0)
+    throw new Error(`package.json's ${key} is not a list of npm script names`);
+  const unknown = names.filter(
+    (name) => typeof name !== "string" || !Object.hasOwn(pkg.scripts ?? {}, name),
+  );
+  if (unknown.length > 0)
+    throw new Error(`package.json's ${key} lists what is not an npm script: ${unknown.join(", ")}`);
+  return names;
+}
+
 if (import.meta.main) {
-  const names = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  const names =
+    args[0] === "--list" && args.length === 2
+      ? listedSteps(JSON.parse(readFileSync("package.json", "utf8")), args[1])
+      : args;
   if (names.length === 0) throw new Error("Pass npm script names to run.");
   // (runSteps's handlers stop the steps; these keep a signal from killing the process until it exits, so one that comes
   // while the last line waits for a slow reader changes neither the line nor the status)

@@ -1,10 +1,10 @@
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { runSteps, summaryLine } from "./run-parallel.mjs";
+import { listedSteps, runSteps, summaryLine } from "./run-parallel.mjs";
 
 // `npm run check`, in three parts (#2106):
 //
-// 1. the checks before the tests: the steps `check:pretest` names, each to its end, through `tools/run-parallel.mjs`;
+// 1. the checks before the tests: the steps `check:pretest` runs, each to its end, through `tools/run-parallel.mjs`;
 // 2. whatever they found, the build (`npm run build`), without UI source maps;
 // 3. when the build passed, the compiled suite (`tools/test-output-filter.mjs`). It runs what the build wrote, so after a
 //    failed build it does not run: it would test stale or missing code. No check before the tests writes what it runs.
@@ -20,20 +20,26 @@ import { runSteps, summaryLine } from "./run-parallel.mjs";
 // them as it reaches it. Exit status: the first failed part's, or 130 or 143 for a signal that came first, else 0.
 // `VERIFY_SERIAL=1` runs the checks before the tests one after another.
 
-/** The steps of `check:pretest`, which must be one `tools/run-parallel.mjs` call. */
-export function pretestSteps(scripts) {
-  const words = /^node tools\/run-parallel\.mjs((?: [\w:.-]+)+)$/u.exec(
-    scripts["check:pretest"] ?? "",
-  );
+/**
+ * The steps of `pkg`'s `check:pretest`, which must be one `tools/run-parallel.mjs` call: of the scripts it names, or of
+ * those the `package.json` list it names with `--list` holds (`listedSteps`).
+ */
+export function pretestSteps(pkg) {
+  const script = pkg.scripts?.["check:pretest"] ?? "";
+  const listed = /^node tools\/run-parallel\.mjs --list ([\w-]+)$/u.exec(script);
+  if (listed !== null) return listedSteps(pkg, listed[1]);
+  const words = /^node tools\/run-parallel\.mjs((?: [\w:.-]+)+)$/u.exec(script);
   if (words === null)
-    throw new Error("check:pretest is not one `node tools/run-parallel.mjs <npm script>...` call");
+    throw new Error(
+      "check:pretest is not one `node tools/run-parallel.mjs <npm script>...` or `--list <key>` call",
+    );
   return words[1].trim().split(" ");
 }
 
 const SIGNALS = { SIGINT: 130, SIGTERM: 143 };
 
 async function main() {
-  const scripts = JSON.parse(readFileSync("package.json", "utf8")).scripts;
+  const pkg = JSON.parse(readFileSync("package.json", "utf8"));
   let signalled = 0;
   let running = null;
   // (installed until the process exits, the last line's write included: a later signal is passed on to a running part
@@ -69,9 +75,7 @@ async function main() {
       });
     });
 
-  const pretest = await runSteps(pretestSteps(scripts), {
-    serial: process.env.VERIFY_SERIAL === "1",
-  });
+  const pretest = await runSteps(pretestSteps(pkg), { serial: process.env.VERIFY_SERIAL === "1" });
   const steps = [...pretest.steps];
   let exitCode = pretest.exitCode;
   const fail = (code) => {

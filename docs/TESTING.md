@@ -45,7 +45,8 @@ Vue's parser refuses (vue-tsc refuses it in CI). `tools/repository-checks/import
 sources, the packages each area may import with their reasons, the generated-component exception, and what no document
 declares. `npm run lint:design` and `npm run test:lint:design` check the [Player design
 contracts](LINTING.md#player-design-lint) and their positive/negative fixtures; both are included in `npm run check`.
-Independent pre-test gates and UI checks/builds run concurrently through `tools/run-parallel.mjs`.
+Independent pre-test gates and UI checks/builds run concurrently through `tools/run-parallel.mjs`; the pre-test gates
+are the npm scripts `package.json`'s `checkPretest` lists, one per line.
 `npm run check` (`tools/run-check.mjs`) runs the build and the compiled tests also when a pre-test check failed, and
 its last line names what ran, failed and did not run. TypeScript compilation precedes UI work; compiled tests run only
 after all builds pass, as many files at once as
@@ -55,8 +56,9 @@ figure but never raise it above a cap the runner can see (`tools/test-files-at-o
 its own, as one whose process ends before its tests report, fails the full suite and is named. Each command's output is printed together, including warnings. A failed command stops no
 other in its group, and its leftover process group is terminated. On SIGINT and SIGTERM, `run-parallel` stops its own
 command groups, escalating after a grace period, and starts no other; `run-check` forwards the signal and waits for its
-part, without a deadline. A command `run-parallel` stops this way is labelled `ABORTED`, not `FAIL`. `npm run test:verification` checks scheduling, diagnostics and
-process cleanup (POSIX cleanup assertions run on CI; Windows uses `taskkill /t /f`). A tool test that builds a git
+part, without a deadline. A command `run-parallel` stops this way is labelled `ABORTED`, not `FAIL`. `npm run test:verification` runs every
+`tools/**/*.test.mjs` outside `tools/oxlint/`, whose tests `test:lint` runs, by glob: a new tool test needs no entry.
+It checks scheduling, diagnostics and process cleanup (POSIX cleanup assertions run on CI; Windows uses `taskkill /t /f`). A tool test that builds a git
 repository takes its git environment from `tools/fixture-git.mjs`, so that no host git configuration, ignore or
 attributes file, `GIT_*` variable or message language reaches the fixture; the helper's comment names what it keeps.
 
