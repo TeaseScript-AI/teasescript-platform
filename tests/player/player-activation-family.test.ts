@@ -184,7 +184,6 @@ interface FamilyHost {
 
 let usePlayerSession: (options: {
   readonly bridge: Promise<PlayerBridge>;
-  readonly debugHistorySpill: () => Promise<null>;
   readonly resolveAsset?: (path: string) => string | null;
   readonly room?: "debug";
   readonly scriptStorage?: ScriptStorageProvider;
@@ -281,7 +280,6 @@ function playerOn(bridge: PlayerBridge, keeping = false) {
   const player = scope.run(() =>
     usePlayerSession({
       bridge: Promise.resolve(bridge),
-      debugHistorySpill: async () => null,
       resolveAsset: (path) => path,
       ...(keeping && {
         room: "debug" as const,

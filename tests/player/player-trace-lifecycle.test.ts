@@ -37,10 +37,7 @@ interface TracingPlayer {
   ): void;
   debugView(request: DebugViewRequest): Promise<DebugView | null>;
 }
-let usePlayerSession: (options: {
-  readonly bridge: Promise<PlayerBridge>;
-  readonly debugHistorySpill: () => Promise<null>;
-}) => TracingPlayer;
+let usePlayerSession: (options: { readonly bridge: Promise<PlayerBridge> }) => TracingPlayer;
 let facade: typeof InProcess;
 let compiler: typeof CompileProject;
 let BridgeLostError: typeof Client.BridgeLostError;
@@ -256,7 +253,7 @@ const staleNames = new WeakMap<TestContext, number[]>();
 function mounted(context: TestContext, bridge: Promise<PlayerBridge>) {
   const scope = effectScope();
   const player = scope.run(() => {
-    const made = usePlayerSession({ bridge, debugHistorySpill: async () => null });
+    const made = usePlayerSession({ bridge });
     const named = staleNames.get(context) ?? [];
     staleNames.set(context, named);
     watch(
