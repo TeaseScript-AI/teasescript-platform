@@ -29,7 +29,8 @@
 // each is printed with its reason. A declaration is taken only by a line that needs one: the changed unmoved lines no
 // form admits, in diff order, then the refused imports' lines (below); one covers one line, so two lines of one text
 // need two, taken in the file's order. A blob a declaration names must be UTF-8, or the check cannot compare its text
-// exactly and stops (exit 2). Declarations come from that file alone, and no flag admits a line class.
+// exactly and stops (exit 2): a file that is not can be moved, but not declared in. Declarations come from that file
+// alone, and no flag admits a line class.
 //
 // And a pure move keeps every import's binding: over the change's files, the set of bindings before equals the set
 // after, a binding being one imported or re-exported name with its target, its local or exported name and whether it is

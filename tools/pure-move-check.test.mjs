@@ -258,6 +258,25 @@ test(
       assert.equal(malformed.status, 2, malformed.out);
       assert.match(malformed.out, /a\.txt \(added\) is not UTF-8/u);
     }
+    // a file that is not UTF-8, as the Latin-1 fixture `tests/fixtures/packages/unreadable-file/scene.tease`, moves as
+    // any file does, but no declaration may name it
+    const latin1 = Buffer.from('say "Caf\xe9"\nexit\n', "latin1");
+    const movedOnly = moveOf(
+      { "old/scene.tease": latin1 },
+      { "old/scene.tease": null, "new/scene.tease": latin1 },
+    );
+    try {
+      const plain = movedOnly.run();
+      assert.equal(plain.status, 0, plain.out);
+      const named = movedOnly.run(
+        "--declare",
+        movedOnly.declare([entry("new/scene.tease", "added", "exit")]),
+      );
+      assert.equal(named.status, 2, named.out);
+      assert.match(named.out, /new\/scene\.tease \(added\) is not UTF-8/u);
+    } finally {
+      movedOnly.done();
+    }
     // a line that is U+FFFD, encoded, is declared by it
     const genuine = run({ "a.txt": "anchor\n" }, { "a.txt": "anchor\n\uFFFD\n" }, replaced);
     assert.equal(genuine.status, 0, genuine.out);
