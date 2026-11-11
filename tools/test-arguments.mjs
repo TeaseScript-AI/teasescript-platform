@@ -30,20 +30,22 @@ export const VALUE_OPTIONS = new Set([
 /**
  * The arguments among `args` that Node reads as test paths. Before the first path or `--`: a long option written
  * `--name=value` is whole (Node refuses one it does not know); a value option takes the next argument as its value; any
- * other argument that starts with `-` is refused, since the filter cannot tell whether it takes a value. From the first
- * path or `--` on, every argument is a path.
+ * other argument that starts with `-` is refused, since the filter cannot tell whether it takes a value. A long option's
+ * `_` reads as `-`, as Node reads it (`--test_only` is `--test-only`). From the first path or `--` on, every argument is
+ * a path.
  */
 export function testPathArguments(args) {
   const paths = [];
   let options = true;
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
+    const name = argument.startsWith("--") ? argument.replaceAll("_", "-") : argument;
     if (!options) paths.push(argument);
     else if (argument === "--") options = false;
     else if (argument.startsWith("--") && argument.includes("=")) continue;
-    else if (BOOLEAN_OPTIONS.has(argument)) continue;
+    else if (BOOLEAN_OPTIONS.has(name)) continue;
     // (Node refuses a value option whose next argument starts with `-`, so that run fails whatever this decides.)
-    else if (VALUE_OPTIONS.has(argument)) index += 1;
+    else if (VALUE_OPTIONS.has(name)) index += 1;
     else if (argument.startsWith("-"))
       throw new Error(
         `'${argument}' is not an option it knows; give a Node option's value with '=', as in '--test-name-pattern=name'`,
