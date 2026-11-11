@@ -165,16 +165,19 @@ test(
       assert.equal(status, 1, out);
       assert.match(
         out,
-        /closing +"Closes #1970, #1965, #1956" names several issues after one keyword; as closing syntax it closes only #1970: one keyword per issue/u,
+        /closing +line 1: "Closes #1970, #1965, #1956" names several issues after one keyword; as closing syntax it closes only #1970\. Give each issue meant to close its own keyword \(Closes #1, Closes #2\); otherwise end the clause after the first reference \(a new sentence for the rest\), or split a quoted example so that no keyword stands before the list$/mu,
       );
+      // (the final's colour: digits that run on into a word character are no reference)
+      const colour = check("Fixes #2147" + ", #123abc now normalizes identically.\n", [directory]);
+      assert.equal(colour.status, 0, colour.out);
       assert.match(
         out.trim().split("\n").at(-1),
         /0 placeholders, 1 multi-issue closing clauses$/u,
       );
       // (a comma and a conjunction together, across a line break)
-      const listed = check("Closes #12,\nand #13\n", [directory]);
+      const listed = check("text\nCloses #12,\nand #13\n", [directory]);
       assert.equal(listed.status, 1, listed.out);
-      assert.match(listed.out, /closes only #12: one keyword per issue/u);
+      assert.match(listed.out, /line 2: "Closes #12,\nand #13" .* closes only #12\. /u);
       // (a cost witness: a comma and 60,000 spaces before no reference, which an overlapping separator walked quadratically)
       const spaces = check(`Closes #12,${" ".repeat(60_000)}x`, [directory]);
       assert.equal(spaces.status, 0, spaces.out);
@@ -221,6 +224,60 @@ test(
     }
   },
 );
+
+test("closingClausesOf, over generated clauses: a reference ends where its number ends", () => {
+  const keywords = [
+    "close",
+    "closes",
+    "closed",
+    "fix",
+    "fixes",
+    "fixed",
+    "resolve",
+    "resolves",
+    "resolved",
+  ];
+  const spellings = [
+    (k) => k,
+    (k) => k[0].toUpperCase() + k.slice(1),
+    (k) => `${k.toUpperCase()}:`,
+  ];
+  const forms = [(n) => `#${n}`, (n) => `o/r#${n}`, (n) => `https://github.com/o/r/issues/${n}`];
+  const separators = [", ", " and ", ", and ", " & "];
+  // What stands directly after a reference's digits, and whether the reference still ends there: a word character
+  // (a letter of any script, a digit's continuation, a connector) runs the number on, so there is no reference.
+  const after = [
+    ["", true],
+    [" ", true],
+    [".", true],
+    [")", true],
+    ["-", true],
+    ["\n", true],
+    ["abc", false],
+    ["_x", false],
+    ["é", false],
+  ];
+  let cases = 0;
+  for (const keyword of keywords)
+    for (const spell of spellings)
+      for (const form of forms)
+        for (const separator of separators)
+          for (const [first, firstEnds] of after)
+            for (const [second, secondEnds] of after) {
+              // (a first reference's continuation must leave a separator after it to stay a list: only the
+              // word-character ones are put before the separator, the others stand after the clause)
+              if (firstEnds && first !== "") continue;
+              const text = `${spell(keyword)} ${form(12)}${first}${separator}${form(13)}${second} rest`;
+              const expected = firstEnds && secondEnds ? [form(12)] : [];
+              assert.deepEqual(
+                closingClausesOf(text).map((found) => found.closes),
+                expected,
+                JSON.stringify(text),
+              );
+              cases += 1;
+            }
+  assert.equal(cases, 9 * 3 * 3 * 4 * 4 * 9);
+});
 
 test(
   "each --repo is asked, and a token resolves in the one that has it",

@@ -89,17 +89,27 @@ export function placeholdersOf(text) {
  * keyword followed by more than one issue reference is found, wherever it stands in the text, code included; a quoted
  * example must be written so that it is not such a clause. A keyword is `close`, `closes`, `closed`, `fix`, `fixes`,
  * `fixed`, `resolve`, `resolves` or `resolved` in any case, with an optional `:`; a reference is `#N`, `owner/repo#N`
- * or `https://github.com/owner/repo/issues/N`; references are joined by `,`, `and`, `, and` or `&`. A form GitHub
- * closes on that these patterns do not match, such as a reference inside emphasis or a link, is the way left to fail
- * open.
+ * or `https://github.com/owner/repo/issues/N`, its number not running on into a word character; references are joined
+ * by `,`, `and`, `, and` or `&`. A form GitHub closes on that these patterns do not match, such as a reference inside
+ * emphasis or a link, is the way left to fail open. The text cannot tell an issue from a pull request, nor what the
+ * author means to close: a second reference to a companion pull request or into the first issue's comments fails
+ * too, and the refusal names the ways out.
  */
 export function closingClausesOf(text) {
-  const issue = String.raw`(?:https?:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/\d+|(?:[\w.-]+\/[\w.-]+)?#\d+)`;
+  // (a reference ends where its number ends: digits that run on into a word character, as a colour's, are none)
+  const number = String.raw`\d+(?![\p{L}\p{M}\p{N}\p{Pc}])`;
+  const issue = String.raw`(?:https?:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/${number}|(?:[\w.-]+\/[\w.-]+)?#${number})`;
   const clause = new RegExp(
     String.raw`\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+(${issue})(?:\s*(?:,\s*(?:and\b|&)|,|\band\b|&)\s*${issue})+`,
     "giu",
   );
-  return [...text.matchAll(clause)].map((m) => ({ clause: m[0], closes: m[1] }));
+  // (each clause's line, counted on from the one before, so the text is read once)
+  let line = 1;
+  let at = 0;
+  return [...text.matchAll(clause)].map((m) => {
+    for (; at < m.index; at += 1) if (text[at] === "\n") line += 1;
+    return { clause: m[0], closes: m[1], line };
+  });
 }
 
 /**
@@ -326,10 +336,12 @@ function main() {
     process.stdout.write(`placeholder ${placeholder}  unfilled\n`);
   }
   const clauses = closingClausesOf(text);
-  for (const { clause, closes } of clauses) {
+  for (const { clause, closes, line } of clauses) {
     failed = true;
     process.stdout.write(
-      `closing     "${clause}" names several issues after one keyword; as closing syntax it closes only ${closes}: one keyword per issue (Closes #1, Closes #2)\n`,
+      `closing     line ${line}: "${clause}" names several issues after one keyword; as closing syntax it closes only ${closes}. ` +
+        `Give each issue meant to close its own keyword (Closes #1, Closes #2); otherwise end the clause after the first ` +
+        `reference (a new sentence for the rest), or split a quoted example so that no keyword stands before the list\n`,
     );
   }
   const tokens = Object.values(counts).reduce((sum, n) => sum + n, 0);
