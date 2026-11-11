@@ -84,8 +84,6 @@ const CONSTANT = [
   ]),
   ...core("type-inference/core/items.ts", ["makeItem"]),
   ...core("type-inference/core/method-categories.ts", ["selectsElement"]),
-  // (#1072 1b: a retained collection made, or a module's capture found: native, or a test's recorder's)
-  ...core("type-inference/core/retained/retained.ts", ["retainedModule", "weakMap"]),
   ...core("type-inference/core/program.ts", [
     "CoreProgram.effectNode",
     "CoreProgram.exprAt",
