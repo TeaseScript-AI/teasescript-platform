@@ -19,15 +19,15 @@ export interface RetainedRecorder {
   weakMap<K extends object, V>(name: string): WeakMap<K, V>;
   weakSet<T extends object>(name: string): WeakSet<T>;
   /** An owner's own enumerable fields, each an entry; `hidden` gives its private ones that hold retained state. */
-  owner(
-    owner: object,
+  owner<T extends object>(
+    owner: T,
     name: string,
-    hidden: ((owner: object) => Readonly<Record<string, unknown>>) | null,
+    hidden: ((owner: T) => Readonly<Record<string, unknown>>) | null,
   ): void;
   /** `target`, kept in retained state (or an owner), was changed in place by the current run. */
-  amend(target: object): void;
+  amend<T extends object>(target: T): void;
   /** The solver's current run: a frame, a component being solved, a top-level computation; `null` outside one. */
-  run(run: object | null): void;
+  run<T extends object>(run: T | null): void;
 }
 
 let active: RetainedRecorder | null = null;
@@ -65,7 +65,7 @@ export const Retained = {
     return active === null ? new WeakSet<T>() : active.weakSet(name);
   },
   /** `made`, now held by `owner`, which this changes in place (`amend`): for a field filled on its first use. */
-  held<T>(owner: object, made: T): T {
+  held<O extends object, T>(owner: O, made: T): T {
     if (active !== null) active.amend(owner);
     return made;
   },
@@ -78,18 +78,12 @@ export const Retained = {
     name: string,
     hidden: ((owner: T) => Readonly<Record<string, unknown>>) | null = null,
   ): void {
-    // EVIDENCE: invariant: the recorder calls `hidden` with this owner alone (`Recorder.owner`).
-    if (active !== null)
-      active.owner(
-        owner,
-        name,
-        hidden as ((owner: object) => Readonly<Record<string, unknown>>) | null,
-      );
+    if (active !== null) active.owner(owner, name, hidden);
   },
 };
 
 /** `target`, already kept in retained state, or an owner, was changed in place by the current run. */
-export function amend(target: object): void {
+export function amend<T extends object>(target: T): void {
   if (active !== null) active.amend(target);
 }
 

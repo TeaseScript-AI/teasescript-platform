@@ -119,9 +119,7 @@ interface TrieNode {
  * question, the program's (`WorkLedger.shared`).
  */
 export class KeyTrie {
-  static readonly #hidden = (trie: KeyTrie): Readonly<Record<string, unknown>> => ({
-    roots: trie.#roots,
-  });
+  static readonly #hidden = (trie: KeyTrie) => ({ roots: trie.#roots });
   #roots: Map<PlaceId, TrieNode> | null = null;
 
   public constructor(
