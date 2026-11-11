@@ -114,12 +114,20 @@ test("loadedBy follows the string literals that name a file, and nothing else; p
         'new URL("./url.mjs", import.meta.url);\nimport "./typed.js";\nconst t = `./template.mjs`;\n' +
         // and what it does not follow: a computed path, a concatenation, a folder, a package, a missing file
         'const name = "computed";\nimport(`./${name}.mjs`);\nimport("./concat" + "enated.mjs");\n' +
-        'scan("folder");\nimport "typescript";\nimport "./missing.mjs";\n',
+        'scan("folder");\nimport "typescript";\nimport "./missing.mjs";\n' +
+        // a .js that exists is itself; a file another suffix (.tsx) is named, not read
+        'import "./both.js";\nimport "./view.tsx";\n',
       "imported.mjs": 'import "./transitive.mjs";\n',
       "re-exported.mjs": "export const x = 1;\n",
       "dynamic.mjs": "",
       "required.cjs": "",
-      "tools/spawned.mjs": 'readFileSync("config.json");\n',
+      // (and, from a folder below, a root file whose name begins with two dots, which is inside the root: Sol r1)
+      "tools/spawned.mjs": 'readFileSync("config.json");\nimport "../..helper.mjs";\n',
+      "..helper.mjs": "",
+      "both.js": "",
+      "both.ts": "",
+      "view.tsx": 'import "./inside-tsx.mjs";\n',
+      "inside-tsx.mjs": "",
       "url.mjs": "",
       "typed.ts": "export {};\n",
       "template.mjs": "",
@@ -140,6 +148,8 @@ test("loadedBy follows the string literals that name a file, and nothing else; p
     }
     symlinkSync(join(process.cwd(), "node_modules"), join(root, "node_modules"));
     assert.deepEqual([...loadedBy(["entry.mjs"], root)].sort(), [
+      "..helper.mjs",
+      "both.js",
       "config.json",
       "dynamic.mjs",
       "entry.mjs",
@@ -151,6 +161,7 @@ test("loadedBy follows the string literals that name a file, and nothing else; p
       "transitive.mjs",
       "typed.ts",
       "url.mjs",
+      "view.tsx",
     ]);
     // what a project's loads name only adds that project: a path no project claims still needs every project
     assert.deepEqual(
@@ -178,6 +189,36 @@ test("loadedBy follows the string literals that name a file, and nothing else; p
       assert.deepEqual(unreadableLoads(root), []);
     } finally {
       rmSync(bare, { recursive: true, force: true });
+    }
+    // a lookup that fails other than by finding nothing fails the reading too: a symbolic link loop, and a folder it may
+    // not search (Sol r1)
+    for (const [kind, error] of [
+      ["loop", /ELOOP/u],
+      ["closed", /EACCES/u],
+    ]) {
+      if (kind === "closed" && process.getuid?.() === 0) continue;
+      const lookup = mkdtempSync(join(tmpdir(), `check-changed-loads-${kind}-`));
+      try {
+        mkdirSync(join(lookup, "tools/oxlint"), { recursive: true });
+        symlinkSync(join(process.cwd(), "node_modules"), join(lookup, "node_modules"));
+        writeFileSync(join(lookup, "tools/oxlint/test.mjs"), 'import "../../found/it.mjs";\n');
+        if (kind === "loop") symlinkSync("found", join(lookup, "found"));
+        else {
+          mkdirSync(join(lookup, "found"));
+          writeFileSync(join(lookup, "found/it.mjs"), "");
+          chmodSync(join(lookup, "found"), 0o000);
+        }
+        assert.throws(() => loadedBy(["tools/oxlint/test.mjs"], lookup), error, kind);
+        assert.deepEqual(
+          [...projectsFor(["tools/check-shas.mjs"], lookup)].sort(),
+          ["oxlint-rules", "tools"],
+          kind,
+        );
+        assert.match(unreadableLoads(lookup)[0]?.error ?? "", error, kind);
+      } finally {
+        if (kind === "closed") chmodSync(join(lookup, "found"), 0o755);
+        rmSync(lookup, { recursive: true, force: true });
+      }
     }
   } finally {
     rmSync(root, { recursive: true, force: true });

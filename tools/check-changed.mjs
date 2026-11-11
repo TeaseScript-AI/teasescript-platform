@@ -132,19 +132,24 @@ const READ_BY_ALWAYS_RUN_CHECKS = new Set([".oxlintrc.json"]);
 /** A documentation path selects no project's checks; its Markdown links are checked on every run (`doc links`). */
 const isDocumentation = (path) => path.endsWith(".md") || path.startsWith("docs/");
 
-/** The source files `loadedBy` reads for the paths they name. */
+/** The source files `loadedBy` reads for the paths they name: `.js`, `.mjs`, `.cjs`, `.ts`, `.mts`, `.cts`. */
 const READ_FOR_NAMES = /\.(?:[cm]?js|[cm]?ts)$/u;
+
+/** What a path lookup answers when nothing is there to name (a literal of any text can be looked up). */
+const NOTHING_THERE = new Set(["ENOENT", "ENOTDIR", "ENAMETOOLONG"]);
 
 /**
  * The repository files `entries` (paths from `root`) load or name, the entries included, read from their sources and
- * followed through each file named that is JavaScript or TypeScript. A file names a path by a string literal (quoted, or
- * a template without a substitution) that, from the file's folder when it begins with `.` and from the root otherwise,
- * names an existing file: so an import, `export … from`, a literal `import()` or `require()`, and a script path a
- * runner spawns, as `tools/oxlint/test.mjs` spawns `tools/test-output-filter.mjs`. A `.js` path whose `.ts` exists
- * instead names the `.ts`. Nothing else is followed: a path built by computing (a template with a substitution, a
- * concatenation, a folder listed at run time, as `tools/oxlint/test.mjs` finds its rule tests), a folder, a package, or
- * the paths in a file of another kind (JSON). Throws when a file it follows cannot be read or TypeScript cannot be
- * loaded.
+ * followed through each file named whose suffix `READ_FOR_NAMES` lists. A file names a path by a string literal (quoted,
+ * or a template without a substitution) that, from the file's folder when it begins with `.` and from the root
+ * otherwise, names an existing file inside the root: so an import, `export … from`, a literal `import()` or `require()`,
+ * and a script path a runner spawns, as `tools/oxlint/test.mjs` spawns `tools/test-output-filter.mjs`. A `.js` path
+ * that does not exist, whose `.ts` does, names the `.ts`. Nothing else is followed: a path built by computing (a template
+ * with a substitution, a concatenation, a folder listed at run time, as `tools/oxlint/test.mjs` finds its rule tests),
+ * whose result is not resolved, though each literal piece of it is read as a literal of its own; a folder; a package;
+ * or the paths in a named file of another suffix (`.tsx`, JSON), which is named but not read. Throws when TypeScript
+ * cannot be loaded, a file it follows cannot be read, or a lookup fails other than by finding nothing there (a folder it
+ * may not search, a symbolic link loop).
  */
 export function loadedBy(entries, root = ".") {
   const ts = createRequire(join(resolve(root), "package.json"))("typescript");
@@ -162,9 +167,15 @@ export function loadedBy(entries, root = ".") {
       literal.startsWith(".") ? join(dirname(from), literal) : literal,
     );
     const path = relative(resolve(root), normalize(absolute)).split(sep).join("/");
-    if (path === "" || path.startsWith("..") || isAbsolute(path)) return null;
-    const isFile = (candidate) =>
-      existsSync(join(root, candidate)) && statSync(join(root, candidate)).isFile();
+    if (path === "" || path === ".." || path.startsWith("../") || isAbsolute(path)) return null;
+    const isFile = (candidate) => {
+      try {
+        return statSync(join(root, candidate)).isFile();
+      } catch (error) {
+        if (NOTHING_THERE.has(error.code)) return false;
+        throw error;
+      }
+    };
     if (isFile(path)) return path;
     const typed = path.replace(/\.js$/u, ".ts");
     return typed !== path && isFile(typed) ? typed : null;
