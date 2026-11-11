@@ -26,6 +26,8 @@ const tool = fileURLToPath(new URL("./run-check.mjs", import.meta.url));
  */
 function fixture(t, exits, waits = null) {
   const cwd = mkdtempSync(join(tmpdir(), "run-check-test-"));
+  // (after hooks run in the order they are registered: the recorded process's kill, then the folder's removal)
+  killRecorded(t, cwd, "pid");
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   const part = (name) =>
     "import { appendFileSync } from 'node:fs'; import { spawn } from 'node:child_process'; " +
@@ -147,7 +149,6 @@ test(
         }
       };
       t.after(() => group("SIGKILL"));
-      killRecorded(t, cwd, "pid");
       const closed = new Promise((resolve) => child.on("close", resolve));
       const pid = await waitFor(
         `the ${waits}'s descendant to start`,
@@ -188,7 +189,6 @@ test(
       ],
     ]) {
       const cwd = fixture(t, {}, waits);
-      killRecorded(t, cwd, "pid");
       const result = await slowReader(t, {
         cwd,
         args,

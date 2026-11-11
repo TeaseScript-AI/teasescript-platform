@@ -17,6 +17,8 @@ const runner = fileURLToPath(new URL("./run-parallel.mjs", import.meta.url));
 
 function fixture(t, sources) {
   const cwd = mkdtempSync(join(tmpdir(), "verification-test-"));
+  // (after hooks run in the order they are registered: the recorded process's kill, then the folder's removal)
+  killRecorded(t, cwd, "pid");
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   const scripts = {};
   for (const [name, source] of Object.entries(sources)) {
@@ -127,7 +129,6 @@ describe("process cleanup", { concurrency: true }, () => {
         spawn(process.execPath, ['-e', "require('node:fs').writeFileSync('pid', String(process.pid)); process.on('SIGTERM', () => {}); ${idleBounded}"], {stdio:'inherit'});
         ${reason === "parent-failure" ? `${awaitFile("pid", "its descendant to start")} process.exit(9);` : idleBounded}`,
         });
-        killRecorded(t, cwd, "pid");
         const { child, done } = start(t, cwd, ["waiting"]);
         const pid = await waitFor(
           "the descendant that ignores SIGTERM to start",
