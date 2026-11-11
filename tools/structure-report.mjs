@@ -60,13 +60,18 @@
 // could not run: <reason>` on exit 2, and `structure report failed: <error>` when the report throws, which it then
 // rethrows. The rows are read from the report's own signals; every other signal is in the report only.
 //
+// Options: each of --top, --json, --compare, --diff and --summary takes a value, as the next argument or after `=`
+// (`--json=FILE`); --top's is a whole number; --moved takes none. Every other argument is a root; one that starts with
+// `-` is refused as an unknown option, so a root of that name is written `./-name`.
+//
 // Without `node_modules` in its checkout, it links main's before it loads `ts-morph`, as `check-changed` does and through
 // its `linkMainNodeModules` (`TEASESCRIPT_MAIN` relative to the checkout), saying so on standard error; and, as
 // `check-changed`, it reports nothing unless npm's record of the install holds the checkout's lockfile.
 //
-// Exit status: 0 when the report is printed, 2 when an option has no value (the next argument missing or another
-// option), --diff cannot read the change as Git wrote it, --summary has no --diff, or there is no node_modules it can
-// link, or one whose record does not hold the lockfile.
+// Exit status: 0 when the report is printed; 2, with the usage, before anything is read or written, when an option has
+// no value (it is the last argument, the argument after it starts with `-`, or nothing follows its `=`), is given
+// twice, or is unknown, or --top's value is not a whole number; 2 when --diff cannot read the change as Git wrote it,
+// --summary has no --diff, or there is no node_modules it can link, or one whose record does not hold the lockfile.
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -95,37 +100,51 @@ const PARSED = /\.(ts|tsx|mts|cts|js|mjs|cjs)$/;
 
 const USAGE = `usage: node tools/structure-report.mjs [ROOT…] [--top N] [--json FILE] [--compare FILE]
        node tools/structure-report.mjs [ROOT…] --diff BASE [--moved] [--json FILE] [--summary FILE]`;
+/** Ends the run before anything is read or written (exit 2). */
+const refuse = (message) => {
+  console.error(`structure-report: ${message}\n${USAGE}`);
+  process.exit(2);
+};
+/**
+ * The command line, read once from left to right: each option but the flag --moved takes its value after `=` or as the
+ * argument after it, which must be there and must not start with `-`; every option is given at most once; an argument
+ * that starts with `-` and is no option is refused; every other argument is a root.
+ */
 const given = process.argv.slice(2);
-// Each option's value is the argument right after it on the command line as given, read in order, so that each option
-// is checked against its own next argument; of an option given twice, the first counts. An option whose next argument
-// is missing or is another option (`--…`) has no value, which `main` refuses for the first such option.
-const VALUED = ["--top", "--json", "--compare", "--diff", "--summary"];
-const values = {};
-let valueless;
-const args = [];
-for (let i = 0; i < given.length; i++) {
-  if (!VALUED.includes(given[i])) {
-    args.push(given[i]);
+const rootArgs = [];
+const options = new Map();
+for (let i = 2; i < process.argv.length; i++) {
+  const arg = process.argv[i];
+  if (!arg.startsWith("-")) {
+    rootArgs.push(arg);
     continue;
   }
-  const value = given[i + 1];
-  if (value === undefined || value.startsWith("--")) valueless ??= given[i];
-  else {
-    values[given[i]] ??= value;
-    i++;
+  if (arg === "--moved") {
+    if (options.has(arg)) refuse(`${arg} is given twice`);
+    options.set(arg, true);
+    continue;
   }
+  const equals = arg.indexOf("=");
+  const name = equals < 0 ? arg : arg.slice(0, equals);
+  if (!["--top", "--json", "--compare", "--diff", "--summary"].includes(name))
+    refuse(`unknown option ${name}`);
+  const value = equals < 0 ? process.argv[++i] : arg.slice(equals + 1);
+  if (value === undefined || value === "" || (equals < 0 && value.startsWith("-")))
+    refuse(`${name} takes a value`);
+  if (options.has(name)) refuse(`${name} is given twice`);
+  options.set(name, value);
 }
-const top = Number(values["--top"] ?? 10);
-const jsonOut = values["--json"];
-const compareWith = values["--compare"];
-const diffBase = values["--diff"];
-const summaryOut = values["--summary"];
-const movedAt = args.indexOf("--moved");
-const discountMoved = movedAt !== -1;
-if (discountMoved) args.splice(movedAt, 1);
+if (options.has("--top") && !/^\d+$/u.test(options.get("--top")))
+  refuse(`--top takes a whole number, not ${options.get("--top")}`);
+const top = Number(options.get("--top") ?? 10);
+const jsonOut = options.get("--json");
+const compareWith = options.get("--compare");
+const diffBase = options.get("--diff");
+const summaryOut = options.get("--summary");
+const discountMoved = options.has("--moved");
 const roots =
-  args.length > 0
-    ? args.map((root) => path.posix.normalize(root).replace(/\/+$/u, "") || ".")
+  rootArgs.length > 0
+    ? rootArgs.map((root) => path.posix.normalize(root).replace(/\/+$/u, "") || ".")
     : COMPONENTS;
 
 const git = (...gitArgs) =>
@@ -697,7 +716,10 @@ function writeSummary(block) {
 /** The command line the summary names, without --summary and its file. */
 const command = [
   "node tools/structure-report.mjs",
-  ...given.filter((_, i) => given[i] !== "--summary" && given[i - 1] !== "--summary"),
+  ...given.filter(
+    (arg, i) =>
+      arg !== "--summary" && !arg.startsWith("--summary=") && given[i - 1] !== "--summary",
+  ),
 ].join(" ");
 
 /**
@@ -728,10 +750,6 @@ async function loadTypeScript() {
 
 /** The report the command line asks for. */
 async function main() {
-  if (valueless !== undefined) {
-    console.error(`structure-report: ${valueless} needs a value\n${USAGE}`);
-    process.exit(2);
-  }
   if (summaryOut !== undefined && !diffBase) {
     const reason = "structure-report: --summary needs --diff";
     console.error(reason);
