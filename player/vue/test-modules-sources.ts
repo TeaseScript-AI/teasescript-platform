@@ -3,13 +3,16 @@
 // cannot run against Player or engine code older than its own.
 //
 // The stamp covers the whole checkout, not the bundle's inputs: it names no input, so it cannot miss one in the
-// checkout. Every entry is recorded by its path from the root with `/`, at any depth, apart from the root's own
-// `BOOKKEEPING` and `OUTSIDE_THE_STAMP` entries:
+// checkout. Every entry is recorded at any depth, apart from the root's own `BOOKKEEPING` and `OUTSIDE_THE_STAMP`
+// entries, by its key: the names the walk read, joined with `/`, none rewritten. Each key must name one entry; two
+// entries that share a key (names that the file system lists alike) fail the build. Only a folder, a regular file, or a
+// link that resolves to one is read:
 // - a file by the SHA-256 of its content;
 // - a symlink to a file by its target's identity (its path from the root, or its absolute path outside it) and that
 //   content;
-// - a symlink to a folder, a broken symlink, or an unreadable entry by what it is, which fails the build.
-// The set of paths is part of the stamp, so an added, removed or renamed file is a change.
+// - a symlink to a folder, a broken symlink, an entry that cannot be read under its listed name, or a special file
+//   (a FIFO, socket or device, or a link to one) by what it is, unread, which fails the build.
+// The set of keys is part of the stamp, so an added, removed or renamed file is a change.
 //
 // It is a freshness check of the checkout's files, not a key of everything a build depends on. Not attested:
 // - files outside the checkout, however they are reached (a link's target is stamped, not what a tool reads because of
@@ -54,28 +57,32 @@ const OUTSIDE_THE_STAMP = new Map([
   ["dist", "the build output, this bundle and its stamp among it"],
 ]);
 /** What a stamp entry is when it is not a file the build can read; the build refuses these. */
-const UNSTAMPABLE = /^(?:folder link|broken link|unreadable) /u;
+const UNSTAMPABLE = /^(?:folder link|broken link|unreadable|special file|duplicate key)\b/u;
 
 const sha256 = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex");
-const slashes = (path: string) => path.replaceAll("\\", "/");
+/** A path with `/` for the host's own separator, where that is another one; nothing else is rewritten. */
+const posix = (path: string) => (sep === "/" ? path : path.split(sep).join("/"));
 
 /** The stamp entry of one path: its content's hash, a link's target and hash, or what keeps it from being read. */
 function entry(root: string, path: string): string {
   try {
-    if (!lstatSync(path).isSymbolicLink()) return sha256(path);
+    const status = lstatSync(path);
+    if (!status.isSymbolicLink()) return status.isFile() ? sha256(path) : "special file";
     if (!existsSync(path))
-      return `broken link ${slashes(resolve(dirname(path), readlinkSync(path)))}`;
+      return `broken link ${posix(resolve(dirname(path), readlinkSync(path)))}`;
     // A target in the checkout by its path from the root, one outside it by its absolute path: both stay as they are when
     // the checkout moves.
     const target = realpathSync(path);
     const inside = relative(root, target);
-    const identity = slashes(
+    const identity = posix(
       isAbsolute(inside) || inside === ".." || inside.startsWith(`..${sep}`) ? target : inside,
     );
-    if (statSync(path).isDirectory()) return `folder link ${identity}`;
+    const resolved = statSync(path);
+    if (resolved.isDirectory()) return `folder link ${identity}`;
+    if (!resolved.isFile()) return `special file link ${identity}`;
     return `link ${identity} ${sha256(path)}`;
   } catch {
-    return `unreadable ${slashes(relative(root, path))}`;
+    return "unreadable under its listed name";
   }
 }
 
@@ -86,20 +93,37 @@ export function walkSources(checkout: string): Map<string, string> {
   // Link targets are named from the root's real path, as whichever path reached the checkout.
   const root = realpathSync(checkout);
   const stamp = new Map<string, string>();
-  const walk = (folder: string) => {
-    for (const item of readdirSync(folder, { withFileTypes: true })) {
+  // Every key the walk has listed, folders' included: a second entry with one of them fails the build.
+  const listed = new Set<string>();
+  const list = (key: string) => {
+    const twice = listed.has(key);
+    listed.add(key);
+    if (twice) stamp.set(key, "duplicate key: two entries share it");
+    return !twice;
+  };
+  const walk = (folder: string, key: string) => {
+    let items;
+    try {
+      items = readdirSync(folder, { withFileTypes: true });
+    } catch {
+      stamp.set(key, "unreadable under its listed name");
+      return;
+    }
+    for (const item of items) {
       const path = join(folder, item.name);
+      const itemKey = key === "" ? item.name : `${key}/${item.name}`;
       if (
-        folder === root &&
+        key === "" &&
         (BOOKKEEPING.has(item.name) ||
           (OUTSIDE_THE_STAMP.has(item.name) && folderOrLinkToOne(path)))
       )
         continue;
-      if (item.isDirectory()) walk(path);
-      else stamp.set(slashes(relative(root, path)), entry(root, path));
+      if (!list(itemKey)) continue;
+      if (item.isDirectory()) walk(path, itemKey);
+      else stamp.set(itemKey, entry(root, path));
     }
   };
-  walk(root);
+  walk(root, "");
   return new Map([...stamp].sort(([a], [b]) => (a < b ? -1 : 1)));
 }
 
