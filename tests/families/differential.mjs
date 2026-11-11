@@ -20,10 +20,10 @@
 // or tree, before any record is written. A run claims its `--out` once its arguments are read (#2383): it removes what
 // stands there then (an output that is one of its inputs, by any path or link, is refused instead), writes beside it a
 // partial it creates, named by its pid, and renames that onto `--out` once whole; after its claim it removes nothing it
-// did not create. So a run that ends without publishing leaves no earlier result at `--out`, except where the file
-// system forbids removing it: the claim then refuses (exit 2) and says the file standing there is not this run's
-// output. Two runs on one `--out` at a time are not supported: the later claim removes the earlier output, and the loss
-// is a missing file, never another run's records under this run's name.
+// did not create. So a run that ends without publishing leaves no earlier result at `--out`, except where the run
+// cannot reach or remove it, and then the claim refuses (exit 2) and says so. Two runs on one `--out` at a time are not
+// supported: the later claim removes the earlier output, and the loss is a missing file, never another run's records
+// under this run's name.
 import { createHash } from "node:crypto";
 import {
   closeSync,
@@ -44,24 +44,33 @@ const refuse = (why) => {
   process.stderr.write(`differential.mjs: ${why}\n`);
   process.exit(2);
 };
-/** Claims `out` for this run: refuses it where it is one of `inputs` by any path or link, else removes what stands there. */
+/**
+ * Claims `out` for this run: refuses it where it is one of `inputs` by any path or link, or is no file, and else removes
+ * what stands there. Every call the claim makes on `out` passes through one rule (`reach`): nothing there (`ENOENT`,
+ * `ENOTDIR`) proceeds, a call that succeeds proceeds, and any other outcome refuses, since what stands there then stays.
+ */
 function claimOutput(out, inputs) {
-  if (out === undefined || !existsSync(out)) return;
-  const { dev, ino } = statSync(out);
+  if (out === undefined) return;
+  const reach = (call) => {
+    try {
+      return call();
+    } catch (error) {
+      if (error.code === "ENOENT" || error.code === "ENOTDIR") return undefined;
+      return refuse(
+        `cannot claim the output ${out}: ${error.message}; any file standing there is not this run's output`,
+      );
+    }
+  };
+  const found = reach(() => statSync(out));
+  if (found === undefined) return;
   for (const file of inputs)
     if (file !== undefined && existsSync(file)) {
       const input = statSync(file);
-      if (input.dev === dev && input.ino === ino) refuse(`the output ${out} is the input ${file}`);
+      if (input.dev === found.dev && input.ino === found.ino)
+        refuse(`the output ${out} is the input ${file}`);
     }
-  if (!statSync(out).isFile()) refuse(`the output ${out} is no file`);
-  try {
-    unlinkSync(out);
-  } catch (error) {
-    if (!["EACCES", "EPERM", "EROFS"].includes(error.code)) throw error;
-    refuse(
-      `cannot claim the output ${out}: ${error.message}; the file standing there is not this run's output`,
-    );
-  }
+  if (!found.isFile()) refuse(`the output ${out} is no file`);
+  reach(() => unlinkSync(out));
 }
 
 /**

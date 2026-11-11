@@ -662,37 +662,58 @@ test("a run owns its output from its claim: no exit leaves an earlier output, an
     assert.notEqual(ran.status, 0, `${mode}: ${ran.stderr}`);
     assert.equal(existsSync(out), false, mode);
   }
-  // (a claim the file system forbids is a refusal that says so: in a directory the run may not write, the earlier file
-  // stays byte for byte; first shown to refuse the removal, so the test cannot pass where it would succeed, as for root)
-  const locked = join(folder, "locked");
-  mkdirSync(locked);
-  const kept = join(locked, "out.jsonl");
-  const probe = join(locked, "probe");
-  writeFileSync(kept, stale);
-  writeFileSync(probe, "");
-  chmodSync(locked, 0o555);
+  // (a claim that cannot reach or remove what stands at --out refuses and says so, whatever the cause: a directory the
+  // run may not search, one it may not write, and a name too long; each directory is first shown to refuse, so the test
+  // cannot pass where the call would succeed, as for root; an earlier file there stays byte for byte)
+  const lockedAs = (name: string, permissions: number) => {
+    const dir = join(folder, name);
+    mkdirSync(dir);
+    writeFileSync(join(dir, "out.jsonl"), stale);
+    writeFileSync(join(dir, "probe"), "");
+    chmodSync(dir, permissions);
+    return dir;
+  };
+  const unsearchable = lockedAs("unsearchable", 0o600);
+  const unwritable = lockedAs("unwritable", 0o555);
   try {
     assert.throws(
-      () => unlinkSync(probe),
+      () => statSync(join(unsearchable, "probe")),
       { code: "EACCES" },
-      "the directory must refuse a removal",
+      "a search must be refused",
     );
-    for (const [mode, args] of [
-      ["record", [tree, single]],
-      ["join", ["join", "--cases", single, "--base", records]],
-    ] as const) {
-      const ran = spawnSync(process.execPath, [tool, ...args, "--out", kept], { encoding: "utf8" });
-      assert.equal(ran.status, 2, `${mode}: ${ran.stderr}`);
-      assert.match(
-        ran.stderr,
-        /cannot claim the output .*out\.jsonl: EACCES.*; the file standing there is not this run's output/u,
-        mode,
-      );
-      assert.equal(readFileSync(kept, "utf8"), stale, mode);
-    }
+    assert.throws(
+      () => unlinkSync(join(unwritable, "probe")),
+      { code: "EACCES" },
+      "a removal must be refused",
+    );
+    for (const [target, cause] of [
+      [join(unsearchable, "out.jsonl"), "EACCES"],
+      [join(unwritable, "out.jsonl"), "EACCES"],
+      [join(folder, "x".repeat(300)), "ENAMETOOLONG"],
+    ] as const)
+      for (const [mode, args] of [
+        ["record", [tree, single]],
+        ["join", ["join", "--cases", single, "--base", records]],
+      ] as const) {
+        const ran = spawnSync(process.execPath, [tool, ...args, "--out", target], {
+          encoding: "utf8",
+        });
+        assert.equal(ran.status, 2, `${mode}, ${cause}: ${ran.stderr}`);
+        assert.match(
+          ran.stderr,
+          new RegExp(
+            `cannot claim the output .*: ${cause}\\b.*; any file standing there is not this run's output`,
+            "u",
+          ),
+          `${mode}, ${cause}`,
+        );
+      }
   } finally {
-    chmodSync(locked, 0o755);
+    chmodSync(unsearchable, 0o755);
+    chmodSync(unwritable, 0o755);
   }
+  for (const dir of [unsearchable, unwritable])
+    assert.equal(readFileSync(join(dir, "out.jsonl"), "utf8"), stale, dir);
 });
 
 test("the plan's check list lists each check planChecks counts, with its site and type (#2298)", () => {
