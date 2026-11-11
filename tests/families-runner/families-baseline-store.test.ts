@@ -723,7 +723,7 @@ exhausted: null, record: ${head} && source === "fields" ? "other" : "same" };
 test("a stops run's decision stops are classified where both trees ran, never stored, and against a store unavailable, naming the base, each read by compiler-replay's verdict (#2355)", async () => {
   // (the replay's reader of an area's records, which the runner's records below must pass, every form)
   const { areaRecordForm, apartText } = await import(
-    pathToFileURL(resolve(process.cwd(), "tools/compiler-replay.mjs")).href
+    pathToFileURL(resolve(process.cwd(), "tools/compiler-replay/collect.mjs")).href
   );
   const readBack = (kept: Record<string, unknown>[]): Record<string, string> =>
     Object.fromEntries(
