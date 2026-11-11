@@ -15,7 +15,13 @@ import { typePlan } from "../../../type-plans.js";
 import { lazyDefaultArgument } from "../../../lazy-defaults.js";
 import { type ValueKind, VALUE_KIND_NAMES } from "../../../value-kinds.js";
 import type { PlaceId, TypeTerm } from "../../graph.js";
-import { type Answers, type ValueAnswer, type AdmittedType, closedType } from "../answers.js";
+import {
+  type Answers,
+  type ValueAnswer,
+  type AdmittedType,
+  type PlaceAnswer,
+  closedType,
+} from "../answers.js";
 import { joinSteps } from "../budget.js";
 import {
   ContractDescriptors,
@@ -26,6 +32,7 @@ import {
 } from "../contract-descriptors.js";
 import { typedDefault as defaultKinds } from "../contract.js";
 import { leftOutCompletion } from "../consumers.js";
+import { type Definition } from "../definitions.js";
 import { type FlowNode } from "../flow-graph.js";
 import { type ItemTag, REASON, type Item } from "../items.js";
 import { propertyName, propertyStep } from "../program.js";
@@ -272,16 +279,138 @@ export class Contracts {
     // a copy of a written type is F18's receiving context (A4, (1a)), at every level the call's value
     // reaches, but the core answers the call by its default there while its later facts follow that answer: the
     // lowering cannot widen it alone
-    if (
-      landing !== null &&
-      expected !== null &&
-      levelsOf(expected).some((level) => {
-        const admitted = this.answers.place(landing.id, [...landing.path, ...level]).admitted;
-        return admitted.by === "decided" && admitted.inherited;
-      })
-    )
-      throw new OutsideContract(call, "a typed parse or load into a copy of a written type");
+    // PROBE v6: one read per landing level, as the guard reads them; the guard's reason first
+    if (expected === null) return expected;
+    const kindsAt = levelKinds(expected);
+    const levels = landing === null ? [] : levelsOf(expected);
+    const answered = new Map<string, PlaceAnswer>();
+    for (const level of levels) {
+      const answer = this.answers.place(landing!.id, [...landing!.path, ...level]);
+      answered.set(level.join("\u0000"), answer);
+      if (answer.admitted.by === "decided" && answer.admitted.inherited)
+        throw new OutsideContract(call, "a typed parse or load into a copy of a written type");
+    }
+    if (!this.coherence) return expected;
+    // the destination's other stores at every landing level and above
+    if (landing !== null) {
+      const verdict = this.#sourcesAgree(landing.id, landing.path, kindsAt, answered);
+      if (verdict !== null) throw new OutsideContract(call, `PROBE other ${verdict}`);
+    }
+    // the default's reads at every level
+    if (fallback !== null)
+      for (const { path, kinds } of kindsAt.values()) {
+        if (kinds === null) continue;
+        for (const at of atLevel(fallback, path)) {
+          if (at.kind === "other") continue;
+          if (at.kind === "unsure") throw new OutsideContract(call, "PROBE default unsure");
+          const verdict = this.#readAgrees(at.read, at.rest, kinds, true);
+          if (verdict !== null) throw new OutsideContract(call, `PROBE default ${verdict}`);
+        }
+      }
     return expected;
+  }
+
+  /** PROBE (#2307 HEAD 0): whether the coherence check runs (`checkedResult` turns it off). */
+  public coherence = true;
+  /** PROBE v7: each place key's definitions, read once; each unwritten binding's verdict at a level and kinds, once. */
+  readonly #definitionsOf = new Map<string, readonly Definition[]>();
+  readonly #bindingVerdicts = new Map<string, string | null>();
+  readonly #asking = new Set<string>();
+  readonly #readPlaces = new Map<Expression, { id: PlaceId; path: readonly string[] } | null>();
+
+  #definitions(id: PlaceId, path: readonly string[], answer?: PlaceAnswer): readonly Definition[] {
+    const key = `${id}\u0001${path.join("\u0000")}`;
+    let found = this.#definitionsOf.get(key);
+    if (found === undefined) {
+      found = (answer ?? this.answers.place(id, path)).definitions.list;
+      this.#definitionsOf.set(key, found);
+    }
+    return found;
+  }
+
+  /**
+   * PROBE v6: whether a read at `rest` below it is a written binding whose type there is `kinds`; an unwritten one's own
+   * stores are asked the same where `follow` (a default's binding), else it is not proved. `null` where it agrees.
+   */
+  #readAgrees(
+    read: Expression,
+    rest: readonly string[],
+    kinds: ReadonlySet<string>,
+    follow: boolean,
+  ): string | null {
+    let place = this.#readPlaces.get(read);
+    if (place === undefined) {
+      place = this.answers.at(nodeOf(this.answers, this.index, read))?.place ?? null;
+      this.#readPlaces.set(read, place);
+    }
+    if (place === null) return "no-place";
+    const steps = joinSteps(place.path, rest);
+    const annotation = this.lets.get(place.id)?.typeAnnotation ?? null;
+    if (annotation === null) {
+      if (!follow) return "unannotated";
+      const key = `${place.id}\u0001${steps.join("\u0000")}\u0001${[...kinds].sort().join("|")}`;
+      if (this.#bindingVerdicts.has(key)) return this.#bindingVerdicts.get(key)!;
+      // (a binding asked again while its own stores are asked: a cycle of copies, not proved)
+      if (this.#asking.has(key)) return "cycle";
+      this.#asking.add(key);
+      const one = new Map([
+        [steps.join("\u0000"), { path: joinSteps(steps, []), kinds: new Set(kinds) }],
+      ]);
+      const verdict = this.#sourcesAgree(place.id, [], one);
+      this.#asking.delete(key);
+      this.#bindingVerdicts.set(key, verdict);
+      return verdict;
+    }
+    const plan = typePlan(typeFromAnnotation(annotation));
+    const level = plan === null ? undefined : levelKinds(plan).get(steps.join("\u0000"));
+    return level === undefined || level.kinds === null || sameKinds(level.kinds, kinds)
+      ? null
+      : "written-differs";
+  }
+
+  /**
+   * PROBE v6: whether every store into a place (its definitions at each given level below `base` and at every level
+   * above), but `own`'s, stores at that level only literal data, operations and reads of written bindings of the level's
+   * kinds. `null` where they agree.
+   */
+  #sourcesAgree(
+    id: PlaceId,
+    base: readonly string[],
+    kindsAt: ReadonlyMap<string, { path: string[]; kinds: Set<string> | null }>,
+    answered: ReadonlyMap<string, PlaceAnswer> = new Map(),
+  ): string | null {
+    const definitions = new Map<number, Definition>();
+    for (const { path } of kindsAt.values())
+      for (const definition of this.#definitions(
+        id,
+        joinSteps(base, path),
+        answered.get(path.join("\u0000")),
+      ))
+        definitions.set(definition.uid, definition);
+    // (and every level above each: a store into an enclosing object or list covers it)
+    for (const { path } of kindsAt.values()) {
+      const full = joinSteps(base, path);
+      for (let depth = 0; depth < full.length; depth += 1)
+        for (const definition of this.#definitions(id, full.slice(0, depth)))
+          definitions.set(definition.uid, definition);
+    }
+    for (const { path, kinds } of kindsAt.values()) {
+      if (kinds === null) continue;
+      const at = joinSteps(base, path);
+      for (const definition of definitions.values()) {
+        if (definition.path.length > at.length || definition.path.some((step, i) => at[i] !== step))
+          continue;
+        const value = this.index.findExpressionAt(definition.site);
+        if (value === undefined) return "unsure-site";
+        for (const read of atLevel(value, at.slice(definition.path.length))) {
+          if (read.kind === "other") continue;
+          if (read.kind === "unsure") return "unsure";
+          const verdict = this.#readAgrees(read.read, read.rest, kinds, true);
+          if (verdict !== null) return verdict;
+        }
+      }
+    }
+    return null;
   }
 
   /**
@@ -821,6 +950,106 @@ function levelsOf(plan: TypePlan): string[][] {
         pending.push([property.type, [...path, propertyStep(property.name)]]);
   }
   return [...levels.values()];
+}
+
+/** PROBE: each level of a plan with its kinds (a number family's integer folded into number); `null` for an open level. */
+function levelKinds(plan: TypePlan): Map<string, { path: string[]; kinds: Set<string> | null }> {
+  const levels = new Map<string, { path: string[]; kinds: Set<string> | null }>();
+  const pending: [TypePlan, string[]][] = [[plan, []]];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const [at, path] = next;
+    const key = path.join("\u0000");
+    if (at === ANY_VALUE) {
+      levels.set(key, { path, kinds: null });
+      continue;
+    }
+    if (at.kind === "union") {
+      for (const member of at.members) pending.push([member, path]);
+      continue;
+    }
+    const level = levels.get(key) ?? { path, kinds: new Set<string>() };
+    levels.set(key, level);
+    level.kinds?.add(at.kind);
+    if ((at.kind === "list" || at.kind === "set" || at.kind === "dict") && at.element !== null)
+      pending.push([at.element, joinSteps(path, ["element"])]);
+    else if (at.kind === "object")
+      for (const property of at.properties)
+        pending.push([property.type, joinSteps(path, [propertyStep(property.name)])]);
+  }
+  for (const level of levels.values())
+    if (level.kinds?.has("number")) level.kinds.delete("integer");
+  return levels;
+}
+
+/** PROBE: whether two kind sets are one, a number family's integer folded into number on each side. */
+function sameKinds(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  const fold = (set: ReadonlySet<string>) =>
+    new Set([...set].filter((kind) => kind !== "integer" || !set.has("number")));
+  const [x, y] = [fold(a), fold(b)];
+  return x.size === y.size && [...x].every((kind) => y.has(kind));
+}
+
+/**
+ * PROBE: the expressions of a default at a level below it, through parentheses, `otherwise`, list and set elements and
+ * object properties: a read of a place with the steps left below it, `other` for a value no place holds (a literal, an
+ * operation, a typed parse or load, which its own check covers), `unsure` for anything else.
+ */
+function atLevel(
+  value: Expression,
+  path: readonly string[],
+): (
+  | { kind: "read"; read: Expression; rest: readonly string[] }
+  | { kind: "other" }
+  | { kind: "unsure" }
+)[] {
+  const at = unwrap(value);
+  switch (at.kind) {
+    case "numberLiteral":
+    case "booleanLiteral":
+    case "nullLiteral":
+    case "stringLiteral":
+      return [{ kind: "other" }];
+    case "identifier":
+      return [{ kind: "read", read: at, rest: path }];
+    case "propertyAccessExpression":
+    case "indexExpression": {
+      // (a projection of literal data is the parts it selects, `projectedLiteral`; else a read)
+      const selected = projectedLiteral(at);
+      return selected === undefined
+        ? [{ kind: "read", read: at, rest: path }]
+        : selected.flatMap((part) => atLevel(part, path));
+    }
+    case "listLiteral":
+    case "setLiteral":
+      if (path.length === 0) return [{ kind: "other" }];
+      return path[0] === "element"
+        ? at.elements.flatMap((element) => atLevel(element, path.slice(1)))
+        : [{ kind: "unsure" }];
+    case "objectLiteral": {
+      if (path.length === 0) return [{ kind: "other" }];
+      const property = at.properties.find((p) => propertyStep(p.name.name) === path[0]);
+      return property === undefined ? [{ kind: "other" }] : atLevel(property.value, path.slice(1));
+    }
+    case "binaryExpression":
+      return at.operator === "otherwise"
+        ? [...atLevel(at.left, path), ...atLevel(at.right, path)]
+        : [{ kind: "other" }];
+    case "loadExpression":
+      return [{ kind: "other" }];
+    case "callExpression": {
+      if (typedDefault(at) !== undefined) return [{ kind: "other" }];
+      // (a `get`: its receiver's element, or its default)
+      const receiver = getReceiver(at);
+      if (receiver === null) return [{ kind: "unsure" }];
+      const fallback = defaultOf(at);
+      return [
+        ...atLevel(receiver, joinSteps(["element"], path)),
+        ...(fallback === null ? [] : atLevel(fallback, path)),
+      ];
+    }
+    default:
+      return [{ kind: "unsure" }];
+  }
 }
 
 /** A value's contract at a path, and whether each level below it (by its steps) is a written domain. */
