@@ -21,37 +21,68 @@ import { ts } from "ts-morph";
  * `file`, each is either `readonly` and made by one of `Retained`'s makers (`MAKERS`), or named in the object its class's
  * `Retained.owner(this, name, hidden)` returns, `hidden` an arrow written there or a static `#hidden` arrow of the class,
  * whose object literal gives the field itself (`x: owner.#x`), or listed in `OUTSIDE_FIELDS`. Any other private field is refused, whatever its initializer.
- * In a file scoped `module`, only the top level is checked: its other classes keep no retained state. The scope
- * is the recorder's domain (`tests/helpers/retained-recorder.ts`): the admission's files and narrowing's are not in it.
+ * Every file of the type core is checked, a new one too, unless `TOP_LEVEL` names it (its top level alone is checked)
+ * or `OUTSIDE` does, each with its reason; the reasons match the recorder's domain (`tests/helpers/retained-recorder.ts`).
  */
-const SCOPE = [
-  { glob: "src/type-inference/core/contract.ts", level: "file" },
-  { glob: "src/type-inference/core/contract/**/*.ts", level: "file" },
-  { glob: "src/type-inference/core/inherited/**/*.ts", level: "file" },
-  { glob: "src/type-inference/core/values.ts", level: "file" },
-  { glob: "src/type-inference/core/definitions.ts", level: "file" },
-  { glob: "src/type-inference/core/exact-path.ts", level: "file" },
-  { glob: "src/type-inference/core/indexes/guards.ts", level: "file" },
-  { glob: "src/type-inference/core/indexes/handlers.ts", level: "file" },
-  // (the files holding a module's capture: `retainedModule`)
-  { glob: "src/type-inference/core/answers.ts", level: "module" },
-  { glob: "src/type-inference/core/consumers.ts", level: "module" },
-  { glob: "src/type-inference/core/contract-descriptors.ts", level: "module" },
-  { glob: "src/type-inference/core/messages/site.ts", level: "module" },
-  { glob: "src/type-inference/core/property-names.ts", level: "module" },
-];
+const CORE = "src/type-inference/core/";
 
-/** The scoped files the check leaves out, each with why it keeps no retained state. */
-const EXCLUDED = new Map([
+/** The files checked at their top level only (their module captures), each with why its classes are not. */
+const TOP_LEVEL = new Map([
   [
-    "src/type-inference/core/contract/objects.ts",
+    "answers.ts",
+    "its classes are the finished analysis' answers (`CoreAnswers`), made after its runs",
+  ],
+  [
+    "consumers.ts",
+    "its classes are the questions' driver (`Consumers`), outside the recorder's domain by name",
+  ],
+  [
+    "contract-descriptors.ts",
+    "its classes are the result's descriptors (`ContractDescriptors`), made after the runs they describe",
+  ],
+]);
+
+/**
+ * The files and folders (`…/`) the check leaves out, each with why: outside the recorder's domain by name, compared by
+ * identity, or made where no later run follows.
+ */
+const OUTSIDE = new Map([
+  ["admission.ts", "the admission's own state: outside 1b-i's domain, #1072 1b part ii"],
+  ["admission/", "the admission's own state: outside 1b-i's domain, #1072 1b part ii"],
+  [
+    "touch.ts",
+    "the admission's candidate discovery (`Touches`): outside 1b-i's domain, #1072 1b part ii",
+  ],
+  ["narrowing/", "narrowing's indexes: outside the recorder's domain by name"],
+  ["retained/", "the retained API itself"],
+  ["consumers/", "the questions' driver (`Consumers`): outside the recorder's domain by name"],
+  ["check-result/", "the result made from the finished analysis: no run follows it"],
+  ["solver.ts", "the solver: compared by identity (`IDENTITY_CLASSES`)"],
+  ["budget.ts", "the work ledger: compared by identity (`IDENTITY_CLASSES`)"],
+  ["items.ts", "the ingress graph: compared by identity (`IDENTITY_CLASSES`)"],
+  [
+    "program.ts",
+    "the program, built before any run: compared by identity, its census walking it by value",
+  ],
+  ["flow-graph.ts", "the program's flow graph, built with it before any run"],
+  [
+    "contract/objects.ts",
     "what a query gathers (`Gathered`) becomes its proof, which the solver holds; its collections' shapes are closed by its own language (tools/oxlint/objects-language.mjs)",
   ],
   [
-    "src/type-inference/core/contract/contributions.ts",
+    "contract/contributions.ts",
     "a run's flow (`FlowSink`) is the solver's record of the run, published with its answer",
   ],
 ]);
+
+/** How a core file is checked: `file`, `module` (its top level), or `null` (not at all). */
+function levelOf(file) {
+  const inner = file.slice(CORE.length);
+  if (TOP_LEVEL.has(inner)) return "module";
+  for (const name of OUTSIDE.keys())
+    if (name.endsWith("/") ? inner.startsWith(name) : inner === name) return null;
+  return "file";
+}
 
 /** The private fields the check leaves out, each with why the recorder's domain does not hold it. */
 const OUTSIDE_FIELDS = new Map([
@@ -70,14 +101,12 @@ const READONLY = new Set(["ReadonlyMap", "ReadonlySet"]);
 
 export function checkRetainedState(root) {
   const sources = [];
-  for (const { glob, level } of SCOPE)
-    for (const file of globSync(glob, { cwd: root }).sort())
-      if (!EXCLUDED.has(file.split(sep).join("/")))
-        sources.push({
-          file: file.split(sep).join("/"),
-          text: readFileSync(resolve(root, file), "utf8"),
-          level,
-        });
+  for (const found of globSync(`${CORE}**/*.ts`, { cwd: root }).sort()) {
+    const file = found.split(sep).join("/");
+    const level = levelOf(file);
+    if (level !== null)
+      sources.push({ file, text: readFileSync(resolve(root, found), "utf8"), level });
+  }
   return retainedStateDiagnostics(sources);
 }
 
