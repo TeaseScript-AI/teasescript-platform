@@ -17,7 +17,8 @@ import { aside, asideRun } from "./compiler-replay/aside.mjs";
 //   node tools/compiler-replay.mjs aside <prefix> <base> <head> --owner <owner> --declare <file>
 //   node tools/compiler-replay.mjs plan-checks <plan.json>...
 //
-// Each step is its module's in `tools/compiler-replay/` (`submit.mjs`, `collect.mjs`, `reruns.mjs`, `aside.mjs`).
+// The replay steps live in `tools/compiler-replay/` (`submit.mjs`, `collect.mjs`, `reruns.mjs`, `aside.mjs`); `plan-checks`
+// remains here.
 //
 // `plan-checks` prints each plan file's checks (`tests/helpers/plan-checks.ts`'s `planChecks`, from the built `dist/`).
 //

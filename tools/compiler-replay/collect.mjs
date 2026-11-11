@@ -12,6 +12,7 @@
 // refused (exit 2) unless all but one are replaced: by a rerun's record (`rerun-shard`) or by `--replace
 // <failed>=<rerun>`, which is refused when the jobs are not one shard's attempts or the rerun cannot stand. It prints a
 // table and, with `--json`, writes the report.
+// (`ranOut`, `shardsRead` and the reading of a campaign's attempts are `results.mjs`'s.)
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
