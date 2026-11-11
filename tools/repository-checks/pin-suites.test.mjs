@@ -217,15 +217,41 @@ test("the marks are kept true: each reads, and each test file a pin form finds i
   assert.deepEqual(netOf(ROOT, MARKS, NOT_PINS), []);
 });
 
-test("the marked files and the suites they name are counted: a mark lost from a file's head fails here (#2094)", () => {
-  // (the net finds a pin only by a form it knows, and some suites pin by none: candidate's and f18's, among others)
+/** A mark's `{file, in}` pair: the suite, and the file holding its pins when that is another. */
+function pairOf({ file, in: holder }) {
+  return holder === undefined ? file : `${file} in ${holder}`;
+}
+
+// The selection (`suitesFor`) is a function of the `{file, in}` pairs returned by `readMarks`, the reader the CLI calls.
+// The test below reads them with it over the repository and compares them with PAIRS as a set, so no change alters
+// the selection while it passes except an edit to PAIRS, which is the acknowledgement (the net misses formless pins).
+const PAIRS = [
+  "tests/type-core/type-core-candidate.test.ts",
+  "tests/type-core/type-core-closure.test.ts",
+  "tests/type-core/type-core-contract-capture.test.ts",
+  "tests/type-core/type-core-contract.test.ts",
+  "tests/type-core/type-core-declared-escapes.test.ts in tests/helpers/type-core/type-core-declared-escapes-main.ts",
+  "tests/type-core/type-core-f18.test.ts",
+  "tests/type-core/type-core-kept.test.ts",
+  "tests/type-core/type-core-key-ids.test.ts",
+  "tests/type-core/type-core-work-a.test.ts",
+  "tests/type-core/type-core-work-a.test.ts in tests/helpers/type-core/families/admission-products.ts",
+  "tests/type-core/type-core-work-b.test.ts in tests/helpers/type-core/families/output-bound.ts",
+  "tests/type-core/type-core-work-b.test.ts in tests/helpers/type-core/families/w34-links.ts",
+  "tests/type-core/type-core-work-c.test.ts",
+  "tests/type-core/type-core-work-c.test.ts in tests/helpers/type-core/families/admission-products.ts",
+  "tests/type-core/type-core-work-c.test.ts in tests/helpers/type-core/families/property-names.ts",
+];
+
+test("the marks name exactly the expected suites and the files holding their pins (#2094)", () => {
+  const read = MARKED.map(pairOf);
   assert.deepEqual(
     {
-      "marked files": new Set(MARKED.map((suite) => suite.in ?? suite.file)).size,
-      suites: SUITES.length,
+      gained: read.filter((pair) => !PAIRS.includes(pair)),
+      lost: PAIRS.filter((pair) => !read.includes(pair)),
     },
-    { "marked files": 14, suites: 11 },
-    "a `// pins` mark was added or removed; if that is meant, change the count here",
+    { gained: [], lost: [] },
+    "the marks' suites changed; if that is meant, change the list here (PAIRS)",
   );
 });
 
