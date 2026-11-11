@@ -727,6 +727,53 @@ test("the full suite fails on a file that reported no test of its own, and names
   }
 });
 
+test("a test past the time limit fails by name and its file's process ends, for named files and in the full suite (#2454)", async () => {
+  // EVIDENCE: tools/test-in-flight.mjs exports `TEST_LIMIT_MS` as a number of milliseconds, as both runners read it.
+  const { TEST_LIMIT_MS } = (await import(
+    pathToFileURL(resolve(process.cwd(), "tools/test-in-flight.mjs")).href
+  )) as { TEST_LIMIT_MS: number };
+  const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
+  const environment = { ...process.env };
+  delete environment.NODE_TEST_CONTEXT;
+  mkdirSync(resolve(directory, "dist/tests"), { recursive: true });
+  // (the options a test file's process was given: the last `--test-timeout` is the one Node applies)
+  const options = `require("node:test")("options", () => {
+    const given = process.execArgv.filter((option) => option.startsWith("--test-timeout="));
+    console.log("given: " + given.at(-1) + " " + process.execArgv.includes("--test-force-exit"));
+  });`;
+  writeFileSync(resolve(directory, "dist/tests/options.test.js"), options);
+  writeFileSync(
+    resolve(directory, "hangs.test.js"),
+    `require("node:test")("passes", () => {});
+     require("node:test")("hangs", () => new Promise(() => setInterval(() => {}, 1000)));`,
+  );
+  // (a bound on each run: without the forced exit, the hanging test's interval keeps its process, and the run, alive)
+  const run = (args: string[]) =>
+    spawnSync(process.execPath, [filterPath, "--full-output", ...args], {
+      cwd: directory,
+      encoding: "utf8",
+      env: environment,
+      timeout: 60_000,
+    });
+  const given = `given: --test-timeout=${TEST_LIMIT_MS} true`;
+  try {
+    const suite = run([]);
+    assert.equal(suite.status, 0, suite.stderr);
+    assert.ok(suite.stdout.includes(given), suite.stdout);
+    const named = run(["dist/tests/options.test.js"]);
+    assert.equal(named.status, 0, named.stderr);
+    assert.ok(named.stdout.includes(given), named.stdout);
+    // (a shorter limit given to the filter replaces its own, so the hang ends within the bound)
+    const hangs = run(["--test-timeout=300", "hangs.test.js"]);
+    assert.equal(hangs.status, 1, `${hangs.error ?? ""}${hangs.stderr}`);
+    assert.match(hangs.stdout, /^✔ passes \(/mu);
+    assert.match(hangs.stdout, /^✖ hangs \(/mu);
+    assert.match(hangs.stdout, /'test timed out after 300ms'/u);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test(
   "Ctrl+C stops the full suite without an error",
   { skip: process.platform === "win32" },
