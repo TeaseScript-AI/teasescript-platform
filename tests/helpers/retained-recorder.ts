@@ -11,13 +11,16 @@
  * Its domain, and how each kind of state enters it:
  * - a collection made through `Retained` (a field's, a payload's, a module's capture through `retainedModule`): its
  *   membership is one entry, each key's value one entry;
- * - an owner registered through `Retained.owner`: each own enumerable field is an entry, and each private field its
- *   `hidden` gives;
+ * - an owner registered through `Retained.owner`: each own enumerable field (string- or symbol-keyed) is an entry, and
+ *   each private field its `hidden` gives; the names of its fields are one more entry;
  * - a weak collection made through `Retained`: made here as one that keeps its keys, so its entries can be listed.
- * An entry's value is fingerprinted by value through arrays, plain objects, and native maps and sets; a retained
- * collection or owner met inside it is a reference (it is compared as its own entries). A function is taken by
- * identity. Anything else is the conservative default: a native weak collection is a violation (its entries cannot be
- * listed), and an instance of a class not in `IDENTITY_CLASSES` is a violation too.
+ * An entry's value is fingerprinted by value through plain objects and the built-ins of exact prototype (arrays, typed
+ * arrays, native maps and sets, each with its own enumerable fields), every field read through its descriptor; a
+ * retained collection or owner met inside it is a reference (it is compared as its own entries). A function is taken
+ * by identity. Anything else is the conservative default: an accessor is a violation and is never called, a native
+ * weak collection is a violation (its entries cannot be listed), and an instance of a class not in `IDENTITY_CLASSES`
+ * is a violation too. The one accessor read is one a registered owner's `hidden` gives by name: that `hidden` is code
+ * the owner states reads passively (`CorePass`'s getters, which give owners made after it), trusted, not checked.
  *
  * Outside the domain in #1072 1b, by name: the admission's own state (`Admission`, `core/admission/`); narrowing's
  * indexes (`NarrowingIndex` and its module capture, `GuardIndex`'s narrowing queries); what a query gathers in
@@ -264,6 +267,8 @@ export class Recorder implements RetainedRecorder {
       case "string":
         return JSON.stringify(value);
       case "number":
+        // (negative zero is a value of its own: `String` would print it as `0`)
+        return Object.is(value, -0) ? "n-0" : `n${String(value)}`;
       case "boolean":
       case "bigint":
         return `${(typeof value)[0]}${String(value)}`;
@@ -410,9 +415,8 @@ export class Recorder implements RetainedRecorder {
         if (held === undefined) return null;
         // (an own accessor its `hidden` gives by name is the owner's declared read: its value is that one)
         const given = hidden === null ? {} : hidden(held);
-        const fields: (readonly [string, unknown])[] = ownFields(
+        const fields: (readonly [string, unknown])[] = this.#ownFields(
           held,
-          (text) => this.#violation(text),
           new Set(Object.keys(given)),
         );
         for (const [field, value] of Object.entries(given)) fields.push([`#${field}`, value]);
@@ -532,7 +536,8 @@ export class Recorder implements RetainedRecorder {
     if (typeof value === "function") return { hash: `F${this.#id(value)}`, amended: false };
     // (a retained collection or owner met inside a value is compared as its own entries; here only its identity)
     const reference = this.#registered.get(value);
-    if (reference !== undefined) return { hash: reference, amended: amended.has(value) };
+    // (its identity only, so its mark covers its own entries, never this one's)
+    if (reference !== undefined) return { hash: reference, amended: false };
     if (stack.includes(value)) return { hash: `^${this.#id(value)}`, amended: false };
     const known = memo.get(value);
     if (known !== undefined) return known;
@@ -545,19 +550,25 @@ export class Recorder implements RetainedRecorder {
     };
     stack.push(value);
     const prototype: unknown = Object.getPrototypeOf(value);
-    // EVIDENCE: invariant: a prototype object's `constructor`, where it has one, is the class it belongs to.
-    const listed = IDENTITY_CLASSES.get(
-      prototype === null ? undefined : (prototype as { constructor?: unknown }).constructor,
-    );
+    const listed = IDENTITY_CLASSES.get(constructorOf(value));
+    // (a built-in's own fields beyond its contents are walked too: an array's elements are its index fields)
+    const fields = (indices: boolean): void => {
+      for (const [key, field] of this.#ownFields(value)) {
+        if (!indices && INDEX.test(key)) continue;
+        parts.push(JSON.stringify(key));
+        part(field);
+      }
+    };
     if (prototype === Array.prototype) {
-      parts.push("[");
       // EVIDENCE: invariant: an object whose prototype is `Array.prototype` is an array.
-      for (const element of value as unknown[]) part(element);
+      parts.push(`[${(value as unknown[]).length}`);
+      fields(true);
     } else if (TYPED.has(prototype)) {
       // (a typed array's or a data view's bytes are plain data)
       // EVIDENCE: invariant: an object whose prototype is a built-in view's is that view.
       const view = value as ArrayBufferView;
       parts.push(`T${new Uint8Array(view.buffer, view.byteOffset, view.byteLength).join(",")}`);
+      fields(false);
     } else if (prototype === Map.prototype) {
       parts.push("M");
       // EVIDENCE: invariant: an object whose prototype is `Map.prototype` is a map.
@@ -565,19 +576,18 @@ export class Recorder implements RetainedRecorder {
         part(key);
         part(element);
       }
+      fields(true);
     } else if (prototype === Set.prototype) {
       parts.push("S");
       // EVIDENCE: invariant: an object whose prototype is `Set.prototype` is a set.
       for (const element of value as Set<unknown>) part(element);
+      fields(true);
     } else if (prototype === WeakMap.prototype || prototype === WeakSet.prototype) {
       this.#violation(`a native weak collection in retained state, which cannot be listed`);
       parts.push(`W${this.#id(value)}`);
     } else if (PLAIN.has(prototype) || (this.#census && listed?.census === true)) {
       parts.push("{");
-      for (const [key, field] of ownFields(value, (name) => this.#violation(name))) {
-        parts.push(JSON.stringify(key));
-        part(field);
-      }
+      fields(true);
     } else {
       const name = listed?.name ?? className(value);
       this.#identities.set(name, (this.#identities.get(name) ?? 0) + 1);
@@ -599,13 +609,14 @@ export class Recorder implements RetainedRecorder {
    */
   #where(value: unknown, memo: Map<WeakKey, { readonly hash: string }>, path: string): string {
     if (typeof value !== "object" || value === null) return path || "(the value itself)";
-    const children: [string, unknown][] = Array.isArray(value)
-      ? value.map((each, index) => [`[${index}]`, each])
-      : value instanceof Map
-        ? [...value].map(([key, each]) => [`.get(${this.#atom(key)})`, each])
+    const children: [string, unknown][] = [
+      ...(value instanceof Map
+        ? [...value].map(([key, each]): [string, unknown] => [`.get(${this.#atom(key)})`, each])
         : value instanceof Set
-          ? [...value].map((each, index) => [`{${index}}`, each])
-          : ownFields(value).map(([key, each]) => [`.${key}`, each]);
+          ? [...value].map((each, index): [string, unknown] => [`{${index}}`, each])
+          : []),
+      ...this.#ownFields(value).map(([key, each]): [string, unknown] => [`.${key}`, each]),
+    ];
     for (const [step, child] of children) {
       if (typeof child !== "object" || child === null || this.#registered.has(child)) continue;
       const now = memo.get(child)?.hash;
@@ -616,6 +627,28 @@ export class Recorder implements RetainedRecorder {
     return `${path || "(the value)"} (${className(value)})`;
   }
 
+  /**
+   * An object's own enumerable data fields, string-keyed and symbol-keyed (`[y<id>]`), in order, read through their
+   * descriptors: no getter is called. An own accessor is a violation (the conservative default: a getter's value is not
+   * data the walk may compute), unless `declared` names it: a registered owner's `hidden` gives it by name, and the
+   * owner's `hidden` is trusted to read it passively.
+   */
+  #ownFields<T extends object>(
+    value: T,
+    declared: ReadonlySet<string> = new Set(),
+  ): (readonly [string, unknown])[] {
+    const fields: (readonly [string, unknown])[] = [];
+    for (const key of Reflect.ownKeys(value)) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (descriptor?.enumerable !== true) continue;
+      const name = typeof key === "symbol" ? `[${this.#atom(key)}]` : key;
+      if ("value" in descriptor) fields.push([name, descriptor.value]);
+      else if (!declared.has(name))
+        this.#violation(`an accessor \`${name}\` of ${className(value)} in retained state`);
+    }
+    return fields;
+  }
+
   #violation(text: string): void {
     if (this.#seen.has(text)) return;
     this.#seen.add(text);
@@ -623,31 +656,32 @@ export class Recorder implements RetainedRecorder {
   }
 }
 
-/** An object's class's name, as its constructor gives it. */
-function className(value: WeakKey): string {
-  // EVIDENCE: invariant: an object's `constructor` is a function or absent (a null-prototype object), never anything else.
-  const made = (value as { readonly constructor?: { readonly name?: string } }).constructor;
-  return made?.name ?? "anonymous";
+/** A class, as its prototype's `constructor` gives it. */
+interface Made {
+  readonly name: string;
 }
 
+/** An array index's or a typed array's element's key. */
+const INDEX = /^(?:0|[1-9]\d*)$/;
+
 /**
- * An object's own enumerable data fields, in order, read through their descriptors: no getter is called. An own
- * accessor is named to `refuse` (the conservative default: a getter's value is not data the walk may compute), unless
- * `declared` names it: a registered owner's `hidden` that gives it by name, which the owner reads instead.
+ * An object's class: its prototype's own `constructor` where that is a data field holding a function, read through its
+ * descriptor (no getter is called); else none.
  */
-function ownFields(
-  value: WeakKey,
-  refuse?: (text: string) => void,
-  declared: ReadonlySet<string> = new Set(),
-): (readonly [string, unknown])[] {
-  const fields: (readonly [string, unknown])[] = [];
-  for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
-    if (descriptor.enumerable !== true) continue;
-    if ("value" in descriptor) fields.push([key, descriptor.value]);
-    else if (!declared.has(key))
-      refuse?.(`an accessor \`${key}\` of ${className(value)} in retained state`);
-  }
-  return fields;
+function constructorOf(value: WeakKey): Made | undefined {
+  const prototype: unknown = Object.getPrototypeOf(value);
+  if (prototype === null) return undefined;
+  // EVIDENCE: invariant: a prototype is an object, so it can hold a descriptor.
+  const descriptor = Object.getOwnPropertyDescriptor(prototype as object, "constructor");
+  // EVIDENCE: invariant: `typeof` has just found the data field's value a function.
+  return descriptor !== undefined && "value" in descriptor && typeof descriptor.value === "function"
+    ? (descriptor.value as Made)
+    : undefined;
+}
+
+/** An object's class's name, as its constructor gives it (`constructorOf`); `anonymous` without one. */
+function className(value: WeakKey): string {
+  return constructorOf(value)?.name ?? "anonymous";
 }
 
 /** A recording collection's membership and values. */

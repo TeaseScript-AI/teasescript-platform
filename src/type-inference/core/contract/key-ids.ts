@@ -937,8 +937,8 @@ export class PathSteps {
         (of.#views ??= Retained.held(of, Retained.map("PathSteps.#views"))).set(key, entry);
         contract.keep(1);
       }
+      // (run only from the view's `path`, which marks the view in this run)
       view.#entry = entry;
-      amend(view);
       return entry.id;
     };
     const view = new PathSteps(contract, rawSteps().get(of)!, find, offset, length);
