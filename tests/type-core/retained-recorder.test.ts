@@ -2,6 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  keyBelowIn,
+  keyIdOf,
+  keyIdPath,
+  keyPrefixIn,
+  spanRef,
+  stepsOfId,
+  type KeyId,
+  type PathSteps,
+} from "../../src/type-inference/core/contract/key-ids.js";
+import {
   collectMarks,
   depthOf,
   markAccepts,
@@ -332,6 +342,94 @@ test("an accessor in retained state is named and never called, unless its owner'
   assert.deepEqual(unmarked, ["unrecorded change: T.declared.#later"]);
 });
 
+test("an owner's symbol-keyed field changed or added in a later run is named unless amended", () => {
+  for (const change of ["change", "add"] as const) {
+    const { unmarked, marked } = controlled((mark) => {
+      const slot = Symbol("slot");
+      const added = Symbol("added");
+      const owner: { [slot]: { value: number }; [added]?: number } = { [slot]: { value: 1 } };
+      Retained.owner(owner, "T.symbols");
+      return [
+        () => {},
+        () => {
+          if (change === "change") owner[slot].value = 2;
+          else owner[added] = 1;
+          mark(owner);
+        },
+      ];
+    });
+    assert.equal(unmarked.length, 1, change);
+    assert.match(
+      unmarked[0]!,
+      change === "change"
+        ? /^unrecorded change: T\.symbols\.\[y\d+\]$/
+        : /^unrecorded change: T\.symbols's fields$/,
+      change,
+    );
+    assert.deepEqual(marked, [], change);
+  }
+});
+
+test("a built-in's own field beyond its contents, changed in a later run, is named unless amended", () => {
+  const { unmarked, marked } = controlled((mark) => {
+    const child = { n: 1 };
+    const map = Retained.map<string, unknown[]>("T.extra");
+    return [
+      () => map.set("a", Object.assign([], { child })),
+      () => {
+        child.n = 2;
+        mark(child);
+      },
+    ];
+  });
+  assert.deepEqual(unmarked, ['unrecorded change: T.extra at "a"']);
+  assert.deepEqual(marked, []);
+});
+
+test("a field changed from zero to negative zero in a later run is named unless amended", () => {
+  const { unmarked, marked } = controlled((mark) => {
+    const owner = { n: 0 };
+    Retained.owner(owner, "T.zero");
+    return [
+      () => {},
+      () => {
+        owner.n = -0;
+        mark(owner);
+      },
+    ];
+  });
+  assert.deepEqual(unmarked, ["unrecorded change: T.zero.n"]);
+  assert.deepEqual(marked, []);
+});
+
+test("an accessor at an array's index, or a class's `constructor` getter, is never called", () => {
+  let reads = 0;
+  const array: number[] = [];
+  Object.defineProperty(array, 0, {
+    enumerable: true,
+    get: (): number => {
+      reads += 1;
+      return 1;
+    },
+  });
+  class Getter {}
+  Object.defineProperty(Getter.prototype, "constructor", {
+    get: (): typeof Getter => {
+      reads += 1;
+      return Getter;
+    },
+  });
+  const violations = recorded(() => {
+    const map = Retained.map<string, object>("T.getters");
+    return [() => map.set("a", array), () => map.set("c", new Getter()), () => {}];
+  }).violations;
+  assert.deepEqual(violations, [
+    "an accessor `0` of Array in retained state",
+    "an instance of anonymous, a class not in IDENTITY_CLASSES, in retained state",
+  ]);
+  assert.equal(reads, 0);
+});
+
 test("a demand's factory runs as its own run: its caller's amend does not cover the change it makes", () => {
   // (an eager factory, `make` an ordinary function, and a generator one change the payload alike)
   for (const eager of [true, false]) {
@@ -421,6 +519,85 @@ test("a mark automaton compiled for real holders, each in its own run, is record
     return marked.length;
   });
   assert.ok(holders > 1);
+  assert.deepEqual(recorder.report().violations, []);
+});
+
+test("a path's facts and steps, and a stop, made after what they fill, are recorded", () => {
+  // (each lazy fill of `key-ids.ts` in its own run, after the run that made what it fills: the sites the fixture's
+  // sources fill only in the run that made them)
+  const recorder = new Recorder();
+  withRetainedRecorder(recorder, () => {
+    const request = coreRequest([
+      {
+        path: "main.tease",
+        source: "let seed: integer = 1\nlet leaf = {n: seed}\nlet box = {shell: leaf}\nexit\n",
+      },
+    ]);
+    assert.ok(request !== null);
+    const pass = narrowingPass(request);
+    const { contract } = pass;
+    const box = pass.program.places.find(
+      (place) => place.kind.kind === "binding" && place.label === "box",
+    );
+    assert.ok(box !== undefined);
+    let id: KeyId | undefined;
+    let other: KeyId | undefined;
+    let steps: PathSteps | undefined;
+    let suffix: PathSteps | undefined;
+    let view: PathSteps | undefined;
+    const runs: readonly (() => void)[] = [
+      () => {
+        id = keyIdOf(contract, box.id, ["a", "b", "c", "d"]);
+        other = keyIdOf(contract, box.id, ["e", "f", "g"]);
+      },
+      // (its facts' steps)
+      () => (steps = stepsOfId(contract, id!)),
+      // (their suffixes)
+      () => (suffix = stepsOfId(contract, id!, 1)),
+      // (a suffix's path, found on first use)
+      () => void suffix!.path,
+      // (the other path's suffix, then its steps: its facts made by the first)
+      () => void stepsOfId(contract, other!, 1),
+      () => void stepsOfId(contract, other!),
+      // (the steps' text, kept on their path's facts)
+      () => void steps!.text(),
+      () => (view = steps!.from(1)),
+      // (the view's path: its id, its span, the viewed steps' views, the view's entry)
+      () => void view!.path,
+      // (its text, and its entry's)
+      () => void view!.text(),
+      // (a prefix's path, found from its ancestors)
+      () => void steps!.to(2).path,
+      // (the path's prefixes)
+      () => void keyPrefixIn(contract, id!, 2),
+      // (the paths below it by their steps' text)
+      () => void keyBelowIn(contract, id!, ["x", "y"]),
+      // (a path joined below another's: the joins kept on the base's facts, made by a run before)
+      () => void stepsOfId(contract, keyIdOf(contract, box.id, ["x"])),
+      () => void spanRef(contract, keyIdPath(id!)).after(["x"]).id(),
+    ];
+    const solve = (steps: readonly (() => void)[]): void =>
+      void pass.solver.run(
+        (function* (): Work<readonly Item[]> {
+          for (const [index, run] of steps.entries())
+            yield {
+              key: `fill${index}`,
+              kind: "value",
+              file: 0,
+              offset: index,
+              *make(): Work<readonly Item[]> {
+                run();
+                return [];
+              },
+            };
+          return [];
+        })(),
+      );
+    solve(runs);
+    // (a stop between two solves, as admission's decision stops a key: the contract's count of stops)
+    contract.stop(box.id, ["a", "b"]);
+    solve([() => {}]);
+  });
   assert.deepEqual(recorder.report().violations, []);
 });
 

@@ -18,7 +18,7 @@ import { ts } from "ts-morph";
  * What the check does not see is the recorder's: a local filled after it is stored in retained state is walked there by
  * value.
  * A private instance field (`#x`), which no walk of its owner can see, is closed at its declaration: in a file scoped
- * `file`, each is either `readonly` and made by a `Retained.*` call, or named in the object its class's
+ * `file`, each is either `readonly` and made by one of `Retained`'s makers (`MAKERS`), or named in the object its class's
  * `Retained.owner(this, name, hidden)` returns, `hidden` an arrow written there or a static `#hidden` arrow of the class,
  * whose object literal gives the field itself (`x: owner.#x`), or listed in `OUTSIDE_FIELDS`. Any other private field is refused, whatever its initializer.
  * In a file scoped `module`, only the top level is checked: its other classes keep no retained state. The scope
@@ -213,14 +213,18 @@ function at(source, file, node) {
   return { fileName: file, line: line + 1, column: character + 1 };
 }
 
-/** Whether `node` is a call of one of `Retained`'s makers (`Retained.map(…)` and the like). */
+/** `Retained`'s makers: each makes a collection the recorder registers (`Retained.held` registers nothing). */
+const MAKERS = new Set(["map", "set", "weakMap", "weakSet"]);
+
+/** Whether `node` is a call of one of `Retained`'s makers (`Retained.map(…)`, `MAKERS`). */
 function retainedCall(node) {
   return (
     node !== undefined &&
     ts.isCallExpression(node) &&
     ts.isPropertyAccessExpression(node.expression) &&
     ts.isIdentifier(node.expression.expression) &&
-    node.expression.expression.text === "Retained"
+    node.expression.expression.text === "Retained" &&
+    MAKERS.has(node.expression.name.text)
   );
 }
 
