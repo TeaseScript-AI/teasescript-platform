@@ -89,11 +89,7 @@ function ciRuns(ids) {
       shards.length !== count ||
       shards.some((found) => found.conclusion !== "success")
     )
-      fail([`run ${runId}'s test jobs did not all pass (run ${conclusion})`]);
-    if (conclusion !== "success")
-      process.stderr.write(
-        `measure-test-files: run ${runId} ended ${conclusion}, but its ${count} test jobs passed: counted\n`,
-      );
+      fail([`run ${runId}'s test steps did not all pass (run ${conclusion})`]);
     const step = jobs
       .flatMap((job) => job.steps ?? [])
       .find((found) => found.name === "Check source before the tests");
@@ -110,6 +106,10 @@ function ciRuns(ids) {
     if (atOnce.size !== 1)
       fail([`run ${runId}'s test jobs ran ${[...atOnce].join(" and ")} files at once`]);
     const seconds = Object.assign({}, ...kept.map((found) => found.seconds));
+    if (conclusion !== "success")
+      process.stderr.write(
+        `measure-test-files: run ${runId} ended ${conclusion}, but its ${count} test steps passed: counted\n`,
+      );
     return { run: runId, commit, pretest, filesAtOnce: [...atOnce][0], seconds };
   });
 }
