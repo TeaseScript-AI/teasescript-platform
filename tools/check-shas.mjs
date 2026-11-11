@@ -1,5 +1,14 @@
 import { spawnSync } from "node:child_process";
-import { closeSync, existsSync, ftruncateSync, openSync, readFileSync, writeSync } from "node:fs";
+import {
+  closeSync,
+  existsSync,
+  fstatSync,
+  ftruncateSync,
+  openSync,
+  readFileSync,
+  readSync,
+  writeSync,
+} from "node:fs";
 
 // Checks that the commit SHAs a report or pull-request body names exist and are on a remote, before it is sent:
 //
@@ -8,9 +17,12 @@ import { closeSync, existsSync, ftruncateSync, openSync, readFileSync, writeSync
 // `--append` writes the run's last line into <file> as its last line, after a blank line, replacing such a line of its
 // own already there (which is left out of the check), so that the report sent is that file and its line is never
 // copied by hand. Only a whole last line in the tool's own form is its own; a quoted or partial one is text. The file is
-// written in place, through a link: cut after its text, then the line written there. A failure to open or cut leaves it
-// as it was; one while writing or closing leaves its text and maybe part of the line, which the message says to
-// remove; both exit 2.
+// held through one descriptor from before its read until after its write, and written in place, through a link: read
+// again and cut after its text only if it is still as it was read, then the line written there. A file that cannot be
+// opened for reading and writing or is no regular file, one another writer changed meanwhile, and a failure to read or
+// cut leave it as it was (or as the other writer left it); one while writing or closing leaves its text and maybe part
+// of the line, which the message says to remove; all exit 2. Limit: a writer that changes the file in the instant
+// between that second read and the cut is not seen.
 //
 // A SHA-shaped token is 7 to 40 lowercase hex characters, bounded by no letter, digit or `_`. Each is resolved with
 // `git rev-parse --verify --quiet <token>^{commit}` in each `--repo` (default: the current repository) and reported as
@@ -63,37 +75,70 @@ function withoutOwnLine(text) {
   return OWN_LINE.test(trimmed.slice(start)) ? trimmed.slice(0, start).trimEnd() : text;
 }
 
+/** All of `descriptor`'s bytes, read from its start. */
+function readAll(descriptor) {
+  const chunks = [];
+  for (let position = 0; ;) {
+    const chunk = Buffer.alloc(65_536);
+    const length = readSync(descriptor, chunk, 0, chunk.length, position);
+    if (length === 0) return Buffer.concat(chunks);
+    chunks.push(chunk.subarray(0, length));
+    position += length;
+  }
+}
+
 /**
- * Writes `line` as `file`'s last line, in place: the file is cut where `kept`, its text before trailing white space and
- * an own last line, ends, and the blank line and `line` are written there. A failure to open or cut leaves the file as
- * it was; a later failure, closing included, leaves its text, maybe with all or part of the line. Either exits 2,
- * naming the first failure and what it left.
+ * `file` opened for `--append`, for reading and writing, and its bytes read through that descriptor. A file that cannot
+ * be opened or read so, or that is no regular file once opened (a link to one is followed), exits 2 before anything is
+ * written; the descriptor then closes with the process.
  */
-function appendLine(file, bytes, kept, line) {
+function openForAppend(file) {
+  try {
+    const descriptor = openSync(file, "r+");
+    if (!fstatSync(descriptor).isFile())
+      cannotRun(`cannot write ${file}: it is no regular file; it is as it was`);
+    return { descriptor, bytes: readAll(descriptor) };
+  } catch (error) {
+    cannotRun(`cannot write ${file} (${error.code ?? error.message}); it is as it was`);
+  }
+}
+
+/**
+ * Writes `line` as `file`'s last line, in place, through `descriptor`, which read `bytes`: the file is read again, and
+ * only if it is still `bytes` cut where `kept`, its text before trailing white space and an own last line, ends, and
+ * the blank line and `line` are written there. A file another writer changed meanwhile is left as that writer left it;
+ * a failure to read or cut leaves it as it was; a later failure, closing included, leaves its text, maybe with all or
+ * part of the line. Each exits 2, naming the first failure and what it left.
+ */
+function appendLine(file, descriptor, bytes, kept, line) {
   const end = Buffer.byteLength(kept);
   // (the text was read as UTF-8: cut only where its bytes are the same, so no character is split)
   if (!bytes.subarray(0, end).equals(Buffer.from(kept)))
     cannotRun(`cannot write ${file}: it is not UTF-8 text; it is as it was`);
   const tail = Buffer.from(`\n\n${line}\n`);
-  let descriptor;
+  let changed = false;
   let cut = false;
   let failure;
   try {
-    descriptor = openSync(file, "r+");
-    ftruncateSync(descriptor, end);
-    cut = true;
-    for (let written = 0; written < tail.length;)
-      written += writeSync(descriptor, tail, written, tail.length - written, end + written);
+    // (another writer's change since the first read is left as it is, not cut)
+    changed = !readAll(descriptor).equals(bytes);
+    if (!changed) {
+      ftruncateSync(descriptor, end);
+      cut = true;
+      for (let written = 0; written < tail.length;)
+        written += writeSync(descriptor, tail, written, tail.length - written, end + written);
+    }
   } catch (error) {
     failure = error;
   }
   // (closed once, even when it fails: a descriptor whose close reported an error is not closed again)
-  if (descriptor !== undefined)
-    try {
-      closeSync(descriptor);
-    } catch (error) {
-      failure ??= error;
-    }
+  try {
+    closeSync(descriptor);
+  } catch (error) {
+    failure ??= error;
+  }
+  if (changed)
+    cannotRun(`cannot write ${file}: it changed while it was checked, and is left so: run again`);
   if (failure === undefined) return;
   const cause = failure.code ?? failure.message;
   if (!cut) cannotRun(`cannot write ${file} (${cause}); it is as it was`);
@@ -368,7 +413,14 @@ function main() {
     )
       cannotRun(`${repository} is no git repository`);
   if (files.length === 1 && !existsSync(files[0])) cannotRun(`no file ${files[0]}`);
-  const bytes = readFileSync(files.length === 1 ? files[0] : 0);
+  const held = append ? openForAppend(files[0]) : null;
+  let bytes = held?.bytes;
+  if (!held)
+    try {
+      bytes = readFileSync(files.length === 1 ? files[0] : 0);
+    } catch (error) {
+      cannotRun(`cannot read ${files[0] ?? "standard input"} (${error.code ?? error.message})`);
+    }
   const read = bytes.toString("utf8");
   // (with `--append`, a last line of this tool's own, written by an earlier run, is no part of the text)
   const text = append ? withoutOwnLine(read) : read;
@@ -496,7 +548,7 @@ function main() {
     `check-shas: ${tokens} tokens: ${counts.resolved} resolved, ${counts.trees} trees, ${counts.ambiguous} ambiguous, ` +
     `${counts.unresolved} unresolved, ${counts.local} local only, ${counts.skipped} skipped (ids, words, paths, sha256s); ` +
     `${placeholders.length} placeholders, ${clauses.length} multi-issue closing clauses, ${scratch.length} scratch paths`;
-  if (append) appendLine(files[0], bytes, text.trimEnd(), line);
+  if (append) appendLine(files[0], held.descriptor, bytes, text.trimEnd(), line);
   process.stdout.write(`${line}\n`);
   process.exitCode = failed ? 1 : 0;
 }

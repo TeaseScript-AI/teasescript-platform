@@ -706,6 +706,18 @@ test(
           `${kept}\n\n${own(0)}\n`,
           /^check-shas: /mu,
         ],
+        // Another writer between the read and the cut, growing or shortening the file: it is left as that writer left
+        // it, neither cut nor padded.
+        ...[
+          ["grows", `${before}Another writer added this paragraph.\n`],
+          ["shortens", "Short"],
+        ].map(([how, changed]) => [
+          `another writer ${how} the file`,
+          `const real = fs.readSync; let starts = 0; fs.readSync = (d, b, o, l, p) => { if (p === 0 && ++starts === 2) fs.writeFileSync(process.argv.at(-1), ${JSON.stringify(changed)}); return real(d, b, o, l, p); };`,
+          2,
+          changed,
+          /cannot write .*: it changed while it was checked, and is left so: run again$/mu,
+        ]),
       ]) {
         writeFileSync(report, before);
         const preload = `import fs from "node:fs"; import { syncBuiltinESMExports } from "node:module"; ${patch} syncBuiltinESMExports();`;
@@ -726,6 +738,33 @@ test(
         assert.match(result.stdout + result.stderr, message, label);
         assert.equal(readFileSync(report, "utf8"), after, label);
       }
+      // A folder, an unreadable file and a FIFO no one writes: refused before any read, in one line, exit 2; a folder
+      // read without --append too.
+      const fifo = join(directory, "no-writer.fifo");
+      assert.equal(spawnSync("mkfifo", [fifo]).status, 0);
+      const unreadable = join(directory, "unreadable.md");
+      writeFileSync(unreadable, before);
+      chmodSync(unreadable, 0o000);
+      for (const [label, args, message] of [
+        ["a folder", ["--append", directory], /cannot write .* \(EISDIR\); it is as it was$/u],
+        [
+          "an unreadable file",
+          ["--append", unreadable],
+          /cannot write .* \(EACCES\); it is as it was$/u,
+        ],
+        ["a FIFO", ["--append", fifo], /cannot write .*: it is no regular file; it is as it was$/u],
+        ["a folder without --append", [directory], /cannot read .* \(EISDIR\)$/u],
+      ]) {
+        const result = spawnSync(process.execPath, [tool, "--repo", directory, ...args], {
+          encoding: "utf8",
+          timeout: 10_000,
+        });
+        assert.equal(result.status, 2, `${label}: ${result.signal} ${result.stderr}`);
+        assert.match(result.stderr, /^check-shas: [^\n]*\n$/u, label);
+        assert.match(result.stderr.trim(), message, label);
+      }
+      chmodSync(unreadable, 0o600);
+      assert.equal(readFileSync(unreadable, "utf8"), before);
       // Cost: a long run of white space is read once (an unanchored regex over it took quadratic time). The child is
       // killed at 20 s, as a test's timeout stops no loop.
       writeFileSync(report, `Report\n${" ".repeat(2 ** 20)}X\n${" ".repeat(2 ** 20)}\n`);
