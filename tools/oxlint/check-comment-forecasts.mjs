@@ -1,13 +1,15 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { checkedFiles, fileComments } from "./comments.mjs";
 
 // A comment says what the code does now and never forecasts later work (IMPLEMENTATION-AND-REVIEW.md "Code that does
-// not mislead", #1977). This check reads comments only, never strings or code, in the linted files and in `.vue`
+// not mislead", #1977). Its comment rules read comments only, never strings or code, in the linted files and in `.vue`
 // files' `<script>` blocks. A citation of a repository record matches no form: a bare `#N`, a completed stage, `PR N`,
-// "(as) before #N". The forms of `COUNTED_CITATIONS` cite the old design record, which is not in the repository
-// (#1977), so they are no citations: each file's exact count of them in comments is in `comment-citations.json`, which
-// may only fall. A comment that points at the accepted record
+// "(as) before #N". The old design record is not in the repository (#1977), so a reference to it is no citation: its
+// name followed by a revision (`r4`) or a section (`§`) is refused in the text of every file Git lists, documents,
+// strings and code included (#2372), and the forms of `COUNTED_CITATIONS` have each file's exact count in comments in
+// `comment-citations.json`, which may only fall. A comment that points at the accepted record
 // (`docs/specifications/type-inference-accepted-record/<page>.md#<anchor>`, #2089) names a heading of that page; the
 // doc-links check reads Markdown only and never sees a comment. A label of the port plan or the research design (`S8c`,
 // `C9`, `AD-1`) in a comment of the type core's modules has a row in the record's glossary, and every row is still
@@ -31,12 +33,20 @@ export const FORECASTS = [
   { form: "TODO", pattern: /\bTODO\b/u },
 ];
 
-/** The citations whose count per file may only shrink, each by its pattern over a comment's text. */
+/**
+ * A citation of the old design record's revisions or sections: its name, then `r4` or `§`, with only white space and
+ * the marks that continue a comment, a quote or a Markdown block quote between them, so a citation wrapped over two
+ * lines is one. Written so this file's own text has none.
+ */
+const TABLE_CITATION = /\bTABLE[\s*/#>]*(?:r4\b|§)/gu;
+
+/** The one file whose text holds such citations on purpose: this check's own test, whose fixtures must be ones. */
+export const CITATION_FIXTURES = "tools/oxlint/check-comment-forecasts.test.mjs";
+
+/** The citations whose count per file in comments may only shrink, each by its pattern over a comment's text. */
 const COUNTED_CITATIONS = {
-  "TABLE r4": /TABLE r4/gu,
-  "TABLE §": /TABLE §/gu,
   "bare r4.N": /(?<!TABLE )\br4\.\d+/gu,
-  "other TABLE": /\bTABLE\b(?!\s*(?:r4|§))/gu,
+  "other TABLE": /\bTABLE\b(?![\s*/#>]*(?:r4\b|§))/gu,
 };
 
 /** The accepted record's folder of pages, which a comment may point at by a page and a heading's anchor. */
@@ -183,13 +193,37 @@ export function unresolvedPointers(fileName, text, pages) {
   return found;
 }
 
-/**", "dist/**"] }),
-  ].sort();
+/** Each citation of the old design record in `text`, the whole of file `fileName`, with its 1-based line. */
+export function tableCitationsIn(fileName, text) {
+  if (fileName === CITATION_FIXTURES) return [];
+  return [...text.matchAll(TABLE_CITATION)].map((match) => ({
+    line: text.slice(0, match.index).split("\n").length,
+    text: match[0],
+  }));
 }
 
 /**
- * Every forecast not in the allowlist, every allowlist entry no longer found, and every file whose citation counts
- * differ from `comment-citations.json`'s, as diagnostics.
+ * The files Git lists in `root` (tracked, and untracked but not ignored) that are regular files, as `doc-links.mjs`
+ * reads them; a file with a NUL byte is binary and is not read as text. A failed `git` throws.
+ */
+function listedTexts(root) {
+  return execFileSync(
+    "git",
+    ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--deduplicate"],
+    { cwd: root, encoding: "utf8", maxBuffer: 1 << 28 },
+  )
+    .split("\0")
+    .filter(
+      (file) => file !== "" && lstatSync(resolve(root, file), { throwIfNoEntry: false })?.isFile(),
+    )
+    .map((file) => [file, readFileSync(resolve(root, file), "utf8")])
+    .filter(([, text]) => !text.includes("\0"));
+}
+
+/**
+ * Every forecast not in the allowlist, every allowlist entry no longer found, every file whose citation counts
+ * differ from `comment-citations.json`'s, and every citation of the old design record in a file Git lists, as
+ * diagnostics.
  * @returns {{ fileName: string, line: number, column: number, message: string }[]}
  */
 export function checkCommentForecasts(root) {
@@ -238,6 +272,14 @@ export function checkCommentForecasts(root) {
     if (Object.keys(counts).length > 0) counted[file] = counts;
   }
   diagnostics.push(...glossaryFindings(carried, glossary));
+  for (const [file, text] of listedTexts(root))
+    for (const { line, text: citation } of tableCitationsIn(file, text))
+      diagnostics.push({
+        fileName: file,
+        line,
+        column: 1,
+        message: `"${citation.replace(/\s+/gu, " ")}" cites the old design record, which is not in the repository: state the fact, or point at the accepted record, an issue or a merged pull request`,
+      });
   for (const [index, item] of allowed.entries())
     if (!used.has(index))
       diagnostics.push({

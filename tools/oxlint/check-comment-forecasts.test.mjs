@@ -1,15 +1,21 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { relative } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
+  CITATION_FIXTURES,
   citationCounts,
   FORECASTS,
   forecastsIn,
   glossaryFindings,
   glossaryRows,
   labelsIn,
+  tableCitationsIn,
   unresolvedPointers,
 } from "./check-comment-forecasts.mjs";
+import { repositoryRoot } from "./files.mjs";
 
 // A forecast of each form; the citations #1977 allows; and prose and counted references, which are no forecasts.
 const FORECAST_TEXTS = {
@@ -89,19 +95,63 @@ test("the counted citations are counted in comments only", () => {
   assert.deepEqual(
     citationCounts(
       "a.ts",
-      `// TABLE r4.1 and TABLE r4.2, TABLE § 3\nconst s = "TABLE r4.9";\n/* TABLE § 4 */\n`,
+      `// r4.1 and TABLE B2, TABLE F3\nconst s = "r4.9 TABLE q1";\n/* r4.4 */\n`,
     ),
-    { "TABLE r4": 2, "TABLE §": 2 },
+    { "bare r4.N": 2, "other TABLE": 2 },
   );
 });
 
-test("a bare revision and TABLE with another id are counted too, a TABLE revision once", () => {
+test("a TABLE revision or section, wrapped or not, is no counted form: the text check finds it", () => {
   assert.deepEqual(
-    citationCounts(
-      "a.ts",
-      `// TABLE r4.1, r4.2 and F19 (r4.3), TABLE B1\nconst s = "r4.9, TABLE q1";\n`,
+    citationCounts("a.ts", `/* TABLE r4.1, r4.2 and F19 (r4.3), TABLE B1, TABLE\n * § 3 */\n`),
+    { "bare r4.N": 2, "other TABLE": 1 },
+  );
+});
+
+test("a TABLE revision or section is found in any file's text, wrapped or not, with its line", () => {
+  const found = (fileName, text) =>
+    tableCitationsIn(fileName, text).map(({ line, text: citation }) => [line, citation]);
+  // a document, wrapped in a paragraph and in a block quote
+  assert.deepEqual(
+    found(
+      "docs/a.md",
+      "# A\n\nAs ruled (TABLE r4.390).\nThe pins (TABLE\nr4.50 states)\n\n> TABLE\n> § 2\n",
     ),
-    { "TABLE r4": 1, "bare r4.N": 2, "other TABLE": 1 },
+    [
+      [3, "TABLE r4"],
+      [4, "TABLE\nr4"],
+      [7, "TABLE\n> §"],
+    ],
+  );
+  // a string, code and a comment over two lines, and data
+  assert.deepEqual(
+    found(
+      "tests/a.test.ts",
+      'test("a site (TABLE §3.4, r4.62)", () => {});\n/*\n * TABLE\n * r4.1\n */\n',
+    ),
+    [
+      [1, "TABLE §"],
+      [3, "TABLE\n * r4"],
+    ],
+  );
+  assert.deepEqual(found("tests/a.json", '{"reason": "TABLE r4.2"}\n'), [[1, "TABLE r4"]]);
+  // other ids, a longer revision number, and the form that describes the citation
+  assert.deepEqual(
+    found("docs/b.md", "TABLE B1, TABLE F18 and TABLE r40; `TABLE` followed by `r4` or `§`\n"),
+    [],
+  );
+});
+
+test("only this test's own text is exempt from the TABLE citation check, by its path", () => {
+  const path = fileURLToPath(import.meta.url);
+  assert.equal(relative(repositoryRoot, path), CITATION_FIXTURES);
+  const own = readFileSync(path, "utf8");
+  assert.deepEqual(tableCitationsIn(CITATION_FIXTURES, own), []);
+  assert.ok(tableCitationsIn("tools/oxlint/other.test.mjs", own).length > 0);
+  const check = new URL("./check-comment-forecasts.mjs", import.meta.url);
+  assert.deepEqual(
+    tableCitationsIn("tools/oxlint/check-comment-forecasts.mjs", readFileSync(check, "utf8")),
+    [],
   );
 });
 
