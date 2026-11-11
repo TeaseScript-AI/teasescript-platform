@@ -25,8 +25,11 @@
 // the next source. A stalled or uncharged source is never agreement. Resumes: a source already in `--out` is not run
 // again, its record counted as it stands. Prints one JSON summary line; exit 0 when every compared run is equal and
 // nothing stalled or reached the safety net, else 1;
-// 2 on a usage error, where the trees' modes are not the same names once each, or where a worker does not load and
-// check both trees within the safety net: no source is handed to a worker before that, so none is recorded.
+// 2 on a usage error, where the trees' modes are not the same names once each, where a worker does not load and check
+// both trees within the safety net (no source is handed to a worker before that), or where a worker compiling a source
+// posts anything but a run, a run past the limit or that source's record; none of these is recorded. The gate holds
+// against a tree that fails to load, throws, ends, is slow or has a wrong table, not against tree code that posts on
+// the worker's port.
 // `summary` classifies the records per set, source and mode (`modes`, each with its demand, stop and questions runs):
 // identical; work only (the plan, the diagnostics, the error and the questions equal, the charge trace not); a question
 // sequence apart; a publication difference; at a demand allowance apart; for the held family, a stop set or a stopped
@@ -283,12 +286,14 @@ if (isMainThread && process.argv[2] === "summary") {
           seconds * 1000,
         );
       };
+      // (only a run, the run past the limit and this source's record: anything else is no record, #2342 R17)
       const onMessage = (message) => {
-        if (message.running !== undefined) {
+        if (message?.running !== undefined) {
           running = message.running;
           arm();
-        } else if (message.over !== undefined) over = message.over;
-        else finish(message);
+        } else if (message?.over !== undefined) over = message.over;
+        else if (Array.isArray(message?.modes) && message.name === source.name) finish(message);
+        else finish({ stray: JSON.stringify(message ?? null).slice(0, 300) });
       };
       const onError = (error) =>
         finish({
@@ -310,6 +315,10 @@ if (isMainThread && process.argv[2] === "summary") {
       arm();
       current.postMessage(index);
     });
+    if (record.stray !== undefined) {
+      await worker.terminate().catch(() => {});
+      refused(`${source.name}: its worker posted no record but ${record.stray}`);
+    }
     if (record.stalled !== undefined || record.uncharged !== undefined) {
       await worker.terminate().catch(() => {});
       worker = null;

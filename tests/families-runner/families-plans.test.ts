@@ -385,6 +385,38 @@ test("the plans comparison hands no source to a worker before it has loaded and 
   }
 });
 
+test("the plans comparison ends with exit 2 and writes no record where a worker posts a stray message during a source (#2342, R17)", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  built(folder, [
+    ["first", "first"],
+    ["second", "second"],
+  ]);
+  const held = join(folder, "head", "dist", "tests/helpers/type-core-held-host.js");
+  const plans = (out: string, ...more: string[]) =>
+    spawnSync(
+      process.execPath,
+      [tool, join(folder, "base"), join(folder, "head"), "area", "--out", out, ...more],
+      { encoding: "utf8" },
+    );
+  const out = join(folder, "stray.jsonl");
+  assert.equal(plans(out, "--limit", "1").status, 0);
+  const before = readFileSync(out, "utf8");
+  // (the head's first mode posts a message that is neither a run nor a record as it compiles the second source)
+  writeFileSync(
+    held,
+    `${readFileSync(held, "utf8")}
+import { parentPort as port } from "node:worker_threads";
+const { run } = HELD_MODES[0];
+HELD_MODES[0].run = (f) => (port.postMessage({ note: "stray" }), run(f));
+`,
+  );
+  const ran = plans(out);
+  assert.equal(ran.status, 2, `${ran.stdout} ${ran.stderr}`);
+  assert.match(ran.stderr, /second: its worker posted no record but \{"note":"stray"\}/);
+  assert.equal(readFileSync(out, "utf8"), before);
+});
+
 test("the plans summary prints a recorded mode as recorded and says once what a number is (#2342)", (t) => {
   const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
