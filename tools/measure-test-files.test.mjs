@@ -47,43 +47,63 @@ function checkout() {
   }
   // `npm run build` and `npm run check:pretest` pass at once: the files are compiled already.
   write("bin/npm", "#!/bin/sh\nexit 0\n", 0o755);
-  // `gh` answers from `gh.json`: each run's commit, pre-test step seconds and test jobs' file seconds.
+  // `gh` answers the three requests the tool makes from `gh.json` (each run's pre-test step seconds and test jobs' file
+  // seconds), in the real shapes, and fails any other.
   write(
     "bin/gh",
     `#!${process.execPath}
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 const runs = JSON.parse(readFileSync(${JSON.stringify(join(root, "gh.json"))}, "utf8"));
 const args = process.argv.slice(2);
-if (args[0] === "run" && args[1] === "download") {
+const where = /^repos\\/\\{owner\\}\\/\\{repo\\}\\/actions\\/runs\\/(\\d+)(\\/jobs)?$/.exec(args[1] ?? "");
+const start = Date.parse("2026-11-01T00:00:00Z");
+const steps = (run, n) => [
+  ...(n === run.jobs.length - 1
+    ? [{ name: "Check source before the tests", conclusion: "success",
+         started_at: new Date(start).toISOString(),
+         completed_at: new Date(start + run.pretest * 1000).toISOString() }]
+    : []),
+  { name: "Build and run tests (shard " + (n + 1) + ")", conclusion: "success" },
+];
+if (args.join(" ") === "run download " + args[2] + " --pattern test-file-seconds-* --dir " + args[6] && runs[args[2]])
   runs[args[2]].jobs.forEach((seconds, n) => {
-    const folder = args[args.indexOf("--dir") + 1] + "/test-file-seconds-" + n;
+    const folder = args[6] + "/test-file-seconds-" + n;
     mkdirSync(folder, { recursive: true });
     writeFileSync(folder + "/test-file-seconds.json", JSON.stringify({ filesAtOnce: 3, seconds }));
   });
+else if (args[0] === "api" && where && runs[where[1]] && args.length === 2 && !where[2])
+  process.stdout.write(JSON.stringify({ head_sha: where[1].repeat(40).slice(0, 40), conclusion: "success" }));
+else if (args[0] === "api" && where && runs[where[1]] && where[2]) {
+  const jobs = runs[where[1]].jobs.map((_, n) => ({ steps: steps(runs[where[1]], n) }));
+  const query = args.slice(2).join(" ");
+  if (query !== "" && query !== "-q .jobs") process.exit(1);
+  process.stdout.write(JSON.stringify(query === "" ? { total_count: jobs.length, jobs } : jobs));
 } else {
-  const [, id, jobs] = /actions\\/runs\\/(\\d+)(\\/jobs)?$/.exec(args[1]);
-  const run = runs[id];
-  const start = Date.parse("2026-11-01T00:00:00Z");
-  const steps = (n) => [
-    ...(n === run.jobs.length - 1
-      ? [{ name: "Check source before the tests", conclusion: "success",
-           started_at: new Date(start).toISOString(),
-           completed_at: new Date(start + run.pretest * 1000).toISOString() }]
-      : []),
-    { name: "Build and run tests (shard " + (n + 1) + ")", conclusion: "success" },
-  ];
-  process.stdout.write(JSON.stringify(jobs
-    ? run.jobs.map((_, n) => ({ steps: steps(n) }))
-    : { head_sha: id.repeat(40).slice(0, 40), conclusion: "success" }));
+  process.stderr.write("gh fake: unknown request: " + args.join(" ") + "\\n");
+  process.exit(1);
 }
 `,
     0o755,
   );
   for (const args of [
     ["init", "-q"],
-    ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "c"],
-  ])
-    spawnSync("git", ["-C", root, ...args]);
+    [
+      "-c",
+      "user.name=t",
+      "-c",
+      "user.email=t@t",
+      "-c",
+      "commit.gpgSign=false",
+      "commit",
+      "-q",
+      "--allow-empty",
+      "-m",
+      "c",
+    ],
+  ]) {
+    const git = spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    assert.equal(git.status, 0, `git ${args.join(" ")}: ${git.stderr}`);
+  }
   return root;
 }
 
@@ -100,6 +120,9 @@ function measure(root, args) {
       PATH: `${join(root, "bin")}:${process.env.PATH}`,
       // (one file at once, whatever the machine)
       SX_MEM_MIB: "4000",
+      // (the tool's temporary folders and compile cache inside the checkout, which the test removes)
+      TMPDIR: root,
+      NODE_COMPILE_CACHE: join(root, "cache"),
     },
   });
   return {
@@ -144,7 +167,8 @@ test(
     const runs = (missing) =>
       Object.fromEntries(
         [
-          [11, 100, [12, 1, 2, 3]],
+          // (run 11 lacks `sub/a.test.js`, so its median is that of an even count, 30 and 14)
+          [11, 100, [null, 1, 2, 3]],
           [12, 120, [30, 2, 2, 4]],
           [13, 140, [14, 3, 2, 5]],
         ].map(([id, pretest, [subA, a, typeCore, plain]]) => [
@@ -152,7 +176,7 @@ test(
           {
             pretest,
             jobs: [
-              { "sub/a.test.js": subA, "a.test.js": a },
+              { ...(subA === null ? {} : { "sub/a.test.js": subA }), "a.test.js": a },
               Object.fromEntries(
                 [
                   ["sub/type-core-z.test.js", typeCore],
@@ -168,8 +192,8 @@ test(
       const { status, out, module } = measure(root, ["--from-ci", "11", "12", "13"]);
       assert.equal(status, 0, out);
       assert.match(module, /--write --from-ci 11 12 13/u);
-      // (listed: the 10 s file and the type-core file; the others' mean is that of 2 and 4)
-      assert.deepEqual(costly(module), [`"sub/a.test.js": 14,`, `"sub/type-core-z.test.js": 2,`]);
+      // (listed: the file of 10 s or more and the type-core file; the others' mean is that of 2 and 4)
+      assert.deepEqual(costly(module), [`"sub/a.test.js": 22,`, `"sub/type-core-z.test.js": 2,`]);
       assert.match(module, /their mean \(2 files\)\. \*\/\nexport const otherTestSeconds = 3\.0;/u);
       assert.match(module, /export const pretestSeconds = 120;/u);
       assert.match(module, /export const testFilesAtOnce = 3;/u);
