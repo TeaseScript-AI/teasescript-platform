@@ -114,6 +114,7 @@ import { propertyStep } from "./program.js";
 import { elementStep, type MixedSteps, type Obligation } from "./result.js";
 import type { Work } from "./solver.js";
 import { Touches, type Touch } from "./touch.js";
+import { amend } from "./retained/retained.js";
 export { requiredKind } from "./admission/boundaries.js";
 export { withoutChains } from "./admission/classes.js";
 export { withMemberOracle } from "./admission/decision.js";
@@ -240,6 +241,7 @@ export class Admission {
   }
   set reach(value: number) {
     this.pass.receivingDomain.reach = value;
+    amend(this.pass.receivingDomain);
   }
   get termLevels(): ReceivingDomain["termLevels"] {
     return this.pass.receivingDomain.termLevels;
@@ -384,6 +386,7 @@ export class Admission {
   }
   set inherits(value: Inheritance | null) {
     this.pass.receivingDomain.inherits = value;
+    amend(this.pass.receivingDomain);
   }
   get landedPaths(): ReceivingDomain["landedPaths"] {
     return this.pass.receivingDomain.landedPaths;
@@ -401,6 +404,7 @@ export class Admission {
   }
   set forest(value: CopyForest | null) {
     this.pass.receivingDomain.forest = value;
+    amend(this.pass.receivingDomain);
   }
   /** Per class, its eligible member per tested key asked while the groups are made (`eligibleAt`). */
   readonly eligibleWhileGrouping = new Map<Definition, Map<string, Definition | null>>();
@@ -416,6 +420,7 @@ export class Admission {
   }
   set cycleMembers(value: Map<number, PlaceId[]> | null) {
     this.pass.receivingDomain.cycleMembers = value;
+    amend(this.pass.receivingDomain);
   }
   get seedIndex(): ReceivingDomain["seedIndex"] {
     return this.pass.receivingDomain.seedIndex;
@@ -529,6 +534,9 @@ export class Admission {
     for (const { path, term } of this.a4Copies)
       this.reach = Math.max(this.reach, path.length + levelsOf(this, term).length - 1);
     for (const { path } of this.a4Inherits) this.reach += path.length;
+    // (the arrays themselves: the domain's `reset` shares them with the fresh domain it was made from)
+    amend(this.a4Copies);
+    amend(this.a4Inherits);
   }
 
   /**

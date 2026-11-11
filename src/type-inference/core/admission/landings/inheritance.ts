@@ -29,6 +29,7 @@ import type {
   WholeCycle,
 } from "../model.js";
 import { levelsOf } from "../permitted.js";
+import { Retained } from "../../retained/retained.js";
 
 // A4 through copies' landings: where copies land in each place, the copy forest places answer through, cycles of copies.
 
@@ -687,6 +688,7 @@ export class LandingTape {
 
   public constructor(work: WorkLedger) {
     this.work = work;
+    Retained.owner(this, "LandingTape");
   }
 
   /** The tape's point now. */

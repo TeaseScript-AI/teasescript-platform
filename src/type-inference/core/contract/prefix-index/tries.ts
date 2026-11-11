@@ -13,6 +13,7 @@ import {
   type Writer,
 } from "../../items.js";
 import type { PrefixNode, PresenceStep, SupportNode } from "../model.js";
+import { amend, Retained } from "../../retained/retained.js";
 
 /** A layer's leaf in a set of layers, by its number (`SubLayer.self`), the sets ordered as the layers were made. */
 export function setLeaf(contract: Contract, id: number): SupportNode {
@@ -51,7 +52,8 @@ function listedKey(contract: Contract, step: string): string | null {
 /** A step map's leaf: a step's key (`stepKey`) mapped to a set of layers, once per key and set. */
 function mapLeaf(contract: Contract, key: string, value: SupportNode): SupportNode {
   let bySet = contract.mapLeaves.get(key);
-  if (bySet === undefined) contract.mapLeaves.set(key, (bySet = new Map()));
+  if (bySet === undefined)
+    contract.mapLeaves.set(key, (bySet = Retained.map("Contract.mapLeaves[]")));
   const known = bySet.get(value.id);
   if (known !== undefined) return known;
   const leaf: SupportNode = {
@@ -235,6 +237,8 @@ function firstDifference(contract: Contract, a: string, b: string): number {
 function made(contract: Contract, edges: number): number {
   contract.keep(1 + edges);
   contract.facts.supportEdges += edges;
+  amend(contract.facts);
+  amend(contract.facts);
   return contract.facts.supportNodes++;
 }
 
@@ -270,7 +274,8 @@ export function summaryLeaf(contract: Contract, sub: Key, items: readonly Item[]
     )
     .join(",");
   let bySub = contract.summaryLeaves.get(sub);
-  if (bySub === undefined) contract.summaryLeaves.set(sub, (bySub = new Map()));
+  if (bySub === undefined)
+    contract.summaryLeaves.set(sub, (bySub = Retained.map("Contract.summaryLeaves[]")));
   const known = bySub.get(content);
   if (known !== undefined) return known;
   contract.keepText(content.length);
@@ -296,9 +301,11 @@ function supportBranch(
   right: SupportNode,
 ): SupportNode {
   let byLeft = contract.supportBranches.get(bit);
-  if (byLeft === undefined) contract.supportBranches.set(bit, (byLeft = new Map()));
+  if (byLeft === undefined)
+    contract.supportBranches.set(bit, (byLeft = Retained.map("Contract.supportBranches[]")));
   let byRight = byLeft.get(left.id);
-  if (byRight === undefined) byLeft.set(left.id, (byRight = new Map()));
+  if (byRight === undefined)
+    byLeft.set(left.id, (byRight = Retained.map("Contract.supportBranches[][]")));
   const known = byRight.get(right.id);
   if (known !== undefined) return known;
   contract.pass.program.work.charge("invSteps");
@@ -362,10 +369,12 @@ export function union(
   const remember = (a: SupportNode, b: SupportNode, node: SupportNode): void => {
     const [low, high] = a.id < b.id ? [a, b] : [b, a];
     let byHigh = contract.supportUnions.get(low.id);
-    if (byHigh === undefined) contract.supportUnions.set(low.id, (byHigh = new Map()));
+    if (byHigh === undefined)
+      contract.supportUnions.set(low.id, (byHigh = Retained.map("Contract.supportUnions[]")));
     byHigh.set(high.id, node);
     contract.keep(1);
     contract.facts.supportEdges += 1;
+    amend(contract.facts);
     results.push(node);
   };
   for (let task = tasks.pop(); task !== undefined; task = tasks.pop()) {
@@ -489,7 +498,8 @@ export function positionsIn(contract: Contract, set: SupportNode): number[] {
 /** A map node seen under a set of positions, once per node and set. */
 export function viewOf(contract: Contract, inner: SupportNode, positions: SupportNode): PrefixNode {
   let bySet = contract.prefixViews.get(inner.id);
-  if (bySet === undefined) contract.prefixViews.set(inner.id, (bySet = new Map()));
+  if (bySet === undefined)
+    contract.prefixViews.set(inner.id, (bySet = Retained.map("Contract.prefixViews[]")));
   const known = bySet.get(positions.id);
   if (known !== undefined) return known;
   const view: PrefixNode = { id: made(contract, 2), kind: "view", inner, positions };
@@ -631,7 +641,8 @@ export function prefixUnion(
   const united = prefixNode(contract, results.pop()!);
   const [low, high] = first.id < second.id ? [first, second] : [second, first];
   let byHigh = contract.prefixUnions.get(low.id);
-  if (byHigh === undefined) contract.prefixUnions.set(low.id, (byHigh = new Map()));
+  if (byHigh === undefined)
+    contract.prefixUnions.set(low.id, (byHigh = Retained.map("Contract.prefixUnions[]")));
   byHigh.set(high.id, united);
   contract.keep(1);
   return united;

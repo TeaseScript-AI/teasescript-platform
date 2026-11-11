@@ -24,6 +24,7 @@ import { NarrowingEvents } from "../narrowing/events.js";
 import { NarrowingRoutes } from "../narrowing/routes.js";
 import type { StatementTree } from "../narrowing/statement-tree.js";
 import { siteKey, stepName, type CoreProgram } from "../program.js";
+import { amend, Retained } from "../retained/retained.js";
 
 /*
  * The guard index of the coarse core (checkpoint 9, §3.2): a read of key k is guarded inside a branch
@@ -81,33 +82,46 @@ function testedOperands(expression: Expression): readonly Expression[] {
 
 export class GuardIndex {
   /** Per tested key and callable, the entries of the branches its tests guard. */
-  readonly #branches = new Map<Key, Map<Callable | null, Regions<FlowNode>>>();
+  readonly #branches = Retained.map<Key, Map<Callable | null, Regions<FlowNode>>>(
+    "GuardIndex.#branches",
+  );
   /** Per tested key and file, the right-operand regions its tests guard. */
-  readonly #operands = new Map<Key, Map<number, Regions<OperandRegion>>>();
+  readonly #operands = Retained.map<Key, Map<number, Regions<OperandRegion>>>(
+    "GuardIndex.#operands",
+  );
   /** Per tested key, the callables its operand regions stand in (W40). */
-  readonly #operandCallables = new Map<Key, Set<Callable | null>>();
+  readonly #operandCallables = Retained.map<Key, Set<Callable | null>>(
+    "GuardIndex.#operandCallables",
+  );
   /** G3 3b: the tested keys (`narrowed`), as a trie. */
   readonly #tested: KeyTrie;
   /** The keys with a tested key strictly below them: a copy of one carries its read as a mark (§3.2). */
-  readonly belowTested = new Set<Key>();
+  readonly belowTested = Retained.set<Key>("GuardIndex.belowTested");
   /** Per key, the tested keys strictly below it, and the guard regions of those keys once asked (`guardedBelow`). */
-  readonly #testedUnder = new Map<Key, Key[]>();
+  readonly #testedUnder = Retained.map<Key, Key[]>("GuardIndex.#testedUnder");
   /** Per read, the tested paths below it whose regions hold it (`guardedBelowRead`). */
-  readonly #belowReads = new Map<PlaceId, readonly string[]>();
-  readonly #nests = new Map<
+  readonly #belowReads = Retained.map<PlaceId, readonly string[]>("GuardIndex.#belowReads");
+  readonly #nests = Retained.map<
     Key,
     { readonly branches: Map<Callable | null, Nest>; readonly operands: Map<number, Nest> }
-  >();
+  >("GuardIndex.#nests");
   /** The tested keys q below each key, per relative path q, and the longest such path (§8). */
   #testedRelative: Map<string, Set<Key>> | null = null;
   #byPlace: ReadonlyMap<PlaceId, ReadonlyMap<number, Regions<OperandRegion>>> | null = null;
   #testedLength = 0;
   /** Every step of a tested key's path (`testedSteps`). */
-  readonly #testedSteps = new Set<string>();
+  readonly #testedSteps = Retained.set<string>("GuardIndex.#testedSteps");
   #narrowing: NarrowingIndex | null = null;
   #queries: { readonly events: NarrowingEvents; readonly routes: NarrowingRoutes } | null = null;
 
   public constructor(readonly program: CoreProgram) {
+    // (its narrowing indexes, `#narrowing` and `#queries`, are not exposed: outside the recorder's domain in #1072 1b)
+    Retained.owner(this, "GuardIndex", (index) => ({
+      testedRelative: index.#testedRelative,
+      byPlace: index.#byPlace,
+      testedLength: index.#testedLength,
+      nestCount: index.#nestCount,
+    }));
     const work = program.work;
     const flow = program.flow;
     this.#tested = new KeyTrie(
@@ -262,10 +276,13 @@ export class GuardIndex {
     return out.sort();
   }
 
-  readonly #nestIds = new WeakMap<Nest, number>();
+  readonly #nestIds = Retained.weakMap<Nest, number>("GuardIndex.#nestIds");
   #nestId(nest: Nest): number {
     let id = this.#nestIds.get(nest);
-    if (id === undefined) this.#nestIds.set(nest, (id = ++this.#nestCount));
+    if (id === undefined) {
+      this.#nestIds.set(nest, (id = ++this.#nestCount));
+      amend(this);
+    }
     return id;
   }
   #nestCount = 0;
@@ -707,6 +724,7 @@ export class GuardIndex {
       merged.set(place, sorted);
     }
     this.#byPlace = merged;
+    amend(this);
     return merged;
   }
 
@@ -775,6 +793,7 @@ export class GuardIndex {
       }
     }
     this.#testedRelative = relative;
+    amend(this);
     return relative;
   }
 }
