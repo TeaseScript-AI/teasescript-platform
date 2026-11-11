@@ -7,6 +7,7 @@ import {
   readFileSync,
   readdirSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -318,12 +319,12 @@ test("a mark is read from a file's first line only, whole, naming test files, an
     "tests/decl.test.ts:1: /^const T\\b|^\\s+\\d+,$/u finds line 2, which holds no numeric or hex digest literal",
     "tests/e.test.ts:1: no line of the file but the mark's own is a line /only itself/u finds",
     "tests/g.test.ts:1: the mark's line takes no g or y flag",
+    "tests/helpers/f.ts:1: tests/none.test.ts is no test file",
+    "tests/helpers/late.ts:2: a mark is a file's first line",
     "tests/v1.test.ts:1: /^const C\\b/u finds line 2, which holds no numeric or hex digest literal",
     "tests/v2.test.ts:1: /^type T2\\b/u finds line 2, which holds no numeric or hex digest literal",
     "tests/v3.test.ts:1: /^const T/u finds line 2, which holds no numeric or hex digest literal",
     "tests/v4.test.ts:1: /^const S\\b/u finds line 2, which holds no numeric or hex digest literal",
-    "tests/helpers/f.ts:1: tests/none.test.ts is no test file",
-    "tests/helpers/late.ts:2: a mark is a file's first line",
   ]);
 });
 
@@ -511,6 +512,8 @@ test("a file moved out of the core lists every pinning suite (#2049)", { timeout
       mkdirSync(join(directory, file, ".."), { recursive: true });
       copyFileSync(join(ROOT, file), join(directory, file));
     }
+    // (the tool reads its marks with ts-morph, from the repository's own dependencies)
+    symlinkSync(join(ROOT, "node_modules"), join(directory, "node_modules"));
     mkdirSync(join(directory, "src/type-inference/core"), { recursive: true });
     writeFileSync(
       join(directory, "src/type-inference/core/answers.ts"),
