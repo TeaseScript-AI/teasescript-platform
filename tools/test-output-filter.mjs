@@ -90,14 +90,15 @@ if (unmatched.length > 0) {
 // Beside the spec reporter, `test-in-flight.mjs` names on standard error a test still running long after it began.
 // Compact output of named files ends with one line per file and its tests' counts, the passing tests it leaves out among
 // them; a file that failed outside its tests (it threw while loading, or its process ended non-zero) says so beside
-// them. A file that ran no test fails the run, as in the full suite, unless a name pattern was given: then its line says
-// that the pattern matched no test in it. There `test-file-counts.mjs` counts, and names a test in flight in that
-// reporter's place.
+// them. A file that ran no test (a suite alone is none) fails the run, unless the tests were selected (a name or skip
+// pattern, or `--test-only`, in the arguments or `NODE_OPTIONS`, in any spelling Node takes): then its line says the
+// selection matched no test in it. There `test-file-counts.mjs` counts, and names a test in flight in that reporter's
+// place.
 const countsFolder =
   fullSuite || fullOutput ? null : mkdtempSync(join(tmpdir(), "test-file-counts-"));
 const countsFile = countsFolder === null ? null : join(countsFolder, "counts.json");
-const namePattern = arguments_.some((argument) =>
-  /^--test-(?:name|skip)-pattern(?:=|$)/u.test(argument),
+const selected = [...arguments_, ...(process.env.NODE_OPTIONS ?? "").split(/\s+/u)].some((option) =>
+  /^--test[-_](?:(?:name|skip)[-_]pattern|only)(?:=|$)/u.test(option),
 );
 // The folder is removed when the run ends or the filter exits. The filter installs no signal handler, so a signal that
 // ends it leaves the folder in the system's temporary directory, where no run reads it: one counts file, empty until
@@ -176,8 +177,8 @@ child.on("error", (error) => {
 
 /**
  * Each file's counts line, `ℹ <file>: N passed[, N failed][, N cancelled][, N skipped][, N todo][; the file failed
- * outside any test][; <why it ran no test>]`, or why there are none; and whether a file ran no test without a name
- * pattern to explain it.
+ * outside any test][; <why it ran no test>]`, or why there are none; and whether a file ran no test without a selection
+ * to explain it.
  */
 function fileCounts() {
   let counts;
@@ -200,10 +201,10 @@ function fileCounts() {
       let none = "";
       // (a file that failed outside its tests already fails the run, and says so)
       if (passed + failed + cancelled + skipped + todo === 0 && !fileFailed) {
-        if (namePattern) none = "; the name pattern matched no test in it";
+        if (selected) none = "; the selection matched no test in it";
         else {
           ranNothing = true;
-          none = "; it ran no test, which fails the run as in the full suite";
+          none = "; it ran no test, which fails the run";
         }
       }
       return `ℹ ${relative(process.cwd(), file)}: ${passed} passed${others}${own}${none}\n`;

@@ -20,11 +20,15 @@ import { pathToFileURL } from "node:url";
 
 const filterPath = resolve(process.cwd(), "tools/test-output-filter.mjs");
 
-/** Runs the filter on `fixtures`, or on the arguments `argumentsIn` gives for the fixtures' directory. */
+/**
+ * Runs the filter on `fixtures`, or on the arguments `argumentsIn` gives for the fixtures' directory, with `variables`
+ * added to its environment.
+ */
 function runFixtures(
   fixtures: Record<string, string>,
   fullOutput = false,
   argumentsIn?: (directory: string) => string[],
+  variables: NodeJS.ProcessEnv = {},
 ) {
   const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
   // the filter's own temporary folders, apart from everyone else's
@@ -35,6 +39,7 @@ function runFixtures(
     TMPDIR: temporary,
     TEMP: temporary,
     TMP: temporary,
+    ...variables,
   };
   delete environment.NODE_TEST_CONTEXT;
 
@@ -193,28 +198,43 @@ test("compact output ends with each named file's counts, after Node's own output
   assert.deepEqual(compact.leftover, []);
   // after Node's own output: the summary and the failures
   assert.match(compact.stdout, /failing test[\s\S]*\nℹ \S*counted\.test\.mjs: /u);
-  // a file that ran no test fails the run, as in the full suite, and its line says so
+  // a file that ran no test fails the run, a suite alone included, and its line says so
   for (const name of ["suites.test.mjs", "silent.test.mjs"]) {
     const none = runFixtures(fixtures, false, (directory) => [resolve(directory, name)]);
     assert.equal(none.status, 1, `${name}: ${none.stdout}${none.stderr}`);
     assert.match(
       none.stdout,
       new RegExp(
-        `^ℹ \\S*${name.replace(".", "\\.")}: 0 passed; it ran no test, which fails the run as in the full suite$`,
+        `^ℹ \\S*${name.replace(".", "\\.")}: 0 passed; it ran no test, which fails the run$`,
         "mu",
       ),
     );
   }
-  // a name pattern that matches no test runs none, which its line says and the exit does not
-  for (const pattern of [["--test-name-pattern=no such test"], ["--test-skip-pattern", "."]]) {
-    const unmatched = runFixtures(fixtures, false, (directory) => [
-      ...pattern,
-      resolve(directory, "counted.test.mjs"),
-    ]);
-    assert.equal(unmatched.status, 0, unmatched.stderr);
+  // a selection that matches no test runs none, which its line says and the exit does not: a name or skip pattern, or
+  // --test-only, in each spelling Node takes, or in NODE_OPTIONS
+  for (const [selection, variables] of [
+    [["--test-name-pattern=no such test"], {}],
+    [["--test-skip-pattern", "."], {}],
+    [["--test_name_pattern=nosuch"], {}],
+    [["--test-skip_pattern", "."], {}],
+    [["--test-only"], {}],
+    [[], { NODE_OPTIONS: "--test-name-pattern=nosuch" }],
+  ] as const) {
+    const unmatched = runFixtures(
+      fixtures,
+      false,
+      (directory) => [...selection, resolve(directory, "counted.test.mjs")],
+      variables,
+    );
+    assert.equal(
+      unmatched.status,
+      0,
+      `${selection.join(" ")}: ${unmatched.stdout}${unmatched.stderr}`,
+    );
     assert.match(
       unmatched.stdout,
-      /^ℹ \S*counted\.test\.mjs: 0 passed; the name pattern matched no test in it$/mu,
+      /^ℹ \S*counted\.test\.mjs: 0 passed; the selection matched no test in it$/mu,
+      selection.join(" "),
     );
     // and so does one that passes
     assert.deepEqual(unmatched.leftover, []);
@@ -335,7 +355,7 @@ test("each file's line, with the file's own result, reconciles with node:test's 
       const lines = filtered.stdout.split("\n").filter((each) => each.startsWith(prefix));
       assert.equal(lines.length, 1, `${file}: one line\n${filtered.stdout}`);
       const line =
-        /^(\d+) passed(?:, (\d+) failed)?(?:, (\d+) cancelled)?(?:, (\d+) skipped)?(?:, (\d+) todo)?(; the file failed outside any test)?(; it ran no test, which fails the run as in the full suite)?$/u.exec(
+        /^(\d+) passed(?:, (\d+) failed)?(?:, (\d+) cancelled)?(?:, (\d+) skipped)?(?:, (\d+) todo)?(; the file failed outside any test)?(; it ran no test, which fails the run)?$/u.exec(
           lines[0]!.slice(prefix.length),
         );
       assert.ok(line, `${file}: its counts\n${lines[0]}`);

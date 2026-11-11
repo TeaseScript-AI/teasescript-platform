@@ -1,4 +1,4 @@
-import { RuleTester } from "oxlint/plugins-dev";
+import { RuleTester } from "../shared/rule-tester.ts";
 
 import { noUnknownReturnsRule } from "./no-unknown-returns.ts";
 
