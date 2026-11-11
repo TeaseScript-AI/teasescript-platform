@@ -146,6 +146,8 @@ recovery (the camera's are built: #909, #911), reload and restore, simultaneous-
 [`planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md`](planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md).
 
 Exact iframe sandbox flags and frame permissions (the Player's screen wake lock needs `allow="screen-wake-lock"` in a
-frame of another origin; the framing page needs `interactive-widget=resizes-content`, see
-[`PLAYER-UI.md`](ui/PLAYER-UI.md#input-growth-focus-and-keyboard-behavior)), CSP, message schemas, capability negotiation, signing, moderation workflows, captured-media
+frame of another origin, and the framing page needs `interactive-widget=resizes-content`, see
+[`PLAYER-UI.md`](ui/PLAYER-UI.md#input-growth-focus-and-keyboard-behavior); the Player's engine runs in a module Worker loaded
+from its own origin, which needs a frame whose origin is not opaque and a CSP that allows it, such as
+`worker-src 'self'`), CSP, message schemas, capability negotiation, signing, moderation workflows, captured-media
 privacy policy, and time-integrity policy remain to be specified.
