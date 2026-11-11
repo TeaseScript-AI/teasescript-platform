@@ -1,12 +1,11 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, test } from "node:test";
 import { summaryLine } from "./run-parallel.mjs";
-import { awaitFile, bounded, waitFor } from "./runner-test-support.mjs";
+import { awaitFile, spawnTool, waitFor } from "./runner-test-support.mjs";
 
 const runner = fileURLToPath(new URL("./run-parallel.mjs", import.meta.url));
 
@@ -23,32 +22,11 @@ function fixture(t, sources) {
 }
 
 function start(t, cwd, names, serial = false) {
-  const child = spawn(process.execPath, [runner, ...names], {
+  // (`output` both streams in arrival order, `stdout` alone, whose order is the runner's: the last line is read there)
+  return spawnTool(t, process.execPath, [runner, ...names], {
     cwd,
     env: { ...process.env, VERIFY_SERIAL: serial ? "1" : "0" },
-    stdio: ["ignore", "pipe", "pipe"],
   });
-  t.after(() => {
-    if (child.exitCode === null) child.kill("SIGTERM");
-  });
-  // (both streams in arrival order, and stdout alone, whose order is the runner's: the last line is read there)
-  let output = "";
-  let stdout = "";
-  child.stdout.on("data", (chunk) => {
-    output += chunk;
-    stdout += chunk;
-  });
-  child.stderr.on("data", (chunk) => {
-    output += chunk;
-  });
-  const done = bounded(
-    new Promise((resolve, reject) => {
-      child.on("error", reject);
-      child.on("close", (code) => resolve({ code, output, stdout }));
-    }),
-    `run-parallel ${names.join(" ")} to end`,
-  );
-  return { child, done, output: () => output };
 }
 
 const record = `import { appendFileSync, existsSync, writeFileSync } from 'node:fs';`;
@@ -108,25 +86,10 @@ test("a failed step stops no other, serial or parallel; the last line names what
 test("a step npm cannot start fails with exit 1 and is named", async (t) => {
   const cwd = fixture(t, { first: "" });
   // (no npm on PATH: the spawn itself fails)
-  const child = spawn(process.execPath, [runner, "first"], {
+  const { code, output, stdout } = await spawnTool(t, process.execPath, [runner, "first"], {
     cwd,
     env: { ...process.env, PATH: cwd },
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  t.after(() => {
-    if (child.exitCode === null) child.kill("SIGKILL");
-  });
-  let output = "";
-  let stdout = "";
-  child.stdout.on("data", (chunk) => {
-    output += chunk;
-    stdout += chunk;
-  });
-  child.stderr.on("data", (chunk) => (output += chunk));
-  const code = await bounded(
-    new Promise((resolve) => child.on("close", resolve)),
-    "run-parallel without npm to end",
-  );
+  }).done;
   assert.equal(code, 1, output);
   assert.match(output, /\[first\] FAIL/u);
   assert.match(output, /first: spawn npm ENOENT/u);

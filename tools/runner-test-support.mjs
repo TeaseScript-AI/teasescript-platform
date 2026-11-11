@@ -1,6 +1,9 @@
-// Waits and a slow reader for the tests of the check runners (run-parallel, run-check, check-changed). No wait depends
-// on how long a loaded host takes (#2379): each ends on its event, or fails naming what it waited for when the process
-// it watches has ended without it, or after `BOUND_SECONDS`, which only a hang reaches.
+// Waits, process runs and a slow reader for the tests of the check runners (run-parallel, run-check, check-changed). No
+// wait depends on how long a loaded host takes (#2379): each ends on its event, or fails naming what it waited for when
+// the process it watches has ended without it, or after `BOUND_SECONDS`, which only a hang reaches. A bound that expires
+// SIGKILLs what it waited for: a runner keeps handling SIGTERM to the end, so SIGTERM need not end it. Every process
+// these tests start goes through `runSync` (a short fixture command), `spawnTool` or `runTool` (a runner, in its own
+// process group) or `slowReader`.
 
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
@@ -53,12 +56,65 @@ export function bounded(promise, what) {
   return Promise.race([promise, bound]).finally(() => clearTimeout(timer));
 }
 
-/** `spawnSync`, ended after `BOUND_SECONDS` with a failure naming the command. */
+/**
+ * `spawnSync` for a short fixture command that starts no lasting process of its own, as `git`: SIGKILLed after
+ * `BOUND_SECONDS`, with a failure naming the command.
+ */
 export function runSync(command, args, options) {
-  const result = spawnSync(command, args, { ...options, timeout: BOUND_SECONDS * 1000 });
+  const result = spawnSync(command, args, {
+    ...options,
+    timeout: BOUND_SECONDS * 1000,
+    killSignal: "SIGKILL",
+  });
   if (result.error?.code === "ETIMEDOUT")
     throw new Error(`Waited ${BOUND_SECONDS} s for ${[command, ...args].join(" ")} to end`);
   return result;
+}
+
+/**
+ * Starts `command` in its own process group, its stdout and stderr collected unless `stdio` says otherwise. `done`
+ * resolves to its `code`, `signal`, `stdout`, `stderr` and `output` (both, in arrival order); after `BOUND_SECONDS` it
+ * fails, naming the command, and the group is SIGKILLed, as it is when the test ends with it still running.
+ */
+export function spawnTool(t, command, args, { cwd, env, stdio = ["ignore", "pipe", "pipe"] }) {
+  const child = spawn(command, args, { cwd, env, stdio, detached: true });
+  const kill = () => {
+    try {
+      process.kill(-child.pid, "SIGKILL");
+    } catch (error) {
+      if (error.code !== "ESRCH") throw error;
+    }
+  };
+  t.after(kill);
+  let stdout = "";
+  let stderr = "";
+  let output = "";
+  child.stdout?.on("data", (chunk) => {
+    stdout += chunk;
+    output += chunk;
+  });
+  child.stderr?.on("data", (chunk) => {
+    stderr += chunk;
+    output += chunk;
+  });
+  const what = [command, ...args].join(" ").slice(0, 200);
+  const done = bounded(
+    new Promise((resolve, reject) => {
+      child.on("error", reject);
+      child.on("close", (code, signal) => resolve({ code, signal, stdout, stderr, output }));
+    }),
+    `${what} to end`,
+  ).catch((error) => {
+    kill();
+    throw error;
+  });
+  return { child, done, output: () => output };
+}
+
+/** `spawnTool`'s run, awaited: `{ status, signal, stdout, stderr }`, as `spawnSync` gives. */
+export async function runTool(t, command, args, options) {
+  const { code, signal, stdout, stderr } = await spawnTool(t, command, args, options).done;
+  return { status: code, signal, stdout, stderr };
 }
 
 /** Fixture source that waits until `file` exists, or exits 1 after `BOUND_SECONDS`, naming `what`. */
@@ -81,7 +137,7 @@ export async function slowReader(
   { cwd, args, env, ready = null, groupSignal = false, signalsBefore = true },
 ) {
   const fifo = join(cwd, "stdout.fifo");
-  assert.equal(spawnSync("mkfifo", [fifo]).status, 0);
+  assert.equal(runSync("mkfifo", [fifo]).status, 0);
   writeFileSync(
     join(cwd, "mark-last-line.mjs"),
     "import { writeFileSync } from 'node:fs'; const write = process.stdout.write.bind(process.stdout); " +

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import {
   chmodSync,
   closeSync,
@@ -31,7 +31,14 @@ import {
   removeTemporaryWorktree,
   unknownToCostly,
 } from "./check-changed.mjs";
-import { BOUND_SECONDS, bounded, runSync, slowReader, waitFor } from "./runner-test-support.mjs";
+import {
+  awaitFile,
+  BOUND_SECONDS,
+  bounded,
+  runSync,
+  slowReader,
+  waitFor,
+} from "./runner-test-support.mjs";
 
 // A representative changed path for each project, and the projects it alone needs.
 const REPRESENTATIVES = {
@@ -89,7 +96,7 @@ test("without node_modules it can link, it runs no check, says why and the two f
   const directory = mkdtempSync(join(tmpdir(), "check-changed-"));
   const main = mkdtempSync(join(tmpdir(), "check-changed-main-"));
   try {
-    const run = (...args) => spawnSync("git", args, { cwd: directory, encoding: "utf8" });
+    const run = (...args) => runSync("git", args, { cwd: directory, encoding: "utf8" });
     run("init", "-q");
     run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "base");
     writeFileSync(join(directory, "a.mjs"), "export const a = 1;\n");
@@ -131,7 +138,7 @@ function repository({
   installed = {},
 } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "check-changed-repo-"));
-  const run = (...args) => spawnSync("git", args, { cwd: directory, encoding: "utf8" });
+  const run = (...args) => runSync("git", args, { cwd: directory, encoding: "utf8" });
   const write = (path, text) => {
     mkdirSync(dirname(join(directory, path)), { recursive: true });
     writeFileSync(join(directory, path), text);
@@ -142,7 +149,10 @@ function repository({
   write("package-lock.json", JSON.stringify({ lockfileVersion: 3, packages: { "": {}, ...lock } }));
   write(".gitignore", "node_modules/\n");
   // (the checks the merge runs: oxlint waits when asked, so a signal meets a running check)
-  write("tools/oxlint/run.mjs", slowOxlint ? "setTimeout(() => {}, 60_000);\n" : "\n");
+  write(
+    "tools/oxlint/run.mjs",
+    slowOxlint ? `${awaitFile("release-oxlint", "the test to release oxlint")}\n` : "\n",
+  );
   // (a stand-in for the pin-suite mapper that says how it was asked)
   write(
     "tools/repository-checks/pin-suites.mjs",
@@ -238,7 +248,7 @@ test("--merged names a conflict, exits 2 and leaves no worktree", () => {
 test("a signal during --merged stops the checks and removes the worktree; more during that cleanup change nothing (#2106)", async (t) => {
   // (a git whose worktree removal marks its start and waits for the test's release, so the signals land during it)
   const slowGit = mkdtempSync(join(tmpdir(), "check-changed-slow-git-"));
-  const git = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+  const git = runSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
   writeFileSync(
     join(slowGit, "git"),
     `#!/bin/sh\ncase "$*" in *"worktree remove"*) : > "${slowGit}/removing"; i=0; ` +
@@ -323,7 +333,7 @@ test("a change to the type core prints the pin-suite mapper's list, plain and me
           [tool, ...(merged ? ["--merged"] : []), "--base", "main"],
           { cwd: directory, encoding: "utf8", env: environment },
         );
-        const base = spawnSync("git", ["merge-base", "HEAD", "main"], {
+        const base = runSync("git", ["merge-base", "HEAD", "main"], {
           cwd: directory,
           encoding: "utf8",
         }).stdout.trim();
@@ -422,7 +432,7 @@ test("the node_modules link it makes is no change: under the tracked ignore rule
     mkdirSync(join(root, "main", "node_modules"), { recursive: true });
     mkdirSync(repo);
     const git = (...args) =>
-      spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+      runSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
         cwd: repo,
         encoding: "utf8",
       });

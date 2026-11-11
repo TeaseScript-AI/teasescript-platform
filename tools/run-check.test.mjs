@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { pretestSteps } from "./run-check.mjs";
-import { bounded, runSync, slowReader, waitFor } from "./runner-test-support.mjs";
+import { bounded, runTool, slowReader, waitFor } from "./runner-test-support.mjs";
 
 const tool = fileURLToPath(new URL("./run-check.mjs", import.meta.url));
 
@@ -62,21 +62,21 @@ function outcome(cwd, status, stdout, stderr) {
   };
 }
 
-function run(t, exits) {
+async function run(t, exits) {
   const cwd = fixture(t, exits);
-  const result = runSync(process.execPath, [tool], { cwd, encoding: "utf8", env: environment });
+  const result = await runTool(t, process.execPath, [tool], { cwd, env: environment });
   return outcome(cwd, result.status, result.stdout, result.stderr);
 }
 
-test("a failed check before the tests stops no other part: the build and the suite still run (#2106)", (t) => {
-  const result = run(t, { lint: 3 });
+test("a failed check before the tests stops no other part: the build and the suite still run (#2106)", async (t) => {
+  const result = await run(t, { lint: 3 });
   assert.equal(result.status, 3, result.output);
   assert.deepEqual(result.ran, ["lint ", "format ", "build 0", "suite 0"]);
   assert.equal(result.last, "ran: lint, format, build, test suite; failed: lint; not run: none");
 });
 
-test("a failed build stops the suite, and the last line says it did not run and why (#2106)", (t) => {
-  const result = run(t, { format: 4, build: 2 });
+test("a failed build stops the suite, and the last line says it did not run and why (#2106)", async (t) => {
+  const result = await run(t, { format: 4, build: 2 });
   assert.equal(result.status, 4, result.output);
   assert.deepEqual(result.ran, ["lint ", "format ", "build 0"]);
   assert.equal(
@@ -85,11 +85,11 @@ test("a failed build stops the suite, and the last line says it did not run and 
   );
 });
 
-test("a run that passes, and one whose suite fails, name every part in the last line", (t) => {
-  const passing = run(t, {});
+test("a run that passes, and one whose suite fails, name every part in the last line", async (t) => {
+  const passing = await run(t, {});
   assert.equal(passing.status, 0, passing.output);
   assert.equal(passing.last, "ran: lint, format, build, test suite; failed: none; not run: none");
-  const failing = run(t, { suite: 1 });
+  const failing = await run(t, { suite: 1 });
   assert.equal(failing.status, 1, failing.output);
   assert.equal(
     failing.last,
