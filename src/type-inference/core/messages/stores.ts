@@ -6,6 +6,7 @@ import { ROUND_COUNT_FIX } from "../../../loop-rules.js";
 import { isTemporalKind } from "../../../temporal-builtins.js";
 import type { ItemTag } from "../items.js";
 import type { DeclaredBinding, DiagnosticRule, SiteExpectation, StoreRoot } from "../result.js";
+import { bindingsOf } from "../consumers/bindings.js";
 import type { MessageSource } from "./site.js";
 import {
   capitalized,
@@ -158,7 +159,8 @@ export function copySentence(
   source: MessageSource,
   diagnosed: Diagnosed,
 ): string | null {
-  const { binding, root, decider } = rule;
+  const { root, decider } = rule;
+  const binding = bindingsOf(rule);
   const integer = (type: readonly ItemTag[]): boolean => {
     const values = type.filter((kind) => kind !== "null");
     return values.length === 1 && values[0] === "integer";

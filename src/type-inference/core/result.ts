@@ -120,11 +120,6 @@ export type DiagnosticRule =
       readonly root: StoreRoot | null;
       /** The steps from the root to the place: a property, or the collection an element or a dict value is in. */
       readonly steps: readonly StoreStep[];
-      /**
-       * Where a copy decides the type (A4): the variable or parameter with its own written type a read at a site reads,
-       * else `null`; asked only where a sentence names it (#2289).
-       */
-      readonly binding?: (read: SourceSite) => DeclaredBinding | null;
     }
   /**
    * C10: a fallback (`otherwise`) or a default against the kinds of the value it stands in for, and the variable or

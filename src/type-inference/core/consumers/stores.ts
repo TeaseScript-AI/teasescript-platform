@@ -26,7 +26,8 @@ import { keyPlace, type Definition } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import { REASON, type Item, type ItemTag, type Writer } from "../items.js";
 import { propertyStep, siteKey } from "../program.js";
-import { offendingKinds, type DeclaredBinding, type DiagnosticRule } from "../result.js";
+import { offendingKinds, type DiagnosticRule } from "../result.js";
+import { type BindingRead, readsBindings } from "./bindings.js";
 import { error } from "./diagnostics.js";
 import { kindsOf, quietKinds } from "./names.js";
 import { copiesOnly, deferred, storeReach } from "./reach.js";
@@ -144,11 +145,11 @@ function writtenGroups(
 }
 
 /**
- * The variable or parameter with its own written type a read at a site reads (`DiagnosticRule`'s `binding`): by the
+ * The variable or parameter with its own written type a read at a site reads (`readsBindings`): by the
  * read's place (`placeBySite`) and the binding it reads (`occurrenceOf`), map reads alone; `null` for any other site. A
  * store's sentence asks it only where it names a copy's source (#2289), so nothing runs for a rule no sentence words.
  */
-function declaredRead(walk: Consumers): (read: SourceSite) => DeclaredBinding | null {
+function declaredRead(walk: Consumers): BindingRead {
   const { program } = walk.pass;
   return (read) => {
     const occurrence = program.placeBySite.get(siteKey(read));
@@ -216,17 +217,21 @@ export function admittedStores(
       written || !admission.admitted(root, path()).includes("null")
         ? nullableTags
         : [...tags, "null"];
-    const rule = (brought: SourceSite | null = null): DiagnosticRule => ({
-      rule: "store",
-      into: placeText(walk, root, path()),
-      type: named(),
-      written,
-      decider: decider?.site ?? null,
-      brought,
-      root: storeRoot(walk, root),
-      steps: storeSteps(walk, root, path(), written ? writtenOf(program.place(root).kind) : null),
-      ...(written && !decision.own ? { binding } : {}),
-    });
+    const rule = (brought: SourceSite | null = null): DiagnosticRule => {
+      const made: DiagnosticRule = {
+        rule: "store",
+        into: placeText(walk, root, path()),
+        type: named(),
+        written,
+        decider: decider?.site ?? null,
+        brought,
+        root: storeRoot(walk, root),
+        steps: storeSteps(walk, root, path(), written ? writtenOf(program.place(root).kind) : null),
+      };
+      // (a copy decides it: the sentence's reader of the declared variable it copies, beside the rule, #2289)
+      if (written && !decision.own) readsBindings(made, binding);
+      return made;
+    };
     // C9: a place published with its contract's kinds owes the check of external data another store
     // brought, at each candidate carrying it, against those kinds; data a store brings inline has its boundary there,
     // an opaque value C5's obligation at its access (A7)
