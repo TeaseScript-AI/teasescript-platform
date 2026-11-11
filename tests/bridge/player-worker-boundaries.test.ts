@@ -623,7 +623,7 @@ RERUN.rows(
 
 RERUN.rows(
   "W12 going back",
-  "W12: a session kept and a session exported on one topology continue and import on the other",
+  "W12: a session kept and a session exported on one topology continue and import, with its saved values, on the other",
   async (context, topology, end) => {
     stubBrowser(context);
     const other: Topology = topology === "worker" ? "in-process" : "worker";
@@ -647,6 +647,12 @@ RERUN.rows(
     const elsewhere = keptBrowser();
     const third = await page(context, other, elsewhere);
     await importAndContinue(third.host, transfer);
+    // What the importing side received: the script's saved values, and the session.
+    assert.equal(
+      elsewhere.entries.get("visits"),
+      1,
+      "the import's saved values on the other topology",
+    );
     assert.deepEqual(said(third.host), shown, "the import on the other topology");
     return end();
   },
@@ -920,7 +926,7 @@ const ROUNDS =
 
 RERUN.rows(
   "W10 catch-up",
-  "W10: a page that wakes late catches up in steps to the scene time one late observation gives",
+  "W10: a page hidden while time passes catches up in steps, once shown, to the scene time one late observation gives",
   async (context, topology, end) => {
     stubBrowser(context);
     let nowMs = 0;
@@ -928,8 +934,16 @@ RERUN.rows(
     const transport = await topologyBridge(context, topology);
     const { host } = await mount(context, transport);
     await start(host, ROUNDS);
+    // Hidden, then a second passes, then shown: the page's visibility, as the browser reports it.
+    const show = (state: "hidden" | "visible") => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, value: state });
+      document.dispatchEvent(new Event("visibilitychange"));
+    };
+    show("hidden");
+    await turn();
     nowMs += 1_000;
-    document.dispatchEvent(new Event("visibilitychange"));
+    const shownAt = transport.posts.length;
+    show("visible");
     await until(
       () => host.session.value!.state.observedSessionTimeMs >= 1_000,
       "the catch-up ends",
@@ -940,10 +954,11 @@ RERUN.rows(
     const observed = host.session.value!.state.observedSessionTimeMs;
     assert.ok(observed >= 1_000);
     assert.deepEqual(said(host), ["Done", `${Math.floor(observed / 10)} rounds`]);
-    // The late observation ran as a catch-up over the bridge: begun, stepped in tasks with a budget, and adopted.
+    // Once shown, the late observation ran as a catch-up over the bridge: begun, stepped in tasks with a budget, and
+    // adopted.
     const ops = transport.posts.map((post) => post.op);
-    const begun = ops.indexOf("beginCatchUp");
-    assert.ok(begun >= 0, ops.join(", "));
+    const begun = ops.indexOf("beginCatchUp", shownAt);
+    assert.ok(begun >= shownAt, ops.join(", "));
     const steps = transport.posts.filter(
       (post, index) => index > begun && post.op === "stepCatchUp",
     );

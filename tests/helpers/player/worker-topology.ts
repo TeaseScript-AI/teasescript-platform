@@ -29,7 +29,9 @@ import type { PlayerSession } from "../../../player/runtime/runtime-view.js";
  *   reply to the latest request of `later` is too. Both topologies hold the incoming messages at the client's port, this
  *   connection's alone.
  * - `posts`: every request the client posted, in order, as it reached the port.
- * - `topology`, checked by `assertTopology()`: `deliverInTransit` is `null` exactly on the Worker.
+ * - `topology`, checked when the bridge is built and again by `assertTopology()`: on the Worker, `thread` is a real
+ *   thread (a positive id) that answered the bridge's handshake, and `deliverInTransit` is `null`; in-process, there
+ *   is no thread and `deliverInTransit` is the backend's.
  * `tests/helpers/bridge/sends.ts` decides sends above the client instead; this helper works below it, so the client's
  * own disposition of a post stands, and the log holds only what reached the port.
  */
@@ -57,6 +59,8 @@ export interface TopologyBridge {
   assertTopology(): void;
   /** On the Worker, resolves with the thread's exit code once it exited; `null` in-process. */
   readonly exited: Promise<number> | null;
+  /** On the Worker, the thread that runs the host: its id, and how many messages it sent; `null` in-process. */
+  readonly thread: { readonly id: number; readonly messages: () => number } | null;
 }
 
 const BUILD: BuildIdentity = { commit: null, dirty: null, mode: null, appVersion: null };
@@ -172,12 +176,18 @@ export async function topologyBridge(
   assert.ok(client && bridgeModule && facade, "call loadTopology first");
   const made = topology === "worker" ? await onWorker(WORKERS[entry]) : inProcess(delayMs);
   context.after(() => made.bridge.client.terminate());
-  return {
-    ...made,
-    topology,
-    assertTopology: () =>
-      assert.equal(made.bridge.deliverInTransit === null, topology === "worker", "the topology"),
+  const assertTopology = () => {
+    if (topology === "worker")
+      assert.ok(
+        made.thread !== null && made.thread.id > 0 && made.thread.messages() > 0,
+        "a worker topology's host runs on a thread that answered",
+      );
+    else assert.equal(made.thread, null, "an in-process topology has no thread");
+    assert.equal(made.bridge.deliverInTransit === null, topology === "worker", "the topology");
   };
+  // Every row's topology is the one it names: no row can run labelled `worker` without a Worker.
+  assertTopology();
+  return { ...made, topology, assertTopology };
 }
 
 /**
@@ -253,15 +263,29 @@ function inProcess(
   assert.ok(gated !== undefined, "the backend took the gated port");
   const { posts, hold, held, release } = gated;
   const lose = inProcessLoss(bridge, client!.BridgeLostError);
-  return { bridge, posts, exited: null, lose: async () => lose(), hold, held, release };
+  return {
+    bridge,
+    posts,
+    exited: null,
+    thread: null,
+    lose: async () => lose(),
+    hold,
+    held,
+    release,
+  };
 }
 
 async function onWorker(entry: URL): Promise<Omit<TopologyBridge, "topology" | "assertTopology">> {
   const worker = new Worker(entry, { workerData: { build: BUILD } });
   const exited = new Promise<number>((resolve) => worker.once("exit", resolve));
+  let messages = 0;
   const { port, posts, hold, held, release } = gatedPort({
     post: (message) => worker.postMessage(message),
-    listen: (listener) => void worker.on("message", (data: unknown) => listener(data)),
+    listen: (listener) =>
+      void worker.on("message", (data: unknown) => {
+        messages += 1;
+        listener(data);
+      }),
     onFailure: (listener) => {
       worker.on("error", listener);
       worker.on("messageerror", listener);
@@ -274,6 +298,7 @@ async function onWorker(entry: URL): Promise<Omit<TopologyBridge, "topology" | "
     bridge,
     posts,
     exited,
+    thread: { id: worker.threadId, messages: () => messages },
     lose: () =>
       new Promise<void>((resolve) => {
         bridge.client.onLoss(() => resolve());
