@@ -2,7 +2,7 @@
 title: "Answer flight"
 ---
 // The composer while an answer is in flight (#2430): each case answers a first question, then presents what the
-// browser kit's `keys` scenario types into. A block case starts a timer whose block suspends the first question 3 s on.
+// browser kit's `keys` scenario types into. A block case starts a timer whose block interrupts the first question 3 s on.
 let which = askChoice "Prefill", "Password", "Popup", "Export", "Link", "Form", "Code", "Password block", "Plain block", "Lock block"
 if which == "Password block" {
     timer async hidden 3 s { let block = askPassword "Block?" }

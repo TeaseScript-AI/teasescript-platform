@@ -81,9 +81,10 @@ Pass or fail is derived from primary records, never from a cached flag:
   - `demo`;
   - `keys`: keys pressed right after Enter on a `delayed` build, while the answer is in flight (#2430), on
     `/player/?dev` and the `answer-flight` fixture package. Each case expects `main`'s outcome of the same keys, or a
-    declared rule's where #2463 states one (a password field outside the flight's domain; a timer's block that
-    suspends the question). A case #2430 accepts as a residual is recorded, not asserted: the residual cases in
-    `scenarios/keys.mjs`, marked `residual N`. Run it on the `delayed` variant
+    declared rule's where #2463 states one (a password field, which starts empty and is read-only in its own answer's
+    flight; a timer's block that overtakes the answer, where what was left unsent stays in the composer). A case #2430
+    accepts as a residual, or one whose rule the Owner has not decided, is recorded, not asserted: the cases in
+    `scenarios/keys.mjs` marked `residual N` or `pending`. Run it on the `delayed` variant
     (`GATE_VARIANT=delayed GATE_DELAY_MS=250 OUT=DIR npx vite build --config tools/player-gate/variants/vite.config.mjs`,
     then `node tools/player-gate/drive.mjs --engine ENGINE --scenario keys --build "main=CHECKOUT:DIR"
     --packages tests/fixtures/packages --samples 1 --out FILE`).

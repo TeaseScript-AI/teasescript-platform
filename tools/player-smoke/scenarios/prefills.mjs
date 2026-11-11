@@ -11,8 +11,9 @@ import {
   waitFor,
 } from "../driver.mjs";
 
-// A prefill starts as the composer text, also when an answer to the question before it presents it (#2465), and a
-// question a block interrupted shows again with the text typed for it. The composer is read at each question.
+// A prefill starts as the composer text, also when an answer to the question before it presents it (#2465). The composer
+// keeps its text through a block (Owner decision, 2026-11-11, #2463): the block's field shows the text typed before it,
+// and the question it interrupted gets no text back. The composer is read at each question.
 export async function prefillsScenario(cdp, origin) {
   await setViewport(cdp, 1280, 800);
   await navigate(cdp, `${origin}/player/?package=prefills`);
@@ -61,7 +62,9 @@ export async function prefillsScenario(cdp, origin) {
   await read("Typed before the block?, after the block", `${said("B")} && !${field}?.disabled`);
   await sendShown("Typed");
   await read("Resumed?");
+  // A prefill the player did not change, in the composer as a block arrives: the Owner's open question (#2463).
   await read("In the block again?");
+  delete shown["In the block again?"];
   await answer("C");
   await read("Resumed?, after the block", `${said("C")} && !${field}?.disabled`);
   await sendShown("Back");
@@ -98,10 +101,9 @@ export async function prefillsScenario(cdp, origin) {
         "First?": "",
         "Name?": "Ada",
         "Typed before the block?": "",
-        "In the block?": "",
-        "Typed before the block?, after the block": "Typed",
+        "In the block?": "Typed",
+        "Typed before the block?, after the block": "",
         "Resumed?": "Back",
-        "In the block again?": "",
         "Resumed?, after the block": "Back",
         "How many?": "3",
         "When?": "20:00",

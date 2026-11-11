@@ -2,11 +2,11 @@
 // answer's replies are delayed, end as on `main`, whose answers settle before the next key. Each case answers the
 // opening development scenario (`/player/?dev`) or the `answer-flight` fixture package, presses its keys, and records
 // what the page shows once every answer settled. `expect` is `main`'s measured outcome of the same keys, whose answers
-// settle at once (#2430; since 54806a4d6, #2465, `main` keeps a prefill the answer presents, as this branch does), or a
-// declared rule's: where a password field departs or settles, outside the flight's domain, nothing typed or given in
-// the flight is taken (#2463, residual 6); where a timer's block suspends the question, what was left unsent returns
-// with it (#2463, design round 2's end table). A case with a `residual` is a difference #2430 accepts, recorded beside
-// it and never asserted.
+// settle at once (#2430; since 54806a4d6, #2465, `main` keeps a prefill the answer presents), or a declared rule's: the
+// composer has one text, which only the player's typing, deleting and sending change (Owner decision, 2026-11-11,
+// #2463), so where a timer's block overtakes the answer, no command acts on the block and what was left unsent stays in
+// the composer. A case with a `residual` is a difference #2430 accepts, or a case whose rule the Owner has not decided
+// yet (`PENDING`), recorded beside it and never asserted.
 import { cdpSession } from "../lib/engines.mjs";
 import { countedError } from "../lib/probe.mjs";
 
@@ -67,6 +67,7 @@ const shown = (value, notice, entries, extra = {}) => ({
   ...extra,
 });
 const R = (number) => `residual ${number}`;
+const PENDING = "pending the Owner's decision (#2463)";
 // `[keys, expect, residual]` after a completed answer and after a refused one.
 const COMPLETED = {
   idle: [shown("", "", 2)],
@@ -178,16 +179,17 @@ function cases(engine) {
       expect: shown("", REFUSED, 3),
       residual: "",
     },
-    fixture("prefill key", "Prefill", press("x"), shown("Adax", "", 4)),
+    // A prefill that arrives while the composer holds text.
+    fixture("prefill key", "Prefill", press("x"), shown("Adax", "", 4), PENDING),
     fixture(
       "prefill continue-enter-edit",
       "Prefill",
       KEYS["continue-enter-edit"],
       shown("x", "", 5),
     ),
-    // Outside the domain: a password field departs or settles, and nothing typed or given in the flight is taken.
-    // `main` takes what is typed after the answer settled: `x`, the pasted lines, a line break, or `x` after the empty
-    // password's refusal.
+    // A password field settles: it starts empty, without what was typed in the flight. A password field departs: it is
+    // read-only during its own answer's flight, and what is typed then is ignored. `main` takes what is typed after the
+    // answer settled: `x`, the pasted lines, a line break, or `x` after the empty password's refusal.
     fixture("password key", "Password", press("x"), shown("", "", 4)),
     { ...fixture("password paste", "Password", KEYS.paste, shown("", "", 4)), clipboard: "a\nb" },
     ...[
@@ -231,23 +233,27 @@ function cases(engine) {
       answer: "name",
     },
     // A timer's block suspends the first question while its answer is in flight: Enter goes between the block's start
-    // and its publication. The block's field shows its own text; answered, it gives the first question back with what
-    // was left unsent (design round 2's end table): the answer's text, each later Enter's, and the text typed last.
+    // and its publication. What was left unsent (the answer's text, each later Enter's, and the text typed last) stays
+    // the composer's: a plain block's field shows it, and the player's Enter sends it there; a lock's fields take the
+    // composer's place, and once the lock is answered, the first question shows it again. A password block's field
+    // drops it until the Owner decides (#2463).
     ...[
-      ["password block", "Password block", "", type("TAIL"), shown("TAIL", "", 3)],
-      ["plain block", "Plain block", "", type("TAIL"), shown("TAIL", "", 4)],
-      ["lock block", "Lock block", "", type("TAIL"), shown("TAIL", "", 3)],
+      ["password block", "Password block", "", type("TAIL"), "", shown("TAIL", "", 3), PENDING],
+      ["plain block", "Plain block", "", type("TAIL"), "TAIL", shown("", "", 4)],
+      ["lock block", "Lock block", "", type("TAIL"), "", shown("TAIL", "", 3)],
       [
         "overtaken block",
-        "Password block",
+        "Lock block",
         "SENT",
         seq(type("MID"), press("Enter"), type("TAIL")),
+        "",
         shown("SENTMIDTAIL", "", 3),
       ],
-    ].map(([name, block, answer, keys, expect]) => ({
-      ...fixture(name, block, keys, expect),
+    ].map(([name, block, answer, keys, blockShows, expect, residual = ""]) => ({
+      ...fixture(name, block, keys, expect, residual),
       before: [],
       block,
+      blockShows,
       answer,
     })),
   ];
@@ -285,8 +291,11 @@ const inFlight = () => {
   );
 };
 
-/** Answers the block a timer opened, once its field shows its own empty text; the first question then returns. */
-async function answerBlock(page) {
+/**
+ * Answers the block a timer opened, once its field shows what the case expects (`blockShows`): the composer's text in a
+ * plain block's field, which Enter sends, else an empty field of the block's own. The first question then returns.
+ */
+async function answerBlock(page, blockShows) {
   const input = page.locator("[data-composer-input]");
   const repeat = page.locator("[data-composer-repeat]");
   const shown = await page.evaluate(() =>
@@ -295,8 +304,9 @@ async function answerBlock(page) {
     ),
   );
   if (!shown) throw new Error("The block was not presented: the answer did not meet it in flight");
-  if ((await input.inputValue()) !== "")
-    throw new Error("The block's field holds text it was not given");
+  if ((await input.inputValue()) !== blockShows)
+    throw new Error(`The block's field does not show ${JSON.stringify(blockShows)}`);
+  if (blockShows !== "") return input.press("Enter");
   await input.fill("pw");
   await input.press("Enter");
   if ((await repeat.count()) > 0) {
@@ -416,7 +426,7 @@ async function runCase(opened, origin, item) {
     }
     let after = await settled(page, () => opens);
     if (item.block) {
-      await answerBlock(page);
+      await answerBlock(page, item.blockShows);
       after = await settled(page, () => opens);
     }
     return {
