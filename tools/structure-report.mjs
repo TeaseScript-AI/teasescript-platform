@@ -802,12 +802,17 @@ if (
   try {
     main();
   } catch (error) {
-    // A throw is the tool's own failure: the summary says so, since a missing block reads as no signals.
+    // A throw is the tool's own failure: the summary says so, since a missing block reads as no signals. The error
+    // itself is what the run reports, also when the summary cannot be written (a summary file that is a folder).
     if (summaryOut !== undefined && !summaryWritten) {
       const reason = error instanceof Error ? error.message : String(error);
-      writeSummary(
-        summaryBlock(command, undefined, [`structure report failed: ${reason.trimEnd()}`]),
-      );
+      try {
+        writeSummary(
+          summaryBlock(command, undefined, [`structure report failed: ${reason.trimEnd()}`]),
+        );
+      } catch (unwritten) {
+        console.error(`structure-report: the summary could not be written: ${unwritten.message}`);
+      }
     }
     throw error;
   }
