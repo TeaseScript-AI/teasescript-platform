@@ -218,21 +218,33 @@ export function linkMainNodeModules(env, cwd, fallback = MAIN_CHECKOUT) {
   return `${there === null ? "linked" : "replaced a stale link with"} node_modules from ${source}`;
 }
 
-/** This host as npm's `os`, `cpu` and `libc` fields name it (`libc` only on Linux, as npm checks it). */
-const HOST = {
-  os: process.platform,
-  cpu: process.arch,
-  libc:
-    process.platform === "linux"
-      ? process.report.getReport().header.glibcVersionRuntime
-        ? "glibc"
-        : "musl"
-      : null,
-};
+/**
+ * This host's C library as npm-install-checks 8 finds it (`lib/current-env.js`): on Linux, from `/usr/bin/ldd`'s text,
+ * else from the process report (glibc's version, or a musl shared object); `null` when neither says, and off Linux.
+ */
+function hostLibc() {
+  if (process.platform !== "linux") return null;
+  try {
+    const ldd = readFileSync("/usr/bin/ldd", "utf8");
+    return ldd.includes("musl") ? "musl" : ldd.includes("GNU C Library") ? "glibc" : null;
+  } catch {}
+  const report = process.report.getReport();
+  if (report.header?.glibcVersionRuntime) return "glibc";
+  return (report.sharedObjects ?? []).some((file) => /libc\.musl-|ld-musl-/u.test(file))
+    ? "musl"
+    : null;
+}
 
-/** Whether npm's list `list` (an `os`, `cpu` or `libc` field, `!` negating) admits `value`, as npm-install-checks reads it. */
+/** This host as npm's `os`, `cpu` and `libc` fields name it. */
+const HOST = { os: process.platform, cpu: process.arch, libc: hostLibc() };
+
+/**
+ * Whether npm's list `list` (an `os`, `cpu` or `libc` field, `!` negating, `any`) admits `value`, as npm-install-checks
+ * reads it: no list admits everything, and a list never admits a host without that value (a `libc` field off Linux).
+ */
 function admits(list, value) {
-  if (list === undefined || value === null) return true;
+  if (list === undefined) return true;
+  if (value === null) return false;
   const entries = typeof list === "string" ? [list] : list;
   if (entries.length === 1 && entries[0] === "any") return true;
   let negated = 0;

@@ -691,6 +691,30 @@ test("notInstalled excuses an absent optional package only when its os, cpu or l
   ]);
 });
 
+test("notInstalled reads a libc field as npm does: it excludes a host without a C library it knows, off Linux or not (Sol r4 on #2322)", () => {
+  const glibcOnly = {
+    version: "1.0.0",
+    resolved: "g",
+    integrity: "i",
+    optional: true,
+    libc: ["glibc"],
+  };
+  const lock = {
+    packages: { "": { optionalDependencies: { g: "1" } }, "node_modules/g": glibcOnly },
+  };
+  const none = { packages: {} };
+  // absent: missing on glibc Linux, which it applies to; excluded on musl, on a Mac and on a Linux of unknown libc
+  assert.deepEqual(notInstalled(lock, none, { os: "linux", cpu: "x64", libc: "glibc" }), [
+    "node_modules/g 1.0.0 (not installed)",
+  ]);
+  for (const host of [
+    { os: "linux", cpu: "x64", libc: "musl" },
+    { os: "darwin", cpu: "arm64", libc: null },
+    { os: "linux", cpu: "x64", libc: null },
+  ])
+    assert.deepEqual(notInstalled(lock, none, host), [], JSON.stringify(host));
+});
+
 /** What a refusal of a node_modules whose record does not hold the lockfile says to do. */
 const REMEDIES =
   "Main's lockfile: wait for teasescript-main's refresh, and remove a node_modules link pinned to a slot instead of " +
