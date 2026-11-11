@@ -123,6 +123,11 @@ test(
       const url = check("https://github.com/o/r/commit/0123abc4567", [directory]);
       assert.equal(url.status, 1, url.out);
       assert.match(check(`tree/${shas[0]}`, [directory]).out, /resolved/u);
+      // A UUID group that is a commit here is still reported as resolved.
+      const inUuid = check(`${shas[0].slice(0, 8)}-efaf-446b-abad-52bba33d4f81`, [directory]);
+      assert.equal(inUuid.status, 0, inUuid.out);
+      assert.match(inUuid.out, new RegExp(`resolved +${shas[0].slice(0, 8)} `, "u"));
+      assert.match(inUuid.out, /2 tokens: 1 resolved, .* 1 skipped/u);
       for (const [token, text, why] of [
         ["42406642863", "run 42406642863", "only digits, an id"],
         ["1107175450d1b5", "job 1107175450d1b5", "a queue job id"],
@@ -157,6 +162,15 @@ test(
         ["52bba33d4f81a", "0e63ae8e-efaf-446b-abad-52bba33d4f81a", null],
         ["0e63ae8e", "0e63ae8e-efaf-446b-abad", null],
         ["52bba33d4f81", "x0e63ae8e-efaf-446b-abad-52bba33d4f81", null],
+        // (the first group, with the UUID's end at the text's end or touched by a letter, `_`, a Unicode letter, an astral
+        // digit, or an overlong last group)
+        ["0e63ae8e", "0e63ae8e-efaf-446b-abad-52bba33d4f81", "a UUID, an id"],
+        ["0e63ae8e", "0e63ae8e-efaf-446b-abad-52bba33d4f81x", null],
+        ["0e63ae8e", "0e63ae8e-efaf-446b-abad-52bba33d4f81_", null],
+        ["0e63ae8e", "0e63ae8e-efaf-446b-abad-52bba33d4f81é", null],
+        ["0e63ae8e", "0e63ae8e-efaf-446b-abad-52bba33d4f81\u{1D7CE}", null],
+        ["0e63ae8e", "0e63ae8e-efaf-446b-abad-52bba33d4f81a", null],
+        ["52bba33d4f81", "\u{1D7CE}0e63ae8e-efaf-446b-abad-52bba33d4f81", null],
       ])
         assert.equal(excuse(token, text, text.indexOf(token)), why, text);
     } finally {

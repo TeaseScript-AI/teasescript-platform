@@ -211,9 +211,11 @@ export function excuse(token, text, index) {
   if (/^\d+$/u.test(token)) return "only digits, an id";
   if (/^\d{10}[0-9a-f]{4}$/u.test(token)) return "a queue job id";
   if (/^[a-f]+$/u.test(token)) return "a word";
-  // (a UUID is 36 characters: one that holds the token starts at most 35 before it)
-  for (const uuid of text.slice(Math.max(0, index - 35), index + 36).matchAll(UUID)) {
-    const start = Math.max(0, index - 35) + uuid.index;
+  // (a UUID that holds the token starts at most 24 before it, at its last group, and ends at most 36 after it, at its
+  // first; the window also keeps the character on each side, two UTF-16 units for an astral one, for the boundaries)
+  const from = Math.max(0, index - 26);
+  for (const uuid of text.slice(from, index + 38).matchAll(UUID)) {
+    const start = from + uuid.index;
     if (start <= index && index + token.length <= start + uuid[0].length) return "a UUID, an id";
   }
   if (floatDigits(text, index, token.length)) return "a float's digits";
