@@ -171,8 +171,21 @@ test(
         out.trim().split("\n").at(-1),
         /0 placeholders, 1 multi-issue closing clauses$/u,
       );
+      // (a comma and a conjunction together, across a line break)
+      const listed = check("Closes #12,\nand #13\n", [directory]);
+      assert.equal(listed.status, 1, listed.out);
+      assert.match(listed.out, /closes only #12: one keyword per issue/u);
       for (const [text, closes] of [
         ["fixes: #1 and #2", ["#1"]],
+        ["Closes #12, and #13", ["#12"]],
+        ["closes: https://github.com/o/r/issues/1, #2", ["https://github.com/o/r/issues/1"]],
+        ["Closes #1, https://github.com/o/r/issues/2", ["#1"]],
+        // (code is left out by its own delimiters: two spans, and two indented blocks, are no code around the clause)
+        ["``a`b`` Closes #12, #13 `tail`", ["#12"]],
+        ["    ```\n\nCloses #12, #13\n\n    ```\n", ["#12"]],
+        ["``Closes #1, #2``", []],
+        ["~~~\nCloses #1, #2\n~~~\n", []],
+        ["Closes #1 `x` #2", []],
         ["Resolved o/r#3 & #4", ["o/r#3"]],
         ["closed #5,#6", ["#5"]],
         ["Closes #1, closes #2", []],

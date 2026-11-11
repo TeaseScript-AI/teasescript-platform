@@ -80,16 +80,20 @@ export function placeholdersOf(text) {
 
 /**
  * The closing clauses of `text` that name several issues after one keyword, such as `Closes #1970, #1965`, each with
- * the one issue GitHub closes by it, the first: GitHub closes only an issue its own keyword names. Code (fenced blocks
- * and inline spans) is left out, as GitHub reads no keyword there.
+ * the one issue GitHub closes by it, the first: GitHub closes only an issue its own keyword names. An issue is `#N`,
+ * `owner/repo#N` or its `https://github.com/…/issues/N` address; issues are joined by `,`, `and`, `, and` or `&`.
+ * Fenced code blocks and inline code spans are left out, as GitHub reads no keyword there, each by CommonMark's own
+ * delimiters so that no prose beside them goes; other code, such as an indented block, is read as prose. A clause
+ * that emphasis or a link interrupts is not read.
  */
 export function closingClausesOf(text) {
+  // (code becomes a mark that no clause runs across)
   const prose = text
-    .replace(/^[ \t]*```[^\n]*\n[\s\S]*?^[ \t]*```[^\n]*$/gmu, "")
-    .replace(/`[^`\n]*`/gu, "");
-  const issue = String.raw`(?:[\w.-]+\/[\w.-]+)?#\d+`;
+    .replace(/^ {0,3}(([`~])\2{2,})[^\n]*\n[\s\S]*?^ {0,3}\1\2*[ \t]*$/gmu, " \u00b7 ")
+    .replace(/(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?[^`]\1(?!`)/gu, " \u00b7 ");
+  const issue = String.raw`(?:https?:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/\d+|(?:[\w.-]+\/[\w.-]+)?#\d+)`;
   const clause = new RegExp(
-    String.raw`\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+(${issue})(?:\s*(?:,|\band\b|&)\s*${issue})+`,
+    String.raw`\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+(${issue})(?:\s*(?:,\s*(?:and\b|&)?|\band\b|&)\s*${issue})+`,
     "giu",
   );
   return [...prose.matchAll(clause)].map((m) => ({ clause: m[0], closes: m[1] }));
