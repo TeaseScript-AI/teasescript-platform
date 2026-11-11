@@ -4,6 +4,7 @@ import { Activity, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue
 import { Button } from "@/components/ui/button";
 import type { CapturedMediaRepository } from "../../../media/captured-media.js";
 import type { KeptRoomStore, KeptSessionStore } from "../../../persistence/kept-sessions.js";
+import type { PlayerBridge } from "../../../runtime/player-bridge.js";
 import type { PlayerTimerKind } from "../../../presentation/model.js";
 import {
   playerNoticeKeys,
@@ -68,6 +69,8 @@ const backgroundControlsReset = ref(0);
 const themeIntent = ref<PlayerThemeIntent>(defaultPlayerThemeIntents.light);
 
 const props = defineProps<{
+  /** The engine's host, which the page started (`main.ts`). */
+  bridge: Promise<PlayerBridge>;
   capturedMediaRepository?: CapturedMediaRepository | null;
   keptSessions?: KeptSessionStore;
   debugRooms?: KeptRoomStore;
@@ -85,6 +88,7 @@ const buttonsScenario = scenario === "buttons";
 const player = usePlayerSession(
   packageHost !== null
     ? {
+        bridge: props.bridge,
         resolveAsset: packageHost.resolveAsset,
         scriptStorage: createLocalScriptStorage(browserStorage(), packageHost.storageScope),
         // As in the default build: an image the script saves a reference to stays in this browser for later runs.
@@ -100,6 +104,7 @@ const player = usePlayerSession(
         debugPackage: { id: packageHost.storageScope, version: null },
       }
     : {
+        bridge: props.bridge,
         // The camera scenarios speak as the repository demo's Mistress and use its images and sounds.
         resolveAsset:
           cameraScenario || viewfinderScenario || buttonsScenario
