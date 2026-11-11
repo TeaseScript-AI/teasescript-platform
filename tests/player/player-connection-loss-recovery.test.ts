@@ -55,9 +55,11 @@ const feasible = (state: Coordinates) =>
     (state.shown === "none" && state.prepared === "none" && state.inspecting === "no")) &&
   (state.inspecting === "no" || state.shown !== "none");
 
-const optional = <T extends string>(value: string): T | null =>
+function optional<T extends string>(value: string): T | null {
+  if (value === "none") return null;
   // EVIDENCE: fixture: each axis value but "none" is a member of the field's type (`AXES`).
-  value === "none" ? null : (value as T);
+  return value as T;
+}
 
 function lossState(state: Coordinates): LossState {
   return {
@@ -132,6 +134,7 @@ interface RecoveryHost {
     create: { readonly plan: string; readonly options: () => PlayerRuntimeSessionOptions },
   ): Promise<void>;
   activate(): Promise<void>;
+  toStartPage(): Promise<void>;
 }
 let usePlayerSession: (options: {
   readonly bridge: Promise<PlayerBridge>;
@@ -236,7 +239,7 @@ async function page(
   const plan = prepared.result.plan;
   assert.ok(plan !== undefined, "the script was prepared");
   await player.prepareScript(plan, { plan, options: () => ({ wallClockMs: 0 }) });
-  return { connections, player, kept, hostErrors };
+  return { connections, player, kept, hostErrors, scope };
 }
 
 /** Waits until the session shows its question, and the store keeps it there. */
@@ -265,6 +268,9 @@ const RERUN = rerunRegistry({
   "a fresh connection that cannot open": TOPOLOGIES,
   "a kept point gone before the click": TOPOLOGIES,
   "no fresh connection": TOPOLOGIES,
+  "after exit": TOPOLOGIES,
+  "a second loss during the preparation": TOPOLOGIES,
+  "unmounted during the replacement": TOPOLOGIES,
 });
 
 RERUN.rows(
@@ -294,7 +300,7 @@ RERUN.rows(
     await onTheFreshConnection(player, connections);
     assert.equal(player.recovery.value, null);
     assert.equal(player.hostError.value, null);
-    assert.equal(hostErrors(), 0);
+    assert.equal(hostErrors(), 1, "the loss alone is logged, for the developer");
     return end();
   },
 );
@@ -431,6 +437,83 @@ RERUN.rows(
     assert.equal(player.hostError.value, "BridgeLostError");
     assert.equal(player.recovery.value, null);
     assert.equal(hostErrors(), 1);
+    return end();
+  },
+);
+
+RERUN.rows(
+  "after exit",
+  "a session that ended by exit keeps its end, and the start page's Start recovers",
+  async (context, topology, end) => {
+    const { connections, player } = await page(context, topology, {
+      script: 'say "Bye", instant\nexit',
+    });
+    await player.activate();
+    await until(() => player.session.value?.state.status === "halted", "the end");
+    await connections.first.lose();
+    await turns(5);
+    assert.equal(player.recovery.value, null, "the end shows as it is");
+    assert.equal(player.session.value?.state.status, "halted");
+    assert.equal(player.hostError.value, null);
+    // The end dialog closes: the start page offers Start.
+    await player.toStartPage();
+    await until(() => player.activation.value !== null, "the start page");
+    assert.equal(player.activation.value, "start");
+    assert.equal(connections.calls(), 0);
+    await player.activate();
+    await until(() => player.session.value?.state.status === "halted", "the new session's end");
+    assert.equal(connections.calls(), 1);
+    await onTheFreshConnection(player, connections);
+    return end();
+  },
+);
+
+RERUN.rows(
+  "a second loss during the preparation",
+  "a fresh connection lost while it prepares the script offers the same choice again, without another attempt",
+  async (context, topology, end) => {
+    const { connections, player, kept } = await page(context, topology);
+    await player.activate();
+    await keptAtTheQuestion(player, kept);
+    await connections.first.lose();
+    await until(() => player.recovery.value !== null, "the offer");
+    connections.armNext((fresh) => fresh.hold("prepare"));
+    const recovering = player.activate();
+    await until(() => connections.made.length === 2, "the fresh connection");
+    const fresh = connections.current();
+    await fresh.held();
+    await fresh.lose();
+    fresh.release();
+    await recovering;
+    await until(() => player.recovery.value !== null, "the offer again");
+    assert.deepEqual(player.recovery.value, { offer: "continue", where: "page" });
+    assert.equal(player.hostError.value, null, "no error stop");
+    await turns(10);
+    assert.equal(connections.calls(), 1, "no attempt without a click");
+    await player.activate();
+    await until(() => player.session.value?.state.foregroundAction != null, "the question again");
+    assert.equal(connections.calls(), 2);
+    await onTheFreshConnection(player, connections);
+    return end();
+  },
+);
+
+RERUN.rows(
+  "unmounted during the replacement",
+  "a Player unmounted while its fresh connection opens shows and sends nothing more",
+  async (context, topology, end) => {
+    const { connections, player, kept, scope, hostErrors } = await page(context, topology);
+    await player.activate();
+    await keptAtTheQuestion(player, kept);
+    await connections.first.lose();
+    await until(() => player.recovery.value !== null, "the offer");
+    connections.armNext(() => scope.stop());
+    await player.activate();
+    await turns(10);
+    assert.equal(connections.calls(), 1);
+    assert.deepEqual(connections.current().posts, [], "nothing is sent to the fresh connection");
+    assert.equal(player.session.value, null);
+    assert.equal(hostErrors(), 1, "the loss alone is logged");
     return end();
   },
 );
