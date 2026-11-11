@@ -518,7 +518,8 @@ if (isMainThread && process.argv[2] === "summary") {
       let running = null;
       let over = null;
       // (a worker's error, kept until its exit: Node can deliver the error before the messages the worker posted
-      // first, never the exit, so the stall is recorded at the exit and names the run that threw)
+      // first, never the exit, so the stall is recorded at the exit and names the run that threw; a record that
+      // arrives after the error does not end the source, and the worker is not used again)
       let failed = null;
       // (the safety net a run: armed as the source is handed over and again as each run starts; it also bounds the
       // wait for the exit after an error, and then records that error)
@@ -541,8 +542,10 @@ if (isMainThread && process.argv[2] === "summary") {
           running = message.running;
           arm();
         } else if (message?.over !== undefined) over = message.over;
-        else if (Array.isArray(message?.modes) && message.name === source.name) finish(message);
-        else finish({ stray: JSON.stringify(message ?? null).slice(0, 300) });
+        // (a record after an error is not this source's result: its exit records the error, #2427's round 1)
+        else if (Array.isArray(message?.modes) && message.name === source.name) {
+          if (failed === null) finish(message);
+        } else finish({ stray: JSON.stringify(message ?? null).slice(0, 300) });
       };
       const onError = (error) => {
         failed = `${error?.code ?? error?.name}: ${error?.message}`.slice(0, 300);
