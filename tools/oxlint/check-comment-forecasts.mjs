@@ -34,11 +34,14 @@ export const FORECASTS = [
 ];
 
 /**
- * A citation of the old design record's revisions or sections: its name, then `r4` or `§`, with only white space and
- * the marks that continue a comment, a quote or a Markdown block quote between them, so a citation wrapped over two
- * lines is one. Written so this file's own text has none.
+ * What may stand between the old design record's name and a revision or section it cites: any run of characters that
+ * are no letter or digit (white space, line breaks, a comment's or quote's marks, a Markdown table's cell border), HTML
+ * tags and comments, and character entities (`&nbsp;`), so a citation wrapped over lines or markup is one.
  */
-const TABLE_CITATION = /\bTABLE[\s*/#>]*(?:r4\b|§)/gu;
+const BETWEEN = String.raw`(?:[^\p{L}\p{N}_<&]|<[^<>\n]*>|&#?[\p{L}\p{N}]+;|[<&])*?`;
+
+/** A citation of the old design record's revisions or sections. Written so this file's own text has none. */
+const TABLE_CITATION = new RegExp(String.raw`\bTABLE\b${BETWEEN}(?:r4\b|§)`, "gu");
 
 /** The one file whose text holds such citations on purpose: this check's own test, whose fixtures must be ones. */
 export const CITATION_FIXTURES = "tools/oxlint/check-comment-forecasts.test.mjs";
@@ -46,7 +49,7 @@ export const CITATION_FIXTURES = "tools/oxlint/check-comment-forecasts.test.mjs"
 /** The citations whose count per file in comments may only shrink, each by its pattern over a comment's text. */
 const COUNTED_CITATIONS = {
   "bare r4.N": /(?<!TABLE )\br4\.\d+/gu,
-  "other TABLE": /\bTABLE\b(?![\s*/#>]*(?:r4\b|§))/gu,
+  "other TABLE": new RegExp(String.raw`\bTABLE\b(?!${BETWEEN}(?:r4\b|§))`, "gu"),
 };
 
 /** The accepted record's folder of pages, which a comment may point at by a page and a heading's anchor. */
@@ -203,21 +206,40 @@ export function tableCitationsIn(fileName, text) {
 }
 
 /**
- * The files Git lists in `root` (tracked, and untracked but not ignored) that are regular files, as `doc-links.mjs`
- * reads them; a file with a NUL byte is binary and is not read as text. A failed `git` throws.
+ * Each citation of the old design record in the files Git lists in `root` (tracked, and untracked but not ignored)
+ * that are regular files, as `doc-links.mjs` reads them, as diagnostics; a file with a NUL byte is binary and is not
+ * read as text. A failed `git` throws, and so does a listed name that is not UTF-8, which could not be read unchanged.
  */
-function listedTexts(root) {
-  return execFileSync(
+export function tableCitationFindings(root) {
+  const listing = execFileSync(
     "git",
     ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--deduplicate"],
-    { cwd: root, encoding: "utf8", maxBuffer: 1 << 28 },
-  )
-    .split("\0")
-    .filter(
-      (file) => file !== "" && lstatSync(resolve(root, file), { throwIfNoEntry: false })?.isFile(),
-    )
-    .map((file) => [file, readFileSync(resolve(root, file), "utf8")])
-    .filter(([, text]) => !text.includes("\0"));
+    { cwd: root, maxBuffer: 1 << 28 },
+  );
+  const utf8 = new TextDecoder("utf-8", { fatal: true });
+  const findings = [];
+  for (let start = 0, end; (end = listing.indexOf(0, start)) !== -1; start = end + 1) {
+    const bytes = listing.subarray(start, end);
+    let file;
+    try {
+      file = utf8.decode(bytes);
+    } catch {
+      throw new Error(
+        `git lists a file whose name is not UTF-8 (${JSON.stringify(bytes.toString("latin1"))}): rename it, so the TABLE citation check can read it`,
+      );
+    }
+    if (!lstatSync(resolve(root, file), { throwIfNoEntry: false })?.isFile()) continue;
+    const text = readFileSync(resolve(root, file), "utf8");
+    if (text.includes("\0")) continue;
+    for (const { line, text: citation } of tableCitationsIn(file, text))
+      findings.push({
+        fileName: file,
+        line,
+        column: 1,
+        message: `"${citation.replace(/\s+/gu, " ")}" cites the old design record, which is not in the repository: state the fact, or point at the accepted record, an issue or a merged pull request`,
+      });
+  }
+  return findings;
 }
 
 /**
@@ -272,14 +294,7 @@ export function checkCommentForecasts(root) {
     if (Object.keys(counts).length > 0) counted[file] = counts;
   }
   diagnostics.push(...glossaryFindings(carried, glossary));
-  for (const [file, text] of listedTexts(root))
-    for (const { line, text: citation } of tableCitationsIn(file, text))
-      diagnostics.push({
-        fileName: file,
-        line,
-        column: 1,
-        message: `"${citation.replace(/\s+/gu, " ")}" cites the old design record, which is not in the repository: state the fact, or point at the accepted record, an issue or a merged pull request`,
-      });
+  diagnostics.push(...tableCitationFindings(root));
   for (const [index, item] of allowed.entries())
     if (!used.has(index))
       diagnostics.push({

@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { relative } from "node:path";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, relative } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -12,6 +14,7 @@ import {
   glossaryFindings,
   glossaryRows,
   labelsIn,
+  tableCitationFindings,
   tableCitationsIn,
   unresolvedPointers,
 } from "./check-comment-forecasts.mjs";
@@ -135,11 +138,63 @@ test("a TABLE revision or section is found in any file's text, wrapped or not, w
     ],
   );
   assert.deepEqual(found("tests/a.json", '{"reason": "TABLE r4.2"}\n'), [[1, "TABLE r4"]]);
-  // other ids, a longer revision number, and the form that describes the citation
+  // markup between the two: an HTML break, an entity, an HTML comment, a Markdown table's cells
   assert.deepEqual(
-    found("docs/b.md", "TABLE B1, TABLE F18 and TABLE r40; `TABLE` followed by `r4` or `§`\n"),
+    found(
+      "docs/c.md",
+      "TABLE<br>r4.1\nTABLE&nbsp;r4.2\nTABLE<!-- revision --> r4.3\n| record | revision |\n| TABLE | r4.4 |\n",
+    ),
+    [
+      [1, "TABLE<br>r4"],
+      [2, "TABLE&nbsp;r4"],
+      [3, "TABLE<!-- revision --> r4"],
+      [5, "TABLE | r4"],
+    ],
+  );
+  // other ids, a longer revision number, a longer word, and the form that describes the citation
+  assert.deepEqual(
+    found(
+      "docs/b.md",
+      "TABLE B1, TABLE F18 and TABLE r40; TABLEr4; `TABLE` followed by `r4` or `§`\n",
+    ),
     [],
   );
+});
+
+test("the TABLE citation check reads every file Git lists, by its exact path, and refuses a name it cannot read", () => {
+  const root = mkdtempSync(join(tmpdir(), "table-citations-"));
+  try {
+    const git = (...args) => execFileSync("git", args, { cwd: root, stdio: "pipe" });
+    const write = (file, text) => {
+      mkdirSync(dirname(join(root, file)), { recursive: true });
+      writeFileSync(join(root, file), text);
+    };
+    git("init", "-q");
+    write(".gitignore", "ignored/\n");
+    write("docs/a.md", "# A\n\nAs ruled (TABLE r4.1).\n");
+    write("src/a.ts", 'const reason = "a site (TABLE §2)";\n');
+    write(CITATION_FIXTURES, 'const fixture = "TABLE r4.3";\n');
+    write(`other/${CITATION_FIXTURES}`, 'const fixture = "TABLE r4.4";\n');
+    write("gone.md", "TABLE r4.5\n");
+    write("data.bin", "x\0TABLE r4.6\n");
+    git("add", "-A");
+    rmSync(join(root, "gone.md"));
+    write("untracked.txt", "TABLE r4.7\n");
+    write("ignored/a.md", "TABLE r4.8\n");
+    assert.deepEqual(
+      tableCitationFindings(root)
+        .map(({ fileName, line }) => `${fileName}:${line}`)
+        .sort(),
+      ["docs/a.md:3", `other/${CITATION_FIXTURES}:1`, "src/a.ts:1", "untracked.txt:1"],
+    );
+    writeFileSync(
+      Buffer.concat([Buffer.from(`${root}/name-`), Buffer.from([0xff]), Buffer.from(".md")]),
+      "TABLE r4.9\n",
+    );
+    assert.throws(() => tableCitationFindings(root), /whose name is not UTF-8/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("only this test's own text is exempt from the TABLE citation check, by its path", () => {
