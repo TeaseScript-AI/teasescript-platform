@@ -46,9 +46,10 @@ const [{ costlyTestSeconds }, { summaryLine }, { isSuiteTestPath, isTypeCoreTest
 // Then each project a changed path belongs to (`projectsFor`): its type check and tests. A root configuration file
 // belongs to the checks that read it, and needs no project when only those that always run do. A changed path no
 // project claims, other than documentation, runs every project's checks. Every change but documentation (a path ending
-// in `.md` or under `docs/`, `isDocumentation`) runs `test:lint` (`everyChange`). It never builds the TypeScript or runs
-// the compiled test suite, which CI does: a change that shows only there, such as the root tsconfig's emit settings,
-// passes here. When a changed file is under `src/type-inference/core/`, it also prints the suites that pin the core's work or
+// in `.md` or under `docs/`, `isDocumentation`) runs `test:lint` (`everyChange`). The checks run side by side: with
+// `test:lint` a run peaked at about 5.5 GiB summed over its processes (#2431), and a queue job asks `--mem 8G` for it.
+// It never builds the TypeScript or runs the compiled test suite, which CI does: a change that shows only there, such
+// as the root tsconfig's emit settings, passes here. When a changed file is under `src/type-inference/core/`, it also prints the suites that pin the core's work or
 // its published answers, as `tools/repository-checks/pin-suites.mjs` lists them: the focused list such a change runs
 // before review (`docs/TESTING.md`, "Pinned work"), which it does not run itself. When a changed type-core test file has
 // no entry in `tools/costly-test-files.mjs`, it prints one line saying so: the file runs in full, as every file does,

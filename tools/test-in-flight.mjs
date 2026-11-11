@@ -19,11 +19,14 @@ export const AFTER_MS = 5 * 60_000;
  * an asynchronous hang fails by name (#2454). What the test left running can still keep its file's process, and the
  * run, alive until the job's limit. A test's own `timeout` option replaces it for the test, not for its hooks, which
  * take one of their own.
- * 5 minutes is a measurement, to redo as the suite's costliest tests change (2026-11-11). The longest test,
- * `type-core-lost-check-matrix`'s matrix test, took 79.5 to 176.8 s over seven full runs on queue workers (desktop,
- * laptop, and runtime-v2's merge job, 169.7 s): the limit is 1.7× the slowest seen. The costliest file took 177 s in CI
- * (median, `costly-test-files.mjs`). CI's test jobs took 5.2 to 8.6 of their 15 minutes in main's last three green runs,
- * so a hang that begins in a job's first 10 minutes fails before the job's limit.
+ * 5 minutes is a measurement, to redo as the suite's slowest asynchronous tests change (2026-11-11). Only an
+ * asynchronous test or hook can fail at the limit, so the slowest of those measures how near a passing run is to a
+ * false failure: `type-core-mixed-family`'s family test took 18.8 to 59.2 s over seven full runs on queue workers, of
+ * main and of runtime-v2, about 5× below the limit (Node reports no hook's time apart). The two costliest tests,
+ * `type-core-lost-check-matrix`'s matrix test (up to 176.8 s) and `type-core-work-c`'s growth test (up to 148.1 s), are
+ * synchronous: the limit cannot fail them, and only this module's line names them when they stall. CI's test jobs
+ * took 5.2 to 8.6 of their 15 minutes in main's last three green runs, so an asynchronous hang that begins in a job's
+ * first 10 minutes fails before the job's limit.
  */
 export const TEST_LIMIT_MS = 5 * 60_000;
 const LOOK_MS = 60_000;
