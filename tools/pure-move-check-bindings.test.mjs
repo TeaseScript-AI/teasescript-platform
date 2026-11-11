@@ -422,8 +422,8 @@ test(
       "the configuration extends an installed package; the move's compiler run resolves it";
     const declared = run(before, after, "--renames", map, "--declare", (move) =>
       move.declare([
-        { file: "src/a.ts", side: "removed", line: 1, reason },
-        { file: "src/a.ts", side: "added", line: 1, reason },
+        { file: "src/a.ts", side: "removed", text: importer("./old.js").split("\n")[0], reason },
+        { file: "src/a.ts", side: "added", text: importer("./new").split("\n")[0], reason },
       ]),
     );
     assert.equal(declared.status, 0, declared.out);

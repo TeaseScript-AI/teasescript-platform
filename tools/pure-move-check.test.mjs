@@ -68,13 +68,13 @@ test(
         {
           file: "allow.json",
           side: "removed",
-          line: 2,
+          text: '  "a.ts": 2',
           reason: "the allowance follows the moved function",
         },
         {
           file: "allow.json",
           side: "added",
-          line: 2,
+          text: '  "b.ts": 2',
           reason: "the allowance follows the moved function",
         },
       ];
@@ -94,13 +94,13 @@ test(
         "--declare",
         move.declare([
           ...entries,
-          { file: "allow.json", side: "added", line: 9, reason: "no such line" },
+          { file: "allow.json", side: "added", text: '  "c.ts": 2', reason: "no such line" },
         ]),
       );
       assert.equal(stale.status, 1, stale.out);
       assert.match(
         stale.out,
-        /declaration matching no unmoved line: allow\.json:9 \(added\): no such line/u,
+        /declaration matching no unmoved line: allow\.json \(added\) "  \\"c\.ts\\": 2": no such line/u,
       );
     } finally {
       move.done();
@@ -151,16 +151,79 @@ test(
       const bare = elsewhere.run();
       assert.equal(bare.status, 1, bare.out);
       assert.match(bare.out, /unadmitted: a\.ts:\d+ \(added\): \/\/ used below/u);
-      const line = Number(/unadmitted: a\.ts:(\d+) \(added\): \/\/ used below/u.exec(bare.out)[1]);
       const declared = elsewhere.run(
         "--renames",
         elsewhere.renames(splitFamily),
         "--declare",
-        elsewhere.declare([{ file: "a.ts", side: "added", line, reason: "a note the move needs" }]),
+        elsewhere.declare([
+          { file: "a.ts", side: "added", text: "// used below", reason: "a note the move needs" },
+        ]),
       );
       assert.equal(declared.status, 0, declared.out);
     } finally {
       elsewhere.done();
+    }
+  },
+);
+
+test(
+  "a declaration names its line by text: shifted lines stay declared, one declaration covers one line, a line number is refused (#2461)",
+  { timeout: 60_000 },
+  () => {
+    const reason = "the allowance follows the moved function";
+    const entries = [
+      { file: "allow.json", side: "removed", text: '  "a.ts": 2', reason },
+      { file: "allow.json", side: "added", text: '  "b.ts": 2', reason },
+    ];
+    // (as after a rebase onto a base that added a line above the declared ones)
+    const shifted = moveOf(
+      { "a.ts": main, "allow.json": '{\n  "other.ts": 1,\n  "a.ts": 2\n}\n' },
+      { ...split, "allow.json": '{\n  "other.ts": 1,\n  "b.ts": 2\n}\n' },
+    );
+    try {
+      const declared = shifted.run(
+        "--declare",
+        shifted.declare(entries),
+        "--renames",
+        shifted.renames(splitFamily),
+      );
+      assert.equal(declared.status, 0, declared.out);
+      assert.match(declared.out, /declared: allow\.json:3 \(added\): the allowance follows/u);
+      const numbered = shifted.run(
+        "--declare",
+        shifted.declare([{ file: "allow.json", side: "added", line: 3, reason }]),
+      );
+      assert.equal(numbered.status, 2, numbered.out);
+      assert.match(
+        numbered.out,
+        /a declaration is not \{ file, side: "added" \| "removed", text, reason \}/u,
+      );
+    } finally {
+      shifted.done();
+    }
+    // two lines of one text: one declaration leaves the other unadmitted, two pass
+    const twice = moveOf(
+      { "a.ts": main, "allow.json": '[\n  "a.ts",\n  "a.ts",\n  "end"\n]\n' },
+      { ...split, "allow.json": '[\n  "b.ts",\n  "b.ts",\n  "end"\n]\n' },
+    );
+    try {
+      const removed = { file: "allow.json", side: "removed", text: '  "a.ts",', reason };
+      const added = { file: "allow.json", side: "added", text: '  "b.ts",', reason };
+      const run = (declarations) =>
+        twice.run(
+          "--declare",
+          twice.declare(declarations),
+          "--renames",
+          twice.renames(splitFamily),
+        );
+      const once = run([removed, added]);
+      assert.equal(once.status, 1, once.out);
+      assert.match(once.out, /declared 2; unadmitted 2/u);
+      const both = run([removed, removed, added, added]);
+      assert.equal(both.status, 0, both.out);
+      assert.match(both.out, /declared 4; unadmitted 0/u);
+    } finally {
+      twice.done();
     }
   },
 );
@@ -462,8 +525,8 @@ test(
       "--declare",
       (move) =>
         move.declare([
-          { file: "src/sub", side: "removed", line: 1, reason },
-          { file: "src/sub", side: "added", line: 1, reason },
+          { file: "src/sub", side: "removed", text: `Subproject commit ${one}`, reason },
+          { file: "src/sub", side: "added", text: file.trimEnd(), reason },
         ]),
     );
     assert.equal(declared.status, 0, declared.out);

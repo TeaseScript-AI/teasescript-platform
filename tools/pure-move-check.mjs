@@ -21,11 +21,13 @@
 //   4. a line of comments and whitespace alone, in a file the change adds, above its first import or export statement
 //      (a comment elsewhere is a declared line or a failure);
 // or as a declared line: an entry of the `--declare` file, a JSON array of `{ "file", "side": "added" | "removed",
-// "line", "reason" }` (the reason one clause; the file named as it is on that side), for a path-keyed entry (a test
+// "text", "reason" }` (the line's text exactly as on that side, without its line break, so that a rebase shifting the
+// line leaves it declared; the reason one clause; the file named as it is on that side), for a path-keyed entry (a test
 // table's key, an allowance, a comment citing a moved file's path) or a line no form admits (a signature the formatter
 // rewrapped after `export` was added). A declared line must be in the change and not marked moved (a line of a side
-// that is no regular file, below, counts as unmoved), and every declaration must match one; each is printed with its reason. Declarations come from that file alone, and no flag
-// admits a line class.
+// that is no regular file, below, counts as unmoved), and every declaration must match one; each is printed with its
+// reason. A declaration covers one line, so two lines of one text need two. Declarations come from that file alone, and
+// no flag admits a line class.
 //
 // And a pure move keeps every import's binding: over the change's files, the set of bindings before equals the set
 // after, a binding being one imported or re-exported name with its target, its local or exported name and whether it is
@@ -44,8 +46,8 @@
 // report names the family that would join the two. A relative specifier either side cannot
 // resolve, to no file or in a file whose configuration the tree does not establish (a config with an error, such as an
 // `extends` the tree does not hold, or a TypeScript file no config includes or none is above), is refused by name:
-// reported unless a declaration names its side and line, never passed; the move's compiler run is the witness for what
-// the check declines. A declared refusal, its line changed or not, is printed with the refusal reason it covers. One
+// reported unless a declaration names its side and its line's text, never passed; the move's compiler run is the
+// witness for what the check declines. A declared refusal, its line changed or not, is printed with the refusal reason it covers. One
 // known class is a config that `extends` an uncommitted package, which only an install supplies:
 // `player/vue/tsconfig.json` extends `@vue/tsconfig`, so every relative import in a file it owns is refused, and a move
 // there declares those lines.
@@ -202,15 +204,15 @@ function declarationsOf(path) {
       typeof entry === "object" &&
       typeof entry.file === "string" &&
       (entry.side === "added" || entry.side === "removed") &&
-      Number.isInteger(entry.line) &&
-      entry.line > 0 &&
+      typeof entry.text === "string" &&
+      !entry.text.includes("\n") &&
       typeof entry.reason === "string" &&
       entry.reason.trim() !== "" &&
       !entry.reason.includes("\n") &&
-      Object.keys(entry).every((key) => ["file", "side", "line", "reason"].includes(key));
+      Object.keys(entry).every((key) => ["file", "side", "text", "reason"].includes(key));
     if (!ok)
       throw new CannotRun(
-        `pure-move-check: a declaration is not { file, side: "added" | "removed", line, reason }: ${JSON.stringify(entry)}`,
+        `pure-move-check: a declaration is not { file, side: "added" | "removed", text, reason }: ${JSON.stringify(entry)}`,
       );
   }
   return entries;
@@ -735,12 +737,14 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
     ]) {
       if (!regular(file, mode)) continue;
       const text = git("cat-file", "blob", `${ref}:${file}`);
+      const lines = text.split("\n");
       for (const binding of bindingsOf(file, text, resolvers[side])) {
         if (binding.target.type === "missing" || binding.target.type === "refused") {
           const refusal = {
             side: side === "before" ? "removed" : "added",
             file,
             line: binding.line,
+            text: lines[binding.line - 1],
             specifier: binding.specifier,
             reason: binding.target.reason,
           };
@@ -861,7 +865,7 @@ export function checkMove(
         !used.has(at) &&
         d.file === entry.file &&
         d.side === entry.side &&
-        d.line === entry.row.line,
+        d.text === entry.row.text,
     );
     if (index === -1) return null;
     used.add(index);
@@ -894,13 +898,13 @@ export function checkMove(
     renames === null ? null : renamesOf(renames),
     git,
   );
-  // a refusal is declared by a declaration of its side and line, used or not, even where the line is no changed one;
-  // each is printed with the refusal reason it covers
+  // a refusal is declared by a declaration of its side and its line's text, used or not, even where the line is no
+  // changed one; each is printed with the refusal reason it covers
   const refused = [];
   const covered = [];
   for (const refusal of bindings.refusals) {
     const index = declarations.findIndex(
-      (d) => d.file === refusal.file && d.side === refusal.side && d.line === refusal.line,
+      (d) => d.file === refusal.file && d.side === refusal.side && d.text === refusal.text,
     );
     if (index === -1) refused.push(refusal);
     else {
@@ -947,7 +951,7 @@ export function reportOf(base, result) {
   for (const u of unadmitted) out.push(`  unadmitted: ${u.file}:${u.line} (${u.side}): ${u.text}`);
   for (const s of stale)
     out.push(
-      `  declaration matching no unmoved line: ${s.file}:${s.line} (${s.side}): ${s.reason}`,
+      `  declaration matching no unmoved line: ${s.file} (${s.side}) ${JSON.stringify(s.text)}: ${s.reason}`,
     );
   for (const d of declared) out.push(`  declared: ${d.file}:${d.line} (${d.side}): ${d.reason}`);
   for (const c of covered)
