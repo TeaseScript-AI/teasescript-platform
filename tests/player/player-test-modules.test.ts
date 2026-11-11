@@ -301,6 +301,17 @@ test("a Player test bundle is not built from an input the stamp does not cover",
     symlinkSync("actual-src", path("src"));
     return () => unlinkSync(path("src"));
   });
+  // a module left external by its path is read when the tests run, not from the bundle
+  refused(/rounding\.ts is left external by its path/u, () => {
+    write(
+      "player/vue/vite.test-modules.config.ts",
+      config().replace(
+        "rolldownOptions: { input",
+        "rolldownOptions: { external: [/rounding/u], input",
+      ),
+    );
+    return () => write("player/vue/vite.test-modules.config.ts", config());
+  });
   // a compiler option this TypeScript does not know is the compiler's to judge, as the repository's `ES2025` target
   write(
     "compiler-options.json",
@@ -346,6 +357,61 @@ test("a file a package's tsconfig extends must be the package's: the area's are 
       /extends .*\/player\/base\.json, which is neither named by an extends in the area nor/u,
   });
 });
+
+// Every module the bundler loads is judged, not only those it renders into a chunk (round 5), generated: a constant it
+// inlines, a re-export it drops and a `?raw` text it inlines, each from `tools/` (outside the area), from the area, and
+// from a dependency under `node_modules`. Expected from the clauses: from `tools/`, refused; from the area, admitted
+// except the `?raw` form; from `node_modules`, admitted.
+const LOADED_FOLDERS = {
+  "tools/": { folder: "tools", from: "../tools", round: "../player/round.ts" },
+  "the area": { folder: "player/shapes", from: "./shapes", round: "../round.ts" },
+  node_modules: {
+    folder: "player/node_modules/dep",
+    from: "./node_modules/dep",
+    round: "../../round.ts",
+  },
+} as const;
+const LOADED_SHAPES = {
+  "an inlined constant": {
+    file: "value.ts",
+    clock: (from: string) =>
+      `import { step } from "${from}/value.ts";\n${CLOCK.replace("seconds / 60", "seconds / step")}`,
+  },
+  "a dropped re-export": {
+    file: "bridge.ts",
+    clock: (from: string) => CLOCK.replace("./rounding.ts", `${from}/bridge.ts`),
+  },
+  "an inlined ?raw text": {
+    file: "word.txt?raw",
+    clock: (from: string) =>
+      `import text from "${from}/word.txt?raw";\n${CLOCK}export const read = (): string => text;\n`,
+  },
+} as const;
+for (const [source, { folder, from, round }] of Object.entries(LOADED_FOLDERS))
+  for (const [shape, { file, clock }] of Object.entries(LOADED_SHAPES))
+    test(`${shape} from ${source}`, (t) => {
+      const { write, build, minutesOf90 } = checkout(t);
+      write(`${folder}/value.ts`, "export const step = 60;\n");
+      write(`${folder}/bridge.ts`, `export { round } from "${round}";\n`);
+      // short enough for the bundler to inline the text
+      write(`${folder}/word.txt`, "old");
+      write("player/clock.ts", clock(from));
+      const result = build();
+      const path = `${folder}/${file}`.replace(/[.?]/gu, "\\$&");
+      if (source === "node_modules" || (source === "the area" && !file.endsWith("?raw"))) {
+        assert.equal(result.status, 0, result.stderr);
+        assert.equal(minutesOf90(), "2");
+      } else
+        assert.match(
+          result.stderr,
+          new RegExp(
+            file.endsWith("?raw")
+              ? `${path} is a form the stamp does not cover`
+              : `${path} is bundled from outside the stamped area`,
+            "u",
+          ),
+        );
+    });
 
 test("the stamp's root entries are its files and links to files, apart from the checkout's bookkeeping", (t) => {
   const root = mkdtempSync(join(tmpdir(), "player-test-modules-root-"));
