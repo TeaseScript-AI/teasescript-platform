@@ -303,28 +303,34 @@ test("the plans comparison refuses trees whose modes are not the same names once
   const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
   built(folder, [["fine", "fine"]]);
-  const held = join(folder, "head", "dist", "tests/helpers/type-core-held-host.js");
-  const original = readFileSync(held, "utf8");
-  for (const names of [
-    ["forward", "reversed", "forward, unshared", "sideways"],
-    ["forward", "reversed", "forward, unshared"],
-    ["forward", "reversed", "forward, unshared", "forward"],
-    ["forward", "reversed", "forward, unshared", null],
-  ]) {
-    writeFileSync(
-      held,
-      `${original}\nHELD_MODES.splice(0, 4, ...${JSON.stringify(names)}.map((name) => ({ name, run: (f) => f() })));\n`,
-    );
-    const out = join(folder, `${names.length}-${String(names[3])}.jsonl`);
-    const ran = spawnSync(
-      process.execPath,
-      [tool, join(folder, "base"), join(folder, "head"), "area", "--out", out],
-      { encoding: "utf8" },
-    );
-    assert.equal(ran.status, 2, `${JSON.stringify(names)}: ${ran.stderr}`);
-    assert.match(ran.stderr, /held modes are not the same names once each/);
-    assert.equal(existsSync(out), false, JSON.stringify(names));
-  }
+  // (each wrong table on either tree, the other tree's as built: a refusal must not depend on which tree is wrong)
+  const held = (tree: string) => join(folder, tree, "dist", "tests/helpers/type-core-held-host.js");
+  const original = readFileSync(held("base"), "utf8");
+  let at = 0;
+  for (const tree of ["head", "base"])
+    for (const names of [
+      ["forward", "reversed", "forward, unshared", "sideways"],
+      ["forward", "reversed", "forward, unshared"],
+      ["forward", "reversed", "forward, unshared", "forward"],
+      ["forward", "reversed", "forward, unshared", null],
+    ]) {
+      for (const each of ["base", "head"]) writeFileSync(held(each), original);
+      writeFileSync(
+        held(tree),
+        `${original}\nHELD_MODES.splice(0, 4, ...${JSON.stringify(names)}.map((name) => ({ name, run: (f) => f() })));\n`,
+      );
+      at += 1;
+      const out = join(folder, `refused-${at}.jsonl`);
+      const ran = spawnSync(
+        process.execPath,
+        [tool, join(folder, "base"), join(folder, "head"), "area", "--out", out],
+        { encoding: "utf8" },
+      );
+      const named = `${tree} ${JSON.stringify(names)}`;
+      assert.equal(ran.status, 2, `${named}: ${ran.stderr}`);
+      assert.match(ran.stderr, /held modes are not the same names once each/, named);
+      assert.equal(existsSync(out), false, named);
+    }
 });
 
 test("the plans summary prints a recorded mode as recorded and says once what a number is (#2342)", (t) => {
