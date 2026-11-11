@@ -43,7 +43,8 @@ const ORDERS = {
  * at its stop's allowance; an `apart…` source's plan on the head names its demand and allowance, so every pair differs;
  * the stop search throws for `throws`; the analysis charges 5,000 for `overanalysis` and nothing for
  * `apart-zero-questions`; the one stop of `apart-stop <n>` and `overstop <n>` is at the allowance `<n>`, of any
- * other at 10; and `lists` has a stop list of each tree's own, at edge allowances, out of order (#2340).
+ * other at 10; and `lists`, `empty-base`, `empty-head` and `duplicates` have a stop list of each tree's own: at edge
+ * allowances out of order, empty on one tree, and one allowance twice (#2340).
  */
 const MODULES: Record<string, string> = {
   "src/type-inference/core/budget.js": `let test = null;
@@ -125,20 +126,27 @@ export function heldStops(c, mode) {
   if (c.name === "lost") wait(6000);
   if (c.name === "throws") throw new Error("search failed");
   mode.run(() => new WorkLedger(10).charge("frames", c.name === "searched" ? 5000 : 300));
-  if (c.name === "lists")
-    return import.meta.url.includes("/head/")
-      ? [
-          { allowance: Infinity, phase: "walk" },
-          { allowance: 2, phase: "read" },
-          { allowance: 10, phase: "added" },
-        ]
-      : [
-          { allowance: 0, phase: "walk" },
-          { allowance: -1, phase: "walk" },
-          { allowance: 0.5, phase: "read" },
-          { allowance: NaN, phase: "walk" },
-          { allowance: Infinity, phase: "removed" },
-        ];
+  const walk = (...allowances) => allowances.map((allowance) => ({ allowance, phase: "walk" }));
+  const lists = {
+    lists: [
+      [
+        { allowance: 0, phase: "walk" },
+        { allowance: -1, phase: "walk" },
+        { allowance: 0.5, phase: "read" },
+        { allowance: NaN, phase: "walk" },
+        { allowance: Infinity, phase: "removed" },
+      ],
+      [
+        { allowance: Infinity, phase: "walk" },
+        { allowance: 2, phase: "read" },
+        { allowance: 10, phase: "added" },
+      ],
+    ],
+    "empty-base": [[], walk(5)],
+    "empty-head": [walk(5), []],
+    duplicates: [walk(1, 1), walk(1)],
+  }[c.name];
+  if (lists !== undefined) return lists[import.meta.url.includes("/head/") ? 1 : 0];
   const [, at] = /^(?:apart-stop|overstop) (.+)$/.exec(c.name) ?? [];
   return [{ allowance: at === undefined ? 10 : Number(at), phase: "admission" }];
 }
@@ -476,6 +484,9 @@ test("every record form the runner writes, at its allowance edges, passes the su
     "throws",
     "lost",
     "lists",
+    "empty-base",
+    "empty-head",
+    "duplicates",
     "failing",
     ...edges.flatMap((edge) => [`apart-stop ${edge}`, `overstop ${edge}`]),
   ];
@@ -586,9 +597,25 @@ test("every record form the runner writes, at its allowance edges, passes the su
   assert.ok(modes.some((m) => m.stops?.unavailable !== undefined));
   assert.ok(records.some((r) => r.name === "cases.mjs/fine" && r.differing === 0));
   // (and the summary reads every line)
-  const summary = spawnSync(process.execPath, [tool, "summary", ...files], { encoding: "utf8" });
+  const summary = spawnSync(process.execPath, [tool, "summary", ...files, "--list", "100000"], {
+    encoding: "utf8",
+  });
   assert.equal(summary.stderr, "");
   assert.equal(summary.status, 0);
+  // (an empty list on either tree, and an allowance twice, each read in every mode: #2340's round 2)
+  for (const [name, line] of [
+    ["empty-base", 'stop phase "walk" added: base none (0), head 5 (1)'],
+    ["empty-head", 'stop phase "walk" removed: base 5 (1), head none (0)'],
+    ["duplicates", 'stop phase "walk" moved: base 1, 1 (2), head 1 (1)'],
+  ])
+    assert.equal(
+      summary.stdout
+        .split("\n")
+        .filter((each) => each.startsWith(`held ${name} mode `) && each.endsWith(`: ${line}`))
+        .length,
+      4,
+      name,
+    );
 });
 
 test("each held mode's name says the settings its run sets, and the oracle's mode of those settings is found by them, not by position (#2342)", () => {

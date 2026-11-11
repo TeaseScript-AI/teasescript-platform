@@ -34,13 +34,16 @@
 // identical; work only (the plan, the diagnostics, the error and the questions equal, the charge trace not); a question
 // sequence apart; a publication difference; at a demand allowance apart, each row in the same one class and named by
 // every part apart, with which tree's output the allowance stops against that tree's own unstopped compile (#2341); for
-// the held family, a stop set or a stopped compile apart, each by its parts, and the analysis's units apart; and lists
-// each with the stalled and uncharged sources. Before any output it checks every line's keys, types and value formats
-// against those the runner writes (`recordFault`), a gate against malformed, foreign and truncated lines, not a proof
-// of the invariants between one record's fields: a line it refuses ends the summary, exit 2, naming its file, line and
-// fault. A record from
-// before #2342 names its mode by a number, its index in `HELD_MODES` at the commit that wrote it: printed as that number,
-// never translated, with one line that says so.
+// the held family, a stop set apart phase by phase (#2340: from both trees' stop lists, which a record keeps where the
+// sets differ, a phase on the head alone is added, on the base alone removed, on both at other allowances, compared
+// ascending, moved; a stop that changes phase over an overlapping range reads as one removed and one added, and a
+// record without the lists, or whose lists differ in no phase, is unavailable, never equal), a stopped compile apart by
+// its parts, and the analysis's units apart; and lists each with the stalled and uncharged sources. Before any output
+// it checks every line's keys, types and value formats against those the runner writes (`recordFault`), a gate against
+// malformed, foreign and truncated lines, not a proof of the invariants between one record's fields: a line it refuses
+// ends the summary, exit 2, naming its file, line and fault. A record from before #2342 names its mode by a number, its
+// index in `HELD_MODES` at the commit that wrote it: printed as that number, never translated, with one line that says
+// so.
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
@@ -316,7 +319,7 @@ function stopMoves({ base, head }) {
   });
 }
 
-/** Allowances as runs of consecutive ones (`5..7, 9`) in the list's order, any other allowance as it is, or `none`. */
+/** Allowances in the list's order as runs, each increasing by exactly 1 (`5..7, 9`, `0.5..2.5`), or `none`. */
 const runsOf = (allowances) => {
   const runs = [];
   for (const allowance of allowances) {
