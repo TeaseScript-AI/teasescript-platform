@@ -112,6 +112,10 @@ test("a TABLE revision or section, wrapped or not, is no counted form: the text 
     ),
     { "bare r4.N": 1, "other TABLE": 1 },
   );
+  // a name whose citation is on the next line only
+  assert.deepEqual(citationCounts("a.ts", "/* TABLE B1\n * words before r4.5 */\n"), {
+    "bare r4.N": 1,
+  });
 });
 
 test("a line naming TABLE and then r4 or § is found in any file's text, wrapped or not, with its line", () => {
@@ -170,6 +174,10 @@ test("a line naming TABLE and then r4 or § is found in any file's text, wrapped
     ),
     [],
   );
+  // a letter or digit beyond ASCII on either edge
+  assert.deepEqual(found("docs/f.md", "éTABLE r4.5\n\nTABLE r4² and TABLE r4٣\n"), []);
+  // a citing last line without a line break
+  assert.deepEqual(found("docs/g.md", "TABLE r4.5"), [[1, "TABLE r4.5"]]);
 });
 
 test("every ASCII character that is no letter or digit may stand between TABLE and r4 or §, once or twice", () => {
