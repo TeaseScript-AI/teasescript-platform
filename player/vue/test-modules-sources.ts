@@ -33,7 +33,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { Plugin, ResolvedConfig } from "vite";
 
 /**
@@ -61,7 +61,13 @@ function entry(root: string, path: string): string {
     if (!lstatSync(path).isSymbolicLink()) return sha256(path);
     if (!existsSync(path))
       return `broken link ${slashes(resolve(dirname(path), readlinkSync(path)))}`;
-    const identity = slashes(relative(root, realpathSync(path)));
+    // A target in the checkout by its path from the root, one outside it by its absolute path: both stay as they are when
+    // the checkout moves.
+    const target = realpathSync(path);
+    const inside = relative(root, target);
+    const identity = slashes(
+      isAbsolute(inside) || inside === ".." || inside.startsWith(`..${sep}`) ? target : inside,
+    );
     if (statSync(path).isDirectory()) return `folder link ${identity}`;
     return `link ${identity} ${sha256(path)}`;
   } catch {
@@ -90,7 +96,13 @@ export function walkSources(checkout: string): Map<string, string> {
     if (item.isSymbolicLink() && existsSync(path) && statSync(path).isDirectory()) continue;
     add(path);
   }
-  for (const folder of AREA_FOLDERS) if (existsSync(join(root, folder))) walk(join(root, folder));
+  // An area folder is walked when it is a folder; a link in its place is judged as any entry, so a link to a folder fails.
+  for (const folder of AREA_FOLDERS) {
+    const path = join(root, folder);
+    const status = lstatSync(path, { throwIfNoEntry: false });
+    if (status?.isDirectory() === true) walk(path);
+    else if (status !== undefined) add(path);
+  }
   return new Map([...stamp].sort(([a], [b]) => (a < b ? -1 : 1)));
 }
 
@@ -108,7 +120,8 @@ const dependency = (file: string) => slashes(file).includes("/node_modules/");
 
 /**
  * The local files a `tsconfig*.json` reaches by `extends` and `references`, recursively; throws on a file that cannot
- * be read, a malformed edge, or a target outside the area. A package specifier names a dependency and ends the walk.
+ * be read, a malformed edge, or a target outside the area. A reference is always a local path; an `extends` that is no
+ * relative or absolute path names a package, a dependency, and ends the walk.
  */
 async function tsconfigClosure(root: string, start: string, seen: Set<string>): Promise<void> {
   if (seen.has(start)) return;
@@ -119,10 +132,11 @@ async function tsconfigClosure(root: string, start: string, seen: Set<string>): 
     throw new Error(`${start} cannot be read as a tsconfig`);
   const config: Record<string, unknown> = parsed.config;
   const edges: string[] = [];
+  const local = (edge: string) => edge.startsWith(".") || isAbsolute(edge);
   const extendsValue = config.extends;
-  if (typeof extendsValue === "string") edges.push(extendsValue);
+  if (typeof extendsValue === "string") edges.push(...[extendsValue].filter(local));
   else if (Array.isArray(extendsValue) && extendsValue.every((each) => typeof each === "string"))
-    edges.push(...extendsValue);
+    edges.push(...extendsValue.filter(local));
   else if (extendsValue !== undefined) throw new Error(`${start} has a malformed "extends"`);
   const references = config.references;
   if (references !== undefined) {
@@ -137,7 +151,6 @@ async function tsconfigClosure(root: string, start: string, seen: Set<string>): 
     }
   }
   for (const edge of edges) {
-    if (!(edge.startsWith(".") || isAbsolute(edge))) continue;
     const base = resolve(dirname(start), edge);
     const target = [base, `${base}.json`, join(base, "tsconfig.json")].find(
       (candidate) => existsSync(candidate) && statSync(candidate).isFile(),

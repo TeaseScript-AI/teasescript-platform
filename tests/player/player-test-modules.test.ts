@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
   copyFileSync,
+  cpSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -17,8 +18,9 @@ import { fileURLToPath } from "node:url";
 import { walkSources } from "../../player/vue/test-modules-sources.js";
 
 // A compiled-only run after a Player or engine edit used the bundle of the code before it, and passed (#2141). The
-// fixture is a checkout with the real stamp plugin, the compiled loader and its compiled walk: a two-module Player, its
-// imported module a symlink, compiled under a tsconfig that extends a root file.
+// fixture is a checkout with the real stamp plugin, the compiled loader and its compiled walk: a Player module importing
+// two symlinks, one to a module beside it and one to a file outside the checkout, compiled under a tsconfig that
+// extends a root file.
 const repository = fileURLToPath(new URL("../../../", import.meta.url));
 
 const config = (head = "") => `import { fileURLToPath, URL } from "node:url";
@@ -38,13 +40,17 @@ export default defineConfig({
   },
 });
 `;
-const CLOCK = `import { round } from "./rounding.ts";\nexport const minutes = (seconds: number): number => round(seconds / 60);\n`;
+const CLOCK = `import { round } from "./rounding.ts";\nimport { limit } from "./limit.ts";\nexport const minutes = (seconds: number): number => limit(round(seconds / 60));\n`;
 const STALE = (paths: string) =>
   `The Player test bundle is older than its sources (${paths}): run \`npm run build:player-test-modules\`, or \`npm test -- dist/tests/<file>.test.js\`, before a compiled-only run.`;
 
 function checkout(t: TestContext) {
   const root = mkdtempSync(join(tmpdir(), "player-test-modules-"));
-  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const outside = mkdtempSync(join(tmpdir(), "player-test-modules-outside-"));
+  t.after(() => {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(outside, { recursive: true, force: true });
+  });
   const path = (name: string) => join(root, name);
   const write = (name: string, text: string) => {
     mkdirSync(dirname(path(name)), { recursive: true });
@@ -59,6 +65,8 @@ function checkout(t: TestContext) {
   write("player/round-copy.ts", "export const round = Math.round;\n");
   write("tools/options.json", "{}\n");
   symlinkSync("round.ts", path("player/rounding.ts"));
+  writeFileSync(join(outside, "limit.ts"), "export const limit = (minutes: number) => minutes;\n");
+  symlinkSync(join(outside, "limit.ts"), path("player/limit.ts"));
   for (const name of [
     "player/vue/test-modules-sources.ts",
     "dist/tests/helpers/player-modules.js",
@@ -81,7 +89,7 @@ function checkout(t: TestContext) {
     );
   // `minutes(90)` from each load in a test process of its own, as the loader checks once a process, or the error it
   // refuses with; `between` runs in that process between two loads.
-  const minutesOf90 = (loads = 1, between = "") => {
+  const minutesOf90 = (loads = 1, between = "", cwd = root) => {
     const result = spawnSync(
       process.execPath,
       [
@@ -95,18 +103,22 @@ for (let load = 0; load < ${loads}; load++) {
   catch (error) { console.log(error.message); }
 }`,
       ],
-      { cwd: root, encoding: "utf8" },
+      { cwd, encoding: "utf8" },
     );
     assert.equal(result.status, 0, result.stderr);
     return result.stdout.trim();
   };
-  return { path, write, build, minutesOf90 };
+  return { root, outside, path, write, build, minutesOf90 };
 }
 
 test("a Player test bundle is refused once a file in the stamped area changes", (t) => {
-  const { path, write, build, minutesOf90 } = checkout(t);
+  const { root, outside, path, write, build, minutesOf90 } = checkout(t);
   assert.equal(build().status, 0);
   assert.equal(minutesOf90(), "2");
+  // the built checkout, moved with its links, is the same checkout
+  const moved = join(outside, "moved/checkout");
+  cpSync(root, moved, { recursive: true, verbatimSymlinks: true });
+  assert.equal(minutesOf90(1, "", moved), "2");
 
   // the imported module, edited through its symlink's target, then rebuilt: the new code loads
   write("player/round.ts", "export const round = Math.floor;\n");
@@ -150,6 +162,15 @@ test("a Player test bundle is refused once a file in the stamped area changes", 
       "compiler-options.json",
       "package.json",
     ].map((name) => [name, edit(name)] as const),
+    // the file outside the checkout that a link in the area reads
+    [
+      "player/limit.ts",
+      () => {
+        const before = readFileSync(join(outside, "limit.ts"), "utf8");
+        writeFileSync(join(outside, "limit.ts"), `${before}// edited\n`);
+        return () => writeFileSync(join(outside, "limit.ts"), before);
+      },
+    ],
     // a file the resolver could choose now, a file in `src/`, a root file of any kind
     ...["player/clock.js", "src/unrelated.ts", ".env", "README.md"].map(
       (name) => [name, add(name)] as const,
@@ -217,9 +238,23 @@ test("a Player test bundle is not built from an input the stamp does not cover",
     return () =>
       write("compiler-options.json", JSON.stringify({ compilerOptions: { strict: true } }));
   });
+  // a project reference is a local path, also without "./"
+  write("tools/tsconfig.json", "{}\n");
+  for (const reference of ["tools", "tools/options.json"])
+    refused(/reaches .*tools\/(?:tsconfig|options)\.json, outside the stamped area/u, () => {
+      write("compiler-options.json", JSON.stringify({ references: [{ path: reference }] }));
+      return () =>
+        write("compiler-options.json", JSON.stringify({ compilerOptions: { strict: true } }));
+    });
+  // a link to a folder, in the area or in place of an area folder
   refused(/player\/tools cannot be stamped \(folder link /u, () => {
     symlinkSync("../tools", path("player/tools"));
     return () => unlinkSync(path("player/tools"));
+  });
+  write("actual-src/value.ts", "export const value = 1;\n");
+  refused(/src cannot be stamped \(folder link actual-src\)/u, () => {
+    symlinkSync("actual-src", path("src"));
+    return () => unlinkSync(path("src"));
   });
   assert.equal(build().status, 0);
 });
