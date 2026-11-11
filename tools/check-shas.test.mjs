@@ -303,6 +303,36 @@ test(
           [],
         );
       }
+      // A write that fails partway (the file-size limit below the report's size): exit 2, the file byte for byte as
+      // it was, no copy left.
+      const big = `READY at ${shas[0].slice(0, 9)}.\n${"word ".repeat(1000)}\n`;
+      writeFileSync(report, big);
+      const limited = spawnSync(
+        "sh",
+        [
+          "-c",
+          'ulimit -f 2 && exec "$0" "$@"',
+          process.execPath,
+          tool,
+          "--repo",
+          directory,
+          "--append",
+          report,
+        ],
+        { encoding: "utf8", timeout: 20_000 },
+      );
+      assert.equal(limited.status, 2, limited.stderr);
+      assert.match(limited.stderr, /cannot write .* \(EFBIG\); it is as it was$/mu);
+      assert.equal(readFileSync(report, "utf8"), big);
+      assert.deepEqual(
+        readdirSync(directory).filter((name) => name.includes("check-shas-")),
+        [],
+      );
+      // A name as long as a file's name can be is written too: the copy's name does not grow with it.
+      const named = join(directory, "r".repeat(240));
+      writeFileSync(named, `READY at ${shas[0].slice(0, 9)}.\n`);
+      assert.equal(run(named).status, 0);
+      assert.match(readFileSync(named, "utf8"), /\n\ncheck-shas: 1 tokens: /u);
       // Cost: a long run of white space is read once (an unanchored regex over it took quadratic time). The child is
       // killed at 20 s, as a test's timeout stops no loop.
       writeFileSync(report, `Report\n${" ".repeat(2 ** 20)}X\n${" ".repeat(2 ** 20)}\n`);

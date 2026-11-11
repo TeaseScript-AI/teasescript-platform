@@ -1,9 +1,12 @@
 import { spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import {
   accessSync,
   chmodSync,
+  closeSync,
   constants,
   existsSync,
+  openSync,
   readFileSync,
   realpathSync,
   renameSync,
@@ -11,7 +14,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { dirname, join } from "node:path";
 
 // Checks that the commit SHAs a report or pull-request body names exist and are on a remote, before it is sent:
 //
@@ -63,19 +66,37 @@ function withoutOwnLine(text) {
   return OWN_LINE.test(trimmed.slice(start)) ? trimmed.slice(0, start).trimEnd() : text;
 }
 
-/** Replaces `file`'s content whole: a complete copy beside it, renamed over it; a failure leaves it as it was. */
+/**
+ * Replaces `file`'s content whole: a complete copy beside it, under a short name of its own, renamed over it. A failure
+ * leaves the file as it was, removes the copy only when this run created it, and exits 2.
+ */
 function replaceFile(file, content) {
   let temporary;
+  let created = false;
   try {
     const target = realpathSync(file);
     accessSync(target, constants.W_OK);
-    temporary = join(dirname(target), `.${basename(target)}.check-shas-${process.pid}`);
-    writeFileSync(temporary, content, { flag: "wx" });
+    temporary = join(dirname(target), `.check-shas-${randomBytes(6).toString("hex")}`);
+    const descriptor = openSync(temporary, "wx");
+    created = true;
+    try {
+      writeFileSync(descriptor, content);
+    } finally {
+      closeSync(descriptor);
+    }
     chmodSync(temporary, statSync(target).mode & 0o7777);
     renameSync(temporary, target);
   } catch (error) {
-    if (temporary !== undefined) rmSync(temporary, { force: true });
-    cannotRun(`cannot write ${file} (${error.code ?? error.message}); it is as it was`);
+    if (created)
+      try {
+        rmSync(temporary, { force: true });
+      } catch {
+        // (the failure below is the one reported; a copy left is named there)
+      }
+    cannotRun(
+      `cannot write ${file} (${error.code ?? error.message}); it is as it was` +
+        (created && existsSync(temporary) ? `, and its copy ${temporary} is left` : ""),
+    );
   }
 }
 
