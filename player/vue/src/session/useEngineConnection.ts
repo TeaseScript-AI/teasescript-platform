@@ -67,8 +67,9 @@ export function useEngineConnection({
     (options.bridge === undefined ? () => Promise.resolve(inProcess()) : null);
   // This Player's hold on its bridge (`PlayerBridge.claim`): one live Player per bridge.
   const claim = Symbol("Player");
-  // The bridge once the current connection is ready (`connected` settled with it), or `null` before; also for a Player
-  // disposed meanwhile, which does not take it.
+  // The current connection's bridge once its source promise yields it, before the claim and the readiness hook, either
+  // of which can still reject `connected`; kept also for a Player disposed meanwhile, which does not take it. `null`
+  // before, and while a replacement opens.
   let settled: PlayerBridge | null = null;
   // The source the pages prepared last, with its plan token in the current host.
   let source: PreparedSource | null = null;

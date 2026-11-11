@@ -514,6 +514,11 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "lifecycle",
     ["BridgeClient.request", "BridgeClient.signal"],
   ],
+  // The loss of the current connection: the Player's stop.
+  "player/vue/src/session/useEngineConnection.ts useEngineConnection > take > onLoss:callback": [
+    "lifecycle",
+    ["BridgeClient.request", "BridgeClient.signal"],
+  ],
   // The replacement of a lost connection from the player's click: it takes the fresh bridge as the readiness callback
   // does, and prepares the script in it.
   "player/vue/src/session/useEngineConnection.ts useEngineConnection > replace": [
@@ -595,7 +600,6 @@ const ESCAPES: Readonly<Record<string, Policy>> = {
     "bridge plumbing",
   "player/encryption/lock-service.ts LockService > #present > wake {wake}": "own observation",
   "player/vue/src/session/useCallView.ts useCallView {followCallView}": "lifecycle",
-  "player/vue/src/session/useEngineConnection.ts useEngineConnection > take {lost}": "lifecycle",
   // The export lease's release, which the activation's retirement (`own`) and the dialog's cancellation run, and which
   // the handoff takes back from the cancellation.
   "player/vue/src/session/activation/useExportCandidate.ts useExportCandidate > deliver {release}":
