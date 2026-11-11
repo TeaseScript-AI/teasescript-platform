@@ -132,14 +132,21 @@ const CONSTRUCTED =
 const DEEP =
   `let a: number${"[]".repeat(33)} = ${"[".repeat(33)}0${"]".repeat(33)}\n` +
   `let b = fromJson(hostValue, default: 0)\nb = a${".first".repeat(33)}\nsay b\nexit\n`;
+// Calls that land through fallbacks (`otherwise`): 33 deep, and 4,096 deep, where a landing walk by recursion
+// overflows the stack.
+const fallbacks = (n: number, copy: boolean): string =>
+  `${copy ? "let a: number = 0\n" : ""}let b = fromJson(hostValue, default: 0)${" otherwise null".repeat(n)}\n` +
+  `${copy ? "b = a\n" : ""}say b\nexit\n`;
 
-test("receiving.mjs finds a source projection's fixed point, at any depth, and a read the constructor memoised", () => {
+test("receiving.mjs finds a fixed point through a deep projection or landing, and a read the constructor memoised", () => {
   const { status, lines } = run([
     ["projected", PROJECTED],
     ["projected-control", `let witness: number = 0\n${PROJECTED}`],
     ["constructed", CONSTRUCTED],
     ["deep", DEEP],
     ["deep-control", `let witness: number = 0\n${DEEP}`],
+    ["fallbacks", fallbacks(33, true)],
+    ["fallbacks-long", fallbacks(4096, false)],
   ]);
   assert.equal(status, 0);
   assert.deepEqual(
@@ -152,7 +159,14 @@ test("receiving.mjs finds a source projection's fixed point, at any depth, and a
       ["constructed", "L"],
       ["deep", "L"],
       ["deep-control", "L"],
+      ["fallbacks", "L"],
+      ["fallbacks-long", "R"],
     ],
+  );
+  // (`otherwise null` makes the copy's `number` optional: `number?` is the fixed point)
+  assert.deepEqual(
+    alternates(lines, "fallbacks"),
+    Array(4).fill([':none->{"kind":"union","members":[number,null]}']),
   );
   for (const name of ["projected", "deep"]) {
     for (const each of alternates(lines, name)) assert.ok(each.includes(":none->number"));

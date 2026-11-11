@@ -149,30 +149,35 @@ function nest(term, rest) {
 }
 
 /** Where a value lands: whether in a written place, and its unwritten terminal places (a literal's cell is passed
- * through to the literal's own landing, never a level itself). A value is followed once per path, at any depth. */
-function destinations(
-  contract,
-  value,
-  at = [],
-  seen = new Map(),
-  out = { written: false, places: [] },
-) {
-  const paths = seen.get(value) ?? new Set();
-  if (paths.has(at.join("."))) return out;
-  seen.set(value, paths.add(at.join(".")));
+ * through to the literal's own landing, never a level itself). A value is followed once per path, at any depth, depth
+ * first in source order. */
+function destinations(contract, value) {
   const { program, definitions } = contract.pass;
-  for (const d of definitions.byValue.get(value) ?? []) {
-    const owner = program.cellOwner.get(d.place);
-    if (owner?.kind === "cell") {
-      destinations(contract, owner.owner, ["element", ...at], seen, out);
+  const out = { written: false, places: [] };
+  const seen = new Map();
+  // (each step is a value to follow at a path, or a terminal place to record in this order)
+  const todo = [{ value, at: [] }];
+  while (todo.length > 0) {
+    const step = todo.pop();
+    if (step.place !== undefined) {
+      out.places.push(step.place);
       continue;
     }
-    if (d.kind !== "whole") continue;
-    if (writtenOf(program.place(d.place).kind) !== null) out.written = true;
-    else out.places.push({ place: d.place, path: [...d.path, ...at] });
+    const paths = seen.get(step.value) ?? new Set();
+    if (paths.has(step.at.join("."))) continue;
+    seen.set(step.value, paths.add(step.at.join(".")));
+    const next = [];
+    for (const d of definitions.byValue.get(step.value) ?? []) {
+      const owner = program.cellOwner.get(d.place);
+      if (owner?.kind === "cell") next.push({ value: owner.owner, at: ["element", ...step.at] });
+      else if (d.kind !== "whole") continue;
+      else if (writtenOf(program.place(d.place).kind) !== null) out.written = true;
+      else next.push({ place: { place: d.place, path: [...d.path, ...step.at] } });
+    }
+    const operation = definitions.fallbackOf.get(step.value);
+    if (operation !== undefined) next.push({ value: operation, at: step.at });
+    todo.push(...next.reverse());
   }
-  const operation = definitions.fallbackOf.get(value);
-  if (operation !== undefined) destinations(contract, operation, at, seen, out);
   return out;
 }
 
