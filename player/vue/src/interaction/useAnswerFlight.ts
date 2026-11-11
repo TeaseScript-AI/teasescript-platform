@@ -17,10 +17,21 @@ import { shortcutOutcome } from "./playerKeys";
  * typed in the flight after the text `main`'s field would hold, and a held key that the interaction does not take,
  * typed as its character.
  *
+ * Its domain: it holds only while the departing field is the plain text field, and a settle that shows anything else
+ * than the plain text field ends the flight and drops what was typed in it. A password field is read-only during its
+ * own answer's flight. Only between two fields of the same element does the browser enter a paste, an IME's text or a
+ * phone's capitalisation alike (#2463, residual 6). Within the domain, the Composer decides nothing by the field:
+ * - Enter queues a submit, which the host's `submit` runs; Space in the empty field is held, and `shortcutOutcome`
+ *   decides it against the settled interaction; any other key is the browser's, in the field;
+ * - Shift+Enter, which a password field takes as Enter, and Enter in a lock's first password field, which moves to its
+ *   repeat, do not run: no password field holds;
+ * - Escape does nothing, as no form editor holds; Send, the paperclip and a dropped file do not run while the answer is
+ *   being submitted; Caps Lock, the eye buttons and the focus handlers change no text.
+ *
  * Of what the flight holds, three things become the field's text at a settlement, and nothing else it holds is ever
  * written to the field: the text of an answer that was refused (`aside`), the text the settlement wrote (`settled`,
- * such as a prefill), and a key held in the empty field, typed as its character. None of them is in the field during
- * the flight, so an edit made within the flight does not reach them (#2463, residual 1).
+ * such as a prefill), and a key held in the empty field, typed as its character. None of them is a password, and none
+ * is in the field during the flight, so an edit made within the flight does not reach them (#2463, residual 1).
  */
 
 type Source = "input" | "button";
@@ -64,7 +75,7 @@ export interface AnswerFlightHost {
   text(): string;
   writeField(text: string): void;
   interceptInput(take: (text: string) => void): { write(text: string): void; release(): void };
-  /** Whether a flight beginning now holds the composer: its plain text or password field is shown and takes input. */
+  /** Whether the flight's domain holds the composer now: its plain text field is shown and takes input. */
   holds(): boolean;
   /** Whether the composer takes no input (the composer's `disabled`). */
   disabled(): boolean;
@@ -183,17 +194,16 @@ export function useAnswerFlight(host: AnswerFlightHost) {
     const current = flight;
     if (!current) return;
     holding.value = false;
-    // The answer left a form editor, a picker, a lock or a disabled composer: what its settlement wrote applies, and
-    // what was typed or given meanwhile goes.
-    if (!host.holds()) {
-      const settled = current.settled;
-      release();
-      if (settled !== undefined) host.writeField(settled);
-      return;
-    }
     // The text the field holds on `main` once the answer settled: what the settlement wrote, else, if the answer was
     // refused, its own text.
     let prefix = current.settled ?? (settlement === "refused" ? current.aside : "");
+    // The answer left a field other than the plain text field (a password field, a picker, a form editor, a lock) or a
+    // disabled composer: the flight ends, and what was typed or given meanwhile goes.
+    if (!host.holds()) {
+      release();
+      host.writeField(prefix);
+      return;
+    }
     // A change of the text clears a notice, as the text's watch does when the change comes after the answer.
     if (current.current.changed) host.clearFeedback();
     for (let command = current.queue.shift(); command; command = current.queue.shift()) {
