@@ -18,8 +18,10 @@ import { existsSync, readFileSync } from "node:fs";
 // may be a commit not fetched yet: the message says to fetch it; this tool never fetches. A token that is no commit
 // but a tree, such as a stored baseline's `src` tree hash, is reported as a tree, resolved, without the remote check:
 // proving a tree reachable from a remote ref is costly.
-// Unfilled placeholders (`PLACEHOLDERS`) outside fenced code blocks are reported too. Every run that completes ends
-// with one line counting the tokens by result and the placeholders, so no output means it did not run.
+// Unfilled placeholders (`PLACEHOLDERS`) outside fenced code blocks are reported too, and so is every path under the
+// disposable scratch area `/tmp/agent-work/`, anywhere in the text (`scratchPathsOf`): its files are deleted after
+// inactivity, often before a reader checks them. Every run that completes ends with one line counting the tokens by
+// result, the placeholders and those paths, so no output means it did not run.
 //
 // Tokens that need not be commits are checked, and skipped when no repository resolves them, so no rule hides a SHA:
 // - only digits: a CI run, comment or issue id;
@@ -30,9 +32,8 @@ import { existsSync, readFileSync } from "node:fs";
 // - shorter than 40 and inside a URL or a path, except after `/commit/`, `/commits/`, `/tree/` or `/blob/`: a file's
 //   or a job's name. A full 40-character SHA in a path, such as an evidence folder, must resolve.
 //
-// Exit status: 0 when every token that must be a commit resolved on a remote and no placeholder is left, 1 otherwise,
-// 2 when it
-// cannot run (bad arguments, an unreadable file, or a `--repo` that is no git repository).
+// Exit status: 0 when every token that must be a commit resolved on a remote and no placeholder or scratch path is
+// left, 1 otherwise, 2 when it cannot run (bad arguments, an unreadable file, or a `--repo` that is no git repository).
 
 /** The unfilled placeholders a report can carry, case-insensitive. */
 export const PLACEHOLDERS = [
@@ -67,6 +68,16 @@ export function tokensOf(text) {
     if (!found.has(match[0]) || why === null) found.set(match[0], why);
   }
   return found;
+}
+
+/**
+ * The paths of `text` under the scratch area `/tmp/agent-work/`, also as `file:///tmp/agent-work/…`, wherever they
+ * stand, code included: a path that names a file there is evidence that will be gone. A folder named by a placeholder,
+ * such as `/tmp/agent-work/<task>/`, describes the area and is no path.
+ */
+export function scratchPathsOf(text) {
+  const path = /(?:(?<=file:\/\/)|(?<![\w.~/-]))\/tmp\/agent-work\/[\w.-][^\s`'"()[\]<>]*/gu;
+  return [...new Set([...text.matchAll(path)].map((m) => m[0].replace(/[.,;:!?]+$/u, "")))];
 }
 
 /**
@@ -298,6 +309,13 @@ function main() {
       );
     }
   }
+  const scratch = scratchPathsOf(text);
+  for (const path of scratch) {
+    failed = true;
+    process.stdout.write(
+      `scratch     ${path}  under /tmp/agent-work, deleted before a reader looks: cite a retained copy\n`,
+    );
+  }
   const placeholders = placeholdersOf(text);
   for (const placeholder of placeholders) {
     failed = true;
@@ -307,7 +325,7 @@ function main() {
   process.stdout.write(
     `check-shas: ${tokens} tokens: ${counts.resolved} resolved, ${counts.trees} trees, ${counts.ambiguous} ambiguous, ` +
       `${counts.unresolved} unresolved, ${counts.local} local only, ${counts.skipped} skipped (ids, words, paths, sha256s); ` +
-      `${placeholders.length} placeholders\n`,
+      `${placeholders.length} placeholders, ${scratch.length} scratch paths\n`,
   );
   process.exitCode = failed ? 1 : 0;
 }

@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { excuse } from "./check-shas.mjs";
+import { excuse, scratchPathsOf } from "./check-shas.mjs";
 
 const tool = fileURLToPath(new URL("./check-shas.mjs", import.meta.url));
 
@@ -153,6 +153,34 @@ test("an unfilled placeholder fails", { timeout: 30_000 }, () => {
   }
 });
 
+test("a path under the scratch area fails, wherever it stands", { timeout: 30_000 }, () => {
+  const { directory } = repository();
+  try {
+    const { status, out } = check(
+      "Evidence /tmp/agent-work/lane3/cross64.tsv, retained at ~/work/evidence/lane3/cross64.tsv.\n",
+      [directory],
+    );
+    assert.equal(status, 1, out);
+    assert.match(out, /scratch +\/tmp\/agent-work\/lane3\/cross64\.tsv +under \/tmp\/agent-work/u);
+    assert.match(out.trim().split("\n").at(-1), /0 placeholders, 1 scratch paths$/u);
+    for (const [text, paths] of [
+      ["see /tmp/agent-work/a/b.txt.", ["/tmp/agent-work/a/b.txt"]],
+      ["`/tmp/agent-work/a/` and (/tmp/agent-work/c)", ["/tmp/agent-work/a/", "/tmp/agent-work/c"]],
+      ["```\nls /tmp/agent-work/a/run.log\n```\n", ["/tmp/agent-work/a/run.log"]],
+      ["file:///tmp/agent-work/a/report.html", ["/tmp/agent-work/a/report.html"]],
+      ["/tmp/agent-work/a and /tmp/agent-work/a", ["/tmp/agent-work/a"]],
+      ["work in /tmp/agent-work/<task>/", []],
+      ["the area /tmp/agent-work, cleaned after inactivity", []],
+      ["/home/x/tmp/agent-work/a", []],
+      ["/tmp/agent-workshop/a", []],
+      ["~/work/evidence/friction/a.out", []],
+    ])
+      assert.deepEqual(scratchPathsOf(text), paths, text);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 test(
   "each --repo is asked, and a token resolves in the one that has it",
   { timeout: 30_000 },
@@ -183,11 +211,11 @@ test(
       for (const [text, line] of [
         [
           "",
-          "0 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 0 placeholders",
+          "0 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 0 placeholders, 0 scratch paths",
         ],
         [
           `at ${shas[0].slice(0, 9)}, <sha>`,
-          "1 tokens: 1 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 1 placeholders",
+          "1 tokens: 1 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 1 placeholders, 0 scratch paths",
         ],
       ]) {
         const { out } = check(text, [directory]);
