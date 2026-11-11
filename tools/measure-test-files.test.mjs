@@ -388,12 +388,18 @@ test(
             .filter((name) => name.startsWith("GIT_") || name === "XDG_CONFIG_HOME")
             .sort(),
           [
+            "GIT_ATTR_NOSYSTEM",
             "GIT_AUTHOR_EMAIL",
             "GIT_AUTHOR_NAME",
             "GIT_COMMITTER_EMAIL",
             "GIT_COMMITTER_NAME",
+            "GIT_CONFIG_COUNT",
             "GIT_CONFIG_GLOBAL",
+            "GIT_CONFIG_KEY_0",
+            "GIT_CONFIG_KEY_1",
             "GIT_CONFIG_NOSYSTEM",
+            "GIT_CONFIG_VALUE_0",
+            "GIT_CONFIG_VALUE_1",
           ],
         );
         assert.equal(given.GIT_CONFIG_GLOBAL, "/dev/null");
