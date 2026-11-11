@@ -60,8 +60,8 @@
 // could not run: <reason>` on exit 2. The rows are read from the report's own signals; every other signal is in the
 // report only.
 //
-// Exit status: 0 when the report is printed, 2 when --diff cannot read the change as Git wrote it, or --summary has no
-// file or no --diff.
+// Exit status: 0 when the report is printed, 2 when an option has no value (the next argument missing or another
+// option), --diff cannot read the change as Git wrote it, or --summary has no --diff.
 import { execFileSync } from "node:child_process";
 import { appendFileSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -81,12 +81,21 @@ const COMPONENTS = ["src", "player", "tests", "tools", "playground"];
 const CODE = /\.(ts|tsx|mts|cts|js|mjs|cjs|vue)$/;
 const PARSED = /\.(ts|tsx|mts|cts|js|mjs|cjs)$/;
 
+const USAGE = `usage: node tools/structure-report.mjs [ROOT…] [--top N] [--json FILE] [--compare FILE]
+       node tools/structure-report.mjs [ROOT…] --diff BASE [--moved] [--json FILE] [--summary FILE]`;
 const args = process.argv.slice(2);
 const given = [...args];
+// the first option given without its value, which `main` refuses
+let valueless;
 const option = (name) => {
   const i = args.indexOf(name);
   if (i < 0) return undefined;
   const value = args[i + 1];
+  if (value === undefined || value.startsWith("--")) {
+    valueless ??= name;
+    args.splice(i, 1);
+    return undefined;
+  }
   args.splice(i, 2);
   return value;
 };
@@ -94,7 +103,6 @@ const top = Number(option("--top") ?? 10);
 const jsonOut = option("--json");
 const compareWith = option("--compare");
 const diffBase = option("--diff");
-const summaryGiven = args.includes("--summary");
 const summaryOut = option("--summary");
 const movedAt = args.indexOf("--moved");
 const discountMoved = movedAt !== -1;
@@ -669,8 +677,8 @@ function writeSummary(block) {
 
 /** The report the command line asks for. */
 function main() {
-  if (summaryGiven && (summaryOut === undefined || summaryOut.startsWith("--"))) {
-    console.error("structure-report: --summary needs a file");
+  if (valueless !== undefined) {
+    console.error(`structure-report: ${valueless} needs a value\n${USAGE}`);
     process.exit(2);
   }
   const command = [
