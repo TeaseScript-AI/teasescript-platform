@@ -603,7 +603,7 @@ test("Debug off ends auto-skip and a running jump, and Debug on again starts wit
   assert.deepEqual(logNow()?.lines.value, []);
 });
 
-test("a countdown shows while Debug runs, not before Continue, and follows display time", async (context) => {
+test("a countdown shows while Debug runs, not before Continue, and counts from the session's observed time", async (context) => {
   // One browser: its kept sessions and debug rooms under the script's storage scope, which a reload finds again.
   const kept = memoryKeptSessionStore();
   const rooms = memoryKeptRoomStore();
@@ -639,6 +639,8 @@ test("a countdown shows while Debug runs, not before Continue, and follows displ
   };
   const tasks = () => new Promise((resolve) => setTimeout(resolve, 5));
   stubBrowser(context);
+  // Scene time moves only by the observation below: the page's clock stands still, so its estimate adds nothing.
+  context.mock.method(performance, "now", () => 0);
   const { player, debug, close } = await page({ menu: false, autoSkip: false });
   assert.equal(player.activation.value, "start");
   await player.activate();
@@ -655,11 +657,12 @@ test("a countdown shows while Debug runs, not before Continue, and follows displ
   // restored afresh and waits for Continue before its countdown shows.
   Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
   document.dispatchEvent(new Event("visibilitychange"));
-  for (let wait = 0; (await rooms.session(scriptStorage.scope)) === null; wait += 1) {
-    assert.ok(wait < 400, "the hidden page kept the debug room's session");
+  // The keep is the host's work: bounded in real time, not in turns.
+  const keptBy = process.hrtime.bigint() + 30_000_000_000n;
+  while ((await rooms.session(scriptStorage.scope)) === null) {
+    assert.ok(process.hrtime.bigint() < keptBy, "the hidden page kept the debug room's session");
     await tasks();
   }
-  for (let wait = 0; wait < 4; wait += 1) await tasks();
   close();
   Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
   const reloaded = await page({ menu: true, autoSkip: false }, "debug");

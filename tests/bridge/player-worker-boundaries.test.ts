@@ -1031,17 +1031,17 @@ RERUN.rows(
     await until(() => refusals.length > 0, "the catch-up's refusal");
     assert.deepEqual(refusals, ["basis"]);
     await until(() => buttonLabel(host) === "After", "the answer's next button");
+    await until(
+      () => host.session.value!.state.observedSessionTimeMs >= 1_000,
+      "the fresh observation",
+    );
     // Refused, the catch-up adopted nothing (a step already queued finds no copy); the clock observed the late second in
-    // one go instead.
+    // one go instead. Read once that observation is in, so a later adoption is in the log.
     const ops = transport.posts.slice(heldAt).map((post) => post.op);
     const begun = ops.indexOf("beginCatchUp");
     assert.ok(begun >= 0, ops.join(", "));
     assert.equal(ops.indexOf("adoptCatchUp", begun), -1, ops.join(", "));
     assert.ok(ops.indexOf("observeTime", begun) > begun, ops.join(", "));
-    await until(
-      () => host.session.value!.state.observedSessionTimeMs >= 1_000,
-      "the fresh observation",
-    );
     assert.equal(host.hostError.value, null);
     assert.equal(buttonLabel(host), "After", "the next button still asks");
     return end();

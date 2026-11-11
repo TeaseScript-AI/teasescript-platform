@@ -580,10 +580,10 @@ const SUCCESSOR = 'say "successor", instant\nlet next = askChoice "Go"\nexit';
  *   the export's caller, which takes its failure, report it instead.
  * - The injected loss, the Player errors the schedule reports, and the error stop's error.
  * - A same-lineage Continue (the composable's `prepareRestore` of the session it shows, which no page does: a page
- *   continues a kept session restored fresh) of a session a Player error stopped is refused. So is one queued behind a
- *   Debug mode publication that had not succeeded before it: the publication moves the session on under the Continue's
- *   `beginRecording`, whose basis is then stale. That `basis` refusal is right, as for any foreign change; the Player
- *   reports both.
+ *   continues a kept session restored fresh) of a session a Player error stopped is refused. So is one after a Debug
+ *   mode publication that had not succeeded before it: the Debug request changed the host without publishing its
+ *   revision to the bridge, so the Continue's `beginRecording` is refused `basis`. That refusal is right, as for any
+ *   foreign change; the Player reports both.
  */
 function runErrors(c: Case, mode: Mode): readonly string[] {
   const playerError = ["haltAck", "captureReply", "exportWaiting"].includes(c.handle);
