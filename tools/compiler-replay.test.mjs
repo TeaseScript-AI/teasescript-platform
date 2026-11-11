@@ -4,15 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync }
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import {
-  ROOT,
-  jobId,
-  ran,
-  results,
-  standInQueue,
-  tool,
-  write,
-} from "./compiler-replay/test-fixtures.mjs";
+import { ROOT, jobId, ran, standInQueue, tool, write } from "./compiler-replay/test-fixtures.mjs";
 
 test("a step the tool does not have, or one missing its arguments, is a usage error", () => {
   for (const args of [[], ["replay"], ["submit", "b"], ["collect", "p"]]) {
