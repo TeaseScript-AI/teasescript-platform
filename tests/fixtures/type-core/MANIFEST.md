@@ -17,7 +17,7 @@ condition, are rows of the cells test and keep the warning.
 
 No record changed. `heldBack` releases 11 of the 32 `cp9-cells/s9b/f18-held/…` records: `named/*` (10) and
 `computed-key/integer-default-control`. It still holds:
-- `copy/*` (18): a copy of a written type as the receiving context (r4.77 (2)), awaiting the A4 receiving design;
+- `copy/*` (18): a copy of a written type as the receiving context (PR #1051), awaiting the A4 receiving design;
 - `copy/scalar-json-host-value/*` (2): `files: true` is outside the slice, and their text operand's warning is C13's;
 - `computed-key/null-default`: N3's required check (S10).
 
@@ -79,7 +79,7 @@ with the set's tooling as r481 published it: `convert.py` `25a3b7152cd55fe8…`,
   it and the comparison compares it with the diagnostic (`tests/helpers/type-core-records.ts`). No other record has it.
 - Held at this revision (`heldBack`, `tests/helpers/type-core/type-core-fixture.ts`; their counts pinned in the cells test): the
   adapters' 9, stage 3b's 653, S9b's F18 shapes 32, and `cp9-cells/F16/invalid-datetime-difference`, whose operator
-  site §3.4 puts at its right operand (r4.62); 1,318 records compare whole.
+  site §3.4 puts at its right operand; 1,318 records compare whole.
 
 ## Refresh to the set's revision `81b3a0c4…` (M4 step S6b)
 
@@ -107,7 +107,7 @@ cp "$work/out/cells.jsonl" "$work/out/cells-deferred.jsonl" tests/fixtures/type-
   separate `cells-rule-function.jsonl` (`987bc86d…`), which this refresh removes; and the 18 of the owner's
   authority-deviation decisions (2026-10-25): AD-3's six `cp9-cells/s4/s6b/dead-code/…`, AD-2's five
   `cp9-cells/s4/s7/load-field-repair/…` and AD-1's seven.
-  Changed: AD-1's 92 re-derived expectations, r4.62's 21 member-read and operator site ends, and r4.60's corrected
+  Changed: AD-1's 92 re-derived expectations, the 21 re-sited member-read and operator ends, and the corrected
   `cp9-cells/r8/get-dispatch/unknown`. AD-1's 55 metadata re-derivations leave their compact records as they were. In
   the deferred file AD-1 re-derives `cp9-cells/3b/review-late/json/constant`.
 - Every AD-1 record cites a cell of stage 3b (N1–N10), so that class holds it until S10; the tests name the held
@@ -134,10 +134,10 @@ compiler build of `main` `6187eb145`, in both demand orders:
   against its output on the rewritten record): 1,888 of 1,888;
 - the fixture against the model's compacted records on the rewritten set: 1,850 the same, the 9 adapter records apart,
   and 29 different, records round 19d predates: the 23 `cp9-cells/s4/followup/…` records of #1026's follow-up (PRs
-  #1027, #1028) and 6 of the 14 `cp9-cells/s4/s6/…` records of r4.48 (the research folder's later model, `d0d44513…`,
+  #1027, #1028) and 6 of the 14 `cp9-cells/s4/s6/…` records of S6's returns and defaults as stores (the research folder's later model, `d0d44513…`,
   differs in those 6 only);
 - boundary checks and ingress stores one to one in 1,874 records, 4 more consumed in place, 3 more with a store owing
-  none, and 7 different, follow-up records (clock reads, r4.47 (5)).
+  none, and 7 different, follow-up records (clock reads, #1026's follow-up).
 
 The sections below are S0's record of the method; the file table names the refreshed fixture.
 
@@ -233,7 +233,7 @@ end runs them, so they are unverified by construction.
 ## The four collection records (confirmed by Sol)
 
 These are `cases.jsonl` lines 578, 579, 722 and 1137. Each rewrite replaces the host read in place with a `load` that
-has a typed collection default. Under TABLE F18, a load with a typed default has the default's kind, definite, and
+has a typed collection default. Under F18, a load with a typed default has the default's kind, definite, and
 "a loaded … collection's M is `open`": the runtime checks the shape, not emptiness. Its contents are external data,
 and the `load` call is a C9 ingress expression (reason `external-data`), so the boundary stays at the same start
 offset with the same target and `against`. V30 uses the same form (`load("pushups", default: [])`).

@@ -161,7 +161,7 @@ function c10Record(source: string): string {
     .trimEnd();
 }
 
-test("C10 takes a fallback's family from its value's domain where the read cannot (r4.150)", () => {
+test("C10 takes a fallback's family from its value's domain where the read cannot", () => {
   // (each cell's record in the four modes; the first group errs at the fallback where main ran it at runtime: a written
   // or retained `T?` of one non-null family, as for `= 1`, at a root, an element, a dict's value, a nested literal, a
   // parameter, a copy and an `otherwise` chain, and `get`'s default; the second group: the controls)

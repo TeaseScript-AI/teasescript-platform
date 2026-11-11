@@ -449,7 +449,7 @@ export function heldBack(record: FixtureRecord): string | null {
   if (record.name.startsWith("cp9-cells/s9b/f18-held/copy/scalar-json-host-value/"))
     return "fromJson with files: true outside the slice, and C13's text operand";
   if (record.name.startsWith("cp9-cells/s9b/f18-held/copy/"))
-    return "S9b's F18 copy of a written type as the receiving context (r4.77 (2))";
+    return "S9b's F18 copy of a written type as the receiving context";
   // Known text the conversion cannot convert is a compile error of its own (V30 §13, #1105), which the core's record
   // holds since the checks that owe the runtime nothing publish there (the lead's decision 3 on #1072): the record lacks
   // it until its maintainer adds it.

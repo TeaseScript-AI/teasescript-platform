@@ -926,7 +926,7 @@ const SAME_TYPE_UNIONS: readonly (readonly [string, string?, string?, (string | 
   ["let f: integer?[] | integer[] = []", "integer?[] | integer[]", "integer?[] | integer[]", null],
 ];
 
-test("V30 §13's union examples: f–p one compile error at the written type naming the union, h's form with its suggestion, a–e and a type written twice valid (r4.75 (3))", () => {
+test("V30 §13's union examples: f–p one compile error at the written type naming the union, h's form with its suggestion, a–e and a type written twice valid", () => {
   const wrong: string[] = [];
   for (const [line, type, unionText, suggestion] of [...V30_UNION_EXAMPLES, ...SAME_TYPE_UNIONS])
     // (also in code that never runs: the rule reads the written type alone)
@@ -993,7 +993,7 @@ test("V30 §13's union examples: f–p one compile error at the written type nam
  * The rule reads the written types alone: no solver order or sharing reaches it, and the analysis reports its errors as
  * they are (`analyseCore`), which each placement's first error and first valid control show in both orders.
  */
-test("V30 §13's union rule at every place and depth: one compile error at the written type naming the union (r4.75 (3))", (t) => {
+test("V30 §13's union rule at every place and depth: one compile error at the written type naming the union", (t) => {
   const wrong: string[] = [];
   let errors = 0;
   const analysed = new Set<string>();
@@ -1023,7 +1023,7 @@ test("V30 §13's union rule at every place and depth: one compile error at the w
   assert.equal(analysed.size, 2 * new Set(UNION_RULE_MATRIX.map((c) => c.placement)).size);
 });
 
-test("a copy of an unannotated source has its whole-source type, a later fraction or null included (Q1, ADR 0021 1.1, 1.2, r4.28)", (t) => {
+test("a copy of an unannotated source has its whole-source type, a later fraction or null included (Q1, ADR 0021 1.1, 1.2)", (t) => {
   const { wrong, full } = failing(INFERRED_COPY_MATRIX);
   t.diagnostic(
     `${INFERRED_COPY_MATRIX.length} sources (${full} in all three layers), both orders, sharing on and off`,
@@ -1031,7 +1031,7 @@ test("a copy of an unannotated source has its whole-source type, a later fractio
   assert.deepEqual(wrong, []);
 });
 
-test("a copy of an unannotated parameter whose default copies a written binding has the written type (F21, r4.75 (1))", (t) => {
+test("a copy of an unannotated parameter whose default copies a written binding has the written type (F21)", (t) => {
   const { wrong, full } = failing(DEFAULT_CHAIN_MATRIX);
   t.diagnostic(
     `${DEFAULT_CHAIN_MATRIX.length} sources (${full} in all three layers; a function is outside the candidate slice), both orders, sharing on and off`,

@@ -451,7 +451,7 @@
    "parent": "U04",
    "state": "pending",
    "title": "Nullable written list use lacks its required guard",
-   "closes": "r4.374 until S10 AD-1/U5 (#1073) and S9b written/receiving bridge (#1072)",
+   "closes": "#1075's adjudication until S10 AD-1/U5 (#1073) and S9b written/receiving bridge (#1072)",
    "witness": "0d49a0fcb499 1405-settled-sweep-demand.mjs/case/nullableListCopy/0 (source order, sharing on)",
    "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U04-A"
   },
@@ -508,7 +508,7 @@
    "parent": "U04",
    "state": "pending",
    "title": "Unmodelled findAll result loses exact empty-selection rejection",
-   "closes": "r4.374 until S9b text/regex calls (#1072), including #1321 empty-selection obligation",
+   "closes": "#1075's adjudication until S9b text/regex calls (#1072), including #1321 empty-selection obligation",
    "witness": "51368c38b731 1303-astra-probes.mjs/gap-1321-written (source order, sharing on)",
    "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U04-K"
   },
@@ -573,7 +573,7 @@
    "parent": "U04",
    "state": "pending",
    "title": "A collection union call loses the mixed-element rejection",
-   "closes": "r4.374 until S9b collection calls (#1072), including the owed TSV044 rejection",
+   "closes": "#1075's adjudication until S9b collection calls (#1072), including the owed TSV044 rejection",
    "witness": "bf11b0efe123 1272-astra-joins.mjs/join-union-method-deferred (source order, sharing on)",
    "evidence": "/home/peter/work/evidence/1075-sol-adjudication/dff711474d398ba442470ddf221efbf7c385a7b4/adjudication.json#U04-U"
   },
