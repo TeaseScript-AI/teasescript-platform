@@ -248,7 +248,8 @@ export function useSessionActivation({
   // A Continue under way in the host, whose session no other activation may let run on; see `supersede`.
   let continuing: PlayerSession | null = null;
   // The Start or Continue still beginning over the bridge. A later activation begins only once it settled, so the
-  // obsolete one's requests run in the host before the replacement's, which claims the recorder and trace last.
+  // obsolete one's requests are posted before the replacement's. The outcome does not rest on that order:
+  // `supersede` halts an obsolete Continue on receipt, and the host refuses its later requests (#2365).
   let begunInFlight: Promise<void> | null = null;
   // The session that Start or Continue is beginning, once the host names it; an error stop stops at it.
   let sessionBeginning: Promise<PlayerSession | SessionTarget> | null = null;

@@ -811,12 +811,19 @@ for (const form of ["a source prepare", "a held plan"] as const)
       form === "a held plan"
         ? await preparedPlan(Promise.resolve(bridge), compiler.compilePlayerProject(script).plan!)
         : await preparedSource(Promise.resolve(bridge), script);
-    // The Continue's `beginRecording` reply is held, so the Start waits for it (`begunInFlight`).
+    // The Continue's `beginRecording` reply is held, so the Start waits for it (`begunInFlight`): its `start` posts only
+    // once that reply is let go.
     const request = bridge.client.request.bind(bridge.client);
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => (release = resolve));
+    const order: string[] = [];
+    let letGo!: () => void;
+    const held = new Promise<void>((resolve) => (letGo = resolve));
+    const release = () => {
+      order.push("beginRecording let go");
+      letGo();
+    };
     let first = true;
     context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+      if (args[0] === "start") order.push("start");
       const reply = request(...args);
       if (args[0] !== "beginRecording" || !first) return reply;
       first = false;
@@ -845,6 +852,11 @@ for (const form of ["a source prepare", "a held plan"] as const)
     await Promise.all([obsolete, starting]);
     for (let index = 0; index < 5; index += 1) await turn();
     assert.equal(player.hostError.value, null);
+    assert.deepEqual(
+      order,
+      ["beginRecording let go", "start"],
+      "the Start posts its start only once the Continue's begin settled",
+    );
     const capture = facade.hatch(player.session.value!, (session) =>
       adapter.playerRuntimeSnapshot(session).temporalCaptures.at(-1)!,
     );
