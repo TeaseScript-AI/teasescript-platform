@@ -129,7 +129,7 @@ export const cases = (() => {
       [{ hostValue: { kind: "list", items: [1, 2] }, hostOther: 4 }],
       [{ hostValue: null, hostOther: 4 }],
     ],
-    // a fixed need read from a domain (S3 §5 revision 15): a copied written list that may be empty, its selection
+    // a fixed need read from a domain (S3 revision 15): a copied written list that may be empty, its selection
     emptyCopy: [
       'let grow: boolean = hostValue\nlet a: integer[] = []\nif grow { a.add(2) }\nlet b = a\nsay b.first\nsay "AFTER"\nexit\n',
       [],

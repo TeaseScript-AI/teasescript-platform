@@ -34,7 +34,7 @@ import { readFixture } from "../helpers/type-core/type-core-fixture.js";
 import { type CompactRecord, recordDifferences } from "../helpers/type-core-records.js";
 
 /*
- * The discharge map's new rows (the port plan's S3 §4, step S7) through the candidate route, each in the three layers of
+ * The discharge map's new rows (the port plan's S3, step S7) through the candidate route, each in the three layers of
  * the runtime-check evidence rule (docs/TESTING.md): the core's obligation at its site; the plan content that carries
  * its check at the intended site, with its target and type; and runs through the public route, a fitting value reaching
  * the next effect and a violating one stopping at the check, with its TSR code there, before that effect. Every layer
@@ -100,7 +100,7 @@ const S7_NAMES: readonly string[] = S7_FIELDS;
 
 /**
  * The S7 content of a plan, each as `field node@start:end value`, in plan order: the new fields of the discharge map's
- * rows (S3 §4's "Serialised contracts"), and a load's `type` beside its `repair`.
+ * rows (S3's "Serialised contracts"), and a load's `type` beside its `repair`.
  */
 function contentOf(plan: InstructionPlan): string[] {
   const found: string[] = [];
@@ -240,7 +240,7 @@ const ran = (result: Ran): Ran => ({
   warnings: result.warnings,
 });
 
-test("a store of a property its object may lack requires it, in three layers, in both orders (C5c, S3 §4)", () => {
+test("a store of a property its object may lack requires it, in three layers, in both orders (C5c, S3)", () => {
   // an unknown receiver, and an object some source lacks the property in
   const unknown = 'let x = hostValue\nx.n = 2\nsay "AFTER"\nexit\n';
   const some =
@@ -311,7 +311,7 @@ test("each read of a property one conditional replacement lacks is checked where
   }
 });
 
-test("a list get rejects an index that is no whole number, in three layers, in both orders (C2, S3 §4)", () => {
+test("a list get rejects an index that is no whole number, in three layers, in both orders (C2, S3)", () => {
   const source = 'let xs = [1, 2]\nlet v = xs.get(hostValue, default: 0)\nsay "AFTER"\nexit\n';
   const index = at(source, "hostValue");
   const known = decision(source);
@@ -385,7 +385,7 @@ test("a checked list get without its index fails the plan's and the checkpoint's
   );
 });
 
-test("an otherwise's selected fallback is checked against the value's family, in three layers, in both orders (C10, S3 §4)", () => {
+test("an otherwise's selected fallback is checked against the value's family, in three layers, in both orders (C10, S3)", () => {
   // the expression form, and the form whose fallback runs as instructions (a file store)
   const direct =
     'let amount = [1, null][1]\nlet result = amount otherwise hostValue\nsay "AFTER"\nexit\n';
@@ -462,7 +462,7 @@ function notOpened(plan: InstructionPlan, hostValue: SerializableRuntimeValue): 
   return summary(events, result.snapshot.status);
 }
 
-test("the default of fileFromBase64, decryptText and decryptFile is checked where it is selected, in three layers, in both orders (C10, S3 §4)", () => {
+test("the default of fileFromBase64, decryptText and decryptFile is checked where it is selected, in three layers, in both orders (C10, S3)", () => {
   for (const call of [
     'fileFromBase64("!"',
     'decryptText("!", password: "pw"',
@@ -487,7 +487,7 @@ test("the default of fileFromBase64, decryptText and decryptFile is checked wher
   }
 });
 
-test("a get's and a conversion's selected default is checked against the result's family, in three layers, in both orders (C10, S3 §4)", () => {
+test("a get's and a conversion's selected default is checked against the result's family, in three layers, in both orders (C10, S3)", () => {
   // (the conversion's text is loaded, so its run gives the default: known text that cannot convert is an error, #1105)
   for (const [source, fits, bad] of [
     ['let v = [1].get(5, default: hostValue)\nsay "AFTER"\nexit\n', 5, "text"],
@@ -824,7 +824,7 @@ test("fromJson reads its JSON as its expected type on both lowerings, a wrong ki
   assert.deepEqual(ran(runWith(openPlan, '{"name": "Ada"}')), halted(["Ada"]));
 });
 
-test("fromJson's object repair waits for a default that runs instructions, also across a file store's answer and every checkpoint (F18, S3 §4's handoff)", () => {
+test("fromJson's object repair waits for a default that runs instructions, also across a file store's answer and every checkpoint (F18, S3's handoff)", () => {
   // a default that runs as instructions (a file store of its own): the JSON's dict waits in the result's temporary
   const source =
     'let p = fromJson("{\\"name\\": \\"Ada\\"}", default: fromJson("{\\"name\\": \\"G\\", \\"count\\": 1}", default: {name: "Guest", count: 0}))\nsay p.name\nsay p.count\nexit\n';
@@ -1180,7 +1180,7 @@ const AD2: readonly (readonly [
   ],
 ];
 
-test("a load repairs a stored record per field, the stored value kept, each bad field named by TSW016: AD-2's records and scenarios (ADR 0021 rule 6.5)", () => {
+test("a load repairs a stored record per field, the stored value kept, each bad field named by TSW016: the expectation set's records and scenarios (ADR 0021 rule 6.5)", () => {
   // the set's five AD-2 records, in the fixture since S6b's refresh
   const records = new Map(
     readFixture()
@@ -1269,7 +1269,7 @@ test("a load repairs a stored record per field, the stored value kept, each bad 
  * revisions both increase once for S7; a plan without it, such as every legacy plan, and its checkpoints stay valid and
  * run as before, and plan validation rejects the new fields where they do not belong.
  */
-test("a legacy plan's checkpoint restores at the current revisions and resumes as before, at every boundary (D7)", () => {
+test("a legacy plan's checkpoint restores at the current revisions and resumes as before, at every boundary", () => {
   // every row's construct in one script the production backend compiles: its plan has none of the new content
   const source =
     'let room = {count: 1}\nroom.name = "hall"\nlet xs = [1, 2]\nlet v = xs.get(5, default: 0)\n' +
@@ -1287,7 +1287,7 @@ test("a legacy plan's checkpoint restores at the current revisions and resumes a
   assert.deepEqual(summary(rest.events, rest.snapshot.status), halted(["hall", "x"]));
 });
 
-test("plan validation rejects S7's fields where they do not belong (S3 §4's serialised contracts)", () => {
+test("plan validation rejects S7's fields where they do not belong (S3's serialised contracts)", () => {
   const plan = candidatePlan(
     "let x = hostValue\nx.n = 2\nlet xs = [1]\nlet v = xs.get(hostValue, default: hostValue)\n" +
       "let amount = [1, null][1]\nlet result = amount otherwise hostValue\nexit\n",
@@ -2356,7 +2356,7 @@ test("a field that fits, `null` included, survives a sibling's repair: fromJson 
   );
 });
 
-test("the candidate route rejects the loads whose storage rules S9b brings (S3 §3)", () => {
+test("the candidate route rejects the loads whose storage rules S9b brings (S3)", () => {
   for (const source of [
     // one key, two spellings: the agreement of a key's loads
     'let a = load("k", default: 0)\nlet b = load("""k""", default: "x")\nexit\n',

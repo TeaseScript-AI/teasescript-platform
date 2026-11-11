@@ -28,7 +28,7 @@ import {
 } from "./type-core-written.js";
 
 /*
- * The stores at, below and above a stopped decision (#1416, #1440; S3 §5, ADR 0021 rule 1.10): a store or argument
+ * The stores at, below and above a stopped decision (#1416, #1440; S3, ADR 0021 rule 1.10): a store or argument
  * whose value holds a key whose decision stopped at its demand allowance keeps that key's obligation, its check against
  * its destination's complete type or its value marked. A generated family over the destination's origin (written, a
  * copy, a copy of a copy, a property a copy decides, one named `element`, an object a literal decides, a sibling

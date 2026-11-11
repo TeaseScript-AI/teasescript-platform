@@ -941,8 +941,8 @@ export class Contract {
     return onlyNull(this, fallback);
   }
 
-  public landsIn(value: PlaceId, path: readonly string[], depth?: number): TypeTerm | null {
-    return landsIn(this, value, path, depth);
+  public landsIn(value: PlaceId, path: readonly string[]): TypeTerm | null {
+    return landsIn(this, value, path);
   }
 
   public copiedKey(value: PlaceId): CanonicalKey | null {
