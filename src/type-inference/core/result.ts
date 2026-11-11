@@ -120,6 +120,8 @@ export type DiagnosticRule =
       readonly root: StoreRoot | null;
       /** The steps from the root to the place: a property, or the collection an element or a dict value is in. */
       readonly steps: readonly StoreStep[];
+      /** Where a copy decides the type (A4): the declared binding the deciding store copies, where it names one. */
+      readonly copied?: CopiedBinding;
     }
   /**
    * C10: a fallback (`otherwise`) or a default against the kinds of the value it stands in for, and the variable or
@@ -307,6 +309,18 @@ export interface StoreRoot {
   readonly name: string;
   /** The declaration as written: a variable's `let` or `global` statement, a parameter with its type and default. */
   readonly site: SourceSite | null;
+}
+
+/**
+ * A variable or parameter with its own written type that a store copies (#2289): its value is a read of it
+ * (`value`), or a list or set literal whose every element is (`elements`).
+ */
+export interface CopiedBinding {
+  readonly form: "value" | "elements";
+  readonly name: string;
+  /** Its declaration as written. */
+  readonly site: SourceSite;
+  readonly type: readonly ItemTag[];
 }
 
 /** #1762: each side's steps of a mixed rule as its sentence writes them (`shown`). */

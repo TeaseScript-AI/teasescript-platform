@@ -164,6 +164,21 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
           "declare it as 'let n: integer? = 1'.",
       ],
     ],
+    // (#2289: a copy of a declared variable holds its type, and declares nothing itself; the owner's sentences)
+    [
+      "let lives: integer = 3\nlet copy = lives\ncopy = 2.5\nexit\n",
+      [
+        "E TSV041 '2.5': 'copy' holds a whole number (integer) because it is a copy of 'lives', declared " +
+          "'integer' on line 1. To store other numbers in it, write 'let copy: number = lives'.",
+      ],
+    ],
+    [
+      "let lives: integer = 3\nlet scores = [lives]\nscores.add(2.5)\nexit\n",
+      [
+        "E TSV041 '2.5': 'scores' holds whole numbers (integer[]) because its elements are copies of 'lives', " +
+          "declared 'integer' on line 1. To add other numbers to it, write 'let scores: number[] = [lives]'.",
+      ],
+    ],
     [
       "let n: integer = hostValue\nexit\n",
       [
