@@ -29,8 +29,10 @@
 // check both trees within the safety net: no source is handed to a worker before that, so none is recorded.
 // `summary` classifies the records per set, source and mode (`modes`, each with its demand, stop and questions runs):
 // identical; work only (the plan, the diagnostics, the error and the questions equal, the charge trace not); a question
-// sequence apart; a publication difference; at a demand allowance apart; for the held family, a stop set or a stopped
-// compile apart, and the analysis's units apart; and lists each with the stalled and uncharged sources. A record from
+// sequence apart; a publication difference; unavailable, where a part is unrecorded; at a demand allowance apart, each
+// row in the same one class and named by every part apart, with which tree's output the allowance stops against that
+// tree's own unstopped compile (#2341); for the held family, a stop set or a stopped compile apart, each by its parts,
+// and the analysis's units apart; and lists each with the stalled and uncharged sources. A record from
 // before #2342 names its mode by a number, its index in `HELD_MODES` at the commit that wrote it: printed as that number,
 // never translated, with one line that says so.
 import { createHash } from "node:crypto";
@@ -51,6 +53,58 @@ const setOf = (set, headRoot) => {
   return path.join(headRoot, "tests", "families", set);
 };
 
+/** A compile's parts as a record holds them, each by the name the summary prints, in that order. */
+const PARTS = [
+  ["plan", "plan"],
+  ["diagnostics", "diagnostics"],
+  ["error", "error"],
+  ["questions", "questions"],
+  ["trace", "work"],
+];
+/** The parts that make a publication: what a compile emits, as against what it asks and charges. */
+const OUTPUT = new Set(["plan", "diagnostics", "error"]);
+
+/**
+ * The parts in which two compiles of a record differ, by their printed names; `null` where either lacks one (#2341: an
+ * unrecorded part is never equal).
+ */
+function partsApart(b, h) {
+  if (PARTS.some(([field]) => b?.[field] === undefined || h?.[field] === undefined)) return null;
+  return PARTS.filter(([field]) => b[field] !== h[field]).map(([, name]) => name);
+}
+
+/**
+ * A difference's one class, by precedence: `publication` where the output differs (whatever else does), else
+ * `questions`, else `work`; `unavailable` where a part is unrecorded or none differs.
+ */
+function classOf(parts) {
+  if (parts === null || parts.length === 0) return "unavailable";
+  if (parts.some((part) => OUTPUT.has(part))) return "publication";
+  return parts.includes("questions") ? "questions" : "work";
+}
+
+/**
+ * A demand row as #2341 reads it: its parts apart, its class, and for each tree the parts in which its compile at the
+ * allowance differs from that tree's own unstopped compile in the mode (`natural`), so that which tree the allowance
+ * stops, by its output, is a fact of the record: `base`, `head`, `both`, `neither`, or `unavailable`.
+ */
+function demandRow(d, natural) {
+  const parts = partsApart(d.base, d.head);
+  const own = { base: partsApart(natural.base, d.base), head: partsApart(natural.head, d.head) };
+  const stops = (side) => own[side] !== null && own[side].some((part) => OUTPUT.has(part));
+  const stopped =
+    own.base === null || own.head === null
+      ? "unavailable"
+      : stops("base") && stops("head")
+        ? "both"
+        : stops("base")
+          ? "base"
+          : stops("head")
+            ? "head"
+            : "neither";
+  return { parts, kind: classOf(parts), own, stopped };
+}
+
 /** The records' classification (`summary`): one line per set, then each difference, stall and safety net reached. */
 function summarize(files, limit) {
   const sets = new Map();
@@ -67,7 +121,17 @@ function summarize(files, limit) {
         workHigher: 0,
         questions: 0,
         publication: 0,
+        unavailable: 0,
         demand: 0,
+        demandPublication: 0,
+        demandQuestions: 0,
+        demandWork: 0,
+        demandUnavailable: 0,
+        demandStopsBase: 0,
+        demandStopsHead: 0,
+        demandStopsBoth: 0,
+        demandStopsNeither: 0,
+        demandStopsUnavailable: 0,
         stopSet: 0,
         stoppedCompile: 0,
         analysisApart: 0,
@@ -97,18 +161,22 @@ function summarize(files, limit) {
       // (a name, or a number from before #2342, printed as recorded and said once below)
       if (typeof m.mode === "number") numbered = true;
       const at = `${r.set} ${r.name} mode ${typeof m.mode === "number" ? m.mode : JSON.stringify(m.mode)}`;
-      if (m.same) bump(r.set, "identical");
-      else if (b.plan === h.plan && b.diagnostics === h.diagnostics && b.error === h.error) {
-        if (b.questions !== h.questions) {
-          bump(r.set, "questions");
-          listed.push(
-            `${at}: questions ${b.questions} → ${h.questions}, units ${b.units} → ${h.units}`,
-          );
-        } else {
-          bump(r.set, "workOnly");
-          bump(r.set, h.units < b.units ? "workLower" : "workHigher");
-          listed.push(`${at}: work ${b.units} → ${h.units}`);
-        }
+      const kind = m.same ? "identical" : classOf(partsApart(b, h));
+      if (kind === "identical") bump(r.set, "identical");
+      else if (kind === "questions") {
+        bump(r.set, "questions");
+        listed.push(
+          `${at}: questions ${b.questions} → ${h.questions}, units ${b.units} → ${h.units}`,
+        );
+      } else if (kind === "work") {
+        bump(r.set, "workOnly");
+        bump(r.set, h.units < b.units ? "workLower" : "workHigher");
+        listed.push(`${at}: work ${b.units} → ${h.units}`);
+      } else if (kind === "unavailable") {
+        bump(r.set, "unavailable");
+        listed.push(
+          `${at}: unavailable (a part unrecorded, or none apart where the record says so)`,
+        );
       } else {
         bump(r.set, "publication");
         const sign = (x, y) => (x === y ? "=" : "≠");
@@ -117,9 +185,21 @@ function summarize(files, limit) {
             `error ${b.error} → ${h.error}, units ${b.units} → ${h.units}`,
         );
       }
+      const list = (parts) => (parts === null ? "unrecorded" : parts.join(", ") || "none");
       for (const d of m.demands ?? []) {
         bump(r.set, "demand");
-        listed.push(`${at}: at demand allowance ${d.demand} apart`);
+        const row = demandRow(d, m);
+        bump(r.set, `demand${row.kind[0].toUpperCase()}${row.kind.slice(1)}`);
+        bump(r.set, `demandStops${row.stopped[0].toUpperCase()}${row.stopped.slice(1)}`);
+        const error = row.parts?.includes("error")
+          ? `, error ${d.base.error} → ${d.head.error}`
+          : "";
+        listed.push(
+          `${at}: at demand allowance ${d.demand} apart (${row.kind}): ${list(row.parts)}${error}; ` +
+            `stops ${row.stopped} (against its own unstopped compile, base: ${list(row.own.base)}, head: ` +
+            `${list(row.own.head)}); checks ${b.checks}/${d.base.checks} → ${h.checks}/${d.head.checks} ` +
+            `(unstopped/at the allowance), units ${d.base.units} → ${d.head.units}`,
+        );
       }
       if (m.stops !== undefined) {
         if (!m.stops.sameSet) {
@@ -128,7 +208,9 @@ function summarize(files, limit) {
         }
         for (const d of m.stops.differ) {
           bump(r.set, "stoppedCompile");
-          listed.push(`${at}: stopped compile at ${d.allowance} (${d.phase}) apart`);
+          listed.push(
+            `${at}: stopped compile at ${d.allowance} (${d.phase}) apart: ${list(partsApart(d.base, d.head))}`,
+          );
         }
       }
       if (m.questions !== undefined && m.questions.analysis !== m.questions.analysisHead) {
@@ -137,7 +219,9 @@ function summarize(files, limit) {
       }
       for (const d of m.questions?.differ ?? []) {
         bump(r.set, "stoppedCompile");
-        listed.push(`${at}: questions-phase compile at ${d.allowance} apart`);
+        listed.push(
+          `${at}: questions-phase compile at ${d.allowance} apart: ${list(partsApart(d.base, d.head))}`,
+        );
       }
     }
   }
