@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, readlinkSync } from "node:fs";
+import { basename } from "node:path";
 
 // A `pre-push` hook: before a push replaces a branch's head on the remote with one that does not contain it (a
 // force-push) or deletes the branch, it pushes that old head to `refs/archive/<full sha>` on the same remote, so a
@@ -7,8 +8,8 @@ import { readFileSync } from "node:fs";
 // fast-forward, a new branch and any other ref outside `refs/archive/` cost nothing. A push that would delete or move
 // an archive ref is refused: archives are kept. So is a pruning push (`--mirror`, `--prune`, or a remote with
 // `remote.<name>.mirror`): git lists the refs it prunes to no hook, so it could delete an archive unseen. The pruning
-// flags are read from the `git push` process this hook runs under (`/proc`); where that cannot be read, they are not
-// checked.
+// options are read from the git process this hook runs under (`/proc`), as git parses them; where `/proc` cannot be
+// read, they are not checked.
 //
 //   node tools/archive-replaced-heads.mjs <remote name> <remote URL>     (git's pre-push arguments; its ref lines on
 //                                                                        standard input)
@@ -20,24 +21,48 @@ import { readFileSync } from "node:fs";
 const ZERO = /^0+$/u;
 const git = (...args) => spawnSync("git", args, { encoding: "utf8" });
 
+/** The `git push` options a long option `arg` names, by git's own table and its unique-prefix rule, or `null`. */
+function pushOption(arg, options) {
+  const name = `--${arg.slice(2).split("=")[0]}`;
+  if (options.includes(name)) return name;
+  const candidates = options.filter((option) => option.startsWith(name));
+  return candidates.length === 1 ? candidates[0] : null;
+}
+
 /**
- * Whether the push this hook runs under prunes (`--mirror`, `--prune`, or `remote.<remote>.mirror`); `null` when no
- * `git push` process is found among this process's ancestors.
+ * Whether the push this hook runs under prunes: `remote.<remote>.mirror`, or `--mirror` or `--prune` (in any spelling
+ * git accepts, the last of `--x` and `--no-x` winning) on the nearest ancestor process whose executable is git,
+ * whatever name invoked it. `null` when `/proc` cannot be read or no git ancestor is found; `true` when that ancestor
+ * shows no `push`, as its options cannot be read.
  */
 function pruningPush(remote) {
   if (git("config", "--bool", `remote.${remote}.mirror`).stdout.trim() === "true") return true;
   for (let pid = process.ppid; pid > 1;) {
     let argv;
     let stat;
+    let executable;
     try {
+      executable = readlinkSync(`/proc/${pid}/exe`);
       argv = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0");
       stat = readFileSync(`/proc/${pid}/stat`, "utf8");
     } catch {
       return null;
     }
-    const push = argv.indexOf("push");
-    if (push > 0 && /(?:^|\/)git$/u.test(argv[0]))
-      return argv.slice(push + 1).some((arg) => /^--(?:mirror|prune)(?:=|$)/u.test(arg));
+    if (basename(executable) === "git") {
+      const push = argv.indexOf("push", 1);
+      if (push < 0) return true;
+      // (git's own table of push's long options, hidden ones included)
+      const options = git("push", "--git-completion-helper-all").stdout.trim().split(/\s+/u);
+      const set = new Map();
+      for (const arg of argv.slice(push + 1)) {
+        if (arg === "--") break;
+        const option = arg.startsWith("--") ? pushOption(arg, options) : null;
+        for (const pruning of ["mirror", "prune"])
+          if (option === `--${pruning}`) set.set(pruning, true);
+          else if (option === `--no-${pruning}`) set.set(pruning, false);
+      }
+      return set.get("mirror") === true || set.get("prune") === true;
+    }
     // (the parent's id: the second field after the parenthesized command name)
     pid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
   }
