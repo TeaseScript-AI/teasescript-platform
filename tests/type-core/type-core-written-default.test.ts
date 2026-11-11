@@ -1,3 +1,4 @@
+// pins: a written default's walk units | line /units: \d/u
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -164,31 +165,55 @@ test("a default's written type: certain where it has one kind, so a number defau
   }
 });
 
+/** The rule's answer for the one typed call of `text` (`@`, its default `fb`) at `rest`, and the units it charged. */
+function ruleAt(
+  text: string,
+  rest: readonly string[],
+  reversed: boolean,
+): { readonly items: string[] | null; readonly units: number } {
+  const source = `${text.replace("@", "let v = fromJson(hostValue, default: fb, files: false)")}\nexit\n`;
+  const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
+  assert.ok(request !== null, text);
+  const pass = narrowingPassIn(request, reversed);
+  const fallbacks = pass.program.constraints.flatMap((c) => {
+    const fallback = c.kind === "operation" ? defaultOf(c) : undefined;
+    return fallback === undefined ? [] : [fallback];
+  });
+  const [fallback] = fallbacks;
+  assert.ok(fallbacks.length === 1 && fallback !== undefined, text);
+  const before = pass.program.work.counts().get("invSteps") ?? 0;
+  const items = writtenDefault(pass, fallback, rest);
+  return {
+    items: items === null ? null : items.map((item) => `${item.tag} ${item.cert}`),
+    units: (pass.program.work.counts().get("invSteps") ?? 0) - before,
+  };
+}
+
+test("a written parameter or global, which the candidate route declines, and a chain of copies give their written type, a unit per binding followed (#1072 step 0)", () => {
+  const rows = [
+    { text: "function f(fb: number) {\n  @\n}\nf(0)", units: 1 },
+    { text: "global fb: number = 0\n@", units: 1 },
+    { text: "let w: number = 0\nlet f1 = w\nlet fb = f1\n@", units: 3 },
+  ];
+  for (const { text, units } of rows)
+    for (const reversed of [false, true])
+      assert.deepEqual(ruleAt(text, [], reversed), { items: ["number def"], units }, text);
+});
+
 test("a default's written type is none outside the forms the rule admits, the default then read as it holds at the call (#1072 step 0)", () => {
   const sources = [
     // #2307's open residual: a default that starts as `null` and takes its type from a later copy
     "let w: integer? = null\nlet fb = null\nfb = w\n@",
     // cells that disagree
     "let w: number = 0\nlet fb = [w, 1]\n@",
-    // a loop variable, a part of a written list, a computed default
+    // a loop variable, a part of a written list, a computed default, an unwritten parameter
     "let xs: number[] = [0]\nfor fb in xs {\n  @\n}",
     "let xs: number[] = [0]\nlet fb = xs[0]\n@",
     "let w: number? = 0\nlet fb = w otherwise 1\n@",
+    "function f(fb) {\n  @\n}\nf(0)",
   ];
-  for (const text of sources) {
-    const source = `${text.replace("@", "let v = fromJson(hostValue, default: fb, files: false)")}\nexit\n`;
-    const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
-    assert.ok(request !== null, text);
-    for (const reversed of [false, true]) {
-      const pass = narrowingPassIn(request, reversed);
-      const fallbacks = pass.program.constraints.flatMap((c) => {
-        const fallback = c.kind === "operation" ? defaultOf(c) : undefined;
-        return fallback === undefined ? [] : [fallback];
-      });
-      const [fallback] = fallbacks;
-      assert.ok(fallbacks.length === 1 && fallback !== undefined, text);
+  for (const text of sources)
+    for (const reversed of [false, true])
       for (const rest of [[], ["element"]])
-        assert.equal(writtenDefault(pass, fallback, rest), null, `${text} at ${rest.join(".")}`);
-    }
-  }
+        assert.equal(ruleAt(text, rest, reversed).items, null, `${text} at ${rest.join(".")}`);
 });

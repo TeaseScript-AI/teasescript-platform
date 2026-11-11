@@ -648,13 +648,13 @@ const WITNESSES: readonly {
     name: "a call in a loop reading an outer variable",
     source: "let d: number = 0\nfor entry in [0] {\n  @\n}",
     read: "d",
-    derived: { refused: "a variable read inside a loop" },
+    derived: "number",
   },
   {
     name: "a call in a repeat reading an outer variable",
     source: "let d: number = 0\nrepeat 1 {\n  @\n}",
     read: "d",
-    derived: { refused: "a variable read inside a loop" },
+    derived: "number",
   },
   {
     name: "a default that computes from a variable",
