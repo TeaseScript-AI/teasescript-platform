@@ -106,18 +106,28 @@ test("a run that passes, and one whose suite fails, name every part in the last 
   );
 });
 
-test("the checks before the tests are check:pretest's run-parallel steps, and another form is refused", () => {
-  const scripts = JSON.parse(
-    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
-  ).scripts;
-  assert.ok(pretestSteps(scripts).includes("test:verification"));
-  assert.deepEqual(pretestSteps({ "check:pretest": "node tools/run-parallel.mjs a b:c" }), [
-    "a",
-    "b:c",
-  ]);
+test("the checks before the tests are check:pretest's run-parallel steps, named or listed, and another form is refused", () => {
+  const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
+  // the repository's: listed in package.json, one per line, so that steps added at different places merge (R-34)
+  assert.equal(pkg.scripts["check:pretest"], "node tools/run-parallel.mjs --list checkPretest");
+  assert.deepEqual(pretestSteps(pkg), pkg.checkPretest);
+  assert.ok(pretestSteps(pkg).includes("test:verification"));
+  assert.deepEqual(
+    pretestSteps({ scripts: { "check:pretest": "node tools/run-parallel.mjs a b:c" } }),
+    ["a", "b:c"],
+  );
+  const scripts = { "check:pretest": "node tools/run-parallel.mjs --list steps", a: "", "b:c": "" };
+  assert.deepEqual(pretestSteps({ scripts, steps: ["b:c", "a"] }), ["b:c", "a"]);
+  for (const [steps, message] of [
+    [undefined, "package.json's steps is not a list of npm script names"],
+    [[], "package.json's steps is not a list of npm script names"],
+    [["a", "d", 1], "package.json's steps lists what is not an npm script: d, 1"],
+  ])
+    assert.throws(() => pretestSteps({ scripts, steps }), { message });
   for (const script of [undefined, "npm run a && node tools/run-parallel.mjs b", "npm run a"])
-    assert.throws(() => pretestSteps({ "check:pretest": script }), {
-      message: "check:pretest is not one `node tools/run-parallel.mjs <npm script>...` call",
+    assert.throws(() => pretestSteps({ scripts: { "check:pretest": script } }), {
+      message:
+        "check:pretest is not one `node tools/run-parallel.mjs <npm script>...` or `--list <key>` call",
     });
 });
 

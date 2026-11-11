@@ -91,6 +91,22 @@ test("a failed step stops no other, serial or parallel; the last line names what
   }
 });
 
+test("--list runs the npm scripts a package.json list holds, in its order, and refuses a list of what is not a script (R-34)", async (t) => {
+  const cwd = fixture(t, { a: "", b: "" });
+  const scripts = JSON.parse(readFileSync(join(cwd, "package.json"), "utf8")).scripts;
+  writeFileSync(
+    join(cwd, "package.json"),
+    JSON.stringify({ steps: ["b", "a"], bad: ["a", "c"], scripts }),
+  );
+  const listed = await start(t, cwd, ["--list", "steps"], true).done;
+  assert.equal(listed.code, 0, listed.output);
+  assert.equal(listed.stdout.trim().split("\n").at(-1), "ran: b, a; failed: none; not run: none");
+  assert.match(listed.stdout, /\[b\] PASS[\s\S]*\[a\] PASS/u);
+  const refused = await start(t, cwd, ["--list", "bad"]).done;
+  assert.equal(refused.code, 1, refused.output);
+  assert.match(refused.stderr, /package\.json's bad lists what is not an npm script: c/u);
+});
+
 test("a step npm cannot start fails with exit 1 and is named", async (t) => {
   const cwd = fixture(t, { first: "" });
   // (no npm on PATH: the spawn itself fails)
