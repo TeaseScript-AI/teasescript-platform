@@ -334,19 +334,16 @@ async function main(argv) {
       throw new CannotRun(
         `compiling the base failed (${build.signal ?? `exit ${build.status}`}):\n${build.stderr}`,
       );
-    // The base's own configuration with the head's stamping plugin in place of any of its own, so the head's loader
-    // finds a stamp of what was built also at a base from before the plugin.
+    // As `vite build --config` builds them, with the head's stamping plugin added as inline configuration: it writes
+    // `sources.json` last, so the head's loader finds a stamp of what was built also at a base from before the plugin.
     const bundles = spawnSync(
       process.execPath,
       [
         "--input-type=module",
         "--eval",
-        `const { build, loadConfigFromFile } = await import("vite");
+        `const { build } = await import("vite");
 const { testModulesSources } = await import(${JSON.stringify(pathToFileURL(join(root, "player/vue/test-modules-sources.ts")).href)});
-const loaded = await loadConfigFromFile({ command: "build", mode: "production" }, "player/vue/vite.test-modules.config.ts");
-if (loaded === null) throw new Error("player/vue/vite.test-modules.config.ts has no configuration");
-const plugins = [loaded.config.plugins ?? []].flat(Infinity).filter((plugin) => plugin && plugin.name !== "test-modules-sources");
-await build({ ...loaded.config, configFile: false, plugins: [...plugins, testModulesSources()] });`,
+await build({ configFile: "player/vue/vite.test-modules.config.ts", plugins: [testModulesSources()] });`,
       ],
       { cwd: worktree, encoding: "utf8" },
     );
