@@ -144,6 +144,9 @@ export async function runSteps(names, { serial = false } = {}) {
 if (import.meta.main) {
   const names = process.argv.slice(2);
   if (names.length === 0) throw new Error("Pass npm script names to run.");
+  // (runSteps's handlers stop the steps; these keep a signal from killing the process until it exits, so one that comes
+  // while the last line waits for a slow reader changes neither the line nor the status)
+  for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => {});
   const { steps, exitCode } = await runSteps(names, { serial: process.env.VERIFY_SERIAL === "1" });
   console.log(`\n${summaryLine(steps)}`);
   process.exitCode = exitCode;
