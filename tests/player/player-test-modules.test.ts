@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   chmodSync,
   cpSync,
@@ -282,37 +283,66 @@ test("an entry the walk does not admit fails the build: a folder link, a name th
   assert.equal(build().status, 0);
 });
 
-// Round 2's witness: a link retargeted from a valid name to a target whose name is not UTF-8 but decodes to it, with the
-// same content, which the configuration reads through the link. It is refused, and so is its rebuild.
-test("a link retargeted to a name that is not UTF-8 is refused, and its rebuild fails", (t) => {
+// Round 3's witness: a link's own text, which the configuration reads, respelled to the same target. Refused, and a
+// rebuild loads the new text.
+test("a link respelled to the same target is refused, and a rebuild loads its new text", (t) => {
   const { path, write, build, minutesOf90 } = checkout(t);
-  const raw = Buffer.concat([
-    Buffer.from(path("dist/raw/")),
-    Buffer.from([0xff]),
-    Buffer.from(".txt"),
-  ]);
-  write("dist/raw/\ufffd.txt", "same");
-  writeFileSync(raw, "same");
-  symlinkSync("../dist/raw/\ufffd.txt", path("tools/input.txt"));
+  write("tools/target.txt", "fixed");
+  symlinkSync("target.txt", path("tools/input.txt"));
   write(
     "player/vue/vite.test-modules.config.ts",
     `import { readlinkSync } from "node:fs";\n${config().replace(
       "publicDir: false,",
-      'publicDir: false,\n  define: { __WITNESS__: JSON.stringify(readlinkSync("tools/input.txt", { encoding: "buffer" }).toString("hex")) },',
+      'publicDir: false,\n  define: { __WITNESS__: JSON.stringify(readlinkSync("tools/input.txt", "utf8")) },',
+    )}`,
+  );
+  write("player/clock.ts", `${CLOCK}export const witness = __WITNESS__;\n`);
+  const witness = () => minutesOf90(1, "", path(""), "witness");
+  const built = build();
+  assert.equal(built.status, 0, built.stderr);
+  assert.equal(witness(), JSON.stringify("target.txt"));
+  unlinkSync(path("tools/input.txt"));
+  symlinkSync("./target.txt", path("tools/input.txt"));
+  assert.equal(witness(), STALE("tools/input.txt"));
+  assert.equal(build().status, 0);
+  assert.equal(witness(), JSON.stringify("./target.txt"));
+});
+
+// A link whose own text stays, resolved through a link in the excluded `dist/` that is retargeted, with the same content,
+// which the configuration reads: first to another valid name, which is refused and rebuilt; then, round 2's witness, to a
+// name that is not UTF-8 but decodes to the first, which is refused, and so is its rebuild.
+test("a link whose target changes is refused, and its rebuild fails when the target's name is not UTF-8", (t) => {
+  const { path, write, build, minutesOf90 } = checkout(t);
+  const raw = Buffer.concat([Buffer.from([0xff]), Buffer.from(".txt")]);
+  write("dist/raw/\ufffd.txt", "same");
+  write("dist/raw/other.txt", "same");
+  writeFileSync(Buffer.concat([Buffer.from(path("dist/raw/")), raw]), "same");
+  symlinkSync("\ufffd.txt", path("dist/raw/via.txt"));
+  symlinkSync("../dist/raw/via.txt", path("tools/input.txt"));
+  write(
+    "player/vue/vite.test-modules.config.ts",
+    `import { realpathSync } from "node:fs";\n${config().replace(
+      "publicDir: false,",
+      'publicDir: false,\n  define: { __WITNESS__: JSON.stringify(realpathSync.native("tools/input.txt", { encoding: "buffer" }).toString("hex")) },',
     )}`,
   );
   write("player/clock.ts", `${CLOCK}export const witness = __WITNESS__;\n`);
   const built = build();
   assert.equal(built.status, 0, built.stderr);
-  const target = (bytes: Buffer) =>
-    JSON.stringify(Buffer.concat([Buffer.from("../dist/raw/"), bytes]).toString("hex"));
-  assert.equal(minutesOf90(1, "", path(""), "witness"), target(Buffer.from("\ufffd.txt")));
-  unlinkSync(path("tools/input.txt"));
-  symlinkSync(
-    Buffer.concat([Buffer.from("../dist/raw/"), Buffer.from([0xff]), Buffer.from(".txt")]),
-    path("tools/input.txt"),
-  );
-  assert.equal(minutesOf90(1, "", path(""), "witness"), STALE("tools/input.txt"));
+  const witness = () => minutesOf90(1, "", path(""), "witness");
+  const resolved = () =>
+    JSON.stringify(
+      realpathSync.native(path("tools/input.txt"), { encoding: "buffer" }).toString("hex"),
+    );
+  assert.equal(witness(), resolved());
+  unlinkSync(path("dist/raw/via.txt"));
+  symlinkSync("other.txt", path("dist/raw/via.txt"));
+  assert.equal(witness(), STALE("tools/input.txt"));
+  assert.equal(build().status, 0);
+  assert.equal(witness(), resolved());
+  unlinkSync(path("dist/raw/via.txt"));
+  symlinkSync(raw, path("dist/raw/via.txt"));
+  assert.equal(witness(), STALE("tools/input.txt"));
   const rebuilt = build();
   assert.notEqual(rebuilt.status, 0);
   assert.match(
@@ -560,13 +590,17 @@ for (const name of ["node_modules", "dist", "other", "with\\backslash"])
         if (expected.length === 0) return;
         if (kind === "file") assert.match(stamp.get(path) ?? "", /^file [0-9a-f]{64}$/u);
         if (kind === "file link")
-          assert.match(stamp.get(path) ?? "", /^link targets\/file\.ts [0-9a-f]{64}$/u);
+          assert.equal(
+            stamp.get(path),
+            `link ${JSON.stringify(join(root, "targets/file.ts"))} "targets/file.ts" ${createHash("sha256").update("file").digest("hex")}`,
+          );
         if (kind === "folder link") assert.equal(reason, "a link to a folder, targets/folder");
         if (kind === "special file") assert.equal(reason, "a special file");
       });
 
-// The names family: an entry is admitted exactly when the bytes of its name, or of its link's target, are UTF-8, and two
-// admitted entries with different bytes never share a key or an identity. The expectations are UTF-8's, not a decoder's.
+// The names family: an entry is admitted exactly when the bytes of its name, of its link's text, and of its link's target
+// are UTF-8. Two admitted entries never share a key, and two admitted links whose texts or targets differ never share a
+// stamp; two links with one text and one target do. The expectations are UTF-8's, not a decoder's.
 const NAMES: readonly (readonly [string, readonly number[], boolean])[] = [
   ["ASCII", [0x61], true],
   ["a two-byte sequence", [0xc3, 0xa9], true],
@@ -579,24 +613,50 @@ const NAMES: readonly (readonly [string, readonly number[], boolean])[] = [
   ["an overlong encoding", [0xc0, 0xaf], false],
   ["an encoded surrogate half", [0xed, 0xa0, 0x80], false],
 ];
-type Position = "a file" | "a folder" | "a link" | "a link's target";
-const POSITIONS: readonly Position[] = ["a file", "a folder", "a link", "a link's target"];
+type Position = "a file" | "a folder" | "a link" | "a link's text" | "a link's target";
+const POSITIONS: readonly Position[] = [
+  "a file",
+  "a folder",
+  "a link",
+  "a link's text",
+  "a link's target",
+];
 
-/** Makes one entry whose name, or whose link's target's name, is `bytes` and `-name`, in `folder` of `root`. */
+/**
+ * Makes one entry in `folder` of `root` with `bytes` and `-name` as its name, as a folder in its link's text, or as its
+ * link's target's name. The links of the last two are `link-<index>.txt`, with the folder and the target in the excluded
+ * `dist/`, so that only the link carries the bytes.
+ */
 function named(root: string, position: Position, folder: string, bytes: Buffer, index: number) {
   const prefix = folder === "" ? "" : `${folder}/`;
   const at = (...parts: Buffer[]) => Buffer.concat([Buffer.from(`${root}/`), ...parts]);
   const name = Buffer.concat([bytes, Buffer.from("-name")]);
   mkdirSync(join(root, folder), { recursive: true });
-  if (position === "a link's target") {
-    mkdirSync(join(root, "dist", folder), { recursive: true });
-    writeFileSync(at(Buffer.from(`dist/${prefix}`), name), "target");
-    symlinkSync(at(Buffer.from(`dist/${prefix}`), name), join(root, prefix, `link-${index}.txt`));
+  if (position === "a link's text" || position === "a link's target") {
     const key = `${prefix}link-${index}.txt`;
+    mkdirSync(join(root, "dist", folder), { recursive: true });
+    if (position === "a link's text") {
+      // `dist/<folder>/<name>/../file.txt`: the bytes are in the text alone, and the target is `file.txt`
+      mkdirSync(at(Buffer.from(`dist/${prefix}`), name), { recursive: true });
+      writeFileSync(join(root, "dist", prefix, "file.txt"), "target");
+      const text = at(Buffer.from(`dist/${prefix}`), name, Buffer.from("/../file.txt"));
+      symlinkSync(text, join(root, prefix, `link-${index}.txt`));
+      return {
+        key,
+        shown: key,
+        value: `link ${JSON.stringify(text.toString())} ${JSON.stringify(`dist/${prefix}file.txt`)} `,
+        reason: "a link whose text is not valid UTF-8",
+      };
+    }
+    // a valid text, `dist/<folder>/via-<index>`, a link in `dist/` to the name: the bytes are in the target alone
+    writeFileSync(at(Buffer.from(`dist/${prefix}`), name), "target");
+    symlinkSync(name, join(root, "dist", prefix, `via-${index}`));
+    const text = join(root, "dist", prefix, `via-${index}`);
+    symlinkSync(text, join(root, prefix, `link-${index}.txt`));
     return {
       key,
       shown: key,
-      value: `link dist/${prefix}${name.toString()} `,
+      value: `link ${JSON.stringify(text)} ${JSON.stringify(`dist/${prefix}${name.toString()}`)} `,
       reason: "a link whose target's path is not valid UTF-8",
     };
   }
@@ -614,7 +674,10 @@ function named(root: string, position: Position, folder: string, bytes: Buffer, 
   return {
     key: position === "a folder" ? `${key}/inner.txt` : key,
     shown: key,
-    value: { "a file": "file ", "a link": "link targets/file.txt ", "a folder": "file " }[position],
+    value:
+      position === "a link"
+        ? `link ${JSON.stringify(join(root, "targets/file.txt"))} "targets/file.txt" `
+        : "file ",
     reason: `a name that is not valid UTF-8, bytes ${name.toString("hex")}`,
   };
 }
@@ -643,7 +706,7 @@ for (const position of POSITIONS)
         assert.deepEqual(ownKeys(stamp), admitted.map(({ key }) => key).sort());
         for (const { key, value } of admitted) assert.ok(stamp.get(key)?.startsWith(value), key);
       });
-    test(`every name at once as ${position} in ${folder || "the root"}: no two admitted entries share a key or an identity`, (t) => {
+    test(`every name at once as ${position} in ${folder || "the root"}: no two admitted entries share a key${position.startsWith("a link's") ? ", nor two links a stamp" : ""}`, (t) => {
       const root = namesRoot(t);
       const made = NAMES.map(([, bytes, valid], index) => ({
         valid,
@@ -668,5 +731,7 @@ for (const position of POSITIONS)
       const admitted = [...made.filter(({ valid }) => valid), ...twins];
       assert.deepEqual(ownKeys(stamp), admitted.map(({ key }) => key).sort());
       for (const { key, value } of admitted) assert.ok(stamp.get(key)?.startsWith(value), key);
+      if (position.startsWith("a link's"))
+        assert.equal(new Set(admitted.map(({ key }) => stamp.get(key))).size, admitted.length);
     });
   }

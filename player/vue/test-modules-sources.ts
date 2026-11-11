@@ -4,15 +4,17 @@
 //
 // The stamp covers the whole checkout, not the bundle's inputs: it names no input, so it cannot miss one in the
 // checkout. The walk admits exactly one thing, at any depth, apart from the root's own `BOOKKEEPING` and
-// `OUTSIDE_THE_STAMP` entries: a regular file, or a link that resolves to one, under a unique key, with a name and a
-// link identity that are valid UTF-8. Everything else is refused, by default, whatever it is, and a refusal fails the
-// build. An admitted entry is stamped as:
-// - a file: `file` and the SHA-256 of its content;
-// - a link: `link`, its target's identity (its path from the root, or its absolute path outside it), and that content.
-// A key is the names the walk read, joined with `/`, none rewritten. Names and link targets are read as bytes and decoded
-// by the platform's strict UTF-8 decoder, which is one-to-one, and a name holds no `/`: so a key is unique, and two
-// entries never share a key or an identity. The set of keys is part of the stamp, so an added, removed or renamed file
-// is a change.
+// `OUTSIDE_THE_STAMP` entries: a regular file, or a link that resolves to one, under a unique key, with a name, a link
+// text and a link identity that are valid UTF-8. Everything else is refused, by default, whatever it is, and a refusal
+// fails the build. An admitted entry's stamp determines every byte that reading it returns: a file's content, and a
+// link's own text, the target it resolves to and that target's content. It is `file <SHA-256 of the content>`, or
+// `link <text> <identity> <SHA-256 of the target's content>` with the text and the identity (the target's path from the
+// root, or its absolute path outside it) as JSON strings. It does not attest metadata (mode, times, ownership, link
+// count): a build that reads those is not attested.
+// A key is the names the walk read, joined with `/`, none rewritten. Names, link texts and link targets are read as bytes
+// and decoded by the platform's strict UTF-8 decoder, which is one-to-one, and a name holds no `/`: so keys are unique,
+// and identities are lossless, so two links share one only when they resolve to one target. The set of keys is part of
+// the stamp, so an added, removed or renamed file is a change.
 //
 // It is a freshness check of the checkout's files, not a key of everything a build depends on. Not attested:
 // - files outside the checkout, however they are reached (a link's target is stamped, not what a tool reads because of
@@ -31,6 +33,7 @@ import {
   lstatSync,
   readdirSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   statSync,
   writeFileSync,
@@ -79,6 +82,9 @@ function entry(root: string, path: string): Entry {
     const status = lstatSync(path);
     if (!status.isSymbolicLink())
       return status.isFile() ? { stamp: `file ${sha256(path)}` } : { refused: "a special file" };
+    // The link's own text, in bytes: what reading the link returns.
+    const own = text(readlinkSync(path, { encoding: "buffer" }));
+    if (own === undefined) return { refused: "a link whose text is not valid UTF-8" };
     if (!existsSync(path)) return { refused: "a broken link" };
     // The target as the system resolves it, in bytes: a target whose path is not UTF-8 has no lossless identity.
     const target = text(realpathSync.native(path, { encoding: "buffer" }));
@@ -90,7 +96,8 @@ function entry(root: string, path: string): Entry {
       isAbsolute(inside) || inside === ".." || inside.startsWith(`..${sep}`) ? target : inside,
     );
     const resolved = statSync(path);
-    if (resolved.isFile()) return { stamp: `link ${identity} ${sha256(path)}` };
+    if (resolved.isFile())
+      return { stamp: `link ${JSON.stringify(own)} ${JSON.stringify(identity)} ${sha256(path)}` };
     return {
       refused: `a link to ${resolved.isDirectory() ? "a folder" : "a special file"}, ${identity}`,
     };
