@@ -364,6 +364,51 @@ test(
 );
 
 test(
+  "a rewrite is archived whatever this clone's replacement refs or graft file say of its history",
+  { timeout: 60_000 },
+  () => {
+    const repo = setup();
+    try {
+      for (const form of ["a replacement ref", "a graft file"]) {
+        // B and C share their parent, so C does not contain B; this clone's history says it does.
+        const parent = repo.commit(`${form} parent`);
+        const b = repo.commit(`${form} B`, parent);
+        const c = repo.commit(`${form} C`, parent);
+        const branch = `refs/heads/${form.replaceAll(" ", "-")}`;
+        repo.git("push", "origin", `${b}:${branch}`);
+        if (form === "a replacement ref")
+          repo.git("update-ref", `refs/replace/${c}`, repo.commit(`${form} C on B`, b));
+        else {
+          mkdirSync(join(repo.root, "clone/.git/info"), { recursive: true });
+          writeFileSync(join(repo.root, "clone/.git/info/grafts"), `${c} ${b}\n`);
+        }
+        assert.equal(
+          repo.git("merge-base", "--is-ancestor", b, c).status,
+          0,
+          `${form}: the clone's view`,
+        );
+        const pushed = repo.git("push", "origin", `+${c}:${branch}`);
+        assert.equal(pushed.status, 0, `${form}: ${pushed.stderr}`);
+        assert.equal(repo.remote("rev-parse", branch).stdout.trim(), c, form);
+        assert.equal(
+          repo.remote("rev-parse", `refs/archive/${b}`).stdout.trim(),
+          b,
+          `${form}: archived`,
+        );
+        assert.equal(
+          repo.git("rev-parse", `refs/archive/${b}`).stdout.trim(),
+          b,
+          `${form}: kept here`,
+        );
+        rmSync(join(repo.root, "clone/.git/info/grafts"), { force: true });
+      }
+    } finally {
+      rmSync(repo.root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
   "a value that cannot be archived refuses the whole push, and the ref stays",
   { timeout: 60_000 },
   () => {
