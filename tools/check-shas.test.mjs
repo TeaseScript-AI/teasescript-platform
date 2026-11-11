@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { closingClausesOf, excuse } from "./check-shas.mjs";
+import { closingClausesOf, excuse, scratchPathsOf } from "./check-shas.mjs";
 
 const tool = fileURLToPath(new URL("./check-shas.mjs", import.meta.url));
 
@@ -244,7 +244,7 @@ test(
       assert.equal(colour.status, 0, colour.out);
       assert.match(
         out.trim().split("\n").at(-1),
-        /0 placeholders, 1 multi-issue closing clauses$/u,
+        /0 placeholders, 1 multi-issue closing clauses, 0 scratch paths$/u,
       );
       // (a comma and a conjunction together, across a line break)
       const listed = check("text\nCloses #12,\nand #13\n", [directory]);
@@ -359,6 +359,131 @@ test("closingClausesOf, over generated clauses: a reference ends where its numbe
 });
 
 test(
+  "a path into the scratch area is named with its line and counted, and fails nothing",
+  { timeout: 60_000 },
+  () => {
+    const { directory } = repository();
+    try {
+      const { status, out } = check(
+        "Report\nEvidence /tmp/agent-work/lane3/cross64.tsv, retained at ~/work/evidence/lane3/cross64.tsv.\n",
+        [directory],
+      );
+      assert.equal(status, 0, out);
+      assert.match(
+        out,
+        /^scratch +line 2: \/tmp\/agent-work\/lane3\/cross64\.tsv +under \/tmp\/agent-work, deleted after inactivity: if a reader needs the file, move it to retained evidence and cite that copy$/mu,
+      );
+      assert.match(
+        out.trim().split("\n").at(-1),
+        /0 placeholders, 0 multi-issue closing clauses, 1 scratch paths$/u,
+      );
+      // The count beside a failure: a scratch path changes no exit status either way.
+      assert.equal(check("<sha> in /tmp/agent-work/a/b\n", [directory]).status, 1);
+      for (const [text, count] of [
+        ["|/tmp/agent-work/a|/tmp/agent-work/b|", 2],
+        [
+          "The scratch area is /tmp/agent-work/. Or /tmp/agent-work/... or /tmp/agent-work/<task>/",
+          0,
+        ],
+      ]) {
+        const result = check(`${text}\n`, [directory]);
+        assert.equal(result.status, 0, `${text}: ${result.out}`);
+        assert.match(
+          result.out.trim().split("\n").at(-1),
+          new RegExp(` ${count} scratch paths$`, "u"),
+          text,
+        );
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "scratchPathsOf, over generated descendants, containers and endings",
+  { timeout: 30_000 },
+  () => {
+    const before = ["/tmp/", "../"];
+    const area = ["agent-work"];
+    const inside = ["a", "@lane/r.out", "+run/r.out", "épreuve/r.out", "./a/b.txt", "a/../b"];
+    const outside = ["", ".", "./", "..", "../a", "<task>/", "./."];
+    const containers = [
+      (p) => p,
+      (p) => `\`${p}\``,
+      (p) => `(${p})`,
+      (p) => `[r](${p})`,
+      (p) => `| ${p} |`,
+      (p) => `'${p}'`,
+      (p) => `"${p}"`,
+    ];
+    const endings = ["", ".", ",", ";", ":", "!", "?", "..."];
+    let cases = 0;
+    for (const head of before)
+      for (const name of area)
+        for (const [tails, named] of [
+          [inside, true],
+          [outside, false],
+        ])
+          for (const tail of tails)
+            for (const contain of containers)
+              for (const end of endings) {
+                const path = `${head}${name}/${tail}`;
+                const text = `see ${contain(path)}${end} next`;
+                // (a path's own last characters that are sentence punctuation are no part of what it names)
+                const expected = named ? [path.replace(/[.,;:!?]+$/u, "")] : [];
+                assert.deepEqual(
+                  scratchPathsOf(text).map((found) => found.path),
+                  expected,
+                  text,
+                );
+                cases += 1;
+              }
+    assert.equal(cases, 2 * 13 * 7 * 8);
+    for (const [text, paths] of [
+      ["/tmp/agent-work/a and /tmp/agent-work/a", ["/tmp/agent-work/a"]],
+      ["/tmp/agent-workshop/a bin/prepare-agent-workspace.sh", []],
+      ["~/work/evidence/friction/a.out", []],
+      // (the area's name is what is seen, wherever the folder is: a folder of that name elsewhere counts too)
+      ["/home/x/tmp/agent-work/a", ["/home/x/tmp/agent-work/a"]],
+    ])
+      assert.deepEqual(
+        scratchPathsOf(text).map((found) => found.path),
+        paths,
+        text,
+      );
+    // Each path once, with the line it first stands on.
+    assert.deepEqual(
+      scratchPathsOf("a\r\nb /tmp/agent-work/x\n\n/tmp/agent-work/y /tmp/agent-work/x"),
+      [
+        { path: "/tmp/agent-work/x", line: 2 },
+        { path: "/tmp/agent-work/y", line: 4 },
+      ],
+    );
+    // Cost: punctuation inside or at the end of a long path is read once. A regex trimming the end took quadratic time,
+    // about 400 s here; linear takes milliseconds. The child is killed at 20 s, as a test's timeout stops no loop.
+    const cost = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `import { scratchPathsOf } from ${JSON.stringify(tool)};
+const dots = ".".repeat(2 ** 19);
+const found = [
+  scratchPathsOf("/tmp/agent-work/a" + dots + "x").length,
+  scratchPathsOf("/tmp/agent-work/" + dots).length,
+  scratchPathsOf("/tmp/agent-work" + "/.".repeat(2 ** 18) + "/a").length,
+];
+process.stdout.write(found.join(" "));`,
+      ],
+      { encoding: "utf8", timeout: 20_000 },
+    );
+    assert.equal(cost.signal, null, "killed at 20 s");
+    assert.equal(cost.stdout, "1 0 1", cost.stderr);
+  },
+);
+
+test(
   "each --repo is asked, and a token resolves in the one that has it",
   { timeout: 30_000 },
   () => {
@@ -388,11 +513,11 @@ test(
       for (const [text, line] of [
         [
           "",
-          "0 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 0 placeholders, 0 multi-issue closing clauses",
+          "0 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 0 placeholders, 0 multi-issue closing clauses, 0 scratch paths",
         ],
         [
           `at ${shas[0].slice(0, 9)}, <sha>`,
-          "1 tokens: 1 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 1 placeholders, 0 multi-issue closing clauses",
+          "1 tokens: 1 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 1 placeholders, 0 multi-issue closing clauses, 0 scratch paths",
         ],
       ]) {
         const { out } = check(text, [directory]);

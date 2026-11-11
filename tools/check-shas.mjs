@@ -20,8 +20,11 @@ import { existsSync, readFileSync } from "node:fs";
 // proving a tree reachable from a remote ref is costly.
 // Unfilled placeholders (`PLACEHOLDERS`) outside fenced code blocks are reported too, and so is a closing clause that
 // names several issues after one keyword, in code too, which as closing syntax closes only the first
-// (`closingClausesOf`). Every run that completes ends with one line counting the tokens by result, the placeholders
-// and those clauses, so no output means it did not run.
+// (`closingClausesOf`). Paths into the disposable scratch area `/tmp/agent-work/`, whose files are deleted after
+// inactivity, are named and counted, not failed: a report may mention one rightly (a command it ran, a reviewer's
+// folder), and a reader who needs the file needs a retained copy (`scratchPathsOf` says which spellings it reads).
+// Every run that completes ends with one line counting the tokens by result, the placeholders, those clauses and those
+// paths, so no output means it did not run.
 //
 // Tokens that need not be commits are checked, and skipped when no repository resolves them, so no rule hides a SHA:
 // - only digits: a CI run, comment or issue id;
@@ -39,8 +42,8 @@ import { existsSync, readFileSync } from "node:fs";
 //   or a job's name. A full 40-character SHA in a path, such as an evidence folder, must resolve.
 //
 // Exit status: 0 when every token that must be a commit resolved on a remote and no placeholder or several-issue
-// closing clause is left, 1 otherwise, 2 when it cannot run (bad arguments, an unreadable file, or a `--repo` that is
-// no git repository).
+// closing clause is left (scratch paths do not change it), 1 otherwise, 2 when it cannot run (bad arguments, an
+// unreadable file, or a `--repo` that is no git repository).
 
 /** The unfilled placeholders a report can carry, case-insensitive. */
 export const PLACEHOLDERS = [
@@ -112,6 +115,38 @@ export function tokensOf(text) {
     if (!found.has(match[0]) || why === null) found.set(match[0], why);
   }
   return found;
+}
+
+/**
+ * The paths of `text` that name something inside a folder `agent-work`, as the scratch area `/tmp/agent-work/` is
+ * named, wherever they stand, code included, each once with the line it first stands on. A path is a run of
+ * characters other than white space, quotes, backticks, brackets and `|` (a compact table's cell separator), without
+ * the sentence punctuation that ends it; it names the area's content when a slash-separated component is exactly
+ * `agent-work` and is followed by one other than `.` or `..`. The area itself (`/tmp/agent-work/.`) or a folder named
+ * by a placeholder (`/tmp/agent-work/<task>/`) is no such path. This is a count, not a guarantee: a path written
+ * otherwise is not seen, such as one broken by white space, a JSON value with escaped slashes, a relative path assigned
+ * to a shell variable (`NAME=agent-work/…`), or one reaching the area through another name (`$SCRATCH/report.out`).
+ */
+export function scratchPathsOf(text) {
+  const found = new Map();
+  let line = 1;
+  let at = 0;
+  for (const { 0: run, index } of text.matchAll(/[^\s`'"()[\]<>|]+/gu)) {
+    if (!run.includes("agent-work")) continue;
+    for (; at < index; at += 1) if (text[at] === "\n") line += 1;
+    // (from the end, so that punctuation inside the path is read once)
+    let end = run.length;
+    while (end > 0 && ".,;:!?".includes(run[end - 1])) end -= 1;
+    const path = run.slice(0, end);
+    const parts = path.split("/");
+    const inside = (from) => {
+      while (parts[from] === "" || parts[from] === ".") from += 1;
+      return from < parts.length && parts[from] !== "..";
+    };
+    if (!found.has(path) && parts.some((part, from) => part === "agent-work" && inside(from + 1)))
+      found.set(path, line);
+  }
+  return [...found].map(([path, first]) => ({ path, line: first }));
 }
 
 /**
@@ -373,6 +408,11 @@ function main() {
       );
     }
   }
+  const scratch = scratchPathsOf(text);
+  for (const { path, line } of scratch)
+    process.stdout.write(
+      `scratch     line ${line}: ${path}  under /tmp/agent-work, deleted after inactivity: if a reader needs the file, move it to retained evidence and cite that copy\n`,
+    );
   const placeholders = placeholdersOf(text);
   for (const placeholder of placeholders) {
     failed = true;
@@ -391,7 +431,7 @@ function main() {
   process.stdout.write(
     `check-shas: ${tokens} tokens: ${counts.resolved} resolved, ${counts.trees} trees, ${counts.ambiguous} ambiguous, ` +
       `${counts.unresolved} unresolved, ${counts.local} local only, ${counts.skipped} skipped (ids, words, paths, sha256s); ` +
-      `${placeholders.length} placeholders, ${clauses.length} multi-issue closing clauses\n`,
+      `${placeholders.length} placeholders, ${clauses.length} multi-issue closing clauses, ${scratch.length} scratch paths\n`,
   );
   process.exitCode = failed ? 1 : 0;
 }
