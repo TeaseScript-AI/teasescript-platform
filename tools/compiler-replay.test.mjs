@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  areaRecordForm,
   areasOf,
   batchOf,
   declarations,
@@ -1071,7 +1072,11 @@ test("collect reads every area record form the real run.mjs writes, and a record
       "rings: 4 unanswered",
       ...apart("published.mjs", "left apart", "part 2 of 4/4"),
       ...apart("published.mjs", "differs", "part 2 of 4/4"),
-      ...apart("stopping.mjs", "stops", "stops natural apart"),
+      ...apart(
+        "stopping.mjs",
+        "stops",
+        "stops natural apart; stops added 0; removed 0; moved 1: r:x (base pass 1 ordinal 1, head pass 1 ordinal 2)",
+      ),
     ];
     const r = report("p", root, ["rings"]);
     assert.deepEqual(verdict(r), { status: 1, reasons: expected });
@@ -1087,4 +1092,45 @@ test("collect reads every area record form the real run.mjs writes, and a record
     rmSync(directory, { recursive: true, force: true });
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("a stops difference is read only in a stops form run.mjs writes, any other is unread (#2355)", () => {
+  const difference = {
+    generator: "g",
+    source: "s",
+    mode: "src-on",
+    check: "stops 16",
+    base: "a",
+    head: "b",
+  };
+  const stop = { label: "r", path: "x", base: [1, 2], head: null };
+  const lists = (fields) => ({ added: [], removed: [], moved: [], ...fields });
+  for (const stops of [
+    { unavailable: "the base's run holds no stop list" },
+    { listsEqual: true },
+    lists({ removed: [stop] }),
+    lists({ moved: [{ ...stop, head: [2, 2] }] }),
+  ])
+    assert.equal(areaRecordForm({ ...difference, stops }), "difference", JSON.stringify(stops));
+  for (const stops of [
+    null,
+    [],
+    { listsEqual: false },
+    { unavailable: 1 },
+    { unavailable: "x", listsEqual: true },
+    { added: [], removed: [] },
+    lists({ other: [] }),
+    lists({ added: {} }),
+    lists({ added: [{ ...stop, label: 1 }] }),
+    lists({ added: [{ ...stop, path: undefined }] }),
+    lists({ added: [{ ...stop, base: [1] }] }),
+    lists({ added: [{ ...stop, base: [1, 2.5] }] }),
+    lists({ added: [{ ...stop, base: null }] }),
+    // (key sets compared by their names and count, never by a joined text)
+    { "added moved removed": [] },
+    { listsEqual: true, extra: 1 },
+    lists({ added: [{ ...stop, extra: 1 }] }),
+    lists({ added: [{ label: "r", path: "x", base: [1, 2] }] }),
+  ])
+    assert.equal(areaRecordForm({ ...difference, stops }), "unread", JSON.stringify(stops));
 });
