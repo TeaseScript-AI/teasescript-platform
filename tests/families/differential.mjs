@@ -191,6 +191,11 @@ async function loadTree(root) {
   };
 }
 
+/** A case's `storage` as script storage entries, a copy of its own for each run, or `undefined` where it has none. */
+const entriesOf = (storage) =>
+  storage &&
+  Object.entries(storage).map(([key, value]) => ({ key, value: structuredClone(value) }));
+
 /** Each case's files and globals, a set's from its unit; a set unreadable, or its unit missing or ambiguous, refuses the file. */
 async function resolveCases(cases, root) {
   const unitOf = unitResolver(root);
@@ -252,19 +257,11 @@ async function record() {
     end: d.span.end.offset,
     message: d.message,
   });
-  // (each run starts from its own copy of the case's storage)
   const runs = (plan, c) =>
     c.runs?.map((globals) => {
       const given = c.storage === undefined ? {} : { storage: c.storage };
-      const storage =
-        c.storage === undefined
-          ? undefined
-          : Object.entries(c.storage).map(([key, value]) => ({
-              key,
-              value: structuredClone(value),
-            }));
       try {
-        return { globals, ...given, ...runGlobals(plan, globals, storage) };
+        return { globals, ...given, ...runGlobals(plan, globals, entriesOf(c.storage)) };
       } catch (error) {
         return { globals, ...given, threw: thrown(error) };
       }
