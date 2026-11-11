@@ -260,7 +260,12 @@ for (const [target, signal] of [
         assert.doesNotMatch(output, /ℹ \S*running\.test\.mjs: /u);
         assert.deepEqual(readdirSync(temporary), []);
       } finally {
-        if (filter.exitCode === null && filter.signalCode === null) process.kill(-group, "SIGKILL");
+        // The fixture's test process outlives a signal to the runner alone: the group goes whatever ended.
+        try {
+          process.kill(-group, "SIGKILL");
+        } catch {
+          // The whole group has ended.
+        }
         rmSync(directory, { recursive: true, force: true });
       }
     },
