@@ -285,6 +285,71 @@ test("a revision number names an entry of the accepted record, each end of a ran
   assert.deepEqual(missing("docs/specifications/other.md", "r4.9999\n"), [[1, "9999"]]);
 });
 
+test("a heading the doc-links check resolves is an entry exactly when its level and text are the rule's, form by form", () => {
+  // [form, heading with N for its number, doc-links resolves its anchor, the revision rule takes it as an entry]
+  const forms = [
+    ["plain", "### r4-N", true, true],
+    ["strikethrough", "### ~~r4-N~~", true, true],
+    ["emphasis", "### *r4-N*", true, true],
+    ["strong", "### **r4-N**", true, true],
+    ["inline code", "### `r4-N`", true, true],
+    ["escaped hyphen", "### r4\\-N", true, true],
+    ["character reference", "### r4&#45;N", true, true],
+    ["link", "### [r4-N](#r4-N)", true, true],
+    ["reference link", "### [r4-N][eN]\n\n[eN]: #r4-N", true, true],
+    ["trailing hashes", "### r4-N ###", true, true],
+    ["inline HTML", "### <em>r4-N</em>", true, true],
+    ["inline HTML comment", "### r4<!-- c -->-N", true, true],
+    ["inline HTML span", "### <span>r4-N</span>", true, true],
+    ["image beside the text", "### r4-N![alt](i.png)", true, true],
+    // (outside the rule: another level, other text; and no Markdown heading at all)
+    ["setext, level 2", "r4-N\n---", true, false],
+    ["scheme autolink, text `r4-N:`", "### <r4-N:>", true, false],
+    ["HTML in angle brackets", "### <r4-N>", false, false],
+    ["HTML heading", "<h3>r4-N</h3>", false, false],
+  ].map(([form, heading, links, entry], index) => {
+    const number = String(9901 + index);
+    return { form, heading: heading.replaceAll("N", number), number, links, entry };
+  });
+  const root = mkdtempSync(join(tmpdir(), "record-headings-"));
+  try {
+    const record = "docs/specifications/type-inference-accepted-record";
+    const write = (file, text) => {
+      mkdirSync(dirname(join(root, file)), { recursive: true });
+      writeFileSync(join(root, file), text);
+    };
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    write(".gitignore", "node_modules\n");
+    symlinkSync(join(repositoryRoot, "node_modules"), join(root, "node_modules"));
+    write(`${record}/page.md`, `# Page\n\n${forms.map(({ heading }) => heading).join("\n\n")}\n`);
+    write(
+      "docs/refs.md",
+      forms
+        .map(({ number }) => `[r4.${number}](${record.slice(5)}/page.md#r4-${number})`)
+        .join("\n\n") + "\n",
+    );
+    const links = spawnSync(
+      process.execPath,
+      [fileURLToPath(new URL("../repository-checks/doc-links.mjs", import.meta.url))],
+      { cwd: root, encoding: "utf8" },
+    );
+    const unresolved = new Set(
+      [...links.stderr.matchAll(/#r4-(\d+)/gu)].map(([, number]) => number),
+    );
+    const refused = new Set(
+      listedTextFindings(root)
+        .filter(({ fileName }) => fileName === "docs/refs.md")
+        .map(({ message }) => /^revision (\d+)/u.exec(message)?.[1]),
+    );
+    assert.deepEqual(
+      forms.map(({ form, number }) => [form, !unresolved.has(number), !refused.has(number)]),
+      forms.map(({ form, links: resolves, entry }) => [form, resolves, entry]),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("the TABLE citation check reads every file Git lists, by its exact path, and refuses a name it cannot read", async () => {
   const root = mkdtempSync(join(tmpdir(), "table-citations-"));
   try {
