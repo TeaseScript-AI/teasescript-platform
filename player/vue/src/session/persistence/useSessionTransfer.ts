@@ -284,8 +284,8 @@ export function useSessionTransfer({
         "A review being imported cannot be discarded: its import still needs the session read for it.",
       );
     const issued = issuedBy.get(transfer);
-    issuedBy.delete(transfer);
-    // Released only in a host that still holds it: a lost host's tickets went with it, and another may reuse one.
+    // Released only in a host that still holds it: a lost host's tickets went with it, and another may reuse one. The
+    // read keeps its issuer, so a later review of it asks that host, which refuses it.
     if (issued !== undefined && issued.losses === losses())
       void issued.host.client
         .request("releaseTransfer", { ticket: transfer.ticket })
