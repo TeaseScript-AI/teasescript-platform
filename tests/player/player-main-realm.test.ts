@@ -51,12 +51,12 @@ test("the main realm reaches Worker-side code only through the imports RATCHET l
   );
 });
 
-test("the main realm loads no reader of an exported file: the engine host reads it (L5h.2)", () => {
+test("the main realm loads no reader of an exported file: the engine host reads it (#1951)", () => {
   assert.equal(graph.modules.includes("player/persistence/session-transfer-read.ts"), false);
   assert.equal(graph.modules.includes("player/engine-bridge/ops/transfer.ts"), false);
 });
 
-test("the main realm writes a debug export without its reader and replay, which run in the Worker (L5i.1)", () => {
+test("the main realm writes a debug export without its reader and replay, which run in the Worker (#2296)", () => {
   assert.equal(graph.modules.includes("player/debug/debug-export-file.ts"), true);
   assert.equal(graph.modules.includes("player/debug/debug-export.ts"), false);
 });

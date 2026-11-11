@@ -206,7 +206,7 @@ async function playTape(bridge: PlayerBridge, recording = false, calls = false) 
   return { steps, session };
 }
 
-test("L5c's ops give the same replies, publications and events in-process and in a Worker", async () => {
+test("the input and storage ops (#1873) give the same replies, publications and events in-process and in a Worker", async () => {
   const worker = new PlayerBridge(await connectBridge(nodeWorkerPort(PLAYER_WORKER, BUILD), BUILD));
   try {
     const local = await playTape(await inProcessBridge());
@@ -323,7 +323,7 @@ function direct(session: PlayerRuntimeSession, op: string, args: Record<string, 
     : answeredByPlayerInput(session, a.input, call);
 }
 
-test("L5c's ops give what today's adapter calls give, and the recording keeps how each answer was given", async () => {
+test("the input and storage ops (#1873) give what today's adapter calls give, and the recording keeps how each answer was given", async () => {
   const bridge = await inProcessBridge();
   const viaOps = await playTape(bridge, true);
   const recorder = new DebugRecorder();
@@ -365,7 +365,7 @@ test("L5c's ops give what today's adapter calls give, and the recording keeps ho
 const refused = (code: string) => (error: unknown) =>
   error instanceof BridgeRequestError && error.kind === "bridge" && error.code === code;
 
-test("L5c's ops refuse malformed arguments, and a stale action, a released or a stopped session, without effect", async () => {
+test("the input and storage ops (#1873) refuse malformed arguments, and a stale action, a released or a stopped session, without effect", async () => {
   const bridge = await inProcessBridge();
   const session = await bridge.start(await prepared(bridge), START, false);
   const actionId = presented(session);
