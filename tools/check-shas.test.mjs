@@ -7,6 +7,9 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { closingClausesOf, excuse, scratchPathsOf } from "./check-shas.mjs";
+import { isolateGit } from "./fixture-git.mjs";
+
+isolateGit();
 
 const tool = fileURLToPath(new URL("./check-shas.mjs", import.meta.url));
 
@@ -542,20 +545,7 @@ function withRemote() {
   const tree = git("rev-parse", "main^{tree}").stdout.trim();
   const local = spawnSync(
     "git",
-    [
-      "-C",
-      directory,
-      "-c",
-      "user.name=t",
-      "-c",
-      "user.email=t@t",
-      "commit-tree",
-      tree,
-      "-p",
-      "main",
-      "-m",
-      "local",
-    ],
+    ["-C", directory, "commit-tree", tree, "-p", "main", "-m", "local"],
     { encoding: "utf8" },
   ).stdout.trim();
   git("update-ref", "refs/heads/main", local);
@@ -597,9 +587,7 @@ test(
   () => {
     const { directory, origin, local } = withRemote();
     const git = (...args) =>
-      spawnSync("git", ["-C", directory, "-c", "user.name=t", "-c", "user.email=t@t", ...args], {
-        encoding: "utf8",
-      }).stdout.trim();
+      spawnSync("git", ["-C", directory, ...args], { encoding: "utf8" }).stdout.trim();
     try {
       // A pre-rebase head archived under its item, and a squash-merged pull request whose earlier head is cited too;
       // the default fetch mirrors neither.

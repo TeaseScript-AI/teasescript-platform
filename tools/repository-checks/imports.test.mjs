@@ -17,6 +17,9 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { cycleGroups, isGeneratedComponentGroup } from "./imports.mjs";
+import { isolateGit } from "../fixture-git.mjs";
+
+isolateGit();
 
 // The wrapper's own part: Git's file list, the two cruises' ownership, the cycle groups, the generated-component
 // exception, the waiting list, the messages and exit status, and ending on a signal. dependency-cruiser's own suite
@@ -63,7 +66,7 @@ function checkout(files) {
   const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" });
   git("init", "-q");
   git("add", "-A");
-  git("-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "-m", "fixture");
+  git("commit", "-q", "-m", "fixture");
   return root;
 }
 

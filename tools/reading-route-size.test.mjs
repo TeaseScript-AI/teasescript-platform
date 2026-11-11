@@ -7,6 +7,9 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { ROUTE } from "./reading-route-size.mjs";
+import { isolateGit } from "./fixture-git.mjs";
+
+isolateGit();
 
 const tool = fileURLToPath(new URL("./reading-route-size.mjs", import.meta.url));
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -37,17 +40,7 @@ function commit(directory, files) {
     writeFileSync(join(directory, path), content);
   }
   spawnSync("git", ["-C", directory, "add", "-A"]);
-  const git = [
-    "-C",
-    directory,
-    "-c",
-    "user.name=t",
-    "-c",
-    "user.email=t@t",
-    "-c",
-    "commit.gpgsign=false",
-  ];
-  spawnSync("git", [...git, "commit", "-q", "--no-verify", "--allow-empty", "-m", "c"]);
+  spawnSync("git", ["-C", directory, "commit", "-q", "--allow-empty", "-m", "c"]);
   return spawnSync("git", ["-C", directory, "rev-parse", "HEAD"], {
     encoding: "utf8",
   }).stdout.trim();
