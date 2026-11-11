@@ -34,13 +34,12 @@ import { parseHistoryMarks, type HistoryMarks } from "../debug/debug-history-mar
 import { startBridgeHost, type HostPort, type HostSessions } from "./worker-host.js";
 
 /*
- * The Player's production backend: the same host and ops as a Worker's, in the page's realm, over a port pair that
- * passes every message through `structuredClone`. A request a session op handles runs when it is posted; replies arrive
- * later, on a microtask or after `delayMs`, as from a Worker.
+ * The engine's backend in the caller's realm, for tests and the gate kit only: the same host and ops as the engine's
+ * Worker (`browser-client.ts`), over a port pair that passes every message through `structuredClone`. A request a
+ * session op handles runs when it is posted; replies arrive later, on a microtask or after `delayMs`, as from a Worker.
  *
- * The **facade** below reaches the host's sessions synchronously, for tests only: no production code calls it. Every
- * main-realm import of this module is a RATCHET entry (`inventory.ts`); the L5 gate requires this module gone, not only
- * RATCHET empty.
+ * The **facade** below reaches the host's sessions synchronously, for tests only. No main-realm module imports this one
+ * (`inventory.ts`'s `RATCHET` is empty); the L5 gate requires this module gone, not only RATCHET empty.
  */
 
 interface Backend {

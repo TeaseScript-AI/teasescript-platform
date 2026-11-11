@@ -42,7 +42,6 @@ interface MediaHost {
 }
 let usePlayerSession: (options: {
   readonly bridge: Promise<PlayerBridge>;
-  readonly debugHistorySpill: () => Promise<null>;
   readonly resolveAsset: (path: string) => string | null;
 }) => MediaHost;
 let usePlanPhotoPreload: (
@@ -128,7 +127,6 @@ async function mount(context: TestContext, topology: Topology, delayMs: number) 
   const player = scope.run(() =>
     usePlayerSession({
       bridge: Promise.resolve(bridge),
-      debugHistorySpill: async () => null,
       resolveAsset: (path) => `https://fixture/${path}`,
     }),
   )!;

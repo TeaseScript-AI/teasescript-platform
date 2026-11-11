@@ -5,8 +5,8 @@
  *
  * `RATCHET` only shrinks: a family's PR removes the entries tagged with its family and adds none (its reviewers check
  * this). The one exception is L5b's: it added the main realm's imports of the transition facade (`in-process.ts`), each
- * tagged with the family that removes that importer's last use. Activation requires `RATCHET` empty, and the L5 gate
- * requires `in-process.ts`'s facade gone, not only its entries.
+ * tagged with the family that removes that importer's last use. Since the activation (#2321) `RATCHET` is empty: the main
+ * realm constructs no in-process backend. The L5 gate requires `in-process.ts`'s facade gone, not only its entries.
  */
 
 /** The bridge families of the L5 series that move engine work into the Worker. */
@@ -23,6 +23,7 @@ export const COMPLETED_FAMILIES: readonly BridgeFamily[] = [
   "L5g",
   "L5h",
   "L5i",
+  "activation",
 ];
 
 /** The `src/` modules the main realm may load, grouped by why. */
@@ -151,15 +152,7 @@ export interface RatchetEntry {
   readonly family: BridgeFamily;
 }
 
-export const RATCHET: readonly RatchetEntry[] = [
-  // activation
-  {
-    importer: "player/vue/src/session/useEngineConnection.ts",
-    target: "player/engine-bridge/in-process.ts",
-    name: "createInProcessBackend",
-    family: "activation",
-  },
-];
+export const RATCHET: readonly RatchetEntry[] = [];
 
 /** How each export of `runtime-adapter.ts` leaves the main realm: an engine op, a reader of the plan or of the session, or the engine itself. */
 export const ADAPTER_EXPORTS: Readonly<
