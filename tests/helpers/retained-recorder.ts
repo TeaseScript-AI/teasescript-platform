@@ -22,10 +22,11 @@
  * is a violation too. The one accessor read is one a registered owner's `hidden` gives by name: that `hidden` is code
  * the owner states reads passively (`CorePass`'s getters, which give owners made after it), trusted, not checked.
  *
- * Outside the domain in #1072 1b, by name: the admission's own state (`Admission`, `core/admission/`); narrowing's
- * indexes (`NarrowingIndex` and its module capture, `GuardIndex`'s narrowing queries); what a query gathers in
- * `contract/objects.ts` and a run's flow in `contract/contributions.ts` (the solver's records, as the lint's
- * `EXCLUDED` says).
+ * Outside the domain in #1072 1b, by name: the admission's own state (`Admission`, `core/admission/`, `Touches`);
+ * narrowing's indexes (`NarrowingIndex` and its module capture, `GuardIndex`'s narrowing queries); the questions' driver
+ * (`Consumers`); what a query gathers in `contract/objects.ts` and a run's flow in `contract/contributions.ts` (the
+ * solver's records); the result made after the analysis (`check-result/`, `CoreAnswers`, `ContractDescriptors`). The
+ * lint's `OUTSIDE` and `TOP_LEVEL` give each reason; every other file of the type core is checked.
  *
  * The fingerprint is a detached string hash computed at the run switch (object identities as this recorder's own ids),
  * never the live object.

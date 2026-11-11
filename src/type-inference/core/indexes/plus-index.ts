@@ -13,6 +13,7 @@ import {
   type Writer,
 } from "../items.js";
 import type { CoreProgram, ValueConstraint } from "../program.js";
+import { amend, Retained } from "../retained/retained.js";
 import { sharing } from "../sharing.js";
 import type { Work } from "../solver.js";
 
@@ -136,7 +137,8 @@ export function plusRun(pass: CorePass, value: PlaceId, step: string, exact: boo
   let state = contract.plusIndex;
   if (state === null) {
     contract.keep(3);
-    state = contract.plusIndex = { seed: step, seen: new Map(), indexed: null };
+    state = { seed: step, seen: Retained.map<PlaceId, string>("PlusIndex.seen"), indexed: null };
+    contract.plusIndex = Retained.held(contract, state);
   }
   const known = state.indexed?.runs.get(value);
   if (known !== undefined) return known;
@@ -196,12 +198,14 @@ function indexed(pass: CorePass, state: PlusIndex): Indexed {
   contract.keep(below.size);
   state.indexed = {
     below,
-    shapes: new Map(),
-    bindings: new Map(),
-    terms: new Map(),
-    bindingsHolding: new Map(),
-    runs: new Map(),
+    shapes: Retained.map("PlusIndex.shapes"),
+    bindings: Retained.map("PlusIndex.bindings"),
+    terms: Retained.map("PlusIndex.terms"),
+    bindingsHolding: Retained.map("PlusIndex.bindingsHolding"),
+    runs: Retained.map("PlusIndex.runs"),
   };
+  // (the state made at an earlier ask, its index filled here)
+  amend(state);
   return state.indexed;
 }
 

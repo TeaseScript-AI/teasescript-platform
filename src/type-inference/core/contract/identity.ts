@@ -102,7 +102,7 @@ export function choiceKeysStored(contract: Contract): StoredChoiceKeys {
       text ||= path.includes("text");
       if (value && text) break;
     }
-    contract.storedChoiceKeys = { value, text };
+    contract.storedChoiceKeys = Retained.held(contract, { value, text });
   }
   return contract.storedChoiceKeys;
 }
