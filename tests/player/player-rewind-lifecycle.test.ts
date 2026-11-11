@@ -515,7 +515,11 @@ function advance(
   };
 
   if (w.sealed === "loss") {
-    const sent = actions.filter((action) => action.kind !== "readOnly");
+    // After a loss only the page's own view changes: read-only, and a new session's cleared view; nothing posts.
+    const sent = actions.filter(
+      (action) =>
+        action.kind !== "readOnly" && !(event.kind === "newSession" && action.kind === "clearView"),
+    );
     if (sent.length > 0) return fail("an action after a loss");
     if (sealedBefore !== "loss" && actions.length === 0 && sealedBefore === null)
       return fail("a loss without its read-only view");
@@ -1422,12 +1426,12 @@ test("a step's drop goes to the history it was sent to, and none once that histo
   ]);
 });
 
-test("after a loss a new session still ends the inspection, and sends nothing", () => {
+test("after a loss a new session still ends the inspection, clears the view, and sends nothing", () => {
   const lost = play(INSPECTING, ["lost"]);
   assert.equal(lost.world.state.inspecting, true, "the lost page keeps what it showed");
   const { world, batches } = play(lost.world, ["newSession"]);
   assert.equal(world.state.inspecting, false, "the new session is no inspection");
-  assert.deepEqual(kinds(batches), []);
+  assert.deepEqual(kinds(batches), ["clearView"]);
 });
 
 test("Sol r5 B1: an obsolete reinstatement gate decides nothing; only the current one reinstates, or reports its failure", () => {

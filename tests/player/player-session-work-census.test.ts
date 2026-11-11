@@ -514,6 +514,17 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     "lifecycle",
     ["BridgeClient.request", "BridgeClient.signal"],
   ],
+  // The replacement of a lost connection from the player's click: it takes the fresh bridge as the readiness callback
+  // does, and prepares the script in it.
+  "player/vue/src/session/useEngineConnection.ts useEngineConnection > replace": [
+    "lifecycle",
+    ["BridgeClient.request", "BridgeClient.signal"],
+  ],
+  // The script's preparation, sent once the connection is ready when it was not yet: what the page's preparers send.
+  "player/vue/src/session/useEngineConnection.ts useEngineConnection > prepareScriptSource > then:callback":
+    ["creation", ["BridgeClient.request"]],
+  "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > restoreForRecovery > owned:callback":
+    ["creation", ["BridgeClient.request"]],
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > toStartPage": [
     "lifecycle",
     ["BridgeClient.request", "BridgeClient.signal"],
@@ -584,12 +595,7 @@ const ESCAPES: Readonly<Record<string, Policy>> = {
     "bridge plumbing",
   "player/encryption/lock-service.ts LockService > #present > wake {wake}": "own observation",
   "player/vue/src/session/useCallView.ts useCallView {followCallView}": "lifecycle",
-  // The script's preparation, sent once the bridge's source promise yielded it, when it had not yet: what the page's
-  // preparers send, which both wait for the readiness first.
-  "player/vue/src/session/useEngineConnection.ts useEngineConnection > prepareScriptSource {send}":
-    "creation",
-  "player/vue/src/session/useEngineConnection.ts useEngineConnection > then:callback {lost}":
-    "lifecycle",
+  "player/vue/src/session/useEngineConnection.ts useEngineConnection > take {lost}": "lifecycle",
   // The export lease's release, which the activation's retirement (`own`) and the dialog's cancellation run, and which
   // the handoff takes back from the cancellation.
   "player/vue/src/session/activation/useExportCandidate.ts useExportCandidate > deliver {release}":
