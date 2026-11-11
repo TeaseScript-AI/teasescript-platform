@@ -94,6 +94,17 @@ if (unmatched.length > 0) {
 const countsFolder =
   fullSuite || fullOutput ? null : mkdtempSync(join(tmpdir(), "test-file-counts-"));
 const countsFile = countsFolder === null ? null : join(countsFolder, "counts.json");
+/** Removes the counts' folder, at the run's end or the filter's: also when a signal ends the filter first. */
+const removeCounts = () => countsFolder && rmSync(countsFolder, { recursive: true, force: true });
+if (countsFolder !== null) {
+  process.once("exit", removeCounts);
+  // (`once`: the signal raised again after the removal ends the filter as it would have)
+  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"])
+    process.once(signal, () => {
+      removeCounts();
+      process.kill(process.pid, signal);
+    });
+}
 const nodeArguments = fullSuite
   ? [join(import.meta.dirname, "run-test-files.mjs"), ...testFiles]
   : [
@@ -164,7 +175,7 @@ child.on("error", (error) => {
   process.exitCode = 1;
 });
 
-/** Each file's counts line, `ℹ <file>: N passed[, N failed][, N skipped][, N todo]`, or why there are none. */
+/** Each file's counts line, `ℹ <file>: N passed[, N failed][, N cancelled][, N skipped][, N todo]`, or why there are none. */
 function fileCountLines() {
   let counts;
   try {
@@ -173,8 +184,8 @@ function fileCountLines() {
     return `ℹ test-output-filter: no counts per file: ${error.message}\n`;
   }
   return Object.entries(counts)
-    .map(([file, { passed, failed, skipped, todo }]) => {
-      const others = Object.entries({ failed, skipped, todo })
+    .map(([file, { passed, failed, cancelled, skipped, todo }]) => {
+      const others = Object.entries({ failed, cancelled, skipped, todo })
         .filter(([, count]) => count > 0)
         .map(([word, count]) => `, ${count} ${word}`)
         .join("");
@@ -186,7 +197,7 @@ function fileCountLines() {
 child.on("close", (code, signal) => {
   if (countsFolder !== null) {
     if (!refused && signal === null) process.stdout.write(fileCountLines());
-    rmSync(countsFolder, { recursive: true, force: true });
+    removeCounts();
   }
   if (refused) return;
   if (signal !== null) {

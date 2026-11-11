@@ -8,6 +8,7 @@ import {
   mkdtempSync,
   openSync,
   readFileSync,
+  readdirSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
@@ -156,8 +157,14 @@ test("compact output ends with each named file's counts, 0 passed for a file tha
         it("second row", () => {});
       });
       test("failing test", () => assert.equal(1, 2));
+      test("timed out test", { timeout: 10 }, () => new Promise(() => setTimeout(() => {}, 100)));
       test.skip("skipped test", () => {});
       test.todo("todo test");
+    `,
+    // suites alone, no test
+    "suites.test.mjs": `
+      import { describe } from "node:test";
+      describe("an empty family", () => {});
     `,
     // its process ends before its test reports
     "silent.test.mjs": `
@@ -165,13 +172,15 @@ test("compact output ends with each named file's counts, 0 passed for a file tha
       test("never reported", () => process.exit(0));
     `,
   };
-  const counted = /^ℹ \S*counted\.test\.mjs: 2 passed, 1 failed, 1 skipped, 1 todo$/mu;
+  const counted = /^ℹ \S*counted\.test\.mjs: 2 passed, 1 failed, 1 cancelled, 1 skipped, 1 todo$/mu;
   const silent = /^ℹ \S*silent\.test\.mjs: 0 passed$/mu;
+  const suites = /^ℹ \S*suites\.test\.mjs: 0 passed$/mu;
   const compact = runFixtures(fixtures);
   assert.equal(compact.status, 1, compact.stderr);
   assert.doesNotMatch(compact.stdout, /first row|second row/);
   assert.match(compact.stdout, counted);
   assert.match(compact.stdout, silent);
+  assert.match(compact.stdout, suites);
   // after Node's own output: the summary and the failures
   assert.match(compact.stdout, /failing test[\s\S]*\nℹ \S*counted\.test\.mjs: /u);
   // a name pattern that matches no test runs none
@@ -185,6 +194,58 @@ test("compact output ends with each named file's counts, 0 passed for a file tha
   const full = runFixtures(fixtures, true);
   assert.doesNotMatch(full.stdout, /^ℹ \S*\.test\.mjs: /mu);
 });
+
+test(
+  "Ctrl+C stops a run of named files and leaves no counts behind",
+  { skip: process.platform === "win32" },
+  async () => {
+    const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
+    // the filter's own temporary folders, apart from everyone else's
+    const temporary = resolve(directory, "tmp");
+    mkdirSync(temporary);
+    const environment = { ...process.env, TMPDIR: temporary };
+    delete environment.NODE_TEST_CONTEXT;
+    const started = resolve(directory, "started");
+    const fixture = resolve(directory, "running.test.mjs");
+    writeFileSync(
+      fixture,
+      `import { writeFileSync } from "node:fs";
+       import test from "node:test";
+       test("running", () => {
+         writeFileSync(${JSON.stringify(started)}, "");
+         return new Promise(() => setInterval(() => {}, 1000));
+       });`,
+    );
+    // In a process group of its own, which receives the signal as a terminal's group does.
+    const filter = spawn(process.execPath, [filterPath, fixture], {
+      cwd: directory,
+      env: environment,
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let output = "";
+    filter.stdout.setEncoding("utf8").on("data", (chunk: string) => (output += chunk));
+    filter.stderr.setEncoding("utf8").on("data", (chunk: string) => (output += chunk));
+    const closed = once(filter, "close");
+    const group = filter.pid;
+    assert.ok(group !== undefined);
+    try {
+      for (let wait = 0; wait < 500 && !existsSync(started); wait++) await delay(10);
+      assert.ok(existsSync(started), output);
+      assert.equal(
+        readdirSync(temporary).filter((name) => name.startsWith("test-file-counts-")).length,
+        1,
+      );
+      process.kill(-group, "SIGINT");
+      assert.deepEqual(await closed, [null, "SIGINT"]);
+      assert.doesNotMatch(output, /ℹ \S*running\.test\.mjs: /u);
+      assert.deepEqual(readdirSync(temporary), []);
+    } finally {
+      if (filter.exitCode === null && filter.signalCode === null) process.kill(-group, "SIGKILL");
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
 
 test("filter refuses a path that matches no test file before Node runs any", () => {
   const fixtures = {
