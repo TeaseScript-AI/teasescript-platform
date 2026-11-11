@@ -56,6 +56,17 @@ function claimOutput(out, inputs) {
   unlinkSync(out);
 }
 
+/** The partial a run writes beside `out` and renames onto it once whole, named by its pid; created empty. */
+function startPartial(out) {
+  const partial = `${out}.partial-${process.pid}`;
+  try {
+    writeFileSync(partial, "");
+  } catch (error) {
+    refuse(`cannot write ${partial}: ${error.message}`);
+  }
+  return partial;
+}
+
 /** The start of a record's line: the tool writes each record with its name first. */
 const NAME_FIELD = Buffer.from('{"name":"');
 
@@ -331,13 +342,7 @@ async function record() {
     return { agree: bare.every((each) => each === bare[0]), modes: list };
   };
 
-  // (written beside the output and renamed onto it once whole)
-  const partial = `${out}.partial-${process.pid}`;
-  try {
-    writeFileSync(partial, "");
-  } catch (error) {
-    refuse(`cannot write ${partial}: ${error.message}`);
-  }
+  const partial = startPartial(out);
   for (const c of cases) {
     const { files, globals } = c;
     const row = {
