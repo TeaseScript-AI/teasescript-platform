@@ -48,15 +48,16 @@ import {
 // shards, sources, runs, differences and what did not compare; the set's records; the stall verdicts of
 // `tests/families/stalls.mjs` over the areas' work records, with `<prefix>-rerun`'s records where `rerun-stalls` ran;
 // each area difference by its first differing part ("route only": the last part, both trees with as many parts), a
-// run without parts (a stops run's) as its check apart; an area record of no form `run.mjs` writes (`areaRecordForm`)
-// as unread, which differs, never equal; each set difference by what differs; and `<prefix>-aside`'s rows where `aside` ran. A shard is its job name
-// (`<area>-<i>of<N>`; an area ran when its shards 0 to N-1 of one N stand), and of its attempts one is read: the one
-// that left a summary line and whose queue record (`meta.json`) shows its runner's own ending (`ranOut`: exit 0 or 1, 3
-// as well for an area job, with the queue's outcome for that exit, no OOM kill, no timeout, no lost test file). Any
-// other attempt is listed, with its host and outcome, as replaced and never read; a shard none of whose attempts stands
-// is "not run", never equal. Several attempts that could stand are refused (exit 2) unless all but one are replaced: by
-// a rerun's record (`rerun-shard`) or by `--replace <failed>=<rerun>`, which is refused when the jobs are not one
-// shard's attempts or the rerun cannot stand. It prints a table and, with `--json`, writes the report.
+// stops run's by the stops `run.mjs` classified (`apartText`); an area record of no form `run.mjs` writes
+// (`areaRecordForm`) as unread, which differs, never equal; each set difference by what differs; and `<prefix>-aside`'s
+// rows where `aside` ran. A shard is its job name (`<area>-<i>of<N>`; an area ran when its shards 0 to N-1 of one N
+// stand), and of its attempts one is read: the one that left a summary line and whose queue record (`meta.json`) shows
+// its runner's own ending (`ranOut`: exit 0 or 1, 3 as well for an area job, with the queue's outcome for that exit, no
+// OOM kill, no timeout, no lost test file). Any other attempt is listed, with its host and outcome, as replaced and
+// never read; a shard none of whose attempts stands is "not run", never equal. Several attempts that could stand are
+// refused (exit 2) unless all but one are replaced: by a rerun's record (`rerun-shard`) or by `--replace
+// <failed>=<rerun>`, which is refused when the jobs are not one shard's attempts or the rerun cannot stand. It prints a
+// table and, with `--json`, writes the report.
 //
 // `rerun-shard` submits one shard again into its campaign, `submit`'s own submission with the shard written in, as the
 // rerun of `<job>` (a split shard by the costs file its record names, from `~/work/replay-costs/`, refused where that
@@ -443,16 +444,79 @@ export const routeOnly = (d) => d.parts?.[0] === d.parts?.[1] && d.part === d.pa
 
 const isObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 
+/** Whether `at` is one tree's `[pass, ordinal]` of a stop, or `null` where that tree has none. */
+const stopAt = (at) =>
+  at === null || (Array.isArray(at) && at.length === 2 && at.every(Number.isInteger));
+
+/**
+ * Whether `stops` is what `run.mjs` (`stopsApart`, #2355) writes on a stops difference: `{ unavailable }` text,
+ * `{ listsEqual: true }`, or `added`, `removed` and `moved` lists of `{ label, path, base, head }`.
+ */
+function stopsForm(stops) {
+  if (!isObject(stops)) return false;
+  const keys = Object.keys(stops).sort().join(" ");
+  if (keys === "unavailable") return typeof stops.unavailable === "string";
+  if (keys === "listsEqual") return stops.listsEqual === true;
+  return (
+    keys === "added moved removed" &&
+    Object.values(stops).every(
+      (list) =>
+        Array.isArray(list) &&
+        list.every(
+          (stop) =>
+            isObject(stop) &&
+            typeof stop.label === "string" &&
+            typeof stop.path === "string" &&
+            stopAt(stop.base) &&
+            stopAt(stop.head) &&
+            (stop.base !== null || stop.head !== null),
+        ),
+    )
+  );
+}
+
 /**
  * The form of an area record that names a run (`mode`), out of those `tests/families/run.mjs` writes: `exception`
  * (`thrown`) and `unanswered` (no `head`: what both trees answered agrees), which the area's summary counts, or
- * `difference` (both trees' hashes, `parts` where the run is a publication's); any other record is `unread`.
+ * `difference` (both trees' hashes, `parts` where the run is a publication's, `stops` where it is a stops run's
+ * and `stopsForm` holds); any other record is `unread`.
  */
 export function areaRecordForm(d) {
   if (isObject(d.thrown)) return "exception";
   if (isObject(d.unanswered) && d.head === undefined) return "unanswered";
-  if (typeof d.base === "string" && typeof d.head === "string") return "difference";
+  if (
+    typeof d.base === "string" &&
+    typeof d.head === "string" &&
+    (d.stops === undefined || stopsForm(d.stops))
+  )
+    return "difference";
   return "unread";
+}
+
+/** One tree's pass and ordinal of a stop, or `none`. */
+const atText = (at) => (at === null ? "none" : `pass ${at[0]} ordinal ${at[1]}`);
+
+/**
+ * Where an area difference lies: a publication's first differing part; or a stops run's stops as `run.mjs` classified
+ * them (#2355), each added, removed or moved stop by its place (`label:path`) and both trees' pass and ordinal, or why
+ * they are unavailable; else its check apart.
+ */
+export function apartText(d) {
+  if (Array.isArray(d.parts)) return `part ${d.part} of ${d.parts.join("/")}`;
+  const { stops } = d;
+  if (stops === undefined) return `${d.check} apart`;
+  if (stops.unavailable !== undefined)
+    return `${d.check} apart; which stops: unavailable (${stops.unavailable})`;
+  if (stops.listsEqual)
+    return `${d.check} apart; its stop lists equal, the stop set's other fields apart`;
+  const kinds = ["added", "removed", "moved"].map((kind) => {
+    const listed = stops[kind].map(
+      ({ label, path, base, head }) =>
+        `${label}:${path} (base ${atText(base)}, head ${atText(head)})`,
+    );
+    return `${kind} ${listed.length}${listed.length === 0 ? "" : `: ${listed.join(", ")}`}`;
+  });
+  return `${d.check} apart; stops ${kinds.join("; ")}`;
 }
 
 /** What differs in a set record's mode: `null` where nothing does. */
@@ -642,11 +706,7 @@ export function verdict(r) {
   );
   for (const d of r.differences)
     if (!(d.routeOnly && agreed.has(`${d.source} ${d.mode}`)))
-      reasons.push(
-        `${d.area} ${d.generator} ${d.source} ${d.mode}: ${
-          Array.isArray(d.parts) ? `part ${d.part} of ${d.parts.join("/")}` : `${d.check} apart`
-        }`,
-      );
+      reasons.push(`${d.area} ${d.generator} ${d.source} ${d.mode}: ${apartText(d)}`);
   for (const { area, job, record } of r.unread)
     reasons.push(
       `${area} (${job}): a record of no form run.mjs writes: ${JSON.stringify(record).slice(0, 300)}`,
