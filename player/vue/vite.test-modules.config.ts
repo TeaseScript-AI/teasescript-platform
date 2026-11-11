@@ -21,6 +21,7 @@ const modules = [
   "player/vue/src/debug/random/randomDrawPresentation.ts",
   "player/vue/src/session/runtime-input.ts",
   "player/vue/src/hostedScript.ts",
+  "player/vue/src/development/scenarioStart.ts",
   "player/vue/src/stage/stagePhotos.ts",
   "player/vue/src/transcript/transcriptPresentation.ts",
   "player/vue/src/debug/random/useDebugRandom.ts",

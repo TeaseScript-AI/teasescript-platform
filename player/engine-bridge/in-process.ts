@@ -38,9 +38,9 @@ import { startBridgeHost, type HostPort, type HostSessions } from "./worker-host
  * passes every message through `structuredClone`. A request a session op handles runs when it is posted; replies arrive
  * later, on a microtask or after `delayMs`, as from a Worker.
  *
- * The **transition facade** below lets code that has not moved to the bridge reach the host's session synchronously.
- * Every main-realm import of one of its names is a RATCHET entry (`inventory.ts`); the L5 gate requires this module
- * gone, not only RATCHET empty.
+ * The **facade** below reaches the host's sessions synchronously, for tests only: no production code calls it. Every
+ * main-realm import of this module is a RATCHET entry (`inventory.ts`); the L5 gate requires this module gone, not only
+ * RATCHET empty.
  */
 
 interface Backend {
@@ -197,8 +197,8 @@ export interface HostFactoryInput {
 
 /**
  * **Facade.** Registers the session `make` creates in the host, under a new bridge session, and returns its first
- * publication. `make` is a transitional factory: a Start with Debug's trace or random control, a restore, a transfer,
- * DevelopmentPreview's Start. A session that brought a plan of its own gets a new plan token. `{ plan, options }`
+ * publication, for tests. `make` is a factory: a session a test made or restored outside the host, or a Start with
+ * Debug's trace or random control. A session that brought a plan of its own gets a new plan token. `{ plan, options }`
  * starts a held plan instead. Either runs with the connection's value trace; a Start (`random`) also with its Player's
  * random control. A restore begins without ownership, until an explicit adoption (`adoptRandom`).
  *

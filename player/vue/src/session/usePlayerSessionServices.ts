@@ -1,4 +1,4 @@
-import { shallowRef, watch, type Ref } from "vue";
+import { onScopeDispose, shallowRef, watch, type Ref } from "vue";
 import { FileStoreService } from "../../../media/stored-files.js";
 import { LockService, type LockDialog } from "../../../encryption/lock-service.js";
 import {
@@ -13,8 +13,7 @@ import type { PlayerSessionOptions } from "./usePlayerSession.js";
 
 /*
  * The services that answer a script's requests in service sections, moved from `usePlayerSession` unchanged: photo
- * capture, the file stores, and the locks with their dialog. The lock code's preload stays in the composable, which
- * reads `heldPlan` for it.
+ * capture, the file stores, and the locks with their dialog, with the preload of the lock code.
  */
 
 /** What the session services need from the Player's session composable. */
@@ -81,5 +80,38 @@ export function usePlayerSessionServices({
     ...(options.lockServices === undefined ? {} : { crypto: options.lockServices }),
   });
   watch([servicedSession, generation], () => locks.request());
+  // A script that locks or opens loads the lock code while the Player is online, so locking works offline later; one
+  // that locks also loads the public keys' code. The plan's host says which (`planMetadata`). A reply loads only while
+  // its connection and token are still the serviced ones and the scope lives; a refused or lost one loads nothing. The
+  // service loads the code itself where a step needs it, so a lock asked before the reply only waits for that import.
+  let disposed = false;
+  onScopeDispose(() => (disposed = true));
+  watch(
+    [
+      () => servicedSession.value?.connection ?? null,
+      () => servicedSession.value?.planToken ?? null,
+    ],
+    ([connection, plan]) => {
+      if (connection === null || plan === null) return;
+      connection.client.request("planMetadata", { plan }).then(
+        (reply) => {
+          const needs = reply.result;
+          const now = servicedSession.value;
+          if (disposed || now?.connection !== connection || now.planToken !== plan) return;
+          if (needs?.locks !== true) return;
+          void import("../../../encryption/content-lock.js").catch(() => {});
+          void (
+            options.lockServices?.tlock ?? (() => import("../../../encryption/time-lock.js"))
+          )().catch(() => {});
+          if (needs.encrypts)
+            void (
+              options.lockServices?.age ?? (() => import("../../../encryption/age.js"))
+            )().catch(() => {});
+        },
+        // A Worker that is lost or ended loads nothing.
+        () => {},
+      );
+    },
+  );
   return { captures, fileStores, lockDialog, locks };
 }

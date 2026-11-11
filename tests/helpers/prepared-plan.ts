@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import type { StartOptions } from "../../player/engine-bridge/ops/session.js";
+import type { PlayerSessionStart } from "../../player/vue/src/session/sessionStart.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import type { PlayerProject } from "../../player/runtime/runtime-adapter.js";
 import type { InstructionPlan } from "../../src/index.js";
@@ -66,13 +67,10 @@ export async function preparedSource(
 }
 
 /**
- * A Start of a plan the host holds, as `PlayerSessionStart`'s plan form gives it: its token and its Start options. The
- * test loaders take only this form; `player-factory-start.test.ts`, held until PR B, alone admits a factory.
+ * A Start as the Player takes it: the production `PlayerSessionStart`, a held plan's token and its Start options. Every
+ * test loader's `prepare` takes this type, so a Start the Player would refuse does not compile in a test either.
  */
-export interface PlanStart {
-  readonly plan: string;
-  readonly options: () => Omit<StartOptions, "debugMode">;
-}
+export type PlanStart = PlayerSessionStart;
 
 /** A Start of `script`, compiled in the host of `bridge`, with `options` read at the activation. */
 export async function sourceStart(

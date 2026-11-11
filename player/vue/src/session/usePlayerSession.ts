@@ -1,7 +1,6 @@
 import { computed, ref, shallowRef, watch } from "vue";
 import { tryOnScopeDispose } from "@vueuse/core";
 import { browserMediaUrls } from "../../../media/browser-capture.js";
-import { planLockNeeds } from "../../../runtime/plan-metadata.js";
 import {
   CapturedMediaStore,
   isCapturedMediaReference,
@@ -14,15 +13,13 @@ import {
 import { browserImageDecoder, type ImageDecoder } from "../../../media/image-file.js";
 import { type LockDialogInput } from "../../../encryption/lock-service.js";
 import type { LockServices } from "../../../encryption/content-lock.js";
-import type { PlayerRuntimeSession } from "../../../runtime/runtime-adapter.js";
 import {
   playerTemporalContext,
   playerRuntimeMedia,
   playerRuntimePermanentButtons,
   type PlayerSession,
 } from "../../../runtime/runtime-view.js";
-import { createInProcessBackend, heldPlan } from "../../../engine-bridge/in-process.js";
-import type { StartOptions } from "../../../engine-bridge/ops/session.js";
+import { createInProcessBackend } from "../../../engine-bridge/in-process.js";
 import {
   bridgeOf,
   endsQuietly,
@@ -34,13 +31,11 @@ import type { SessionOp } from "../../../engine-bridge/op-catalogue.js";
 import { RETIRED, type InputSection, type InputSectionHost } from "./runtime-input";
 import { sweepDebugHistories } from "../../../debug/debug-history-indexeddb.js";
 import type { DebugHistorySpill } from "../../../engine-bridge/history/snapshots.js";
-import type { DebugRecorder } from "../../../debug/debug-recorder.js";
 import {
   keptPhotoReferences,
   type KeptRoomStore,
   type KeptSessionStore,
 } from "../../../persistence/kept-sessions.js";
-import type { RuntimeDebugContext } from "../../../../src/index.js";
 import type { SavedDataHost } from "../../../persistence/saved-data.js";
 import { playerBuildIdentity } from "../../../build-identity.js";
 import type { ScriptStorageProvider } from "../../../persistence/script-storage.js";
@@ -51,7 +46,7 @@ import {
   playerNotices,
   type PlayerNotice,
 } from "../../../presentation/notices.js";
-import type { RandomControlOptions, TemporalContext } from "../../../../src/index.js";
+import type { TemporalContext } from "../../../../src/index.js";
 
 import { useRuntimeSceneClock, type SectionWork } from "./useRuntimeSceneClock";
 import { useScreenWakeLock } from "./useScreenWakeLock";
@@ -141,25 +136,7 @@ export interface PlayerSessionOptions {
   debugHistoryMemoryBudget?: number;
 }
 
-/**
- * Creates a new session at Start. Either a held plan with the options its Start reads then, which starts over the
- * bridge (`start`); or a transitional factory, which the engine's host runs (`introduceNow`): pass `recording` on to
- * `createPlayerRuntimeSession`, so a debug export can replay it, while Debug runs its value trace records it from the
- * start, and the script reads whether Debug is on.
- */
-export type PlayerSessionStart =
-  | {
-      /** The host's token for the plan. */
-      readonly plan: string;
-      /** The Start's data options, read at activation; Player Debug supplies `debugMode` (`setDebugMode`). */
-      readonly options: () => Omit<StartOptions, "debugMode">;
-    }
-  | ((recording: {
-      readonly recorder: DebugRecorder;
-      readonly debugTrace?: RuntimeDebugContext;
-      readonly debugMode: boolean;
-      readonly randomControl?: RandomControlOptions;
-    }) => PlayerRuntimeSession);
+export type { PlayerSessionStart } from "./sessionStart.js";
 
 // Presentation lifecycle around the shown session. It holds the shown `PlayerSession` publication; the engine's host
 // owns the canonical runtime state. This host records which session is shown, when presentation must reset, maps
@@ -612,26 +589,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     serviceSection,
     options,
   });
-  // A script that locks or opens loads the lock code while the Player is online, so locking works offline later; one
-  // that locks also loads the public keys' code.
-  watch(
-    () => {
-      const serviced = servicedSession.value;
-      return serviced === null ? undefined : heldPlan(serviced.connection, serviced.planToken);
-    },
-    (plan) => {
-      const needs = plan === undefined ? null : planLockNeeds(plan);
-      if (needs?.locks !== true) return;
-      void import("../../../encryption/content-lock.js").catch(() => {});
-      void (
-        options.lockServices?.tlock ?? (() => import("../../../encryption/time-lock.js"))
-      )().catch(() => {});
-      if (needs.encrypts)
-        void (options.lockServices?.age ?? (() => import("../../../encryption/age.js")))().catch(
-          () => {},
-        );
-    },
-  );
   const {
     cameraOffered,
     captureCamera,

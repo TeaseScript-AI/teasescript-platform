@@ -36,6 +36,7 @@
     "player/runtime/runtime-view.ts",
     "player/vue/src/session/runtime-input.ts",
     "player/vue/src/hostedScript.ts",
+    "player/vue/src/development/scenarioStart.ts",
     "player/vue/src/debug/random/useRandomDrawPickerState.ts",
     "player/vue/src/session/useRuntimeSceneClock.ts",
     "player/vue/src/debug/useDebugView.ts",

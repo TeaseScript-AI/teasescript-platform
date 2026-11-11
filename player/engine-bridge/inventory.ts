@@ -22,6 +22,7 @@ export const COMPLETED_FAMILIES: readonly BridgeFamily[] = [
   "L5f",
   "L5g",
   "L5h",
+  "L5i",
 ];
 
 /** The `src/` modules the main realm may load, grouped by why. */
@@ -75,8 +76,6 @@ export const ALLOWED_SOURCE: readonly {
       "src/save-rules.ts",
       "src/shown-text-rules.ts",
       "src/speaker-terms.ts",
-      "src/tag-query.ts",
-      "src/tags.ts",
       "src/temporal-builtins.ts",
       "src/web-url.ts",
     ],
@@ -159,25 +158,6 @@ export interface RatchetEntry {
 }
 
 export const RATCHET: readonly RatchetEntry[] = [
-  // L5i
-  {
-    importer: "player/vue/src/development/DevelopmentPreview.vue",
-    target: "player/runtime/compile-project.ts",
-    name: "createPlayerRuntimeSession",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/session/usePlayerSession.ts",
-    target: "player/engine-bridge/in-process.ts",
-    name: "heldPlan",
-    family: "L5i",
-  },
-  {
-    importer: "player/vue/src/session/activation/useSessionActivation.ts",
-    target: "player/engine-bridge/in-process.ts",
-    name: "introduceNow",
-    family: "L5i",
-  },
   // activation
   {
     importer: "player/vue/src/session/usePlayerSession.ts",

@@ -244,7 +244,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/hostedScript.ts prepareHostedScript > then:callback": [
     "creation",
-    ["BridgeClient.request", "BridgeClient.signal", "introduceNow"],
+    ["BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/hostedScript.ts prepareHostedScript > then:callback > catch:callback": [
     "lifecycle",
@@ -252,7 +252,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/main.ts setup": [
     "composition",
-    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal", "introduceNow"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/session/useCallView.ts useCallView > demandCallView > release": [
     "lifecycle",
@@ -272,6 +272,24 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     ["own observation", ["BridgeClient.request"]],
   "player/vue/src/session/usePlayerSessionServices.ts usePlayerSessionServices > watch:callback#3":
     ["own observation", ["BridgeClient.request"]],
+  "player/vue/src/session/usePlayerSessionServices.ts usePlayerSessionServices > watch:callback#4":
+    ["read", ["BridgeClient.request"]],
+  "player/vue/src/development/scenarioStart.ts prepareScenario": [
+    "creation",
+    ["BridgeClient.request", "BridgeClient.signal"],
+  ],
+  "player/vue/src/development/scenarioStart.ts prepareScenario > then:callback#1": [
+    "creation",
+    ["BridgeClient.request", "BridgeClient.signal"],
+  ],
+  "player/vue/src/development/scenarioStart.ts prepareScenario > then:callback#2": [
+    "creation",
+    ["BridgeClient.request"],
+  ],
+  "player/vue/src/development/scenarioStart.ts prepareScenario > catch:callback": [
+    "lifecycle",
+    ["BridgeClient.request", "BridgeClient.signal"],
+  ],
   "player/vue/src/stage/stagePhotos.ts usePlanPhotoPreload": ["read", ["BridgeClient.request"]],
   "player/vue/src/stage/stagePhotos.ts usePlanPhotoPreload > watch:callback": [
     "read",
@@ -353,7 +371,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     ["own observation", ["BridgeClient.request"]],
   "player/vue/src/debug/usePlayerDebug.ts usePlayerDebug": [
     "composition",
-    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal", "introduceNow"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/debug/usePlayerDebug.ts usePlayerDebug > explain": [
     "read",
@@ -365,7 +383,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/debug/usePlayerDebug.ts usePlayerDebug > watch:callback#3.2": [
     "clock: debugMode",
-    ["BridgeClient.request", "BridgeClient.signal", "introduceNow"],
+    ["BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/debug/usePlayerDebug.ts usePlayerDebug > watch:callback#3.2 > run:callback": [
     "composition",
@@ -385,7 +403,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > copyToDebugRoom > then:callback": [
     "creation",
-    ["BridgeClient.request", "BridgeClient.signal", "introduceNow"],
+    ["BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/session/useDebugModeAndTrace.ts useDebugModeAndTrace > debugView > then:callback.2":
     ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
@@ -412,10 +430,10 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > importSession": [
     "creation",
-    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal", "introduceNow"],
+    ["BridgeClient.post", "BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/session/persistence/useSessionTransfer.ts useSessionTransfer > importSession > owned:callback":
-    ["creation", ["BridgeClient.request", "BridgeClient.signal", "introduceNow"]],
+    ["creation", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/session/persistence/useSessionTransfer.ts useSessionTransfer > importSession > owned:callback > replaceSession > commit:callback#4":
     ["creation", ["BridgeClient.request"]],
   "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > keepIn > admit:callback": [
@@ -439,7 +457,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > prepareKept > owned:callback":
     ["creation", ["BridgeClient.request"]],
   "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > prepareKept > owned:callback > commit:callback#1":
-    ["creation", ["BridgeClient.request", "BridgeClient.signal", "introduceNow"]],
+    ["creation", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/session/persistence/useKeptSession.ts useKeptSession > prepareKept > owned:callback > commit:callback#2":
     ["creation", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/session/activation/work/continue.ts continueRestored > catch:callback": [
@@ -462,11 +480,11 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     ["creation", ["BridgeClient.request"]],
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > rooms > reloadDebug": [
     "creation",
-    ["BridgeClient.request", "BridgeClient.signal", "introduceNow"],
+    ["BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > rooms > resetDebug": [
     "creation",
-    ["BridgeClient.request", "BridgeClient.signal", "introduceNow"],
+    ["BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/session/useRandomControl.ts useRandomControl > flushRandom > then:callback.2": [
     "lifecycle",
@@ -483,9 +501,9 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     ["BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > startDebugSessionAnew > then:callback":
-    ["creation", ["BridgeClient.request", "BridgeClient.signal", "introduceNow"]],
+    ["creation", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > startFrom > then:callback#1":
-    ["creation", ["BridgeClient.request", "BridgeClient.signal", "introduceNow"]],
+    ["creation", ["BridgeClient.request", "BridgeClient.signal"]],
   // The begin's own reaction, which settles it through the record's `settle`: its success is the creation, its
   // failure the error stop, as at the base.
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > startFrom > then:callback#2.1":
@@ -498,7 +516,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
   ],
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > toStartPage": [
     "lifecycle",
-    ["BridgeClient.request", "BridgeClient.signal", "introduceNow"],
+    ["BridgeClient.request", "BridgeClient.signal"],
   ],
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > tryOnScopeDispose:callback": [
     "lifecycle",
