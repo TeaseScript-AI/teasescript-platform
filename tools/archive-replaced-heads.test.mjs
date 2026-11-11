@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -172,13 +172,35 @@ test(
       assert.equal(remote("rev-parse", "side").stdout.trim(), rewritten);
 
       // A mirror push from a clone without the archive would delete it unlisted, and move `main` back: refused, nothing moves.
+      // Every spelling git accepts, from git under its own name or another (a link), is refused.
       git("reset", "-q", "--hard", first);
-      const mirror = git("push", "-q", "--mirror", "origin");
-      assert.notEqual(mirror.status, 0);
-      assert.match(
-        mirror.stderr,
-        /a pruning push \(--mirror or --prune\) can delete archive refs unseen/u,
+      const linked = join(root, "custom-git");
+      symlinkSync(
+        spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim(),
+        linked,
       );
+      for (const invoker of ["git", linked])
+        for (const spelling of [
+          "--mirror origin",
+          "--mi origin",
+          "--mirr origin",
+          "--no-prune --mirror origin",
+          // (a pruning refspec push names its refspec)
+          "--prune origin +refs/heads/*:refs/heads/*",
+          "--pru origin +refs/heads/*:refs/heads/*",
+        ]) {
+          const pruning = spawnSync(
+            invoker,
+            ["-C", join(root, "clone"), "push", "-q", ...spelling.split(" ")],
+            { encoding: "utf8", timeout: 20_000 },
+          );
+          assert.notEqual(pruning.status, 0, `${invoker} ${spelling}`);
+          assert.match(
+            pruning.stderr,
+            /a pruning push \(--mirror or --prune\) can delete archive refs unseen/u,
+            `${invoker} ${spelling}`,
+          );
+        }
       // An explicit deletion of an archive is listed to the hook, and refused.
       const explicit = git("push", "-q", "origin", `:refs/archive/${shared}`);
       assert.notEqual(explicit.status, 0);
@@ -188,6 +210,10 @@ test(
       );
       assert.equal(archived(), `refs/archive/${shared} ${shared}`);
       assert.equal(remote("rev-parse", "main").stdout.trim(), rewritten);
+      // The last of `--mirror` and `--no-mirror` wins, as in git: no pruning, an ordinary force-push.
+      const negated = git("push", "-q", "--mirror", "--no-mirror", "--force", "origin", "main");
+      assert.equal(negated.status, 0, negated.stderr);
+      assert.equal(remote("rev-parse", "main").stdout.trim(), first);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
