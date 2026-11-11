@@ -96,7 +96,7 @@ const countsFolder =
 const countsFile = countsFolder === null ? null : join(countsFolder, "counts.json");
 // The folder is removed when the run ends or the filter exits. The filter installs no signal handler, so a signal that
 // ends it leaves the folder in the system's temporary directory, where no run reads it: one counts file, empty until
-// the run ends, then under a hundred bytes per named file.
+// the run ends, then one JSON entry per named file: its absolute path and five counts.
 const removeCounts = () => countsFolder && rmSync(countsFolder, { recursive: true, force: true });
 if (countsFolder !== null) process.once("exit", removeCounts);
 const nodeArguments = fullSuite
