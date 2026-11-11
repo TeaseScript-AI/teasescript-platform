@@ -451,9 +451,7 @@ export function useKeptSession({
     if (found === null) return {};
     // Not for a session that ended, which only its events can show when its state is of another revision: the engine
     // ends a session with an `exit` or `runtimeFailure` event.
-    const explain = !found.events.some(
-      (event) => event.kind === "exit" || event.kind === "runtimeFailure",
-    );
+    const explain = !found.events.some(endsSession);
     let restored: PlayerSession | "otherPlan" | "ended";
     try {
       const host = await currentConnection();
@@ -511,6 +509,71 @@ export function useKeptSession({
     owns();
     return { session, media };
   }
+  /** Waits until the keep work under way settled: a publish already issued finishes in its store first. */
+  async function settleKeepWork(): Promise<void> {
+    while (keeping !== null) await keeping;
+  }
+  /**
+   * Whether the room keeps a session that a Continue could go on with, as far as this page can tell without the host
+   * (PLAYER-UI "Session end and failure"): a stored record whose events the engine's checks accept and that has not
+   * ended, read once the keep work under way settled. The host's plan comparison and restore decide only at the click.
+   */
+  async function keptPointFound(): Promise<boolean> {
+    await settleKeepWork();
+    if (keptScope === null || isDisposed()) return false;
+    const stored = await keptStore()
+      .session(keptScope)
+      .catch(() => null);
+    const found = stored === null ? null : keptSession(stored);
+    return found !== null && !found.events.some(endsSession);
+  }
+  /**
+   * The host of a fresh connection prepared the script as `plan`: what this page kept of the lost host's plans goes
+   * (the plan JSON's lease starts empty, and every persistence operation of the lost host retires), and `plan` is the
+   * script's plan from now on, as a new preparation makes it.
+   */
+  function rebindScript(plan: string) {
+    planJsonLease = EMPTY_PLAN_JSON_LEASE;
+    planTenure += 1;
+    retireStaleOperations();
+    settlePlanJson({ kind: "replace", plan });
+    if (scriptPlan === null) return;
+    if (keptScope !== null) settlePlanJson({ kind: "prepare", plan });
+    scriptPlan = plan;
+  }
+  /**
+   * The kept session restored in the host for a Continue the player chose after a loss, installed as `prepareKept`
+   * installs it but without preparing an activation: its photos and what is kept of it. Else, for Start, why it cannot
+   * go on, if the start page explains it; `null` when the page moved on meanwhile.
+   */
+  async function restoreForRecovery(): Promise<
+    { readonly session: PlayerSession } | { readonly outdated?: Problem } | null
+  > {
+    const plan = scriptPlan;
+    if (plan === null) return {};
+    // A preparation of its own: one under way, such as the start page's, goes.
+    const ctx = persistenceOwnership(nextPreparation());
+    let found: Awaited<ReturnType<typeof restoreKept>> | null = null;
+    const ran = await owned(ctx, async () => {
+      found = await restoreKept(plan, ctx);
+      if ("session" in found && !ctx.current()) bridgeOf(found.session).release(found.session);
+      ctx.check();
+      if (found !== null && "session" in found) {
+        const restored = found;
+        ctx.commit(() => {
+          for (const [reference, stored] of restored.media)
+            capturedMedia.restoreSessionMedia(reference, stored);
+          kept = {
+            plan: true,
+            count: restored.session.events.length,
+            last: restored.session.events.at(-1) ?? null,
+          };
+        });
+      }
+    });
+    if (!ran || found === null) return null;
+    return found;
+  }
   /**
    * Returns to the start page once the session ended by `exit`, which the host does when the player closes the end
    * dialog; the ended session is kept first, so a reload starts anew.
@@ -531,6 +594,10 @@ export function useKeptSession({
     settlePlanJson,
     keepSessionLater,
     settleKeepAttempt,
+    settleKeepWork,
+    keptPointFound,
+    rebindScript,
+    restoreForRecovery,
     prepareScript,
     prepareKept,
     toStartPage,
@@ -586,6 +653,10 @@ export function useKeptSession({
     },
   };
 }
+
+/** Whether `event` ends its session: the engine ends a session with an `exit` or `runtimeFailure` event. */
+const endsSession = (event: InterpreterEvent) =>
+  event.kind === "exit" || event.kind === "runtimeFailure";
 
 /** Whether `info`, an engine error's details from the host, is a `CheckpointError`'s. */
 function isCheckpointErrorInfo(info: unknown): info is CheckpointErrorInfo {

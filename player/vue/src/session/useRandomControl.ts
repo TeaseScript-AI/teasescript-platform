@@ -240,6 +240,16 @@ export function useRandomControl({
     dropPending() {
       pendingRandom = false;
     },
+    /**
+     * A fresh connection replaced the lost one: its history went with the lost host, and the random control goes to the
+     * fresh one once it is ready, under the claim taken there.
+     */
+    reconnected() {
+      lastRandom = undefined;
+      resetRequested = false;
+      randomOwner = null;
+      pendingRandom = desiredRandom !== null;
+    },
     /** This Player's newest random intent sent, or `undefined` before any. */
     issuedRandom: () => lastRandom,
     /** Whether Debug's random control is off for every site. */
