@@ -497,6 +497,14 @@ function treeResolver(ref, tree, folders, git) {
  * reference (outside the import, re-export and import-equals statements above) is a `reference` whose target is
  * `refused`, one per line.
  */
+/** The line of offset `at` in `text` as Git counts lines, each ended by LF alone (TypeScript also ends one at CR or U+2028). */
+function gitLine(text, at) {
+  let line = 1;
+  for (let end = text.indexOf("\n"); end !== -1 && end < at; end = text.indexOf("\n", end + 1))
+    line += 1;
+  return line;
+}
+
 function bindingsOf(file, text, resolver) {
   if (!PARSED.test(file)) return [];
   const config = resolver.configOf(file);
@@ -536,7 +544,7 @@ function bindingsOf(file, text, resolver) {
   const out = [];
   const compared = new Set();
   for (const statement of source.statements) {
-    const line = source.getLineAndCharacterOfPosition(statement.getStart(source)).line + 1;
+    const line = gitLine(text, statement.getStart(source));
     if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
       compared.add(statement);
       const specifier = statement.moduleSpecifier.text;
@@ -619,7 +627,7 @@ function otherReferencesOf(source, text, compared) {
   const out = [];
   const lines = new Set();
   const refuse = (at, shown, what) => {
-    const line = source.getLineAndCharacterOfPosition(at).line + 1;
+    const line = gitLine(text, at);
     if (lines.has(line)) return;
     lines.add(line);
     const specifier = shown.split("\n")[0].slice(0, 60);
@@ -858,17 +866,18 @@ export function checkMove(
       .map(([file, mode]) => `${file} (${mode})`),
   );
   const declarations = declare === null ? [] : declarationsOf(declare);
-  const used = new Set();
+  // each declaration binds to the one line it first matches, by the line's number on its side
+  const bound = new Map();
   const declaredFor = (entry) => {
     const index = declarations.findIndex(
       (d, at) =>
-        !used.has(at) &&
+        !bound.has(at) &&
         d.file === entry.file &&
         d.side === entry.side &&
         d.text === entry.row.text,
     );
     if (index === -1) return null;
-    used.add(index);
+    bound.set(index, entry.row.line);
     return declarations[index].reason;
   };
   const { verdicts, moved } = verdictsOf(mergeBase, "HEAD", files, { cwd, declaredFor });
@@ -898,25 +907,29 @@ export function checkMove(
     renames === null ? null : renamesOf(renames),
     git,
   );
-  // a refusal is declared by a declaration of its side and its line's text, used or not, even where the line is no
-  // changed one; each is printed with the refusal reason it covers
+  // a refusal is declared by the declaration bound to its line, a changed one or not, else by one of its side and its
+  // line's text bound to none, which it binds; each is printed with the refusal reason it covers
   const refused = [];
   const covered = [];
+  const ofSide = (d, refusal) => d.file === refusal.file && d.side === refusal.side;
   for (const refusal of bindings.refusals) {
-    const index = declarations.findIndex(
-      (d) => d.file === refusal.file && d.side === refusal.side && d.text === refusal.text,
+    let index = declarations.findIndex(
+      (d, at) => ofSide(d, refusal) && bound.get(at) === refusal.line,
     );
-    if (index === -1) refused.push(refusal);
-    else {
-      covered.push({ ...refusal, declared: declarations[index].reason });
-      if (!used.has(index)) {
-        used.add(index);
+    if (index === -1) {
+      index = declarations.findIndex(
+        (d, at) => ofSide(d, refusal) && !bound.has(at) && d.text === refusal.text,
+      );
+      if (index !== -1) {
+        bound.set(index, refusal.line);
         counts.declared += 1;
       }
     }
+    if (index === -1) refused.push(refusal);
+    else covered.push({ ...refusal, declared: declarations[index].reason });
   }
   counts.refused = refused.length;
-  const stale = declarations.filter((_, at) => !used.has(at));
+  const stale = declarations.filter((_, at) => !bound.has(at));
   return {
     mergeBase,
     unadmitted,
