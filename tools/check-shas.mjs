@@ -26,6 +26,12 @@ import { existsSync, readFileSync } from "node:fs";
 // - 14 characters whose first 10 are digits: a queue job id (`sx-job`: the month to the second, then 4 hex), such as
 //   `1107175450d1b5`;
 // - only the letters a-f: a word, such as `defaced`;
+// - a number's fractional digits followed by `e` and its exponent, the number standing alone: no word character of
+//   any script (a letter, mark, number or connector) touches it on either side, and no `.` precedes it, so `v1.`, `β1.`
+//   and a dotted version stay checked, while any quote, backtick, bracket, operator or white space admits it
+//   (`floatDigits`): a float's digits, such as `1.7976931348623157e+308` or `6.02214076e23`. A token of that shape
+//   after any punctuation is therefore skipped when unresolved, which is acceptable as the rule reaches only a token no
+//   repository resolves, of digits, one `e` and an exponent, directly after `<digits>.`;
 // - right after the word `sha256` (with a space, `:` or `=` between): a file's hash, such as `sha256 4322b2e0e668`;
 // - shorter than 40 and inside a URL or a path, except after `/commit/`, `/commits/`, `/tree/` or `/blob/`: a file's
 //   or a job's name. A full 40-character SHA in a path, such as an evidence folder, must resolve.
@@ -42,11 +48,48 @@ export const PLACEHOLDERS = [
 
 const TOKEN = /(?<![0-9A-Za-z_])[0-9a-f]{7,40}(?![0-9A-Za-z_])/gu;
 
+/** A word character of any script: a letter, mark, number or connector (the Unicode categories L, M, N and Pc). */
+const WORD = /^[\p{L}\p{M}\p{N}\p{Pc}]/u;
+
+/** The code point that ends right before `at` in `text`, as a string, or `""` at the start. */
+function charBefore(text, at) {
+  if (at <= 0) return "";
+  return at >= 2 && /[\udc00-\udfff]/u.test(text[at - 1]) && /[\ud800-\udbff]/u.test(text[at - 2])
+    ? text.slice(at - 2, at)
+    : text[at - 1];
+}
+
+/**
+ * Whether the token at `index`, of `length` characters, is a float's digits standing alone: digits ending in `e` and
+ * the exponent's digits (in the token, or after it behind a sign), right after an integer part (ASCII digits, an
+ * optional sign) and a `.`, with no word character (`WORD`) touching the number on either side and no `.` before it.
+ */
+function floatDigits(text, index, length) {
+  const token = text.slice(index, index + length);
+  let end = index + length;
+  if (/^\d+e$/u.test(token)) {
+    const exponent = /^[+-]\d+/u.exec(text.slice(end, end + 32));
+    if (exponent === null) return false;
+    end += exponent[0].length;
+    while (/\d/u.test(text[end] ?? "")) end += 1;
+  } else if (!/^\d+e\d+$/u.test(token)) return false;
+  let at = index - 1;
+  if (text[at] !== ".") return false;
+  const point = at;
+  while (at > 0 && /\d/u.test(text[at - 1])) at -= 1;
+  if (at === point) return false;
+  if (/[+-]/u.test(text[at - 1] ?? "")) at -= 1;
+  const left = charBefore(text, at);
+  const right = String.fromCodePoint(text.codePointAt(end) ?? 32);
+  return left !== "." && !WORD.test(left) && !WORD.test(right);
+}
+
 /** Why a token need not be a commit, or `null` when it must resolve. */
 export function excuse(token, text, index) {
   if (/^\d+$/u.test(token)) return "only digits, an id";
   if (/^\d{10}[0-9a-f]{4}$/u.test(token)) return "a queue job id";
   if (/^[a-f]+$/u.test(token)) return "a word";
+  if (floatDigits(text, index, token.length)) return "a float's digits";
   if (/\bsha256[\s:=]+$/iu.test(text.slice(Math.max(0, index - 16), index)))
     return "a file's sha256";
   // The run of non-space characters the token is in: a URL or a path, unless it names the commit itself.
