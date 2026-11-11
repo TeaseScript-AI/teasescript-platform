@@ -1,37 +1,95 @@
-// Requires Playwright CLI and a running Player development preview of this checkout (`npm run dev:player`).
-// npm run test:player:preview -- http://localhost:5173/player/
+// Requires Playwright CLI and a Player development preview of this checkout.
+// npm run test:player:preview [-- http://localhost:5173/player/]
+// Without a URL, it starts the preview itself (`tools/player-preview-server.mjs`): on 127.0.0.1, on a port Vite
+// chooses, with a dependency cache in its scratch folder. The preview's standard input is a pipe this process holds,
+// and the preview exits when that input ends, so it ends with this run however the run ends.
 // Before any check, the preview must answer `<url>__checkout` (`player/vue/vite.config.ts`) with this checkout's real
 // path, as `text/plain`; a preview of another checkout, or one that does not say which checkout it serves, is refused.
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, realpathSync, writeFileSync, rmSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import {
+  closeSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const url = process.argv[2];
-if (!url) throw new Error("Pass the Player development preview URL.");
 const checkout = realpathSync(fileURLToPath(new URL("..", import.meta.url)));
-const endpoint = new URL("__checkout", url.endsWith("/") ? url : `${url}/`);
-const answer = await fetch(endpoint).catch((error) => error);
-// An older preview answers the path with its page, as it does any path it does not know.
-const served =
-  answer instanceof Response &&
-  answer.ok &&
-  answer.headers.get("content-type")?.startsWith("text/plain")
-    ? await answer.text()
-    : null;
-if (served !== checkout)
-  throw new Error(
-    `${url} is no development preview of this checkout (${checkout}): ${
-      served !== null
-        ? `it serves ${served}`
-        : answer instanceof Response
-          ? `${endpoint} answered ${answer.status} ${answer.headers.get("content-type") ?? "without a type"}, not a checkout`
-          : `${endpoint} failed: ${answer.message}`
-    }. Start this checkout's preview (\`npm run dev:player\`) and pass its URL.`,
-  );
-const scratch = mkdtempSync(join(tmpdir(), "player-preview-"));
 const session = `player-preview-${process.pid}`;
+/** The run's scratch folder: browser configuration, failure artifacts, and a started preview's cache and log. */
+let scratch = "";
+
+/** Refuses a URL whose preview does not answer `__checkout` with this checkout's real path. */
+async function checkIdentity(url) {
+  const endpoint = new URL("__checkout", url.endsWith("/") ? url : `${url}/`);
+  const answer = await fetch(endpoint).catch((error) => error);
+  // An older preview answers the path with its page, as it does any path it does not know.
+  const served =
+    answer instanceof Response &&
+    answer.ok &&
+    answer.headers.get("content-type")?.startsWith("text/plain")
+      ? await answer.text()
+      : null;
+  if (served !== checkout)
+    throw new Error(
+      `${url} is no development preview of this checkout (${checkout}): ${
+        served !== null
+          ? `it serves ${served}`
+          : answer instanceof Response
+            ? `${endpoint} answered ${answer.status} ${answer.headers.get("content-type") ?? "without a type"}, not a checkout`
+            : `${endpoint} failed: ${answer.message}`
+      }. Pass the URL of this checkout's preview (\`npm run dev:player\`), or none to have one started.`,
+    );
+}
+
+/** The last lines of a started preview's log. */
+const logTail = (preview) => readFileSync(preview.log, "utf8").split("\n").slice(-20).join("\n");
+
+/**
+ * Starts this checkout's preview. Its end is recorded from the moment it is spawned, as `ended` (a promise) and
+ * `status`, so that an end that comes while this process is blocked in a browser command is still known afterwards.
+ */
+function startPreview() {
+  const log = join(scratch, "preview.log");
+  // A file, not a pipe: a pipe this process does not read while a browser command blocks it would stall the server.
+  const output = openSync(log, "w");
+  const child = spawn(
+    process.execPath,
+    [fileURLToPath(new URL("player-preview-server.mjs", import.meta.url)), join(scratch, "vite")],
+    { cwd: checkout, stdio: ["pipe", output, output] },
+  );
+  closeSync(output);
+  // Ending the input of a preview that has already ended fails; that end is reported from `ended`.
+  child.stdin?.on("error", () => {});
+  const preview = { child, log, status: undefined };
+  preview.ended = new Promise((resolve) => {
+    child.once("error", (error) => resolve(`could not start (${error.message})`));
+    child.once("exit", (code, signal) =>
+      resolve(signal === null ? `exited with ${code}` : `ended by ${signal}`),
+    );
+  }).then((status) => (preview.status = status));
+  return preview;
+}
+
+/** The URL a started preview reports once it listens; fails if it ends first or is not ready within two minutes. */
+async function readyPreview(preview) {
+  const deadline = Date.now() + 120_000;
+  for (;;) {
+    const url = /^READY (\S+)\n/mu.exec(readFileSync(preview.log, "utf8"))?.[1];
+    if (url !== undefined) return url;
+    if (preview.status !== undefined)
+      throw new Error(`The preview ${preview.status} before it was ready:\n${logTail(preview)}`);
+    if (Date.now() > deadline)
+      throw new Error(`The preview was not ready within two minutes:\n${logTail(preview)}`);
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+}
+
 function cli(...args) {
   const result = spawnSync("playwright-cli", [`-s=${session}`, ...args], {
     cwd: scratch,
@@ -737,40 +795,71 @@ async function runGroup(browserPage, run, url, artifacts) {
   }
 }
 
-let passed = false;
-try {
-  const config = join(scratch, "browser.json");
-  writeFileSync(
-    config,
-    JSON.stringify({
-      browser: {
-        contextOptions: { ignoreHTTPSErrors: true },
-        // X11 agents may report no pointer; exercise the real desktop hover CSS as well as touch tests.
-        launchOptions: {
-          args: [
-            "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4",
-          ],
-        },
-      },
-    }),
-  );
-  cli("open", url, "--config", config);
-  for (const group of groups) {
-    console.log(`player-preview-checks: RUN ${group.name}`);
-    const output = cli(
-      "run-code",
-      `async page => (${runGroup.toString()})(page, ${group.toString()}, ${JSON.stringify(url)}, ${JSON.stringify(join(scratch, group.name))})`,
-    );
-    const result = output.match(/^### Result\r?\n"(PASS [^"\n]+)"$/mu)?.[1];
-    if (!result) throw new Error(output);
-    console.log(`player-preview-checks: ${result}`);
-  }
-  passed = true;
-} finally {
+/** Runs every group against `given`, or against a preview it starts when `given` is undefined. */
+async function main(given) {
+  if (given !== undefined) await checkIdentity(given);
+  scratch = mkdtempSync(join(tmpdir(), "player-preview-"));
+  let preview;
+  let passed = false;
   try {
-    cli("close");
+    let url = given;
+    if (url === undefined) {
+      preview = startPreview();
+      url = await readyPreview(preview);
+      await checkIdentity(url);
+    }
+    const config = join(scratch, "browser.json");
+    writeFileSync(
+      config,
+      JSON.stringify({
+        browser: {
+          contextOptions: { ignoreHTTPSErrors: true },
+          // X11 agents may report no pointer; exercise the real desktop hover CSS as well as touch tests.
+          launchOptions: {
+            args: [
+              "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4",
+            ],
+          },
+        },
+      }),
+    );
+    cli("open", url, "--config", config);
+    for (const group of groups) {
+      console.log(`player-preview-checks: RUN ${group.name}`);
+      const output = cli(
+        "run-code",
+        `async page => (${runGroup.toString()})(page, ${group.toString()}, ${JSON.stringify(url)}, ${JSON.stringify(join(scratch, group.name))})`,
+      );
+      const result = output.match(/^### Result\r?\n"(PASS [^"\n]+)"$/mu)?.[1];
+      if (!result) throw new Error(output);
+      // A started preview that ended during the group fails it: the browser may have passed on what it had loaded.
+      if (preview !== undefined) {
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        if (preview.status !== undefined)
+          throw new Error(
+            `The preview ${preview.status} during ${group.name}:\n${logTail(preview)}`,
+          );
+      }
+      console.log(`player-preview-checks: ${result}`);
+    }
+    passed = true;
   } finally {
-    if (passed) rmSync(scratch, { recursive: true, force: true });
-    else console.error(`player-preview-checks: failure artifacts retained at ${scratch}`);
+    try {
+      cli("close");
+    } finally {
+      try {
+        // Its input's end ends the preview; `ended` settles however and whenever it ended.
+        if (preview !== undefined) {
+          preview.child.stdin?.end();
+          await preview.ended;
+        }
+      } finally {
+        if (passed) rmSync(scratch, { recursive: true, force: true });
+        else console.error(`player-preview-checks: failure artifacts retained at ${scratch}`);
+      }
+    }
   }
 }
+
+// Imported, it runs nothing.
+if (import.meta.main) await main(process.argv[2] || undefined);
