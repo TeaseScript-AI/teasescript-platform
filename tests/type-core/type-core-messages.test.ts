@@ -204,6 +204,43 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
           ROUND,
       ],
     ],
+    // (#2289 R12: a dict's values take the list's sentence; a property, another type, a warning take the reason)
+    [
+      'let lives: integer = 3\nlet table = dict{a: lives}\ntable["b"] = 2.5\nexit\n',
+      [
+        "E TSV041 '2.5': 'table' holds whole numbers (integer dict) because its values are copies of 'lives', " +
+          "declared 'integer' on line 1. To add other numbers to it, write 'let table: number dict = dict{a: lives}'.",
+      ],
+    ],
+    [
+      "let lives: integer = 3\nlet box = {count: lives}\nbox.count = 2.5\nexit\n",
+      [
+        "E TSV041 '2.5': 'box.count' holds a whole number (integer) because it is a copy of 'lives', declared " +
+          `'integer' on line 1, so it cannot take a number. ${ROUND}`,
+      ],
+    ],
+    [
+      'let name: string = "Ann"\nlet copy = name\ncopy = 3\nexit\n',
+      [
+        "E TSV041 '3': 'copy' holds text (string) because it is a copy of 'name', declared 'string' on line 1, so " +
+          "it cannot take a whole number (integer). To show '3' as text, write '\"${3}\"'.",
+      ],
+    ],
+    [
+      "let lives: integer = 3\nlet copy = lives\ncopy = hostValue\nexit\n",
+      [
+        "W TSV041 'hostValue': 'copy' holds a whole number (integer) because it is a copy of 'lives', declared " +
+          `'integer' on line 1, but 'hostValue' may be a value of another type here. ${STOPS} Check 'hostValue' ` +
+          `first, as in 'if hostValue is integer { copy = hostValue }'. ${OUTSIDE("hostValue")}`,
+      ],
+    ],
+    // (a copy of a copy: no declared variable to name, so the line that decided it)
+    [
+      "let lives: integer = 3\nlet copy = lives\nlet again = copy\nagain = 2.5\nexit\n",
+      [
+        `E TSV041 '2.5': 'again' holds a whole number (integer) since line 3, so it cannot take a number. ${ROUND}`,
+      ],
+    ],
     [
       "let n: integer = hostValue\nexit\n",
       [
@@ -2731,7 +2768,7 @@ test("a store below its value checks the whole receiving type, null kept, and th
       "let x:integer[]?[]=[[1]]\nlet b=x\nb=hostValue\nexit\n",
       "hostValue",
       warned(
-        "An element of an element of 'b' is declared as a whole number (integer)",
+        "An element of an element of 'b' holds a whole number (integer) since line 2",
         "hostValue",
         "Check that every element of every element of 'hostValue' is a whole number (integer) first.",
       ),
@@ -2740,7 +2777,7 @@ test("a store below its value checks the whole receiving type, null kept, and th
       "let x:integer[]? dict=dict {}\nlet b=x\nb=hostValue\nexit\n",
       "hostValue",
       warned(
-        "An element of an element of 'b' is declared as a whole number (integer)",
+        "An element of an element of 'b' holds a whole number (integer) since line 2",
         "hostValue",
         "Check that every element of every value of 'hostValue' is a whole number (integer) first.",
       ),
@@ -2749,13 +2786,13 @@ test("a store below its value checks the whole receiving type, null kept, and th
     [
       "let x:integer[]? dict=dict {}\nlet b=x\nb=hostValue\nexit\n",
       "hostValue",
-      `An element of 'b' is declared as a list or null, but 'hostValue' may be a value of another type here. ${STOPS} ${OUTSIDE("hostValue")}`,
+      `An element of 'b' holds a list or null since line 2, but 'hostValue' may be a value of another type here. ${STOPS} ${OUTSIDE("hostValue")}`,
     ],
     [
       "let x:integer[]?[]=[[1]]\nlet a={f: x}\na.f=[hostValue]\nexit\n",
       "hostValue",
       warned(
-        "An element of an element of 'a.f' is declared as a whole number (integer)",
+        "An element of an element of 'a.f' holds a whole number (integer) since line 2",
         "hostValue",
         "Check that every element of 'hostValue' is a whole number (integer) first.",
       ),
