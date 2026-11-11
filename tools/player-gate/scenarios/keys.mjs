@@ -165,6 +165,17 @@ function cases(engine) {
       expect,
       residual: "",
     })),
+    // Enter on the empty composer at the unselected choices is refused; Space within its flight types nothing there,
+    // and the notice stays.
+    {
+      name: "unselected empty-enter space",
+      url: "/player/?dev",
+      before: [STAY, "Continue"],
+      answer: "",
+      keys: KEYS.space,
+      expect: shown("", REFUSED, 3),
+      residual: "",
+    },
     fixture("prefill key", "Prefill", press("x"), shown("Adax", "", 4)),
     fixture(
       "prefill continue-enter-edit",
@@ -184,7 +195,14 @@ function cases(engine) {
       R(6),
     ),
     fixture("link enter", "Link", press("Enter"), shown("", "", 3, { pages: 1 }), R(6)),
-    // The field's label, typed and sent, starts the flight whose settlement opens the field's editor, where `main`'s
+    // The field's label, typed and sent, starts the flight whose settlement opens the field's editor with its text: the
+    // flight lets go of the composer, and nothing of it stays.
+    {
+      ...fixture("form release", "Form", KEYS.idle, shown("Ada", "", 4)),
+      before: ["Form", { type: "Stay" }],
+      answer: "name",
+    },
+    // The same, where `main`'s
     // x replaces its text and Escape closes it.
     {
       ...fixture("form escape", "Form", seq(press("x"), press("Escape")), shown("", "", 4), R(6)),
