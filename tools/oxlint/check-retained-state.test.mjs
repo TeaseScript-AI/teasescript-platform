@@ -121,8 +121,11 @@ test("a private field is a readonly `Retained` collection, exposed by its class'
         "class Unregistered {",
         "  #state = 0;",
         "}",
+        "class Held {",
+        "  readonly #payload = Retained.held(this, new Map<string, number>());",
+        "}",
       ].join("\n"),
     ),
-    [4, 5, 6, 15, 23, 26],
+    [4, 5, 6, 15, 23, 26, 29],
   );
 });
