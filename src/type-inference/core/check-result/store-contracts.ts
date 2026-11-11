@@ -326,6 +326,7 @@ export class Contracts {
   /** PROBE v7: each place key's definitions, read once; each unwritten binding's verdict at a level and kinds, once. */
   readonly #definitionsOf = new Map<string, readonly Definition[]>();
   readonly #bindingVerdicts = new Map<string, string | null>();
+  readonly #asking = new Set<string>();
 
   #definitions(id: PlaceId, path: readonly string[], answer?: PlaceAnswer): readonly Definition[] {
     const key = `${id}\u0001${path.join("\u0000")}`;
@@ -355,10 +356,14 @@ export class Contracts {
       if (!follow) return "unannotated";
       const key = `${place.id}\u0001${steps.join("\u0000")}\u0001${[...kinds].sort().join("|")}`;
       if (this.#bindingVerdicts.has(key)) return this.#bindingVerdicts.get(key)!;
+      // (a binding asked again while its own stores are asked: a cycle of copies, not proved)
+      if (this.#asking.has(key)) return "cycle";
+      this.#asking.add(key);
       const one = new Map([
         [steps.join("\u0000"), { path: joinSteps(steps, []), kinds: new Set(kinds) }],
       ]);
       const verdict = this.#sourcesAgree(place.id, [], one, null);
+      this.#asking.delete(key);
       this.#bindingVerdicts.set(key, verdict);
       return verdict;
     }
@@ -411,7 +416,7 @@ export class Contracts {
         for (const read of atLevel(value, at.slice(definition.path.length))) {
           if (read.kind === "other") continue;
           if (read.kind === "unsure") return "unsure";
-          const verdict = this.#readAgrees(read.read, read.rest, kinds, own !== null);
+          const verdict = this.#readAgrees(read.read, read.rest, kinds, true);
           if (verdict !== null) return verdict;
         }
       }
@@ -1049,8 +1054,17 @@ function atLevel(
         : [{ kind: "other" }];
     case "loadExpression":
       return [{ kind: "other" }];
-    case "callExpression":
-      return typedDefault(at) !== undefined ? [{ kind: "other" }] : [{ kind: "unsure" }];
+    case "callExpression": {
+      if (typedDefault(at) !== undefined) return [{ kind: "other" }];
+      // (a `get`: its receiver's element, or its default)
+      const receiver = getReceiver(at);
+      if (receiver === null) return [{ kind: "unsure" }];
+      const fallback = defaultOf(at);
+      return [
+        ...atLevel(receiver, joinSteps(["element"], path)),
+        ...(fallback === null ? [] : atLevel(fallback, path)),
+      ];
+    }
     default:
       return [{ kind: "unsure" }];
   }
