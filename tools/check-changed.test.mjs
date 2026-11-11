@@ -52,8 +52,9 @@ const REPRESENTATIVES = {
   typescript: ["src/compiler.ts", ["typescript"]],
   "player-vue": ["player/vue/src/shell/PlayerApp.vue", ["player-vue"]],
   "oxlint-rules": ["tools/oxlint/run.mjs", ["oxlint-rules"]],
-  tools: ["tools/test-shards.mjs", ["tools"]],
-  "repository checks": ["tools/repository-checks/regression-cases.mjs", ["tools"]],
+  // (the tools, the repository checks and knip's configuration, which only the checks run for every change read, #2472)
+  tools: ["tools/test-shards.mjs", []],
+  "repository checks": ["tools/repository-checks/regression-cases.mjs", []],
   families: [
     "tests/families/copies/copy-admission/named-and-nested-composite-admission.mjs",
     ["families"],
@@ -63,14 +64,14 @@ const REPRESENTATIVES = {
   // root configuration files, each needing the projects whose checks read it
   "root tsconfig": ["tsconfig.json", ["typescript", "oxlint-rules", "design-lint"]],
   "Player tsconfig": ["player/vue/tsconfig.json", ["player-vue", "design-lint"]],
-  "knip config": ["knip.json", ["tools"]],
+  "knip config": ["knip.json", []],
   formatting: [".prettierrc.json", ["formatting"]],
   "Prettier ignore file": [".prettierignore", ["formatting"]],
   "design-lint": ["eslint.design.config.mjs", ["design-lint"]],
   // (which test:lint reads: turning a rule off there fails its rule tests, Sol's final on #2434)
   "oxlint config": [".oxlintrc.json", []],
   // (which test:lint runs its rule tests through, #2402)
-  "test:lint's output filter": ["tools/test-output-filter.mjs", ["tools"]],
+  "test:lint's output filter": ["tools/test-output-filter.mjs", []],
   unknown: [".github/workflows/ci.yml", Object.keys(PROJECTS)],
   "package manifest": ["package.json", Object.keys(PROJECTS)],
 };
@@ -166,12 +167,21 @@ function repository({
   };
   run("init", "-q", "-b", "main");
   write("a.mjs", "export const a = 1;\n");
-  // (a stand-in test:lint, which every change but documentation runs, that passes with the other stand-ins)
+  // (stand-ins that pass with the others: test:lint, which every change but documentation runs, and
+  // test:verification and typecheck:player, which every change runs)
   write(
     "package.json",
     JSON.stringify({
       devDependencies: { prettier: "0.0.0" },
-      ...(passing ? { scripts: { "test:lint": "node -e 0" } } : {}),
+      ...(passing
+        ? {
+            scripts: {
+              "test:lint": "node -e 0",
+              "test:verification": "node -e 0",
+              "typecheck:player": "node -e 0",
+            },
+          }
+        : {}),
     }),
   );
   write("package-lock.json", JSON.stringify({ lockfileVersion: 3, packages: { "": {}, ...lock } }));
@@ -395,7 +405,7 @@ test("a deleted path and both sides of a move select their projects as a changed
     'docs/a"quote.md',
   ];
   const changes = {
-    "a deleted tool": [["rm", "-q", "tools/test-file-counts.mjs"], "oxlint-rules, tools"],
+    "a deleted tool": [["rm", "-q", "tools/test-file-counts.mjs"], "oxlint-rules"],
     "a deleted source": [["rm", "-q", "src/a.ts"], "typescript, oxlint-rules"],
     "a move out of the Player": [
       ["mv", "player/vue/b.ts", "src/b.ts"],
@@ -440,7 +450,7 @@ test("a deleted path and both sides of a move select their projects as a changed
 });
 
 test("an untracked path is read as it is named: a quoted or non-ASCII name selects as its path does (#2431)", () => {
-  const cases = { 'docs/a"quote é.md': "none", 'tools/a"quote é.mjs': "oxlint-rules, tools" };
+  const cases = { 'docs/a"quote é.md': "none", 'tools/a"quote é.mjs': "oxlint-rules" };
   for (const [path, projects] of Object.entries(cases)) {
     const { directory } = repository({ passing: true });
     try {
@@ -1009,9 +1019,10 @@ test("its last line names what ran, what failed, and what it did not run: the ch
       assert.equal(result.status, fails ? 1 : 0, result.stdout + result.stderr);
       assert.equal(
         result.stdout.trimEnd().split("\n").at(-1),
-        "check-changed: ran: diff --check, merge commits, format, oxlint, knip, doc links, imports, pin suites, tsc, test:lint; " +
+        "check-changed: ran: diff --check, merge commits, format, oxlint, knip, doc links, imports, test:verification, " +
+          "typecheck:player, pin suites, tsc, test:lint; " +
           `failed: ${fails ? "pin suites" : "none"}; ` +
-          "not run: test:families, typecheck:player, lint:design, test:verification, format:check, " +
+          "not run: test:families, lint:design, format:check, " +
           "test:lint:design, the compiled test suite (CI runs it)",
       );
     } finally {
@@ -1042,8 +1053,9 @@ test(
       signalsBefore: false,
     });
     const last =
-      "check-changed: ran: diff --check, merge commits, format, oxlint, knip, doc links, imports, pin suites, tsc, test:lint; " +
-      "failed: pin suites; not run: test:families, typecheck:player, lint:design, test:verification, " +
+      "check-changed: ran: diff --check, merge commits, format, oxlint, knip, doc links, imports, test:verification, " +
+      "typecheck:player, pin suites, tsc, test:lint; " +
+      "failed: pin suites; not run: test:families, lint:design, " +
       "format:check, test:lint:design, the compiled test suite (CI runs it)";
     const at = result.stdout + result.stderr;
     assert.deepEqual([result.code, result.signal], [1, null], at);
@@ -1204,7 +1216,17 @@ test("`merge commits` runs in every run, plain, merged and in a merged checkout,
     assert.equal(result.status, status, `${at}: ${result.stdout}${result.stderr}`);
     assert.deepEqual(
       result.stdout.match(/^(?:PASS|FAIL) {2}\S.*$/gmu).map((line) => line.split(/ {2,}/u)[1]),
-      ["diff --check", "merge commits", "oxlint", "knip", "doc links", "imports"],
+      // (each change is documentation only: the tool tests and the Player's type check run for every change, #2472)
+      [
+        "diff --check",
+        "merge commits",
+        "oxlint",
+        "knip",
+        "doc links",
+        "imports",
+        "test:verification",
+        "typecheck:player",
+      ],
       at,
     );
     if (lines.length > 0)

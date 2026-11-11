@@ -41,8 +41,13 @@ const [{ costlyTestSeconds }, { summaryLine }, { isSuiteTestPath, isTypeCoreTest
 // HEAD's own line leaves, `origin/main` or `origin/runtime-v2`, which it prints, or exit 2 when it cannot prove which
 // (`branchedFrom`); the changes are those since its merge-base with HEAD, committed or not, untracked files, deleted
 // ones and both sides of a move included. Always: `git diff --check`, the format check of the changed files, oxlint,
-// knip, the doc links and the imports, each as CI runs it, and `merge commits`: since the merge-base, no merge commit
-// but one whose later parents are on origin/main or origin/runtime-v2 and not on the base (`strayMerges`).
+// knip, the doc links, the imports, `test:verification` and `typecheck:player`, each as CI runs it, and
+// `merge commits`: since the merge-base, no merge commit but one whose later parents are on origin/main or
+// origin/runtime-v2 and not on the base (`strayMerges`). The tool tests and the Player's type check read far more than
+// a claim can name (#2472): `typecheck:player` type-checks the `src/`, `player/` and `playground/` files the Player
+// imports, 314 tracked files outside `player/vue/` on main cfbf2b415; `test:verification` read 471 besides the tools
+// and checks it tests, among them every `.ts` file under `tests/` (`pin-suites`) and the documents the reading route
+// lists (`reading-route-size`).
 // Then each project a changed path belongs to (`projectsFor`): its type check and tests. A root configuration file
 // belongs to the checks that read it, and needs no project when only those that always run do. A changed path no
 // project claims, other than documentation, runs every project's checks. Every change but documentation (a path ending
@@ -93,10 +98,7 @@ export const PROJECTS = {
     checks: ["tsc"],
   },
   families: { claims: (path) => path.startsWith("tests/families/"), checks: ["test:families"] },
-  "player-vue": {
-    claims: (path) => path.startsWith("player/vue/"),
-    checks: ["typecheck:player", "lint:design"],
-  },
+  "player-vue": { claims: (path) => path.startsWith("player/vue/"), checks: ["lint:design"] },
   // `test:lint`'s rule tests read far more than a claim can name: `.oxlintrc.json`, the tools that run and count them
   // (one by a computed path), and the repository's own sources and test helpers, which they lint as fixtures; a trace
   // found 859 tracked files (#2431). So it runs for every change that is not documentation only, as oxlint does, which
@@ -106,13 +108,6 @@ export const PROJECTS = {
     claims: (path) => path.startsWith("tools/oxlint/") || path === "tsconfig.json",
     everyChange: true,
     checks: ["test:lint"],
-  },
-  tools: {
-    claims: (path) =>
-      /^tools\/[^/]+\.(?:mjs|cjs|js)$/u.test(path) ||
-      path.startsWith("tools/repository-checks/") ||
-      path === "knip.json",
-    checks: ["test:verification"],
   },
   // Prettier's configuration and ignore file change how every file formats, not only the changed ones.
   formatting: {
@@ -129,15 +124,23 @@ export const PROJECTS = {
   },
 };
 
-/** Root configuration files that only the checks run for every change read: oxlint's, which `test:lint` reads too. */
-const READ_BY_ALWAYS_RUN_CHECKS = new Set([".oxlintrc.json"]);
+/**
+ * Paths that only the checks run for every change read, so they need no project: oxlint's configuration, which
+ * `test:lint` reads too, and the tools, the repository checks and knip's configuration, which `test:verification` and
+ * knip read (and `typecheck:player` and `test:lint` one tool each).
+ */
+const readByAlwaysRunChecks = (path) =>
+  path === ".oxlintrc.json" ||
+  /^tools\/[^/]+\.(?:mjs|cjs|js)$/u.test(path) ||
+  path.startsWith("tools/repository-checks/") ||
+  path === "knip.json";
 
 /** A documentation path selects no project's checks; its Markdown links are checked on every run (`doc links`). */
 const isDocumentation = (path) => path.endsWith(".md") || path.startsWith("docs/");
 
 /**
  * The projects whose checks `paths` need. A project with `everyChange` is needed by every path but documentation. A path
- * no project claims, documentation and the configuration only the checks run for every change read aside, needs every
+ * no project claims, documentation and the paths only the checks run for every change read aside, needs every
  * project: an unknown kind of path is checked by everything, never by nothing.
  */
 export function projectsFor(paths) {
@@ -145,7 +148,7 @@ export function projectsFor(paths) {
   for (const path of paths) {
     if (isDocumentation(path)) continue;
     for (const name of Object.keys(PROJECTS)) if (PROJECTS[name].everyChange) projects.add(name);
-    if (READ_BY_ALWAYS_RUN_CHECKS.has(path)) continue;
+    if (readByAlwaysRunChecks(path)) continue;
     const claiming = Object.keys(PROJECTS).filter((name) => PROJECTS[name].claims(path));
     for (const name of claiming.length > 0 ? claiming : Object.keys(PROJECTS)) projects.add(name);
   }
@@ -779,6 +782,8 @@ async function check(cleanups) {
     run("knip", process.execPath, ["node_modules/knip/bin/knip.js"]),
     run("doc links", process.execPath, ["tools/repository-checks/doc-links.mjs"]),
     run("imports", process.execPath, ["tools/repository-checks/imports.mjs"]),
+    run("test:verification", npm, ["run", "--silent", "test:verification"]),
+    run("typecheck:player", npm, ["run", "--silent", "typecheck:player"]),
     ...(coreChanged
       ? [
           run(
