@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
-  copyFileSync,
+  chmodSync,
   cpSync,
   mkdirSync,
   mkdtempSync,
@@ -45,7 +45,7 @@ const CLOCK = `import { round } from "./rounding.ts";\nimport { limit } from "./
 const STALE = (paths: string) =>
   `The Player test bundle was built before a file of this checkout changed (${paths}): run \`npm run build:player-test-modules\` to rebuild it.`;
 
-function checkout(t: TestContext) {
+function checkout(t: TestContext, sources = repository) {
   const root = mkdtempSync(join(tmpdir(), "player-test-modules-"));
   const outside = mkdtempSync(join(tmpdir(), "player-test-modules-outside-"));
   t.after(() => {
@@ -68,14 +68,13 @@ function checkout(t: TestContext) {
   symlinkSync("round.ts", path("player/rounding.ts"));
   writeFileSync(join(outside, "limit.ts"), "export const limit = (minutes: number) => minutes;\n");
   symlinkSync(join(outside, "limit.ts"), path("player/limit.ts"));
+  // Written, not copied with their mode: the tests edit them, and a queue `--commit` tree's sources are read-only.
   for (const name of [
     "player/vue/test-modules-sources.ts",
     "dist/tests/helpers/player-modules.js",
     "dist/player/vue/test-modules-sources.js",
-  ]) {
-    mkdirSync(dirname(path(name)), { recursive: true });
-    copyFileSync(join(repository, name), path(name));
-  }
+  ])
+    write(name, readFileSync(join(sources, name), "utf8"));
   symlinkSync(join(repository, "node_modules"), path("node_modules"));
   const build = () =>
     spawnSync(
@@ -210,18 +209,105 @@ test("a Player test bundle is refused once a file of the checkout changes", (t) 
   );
 });
 
-test("a link to a folder fails the build, at any depth and in the root", (t) => {
+// Raw names: a name that is not valid UTF-8 is listed decoded, as `\ufffd` for each invalid byte.
+const rawName = (folder: string, bytes: readonly number[], rest = "") =>
+  Buffer.concat([Buffer.from(`${folder}/`), Buffer.from(bytes), Buffer.from(rest)]);
+
+test("an entry the walk cannot stamp fails the build: a folder link, two entries listed alike, an unreadable name, a special file", (t) => {
   const { path, write, build } = checkout(t);
-  const refused = (expected: RegExp, link: string, target: string) => {
-    symlinkSync(target, path(link), "junction");
-    assert.match(build().stderr, expected, link);
-    unlinkSync(path(link));
+  const refused = (expected: RegExp, make: () => () => void) => {
+    const undo = make();
+    const result = build();
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, expected);
+    undo();
+  };
+  const link = (name: string, target: string) => () => {
+    symlinkSync(target, path(name), "junction");
+    return () => unlinkSync(path(name));
   };
   write("actual-src/value.ts", "export const value = 1;\n");
-  refused(/player\/tools cannot be stamped \(folder link tools\)/u, "player/tools", "../tools");
-  refused(/src cannot be stamped \(folder link actual-src\)/u, "src", "actual-src");
-  refused(/docs-link cannot be stamped \(folder link actual-src\)/u, "docs-link", "actual-src");
+  refused(
+    /player\/tools cannot be stamped \(folder link tools\)/u,
+    link("player/tools", "../tools"),
+  );
+  refused(/src cannot be stamped \(folder link actual-src\)/u, link("src", "actual-src"));
+  refused(
+    /docs-link cannot be stamped \(folder link actual-src\)/u,
+    link("docs-link", "actual-src"),
+  );
+  // a name that is not UTF-8 beside the valid name it is listed as, for a file and for a folder
+  refused(/raw\/\ufffd\.txt cannot be stamped \(duplicate key: two entries share it\)/u, () => {
+    write("raw/\ufffd.txt", "valid");
+    writeFileSync(rawName(path("raw"), [0xff], ".txt"), "raw");
+    return () => rmSync(path("raw"), { recursive: true });
+  });
+  refused(/tools\/\ufffd cannot be stamped \(duplicate key: two entries share it\)/u, () => {
+    mkdirSync(path("tools/\ufffd"));
+    mkdirSync(rawName(path("tools"), [0xfe]));
+    writeFileSync(rawName(path("tools"), [0xfe], "/value.txt"), "raw");
+    return () => {
+      rmSync(path("tools/\ufffd"), { recursive: true });
+      rmSync(rawName(path("tools"), [0xfe]), { recursive: true });
+    };
+  });
+  // a lone name that is not UTF-8: listed, but not readable under the name it is listed as
+  refused(/tools\/\ufffd\.txt cannot be stamped \(unreadable under its listed name\)/u, () => {
+    writeFileSync(rawName(path("tools"), [0xff], ".txt"), "raw");
+    return () => rmSync(rawName(path("tools"), [0xff], ".txt"));
+  });
+  // a special file is not read, so a FIFO with no writer cannot hang the walk
+  const fifo = (name: string) => () => {
+    assert.equal(spawnSync("mkfifo", [path(name)]).status, 0);
+    return () => unlinkSync(path(name));
+  };
+  refused(/tools\/pipe cannot be stamped \(special file\)/u, fifo("tools/pipe"));
+  refused(/player\/pipe-link cannot be stamped \(special file link tools\/pipe\)/u, () => {
+    const undo = fifo("tools/pipe")();
+    symlinkSync("../tools/pipe", path("player/pipe-link"));
+    return () => {
+      unlinkSync(path("player/pipe-link"));
+      undo();
+    };
+  });
   assert.equal(build().status, 0);
+});
+
+test("two names that differ only by a backslash are two entries, each stamped by its own content", (t) => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "player-test-modules-backslash-")));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "tools"));
+  writeFileSync(join(root, "tools/data.txt"), "slash");
+  writeFileSync(join(root, "tools\\data.txt"), "backslash");
+  const before = walkSources(root);
+  assert.deepEqual([...before.keys()], ["tools/data.txt", "tools\\data.txt"]);
+  for (const name of ["tools/data.txt", "tools\\data.txt"]) {
+    writeFileSync(join(root, name), "edited");
+    const after = walkSources(root);
+    assert.deepEqual(
+      [...after.keys()].filter((key) => after.get(key) !== before.get(key)),
+      [name],
+    );
+    writeFileSync(join(root, name), name.includes("\\") ? "backslash" : "slash");
+  }
+});
+
+test("the fixture's copies stay writable when their sources are read-only, as in a queue --commit tree", (t) => {
+  const sources = mkdtempSync(join(tmpdir(), "player-test-modules-sources-"));
+  t.after(() => rmSync(sources, { recursive: true, force: true }));
+  for (const name of [
+    "player/vue/test-modules-sources.ts",
+    "dist/tests/helpers/player-modules.js",
+    "dist/player/vue/test-modules-sources.js",
+  ]) {
+    mkdirSync(dirname(join(sources, name)), { recursive: true });
+    writeFileSync(join(sources, name), readFileSync(join(repository, name)));
+    chmodSync(join(sources, name), 0o444);
+  }
+  const { write, build, minutesOf90 } = checkout(t, sources);
+  assert.equal(build().status, 0);
+  write("player/vue/test-modules-sources.ts", "// edited\n");
+  assert.equal(minutesOf90(), STALE("player/vue/test-modules-sources.ts"));
 });
 
 // The witnesses of review rounds 3 to 6, each an input the stamp missed before it covered the whole checkout, and two of
@@ -379,11 +465,12 @@ test("the stamp covers the checkout apart from the root's bookkeeping, node_modu
   );
 });
 
-// The entry rule, generated: a name, a kind and a placement; each expected stamp follows from the clauses. A file or a
-// link to one is an entry everywhere. A folder is entered everywhere, except a folder or a link to one named
-// `node_modules` or `dist` in the root, which is left out. Any other link to a folder fails the build.
-for (const name of ["node_modules", "dist", "other"])
-  for (const kind of ["file", "file link", "folder", "folder link"])
+// The entry rule, generated: a name, a kind and a placement; each expected stamp follows from the clauses. A key is the
+// names joined with `/`, none rewritten. A file or a link to one is an entry everywhere. A folder is entered everywhere,
+// except a folder or a link to one named `node_modules` or `dist` in the root, which is left out. Any other link to a
+// folder, and a special file, fail the build.
+for (const name of ["node_modules", "dist", "other", "with\\backslash"])
+  for (const kind of ["file", "file link", "folder", "folder link", "special file"])
     for (const placement of ["the root", "an area folder", "a nested folder", "tools/"])
       test(`a ${kind} named ${name} in ${placement}`, (t) => {
         const root = mkdtempSync(join(tmpdir(), "player-test-modules-entry-"));
@@ -394,13 +481,15 @@ for (const name of ["node_modules", "dist", "other"])
           "a nested folder": "player/nested",
           "tools/": "tools",
         }[placement]!;
-        const path = join(folder, name).replaceAll("\\", "/");
+        const path = folder === "" ? name : `${folder}/${name}`;
         mkdirSync(join(root, folder), { recursive: true });
         mkdirSync(join(root, "targets/folder"), { recursive: true });
         writeFileSync(join(root, "targets/file.ts"), "file");
         writeFileSync(join(root, "targets/folder/inner.ts"), "inner");
         if (kind === "file") writeFileSync(join(root, path), "entry");
         else if (kind === "file link") symlinkSync(join(root, "targets/file.ts"), join(root, path));
+        else if (kind === "special file")
+          assert.equal(spawnSync("mkfifo", [join(root, path)]).status, 0);
         else if (kind === "folder") {
           mkdirSync(join(root, path));
           writeFileSync(join(root, path, "inner.ts"), "inner");
@@ -414,4 +503,6 @@ for (const name of ["node_modules", "dist", "other"])
         );
         if (kind === "folder link" && expected.length > 0)
           assert.match(stamp.get(path) ?? "", /^folder link /u, "a folder link fails the build");
+        if (kind === "special file")
+          assert.equal(stamp.get(path), "special file", "a special file fails the build");
       });
