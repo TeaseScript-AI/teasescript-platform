@@ -19,6 +19,9 @@ import {
 import type { SessionTransfer } from "../../player/persistence/session-transfer.js";
 import { coverageGaps, product, type Coordinates } from "../helpers/family-coverage.js";
 import { readForImport, type SessionRead } from "../helpers/player/transfer-read.js";
+import { presentedAction, runtimeInput } from "../helpers/player/player-input.js";
+import { memoryStorage } from "../helpers/player/storage-host.js";
+import { playerRuntimeForeground } from "../../player/runtime/runtime-view.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import {
   loadTopology,
@@ -145,6 +148,8 @@ interface RecoveryHost {
   }): Promise<{ readonly kind: string }>;
   reviewSessionImport(transfer: SessionRead): Promise<ImportReview>;
   importSession(review: ImportReview): Promise<void>;
+  readonly inputSection: unknown;
+  scriptStorageOptions(): PlayerRuntimeSessionOptions;
 }
 /** The composable's review of a session to import, which only `importSession` reads. */
 interface ImportReview {
@@ -224,12 +229,18 @@ async function page(
     kept = memoryKeptSessionStore(),
     script = KEEPS_AT_A_QUESTION,
     replaceable = true,
-  }: { kept?: KeptSessionStore; script?: string; replaceable?: boolean } = {},
+    storage,
+  }: {
+    kept?: KeptSessionStore;
+    script?: string;
+    replaceable?: boolean;
+    storage?: ScriptStorageProvider;
+  } = {},
 ) {
   browser(context);
   const hostErrors = hostErrorLog(context);
   const connections = await topologyConnections(context, topology);
-  const scriptStorage: ScriptStorageProvider = {
+  const scriptStorage: ScriptStorageProvider = storage ?? {
     scope: SCOPE,
     load: async () => [],
     write: async () => {},
@@ -252,7 +263,11 @@ async function page(
   const prepared = await player.prepareScriptSource(script);
   const plan = prepared.result.plan;
   assert.ok(plan !== undefined, "the script was prepared");
-  await player.prepareScript(plan, { plan, options: () => ({ wallClockMs: 0 }) });
+  // The session's saves go to the page's script storage, as the hosted page starts it.
+  await player.prepareScript(plan, {
+    plan,
+    options: () => ({ ...player.scriptStorageOptions(), wallClockMs: 0 }),
+  });
   return { connections, player, kept, hostErrors, scope };
 }
 
@@ -291,6 +306,8 @@ const RERUN = rerunRegistry({
   "a keep's publish under way at the loss": TOPOLOGIES,
   // Only the in-process host can report the loss of a client already ended; a Worker's ended client reports none.
   "a late loss of the replaced connection": ["in-process"],
+  "the reload witness": TOPOLOGIES,
+  "a refused keep after a recovered Continue": TOPOLOGIES,
 });
 
 RERUN.rows(
@@ -654,6 +671,148 @@ RERUN.rows(
     assert.equal(player.recovery.value, null);
     assert.equal(player.hostError.value, null);
     assert.equal(player.connectionLosses.value, 1);
+    return end();
+  },
+);
+
+/** Answers the shown choice with its first option, as its button does. */
+async function answerFirst(player: RecoveryHost): Promise<void> {
+  const input = await runtimeInput();
+  const shown = player.session.value!;
+  const foreground = playerRuntimeForeground(shown);
+  assert.ok(foreground?.kind === "choose");
+  const result = await input.runInput(
+    player.inputSection,
+    presentedAction(shown),
+    presentedAction,
+    input.intents.choice(foreground.options[0]!.id, "button"),
+  );
+  assert.equal(result.kind, "answered");
+}
+
+/** A choice kept, its answer saved, the next keep's capture held: then the connection is lost. */
+const WITNESS =
+  'let pick = askChoice go: "Go"\nsave pick as "picked"\nsay "after", instant\nlet next = askChoice again: "Again"\nexit';
+
+/** One run of the witness up to its loss, with stores of its own. */
+async function witnessToLoss(context: TestContext, topology: Topology) {
+  const kept = memoryKeptSessionStore();
+  const storage = memoryStorage({});
+  const provider: ScriptStorageProvider = { ...storage.provider, scope: SCOPE };
+  const run = await page(context, topology, { kept, script: WITNESS, storage: provider });
+  await run.player.activate();
+  await keptAtTheQuestion(run.player, kept);
+  run.connections.first.hold("captureKeep");
+  await answerFirst(run.player);
+  await run.connections.first.held();
+  // The page writes the save in its own task, while the next keep's capture is held.
+  await until(() => storage.writes.length > 0, "the save written");
+  assert.deepEqual(storage.writes, [["picked", "go"]], "the save was written before the loss");
+  await run.connections.first.lose();
+  run.connections.first.release();
+  return { ...run, kept, storage, provider };
+}
+
+/** What the witness compares once the continued session answered again and shows its next choice. */
+async function witnessAfter(
+  player: RecoveryHost,
+  connection: { readonly posts: readonly { readonly op: string }[] },
+  storage: ReturnType<typeof memoryStorage>,
+) {
+  await until(() => player.session.value?.state.foregroundAction != null, "the kept question");
+  const transcriptAtContinue = player.session.value!.transcriptEntries.length;
+  await answerFirst(player);
+  await until(
+    () =>
+      (player.session.value?.transcriptEntries.length ?? 0) > transcriptAtContinue &&
+      player.session.value?.state.foregroundAction != null,
+    "the next question",
+  );
+  const ops = connection.posts.map((post) => post.op);
+  return {
+    writes: storage.writes,
+    entries: [...storage.entries],
+    events: player.session.value!.events.map((event) => event.kind),
+    transcriptAtContinue,
+    transcript: player.session.value!.transcriptEntries.length,
+    // The begin's posts, from the kept session's restore on; the preparation's come before it on either path.
+    begin: ops.slice(ops.indexOf("restoreKept")),
+  };
+}
+
+RERUN.rows(
+  "the reload witness",
+  "Continue after a recovery repeats what a reload and Continue repeat: the save after the kept point runs again in both",
+  async (context, topology, end) => {
+    // R: the recovery in the page.
+    const recovered = await witnessToLoss(context, topology);
+    await until(() => recovered.player.recovery.value !== null, "the offer");
+    assert.equal(recovered.player.recovery.value?.offer, "continue");
+    await recovered.player.activate();
+    const r = await witnessAfter(
+      recovered.player,
+      recovered.connections.current(),
+      recovered.storage,
+    );
+    // B: a reload: a new Player on a new connection with the same stores, and its Continue.
+    const lost = await witnessToLoss(context, topology);
+    lost.scope.stop();
+    const reloaded = await page(context, topology, {
+      kept: lost.kept,
+      script: WITNESS,
+      storage: lost.provider,
+    });
+    assert.equal(reloaded.player.activation.value, "continue");
+    await reloaded.player.activate();
+    const b = await witnessAfter(reloaded.player, reloaded.connections.first, lost.storage);
+    assert.deepEqual(
+      r.writes,
+      [
+        ["picked", "go"],
+        ["picked", "go"],
+      ],
+      "the save runs again",
+    );
+    assert.deepEqual(r, b);
+    return end();
+  },
+);
+
+RERUN.rows(
+  "a refused keep after a recovered Continue",
+  "a recovered Continue whose next keep is refused offers Continue from the same kept point after another loss",
+  async (context, topology, end) => {
+    const store = memoryKeptSessionStore();
+    const refusal = { on: false, refused: 0 };
+    const kept: KeptSessionStore = {
+      session: (scope) => store.session(scope),
+      media: store.media,
+      discard: (scope) => store.discard(scope),
+      publish: async (scope, update) => {
+        if (refusal.on) {
+          refusal.refused += 1;
+          throw new Error("The store refused the write.");
+        }
+        return store.publish(scope, update);
+      },
+    };
+    const { connections, player } = await page(context, topology, { kept, script: WITNESS });
+    await player.activate();
+    await keptAtTheQuestion(player, kept);
+    await connections.first.lose();
+    await until(() => player.recovery.value !== null, "the offer");
+    await player.activate();
+    await until(() => player.session.value?.state.foregroundAction != null, "the kept question");
+    await turns(5);
+    const stored = await store.session(SCOPE);
+    assert.ok(stored !== null);
+    refusal.on = true;
+    await answerFirst(player);
+    await until(() => refusal.refused > 0, "the next keep refused");
+    assert.deepEqual(await store.session(SCOPE), stored, "the kept point stays");
+    await connections.current().lose();
+    await until(() => player.recovery.value !== null, "the offer again");
+    assert.deepEqual(player.recovery.value, { offer: "continue", where: "line" });
     return end();
   },
 );
