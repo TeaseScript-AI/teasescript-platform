@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
@@ -1001,5 +1010,74 @@ test("--moved reads no gitlink as a file: a submodule replaced by a regular file
     assert.match(result.stdout, /file gaining over 300 lines: \+\d+ src\/sub\.ts/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("without node_modules it links main's before it reports, and stops when there is none to link or it does not hold the lockfile", () => {
+  const checkout = mkdtempSync(join(tmpdir(), "structure-report-modules-"));
+  const run = (env, ...args) =>
+    spawnSync(process.execPath, [join(checkout, "tools/structure-report.mjs"), ...args], {
+      cwd: join(checkout, "work"),
+      encoding: "utf8",
+      env: { ...process.env, ...env },
+    });
+  try {
+    // a checkout of the tools, its lockfile, and no node_modules
+    const repository = dirname(dirname(tool));
+    cpSync(dirname(tool), join(checkout, "tools"), { recursive: true });
+    cpSync(join(repository, "package-lock.json"), join(checkout, "package-lock.json"));
+    const git = (...args) =>
+      execFileSync("git", args, { cwd: join(checkout, "work"), encoding: "utf8" }).trim();
+    mkdirSync(join(checkout, "work"));
+    git("init", "-q");
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    write(join(checkout, "work"), { "src/a.ts": "export const a = 1;\n" });
+    git("add", "-A");
+    git("commit", "-q", "-m", "base");
+
+    // main's install, through the checkout TEASESCRIPT_MAIN names
+    const linked = run({ TEASESCRIPT_MAIN: repository });
+    assert.equal(linked.status, 0, linked.stderr);
+    assert.equal(
+      linked.stderr,
+      `structure-report: linked node_modules from ${repository}/node_modules\n`,
+    );
+    assert.match(linked.stdout, /^1 code files under /u);
+    assert.ok(lstatSync(join(checkout, "node_modules")).isSymbolicLink());
+
+    // no node_modules to link: exit 2, also in the summary
+    rmSync(join(checkout, "node_modules"));
+    const empty = join(checkout, "empty");
+    mkdirSync(empty);
+    const summary = join(checkout, "summary.md");
+    const none = run({ TEASESCRIPT_MAIN: empty }, "--diff", "HEAD", "--summary", summary);
+    assert.equal(none.status, 2, none.stderr);
+    assert.match(
+      none.stderr,
+      /^structure-report: no node_modules, and \S+ has no node_modules folder/u,
+    );
+    assert.match(
+      readFileSync(summary, "utf8"),
+      /structure report could not run: structure-report: no node_modules, and /u,
+    );
+
+    // an install whose record does not hold the checkout's lockfile
+    writeFileSync(
+      join(checkout, "package-lock.json"),
+      JSON.stringify({
+        lockfileVersion: 3,
+        packages: { "": {}, "node_modules/no-such-package": { version: "1.0.0" } },
+      }),
+    );
+    const held = run({ TEASESCRIPT_MAIN: repository });
+    assert.equal(held.status, 2, held.stderr);
+    assert.match(
+      held.stderr,
+      /does not hold package-lock\.json: node_modules\/no-such-package 1\.0\.0 \(not installed\)/u,
+    );
+    assert.doesNotMatch(held.stdout, /code files under/u);
+  } finally {
+    rmSync(checkout, { recursive: true, force: true });
   }
 });
