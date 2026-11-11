@@ -56,7 +56,9 @@ its own, as one whose process ends before its tests report, fails the full suite
 other in its group, and its leftover process group is terminated. On SIGINT and SIGTERM, `run-parallel` stops its own
 command groups, escalating after a grace period, and starts no other; `run-check` forwards the signal and waits for its
 part, without a deadline. A command `run-parallel` stops this way is labelled `ABORTED`, not `FAIL`. `npm run test:verification` checks scheduling, diagnostics and
-process cleanup (POSIX cleanup assertions run on CI; Windows uses `taskkill /t /f`).
+process cleanup (POSIX cleanup assertions run on CI; Windows uses `taskkill /t /f`). A tool test that builds a git
+repository takes its git environment from `tools/fixture-git.mjs`, so that no host git configuration, ignore or
+attributes file, `GIT_*` variable or message language reaches the fixture; the helper's comment names what it keeps.
 
 Use `VERIFY_SERIAL=1 npm run check` for serial diagnosis or constrained machines; it runs the same commands.
 CI uses a job-local Node module compilation cache. Standard checks omit UI source maps because no configured check

@@ -32,6 +32,7 @@ import {
   strayMerges,
   unknownToCostly,
 } from "./check-changed.mjs";
+import { isolateGit } from "./fixture-git.mjs";
 import {
   awaitFile,
   BOUND_SECONDS,
@@ -40,6 +41,8 @@ import {
   slowReader,
   waitFor,
 } from "./runner-test-support.mjs";
+
+isolateGit();
 
 // A representative changed path for each project, and the projects it alone needs.
 const REPRESENTATIVES = {
@@ -99,7 +102,7 @@ test("without node_modules it can link, it runs no check, says why and the two f
   try {
     const run = (...args) => runSync("git", args, { cwd: directory, encoding: "utf8" });
     run("init", "-q");
-    run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "base");
+    run("commit", "-q", "--allow-empty", "-m", "base");
     writeFileSync(join(directory, "a.mjs"), "export const a = 1;\n");
     const tool = fileURLToPath(new URL("./check-changed.mjs", import.meta.url));
     const result = runSync(process.execPath, [tool, "--base", "HEAD"], {
@@ -168,7 +171,7 @@ function repository({
     ])
       write(path, "\n");
   run("add", ".");
-  run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base");
+  run("commit", "-q", "-m", "base");
   run("switch", "-q", "-c", "feature");
   if (!passing) write("a.mjs", "export const a = 2;\n");
   if (core === "added") write("src/type-inference/core/answers.ts", "export const answers = 1;\n");
@@ -176,11 +179,11 @@ function repository({
   if (core === "renamed")
     run("mv", "src/type-inference/core/answers.ts", "src/type-inference/answers.ts");
   run("add", "-A");
-  run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "feature");
+  run("commit", "-q", "-m", "feature");
   if (conflict) {
     run("switch", "-q", "main");
     write("a.mjs", "export const a = 3;\n");
-    run("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-am", "main");
+    run("commit", "-q", "-am", "main");
     run("switch", "-q", "feature");
   }
   // A stand-in `node_modules` whose Prettier is the pinned one and does nothing.
@@ -432,11 +435,7 @@ test("the node_modules link it makes is no change: under the tracked ignore rule
   try {
     mkdirSync(join(root, "main", "node_modules"), { recursive: true });
     mkdirSync(repo);
-    const git = (...args) =>
-      runSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
-        cwd: repo,
-        encoding: "utf8",
-      });
+    const git = (...args) => runSync("git", args, { cwd: repo, encoding: "utf8" });
     git("init", "-q");
     // the repository's own ignore rules, and no local exclude
     writeFileSync(
@@ -959,10 +958,7 @@ test(
 function mergeGraph() {
   const { directory } = repository({ passing: true });
   const git = (...args) => {
-    const result = runSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
-      cwd: directory,
-      encoding: "utf8",
-    });
+    const result = runSync("git", args, { cwd: directory, encoding: "utf8" });
     assert.equal(result.status, 0, result.stderr);
     return result.stdout.trim();
   };
