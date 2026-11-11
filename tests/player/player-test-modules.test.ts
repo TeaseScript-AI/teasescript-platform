@@ -274,6 +274,11 @@ test("a Player test bundle is not built from an input the stamp does not cover",
     symlinkSync("actual-src", path("src"));
     return () => unlinkSync(path("src"));
   });
+  // a compiler option this TypeScript does not know is the compiler's to judge, as the repository's `ES2025` target
+  write(
+    "compiler-options.json",
+    JSON.stringify({ compilerOptions: { strict: true, target: "ES2025" } }),
+  );
   assert.equal(build().status, 0);
 });
 
@@ -393,9 +398,10 @@ for (const kind of ["extends", "references"] as const)
           kind === "extends"
             ? extendedFiles(parsed?.options ?? {})[0]
             : ts.resolveProjectReferencePath({ path: resolve(root, edge) });
+        // A diagnostic TypeScript places in the file, whose only property is the edge: an `extends` it cannot resolve.
         const reported = (parsed?.errors ?? []).some(
           (diagnostic) =>
-            diagnostic.category === ts.DiagnosticCategory.Error && diagnostic.code !== 18003,
+            diagnostic.category === ts.DiagnosticCategory.Error && diagnostic.start !== undefined,
         );
         const passes =
           !reported &&
