@@ -85,7 +85,7 @@ test("a short SHA several commits share is ambiguous", { timeout: 60_000 }, () =
 });
 
 test(
-  "ids, job ids, hex words and paths that resolve nowhere are skipped; each still resolves when it can",
+  "ids, job ids, hex words, float digits and paths that resolve nowhere are skipped; each still resolves when it can",
   { timeout: 30_000 },
   () => {
     const { directory, shas } = repository();
@@ -97,12 +97,13 @@ test(
         "a defaced cafebabe",
         "results in ~/jobs/results/clarity-a/11071351201ab1/out/ and /tmp/x/0c1d2e3f4a5b/",
         "see https://example.com/files/a1b2c3d4e5f6/report",
+        "Number.MAX_VALUE is 1.7976931348623157e+308",
       ].join("\n");
       const { status, out } = check(text, [directory]);
       assert.equal(status, 0, out);
       assert.match(
         out,
-        /9 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 9 skipped/u,
+        /10 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 10 skipped/u,
       );
       // A commit URL is checked; a path that holds a real SHA still reports it.
       const url = check("https://github.com/o/r/commit/0123abc4567", [directory]);
@@ -120,6 +121,10 @@ test(
           null,
         ],
         ["defaced", "a defaced wall", "a word"],
+        ["7976931348623157e", "MAX_VALUE 1.7976931348623157e+308", "a float's digits"],
+        ["02214076e23", "about 6.02214076e23", "a float's digits"],
+        ["7976931348623157e", "1.7976931348623157e is cut", null],
+        ["7976931348623157e", "v7976931348623157e+308", null],
         ["4322b2e0e668", "the runner's sha256 4322b2e0e668", "a file's sha256"],
         ["7ce49d8d3ba1", "(sha256: 7ce49d8d3ba1)", "a file's sha256"],
         ["7ce49d8d3ba1", "SHA256=7ce49d8d3ba1", "a file's sha256"],

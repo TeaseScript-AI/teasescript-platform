@@ -22,6 +22,8 @@ import { existsSync, readFileSync } from "node:fs";
 // - 14 characters whose first 10 are digits: a queue job id (`sx-job`: the month to the second, then 4 hex), such as
 //   `1107175450d1b5`;
 // - only the letters a-f: a word, such as `defaced`;
+// - digits right after `<digit>.` that end in an exponent's `e`, its digits included or a sign and digit following: a
+//   float's digits, such as `1.7976931348623157e+308` or `6.02214076e23`;
 // - right after the word `sha256` (with a space, `:` or `=` between): a file's hash, such as `sha256 4322b2e0e668`;
 // - shorter than 40 and inside a URL or a path, except after `/commit/`, `/commits/`, `/tree/` or `/blob/`: a file's
 //   or a job's name. A full 40-character SHA in a path, such as an evidence folder, must resolve.
@@ -43,6 +45,12 @@ export function excuse(token, text, index) {
   if (/^\d+$/u.test(token)) return "only digits, an id";
   if (/^\d{10}[0-9a-f]{4}$/u.test(token)) return "a queue job id";
   if (/^[a-f]+$/u.test(token)) return "a word";
+  if (
+    /\d\.$/u.test(text.slice(Math.max(0, index - 2), index)) &&
+    (/^\d+e\d+$/u.test(token) ||
+      (/^\d+e$/u.test(token) && /^[+-]\d/u.test(text.slice(index + token.length))))
+  )
+    return "a float's digits";
   if (/\bsha256[\s:=]+$/iu.test(text.slice(Math.max(0, index - 16), index)))
     return "a file's sha256";
   // The run of non-space characters the token is in: a URL or a path, unless it names the commit itself.
