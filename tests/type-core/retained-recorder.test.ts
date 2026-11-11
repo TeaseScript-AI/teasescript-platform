@@ -16,6 +16,7 @@ import {
   depthOf,
   markAccepts,
 } from "../../src/type-inference/core/contract/marks.js";
+import { analyseCore } from "../../src/type-inference/core/answers.js";
 import type { Item } from "../../src/type-inference/core/items.js";
 import {
   amend,
@@ -665,6 +666,55 @@ test("the recorder finds no unrecorded change in its sample of the fixture, in t
       const report = recorder.report();
       assert.ok(report.entries > 0, `${name} (${mode.name}): reaches retained state`);
       for (const violation of report.violations) found.push(`${name} (${mode.name}): ${violation}`);
+    }
+  }
+  assert.deepEqual(found, []);
+});
+
+test("a marked ring analysed whole (`analyseCore`), in the four held modes, has every change recorded (#1072)", () => {
+  // (the published route leaves these before the core runs; the analysis whole grows a pushed read's frontier, admission's
+  // holders state, a prefix's property index and the listing memo in later runs than made them: `type-core-pushed-reads`'
+  // marked rings, #1784)
+  const sources = [
+    [
+      "let p0={s0:{s1:0}}",
+      "let p1={s0:{s1:1}}",
+      "let p2={s0:{s1:2}}",
+      "p2.q=p0",
+      "if p1.s0.s1 is integer { p2=p1 }",
+      "if p0.s0.s1 is integer { p1=p0 }",
+      "p0=p2",
+      "p2=p2.q",
+      'say "${p2.q.q.s0.s1}"',
+      "exit",
+    ],
+    [
+      "let p0={g:0}",
+      "let p1={g:1}",
+      "let p2={g:2}",
+      "p2.q=p0",
+      "p2=p1",
+      "if p0.g is integer { p1=p0 }",
+      "p0=p2",
+      "p2=p2.q",
+      'say "${p2.q.q.g}"',
+      "exit",
+    ],
+  ];
+  const found: string[] = [];
+  for (const lines of sources) {
+    const request = coreRequest(
+      [{ path: "main.tease", source: lines.join("\n") + "\n" }],
+      ["hostValue", "hostOther"],
+    );
+    assert.ok(request !== null);
+    for (const mode of HELD_MODES) {
+      const recorder = new Recorder();
+      withRetainedRecorder(recorder, () => mode.run(() => analyseCore(request)));
+      const report = recorder.report();
+      assert.ok(report.entries > 0, mode.name);
+      for (const violation of report.violations)
+        found.push(`${lines[4]} (${mode.name}): ${violation}`);
     }
   }
   assert.deepEqual(found, []);
