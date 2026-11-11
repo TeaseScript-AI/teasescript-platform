@@ -334,7 +334,7 @@ test("a deep literal's decision grows with its depth, never with its square (#14
  * known limit by the owner's decision (docs/specifications/type-inference-accepted-record/admission.md#r4-49, option
  * A): a regression check on the 64 → 128 step only, at its measured doubling, not a bound at larger sizes; a change to
  * admission's passes re-measures and proposes the gate with its counts, never retunes it. Copies interleaved with
- * conditional stores below their path (S6-CARRIERS §4.7, condition (b)) are gated in the same form, a known limit by
+ * conditional stores below their path (S6-CARRIERS, condition (b)) are gated in the same form, a known limit by
  * the owner's decision too, and so are copies separated by calls storing their source and the dormant meetings a
  * fitting ring makes owed again (#1338).
  */
@@ -407,7 +407,7 @@ test("a written decider in nested selections is answered once per level, each pa
 
 /**
  * S6c: the value side's inherited products, gated as W34 is: same-source adds, choices
- * and a literal's `get`s (S6-CARRIERS §4.5, §4.7: `ADMISSION_SAME_SOURCES`), product (c) of W34's class, k literals of
+ * and a literal's `get`s (S6-CARRIERS: `ADMISSION_SAME_SOURCES`), product (c) of W34's class, k literals of
  * typed ingresses of one default (`ADMISSION_INGRESS_PRESETS`), and each discovery site's class (`VALUE_CLASS_SITES`),
  * their totals and each counter of at least 200 units in either order (they were gated at their measured doublings,
  * 2.04 to 3.65, while the value side read each copy at each field).

@@ -35,7 +35,7 @@ import type { CompactRecord } from "../helpers/type-core-records.js";
  * Stage 3b's narrowing index (S10's first part), asked directly, and the stored values that read it (S10
  * part 2b; the other consumers read it in part 2c). Per N1 form and per N2 event a control that holds and a case that
  * changes only the premise, taken from the expectation set's 3b shapes; G's filter on items; N5's preserving and
- * breaking stores, one location and a component; N3's route witnesses for the design's own examples.
+ * breaking stores, one location and a component; N3's route witnesses for the cases below.
  */
 
 const FLAG = 'let flagHost = askBoolean "flag"';

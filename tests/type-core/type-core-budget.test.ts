@@ -272,7 +272,7 @@ test("a generator's shared build counts to the total, never to the asker, and en
 });
 
 /**
- * S3 §5: the pipeline handles depth 10,000; the consumers of statements nested past the core's 256 are
+ * S3: the pipeline handles depth 10,000; the consumers of statements nested past the core's 256 are
  * checked when the script runs, every other statement proved as ever (admission still decides every place from every
  * store), an `else if` one level more: a check inside them is moved, an error outside stands, and one warning names the
  * deepest nesting's place.
@@ -301,7 +301,7 @@ test("statements nested past 256 levels are checked when the script runs, the re
       errors: ["TSV041 1.5"],
       stops: 1,
       unchecked: ["top level"],
-      // (the host read is its own data after the stop, as unstopped: S3 §5 revision 18)
+      // (the host read is its own data after the stop, as unstopped: S3 revision 18)
       deferred: ["operand hostValue unknown"],
     });
   assert.equal(analysed(requestOf(main(chained(255)))).budget.exhausted, null);
@@ -651,7 +651,7 @@ test("mutual copies stopped in the walk finish in work bounded by the program, i
 /**
  * Recursive record types (Astra's rounds 2–3): a linked list built by `chain(n)` and walked by `last(node)`
  * through `node.next` reaches any allowance; the stop answers every value it did not decide `unknown` with `budget`,
- * never asking its contract again, so the fallback is finite (S3 §5) and the count is checked when it runs.
+ * never asking its contract again, so the fallback is finite (S3) and the count is checked when it runs.
  */
 test("a linked record list stops at the allowance with its count checked when it runs, in either order", () => {
   const source =

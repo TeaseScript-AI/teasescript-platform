@@ -5377,11 +5377,11 @@ test("named external data a carrier stores into a place published with a kind ow
 });
 
 /**
- * S6-CARRIERS §1: the carrier table names each operand's role and its evaluation position among the carrier's
+ * S6-CARRIERS: the carrier table names each operand's role and its evaluation position among the carrier's
  * operands, and every role of `CARRIER_ROLES` is some row's: a `get`'s receiver 0 and default 2 (its key is 1), an
  * `otherwise`'s operand 0 and fallback 1, a `load`'s and a parse's default 1, a list's `+` and a choice by operand.
  */
-test("the carrier table names each operand's role and evaluation position (S6-CARRIERS §1)", () => {
+test("the carrier table names each operand's role and evaluation position (S6-CARRIERS)", () => {
   const source = [
     "let xs = [1, 2]",
     "let d = dict{a: 1}",
@@ -5431,11 +5431,11 @@ test("the carrier table names each operand's role and evaluation position (S6-CA
 });
 
 /**
- * S6-CARRIERS §2 (the design review's D1): stops are ordered by evaluation key, not by the walk's traversal, so in a
+ * S6-CARRIERS (the design review's D1): stops are ordered by evaluation key, not by the walk's traversal, so in a
  * list of choice objects the first element's selected text precedes the second element's selected value, whichever
  * row reaches each, in both element orders. Each program's whole record, in both orders.
  */
-test("a choice list's earliest evaluated ingress names C1's site, in both element orders (S6-CARRIERS §2, D1)", () => {
+test("a choice list's earliest evaluated ingress names C1's site, in both element orders (S6-CARRIERS, D1)", () => {
   for (const [source, start] of [
     [
       'let out = askChoice [{text: hostValue}, {text: "two", value: hostValue}]\nout = "x"\nexit\n',
@@ -5503,11 +5503,11 @@ test("a choice list's earliest evaluated ingress names C1's site, in both elemen
 });
 
 /**
- * S6-CARRIERS §3.1 (the first design review's B3): an identity holding an ingress occurrence is fresh, so two equal
+ * S6-CARRIERS (the first design review's B3): an identity holding an ingress occurrence is fresh, so two equal
  * computations over host data stay two contract entries and each keeps its leaf: a consumer that meets either
  * payload brings each store's boundary, at each host value. The whole record, in both orders.
  */
-test("two equal computations over host data keep each ingress's boundary (S6-CARRIERS §3.1)", () => {
+test("two equal computations over host data keep each ingress's boundary (S6-CARRIERS)", () => {
   const source =
     'let flagHost = askBoolean "flag"\nlet box = {payload: hostValue otherwise null}\n' +
     "if flagHost { box = {payload: hostValue otherwise null} }\nlet count: integer = box.payload\nexit\n";
@@ -5551,7 +5551,7 @@ test("two equal computations over host data keep each ingress's boundary (S6-CAR
 });
 
 /**
- * S6-CARRIERS §4.6 with the guard's mark (Codex r20 B1): literals grouped by the structure they hold at a path share an answer only
+ * S6-CARRIERS with the guard's mark (Codex r20 B1): literals grouped by the structure they hold at a path share an answer only
  * where their reads are marked alike. A read under a test of its path, or of a path below it, inside a computed child (a
  * `get`, a projection of a literal, an index, an `otherwise`) keeps its mark, so the definite fraction a guarded copy
  * also holds is the warning with its check, never the error. The whole record, in both orders.
@@ -5617,7 +5617,7 @@ test("a guarded read inside a computed child keeps its mark where literals share
 });
 
 /**
- * S6-CARRIERS §3.3, §3.4 (Codex r20 B6, N1, N2), from the landing index: a typed `load` or `fromJson`
+ * S6-CARRIERS (Codex r20 B6, N1, N2), from the landing index: a typed `load` or `fromJson`
  * no store brings, its property never stored or its text only displayed, keeps F18's own check where it runs; a
  * member of host data owes C1 at the member read and C9 at the host value; and a surely measured length is derived
  * (F14), never the external data of the ingress it measures. The whole record, in both orders.
@@ -5793,7 +5793,7 @@ test("named data beside inline host data keeps its check and boundary, and an ad
 });
 
 /**
- * S6-CARRIERS §4.2, §4.3: copies of one source with equal signatures are one class, and the class decides through its
+ * S6-CARRIERS: copies of one source with equal signatures are one class, and the class decides through its
  * earliest member no test of the read's path holds (a guard marks a read possible, so it decides nothing): an unguarded
  * copy decides whether a guarded one comes before it or after it, the add of text then the misfit (A6); without a
  * written type a guarded copy decides nothing (the trace: the add decides, the unguarded copy is the misfit); with
@@ -5900,7 +5900,7 @@ test("a class decides through its earliest member no guard of the path holds, in
 });
 
 /**
- * S6-CARRIERS §6's witnesses, as exact records in both orders:
+ * S6-CARRIERS's witnesses, as exact records in both orders:
  * - the first design review's across-function copy (its B2): the function's copy reads its source across X4, the
  *   integer and unknown contract, and owes its own C1; the exact top-level copy owes nothing;
  * - the second design review's reversed copy (its B1): the function's copy comes first, yet the exact top-level copy
@@ -5917,7 +5917,7 @@ test("a class decides through its earliest member no guard of the path holds, in
  *   between them that registers a handler storing the key (X7, H9), whose later read takes the contract, as both do
  *   after the registration.
  */
-test("the carrier design's witnesses give their exact records, in both orders (S6-CARRIERS §6)", () => {
+test("the carrier design's witnesses give their exact records, in both orders (S6-CARRIERS)", () => {
   const witnesses = CARRIER_WITNESSES;
 
   for (const [name, source, text] of witnesses) {
