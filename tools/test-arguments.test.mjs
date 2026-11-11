@@ -34,8 +34,9 @@ test("every argument Node reads as a path is checked, whatever option comes befo
         .map((option) => [`value with = ${option}`, [`${option}=v`]]),
     ),
     "unknown bare": ["--unknown"],
-    // Node reads `--test_only` as `--test-only`; the filter does not, so it refuses it rather than guess.
-    "unknown bare underscore spelling": ["--test_only"],
+    // Node reads `_` in a long option's name as `-`, and so does the filter.
+    "boolean underscore spelling": ["--test_only"],
+    "value underscore spelling": ["--test_skip_pattern", "v"],
     "unknown with =": ["--unknown=v"],
     terminator: ["--"],
   };
