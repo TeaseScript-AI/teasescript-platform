@@ -24,6 +24,7 @@ import { expressionParts, statementExpressions } from "../../../expression-child
 import { listDraw, listMethod } from "../../../list-methods.js";
 import type { ItemTag } from "../items.js";
 import type { CheckedDiagnostic, StoreStep } from "../result.js";
+import { Retained, retainedModule } from "../retained/retained.js";
 
 // How a message names the source, and the syntax around a site it reads: checks that hold, parts, acts, landings.
 
@@ -133,10 +134,10 @@ interface Evaluation {
   readonly at: Map<string, number>;
 }
 
-const EVALUATIONS = new WeakMap<Statement, Evaluation>();
+const EVALUATIONS = retainedModule("site.EVALUATIONS", Retained.weakMap<Statement, Evaluation>);
 
 function evaluation(statement: Statement): Evaluation {
-  const known = EVALUATIONS.get(statement);
+  const known = EVALUATIONS().get(statement);
   if (known !== undefined) return known;
   const lazy: boolean[] = [];
   const first: number[] = [];
@@ -174,7 +175,7 @@ function evaluation(statement: Statement): Evaluation {
   if (statement.kind === "assignmentStatement" && statement.target.kind !== "identifier")
     add(statement.target, false, 0);
   const prepared = { lazy, first, acting, at };
-  EVALUATIONS.set(statement, prepared);
+  EVALUATIONS().set(statement, prepared);
   return prepared;
 }
 
@@ -363,12 +364,15 @@ export function givenByCall(
 }
 
 /** Each declaration's parameters by name, made on its first named argument (Codex r1 on #1817: no search per one). */
-const PARAMETERS = new WeakMap<FunctionDeclaration, ReadonlyMap<string, FunctionParameter>>();
+const PARAMETERS = retainedModule(
+  "site.PARAMETERS",
+  Retained.weakMap<FunctionDeclaration, ReadonlyMap<string, FunctionParameter>>,
+);
 
 function parametersByName(declared: FunctionDeclaration): ReadonlyMap<string, FunctionParameter> {
-  let named = PARAMETERS.get(declared);
+  let named = PARAMETERS().get(declared);
   if (named === undefined)
-    PARAMETERS.set(
+    PARAMETERS().set(
       declared,
       (named = new Map(declared.parameters.map((each) => [each.name.name, each]))),
     );
@@ -596,7 +600,10 @@ function selectedFrom(expression: Expression, charge: Charge): ListLiteral | Set
 }
 
 /** Each object literal's properties by name, made on its first lookup (`ownerOf`), one unit per property it holds. */
-const PROPERTIES = new WeakMap<ObjectLiteral, ReadonlyMap<string, ObjectProperty>>();
+const PROPERTIES = retainedModule(
+  "site.PROPERTIES",
+  Retained.weakMap<ObjectLiteral, ReadonlyMap<string, ObjectProperty>>,
+);
 
 /**
  * The narrowest expression that owns the property `steps` lead to below the value at `site` (#1495): from the value
@@ -618,10 +625,13 @@ export function ownerOf(
       at = at.expression;
     }
     if (!("property" in step) || at.kind !== "objectLiteral") break;
-    let named = PROPERTIES.get(at);
+    let named = PROPERTIES().get(at);
     if (named === undefined) {
       charge(at.properties.length);
-      PROPERTIES.set(at, (named = new Map(at.properties.map((entry) => [entry.name.name, entry]))));
+      PROPERTIES().set(
+        at,
+        (named = new Map(at.properties.map((entry) => [entry.name.name, entry]))),
+      );
     }
     const property = named.get(step.property);
     if (property === undefined) break;

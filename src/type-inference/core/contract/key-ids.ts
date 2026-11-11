@@ -28,6 +28,7 @@ import {
 import { memberStep } from "../method-categories.js";
 import { keyLane } from "./lanes.js";
 import { pathAt } from "./literal-index.js";
+import { amend, Retained, retainedModule } from "../retained/retained.js";
 
 // G3 stage 1: a key as a cursor, made one step from its parent's, and the one charged boundary between
 // cursors and the texts and step arrays of keys; and the one place that decides a key's identity (`keyAt`, `keyBelowIn`,
@@ -174,7 +175,8 @@ function keyBelowWith(contract: Contract, asked: Key, rest: Steps, kept: boolean
   }
   const start = isKeyId(key) ? key : rootId(keyPlace(key));
   // (the path below a kept path, by its steps' text: made once per path and steps, found again at one visit)
-  const below = (factsOf(contract, keyIdPath(start)).below ??= new Map());
+  const facts = factsOf(contract, keyIdPath(start));
+  const below = (facts.below ??= Retained.held(facts, Retained.map("PathFacts.below")));
   const text = stepsText(rest);
   let path = below.get(text);
   if (path === undefined) {
@@ -277,6 +279,7 @@ function prefixesOf(contract: Contract, path: number): readonly number[] {
   prefixes.reverse();
   keptArray(contract.work, prefixes);
   facts.prefixes = prefixes;
+  amend(facts);
   return prefixes;
 }
 
@@ -418,7 +421,8 @@ function spanId(contract: Contract, path: number, from: number): number {
   convert(contract, way.length + 1, 0, way.length);
   for (let index = way.length - 1; index >= 0; index -= 1) {
     id = pathAt(contract, id, steps[way[index]!]!);
-    (factsOf(contract, way[index]!).spans ??= new Map()).set(from, id);
+    const facts = factsOf(contract, way[index]!);
+    (facts.spans ??= Retained.held(facts, Retained.map("PathFacts.spans"))).set(from, id);
   }
   return id;
 }
@@ -449,7 +453,10 @@ export function prefixId(contract: Contract, path: number, length: number): numb
   for (; depths[at]! > length && known(at) === undefined; at = parents[at]!) way.push(at);
   const id = depths[at]! === length ? at : known(at)!;
   convert(contract, way.length + 1, 0, way.length);
-  for (const node of way) (factsOf(contract, node).prefixAt ??= new Map()).set(length, id);
+  for (const node of way) {
+    const facts = factsOf(contract, node);
+    (facts.prefixAt ??= Retained.held(facts, Retained.map("PathFacts.prefixAt"))).set(length, id);
+  }
   return id;
 }
 
@@ -460,7 +467,8 @@ export function prefixId(contract: Contract, path: number, length: number): numb
 function joinedId(contract: Contract, base: number, rest: number): number {
   if (base === 0) return rest;
   const { pathParents: parents, pathLastSteps: steps } = contract;
-  const byRest = (factsOf(contract, base).joined ??= new Map());
+  const facts = factsOf(contract, base);
+  const byRest = (facts.joined ??= Retained.held(facts, Retained.map("PathFacts.joined")));
   const way: number[] = [];
   let at = rest;
   for (; at !== 0 && !byRest.has(at); at = parents[at]!) way.push(at);
@@ -691,6 +699,7 @@ function textOf(contract: Contract, path: number): string {
   const text = pathText(ownSteps(stepsOfId(contract, keyIdAt(0, path))));
   contract.keepText(text.length);
   facts.text = text;
+  amend(facts);
   return text;
 }
 
@@ -755,7 +764,8 @@ export function keyOfId(contract: Contract, id: KeyId): Key {
     at === 0
       ? keptKey(contract.work, place, way)
       : keptKeyBelow(contract.work, texts!.get(at)!, way);
-  if (texts === undefined) contract.keyTexts.set(place, (texts = new Map()));
+  if (texts === undefined)
+    contract.keyTexts.set(place, (texts = Retained.map("Contract.keyTexts[]")));
   texts.set(path, text);
   return text;
 }
@@ -790,20 +800,23 @@ export function stepsOfId(contract: Contract, id: KeyId, from = 0): PathSteps {
     made.reverse();
     steps = kept(contract, path, from, made);
   }
-  if (from === 0) facts.steps = steps;
-  else (facts.suffixes ??= new Map()).set(from, steps);
+  if (from === 0) {
+    facts.steps = steps;
+    amend(facts);
+  } else
+    (facts.suffixes ??= Retained.held(facts, Retained.map("PathFacts.suffixes"))).set(from, steps);
   return steps;
 }
 
 /** Each `PathSteps`' steps, read by this module alone: no other module can spell them; a view's those it views. */
-const rawSteps = new WeakMap<PathSteps, readonly string[]>();
+const rawSteps = retainedModule("key-ids.rawSteps", Retained.weakMap<PathSteps, readonly string[]>);
 
 /** Where a view starts in the steps it views (`PathSteps`, set by its class alone). */
 let offsetOf: (steps: PathSteps) => number;
 
 /** Steps' own steps as an array, for this module's makers: a view's sliced from those it views. */
 function ownSteps(steps: PathSteps): readonly string[] {
-  const raw = rawSteps.get(steps)!;
+  const raw = rawSteps().get(steps)!;
   const start = offsetOf(steps);
   return start === 0 && steps.length === raw.length ? raw : raw.slice(start, start + steps.length);
 }
@@ -821,6 +834,13 @@ export class PathSteps {
   static {
     offsetOf = (steps) => steps.#offset;
   }
+  static readonly #hidden = (steps: PathSteps): Readonly<Record<string, unknown>> => ({
+    id: steps.#id,
+    text: steps.#text,
+    of: steps.#of,
+    views: steps.#views,
+    entry: steps.#entry,
+  });
   readonly #contract: Contract;
   readonly length: number;
   #id: number | undefined;
@@ -845,17 +865,22 @@ export class PathSteps {
     this.length = length;
     if (typeof id === "number") this.#id = id;
     this.#find = typeof id === "number" ? () => id : id;
-    rawSteps.set(this, steps);
+    rawSteps().set(this, steps);
+    Retained.owner(this, "PathSteps", PathSteps.#hidden);
   }
   /** The step at `index`, none past its length. */
   at(index: number): string | undefined {
     return index >= 0 && index < this.length
-      ? rawSteps.get(this)![this.#offset + index]
+      ? rawSteps().get(this)![this.#offset + index]
       : undefined;
   }
   /** The id of the path it spells, found once (`spanId`, `prefixId`, `joinedId`). */
   get path(): number {
-    return (this.#id ??= this.#find());
+    if (this.#id === undefined) {
+      this.#id = this.#find();
+      amend(this);
+    }
+    return this.#id;
   }
   /**
    * The id of the path it spells where found already, else `undefined`: it finds none. A view's is found once and kept on
@@ -874,7 +899,11 @@ export class PathSteps {
     const path = this.path;
     const entry = this.#entry;
     this.#text = entry?.text ?? textOf(this.#contract, path);
-    if (entry !== undefined) entry.text = this.#text;
+    amend(this);
+    if (entry !== undefined) {
+      entry.text = this.#text;
+      amend(entry);
+    }
     return this.#text;
   }
   /** The text of its first `length` steps, through the record (`textOf` of its prefix's path). */
@@ -902,13 +931,14 @@ export class PathSteps {
       if (entry === undefined) {
         const from = offset === 0 ? of.path : spanId(contract, of.path, offset);
         entry = { id: offset + length === of.length ? from : prefixId(contract, from, length) };
-        (of.#views ??= new Map()).set(key, entry);
+        (of.#views ??= Retained.held(of, Retained.map("PathSteps.#views"))).set(key, entry);
         contract.keep(1);
       }
       view.#entry = entry;
+      amend(view);
       return entry.id;
     };
-    const view = new PathSteps(contract, rawSteps.get(of)!, find, offset, length);
+    const view = new PathSteps(contract, rawSteps().get(of)!, find, offset, length);
     view.#of = of;
     return view;
   }

@@ -1,6 +1,7 @@
 import { KeyTrie, keptPrefixes, sortCost, type DefinitionIndex, type Key } from "../definitions.js";
 import type { Callable, FlowNode } from "../flow-graph.js";
 import type { CoreProgram } from "../program.js";
+import { Retained } from "../retained/retained.js";
 
 /*
  * The handler index of the coarse core (checkpoint 9, §6.4 H1–H9, F24, §8): which keys a timer, media or
@@ -27,10 +28,10 @@ const offsetOf = (node: FlowNode): number => node.span?.start.offset ?? -1;
 
 export class HandlerIndex {
   /** The keys with a definition in block code (F24's handler stores). */
-  readonly #handlerKeys = new Set<Key>();
+  readonly #handlerKeys = Retained.set<Key>("HandlerIndex.#handlerKeys");
   /** The keys above one: a prefix of a handler store's key. */
-  readonly #handlerAbove = new Set<Key>();
-  readonly #facts = new Map<Callable, Registrations>();
+  readonly #handlerAbove = Retained.set<Key>("HandlerIndex.#handlerAbove");
+  readonly #facts = Retained.map<Callable, Registrations>("HandlerIndex.#facts");
   /** G3 3b: `#handlerKeys` as a trie (`handlerTouches`). */
   readonly #handled: KeyTrie;
 
@@ -38,6 +39,7 @@ export class HandlerIndex {
     readonly program: CoreProgram,
     readonly definitions: DefinitionIndex,
   ) {
+    Retained.owner(this, "HandlerIndex");
     const work = program.work;
     const flow = program.flow;
     this.#handled = new KeyTrie(work, "eventSteps", () => this.#handlerKeys);

@@ -14,6 +14,7 @@ import type { Callable, FlowLoop, FlowNode } from "./flow-graph.js";
 import { makeItem, writerKey, type ContextWord, type Item, type Writer } from "./items.js";
 import { conversionCategory, methodCategory } from "./method-categories.js";
 import { siteKey, type CoreProgram } from "./program.js";
+import { amend, Retained } from "./retained/retained.js";
 
 /*
  * The definitions of the coarse core (checkpoint 9, §3.1 X2–X6, §6 O, §8): every store, add, clear,
@@ -118,17 +119,30 @@ interface TrieNode {
  * question, the program's (`WorkLedger.shared`).
  */
 export class KeyTrie {
+  static readonly #hidden = (trie: KeyTrie): Readonly<Record<string, unknown>> => ({
+    roots: trie.#roots,
+  });
   #roots: Map<PlaceId, TrieNode> | null = null;
 
   public constructor(
     readonly work: WorkLedger,
     readonly counter: WorkCounter,
     readonly keys: () => Iterable<Key>,
-  ) {}
+  ) {
+    Retained.owner(this, "KeyTrie", KeyTrie.#hidden);
+  }
+
+  /** The trie, built on its first question. */
+  #rooted(): Map<PlaceId, TrieNode> {
+    if (this.#roots !== null) return this.#roots;
+    this.#roots = this.work.shared(() => this.#build());
+    amend(this);
+    return this.#roots;
+  }
 
   /** The keys of the set at or above `key`, the nearest first; `self`: the key itself too. */
   public above(key: Key, self: boolean): Key[] {
-    const roots = (this.#roots ??= this.work.shared(() => this.#build()));
+    const roots = this.#rooted();
     let node = roots.get(keyPlace(key));
     const found: Key[] = [];
     if (node === undefined) return found;
@@ -156,7 +170,7 @@ export class KeyTrie {
     steps: { readonly length: number; at(index: number): string | undefined },
     self: boolean,
   ): { readonly key: Key; readonly depth: number }[] {
-    const roots = (this.#roots ??= this.work.shared(() => this.#build()));
+    const roots = this.#rooted();
     let node = roots.get(place);
     const found: { key: Key; depth: number }[] = [];
     if (node === undefined) return found;
@@ -371,42 +385,42 @@ export type PositionRange = readonly [number, number];
  * the literal cells' stores, the owner sets and the global site list (definitions + sites).
  */
 export class DefinitionIndex {
-  readonly byKey = new Map<Key, Definition[]>();
+  readonly byKey = Retained.map<Key, Definition[]>("DefinitionIndex.byKey");
   /** The stores into a literal's own cells and properties, by the cell or property place. */
-  readonly cellDefs = new Map<PlaceId, Definition[]>();
+  readonly cellDefs = Retained.map<PlaceId, Definition[]>("DefinitionIndex.cellDefs");
   /** The stores into each destination key (an add at its element), with the path below the key they reach. */
-  readonly candidates = new Map<
+  readonly candidates = Retained.map<
     Key,
     { readonly d: Definition; readonly at: readonly string[] }[]
-  >();
+  >("DefinitionIndex.candidates");
   /** The stores and adds into places; and the returns, arguments and parameter defaults (C9's transfers). */
   readonly storeDefs: Definition[] = [];
   readonly transferDefs: Definition[] = [];
   /** A dead call's arguments for written parameters, by the parameter's key: candidates, never definitions (F22). */
-  readonly deadArguments = new Map<Key, Definition[]>();
+  readonly deadArguments = Retained.map<Key, Definition[]>("DefinitionIndex.deadArguments");
   /** A binding's declaration: its initializer or its loop binding. */
-  readonly declOf = new Map<PlaceId, Definition>();
+  readonly declOf = Retained.map<PlaceId, Definition>("DefinitionIndex.declOf");
   /** F5a: a loop's exit definition per collection key. */
-  readonly loopAdds = new Map<Key, Definition[]>();
+  readonly loopAdds = Retained.map<Key, Definition[]>("DefinitionIndex.loopAdds");
   /** The definitions storing each value, literal cells included (A1, C10, F18). */
-  readonly byValue = new Map<PlaceId, Definition[]>();
+  readonly byValue = Retained.map<PlaceId, Definition[]>("DefinitionIndex.byValue");
   /** The operation a fallback operand or a default belongs to: it lands where the operation's result lands. */
-  readonly fallbackOf = new Map<PlaceId, PlaceId>();
+  readonly fallbackOf = Retained.map<PlaceId, PlaceId>("DefinitionIndex.fallbackOf");
   /** C9: the values external data enters by (a syntactic set: where each lands is admission's landing index). */
-  readonly ingress = new Set<PlaceId>();
+  readonly ingress = Retained.set<PlaceId>("DefinitionIndex.ingress");
   /** Each ingress by the key of its leaf (`ingressLeaf`): the value its own expression's writer names. */
-  readonly ingressAt = new Map<string, PlaceId>();
+  readonly ingressAt = Retained.map<string, PlaceId>("DefinitionIndex.ingressAt");
   /** The keys below each key that have definitions (X6's own events, X7's keys below). */
-  readonly #keysBelow = new Map<Key, Key[]>();
-  readonly #foreignAt = new Set<Key>();
-  readonly #foreignBelow = new Set<Key>();
+  readonly #keysBelow = Retained.map<Key, Key[]>("DefinitionIndex.#keysBelow");
+  readonly #foreignAt = Retained.set<Key>("DefinitionIndex.#foreignAt");
+  readonly #foreignBelow = Retained.set<Key>("DefinitionIndex.#foreignBelow");
   /** G3 3b: the keys with a definition or a loop's exit definition, and those another callable stores, as tries. */
   readonly stored: KeyTrie;
   readonly foreign: KeyTrie;
   /** The sites of each asked holder's own writers (`hasWriter`), gathered on its first question. */
-  readonly #writerSites = new Map<Key, ReadonlySet<string>>();
+  readonly #writerSites = Retained.map<Key, ReadonlySet<string>>("DefinitionIndex.#writerSites");
   /** Each parameter's default (`defaultOf`), kept as `#parameterDefaults` makes it. */
-  readonly #defaultOf = new Map<PlaceId, Definition>();
+  readonly #defaultOf = Retained.map<PlaceId, Definition>("DefinitionIndex.#defaultOf");
   /** The dominator positions of every live call site's call-in and call-out outside block code, sorted (X6). */
   readonly sitePositions: readonly number[];
   /**
@@ -502,6 +516,7 @@ export class DefinitionIndex {
         append(this.#keysBelow, keptKey(this.program.work, place, path.slice(0, length)), key);
       }
     }
+    Retained.owner(this, "DefinitionIndex", (index) => ({ serial: index.#serial }));
   }
 
   /**
@@ -1009,11 +1024,11 @@ export function joinedOperand(operand: PlaceId): number {
  * lists, X6's first event between two nodes, and R.
  */
 export class DefinitionLists {
-  readonly #sorted = new Map<Key, SortedDefinitions>();
-  readonly #below = new Map<Key, SortedDefinitions>();
-  readonly #events = new Map<Key, number[]>();
-  readonly #certain = new Map<Definition, boolean>();
-  readonly #singleSite = new Map<number, boolean>();
+  readonly #sorted = Retained.map<Key, SortedDefinitions>("DefinitionLists.#sorted");
+  readonly #below = Retained.map<Key, SortedDefinitions>("DefinitionLists.#below");
+  readonly #events = Retained.map<Key, number[]>("DefinitionLists.#events");
+  readonly #certain = Retained.map<Definition, boolean>("DefinitionLists.#certain");
+  readonly #singleSite = Retained.map<number, boolean>("DefinitionLists.#singleSite");
 
   public constructor(
     readonly index: DefinitionIndex,
@@ -1021,7 +1036,9 @@ export class DefinitionLists {
     readonly live: (d: Definition) => boolean,
     /** Whether a list `+`'s operand gives the join its elements: not rejected by admission (A6, `joinElements`). */
     readonly joined: (operand: PlaceId) => boolean = () => true,
-  ) {}
+  ) {
+    Retained.owner(this, "DefinitionLists");
+  }
 
   get #program(): CoreProgram {
     return this.index.program;

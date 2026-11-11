@@ -26,6 +26,7 @@ import type {
   SubLayer,
 } from "../model.js";
 import { aliasLayer, projectedLayer } from "./layers.js";
+import { amend } from "../../retained/retained.js";
 
 /**
  * The root a store copies whole where `prefixWork` follows the copy into its source's own stores: a live whole store,
@@ -130,6 +131,7 @@ function ringOf(contract: Contract, place: PlaceId): CopyRing | null {
         contract.facts.ringComponents += 1;
         contract.facts.ringPorts += members.length;
         contract.facts.ringStops += stops.size;
+        amend(contract.facts);
       }
     }
     for (const member of members) contract.rings.set(member, ring);
@@ -198,6 +200,7 @@ export function* prefixWork(contract: Contract, prefix: CanonicalKey): IdentityW
     if (index === undefined) {
       f.seen.set(id, f.out.length);
       contract.facts.prefixEntries += 1;
+      amend(contract.facts);
       // its marks: its identity's holder; a stored value at a path is that value's holder lifted there
       const holder =
         e.key !== undefined
@@ -248,6 +251,7 @@ export function* prefixWork(contract: Contract, prefix: CanonicalKey): IdentityW
     if (defs === undefined) {
       f.also.set(layer, (defs = new Set()));
       contract.facts.prefixEntries += 1;
+      amend(contract.facts);
     }
     defs.add(f.d);
   };

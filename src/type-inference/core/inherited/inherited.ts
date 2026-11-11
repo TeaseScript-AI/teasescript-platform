@@ -30,6 +30,7 @@ import type { WorkLedger } from "../budget.js";
 import { copySources, stopsOfRead } from "../admission/walk.js";
 import { wholeOf } from "../admission/eligibility.js";
 import { positions } from "../positions.js";
+import { Retained } from "../retained/retained.js";
 
 // A4 through copies: the written type an unwritten place's decision inherits, from the graph of copies.
 
@@ -500,10 +501,18 @@ function* answerOf(
 export function openAboveKey(admission: Admission, place: PlaceId, key: KeyId): boolean {
   if (!admission.a4Places.has(place)) return false;
   let root = admission.a4Places.get(place) ?? null;
-  if (root === null) admission.a4Places.set(place, (root = { carried: [], below: new Map() }));
+  if (root === null)
+    admission.a4Places.set(
+      place,
+      (root = { carried: [], below: Retained.map("ReceivingDomain.a4Places.below") }),
+    );
   const { contract } = admission.pass;
   let byPath = admission.openSteps.get(place);
-  if (byPath === undefined) admission.openSteps.set(place, (byPath = new Map([[0, root]])));
+  if (byPath === undefined)
+    admission.openSteps.set(
+      place,
+      (byPath = Retained.map("ReceivingDomain.openSteps[]", [[0, root]])),
+    );
   const way: number[] = [];
   let at = keyIdPath(key);
   for (; !byPath.has(at); at = contract.pathParents[at]!) way.push(at);
@@ -529,7 +538,10 @@ export function openAboveKey(admission: Admission, place: PlaceId, key: KeyId): 
           }
           if (!carried.includes(below)) carried.push(below);
         }
-        node.below.set(step, (next = { carried, below: new Map() }));
+        node.below.set(
+          step,
+          (next = { carried, below: Retained.map("ReceivingDomain.a4Places.below") }),
+        );
       }
       node = next;
     }
@@ -542,7 +554,11 @@ export function openAboveKey(admission: Admission, place: PlaceId, key: KeyId): 
 export function openAbove(admission: Admission, place: PlaceId, path: readonly string[]): boolean {
   if (!admission.a4Places.has(place)) return false;
   let at = admission.a4Places.get(place) ?? null;
-  if (at === null) admission.a4Places.set(place, (at = { carried: [], below: new Map() }));
+  if (at === null)
+    admission.a4Places.set(
+      place,
+      (at = { carried: [], below: Retained.map("ReceivingDomain.a4Places.below") }),
+    );
   for (let length = 0; length < path.length && at.carried !== true; length += 1) {
     const step = path[length]!;
     let next = at.below.get(step);
@@ -561,7 +577,10 @@ export function openAbove(admission: Admission, place: PlaceId, path: readonly s
         }
         if (!carried.includes(below)) carried.push(below);
       }
-      at.below.set(step, (next = { carried, below: new Map() }));
+      at.below.set(
+        step,
+        (next = { carried, below: Retained.map("ReceivingDomain.a4Places.below") }),
+      );
     }
     at = next;
   }

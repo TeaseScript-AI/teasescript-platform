@@ -17,6 +17,7 @@ import type {
   StoredClass,
 } from "./model.js";
 import { termAt, typeKinds, writtenOf } from "./terms.js";
+import { amend } from "../retained/retained.js";
 
 // A selection's objects on one side (#1278, #1233): the names a choice object may hold, its pieces, stored classes.
 
@@ -437,6 +438,7 @@ export function* selectedObject(
 ): Work<readonly Item[]> {
   contract.pass.program.work.charge("invSteps");
   contract.facts.selectionVisits += 1;
+  amend(contract.facts);
   const { selected } = object;
   if (object.term.properties === null ? !byValue : (selected?.name === "value") !== byValue)
     return [];

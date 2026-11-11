@@ -33,6 +33,7 @@ import {
   topsAt,
 } from "./layers.js";
 import { prefixStores } from "./stores.js";
+import { amend } from "../../retained/retained.js";
 
 // #1466: what a consumer reads of a prefix's layers at a path, as one summary per layer and path: a demand that proves
 // its support with each source's own answer (`subAt`) in its leaf, so the solver owns it as every answer (its reads,
@@ -70,6 +71,7 @@ function layerDemand(contract: Contract, layer: SubLayer, path: number): ProofDe
   contract.keepText(name.length);
   contract.keep(1);
   contract.facts.layerDemands += 1;
+  amend(contract.facts);
   at.demand = {
     key: name,
     kind: "contract",

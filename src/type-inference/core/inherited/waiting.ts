@@ -10,6 +10,7 @@ import {
 } from "../contract/key-ids.js";
 import type { Inheriting } from "../admission/model.js";
 import { permittedAt } from "../admission/permitted.js";
+import { amend } from "../retained/retained.js";
 
 // The decisions that wait on each other through copies (a union-find by key), and what a scan reads of an inherited type.
 
@@ -104,6 +105,7 @@ export function join(admission: Admission, reader: string, first: Key, second: K
   const [a, b] = [canonicalKey(contract, first), canonicalKey(contract, second)];
   link(admission, a, b);
   admission.pass.receivingDomain.joins.push({ reader, a, b });
+  amend(admission.pass.receivingDomain);
 }
 
 /**
@@ -120,6 +122,7 @@ export function settleCycles(admission: Admission): void {
   admission.cycleSizes.clear();
   for (const { a, b } of receivingDomain.joins) link(admission, a, b);
   receivingDomain.joinsSettled = solver.forgets;
+  amend(receivingDomain);
 }
 
 /** `settleCycles` where the solver forgot answers since `cycles` was last made, between two runs. */

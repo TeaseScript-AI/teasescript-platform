@@ -42,6 +42,7 @@ import {
   union,
   viewOf,
 } from "./tries.js";
+import { amend, Retained } from "../../retained/retained.js";
 
 /** The layer an alias of `place` inherits: the place's own stores below its root over the place's layers, once. */
 export function aliasLayer(
@@ -251,7 +252,8 @@ export function listingBelow(
 ): SupportNode | null {
   // (a layer's set below it at a step is the same for every path under the step: found once per layer and step)
   let bySteps = contract.layersBelow.get(layer);
-  if (bySteps === undefined) contract.layersBelow.set(layer, (bySteps = new Map()));
+  if (bySteps === undefined)
+    contract.layersBelow.set(layer, (bySteps = Retained.map("Contract.layersBelow[]")));
   const known = bySteps.get(step);
   if (known !== undefined) return known;
   const set = mapGet(contract, layer.under, step);
@@ -348,6 +350,7 @@ export function atPath(contract: Contract, layer: SubLayer, path: number): Layer
     layer.paths.set(path, (at = {}));
     contract.keep(1);
     contract.facts.supportEdges += 1;
+    amend(contract.facts);
   }
   return at;
 }
@@ -427,7 +430,8 @@ function stepLayersOf(
 ): StepLayers {
   const work = contract.pass.program.work;
   let bySteps = contract.stepLayers.get(owner);
-  if (bySteps === undefined) contract.stepLayers.set(owner, (bySteps = new Map()));
+  if (bySteps === undefined)
+    contract.stepLayers.set(owner, (bySteps = Retained.map("Contract.stepLayers[]")));
   const known = bySteps.get(step);
   if (known !== undefined) return known;
   const found = find();
@@ -585,7 +589,8 @@ function holdersIn(
 /** A set's holders kept by path id (`Contract.holdersBelow`), made where first asked. */
 function holdersOf(contract: Contract, set: SupportNode): Map<number, SupportNode | null> {
   let byPath = contract.holdersBelow.get(set);
-  if (byPath === undefined) contract.holdersBelow.set(set, (byPath = new Map()));
+  if (byPath === undefined)
+    contract.holdersBelow.set(set, (byPath = Retained.map("Contract.holdersBelow[]")));
   return byPath;
 }
 
@@ -622,7 +627,8 @@ export function topsAt(
   }
   const passed = passedBelow(contract, layers, holding);
   if (passed.length === 0) return out;
-  const answers = madePathId(path) ?? (path.holders ??= new Map());
+  const answers =
+    madePathId(path) ?? (path.holders ??= Retained.held(path, Retained.map("ReadPath.holders")));
   for (const index of passed) {
     const { set, defs } = layers.below[index]!;
     for (const layer of layersIn(contract, holdersIn(contract, set, ref, answers)))
@@ -734,6 +740,7 @@ export function relevantSubs(
       for (const d of defs) own.add(d);
     }
   contract.facts.listedSources += found.size;
+  amend(contract.facts);
   return [...found]
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([key, defs]) => ({ key, defs }));

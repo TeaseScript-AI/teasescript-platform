@@ -43,6 +43,7 @@ import {
 import type { IndexNode } from "./contract.js";
 import type { Work } from "./solver.js";
 import type { ReadRoute } from "./values.js";
+import { amend, Retained } from "./retained/retained.js";
 
 /*
  * The exact path of the coarse core (checkpoint 9): a read of key k at node n is answered from one
@@ -278,25 +279,34 @@ function exitsOf(
 }
 
 export class ExactPath {
-  readonly #memo = new Map<string, ExactAnswer>();
+  readonly #memo = Retained.map<string, ExactAnswer>("ExactPath.#memo");
   #copies: CopyForest | null = null;
   /** Per source, its copies whose reads are reached, per callable (built once). */
   #bySource: Map<PlaceId, Map<Callable | null, CopyLink[]>> | null = null;
   /** Per source and callable, those copies' intervals of the walk, nested (built as asked). */
-  readonly #sourceSpans = new Map<PlaceId, Map<Callable | null, NestedSpans<CopyLink>>>();
+  readonly #sourceSpans = Retained.map<PlaceId, Map<Callable | null, NestedSpans<CopyLink>>>(
+    "ExactPath.#sourceSpans",
+  );
   /** The route of each definition's value at a path, recorded as it is answered (S3 §1). */
-  readonly #defRoutes = new Map<string, ReadRoute>();
+  readonly #defRoutes = Retained.map<string, ReadRoute>("ExactPath.#defRoutes");
   /** Per add, its place in its run of adds of one class (`#repeatOf`): the run's third add, and its own position. */
-  readonly #runs = new Map<
+  readonly #runs = Retained.map<
     Definition,
     { readonly third: Definition | null; readonly at: number }
-  >();
+  >("ExactPath.#runs");
   /** Per tested key, its guarded exits, nested (built once its callables have been asked as often as it has exits). */
-  readonly #exitSpans = new Map<Key, NestedSpans<number> | null>();
+  readonly #exitSpans = Retained.map<Key, NestedSpans<number> | null>("ExactPath.#exitSpans");
   /** Per tested key whose guarded exits are not built: its exits in its callables, and the callables asked so far. */
-  readonly #exitBudget = new Map<Key, { readonly exits: number; asked: number }>();
+  readonly #exitBudget = Retained.map<Key, { readonly exits: number; asked: number }>(
+    "ExactPath.#exitBudget",
+  );
 
-  public constructor(readonly pass: CorePass) {}
+  public constructor(readonly pass: CorePass) {
+    Retained.owner(this, "ExactPath", (exact) => ({
+      copies: exact.#copies,
+      bySource: exact.#bySource,
+    }));
+  }
 
   /** The analysis's ledger, which the paths and keys built here are charged to (`keptKey`, `keptText`). */
   get #work(): WorkLedger {
@@ -766,15 +776,16 @@ export class ExactPath {
       atSeveral,
       belowSeveral,
       anchorsOf,
-      placesBuilt: new Map(),
+      placesBuilt: Retained.map("ExactPath.copies.placesBuilt"),
       markPlaces,
       markSeveral,
       markSpans,
       operandSpans,
       exits: exitsOf(exitSet, program),
-      anchorsBuilt: new Map(),
-      marksBuilt: new Map(),
+      anchorsBuilt: Retained.map("ExactPath.copies.anchorsBuilt"),
+      marksBuilt: Retained.map("ExactPath.copies.marksBuilt"),
     };
+    amend(this);
     return this.#copies;
   }
 
@@ -1067,6 +1078,7 @@ export class ExactPath {
         else list.push(link);
       }
       this.#bySource = bySource;
+      amend(this);
     }
     const links = this.#bySource.get(source)?.get(callable);
     if (links === undefined) return null;

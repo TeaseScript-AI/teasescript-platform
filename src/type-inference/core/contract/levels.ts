@@ -41,6 +41,7 @@ import type {
   PropertyIndex,
   PropertySource,
 } from "./model.js";
+import { Retained, retainedModule } from "../retained/retained.js";
 
 // A prefix's levels (§4.6): its entries grouped at a path, and a literal's structure by path.
 
@@ -520,8 +521,8 @@ function foldGroups(
       const first = contract.joined(list[0]!.at, ".");
       const alike = list.every((member) => contract.joined(member.at, ".") === first);
       // (a short name for the list, made once: a read's scan key never spells its members out)
-      const known = MEMBER_LISTS.get(contract) ?? 0;
-      MEMBER_LISTS.set(contract, known + 1);
+      const known = MEMBER_LISTS().get(contract) ?? 0;
+      MEMBER_LISTS().set(contract, known + 1);
       const membersKey = `m${known}`;
       groups[position] = { ...groups[position]!, members: list, membersKey, alike };
     });
@@ -641,12 +642,12 @@ function absenceClass(
  */
 function ownAbsence(contract: Contract, literal: PlaceId): ReadonlyMap<Writer, string> {
   const index = contract.literalIndex(literal);
-  let known = OWN_ABSENCE.get(index);
+  let known = OWN_ABSENCE().get(index);
   if (known === undefined) {
     // (structure shared by every read of the literal, counted to the total and not to the asking decision:
     // docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-349)
     known = contract.pass.program.work.shared(() => ownObjects(contract, index));
-    OWN_ABSENCE.set(index, known);
+    OWN_ABSENCE().set(index, known);
   }
   return known;
 }
@@ -667,18 +668,25 @@ function ownObjects(contract: Contract, index: LiteralIndex): Map<Writer, string
 }
 
 /** The member lists named so far, per contract (a pass's): their count. */
-const MEMBER_LISTS = new WeakMap<Contract, number>();
+const MEMBER_LISTS = retainedModule("levels.MEMBER_LISTS", Retained.weakMap<Contract, number>);
 
 /** `ownAbsence`'s maps, per literal index. */
-const OWN_ABSENCE = new WeakMap<object, Map<Writer, string>>();
+const OWN_ABSENCE = retainedModule(
+  "levels.OWN_ABSENCE",
+  Retained.weakMap<object, Map<Writer, string>>,
+);
 
 /** `groupRead`'s kept scans, per contract (a pass's): by class, the earliest writer. */
 function keptAbsences(contract: Contract): Map<string, Writer | null> {
-  let kept = KEPT_ABSENCES.get(contract);
-  if (kept === undefined) KEPT_ABSENCES.set(contract, (kept = new Map()));
+  let kept = KEPT_ABSENCES().get(contract);
+  if (kept === undefined)
+    KEPT_ABSENCES().set(contract, (kept = Retained.map("levels.KEPT_ABSENCES[]")));
   return kept;
 }
-const KEPT_ABSENCES = new WeakMap<Contract, Map<string, Writer | null>>();
+const KEPT_ABSENCES = retainedModule(
+  "levels.KEPT_ABSENCES",
+  Retained.weakMap<Contract, Map<string, Writer | null>>,
+);
 
 /**
  * A literal's structure by path, once (§4.6): what stands at each path of its index itself (its own terms' kinds,

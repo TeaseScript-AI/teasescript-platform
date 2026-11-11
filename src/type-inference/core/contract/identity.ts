@@ -16,6 +16,7 @@ import { holderAt, holderOfKey, newHolder } from "./marks.js";
 import type { Identity, IdentityWork, StoredChoiceKeys } from "./model.js";
 import { writtenOf } from "./terms.js";
 import { resultOf } from "./value-kinds.js";
+import { Retained } from "../retained/retained.js";
 
 // The one identity function (§8): the key a value copies, a key's and a value's source identity, structures.
 
@@ -109,7 +110,7 @@ export function choiceKeysStored(contract: Contract): StoredChoiceKeys {
 /** The keys of a place that have definitions. */
 function keysOfPlace(contract: Contract, place: PlaceId): readonly Key[] {
   if (contract.placeKeys === null) {
-    contract.placeKeys = new Map();
+    contract.placeKeys = Retained.held(contract, Retained.map("Contract.placeKeys"));
     for (const [key] of contract.pass.definitions.byKey) {
       contract.pass.program.work.charge("invSteps");
       const list = contract.placeKeys.get(keyPlace(key));
@@ -123,13 +124,14 @@ function keysOfPlace(contract: Contract, place: PlaceId): readonly Key[] {
 /** Per place, the first steps of its live stores below the root (a preset's changed field). */
 export function subFirstOf(contract: Contract, place: PlaceId): ReadonlySet<string> {
   if (contract.subFirst === null) {
-    contract.subFirst = new Map();
+    contract.subFirst = Retained.held(contract, Retained.map("Contract.subFirst"));
     for (const [key, list] of contract.pass.definitions.byKey) {
       const path = keyPath(key);
       contract.pass.program.work.charge("invSteps");
       if (path.length > 0 && list.some((d) => contract.pass.lists.live(d))) {
         let steps = contract.subFirst.get(keyPlace(key));
-        if (steps === undefined) contract.subFirst.set(keyPlace(key), (steps = new Set()));
+        if (steps === undefined)
+          contract.subFirst.set(keyPlace(key), (steps = Retained.set("Contract.subFirst[]")));
         steps.add(path[0]!);
       }
     }

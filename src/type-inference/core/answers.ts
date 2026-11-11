@@ -103,6 +103,7 @@ import {
 } from "./contract-descriptors.js";
 import { admittedLevel } from "./admission/admitted.js";
 import { stopDiagnostics } from "./stop-diagnostics.js";
+import { Retained, retainedModule } from "./retained/retained.js";
 
 // (a kind's closed type lives with the contract descriptors, which build types of kinds; the adapters read it here)
 export { closedType };
@@ -1128,7 +1129,10 @@ function termProperties(term: TypeTerm): string[] {
 }
 
 /** Each program's kept-variable names by base (`keptName`), one survey for all the answers asked of it. */
-const KEPT_NAMES = new WeakMap<CorePass["program"], Map<string, string>>();
+const KEPT_NAMES = retainedModule(
+  "answers.KEPT_NAMES",
+  Retained.weakMap<CorePass["program"], Map<string, string>>,
+);
 
 class CoreAnswers implements Answers {
   readonly outcome: CoreOutcome;
@@ -1476,8 +1480,8 @@ class CoreAnswers implements Answers {
 
   public keptName(base: string): string {
     const { program } = this.#pass;
-    let names = KEPT_NAMES.get(program);
-    if (names === undefined) KEPT_NAMES.set(program, (names = new Map()));
+    let names = KEPT_NAMES().get(program);
+    if (names === undefined) KEPT_NAMES().set(program, (names = new Map()));
     let name = names.get(base);
     if (name === undefined) {
       const { work } = program;

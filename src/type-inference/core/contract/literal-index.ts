@@ -30,6 +30,7 @@ import type {
   WalkRank,
 } from "./model.js";
 import { typeTags } from "./terms.js";
+import { amend, Retained, retainedModule } from "../retained/retained.js";
 
 // The literal index (§8): one index of a literal's structure per literal value or cell, its paths and signature.
 
@@ -50,19 +51,19 @@ function marksOwn(node: IndexNode): boolean {
 /** A node of a literal's index holding nothing yet. */
 function indexNode(): IndexNode {
   return {
-    terms: new Map(),
+    terms: Retained.map("LiteralNode.terms"),
     reads: [],
     exact: [],
     others: [],
     objects: null,
     reference: false,
     empty: false,
-    children: new Map(),
-    seen: new Set(),
-    readIds: new Map(),
+    children: Retained.map("LiteralNode.children"),
+    seen: Retained.set("LiteralNode.seen"),
+    readIds: Retained.map("LiteralNode.readIds"),
     firstRead: null,
     firstOther: null,
-    via: new Map(),
+    via: Retained.map("LiteralNode.via"),
   };
 }
 
@@ -116,7 +117,8 @@ export function pathSteps(contract: Contract, id: number): string[] {
 /** The id of the path one `step` below the path `parent`, made (and charged, its step and slot) when first asked. */
 export function pathAt(contract: Contract, parent: number, step: string): number {
   let steps = contract.pathChildren[parent];
-  if (steps === undefined) contract.pathChildren[parent] = steps = new Map();
+  if (steps === undefined)
+    contract.pathChildren[parent] = steps = Retained.map("Contract.pathChildren[]");
   const known = steps.get(step);
   if (known !== undefined) return known;
   contract.keepText(step.length);
@@ -130,6 +132,7 @@ export function pathAt(contract: Contract, parent: number, step: string): number
   contract.pathMembers.push(memberStep([step], 0) === 0 ? id : contract.pathMembers[parent]!);
   contract.pathProperties.push(contract.pathProperties[parent]! && propertyOnly(step));
   contract.pathPositions.push(contract.pathPositions[parent]! && positionStep(step));
+  amend(contract);
   steps.set(step, id);
   return id;
 }
@@ -307,6 +310,7 @@ export function heldBelow(contract: Contract, node: IndexNode): NodeBelow {
         own.empty ||
         top.children.some((child) => child.below!.beside),
     };
+    amend(top.node);
   }
   return node.below!;
 }
@@ -443,6 +447,7 @@ export function* indexWork(contract: Contract, literal: PlaceId): IdentityWork {
           contract.keep(1);
           node.seen.add(key);
           contract.facts.literalEntries += 1;
+          amend(contract.facts);
           node.firstOther ??= rank;
           put(node.others, { g, value });
           continue;
@@ -464,6 +469,7 @@ export function* indexWork(contract: Contract, literal: PlaceId): IdentityWork {
         const read = node.readIds.get(id);
         if (read === undefined) {
           contract.facts.literalEntries += 1;
+          amend(contract.facts);
           contract.keep(2);
           const entry: ReadEntry = {
             g,
@@ -506,7 +512,8 @@ export function* indexWork(contract: Contract, literal: PlaceId): IdentityWork {
       if (term.kind === "object") {
         if (node.objects === null) {
           contract.keep(4);
-          node.objects = { list: [], count: new Map() };
+          node.objects = { list: [], count: Retained.map("LiteralNode.objects.count") };
+          amend(node);
         }
         // its property names, and the property its button value reads, decided once per record (V30 §19)
         const names = new Set<string>();
@@ -516,6 +523,7 @@ export function* indexWork(contract: Contract, literal: PlaceId): IdentityWork {
         contract.keep(2 + 4 * (term.properties?.length ?? 0));
         for (const property of term.properties ?? []) {
           contract.facts.selectionVisits += 1;
+          amend(contract.facts);
           names.add(contract.kept(propertyStep(property.name)));
           if (property.name === "value") value ??= property;
           else if (property.name === "text") text ??= property;
@@ -557,7 +565,11 @@ export function* indexWork(contract: Contract, literal: PlaceId): IdentityWork {
     for (let at = fill.length - 1; at >= 0; at -= 1) nodes.push(fill[at]!);
   }
   contract.indexing.delete(literal);
-  contract.literals.set(literal, { root, byId: new Map([[0, root]]), lacking: new Map() });
+  contract.literals.set(literal, {
+    root,
+    byId: Retained.map("LiteralIndex.byId", [[0, root]]),
+    lacking: Retained.map("LiteralIndex.lacking"),
+  });
 }
 
 /**
@@ -644,10 +656,10 @@ export function* loadsBelow(
     merged = withoutEmpty(mergeItems(items, program.scope));
     contract.keep(1 + merged.length);
     contract.loadsBelowOf.set(groups, merged);
-    if (staged !== null) loadsFlows.set(groups, staged.inclusions);
+    if (staged !== null) loadsFlows().set(groups, staged.inclusions);
   }
   if (flow !== null) {
-    const kept = loadsFlows.get(groups);
+    const kept = loadsFlows().get(groups);
     // (an answer kept by a reader that passed no flow: no flow of it)
     if (kept === undefined) flow.opaque("loads");
     // (read by the reader that made the kept answer, in its run: `kept`, which a run's own reads need not hold)
@@ -658,7 +670,10 @@ export function* loadsBelow(
 }
 
 /** #1668: per loads' groups, the inclusions their kept merged answer was made of (`loadsBelow`). */
-const loadsFlows = new WeakMap<readonly OtherGroup[], readonly Inclusion[]>();
+const loadsFlows = retainedModule(
+  "literal-index.loadsFlows",
+  Retained.weakMap<readonly OtherGroup[], readonly Inclusion[]>,
+);
 
 /**
  * #1456: a prefix's property index over its sources (`PropertyIndex`), each a closed object literal stored whole: its
