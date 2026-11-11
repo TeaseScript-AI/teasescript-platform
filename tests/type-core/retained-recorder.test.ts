@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import {
+  collectMarks,
+  depthOf,
+  markAccepts,
+} from "../../src/type-inference/core/contract/marks.js";
 import type { Item } from "../../src/type-inference/core/items.js";
 import {
   amend,
@@ -8,11 +13,13 @@ import {
   withRetainedRecorder,
 } from "../../src/type-inference/core/retained/retained.js";
 import { Solver, type Demand, type Work } from "../../src/type-inference/core/solver.js";
+import { coreRequest } from "../helpers/type-core-analysis.js";
 import { readFixture } from "../helpers/type-core/type-core-fixture.js";
+import { narrowingPass } from "../helpers/type-core/type-core-narrowing.js";
 import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import { itemScope } from "../helpers/type-core-items.js";
 import { publishedRoute } from "../helpers/type-core-oracles.js";
-import { Recorder, type RecorderReport } from "../helpers/retained-recorder.js";
+import { Recorder, RecorderProbe, type RecorderReport } from "../helpers/retained-recorder.js";
 
 // #1072 step 1b: the recorder's negative controls. Each shape changes retained state in a later solver run than the one
 // that made it; without its mark the recorder names the change, with it the recorder is quiet.
@@ -203,7 +210,6 @@ test("an instance of a class not compared by identity is named in retained state
   class Unlisted {
     value = 1;
   }
-  class RecorderProbe {}
   const named = (made: Unlisted | RecorderProbe): readonly string[] =>
     recorded(() => {
       const map = Retained.map<string, Unlisted | RecorderProbe>("T.classes");
@@ -213,6 +219,209 @@ test("an instance of a class not compared by identity is named in retained state
     "an instance of Unlisted, a class not in IDENTITY_CLASSES, in retained state",
   ]);
   assert.deepEqual(named(new RecorderProbe()), []);
+});
+
+test("a set's or a weak set's member changed in place in a later run is named unless amended", () => {
+  for (const kind of ["set", "weakSet"] as const) {
+    const { unmarked, marked } = controlled((mark) => {
+      const members =
+        kind === "set"
+          ? Retained.set<{ value: number }>("T.set")
+          : Retained.weakSet<{ value: number }>("T.set");
+      const member = { value: 1 };
+      return [
+        () => members.add(member),
+        () => {
+          member.value = 2;
+          mark(member);
+        },
+      ];
+    });
+    assert.equal(unmarked.length, 1, kind);
+    assert.match(unmarked[0]!, /^unrecorded change: T\.set at o\d+$/, kind);
+    assert.deepEqual(marked, [], kind);
+  }
+});
+
+test("a native map's key changed in place in a later run is named unless amended", () => {
+  const { unmarked, marked } = controlled((mark) => {
+    const key = { value: 1 };
+    const owner = { map: new Map([[key, 0]]) };
+    Retained.owner(owner, "T.native");
+    return [
+      () => {},
+      () => {
+        key.value = 2;
+        mark(key);
+      },
+    ];
+  });
+  assert.deepEqual(unmarked, ["unrecorded change: T.native.map"]);
+  assert.deepEqual(marked, []);
+});
+
+test("an owner's field added or deleted in a later run is named unless the owner is amended", () => {
+  for (const change of ["add", "delete"] as const) {
+    const { unmarked, marked } = controlled((mark) => {
+      const owner: { field?: number; extra?: number } = { field: 1 };
+      Retained.owner(owner, "T.owner");
+      return [
+        () => {},
+        () => {
+          if (change === "add") owner.extra = 2;
+          else delete owner.field;
+          mark(owner);
+        },
+      ];
+    });
+    assert.deepEqual(unmarked, ["unrecorded change: T.owner's fields"], change);
+    assert.deepEqual(marked, [], change);
+  }
+});
+
+test("a subclass of a walked built-in, or a class named like a listed one, is named in retained state", () => {
+  class UnlistedMap extends Map<string, number> {
+    value = 1;
+  }
+  class UnlistedArray extends Array<number> {
+    value = 1;
+  }
+  const Listed = class Solver {
+    value = 1;
+  };
+  for (const [made, name] of [
+    [new UnlistedMap(), "UnlistedMap"],
+    [new UnlistedArray(), "UnlistedArray"],
+    [new Listed(), "Solver"],
+  ] as const) {
+    const violations = recorded(() => {
+      const map = Retained.map<string, object>("T.classes");
+      return [() => map.set("c", made)];
+    }).violations;
+    assert.deepEqual(violations, [
+      `an instance of ${name}, a class not in IDENTITY_CLASSES, in retained state`,
+    ]);
+  }
+});
+
+test("an accessor in retained state is named and never called, unless its owner's `hidden` gives it", () => {
+  const payload = {
+    reads: 0,
+    get data(): number {
+      this.reads += 1;
+      return 1;
+    },
+  };
+  const violations = recorded(() => {
+    const map = Retained.map<string, typeof payload>("T.accessor");
+    return [() => map.set("p", payload), () => {}];
+  }).violations;
+  assert.deepEqual(violations, ["an accessor `data` of Object in retained state"]);
+  assert.equal(payload.reads, 0);
+  // (`CorePass`'s shape: a getter of a value made after its owner, which the owner's `hidden` reads)
+  const { unmarked } = controlled(() => {
+    const later = { value: 1 };
+    const owner = {
+      get later(): { value: number } {
+        return later;
+      },
+    };
+    Retained.owner(owner, "T.declared", (made) => ({ later: made.later }));
+    return [() => {}, () => (later.value = 2)];
+  });
+  assert.deepEqual(unmarked, ["unrecorded change: T.declared.#later"]);
+});
+
+test("a demand's factory runs as its own run: its caller's amend does not cover the change it makes", () => {
+  // (an eager factory, `make` an ordinary function, and a generator one change the payload alike)
+  for (const eager of [true, false]) {
+    const recorder = new Recorder();
+    withRetainedRecorder(recorder, () => {
+      const payload = { value: 1 };
+      Retained.map<string, { value: number }>("T.factory").set("p", payload);
+      const change = (): void => {
+        payload.value = 2;
+      };
+      const child: Demand = {
+        key: "child",
+        kind: "value",
+        file: 0,
+        offset: 1,
+        make: eager
+          ? (): Work<readonly Item[]> => {
+              change();
+              return (function* (): Work<readonly Item[]> {
+                return [];
+              })();
+            }
+          : function* (): Work<readonly Item[]> {
+              change();
+              return [];
+            },
+      };
+      const parent: Demand = {
+        key: "parent",
+        kind: "value",
+        file: 0,
+        offset: 0,
+        *make(): Work<readonly Item[]> {
+          amend(payload);
+          yield child;
+          return [];
+        },
+      };
+      new Solver(itemScope()).run(
+        (function* (): Work<readonly Item[]> {
+          yield parent;
+          return [];
+        })(),
+      );
+    });
+    assert.deepEqual(
+      recorder.report().violations,
+      ['unrecorded change: T.factory at "p"'],
+      `eager: ${eager}`,
+    );
+  }
+});
+
+test("a mark automaton compiled for real holders, each in its own run, is recorded", () => {
+  const recorder = new Recorder();
+  const holders = withRetainedRecorder(recorder, () => {
+    const request = coreRequest([
+      {
+        path: "main.tease",
+        source:
+          "let seed: integer = 1\nlet a = {p: seed}\nlet b = {q: seed}\n" +
+          "if a.p != null { repeat a.p {} }\nif b.q != null { repeat b.q {} }\nexit\n",
+      },
+    ]);
+    assert.ok(request !== null);
+    const pass = narrowingPass(request);
+    collectMarks(pass.contract);
+    const marked = [...pass.contract.holders.values()].filter(
+      (holder) => depthOf(pass.contract, holder) !== Infinity,
+    );
+    pass.solver.run(
+      (function* (): Work<readonly Item[]> {
+        for (const [index, holder] of marked.entries())
+          yield {
+            key: `mark${index}`,
+            kind: "value",
+            file: 0,
+            offset: index,
+            *make(): Work<readonly Item[]> {
+              markAccepts(pass.contract, holder, ["p"]);
+              return [];
+            },
+          };
+        return [];
+      })(),
+    );
+    return marked.length;
+  });
+  assert.ok(holders > 1);
+  assert.deepEqual(recorder.report().violations, []);
 });
 
 /**

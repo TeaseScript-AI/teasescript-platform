@@ -150,6 +150,12 @@ class NestedSpans<T> {
     spans: readonly Span<T>[],
     private readonly work: WorkLedger,
   ) {
+    Retained.owner(this, "NestedSpans", (nested) => ({
+      start: nested.#start,
+      end: nested.#end,
+      item: nested.#item,
+      jumps: nested.#jumps,
+    }));
     const sorted = [...spans].sort((x, y) => x.start - y.start || y.end - x.end);
     work.charge("exactQueries", sortCost(sorted.length));
     const parent: number[] = [];

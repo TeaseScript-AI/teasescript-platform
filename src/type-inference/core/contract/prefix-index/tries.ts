@@ -238,7 +238,6 @@ function made(contract: Contract, edges: number): number {
   contract.keep(1 + edges);
   contract.facts.supportEdges += edges;
   amend(contract.facts);
-  amend(contract.facts);
   return contract.facts.supportNodes++;
 }
 

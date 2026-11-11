@@ -17,6 +17,7 @@ import {
 } from "../../../src/type-inference/core/narrowing/narrowings.js";
 import { CoreProgram, type CoreAnalysisRequest } from "../../../src/type-inference/core/program.js";
 import { ReceivingDomain } from "../../../src/type-inference/core/inherited/receiving-domain.js";
+import { Retained } from "../../../src/type-inference/core/retained/retained.js";
 import { Solver, withSolverSeam } from "../../../src/type-inference/core/solver.js";
 import { Values } from "../../../src/type-inference/core/values.js";
 
@@ -56,6 +57,12 @@ export function narrowingPass(request: CoreAnalysisRequest): CorePass {
   const exact = new ExactPath(pass);
   const contract = new Contract(pass);
   const values = new Values(pass);
+  // (as `createPass` registers its pass: the retained-state recorder reads its getters through this)
+  Retained.owner(pass, "CorePass", (made) => ({
+    exact: made.exact,
+    contract: made.contract,
+    values: made.values,
+  }));
   return pass;
 }
 

@@ -245,6 +245,11 @@ interface Frame {
   readonly trace: FlowSink | null;
 }
 
+/** Test-only: a run's identity as the retained-state recorder hears it, made before its demand's factory runs. */
+interface RunMark {
+  readonly started: true;
+}
+
 interface Rerun {
   readonly solving: Solving;
   readonly member: DemandNode;
@@ -434,6 +439,11 @@ export class Solver {
   readonly #seam: SolverSeam | null = activeSeam;
   /** Test-only: the retained-state recorder, told the current run (`retained/retained.ts`); `null` in production. */
   readonly #retained = retainedRecorder();
+  /**
+   * Test-only: each frame's run, as the recorder was told it before its demand's factory ran (`#started`); made only
+   * with a recorder.
+   */
+  readonly #runOf: WeakMap<Frame, RunMark> | null = this.#retained === null ? null : new WeakMap();
   /** The order of demands' keys at one site and kind (`canonical`): the pass's, a cursor's by its logical text. */
   names: ((a: string, b: string) => number) | null = null;
   /** Test-only seam: a component's names as another pass replays them (`exportNames`). */
@@ -813,6 +823,22 @@ export class Solver {
     return flow;
   }
 
+  /**
+   * Test-only: a demand's run starts before its factory (`make`) runs, whose code is the run's too; `null` without a
+   * recorder, which then makes nothing.
+   */
+  #starting(): RunMark | null {
+    if (this.#retained === null) return null;
+    const run: RunMark = { started: true };
+    this.#retained.run(run);
+    return run;
+  }
+
+  /** Test-only: `frame` runs as the run `#starting` began. */
+  #started(frame: Frame, run: RunMark | null): void {
+    if (run !== null) this.#runOf?.set(frame, run);
+  }
+
   /** Runs frames, and solves the components they close, until `base` returns. */
   #drive(base: Frame): void {
     const frames = this.#frames;
@@ -829,7 +855,7 @@ export class Solver {
       }
       const frame = frames.at(-1)!;
       // (the frame's step is its run's, and so is its finish below: its decision's choice and answer)
-      this.#retained?.run(frame);
+      this.#retained?.run(this.#runOf?.get(frame) ?? frame);
       const step = this.#advance(frame, frame.inline, frame.pending ?? []);
       frame.pending = undefined;
       this.#work.charge("yields");
@@ -878,7 +904,9 @@ export class Solver {
         trace: null,
       };
       this.#active.set(demand.key, created);
+      const run = this.#starting();
       const pushed = this.#frame(created, demand.make(), created.index, null);
+      this.#started(pushed, run);
       this.#stack.push(created);
       this.#frames.push(pushed);
       return;
@@ -1018,7 +1046,10 @@ export class Solver {
       this.#work.charge("sccReruns");
       const rerun: Rerun = { solving, member, reads: new Set() };
       this.#reruns.push(rerun);
-      this.#frames.push(this.#frame(null, member.demand.make(), solving.component.index, rerun));
+      const run = this.#starting();
+      const pushed = this.#frame(null, member.demand.make(), solving.component.index, rerun);
+      this.#started(pushed, run);
+      this.#frames.push(pushed);
       return;
     }
   }

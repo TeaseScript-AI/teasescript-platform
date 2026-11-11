@@ -27,63 +27,95 @@
  * The fingerprint is a detached string hash computed at the run switch (object identities as this recorder's own ids),
  * never the live object.
  */
+import { WorkLedger } from "../../src/type-inference/core/budget.js";
+import { IngressGraph } from "../../src/type-inference/core/items.js";
+import { CoreProgram } from "../../src/type-inference/core/program.js";
 import type { RetainedRecorder } from "../../src/type-inference/core/retained/retained.js";
+import { Solver } from "../../src/type-inference/core/solver.js";
+
+/** A negative control's marker (`tests/type-core/retained-recorder.test.ts`): a listed class of no other use. */
+export class RecorderProbe {}
+
+/** A listed class: one taken by identity. */
+interface IdentityClass {
+  readonly name: string;
+  /** Why a later run cannot observe a change in one of its instances through retained state. */
+  readonly reason: string;
+  /** Whether the reason is a test: the `census` option walks its instances by value. */
+  readonly census: boolean;
+}
 
 /**
- * The classes whose instances an entry's value takes by identity, each with why a later run cannot observe a change in
- * one through retained state: `census` where the reason is a test (`Recorder`'s `census` option walks them by value).
- * A class met in retained state and missing here fails the recorder.
+ * The classes whose instances an entry's value takes by identity, by the class itself (never by its name), each with
+ * its reason. An instance of any other class met in retained state fails the recorder, a subclass of a listed class or
+ * of a native collection included.
  */
-const IDENTITY_CLASSES: ReadonlyMap<string, { readonly reason: string; readonly census: boolean }> =
-  new Map([
-    [
-      "Solver",
-      {
-        reason:
-          "the solver's own records: a run reads them through solver reads, which the rule's reads govern, never as retained data",
-        census: false,
-      },
-    ],
-    [
-      "WorkLedger",
-      {
-        reason:
-          "the work ledger: every charge changes it by design, and a stop reads it under the resource rule, not as retained data",
-        census: false,
-      },
-    ],
-    [
-      "IngressGraph",
-      {
-        reason:
-          "the item scope's ingress cells: every run that makes an item may add one, as every charge adds to the ledger; an item names its cells, and items compare by their own signature",
-        census: false,
-      },
-    ],
-    [
-      "CoreProgram",
-      {
-        reason:
-          "the program, indexed before the first pass and read by every pass: the census run finds no change",
-        census: true,
-      },
-    ],
-    [
-      "NestedSpans",
-      {
-        reason:
-          "built whole in its constructor: its private fields are written nowhere else (src/type-inference/core/exact-path.ts)",
-        census: false,
-      },
-    ],
-    [
-      "RecorderProbe",
-      {
-        reason: "a negative control's own marker (tests/type-core/retained-recorder.test.ts)",
-        census: false,
-      },
-    ],
-  ]);
+const IDENTITY_CLASSES: ReadonlyMap<unknown, IdentityClass> = new Map<unknown, IdentityClass>([
+  [
+    Solver,
+    {
+      name: "Solver",
+      reason:
+        "the solver's own records: a run reads them through solver reads, which the rule's reads govern, never as retained data",
+      census: false,
+    },
+  ],
+  [
+    WorkLedger,
+    {
+      name: "WorkLedger",
+      reason:
+        "the work ledger: every charge changes it by design, and a stop reads it under the resource rule, not as retained data",
+      census: false,
+    },
+  ],
+  [
+    IngressGraph,
+    {
+      name: "IngressGraph",
+      reason:
+        "the item scope's ingress cells: every run that makes an item may add one, as every charge adds to the ledger; an item names its cells, and items compare by their own signature",
+      census: false,
+    },
+  ],
+  [
+    CoreProgram,
+    {
+      name: "CoreProgram",
+      reason:
+        "the program, indexed before the first pass and read by every pass: the census run finds no change",
+      census: true,
+    },
+  ],
+  [
+    RecorderProbe,
+    {
+      name: "RecorderProbe",
+      reason: "a negative control's own marker, never changed",
+      census: false,
+    },
+  ],
+]);
+
+/** The prototypes whose instances are walked by value: plain data, by exact prototype only. */
+const PLAIN = new Set<unknown>([Object.prototype, null]);
+const TYPED = new Set<unknown>(
+  [
+    Int8Array,
+    Uint8Array,
+    Uint8ClampedArray,
+    Int16Array,
+    Uint16Array,
+    Int32Array,
+    Uint32Array,
+    Float16Array,
+    Float32Array,
+    Float64Array,
+    BigInt64Array,
+    BigUint64Array,
+    DataView,
+  ].map((type) => type.prototype),
+);
 
 /** One run's marks: the entries its collections' writes named, and the objects it amended. */
 interface Marks {
@@ -120,8 +152,6 @@ export interface RecorderReport {
   /** Classes compared by identity, with the times they were met. */
   readonly identities: ReadonlyMap<string, number>;
 }
-
-const PLAIN = new Set<unknown>([Object.prototype, null]);
 
 /** A 53-bit hash of a string (cyrb53), as a short text. */
 function hashText(text: string): string {
@@ -378,10 +408,14 @@ export class Recorder implements RetainedRecorder {
       fields: () => {
         const held = ref.deref();
         if (held === undefined) return null;
-        const fields: (readonly [string, unknown])[] = Object.entries(held);
-        if (hidden !== null)
-          for (const [field, value] of Object.entries(hidden(held)))
-            fields.push([`#${field}`, value]);
+        // (an own accessor its `hidden` gives by name is the owner's declared read: its value is that one)
+        const given = hidden === null ? {} : hidden(held);
+        const fields: (readonly [string, unknown])[] = ownFields(
+          held,
+          (text) => this.#violation(text),
+          new Set(Object.keys(given)),
+        );
+        for (const [field, value] of Object.entries(given)) fields.push([`#${field}`, value]);
         return fields;
       },
       amendedBy: (amended) => {
@@ -444,15 +478,16 @@ export class Recorder implements RetainedRecorder {
         `${collection.name}'s membership`,
         null,
       );
+      // (a map's value at each key, a set's member itself: each its own entry, by value)
       for (const [key, value, keyed] of listed) {
-        if (!keyed) continue;
-        const node = this.#value(value, memo, marks.amended, []);
+        const held = keyed ? value : key;
+        const node = this.#value(held, memo, marks.amended, []);
         changed(
           this.#keyEntry(collection.id, key),
           node.hash,
           () => node.amended,
           `${collection.name} at ${this.#atom(key)}`,
-          value,
+          held,
         );
       }
     }
@@ -460,6 +495,14 @@ export class Recorder implements RetainedRecorder {
       const fields = record.fields();
       if (fields === null) continue;
       const ownerAmended = record.amendedBy(marks.amended);
+      // (its fields' names: one more entry, so a field added or removed is a change too)
+      changed(
+        `O${record.id}:#`,
+        hashText(fields.map(([field]) => JSON.stringify(field)).join(",")),
+        () => ownerAmended,
+        `${record.name}'s fields`,
+        null,
+      );
       for (const [field, value] of fields) {
         const node = this.#value(value, memo, marks.amended, []);
         changed(
@@ -502,37 +545,42 @@ export class Recorder implements RetainedRecorder {
     };
     stack.push(value);
     const prototype: unknown = Object.getPrototypeOf(value);
-    if (Array.isArray(value)) {
+    const listed = IDENTITY_CLASSES.get(
+      prototype === null ? undefined : (prototype as { constructor?: unknown }).constructor,
+    );
+    if (prototype === Array.prototype) {
       parts.push("[");
-      for (const element of value) part(element);
-    } else if (ArrayBuffer.isView(value)) {
+      // EVIDENCE: invariant: an object whose prototype is `Array.prototype` is an array.
+      for (const element of value as unknown[]) part(element);
+    } else if (TYPED.has(prototype)) {
       // (a typed array's or a data view's bytes are plain data)
-      parts.push(`T${new Uint8Array(value.buffer, value.byteOffset, value.byteLength).join(",")}`);
-    } else if (value instanceof Map) {
+      // EVIDENCE: invariant: an object whose prototype is a built-in view's is that view.
+      const view = value as ArrayBufferView;
+      parts.push(`T${new Uint8Array(view.buffer, view.byteOffset, view.byteLength).join(",")}`);
+    } else if (prototype === Map.prototype) {
       parts.push("M");
-      for (const [key, element] of value) {
-        parts.push(this.#atom(key));
+      // EVIDENCE: invariant: an object whose prototype is `Map.prototype` is a map.
+      for (const [key, element] of value as Map<unknown, unknown>) {
+        part(key);
         part(element);
       }
-    } else if (value instanceof Set) {
+    } else if (prototype === Set.prototype) {
       parts.push("S");
-      for (const element of value) part(element);
-    } else if (value instanceof WeakMap || value instanceof WeakSet) {
+      // EVIDENCE: invariant: an object whose prototype is `Set.prototype` is a set.
+      for (const element of value as Set<unknown>) part(element);
+    } else if (prototype === WeakMap.prototype || prototype === WeakSet.prototype) {
       this.#violation(`a native weak collection in retained state, which cannot be listed`);
       parts.push(`W${this.#id(value)}`);
-    } else if (
-      PLAIN.has(prototype) ||
-      (this.#census && IDENTITY_CLASSES.get(className(value))?.census === true)
-    ) {
+    } else if (PLAIN.has(prototype) || (this.#census && listed?.census === true)) {
       parts.push("{");
-      for (const [key, field] of Object.entries(value)) {
+      for (const [key, field] of ownFields(value, (name) => this.#violation(name))) {
         parts.push(JSON.stringify(key));
         part(field);
       }
     } else {
-      const name = className(value);
+      const name = listed?.name ?? className(value);
       this.#identities.set(name, (this.#identities.get(name) ?? 0) + 1);
-      if (!IDENTITY_CLASSES.has(name))
+      if (listed === undefined)
         this.#violation(
           `an instance of ${name}, a class not in IDENTITY_CLASSES, in retained state`,
         );
@@ -556,7 +604,7 @@ export class Recorder implements RetainedRecorder {
         ? [...value].map(([key, each]) => [`.get(${this.#atom(key)})`, each])
         : value instanceof Set
           ? [...value].map((each, index) => [`{${index}}`, each])
-          : Object.entries(value).map(([key, each]) => [`.${key}`, each]);
+          : ownFields(value).map(([key, each]) => [`.${key}`, each]);
     for (const [step, child] of children) {
       if (typeof child !== "object" || child === null || this.#registered.has(child)) continue;
       const now = memo.get(child)?.hash;
@@ -579,6 +627,26 @@ function className(value: WeakKey): string {
   // EVIDENCE: invariant: an object's `constructor` is a function or absent (a null-prototype object), never anything else.
   const made = (value as { readonly constructor?: { readonly name?: string } }).constructor;
   return made?.name ?? "anonymous";
+}
+
+/**
+ * An object's own enumerable data fields, in order, read through their descriptors: no getter is called. An own
+ * accessor is named to `refuse` (the conservative default: a getter's value is not data the walk may compute), unless
+ * `declared` names it: a registered owner's `hidden` that gives it by name, which the owner reads instead.
+ */
+function ownFields(
+  value: WeakKey,
+  refuse?: (text: string) => void,
+  declared: ReadonlySet<string> = new Set(),
+): (readonly [string, unknown])[] {
+  const fields: (readonly [string, unknown])[] = [];
+  for (const [key, descriptor] of Object.entries(Object.getOwnPropertyDescriptors(value))) {
+    if (descriptor.enumerable !== true) continue;
+    if ("value" in descriptor) fields.push([key, descriptor.value]);
+    else if (!declared.has(key))
+      refuse?.(`an accessor \`${key}\` of ${className(value)} in retained state`);
+  }
+  return fields;
 }
 
 /** A recording collection's membership and values. */

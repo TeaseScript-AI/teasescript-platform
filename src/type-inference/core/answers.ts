@@ -192,6 +192,12 @@ function createPass(
   const exact = new ExactPath(pass);
   const contract = new Contract(pass);
   const values = new Values(pass);
+  // (its getters give these three, made after it; its other fields are its parts)
+  Retained.owner(pass, "CorePass", (made) => ({
+    exact: made.exact,
+    contract: made.contract,
+    values: made.values,
+  }));
   // (#1526 phase C: no decision of a completion pass stops at its allowance, so nothing #1599 keeps for one is kept,
   // from before anything of the pass solves)
   if (completion) contract.closeDecisions();
