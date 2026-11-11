@@ -19,7 +19,6 @@ import {
   playerRuntimePermanentButtons,
   type PlayerSession,
 } from "../../../runtime/runtime-view.js";
-import { createInProcessBackend } from "../../../engine-bridge/in-process.js";
 import {
   bridgeOf,
   endsQuietly,
@@ -49,6 +48,7 @@ import {
 import type { TemporalContext } from "../../../../src/index.js";
 
 import { useRuntimeSceneClock, type SectionWork } from "./useRuntimeSceneClock";
+import { useEngineConnection } from "./useEngineConnection.js";
 import { useScreenWakeLock } from "./useScreenWakeLock";
 import { useCallView } from "./useCallView.js";
 import { usePlayerCameraLifecycle, useSessionCamera } from "./usePlayerCameras.js";
@@ -163,39 +163,27 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // A new session remounts the transcript and resets interaction-local state.
   const generation = ref(0);
   const interactionReset = ref(0);
-  // The engine's host, which owns the plans, the sessions and the recorder of every session's engine calls from Start,
-  // in every build, for a debug export (DEBUGGER.md "Debug export"); in-process by default.
-  // The in-process backend is ready at once, so a Start within the first click needs no wait.
-  let bridge: PlayerBridge | null =
-    options.bridge === undefined
-      ? createInProcessBackend(playerBuildIdentity, {
-          ...(options.debugHistorySpill && { historySpill: options.debugHistorySpill }),
-          ...(options.debugHistoryMemoryBudget !== undefined && {
-            historyBudget: options.debugHistoryMemoryBudget,
-          }),
-        })
-      : null;
-  // This Player's hold on its bridge (`PlayerBridge.claim`): one live Player per bridge.
-  const claim = Symbol("Player");
-  // Once the host is reachable, and only while this Player lives: it takes the bridge, observes its loss (see
-  // `bridgeLost`), and sends its tracing setting before any Start that waits for it. A host that never became reachable,
-  // or one another Player holds, is the `bridge` promise's failure, which its own callers handle.
-  const bridgeReady = (options.bridge ?? Promise.resolve(bridge!)).then((ready) => {
-    if (disposed) return ready;
-    random.claimed(ready.claim(claim));
-    bridge = ready;
-    ready.client.onLoss(bridgeLost);
-    // An injected bridge with a tracing serial allocated: only an earlier Player can have allocated it, as this one could
-    // send nothing to the bridge before now.
-    if (options.bridge !== undefined && ready.hasAllocatedTracingIntent) debug.pendTracing();
-    flushTracing(ready);
-    flushRandom(ready, null);
-    return ready;
+  // The engine's host and this Player's hold on it (`session/useEngineConnection.ts`). Once it is ready, the Player's
+  // random control takes its claim, its loss is observed (`bridgeLost`), and the tracing setting is sent before any
+  // Start that waits for it.
+  const connection = useEngineConnection({
+    options,
+    isDisposed: () => disposed,
+    claimed: (generation) => random.claimed(generation),
+    lost: (error) => bridgeLost(error),
+    ready(ready) {
+      // An injected bridge with a tracing serial allocated: only an earlier Player can have allocated it, as this one
+      // could send nothing to the bridge before now.
+      if (options.bridge !== undefined && ready.hasAllocatedTracingIntent) debug.pendTracing();
+      flushTracing(ready);
+      flushRandom(ready, null);
+    },
+    unreachable() {
+      debug.dropPending();
+      random.dropPending();
+    },
   });
-  bridgeReady.catch(() => {
-    debug.dropPending();
-    random.dropPending();
-  });
+  const { now: bridgeNow, currentConnection, prepareScriptSource } = connection;
   // The activation under way: its preparation, begin, completions and error stop (`session/activation/`).
   const {
     activationRun,
@@ -221,9 +209,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     options,
     session,
     stopped,
-    bridgeNow: () => bridge,
-    bridgeReady,
-    requireBridge,
+    bridgeNow,
+    currentConnection,
+    requireBridge: connection.require,
     isDisposed: () => disposed,
     showSession,
     camera: { open: (capability) => camera.open(capability), release: () => camera.release() },
@@ -264,7 +252,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   }
   // Debug's value trace and Debug mode (`session/useDebugModeAndTrace.ts`).
   const debug = useDebugModeAndTrace({
-    bridgeNow: () => bridge,
+    bridgeNow,
     isDisposed: () => disposed,
     reportActivationError,
     reportPageError,
@@ -372,7 +360,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const resolveTemporalContext = options.temporalContext ?? (() => playerTemporalContext());
   // Debug's rewind over the Player's lifetime (`session/useSessionRewind.ts`).
   const rewind = useSessionRewind({
-    bridgeNow: () => bridge,
+    bridgeNow,
     session,
     generation,
     stopped,
@@ -407,8 +395,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   } = rewind;
   // Debug's random control (`session/useRandomControl.ts`).
   const random = useRandomControl({
-    bridgeNow: () => bridge,
-    claim,
+    bridgeNow,
+    claim: connection.claim,
     isDisposed: () => disposed,
     activationRun,
     reportActivationError,
@@ -628,8 +616,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // The script's kept session and its persistence operations (`session/persistence/useKeptSession.ts`).
   const keptOwner = useKeptSession({
     options,
-    bridgeNow: () => bridge,
-    bridgeReady,
+    bridgeNow,
+    currentConnection,
     isDisposed: () => disposed,
     session,
     capturedMedia,
@@ -664,12 +652,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   let disposed = false;
   tryOnScopeDispose(() => {
     // The trace was this Player's: it ends with it.
-    debug.dispose(bridge);
+    debug.dispose(bridgeNow());
     // Its random control ends with it too, with its history.
-    random.dispose(bridge);
+    random.dispose(bridgeNow());
     // The activation's run ends before the Player gives the connection up.
     activationRun.retire();
-    bridge?.unclaim(claim);
+    connection.release();
     disposed = true;
     supersede();
     // The host's JSON of the plans this page prepared, written or waiting for its task, is not needed any more.
@@ -816,8 +804,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     importSession,
   } = useSessionTransfer({
     options,
-    bridgeNow: () => bridge,
-    bridgeReady,
+    bridgeNow,
+    currentConnection,
     session,
     room,
     scriptStorage,
@@ -949,7 +937,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
 
   const exportCandidate = useExportCandidate({
     session,
-    bridge: () => bridge,
+    bridge: bridgeNow,
     activation: activationRun,
     halting,
     build: playerBuildIdentity,
@@ -982,12 +970,6 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
       await section.send("pressPermanentButton", { buttonId });
     });
   }
-  /** The engine's host, which the in-process backend gives at once; an injected one is ready before any Start. */
-  function requireBridge(): PlayerBridge {
-    if (bridge === null) throw new Error("The engine's host is not ready.");
-    return bridge;
-  }
-
   const rewindApi = {
     /** Whether a restored state is shown for inspection, which runs only once input adopts it. */
     inspecting: computed(() => inspecting.value),
@@ -1011,8 +993,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   return {
     session: computed(() => session.value),
     demandCallView,
-    /** The engine's host, once it is ready. */
-    bridge: bridgeReady,
+    /** The engine's host, once it is ready: the current connection's. */
+    get bridge() {
+      return currentConnection();
+    },
+    /** Compiles a script's source in the engine's host without running it (`useEngineConnection`). */
+    prepareScriptSource,
     generation: computed(() => generation.value),
     interactionReset: computed(() => interactionReset.value),
     /**

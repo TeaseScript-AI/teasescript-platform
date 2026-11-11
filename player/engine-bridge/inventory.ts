@@ -160,7 +160,7 @@ export interface RatchetEntry {
 export const RATCHET: readonly RatchetEntry[] = [
   // activation
   {
-    importer: "player/vue/src/session/usePlayerSession.ts",
+    importer: "player/vue/src/session/useEngineConnection.ts",
     target: "player/engine-bridge/in-process.ts",
     name: "createInProcessBackend",
     family: "activation",

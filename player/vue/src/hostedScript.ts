@@ -39,10 +39,8 @@ export function prepareHostedScript(
   const failure = shallowRef<ScriptFailure | null>(null);
   const identity = shallowRef<ScriptIdentity>({ title: null, author: null });
   void Promise.all([host.load(), player.loadScriptStorage(), player.bridge])
-    .then(async ([{ project }, , bridge]) => {
-      const prepared = await bridge.client.request("prepare", {
-        source: { kind: "source", script: project },
-      });
+    .then(async ([{ project }]) => {
+      const prepared = await player.prepareScriptSource(project);
       const compilation = prepared.result;
       if (compilation.kind !== "prepared" && compilation.kind !== "notCompiled")
         throw new Error("A source prepared as no compilation.");

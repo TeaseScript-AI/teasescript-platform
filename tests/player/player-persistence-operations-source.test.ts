@@ -123,6 +123,7 @@ const SERVICES =
 const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   [MAIN]: {
     usePlayerSession: SETUP,
+    "usePlayerSession.ready": SETUP,
     "usePlayerSession.hasNormalStorage": MOVE,
     "usePlayerSession.hasScriptStorage": SESSION,
     "usePlayerSession.showSession": SESSION,
@@ -137,6 +138,11 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     "usePlayerSession.images.discard": EDIT,
   },
   "session/activation/useActivationRun.ts": { "useActivationRun.retire": READ },
+  "session/useEngineConnection.ts": {
+    useEngineConnection: SETUP,
+    send: "compiles the script in the host (`prepare`): it reaches no store",
+    "useEngineConnection.release": SETUP,
+  },
   "session/useCallView.ts": { viewCalls: SESSION },
   "session/useDebugModeAndTrace.ts": { issueTracing: SESSION, debugView: SESSION },
   "session/persistence/useSessionTransfer.ts": {
@@ -257,8 +263,10 @@ const RAW = new Set([
  */
 const DERIVED: Readonly<Record<string, string>> = {
   resolvePackageAsset: "the host's asset resolver, from the options: no store",
+  connection:
+    "the engine bridge and its readiness, from the options: its requests are checked as host members",
   bridge: "the engine bridge, from the options: its requests are checked as host members",
-  bridgeReady: "the bridge once ready, from the options: its requests are checked as host members",
+  connected: "the bridge once ready, from the options: its requests are checked as host members",
   capturedMedia: "the media store, from the options: checked by `MEDIA`",
   room: "the room shown, from the options and the saved values: a value, no store",
   resolveTemporalContext: "the host's time zone source, from the options: no store",

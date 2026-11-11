@@ -23,9 +23,7 @@ export function prepareScenario(
   if (getCurrentScope() !== undefined) onScopeDispose(() => (disposed = true));
   return (storage ? player.loadScriptStorage() : Promise.resolve())
     .then(() => player.bridge)
-    .then((bridge) =>
-      bridge.client.request("prepare", { source: { kind: "source", script: source } }),
-    )
+    .then(() => player.prepareScriptSource(source))
     .then((prepared) => {
       if (disposed) return;
       const compilation = prepared.result;

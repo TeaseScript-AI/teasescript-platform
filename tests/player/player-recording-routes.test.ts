@@ -331,7 +331,7 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
     "before the activation's record begins; the click's token decides",
   "useSessionActivation.ts: useSessionActivation > activate: await loadScriptStorage":
     "before the activation's record begins; the click's token decides",
-  "useSessionActivation.ts: useSessionActivation > startFrom: then bridgeReady":
+  "useSessionActivation.ts: useSessionActivation > startFrom: then currentConnection":
     "before the activation's record begins; the click's token decides",
   "continue.ts: continueRestored: await restored.beginRecording": READMITS,
   "continue.ts: continueRestored: await continued.resolveDrawNaturally": READMITS,

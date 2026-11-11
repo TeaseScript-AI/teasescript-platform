@@ -510,7 +510,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     ["creation", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > startFrom > then:callback#2.2":
     ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
-  "player/vue/src/session/usePlayerSession.ts usePlayerSession > then:callback": [
+  "player/vue/src/session/useEngineConnection.ts useEngineConnection > then:callback": [
     "lifecycle",
     ["BridgeClient.request", "BridgeClient.signal"],
   ],
@@ -584,7 +584,7 @@ const ESCAPES: Readonly<Record<string, Policy>> = {
     "bridge plumbing",
   "player/encryption/lock-service.ts LockService > #present > wake {wake}": "own observation",
   "player/vue/src/session/useCallView.ts useCallView {followCallView}": "lifecycle",
-  "player/vue/src/session/usePlayerSession.ts usePlayerSession > then:callback {bridgeLost}":
+  "player/vue/src/session/useEngineConnection.ts useEngineConnection > then:callback {lost}":
     "lifecycle",
   // The export lease's release, which the activation's retirement (`own`) and the dialog's cancellation run, and which
   // the handoff takes back from the cancellation.

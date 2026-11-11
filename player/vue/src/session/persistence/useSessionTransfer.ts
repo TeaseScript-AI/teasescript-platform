@@ -38,7 +38,8 @@ interface SessionTransferHost {
   readonly options: PlayerSessionOptions;
   /** The engine's host now, or `null` before it is ready. */
   readonly bridgeNow: () => PlayerBridge | null;
-  readonly bridgeReady: Promise<PlayerBridge>;
+  /** The current connection once it is ready. */
+  readonly currentConnection: () => Promise<PlayerBridge>;
   readonly session: Readonly<Ref<PlayerSession | null>>;
   readonly room: Readonly<Ref<"normal" | "debug">>;
   readonly scriptStorage: ScriptStorageProvider | undefined;
@@ -72,7 +73,7 @@ interface SessionTransferHost {
 export function useSessionTransfer({
   options,
   bridgeNow,
-  bridgeReady,
+  currentConnection,
   session,
   room,
   scriptStorage,
@@ -192,7 +193,7 @@ export function useSessionTransfer({
         "This Player does not keep sessions, so it cannot import one.",
       );
     // Restored in the host against the held plan, as Continue would find it after a reload; its state stays there.
-    const host = await bridgeReady;
+    const host = await currentConnection();
     await asTransferError(
       host.client.request("reviewTransfer", {
         ticket: transfer.ticket,
@@ -241,7 +242,7 @@ export function useSessionTransfer({
   async function readTransfer(
     input: { readonly bytes: Uint8Array<ArrayBuffer> } | { readonly text: string },
   ): Promise<PlayerTransferRead> {
-    const host = await bridgeReady;
+    const host = await currentConnection();
     return (await asTransferError(host.client.request("readTransfer", input))).result;
   }
   /** The tickets of the session imports under way, which `discardSessionReview` refuses. */
@@ -330,7 +331,7 @@ export function useSessionTransfer({
             discarded = true;
             ctx.check();
             // The state as the kept session stores it, and its events as the engine writes them, from the host.
-            const host = await bridgeReady;
+            const host = await currentConnection();
             ctx.check();
             const committed = (
               await ctx.admit(() =>

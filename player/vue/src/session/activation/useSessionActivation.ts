@@ -60,7 +60,8 @@ interface SessionActivationHost {
   readonly stopped: Readonly<Ref<boolean>>;
   /** The engine's host now, or `null` before it is ready. */
   readonly bridgeNow: () => PlayerBridge | null;
-  readonly bridgeReady: Promise<PlayerBridge>;
+  /** The current connection once it is ready. */
+  readonly currentConnection: () => Promise<PlayerBridge>;
   readonly requireBridge: () => PlayerBridge;
   readonly isDisposed: () => boolean;
   /** Shows `next` as the Player's, for `origin`, the activation that began it. */
@@ -91,7 +92,7 @@ export function useSessionActivation({
   session,
   stopped,
   bridgeNow,
-  bridgeReady,
+  currentConnection,
   requireBridge,
   isDisposed,
   showSession,
@@ -484,7 +485,7 @@ export function useSessionActivation({
     const token = activationToken;
     // The engine's host is ready at once in-process; an injected one may answer `ready` later, which this waits for.
     if (bridgeNow() === null)
-      return bridgeReady.then(() => {
+      return currentConnection().then(() => {
         if (!isDisposed() && token === activationToken) return startFrom(pending, sample);
       });
     hostError.value = null;

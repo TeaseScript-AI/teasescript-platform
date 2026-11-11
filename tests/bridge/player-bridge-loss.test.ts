@@ -765,14 +765,15 @@ test("the Worker's readiness that fails leaves no rejection unhandled", async ()
   assert.deepEqual(unhandled, []);
 });
 
-/** A start page's host as `prepareHostedScript` uses it, whose bridge answers `prepare` with `prepare`. */
+/** A start page's host as `prepareHostedScript` uses it, whose preparation answers with `prepare`. */
 function startPage(
   prepare: () => Promise<{ readonly result: object }>,
   prepareScript: () => Promise<void>,
 ) {
   const reported: unknown[] = [];
   const player = {
-    bridge: Promise.resolve({ client: { request: prepare } }),
+    bridge: Promise.resolve({}),
+    prepareScriptSource: prepare,
     loadScriptStorage: async () => {},
     rememberScriptName: () => {},
     scriptStorageOptions: () => ({}),
