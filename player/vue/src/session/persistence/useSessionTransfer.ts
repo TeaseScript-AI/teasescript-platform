@@ -272,6 +272,16 @@ export function useSessionTransfer({
       );
     return issued.host;
   }
+  /** The session reads let go of (`discardSessionReview`): the host holds them no more, and none is imported. */
+  const discarded = new WeakSet<SessionTransferRead>();
+  /** The live issuer of `transfer`, for an import: a read let go of imports nothing, whatever reviewed it. */
+  function importIssuer(transfer: SessionTransferRead): PlayerBridge {
+    if (discarded.has(transfer))
+      throw new StorageTransferError(
+        "The session read for this import was let go of. Read the file again.",
+      );
+    return liveIssuer(transfer);
+  }
   /** The session reads whose imports are under way, which `discardSessionReview` refuses. */
   const importedTickets = new Set<SessionTransferRead>();
   /**
@@ -283,6 +293,7 @@ export function useSessionTransfer({
       throw new Error(
         "A review being imported cannot be discarded: its import still needs the session read for it.",
       );
+    discarded.add(transfer);
     const issued = issuedBy.get(transfer);
     // Released only in a host that still holds it: a lost host's tickets went with it, and another may reuse one. The
     // read keeps its issuer, so a later review of it asks that host, which refuses it.
@@ -310,8 +321,8 @@ export function useSessionTransfer({
         "A session cannot be imported right now. Try again in a moment.",
       );
     const { transfer } = review;
-    // A session read before a loss is in no live host: nothing of it is imported.
-    liveIssuer(transfer);
+    // A session read before a loss is in no live host, and one let go of is in none: nothing of it is imported.
+    importIssuer(transfer);
     const scope = keptOwner.keptScopeNow()!;
     const plan = keptOwner.scriptPlanNow()!;
     const releaseImporting = holdImporting();
@@ -337,7 +348,7 @@ export function useSessionTransfer({
           while (keptOwner.keepingNow() !== null) await keptOwner.keepingNow();
           ctx.check();
           // Nothing is written for a session a loss took meanwhile.
-          liveIssuer(transfer);
+          importIssuer(transfer);
           // Each photo and file is held under the reference the session and the values hold, as a restored kept
           // session's are; a value's is stored when the values are. One held already is the same (`reviewSessionImport`).
           const added = transfer.media.filter((medium) => !capturedMedia.knows(medium.reference));
@@ -367,7 +378,7 @@ export function useSessionTransfer({
             ctx.check();
             // The state as the kept session stores it, and its events as the engine writes them, from the host that read
             // it.
-            const host = liveIssuer(transfer);
+            const host = importIssuer(transfer);
             const committed = (
               await ctx.admit(() =>
                 host.client.request("transferCommit", { ticket: transfer.ticket }),
