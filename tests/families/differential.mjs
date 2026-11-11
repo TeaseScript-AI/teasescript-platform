@@ -17,7 +17,10 @@
 // cases that still differ and those whose records it cannot read as JSON.
 // Exit 0: every case recorded and nothing threw; 1: a record holds `threw`, or `join` found a case missing, repeated
 // or unknown (it then writes nothing), or with `--ignore` a case differs or is unread; 2: a refused usage, cases file
-// or tree, before any record is written.
+// or tree, before any record is written. A run owns its `--out` from its start (#2383): it removes an earlier one at
+// once (an output that is one of its inputs, by any path or link, is refused instead), writes beside it a partial
+// named by its pid, and renames that onto `--out` once whole; no exit removes an output. So a run that ends without
+// writing leaves no earlier result as its own, and never touches a concurrent run's output.
 import { createHash } from "node:crypto";
 import {
   appendFileSync,
@@ -40,6 +43,19 @@ const refuse = (why) => {
   process.stderr.write(`differential.mjs: ${why}\n`);
   process.exit(2);
 };
+/** Takes `out` for this run: refuses it where it is one of `inputs` by any path or link, else removes an earlier one. */
+function claimOutput(out, inputs) {
+  if (out === undefined || !existsSync(out)) return;
+  const { dev, ino } = statSync(out);
+  for (const file of inputs)
+    if (file !== undefined && existsSync(file)) {
+      const input = statSync(file);
+      if (input.dev === dev && input.ino === ino) refuse(`the output ${out} is the input ${file}`);
+    }
+  if (!statSync(out).isFile()) refuse(`the output ${out} is no file`);
+  unlinkSync(out);
+}
+
 /** The start of a record's line: the tool writes each record with its name first. */
 const NAME_FIELD = Buffer.from('{"name":"');
 
@@ -241,6 +257,7 @@ async function resolveCases(cases, root) {
 async function record() {
   const [root, casesFile] = args;
   const out = option("--out");
+  claimOutput(out, [casesFile]);
   if (root === undefined || casesFile === undefined || out === undefined || root.startsWith("--"))
     refuse("usage: differential.mjs <tree> <cases.jsonl> --out <records.jsonl>");
   const cases = readCases(casesFile);
@@ -314,10 +331,12 @@ async function record() {
     return { agree: bare.every((each) => each === bare[0]), modes: list };
   };
 
+  // (written beside the output and renamed onto it once whole)
+  const partial = `${out}.partial-${process.pid}`;
   try {
-    writeFileSync(out, "");
+    writeFileSync(partial, "");
   } catch (error) {
-    refuse(`cannot write ${out}: ${error.message}`);
+    refuse(`cannot write ${partial}: ${error.message}`);
   }
   for (const c of cases) {
     const { files, globals } = c;
@@ -383,8 +402,9 @@ async function record() {
       if (route.plan === "outside") return { outside: JSON.parse(route.text).outside };
       return compiled(route.plan, JSON.parse(route.text).diagnostics, c);
     });
-    appendFileSync(out, `${JSON.stringify(row)}\n`);
+    appendFileSync(partial, `${JSON.stringify(row)}\n`);
   }
+  renameSync(partial, out);
   process.stdout.write(`${JSON.stringify({ cases: cases.length, threw })}\n`);
   process.exitCode = threw === 0 ? 0 : 1;
 }
@@ -415,19 +435,14 @@ function join() {
     ["base", values("--base")],
     ["head", values("--head")],
   ].filter(([side]) => args.includes(`--${side}`));
+  // (an output that is an input, by any path or link, would be emptied before it is read)
+  claimOutput(out, [casesFile, ...sides.flatMap(([, files]) => files)]);
   const ignored = new Set(allValues("--ignore"));
   if (casesFile === undefined || out === undefined || values("--base").length === 0)
     refuse(
       "usage: differential.mjs join --cases <cases.jsonl> --base <records>... [--head <records>...] --out <file> [--ignore <field>...]",
     );
   if (ignored.size > 0 && sides.length !== 2) refuse("--ignore compares a base with a head");
-  // (an output that is an input, by any path or link, would be emptied before it is read)
-  if (existsSync(out)) {
-    const { dev, ino } = statSync(out);
-    for (const file of [casesFile, ...sides.flatMap(([, files]) => files)])
-      if (existsSync(file) && statSync(file).dev === dev && statSync(file).ino === ino)
-        refuse(`the output ${out} is the input ${file}`);
-  }
   const cases = readCases(casesFile);
   const wanted = new Set(cases.map((c) => c.name));
   const problems = [];

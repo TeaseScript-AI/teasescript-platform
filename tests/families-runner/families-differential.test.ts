@@ -1,17 +1,21 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  closeSync,
+  constants,
   cpSync,
   existsSync,
   linkSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -36,6 +40,7 @@ const MODULES: Record<string, string> = {
   "src/compiler.js": `export const compileProject = (files) => {
   const source = files[0].source;
   if (source.includes("THROW")) throw new TypeError("the stand-in throws");
+  if (source.includes("EXIT")) process.exit(9);
   const error = source.includes("ERROR");
   return { plan: error ? null : ${PLAN},
     diagnostics: error ? [${diagnostic('"TSV001"', "error")}] : [${diagnostic('"TSV052"', "warning")}] };
@@ -522,6 +527,82 @@ test("join --ignore reports a case one tree lacks, a record it cannot read, and 
     assert.equal(ran.ran.status, 2, ran.ran.stderr);
     assert.equal(ran.text, null);
   }
+});
+
+test("a run owns its output from its start: no exit leaves an earlier output, and none removes another run's (#2383)", async (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "families-differential-output-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  const tree = standIn(folder);
+  const out = join(folder, "out.jsonl");
+  const casesOf = (name: string, sources: string[]) => {
+    const file = join(folder, `${name}.jsonl`);
+    writeFileSync(
+      file,
+      sources.map((source, at) => `${JSON.stringify({ name: `c${at}`, source })}\n`).join(""),
+    );
+    return file;
+  };
+  const record = (cases: string, tree_ = tree) =>
+    spawnSync(process.execPath, [tool, tree_, cases, "--out", out], { encoding: "utf8" });
+  const stale = "an earlier run's records\n";
+  // (each run below finds an earlier output at --out and ends without writing: none is left standing)
+  const malformed = join(folder, "malformed.jsonl");
+  writeFileSync(malformed, "{\n");
+  const half = join(folder, "half.jsonl");
+  writeFileSync(half, `${JSON.stringify({ name: "c0" })}\n`);
+  const broken = join(folder, "broken");
+  cpSync(tree, broken, { recursive: true });
+  writeFileSync(join(broken, "dist/src/compiler.js"), 'throw new Error("the import fails");\n');
+  const ends = {
+    refused: () => record(malformed),
+    "import fails": () => record(casesOf("fine", ["MODAL"]), broken),
+    "process ends midway": () => record(casesOf("midway", ["MODAL", "EXIT"])),
+    "join finds a case missing": () =>
+      spawnSync(
+        process.execPath,
+        [tool, "join", "--cases", casesOf("two", ["MODAL", "MODAL"]), "--base", half, "--out", out],
+        { encoding: "utf8" },
+      ),
+  };
+  for (const [end, run] of Object.entries(ends)) {
+    writeFileSync(out, stale);
+    const ran = run();
+    assert.notEqual(ran.status, 0, `${end}: ${ran.stderr}`);
+    assert.equal(existsSync(out), false, end);
+  }
+  // (a whole run publishes its records at once, and leaves nothing beside them; the run that ended midway left its
+  // partial, which no reader takes for --out)
+  const partials = () =>
+    readdirSync(folder).filter((file) => file.startsWith("out.jsonl.partial-"));
+  const before = partials();
+  assert.equal(before.length, 1);
+  writeFileSync(out, stale);
+  const whole = record(casesOf("whole", ["MODAL"]));
+  assert.equal(whole.status, 0, whole.stderr);
+  assert.equal(lines<Row>(readFileSync(out, "utf8")).length, 1);
+  assert.deepEqual(partials(), before);
+  // (two runs on one --out: the first owns it from its start, blocks reading its cases, and is refused after the second
+  // published; the second's output stays, as the first removes nothing on its way out)
+  const fifo = join(folder, "cases.fifo");
+  assert.equal(spawnSync("mkfifo", [fifo]).status, 0);
+  const first = spawn(process.execPath, [tool, tree, fifo, "--out", out], { stdio: "ignore" });
+  const exited = new Promise<number | null>((done) => first.on("exit", done));
+  let writer: number | undefined;
+  for (let tries = 0; writer === undefined; tries += 1) {
+    try {
+      writer = openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK);
+    } catch (error) {
+      assert.ok(tries < 200, `the first run never read its cases: ${String(error)}`);
+      await new Promise((done) => setTimeout(done, 50));
+    }
+  }
+  const second = record(casesOf("second", ["MODAL"]));
+  assert.equal(second.status, 0, second.stderr);
+  const published = readFileSync(out, "utf8");
+  writeSync(writer, "{\n");
+  closeSync(writer);
+  assert.equal(await exited, 2);
+  assert.equal(readFileSync(out, "utf8"), published);
 });
 
 test("the plan's check list lists each check planChecks counts, with its site and type (#2298)", () => {
