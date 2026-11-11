@@ -152,6 +152,7 @@ interface RecoveryHost {
   }): Promise<{ readonly kind: string }>;
   reviewSessionImport(transfer: SessionRead): Promise<ImportReview>;
   importSession(review: ImportReview): Promise<void>;
+  discardSessionReview(transfer: SessionRead): void;
   readonly inputSection: unknown;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
 }
@@ -338,6 +339,7 @@ const RERUN = rerunRegistry({
   "an unreadable record before the Continue click": TOPOLOGIES,
   "an ended record before the Continue click": TOPOLOGIES,
   "a kept point appearing before a Start again click": TOPOLOGIES,
+  "a discarded review": TOPOLOGIES,
 });
 
 RERUN.rows(
@@ -1482,6 +1484,35 @@ RERUN.rows(
     await player.activate();
     await until(() => player.session.value?.state.foregroundAction != null, "the question");
     assert.equal(player.session.value!.liveEventSequence, 0, "a session started anew");
+    return end();
+  },
+);
+
+RERUN.rows(
+  "a discarded review",
+  "a review whose read was let go of imports nothing, and a review of that read asks its host, which refuses",
+  async (context, topology, end) => {
+    const { storage, provider } = replacingStorage({ local: "keep" });
+    const { connections, player, kept } = await page(context, topology, { storage: provider });
+    await player.activate();
+    await keptAtTheQuestion(player, kept);
+    const { transfer } = await player.exportSession();
+    const read = await readForImport(player, {
+      ...transfer,
+      entries: [{ key: "foreign", value: "imported" }],
+    });
+    const review = await player.reviewSessionImport(read);
+    player.discardSessionReview(read);
+    const posted = connections.first.posts.length;
+    await assert.rejects(player.reviewSessionImport(read));
+    assert.ok(
+      connections.first.posts.slice(posted).some((post) => post.op === "reviewTransfer"),
+      "the review asked the host that read it",
+    );
+    const before = await kept.session(SCOPE);
+    await assert.rejects(player.importSession(review), /let go of/u);
+    assert.deepEqual([...storage.entries], [["local", "keep"]]);
+    assert.deepEqual(await kept.session(SCOPE), before);
     return end();
   },
 );
