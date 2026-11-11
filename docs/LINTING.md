@@ -75,7 +75,9 @@ so it cites nothing: in every file Git lists except the check's own test, a line
 holds the whole word `r4` or a section mark later on, or whose next line holds one anywhere, is refused. What stands
 between does not count, markup or words, so such a line is refused in prose too: state the fact, or keep the revision
 two lines away. A citation over three or more lines, in another letter case or inside a longer word is outside the check
-and left to review.
+and left to review. A revision number `r4.N` (a whole token) names the accepted record's entry `r4-N`: outside the
+record's own pages and the check's test, one with no such heading is refused, in every file Git lists; the check proves
+the entry exists, not that it carries the sentence's claim, and other spellings (`R4.1`, an anchor `#r4-N`) are not its.
 `comment-citations.json` holds each file's exact counts in comments of its other forms (a bare `r4.N`, the record's name
 with another id), which may only fall.
 `comment-forecasts-allowed.json` lists the forecasts the check accepts, and each entry must still be found.

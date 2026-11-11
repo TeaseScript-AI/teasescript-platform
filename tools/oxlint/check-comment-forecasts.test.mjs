@@ -14,9 +14,11 @@ import {
   glossaryFindings,
   glossaryRows,
   labelsIn,
-  tableCitationFindings,
+  listedTextFindings,
+  recordEntries,
   tableCitationsIn,
   unresolvedPointers,
+  unresolvedRevisionsIn,
 } from "./check-comment-forecasts.mjs";
 import { repositoryRoot } from "./files.mjs";
 
@@ -239,6 +241,43 @@ test("whatever stands between TABLE and r4 or § on its line, markup or words, t
       );
 });
 
+test("a revision number names an entry of the accepted record, each end of a range too, outside the record's pages", () => {
+  const entries = recordEntries(
+    new Map([
+      ["sharing", "# Sharing\n\n### r4-38\n\n### section-2-f12\n"],
+      ["oracles", "# Oracles\n\n### r4-165\n\nnot a heading: ### r4-7\n"],
+    ]),
+  );
+  assert.deepEqual([...entries].sort(), ["165", "38"]);
+  const missing = (fileName, text) =>
+    unresolvedRevisionsIn(fileName, text, entries).map(({ line, number }) => [line, number]);
+  // a document, a link's text, a string, data and a range
+  assert.deepEqual(
+    missing(
+      "docs/a.md",
+      "# A\n\nAs [r4.38](x.md#r4-38) and r4.165 hold, r4.9999 names none.\n\nRange r4.38–r4.9998, r4.12–r4.165.\n",
+    ),
+    [
+      [3, "9999"],
+      [5, "9998"],
+      [5, "12"],
+    ],
+  );
+  assert.deepEqual(missing("tests/a.test.ts", 'test("a rule (C9 r4.9997)", () => {});\n'), [
+    [1, "9997"],
+  ]);
+  assert.deepEqual(missing("tests/a.json", '{"closes": "r4.9996 until #1"}\r\n'), [[1, "9996"]]);
+  // other spellings and longer tokens are no revision numbers; an anchor is the doc-links check's
+  assert.deepEqual(missing("docs/b.md", "R4.1, xr4.1, r4-9999, x.r4.2, r4.1a\n"), [[1, "1"]]);
+  // the record's own pages and this test are outside the rule
+  assert.deepEqual(
+    missing("docs/specifications/type-inference-accepted-record/admission.md", "built as r4.167\n"),
+    [],
+  );
+  assert.deepEqual(missing(CITATION_FIXTURES, "r4.9999\n"), []);
+  assert.deepEqual(missing("docs/specifications/other.md", "r4.9999\n"), [[1, "9999"]]);
+});
+
 test("the TABLE citation check reads every file Git lists, by its exact path, and refuses a name it cannot read", async () => {
   const root = mkdtempSync(join(tmpdir(), "table-citations-"));
   try {
@@ -258,6 +297,12 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
       "docs/specifications/type-inference-accepted-record/README.md",
       "# Record\n\n## Labels\n",
     );
+    write(
+      "docs/specifications/type-inference-accepted-record/sharing.md",
+      "# S\n\n### r4-38\n\nas r4.167\n",
+    );
+    write("docs/rev.md", "Kept r4.38.\n\nGone r4.9999.\n");
+    write("src/rev.ts", 'const reason = "r4.9998 and r4.38";\n');
     symlinkSync(join(repositoryRoot, "node_modules"), join(root, "node_modules"));
     write("docs/a.md", "# A\n\nAs ruled (TABLE r4.1).\n");
     write("src/a.ts", 'const reason = "a site (TABLE §2)";\n');
@@ -277,26 +322,38 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
       "src/a.ts:1",
       "untracked.txt:1",
     ].sort();
-    const at = (findings) => findings.map(({ fileName, line }) => `${fileName}:${line}`).sort();
-    assert.deepEqual(at(tableCitationFindings(root)), expected);
+    // each TABLE fixture's revision has no entry here, so it is a revision finding too (`src/a.ts` cites a section)
+    const revisions = [
+      ...expected.filter((found) => found !== "src/a.ts:1"),
+      "docs/rev.md:3",
+      "src/rev.ts:1",
+    ].sort();
+    const at = (findings, kind) =>
+      findings
+        .filter(({ message }) => message.includes(kind))
+        .map(({ fileName, line }) => `${fileName}:${line}`)
+        .sort();
+    const record = "docs/specifications/type-inference-accepted-record";
+    const pages = new Map(
+      ["README", "sharing"].map((name) => [
+        name,
+        readFileSync(join(root, record, `${name}.md`), "utf8"),
+      ]),
+    );
+    const listed = listedTextFindings(root, pages);
+    assert.deepEqual(at(listed, "cites a record that is not in the repository"), expected);
+    assert.deepEqual(at(listed, "names no entry of the accepted record"), revisions);
     const entry = await import(
       pathToFileURL(join(root, "tools/oxlint/check-comment-forecasts.mjs")).href
     );
-    assert.deepEqual(
-      at(
-        entry
-          .checkCommentForecasts(root)
-          .filter(({ message }) =>
-            message.includes("cites a record that is not in the repository"),
-          ),
-      ),
-      expected,
-    );
+    const entryFindings = entry.checkCommentForecasts(root);
+    assert.deepEqual(at(entryFindings, "cites a record that is not in the repository"), expected);
+    assert.deepEqual(at(entryFindings, "names no entry of the accepted record"), revisions);
     writeFileSync(
       Buffer.concat([Buffer.from(`${root}/name-`), Buffer.from([0xff]), Buffer.from(".md")]),
       "TABLE r4.9\n",
     );
-    assert.throws(() => tableCitationFindings(root), /whose name is not UTF-8/u);
+    assert.throws(() => listedTextFindings(root, pages), /whose name is not UTF-8/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
