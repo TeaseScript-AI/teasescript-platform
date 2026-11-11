@@ -59,7 +59,7 @@ export function storeSubject(rule: StoreRule, source: MessageSource, later = fal
  * names it as a sentence does: `'lives', declared 'integer' on line 1`. `null` where any of it is not proved. The
  * declared variable is looked up last, only for a sentence being made (`bindingsOf`).
  */
-export function copyOf(
+function copyOf(
   rule: StoreRule,
   source: MessageSource,
 ): { readonly form: "value" | "elements" | "values"; readonly of: string } | null {
