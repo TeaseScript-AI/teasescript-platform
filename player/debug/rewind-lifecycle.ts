@@ -263,10 +263,14 @@ function settleAdoption(state: LifecycleState, succeeded: boolean): LifecycleOut
 /** Decides `event` in `state`: the state after it, and the actions to apply. */
 export function advanceLifecycle(state: LifecycleState, event: LifecycleEvent): LifecycleOutcome {
   // A sealed Player decides only its last close; a lost connection sends nothing. A new session still ends the
-  // inspection the page shows, which this state is the one account of.
+  // inspection the page shows, which this state is the one account of, and the lost history's view, which no longer
+  // belongs to what shows: a session recovered after the loss runs without rewind until the page is reloaded.
   if (state.sealed === "loss")
     return event.kind === "newSession"
-      ? done({ ...state, inspecting: false, adopting: false, step: null, returning: false })
+      ? done(
+          { ...state, inspecting: false, adopting: false, step: null, returning: false },
+          { kind: "clearView" },
+        )
       : done(state);
   // A loss after disposal still seals it further: nothing is sent through the lost client.
   if (state.sealed === "disposal" && event.kind === "lost")

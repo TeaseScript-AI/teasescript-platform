@@ -95,6 +95,8 @@ const props = defineProps<{
       readonly reviewSession: (transfer: SessionTransferRead) => Promise<SessionImportReview>;
       readonly discardSession: (transfer: SessionTransferRead) => void;
       readonly commitSession: (review: SessionImportReview) => Promise<void>;
+      /** Changes whenever the engine's connection is lost. */
+      readonly losses: number;
     };
     /** Clearing the shown script's saved data, when the host keeps it; possible only while no session runs. */
     readonly clear: { readonly available: boolean; readonly run: () => Promise<boolean> } | null;
@@ -1024,6 +1026,7 @@ async function updateSidebarVisibility(open: boolean) {
                             :review-session="savedData.import.reviewSession"
                             :discard-session="savedData.import.discardSession"
                             :commit-session="savedData.import.commitSession"
+                            :losses="savedData.import.losses"
                           />
                         </div>
                         <template v-if="savedData.clear">

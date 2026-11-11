@@ -399,6 +399,7 @@ const savedData = computed(() =>
           reviewSession: props.player.reviewSessionImport,
           discardSession: props.player.discardSessionReview,
           commitSession: props.player.importSession,
+          losses: props.player.connectionLosses.value,
         },
         clear: props.player.hasScriptStorage
           ? {
@@ -660,6 +661,7 @@ async function toggleFullscreen() {
             :author="author"
             :debug-room="player.rooms.current.value === 'debug'"
             :start-anew="player.rooms.debugHasData.value"
+            :recovery="player.recovery.value?.where === 'page' ? player.recovery.value.offer : null"
             @activate="player.activate"
             @reload="void player.rooms.reloadDebug()"
             @reset="void player.rooms.resetDebug()"
@@ -772,7 +774,11 @@ async function toggleFullscreen() {
               ref="runtimeEnd"
               :state="session?.state ?? null"
               :host-error="player.hostError.value"
+              :recovery="
+                player.recovery.value?.where === 'line' ? player.recovery.value.offer : null
+              "
               @details="showErrorDetails"
+              @activate="player.activate"
             />
             <!-- Closest to the composer, also below a failure the inspected state shows. -->
             <RewindInspection

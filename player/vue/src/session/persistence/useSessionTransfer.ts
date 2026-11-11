@@ -243,8 +243,15 @@ export function useSessionTransfer({
     input: { readonly bytes: Uint8Array<ArrayBuffer> } | { readonly text: string },
   ): Promise<PlayerTransferRead> {
     const host = await currentConnection();
-    return (await asTransferError(host.client.request("readTransfer", input))).result;
+    const read = (await asTransferError(host.client.request("readTransfer", input))).result;
+    if ("ticket" in read) issuedBy.set(read.ticket, host);
+    return read;
   }
+  /**
+   * The connection that read each session still held for an import: its ticket names the session in that host only, so
+   * it is released there, and a connection that replaced a lost one imports nothing of it.
+   */
+  const issuedBy = new Map<string, PlayerBridge>();
   /** The tickets of the session imports under way, which `discardSessionReview` refuses. */
   const importedTickets = new Set<string>();
   /**
@@ -256,9 +263,9 @@ export function useSessionTransfer({
       throw new Error(
         "A review being imported cannot be discarded: its import still needs the session read for it.",
       );
-    void bridgeNow()
-      ?.client.request("releaseTransfer", { ticket: transfer.ticket })
-      .catch(() => {});
+    const host = issuedBy.get(transfer.ticket) ?? bridgeNow();
+    issuedBy.delete(transfer.ticket);
+    void host?.client.request("releaseTransfer", { ticket: transfer.ticket }).catch(() => {});
   }
   /**
    * Imports a reviewed session. A session of this script in progress ends first; the session's saved values replace the
@@ -279,6 +286,10 @@ export function useSessionTransfer({
         "A session cannot be imported right now. Try again in a moment.",
       );
     const { transfer } = review;
+    // A session read by a connection since lost is not in the host now: nothing of it is imported.
+    const issuer = issuedBy.get(transfer.ticket);
+    if (issuer !== undefined && issuer !== bridgeNow())
+      throw new Error("The session read for this import was lost with the engine's connection.");
     const scope = keptOwner.keptScopeNow()!;
     const plan = keptOwner.scriptPlanNow()!;
     const releaseImporting = holdImporting();

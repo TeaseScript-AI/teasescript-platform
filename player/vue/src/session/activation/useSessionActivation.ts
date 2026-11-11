@@ -1,4 +1,4 @@
-import { ref, shallowRef, type Ref } from "vue";
+import { computed, ref, shallowRef, type Ref } from "vue";
 import type { DebugRecording } from "../../../../debug/debug-recorder.js";
 import { playerTemporalContext, type PlayerSession } from "../../../../runtime/runtime-view.js";
 import { bridgeOf, endsQuietly, type PlayerBridge } from "../../../../runtime/player-bridge.js";
@@ -15,6 +15,7 @@ import {
   type RunOrigin,
 } from "./useActivationRun.js";
 import { continueRestored } from "./work/continue.js";
+import { recoveryKind, type Recovery, type ShownStatus } from "./recoveryKind.js";
 import { stopAt, stopLateStart, type StopPage } from "./work/stop.js";
 import {
   commitIncident,
@@ -63,6 +64,15 @@ interface SessionActivationHost {
   /** The current connection once it is ready. */
   readonly currentConnection: () => Promise<PlayerBridge>;
   readonly requireBridge: () => PlayerBridge;
+  /** The connection's replacement after a loss (`useEngineConnection`). */
+  readonly connection: {
+    /** The plan token of the source a replacement prepares again, or `null` when none can. */
+    replaceablePlan(): string | null;
+    /** Opens a fresh connection and prepares the remembered source in it; resolves with that preparation's reply. */
+    replace(): Promise<{ readonly result: { readonly kind: string; readonly plan?: string } }>;
+  };
+  /** Whether a state Debug's rewind restored is shown for inspection. */
+  readonly inspecting: () => boolean;
   readonly isDisposed: () => boolean;
   /** Shows `next` as the Player's, for `origin`, the activation that began it. */
   readonly showSession: (next: PlayerSession, origin: Origin) => void;
@@ -94,6 +104,8 @@ export function useSessionActivation({
   bridgeNow,
   currentConnection,
   requireBridge,
+  connection,
+  inspecting,
   isDisposed,
   showSession,
   camera,
@@ -224,6 +236,17 @@ export function useSessionActivation({
   function lose(error: unknown) {
     const name = error instanceof Error ? error.name : "Error";
     console.error("[player] host error", error);
+    // What the player can recover, decided before the activation's state is cleared (`recoveryKind`).
+    const shown = session.value;
+    const recovery = recoveryKind({
+      disposed: isDisposed(),
+      replaceable: replaceable(),
+      // EVIDENCE: invariant: a shown session's status is one of the runtime's statuses `ShownStatus` names.
+      shown: shown === null ? null : (shown.state.status as ShownStatus),
+      inspecting: inspecting(),
+      clicking: beginning.value ? clickKind : null,
+      prepared: activation.value?.kind ?? null,
+    });
     activationToken += 1;
     continuing = null;
     beginning.value = false;
@@ -232,10 +255,56 @@ export function useSessionActivation({
       const final = bridgeOf(target).latest(target);
       if (final !== null) session.value = final;
     }
-    hostError.value ??= name;
     halting.value = false;
     activationRun.revoke();
+    lateStop = null;
+    if (recovery === null) {
+      hostError.value ??= name;
+      return;
+    }
+    lost.value = true;
+    recoveryShown.value = recovery;
+    offer.value = null;
+    if (recovery.kind === "start" || recovery.kind === "continue") offer.value = recovery.kind;
+    else if (recovery.kind === "kept") {
+      // The offer waits for one read of the store, after the keep work under way settled.
+      const asked = recovery;
+      void keptOwner()
+        .keptPointFound()
+        .then((found) => {
+          if (recoveryShown.value === asked && !isDisposed())
+            offer.value = found ? "continue" : "start";
+        });
+    }
   }
+  /**
+   * The engine's connection was lost and a fresh one can replace it, from the player's click only: the session stopped as
+   * at a Player error, and the next Start or Continue first replaces the connection.
+   */
+  const lost = ref(false);
+  /** What the loss left the player to recover (`recoveryKind`), until a click replaced the connection. */
+  const recoveryShown = shallowRef<Recovery | null>(null);
+  /** What the stop offers once decided: Continue from the last kept point, or Start again; `null` while it reads. */
+  const offer = ref<"start" | "continue" | null>(null);
+  /** Whether the script a replacement prepares again is the one the latest Start runs. */
+  const replaceable = () => {
+    const plan = connection.replaceablePlan();
+    return plan !== null && lastStart.value?.plan === plan;
+  };
+  /**
+   * The recovery the page presents: its offer, over the stopped session (`line`) or on the start page (`page`); `null`
+   * when nothing is offered, as before the store was read, after an end, or on a start page that stays as it was.
+   */
+  const recoveryOffer = computed(() => {
+    const recovery = recoveryShown.value;
+    const kind = offer.value;
+    if (recovery === null || kind === null) return null;
+    if (recovery.kind === "kept") return { offer: kind, where: "line" as const };
+    if (recovery.kind !== "ended" && recovery.shown) return { offer: kind, where: "page" as const };
+    return null;
+  });
+  // The kind of the Start or Continue the player's click under way began, while `beginning` holds.
+  let clickKind: "start" | "continue" = "start";
   /**
    * The page's error reporter: an exception of the Player at a page owner's own event (its interface, the hosted
    * script, Debug's rewind, the page-wide trace and random settings), reported for the activation live at that event.
@@ -306,12 +375,16 @@ export function useSessionActivation({
     beginning.value = false;
     // A new session needs its own camera; a superseded acquisition never stays open.
     camera.release();
-    activation.value = {
+    activation.value = startRecipe(create, outdated);
+    prepareActivation("start");
+  }
+  /** The Start of `create`, with `outdated`, why the kept session cannot continue, for the start page. */
+  function startRecipe(create: PlayerSessionStart, outdated?: Problem): Activation {
+    return {
       kind: "start",
       begin: (origin) => startedSession(create, { debugMode: debugModeOn() }, origin),
       ...(outdated === undefined ? {} : { outdated }),
     };
-    prepareActivation("start");
   }
   /**
    * Prepares in a task of its own what the activation would otherwise compute within the click (#1707): the zone the
@@ -372,7 +445,12 @@ export function useSessionActivation({
     supersede();
     beginning.value = false;
     camera.release();
-    activation.value = {
+    activation.value = continueRecipe(restored);
+    prepareActivation("continue");
+  }
+  /** The Continue of `restored`. */
+  function continueRecipe(restored: PlayerSession): Activation {
+    return {
       kind: "continue",
       begin: (origin) => {
         continuing = restored;
@@ -394,23 +472,26 @@ export function useSessionActivation({
       },
       restored,
     };
-    prepareActivation("continue");
   }
   /**
    * Runs the prepared Start or Continue; call it from the activating click. With the camera capability it first opens
    * the session camera, so any browser permission request happens here, before ordinary script execution. A camera
    * failure never prevents the session from starting. Start then reads the stored values again, which another tab may
-   * have changed since they were read; Continue goes on with its session's own view of them.
+   * have changed since they were read; Continue goes on with its session's own view of them. After the engine's
+   * connection was lost, the click is the player's choice of what the stop offers, and the connection is replaced first
+   * (`recover`).
    */
   async function activate() {
     const pending = activation.value;
-    if (!pending || clearing().value || importing().value) return;
+    const kind = pending?.kind ?? (lost.value ? (recoveryOffer.value?.offer ?? null) : null);
+    if (kind === null || clearing().value || importing().value) return;
     activation.value = null;
     // The activation it replaces, such as a Continue still beginning, goes.
     supersede();
     const token = activationToken;
+    clickKind = kind;
     const withCamera = options.capabilities?.camera === true;
-    const reading = pending.kind === "start" && hasScriptStorage();
+    const reading = kind === "start" && hasScriptStorage();
     // Everything the browser allows only within the player's click runs here, before any await or request: the
     // session may show only after the host replied (a Start of a held plan, a Continue), or after the camera answered.
     // Retire the previous session first: its elements return to the pool before priming, so the new session never
@@ -432,7 +513,7 @@ export function useSessionActivation({
           await begunInFlight;
           if (isDisposed() || token !== activationToken) return;
         }
-        await startFrom(pending, sample ?? sampleClick());
+        await beginClicked(pending, kind, token, sample ?? sampleClick());
       } finally {
         if (token === activationToken) beginning.value = false;
       }
@@ -459,10 +540,70 @@ export function useSessionActivation({
         await begunInFlight;
         if (isDisposed() || token !== activationToken) return;
       }
-      await startFrom(pending, sample ?? sampleClick());
+      await beginClicked(pending, kind, token, sample ?? sampleClick());
     } finally {
       if (token === activationToken) beginning.value = false;
     }
+  }
+  /** Begins what the click chose: the prepared activation, or after a loss, the recovery of `kind`. */
+  function beginClicked(
+    pending: Activation | null,
+    kind: "start" | "continue",
+    token: number,
+    sample: ClickSample,
+  ): Promise<void> | void {
+    if (lost.value) return recover(kind, token, sample);
+    if (pending !== null) return startFrom(pending, sample);
+  }
+  /**
+   * The click's recovery after a loss (PLAYER-UI "Session end and failure"): once the keep work under way settled, a
+   * fresh connection replaces the lost one and prepares the script again, and the click begins `kind` there with its own
+   * sample, without preparing the start page, so the click keeps its token, its camera and its wake lock. A Continue
+   * first restores the kept session in the fresh host; one it refuses shows the start page with Start, and nothing
+   * begins. A failure before the begin offers the same choice again; a loss meanwhile is a new stop.
+   */
+  async function recover(kind: "start" | "continue", token: number, sample: ClickSample) {
+    const owns = () => !isDisposed() && token === activationToken;
+    try {
+      await keptOwner().settleKeepWork();
+      if (!owns()) return;
+      const prepared = await connection.replace();
+      if (!owns()) return;
+      const plan = prepared.result.kind === "prepared" ? prepared.result.plan : undefined;
+      if (plan === undefined || lastStart.value === null)
+        throw new Error("The script was not prepared again.");
+      keptOwner().rebindScript(plan);
+      const create: PlayerSessionStart = { ...lastStart.value, plan };
+      lastStart.value = create;
+      let recipe: Activation;
+      if (kind === "continue") {
+        const found = await keptOwner().restoreForRecovery();
+        if (!owns()) {
+          if (found !== null && "session" in found) bridgeOf(found.session).release(found.session);
+          return;
+        }
+        if (found === null || !("session" in found)) {
+          endRecovery();
+          prepareStart(create, found?.outdated);
+          return;
+        }
+        recipe = continueRecipe(found.session);
+      } else recipe = startRecipe(create);
+      endRecovery();
+      await startFrom(recipe, sample);
+    } catch (error) {
+      if (!owns()) return;
+      console.error("[player] host error", error);
+      // The click cleared the session: the choice shows again on the start page.
+      recoveryShown.value = { kind, shown: true };
+      offer.value = kind;
+    }
+  }
+  /** The connection was replaced: the stop and its offer end. */
+  function endRecovery() {
+    lost.value = false;
+    recoveryShown.value = null;
+    offer.value = null;
   }
   /**
    * The session `create` starts over the bridge (`start`): its held plan, with the options it reads now, the click's
@@ -543,6 +684,8 @@ export function useSessionActivation({
     activationRun,
     heldDebugRecording,
     hostError,
+    lost,
+    recoveryOffer,
     halting,
     reportActivationError,
     reportPageError,
