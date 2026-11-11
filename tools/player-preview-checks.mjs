@@ -71,13 +71,21 @@ async function startPreview() {
 async function checkServedCheckout(url) {
   const endpoint = new URL("__checkout", url.endsWith("/") ? url : `${url}/`);
   const answer = await fetch(endpoint).catch((error) => error);
-  const served = answer instanceof Response && answer.ok ? await answer.text() : null;
+  // An older preview answers the path with its page, as it does any path it does not know.
+  const served =
+    answer instanceof Response &&
+    answer.ok &&
+    answer.headers.get("content-type")?.startsWith("text/plain")
+      ? await answer.text()
+      : null;
   if (served !== checkout)
     throw new Error(
       `${url} is no development preview of this checkout (${checkout}): ${
-        served === null
-          ? `${endpoint} ${answer instanceof Response ? `answered ${answer.status}` : `failed: ${answer.message}`}`
-          : `it serves ${served}`
+        served !== null
+          ? `it serves ${served}`
+          : answer instanceof Response
+            ? `${endpoint} answered ${answer.status} ${answer.headers.get("content-type") ?? "without a type"}, not a checkout`
+            : `${endpoint} failed: ${answer.message}`
       }. Run the checks without a URL to start this checkout's preview.`,
     );
 }
@@ -755,8 +763,8 @@ async function runGroup(browserPage, run, url, artifacts) {
   }
 }
 
-let passed = false;
 let preview = null;
+let failure = null;
 try {
   const url = process.argv[2] ?? (preview = await startPreview()).url;
   if (preview !== null)
@@ -788,16 +796,18 @@ try {
     if (!result) throw new Error(output);
     console.log(`player-preview-checks: ${result}`);
   }
-  passed = true;
-} finally {
-  try {
-    await cli("close");
-  } catch (error) {
-    if (passed) throw error;
-  } finally {
-    await preview?.server.close();
-    rmSync(join(scratch, "vite"), { recursive: true, force: true });
-    if (passed) rmSync(scratch, { recursive: true, force: true });
-    else console.error(`player-preview-checks: failure artifacts retained at ${scratch}`);
-  }
+} catch (error) {
+  failure = error;
 }
+// The browser, the started preview and its dependency cache go whether the checks passed or not; a failure's
+// screenshot and trace stay.
+const closed = await cli("close").then(
+  () => null,
+  (error) => error,
+);
+await preview?.server.close();
+rmSync(join(scratch, "vite"), { recursive: true, force: true });
+if (failure === null) rmSync(scratch, { recursive: true, force: true });
+else console.error(`player-preview-checks: failure artifacts retained at ${scratch}`);
+if (failure !== null) throw failure;
+if (closed !== null) throw closed;

@@ -48,6 +48,7 @@ const servedCheckout: Plugin = {
   configureServer(server) {
     const checkout = realpathSync(fileURLToPath(new URL("../..", import.meta.url)));
     server.middlewares.use(`${server.config.base}__checkout`, (_request, response) => {
+      response.setHeader("Content-Type", "text/plain; charset=utf-8");
       response.end(checkout);
     });
   },
