@@ -977,6 +977,8 @@ RERUN.rows(
 test("each connection's post log and reply gate see its own requests alone, with two connections live", async (context) => {
   for (const topology of TOPOLOGIES) {
     const held = await topologyBridge(context, topology, { delayMs: 5 });
+    // Let go also when an assertion below fails, so the gate holds nothing of a later test.
+    context.after(() => held.release());
     const other = await topologyBridge(context, topology, { delayMs: 5 });
     const before = held.posts.length;
     held.hold("prepare");
@@ -988,7 +990,6 @@ test("each connection's post log and reply gate see its own requests alone, with
     assert.equal(settled, "prepared", "the other connection's reply is not held");
     assert.deepEqual(held.posts.slice(before), [], "the held connection logged nothing");
     assert.ok(other.posts.some((post) => post.op === "prepare"));
-    held.release();
   }
 });
 

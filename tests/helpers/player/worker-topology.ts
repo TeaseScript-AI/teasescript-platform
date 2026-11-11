@@ -25,8 +25,8 @@ import type { PlayerSession } from "../../../player/runtime/runtime-view.js";
  *   at ready). In-process, the client is terminated and its listeners get a `BridgeLostError`, as a real loss; on the
  *   Worker, the thread is terminated, and its `exit` reaches the client as a real loss.
  * - `hold(op)`, `held()`, `release()`: from the post of the first request of `op` after `hold`, its reply and every
- *   later one are held until `release`; `held()` resolves once that reply is among them. In-process the backend's
- *   delayed deliveries are held (it needs a `delayMs`), on the Worker the messages at the port.
+ *   later one are held until `release`; `held()` resolves once that reply is among them. Both topologies hold the
+ *   incoming messages at the client's port, this connection's alone.
  * - `posts`: every request the client posted, in order, as it reached the port.
  * - `topology`, checked by `assertTopology()`: `deliverInTransit` is `null` exactly on the Worker.
  * `tests/helpers/bridge/sends.ts` decides sends above the client instead; this helper works below it, so the client's
