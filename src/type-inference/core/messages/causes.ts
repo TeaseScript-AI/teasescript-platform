@@ -1,10 +1,13 @@
+import type { Expression } from "../../../ast.js";
 import { REFERENCE } from "../contract.js";
+import { selectsElement } from "../method-categories.js";
 import type { ContextWord, ItemTag } from "../items.js";
 import type { ContextDetail, RequiredCheck } from "../result.js";
 import type { MessageSource } from "./site.js";
-import { described } from "./words.js";
+import { described, parsedExpression } from "./words.js";
 
-// A warning's last sentence: why the value may be of another type, from its origin or its context word.
+// The sentences of a cause: a warning's last, why the value may be of another type, from its origin or its context
+// word; and the route rule's error's first, what brings the offending type to the use.
 
 const HANDLER_RUNS: Readonly<Record<NonNullable<ContextDetail["handler"]>, string>> = {
   button: "the button is pressed",
@@ -119,16 +122,141 @@ export function contextSentence(
 }
 
 /**
+ * The properties the subject reads below the place its writer's value lands in (`o.x` below `o = { x: null }`: `x`),
+ * where both are plain paths of one root; none where the writer is the read itself (a call, a `load`, a selection used
+ * where it stands); `null` where it cannot be told.
+ */
+function readBelow(required: RequiredCheck, source: MessageSource): readonly string[] | null {
+  const landing = source.landing(required.writer);
+  if (landing === null) return source.text(required.writer) === required.subject ? [] : null;
+  const names: string[] = [];
+  let at = parsedExpression(required.subject)?.expression;
+  while (at?.kind === "propertyAccessExpression" && !selectsElement(at.property.name)) {
+    names.unshift(at.property.name);
+    at = at.object;
+  }
+  if (at?.kind !== "identifier" || at.name !== landing.root || landing.method !== undefined)
+    return null;
+  for (const [index, step] of landing.steps.entries())
+    if (!("property" in step) || step.property !== names[index]) return null;
+  return names.slice(landing.steps.length);
+}
+
+/**
+ * What brings a possible null to the route rule's error's use, in the owner's words (2026-11-11, #2287), from the
+ * writer N10 names as its own text parses: one row per expression kind, so a new kind does not compile without its
+ * row. An object literal answers through the property the subject reads below it; any other row only where the writer
+ * is the subject's own value. `null` gives the first clause alone: a writer that is no form a cause names.
+ */
+function nullCause(required: RequiredCheck, source: MessageSource): string | null {
+  const text = source.text(required.writer);
+  const parsed = parsedExpression(text);
+  const below = readBelow(required, source);
+  if (parsed === null) return null;
+  const own = (expression: Expression): string =>
+    text.slice(expression.span.start.offset - parsed.at, expression.span.end.offset - parsed.at);
+  // (the writer's line, and the lines its text spans before the expression)
+  const lineOf = (expression: Expression): number =>
+    source.line(required.writer) +
+    text.slice(0, expression.span.start.offset - parsed.at).split("\n").length -
+    1;
+  const copy = (expression: Expression): string | null => {
+    let at = expression;
+    while (at.kind === "propertyAccessExpression" && !selectsElement(at.property.name))
+      at = at.object;
+    return at.kind === "identifier"
+      ? `it is a copy of '${own(expression)}' (line ${lineOf(expression)}), which can hold null`
+      : null;
+  };
+  const cause = (expression: Expression, steps: readonly string[] | null): string | null => {
+    const line = lineOf(expression);
+    switch (expression.kind) {
+      case "nullLiteral":
+        // (a `null` stored, a parameter's default among them, is the value of the place it is written for)
+        return `it is set to null on line ${line}`;
+      case "parenthesizedExpression":
+        return cause(expression.expression, steps);
+      case "objectLiteral": {
+        if (steps === null || steps.length === 0) return null;
+        const property = expression.properties.find((each) => each.name.name === steps[0]);
+        return property === undefined ? null : cause(property.value, steps.slice(1));
+      }
+      default:
+        if (steps === null || steps.length > 0) return null;
+    }
+    switch (expression.kind) {
+      case "loadExpression":
+        return `'load' on line ${line} can give null`;
+      case "identifier":
+        return copy(expression);
+      case "propertyAccessExpression":
+        return selectsElement(expression.property.name)
+          ? `'${own(expression)}' on line ${line} can give null`
+          : copy(expression);
+      case "indexExpression":
+        return `an element of '${own(expression.object)}' (line ${line}) can be null`;
+      case "binaryExpression":
+        return expression.operator === "otherwise"
+          ? `'${own(expression)}' on line ${line} can give null`
+          : null;
+      case "callExpression": {
+        const { callee } = expression;
+        const name =
+          callee.kind === "identifier"
+            ? callee.name
+            : callee.kind === "propertyAccessExpression"
+              ? callee.property.name
+              : null;
+        return name === null ? null : `'${name}' on line ${line} can give null`;
+      }
+      case "interactionExpression": {
+        const name = /^[A-Za-z_]\w*/.exec(own(expression))?.[0];
+        return name === undefined ? null : `'${name}' on line ${line} can give null`;
+      }
+      case "booleanLiteral":
+      case "numberLiteral":
+      case "durationLiteral":
+      case "unitExpression":
+      case "angleExpression":
+      case "stringLiteral":
+      case "regexLiteral":
+      case "listLiteral":
+      case "setLiteral":
+      case "dictLiteral":
+      case "unaryExpression":
+      case "rangeExpression":
+      case "sayExpression":
+      case "showButtonExpression":
+      case "showPopupExpression":
+      case "timerExpression":
+      case "playMediaExpression":
+      case "showCameraExpression":
+      case "showPermanentButtonExpression":
+      case "tagQueryExpression":
+      case "typeTestExpression":
+        return null;
+      default: {
+        const unnamed: never = expression;
+        return unnamed;
+      }
+    }
+  };
+  return cause(parsed.expression, below);
+}
+
+/**
  * The route rule's error's first sentence (AD-1, #1073), from N10's payload: the read, the offending kind,
- * and the writer's line; its fix is the warning's it stands in for (`coreMessage`).
+ * and the writer's line; its fix is the warning's it stands in for (`coreMessage`). A null's names what brings it
+ * (`nullCause`), else nothing past the rule.
  */
 export function requiredSentence(
   kinds: readonly ItemTag[],
   required: RequiredCheck,
   source: MessageSource,
 ): string {
-  const line = source.line(required.writer);
-  return kinds.includes("null")
-    ? `'${required.subject}' can be null here because of '${source.text(required.writer)}' on line ${line}.`
-    : `'${required.subject}' can be ${described(kinds)} here because of line ${line}.`;
+  if (!kinds.includes("null"))
+    return `'${required.subject}' can be ${described(kinds)} here because of line ${source.line(required.writer)}.`;
+  const cause = nullCause(required, source);
+  const first = `'${required.subject}' must be checked for null before it is used here`;
+  return cause === null ? `${first}.` : `${first}: ${cause}.`;
 }
