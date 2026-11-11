@@ -834,7 +834,7 @@ export class PathSteps {
   static {
     offsetOf = (steps) => steps.#offset;
   }
-  static readonly #hidden = (steps: PathSteps): Readonly<Record<string, unknown>> => ({
+  static readonly #hidden = (steps: PathSteps) => ({
     id: steps.#id,
     text: steps.#text,
     of: steps.#of,
