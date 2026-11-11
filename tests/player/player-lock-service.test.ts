@@ -1024,7 +1024,6 @@ interface LockingPlayer {
 }
 let usePlayerSession: (options: {
   readonly bridge: Promise<PlayerBridge>;
-  readonly debugHistorySpill: () => Promise<null>;
   readonly lockServices?: LockServices;
 }) => LockingPlayer;
 before(async () => {
@@ -1224,11 +1223,7 @@ async function lockingPlayer(context: TestContext, topology: Topology) {
   const loaders = countedLoaders();
   const scope = effectScope();
   const player = scope.run(() =>
-    usePlayerSession({
-      bridge: Promise.resolve(transport.bridge),
-      debugHistorySpill: async () => null,
-      lockServices: loaders.services,
-    }),
+    usePlayerSession({ bridge: Promise.resolve(transport.bridge), lockServices: loaders.services }),
   )!;
   context.after(() => scope.stop());
   const start = async () => {

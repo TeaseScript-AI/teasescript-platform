@@ -1,9 +1,7 @@
-import { createInProcessBackend } from "../../../engine-bridge/in-process.js";
 import type { BridgeLostError, BridgeResult } from "../../../engine-bridge/client.js";
 import type { OpResult } from "../../../engine-bridge/op-catalogue.js";
 import type { PlayerProject } from "../../../runtime/runtime-adapter.js";
 import type { PlayerBridge } from "../../../runtime/player-bridge.js";
-import { playerBuildIdentity } from "../../../build-identity.js";
 import type { PlayerSessionOptions } from "./usePlayerSession.js";
 
 /*
@@ -54,23 +52,12 @@ export function useEngineConnection({
   ready,
   unreachable,
 }: EngineConnectionHost) {
-  // The default in-process backend, made at once and again for each replacement.
-  const inProcess = () =>
-    createInProcessBackend(playerBuildIdentity, {
-      ...(options.debugHistorySpill && { historySpill: options.debugHistorySpill }),
-      ...(options.debugHistoryMemoryBudget !== undefined && {
-        historyBudget: options.debugHistoryMemoryBudget,
-      }),
-    });
   // The engine's host, which owns the plans, the sessions and the recorder of every session's engine calls from Start,
-  // in every build, for a debug export (DEBUGGER.md "Debug export"); in-process by default.
-  // The in-process backend is ready at once, so a Start within the first click needs no wait.
-  let bridge: PlayerBridge | null = options.bridge === undefined ? inProcess() : null;
-  // How a lost connection is replaced: the host's factory, or a new in-process backend; none for an injected bridge
-  // without one, whose loss stays the Player's error stop.
-  const nextConnection: (() => Promise<PlayerBridge>) | null =
-    options.nextConnection ??
-    (options.bridge === undefined ? () => Promise.resolve(inProcess()) : null);
+  // in every build, for a debug export (DEBUGGER.md "Debug export"): the bridge the Player is given, once it is ready.
+  let bridge: PlayerBridge | null = null;
+  // How a lost connection is replaced: the host's factory; none for a bridge given without one, whose loss stays the
+  // Player's error stop.
+  const nextConnection: (() => Promise<PlayerBridge>) | null = options.nextConnection ?? null;
   // This Player's hold on its bridge (`PlayerBridge.claim`): one live Player per bridge.
   const claim = Symbol("Player");
   // The current connection's bridge once its source promise yields it, before the claim and the readiness hook, either
@@ -100,7 +87,7 @@ export function useEngineConnection({
   // Once the host is reachable, and only while this Player lives: it takes the bridge, observes its loss, and sends what
   // waited for it before any Start that waits for it. A host that never became reachable, or one another Player holds,
   // is the `bridge` promise's failure, which its own callers handle.
-  let connected = (options.bridge ?? Promise.resolve(bridge!)).then((reached) => {
+  let connected = options.bridge.then((reached) => {
     settled = reached;
     if (isDisposed()) return reached;
     take(reached);
@@ -132,9 +119,9 @@ export function useEngineConnection({
   return {
     /** This Player's claim, with which it holds the bridge and its random control there. */
     claim,
-    /** The engine's host now, or `null` before it is ready; the in-process backend is there at once. */
+    /** The engine's host now, or `null` before it is ready. */
     now: (): PlayerBridge | null => bridge,
-    /** The engine's host, which the in-process backend gives at once; an injected one is ready before any Start. */
+    /** The engine's host, which is ready before any Start (`currentConnection`). */
     require(): PlayerBridge {
       if (bridge === null) throw new Error("The engine's host is not ready.");
       return bridge;
