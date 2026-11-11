@@ -403,16 +403,19 @@ test("main and measured occur in a family only at an admitted position; any othe
 
 test("the four pin forms are found by their text, and a pin written another way is not", () => {
   const CONTRACT = "tests/type-core/type-core-contract.test.ts";
-  assert.deepEqual(pinFormsOf("  assert.equal(budget.total, 22_962_573);"), ["total"]);
-  assert.deepEqual(pinFormsOf("    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],"), [
-    "table",
+  assert.deepEqual(pinFormsOf("  assert.equal(budget.total, 22_962_573);", CONTRACT), ["total"]);
+  assert.deepEqual(
+    pinFormsOf("    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],", CONTRACT),
+    ["table"],
+  );
+  assert.deepEqual(pinFormsOf('  decide: [\n    6,\n    "a stopped decision\'s path"', CONTRACT), [
+    "listed",
   ]);
-  assert.deepEqual(pinFormsOf('  decide: [\n    6,\n    "a stopped decision\'s path"'), ["listed"]);
   assert.deepEqual(pinFormsOf('      upToOrder: "8ec84600facd682a",', CONTRACT), ["digest"]);
   // (the named limits: another assertion, a short total, a nested table)
-  assert.deepEqual(pinFormsOf("  assert.strictEqual(budget.total, 22_962_573);"), []);
-  assert.deepEqual(pinFormsOf("  assert.equal(budget.total, 573);"), []);
-  assert.deepEqual(pinFormsOf("    [7995, 60],\n    [7081, 60],"), []);
+  assert.deepEqual(pinFormsOf("  assert.strictEqual(budget.total, 22_962_573);", CONTRACT), []);
+  assert.deepEqual(pinFormsOf("  assert.equal(budget.total, 573);", CONTRACT), []);
+  assert.deepEqual(pinFormsOf("    [7995, 60],\n    [7081, 60],", CONTRACT), []);
   // (a digest's limits: under 16 digits, in an array, in a comment)
   assert.deepEqual(pinFormsOf('  upToOrder: "8ec84600facd682",', CONTRACT), []);
   assert.deepEqual(pinFormsOf('  parts: ["0123456789abcdef"],', CONTRACT), []);

@@ -135,7 +135,7 @@ const FORM_SCOPES = {
   digest: (file) => file.startsWith("tests/type-core/") || /(?:^|\/)type-core-[^/]*$/u.test(file),
 };
 
-/** The pin forms `text`, the text of `file`, holds, by name. */
+/** The pin forms `text`, the text of `file` (a path under the repository), holds, by name. */
 export function pinFormsOf(text, file) {
   return Object.keys(PIN_FORMS).filter(
     (name) => (FORM_SCOPES[name]?.(file) ?? true) && PIN_FORMS[name].test(text),
