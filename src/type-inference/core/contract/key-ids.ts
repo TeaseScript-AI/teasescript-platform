@@ -835,6 +835,9 @@ export class PathSteps {
     offsetOf = (steps) => steps.#offset;
   }
   static readonly #hidden = (steps: PathSteps) => ({
+    contract: steps.#contract,
+    find: steps.#find,
+    offset: steps.#offset,
     id: steps.#id,
     text: steps.#text,
     of: steps.#of,

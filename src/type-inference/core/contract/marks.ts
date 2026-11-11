@@ -616,9 +616,9 @@ function automatonOf(contract: Contract): MarkAutomaton {
       contract,
       (known = {
         states: [],
-        roots: new Map(),
-        starts: new Map(),
-        moves: new Map(),
+        roots: Retained.map("MarkAutomaton.roots"),
+        starts: Retained.map("MarkAutomaton.starts"),
+        moves: Retained.map("MarkAutomaton.moves"),
         prefixVisits: 0,
       }),
     );
@@ -782,6 +782,8 @@ function compiled(contract: Contract, automaton: MarkAutomaton, holder: Holder):
 function compile(contract: Contract, automaton: MarkAutomaton, holder: Holder): number {
   const { program, guards } = contract.pass;
   const root = newState(contract, automaton);
+  // (a compile fills the automaton in place: its states, their steps, accepting flags and ε-moves, its prefix visits)
+  amend(automaton);
   // its guarded literal paths
   for (const at of holder.guarded) {
     program.work.charge("eventSteps");

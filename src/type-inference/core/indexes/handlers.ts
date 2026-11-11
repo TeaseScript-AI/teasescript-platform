@@ -39,7 +39,7 @@ export class HandlerIndex {
     readonly program: CoreProgram,
     readonly definitions: DefinitionIndex,
   ) {
-    Retained.owner(this, "HandlerIndex");
+    Retained.owner(this, "HandlerIndex", (index) => ({ handled: index.#handled }));
     const work = program.work;
     const flow = program.flow;
     this.#handled = new KeyTrie(work, "eventSteps", () => this.#handlerKeys);
