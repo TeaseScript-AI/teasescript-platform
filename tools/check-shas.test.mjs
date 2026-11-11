@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -194,6 +194,45 @@ test(
         assert.equal(out.trim().split("\n").at(-1), `check-shas: ${line}`, JSON.stringify(text));
       }
       assert.equal(check("", [directory]).status, 0);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "--append writes the run's last line as the file's own last line, replacing its earlier one",
+  { timeout: 30_000 },
+  () => {
+    const { directory, shas } = repository();
+    const report = join(directory, "report.md");
+    const run = (...extra) =>
+      spawnSync(process.execPath, [tool, "--repo", directory, "--append", ...extra, report], {
+        encoding: "utf8",
+      });
+    try {
+      writeFileSync(report, `READY at ${shas[0].slice(0, 9)}.\n`);
+      const first = run();
+      assert.equal(first.status, 0, first.stderr);
+      const line = first.stdout.trim().split("\n").at(-1);
+      assert.match(line, /^check-shas: 1 tokens: 1 resolved, /u);
+      assert.equal(readFileSync(report, "utf8"), `READY at ${shas[0].slice(0, 9)}.\n\n${line}\n`);
+      // A second run, after an edit, checks the text without its own line and replaces it.
+      writeFileSync(
+        report,
+        readFileSync(report, "utf8").replace("READY at", "READY, <sha> fixed, at"),
+      );
+      const second = run();
+      assert.equal(second.status, 1, second.stdout);
+      const written = readFileSync(report, "utf8");
+      assert.equal(written.match(/^check-shas: /gmu).length, 1, written);
+      assert.match(written.trim().split("\n").at(-1), /1 tokens: 1 resolved, .*; 1 placeholders$/u);
+      // It needs a file to write.
+      const piped = spawnSync(process.execPath, [tool, "--repo", directory, "--append"], {
+        input: "x",
+        encoding: "utf8",
+      });
+      assert.equal(piped.status, 2);
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
