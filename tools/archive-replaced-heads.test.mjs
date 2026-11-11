@@ -447,6 +447,29 @@ test(
       );
       assert.equal(repo.remote("rev-parse", "main").stdout.trim(), other);
       assert.equal(repo.remote("for-each-ref", "refs/archive").stdout, "");
+
+      // Archived on the remote but not kept here (a file where this clone's archive folder goes): refused, saying
+      // what to repair; once repaired, the push goes through.
+      repo.git("fetch", "origin", "main");
+      const blocked = join(repo.root, "clone/.git/refs/archive");
+      writeFileSync(blocked, "");
+      const newer = repo.commit("newer");
+      const unkept = repo.git("push", "origin", `+${newer}:refs/heads/main`);
+      assert.notEqual(unkept.status, 0);
+      assert.ok(
+        unkept.stderr.includes(`cannot keep refs/archive/${other} in this clone (`),
+        unkept.stderr,
+      );
+      assert.match(
+        unkept.stderr,
+        /\); the remote archive is retained: repair this clone's refs\/archive path or its permissions, then push again; push refused$/mu,
+      );
+      assert.equal(repo.remote("rev-parse", "main").stdout.trim(), other);
+      assert.equal(repo.remote("rev-parse", `refs/archive/${other}`).stdout.trim(), other);
+      rmSync(blocked);
+      const repaired = repo.git("push", "origin", `+${newer}:refs/heads/main`);
+      assert.equal(repaired.status, 0, repaired.stderr);
+      assert.equal(repo.git("rev-parse", `refs/archive/${other}`).stdout.trim(), other);
     } finally {
       rmSync(repo.root, { recursive: true, force: true });
     }

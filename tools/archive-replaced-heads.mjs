@@ -118,7 +118,11 @@ function main() {
   // (the clone's own archive refs, so that a pruning push from it does not delete them on the remote)
   for (const ref of refs.filter((ref) => here.get(ref) === "")) {
     const kept = git("update-ref", ref, holds(ref), "");
-    if (kept.status !== 0) fail(`cannot keep ${ref} in this clone (${kept.stderr.trim()})`);
+    if (kept.status !== 0)
+      fail(
+        `cannot keep ${ref} in this clone (${kept.stderr.trim()}); the remote archive is retained: repair this ` +
+          "clone's refs/archive path or its permissions, then push again",
+      );
   }
   for (const { ref, old } of replaced)
     process.stderr.write(
