@@ -134,6 +134,7 @@ const SECTION_CELLS = {
   keepDurable: { timing: ["timing"] },
   demo: { timing: ["counts", "timing"] },
   delayedSmoke: { timing: ["timing"] },
+  keys: { timing: ["counts", "timing"] },
 };
 
 /** `fixture` with the value at `path` replaced by `value` (removed for `undefined`). */

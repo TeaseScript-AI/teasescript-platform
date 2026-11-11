@@ -22,18 +22,29 @@ const composerModel: InjectionKey<ComposerModel> = Symbol("composerModel");
 
 /**
  * The owner of the composer's text and repeat, for the component that renders the composer. It gets them only to read,
- * through `text`, and writes them only through `writeField`: the composer ends a composition under way in that field
- * and shows the text, and the text is published at once, also an unchanged one. The composer takes the writable model
- * itself (`useComposerModel`), which the component providing it cannot inject.
+ * through `text`, and writes them only through `writeField`, or the `write` of an intercepting flight: the composer
+ * ends a composition under way in that field and shows the text, and the text is published at once, also an unchanged
+ * one. The composer takes the writable model itself (`useComposerModel`), which the component providing it cannot
+ * inject.
  */
 export function useComposerFields(): {
   text(field: ComposerField): string;
   writeField(field: ComposerField, text: string): void;
+  /**
+   * Hands every later `writeField` of the composer's input to `take` instead of writing it, until `release`; `write`
+   * writes the input past it. An answer in flight takes the texts its settlement writes this way (`useAnswerFlight`).
+   */
+  interceptInput(take: (text: string) => void): { write(text: string): void; release(): void };
 } {
   const draft = ref("");
   const repeated = ref("");
   let writer: FieldWriter | null = null;
+  let interceptor: ((text: string) => void) | null = null;
   const model = (field: ComposerField) => (field === "repeat" ? repeated : draft);
+  const write = (field: ComposerField, text: string) => {
+    writer?.(field, text);
+    model(field).value = text;
+  };
   provide(composerModel, {
     draft,
     repeated,
@@ -47,8 +58,17 @@ export function useComposerFields(): {
   return {
     text: (field) => model(field).value,
     writeField(field, text) {
-      writer?.(field, text);
-      model(field).value = text;
+      if (field === "input" && interceptor) interceptor(text);
+      else write(field, text);
+    },
+    interceptInput(take) {
+      interceptor = take;
+      return {
+        write: (text) => write("input", text),
+        release() {
+          if (interceptor === take) interceptor = null;
+        },
+      };
     },
   };
 }

@@ -29,6 +29,8 @@
     "player/vue/src/shell/usePlayerTheme.ts",
     "player/vue/src/notifications/usePlayerToasts.ts",
     "player/vue/src/stage/useStagePhoto.ts",
+    "player/vue/src/interaction/playerKeys.ts",
+    "player/vue/src/interaction/useAnswerFlight.ts",
     "player/media/captured-media.ts",
     "player/runtime/compile-project.ts",
     "player/engine-bridge/client.ts",

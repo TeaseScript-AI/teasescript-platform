@@ -41,6 +41,8 @@ const modules = [
   "player/vue/src/shell/usePlayerTheme.ts",
   "player/vue/src/notifications/usePlayerToasts.ts",
   "player/vue/src/stage/useStagePhoto.ts",
+  "player/vue/src/interaction/playerKeys.ts",
+  "player/vue/src/interaction/useAnswerFlight.ts",
 ];
 
 // One server-side bundle for all test processes, built with the other UI builds, instead of every test file
