@@ -42,6 +42,7 @@ const tests = run({
   concurrency: atOnce,
   isolation: "process",
   timeout: TEST_LIMIT_MS,
+  // (no `forceExit`: it ended files before their later tests ran, 3899 of 3952 tests with exit 0, job 1111163300ceb7)
   signal: controller.signal,
 });
 trackInFlight((type, listener) => tests.on(type, listener));

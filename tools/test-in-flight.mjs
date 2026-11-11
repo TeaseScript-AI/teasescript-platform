@@ -15,9 +15,10 @@ export const AFTER_MS = 5 * 60_000;
  * and its file's other tests still run. Both runners of the suite give it (`run-test-files.mjs`, and
  * `test-output-filter.mjs` for named files, where a later `--test-timeout` replaces it), so a hang is a named failure
  * before a job's limit (#2454). What the test left running can still keep its file's process, and the run, alive until
- * that limit: Node's `--test-force-exit`, which would end it, ended files before their later tests ran (#2454). Measured: CI's costliest file took 177 s
- * (`costly-test-files.mjs`), the longest test 125 s on a queue worker (2026-11-11); CI's test jobs take 5 to 7 of their
- * 15 minutes. A test's own `timeout` option replaces it.
+ * that limit. A test's own `timeout` option replaces it.
+ * 5 minutes is a measurement, to redo as the suite's costliest tests change (2026-11-11): the longest test took 125 s on
+ * a queue worker (job 11111622335a16), the costliest file 177 s in CI (median, `costly-test-files.mjs`), and CI's test
+ * jobs take 5 to 7 of their 15 minutes.
  */
 export const TEST_LIMIT_MS = 5 * 60_000;
 const LOOK_MS = 60_000;
