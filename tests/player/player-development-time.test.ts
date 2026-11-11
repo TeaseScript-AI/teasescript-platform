@@ -29,6 +29,7 @@ import { loadPlayerModule } from "../helpers/player-modules.js";
 import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
 import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
+import { inProcessBackend } from "../helpers/player/worker-topology.js";
 
 // The adapter's functions, also on the sessions the composables' host holds (`helpers/player/host-sessions.ts`).
 const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
@@ -310,7 +311,10 @@ interface SessionHost {
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
 }
-let usePlayerSession: (options: { scriptStorage?: ScriptStorageProvider }) => SessionHost;
+let usePlayerSession: (options: {
+  readonly bridge: Promise<PlayerBridge>;
+  scriptStorage?: ScriptStorageProvider;
+}) => SessionHost;
 let useDevelopmentTime: (
   player: SessionHost,
   initial: { autoSkip: boolean },
@@ -393,7 +397,10 @@ async function mount(
   const scope = effectScope();
   const logged: string[] = [];
   const mounted = scope.run(() => {
-    const player = usePlayerSession(scriptStorage === undefined ? {} : { scriptStorage });
+    const player = usePlayerSession({
+      bridge: inProcessBackend(),
+      ...(scriptStorage === undefined ? {} : { scriptStorage }),
+    });
     const time = useDevelopmentTime(player, initial, (text) => logged.push(text));
     return { player, time, logged, unmount: () => scope.stop() };
   });
@@ -549,7 +556,7 @@ async function mountDebug(
   stubBrowser(context);
   const scope = effectScope();
   const mounted = scope.run(() => {
-    const player = usePlayerSession({});
+    const player = usePlayerSession({ bridge: inProcessBackend() });
     return { player, debug: usePlayerDebug(player, initial) };
   });
   assert.ok(mounted);

@@ -691,11 +691,7 @@ async function startOn(context: TestContext, host: RewindHost, plan: string, hel
 async function playerOn(context: TestContext, bridge: PlayerBridge) {
   const scope = effectScope();
   const host = scope.run(() =>
-    usePlayerSession({
-      bridge: Promise.resolve(bridge),
-      scriptStorage: memoryStorage().provider,
-      debugHistorySpill: async () => null,
-    }),
+    usePlayerSession({ bridge: Promise.resolve(bridge), scriptStorage: memoryStorage().provider }),
   )!;
   const debug = effectScope();
   const rewind = debug.run(() => useDebugRewind(host))!;

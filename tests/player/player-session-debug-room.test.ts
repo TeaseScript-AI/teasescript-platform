@@ -29,6 +29,7 @@ import type {
 import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
+import { inProcessBackend } from "../helpers/player/worker-topology.js";
 
 // The adapter's functions, also on the sessions the composables' host holds (`helpers/player/host-sessions.ts`).
 const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
@@ -126,6 +127,7 @@ function mountHost(
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
+      bridge: inProcessBackend(),
       scriptStorage: options.own,
       keptSessions: options.kept,
       debugRooms: options.rooms,
