@@ -60,8 +60,8 @@
 // could not run: <reason>` on exit 2. The rows are read from the report's own signals; every other signal is in the
 // report only.
 //
-// Exit status: 0 when the report is printed, 2 when --diff cannot read the change as Git wrote it, or --summary has no
-// file or no --diff.
+// Exit status: 0 when the report is printed, 2 when an option has no value (the next argument missing or another
+// option), --diff cannot read the change as Git wrote it, or --summary has no --diff.
 import { execFileSync } from "node:child_process";
 import { appendFileSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -81,21 +81,33 @@ const COMPONENTS = ["src", "player", "tests", "tools", "playground"];
 const CODE = /\.(ts|tsx|mts|cts|js|mjs|cjs|vue)$/;
 const PARSED = /\.(ts|tsx|mts|cts|js|mjs|cjs)$/;
 
-const args = process.argv.slice(2);
-const given = [...args];
-const option = (name) => {
-  const i = args.indexOf(name);
-  if (i < 0) return undefined;
-  const value = args[i + 1];
-  args.splice(i, 2);
-  return value;
-};
-const top = Number(option("--top") ?? 10);
-const jsonOut = option("--json");
-const compareWith = option("--compare");
-const diffBase = option("--diff");
-const summaryGiven = args.includes("--summary");
-const summaryOut = option("--summary");
+const USAGE = `usage: node tools/structure-report.mjs [ROOT…] [--top N] [--json FILE] [--compare FILE]
+       node tools/structure-report.mjs [ROOT…] --diff BASE [--moved] [--json FILE] [--summary FILE]`;
+const given = process.argv.slice(2);
+// Each option's value is the argument right after it on the command line as given, read in order, so that each option
+// is checked against its own next argument; of an option given twice, the first counts. An option whose next argument
+// is missing or is another option (`--…`) has no value, which `main` refuses for the first such option.
+const VALUED = ["--top", "--json", "--compare", "--diff", "--summary"];
+const values = {};
+let valueless;
+const args = [];
+for (let i = 0; i < given.length; i++) {
+  if (!VALUED.includes(given[i])) {
+    args.push(given[i]);
+    continue;
+  }
+  const value = given[i + 1];
+  if (value === undefined || value.startsWith("--")) valueless ??= given[i];
+  else {
+    values[given[i]] ??= value;
+    i++;
+  }
+}
+const top = Number(values["--top"] ?? 10);
+const jsonOut = values["--json"];
+const compareWith = values["--compare"];
+const diffBase = values["--diff"];
+const summaryOut = values["--summary"];
 const movedAt = args.indexOf("--moved");
 const discountMoved = movedAt !== -1;
 if (discountMoved) args.splice(movedAt, 1);
@@ -669,8 +681,8 @@ function writeSummary(block) {
 
 /** The report the command line asks for. */
 function main() {
-  if (summaryGiven && (summaryOut === undefined || summaryOut.startsWith("--"))) {
-    console.error("structure-report: --summary needs a file");
+  if (valueless !== undefined) {
+    console.error(`structure-report: ${valueless} needs a value\n${USAGE}`);
     process.exit(2);
   }
   const command = [

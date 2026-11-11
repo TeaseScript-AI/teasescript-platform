@@ -718,13 +718,7 @@ test(
           false,
         ),
       );
-      // --summary without its file stops the report; without --diff, its block says why
-      const valueless = spawnSync(process.execPath, [tool, "--diff", quiet.base, "--summary"], {
-        cwd: quiet.root,
-        encoding: "utf8",
-      });
-      assert.equal(valueless.status, 2);
-      assert.equal(valueless.stderr, "structure-report: --summary needs a file\n");
+      // --summary without --diff: its block says why
       const alone = join(quiet.root, "alone.md");
       const undiffed = spawnSync(process.execPath, [tool, "--summary", alone], {
         cwd: quiet.root,
@@ -749,6 +743,45 @@ test(
     }
   },
 );
+
+test("an option given without its value stops the report with the usage, writing nothing", () => {
+  const root = mkdtempSync(join(tmpdir(), "structure-report-valueless-"));
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+  try {
+    git("init", "-q");
+    git("config", "user.email", "t@t");
+    git("config", "user.name", "t");
+    write(root, { "src/a.ts": "export const a = 1;\n" });
+    git("add", "-A");
+    git("commit", "-q", "-m", "base");
+    for (const [name, args] of [
+      ["--json", ["src", "--json"]],
+      ["--top", ["--top"]],
+      ["--compare", ["--compare"]],
+      ["--diff", ["--diff"]],
+      ["--summary", ["--diff", "HEAD", "--summary"]],
+      // the next argument another option: neither is taken as the other's value
+      ["--json", ["--json", "--diff", "HEAD"]],
+      ["--diff", ["--diff", "--moved"]],
+      // whatever order the options are read in, each is checked against its own next argument
+      ["--diff", ["--diff", "--top", "1", "HEAD"]],
+      ["--json", ["--json", "--top", "1", "report.json"]],
+      ["--summary", ["--summary", "--diff", "HEAD", "summary.md"]],
+      ["--compare", ["--compare", "--top", "1", "snapshot.json"]],
+    ]) {
+      const result = spawnSync(process.execPath, [tool, ...args], { cwd: root, encoding: "utf8" });
+      assert.equal(result.status, 2, args.join(" "));
+      assert.equal(result.stdout, "", args.join(" "));
+      assert.match(
+        result.stderr,
+        new RegExp(`^structure-report: ${name} needs a value\\nusage: `, "u"),
+      );
+    }
+    assert.deepEqual(git("status", "--porcelain", "--untracked-files=all"), "");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test(
   "--moved suppresses a file over 1,000 lines whose added lines are all a move's admitted forms",
