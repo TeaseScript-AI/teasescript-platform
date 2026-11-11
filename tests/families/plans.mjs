@@ -241,29 +241,15 @@ function stopsFault(stops) {
 }
 
 /**
- * Why `list` is no list of settled stops as `heldStops(…, 1)` gives it, else undefined: `{allowance, phase}` objects,
- * positive whole allowances, each phase one block of consecutive ascending allowances (`phaseEnds`' ranges).
+ * Why `list` is no stop list the runner writes, else undefined: `{allowance, phase}` stops as the tree's `heldStops(…, 1)`
+ * gives them, unchecked, so an allowance as any pair holds one (R19), in any order (R21: the order of a tree's phases
+ * and allowances is the tree's, not the record's form).
  */
 function stopListFault(list) {
   if (!Array.isArray(list)) return "a stop list that is no list";
-  const ended = new Set();
-  let last;
-  for (const stop of list) {
-    if (
-      !shaped(stop, ["allowance", "phase"]) ||
-      !(whole(stop.allowance) && stop.allowance > 0) ||
-      !text(stop.phase)
-    )
-      return "a stop that is no {allowance, phase} with a positive whole allowance";
-    if (last?.phase === stop.phase) {
-      if (stop.allowance !== last.allowance + 1)
-        return "a phase whose allowances are not consecutive and ascending";
-    } else {
-      if (last !== undefined) ended.add(last.phase);
-      if (ended.has(stop.phase)) return "a phase in two blocks";
-    }
-    last = stop;
-  }
+  for (const stop of list)
+    if (!shaped(stop, ["allowance", "phase"]) || !allowanceOf(stop.allowance) || !text(stop.phase))
+      return "a stop that is no {allowance, phase}";
   return undefined;
 }
 
@@ -327,7 +313,7 @@ function stopMoves({ base, head }) {
   });
 }
 
-/** Allowances as runs of consecutive ones (`5..7, 9`), or `none`. */
+/** Allowances as runs of consecutive ones (`5..7, 9`) in the list's order, any other allowance as it is, or `none`. */
 const runsOf = (allowances) => {
   const runs = [];
   for (const allowance of allowances) {

@@ -46,8 +46,8 @@ const ORDERS = {
  * every record form (R20): `exits` ends its worker; `over at demand <n>` charges 5,000 at that demand, and `overstop`
  * at its stop's allowance; an `apart…` source's plan on the head names its demand and allowance, so every pair differs;
  * the stop search throws for `throws`; the analysis charges 5,000 for `overanalysis` and nothing for
- * `apart-zero-questions`; and the one stop of `apart-stop <n>` and `overstop <n>` is at the allowance `<n>`, of any
- * other at 10.
+ * `apart-zero-questions`; the one stop of `apart-stop <n>` and `overstop <n>` is at the allowance `<n>`, of any
+ * other at 10; and `lists` has a stop list of each tree's own, at edge allowances, out of order (#2340).
  */
 const MODULES: Record<string, string> = {
   "src/type-inference/core/budget.js": `let test = null;
@@ -132,6 +132,20 @@ export function heldStops(c, mode) {
   if (c.name === "lost") wait(6000);
   if (c.name === "throws") throw new Error("search failed");
   mode.run(() => new WorkLedger(10).charge("frames", c.name === "searched" ? 5000 : 300));
+  if (c.name === "lists")
+    return import.meta.url.includes("/head/")
+      ? [
+          { allowance: Infinity, phase: "walk" },
+          { allowance: 2, phase: "read" },
+          { allowance: 10, phase: "added" },
+        ]
+      : [
+          { allowance: 0, phase: "walk" },
+          { allowance: -1, phase: "walk" },
+          { allowance: 0.5, phase: "read" },
+          { allowance: NaN, phase: "walk" },
+          { allowance: Infinity, phase: "removed" },
+        ];
   const [, at] = /^(?:apart-stop|overstop) (.+)$/.exec(c.name) ?? [];
   return [{ allowance: at === undefined ? 10 : Number(at), phase: "admission" }];
 }
@@ -575,6 +589,8 @@ test("every record form the runner writes, at its allowance edges, passes the su
     "overanalysis",
     "throws",
     "lost",
+    "lists",
+    "failing",
     ...edges.flatMap((edge) => [`apart-stop ${edge}`, `overstop ${edge}`]),
   ];
   for (const tree of ["base", "head"]) {
@@ -621,7 +637,12 @@ test("every record form the runner writes, at its allowance edges, passes the su
     run?: { at: string };
     modes?: {
       demands?: { demand: unknown }[];
-      stops?: { differ: { allowance: unknown }[] };
+      stops?: {
+        differ?: { allowance: unknown }[];
+        base?: { allowance: unknown }[];
+        head?: { allowance: unknown }[];
+        unavailable?: string;
+      };
       questions?: { differ: { allowance: unknown }[] };
     }[];
   };
@@ -667,6 +688,16 @@ test("every record form the runner writes, at its allowance edges, passes the su
     "null",
   ]);
   assert.ok(modes.some((m) => m.questions?.differ.some((d) => d.allowance === 0)));
+  // (#2340: both trees' stop lists where the sets differ, at the edges, and a stop search that did not run)
+  assert.deepEqual(
+    values(
+      modes.flatMap((m) =>
+        [...(m.stops?.base ?? []), ...(m.stops?.head ?? [])].map((stop) => stop.allowance),
+      ),
+    ),
+    ["-1", "0", "0.5", "10", "2", "null"],
+  );
+  assert.ok(modes.some((m) => m.stops?.unavailable !== undefined));
   assert.ok(records.some((r) => r.name === "cases.mjs/fine" && r.differing === 0));
   // (and the summary reads every line)
   const summary = spawnSync(process.execPath, [tool, "summary", ...files], { encoding: "utf8" });
@@ -1076,58 +1107,31 @@ test("the plans summary refuses, naming file, line and fault, any line that is n
       /no \{allowance, phase\}/,
     ],
     [
-      "a non-positive allowance",
-      (r) => withStops(r, { ...apartStops, head: [{ allowance: 0, phase: "walk" }] }),
-      /positive whole allowance/,
+      "an allowance as text",
+      (r) => withStops(r, { ...apartStops, head: [{ allowance: "1", phase: "walk" }] }),
+      /no \{allowance, phase\}/,
     ],
     [
-      "allowances out of order",
+      "a phase that is no text",
+      (r) => withStops(r, { ...apartStops, head: [{ allowance: 1, phase: 2 }] }),
+      /no \{allowance, phase\}/,
+    ],
+    ["a stop list that is no list", (r) => withStops(r, { ...apartStops, head: {} }), /no list/],
+    [
+      // (R19, R21: a tree's allowances and their order are its own, so any it may give passes)
+      "stops at any allowance, in any order",
       (r) =>
         withStops(r, {
           ...apartStops,
-          head: stopList([
-            ["walk", 2],
-            ["walk", 1],
-          ]),
+          head: [
+            { allowance: 0, phase: "walk" },
+            { allowance: -1, phase: "walk" },
+            { allowance: 0.5, phase: "read" },
+            { allowance: null, phase: "walk" },
+            { allowance: 0, phase: "walk" },
+          ],
         }),
-      /consecutive and ascending/,
-    ],
-    [
-      "an allowance twice",
-      (r) =>
-        withStops(r, {
-          ...apartStops,
-          head: stopList([
-            ["walk", 1],
-            ["walk", 1],
-          ]),
-        }),
-      /consecutive and ascending/,
-    ],
-    [
-      "a gap in a phase",
-      (r) =>
-        withStops(r, {
-          ...apartStops,
-          head: stopList([
-            ["walk", 1],
-            ["walk", 3],
-          ]),
-        }),
-      /consecutive and ascending/,
-    ],
-    [
-      "a phase in two blocks",
-      (r) =>
-        withStops(r, {
-          ...apartStops,
-          head: stopList([
-            ["walk", 1],
-            ["read", 5],
-            ["walk", 2],
-          ]),
-        }),
-      /two blocks/,
+      null,
     ],
   ];
   for (const [at, [label, change, fault]] of rows.entries()) {

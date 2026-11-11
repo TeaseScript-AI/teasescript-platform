@@ -352,13 +352,16 @@ stdout; `plans.mjs summary <records>...` classifies the records (identical, work
 and lists each difference, stall and uncharged source. A differing demand row takes the same one class (publication
 where the plan, the diagnostics or the error differ, else questions, else work), lists every part apart, and says which
 tree's output the allowance stops against that tree's own unstopped compile in the mode (base, head, both or neither),
-each counted. `summary` first checks every line's keys, types and value formats against those the runner writes: a gate
-against malformed, foreign and truncated lines, which refuses the input (exit 2), not a proof of the invariants between
-one record's fields. A record and a stall's run name their mode by that `name`; a record from before #2342 holds a
-number, the mode's index in `HELD_MODES` at the commit that wrote it (`forward`, `reversed`, `forward, unshared`,
-`reversed, unshared` from 3804b7d3f, where the table began, to this day; the oracle's `MODES` orders them otherwise),
-printed as that number and never translated. A builder runs the head tree's copy instead of copying a kit, and extends
-it here where a comparison needs more:
+each counted. Where a held mode's stop sets differ, the record keeps both trees' stop lists (#2340), and the summary
+says per phase which tree added, removed or moved its stops, with both trees' allowances; a stop that changes phase over
+an overlapping range reads as one removed and one added, and a record without the lists (from before #2340) is counted
+unavailable, never equal. `summary` first checks every line's keys, types and value formats against those the runner
+writes: a gate against malformed, foreign and truncated lines, which refuses the input (exit 2), not a proof of the
+invariants between one record's fields. A record and a stall's run name their mode by that `name`; a record from before
+#2342 holds a number, the mode's index in `HELD_MODES` at the commit that wrote it (`forward`, `reversed`, `forward,
+unshared`, `reversed, unshared` from 3804b7d3f, where the table began, to this day; the oracle's `MODES` orders them
+otherwise), printed as that number and never translated. A builder runs the head tree's copy instead of copying a kit,
+and extends it here where a comparison needs more:
 
 ```sh
 sx-job submit --commit base=<base> --commit head=<head> --shards 16 --mem 3G --timeout 1h --campaign <T> \
