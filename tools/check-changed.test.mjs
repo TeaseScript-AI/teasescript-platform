@@ -28,11 +28,13 @@ import {
   MAIN_CHECKOUT,
   branchedFrom,
   linkMainNodeModules,
+  loadedBy,
   notInstalled,
   projectsFor,
   removeTemporaryWorktree,
   strayMerges,
   unknownToCostly,
+  unreadableLoads,
 } from "./check-changed.mjs";
 import { isolateGit } from "./fixture-git.mjs";
 import {
@@ -51,7 +53,10 @@ const REPRESENTATIVES = {
   typescript: ["src/compiler.ts", ["typescript"]],
   "player-vue": ["player/vue/src/PlayerApp.vue", ["player-vue"]],
   "oxlint-rules": ["tools/oxlint/run.mjs", ["oxlint-rules"]],
-  tools: ["tools/test-shards.mjs", ["tools"]],
+  tools: ["tools/check-shas.mjs", ["tools"]],
+  // a tool `test:lint`'s runner loads, which it runs the rule tests through (#2402), and one that tool imports
+  "loaded by test:lint's runner": ["tools/test-output-filter.mjs", ["tools", "oxlint-rules"]],
+  "imported by what test:lint's runner loads": ["tools/test-shards.mjs", ["tools", "oxlint-rules"]],
   "repository checks": ["tools/repository-checks/regression-cases.mjs", ["tools"]],
   families: [
     "tests/families/copies/copy-admission/named-and-nested-composite-admission.mjs",
@@ -96,6 +101,87 @@ test("each changed path needs its project's checks, documentation and oxlint's c
     ...new Set(Object.values(PROJECTS).flatMap(({ checks }) => checks)),
   ]);
   assert.equal(everyCheck.filter((check) => check === "lint:design").length, 1);
+});
+
+test("loadedBy follows the string literals that name a file, and nothing else; projectsFor runs a project whose loads cannot be read (#2402)", () => {
+  const root = mkdtempSync(join(tmpdir(), "check-changed-loads-"));
+  try {
+    const files = {
+      // each form it reads
+      "entry.mjs":
+        'import "./imported.mjs";\nexport { x } from "./re-exported.mjs";\nawait import("./dynamic.mjs");\n' +
+        'const require = () => {};\nrequire("./required.cjs");\nspawn("node", ["tools/spawned.mjs"]);\n' +
+        'new URL("./url.mjs", import.meta.url);\nimport "./typed.js";\nconst t = `./template.mjs`;\n' +
+        // and what it does not follow: a computed path, a concatenation, a folder, a package, a missing file
+        'const name = "computed";\nimport(`./${name}.mjs`);\nimport("./concat" + "enated.mjs");\n' +
+        'scan("folder");\nimport "typescript";\nimport "./missing.mjs";\n',
+      "imported.mjs": 'import "./transitive.mjs";\n',
+      "re-exported.mjs": "export const x = 1;\n",
+      "dynamic.mjs": "",
+      "required.cjs": "",
+      "tools/spawned.mjs": 'readFileSync("config.json");\n',
+      "url.mjs": "",
+      "typed.ts": "export {};\n",
+      "template.mjs": "",
+      "transitive.mjs": "",
+      "computed.mjs": "",
+      "concatenated.mjs": "",
+      "folder/inside.mjs": "",
+      // a file of another kind is named, not read
+      "config.json": '{ "next": "unread.mjs" }\n',
+      "unread.mjs": "",
+      // test:lint's runner, in this root, naming a file no project claims
+      "tools/oxlint/test.mjs": 'spawn("node", ["lib/helper.mjs"]);\n',
+      "lib/helper.mjs": "",
+    };
+    for (const [path, text] of Object.entries(files)) {
+      mkdirSync(dirname(join(root, path)), { recursive: true });
+      writeFileSync(join(root, path), text);
+    }
+    symlinkSync(join(process.cwd(), "node_modules"), join(root, "node_modules"));
+    assert.deepEqual([...loadedBy(["entry.mjs"], root)].sort(), [
+      "config.json",
+      "dynamic.mjs",
+      "entry.mjs",
+      "imported.mjs",
+      "re-exported.mjs",
+      "required.cjs",
+      "template.mjs",
+      "tools/spawned.mjs",
+      "transitive.mjs",
+      "typed.ts",
+      "url.mjs",
+    ]);
+    // what a project's loads name only adds that project: a path no project claims still needs every project
+    assert.deepEqual(
+      [...projectsFor(["lib/helper.mjs"], root)].sort(),
+      Object.keys(PROJECTS).sort(),
+    );
+    assert.deepEqual([...projectsFor(["tools/check-shas.mjs"], root)], ["tools"]);
+    // the repository's own: test:lint's runner loads the output filter, which runs the rule tests
+    assert.ok(loadedBy(PROJECTS["oxlint-rules"].loads).has("tools/test-output-filter.mjs"));
+    // a file it follows that cannot be read fails the reading, and so does a root without TypeScript
+    assert.throws(() => loadedBy(["absent.mjs"], root), /ENOENT/u);
+    const bare = mkdtempSync(join(tmpdir(), "check-changed-loads-bare-"));
+    try {
+      writeFileSync(join(bare, "entry.mjs"), "");
+      assert.throws(() => loadedBy(["entry.mjs"], bare), /typescript/u);
+      // projectsFor then runs the project's checks for any path no other rule gives it, and says why
+      assert.deepEqual([...projectsFor(["tools/check-shas.mjs"], bare)].sort(), [
+        "oxlint-rules",
+        "tools",
+      ]);
+      assert.deepEqual(
+        unreadableLoads(bare).map(({ name }) => name),
+        ["oxlint-rules"],
+      );
+      assert.deepEqual(unreadableLoads(root), []);
+    } finally {
+      rmSync(bare, { recursive: true, force: true });
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("without node_modules it can link, it runs no check, says why and the two fixes, and exits 2", () => {
