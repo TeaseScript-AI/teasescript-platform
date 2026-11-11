@@ -367,15 +367,23 @@ watch(
 // The form holds the text being typed, shortly after typing pauses, so a checkpoint or debug export keeps it. Only the
 // composer's own field takes it, while it is presented.
 let draftTimer: ReturnType<typeof setTimeout> | undefined;
+// A question keeps its text for the action it was typed for, as it changes: once an answer completes, the composer it
+// empties is the answered question's, not the next one's, whose prefill or typed text would otherwise read as emptied.
+watch(
+  draft,
+  (text) => {
+    // A password typed but not sent is never kept: a question that resumes after a block asks for it again.
+    if (
+      actionId.value !== undefined &&
+      form.value === null &&
+      foreground.value?.kind !== "ask-password"
+    )
+      typedTexts()?.set(typedKey(actionId.value, ""), text);
+  },
+  { flush: "sync" },
+);
 watch(draft, (text) => {
   clearTimeout(draftTimer);
-  // A password typed but not sent is never kept: a question that resumes after a block asks for it again.
-  if (
-    actionId.value !== undefined &&
-    form.value === null &&
-    foreground.value?.kind !== "ask-password"
-  )
-    typedTexts()?.set(typedKey(actionId.value, ""), text);
   if (!ownsPresentedEditor() || !props.session) return;
   const target = composerOwner!;
   const { plan } = props.session;
