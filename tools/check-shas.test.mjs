@@ -647,9 +647,26 @@ test(
       assert.equal(refused.status, 2, refused.stderr);
       assert.match(refused.stderr, /is not UTF-8 text; it is as it was$/mu);
       assert.ok(readFileSync(report).equals(notText));
+      // UTF-8 text beyond ASCII (a byte order mark, two- and four-byte characters, CRLF line ends): written, its bytes
+      // kept, and on a rerun its line replaced.
+      const wide = `\uFEFFREADY é 😀 at ${shas[0].slice(0, 9)}.\r\nü\r\n`;
+      writeFileSync(report, wide);
+      for (const pass of ["first", "rerun"]) {
+        const result = run();
+        assert.equal(result.status, 0, `${pass}: ${result.stderr}`);
+        assert.ok(
+          readFileSync(report).equals(
+            Buffer.from(`\uFEFFREADY é 😀 at ${shas[0].slice(0, 9)}.\r\nü\n\n${own(0)}\n`),
+          ),
+          pass,
+        );
+      }
       // Each step that writes, failing or writing short, by a preload that replaces node:fs's function: a failed cut
-      // leaves the file as it was; a failed write leaves its text, maybe with part of the line, and says to remove that;
-      // a short write is continued.
+      // leaves the file as it was; a failed write or close leaves its text, maybe with all or part of the line, and says
+      // to remove a partial one; a failed close does not hide a failed cut; a short write is continued.
+      // (the descriptor `--append` opens, `r+`; the real close runs before the injected error)
+      const closing =
+        'const open = fs.openSync; let opened; fs.openSync = (...a) => { const d = open(...a); if (a[1] === "r+") opened = d; return d; }; const real = fs.closeSync;';
       const failing = (step) =>
         `fs.${step} = () => { throw Object.assign(new Error("injected"), { code: "EIO" }); };`;
       for (const [label, patch, status, after, message] of [
@@ -659,14 +676,28 @@ test(
           failing("writeSync"),
           2,
           kept,
-          /last line \(EIO\); its text is as it was, and part of the line may stand after it: remove that by hand$/mu,
+          /last line \(EIO\); its text is as it was, and all or part of the line may stand after it: remove a partial line by hand$/mu,
         ],
         [
           "a partial write",
           'const real = fs.writeSync; let n = 0; fs.writeSync = (d, b, o, l, p) => { if (n++ > 0) throw Object.assign(new Error("injected"), { code: "EIO" }); return real(d, b, o, 5, p); };',
           2,
           `${kept}\n\nche`,
-          /remove that by hand$/mu,
+          /remove a partial line by hand$/mu,
+        ],
+        [
+          "a failed close after a complete write",
+          `${closing} fs.closeSync = (d) => { real(d); if (d === opened) throw Object.assign(new Error("injected"), { code: "EIO" }); };`,
+          2,
+          `${kept}\n\n${own(0)}\n`,
+          /last line \(EIO\); its text is as it was, and all or part of the line may stand after it/mu,
+        ],
+        [
+          "a failed cut, then a failed close: the cut is named",
+          `${closing} ${failing("ftruncateSync").replace("EIO", "ENOSPC")} fs.closeSync = (d) => { real(d); if (d === opened) throw Object.assign(new Error("injected"), { code: "EIO" }); };`,
+          2,
+          before,
+          /\(ENOSPC\); it is as it was$/mu,
         ],
         [
           "a short write",
