@@ -1005,13 +1005,17 @@ export const MODES = [false, true].flatMap((reversed) =>
 const hashed = (text) => createHash("sha256").update(text).digest("hex");
 export function publicationHashes(files) {
   const source = files[0].source;
-  if (source === "throws") throw new TypeError("a stand-in exception");
+  if (source === "throws" || source === (${head} ? "throws on head" : "throws on base"))
+    throw new TypeError("a stand-in exception");
   const answered = ${head} && source !== "left" ? '[1,"z"]' : '[1,"x"]';
   const unanswered = { left: ${head ? 1 : 2}, "left apart": 2 }[source] ?? 0;
   return { parts: ['"A"', '"R"', answered, '"T"'].map(hashed), unanswered };
 }
-export const stopSet = () => ({ stops: [[1, "r", "x", ${head ? 2 : 1}]], passes: 1, restarts: 0,
-  outcome: "complete", exhausted: null, record: "same" });
+export function stopSet(files) {
+  if (${head} && files[0].source === "stops throw on head") throw new TypeError("a stand-in exception");
+  return { stops: [[1, "r", "x", ${head ? 2 : 1}]], passes: 1, restarts: 0, outcome: "complete", exhausted: null,
+    record: "same" };
+}
 `;
 
 test("collect reads every area record form the real run.mjs writes, and a record of no known form differs, never equal (#2447)", () => {
@@ -1030,15 +1034,22 @@ test("collect reads every area record form the real run.mjs writes, and a record
     });
     const area = join(directory, "rings");
     mkdirSync(area);
-    // (a publication difference, an exception, a run left unanswered whose answered parts agree, one whose answered
-    // parts differ, and a stops run's difference, which has no parts)
+    // (a publication difference; an exception on both trees, on the base alone and on the head alone, and a stops
+    // run's on the head alone; a run left unanswered whose answered parts agree, one whose answered parts differ; and a
+    // stops run's difference, which has no parts)
     writeFileSync(
       join(area, "published.mjs"),
-      `export const cases = ${JSON.stringify(["throws", "left apart", "differs", "left"].map((s) => [s, s]))};\n`,
+      `export const cases = ${JSON.stringify(
+        ["throws", "left apart", "throws on head", "differs", "throws on base", "left"].map((s) => [
+          s,
+          s,
+        ]),
+      )};\n`,
     );
     writeFileSync(
       join(area, "stopping.mjs"),
-      'export const cases = [["stops", "stops"]];\nexport const checks = ["stops"];\n',
+      'export const cases = [["stops throw on head", "stops throw on head"], ["stops", "stops"]];\n' +
+        'export const checks = ["stops"];\n',
     );
     // (shard 0 as the area job writes it: the runner's differences and its summary line)
     const out = join(root, "p-areas", jobId("a", 0), "out");
@@ -1056,7 +1067,7 @@ test("collect reads every area record form the real run.mjs writes, and a record
     const apart = (generator, source, text) =>
       modes.map((mode) => `rings ${generator} ${source} ${mode}: ${text}`);
     const expected = [
-      "rings: 4 exceptions",
+      "rings: 16 exceptions",
       "rings: 4 unanswered",
       ...apart("published.mjs", "left apart", "part 2 of 4/4"),
       ...apart("published.mjs", "differs", "part 2 of 4/4"),
