@@ -500,10 +500,10 @@ node tests/families/differential.mjs join --cases cases.jsonl --base <base jobs'
 compiles each source of a set (`corpus`, `fixture` or an area) through both public routes of one built tree, the legacy
 backend and the core (`decisionRecords`), in the four modes, and writes one JSON line per source to `--out` and the
 core's decision records to `--decisions`. Each route runs in its own process with `--memory` MB of old generation
-(2,048, the families runner's, so both compare a source under the same cap; it refuses Node options and `NODE_OPTIONS`,
-whose heap flags would override that: the queue sets one, so the command clears it), under the unit limit below (the
-legacy route charges no ledger) and the safety net. A run that fails (heap, units, safety net, the process's end, a V8
-abort at its heap limit included: #1738) leaves the source's other runs and is recorded as `{ outcome: "failed",
+(2,048, the families runner's, so both compare a source under the same cap; a route's process starts without the
+caller's `NODE_OPTIONS`, such as the queue's heap flag, and with no other Node option of the caller's, #2329), under
+the unit limit below (the legacy route charges no ledger) and the safety net. A run that fails (heap, units, safety
+net, the process's end, a V8 abort at its heap limit included: #1738) leaves the source's other runs and is recorded as `{ outcome: "failed",
 failure, phase, runsBeforeFailure, heapMiB }` (`heapMiB`: the worker's heap limit as V8 measured it) in its row and in
 the record's `failed` list, with `incomplete: true` and the first failure as `reason`; the next run starts in a fresh
 worker. A reused worker's heap failure or safety net is retried once in a fresh one, whose result is the run's
@@ -514,8 +514,8 @@ the natural allowance on current main, so no natural run reaches a receiving com
 record is never agreement.
 
 ```sh
-sx-job submit --commit <sha> --shards 16 --mem 6G --timeout 2h --campaign <T> -- bash -c 'env -u NODE_OPTIONS \
-  node "$SX_TREE/tests/families/shadow.mjs" "$SX_TREE" <set> --shard {i}/{n} --demands 16 --out "$SX_OUT/shadow.jsonl" \
+sx-job submit --commit <sha> --shards 16 --mem 6G --timeout 2h --campaign <T> -- bash -c \
+  'node "$SX_TREE/tests/families/shadow.mjs" "$SX_TREE" <set> --shard {i}/{n} --demands 16 --out "$SX_OUT/shadow.jsonl" \
   --decisions "$SX_OUT/decisions.jsonl" > "$SX_OUT/shadow.log"'
 ```
 
@@ -544,7 +544,7 @@ green` only with no `open` row, and `--gate` (S11's final run, with `--expect`) 
 records it reproduces its aggregate (`~/work/evidence/1728/`):
 
 ```sh
-env -u NODE_OPTIONS node "$SX_TREE/tests/families/shadow.mjs" "$SX_TREE" <set> --manifest > expect.jsonl
+node "$SX_TREE/tests/families/shadow.mjs" "$SX_TREE" <set> --manifest > expect.jsonl
 node tests/families/shadow-classify.mjs <shards' shadow.jsonl>... --expect expect.jsonl --out <folder> [--gate]
 ```
 
