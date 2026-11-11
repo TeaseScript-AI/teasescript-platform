@@ -147,17 +147,22 @@ const MERGED_INTO_EACH_OTHER = ["origin/main", "origin/runtime-v2"];
  * or `origin/runtime-v2` and not on `base` (named `baseName`), the commit the run compares with: so merging main into a
  * branch of runtime-v2, or runtime-v2 into a branch of main, passes, and merging a branch's own base into it, or any
  * other branch, does not; a lane branch rebases instead. Which line the first parent is on is not checked. A lookup git
- * cannot answer (a missing ref or commit) fails, as unproven, with the advice to fetch.
+ * cannot answer (a missing ref or commit), or answers "no" in a shallow clone, fails as unproven, with the advice to
+ * fetch or deepen the clone.
  */
 export function strayMerges(from, head, base, baseName) {
-  // (true or false, or the error of a lookup git cannot answer)
-  const holds = (ref, commit) => {
+  // (a shallow clone lacks history, so there git's "not an ancestor" proves nothing)
+  const shallow = git("rev-parse", "--is-shallow-repository") === "true";
+  // (true or false, or why git cannot answer)
+  const holds = (ref, commit, name = ref) => {
     const lookup = spawnSync("git", ["merge-base", "--is-ancestor", commit, ref], {
       encoding: "utf8",
     });
-    if (lookup.status === 0 || lookup.status === 1) return lookup.status === 0;
-    return `${ref}: ${lookup.stderr.trim().split("\n")[0] || `git exit ${lookup.status}`}`;
+    if (lookup.status === 0) return true;
+    if (lookup.status === 1) return shallow ? `${name}: the clone is shallow` : false;
+    return `${name}: ${lookup.stderr.trim().split("\n")[0] || `git exit ${lookup.status}`}`;
   };
+  const refs = [baseName, ...MERGED_INTO_EACH_OTHER].join(", ");
   const stray = [];
   for (const line of git("rev-list", "--merges", "--parents", `${from}..${head}`).split("\n")) {
     if (line === "") continue;
@@ -165,18 +170,23 @@ export function strayMerges(from, head, base, baseName) {
     const why = [];
     for (const parent of merged) {
       const short = parent.slice(0, 9);
-      const onBase = holds(base, parent);
+      const onBase = holds(base, parent, baseName);
       if (onBase === true) {
         why.push(`merges ${short}, which the base already holds: rebase onto ${baseName} instead`);
         continue;
       }
       const onBranches = MERGED_INTO_EACH_OTHER.map((ref) => holds(ref, parent));
       if (onBase === false && onBranches.includes(true)) continue;
-      const errors = [onBase, ...onBranches].filter((answer) => typeof answer === "string");
+      const errors = [
+        ...new Set([onBase, ...onBranches].filter((answer) => typeof answer === "string")),
+      ];
       why.push(
         errors.length > 0
-          ? `merges ${short}, which git cannot place (${errors.join("; ")}): fetch ${[baseName, ...MERGED_INTO_EACH_OTHER].join(", ")} and run again`
-          : `merges ${short}, which neither ${MERGED_INTO_EACH_OTHER.join(" nor ")} holds: rebase onto ${baseName} instead`,
+          ? `merges ${short}, which git cannot place (${errors.join("; ")}): ` +
+              (shallow ? "deepen the clone (git fetch --unshallow)" : `fetch ${refs}`) +
+              " and run again"
+          : `merges ${short}, which neither ${MERGED_INTO_EACH_OTHER.join(" nor ")} holds: rebase onto ` +
+              `${baseName} instead, or, if it has landed on one of them since your last fetch, fetch ${refs} and run again`,
       );
     }
     if (why.length > 0)

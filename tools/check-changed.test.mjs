@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -555,7 +556,8 @@ test(
       [
         "main",
         "other",
-        "which neither origin/main nor origin/runtime-v2 holds: rebase onto main instead",
+        "which neither origin/main nor origin/runtime-v2 holds: rebase onto main instead, or, if it has landed on " +
+          "one of them since your last fetch, fetch main, origin/main, origin/runtime-v2 and run again",
       ],
       ["main", "runtime-v2", null],
       ["runtime-v2", "main", null],
@@ -570,10 +572,28 @@ test(
         "origin/runtime-v2",
       ],
       ["runtime-v2", "main", null, "origin/runtime-v2"],
+      // a stale origin/main, which lacks the main commit merged: the advice names the fetch beside the rebase
+      [
+        "runtime-v2",
+        "main",
+        "which neither origin/main nor origin/runtime-v2 holds: rebase onto runtime-v2 instead, or, if it has " +
+          "landed on one of them since your last fetch, fetch runtime-v2, origin/main, origin/runtime-v2 and run again",
+        "stale",
+      ],
+      // a shallow clone, whose "no" proves nothing: unproven, with the advice to deepen it (Sol r2)
+      [
+        "origin/main",
+        "runtime-v2",
+        "which git cannot place (origin/main: the clone is shallow): deepen the clone (git fetch --unshallow) and " +
+          "run again",
+        "shallow",
+      ],
     ];
     for (const merged of [false, true])
-      for (const [base, merges, failure, missing] of cases) {
+      for (const [base, merges, failure, tweak] of cases) {
         const { directory } = repository({ passing: true });
+        // (the shallow case clones the branches, so its base is the clone's origin/main)
+        const branch = base.replace(/^origin\//u, "");
         const git = (...args) => {
           const result = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
             cwd: directory,
@@ -594,21 +614,34 @@ test(
           commit("runtime-v2", "runtime-v2.md");
           commit("other", "other.md");
           commit("main", "main.md");
-          git("switch", "-q", "-c", "lane", base);
+          git("switch", "-q", "-c", "lane", branch);
           commit("lane", "lane.md");
           // (both grow after the lane branched, so merging either is a merge commit)
           commit("main", "main-later.md");
           commit("runtime-v2", "runtime-v2-later.md");
           git("update-ref", "refs/remotes/origin/main", "main");
           git("update-ref", "refs/remotes/origin/runtime-v2", "runtime-v2");
-          if (missing !== undefined) git("update-ref", "-d", `refs/remotes/${missing}`);
+          if (tweak === "origin/runtime-v2")
+            git("update-ref", "-d", "refs/remotes/origin/runtime-v2");
+          if (tweak === "stale") git("update-ref", "refs/remotes/origin/main", "main~1");
           git("switch", "-q", "lane");
           if (merges !== null) git("merge", "-q", "--no-edit", merges);
+          let cwd = directory;
+          if (tweak === "shallow") {
+            // (a branch deeper than the clone, so the clone lacks history, while main's and the lane's are whole)
+            git("branch", "deep", "main");
+            for (const step of [1, 2, 3, 4]) commit("deep", `deep-${step}.md`);
+            git("switch", "-q", "lane");
+            cwd = `${directory}-shallow`;
+            git("clone", "-q", "--depth=3", "--no-single-branch", `file://${directory}`, cwd);
+            cpSync(join(directory, "node_modules"), join(cwd, "node_modules"), { recursive: true });
+          }
           const result = spawnSync(
             process.execPath,
             [tool, ...(merged ? ["--merged"] : []), "--base", base],
-            { cwd: directory, encoding: "utf8", env: environment },
+            { cwd, encoding: "utf8", env: environment },
           );
+          if (tweak === "shallow") rmSync(cwd, { recursive: true, force: true });
           const at = `${merged ? "merged" : "plain"}: a branch of ${base} merging ${merges}`;
           assert.equal(
             result.status,
