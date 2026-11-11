@@ -200,16 +200,21 @@ async function mediaPlaybackChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
   };
-  // Observe the Player's audio elements; the first play() is refused, as a browser without activation would.
+  // Observe the Player's audio elements. Every play() is refused, as a browser that grants no audio would, until the
+  // player clicks "Enable audio": refusing only the first would refuse the silent play that primes an element at Start.
   await page.addInitScript(() => {
     window.__played = [];
     const play = HTMLMediaElement.prototype.play;
-    let refused = false;
+    let refusing = true;
+    document.addEventListener(
+      "click",
+      (event) => {
+        if (event.target.closest("button")?.textContent.trim() === "Enable audio") refusing = false;
+      },
+      true,
+    );
     HTMLMediaElement.prototype.play = function () {
-      if (!refused) {
-        refused = true;
-        return Promise.reject(new DOMException("Refused", "NotAllowedError"));
-      }
+      if (refusing) return Promise.reject(new DOMException("Refused", "NotAllowedError"));
       window.__played.push(this);
       return play.call(this);
     };
