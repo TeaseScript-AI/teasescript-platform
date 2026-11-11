@@ -40,7 +40,7 @@
 // (a split's files importing each other) are left out. A binding on one side only fails, with its file, line and
 // specifier; form 1 admits an import line's presence, this rule its content. A target the move relocates or adds
 // without a family in `--renames` fails, and the report names the flag. So does a binding on one side only between two
-// files the change edits that are there on both sides, as when code moves out of a file that still calls it, and the
+// files the change edits, its target there on both sides, as when code moves out of a file that still calls it, and the
 // report names the family that would join the two. A relative specifier either side cannot
 // resolve, to no file or in a file whose configuration the tree does not establish (a config with an error, such as an
 // `extends` the tree does not hold, or a TypeScript file no config includes or none is above), is refused by name:
