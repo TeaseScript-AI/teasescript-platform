@@ -682,18 +682,12 @@ test("the check and the baselines take one set of areas: each folder of tests/fa
 
 test("a stops run's decision stops are classified where both trees ran, never stored, and against a store unavailable, naming the base, each read by compiler-replay's verdict (#2355)", async () => {
   // (the replay's reader of an area's records, which the runner's records below must pass, every form)
-  const replay = (await import(
+  const { areaRecordForm, apartText } = await import(
     pathToFileURL(resolve(process.cwd(), "tools/compiler-replay.mjs")).href
-  )) as {
-    areaRecordForm: (record: Record<string, unknown>) => string;
-    apartText: (record: Record<string, unknown>) => string;
-  };
-  const readBack = (kept: Record<string, unknown>[]) =>
+  );
+  const readBack = (kept: Record<string, unknown>[]): Record<string, string> =>
     Object.fromEntries(
-      kept.map((record) => [
-        record.source,
-        `${replay.areaRecordForm(record)}: ${replay.apartText(record)}`,
-      ]),
+      kept.map((record) => [record.source, `${areaRecordForm(record)}: ${apartText(record)}`]),
     );
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
