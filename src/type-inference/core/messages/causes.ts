@@ -1,6 +1,7 @@
 import { REFERENCE } from "../contract.js";
 import type { ContextWord, ItemTag } from "../items.js";
-import type { ContextDetail } from "../result.js";
+import type { ContextDetail, RequiredCheck } from "../result.js";
+import type { MessageSource } from "./site.js";
 import { described } from "./words.js";
 
 // A warning's last sentence: why the value may be of another type, from its origin or its context word.
@@ -115,4 +116,19 @@ export function contextSentence(
             `${described([reference])}, whose properties are known only when the script runs.`;
     }
   }
+}
+
+/**
+ * The route rule's error's first sentence (AD-1, #1073), from N10's payload: the read, the offending kind,
+ * and the writer's line; its fix is the warning's it stands in for (`coreMessage`).
+ */
+export function requiredSentence(
+  kinds: readonly ItemTag[],
+  required: RequiredCheck,
+  source: MessageSource,
+): string {
+  const line = source.line(required.writer);
+  return kinds.includes("null")
+    ? `'${required.subject}' can be null here because of '${source.text(required.writer)}' on line ${line}.`
+    : `'${required.subject}' can be ${described(kinds)} here because of line ${line}.`;
 }

@@ -23,12 +23,7 @@ import {
 import { VALUE_KINDS } from "../../../value-kinds.js";
 import { propertyName } from "../program.js";
 import type { ItemTag } from "../items.js";
-import type {
-  DiagnosticRule,
-  RequiredCheck,
-  SiteExpectation,
-  WrittenTypeError,
-} from "../result.js";
+import type { DiagnosticRule, SiteExpectation, WrittenTypeError } from "../result.js";
 import type { MessageSource } from "./site.js";
 import {
   argumentFixOf,
@@ -820,21 +815,6 @@ function listJoinFix(
       ? ", or call the add method on a line of its own."
       : `, or add the element to '${list}' itself with '${add}' on a line of its own.`)
   );
-}
-
-/**
- * The route rule's error's first sentence (AD-1, #1073), from N10's payload: the read, the offending kind,
- * and the writer's line; its fix is the warning's it stands in for (`coreMessage`).
- */
-export function requiredSentence(
-  kinds: readonly ItemTag[],
-  required: RequiredCheck,
-  source: MessageSource,
-): string {
-  const line = source.line(required.writer);
-  return kinds.includes("null")
-    ? `'${required.subject}' can be null here because of '${source.text(required.writer)}' on line ${line}.`
-    : `'${required.subject}' can be ${described(kinds)} here because of line ${line}.`;
 }
 
 export function errorSentence(
