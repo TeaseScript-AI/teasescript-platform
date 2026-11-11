@@ -53,6 +53,8 @@ import {
 // - 14 characters whose first 10 are digits: a queue job id (`sx-job`: the month to the second, then 4 hex), such as
 //   `1107175450d1b5`;
 // - only the letters a-f: a word, such as `defaced`;
+// - a group of a UUID, five groups of 8, 4, 4, 4 and 12 hexadecimal digits in either case joined by `-` and touched by
+//   no letter, digit or `_`: an id, such as a T3 thread's `0e63ae8e-efaf-446b-abad-52bba33d4f81`;
 // - a number's fractional digits followed by `e` and its exponent, the number standing alone: no word character of
 //   any script (a letter, mark, number or connector) touches it on either side, and no `.` precedes it, so `v1.`, `β1.`
 //   and a dotted version stay checked, while any quote, backtick, bracket, operator or white space admits it
@@ -156,6 +158,10 @@ function appendLine(file, descriptor, bytes, kept, line) {
   );
 }
 
+/** A UUID, touched by no letter, digit or `_`. */
+const UUID =
+  /(?<![\p{L}\p{N}_])[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}(?![\p{L}\p{N}_])/giu;
+
 /** The unfilled placeholders a report can carry, case-insensitive. */
 export const PLACEHOLDERS = [
   /<(?:full[ -])?(?:sha|commit|head|base)(?:[ -][a-z]+)?>/giu,
@@ -205,6 +211,11 @@ export function excuse(token, text, index) {
   if (/^\d+$/u.test(token)) return "only digits, an id";
   if (/^\d{10}[0-9a-f]{4}$/u.test(token)) return "a queue job id";
   if (/^[a-f]+$/u.test(token)) return "a word";
+  // (a UUID is 36 characters: one that holds the token starts at most 35 before it)
+  for (const uuid of text.slice(Math.max(0, index - 35), index + 36).matchAll(UUID)) {
+    const start = Math.max(0, index - 35) + uuid.index;
+    if (start <= index && index + token.length <= start + uuid[0].length) return "a UUID, an id";
+  }
   if (floatDigits(text, index, token.length)) return "a float's digits";
   if (/\bsha256[\s:=]+$/iu.test(text.slice(Math.max(0, index - 16), index)))
     return "a file's sha256";
