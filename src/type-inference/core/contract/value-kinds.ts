@@ -47,7 +47,7 @@ import {
 } from "./key-ids.js";
 import { contractOfOp } from "./operations.js";
 import { projected } from "./positions.js";
-import { defaultOf, termAt, typeKinds, writtenOf } from "./terms.js";
+import { defaultOf, termAt, typeKinds, writtenDefault, writtenOf } from "./terms.js";
 
 // The kinds a value can have, by its kind and at a path, mirroring the value side's dispatch.
 
@@ -655,7 +655,8 @@ export function* defaultKinds(
 }
 
 /**
- * `defaultKinds`' run (F18): literal data by its contract, as before; a default that reads a variable
+ * `defaultKinds`' run (F18): the default's written type where its syntax gives one (`writtenDefault`, as the value
+ * side's `Values.defaultKinds` reads it first); else literal data by its contract; a default that reads a variable
  * or computes as the value side reads it at its call's snapshot (`FlowGraph.snapshotOf`), its marks, narrowing, copies
  * and stops included, never the settled type of a place it reads, so the call's contract and its answer agree.
  */
@@ -665,6 +666,12 @@ function* snapshotKinds(
   rest: readonly string[],
 ): Work<readonly Item[]> {
   const { program, values, solver } = contract.pass;
+  const written = writtenDefault(contract.pass, fallback, rest);
+  if (written !== null) {
+    // (#1668: an answer of syntax alone, its slot's edges unavailable as the value side's read leaves them)
+    solver.sink()?.opaque("exact");
+    return written;
+  }
   const site = program.places[fallback]?.site;
   const expression = site === undefined || site === null ? null : program.exprAt(site);
   if (expression !== null && !program.flow.snapshotNeedsValue(expression))
