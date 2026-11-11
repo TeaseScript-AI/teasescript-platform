@@ -63,10 +63,10 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
     name: "A2-interleaved-conditional-copies",
     measures:
-      "§4.1, condition (b): k copies of a k-field record of named host data, each after a conditional store below it",
+      "condition (b): k copies of a k-field record of named host data, each after a conditional store below it",
     // A gated known limit by the owner's decision (option A): each copy sees one more conditional store below the
-    // copied path, so each has its own signature, k classes, each answered at each of the k fields read (S6-CARRIERS
-    // §4.7's first unmerged shape; a rule beyond the class rule merges them). 377,525 / 1,357,501 units at k = 64, 128
+    // copied path, so each has its own signature, k classes, each answered at each of the k fields read
+    // (S6-CARRIERS §4.7's first unmerged shape; a rule beyond the class rule merges them). 377,525 / 1,357,501 units at k = 64, 128
     // in both orders (3.6080; 3.6222 before Codex r23's repairs, 3.6236 earlier); the allowance
     // reached at k = 618; at k = 1,024 82,410,069 units under a raised test allowance, 274.7 % of its 30,000,000 (the
     // analysis itself stops at the allowance with the budget error)
@@ -86,7 +86,7 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
     name: "A2-copies-separated-by-storing-calls",
     measures:
-      "§4.1, condition (b): k copies of a global another callable stores, each after a call storing it, at k fields",
+      "condition (b): k copies of a global another callable stores, each after a call storing it, at k fields",
     // A gated known limit by the owner's decision (option A): each copy reads the global after one more
     // call that stores it, so each has its own snapshot, k entries of the literal, each read at each of the k
     // fields (S6-CARRIERS §4.7's second unmerged shape, copies separated by calls while the source is owned away; a rule
@@ -118,12 +118,12 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
  * each class and boundary once, not every combination (the owner's test-cost rule). Adds of several
  * sources strictly in turn keep the chain's one step per add per path, which the PR measures. The value side reads each class once per field (S6c: a run of adds of one
  * class answers as its third add, `ExactPath`; a choice's options and a literal's computed values by their classes,
- * `Contract.classOf`), so every counter grows with the program (§3.3's gate; the known-product gates of S6 are gone).
+ * `Contract.classOf`), so every counter grows with the program (the gate; the known-product gates of S6 are gone).
  */
 export const ADMISSION_SAME_SOURCES: readonly WorkFamily[] = [
   {
     name: "A5-same-source-adds",
-    measures: "§4.5, A5: k `xs.add(root)` of one k-field record, every field of `xs[0]` read",
+    measures: "A5: k `xs.add(root)` of one k-field record, every field of `xs[0]` read",
     // 42,163 / 84,912 units at k = 64, 128 in both orders (2.0213; `main` 41,382 / 83,363)
     program: (k) =>
       main(
@@ -138,7 +138,7 @@ export const ADMISSION_SAME_SOURCES: readonly WorkFamily[] = [
   },
   {
     name: "A8-same-source-choices",
-    measures: "§4.5, A8: a choice of k options whose value is one k-field record, every field read",
+    measures: "A8: a choice of k options whose value is one k-field record, every field read",
     // 37,733 / 75,524 units at k = 64, 128 in both orders (2.0089; `main` 58,319 / 157,678, 2.71, the value side's
     // choice items one per option at each field read)
     program: (k) =>
@@ -211,7 +211,7 @@ export const ADMISSION_SAME_SOURCES: readonly WorkFamily[] = [
   {
     name: "A5-same-source-adds-unknown",
     measures:
-      "§4.5, A5: k `xs.add(root)` of one k-field record of host data, every field of `xs[0]` read",
+      "A5: k `xs.add(root)` of one k-field record of host data, every field of `xs[0]` read",
     // 96,856 / 195,175 units at k = 64, 128 in both orders (2.0233; `main` 341,464 / 1,208,423, 3.55, the value side's
     // exact add chain walked per field)
     program: (k) =>
@@ -266,7 +266,7 @@ export const ADMISSION_SAME_SOURCES: readonly WorkFamily[] = [
   {
     name: "A8-same-source-choices-unknown",
     measures:
-      "§4.5, A8: a choice of k options whose value is one k-field record of host data, every field read",
+      "A8: a choice of k options whose value is one k-field record of host data, every field read",
     // 82,323 / 165,189 units at k = 64, 128 in both orders (2.0148; `main` 195,133 / 620,207, 3.19)
     program: (k) =>
       main(
@@ -583,14 +583,14 @@ export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
  * added to one list, every field read. Each literal holding an ingress is its own source, so the key's
  * contract met k entries at each of the k reads (S4's product); S6c reads the entries of one shape once per field where
  * no unknown answers there (an unknown's ingress stores are each entry's own, C9), so every counter grows with the
- * program (§3.3's gate): 90,737 / 182,712 and 92,017 / 185,016 units at k = 64, 128 (2.0181, 2.0142; `main` 3.17, 3.16).
+ * program (the gate): 90,737 / 182,712 and 92,017 / 185,016 units at k = 64, 128 (2.0181, 2.0142; `main` 3.17, 3.16).
  */
 export const ADMISSION_INGRESS_PRESETS: readonly WorkFamily[] = [
   ["A8-added-load-presets", 'load("k", default: seed)'],
   ["A8-added-parse-presets", 'fromJson("{}", default: seed)'],
 ].map(([name, ingress]) => ({
   name: name!,
-  measures: `§8, A8: k literals of two \`${ingress}\` added to one list, every field read (Codex r12, Astra r2 D-W1)`,
+  measures: `A8: k literals of two \`${ingress}\` added to one list, every field read (Codex r12, Astra r2 D-W1)`,
   program: (k: number) =>
     main(
       lines(
@@ -616,7 +616,7 @@ export const ADMISSION_INGRESS_PRESETS: readonly WorkFamily[] = [
 export const READ_CHAIN_PRODUCTS: readonly KnownProduct[] = [
   {
     name: "F12-first-chain",
-    measures: "F12, §8: a list nested k deep read through k `.first` into a written destination",
+    measures: "F12: a list nested k deep read through k `.first` into a written destination",
     // 125,852 / 493,911 units at k = 64, 128 (4.0137; reversed 494,215, 4.0161): S8 part 3 makes each key prefix of
     // the literal's paths once (admission's `groups`) and walks no held literal's identity again (`#collectMarks`),
     // where S8 part 2 charged 204,495 / 982,598 (4.9150); `main` before S6c stops at the allowance from k = 20
@@ -633,7 +633,7 @@ export const READ_CHAIN_PRODUCTS: readonly KnownProduct[] = [
   {
     name: "F12-index-chain",
     measures:
-      "F12, §8: a list nested k deep around a 4-field record of host data, each field read through k index steps",
+      "F12: a list nested k deep around a 4-field record of host data, each field read through k index steps",
     // 252,377 / 922,560 units at k = 64, 128 (3.8340; reversed 3.8325; S8 part 2 346,019 / 1,469,854, 4.4550; `main`
     // 707,530 / 4,318,378, 6.4008)
     measured: 3.84,
@@ -651,7 +651,7 @@ export const READ_CHAIN_PRODUCTS: readonly KnownProduct[] = [
   {
     name: "F12-member-chain",
     measures:
-      "F12, §8: a record nested k deep read through its k properties into a written destination",
+      "F12: a record nested k deep read through its k properties into a written destination",
     // 75,901 / 293,585 units at k = 64, 128 in both orders (3.9216; `main` 261,675 / 1,496,830, 5.80)
     measured: 3.93,
     program: (k) =>
@@ -728,7 +728,7 @@ function cycleOfSourcesAdds(n: number, k: number): readonly SourceFile[] {
 export const MIXED_ADD_PRODUCTS: readonly KnownProduct[] = [
   {
     name: "A5-two-sources-alternating-adds",
-    measures: "§3.3: k adds alternating between two records of host data, each field read",
+    measures: "k adds alternating between two records of host data, each field read",
     // 405,404 / 1,336,783 units at k = 64, 128 in both orders (3.3102)
     measured: 3.36,
     program: (k) =>
@@ -746,7 +746,7 @@ export const MIXED_ADD_PRODUCTS: readonly KnownProduct[] = [
   },
   {
     name: "A5-three-sources-adds",
-    measures: "§3.3: k adds of three records of host data in the turn a, b, c, b, each field read",
+    measures: "k adds of three records of host data in the turn a, b, c, b, each field read",
     // 470,597 / 1,483,590 units at k = 64, 128 in both orders (3.1642)
     measured: 3.22,
     program: (k) =>
@@ -765,14 +765,14 @@ export const MIXED_ADD_PRODUCTS: readonly KnownProduct[] = [
   },
   {
     name: "A5-cycle-of-8-sources-adds",
-    measures: "§3.3: k adds of 8 records of host data in turn, each field read",
+    measures: "k adds of 8 records of host data in turn, each field read",
     // 740,812 / 2,008,769 units at k = 64, 128 in both orders (2.7212)
     measured: 2.78,
     program: (k) => cycleOfSourcesAdds(8, k),
   },
   {
     name: "A5-cycle-of-9-sources-adds",
-    measures: "§3.3: k adds of 9 records of host data in turn, each field read",
+    measures: "k adds of 9 records of host data in turn, each field read",
     // 798,340 / 2,124,045 units at k = 64, 128 (2.6700; reversed 2.6699)
     measured: 2.73,
     program: (k) => cycleOfSourcesAdds(9, k),

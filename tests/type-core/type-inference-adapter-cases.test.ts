@@ -15,7 +15,7 @@ import {
 import { assertCase, type AdapterExpectation } from "../helpers/type-core/adapter-parity.js";
 
 /**
- * The case tables of the branched legacy routines (O4 stage 2b, work note §6.6): each table is generated from its
+ * The case tables of the branched legacy routines (O4 stage 2b, work note): each table is generated from its
  * templates and the legacy oracle, compared with the table checked in (so that neither the templates nor the oracle
  * drift unseen), and every row is asserted against the relation the routing gives the operation. Set
  * `ADAPTER_CASES_WRITE=1` to write the tables anew after a deliberate change of the templates or the legacy.

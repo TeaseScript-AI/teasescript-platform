@@ -49,7 +49,7 @@ const NO_DETAIL: ContextDetail = {
   receiver: null,
 };
 
-// The core's structured result (§3.4, §4, F28, §10.5): which word and which writer explain a warning, which kinds
+// The core's structured result (F28): which word and which writer explain a warning, which kinds
 // owe their own diagnostics, how targets are named, and the record the tests compare with the expectation set.
 
 const writer = (kind: string, start: number, file = 0): Writer => ({
@@ -110,7 +110,7 @@ test("an unknown whose word comes first explains an obligation, and its writer i
   });
 });
 
-test("each kind offends once, the rows of one unknown operand as one kind and every unknown as one (§4)", () => {
+test("each kind offends once, the rows of one unknown operand as one kind and every unknown as one", () => {
   const scope = itemScope();
   const host = unknown(REASON.external, 20);
   // `x / 4` with `x` unknown: number, duration, calendar duration and angle, all standing for `x`
@@ -130,7 +130,7 @@ test("each kind offends once, the rows of one unknown operand as one kind and ev
   assert.equal(kinds[2]?.item, opaque);
 });
 
-test("a target names a selection or index `element`, a dict's value `entry` (§10.5)", () => {
+test("a target names a selection or index `element`, a dict's value `entry`", () => {
   assert.equal(elementStep(["list", "set", "empty"]), "element");
   assert.equal(elementStep(["dict", "empty"]), "entry");
   assert.equal(elementStep(["dict", "null"]), "element");
@@ -369,7 +369,7 @@ test("a result's record has the expectation set's shape, survives JSON, and comp
 });
 
 test("two warnings owing alike list their obligation twice, and a check alike to one of them not again", () => {
-  // `x + "a"` with `x` a possible text and an unknown: one operand obligation per offending kind, alike (§4)
+  // `x + "a"` with `x` a possible text and an unknown: one operand obligation per offending kind, alike
   const owed: Omit<Obligation, "boundary"> = {
     kind: "operand",
     target: "x",

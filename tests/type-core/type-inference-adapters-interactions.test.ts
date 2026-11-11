@@ -16,7 +16,7 @@ import {
 } from "../helpers/type-core/adapter-parity.js";
 
 /**
- * The interactions' relations on inputs the case tables cannot write (work note §6.3): an operand that may also
+ * The interactions' relations on inputs the case tables cannot write (work note): an operand that may also
  * be one the compiler cannot know beside known alternatives, and a part of a written field that the result rule does
  * not read, left bottom. The tables (`tests/fixtures/type-inference/adapter-cases/{choice,form}.jsonl`) pin the
  * written forms.

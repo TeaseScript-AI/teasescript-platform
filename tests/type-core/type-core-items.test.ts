@@ -151,7 +151,7 @@ test("the item algebra keeps its laws over random items from a fixed seed", () =
     }
 
     // weakening: every item a possibility, nothing else lost; the word added where none comes first, except for an
-    // unknown, whose own word, its reason's, comes first (§3.4)
+    // unknown, whose own word, its reason's, comes first
     {
       const weakened = weaken(a, "member");
       law(
@@ -350,7 +350,7 @@ test("an operation's result follows the runtime's rows (F16)", () => {
     "calendarDuration pos",
     "angle pos",
   ]);
-  // one unknown, one kind (§4): the results stand for that operand, explained by its writer and reason
+  // one unknown, one kind: the results stand for that operand, explained by its writer and reason
   assert.ok(
     quotient.every((item) => item.fan === "assignment@0:20" && item.writer === host.writer),
   );
@@ -371,7 +371,7 @@ test("an operation's result follows the runtime's rows (F16)", () => {
   assert.deepEqual(kinds(operationItems("+", [[deferred], [integer]], scope, SITE)), [
     "unknown pos",
   ]);
-  // the guard mark travels through arithmetic, and a marked result is never definite (§3.2)
+  // the guard mark travels through arithmetic, and a marked result is never definite
   const guarded = makeItem("integer", writer("literal", 30), { cert: "pos", guarded: true });
   const marked = operationItems("+", [[guarded], [integer]], scope, SITE);
   assert.deepEqual(kinds(marked), ["integer pos"]);

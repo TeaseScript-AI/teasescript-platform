@@ -9,7 +9,7 @@ import { coreRequest } from "../helpers/type-core-analysis.js";
 import { readFixture } from "../helpers/type-core/type-core-fixture.js";
 
 /**
- * The discharge map of the port plan's S3 note (§4, "Completeness"): every check the core emits has a row, which names
+ * The discharge map of the port plan's S3 note ("Completeness"): every check the core emits has a row, which names
  * the runtime check that discharges it: the runtime's own, or plan content only the core emits (S7, the map's "new"
  * rows, run through the candidate route in `type-core-discharge-runtime.test.ts`). A check is placed in
  * its row by its kind and by where it stands in the source: a store's value, an argument or a return (C1, C7), an

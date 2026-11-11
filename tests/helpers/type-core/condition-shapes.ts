@@ -5,7 +5,7 @@ import { analyzeTypes } from "../../../src/type-inference/index.js";
 import { request } from "./type-inference-graph.js";
 
 /*
- * The condition-shape table (O4 stage 2c, work note §4): every line of the legacy branch decisions
+ * The condition-shape table (O4 stage 2c, work note): every line of the legacy branch decisions
  * (`#branchKindTask`, `#narrowTest`) gives rows from templates over the written forms that reach it, and each row pins
  * what the legacy observes of the source: the facts of the reads inside and after the branches, the condition's own
  * fact, the ordered diagnostics, and the `test` constraints the collector emits. The table is generated at the base

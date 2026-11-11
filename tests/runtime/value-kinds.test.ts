@@ -29,9 +29,9 @@ import {
 type Fact = "shown" | "notation" | "json" | "choice" | "ordered" | "dictKey" | "saved" | "case";
 
 /**
- * Each kind's description, and what V30 lets a script do with a value of it: show it with `${...}` and `join()` (§8),
- * where `say` shows a script reference and a regex in their notation, write it with `toJson` (§13), give it to a button as its value (§26), order it with `<` (§5, §35), use it as a dict key
- * (§40), save it (§25), and write it as a `case` value (§32).
+ * Each kind's description, and what V30 lets a script do with a value of it: show it with `${...}` and `join()` (V30 §8, §16),
+ * where `say` shows a script reference and a regex in their notation, write it with `toJson` (V30 §13), give it to a button as its value (V30 §19), order it with `<` (V30 §5, §35), use it as a dict key
+ * (V30 §40), save it (V30 §25), and write it as a `case` value (V30 §32).
  */
 const EXPECTED: Readonly<Record<ValueKind, readonly [description: string, ...facts: Fact[]]>> = {
   integer: ["a whole number (integer)", "shown", "json", "choice", "ordered", "saved", "case"],

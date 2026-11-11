@@ -549,7 +549,7 @@ test("a stored object's property its default lacks owes its member warning and c
 });
 
 /**
- * #1469 (§4: one warning and check per offending kind, every unknown one kind): where the receiver may hold a value the
+ * #1469 (one warning and check per offending kind, every unknown one kind): where the receiver may hold a value the
  * script cannot know, itself absent included, and an object it may hold may lack the property, the access owes one check,
  * explained by the property's own answer. The receiver's own access keeps its warning, and a run stops there where the
  * receiver is absent, at the access where the property is. A read names stored or host data as its cause (`outside`),

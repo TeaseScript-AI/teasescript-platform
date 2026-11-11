@@ -1364,7 +1364,7 @@ export function combinedAnalyses(
   };
 }
 
-/** A dictionary's derived lists (`dictList`): a read through one is named by its own text (`keyLabel`, §10.5). */
+/** A dictionary's derived lists (`dictList`): a read through one is named by its own text (`keyLabel`). */
 const DERIVED = new Set(["values", "keys"]);
 
 /**

@@ -28,7 +28,7 @@ import { OPERANDS } from "../helpers/type-core/adapter-operands.js";
 
 /**
  * Parity of the conversions and of the file, hash and lock calls, `escapeMarkup` and `script` with the legacy checker
- * (work note §5.2, §6.3): each call over an operand of every kind of the registry and the compound shapes, and each
+ * (work note): each call over an operand of every kind of the registry and the compound shapes, and each
  * `default:` policy with a known fitting, a known unfitting, a dynamic, a null and an absent default. The legacy's
  * facts and errors are declared per row; the operand's kind is checking-only, so the result is the call's.
  */

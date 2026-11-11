@@ -118,7 +118,7 @@ const CHARGING = [
     "CoreProgram.blockReachable",
     "CoreProgram.inBlockCode",
   ]),
-  // (a key's read at a node, §3: the value side's charged work, as `valueItems`)
+  // (a key's read at a node: the value side's charged work, as `valueItems`)
   ...core("type-inference/core/values.ts", ["Values.keyItems", "Values.valueItems"]),
 ];
 

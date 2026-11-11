@@ -24,14 +24,14 @@ import {
 } from "../helpers/type-core/adapter-parity.js";
 
 /**
- * The input-shape tables of the three relations the PR review rounds found siblings in (work note §6.3, the
+ * The input-shape tables of the three relations the PR review rounds found siblings in (work note, the
  * orchestrator's decision of 2026-10-18): the set operations with the dict gate, the weighted source, and the
  * `min`/`max` dispatch. Each relation is run over the product of its operands' shapes (a closed kind, a nullable, null
  * alone, a union of collections of one kind, an empty collection, a value the compiler cannot know, one that may
  * also be such a value, and bottom) and its call shapes (as written, an extra positional argument, an extra named
  * argument, a named-only argument). A shape the source can write is pinned by the oracle: a closed fact is realized,
  * an unknown one answered by an answer that realizes to unknown. A bottom operand follows the carrier's read-order
- * rule (work note §3, the orchestrator's decision of 2026-10-18): the relation waits for it where the legacy's
+ * rule (work note, the orchestrator's decision of 2026-10-18): the relation waits for it where the legacy's
  * branch reads the operand's type before deciding, and waiting longer than strictly necessary is the safe
  * direction. The table checks the unsafe direction: where the same inputs with the operand of several kinds give
  * different answers, the relation must wait; where they agree, the common answer or a wait is accepted.

@@ -71,7 +71,7 @@ const OUTSIDE = (name: string): string =>
 const COUNT = "A repeat count must be a whole number (integer) of at least 0";
 const ROUND = "Round the number with the floor, round or ceil function first.";
 
-test("each context word's cause says why the value may be of another type, on the set's record for the word (D1, §3.4)", () => {
+test("each context word's cause says why the value may be of another type, on the set's record for the word (D1)", () => {
   const word = (name: string, expected: readonly string[]): void => {
     const record = records.find((found) => found.name === name);
     assert.ok(record !== undefined, name);
