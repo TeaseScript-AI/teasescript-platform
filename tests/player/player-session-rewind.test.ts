@@ -41,9 +41,8 @@ import { sourceStart } from "../helpers/prepared-plan.js";
 
 /** Ends the capture `reportsInto` began, at the check of what it captured, so that a later host error prints again. */
 function endCapture() {
-  // `reportsInto` replaced `console.error` by a mock of the test's context, which carries its `mock`.
-  const error: unknown = console.error;
-  const capture = typeof error === "function" && "mock" in error ? error.mock : undefined;
+  // EVIDENCE: fixture: `reportsInto` replaced `console.error` by a mock of the test's context, a proxy whose `mock` a read finds but `in` does not.
+  const capture: unknown = (console.error as { readonly mock?: unknown }).mock;
   assert.ok(
     typeof capture === "object" &&
       capture !== null &&
