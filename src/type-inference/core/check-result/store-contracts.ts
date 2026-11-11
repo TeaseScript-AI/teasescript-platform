@@ -279,132 +279,123 @@ export class Contracts {
     // a copy of a written type is F18's receiving context (A4, (1a)), at every level the call's value
     // reaches, but the core answers the call by its default there while its later facts follow that answer: the
     // lowering cannot widen it alone
-    // PROBE v2: one read per landing level, as the guard reads them; the guard's reason first, then coherence
+    // PROBE v6: one read per landing level, as the guard reads them; the guard's reason first
     if (expected === null) return expected;
     const kindsAt = levelKinds(expected);
-    let incoherent: string | null = null;
-    const answered: [string[], PlaceAnswer][] = [];
-    for (const level of levelsOf(expected)) {
-      if (landing === null) break;
-      const answer = this.answers.place(landing.id, [...landing.path, ...level]);
-      answered.push([level, answer]);
-      const { admitted, contract } = answer;
+    let written: string | null = null;
+    const levels = landing === null ? [] : levelsOf(expected);
+    const answered = new Map<string, PlaceAnswer>();
+    for (const level of levels) {
+      const answer = this.answers.place(landing!.id, [...landing!.path, ...level]);
+      answered.set(level.join("\u0000"), answer);
+      const { admitted } = answer;
       if (admitted.by === "decided" && admitted.inherited)
         throw new OutsideContract(call, "a typed parse or load into a copy of a written type");
       const kinds = kindsAt.get(level.join("\u0000"))?.kinds ?? null;
-      const held = new Set<string>(contract.kinds.map((item) => item.tag));
-      if (kinds !== null && held.has("number")) held.delete("integer");
-      const verdict =
-        kinds === null
-          ? "same"
-          : admits(admitted, kinds) !== "same"
-            ? admits(admitted, kinds)
-            : [...held].every(
-                  (kind) => kinds.has(kind) || (kind === "integer" && kinds.has("number")),
-                )
-              ? "same"
-              : "holds-more";
-      if (incoherent === null && verdict !== "same") incoherent = `PROBE receiving ${verdict}`;
+      if (
+        written === null &&
+        kinds !== null &&
+        admitted.by === "written" &&
+        admits(admitted, kinds) !== "same"
+      )
+        written = "PROBE receiving written-differs";
     }
     if (!this.coherence) return expected;
-    if (incoherent !== null) throw new OutsideContract(call, incoherent);
-    if (fallback !== null) this.#defaultCoherent(call, fallback, kindsAt);
-    if (landing !== null) this.#othersCoherent(call, landing, answered, kindsAt);
-    return expected;
-  }
-
-  /**
-   * PROBE (#2307 HEAD 0) v4: the destination's other stores at each landing level (its definitions there): each place
-   * their stored value reads at that level is a written binding whose type there is the reader's; any other read
-   * declines (an unwritten source's domain is not proved here).
-   */
-  #othersCoherent(
-    call: CallExpression | LoadExpression,
-    landing: Landing,
-    answered: readonly [string[], PlaceAnswer][],
-    kindsAt: ReadonlyMap<string, { path: string[]; kinds: Set<string> | null }>,
-  ): void {
-    // (every definition of every landing level, each once: a store at a shallower level covers the deeper ones)
-    const definitions = new Map<number, Definition>();
-    for (const [, answer] of answered)
-      for (const definition of answer.definitions.list) definitions.set(definition.uid, definition);
-    // (and every definition of a level above the landing: a store into an enclosing object or list)
-    for (let depth = 0; depth < landing.path.length; depth += 1)
-      for (const definition of this.answers.place(landing.id, landing.path.slice(0, depth))
-        .definitions.list)
-        definitions.set(definition.uid, definition);
-    for (const [level] of answered) {
-      const kinds = kindsAt.get(level.join("\u0000"))?.kinds ?? null;
-      if (kinds === null) continue;
-      const at = [...landing.path, ...level];
-      for (const definition of definitions.values()) {
-        if (definition.path.length > at.length || definition.path.some((step, i) => at[i] !== step))
-          continue;
-        const value = this.index.findExpressionAt(definition.site);
-        if (value === undefined) throw new OutsideContract(call, "PROBE other unsure-site");
-        let own = false;
-        for (
-          let node: Expression | undefined = call;
-          node !== undefined;
-          node = this.index.parentOf(node)
-        )
-          if (node === value) own = true;
-        if (own) continue;
-        for (const read of atLevel(value, at.slice(definition.path.length))) {
-          if (read.kind === "other") continue;
-          if (read.kind === "unsure") throw new OutsideContract(call, "PROBE other unsure");
-          const place = this.answers.at(nodeOf(this.answers, this.index, read.read))?.place ?? null;
-          const annotation =
-            place === null ? null : (this.lets.get(place.id)?.typeAnnotation ?? null);
-          if (place === null || annotation === null)
-            throw new OutsideContract(call, "PROBE other unannotated");
-          const plan = typePlan(typeFromAnnotation(annotation));
-          const written =
-            plan === null
-              ? undefined
-              : levelKinds(plan).get(joinSteps(place.path, read.rest).join("\u0000"));
-          if (written !== undefined && written.kinds !== null && !sameKinds(written.kinds, kinds))
-            throw new OutsideContract(call, "PROBE other written-differs");
+    if (written !== null) throw new OutsideContract(call, written);
+    // the destination's other stores at every landing level and above
+    if (landing !== null) {
+      const verdict = this.#sourcesAgree(landing.id, landing.path, kindsAt, call, answered);
+      if (verdict !== null) throw new OutsideContract(call, `PROBE other ${verdict}`);
+    }
+    // the default's reads at every level
+    if (fallback !== null)
+      for (const { path, kinds } of kindsAt.values()) {
+        if (kinds === null) continue;
+        for (const at of atLevel(fallback, path)) {
+          if (at.kind === "other") continue;
+          if (at.kind === "unsure") throw new OutsideContract(call, "PROBE default unsure");
+          const verdict = this.#readAgrees(at.read, at.rest, kinds, true);
+          if (verdict !== null) throw new OutsideContract(call, `PROBE default ${verdict}`);
         }
       }
-    }
+    return expected;
   }
 
   /** PROBE (#2307 HEAD 0): whether the coherence check runs (`checkedResult` turns it off). */
   public coherence = true;
 
   /**
-   * PROBE (#2307 HEAD 0) v2: the default side: at every level of the reader's plan, each place the default reads there
-   * admits the reader's kinds: a written binding by its annotation (no question), any other by admission.
+   * PROBE v6: whether a read at `rest` below it is a written binding whose type there is `kinds`; an unwritten one's own
+   * stores are asked the same where `follow` (a default's binding), else it is not proved. `null` where it agrees.
    */
-  #defaultCoherent(
-    call: CallExpression | LoadExpression,
-    fallback: Expression,
+  #readAgrees(
+    read: Expression,
+    rest: readonly string[],
+    kinds: ReadonlySet<string>,
+    follow: boolean,
+  ): string | null {
+    const place = this.answers.at(nodeOf(this.answers, this.index, read))?.place ?? null;
+    if (place === null) return "no-place";
+    const steps = joinSteps(place.path, rest);
+    const annotation = this.lets.get(place.id)?.typeAnnotation ?? null;
+    if (annotation === null) {
+      if (!follow) return "unannotated";
+      const one = new Map([[steps.join("\u0000"), { path: [...steps], kinds: new Set(kinds) }]]);
+      return this.#sourcesAgree(place.id, [], one, null);
+    }
+    const plan = typePlan(typeFromAnnotation(annotation));
+    const level = plan === null ? undefined : levelKinds(plan).get(steps.join("\u0000"));
+    return level === undefined || level.kinds === null || sameKinds(level.kinds, kinds)
+      ? null
+      : "written-differs";
+  }
+
+  /**
+   * PROBE v6: whether every store into a place (its definitions at each given level below `base` and at every level
+   * above), but `own`'s, stores at that level only literal data, operations and reads of written bindings of the level's
+   * kinds. `null` where they agree.
+   */
+  #sourcesAgree(
+    id: PlaceId,
+    base: readonly string[],
     kindsAt: ReadonlyMap<string, { path: string[]; kinds: Set<string> | null }>,
-  ): void {
+    own: Expression | null,
+    answered: ReadonlyMap<string, PlaceAnswer> = new Map(),
+  ): string | null {
+    const definitions = new Map<number, Definition>();
+    for (const { path } of kindsAt.values())
+      for (const definition of (
+        answered.get(path.join("\u0000")) ?? this.answers.place(id, joinSteps(base, path))
+      ).definitions.list)
+        definitions.set(definition.uid, definition);
+    for (let depth = 0; depth < base.length; depth += 1)
+      for (const definition of this.answers.place(id, base.slice(0, depth)).definitions.list)
+        definitions.set(definition.uid, definition);
     for (const { path, kinds } of kindsAt.values()) {
       if (kinds === null) continue;
-      for (const at of atLevel(fallback, path)) {
-        if (at.kind === "other") continue;
-        if (at.kind === "unsure") throw new OutsideContract(call, "PROBE default unsure");
-        const place = this.answers.at(nodeOf(this.answers, this.index, at.read))?.place ?? null;
-        if (place === null) throw new OutsideContract(call, "PROBE default no-place");
-        const steps = joinSteps(place.path, at.rest);
-        const annotation = this.lets.get(place.id)?.typeAnnotation ?? null;
-        let verdict: string;
-        if (annotation !== null) {
-          const plan = typePlan(typeFromAnnotation(annotation));
-          const written = plan === null ? undefined : levelKinds(plan).get(steps.join("\u0000"));
-          verdict =
-            written === undefined || written.kinds === null
-              ? "same"
-              : sameKinds(written.kinds, kinds)
-                ? "same"
-                : "written-differs";
-        } else verdict = admits(this.answers.place(place.id, steps).admitted, kinds);
-        if (verdict !== "same") throw new OutsideContract(call, `PROBE default ${verdict}`);
+      const at = joinSteps(base, path);
+      for (const definition of definitions.values()) {
+        if (definition.path.length > at.length || definition.path.some((step, i) => at[i] !== step))
+          continue;
+        const value = this.index.findExpressionAt(definition.site);
+        if (value === undefined) return "unsure-site";
+        let mine = false;
+        for (
+          let node: Expression | undefined = own ?? undefined;
+          node !== undefined;
+          node = this.index.parentOf(node)
+        )
+          if (node === value) mine = true;
+        if (mine) continue;
+        for (const read of atLevel(value, at.slice(definition.path.length))) {
+          if (read.kind === "other") continue;
+          if (read.kind === "unsure") return "unsure";
+          const verdict = this.#readAgrees(read.read, read.rest, kinds, false);
+          if (verdict !== null) return verdict;
+        }
       }
     }
+    return null;
   }
 
   /**
