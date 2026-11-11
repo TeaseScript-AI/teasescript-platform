@@ -14,8 +14,10 @@ import { parseArgs } from "node:util";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
 
 const STATIC = /(?:\bfrom|\bimport)\s*["']\.\/([^"']+)["']/gu;
-const DYNAMIC = /(?<![\w$.])import\(\s*(["'`])\.\/([^"'`]+)\1\s*\)/gu;
-const ANY_DYNAMIC = /(?<![\w$.])import\(/gu;
+// A path with a substitution (`${…}`) is no path the inventory can read, so it is left to ANY_DYNAMIC's count.
+const DYNAMIC = /(?<![\w$.])import\(\s*(["'`])\.\/([^"'`$]+)\1\s*\)/gu;
+// Every `import(`, also with spaces or comments before its parenthesis.
+const ANY_DYNAMIC = /(?<![\w$.])import(?:\s|\/\*[\s\S]*?\*\/)*\(/gu;
 
 /** The inventory of the build in `app`, named `build`; throws for a file it cannot class. */
 export function inventoryOf(app, build) {
