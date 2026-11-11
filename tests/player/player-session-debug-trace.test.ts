@@ -148,12 +148,12 @@ function createHost(context: TestContext, makeBridge?: () => PlayerBridge): Trac
   }
   context.mock.timers.enable({ apis: ["setTimeout"] });
   const scope = effectScope();
-  // A bridge made after the mock timers, so that its replies wait for them.
-  const bridge = makeBridge?.();
-  if (bridge !== undefined) context.after(() => bridge.client.terminate());
-  const host = scope.run(() =>
-    usePlayerSession(bridge === undefined ? {} : { bridge: Promise.resolve(bridge) }),
-  );
+  // A bridge made after the mock timers, so that its replies wait for them; by default, the bundle's in-process backend.
+  const bridge =
+    makeBridge?.() ??
+    createInProcessBackend({ commit: null, dirty: null, mode: null, appVersion: null });
+  context.after(() => bridge.client.terminate());
+  const host = scope.run(() => usePlayerSession({ bridge: Promise.resolve(bridge) }));
   assert.ok(host);
   context.after(() => scope.stop());
   return host;

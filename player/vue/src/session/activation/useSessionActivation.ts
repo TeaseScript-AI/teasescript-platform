@@ -484,7 +484,7 @@ export function useSessionActivation({
    */
   function startFrom(pending: Activation, sample: ClickSample): Promise<void> | void {
     const token = activationToken;
-    // The engine's host is ready at once in-process; an injected one may answer `ready` later, which this waits for.
+    // The engine's host may answer `ready` after the click, which this waits for.
     if (bridgeNow() === null)
       return currentConnection().then(() => {
         if (!isDisposed() && token === activationToken) return startFrom(pending, sample);

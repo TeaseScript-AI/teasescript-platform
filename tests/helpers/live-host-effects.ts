@@ -144,8 +144,6 @@ const PLAYER_SESSION_OPTIONS = {
   keptSessions: "recorded",
   debugRooms: "recorded",
   room: "absent",
-  debugHistorySpill: "pure",
-  debugHistoryMemoryBudget: "absent",
 } as const;
 
 const checkout = fileURLToPath(new URL("../../..", import.meta.url));
@@ -296,7 +294,6 @@ export interface LiveHostOptions<B> {
   readonly temporalContext: () => typeof DEFAULT_TEMPORAL_CONTEXT;
   readonly keptSessions: KeptSessionStore;
   readonly debugRooms: KeptRoomStore;
-  readonly debugHistorySpill: () => Promise<null>;
 }
 
 /** A fake medium element, as `MediaDeviceElement` describes the browser's: its state, and its calls counted. */
@@ -450,7 +447,6 @@ export class LiveHostEffects {
       temporalContext: () => DEFAULT_TEMPORAL_CONTEXT,
       keptSessions: this.keptSessions,
       debugRooms: this.debugRooms,
-      debugHistorySpill: async () => null,
     };
     assert.deepEqual(
       Object.keys(given).sort(),
