@@ -7612,8 +7612,8 @@ test("the sentence table and the derived record name every site that words or de
   const sitesOf = (file: string, text: string, words: Set<string>, fields: Set<string>): void => {
     const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
     // (the word makers a file imports from the messages, by their own names however it binds them: named, renamed,
-    // the module's namespace or its default; codes, paths and a parse of the source's text are no kind's words)
-    const NOT_WORDS = new Set(["codeOf", "pathPhrase", "parsedExpression"]);
+    // the module's namespace or its default; codes and paths are no kind's words)
+    const NOT_WORDS = new Set(["codeOf", "pathPhrase"]);
     const named = new Map<string, string>();
     const spaces = new Set<string>();
     for (const statement of source.statements)

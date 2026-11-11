@@ -26,8 +26,7 @@ import { keyPlace, type Definition } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import { REASON, type Item, type ItemTag, type Writer } from "../items.js";
 import { propertyStep, siteKey } from "../program.js";
-import { offendingKinds, type CopiedBinding, type DiagnosticRule } from "../result.js";
-import { parsedExpression } from "../messages/words.js";
+import { offendingKinds, type DeclaredBinding, type DiagnosticRule } from "../result.js";
 import { error } from "./diagnostics.js";
 import { kindsOf, quietKinds } from "./names.js";
 import { copiesOnly, deferred, storeReach } from "./reach.js";
@@ -145,55 +144,25 @@ function writtenGroups(
 }
 
 /**
- * The variable or parameter with its own written type that a copy's deciding store `d` copies (A4), as `copied`: the
- * store's value a read of it, or a list or set literal whose every element is one; else nothing. The place's sentence
- * names it (#2289). Map reads and a parse of the literal's text alone, nothing charged: no decision depends on it.
+ * The variable or parameter with its own written type a read at a site reads (`DiagnosticRule`'s `binding`): by the
+ * read's place (`placeBySite`) and the binding it reads (`occurrenceOf`), map reads alone; `null` for any other site. A
+ * store's sentence asks it only where it names a copy's source (#2289), so nothing runs for a rule no sentence words.
  */
-function copiedBinding(
-  walk: Consumers,
-  d: Definition,
-): { readonly copied: CopiedBinding } | undefined {
+function declaredRead(walk: Consumers): (read: SourceSite) => DeclaredBinding | null {
   const { program } = walk.pass;
-  const bound = (value: PlaceId | undefined): PlaceId | undefined =>
-    value === undefined ? undefined : program.occurrenceOf.get(value);
-  let form: CopiedBinding["form"] = "value";
-  let binding = bound(d.value);
-  if (binding === undefined) {
-    const parsed = parsedExpression(program.textAt(d.site));
-    const literal = parsed?.expression;
-    if (
-      literal === undefined ||
-      (literal.kind !== "listLiteral" && literal.kind !== "setLiteral") ||
-      literal.elements.length === 0
-    )
-      return undefined;
-    // (each element's read by its site in the file: the literal's start, the element's offset in the parsed text)
-    const at = (offset: number): number => d.site.start + offset - parsed!.at;
-    const reads = new Set(
-      literal.elements.map((element) =>
-        bound(
-          program.placeBySite.get(
-            siteKey({
-              file: d.site.file,
-              start: at(element.span.start.offset),
-              end: at(element.span.end.offset),
-            }),
-          ),
-        ),
-      ),
-    );
-    [binding] = reads;
-    if (reads.size !== 1 || binding === undefined) return undefined;
-    form = "elements";
-  }
-  const { kind, site } = program.place(binding);
-  const written = writtenOf(kind);
-  const declared =
-    kind.kind === "parameter" ||
-    (kind.kind === "binding" && (kind.declared === "let" || kind.declared === "global"));
-  return written === null || site === null || !declared
-    ? undefined
-    : { copied: { form, name: kind.name, site, type: typeTags(written) } };
+  return (read) => {
+    const occurrence = program.placeBySite.get(siteKey(read));
+    const binding = occurrence === undefined ? undefined : program.occurrenceOf.get(occurrence);
+    if (binding === undefined) return null;
+    const { kind, site } = program.place(binding);
+    const written = writtenOf(kind);
+    const declared =
+      kind.kind === "parameter" ||
+      (kind.kind === "binding" && (kind.declared === "let" || kind.declared === "global"));
+    return written === null || site === null || !declared
+      ? null
+      : { name: kind.name, site, type: typeTags(written) };
+  };
 }
 
 /**
@@ -216,6 +185,7 @@ export function admittedStores(
 ): void {
   const { program, definitions } = walk.pass;
   const admission = walk.admission;
+  const binding = declaredRead(walk);
   for (const group of completed !== null
     ? [completed]
     : walk.order<DecidedAt>(writtenOnly ? writtenGroups(walk) : admission.groups())) {
@@ -246,15 +216,6 @@ export function admittedStores(
       written || !admission.admitted(root, path()).includes("null")
         ? nullableTags
         : [...tags, "null"];
-    // (the copied binding a sentence names, found once per decision where a diagnostic asks for it)
-    let found: { readonly copied: CopiedBinding } | undefined | null = null;
-    const copied = (): { readonly copied: CopiedBinding } | undefined =>
-      found !== null
-        ? found
-        : (found =
-            written && !decision.own && decider !== null
-              ? copiedBinding(walk, decider)
-              : undefined);
     const rule = (brought: SourceSite | null = null): DiagnosticRule => ({
       rule: "store",
       into: placeText(walk, root, path()),
@@ -264,7 +225,7 @@ export function admittedStores(
       brought,
       root: storeRoot(walk, root),
       steps: storeSteps(walk, root, path(), written ? writtenOf(program.place(root).kind) : null),
-      ...copied(),
+      ...(written && !decision.own ? { binding } : {}),
     });
     // C9: a place published with its contract's kinds owes the check of external data another store
     // brought, at each candidate carrying it, against those kinds; data a store brings inline has its boundary there,
