@@ -322,7 +322,7 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
       "src/a.ts:1",
       "untracked.txt:1",
     ].sort();
-    // each TABLE fixture's revision has no entry here, so it is a revision finding too (`src/a.ts` cites a section)
+    // each citation fixture's revision has no entry here, so it is a revision finding too (`src/a.ts` cites a section)
     const revisions = [
       ...expected.filter((found) => found !== "src/a.ts:1"),
       "docs/rev.md:3",
