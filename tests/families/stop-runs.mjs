@@ -5,9 +5,10 @@
 // docs/DEVELOPMENT-WORKFLOW.md#review-convergence): positive escapes are the blockers, an unwitnessed cell is unresolved
 // evidence (#2080's design round). `open` and `later` are shown escapes, `closed` means the two plans are equal, and
 // every other difference is `unwitnessed`, never proof that no check is owed.
-// An item is a line of JSON: a plans record's `{set, name, key?, mode, demand}` (`mode` a `HELD_MODES` index; `set` as
-// `plans.mjs` reads it: corpus with CASES_JSON, fixture, held, or an area of the tree's tests/families; `key` the unit's
-// `sourceKey`, `units.mjs`) or a records row's `{files, globals, label, demand}` (`label` src-on, src-off, rev-on or
+// An item is a line of JSON: a plans record's `{set, name, key?, mode, demand}` (`mode` a `HELD_MODES` name; a number, a
+// record's from before #2342, is read as an index into this tree's `HELD_MODES`, which is right only where its order is
+// the one at the commit that wrote the record; `set` as `plans.mjs` reads it: corpus with CASES_JSON, fixture, held, or
+// an area of the tree's tests/families; `key` the unit's `sourceKey`, `units.mjs`) or a records row's `{files, globals, label, demand}` (`label` src-on, src-off, rev-on or
 // rev-off, a `MODES` mode). A set's item names the units of its name and, given one, its key: units that differ under
 // one name are never picked between (#2254), so such an item without a key is `ambiguous`. With `--shard i/N`, the
 // items whose index k has k mod N = i. Writes `rows.jsonl` (the item without its files, the `key` of the unit run, and
@@ -57,7 +58,15 @@ const items = readFileSync(itemsFile, "utf8")
   .filter((_, at) => at % shards === shard);
 const unitOf = unitResolver(root);
 const modeOf = (item) => {
-  if (item.label === undefined) return (make) => HELD_MODES[item.mode].run(make);
+  if (item.label === undefined) {
+    // (a name since #2342; a number, a record's from before it, as its index)
+    const held =
+      typeof item.mode === "string"
+        ? HELD_MODES.find((mode) => mode.name === item.mode)
+        : HELD_MODES[item.mode];
+    if (held === undefined) throw new Error(`no held mode ${JSON.stringify(item.mode)}`);
+    return (make) => held.run(make);
+  }
   const mode = MODES.find(
     (m) => `${m.reversed ? "rev" : "src"}-${m.unshared ? "off" : "on"}` === item.label,
   );

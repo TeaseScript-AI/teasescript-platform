@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -15,8 +15,9 @@ import { join } from "node:path";
 // place changes when the entry goes, keeps the entry too.
 //
 // The copy is `.oxlintrc.probe-<pid>-<random>.json`, a name oxlint never reads by itself, gitignored, and removed when
-// the check ends. The check installs no signal handler: interrupted, it stops by the signal; the next run removes what
-// an interrupted run left, each probe whose owner process is no longer alive.
+// the check ends: it returns, it throws, or a SIGINT, SIGTERM or SIGHUP stops it, which also stops the oxlint it runs,
+// and then the check's process by that signal. A SIGKILL leaves the probe; the next run removes each probe whose owner
+// process is no longer alive.
 //
 // "Off" is a severity oxlint's schema (`AllowWarnDeny`, `node_modules/oxlint/configuration_schema.json`) says turns a
 // rule off: "allow", "off" or 0, alone or first in an array. A severity the schema does not have, in the root `rules`
@@ -122,12 +123,14 @@ function sweepProbes(root) {
   }
 }
 
+const SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
+
 /**
  * The findings of the waiting lists in the configuration `configFile` (relative to `root`, its text `configText`):
  * each `{ fileName, line, column, message }`. `linted` is the set of files `npm run lint` lints, relative to `root`;
  * `executable` is oxlint's.
  */
-export function checkWaitingOverrides(root, configFile, configText, linted, executable) {
+export async function checkWaitingOverrides(root, configFile, configText, linted, executable) {
   const config = JSON.parse(configText);
   const positions = positionsOf(configText);
   const findings = [];
@@ -177,9 +180,10 @@ export function checkWaitingOverrides(root, configFile, configText, linted, exec
 
   sweepProbes(root);
   const probe = `.oxlintrc.probe-${process.pid}-${randomBytes(4).toString("hex")}.json`;
+  let running = null;
   const lint = (file, files) =>
-    diagnosticsOf(
-      spawnSync(
+    new Promise((resolve, reject) => {
+      running = spawn(
         process.execPath,
         [
           executable,
@@ -191,9 +195,29 @@ export function checkWaitingOverrides(root, configFile, configText, linted, exec
           "json",
           ...files,
         ],
-        { cwd: root, encoding: "utf8", maxBuffer: 256 * 1024 * 1024 },
-      ),
-    );
+        { cwd: root, stdio: ["ignore", "pipe", "pipe"] },
+      );
+      const output = { stdout: "", stderr: "" };
+      for (const stream of ["stdout", "stderr"])
+        running[stream].setEncoding("utf8").on("data", (chunk) => (output[stream] += chunk));
+      running.on("error", reject);
+      running.on("close", (status) => {
+        running = null;
+        try {
+          resolve(diagnosticsOf({ ...output, status }));
+        } catch (error) {
+          reject(error);
+        }
+      });
+    });
+  // the probe goes with the run it serves; the signal then ends this process as it would have without the handler
+  const stop = (signal) => {
+    rmSync(join(root, probe), { force: true });
+    running?.kill(signal);
+    for (const each of SIGNALS) process.off(each, stop);
+    process.kill(process.pid, signal);
+  };
+  for (const signal of SIGNALS) process.on(signal, stop);
   try {
     for (const { entry, index } of waiting) {
       const files = [];
@@ -209,11 +233,9 @@ export function checkWaitingOverrides(root, configFile, configText, linted, exec
         join(root, probe),
         JSON.stringify({ ...config, overrides: overrides.filter((_, at) => at !== index) }),
       );
-      const kept = new Set(lint(configFile, files).map(({ key }) => key));
+      const kept = new Set((await lint(configFile, files)).map(({ key }) => key));
       const needed = new Set(
-        lint(probe, files)
-          .filter(({ key }) => !kept.has(key))
-          .map(({ file }) => file),
+        (await lint(probe, files)).filter(({ key }) => !kept.has(key)).map(({ file }) => file),
       );
       const rules = Object.keys(entry.rules);
       for (const [position, file] of entry.files.entries())
@@ -224,6 +246,7 @@ export function checkWaitingOverrides(root, configFile, configText, linted, exec
           );
     }
   } finally {
+    for (const signal of SIGNALS) process.off(signal, stop);
     rmSync(join(root, probe), { force: true });
   }
   return findings.sort((one, other) => one.line - other.line || one.column - other.column);

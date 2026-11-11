@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
-import { fstatSync, globSync } from "node:fs";
-import { join } from "node:path";
+import { fstatSync, globSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, relative } from "node:path";
 import { testPathArguments } from "./test-arguments.mjs";
 import { shardFiles, shardOption, suiteTestFiles } from "./test-shards.mjs";
 
@@ -87,14 +88,33 @@ if (unmatched.length > 0) {
 // Node's command line sorts the files it runs, so the full suite goes through a runner that keeps the costly files
 // first: started late, one of them would run alone at the end.
 // Beside the spec reporter, `test-in-flight.mjs` names on standard error a test still running long after it began.
+// Compact output of named files ends with one line per file and its tests' counts, the passing tests it leaves out among
+// them, so a file that ran nothing shows `0 passed` (the full suite fails such a file instead); a file that failed
+// outside its tests (it threw while loading, or its process ended non-zero) says so beside them. There
+// `test-file-counts.mjs` counts, and names a test in flight in that reporter's place.
+const countsFolder =
+  fullSuite || fullOutput ? null : mkdtempSync(join(tmpdir(), "test-file-counts-"));
+const countsFile = countsFolder === null ? null : join(countsFolder, "counts.json");
+// The folder is removed when the run ends or the filter exits. The filter installs no signal handler, so a signal that
+// ends it leaves the folder in the system's temporary directory, where no run reads it: one counts file, empty until
+// the run ends, then one JSON entry per named file: its absolute path and five counts.
+const removeCounts = () => countsFolder && rmSync(countsFolder, { recursive: true, force: true });
+if (countsFolder !== null) process.once("exit", removeCounts);
 const nodeArguments = fullSuite
   ? [join(import.meta.dirname, "run-test-files.mjs"), ...testFiles]
   : [
       "--test",
       "--test-reporter=spec",
       "--test-reporter-destination=stdout",
-      `--test-reporter=${join(import.meta.dirname, "test-in-flight.mjs")}`,
-      "--test-reporter-destination=stderr",
+      ...(countsFile === null
+        ? [
+            `--test-reporter=${join(import.meta.dirname, "test-in-flight.mjs")}`,
+            "--test-reporter-destination=stderr",
+          ]
+        : [
+            `--test-reporter=${join(import.meta.dirname, "test-file-counts.mjs")}`,
+            `--test-reporter-destination=${countsFile}`,
+          ]),
       ...testFiles,
     ];
 // (without `TEST_FULL_OUTPUT`: a test that runs this filter itself chooses its own output)
@@ -150,7 +170,34 @@ child.on("error", (error) => {
   process.exitCode = 1;
 });
 
+/**
+ * Each file's counts line, `ℹ <file>: N passed[, N failed][, N cancelled][, N skipped][, N todo][; the file failed
+ * outside any test]`, or why there are none.
+ */
+function fileCountLines() {
+  let counts;
+  try {
+    counts = JSON.parse(readFileSync(countsFile, "utf8"));
+  } catch (error) {
+    return `ℹ test-output-filter: no counts per file: ${error.message}\n`;
+  }
+  return Object.entries(counts)
+    .map(([file, { passed, failed, cancelled, skipped, todo, fileFailed }]) => {
+      const others = Object.entries({ failed, cancelled, skipped, todo })
+        .filter(([, count]) => count > 0)
+        .map(([word, count]) => `, ${count} ${word}`)
+        .join("");
+      const own = fileFailed ? "; the file failed outside any test" : "";
+      return `ℹ ${relative(process.cwd(), file)}: ${passed} passed${others}${own}\n`;
+    })
+    .join("");
+}
+
 child.on("close", (code, signal) => {
+  if (countsFolder !== null) {
+    if (!refused && signal === null) process.stdout.write(fileCountLines());
+    removeCounts();
+  }
   if (refused) return;
   if (signal !== null) {
     process.kill(process.pid, signal);

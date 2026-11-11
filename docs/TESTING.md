@@ -83,9 +83,10 @@ copies, only when `--player-profile profile.json` gives a JSON object of them, s
 The suite is every `tests/*.test.ts` and every `tests/<folder>/*.test.ts` one folder down, except in `fixtures/` and
 `helpers/`, which hold no tests (a closed list, `suiteTestFiles` in `tools/test-shards.mjs`); a file is named by its path
 under `tests/`, one at the top by its name alone.
-`npm run test -- dist/tests/<file>.test.js` runs one compiled test through the same compact filter, which fails before running anything when a passed path matches no file; use `npm run test:full-output -- dist/tests/<file>.test.js` only for diagnosis.
+`npm run test -- dist/tests/<file>.test.js` runs one compiled test through the same compact filter, which fails before running anything when a passed path matches no file, and ends with each named file's test counts (`ℹ <file>: N passed`, `0 passed` when it ran no test, and `; the file failed outside any test` when it threw while loading or its process ended non-zero); use `npm run test:full-output -- dist/tests/<file>.test.js` only for diagnosis.
 `node tools/check-changed.mjs` runs before a push the checks CI fails on for what changed since the base (`git diff --check`, format, oxlint, knip, the doc links, the imports, and the changed projects' type checks and tool tests; its header lists them and its exit codes); CI still runs the tests. `--merged` runs them on HEAD merged into the base's current commit, as CI tests after a squash.
-`node tools/check-shas.mjs [--repo <path>]... [<file>]` checks that the commit SHAs a report or pull-request body names exist and are on a remote (a tree hash only exists), and finds its unfilled placeholders (its header lists the rules); it never fetches.
+`node tools/check-shas.mjs [--repo <path>]... [<file>]` checks that the commit SHAs a report or pull-request body names exist and are on a remote (a remote-tracking ref, or an archived or pull-request head on `origin`; a tree hash only exists), and finds its unfilled placeholders and its closing clauses that name several issues after one keyword; it names and counts, without failing, the paths it reads into the scratch area `/tmp/agent-work/`, a count that claims no completeness (its header lists the rules and what it does not read); it never fetches.
+`tools/archive-replaced-heads.mjs` is a `pre-push` hook: before a push deletes or rewrites a ref on the remote, it pushes the old value to `refs/archive/<sha>` there and keeps the same ref in this clone, and refuses the push when it cannot or when the push would delete or rewrite an archive (its header lists the rules and the limit).
 CI's "Structure signals (advisory)" step, after `check:pretest` in the job that runs it, prints
 `node tools/structure-report.mjs --diff HEAD^1 --moved`: the structure signals the change adds to, against the merge's
 first parent, without Git's moved lines. Its `--summary` rows, each file over 1,000 lines or gaining over 300, go to
@@ -143,9 +144,9 @@ then classifies every legacy/core pair, and every source's core with sharing on 
 Per set, its manifest from a built tree of that commit, then its shards on the central queue:
 
 ```shell
-env -u NODE_OPTIONS node <tree>/tests/families/shadow.mjs <tree> <set> --manifest > expect-<set>.jsonl
-sx-job submit --commit <main sha> --shards 16 --mem 6G --timeout 2h --campaign <T>-<set> -- bash -c 'env -u NODE_OPTIONS \
-  node "$SX_TREE/tests/families/shadow.mjs" "$SX_TREE" <set> --shard {i}/{n} --demands 16 --out "$SX_OUT/shadow.jsonl" \
+node <tree>/tests/families/shadow.mjs <tree> <set> --manifest > expect-<set>.jsonl
+sx-job submit --commit <main sha> --shards 16 --mem 6G --timeout 2h --campaign <T>-<set> -- bash -c \
+  'node "$SX_TREE/tests/families/shadow.mjs" "$SX_TREE" <set> --shard {i}/{n} --demands 16 --out "$SX_OUT/shadow.jsonl" \
   > "$SX_OUT/shadow.log"'
 ```
 
@@ -159,7 +160,7 @@ node tests/families/shadow-classify.mjs <every shard's shadow.jsonl> --expect ex
 with one `--expect` per set's manifest (the flag takes one file).
 
 For `corpus`, both commands also need `CASES_JSON=<cases.json>` before `node`, and the job `--data <cases.json>`.
-`env -u NODE_OPTIONS` keeps the queue's heap flag from overriding each route's `--memory`. `--demands 16` is the
+Each route's `--memory` holds whatever `NODE_OPTIONS` the queue sets: a route starts without it. `--demands 16` is the
 completion control: nothing stops at the natural allowance on current `main`, so only a demand-allowance run reaches
 a receiving completion. The gate table also counts, as information only, the control's runs that left the slice by
 the class that names their text (`declined/lost check` or an exclusion rule), every such class a row and a text no class
@@ -260,8 +261,9 @@ shard by its lines and refuse differences without replacement; baseline status s
 build and every recorded area is complete.
 
 **Pinned work.** Some suites pin the core's exact work or its published answers: totals, listed copy and construction
-sites, work tables, and the published answers' digests (TABLE r4.185) (`tools/repository-checks/pin-suites.mjs` lists
-them, by hand). A change under `src/type-inference/core/` runs all of them before
+sites, work tables, and the published answers' digests (TABLE r4.185). Each file holding such pins says so in its first
+line, a mark that `tools/repository-checks/pin-suites.mjs` reads (`// pins: <what> | line /<regex>/`, or
+`// pins for <suite>, ...: …` in a helper). A change under `src/type-inference/core/` runs all of them before
 it asks for review and before READY: `node tools/repository-checks/pin-suites.mjs --run`. A pin that moves is re-pinned
 only with its ground: a comment at the pin, or in its test's header, naming how many units more or fewer and the change
 that moved them ("18 units more at demand 64 since #1828: …" above the closure suite's list-join row; "6 fewer since
@@ -386,7 +388,8 @@ as scrolling that must feel the same over the conversation, beside it, and over 
 not pin animations, timings, exact colours, or layout; the scoped visual check below covers those by eye. The existing
 Chromium DevTools smoke route has no browser-automation package dependency; it plays the repository demo end to end (see
 [Local browser smoke](#local-browser-smoke-and-future-host-e2e-gate)). For the development preview, run
-`npm run test:player:preview -- <preview-url>` against a running `npm run dev:player` server; it requires
+`npm run test:player:preview -- <preview-url>` against a running `npm run dev:player` server of this checkout (it
+refuses one that serves another; starting and stopping that server is still by hand, #2391); it requires
 `playwright-cli` on `PATH` and an available Chromium browser. Both run outside `npm run check` and are not a final
 cross-browser or production-host E2E suite. Preview groups use fresh browser contexts. On failure the runner reports a
 retained scratch directory with a screenshot and Playwright trace for the failing group; delete it after diagnosis.

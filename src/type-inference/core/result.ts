@@ -309,6 +309,13 @@ export interface StoreRoot {
   readonly site: SourceSite | null;
 }
 
+/** A variable or parameter with its own written type (#2289): its name, its declaration as written, its type. */
+export interface DeclaredBinding {
+  readonly name: string;
+  readonly site: SourceSite;
+  readonly type: readonly ItemTag[];
+}
+
 /** #1762: each side's steps of a mixed rule as its sentence writes them (`shown`). */
 export interface MixedSteps {
   readonly type: readonly string[];
