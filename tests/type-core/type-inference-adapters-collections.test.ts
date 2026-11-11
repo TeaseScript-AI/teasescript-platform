@@ -71,7 +71,7 @@ test("list methods give what their contract names: a value, a copy of an element
   );
 });
 
-test("get gives the element or the default (Q2) and needs its default; union joins the elements of both", () => {
+test("get gives the element or the default and needs its default; union joins the elements of both", () => {
   assertEqualResult(
     method("get"),
     inputsOf({ receiver: LIST, arguments: [INTEGER], named: { default: closedView(STRING_TYPE) } }),

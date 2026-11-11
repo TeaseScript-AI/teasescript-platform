@@ -15,6 +15,8 @@ import {
   glossaryRows,
   labelsIn,
   listedTextFindings,
+  printedLabelsIn,
+  printedTexts,
   recordAnchors,
   recordEntries,
   tableCitationsIn,
@@ -489,10 +491,24 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
     const record = "docs/specifications/type-inference-accepted-record";
     write(
       `${record}/README.md`,
-      "# Record\n\n## Labels\n\n| label | meaning |\n| --- | --- |\n| `C9` | a rule |\n\n### r4-40\n",
+      "# Record\n\n## Labels\n\n| label | meaning |\n| --- | --- |\n| `C9` | a rule |\n| `W5` | a family |\n| `W6` | a family |\n| `W7` | a family |\n| `W8` | a family |\n| `W9` | a family |\n| `W10` | a family |\n| `W11` | a family |\n\n### r4-40\n",
     );
     // a core comment's label with its glossary row: no finding, so the glossary is the README Git lists
     write("src/type-inference/core/labelled.ts", "// C9 holds here\nexport const x = 1;\n");
+    // printed text, not an expected message: a label without a row refused, a row only it carries kept, in a title (an
+    // escaped callee too), a bracketed name, each erased wrapper on a value (`as`, `<T>`, `satisfies`, `!`) or object
+    write(
+      "tests/printed.test.ts",
+      [
+        'test("W99 grows", () => {});',
+        'export const family = { measures: "W5: one preset" };',
+        'assert.equal(found, "TSV041 error L19");',
+        'te\\u0073t("W98 grows", () => {});',
+        'export const group = { ["authority"]: "W6" }; export const o = { measures: "W93 W11" } as const;',
+        'test("W97 W7" as const, f); test(<string>"W96 W8", f); const a = { measures: "W95 W9" satisfies string, authority: "W94 W10"! };',
+        "",
+      ].join("\n"),
+    );
     // (a struck-through heading, GitHub's mark, and one with inline HTML, read as the doc-links check reads them)
     write(
       `${record}/sharing.md`,
@@ -596,9 +612,13 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
         ),
       ["src/pointers.ts:3 r4-9", "src/pointers.ts:4 twice-2", "src/pointers.ts:4 r4-41"],
     );
-    assert.deepEqual(
-      entryFindings.filter(({ message }) => message.includes("glossary")),
-      [],
+    const printed = /^a test's title or a measures or authority string carries the label (\w+),/u;
+    assert.equal(
+      entryFindings
+        .filter(({ message }) => message.includes("glossary"))
+        .map(({ fileName, line, message }) => `${fileName}:${line} ${printed.exec(message)?.[1]}`)
+        .join(", "),
+      "tests/printed.test.ts:1 W99, tests/printed.test.ts:4 W98, tests/printed.test.ts:5 W93, tests/printed.test.ts:6 W97, tests/printed.test.ts:6 W96, tests/printed.test.ts:6 W95, tests/printed.test.ts:6 W94",
     );
     writeFileSync(
       Buffer.concat([Buffer.from(`${root}/name-`), Buffer.from([0xff]), Buffer.from(".md")]),
@@ -624,7 +644,9 @@ test("only this test's own text is exempt from the TABLE citation check, by its 
 });
 
 // The document names a section list may follow, and the list's separators after its first number.
-const SECTION_NAMES = ["V30", "ADR 0021", "PLAN", "S3", "S6-CARRIERS"];
+const SECTION_NAMES = ["V30", "ADR 0021"];
+// The port plan's documents, outside the repository: a section of theirs is refused like any other.
+const PLAN_DOCUMENTS = ["PLAN", "S3", "S6-CARRIERS"];
 const SECTION_SEPARATORS = [", ", " and ", ", and ", " or "];
 const sectionsIn = (text) =>
   unnamedSectionsIn("tests/a.ts", text).map(({ line, section }) => `${line} ${section}`);
@@ -656,7 +678,7 @@ test("a section list right after a document's name is admitted, in every form th
   for (const name of SECTION_NAMES)
     assert.deepEqual(sectionsIn(`(${name} §1–2, §5)`), [], `${name} range`);
   // at the start of a line and of the text, and after a character that is no letter or digit
-  assert.deepEqual(sectionsIn("V30 §1\n(ADR 0021 §6.2)\n`S3 §5`, _V30 §2"), []);
+  assert.deepEqual(sectionsIn("V30 §1\n(ADR 0021 §6.2)\n`V30 §5`, _V30 §2"), []);
 });
 
 test("every other section number is found, with its line and as written", () => {
@@ -672,6 +694,8 @@ test("every other section number is found, with its line and as written", () => 
     "ADR 00211 §1",
     "xV30 §1",
     "S30 §1",
+    ...PLAN_DOCUMENTS.map((name) => `${name} §5`),
+    ...PLAN_DOCUMENTS.map((name) => `(${name} §§4.1–4.7)`),
     "S6 §1",
     "S6-CARRIERS-X §1",
     "2V30 §1",
@@ -694,6 +718,13 @@ test("every other section number is found, with its line and as written", () => 
   ])
     assert.equal(sectionsIn(text).length, 1, text);
   assert.deepEqual(sectionsIn("V30 §13ab, §2"), ["1 §13", "1 §2"]);
+  // every number of a plan document's list is refused
+  assert.deepEqual(sectionsIn("(S3 §1, §4) and S6-CARRIERS §4.5, §4.7"), [
+    "1 §1",
+    "1 §4",
+    "1 §4.5",
+    "1 §4.7",
+  ]);
   assert.deepEqual(sectionsIn(`§${" ".repeat(25)}1`), ["1 § 1"]);
   // each ASCII character but the one space, once and twice, between a name and its section
   for (const name of SECTION_NAMES)
@@ -802,6 +833,91 @@ test("a comment's pointer at the accepted record names an anchor of the page it 
   );
 });
 
+test("printed text is a test's title and a measures or authority value, in every form the rule names, and nothing else", () => {
+  const source = [
+    'test("A1 one", f);',
+    "it.skip(`A2 ${x} A3`, f);",
+    'describe.only(("A4" + " A5"), g);',
+    'suite.todo("A6");',
+    't.test("A7", f);',
+    'node.describe("A8", f);',
+    "export const families = [",
+    '  { measures: "A9", authority: `A10 ${y}`, "measures": (k) => `A11 ${k}` },',
+    "];",
+    // a bracketed name, a class's property, escapes in a callee, a name and a part
+    'const c = { ["measures"]: "A12", [`authority`]: "A13" };',
+    'class G { measures = "A14"; static authority = "A15"; }',
+    'te\\u0073t("A16", f); const e = { "measu\\u0072es": "\\x4117" };',
+    // not printed: another argument, another property, a block body, a variable, an expected value, a comment
+    'test(title, "B1");',
+    'const r = { rule: "B2", reason: "B3", name: "B4", measures: (k) => { return "B5"; } };',
+    'assert.equal(x, "B6"); // B7',
+    'const n = { measure: "B9", authority: "ordinary", [name]: "B10" };',
+    "check(`B8`);",
+    "",
+  ].join("\n");
+  assert.equal(
+    printedLabelsIn("tests/a.test.ts", source)
+      .map(({ line, label }) => `${line} ${label}`)
+      .join(", "),
+    "1 A1, 2 A2, 2 A3, 3 A4, 3 A5, 4 A6, 5 A7, 6 A8, 8 A9, 8 A10, 8 A11, 10 A12, 10 A13, 11 A14, 11 A15, 12 A16, 12 A17",
+  );
+  // a file with none of the callee or property names, and no backslash, is not parsed; one with a backslash is
+  assert.deepEqual(printedTexts("tests/b.ts", 'const s = "A1";\n'), []);
+  assert.deepEqual(
+    printedLabelsIn("tests/b.ts", 'const s = { "measur\\u0065s": "A1" };\n').map(
+      ({ label }) => label,
+    ),
+    ["A1"],
+  );
+  // a part with an escape reports its first line
+  assert.deepEqual(printedLabelsIn("tests/b.ts", "test(`A1\\n\nA2`, f);\n"), [
+    { line: 1, label: "A1" },
+    { line: 1, label: "A2" },
+  ]);
+  // a file with a property alone, and none with a callee alone, is read
+  assert.deepEqual(
+    ["measures", "authority"].map((name) =>
+      printedLabelsIn("tests/f.ts", `export const f = { ${name}: "A1" };\n`).map(
+        ({ label }) => label,
+      ),
+    ),
+    [["A1"], ["A1"]],
+  );
+  // the label reading is the comments' own: review references and names that are no labels are none
+  assert.deepEqual(
+    printedLabelsIn(
+      "tests/c.test.ts",
+      "test(\"past V8 and RE2 (Codex r2's B1, #1027's F12) at C9\", f);\n",
+    ),
+    [{ line: 1, label: "C9" }],
+  );
+});
+
+test("a printed label without a row is refused, and a row printed text carries is carried", () => {
+  const glossary = new Map([
+    ["C9", 7],
+    ["W5", 8],
+  ]);
+  assert.deepEqual(
+    glossaryFindings(
+      [
+        { fileName: "src/type-inference/core/a.ts", line: 3, label: "C9" },
+        { fileName: "tests/a.test.ts", line: 2, label: "W5", printed: true },
+        { fileName: "tests/a.test.ts", line: 4, label: "W99", printed: true },
+      ],
+      glossary,
+    ).map(({ fileName, line, message }) => [fileName, line, message.split(",")[0]]),
+    [
+      [
+        "tests/a.test.ts",
+        4,
+        "a test's title or a measures or authority string carries the label W99",
+      ],
+    ],
+  );
+});
+
 test("a comment's port-plan or research label is found; a review reference, a document name and a string are not", () => {
   assert.deepEqual(
     labelsIn(
@@ -813,7 +929,7 @@ test("a comment's port-plan or research label is found; a review reference, a do
         "/* Codex r21",
         " * N1, Astra r1's",
         " * A1, Sol's final F7, Astra's reviews B5 and B6, Astra's recheck r3 F8, N9, Astra B7-r2, Codex r3 R3-F6 */",
-        "// V30 §19",
+        "// V30 §19, a V8 heap and an RE2 pattern",
         'const s = "C13";',
         "",
       ].join("\n"),

@@ -84,13 +84,24 @@ included) names an anchor of a record page Git lists, read and slugged as the do
 (`headingAnchors`); another mention of the record (its folder, a page without an anchor) is not its, and the check
 proves the anchor exists, not that it carries the comment's claim. A section number (`§` or `§§`, then a digit) stands,
 as a whole number, in a section list right after a repository document's name on its line (`V30 §13`, `ADR 0021 §6.2`,
-`V30 §5, §35`); `PLAN`, `S3` and `S6-CARRIERS` name the port plan's documents outside the repository and are allowed as
-labels while #2423 decides them. Any other section number is refused in every file
+`V30 §5, §35`); a section of the port plan's documents (`S3 §5`, `S6-CARRIERS §4.1`) cites what is outside the
+repository. Any other section number is refused in every file
 Git lists except `docs/`, whose documents number their own sections; `src/`, whose comments #2209 rewrites;
 `tests/fixtures/type-core/cells.jsonl`, whose section numbers are cell ids in recorded data whose bytes `MANIFEST.md`
 fixes; `tools/oxlint/comment-declarations-waiting.json`, which quotes comments word for word, its section numbers only
 `src/`'s, and shrinks with #2209; and the check's test. The check proves the form, not that the section exists or
-carries the sentence's claim. `comment-citations.json` holds each file's exact counts in comments of its other forms (a
+carries the sentence's claim. A research label (a `LABEL` of the check: `C9`, `W34`, `S6-CARRIERS`) has a row in the
+record's glossary (its `README.md`, "Labels") where it stands in a comment under `src/type-inference/core/` or in
+printed test text: a test's title (the first argument of `test`, `it`, `describe` or `suite`, or of a property so
+named, with or without `.skip`, `.only` or `.todo`) or the value of a `measures` or `authority` property (an object's
+or a class's, its name bare, quoted or a string in brackets). Of a title or value the check reads a string, a
+template's text (not its `${}` expressions), either side of a `+`, parentheses, what TypeScript erases (an `as` or
+angle-bracket assertion, `satisfies`, a non-null assertion) and an arrow function's expression body, with escapes
+resolved; a variable, a call or a helper's result is not read. A review reference (`Codex r2's B1`) and the names
+`V30`, `V8` and `RE2` are no labels. A row counts as carried when such a comment or printed text uses it, and a row
+nothing carries is refused. Test comments, other strings and code are not read, and a row proves the label is defined,
+not that the text uses it in that sense.
+`comment-citations.json` holds each file's exact counts in comments of its other forms (a
 bare `r4.N`, read as the revision rule reads it, and the record's name with another id), which may only fall.
 `comment-forecasts-allowed.json` lists the forecasts the check accepts, and each entry must still be found.
 

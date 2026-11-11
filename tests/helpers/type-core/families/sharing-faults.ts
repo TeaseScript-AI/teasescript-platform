@@ -2,7 +2,7 @@ import type { SourceFile } from "../../type-core-analysis.js";
 import { parsed } from "./builders.js";
 
 /**
- * The member-answer oracle's own programs (S6-CARRIERS §4.1, condition (a)): Astra's two M1 witnesses (a conditional
+ * The member-answer oracle's own programs (S6-CARRIERS, condition (a)): Astra's two M1 witnesses (a conditional
  * store below the copied path before and between the copies), every alias form (a copy, a literal's cell, a list's, a
  * nested one, a literal index, a chain's link) beside the events its class answers through (a conditional store before
  * or between the copies, a copy under a test of its source or of a field, a store between them), literal cells beside

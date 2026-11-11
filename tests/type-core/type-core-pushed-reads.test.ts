@@ -954,7 +954,7 @@ test("a closed ring's dead histories are not kept to an unrelated tested depth: 
   }
 });
 
-test("two pending sets that meet at one node are held as their union, in four modes (#1784, Codex r6 on R8b)", () => {
+test("two pending sets that meet at one node are held as their union, in four modes (#1784, Codex r6)", () => {
   // (one holder pending at `q` for `a`, another for `q.b`: a goal reaches one base node with both sets, so only their
   // union marks both reads below it)
   const source =

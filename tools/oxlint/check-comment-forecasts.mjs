@@ -2,7 +2,8 @@ import { execFileSync } from "node:child_process";
 import { lstatSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { headingAnchors, headingText, markdownProcessor } from "../repository-checks/markdown.mjs";
-import { checkedFiles, fileComments } from "./comments.mjs";
+import { ts } from "ts-morph";
+import { checkedFiles, fileComments, scriptsOf } from "./comments.mjs";
 
 // A comment says what the code does now and never forecasts later work (IMPLEMENTATION-AND-REVIEW.md "Code that does
 // not mislead", #1977). Its comment rules read comments only, never strings or code, in the linted files and in `.vue`
@@ -17,8 +18,9 @@ import { checkedFiles, fileComments } from "./comments.mjs";
 // (`docs/specifications/type-inference-accepted-record/<page>.md#<anchor>`, #2089) names an anchor of a record page
 // Git lists, read and slugged as the doc-links check reads them (#2422); that check reads Markdown only and never sees
 // a comment. A label of the port plan or the research design (`S8c`,
-// `C9`, `AD-1`) in a comment of the type core's modules has a row in the record's glossary, and every row is still
-// carried by such a comment; an id after a reviewer's round ("Codex r2's B1") is a review reference, not a label.
+// `C9`, `AD-1`) in a comment of the type core's modules, or in printed test text (`printedTexts`: a test's title, a
+// `measures` or `authority` value, #2423), has a row in the record's glossary, and every row is still carried by such
+// a comment or text; an id after a reviewer's round ("Codex r2's B1") is a review reference, not a label.
 // `comment-forecasts-allowed.json` lists the forecasts this check accepts, and every entry must still be found.
 
 /** The forms of a forecast, #1977's list, each one pattern over a comment's text. */
@@ -94,8 +96,8 @@ const RECORD = "docs/specifications/type-inference-accepted-record";
 const CORE = "src/type-inference/core/";
 
 /**
- * A port-plan or research label: a step, an id, a checkpoint, the plan or a plan document. A section number (`V30 §3`,
- * `S3 §5`) is not a label; the glossary's one row for a bare `§N` is not checked against comments.
+ * A port-plan or research label: a step, an id, a checkpoint, the plan or a plan document. A section number (`V30 §3`)
+ * is not a label; the glossary's one row for a bare `§N` is not checked against comments.
  */
 const LABEL =
   /\b(?:S\d-[A-Z]+(?:-[A-Z]+)*|S\d{1,2}[a-z]?|[A-Z]{1,2}\d{1,3}[a-z]?|AD-\d|PLAN|checkpoint \d+)\b/gu;
@@ -111,29 +113,132 @@ const REVIEWED =
 /** A reviewer's review just after an id ("B1 of Astra's review") makes it a review reference too. */
 const REVIEWED_AFTER = /^(?: of (?:Codex|Astra|Sol|Fable|Opus)'s review|-r\d)/u;
 
-/** Labels that name a repository document, not the plan or the research. */
-const DOCUMENTS = new Set(["V30"]);
+/** Names that are no labels: a repository document (`V30`), an engine (`V8`) and a regex library (`RE2`). */
+const NO_LABELS = new Set(["V30", "V8", "RE2"]);
 
-/** Each label in `text`'s comments, with its line; review references and document names are not labels. */
-export function labelsIn(fileName, text) {
+/**
+ * Each label in `text`, a comment's or a printed string's, with its offset: a `LABEL` token that no review reference
+ * stands around and that is no name of `NO_LABELS`. The one reading of a label, for comments and printed text alike.
+ */
+function labelsInText(text) {
   const found = [];
-  for (const comment of fileComments(fileName, text))
-    for (const match of comment.text.matchAll(LABEL)) {
-      // a block comment's line breaks and leading `*` or `//` read as one space
-      const before = comment.text
-        .slice(Math.max(0, match.index - 60), match.index)
-        .replace(/\s*\n\s*(?:\*(?!\/)|\/\/)?\s*/gu, " ");
-      const after = comment.text.slice(
-        match.index + match[0].length,
-        match.index + match[0].length + 30,
-      );
-      if (REVIEWED.test(before) || REVIEWED_AFTER.test(after) || DOCUMENTS.has(match[0])) continue;
-      found.push({
-        line: comment.line + comment.text.slice(0, match.index).split("\n").length - 1,
-        label: match[0],
-      });
-    }
+  for (const match of text.matchAll(LABEL)) {
+    // a block comment's line breaks and leading `*` or `//` read as one space
+    const before = text
+      .slice(Math.max(0, match.index - 60), match.index)
+      .replace(/\s*\n\s*(?:\*(?!\/)|\/\/)?\s*/gu, " ");
+    const after = text.slice(match.index + match[0].length, match.index + match[0].length + 30);
+    if (REVIEWED.test(before) || REVIEWED_AFTER.test(after) || NO_LABELS.has(match[0])) continue;
+    found.push({ index: match.index, label: match[0] });
+  }
   return found;
+}
+
+/** Each label in `text`'s comments, with its line; review references and names that are no labels are not labels. */
+export function labelsIn(fileName, text) {
+  return fileComments(fileName, text).flatMap((comment) =>
+    labelsInText(comment.text).map(({ index, label }) => ({
+      line: comment.line + comment.text.slice(0, index).split("\n").length - 1,
+      label,
+    })),
+  );
+}
+
+/** The callees whose first argument is a test's title, alone or before `.skip`, `.only` or `.todo`. */
+const TEST_CALLEES = new Set(["test", "it", "describe", "suite"]);
+
+/** The properties whose value is printed text: a work family's `measures`, a shadow group's `authority`. */
+const PRINTED_PROPERTIES = new Set(["measures", "authority"]);
+
+/**
+ * The printed text of `text`, the whole of file `fileName`: each literal part, with its first line, of a test's title
+ * (the first argument of a call to `test`, `it`, `describe` or `suite`, or to a property of those names, before
+ * `.skip`, `.only` or `.todo` or not) and of a `measures` or `authority` property's value. A part is a string, a
+ * template's text (not its `${}` expressions), either side of a `+`, inside parentheses or what TypeScript erases (an
+ * `as` or angle-bracket assertion, `satisfies`, a non-null assertion), or what an arrow function's expression body
+ * gives; any other expression is not read. A property is an object's or a class's, named by an
+ * identifier, a string, or a string in brackets (`["measures"]`). Names and parts are read with their escapes
+ * resolved; a part with an escape reports its first line.
+ */
+export function printedTexts(fileName, text) {
+  // A file with none of the names, and no backslash that could spell one, has none of these positions.
+  if (!/\\|\b(?:test|it|describe|suite|measures|authority)\b/u.test(text)) return [];
+  const parts = [];
+  for (const { source, text: script, lineOffset } of scriptsOf(fileName, text)) {
+    const part = (node, from, to) => {
+      const start = node.getStart(source) + from;
+      parts.push({
+        line: source.getLineAndCharacterOfPosition(start).line + 1 + lineOffset,
+        text: script.slice(start, node.end - to).includes("\\")
+          ? node.text.replace(/\r\n?|[\n\u2028\u2029]/gu, " ")
+          : node.text,
+      });
+    };
+    const read = (node) => {
+      if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) part(node, 1, 1);
+      else if (ts.isTemplateExpression(node)) {
+        part(node.head, 1, 2);
+        for (const span of node.templateSpans)
+          part(span.literal, 1, ts.isTemplateTail(span.literal) ? 1 : 2);
+      } else if (
+        ts.isBinaryExpression(node) &&
+        node.operatorToken.kind === ts.SyntaxKind.PlusToken
+      ) {
+        read(node.left);
+        read(node.right);
+      } else if (
+        ts.isParenthesizedExpression(node) ||
+        ts.isAsExpression(node) ||
+        ts.isTypeAssertionExpression(node) ||
+        ts.isSatisfiesExpression(node) ||
+        ts.isNonNullExpression(node)
+      )
+        read(node.expression);
+      else if (ts.isArrowFunction(node) && !ts.isBlock(node.body)) read(node.body);
+    };
+    const isTestCallee = (callee) => {
+      const named = (node) =>
+        (ts.isIdentifier(node) && TEST_CALLEES.has(node.text)) ||
+        (ts.isPropertyAccessExpression(node) && TEST_CALLEES.has(node.name.text));
+      return (
+        named(callee) ||
+        (ts.isPropertyAccessExpression(callee) &&
+          ["skip", "only", "todo"].includes(callee.name.text) &&
+          named(callee.expression))
+      );
+    };
+    const propertyName = (name) =>
+      ts.isComputedPropertyName(name)
+        ? ts.isStringLiteralLike(name.expression)
+          ? name.expression.text
+          : undefined
+        : ts.isIdentifier(name) || ts.isStringLiteral(name)
+          ? name.text
+          : undefined;
+    const visit = (node) => {
+      if (ts.isCallExpression(node) && node.arguments.length > 0 && isTestCallee(node.expression))
+        read(node.arguments[0]);
+      if (
+        (ts.isPropertyAssignment(node) || ts.isPropertyDeclaration(node)) &&
+        node.initializer &&
+        PRINTED_PROPERTIES.has(propertyName(node.name))
+      )
+        read(node.initializer);
+      ts.forEachChild(node, visit);
+    };
+    visit(source);
+  }
+  return parts;
+}
+
+/** Each label in `text`'s printed text (`printedTexts`), with its line. */
+export function printedLabelsIn(fileName, text) {
+  return printedTexts(fileName, text).flatMap((part) =>
+    labelsInText(part.text).map(({ index, label }) => ({
+      line: part.line + part.text.slice(0, index).split("\n").length - 1,
+      label,
+    })),
+  );
 }
 
 /** The glossary's rows in the record's `README.md`: each label of its `## Labels` table, with its line. */
@@ -150,18 +255,19 @@ export function glossaryRows(readme) {
 }
 
 /**
- * Each label the core's comments carry (`carried`, with its file and line) that the glossary has no row for, and each
- * row whose label no comment carries; the bare `§N` row is not checked against comments.
+ * Each carried label (`carried`, with its file and line: the core's comments' labels, and every file's printed text's,
+ * those marked `printed`) that the glossary has no row for, and each row whose label nothing carries; a row printed
+ * text carries is carried. The bare `§N` row is not checked.
  */
 export function glossaryFindings(carried, glossary) {
   const findings = [];
-  for (const { fileName, line, label } of carried)
+  for (const { fileName, line, label, printed } of carried)
     if (!glossary.has(label))
       findings.push({
         fileName,
         line,
         column: 1,
-        message: `a comment carries the label ${label}, which the accepted record's glossary does not define (${RECORD}/README.md, Labels)`,
+        message: `${printed ? "a test's title or a measures or authority string" : "a comment"} carries the label ${label}, which the accepted record's glossary does not define (${RECORD}/README.md, Labels)`,
       });
   const labels = new Set(carried.map(({ label }) => label));
   for (const [label, line] of glossary)
@@ -170,7 +276,7 @@ export function glossaryFindings(carried, glossary) {
         fileName: `${RECORD}/README.md`,
         line,
         column: 1,
-        message: `the glossary defines ${label}, which no comment of the type core carries any more; remove its row`,
+        message: `the glossary defines ${label}, which no comment of the type core and no printed test text carries any more; remove its row`,
       });
   return findings;
 }
@@ -302,14 +408,14 @@ const SECTION_NUMBER = /§§?[ \t]*[0-9]/gu;
  * The section lists a section number may stand in, a closed set: a document's name, one space, `§` or `§§` and a
  * whole number (dotted parts, a letter, a range), then any further `, §N`, ` and §N`, `, and §N` or ` or §N`, on one
  * line.
- * `V30` and `ADR NNNN` are repository documents. `PLAN`, `S3` and `S6-CARRIERS` name the port plan's documents
- * outside the repository; they are allowed as labels, which #2423 decides, not as citations.
+ * `V30` and `ADR NNNN` are the repository's documents; a section of any other document, the port plan's (`S3`,
+ * `S6-CARRIERS`) included, is outside the repository.
  */
 const NAMED_SECTIONS = (() => {
   // (a number ends where no letter or digit follows, and no `.`, `–` or `-` before a digit)
   const number = String.raw`\d+(?:\.\d+)*[a-z]?(?:[–-]\d+(?:\.\d+)*[a-z]?)?(?![\p{L}\p{N}]|[.–-]\p{N})`;
   return new RegExp(
-    String.raw`(?<![\p{L}\p{N}])(?:V30|ADR \d{4}|PLAN|S3|S6-CARRIERS) §§?${number}(?:(?:, | and |, and | or )§${number})*`,
+    String.raw`(?<![\p{L}\p{N}])(?:V30|ADR \d{4}) §§?${number}(?:(?:, | and |, and | or )§${number})*`,
     "gu",
   );
 })();
@@ -485,6 +591,8 @@ export function checkCommentForecasts(root) {
       });
     if (file.startsWith(CORE))
       for (const found of labelsIn(file, text)) carried.push({ fileName: file, ...found });
+    for (const found of printedLabelsIn(file, text))
+      carried.push({ fileName: file, ...found, printed: true });
     const counts = citationCounts(file, text);
     if (Object.keys(counts).length > 0) counted[file] = counts;
   }

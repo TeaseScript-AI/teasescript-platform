@@ -153,9 +153,16 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | `O15` | block-local reads use the contract because handlers can run after intervening stores |
 | `P3` | a present, dominating, unguarded single-kind contract can prove a read definite |
 | `P7` | literal graph facts prove branch feasibility, loop entry, and selected literal elements |
+| `W5` | the work family for one text-valued preset over k numeric fields |
+| `W19` | the work family for k guarded copies of one record inside a literal |
+| `W24` | the work family for one identity function, in which a guard scope is no identity |
+| `W29` | the work family for N5's preserving stores to k locations in one loop, each evaluated once |
 | `W30` | the work family for long and/or test chains without repeated sibling-test scans |
+| `W32` | the work family for N3's k whole stores of a record with null fields under k branches, read at k fields |
 | `W34` | the whole-copy chain and fan work family sharing source marks across demanded fields ([r4-38](sharing.md#r4-38)) |
 | `W40` | the work family indexing tested paths by callable or file instead of scanning contributions |
+| `W44` | the work family for the width of one root's keys under projected copies, whose stores are found below each copy's path alone |
+| `W45` | the work family for a joined copy's sources, referenced once per destination and never flattened into it |
 | `B1` | per-demand and program work budgets defer unproved checks to runtime ([r4-23](sharing.md#r4-23)) |
 | `B2` | rejected copies contribute no contents in the next pass, but retain their landings |
 | `D1` | diagnostic sentences name the consumer, its context, the problem, and the fix; also, in the receiving checks, that a receiving check validates the full destination contract and only ancestor shapes (a review finding's id) |

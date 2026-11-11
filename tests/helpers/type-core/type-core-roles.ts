@@ -417,7 +417,7 @@ export function roleClasses(): { readonly classes: RuleClass[]; readonly none: s
   return { classes, none };
 }
 
-/** The role matrix's compositions (S6-CARRIERS §6), each a name, its program before its final `exit` and its record. */
+/** The role matrix's compositions (S6-CARRIERS), each a name, its program before its final `exit` and its record. */
 export const COMPOSITIONS: readonly (readonly [string, string, string])[] = (() => {
   const choice = (options: string): string => `let out = askChoice ${options}\nsay "AFTER"\n`;
   const boundary = (against: string, span: string): string =>
