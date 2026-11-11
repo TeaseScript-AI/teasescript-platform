@@ -343,7 +343,7 @@ RERUN.rows(
     assert.equal(first.host.session.value, null, "the host has not replied yet");
     first.transport.release();
     await starting;
-    await until(() => asks(first.host), "the first question is asked");
+    await until(() => asks(first.host), "the first question is asked", "host");
     // The options as the host holds them: its checkpoint of the started session.
     const sampled = first.sampled();
     assert.ok(sampled?.temporalContext, "the click sampled a temporal context");
@@ -564,7 +564,7 @@ async function importAndContinue(host: Host, transfer: SessionTransfer) {
 async function playToSecondQuestion(host: Host) {
   const input = await runtimeInput();
   await host.activate();
-  await until(() => asks(host), "the first question is asked");
+  await until(() => asks(host), "the first question is asked", "host");
   assert.equal((await answer(host, input.intents.composer("one", "enter"))).kind, "answered");
   await until(() => said(host).includes("Got one."), "the first answer shows");
   await until(() => asks(host), "the second question is asked");
@@ -596,7 +596,7 @@ RERUN.rows(
     assert.equal(edited.scriptStorage.find((entry) => entry.key === "visits")?.value, 5);
     // Debug on carries the session into the debug room, where it goes on; the normal room keeps it where it was.
     second.host.setDebugMode(true);
-    await until(() => second.host.rooms.current.value === "debug", "the debug room");
+    await until(() => second.host.rooms.current.value === "debug", "the debug room", "host");
     assert.deepEqual(said(second.host), shown, "the debug room's copy of the session");
     const copied = await checkpointSnapshot(second.transport.bridge, second.host.session.value!);
     assert.equal(copied.debugMode, true);
@@ -947,6 +947,7 @@ RERUN.rows(
     await until(
       () => host.session.value!.state.observedSessionTimeMs >= 1_000,
       "the catch-up ends",
+      "host",
     );
     const input = await runtimeInput();
     assert.equal((await answer(host, input.intents.choice(null, "button"))).kind, "answered");

@@ -97,9 +97,27 @@ export async function inProcessBackend(
   return module.createInProcessBackend(BUILD, options);
 }
 
-/** Waits, in short real-time turns, until `check` holds. */
-export async function until(check: () => boolean, label: string): Promise<void> {
-  for (let turn = 0; turn < 1_000; turn += 1) {
+/**
+ * How long a wait on the engine's host may take: a reply or publication of a real Worker, which the host's load decides.
+ * The slowest measured took about 0.6 s on a loaded queue host.
+ */
+const HOST_MS = 30_000;
+
+/**
+ * Waits, in short real-time turns, until `check` holds, and fails with `label` if it never does. A wait `on` an
+ * in-process `"step"` gives up after 1,000 turns. A wait `on` the `"host"`, whose reply or publication makes `check`
+ * hold and may still be under way when the wait starts, gives up after `HOST_MS` on the process's monotonic clock, which
+ * no test mocks as it does `Date` and `performance`.
+ */
+export async function until(
+  check: () => boolean,
+  label: string,
+  on: "step" | "host" = "step",
+): Promise<void> {
+  const deadline = process.hrtime.bigint() + BigInt(HOST_MS) * 1_000_000n;
+  const waiting = (turn: number) =>
+    on === "host" ? process.hrtime.bigint() < deadline : turn < 1_000;
+  for (let turn = 0; waiting(turn); turn += 1) {
     if (check()) return;
     await new Promise((resolve) => setTimeout(resolve, 2));
   }
@@ -300,6 +318,7 @@ function gatedPort(port: Client.ClientPort) {
           .slice(gate.from)
           .map((post) => post.op)
           .join(", ")}`,
+        "host",
       ),
     release: () => {
       Object.assign(gate, { holding: false, target: null });
