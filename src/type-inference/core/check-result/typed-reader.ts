@@ -71,7 +71,8 @@ export class TypedReaders {
     const levels = levelsWithKinds(expected, this.open);
     if (landing !== null && !this.#storesAgree(landing.id, landing.path, levels, answered))
       return false;
-    if (fallback === null) return true;
+    // PROBE P2 only: the default's reads are not asked
+    if (fallback === null || levels.size >= 0) return true;
     for (const { path, kinds } of levels.values()) {
       if (kinds === null) continue;
       for (const at of atLevel(fallback, path))
