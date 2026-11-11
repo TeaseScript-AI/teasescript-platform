@@ -4,12 +4,16 @@
 //   npm run test:player:preview -- <url>   uses a running preview of this checkout (`npm run dev:player`)
 //
 // Without a URL it starts the Player's Vite development server in this process, on a free port of 127.0.0.1 that it
-// binds strictly, with a dependency cache of its own in its scratch folder (not the shared `node_modules/.vite`), and
-// closes it when the checks end or fail; ended by a signal, the process ends with it. Either way, before any check, the
-// server must answer `<url>__checkout` (`player/vue/vite.config.ts`) with this checkout's real path, else the run stops:
-// a preview of another checkout, or a server that does not say which checkout it serves, is refused. What it cannot
-// check: whether a running preview's server has reloaded the checkout's current files (Vite serves edited files, but
-// not an edited configuration until it restarts).
+// binds strictly, with a dependency cache of its own in its scratch folder (not the shared `node_modules/.vite`). Either
+// way, before any check, the server must answer `<url>__checkout` (`player/vue/vite.config.ts`) with this checkout's
+// real path, else the run stops: a preview of another checkout, or a server that does not say which checkout it serves,
+// is refused. What it cannot check: whether a running preview's server has reloaded the checkout's current files (Vite
+// serves edited files, but not an edited configuration until it restarts).
+//
+// One shutdown ends every run, also one stopped by SIGINT or SIGTERM: it stops the Playwright CLI command that runs,
+// closes the browser session and the server it started, and removes the dependency cache; it removes the scratch folder
+// after a pass and names it, with a failing group's screenshot and trace, otherwise. A cleanup error never replaces the
+// run's own failure. Stopped by a signal, the run exits with 128 plus the signal's number.
 import { spawn } from "node:child_process";
 import { mkdtempSync, realpathSync, writeFileSync, rmSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
@@ -20,11 +24,17 @@ import { fileURLToPath } from "node:url";
 const checkout = realpathSync(fileURLToPath(new URL("..", import.meta.url)));
 const scratch = mkdtempSync(join(tmpdir(), "player-preview-"));
 const session = `player-preview-${process.pid}`;
+/** The Playwright CLI commands that run, which the shutdown stops. */
+const running = new Set();
+/** The development server this run started, or `null`. */
+let server = null;
 async function cli(...args) {
   const child = spawn("playwright-cli", [`-s=${session}`, ...args], {
     cwd: scratch,
     stdio: ["ignore", "pipe", "pipe"],
   });
+  running.add(child);
+  child.once("close", () => running.delete(child));
   let stdout = "";
   let stderr = "";
   child.stdout.setEncoding("utf8").on("data", (text) => (stdout += text));
@@ -48,24 +58,52 @@ function freePort() {
   });
 }
 
-/** Starts this checkout's development preview; resolves to its URL and its server. */
+/** Starts this checkout's development preview and resolves to its URL; the shutdown closes it. */
 async function startPreview() {
   const { createServer } = await import("vite");
-  const server = await createServer({
+  const vite = new Set(process.listeners("SIGTERM"));
+  server = await createServer({
     configFile: join(checkout, "player/vue/vite.config.ts"),
     cacheDir: join(scratch, "vite"),
     logLevel: "warn",
     clearScreen: false,
     server: { host: "127.0.0.1", port: await freePort(), strictPort: true },
   });
-  try {
-    await server.listen();
-  } catch (error) {
-    await server.close();
-    throw error;
-  }
-  return { url: server.resolvedUrls.local[0], server };
+  // Vite's own SIGTERM handler closes the server and exits at once; this run's shutdown does that, after the rest.
+  for (const listener of process.listeners("SIGTERM"))
+    if (!vite.has(listener)) process.off("SIGTERM", listener);
+  await server.listen();
+  return server.resolvedUrls.local[0];
 }
+
+let shutdown = null;
+/** Ends the run once, whatever ends it; resolves to the cleanup errors. */
+function shutDown(failure) {
+  shutdown ??= (async () => {
+    for (const child of running) child.kill("SIGTERM");
+    const problems = [];
+    await cli("close").catch((error) => problems.push(error));
+    await server?.close().catch((error) => problems.push(error));
+    for (const folder of failure === null ? [scratch] : [join(scratch, "vite")])
+      try {
+        rmSync(folder, { recursive: true, force: true });
+      } catch (error) {
+        problems.push(error);
+      }
+    if (failure !== null)
+      console.error(`player-preview-checks: failure artifacts retained at ${scratch}`);
+    return problems;
+  })();
+  return shutdown;
+}
+for (const [signal, number] of [
+  ["SIGINT", 2],
+  ["SIGTERM", 15],
+])
+  process.once(signal, () => {
+    console.error(`player-preview-checks: stopped by ${signal}`);
+    void shutDown(new Error(`stopped by ${signal}`)).finally(() => process.exit(128 + number));
+  });
 
 /** Refuses a server that does not say it serves this checkout. */
 async function checkServedCheckout(url) {
@@ -763,11 +801,10 @@ async function runGroup(browserPage, run, url, artifacts) {
   }
 }
 
-let preview = null;
 let failure = null;
 try {
-  const url = process.argv[2] ?? (preview = await startPreview()).url;
-  if (preview !== null)
+  const url = process.argv[2] ?? (await startPreview());
+  if (server !== null)
     console.log(`player-preview-checks: started this checkout's preview at ${url}`);
   await checkServedCheckout(url);
   const config = join(scratch, "browser.json");
@@ -799,15 +836,6 @@ try {
 } catch (error) {
   failure = error;
 }
-// The browser, the started preview and its dependency cache go whether the checks passed or not; a failure's
-// screenshot and trace stay.
-const closed = await cli("close").then(
-  () => null,
-  (error) => error,
-);
-await preview?.server.close();
-rmSync(join(scratch, "vite"), { recursive: true, force: true });
-if (failure === null) rmSync(scratch, { recursive: true, force: true });
-else console.error(`player-preview-checks: failure artifacts retained at ${scratch}`);
+const problems = await shutDown(failure);
 if (failure !== null) throw failure;
-if (closed !== null) throw closed;
+if (problems.length > 0) throw problems[0];
