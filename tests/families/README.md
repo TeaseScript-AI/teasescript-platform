@@ -453,8 +453,10 @@ A case is one JSON line: `{name, source | files, globals?, runs?, storage?}` (`g
 or `{name, set, unit, key?, runs?, storage?}` for a unit of a set as `stop-runs.mjs` names one (`unitResolver`,
 `units.mjs`). `runs` is a list of the host globals' values, each run on every plan (`runGlobals`); `storage`, an object
 of stored values by key, is the script storage each run starts with, so a `load` reads it (#2338). A name twice, an
-unknown key, `storage` without `runs`, a
-malformed line or a set's unit missing or ambiguous refuses the whole file (exit 2) before any record is written.
+unknown key, a malformed line, a set's unit missing or ambiguous, `storage` without `runs`, or storage that cannot be
+copied or that the tree's runtime rejects (`validateScriptStorageEntries`) refuses the whole file (exit 2) before any
+plan runs or record is written. A run that writes nothing (a refusal, or `join`'s exit 1 below) removes an earlier
+run's `--out`, unless that file is one of its inputs, and says so on stderr.
 
 A record is `{name, case, checker, core, candidate}`:
 - `checker`, and each mode of `candidate` that is not refused: `diagnostics` (severity, code, path, one-based line and
