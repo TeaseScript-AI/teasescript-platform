@@ -255,24 +255,24 @@ const decisionStops = (stops) =>
  * at another pass or ordinal `moved` and a surplus on the head `added`, on the base `removed`, each with both trees'
  * `[pass, ordinal]` (`null` where that tree has none); `listsEqual` where the lists agree and the difference is in the
  * stop set's other fields. Known limit: which of a place's remaining stops pair is that order, not a fact the oracle
- * gives, so two stops of one place that both shift read as two moves in order. Where a side holds no list (a stored run
- * never does), `unavailable`, naming that side, never equal.
+ * gives, so two stops of one place that both shift read as two moves in order. Where either side holds no list (a
+ * stored run never does; an unparsed run or another oracle neither) or not the oracle's, `unavailable`, naming each
+ * such side, never equal.
  */
 function stopsApart(was, is) {
-  if (was?.stops === undefined && is?.stops === undefined) return {};
-  for (const [side, value] of [
+  const lacking = [
     ["base", was],
     ["head", is],
-  ])
-    if (!decisionStops(value?.stops))
-      return {
-        stops: {
-          unavailable:
-            value?.stops === undefined
-              ? `the ${side}'s run holds no stop list (a stored run never does): a run of the differing sources on two trees gives it`
-              : `the ${side}'s stop list is not the oracle's [pass, label, path, ordinal]`,
-        },
-      };
+  ]
+    .filter(([, value]) => !decisionStops(value?.stops))
+    .map(([side, value]) =>
+      value?.stops === undefined
+        ? side === "base"
+          ? "the base's run holds no stop list (a stored run never does): a run of the differing sources on two trees whose oracles list stops gives it"
+          : "the head's run holds no stop list"
+        : `the ${side}'s stop list is not the oracle's [pass, label, path, ordinal]`,
+    );
+  if (lacking.length > 0) return { stops: { unavailable: lacking.join("; ") } };
   const byPlace = (stops) => {
     const places = new Map();
     for (const [pass, label, path, ordinal] of stops) {
@@ -352,9 +352,10 @@ function answeredPrefix(was, is) {
  * (`unansweredAlike`, #1592) only where the base's result holds its parts and both trees left the same count
  * unanswered and published the same answered part (the parts up to the stop, by their hash), else `unanswered`, each
  * with whether what both answered agrees (`prefix`, `answeredPrefix`), a difference where it does not; with no base,
- * `uncompared`, never agreement; else a difference, or nothing where they agree.
+ * `uncompared`, never agreement; else a difference, or nothing where they agree. A stops `check`'s difference names its
+ * stops (`stopsApart`).
  */
-function judged(was, is) {
+function judged(was, is, check) {
   if (was?.thrown !== undefined || is.thrown !== undefined)
     return { thrown: { base: was?.thrown, head: is.thrown } };
   if (was?.value.unanswered > 0 || is.value.unanswered > 0) {
@@ -384,7 +385,7 @@ function judged(was, is) {
       base: was.value.hash.slice(0, 16),
       head: is.value.hash.slice(0, 16),
       ...firstPart(was.value.parts, is.value.parts),
-      ...stopsApart(was.value, is.value),
+      ...(check.startsWith("stops ") ? stopsApart(was.value, is.value) : {}),
     },
   };
 }
@@ -554,7 +555,7 @@ if (process.argv[2] === "--child") {
         const is = results.at(-1);
         if (is.value?.unparsed) parsed = false;
         // one tree's result goes to the runner, which compares it with the stored one or stores it
-        const outcome = results.length === 2 ? judged(results[0], is) : { result: is };
+        const outcome = results.length === 2 ? judged(results[0], is, check) : { result: is };
         await sent({ run: { mode: label, check, ...outcome }, spent: used });
       }
     }
@@ -1231,7 +1232,8 @@ if (process.argv[2] === "--child") {
           allowance,
           ...(questions === null || questions === undefined ? {} : { questions }),
         };
-        const outcome = result === undefined ? run : { ...run, ...judged(kept?.runs[id], result) };
+        const outcome =
+          result === undefined ? run : { ...run, ...judged(kept?.runs[id], result, run.check) };
         const {
           thrown: exception,
           unanswered,

@@ -444,6 +444,10 @@ export const routeOnly = (d) => d.parts?.[0] === d.parts?.[1] && d.part === d.pa
 
 const isObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 
+/** Whether `object`'s own keys are exactly `keys`, in any order. */
+const keysAre = (object, keys) =>
+  Object.keys(object).length === keys.length && keys.every((key) => Object.hasOwn(object, key));
+
 /** Whether `at` is one tree's `[pass, ordinal]` of a stop, or `null` where that tree has none. */
 const stopAt = (at) =>
   at === null || (Array.isArray(at) && at.length === 2 && at.every(Number.isInteger));
@@ -454,17 +458,17 @@ const stopAt = (at) =>
  */
 function stopsForm(stops) {
   if (!isObject(stops)) return false;
-  const keys = Object.keys(stops).sort().join(" ");
-  if (keys === "unavailable") return typeof stops.unavailable === "string";
-  if (keys === "listsEqual") return stops.listsEqual === true;
+  if (keysAre(stops, ["unavailable"])) return typeof stops.unavailable === "string";
+  if (keysAre(stops, ["listsEqual"])) return stops.listsEqual === true;
   return (
-    keys === "added moved removed" &&
+    keysAre(stops, ["added", "removed", "moved"]) &&
     Object.values(stops).every(
       (list) =>
         Array.isArray(list) &&
         list.every(
           (stop) =>
             isObject(stop) &&
+            keysAre(stop, ["label", "path", "base", "head"]) &&
             typeof stop.label === "string" &&
             typeof stop.path === "string" &&
             stopAt(stop.base) &&

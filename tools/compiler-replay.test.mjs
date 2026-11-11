@@ -1126,6 +1126,11 @@ test("a stops difference is read only in a stops form run.mjs writes, any other 
     lists({ added: [{ ...stop, base: [1] }] }),
     lists({ added: [{ ...stop, base: [1, 2.5] }] }),
     lists({ added: [{ ...stop, base: null }] }),
+    // (key sets compared by their names and count, never by a joined text)
+    { "added moved removed": [] },
+    { listsEqual: true, extra: 1 },
+    lists({ added: [{ ...stop, extra: 1 }] }),
+    lists({ added: [{ label: "r", path: "x", base: [1, 2] }] }),
   ])
     assert.equal(areaRecordForm({ ...difference, stops }), "unread", JSON.stringify(stops));
 });

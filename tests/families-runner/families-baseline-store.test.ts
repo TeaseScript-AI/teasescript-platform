@@ -681,7 +681,8 @@ test("the check and the baselines take one set of areas: each folder of tests/fa
 });
 
 // (each source's stops on each tree: a place that stops at another pass, one the head alone stops, one the base
-// alone stops, and stops alike where the stop set differs in another field; names in no order of the property)
+// alone stops, and stops alike where the stop set differs in another field; names in no order of the property; and a
+// tree whose run holds no stop list, `undefined` here: an oracle without them, or the head's unparsed run)
 const stopsOf = (head: boolean) => ({
   moved: [[head ? 2 : 1, "r", "x", 2]],
   added: head
@@ -705,11 +706,16 @@ const stopsOf = (head: boolean) => ({
         [1, "p", "z", 1],
         [2, "p", "z", 1],
       ],
+  "head without": head ? undefined : [[1, "r", "x", 1]],
+  "base without": head ? [[1, "r", "x", 1]] : undefined,
+  "head unparsed": head ? undefined : [[1, "r", "x", 1]],
 });
 const stopsLibrary = (head: boolean) => `
 export function stopSet(files) {
   const source = files[0].source;
-  return { stops: ${JSON.stringify(stopsOf(head))}[source], passes: 1, restarts: 0, outcome: "complete",
+  if (${head} && source === "head unparsed") return null;
+  const stops = ${JSON.stringify(stopsOf(head))}[source];
+  return { ...(stops === undefined ? {} : { stops }), passes: 1, restarts: 0, outcome: "complete",
 exhausted: null, record: ${head} && source === "fields" ? "other" : "same" };
 }
 `;
@@ -725,7 +731,16 @@ test("a stops run's decision stops are classified where both trees ran, never st
     );
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
-    const names = ["moved", "added", "removed", "fields", "restarted"];
+    const names = [
+      "moved",
+      "head without",
+      "added",
+      "base without",
+      "removed",
+      "fields",
+      "head unparsed",
+      "restarted",
+    ];
     const tree = (name: string, sha: string, head: boolean) => {
       const folder = join(directory, name);
       mkdirSync(join(folder, "dist", "tests", "helpers"), { recursive: true });
@@ -762,7 +777,11 @@ test("a stops run's decision stops are classified where both trees ran, never st
     const stopsBy = (kept: Record<string, unknown>[]) =>
       Object.fromEntries(kept.map(({ source, stops }) => [source, stops]));
 
-    // both trees run: each stop by its place, on the tree that has it
+    // (why the stops are unavailable, as run.mjs says it, for each side that holds no list)
+    const baseNone =
+      "the base's run holds no stop list (a stored run never does): a run of the differing sources on two trees whose oracles list stops gives it";
+    const headNone = "the head's run holds no stop list";
+    // both trees run: each stop by its place, on the tree that has it; a side without a list named, never equal
     const beside = run(base, head);
     assert.equal(beside.status, 1, beside.stderr);
     assert.deepEqual(stopsBy(beside.kept), {
@@ -787,6 +806,9 @@ test("a stops run's decision stops are classified where both trees ran, never st
         removed: [{ label: "p", path: "z", base: [1, 1], head: null }],
         moved: [],
       },
+      "head without": { unavailable: headNone },
+      "base without": { unavailable: baseNone },
+      "head unparsed": { unavailable: headNone },
     });
     const apart = "difference: stops natural apart;";
     assert.deepEqual(readBack(beside.kept), {
@@ -795,6 +817,9 @@ test("a stops run's decision stops are classified where both trees ran, never st
       removed: `${apart} stops added 0; removed 1: q:y (base pass 1 ordinal 3, head none); moved 0`,
       fields: `${apart} its stop lists equal, the stop set's other fields apart`,
       restarted: `${apart} stops added 0; removed 1: p:z (base pass 1 ordinal 1, head none); moved 0`,
+      "head without": `${apart} which stops: unavailable (${headNone})`,
+      "base without": `${apart} which stops: unavailable (${baseNone})`,
+      "head unparsed": `${apart} which stops: unavailable (${headNone})`,
     });
 
     // stored: no stops in any stored run (the writer checks each line as every reader does, and the head's run below
@@ -816,24 +841,20 @@ test("a stops run's decision stops are classified where both trees ran, never st
     const values = lines.flatMap(({ runs }) => Object.values(runs ?? {}).map(({ value }) => value));
     assert.equal(values.length, names.length * 4 * 3);
     assert.ok(values.every((value) => !Object.hasOwn(value, "stops")));
-    // the head against the store: a difference whose stops say the base holds no list, never equal
+    // the head against the store: a difference whose stops say the base holds no list, and the head too where it holds
+    // none, never equal
     const against = run(head, "--baseline", join(root, src!, "area"));
     assert.equal(against.status, 1, against.stderr);
-    const unavailable = {
-      unavailable:
-        "the base's run holds no stop list (a stored run never does): a run of the differing sources on two trees gives it",
-    };
+    const why = (name: string) =>
+      name.startsWith("head ") ? `${baseNone}; ${headNone}` : baseNone;
     assert.deepEqual(
       stopsBy(against.kept),
-      Object.fromEntries(names.map((name) => [name, unavailable])),
+      Object.fromEntries(names.map((name) => [name, { unavailable: why(name) }])),
     );
     assert.deepEqual(
       readBack(against.kept),
       Object.fromEntries(
-        names.map((name) => [
-          name,
-          `${apart} which stops: unavailable (${unavailable.unavailable})`,
-        ]),
+        names.map((name) => [name, `${apart} which stops: unavailable (${why(name)})`]),
       ),
     );
   } finally {
