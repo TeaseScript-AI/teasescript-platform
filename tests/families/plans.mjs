@@ -32,10 +32,11 @@
 // the worker's port.
 // `summary` classifies the records per set, source and mode (`modes`, each with its demand, stop and questions runs):
 // identical; work only (the plan, the diagnostics, the error and the questions equal, the charge trace not); a question
-// sequence apart; a publication difference; unavailable, where a part is unrecorded; at a demand allowance apart, each
-// row in the same one class and named by every part apart, with which tree's output the allowance stops against that
-// tree's own unstopped compile (#2341); for the held family, a stop set or a stopped compile apart, each by its parts,
-// and the analysis's units apart; and lists each with the stalled and uncharged sources. A record from
+// sequence apart; a publication difference; at a demand allowance apart, each row in the same one class and named by
+// every part apart, with which tree's output the allowance stops against that tree's own unstopped compile (#2341); for
+// the held family, a stop set or a stopped compile apart, each by its parts, and the analysis's units apart; and lists
+// each with the stalled and uncharged sources. It reads only records it has proved one of the forms the runner writes
+// (`recordFault`): any other line refuses the input, exit 2, naming its file, line and fault. A record from
 // before #2342 names its mode by a number, its index in `HELD_MODES` at the commit that wrote it: printed as that number,
 // never translated, with one line that says so.
 import { createHash } from "node:crypto";
@@ -67,44 +68,168 @@ const PARTS = [
 /** The parts that make a publication: what a compile emits, as against what it asks and charges. */
 const OUTPUT = new Set(["plan", "diagnostics", "error"]);
 
-/**
- * The parts in which two compiles of a record differ, by their printed names; `null` where either lacks one (#2341: an
- * unrecorded part is never equal).
- */
+/** The parts in which two compiles of a record (each proved by `recordFault`) differ, by their printed names. */
 function partsApart(b, h) {
-  if (PARTS.some(([field]) => b?.[field] === undefined || h?.[field] === undefined)) return null;
   return PARTS.filter(([field]) => b[field] !== h[field]).map(([, name]) => name);
 }
 
 /**
  * A difference's one class, by precedence: `publication` where the output differs (whatever else does), else
- * `questions`, else `work`; `unavailable` where a part is unrecorded or none differs.
+ * `questions`, else `work`.
  */
 function classOf(parts) {
-  if (parts === null || parts.length === 0) return "unavailable";
   if (parts.some((part) => OUTPUT.has(part))) return "publication";
   return parts.includes("questions") ? "questions" : "work";
+}
+
+const whole = (value) => Number.isInteger(value) && value >= 0;
+const text = (value) => typeof value === "string";
+const textOrNull = (value) => value === null || text(value);
+/** Whether `value` is an object with every key of `required` and no key outside `required` and `optional`. */
+const shaped = (value, required, optional = []) =>
+  value !== null &&
+  typeof value === "object" &&
+  !Array.isArray(value) &&
+  required.every((key) => Object.hasOwn(value, key)) &&
+  Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
+/** A mode as a record names it: a `HeldMode` name, or before #2342 its index, 0 to 3. */
+const modeName = (mode) =>
+  (text(mode) && mode !== "") || (Number.isInteger(mode) && mode >= 0 && mode < 4);
+
+/** Why `c` is no compile `compile` writes, else undefined. */
+function compileFault(c) {
+  if (!shaped(c, ["plan", "diagnostics", "checks", "error", "trace", "questions", "units"]))
+    return "a compile without exactly its seven parts";
+  if (!textOrNull(c.plan) || !textOrNull(c.diagnostics) || !textOrNull(c.error))
+    return "a compile's plan, diagnostics or error neither text nor null";
+  if (!text(c.trace) || !/^\d+\/\d+\/[0-9a-f]+$/.test(c.trace))
+    return "a compile's trace not n/units/hash";
+  if (!text(c.questions) || !/^\d+\/[0-9a-f]+$/.test(c.questions))
+    return "a compile's questions not n/hash";
+  if (!whole(c.checks) || !whole(c.units)) return "a compile's checks or units no whole number";
+  return undefined;
+}
+
+/** Why `pair` (`{base, head}` and the `fields` it also holds) is no pair the runner writes, else undefined. */
+function pairFault(pair, fields, differing) {
+  if (!shaped(pair, ["base", "head", ...Object.keys(fields)]))
+    return `a compared pair without exactly ${["base", "head", ...Object.keys(fields)].join(", ")}`;
+  for (const [field, proved] of Object.entries(fields))
+    if (!proved(pair[field])) return `a compared pair's ${field} not one the runner writes`;
+  const fault = compileFault(pair.base) ?? compileFault(pair.head);
+  if (fault !== undefined) return fault;
+  // (the runner keeps a demand, stop or questions-phase pair only where its compiles differ)
+  if (differing && partsApart(pair.base, pair.head).length === 0)
+    return "a pair kept as differing whose compiles do not differ";
+  return undefined;
+}
+
+const listOf = (value, fault) =>
+  Array.isArray(value) ? value.map(fault).find((each) => each !== undefined) : "no list";
+
+/**
+ * Why a records line is not one `plans.mjs` writes (#2341, under the lead's ruling R13 on #2364's plan), else undefined:
+ * the closed set of its forms, a source's (its runs, or a stall or a safety net reached) with its modes, compiles and
+ * pairs. `summary` reads nothing it has not proved.
+ */
+function recordFault(r) {
+  if (
+    !shaped(
+      r,
+      ["set", "name"],
+      ["key", "runs", "differing", "modes", "stalled", "uncharged", "run", "work", "allowance"],
+    )
+  )
+    return "no source record";
+  if (!text(r.set) || !text(r.name)) return "a set or name that is no text";
+  if (r.key !== undefined && !(text(r.key) && /^[0-9a-f]{64}$/.test(r.key)))
+    return "a key that is no sha256";
+  const ends = ["stalled", "uncharged"].filter((key) => r[key] !== undefined);
+  if (ends.length > 0) {
+    if (ends.length > 1 || !text(r[ends[0]])) return "a stall that is not one text";
+    if (["runs", "differing", "modes"].some((key) => r[key] !== undefined))
+      return "a stall that also holds runs";
+    const run = r.run;
+    if (
+      run !== null &&
+      !(
+        shaped(run, ["tree", "mode", "at"], ["analysis"]) &&
+        ["base", "head"].includes(run.tree) &&
+        modeName(run.mode) &&
+        text(run.at) &&
+        (run.analysis === undefined || whole(run.analysis))
+      )
+    )
+      return "a stall's run not one the runner names";
+    if (["work", "allowance"].some((key) => r[key] !== undefined && !whole(r[key])))
+      return "a stall's work or allowance no whole number";
+    return undefined;
+  }
+  if (["run", "work", "allowance"].some((key) => r[key] !== undefined))
+    return "a run's stall fields without a stall";
+  if (!whole(r.runs) || !whole(r.differing)) return "runs or differing no whole number";
+  if (!Array.isArray(r.modes) || r.modes.length === 0) return "no modes";
+  if (new Set(r.modes.map((m) => m?.mode)).size !== r.modes.length) return "a mode twice";
+  for (const m of r.modes) {
+    if (!shaped(m, ["mode", "base", "head", "same"], ["demands", "stops", "questions"]))
+      return "a mode not one the runner writes";
+    if (!modeName(m.mode)) return "a mode named neither by a name nor by an index 0 to 3";
+    const fault =
+      pairFault({ base: m.base, head: m.head }, {}, false) ??
+      (m.demands === undefined
+        ? undefined
+        : listOf(m.demands, (d) => pairFault(d, { demand: (n) => whole(n) && n > 0 }, true))) ??
+      stopsFault(m.stops) ??
+      questionsFault(m.questions);
+    if (fault !== undefined) return fault;
+    if (typeof m.same !== "boolean" || m.same !== (partsApart(m.base, m.head).length === 0))
+      return "same that is not whether the compiles' parts are equal";
+  }
+  return undefined;
+}
+
+/** Why a mode's `stops` is not one the runner writes, else undefined. */
+function stopsFault(stops) {
+  if (stops === undefined) return undefined;
+  if (!shaped(stops, ["count", "sameSet", "differ"])) return "stops not one the runner writes";
+  if (!whole(stops.count) || typeof stops.sameSet !== "boolean")
+    return "stops' count or sameSet malformed";
+  return listOf(stops.differ, (d) =>
+    pairFault(d, { allowance: (n) => whole(n) && n > 0, phase: text }, true),
+  );
+}
+
+/** Why a mode's `questions` (the questions phase) is not one the runner writes, else undefined. */
+function questionsFault(q) {
+  if (q === undefined) return undefined;
+  if (!shaped(q, ["analysis", "analysisHead", "compile", "sampled", "differ"]))
+    return "questions phase not one the runner writes";
+  if (
+    ![q.analysis, q.analysisHead].every((n) => n === null || whole(n)) ||
+    !whole(q.compile) ||
+    !whole(q.sampled)
+  )
+    return "questions phase's units malformed";
+  return listOf(q.differ, (d) => pairFault(d, { allowance: (n) => whole(n) && n > 0 }, true));
 }
 
 /**
  * A demand row as #2341 reads it: its parts apart, its class, and for each tree the parts in which its compile at the
  * allowance differs from that tree's own unstopped compile in the mode (`natural`), so that which tree the allowance
- * stops, by its output, is a fact of the record: `base`, `head`, `both`, `neither`, or `unavailable`.
+ * stops, by its output, is a fact of the record: `base`, `head`, `both` or `neither`.
  */
 function demandRow(d, natural) {
   const parts = partsApart(d.base, d.head);
   const own = { base: partsApart(natural.base, d.base), head: partsApart(natural.head, d.head) };
-  const stops = (side) => own[side] !== null && own[side].some((part) => OUTPUT.has(part));
+  const stops = (side) => own[side].some((part) => OUTPUT.has(part));
   const stopped =
-    own.base === null || own.head === null
-      ? "unavailable"
-      : stops("base") && stops("head")
-        ? "both"
-        : stops("base")
-          ? "base"
-          : stops("head")
-            ? "head"
-            : "neither";
+    stops("base") && stops("head")
+      ? "both"
+      : stops("base")
+        ? "base"
+        : stops("head")
+          ? "head"
+          : "neither";
   return { parts, kind: classOf(parts), own, stopped };
 }
 
@@ -124,17 +249,14 @@ function summarize(files, limit) {
         workHigher: 0,
         questions: 0,
         publication: 0,
-        unavailable: 0,
         demand: 0,
         demandPublication: 0,
         demandQuestions: 0,
         demandWork: 0,
-        demandUnavailable: 0,
         demandStopsBase: 0,
         demandStopsHead: 0,
         demandStopsBoth: 0,
         demandStopsNeither: 0,
-        demandStopsUnavailable: 0,
         stopSet: 0,
         stoppedCompile: 0,
         analysisApart: 0,
@@ -143,12 +265,25 @@ function summarize(files, limit) {
       });
     sets.get(set)[key] += 1;
   };
-  const rows = files.flatMap((file) =>
-    readFileSync(file, "utf8")
-      .split("\n")
-      .filter((line) => line.startsWith("{"))
-      .map((line) => JSON.parse(line)),
-  );
+  // (every line proved before any is read: one that is not a record `plans.mjs` writes refuses the input, R13)
+  const rows = [];
+  for (const file of files)
+    for (const [at, line] of readFileSync(file, "utf8").split("\n").entries()) {
+      if (line === "") continue;
+      let record;
+      let fault;
+      try {
+        record = JSON.parse(line);
+        fault = recordFault(record);
+      } catch (error) {
+        fault = `no JSON (${error.message})`;
+      }
+      if (fault !== undefined) {
+        process.stderr.write(`plans.mjs summary: ${file}:${at + 1}: ${fault}\n`);
+        process.exit(2);
+      }
+      rows.push(record);
+    }
   for (const r of rows) {
     bump(r.set, "sources");
     if (r.stalled !== undefined || r.uncharged !== undefined) {
@@ -175,11 +310,6 @@ function summarize(files, limit) {
         bump(r.set, "workOnly");
         bump(r.set, h.units < b.units ? "workLower" : "workHigher");
         listed.push(`${at}: work ${b.units} → ${h.units}`);
-      } else if (kind === "unavailable") {
-        bump(r.set, "unavailable");
-        listed.push(
-          `${at}: unavailable (a part unrecorded, or none apart where the record says so)`,
-        );
       } else {
         bump(r.set, "publication");
         const sign = (x, y) => (x === y ? "=" : "≠");
@@ -188,7 +318,7 @@ function summarize(files, limit) {
             `error ${b.error} → ${h.error}, units ${b.units} → ${h.units}`,
         );
       }
-      const list = (parts) => (parts === null ? "unrecorded" : parts.join(", ") || "none");
+      const list = (parts) => parts.join(", ") || "none";
       for (const d of m.demands ?? []) {
         bump(r.set, "demand");
         const row = demandRow(d, m);
