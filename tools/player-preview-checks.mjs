@@ -256,10 +256,16 @@ async function mediaPlaybackChecks(page) {
   );
   await panelNotice.getByRole("button", { name: "Enable audio", exact: true }).click();
   // After it, a story element plays: audibly, with measured progress, and the Player then releases it.
-  await page.waitForFunction(() => {
-    window.__story ??= window.__played.find((element) => element.currentTime > 0.2);
-    return window.__story !== undefined;
-  });
+  await page
+    .waitForFunction(() => {
+      window.__story ??= window.__played.find((element) => element.currentTime > 0.2);
+      return window.__story !== undefined;
+    })
+    .catch((error) => {
+      throw new Error("No admitted story audio exceeded 0.2 s after Enable audio.", {
+        cause: error,
+      });
+    });
   await retry.waitFor({ state: "hidden" });
   check(
     await page.evaluate(() => !window.__story.muted && window.__story.volume > 0),
