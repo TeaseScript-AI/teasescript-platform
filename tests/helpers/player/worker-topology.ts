@@ -37,7 +37,82 @@ import type { PlayerSession } from "../../../player/runtime/runtime-view.js";
  */
 
 export type Topology = "in-process" | "worker";
-export const TOPOLOGIES: readonly Topology[] = ["in-process", "worker"];
+
+/*
+ * Two settings of a run, read once when this module loads (docs/TESTING.md "Worker-topology settings"):
+ * - `PLAYER_TEST_TOPOLOGY`: `both` (the default) or `worker`. With `worker`, `TOPOLOGIES` and every registry's rows are
+ *   the Worker's only, and an in-process-only case is not owed.
+ * - `PLAYER_TEST_WORKER_DELAY_MS`: a whole number of milliseconds (default 0) by which every message from a Worker
+ *   reaches its client late, in the order the Worker sent it (`delayedDelivery`).
+ */
+
+/** The topologies `setting` selects: `both` or empty for both, `worker` for the Worker's; anything else is refused. */
+export function selectedTopologies(setting: string | undefined): readonly Topology[] {
+  if (setting === undefined || setting === "" || setting === "both")
+    return ["in-process", "worker"];
+  if (setting === "worker") return ["worker"];
+  throw new Error(`PLAYER_TEST_TOPOLOGY is both or worker, not ${JSON.stringify(setting)}.`);
+}
+
+/** The delay `setting` gives every message from a Worker: a whole number of milliseconds, 0 when empty. */
+export function workerDelayMs(setting: string | undefined): number {
+  if (setting === undefined || setting === "") return 0;
+  const ms = /^\d+$/u.test(setting) ? Number(setting) : Number.NaN;
+  if (!Number.isSafeInteger(ms))
+    throw new Error(
+      `PLAYER_TEST_WORKER_DELAY_MS is a whole number of milliseconds, not ${JSON.stringify(setting)}.`,
+    );
+  return ms;
+}
+
+export const TOPOLOGIES: readonly Topology[] = selectedTopologies(
+  process.env["PLAYER_TEST_TOPOLOGY"],
+);
+const WORKER_DELAY_MS = workerDelayMs(process.env["PLAYER_TEST_WORKER_DELAY_MS"]);
+
+// The real timer and monotonic clock, as this module loads: a test that mocks timers, `Date` or `performance` later
+// neither moves nor holds a delayed delivery.
+const realSetTimeout = globalThis.setTimeout;
+const realClearTimeout = globalThis.clearTimeout;
+const monotonicMs = () => Number(process.hrtime.bigint() / 1_000_000n);
+
+/**
+ * Runs each callback given to `run` `delayMs` after it was given, in the order given, on the real timer; at 0, at once.
+ * Each runs in a task of its own, as each of a Worker's events does, so the promise work one starts settles before the
+ * next. `cancel` drops the callbacks not yet run and every later one, so none runs after the test that owned them.
+ */
+export function delayedDelivery(delayMs: number) {
+  const queue: { readonly due: number; readonly deliver: () => void }[] = [];
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let cancelled = false;
+  const schedule = () => {
+    if (timer === null && queue.length > 0)
+      timer = realSetTimeout(drain, Math.max(0, queue[0]!.due - monotonicMs()));
+  };
+  const drain = () => {
+    timer = null;
+    try {
+      if (queue.length > 0 && queue[0]!.due <= monotonicMs()) queue.shift()!.deliver();
+    } finally {
+      schedule();
+    }
+  };
+  return {
+    run(deliver: () => void): void {
+      if (cancelled) return;
+      if (delayMs === 0) return deliver();
+      queue.push({ due: monotonicMs() + delayMs, deliver });
+      schedule();
+    },
+    cancel(): void {
+      cancelled = true;
+      queue.length = 0;
+      if (timer !== null) realClearTimeout(timer);
+      timer = null;
+    },
+    pending: (): number => queue.length,
+  };
+}
 
 /** A request the client posted, as it reached the port, with the page's clock then (`performance.now()`). */
 export interface Posted {
@@ -104,8 +179,11 @@ export async function inProcessBackend(
 const HOST_MS = 30_000;
 
 /**
- * Whether a wait on the engine's host that began now may still go on: for `HOST_MS`, on the process's monotonic clock,
- * which no test mocks as it does `Date` and `performance`. For `until`, and for a wait that steps a mocked clock itself.
+ * Whether a wait on the engine's host that began now may still go on: for `HOST_MS`, on the process's monotonic clock
+ * (`process.hrtime`), which no test mocks as it does `Date`, `performance` and timers. Make it once per wait, outside
+ * its loop: one made again each round renews the allowance without end. It neither waits nor fails: its caller yields
+ * to real time between checks, so a Worker's messages arrive, and fails with its own label. For `until`, and for a wait
+ * that steps a mocked clock itself. A test's several host waits still share the runner's limit per test.
  */
 export function withinHostTime(): () => boolean {
   const deadline = process.hrtime.bigint() + BigInt(HOST_MS) * 1_000_000n;
@@ -113,9 +191,16 @@ export function withinHostTime(): () => boolean {
 }
 
 /**
- * Waits, in short real-time turns, until `check` holds, and fails with `label` if it never does. A wait `on` an
- * in-process `"step"` gives up after 1,000 turns. A wait `on` the `"host"`, whose reply or publication makes `check`
- * hold and may still be under way when the wait starts, gives up after `HOST_MS` of real time (`withinHostTime`).
+ * Waits, in short real-time turns, until `check` holds, and fails with `never: <label>` if it never does. `on` says
+ * what `check` depends on, chosen by that dependency, not by the topology or by how fast it was seen to hold:
+ * - `"step"`: local work only, once every host reply or publication it needs has arrived; it gives up after 1,000 turns.
+ * - `"host"`: a reply or publication of the engine's host that may still be under way, a held one included; it gives up
+ *   after `HOST_MS` of real time (`withinHostTime`).
+ *
+ * A `"step"` wait that does depend on the host usually holds at once, and fails `never: <label>` on a slow runner or
+ * under the delayed challenge (docs/TESTING.md "Worker-topology settings"), which is how the wrong choice shows. A
+ * request that was never made is not found by a longer bound. Its turns run on real timers, so a test that mocks
+ * `setTimeout` cannot use it; a loop that steps a mocked clock uses `withinHostTime` instead.
  */
 export async function until(
   check: () => boolean,
@@ -198,11 +283,23 @@ export async function topologyBridge(
   {
     delayMs,
     entry = "engine",
-  }: { readonly delayMs?: number; readonly entry?: keyof typeof WORKERS } = {},
+    workerDelayMs = WORKER_DELAY_MS,
+  }: {
+    readonly delayMs?: number;
+    readonly entry?: keyof typeof WORKERS;
+    readonly workerDelayMs?: number;
+  } = {},
 ): Promise<TopologyBridge> {
   assert.ok(client && bridgeModule && facade, "call loadTopology first");
-  const made = topology === "worker" ? await onWorker(WORKERS[entry]) : inProcess(delayMs);
-  context.after(() => made.bridge.client.terminate());
+  const delivery = delayedDelivery(topology === "worker" ? workerDelayMs : 0);
+  const made =
+    topology === "worker" ? await onWorker(WORKERS[entry], delivery) : inProcess(delayMs);
+  // A delivery received before the test's end still reaches the client through the test's own loss, release and
+  // waits; at its end, those not yet delivered are dropped.
+  context.after(() => {
+    made.bridge.client.terminate();
+    delivery.cancel();
+  });
   const assertTopology = () => {
     if (topology === "worker")
       assert.ok(
@@ -358,21 +455,27 @@ function inProcess(
   };
 }
 
-async function onWorker(entry: URL): Promise<Omit<TopologyBridge, "topology" | "assertTopology">> {
+async function onWorker(
+  entry: URL,
+  delivery: ReturnType<typeof delayedDelivery>,
+): Promise<Omit<TopologyBridge, "topology" | "assertTopology">> {
   const worker = new Worker(entry, { workerData: { build: BUILD } });
   const exited = new Promise<number>((resolve) => worker.once("exit", resolve));
   let messages = 0;
+  // A failure takes its place in the same order as the messages: a reply the Worker sent before it ended reaches the
+  // client before the loss does.
   const { port, posts, hold, held, release } = gatedPort({
     post: (message) => worker.postMessage(message),
     listen: (listener) =>
       void worker.on("message", (data: unknown) => {
         messages += 1;
-        listener(data);
+        delivery.run(() => listener(data));
       }),
     onFailure: (listener) => {
-      worker.on("error", listener);
-      worker.on("messageerror", listener);
-      worker.on("exit", (code) => listener(new Error(`The worker exited with code ${code}.`)));
+      const fail = (error: Error) => delivery.run(() => listener(error));
+      worker.on("error", fail);
+      worker.on("messageerror", fail);
+      worker.on("exit", (code) => fail(new Error(`The worker exited with code ${code}.`)));
     },
     terminate: () => void worker.terminate(),
   });
@@ -415,8 +518,11 @@ export class RowEnd {
  * assertions in a branch without returning, completes its row. Only a reading of the body shows those.
  */
 export function rerunRegistry<Id extends string>(cases: Readonly<Record<Id, readonly Topology[]>>) {
+  // Only the selected topologies' rows are made and owed (`PLAYER_TEST_TOPOLOGY`).
+  const selected = (topologies: readonly Topology[]) =>
+    topologies.filter((topology) => TOPOLOGIES.includes(topology));
   const feasible: Coordinates[] = Object.entries<readonly Topology[]>(cases).flatMap(
-    ([id, topologies]) => topologies.map((topology) => ({ case: id, topology })),
+    ([id, topologies]) => selected(topologies).map((topology) => ({ case: id, topology })),
   );
   const completed: Coordinates[] = [];
   const registered = new Set<Id>();
@@ -432,7 +538,7 @@ export function rerunRegistry<Id extends string>(cases: Readonly<Record<Id, read
       // One registration per case: a second would complete the first's coordinates in its place.
       assert.ok(!registered.has(id), `the case ${id} is registered twice`);
       registered.add(id);
-      for (const topology of cases[id])
+      for (const topology of selected(cases[id]))
         test(`${name} (${topology})`, async (context) => {
           const token = new RowEnd(`${id} (${topology})`);
           const returned = await body(context, topology, () => token);
