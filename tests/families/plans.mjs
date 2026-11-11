@@ -219,10 +219,52 @@ function recordFault(r) {
 /** Why a mode's `stops` is not one the runner writes, else undefined. */
 function stopsFault(stops) {
   if (stops === undefined) return undefined;
-  if (!shaped(stops, ["count", "sameSet", "differ"])) return "stops not one the runner writes";
+  // (a held case whose base compile failed, #2340)
+  if (shaped(stops, ["unavailable"]))
+    return text(stops.unavailable) ? undefined : "stops unavailable without its reason";
+  if (!shaped(stops, ["count", "sameSet", "differ"], ["base", "head"]))
+    return "stops not one the runner writes";
   if (!whole(stops.count) || typeof stops.sameSet !== "boolean")
     return "stops' count or sameSet malformed";
+  // (both trees' lists, where the sets differ, #2340; none in a record from before it)
+  const lists = ["base", "head"].filter((side) => stops[side] !== undefined);
+  if (lists.length === 1) return "one tree's stop list without the other's";
+  if (lists.length === 2) {
+    if (stops.sameSet) return "stop lists kept for a stop set the same on both trees";
+    const fault = stopListFault(stops.base) ?? stopListFault(stops.head);
+    if (fault !== undefined) return fault;
+    if (stops.count !== stops.base.length) return "a count that is not the base's stops";
+    if (JSON.stringify(stops.base) === JSON.stringify(stops.head))
+      return "stop lists equal where the sets differ";
+  }
   return listOf(stops.differ, (d) => pairFault(d, { allowance: allowanceOf, phase: text }, true));
+}
+
+/**
+ * Why `list` is no list of settled stops as `heldStops(…, 1)` gives it, else undefined: `{allowance, phase}` objects,
+ * positive whole allowances, each phase one block of consecutive ascending allowances (`phaseEnds`' ranges).
+ */
+function stopListFault(list) {
+  if (!Array.isArray(list)) return "a stop list that is no list";
+  const ended = new Set();
+  let last;
+  for (const stop of list) {
+    if (
+      !shaped(stop, ["allowance", "phase"]) ||
+      !(whole(stop.allowance) && stop.allowance > 0) ||
+      !text(stop.phase)
+    )
+      return "a stop that is no {allowance, phase} with a positive whole allowance";
+    if (last?.phase === stop.phase) {
+      if (stop.allowance !== last.allowance + 1)
+        return "a phase whose allowances are not consecutive and ascending";
+    } else {
+      if (last !== undefined) ended.add(last.phase);
+      if (ended.has(stop.phase)) return "a phase in two blocks";
+    }
+    last = stop;
+  }
+  return undefined;
 }
 
 /** Why a mode's `questions` (the questions phase) is not one the runner writes, else undefined. */
@@ -259,6 +301,45 @@ function demandRow(d, natural) {
   return { parts, kind: classOf(parts), own, stopped };
 }
 
+/**
+ * What differs between two trees' settled stops (`stops.base`, `stops.head`, #2340, each proved by `stopListFault`), a
+ * stop known by its phase: a phase on the head alone is `added`, on the base alone `removed`, on both at other
+ * allowances `moved`; each with both trees' allowances in that phase. Known limit: a stop that changes phase over an
+ * overlapping allowance range reads as one removed and one added. `null` where the record holds no lists (one from
+ * before #2340), never equal.
+ */
+function stopMoves({ base, head }) {
+  if (base === undefined) return null;
+  const byPhase = (list) => {
+    const phases = new Map();
+    for (const stop of list) {
+      if (!phases.has(stop.phase)) phases.set(stop.phase, []);
+      phases.get(stop.phase).push(stop.allowance);
+    }
+    return phases;
+  };
+  const [b, h] = [byPhase(base), byPhase(head)];
+  return [...new Set([...b.keys(), ...h.keys()])].flatMap((phase) => {
+    const [was, is] = [b.get(phase) ?? [], h.get(phase) ?? []];
+    if (JSON.stringify(was) === JSON.stringify(is)) return [];
+    const kind = was.length === 0 ? "added" : is.length === 0 ? "removed" : "moved";
+    return [{ phase, kind, base: was, head: is }];
+  });
+}
+
+/** Allowances as runs of consecutive ones (`5..7, 9`), or `none`. */
+const runsOf = (allowances) => {
+  const runs = [];
+  for (const allowance of allowances) {
+    const last = runs.at(-1);
+    if (last !== undefined && allowance === last[1] + 1) last[1] = allowance;
+    else runs.push([allowance, allowance]);
+  }
+  return runs.length === 0
+    ? "none"
+    : runs.map(([low, high]) => (low === high ? `${low}` : `${low}..${high}`)).join(", ");
+};
+
 /** The records' classification (`summary`): one line per set, then each difference, stall and safety net reached. */
 function summarize(files, limit) {
   const sets = new Map();
@@ -284,6 +365,10 @@ function summarize(files, limit) {
         demandStopsBoth: 0,
         demandStopsNeither: 0,
         stopSet: 0,
+        stopsAdded: 0,
+        stopsRemoved: 0,
+        stopsMoved: 0,
+        stopsUnavailable: 0,
         stoppedCompile: 0,
         analysisApart: 0,
         stalled: 0,
@@ -360,12 +445,29 @@ function summarize(files, limit) {
             `(unstopped/at the allowance), units ${d.base.units} → ${d.head.units}`,
         );
       }
-      if (m.stops !== undefined) {
+      if (m.stops?.unavailable !== undefined) {
+        bump(r.set, "stopsUnavailable");
+        listed.push(`${at}: stop set unavailable (${m.stops.unavailable})`);
+      } else if (m.stops !== undefined) {
         if (!m.stops.sameSet) {
           bump(r.set, "stopSet");
           listed.push(`${at}: STOP SET apart (main ${m.stops.count} stops)`);
+          const moves = stopMoves(m.stops);
+          if (moves === null || moves.length === 0) {
+            bump(r.set, "stopsUnavailable");
+            listed.push(
+              `${at}: which stops moved is unavailable (${moves === null ? "no stop lists recorded, a record from before #2340" : "the lists differ, no phase does"})`,
+            );
+          }
+          for (const move of moves ?? []) {
+            bump(r.set, `stops${move.kind[0].toUpperCase()}${move.kind.slice(1)}`);
+            listed.push(
+              `${at}: stop phase ${JSON.stringify(move.phase)} ${move.kind}: base ${runsOf(move.base)} ` +
+                `(${move.base.length}), head ${runsOf(move.head)} (${move.head.length})`,
+            );
+          }
         }
-        for (const d of m.stops.differ) {
+        for (const d of m.stops.differ ?? []) {
           bump(r.set, "stoppedCompile");
           listed.push(
             `${at}: stopped compile at ${d.allowance} (${d.phase}) apart: ${list(partsApart(d.base, d.head))}`,
@@ -861,6 +963,11 @@ if (isMainThread && process.argv[2] === "summary") {
         }
       }
       const c = heldCases?.get(unit.name);
+      // (a held case whose base compile fails has no stop search: said so, never left out, #2340)
+      if (stops && c?.slice && b.error !== null)
+        entry.stops = {
+          unavailable: `the base's unstopped compile failed: ${b.error}`.slice(0, 300),
+        };
       if (stops && c?.slice && b.error === null) {
         const list = searched(base, c, mode);
         const headList = searched(head, c, headMode);
@@ -869,6 +976,8 @@ if (isMainThread && process.argv[2] === "summary") {
           sameSet: JSON.stringify(list) === JSON.stringify(headList),
           differ: [],
         };
+        // (both trees' stops where they differ, for the summary to say which phase each tree added, removed or moved)
+        if (!entry.stops.sameSet) Object.assign(entry.stops, { base: list, head: headList });
         if (!entry.stops.sameSet) record.differing += 1;
         for (const { allowance, phase } of list) {
           const [sb, sh] = [
