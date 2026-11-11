@@ -611,7 +611,7 @@ export const WORK_FAMILIES: readonly WorkFamily[] = [
   },
   {
     name: "W5",
-    measures: "§8 contract: one text-valued preset over k numeric fields",
+    measures: "contract: one text-valued preset over k numeric fields",
     program: (k) =>
       main(
         lines(
@@ -656,7 +656,7 @@ export const WORK_FAMILIES: readonly WorkFamily[] = [
   },
   {
     name: "W9",
-    measures: "§8 contract: k aliases of one preset",
+    measures: "contract: k aliases of one preset",
     program: (k) =>
       main(
         lines(
@@ -670,7 +670,7 @@ export const WORK_FAMILIES: readonly WorkFamily[] = [
   },
   {
     name: "W10",
-    measures: "§8 contract: a list literal of k copies of one record",
+    measures: "contract: a list literal of k copies of one record",
     program: (k) =>
       main(
         lines(
@@ -713,7 +713,7 @@ export const WORK_FAMILIES: readonly WorkFamily[] = [
   })),
   {
     name: "W15",
-    measures: "§8 contract: k presets of one seed, each changing sparse fields",
+    measures: "contract: k presets of one seed, each changing sparse fields",
     program: (k) =>
       main(
         lines(
@@ -748,7 +748,7 @@ export const WORK_FAMILIES: readonly WorkFamily[] = [
   },
   ...([1, 2] as const).map((depth) => ({
     name: depth === 1 ? "W17-one" : "W17-two",
-    measures: "§8 literal index: k records with distinct fields below shared properties",
+    measures: "literal index: k records with distinct fields below shared properties",
     program: (k: number) =>
       main(
         lines(
@@ -765,12 +765,12 @@ export const WORK_FAMILIES: readonly WorkFamily[] = [
   })),
   ...(["sources", "record"] as const).map((variant) => ({
     name: `W19-${variant}`,
-    measures: "§3.2: k guarded copies of one record inside a literal",
+    measures: "k guarded copies of one record inside a literal",
     program: (k: number) => main(w19(k, variant)),
   })),
   ...([true, false] as const).map((changed) => ({
     name: changed ? "W20-changed" : "W20-quiet",
-    measures: "§8: two element steps over k copies",
+    measures: "two element steps over k copies",
     program: (k: number) =>
       main(
         lines(
@@ -785,12 +785,12 @@ export const WORK_FAMILIES: readonly WorkFamily[] = [
   })),
   ...(["fields", "roots", "same"] as const).map((variant) => ({
     name: `W21-${variant}`,
-    measures: "§3.2: the guard index per tested key",
+    measures: "the guard index per tested key",
     program: (k: number) => main(w21(k, variant)),
   })),
   ...([true, false] as const).map((chained) => ({
     name: chained ? "W22-and" : "W22-separate",
-    measures: "§3.2: one `and` of k tests",
+    measures: "one `and` of k tests",
     program: (k: number) =>
       main(
         lines(
@@ -804,22 +804,22 @@ export const WORK_FAMILIES: readonly WorkFamily[] = [
   })),
   ...(["calls", "changed", "hoisted"] as const).map((variant) => ({
     name: `W23-${variant}`,
-    measures: "§8: one source identity per callee result",
+    measures: "one source identity per callee result",
     program: (k: number) => main(w23(k, variant)),
   })),
   ...W24_VARIANTS.map((variant) => ({
     name: `W24-${variant}`,
-    measures: "§8: one identity function, guard scope no identity",
+    measures: "one identity function, guard scope no identity",
     program: (k: number) => main(w24(k, variant)),
   })),
   ...(["stores", "nested", "changed", "aliases"] as const).map((variant) => ({
     name: `W25-${variant}`,
-    measures: "§8: one identity function on the store path",
+    measures: "one identity function on the store path",
     program: (k: number) => main(w25(k, variant)),
   })),
   ...(["repeated", "scope", "hoisted"] as const).map((variant) => ({
     name: `W26-${variant}`,
-    measures: "§8: provenance as a charged set",
+    measures: "provenance as a charged set",
     program: (k: number) => main(w26(k, variant)),
   })),
   ...([true, false] as const).map((registration) => ({
@@ -829,19 +829,15 @@ export const WORK_FAMILIES: readonly WorkFamily[] = [
   })),
   ...(["inside", "varied", "wrapper", "extra-alias"] as const).map((variant) => ({
     name: `W36-${variant}`,
-    measures: "§8: one mark holder per (source, projection)",
+    measures: "one mark holder per (source, projection)",
     program: (k: number) => main(w36(k, variant)),
   })),
   ...([false, true] as const).map((hoisted) => ({
     name: hoisted ? "W37-hoisted" : "W37",
-    measures: "§8: mark references compose, never copy",
+    measures: "mark references compose, never copy",
     program: (k: number) => main(w37(k, hoisted)),
   })),
-  {
-    name: "W38",
-    measures: "§8: an alias forest merged into one place",
-    program: (k) => main(w38(k)),
-  },
+  { name: "W38", measures: "an alias forest merged into one place", program: (k) => main(w38(k)) },
   ...([true, false] as const).map((registration) => ({
     name: registration ? "W39-registration" : "W39-plain",
     measures: "G1: the returnability worklist",
@@ -849,12 +845,12 @@ export const WORK_FAMILIES: readonly WorkFamily[] = [
   })),
   ...([false, true] as const).map((files) => ({
     name: files ? "W40-files" : "W40-functions",
-    measures: "§8: the holder's groups indexed by the tested path",
+    measures: "the holder's groups indexed by the tested path",
     program: (k: number) => w40(k, files),
   })),
   ...(["logical", "operands"] as const).map((variant) => ({
     name: `W40-${variant}`,
-    measures: "§8: logical-operand tests indexed at their callable",
+    measures: "logical-operand tests indexed at their callable",
     program: (k: number) => main(w40l(k, variant)),
   })),
   ...(["return", "exit", "end"] as const).map((terminal) => ({
@@ -915,7 +911,7 @@ export const W44_VARIANTS: readonly WorkFamily[] = [
   })),
   {
     name: "W44-own-values",
-    measures: "§8 r4.15: copies of an object's own `values` are one source",
+    measures: "r4.15: copies of an object's own `values` are one source",
     program: (k) =>
       main(
         lines(

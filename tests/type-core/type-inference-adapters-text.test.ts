@@ -28,7 +28,7 @@ import {
 import { OPERANDS } from "../helpers/type-core/adapter-operands.js";
 
 /**
- * Parity of the members of text with the legacy checker (work note §5.4, §6.3): every method of `TEXT_METHODS` with
+ * Parity of the members of text with the legacy checker (work note): every method of `TEXT_METHODS` with
  * its arguments written, each argument over an operand of every kind of the registry and the compound shapes, the
  * shape and domain problems the visitor reports, `length`, the members text does not have, and text among other
  * kinds of a receiver, which `members.ts` composes.

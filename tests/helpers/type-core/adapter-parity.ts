@@ -32,7 +32,7 @@ import { restrictedTo } from "../../../src/type-inference/adapters/views.js";
 import { request } from "./type-inference-graph.js";
 
 /**
- * Parity of a contract adapter with the legacy checker (O4 stage 2b, work note §6.1). A case declares both what the
+ * Parity of a contract adapter with the legacy checker (O4 stage 2b, work note). A case declares both what the
  * legacy does, the operation's own fact and the errors at it, and what the adapter answers; the helper asserts both,
  * so that a case pins the oracle it is compared with and never infers the adapter's class from the fact.
  */
@@ -325,7 +325,7 @@ export interface LegacyExpectation {
   readonly elsewhere?: readonly string[];
 }
 
-/** What the adapter answers, as the case declares it (work note §6.1). */
+/** What the adapter answers, as the case declares it (work note). */
 export type AdapterExpectation =
   /** The realized result renders as the legacy's fact. */
   | "fact"
@@ -333,7 +333,7 @@ export type AdapterExpectation =
   | "unconstrained"
   /**
    * The answer realizes to the legacy's unknown: `invalid`, `dynamic`, a part the adapter cannot know, or a bounded
-   * `possible`; which, and the provenance, is stage 4's to test where it becomes observable (work note §6.6).
+   * `possible`; which, and the provenance, is stage 4's to test where it becomes observable (work note).
    */
   | "unknown"
   | { readonly dynamic: DynamicWhy }

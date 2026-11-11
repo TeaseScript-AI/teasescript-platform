@@ -7,11 +7,11 @@ import { compactAnalysis, coreRequest } from "../type-core-analysis.js";
 import type { CompactRecord } from "../type-core-records.js";
 
 /*
- * The rule function of the carrier tests (S6-CARRIERS revision 5, §5.1, §6): the floor's 46 classes and the role
+ * The rule function of the carrier tests (S6-CARRIERS revision 5): the floor's 46 classes and the role
  * matrix's are placement and endpoint classes, each shape named and inline, without and with a later store, compared in
- * both orders. Each shape's complete multiset of C1, C9 and C10 records (§5.1: every `copy-type` check, a destination's
+ * both orders. Each shape's complete multiset of C1, C9 and C10 records (every `copy-type` check, a destination's
  * own null-check, and their written-target warnings with their context words) is compared exactly with what this rule
- * function owes, §5.1's table:
+ * function owes, by its table:
  * - inline whole data owes one store boundary at the host value's own span, against the type admitted there, and C1
  *   beside it at that span unless its place is published; reached through a projection of the carrier's
  *   result, it is a member of the data;
@@ -32,7 +32,7 @@ import type { CompactRecord } from "../type-core-records.js";
 
 export type Endpoint = "scalar" | "collection";
 
-/** Where the data stands (§5.1's rows). */
+/** Where the data stands. */
 export type Data =
   "cell" | "whole" | "through" | "member" | "own" | "typed" | "loop-cell" | "loop-operand";
 
@@ -93,7 +93,7 @@ function callSpan(source: string, start: number): string {
 type State = "published" | "later" | "decided";
 
 /**
- * The records `floor`'s shape owes by the rule function (§5.1), sorted: for its source,
+ * The records `floor`'s shape owes by the rule function, sorted: for its source,
  * the named data's binding `name` where it is named (`let name = hostValue` first).
  */
 export function owed(

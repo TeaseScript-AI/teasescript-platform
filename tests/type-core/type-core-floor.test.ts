@@ -11,7 +11,7 @@ import {
 } from "../helpers/type-core/type-core-rule.js";
 
 /*
- * The carrier floor (S6-CARRIERS revision 5, §6): Astra's independent 184 shapes of round 4 (`matrix/REPORT.md`,
+ * The carrier floor (S6-CARRIERS revision 5): Astra's independent 184 shapes of round 4 (`matrix/REPORT.md`,
  * `comparison.md`), transcribed as their 46 placement and endpoint classes, each named and inline, without and with a
  * later store. Its purpose is the enumeration, independent of the carrier table the role matrix is generated from: each
  * of these shapes owes its complete C1, C9 and C10 records, exactly as the rule function
@@ -237,7 +237,7 @@ const CLASSES: readonly RuleClass[] = [
   },
 ];
 
-test("the carrier floor's complete C1, C9 and C10 records are what the rule function owes, in both orders (§6, §5.1)", (t) => {
+test("the carrier floor's complete C1, C9 and C10 records are what the rule function owes, in both orders", (t) => {
   const all = shapesOf(CLASSES);
   assert.equal(all.length, 184);
   assert.equal(new Set(all.map((shape) => shape.name)).size, 184);

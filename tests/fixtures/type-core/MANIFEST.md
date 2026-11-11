@@ -1,15 +1,15 @@
 # The core's compact fixture (M4 steps S0, S6, S6b and S8)
 
 Opus, 2026-10-24, builder for M4 step S0 (brief `/tmp/agent-work/o4-3a-lead-fable/m4/s0-brief.md`, lead Fable): the
-port plan's S0 (a) and (b) (`../checkpoint-9/port-plan/PLAN.md` revision 4, §2 row S0, §3.1 "Host globals"). S4
+port plan's S0 (a) and (b) (`../checkpoint-9/port-plan/PLAN.md` revision 4, its S0 row and "Host globals"). S4
 commits the fixture with its test as `tests/fixtures/type-core/cells.jsonl`; nothing here is in the repository.
 
 ## A loop's write that a break follows (#2025)
 
 The S10 builder (Opus) corrected one record of `cells.jsonl` by hand: `cp9-cells/3b/loop/break/changed` expects
 `valid`, with no diagnostic and no check, in place of a `loop` warning and its null-check. Its loop writes `n = null` and
-then leaves by an unconditional `break`, so no round starts with that value, and the use reads only the tested `n`. V30
-§13: a loop's start accounts for the values an earlier round left, and a write drops a check only when the written value
+then leaves by an unconditional `break`, so no round starts with that value, and the use reads only the tested `n`.
+V30 §13: a loop's start accounts for the values an earlier round left, and a write drops a check only when the written value
 can make the check false. `cp9-cells/3b/loop/break/changed`'s two controls, without the `break` and with it under a
 condition, are rows of the cells test and keep the warning.
 
@@ -36,7 +36,7 @@ current checker's (compared record for record); no other record changed.
 
 The #1469 builder (Opus) edited one record of `cells.jsonl` by hand: `cp9-cells/r42/store-mixed-unknown-property`, a
 store into an object or host data, loses its second member-read warning at `target.other` (context `unknown`) and that
-warning's null-check, since one access owes one warning and check for its unknown kind (§4). No other record changed.
+warning's null-check, since one access owes one warning and check for its unknown kind. No other record changed.
 
 ## Rule A2 where the copy meets the place (#1249)
 
@@ -47,7 +47,7 @@ The four `cp9-cells/s4/s6/owner/bound/record-kind{,-read}/{literal,insert}` reco
 records now hold one compile error at `b` in `[a, b]`, `xs.add(b)` or `c = b`. No other record changed; no record
 has `related` any more. The set's next revision carries the same.
 
-## End offsets (M4 step S6, `S6-CARRIERS.md` revision 5, §9 step 0)
+## End offsets (M4 step S6, `S6-CARRIERS.md` revision 5, its step 0)
 
 Opus, 2026-10-26, builder for M4 step S6 (lead Fable; the lead's answer 4, option B). Both files are regenerated from
 the same pinned set revision `1de3570831c7bc4b…` (deferred `79a837a06da38169…`) with Sol's extended tooling, so every
@@ -79,7 +79,7 @@ with the set's tooling as r481 published it: `convert.py` `25a3b7152cd55fe8…`,
   it and the comparison compares it with the diagnostic (`tests/helpers/type-core-records.ts`). No other record has it.
 - Held at this revision (`heldBack`, `tests/helpers/type-core/type-core-fixture.ts`; their counts pinned in the cells test): the
   adapters' 9, stage 3b's 653, S9b's F18 shapes 32, and `cp9-cells/F16/invalid-datetime-difference`, whose operator
-  site §3.4 puts at its right operand; 1,318 records compare whole.
+  site the design's site rule puts at its right operand; 1,318 records compare whole.
 
 ## Refresh to the set's revision `81b3a0c4…` (M4 step S6b)
 
@@ -196,7 +196,7 @@ One JSON object per line, keys in this order:
 - `requiredCheck` is `null`, or the N10 payload: `{"rule", "writer": {"file", "offset", "end"}, "missingTests"}`
   (153 payloads in 139 records). The writer keeps its `end` because the lead's comparator compares the writer span.
 
-## The host rewrite (§3.1)
+## The host rewrite
 
 Rules, per file of a record (`convert.py`):
 
@@ -256,7 +256,7 @@ What each rewrite keeps:
 The model on the rewritten records gives exactly the remapped expectations, in both orders, and with only `hostValue`
 declared as well. Rejected alternatives:
 - `let xs: list = hostValue`: the written type adds a written-target warning;
-- `[hostValue]`: non-empty, and the ingress moves into the literal (§3.1);
+- `[hostValue]`: non-empty, and the ingress moves into the literal;
 - a prefixed `let listHost = load(…)`: the boundary target and site move to the prefix line.
 
 **Sol's confirmation** (relayed by the lead, 2026-10-24): all four confirmed, per record.
@@ -316,7 +316,7 @@ unconfirmed state.
   checks), `resultStatus` and `operationStatus` (179 each), a check's `reason` (`external-data` on all 197 boundary
   checks: implied by `boundary`) and the `on` texts.
 - **Spans.** S0's sites were start offsets only; S6's regeneration added each site's exclusive `end` (above). The
-  separate `expression` span is dropped, as §3.1 intends.
+  separate `expression` span is dropped, as the port plan's host rewrite intends.
 - **Writer evidence.** `expect.writerSites` (32 records), `provenance.writers` (27 diagnostics), and the record-level
   `writerAssertions` (23), `requiredCheckMetadata` (20), `writerCandidates` (4), `ingressIdentities`,
   `rejectedStores`, `unserializedWriterEvidence` (1 each) and `consumerSite` (2). The lead's comparator does not
@@ -341,9 +341,9 @@ Also for S4:
 
 ## Where the plan's text is out of date (for the lead)
 
-- **Counts.** §3.1 counts 105 `hostFlag` records and 1 `hostText`. This set has 183 and 11 (193 records), and 104
+- **Counts.** The port plan's host rewrite counts 105 `hostFlag` records and 1 `hostText`. This set has 183 and 11 (193 records), and 104
   `hostValue` records.
-- **Scope of the equality.** §3.1 says every `hostFlag`/`hostText` record is single-file and none has a
+- **Scope of the equality.** The port plan's host rewrite says every `hostFlag`/`hostText` record is single-file and none has a
   registration. This set has 3 multi-file records, 5 with a registration and 3 with the read inside a function. The
   model run covers them all: their verdicts are invariant.
 - **Fixture size.** The S0 row estimates about 490 KB. The fixture is 961 KB, of which 348 KB is source text.

@@ -48,7 +48,7 @@ import type { SerializableRuntimeValue } from "../../src/runtime/values/serializ
 import type { CompactRecord } from "./type-core-records.js";
 
 /*
- * The reached fixture's derivation (S6-CARRIERS revision 5, §5.2; the lead's answer 3): what a record's
+ * The reached fixture's derivation (S6-CARRIERS revision 5; the lead's answer 3): what a record's
  * plan checks, where, and how its runs end, derived from the record and its source alone, never from the plan.
  *
  * The derivation covers the fixture's S6/S7 constructs, including objects, members, lazy defaults, conversions,
@@ -2040,7 +2040,7 @@ function replaced(source: string, edits: readonly (readonly [number, number, str
 }
 
 /**
- * §5.2's companions, from the source alone: every host read after the first renamed to a same-length global
+ * The derivation's companions, from the source alone: every host read after the first renamed to a same-length global
  * (`hostValu2`, …); every constant index of a list literal given each element index of the same width; every number
  * literal a store writes whole given a same-width whole-valued number spelling, `1.0` for `1.5` (the numeric kind
  * stays `number`, so the record's decisions stay the same); and `say "AFTER"` inserted before

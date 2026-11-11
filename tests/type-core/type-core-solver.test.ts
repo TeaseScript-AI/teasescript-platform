@@ -41,7 +41,7 @@ import { narrowingPass } from "../helpers/type-core/type-core-narrowing.js";
 import { inMode, MODES } from "../helpers/type-core-oracles.js";
 
 /*
- * The determinism of the coarse core (ADR 0021 1.6; the port plan's S3 note §1): the answers depend on the program,
+ * The determinism of the coarse core (ADR 0021 1.6; the port plan's S3 note): the answers depend on the program,
  * never on the order the analysis visits its consumers or discovers its demands. Every record of the expectation set
  * is analysed in four orders; every component of demands the set produces is solved again from each member as the
  * entry, in the canonical and the reverse order, and each member's answer compared by its items' signature and the
@@ -797,8 +797,8 @@ const NARRATOR = 'speaker narrator { value: "Hello" }\n';
 /**
  * Programs whose receiver gains a reference kind only round its own cycle, whose receiver holds a reference from
  * outside the cycle beside a record, a nested record or an external leaf round it (B2, B2-r2), and the record-only
- * control, with their diagnostics (a class `warning-runtime-check` unless written; a member's at the whole access,
- * §3.4). A return that may not fit the result
+ * control, with their diagnostics (a class `warning-runtime-check` unless written; a member's at the whole access).
+ * A return that may not fit the result
  * its function's first return decides owes C1's check (A2, F23), at the result and at each path of the first return's
  * literal (A8); the record-only control's, which none of its kinds fits, is an error (ADR 0021 1.5) and is rejected, so
  * the result's use sees the first return's record (A6, F23).

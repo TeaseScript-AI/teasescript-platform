@@ -159,7 +159,7 @@ export function derivedStores(stores: readonly DerivedStore[]): string[] {
   );
 }
 
-/** The host values a run's inputs take (§5.2's derived domain): a whole number, text, a truth value, a fraction, null. */
+/** The host values a run's inputs take (the derived domain): a whole number, text, a truth value, a fraction, null. */
 const DOMAIN: readonly SerializableRuntimeValue[] = [2, "text", true, 2.5, null];
 
 /** Every assignment of the domain's values to the globals. */

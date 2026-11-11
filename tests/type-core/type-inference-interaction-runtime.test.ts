@@ -13,7 +13,7 @@ import { compileValidPlan } from "../helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
 import { runUntilExit } from "../helpers/run-until-exit.js";
 
-// The interaction adapters' shape and optionality branches at runtime (stage-2b work note §6.4): each program is a row
+// The interaction adapters' shape and optionality branches at runtime (stage-2b work note): each program is a row
 // of the case tables (`tests/fixtures/type-inference/adapter-cases/{choice,form,commands}.jsonl`), named by its `id`
 // with its `fact` and adapter cell, answered through the runtime's own operations; the value `r` settles to is of the
 // kind the adapter answers.

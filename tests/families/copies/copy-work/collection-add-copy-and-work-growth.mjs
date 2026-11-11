@@ -354,7 +354,7 @@ Object.assign(FAMILIES, {
     "\n" +
     line5(k, (i) => `let r${i} = box.p${i}`) +
     `\n${defs5(k, true)}`,
-  // a chain of k function results that each copy a k-name object (a known representation cost, REPORT §4: each result
+  // a chain of k function results that each copy a k-name object (a known representation cost: each result
   // place owns its parts, so width × depth)
   "c6-wide-result-chain": (k) =>
     "let box = {q: 0}\n" +
@@ -658,7 +658,7 @@ Object.assign(FAMILIES, {
 // outside the default series (single-quoted, run with FAMILIES=...): a chain of k transported circles through functions
 // a button handler calls (the handler runs at any time, so its reads are unbounded and the circles remain: 2k breaks,
 // one sink component per break; the break's graph is built from every blocked place each time, k² scans; the
-// evaluations are linear since checkpoint 8's remembered break reads; REPORT §4). The same chain in the main flow
+// evaluations are linear since checkpoint 8's remembered break reads). The same chain in the main flow
 // (`c8-circle-chain`) has no circle under the read-view contract: every function reads its place at the call.
 Object.assign(FAMILIES, {
   "c8-circle-chain": (k) =>
