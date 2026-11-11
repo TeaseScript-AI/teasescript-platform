@@ -200,29 +200,27 @@ async function mediaPlaybackChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
   };
-  // Observe the Player's audio elements. As in a browser that grants no audio, every play() is refused until the
-  // player's click on "Enable audio" retries the element refused last, with the source it was refused with: that is the
-  // story's audio, as silent priming happens at Start, before it. The retry must call play() while the click is
-  // dispatched or in its microtasks (`window.event` is that click only then); a retry after a timer is outside this
-  // check. Any other call, during the click or after it, stays refused until that retry, and later calls are admitted,
-  // as after a user activation.
+  // Observe the Player's audio elements. As in a browser that grants no audio, every play() is refused until a click on
+  // "Enable audio", the user's activation, and admitted from then on. This check does not say which play() the click
+  // caused: that its retry plays each refused element, with the source it was refused with, during the click is
+  // `tests/player/player-media-device.test.ts`'s to prove.
   await page.addInitScript(() => {
     window.__played = [];
     const play = HTMLMediaElement.prototype.play;
-    let refusing = true;
-    let refused = null;
-    const retrying = (element) =>
-      window.event?.type === "click" &&
-      window.event.target instanceof Element &&
-      window.event.target.closest("button")?.textContent.trim() === "Enable audio" &&
-      refused?.element === element &&
-      refused.source === element.src;
+    let activated = false;
+    window.addEventListener(
+      "click",
+      (event) => {
+        if (
+          event.target instanceof Element &&
+          event.target.closest("button")?.textContent.trim() === "Enable audio"
+        )
+          activated = true;
+      },
+      true,
+    );
     HTMLMediaElement.prototype.play = function () {
-      if (refusing && !retrying(this)) {
-        refused = { element: this, source: this.src };
-        return Promise.reject(new DOMException("Refused", "NotAllowedError"));
-      }
-      refusing = false;
+      if (!activated) return Promise.reject(new DOMException("Refused", "NotAllowedError"));
       window.__played.push(this);
       return play.call(this);
     };
@@ -240,12 +238,12 @@ async function mediaPlaybackChecks(page) {
   await page.locator(".stage-media").waitFor();
   const firstImage = await page.locator(".stage-media").getAttribute("src");
   // Refused audio offers a deliberate retry. That the runtime records no progress meanwhile is
-  // `tests/player/player-media-device.test.ts`'s to prove; here no play() is admitted before the retry.
+  // `tests/player/player-media-device.test.ts`'s to prove; here no play() is admitted before Enable audio.
   const retry = page.getByRole("button", { name: "Enable audio", exact: true });
   await retry.waitFor();
   check(
     await page.evaluate(() => window.__played.length === 0),
-    "A play() was admitted before the retry",
+    "A play() was admitted before Enable audio",
   );
   // The toast may expire, so the panel keeps the retry; it is the only way to continue, so it has no dismissal.
   await page.locator("[data-notification-bell]").click();
@@ -257,16 +255,18 @@ async function mediaPlaybackChecks(page) {
     "The blocked-audio notice must not be dismissible",
   );
   await panelNotice.getByRole("button", { name: "Enable audio", exact: true }).click();
-  await page.waitForFunction(() => window.__played[0]?.currentTime > 0.2);
+  // After it, a story element plays: audibly, with measured progress, and the Player then releases it.
+  await page.waitForFunction(() => {
+    window.__story ??= window.__played.find((element) => element.currentTime > 0.2);
+    return window.__story !== undefined;
+  });
   await retry.waitFor({ state: "hidden" });
   check(
-    await page.evaluate(() => !window.__played[0].muted && window.__played[0].volume > 0),
+    await page.evaluate(() => !window.__story.muted && window.__story.volume > 0),
     "Audio must play audibly, not muted",
   );
   // The runtime settles playback from measured progress and the Player releases the element.
-  await page.waitForFunction(() => !window.__played[0].getAttribute("src"), null, {
-    timeout: 5000,
-  });
+  await page.waitForFunction(() => !window.__story.getAttribute("src"), null, { timeout: 5000 });
   // A later showImage replaces the Stage image.
   await page.getByRole("button", { name: "Stay by the water", exact: true }).click();
   await page.getByRole("button", { name: "Continue", exact: true }).click();
@@ -275,7 +275,7 @@ async function mediaPlaybackChecks(page) {
     firstImage,
   );
   page.keepActivation = false;
-  return "PASS Start gating, runtime Stage image, refused-audio retry and measured audio playback";
+  return "PASS Start gating, runtime Stage image, no audio before Enable audio, then audible measured playback";
 }
 
 async function transcriptNativeWheelChecks(page) {
