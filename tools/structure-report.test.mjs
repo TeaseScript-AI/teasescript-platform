@@ -5,6 +5,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -498,6 +499,126 @@ test("a name that is not UTF-8, and hunks that --numstat does not count, stop th
   }
 });
 
+const USAGE =
+  "usage: node tools/structure-report.mjs [ROOT…] [--top N] [--json FILE] [--compare FILE]\n" +
+  "       node tools/structure-report.mjs [ROOT…] --diff BASE [--moved] [--json FILE] [--summary FILE]\n";
+/** Command lines the report refuses, with its reason: each option that takes a value, missing or repeated. */
+const REFUSED = [
+  [["--top"], "--top takes a value"],
+  [["--json"], "--json takes a value"],
+  [["--compare"], "--compare takes a value"],
+  [["--diff"], "--diff takes a value"],
+  [["--summary"], "--summary takes a value"],
+  [["--summary="], "--summary takes a value"],
+  [["src", "--json"], "--json takes a value"],
+  // the next argument is another option, still on the command line when it is read
+  [["--json", "--compare", "earlier.json"], "--json takes a value"],
+  [["--top", "--json", "out.json"], "--top takes a value"],
+  [["--compare", "--diff", "HEAD"], "--compare takes a value"],
+  [["--diff", "--top", "3"], "--diff takes a value"],
+  [["--diff", "--moved"], "--diff takes a value"],
+  // a second occurrence, without its value or with one
+  [["--top", "2", "--top"], "--top takes a value"],
+  [["--json", "first.json", "--json"], "--json takes a value"],
+  [["--json", "first.json", "--json", "second.json"], "--json is given twice"],
+  [["--compare", "a.json", "--compare", "b.json"], "--compare is given twice"],
+  [["--diff", "HEAD", "--diff", "HEAD"], "--diff is given twice"],
+  [["--summary", "a.md", "--summary", "b.md"], "--summary is given twice"],
+  [["--moved", "--moved"], "--moved is given twice"],
+  [["--top", "2", "--top", "3"], "--top is given twice"],
+  [["--json=first.json", "--json", "second.json"], "--json is given twice"],
+  // --top's value is a whole number (#2090)
+  [["--top", "abc"], "--top takes a whole number, not abc"],
+  [["--top", "1.5"], "--top takes a whole number, not 1.5"],
+  [["--top=abc"], "--top takes a whole number, not abc"],
+  [["--top", "-1"], "--top takes a value"],
+  // after `=`, the value is what follows it, and there must be one (#2090)
+  [["--json="], "--json takes a value"],
+  [["--diff="], "--diff takes a value"],
+  // an argument that starts with `-` and is no option is refused by name, not read as a root (#2090)
+  [["--jsn", "out.json"], "unknown option --jsn"],
+  [["src", "--jsn=out.json"], "unknown option --jsn"],
+  [["-j", "out.json"], "unknown option -j"],
+  [["--"], "unknown option --"],
+];
+
+test("an option without its value, or given twice, stops the report with the usage, and writes nothing", () => {
+  const root = mkdtempSync(join(tmpdir(), "structure-report-"));
+  try {
+    for (const [args, refusal] of REFUSED) {
+      const result = spawnSync(process.execPath, [tool, ...args], { cwd: root, encoding: "utf8" });
+      assert.equal(result.status, 2, args.join(" "));
+      assert.equal(result.stdout, "", args.join(" "));
+      assert.equal(result.stderr, `structure-report: ${refusal}\n${USAGE}`, args.join(" "));
+      assert.deepEqual(readdirSync(root), [], `${args.join(" ")}: nothing is written`);
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("in a repository, a refused command line stops with the usage and writes nothing", () => {
+  const { root, git, base } = history(
+    { "src/sample.ts": "export const x = 1;\n" },
+    { "src/sample.ts": "export const x = 2;\n" },
+  );
+  try {
+    for (const [args, refusal] of [
+      // the argument after --json is an option, whose own value follows: neither becomes the destination
+      [["--json", "--top", "3", "src/sample.ts"], "--json takes a value"],
+      [["--json", "--compare", "earlier.json"], "--json takes a value"],
+      [["--diff", "--json", "out.json", base], "--diff takes a value"],
+      [["--json", "first.json", "--json", "second.json", "--diff", base], "--json is given twice"],
+      [["--diff", base, "--diff"], "--diff takes a value"],
+    ]) {
+      const result = spawnSync(process.execPath, [tool, ...args], { cwd: root, encoding: "utf8" });
+      assert.equal(result.status, 2, args.join(" "));
+      assert.equal(result.stdout, "", args.join(" "));
+      assert.equal(result.stderr, `structure-report: ${refusal}\n${USAGE}`, args.join(" "));
+      assert.equal(
+        git("status", "--porcelain", "--untracked-files=all"),
+        "",
+        `${args.join(" ")}: nothing is written`,
+      );
+    }
+    assert.equal(readFileSync(join(root, "src/sample.ts"), "utf8"), "export const x = 2;\n");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an option's value after `=` reads as the next argument does, and a root that starts with `-` is written ./-name", () => {
+  const { root, base } = history(
+    { "src/x.ts": "export const x = 1;\n", "-odd/y.ts": "export const y = 1;\n" },
+    {
+      "src/x.ts": `export const x = 1;\n${lines(301)}\n`,
+      "-odd/y.ts": `export const y = 1;\n${lines(301)}\n`,
+    },
+  );
+  try {
+    const report = (...args) => {
+      const result = spawnSync(process.execPath, [tool, ...args], { cwd: root, encoding: "utf8" });
+      assert.equal(result.status, 0, args.join(" ") + result.stdout + result.stderr);
+      return result.stdout;
+    };
+    assert.equal(
+      report("src", "--top=1", "--json=one.json"),
+      report("src", "--top", "1", "--json", "two.json"),
+    );
+    assert.equal(
+      readFileSync(join(root, "one.json"), "utf8"),
+      readFileSync(join(root, "two.json"), "utf8"),
+    );
+    assert.equal(report(`--diff=${base}`), report("--diff", base));
+    assert.match(
+      report("./-odd", "--diff", base),
+      /file gaining over 300 lines: \+301 -odd\/y\.ts/u,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test(
   "--moved leaves Git's moved lines out of the added-lines signals and prints what it suppressed",
   { timeout: 60_000 },
@@ -720,6 +841,13 @@ test(
           false,
         ),
       );
+      // --summary without its file stops the report
+      const valueless = spawnSync(process.execPath, [tool, "--diff", quiet.base, "--summary"], {
+        cwd: quiet.root,
+        encoding: "utf8",
+      });
+      assert.equal(valueless.status, 2);
+      assert.match(valueless.stderr, /^structure-report: --summary takes a value\nusage: /u);
       // a throw, here Git refusing a base it cannot name, writes its block (the error's first line, then Git's own),
       // and the report still fails with it
       const thrown = run({ root: quiet.root, base: "no-such-ref" });
@@ -769,43 +897,6 @@ test(
     }
   },
 );
-
-test("an option given without its value stops the report with the usage, writing nothing", () => {
-  const root = mkdtempSync(join(tmpdir(), "structure-report-valueless-"));
-  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
-  try {
-    git("init", "-q");
-    write(root, { "src/a.ts": "export const a = 1;\n" });
-    git("add", "-A");
-    git("commit", "-q", "-m", "base");
-    for (const [name, args] of [
-      ["--json", ["src", "--json"]],
-      ["--top", ["--top"]],
-      ["--compare", ["--compare"]],
-      ["--diff", ["--diff"]],
-      ["--summary", ["--diff", "HEAD", "--summary"]],
-      // the next argument another option: neither is taken as the other's value
-      ["--json", ["--json", "--diff", "HEAD"]],
-      ["--diff", ["--diff", "--moved"]],
-      // whatever order the options are read in, each is checked against its own next argument
-      ["--diff", ["--diff", "--top", "1", "HEAD"]],
-      ["--json", ["--json", "--top", "1", "report.json"]],
-      ["--summary", ["--summary", "--diff", "HEAD", "summary.md"]],
-      ["--compare", ["--compare", "--top", "1", "snapshot.json"]],
-    ]) {
-      const result = spawnSync(process.execPath, [tool, ...args], { cwd: root, encoding: "utf8" });
-      assert.equal(result.status, 2, args.join(" "));
-      assert.equal(result.stdout, "", args.join(" "));
-      assert.match(
-        result.stderr,
-        new RegExp(`^structure-report: ${name} needs a value\\nusage: `, "u"),
-      );
-    }
-    assert.deepEqual(git("status", "--porcelain", "--untracked-files=all"), "");
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
 
 test(
   "--moved suppresses a file over 1,000 lines whose added lines are all a move's admitted forms",
