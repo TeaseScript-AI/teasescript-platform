@@ -24,9 +24,10 @@ import type { PlayerSession } from "../../../player/runtime/runtime-view.js";
  * - `lose()`: the Worker lost, resolving once the client's loss listeners ran (the composable's first, as it registered
  *   at ready). In-process, the client is terminated and its listeners get a `BridgeLostError`, as a real loss; on the
  *   Worker, the thread is terminated, and its `exit` reaches the client as a real loss.
- * - `hold(op)`, `held()`, `release()`: from the post of the first request of `op` after `hold`, its reply and every
- *   later one are held until `release`; `held()` resolves once that reply is among them. Both topologies hold the
- *   incoming messages at the client's port, this connection's alone.
+ * - `hold(op)`, `held(later?)`, `release()`: from the post of the first request of `op` after `hold`, its reply and
+ *   every later one are held until `release`; `held()` resolves once that reply is among them, `held(later)` once the
+ *   reply to the latest request of `later` is too. Both topologies hold the incoming messages at the client's port, this
+ *   connection's alone.
  * - `posts`: every request the client posted, in order, as it reached the port.
  * - `topology`, checked by `assertTopology()`: `deliverInTransit` is `null` exactly on the Worker.
  * `tests/helpers/bridge/sends.ts` decides sends above the client instead; this helper works below it, so the client's
@@ -51,7 +52,7 @@ export interface TopologyBridge {
   readonly posts: readonly Posted[];
   lose(): Promise<void>;
   hold(op: string): void;
-  held(): Promise<void>;
+  held(later?: string): Promise<void>;
   release(): void;
   assertTopology(): void;
   /** On the Worker, resolves with the thread's exit code once it exited; `null` in-process. */
@@ -221,10 +222,14 @@ function gatedPort(port: Client.ClientPort) {
     posts,
     hold: (op: string) =>
       void Object.assign(gate, { target: op, id: null, heldTarget: false, from: posts.length }),
-    held: () =>
+    held: (later?: string) =>
       until(
-        () => gate.heldTarget,
-        `the reply to ${gate.target} held at the port; posted since: ${posts
+        () => {
+          if (later === undefined) return gate.heldTarget;
+          const last = posts.slice(gate.from).findLast((post) => post.op === later);
+          return last !== undefined && buffered.some((data) => decoded(data)?.id === last.id);
+        },
+        `the reply to ${later ?? gate.target} held at the port; posted since: ${posts
           .slice(gate.from)
           .map((post) => post.op)
           .join(", ")}`,

@@ -707,7 +707,8 @@ RERUN.rows(
 
 interface RandomDebug {
   readonly enabled: Ref<boolean>;
-  readonly draw: Readonly<Ref<{ readonly site: string } | null>>;
+  readonly draw: Readonly<Ref<{ readonly site: string; readonly drawId: number } | null>>;
+  tried(site: string): { readonly history: readonly string[] };
   resolve(
     outcome: { readonly kind: "number"; readonly value: number } | "natural",
   ): Promise<boolean>;
@@ -761,26 +762,63 @@ async function mountDebug(context: TestContext, transport: TopologyBridge, scrip
   return mounted;
 }
 
+const DRAWS =
+  'let initial = askText "Begin"\nfor turn in 1..=3 {\n  let roll = randomInteger(1..=6)\n  say "Roll: ${roll}", instant\n}\nshowButton "End"\nexit';
+
+/** The rolls `host` shows. */
+const rolls = (host: Host) => said(host).filter((text) => text.startsWith("Roll: "));
+
 RERUN.rows(
   "W6 paused draw",
-  "W6: with Choose outcomes on, a session pauses at its draw and goes on with the outcome the picker chose",
+  "W6: with Choose outcomes on, a session pauses at its draws and goes on with the outcomes the picker chose; a read of a draw that no longer shows is ignored",
   async (context, topology, end) => {
     stubBrowser(context);
     const transport = await topologyBridge(context, topology);
-    const { host, random } = await mountDebug(
-      context,
-      transport,
-      'let roll = randomInteger(1..=6)\nsay "Roll: ${roll}", instant\nshowButton "Next"\nexit',
-    );
+    const { host, random, rewind } = await mountDebug(context, transport, DRAWS);
     random.enabled.value = true;
     await host.activate();
-    await until(() => random.draw.value !== null, "the session pauses at its draw");
-    assert.deepEqual(said(host), [], "nothing after the draw runs while it waits");
+    const input = await runtimeInput();
+    assert.equal((await answer(host, input.intents.composer("begin", "enter"))).kind, "answered");
+    await until(() => random.draw.value !== null, "the session pauses at its first draw");
+    assert.deepEqual(rolls(host), [], "nothing after the draw runs while it waits");
+    const first = random.draw.value!;
+    // The first draw's own read of what its site took has its reply before the next request does.
+    await transport.bridge.read(host.session.value!, "randomTried", { site: first.site });
+    // The second draw's read is held, and Back to the first input point is posted behind it; both replies arrive
+    // together, so the read's answer comes once the draw it was for no longer shows.
+    transport.hold("randomTried");
     assert.equal(await random.resolve({ kind: "number", value: 6 }), true);
-    await until(() => said(host).includes("Roll: 6"), "the chosen outcome");
-    assert.equal(random.draw.value, null);
-    for (let index = 0; index < 10; index += 1) await turn();
-    assert.deepEqual(said(host), ["Roll: 6"], "resolved once");
+    await until(
+      () => random.draw.value !== null && random.draw.value.drawId !== first.drawId,
+      "the second draw",
+    );
+    assert.deepEqual(rolls(host), ["Roll: 6"], "the chosen outcome, once");
+    await transport.held();
+    const site = random.draw.value!.site;
+    const point = rewind.state.value.points[0];
+    assert.ok(point, "the answer is a point");
+    const back = rewind.back(point.id);
+    await transport.held("rewindBack");
+    transport.release();
+    assert.equal(await back, true, "Back");
+    for (let index = 0; index < 5; index += 1) await turn();
+    assert.equal(random.draw.value, null, "the inspected point shows no draw");
+    assert.deepEqual(
+      random.tried(site).history,
+      [],
+      "the read of the draw that no longer shows is ignored",
+    );
+    assert.deepEqual(rolls(host), []);
+    // Resumed from the first point, the session draws again, each draw with the outcome chosen for it.
+    assert.equal(await rewind.resume(), true, "Resume");
+    assert.equal((await answer(host, input.intents.composer("again", "enter"))).kind, "answered");
+    for (const value of [5, 4, 3]) {
+      await until(() => random.draw.value !== null, `the draw for ${value}`);
+      assert.equal(await random.resolve({ kind: "number", value }), true);
+      await until(() => rolls(host).includes(`Roll: ${value}`), `Roll: ${value}`);
+    }
+    assert.deepEqual(rolls(host), ["Roll: 5", "Roll: 4", "Roll: 3"]);
+    assert.equal(host.hostError.value, null);
     return end();
   },
 );
