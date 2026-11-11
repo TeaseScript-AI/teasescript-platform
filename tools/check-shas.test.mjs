@@ -262,6 +262,54 @@ test(
 );
 
 test(
+  "a commit on origin only under refs/archive/* or in a refs/pull/<n>/head resolves at that ref",
+  { timeout: 30_000 },
+  () => {
+    const { directory, origin, local } = withRemote();
+    const git = (...args) =>
+      spawnSync("git", ["-C", directory, "-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+        encoding: "utf8",
+      }).stdout.trim();
+    try {
+      // A pre-rebase head archived under its item, and a squash-merged pull request whose earlier head is cited too;
+      // the default fetch mirrors neither.
+      git("push", "-q", "origin", `${local}:refs/archive/item/${local}`);
+      const tree = git("rev-parse", "main^{tree}");
+      const earlier = git("commit-tree", tree, "-p", "origin/main", "-m", "pr 1");
+      const prHead = git("commit-tree", tree, "-p", earlier, "-m", "pr 2");
+      git("push", "-q", "origin", `${prHead}:refs/pull/7/head`);
+      const stray = git("commit-tree", tree, "-p", "origin/main", "-m", "stray");
+      git("fetch", "-q", "origin");
+      const text = [local, prHead, earlier, stray].map((sha) => sha.slice(0, 10)).join(", ");
+      const { status, out } = check(text, [directory]);
+      assert.equal(status, 1, out);
+      for (const [sha, ref] of [
+        [local, `refs/archive/item/${local}`],
+        [prHead, "refs/pull/7/head"],
+        [earlier, "refs/pull/7/head"],
+      ])
+        assert.match(
+          out,
+          new RegExp(`resolved +${sha.slice(0, 10)} +${sha} in .*, on origin at ${ref}\n`, "u"),
+        );
+      assert.match(out, new RegExp(`local only +${stray.slice(0, 10)} `, "u"));
+      assert.match(out.trim().split("\n").at(-1), /4 tokens: 3 resolved, .* 1 local only,/u);
+      // An origin that cannot be listed is named, and leaves the commit local only.
+      git("remote", "set-url", "origin", join(origin, "missing"));
+      const unlisted = check(local, [directory]);
+      assert.equal(unlisted.status, 1, unlisted.out);
+      assert.match(
+        unlisted.out,
+        /cannot list origin's refs in .*: archived and pull-request heads not checked/u,
+      );
+      assert.match(unlisted.out, /1 tokens: 0 resolved, .* 1 local only,/u);
+    } finally {
+      for (const path of [directory, origin]) rmSync(path, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
   "a repository without remote-tracking refs is named once, and its commits resolve as before",
   { timeout: 30_000 },
   () => {

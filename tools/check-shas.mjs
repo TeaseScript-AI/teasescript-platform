@@ -9,11 +9,15 @@ import { existsSync, readFileSync } from "node:fs";
 // `git rev-parse --verify --quiet <token>^{commit}` in each `--repo` (default: the current repository) and reported as
 // resolved (in which repository, to which full SHA), ambiguous (a short token several commits share), or unresolved.
 // A resolved commit must also be on a remote, as a reader outside this clone needs it: a remote-tracking ref of a
-// repository that resolves it must contain it (`git for-each-ref --contains` over `refs/remotes`), else it is local
-// only, such as a head from before a rebase. A repository without remote-tracking refs is named once, and its tokens
-// are not checked for that. An unresolved token may be a commit not fetched yet: the message says to fetch it; this
-// tool never fetches. A token that is no commit but a tree, such as a stored baseline's `src` tree hash, is reported
-// as a tree, resolved, without the remote check: proving a tree reachable from a remote ref is costly.
+// repository that resolves it must contain it (`git for-each-ref --contains` over `refs/remotes`), or a ref on its
+// `origin` that the default fetch does not mirror must: an archived head (`refs/archive/*`) or a pull request's head
+// (`refs/pull/<n>/head`, which keeps a squash-merged branch's commits). Those come from one `git ls-remote origin` per
+// repository, asked only for a commit on no remote-tracking ref; a ref's tip counts when this clone has it, and the
+// commit is reported as on origin at that ref. Else it is local only, such as a head from before a rebase. A
+// repository without remote-tracking refs is named once, and its tokens are not checked for that. An unresolved token
+// may be a commit not fetched yet: the message says to fetch it; this tool never fetches. A token that is no commit
+// but a tree, such as a stored baseline's `src` tree hash, is reported as a tree, resolved, without the remote check:
+// proving a tree reachable from a remote ref is costly.
 // Unfilled placeholders (`PLACEHOLDERS`) outside fenced code blocks are reported too. Every run that completes ends
 // with one line counting the tokens by result and the placeholders, so no output means it did not run.
 //
@@ -117,6 +121,53 @@ function resolve(token, repository) {
   return commits.length > 1 ? { ambiguous: commits.length } : null;
 }
 
+/**
+ * The commits that a ref on `repository`'s `origin` under `refs/archive/*` or `refs/pull/<n>/head` contains, each
+ * with that ref, from one `git ls-remote origin`; `{ error }` when that fails. Only the history of a tip this clone
+ * has is walked, as the tool never fetches; a commit a remote-tracking ref has is left out, as it is never local only.
+ */
+function unmirroredOriginRefs(repository) {
+  const listed = spawnSync("git", ["-C", repository, "ls-remote", "origin"], {
+    encoding: "utf8",
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    maxBuffer: 1 << 28,
+    timeout: 60_000,
+  });
+  if (listed.status !== 0)
+    return {
+      error: listed.stderr?.trim().split("\n").at(-1) || `exit ${listed.status ?? "timeout"}`,
+    };
+  const refOf = new Map();
+  for (const line of listed.stdout.split("\n")) {
+    const [tip, ref] = line.split("\t");
+    if (/^refs\/(?:archive\/.+|pull\/\d+\/head)$/u.test(ref ?? "") && !refOf.has(tip))
+      refOf.set(tip, ref);
+  }
+  const tips = spawnSync(
+    "git",
+    ["-C", repository, "cat-file", "--batch-check=%(objectname) %(objecttype)"],
+    { input: [...refOf.keys(), ""].join("\n"), encoding: "utf8", maxBuffer: 1 << 28 },
+  )
+    .stdout.split("\n")
+    .filter((line) => line.endsWith(" commit"))
+    .map((line) => line.split(" ")[0]);
+  const contains = new Map();
+  // (no tips: `git log --stdin` would walk `HEAD` instead)
+  if (tips.length === 0) return { contains };
+  const walked = spawnSync(
+    "git",
+    ["-C", repository, "log", "--source", "--format=%H %S", "--stdin", "--not", "--remotes"],
+    { input: [...tips, ""].join("\n"), encoding: "utf8", maxBuffer: 1 << 28 },
+  );
+  if (walked.status !== 0)
+    return { error: walked.stderr?.trim().split("\n").at(-1) || `git log exit ${walked.status}` };
+  for (const line of walked.stdout.split("\n")) {
+    const [commit, tip] = line.split(" ");
+    if (refOf.has(tip)) contains.set(commit, refOf.get(tip));
+  }
+  return { contains };
+}
+
 function cannotRun(message) {
   process.stderr.write(`check-shas: ${message}\n`);
   process.exit(2);
@@ -171,6 +222,20 @@ function main() {
           { encoding: "utf8" },
         ).stdout.trim() !== ""
       : null;
+  // The ref on origin that contains `sha` though no remote-tracking ref does, or `undefined`; asked once per
+  // repository, and a failure is named once.
+  const originRefs = new Map();
+  const onOriginAt = (sha, repository) => {
+    if (!originRefs.has(repository)) {
+      const refs = unmirroredOriginRefs(repository);
+      originRefs.set(repository, refs.contains ?? new Map());
+      if (refs.error)
+        process.stdout.write(
+          `check-shas: cannot list origin's refs in ${repository} (${refs.error}): archived and pull-request heads not checked\n`,
+        );
+    }
+    return originRefs.get(repository).get(sha);
+  };
   for (const [token, why] of tokensOf(text)) {
     const answers = repositories.map((repository) => ({
       repository,
@@ -180,7 +245,11 @@ function main() {
     const found = answers
       .filter(({ answer }) => answer?.sha)
       .map((entry) => ({ ...entry, remote: onRemote(entry.answer.sha, entry.repository) }));
-    const resolved = found.find(({ remote }) => remote !== false);
+    const resolved =
+      found.find(({ remote }) => remote !== false) ??
+      found
+        .map((entry) => ({ ...entry, at: onOriginAt(entry.answer.sha, entry.repository) }))
+        .find(({ at }) => at !== undefined);
     const local = resolved ? undefined : found[0];
     const tree = resolved || local ? undefined : answers.find(({ answer }) => answer?.tree);
     const ambiguous = answers.find(({ answer }) => answer?.ambiguous);
@@ -209,7 +278,8 @@ function main() {
       );
     else if (resolved)
       process.stdout.write(
-        `resolved    ${token}  ${resolved.answer.sha} in ${resolved.repository}\n`,
+        `resolved    ${token}  ${resolved.answer.sha} in ${resolved.repository}` +
+          `${resolved.at ? `, on origin at ${resolved.at}` : ""}\n`,
       );
     else if (ambiguous) {
       failed = true;
