@@ -573,6 +573,13 @@ function run(name, command, args, shown = false) {
   });
 }
 
+/** A check that has already ended (the merge-commit scan, in this process): its result, which the last line counts. */
+function settled(name, passed, seconds, output) {
+  progress.started.push(name);
+  progress.ended.set(name, passed);
+  return { name, passed, seconds, output, shown: false };
+}
+
 /**
  * The last line (#2106), so that no run, also one that cannot run or is stopped, can be read as one that ran more: what
  * ran, failed, and did not run, a check a signal stopped, a project check no changed path needs and the compiled suite
@@ -694,12 +701,12 @@ async function check(cleanups) {
   const scanSeconds = (performance.now() - scan) / 1000;
   const checks = [
     run("diff --check", "git", ["diff", "--check", mergeBase]),
-    {
-      name: "merge commits",
-      passed: stray.length === 0,
-      seconds: scanSeconds,
-      output: stray.map((line) => `${line}\n`).join(""),
-    },
+    settled(
+      "merge commits",
+      stray.length === 0,
+      scanSeconds,
+      stray.map((line) => `${line}\n`).join(""),
+    ),
     ...(formatted.length > 0
       ? [run("format", formatter, [...formatterArgs, "--check", ...formatted])]
       : []),
