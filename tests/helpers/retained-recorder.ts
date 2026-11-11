@@ -545,6 +545,7 @@ export class Recorder implements RetainedRecorder {
     };
     stack.push(value);
     const prototype: unknown = Object.getPrototypeOf(value);
+    // EVIDENCE: invariant: a prototype object's `constructor`, where it has one, is the class it belongs to.
     const listed = IDENTITY_CLASSES.get(
       prototype === null ? undefined : (prototype as { constructor?: unknown }).constructor,
     );
