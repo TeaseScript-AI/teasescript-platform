@@ -36,6 +36,7 @@ import {
   type Posted,
   type Topology,
   type TopologyBridge,
+  withinHostTime,
 } from "../helpers/player/worker-topology.js";
 
 /*
@@ -548,13 +549,16 @@ async function page(
   return { ...opened, transport, sampled: () => sampled };
 }
 
-/** Waits until `at`'s normal room, or `store`, keeps a session whose events hold `text`. */
+/**
+ * Waits until `at`'s normal room, or `store`, keeps a session whose events hold `text`: a keep that follows the host's
+ * reply, for as long as a wait on the host may take.
+ */
 async function keptWith(
   at: ReturnType<typeof keptBrowser>,
   text: string,
   store: Pick<KeptSessionStore, "session"> = at.kept,
 ) {
-  for (let round = 0; round < 500; round += 1) {
+  for (const within = withinHostTime(); within();) {
     const stored = await store.session(at.provider.scope);
     if (stored !== null && JSON.stringify(stored.events).includes(text)) return;
     await new Promise((resolve) => setTimeout(resolve, 2));
