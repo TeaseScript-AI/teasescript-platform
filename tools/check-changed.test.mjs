@@ -384,6 +384,87 @@ test("a change to the type core prints the pin-suite mapper's list, plain and me
     }
 });
 
+test("a deleted path and both sides of a move select their projects as a changed one does, plain and merged; documentation still none (#2431)", () => {
+  // (each change alone, on a commit holding every path it deletes or moves)
+  const kept = [
+    "tools/test-file-counts.mjs",
+    "src/a.ts",
+    "player/vue/b.ts",
+    "docs/c.md",
+    "docs/é.md",
+    'docs/a"quote.md',
+  ];
+  const changes = {
+    "a deleted tool": [["rm", "-q", "tools/test-file-counts.mjs"], "oxlint-rules, tools"],
+    "a deleted source": [["rm", "-q", "src/a.ts"], "typescript, oxlint-rules"],
+    "a move out of the Player": [
+      ["mv", "player/vue/b.ts", "src/b.ts"],
+      "typescript, player-vue, oxlint-rules",
+    ],
+    "deleted documentation": [["rm", "-q", "docs/c.md"], "none"],
+    // (named as they are: Git's other output quotes them, `"docs/\303\251.md"`, which is no documentation path)
+    "deleted documentation with a non-ASCII name": [["rm", "-q", "docs/é.md"], "none"],
+    "deleted documentation with a quote in its name": [["rm", "-q", 'docs/a"quote.md'], "none"],
+  };
+  for (const merged of [false, true])
+    for (const [name, [change, projects]] of Object.entries(changes)) {
+      const { directory } = repository({ passing: true });
+      const git = (...args) => runSync("git", args, { cwd: directory, encoding: "utf8" });
+      try {
+        for (const path of kept) {
+          mkdirSync(dirname(join(directory, path)), { recursive: true });
+          writeFileSync(join(directory, path), "export {};\n");
+        }
+        git("add", ".");
+        git("commit", "-q", "-m", "the paths the change deletes or moves");
+        git("branch", "-q", "base");
+        git(...change);
+        git("commit", "-q", "-m", name);
+        const result = runSync(
+          process.execPath,
+          [tool, ...(merged ? ["--merged"] : []), "--base", "base"],
+          { cwd: directory, encoding: "utf8", env: environment },
+        );
+        assert.match(
+          result.stdout,
+          new RegExp(
+            `^check-changed: ${change[0] === "mv" ? 2 : 1} changed files since base \\([0-9a-f]{9}\\); projects: ${projects}$`,
+            "mu",
+          ),
+          `${merged ? "merged" : "plain"}, ${name}: ${result.stdout}${result.stderr}`,
+        );
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+});
+
+test("an untracked path is read as it is named: a quoted or non-ASCII name selects as its path does (#2431)", () => {
+  const cases = { 'docs/a"quote é.md': "none", 'tools/a"quote é.mjs': "oxlint-rules, tools" };
+  for (const [path, projects] of Object.entries(cases)) {
+    const { directory } = repository({ passing: true });
+    try {
+      mkdirSync(dirname(join(directory, path)), { recursive: true });
+      writeFileSync(join(directory, path), "export {};\n");
+      const result = runSync(process.execPath, [tool, "--base", "HEAD"], {
+        cwd: directory,
+        encoding: "utf8",
+        env: environment,
+      });
+      assert.match(
+        result.stdout,
+        new RegExp(
+          `^check-changed: 1 changed files since HEAD \\([0-9a-f]{9}\\); projects: ${projects}$`,
+          "mu",
+        ),
+        `${path}: ${result.stdout}${result.stderr}`,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
+});
+
 test("the pin-suite mapper's verdict alone decides a run whose other checks pass, its output printed", () => {
   for (const fails of [false, true]) {
     const { directory } = repository({
