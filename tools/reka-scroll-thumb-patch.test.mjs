@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { build } from "vite";
@@ -15,14 +15,18 @@ const NOT_PATCHED = /reka-ui's ScrollAreaThumb was not patched/u;
 
 /**
  * Builds `entry.js` (source) in a scratch folder that also holds a copy of the thumb at another place in its package
- * (`node_modules/reka-ui/lib/ScrollAreaThumb.mjs`, as an upgrade could move it). Only the files the entry imports by
- * path are bundled; a package it names, and whatever those files import, are external.
+ * (`node_modules/reka-ui/lib/ScrollAreaThumb.mjs`, as an upgrade could move it), and `files` (path to text). Only the
+ * files the entry imports by path are bundled; a package it names, and whatever those files import, are external.
  */
-async function bundle(t, source, plugin = rekaScrollThumbPatch()) {
+async function bundle(t, source, { plugin = rekaScrollThumbPatch(), files = {} } = {}) {
   const root = mkdtempSync(join(tmpdir(), "reka-scroll-thumb-patch-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const entry = join(root, "entry.js");
   writeFileSync(entry, source);
+  for (const [path, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), text);
+  }
   mkdirSync(join(root, "node_modules/reka-ui/lib"), { recursive: true });
   copyFileSync(
     reka("dist/ScrollArea/ScrollAreaThumb.js"),
@@ -39,7 +43,9 @@ async function bundle(t, source, plugin = rekaScrollThumbPatch()) {
       rolldownOptions: {
         input: entry,
         preserveEntrySignatures: "strict",
-        external: (id, importer) => importer !== entry || !(id.startsWith(".") || isAbsolute(id)),
+        // Vite gives importers with `/`, also on Windows.
+        external: (id, importer) =>
+          importer !== entry.replaceAll("\\", "/") || !(id.startsWith(".") || isAbsolute(id)),
       },
     },
   });
@@ -52,6 +58,12 @@ test("a build that bundles no reka-ui file, as the dependency scan, is not refus
   await bundle(t, 'import { Label } from "reka-ui";\nconsole.log(Label);\n');
 });
 
+test("a project folder named reka-ui is not the package", async (t) => {
+  await bundle(t, 'export { local } from "./reka-ui/helper.js";\n', {
+    files: { "reka-ui/helper.js": "export const local = 1;\n" },
+  });
+});
+
 test("a build that bundles reka-ui without its ScrollAreaThumb is refused", async (t) => {
   await assert.rejects(bundle(t, importing(reka("dist/Label/Label.js"))), NOT_PATCHED);
 });
@@ -62,7 +74,7 @@ test("a build that bundles the thumb from another place in its package is refuse
 
 test("one plugin judges each build alone: a patched build does not admit a later unpatched one", async (t) => {
   const plugin = rekaScrollThumbPatch();
-  const code = await bundle(t, importing(reka("dist/ScrollArea/ScrollAreaThumb.js")), plugin);
+  const code = await bundle(t, importing(reka("dist/ScrollArea/ScrollAreaThumb.js")), { plugin });
   assert.match(code, /settlingScrollListener/u);
-  await assert.rejects(bundle(t, MOVED, plugin), NOT_PATCHED);
+  await assert.rejects(bundle(t, MOVED, { plugin }), NOT_PATCHED);
 });
