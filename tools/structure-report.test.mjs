@@ -718,6 +718,30 @@ test(
           false,
         ),
       );
+      // a throw, here Git refusing a base it cannot name, writes its block (the error's first line, then Git's own),
+      // and the report still fails with it
+      const thrown = run({ root: quiet.root, base: "no-such-ref" });
+      assert.equal(thrown.status, 1);
+      const thrownBlock = blockOf(
+        quiet,
+        `--diff no-such-ref --json ${join(quiet.root, "change.json")}`,
+        ["structure report failed: Command failed: git merge-base no-such-ref HEAD"],
+        false,
+      );
+      assert.ok(thrown.block.startsWith(thrownBlock.slice(0, -"```\n".length)), thrown.block);
+      assert.match(thrown.block, /\nfatal: [^\n]*no-such-ref\n```\n$/u);
+      // a summary it cannot write (a folder) leaves the throw itself as the run's error
+      const unwritable = spawnSync(
+        process.execPath,
+        [tool, "--diff", "no-such-ref", "--summary", quiet.root],
+        { cwd: quiet.root, encoding: "utf8" },
+      );
+      assert.equal(unwritable.status, 1);
+      assert.match(unwritable.stderr, /summary could not be written: EISDIR/u);
+      assert.match(
+        unwritable.stderr,
+        /\nError: Command failed: git merge-base no-such-ref HEAD\n/u,
+      );
       // --summary without --diff: its block says why
       const alone = join(quiet.root, "alone.md");
       const undiffed = spawnSync(process.execPath, [tool, "--summary", alone], {

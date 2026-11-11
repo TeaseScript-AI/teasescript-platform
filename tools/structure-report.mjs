@@ -56,9 +56,9 @@
 // over 300 lines, are appended to FILE (CI passes its job summary file) and printed after the report: a heading, the
 // command and the merge base's short sha, then a `text` block of one row per file, sorted by name,
 // `<file> | <lines at the merge base> → <lines at HEAD> | <signals>`, the signals `over 1000` and `gaining N`, N the
-// growth (with `, M moved discounted` under --moved); `no file signalled` when there is none, and `structure report
-// could not run: <reason>` on exit 2. The rows are read from the report's own signals; every other signal is in the
-// report only.
+// growth (with `, M moved discounted` under --moved); `no file signalled` when there is none, `structure report
+// could not run: <reason>` on exit 2, and `structure report failed: <error>` when the report throws, which it then
+// rethrows. The rows are read from the report's own signals; every other signal is in the report only.
 //
 // Exit status: 0 when the report is printed, 2 when an option has no value (the next argument missing or another
 // option), --diff cannot read the change as Git wrote it, or --summary has no --diff.
@@ -673,11 +673,20 @@ function summaryRows(found) {
   return rows.length > 0 ? rows : ["no file signalled"];
 }
 
+// whether the summary has its block, so that a throw after it adds none
+let summaryWritten = false;
 /** Appends the summary `block` to the --summary file and prints it after the report. */
 function writeSummary(block) {
   appendFileSync(summaryOut, block);
+  summaryWritten = true;
   process.stdout.write(`\n${block}`);
 }
+
+/** The command line the summary names, without --summary and its file. */
+const command = [
+  "node tools/structure-report.mjs",
+  ...given.filter((_, i) => given[i] !== "--summary" && given[i - 1] !== "--summary"),
+].join(" ");
 
 /** The report the command line asks for. */
 function main() {
@@ -685,10 +694,6 @@ function main() {
     console.error(`structure-report: ${valueless} needs a value\n${USAGE}`);
     process.exit(2);
   }
-  const command = [
-    "node tools/structure-report.mjs",
-    ...given.filter((_, i) => given[i] !== "--summary" && given[i - 1] !== "--summary"),
-  ].join(" ");
   if (summaryOut !== undefined && !diffBase) {
     const reason = "structure-report: --summary needs --diff";
     console.error(reason);
@@ -793,5 +798,22 @@ function main() {
 if (
   process.argv[1] !== undefined &&
   realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
-)
-  main();
+) {
+  try {
+    main();
+  } catch (error) {
+    // A throw is the tool's own failure: the summary says so, since a missing block reads as no signals. The error
+    // itself is what the run reports, also when the summary cannot be written (a summary file that is a folder).
+    if (summaryOut !== undefined && !summaryWritten) {
+      const reason = error instanceof Error ? error.message : String(error);
+      try {
+        writeSummary(
+          summaryBlock(command, undefined, [`structure report failed: ${reason.trimEnd()}`]),
+        );
+      } catch (unwritten) {
+        console.error(`structure-report: the summary could not be written: ${unwritten.message}`);
+      }
+    }
+    throw error;
+  }
+}
