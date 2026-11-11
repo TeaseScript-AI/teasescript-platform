@@ -180,19 +180,32 @@ test(
         ["Closes #12, and #13", ["#12"]],
         ["closes: https://github.com/o/r/issues/1, #2", ["https://github.com/o/r/issues/1"]],
         ["Closes #1, https://github.com/o/r/issues/2", ["#1"]],
-        // (code is left out by its own delimiters: two spans, and two indented blocks, are no code around the clause)
+        // (code is read like any text: a quoted clause fails, whatever code or delimiters surround it)
         ["``a`b`` Closes #12, #13 `tail`", ["#12"]],
         ["    ```\n\nCloses #12, #13\n\n    ```\n", ["#12"]],
-        ["``Closes #1, #2``", []],
-        ["~~~\nCloses #1, #2\n~~~\n", []],
+        ["``Closes #1, #2``", ["#1"]],
+        ["~~~\nCloses #1, #2\n~~~\n", ["#1"]],
+        ["\\` Closes #12, #13 `tail`", ["#12"]],
+        ["literal `\n# Heading\nCloses #12, #13 `tail`", ["#12"]],
+        ["literal `\r\n\r\nCloses #12, #13\r\n\r\n`tail`", ["#12"]],
+        ["```bad`info\n\nCloses #12, #13\n\n```\n", ["#12"]],
+        // (a cost witness: a 60,000-backtick line, which the earlier code stripping walked superlinearly)
+        [`${"`".repeat(60_000)}\nCloses #12, #13\n`, ["#12"]],
         ["Closes #1 `x` #2", []],
         ["Resolved o/r#3 & #4", ["o/r#3"]],
         ["closed #5,#6", ["#5"]],
         ["Closes #1, closes #2", []],
         ["Closes #1\nRefs #2, #3", []],
         ["Closes #1. #2 follows", []],
-        ["the comment `Closes #1, #2` closed only #1", []],
-        ["```\nCloses #1, #2\n```\n", []],
+        ["the comment `Closes #1, #2` closed only #1", ["#1"]],
+        ["```\nCloses #1, #2\n```\n", ["#1"]],
+        // (each keyword and reference form, so that a pattern missing one fails its row)
+        ["close #1, #2", ["#1"]],
+        ["Fixed #1, #2", ["#1"]],
+        ["FIX #1, #2", ["#1"]],
+        ["resolve #1, #2", ["#1"]],
+        ["resolves #1 & #2", ["#1"]],
+        ["Closes o/r#1, #2", ["o/r#1"]],
         ["encloses #1, #2", []],
       ])
         assert.deepEqual(

@@ -19,7 +19,7 @@ import { existsSync, readFileSync } from "node:fs";
 // but a tree, such as a stored baseline's `src` tree hash, is reported as a tree, resolved, without the remote check:
 // proving a tree reachable from a remote ref is costly.
 // Unfilled placeholders (`PLACEHOLDERS`) outside fenced code blocks are reported too, and so is a closing clause that
-// names several issues after one keyword (`Closes #1, #2`), which closes only the first (`closingClausesOf`). Every run
+// names several issues after one keyword, in code too, which closes only the first (`closingClausesOf`). Every run
 // that completes ends with one line counting the tokens by result, the placeholders and those clauses, so no output
 // means it did not run.
 //
@@ -84,23 +84,21 @@ export function placeholdersOf(text) {
 
 /**
  * The closing clauses of `text` that name several issues after one keyword, such as `Closes #1970, #1965`, each with
- * the one issue GitHub closes by it, the first: GitHub closes only an issue its own keyword names. An issue is `#N`,
- * `owner/repo#N` or its `https://github.com/…/issues/N` address; issues are joined by `,`, `and`, `, and` or `&`.
- * Fenced code blocks and inline code spans are left out, as GitHub reads no keyword there, each by CommonMark's own
- * delimiters so that no prose beside them goes; other code, such as an indented block, is read as prose. A clause
- * that emphasis or a link interrupts is not read.
+ * the one issue GitHub closes by it, the first: GitHub closes only an issue its own keyword names. Every closing
+ * keyword followed by more than one issue reference is found, wherever it stands in the text, code included; a quoted
+ * example must be written so that it is not such a clause. A keyword is `close`, `closes`, `closed`, `fix`, `fixes`,
+ * `fixed`, `resolve`, `resolves` or `resolved` in any case, with an optional `:`; a reference is `#N`, `owner/repo#N`
+ * or `https://github.com/owner/repo/issues/N`; references are joined by `,`, `and`, `, and` or `&`. A form GitHub
+ * closes on that these patterns do not match, such as a reference inside emphasis or a link, is the way left to fail
+ * open.
  */
 export function closingClausesOf(text) {
-  // (code becomes a mark that no clause runs across)
-  const prose = text
-    .replace(/^ {0,3}(([`~])\2{2,})[^\n]*\n[\s\S]*?^ {0,3}\1\2*[ \t]*$/gmu, " \u00b7 ")
-    .replace(/(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?[^`]\1(?!`)/gu, " \u00b7 ");
   const issue = String.raw`(?:https?:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/\d+|(?:[\w.-]+\/[\w.-]+)?#\d+)`;
   const clause = new RegExp(
     String.raw`\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+(${issue})(?:\s*(?:,\s*(?:and\b|&)?|\band\b|&)\s*${issue})+`,
     "giu",
   );
-  return [...prose.matchAll(clause)].map((m) => ({ clause: m[0], closes: m[1] }));
+  return [...text.matchAll(clause)].map((m) => ({ clause: m[0], closes: m[1] }));
 }
 
 /**
