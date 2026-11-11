@@ -8,8 +8,8 @@ let checked: Error | null | undefined;
 
 /**
  * An error naming the paths whose entry in the bundle's `sources.json` differs from the checkout's walk
- * (`player/vue/test-modules-sources.ts`), a path one of them lacks included, or naming why the bundle cannot be
- * checked; `null` when the checkout matches.
+ * (`player/vue/test-modules-sources.ts`), a path one of them lacks and a path the walk refuses included, or naming why
+ * the bundle cannot be checked; `null` when the checkout matches.
  */
 function staleBundle(): Error | null {
   let sources: unknown;
@@ -24,9 +24,11 @@ function staleBundle(): Error | null {
   if (typeof sources !== "object" || sources === null || Array.isArray(sources))
     return new Error(`${fileURLToPath(bundle)}sources.json is not an object of entries.`);
   const stamped = new Map<string, unknown>(Object.entries(sources));
-  const current = walkSources(root);
-  const changed = [...new Set([...stamped.keys(), ...current.keys()])]
-    .filter((path) => stamped.get(path) !== current.get(path))
+  // An entry the walk refuses is a change too: no bundle is built while one exists.
+  const { stamp: current, refused } = walkSources(root);
+  const refusedKeys = new Set(refused.map(([key]) => key));
+  const changed = [...new Set([...stamped.keys(), ...current.keys(), ...refusedKeys])]
+    .filter((path) => refusedKeys.has(path) || stamped.get(path) !== current.get(path))
     .sort();
   if (changed.length === 0) return null;
   const named = changed.slice(0, 5);

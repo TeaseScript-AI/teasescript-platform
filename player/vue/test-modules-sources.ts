@@ -3,16 +3,16 @@
 // cannot run against Player or engine code older than its own.
 //
 // The stamp covers the whole checkout, not the bundle's inputs: it names no input, so it cannot miss one in the
-// checkout. Every entry is recorded at any depth, apart from the root's own `BOOKKEEPING` and `OUTSIDE_THE_STAMP`
-// entries, by its key: the names the walk read, joined with `/`, none rewritten. Each key must name one entry; two
-// entries that share a key (names that the file system lists alike) fail the build. Only a folder, a regular file, or a
-// link that resolves to one is read:
-// - a file by the SHA-256 of its content;
-// - a symlink to a file by its target's identity (its path from the root, or its absolute path outside it) and that
-//   content;
-// - a symlink to a folder, a broken symlink, an entry that cannot be read under its listed name, or a special file
-//   (a FIFO, socket or device, or a link to one) by what it is, unread, which fails the build.
-// The set of keys is part of the stamp, so an added, removed or renamed file is a change.
+// checkout. The walk admits exactly one thing, at any depth, apart from the root's own `BOOKKEEPING` and
+// `OUTSIDE_THE_STAMP` entries: a regular file, or a link that resolves to one, under a unique key, with a name and a
+// link identity that are valid UTF-8. Everything else is refused, by default, whatever it is, and a refusal fails the
+// build. An admitted entry is stamped as:
+// - a file: `file` and the SHA-256 of its content;
+// - a link: `link`, its target's identity (its path from the root, or its absolute path outside it), and that content.
+// A key is the names the walk read, joined with `/`, none rewritten. Names and link targets are read as bytes and decoded
+// by the platform's strict UTF-8 decoder, which is one-to-one, and a name holds no `/`: so a key is unique, and two
+// entries never share a key or an identity. The set of keys is part of the stamp, so an added, removed or renamed file
+// is a change.
 //
 // It is a freshness check of the checkout's files, not a key of everything a build depends on. Not attested:
 // - files outside the checkout, however they are reached (a link's target is stamped, not what a tool reads because of
@@ -31,12 +31,11 @@ import {
   lstatSync,
   readdirSync,
   readFileSync,
-  readlinkSync,
   realpathSync,
   statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, relative, sep } from "node:path";
 import type { Plugin, ResolvedConfig } from "vite";
 
 /** The checkout's own bookkeeping in the root, of any kind, left out with its reasons: no build writes or reads it. */
@@ -56,75 +55,103 @@ const OUTSIDE_THE_STAMP = new Map([
   ],
   ["dist", "the build output, this bundle and its stamp among it"],
 ]);
-/** What a stamp entry is when it is not a file the build can read; the build refuses these. */
-const UNSTAMPABLE = /^(?:folder link|broken link|unreadable|special file|duplicate key)\b/u;
+/** The platform's strict decoder: it refuses any byte sequence that is not UTF-8, and keeps a leading byte order mark. */
+const strict = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
+/** A name's or a path's bytes as text, or `undefined` when they are not valid UTF-8. */
+function text(bytes: Buffer): string | undefined {
+  try {
+    return strict.decode(bytes);
+  } catch {
+    return undefined;
+  }
+}
 
 const sha256 = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex");
 /** A path with `/` for the host's own separator, where that is another one; nothing else is rewritten. */
 const posix = (path: string) => (sep === "/" ? path : path.split(sep).join("/"));
 
-/** The stamp entry of one path: its content's hash, a link's target and hash, or what keeps it from being read. */
-function entry(root: string, path: string): string {
+/** One entry's outcome: an admitted stamp, or why it is refused. */
+type Entry = { stamp: string } | { refused: string };
+
+/** The outcome of one path that is not a folder: only a regular file or a link that resolves to one is admitted. */
+function entry(root: string, path: string): Entry {
   try {
     const status = lstatSync(path);
-    if (!status.isSymbolicLink()) return status.isFile() ? sha256(path) : "special file";
-    if (!existsSync(path))
-      return `broken link ${posix(resolve(dirname(path), readlinkSync(path)))}`;
+    if (!status.isSymbolicLink())
+      return status.isFile() ? { stamp: `file ${sha256(path)}` } : { refused: "a special file" };
+    if (!existsSync(path)) return { refused: "a broken link" };
+    // The target as the system resolves it, in bytes: a target whose path is not UTF-8 has no lossless identity.
+    const target = text(realpathSync.native(path, { encoding: "buffer" }));
+    if (target === undefined) return { refused: "a link whose target's path is not valid UTF-8" };
     // A target in the checkout by its path from the root, one outside it by its absolute path: both stay as they are when
     // the checkout moves.
-    const target = realpathSync(path);
     const inside = relative(root, target);
     const identity = posix(
       isAbsolute(inside) || inside === ".." || inside.startsWith(`..${sep}`) ? target : inside,
     );
     const resolved = statSync(path);
-    if (resolved.isDirectory()) return `folder link ${identity}`;
-    if (!resolved.isFile()) return `special file link ${identity}`;
-    return `link ${identity} ${sha256(path)}`;
+    if (resolved.isFile()) return { stamp: `link ${identity} ${sha256(path)}` };
+    return {
+      refused: `a link to ${resolved.isDirectory() ? "a folder" : "a special file"}, ${identity}`,
+    };
   } catch {
-    return "unreadable under its listed name";
+    return { refused: "unreadable" };
   }
 }
 
 const folderOrLinkToOne = (path: string) => existsSync(path) && statSync(path).isDirectory();
 
-/** The stamp of the checkout at `checkout`: path from the root to entry, in path order. */
-export function walkSources(checkout: string): Map<string, string> {
-  // Link targets are named from the root's real path, as whichever path reached the checkout.
-  const root = realpathSync(checkout);
+/** The checkout at `checkout`: its stamp, key to admitted entry in key order, and every refused entry with its reason. */
+export function walkSources(checkout: string): {
+  stamp: Map<string, string>;
+  refused: (readonly [string, string])[];
+} {
   const stamp = new Map<string, string>();
-  // Every key the walk has listed, folders' included: a second entry with one of them fails the build.
-  const listed = new Set<string>();
-  const list = (key: string) => {
-    const twice = listed.has(key);
-    listed.add(key);
-    if (twice) stamp.set(key, "duplicate key: two entries share it");
-    return !twice;
-  };
+  const refused: (readonly [string, string])[] = [];
+  // Link targets are named from the root's real path, as whichever path reached the checkout.
+  let root;
+  try {
+    root = text(realpathSync.native(checkout, { encoding: "buffer" }));
+  } catch {
+    return { stamp, refused: [[".", "unreadable"]] };
+  }
+  if (root === undefined)
+    return { stamp, refused: [[".", "the checkout's path is not valid UTF-8"]] };
   const walk = (folder: string, key: string) => {
     let items;
     try {
-      items = readdirSync(folder, { withFileTypes: true });
+      items = readdirSync(folder, { withFileTypes: true, encoding: "buffer" });
     } catch {
-      stamp.set(key, "unreadable under its listed name");
+      refused.push([key, "unreadable"]);
       return;
     }
     for (const item of items) {
-      const path = join(folder, item.name);
-      const itemKey = key === "" ? item.name : `${key}/${item.name}`;
+      const name = text(item.name);
+      // A name that is not UTF-8 is shown decoded, which loses bytes; its bytes are in the reason.
+      const itemKey = `${key === "" ? "" : `${key}/`}${name ?? item.name.toString()}`;
+      if (name === undefined) {
+        refused.push([
+          itemKey,
+          `a name that is not valid UTF-8, bytes ${item.name.toString("hex")}`,
+        ]);
+        continue;
+      }
+      const path = join(folder, name);
       if (
         key === "" &&
-        (BOOKKEEPING.has(item.name) ||
-          (OUTSIDE_THE_STAMP.has(item.name) && folderOrLinkToOne(path)))
+        (BOOKKEEPING.has(name) || (OUTSIDE_THE_STAMP.has(name) && folderOrLinkToOne(path)))
       )
         continue;
-      if (!list(itemKey)) continue;
       if (item.isDirectory()) walk(path, itemKey);
-      else stamp.set(itemKey, entry(root, path));
+      else {
+        const outcome = entry(root, path);
+        if ("stamp" in outcome) stamp.set(itemKey, outcome.stamp);
+        else refused.push([itemKey, outcome.refused]);
+      }
     }
   };
   walk(root, "");
-  return new Map([...stamp].sort(([a], [b]) => (a < b ? -1 : 1)));
+  return { stamp: new Map([...stamp].sort(([a], [b]) => (a < b ? -1 : 1))), refused };
 }
 
 /** The Vite plugin that stamps the checkout at the start of the build and writes `sources.json` with the bundle. */
@@ -137,10 +164,12 @@ export function testModulesSources(): Plugin {
       config = resolved;
     },
     buildStart() {
-      stamp = walkSources(config.root);
-      for (const [path, value] of stamp)
-        if (UNSTAMPABLE.test(value))
-          this.error(`test-modules-sources: ${path} cannot be stamped (${value})`);
+      const walked = walkSources(config.root);
+      if (walked.refused.length > 0)
+        this.error(
+          `test-modules-sources: ${walked.refused.map(([key, reason]) => `${key} cannot be stamped (${reason})`).join("; ")}`,
+        );
+      stamp = walked.stamp;
     },
     // Written by hand, as Vite emits no assets from a server-side build, and last, after any other stamping plugin.
     writeBundle: {

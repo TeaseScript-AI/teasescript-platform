@@ -189,6 +189,26 @@ test("a Player test bundle is refused once a file of the checkout changes", (t) 
         return () => write("player/clock.ts", before);
       },
     ],
+    // an added entry the walk refuses, under a key the bundle never had: a name that is not UTF-8, a FIFO
+    [
+      "tools/\ufffd.txt",
+      () => {
+        const raw = Buffer.concat([
+          Buffer.from(path("tools/")),
+          Buffer.from([0xff]),
+          Buffer.from(".txt"),
+        ]);
+        writeFileSync(raw, "raw");
+        return () => rmSync(raw);
+      },
+    ],
+    [
+      "tools/pipe",
+      () => {
+        assert.equal(spawnSync("mkfifo", [path("tools/pipe")]).status, 0);
+        return () => unlinkSync(path("tools/pipe"));
+      },
+    ],
   ];
   for (const [name, change] of changes) {
     const undo = change();
@@ -209,11 +229,7 @@ test("a Player test bundle is refused once a file of the checkout changes", (t) 
   );
 });
 
-// Raw names: a name that is not valid UTF-8 is listed decoded, as `\ufffd` for each invalid byte.
-const rawName = (folder: string, bytes: readonly number[], rest = "") =>
-  Buffer.concat([Buffer.from(`${folder}/`), Buffer.from(bytes), Buffer.from(rest)]);
-
-test("an entry the walk cannot stamp fails the build: a folder link, two entries listed alike, an unreadable name, a special file", (t) => {
+test("an entry the walk does not admit fails the build: a folder link, a name that is not UTF-8, a special file", (t) => {
   const { path, write, build } = checkout(t);
   const refused = (expected: RegExp, make: () => () => void) => {
     const undo = make();
@@ -228,41 +244,34 @@ test("an entry the walk cannot stamp fails the build: a folder link, two entries
   };
   write("actual-src/value.ts", "export const value = 1;\n");
   refused(
-    /player\/tools cannot be stamped \(folder link tools\)/u,
+    /player\/tools cannot be stamped \(a link to a folder, tools\)/u,
     link("player/tools", "../tools"),
   );
-  refused(/src cannot be stamped \(folder link actual-src\)/u, link("src", "actual-src"));
+  refused(/src cannot be stamped \(a link to a folder, actual-src\)/u, link("src", "actual-src"));
   refused(
-    /docs-link cannot be stamped \(folder link actual-src\)/u,
+    /docs-link cannot be stamped \(a link to a folder, actual-src\)/u,
     link("docs-link", "actual-src"),
   );
-  // a name that is not UTF-8 beside the valid name it is listed as, for a file and for a folder
-  refused(/raw\/\ufffd\.txt cannot be stamped \(duplicate key: two entries share it\)/u, () => {
-    write("raw/\ufffd.txt", "valid");
-    writeFileSync(rawName(path("raw"), [0xff], ".txt"), "raw");
-    return () => rmSync(path("raw"), { recursive: true });
-  });
-  refused(/tools\/\ufffd cannot be stamped \(duplicate key: two entries share it\)/u, () => {
-    mkdirSync(path("tools/\ufffd"));
-    mkdirSync(rawName(path("tools"), [0xfe]));
-    writeFileSync(rawName(path("tools"), [0xfe], "/value.txt"), "raw");
-    return () => {
-      rmSync(path("tools/\ufffd"), { recursive: true });
-      rmSync(rawName(path("tools"), [0xfe]), { recursive: true });
-    };
-  });
-  // a lone name that is not UTF-8: listed, but not readable under the name it is listed as
-  refused(/tools\/\ufffd\.txt cannot be stamped \(unreadable under its listed name\)/u, () => {
-    writeFileSync(rawName(path("tools"), [0xff], ".txt"), "raw");
-    return () => rmSync(rawName(path("tools"), [0xff], ".txt"));
-  });
+  // a name that is not UTF-8, shown decoded with its bytes; the names family below holds the rule
+  refused(
+    /tools\/\ufffd\.txt cannot be stamped \(a name that is not valid UTF-8, bytes ff2e747874\)/u,
+    () => {
+      const raw = Buffer.concat([
+        Buffer.from(path("tools/")),
+        Buffer.from([0xff]),
+        Buffer.from(".txt"),
+      ]);
+      writeFileSync(raw, "raw");
+      return () => rmSync(raw);
+    },
+  );
   // a special file is not read, so a FIFO with no writer cannot hang the walk
   const fifo = (name: string) => () => {
     assert.equal(spawnSync("mkfifo", [path(name)]).status, 0);
     return () => unlinkSync(path(name));
   };
-  refused(/tools\/pipe cannot be stamped \(special file\)/u, fifo("tools/pipe"));
-  refused(/player\/pipe-link cannot be stamped \(special file link tools\/pipe\)/u, () => {
+  refused(/tools\/pipe cannot be stamped \(a special file\)/u, fifo("tools/pipe"));
+  refused(/player\/pipe-link cannot be stamped \(a link to a special file, tools\/pipe\)/u, () => {
     const undo = fifo("tools/pipe")();
     symlinkSync("../tools/pipe", path("player/pipe-link"));
     return () => {
@@ -273,17 +282,56 @@ test("an entry the walk cannot stamp fails the build: a folder link, two entries
   assert.equal(build().status, 0);
 });
 
+// Round 2's witness: a link retargeted from a valid name to a target whose name is not UTF-8 but decodes to it, with the
+// same content, which the configuration reads through the link. It is refused, and so is its rebuild.
+test("a link retargeted to a name that is not UTF-8 is refused, and its rebuild fails", (t) => {
+  const { path, write, build, minutesOf90 } = checkout(t);
+  const raw = Buffer.concat([
+    Buffer.from(path("dist/raw/")),
+    Buffer.from([0xff]),
+    Buffer.from(".txt"),
+  ]);
+  write("dist/raw/\ufffd.txt", "same");
+  writeFileSync(raw, "same");
+  symlinkSync("../dist/raw/\ufffd.txt", path("tools/input.txt"));
+  write(
+    "player/vue/vite.test-modules.config.ts",
+    `import { readlinkSync } from "node:fs";\n${config().replace(
+      "publicDir: false,",
+      'publicDir: false,\n  define: { __WITNESS__: JSON.stringify(readlinkSync("tools/input.txt", { encoding: "buffer" }).toString("hex")) },',
+    )}`,
+  );
+  write("player/clock.ts", `${CLOCK}export const witness = __WITNESS__;\n`);
+  const built = build();
+  assert.equal(built.status, 0, built.stderr);
+  const target = (bytes: Buffer) =>
+    JSON.stringify(Buffer.concat([Buffer.from("../dist/raw/"), bytes]).toString("hex"));
+  assert.equal(minutesOf90(1, "", path(""), "witness"), target(Buffer.from("\ufffd.txt")));
+  unlinkSync(path("tools/input.txt"));
+  symlinkSync(
+    Buffer.concat([Buffer.from("../dist/raw/"), Buffer.from([0xff]), Buffer.from(".txt")]),
+    path("tools/input.txt"),
+  );
+  assert.equal(minutesOf90(1, "", path(""), "witness"), STALE("tools/input.txt"));
+  const rebuilt = build();
+  assert.notEqual(rebuilt.status, 0);
+  assert.match(
+    rebuilt.stderr,
+    /tools\/input\.txt cannot be stamped \(a link whose target's path is not valid UTF-8\)/u,
+  );
+});
+
 test("two names that differ only by a backslash are two entries, each stamped by its own content", (t) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "player-test-modules-backslash-")));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, "tools"));
   writeFileSync(join(root, "tools/data.txt"), "slash");
   writeFileSync(join(root, "tools\\data.txt"), "backslash");
-  const before = walkSources(root);
+  const before = walkSources(root).stamp;
   assert.deepEqual([...before.keys()], ["tools/data.txt", "tools\\data.txt"]);
   for (const name of ["tools/data.txt", "tools\\data.txt"]) {
     writeFileSync(join(root, name), "edited");
-    const after = walkSources(root);
+    const after = walkSources(root).stamp;
     assert.deepEqual(
       [...after.keys()].filter((key) => after.get(key) !== before.get(key)),
       [name],
@@ -459,8 +507,10 @@ test("the stamp covers the checkout apart from the root's bookkeeping, node_modu
   }
   symlinkSync(elsewhere, join(root, "node_modules"), "junction");
   symlinkSync("target.txt", join(root, "file-link.txt"));
+  const { stamp, refused } = walkSources(root);
+  assert.deepEqual(refused, []);
   assert.deepEqual(
-    [...walkSources(root).keys()],
+    [...stamp.keys()],
     [".fourth", "README.md", "docs/inner.md", "file-link.txt", "target.txt", "tools/inner.md"],
   );
 });
@@ -468,7 +518,7 @@ test("the stamp covers the checkout apart from the root's bookkeeping, node_modu
 // The entry rule, generated: a name, a kind and a placement; each expected stamp follows from the clauses. A key is the
 // names joined with `/`, none rewritten. A file or a link to one is an entry everywhere. A folder is entered everywhere,
 // except a folder or a link to one named `node_modules` or `dist` in the root, which is left out. Any other link to a
-// folder, and a special file, fail the build.
+// folder, and a special file, are refused.
 for (const name of ["node_modules", "dist", "other", "with\\backslash"])
   for (const kind of ["file", "file link", "folder", "folder link", "special file"])
     for (const placement of ["the root", "an area folder", "a nested folder", "tools/"])
@@ -494,18 +544,129 @@ for (const name of ["node_modules", "dist", "other", "with\\backslash"])
           mkdirSync(join(root, path));
           writeFileSync(join(root, path, "inner.ts"), "inner");
         } else symlinkSync(join(root, "targets/folder"), join(root, path), "junction");
-        const stamp = walkSources(root);
+        const { stamp, refused } = walkSources(root);
         const leftOut =
           placement === "the root" &&
           (name === "node_modules" || name === "dist") &&
           kind.startsWith("folder");
         const expected = leftOut ? [] : kind === "folder" ? [`${path}/inner.ts`] : [path];
         assert.deepEqual(
-          [...stamp.keys()].filter((key) => key === path || key.startsWith(`${path}/`)),
+          [...stamp.keys(), ...refused.map(([key]) => key)]
+            .filter((key) => key === path || key.startsWith(`${path}/`))
+            .sort(),
           expected,
         );
-        if (kind === "folder link" && expected.length > 0)
-          assert.match(stamp.get(path) ?? "", /^folder link /u, "a folder link fails the build");
-        if (kind === "special file")
-          assert.equal(stamp.get(path), "special file", "a special file fails the build");
+        const reason = new Map(refused).get(path);
+        if (expected.length === 0) return;
+        if (kind === "file") assert.match(stamp.get(path) ?? "", /^file [0-9a-f]{64}$/u);
+        if (kind === "file link")
+          assert.match(stamp.get(path) ?? "", /^link targets\/file\.ts [0-9a-f]{64}$/u);
+        if (kind === "folder link") assert.equal(reason, "a link to a folder, targets/folder");
+        if (kind === "special file") assert.equal(reason, "a special file");
       });
+
+// The names family: an entry is admitted exactly when the bytes of its name, or of its link's target, are UTF-8, and two
+// admitted entries with different bytes never share a key or an identity. The expectations are UTF-8's, not a decoder's.
+const NAMES: readonly (readonly [string, readonly number[], boolean])[] = [
+  ["ASCII", [0x61], true],
+  ["a two-byte sequence", [0xc3, 0xa9], true],
+  ["a three-byte sequence", [0xe2, 0x82, 0xac], true],
+  ["a four-byte sequence", [0xf0, 0x9f, 0x98, 0x80], true],
+  ["a leading byte order mark", [0xef, 0xbb, 0xbf], true],
+  ["a backslash", [0x5c], true],
+  ["an invalid lead byte", [0xff], false],
+  ["a truncated sequence", [0xe2, 0x82], false],
+  ["an overlong encoding", [0xc0, 0xaf], false],
+  ["an encoded surrogate half", [0xed, 0xa0, 0x80], false],
+];
+type Position = "a file" | "a folder" | "a link" | "a link's target";
+const POSITIONS: readonly Position[] = ["a file", "a folder", "a link", "a link's target"];
+
+/** Makes one entry whose name, or whose link's target's name, is `bytes` and `-name`, in `folder` of `root`. */
+function named(root: string, position: Position, folder: string, bytes: Buffer, index: number) {
+  const prefix = folder === "" ? "" : `${folder}/`;
+  const at = (...parts: Buffer[]) => Buffer.concat([Buffer.from(`${root}/`), ...parts]);
+  const name = Buffer.concat([bytes, Buffer.from("-name")]);
+  mkdirSync(join(root, folder), { recursive: true });
+  if (position === "a link's target") {
+    mkdirSync(join(root, "dist", folder), { recursive: true });
+    writeFileSync(at(Buffer.from(`dist/${prefix}`), name), "target");
+    symlinkSync(at(Buffer.from(`dist/${prefix}`), name), join(root, prefix, `link-${index}.txt`));
+    const key = `${prefix}link-${index}.txt`;
+    return {
+      key,
+      shown: key,
+      value: `link dist/${prefix}${name.toString()} `,
+      reason: "a link whose target's path is not valid UTF-8",
+    };
+  }
+  const path = at(Buffer.from(prefix), name);
+  if (position === "a file") writeFileSync(path, "entry");
+  else if (position === "a link") {
+    mkdirSync(join(root, "targets"), { recursive: true });
+    writeFileSync(join(root, "targets/file.txt"), "target");
+    symlinkSync(join(root, "targets/file.txt"), path);
+  } else {
+    mkdirSync(path);
+    writeFileSync(Buffer.concat([path, Buffer.from("/inner.txt")]), "inner");
+  }
+  const key = `${prefix}${name.toString()}`;
+  return {
+    key: position === "a folder" ? `${key}/inner.txt` : key,
+    shown: key,
+    value: { "a file": "file ", "a link": "link targets/file.txt ", "a folder": "file " }[position],
+    reason: `a name that is not valid UTF-8, bytes ${name.toString("hex")}`,
+  };
+}
+
+const namesRoot = (t: TestContext) => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "player-test-modules-names-")));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  return root;
+};
+/** The stamp's keys apart from the shared link target, which the family's links read. */
+const ownKeys = (stamp: Map<string, string>) =>
+  [...stamp.keys()].filter((key) => key !== "targets/file.txt").sort();
+
+for (const position of POSITIONS)
+  for (const folder of ["", "player/nested"]) {
+    for (const [label, bytes, valid] of NAMES)
+      test(`${position} whose name has ${label}, in ${folder || "the root"}: ${valid ? "admitted" : "refused"}`, (t) => {
+        const root = namesRoot(t);
+        const entry = named(root, position, folder, Buffer.from(bytes), 0);
+        // beside a name that is not UTF-8, the valid name it decodes to, which is admitted on its own
+        const lossy = Buffer.from(Buffer.from(bytes).toString());
+        const twin = valid ? undefined : named(root, position, folder, lossy, 1);
+        const { stamp, refused } = walkSources(root);
+        assert.deepEqual(refused, valid ? [] : [[entry.shown, entry.reason]]);
+        const admitted = valid ? [entry] : [twin!];
+        assert.deepEqual(ownKeys(stamp), admitted.map(({ key }) => key).sort());
+        for (const { key, value } of admitted) assert.ok(stamp.get(key)?.startsWith(value), key);
+      });
+    test(`every name at once as ${position} in ${folder || "the root"}: no two admitted entries share a key or an identity`, (t) => {
+      const root = namesRoot(t);
+      const made = NAMES.map(([, bytes, valid], index) => ({
+        valid,
+        ...named(root, position, folder, Buffer.from(bytes), index),
+      }));
+      // the valid names the invalid ones decode to, once each
+      const twins = [
+        ...new Set(
+          NAMES.filter(([, , valid]) => !valid).map(([, bytes]) => Buffer.from(bytes).toString()),
+        ),
+      ].map((text, index) =>
+        named(root, position, folder, Buffer.from(text), NAMES.length + index),
+      );
+      const { stamp, refused } = walkSources(root);
+      assert.deepEqual(
+        refused.map(([key]) => key).sort(),
+        made
+          .filter(({ valid }) => !valid)
+          .map(({ shown }) => shown)
+          .sort(),
+      );
+      const admitted = [...made.filter(({ valid }) => valid), ...twins];
+      assert.deepEqual(ownKeys(stamp), admitted.map(({ key }) => key).sort());
+      for (const { key, value } of admitted) assert.ok(stamp.get(key)?.startsWith(value), key);
+    });
+  }
