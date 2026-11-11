@@ -10,7 +10,10 @@ import {
   connectBridge,
   type BridgeResult,
 } from "../../player/engine-bridge/client.js";
+import { openEngineWorker } from "../../player/engine-bridge/browser-client.js";
 import { nodeWorkerPort } from "../../player/engine-bridge/node-client.js";
+import { playerBuildIdentity } from "../../player/build-identity.js";
+import { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import type { PrepareResult } from "../../player/engine-bridge/player-ops.js";
 import { BRIDGE_VERSION, type BuildIdentity } from "../../player/engine-bridge/protocol.js";
 import { compilePlayerProject } from "../../player/runtime/compile-project.js";
@@ -343,4 +346,127 @@ test("the browser Worker's host loads no compiler or language-tooling module unt
     loaded.filter((module) => authoring.test(module)),
     [],
   );
+});
+
+/** An event a fake Worker dispatches: a message's data, or an error's message. */
+interface WorkerEvent {
+  readonly data?: unknown;
+  readonly message?: string;
+}
+
+/**
+ * A browser `Worker` for `browser-client.ts`, installed as the global for one test: it records how it was constructed,
+ * what was posted and whether it was terminated, and dispatches the events a test gives it. `fail` makes its
+ * constructor throw, as a browser does for a blocked or opaque-origin script.
+ */
+function fakeWorkers(context: import("node:test").TestContext, fail: Error | null = null) {
+  const made: {
+    url: URL;
+    options: unknown;
+    terminated: boolean;
+    emit(type: "message" | "error" | "messageerror", event: WorkerEvent): void;
+  }[] = [];
+  class FakeWorker {
+    readonly #listeners = new Map<string, ((event: WorkerEvent) => void)[]>();
+    constructor(url: URL, options: unknown) {
+      if (fail !== null) throw fail;
+      made.push({
+        url,
+        options,
+        terminated: false,
+        emit: (type, event) => {
+          for (const listener of this.#listeners.get(type) ?? []) listener(event);
+        },
+      });
+    }
+    postMessage() {}
+    addEventListener(type: string, listener: (event: WorkerEvent) => void) {
+      this.#listeners.set(type, [...(this.#listeners.get(type) ?? []), listener]);
+    }
+    terminate() {
+      made.at(-1)!.terminated = true;
+    }
+  }
+  Object.defineProperty(globalThis, "Worker", { configurable: true, value: FakeWorker });
+  context.after(() => Reflect.deleteProperty(globalThis, "Worker"));
+  return made;
+}
+
+const ready = (build: BuildIdentity = playerBuildIdentity) => ({
+  data: { v: BRIDGE_VERSION, kind: "ready", build },
+});
+
+test("the page starts the engine's module Worker and has its bridge once a ready of this build arrives", async (context) => {
+  const made = fakeWorkers(context);
+  const opening = openEngineWorker();
+  assert.equal(made.length, 1);
+  assert.ok(
+    made[0]!.url.href.endsWith("/player/engine-bridge/engine.worker.ts"),
+    made[0]!.url.href,
+  );
+  assert.deepEqual(made[0]!.options, { type: "module" });
+  made[0]!.emit("message", ready());
+  assert.ok((await opening) instanceof PlayerBridge);
+  assert.equal(made[0]!.terminated, false);
+});
+
+test("a Worker that cannot start is the page's startup failure, with the browser's message", async (context) => {
+  const failure = (message: string) => ({
+    name: "BridgeStartupError",
+    message: `The engine Worker failed: ${message}`,
+  });
+  // The constructor throws.
+  fakeWorkers(context, new Error("Failed to construct 'Worker': access denied"));
+  await assert.rejects(openEngineWorker(), (error: unknown) => {
+    assert.ok(error instanceof BridgeStartupError);
+    assert.deepEqual(
+      { name: error.name, message: error.message },
+      failure("Failed to construct 'Worker': access denied"),
+    );
+    return true;
+  });
+  // Its events before `ready`: an error with the browser's message, one without (a script that did not load), a message
+  // it could not receive, and a ready of another build. Each ends the Worker.
+  const cases: readonly [
+    type: "error" | "messageerror" | "message",
+    event: WorkerEvent,
+    message: string,
+  ][] = [
+    [
+      "error",
+      { message: "Uncaught SyntaxError: Unexpected token" },
+      "The engine Worker failed: Uncaught SyntaxError: Unexpected token",
+    ],
+    ["error", {}, "The engine Worker failed: its script could not be loaded or run"],
+    ["messageerror", {}, "The engine Worker failed: it sent a message the page cannot receive"],
+    [
+      "message",
+      ready({ ...playerBuildIdentity, commit: "another" }),
+      "The engine Worker belongs to another build of the Player.",
+    ],
+  ];
+  for (const [type, event, message] of cases) {
+    const made = fakeWorkers(context);
+    const opening = openEngineWorker();
+    made[0]!.emit(type, event);
+    await assert.rejects(opening, (error: unknown) => {
+      assert.ok(error instanceof BridgeStartupError, `${type}: ${String(error)}`);
+      assert.equal(error.message, message);
+      return true;
+    });
+    assert.equal(made[0]!.terminated, true, type);
+  }
+});
+
+test("after ready, the Worker's error is the bridge's loss", async (context) => {
+  const made = fakeWorkers(context);
+  const opening = openEngineWorker();
+  made[0]!.emit("message", ready());
+  const bridge = await opening;
+  const lost = new Promise<BridgeLostError>((resolve) => bridge.client.onLoss(resolve));
+  made[0]!.emit("error", { message: "Uncaught RangeError: Maximum call stack size exceeded" });
+  const error = await lost;
+  assert.ok(error instanceof BridgeLostError);
+  assert.match(error.message, /Maximum call stack size exceeded/u);
+  assert.equal(made[0]!.terminated, true);
 });
