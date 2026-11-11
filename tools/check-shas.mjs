@@ -14,8 +14,10 @@ import { existsSync, readFileSync } from "node:fs";
 // are not checked for that. An unresolved token may be a commit not fetched yet: the message says to fetch it; this
 // tool never fetches. A token that is no commit but a tree, such as a stored baseline's `src` tree hash, is reported
 // as a tree, resolved, without the remote check: proving a tree reachable from a remote ref is costly.
-// Unfilled placeholders (`PLACEHOLDERS`) outside fenced code blocks are reported too. Every run that completes ends
-// with one line counting the tokens by result and the placeholders, so no output means it did not run.
+// Unfilled placeholders (`PLACEHOLDERS`) outside fenced code blocks are reported too, and so is a closing clause that
+// names several issues after one keyword (`Closes #1, #2`), which closes only the first (`closingClausesOf`). Every run
+// that completes ends with one line counting the tokens by result, the placeholders and those clauses, so no output
+// means it did not run.
 //
 // Tokens that need not be commits are checked, and skipped when no repository resolves them, so no rule hides a SHA:
 // - only digits: a CI run, comment or issue id;
@@ -26,9 +28,9 @@ import { existsSync, readFileSync } from "node:fs";
 // - shorter than 40 and inside a URL or a path, except after `/commit/`, `/commits/`, `/tree/` or `/blob/`: a file's
 //   or a job's name. A full 40-character SHA in a path, such as an evidence folder, must resolve.
 //
-// Exit status: 0 when every token that must be a commit resolved on a remote and no placeholder is left, 1 otherwise,
-// 2 when it
-// cannot run (bad arguments, an unreadable file, or a `--repo` that is no git repository).
+// Exit status: 0 when every token that must be a commit resolved on a remote and no placeholder or several-issue
+// closing clause is left, 1 otherwise, 2 when it cannot run (bad arguments, an unreadable file, or a `--repo` that is
+// no git repository).
 
 /** The unfilled placeholders a report can carry, case-insensitive. */
 export const PLACEHOLDERS = [
@@ -74,6 +76,23 @@ export function placeholdersOf(text) {
   return [
     ...new Set(PLACEHOLDERS.flatMap((pattern) => [...prose.matchAll(pattern)].map((m) => m[0]))),
   ];
+}
+
+/**
+ * The closing clauses of `text` that name several issues after one keyword, such as `Closes #1970, #1965`, each with
+ * the one issue GitHub closes by it, the first: GitHub closes only an issue its own keyword names. Code (fenced blocks
+ * and inline spans) is left out, as GitHub reads no keyword there.
+ */
+export function closingClausesOf(text) {
+  const prose = text
+    .replace(/^[ \t]*```[^\n]*\n[\s\S]*?^[ \t]*```[^\n]*$/gmu, "")
+    .replace(/`[^`\n]*`/gu, "");
+  const issue = String.raw`(?:[\w.-]+\/[\w.-]+)?#\d+`;
+  const clause = new RegExp(
+    String.raw`\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+(${issue})(?:\s*(?:,|\band\b|&)\s*${issue})+`,
+    "giu",
+  );
+  return [...prose.matchAll(clause)].map((m) => ({ clause: m[0], closes: m[1] }));
 }
 
 /**
@@ -228,11 +247,18 @@ function main() {
     failed = true;
     process.stdout.write(`placeholder ${placeholder}  unfilled\n`);
   }
+  const clauses = closingClausesOf(text);
+  for (const { clause, closes } of clauses) {
+    failed = true;
+    process.stdout.write(
+      `closing     "${clause}" closes only ${closes}: one keyword per issue (Closes #1, Closes #2)\n`,
+    );
+  }
   const tokens = Object.values(counts).reduce((sum, n) => sum + n, 0);
   process.stdout.write(
     `check-shas: ${tokens} tokens: ${counts.resolved} resolved, ${counts.trees} trees, ${counts.ambiguous} ambiguous, ` +
       `${counts.unresolved} unresolved, ${counts.local} local only, ${counts.skipped} skipped (ids, words, paths, sha256s); ` +
-      `${placeholders.length} placeholders\n`,
+      `${placeholders.length} placeholders, ${clauses.length} multi-issue closing clauses\n`,
   );
   process.exitCode = failed ? 1 : 0;
 }

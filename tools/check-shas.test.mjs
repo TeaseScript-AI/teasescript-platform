@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { excuse } from "./check-shas.mjs";
+import { closingClausesOf, excuse } from "./check-shas.mjs";
 
 const tool = fileURLToPath(new URL("./check-shas.mjs", import.meta.url));
 
@@ -154,6 +154,46 @@ test("an unfilled placeholder fails", { timeout: 30_000 }, () => {
 });
 
 test(
+  "a closing clause that names several issues after one keyword fails",
+  { timeout: 30_000 },
+  () => {
+    const { directory } = repository();
+    try {
+      const { status, out } = check("Closes #1970, #1965, #1956 (by the ruled reading)\n", [
+        directory,
+      ]);
+      assert.equal(status, 1, out);
+      assert.match(
+        out,
+        /closing +"Closes #1970, #1965, #1956" closes only #1970: one keyword per issue/u,
+      );
+      assert.match(
+        out.trim().split("\n").at(-1),
+        /0 placeholders, 1 multi-issue closing clauses$/u,
+      );
+      for (const [text, closes] of [
+        ["fixes: #1 and #2", ["#1"]],
+        ["Resolved o/r#3 & #4", ["o/r#3"]],
+        ["closed #5,#6", ["#5"]],
+        ["Closes #1, closes #2", []],
+        ["Closes #1\nRefs #2, #3", []],
+        ["Closes #1. #2 follows", []],
+        ["the comment `Closes #1, #2` closed only #1", []],
+        ["```\nCloses #1, #2\n```\n", []],
+        ["encloses #1, #2", []],
+      ])
+        assert.deepEqual(
+          closingClausesOf(text).map((found) => found.closes),
+          closes,
+          JSON.stringify(text),
+        );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
   "each --repo is asked, and a token resolves in the one that has it",
   { timeout: 30_000 },
   () => {
@@ -183,11 +223,11 @@ test(
       for (const [text, line] of [
         [
           "",
-          "0 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 0 placeholders",
+          "0 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 0 placeholders, 0 multi-issue closing clauses",
         ],
         [
           `at ${shas[0].slice(0, 9)}, <sha>`,
-          "1 tokens: 1 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 1 placeholders",
+          "1 tokens: 1 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 1 placeholders, 0 multi-issue closing clauses",
         ],
       ]) {
         const { out } = check(text, [directory]);
