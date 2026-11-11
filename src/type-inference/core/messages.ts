@@ -43,9 +43,9 @@ import {
 } from "./messages/site.js";
 import { isLiteral, setsProperty } from "./messages/words.js";
 import { inWords, type Diagnosed } from "./messages/code-forms.js";
-import { errorSentence, requiredSentence, writtenTypeMessage } from "./messages/errors.js";
+import { errorSentence, writtenTypeMessage } from "./messages/errors.js";
 import { budgetMessage, warningFix, warningSentence } from "./messages/warnings.js";
-import { contextSentence, originSentence } from "./messages/causes.js";
+import { contextSentence, originSentence, requiredSentence } from "./messages/causes.js";
 import { unusedFallbackMessage } from "./consumers/otherwise.js";
 export type { Landing, MessageSource } from "./messages/site.js";
 export { described, pathPhrase } from "./messages/words.js";

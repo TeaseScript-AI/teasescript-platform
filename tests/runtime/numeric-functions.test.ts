@@ -299,7 +299,7 @@ test("numeric functions check their arguments", () => {
       ["TSV022", "abs() takes its arguments without names. Remove 'by:'.", "by"],
       [
         "TSV043",
-        "'maybe' may be null. Check it first: if maybe != null { ... }, or give a fallback: maybe otherwise 0",
+        "'maybe' must be checked for null before it is used here: its type is 'integer?' (line 1). Check it first: if maybe != null { ... }, or give a fallback: maybe otherwise 0",
         "maybe",
       ],
       [

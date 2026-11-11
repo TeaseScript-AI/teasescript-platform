@@ -1218,8 +1218,10 @@ picks.add("three")    // compile error
   prices.add(2.5)              // prices is a number[]
   ```
 
-- An empty list or set takes its element type from the first element added or assigned. In a list or set literal,
-  integers and numbers together are numbers, and `null` elements make the element type optional. Elements of different
+- An empty list or set takes its element type from the first element added or assigned. A list or set literal takes
+  the type that all its elements fit, in any order: integers and numbers together are numbers, also where an integer
+  comes from a declared variable, so `[lives, 2.5]` and `[2.5, lives]` are both lists of numbers; `null` elements make
+  the element type optional. Elements of different
   types are a compile error that names the union to declare ([§13](#union-types)), and the earliest element's type
   counts for the later uses, as with a store of another type (below).
 - A place without a written type takes its type from its declaration's start value when that value settles it, and
@@ -1244,7 +1246,10 @@ picks.add("three")    // compile error
   and `a.add("s")` are valid. A copy carries what the source holds, with the type it has in the source: after
   `let a = [1]` and `let b = a`, `b.add("s")` is a compile error, as after `let b = [1]`, and after `let i = 1`,
   `let j = i`, and `i = i / 2`, `j` is a `number`, as `i` is. A copy of a variable with a written type keeps that type:
-  after `let a: integer | string = 1` and `let b = a`, `b = "text"` is valid.
+  after `let a: integer | string = 1` and `let b = a`, `b = "text"` is valid. The copy is as strict as the variable it
+  copies: after `let lives: integer = 3` and `let copy = lives`, `copy = 2.5` is a compile error, and so is
+  `scores.add(2.5)` after `let scores = [lives]`; write `let copy: number = lives` to allow other numbers. A value read
+  from outside into a copy is read by that type.
 - A value whose type the compiler cannot know, such as untyped storage or host data, decides nothing and is not
   rejected at compile time. Where a place of known type takes it, also through a place that no other value decided,
   such as `let box = { t: null }` set only from such a value, it is checked when it runs.
@@ -1628,6 +1633,8 @@ warns instead of giving a false error, and the copy is checked when the script r
 
 The required-check rules are not affected: a use that needs a check and has none on some route stays a compile error,
 as `n + 1` does after `let n = 1` and `if askBoolean "Clear?" { n = null }` ([narrowing](#type-tests-and-narrowing)).
+This also holds where two conditions exclude each other: after `if c { n = null }`, a use of `n` inside
+`if not c { … }` still needs its check.
 
 The compiler never hangs and never rejects a script because it is too large or too deeply nested for the analysis.
 Where a place exceeds the compiler's work budget, that place, and the checks that need what the compiler would have
@@ -2732,8 +2739,9 @@ when the script runs ([§13](#type-tests-and-narrowing)). The message names the 
 that uses `n`, inside which `n` is an `integer`, and a fallback ([below](#fallback-with-otherwise)):
 
 ```text
+let n: integer? = load("count", default: null)
 say n + 1
-// 'n' may be null here. Check 'n' first, as in 'if n != null { say n + 1 }', or give a fallback, as in '(n otherwise 0)'.
+// 'n' must be checked for null before it is used here: 'load' on line 1 can give null. Check 'n' first, as in 'if n != null { say n + 1 }', or give a fallback, as in '(n otherwise 0)'.
 ```
 
 Where that code is not proved to compile in the statement's place, the message names the check in words, as in

@@ -581,8 +581,10 @@ test("the capture ends at the first store whose contract leaves the slice's dept
   // #1072 A2 checkpoint 2a, #2098: A4's inherited types are solver proofs, 98 frames, 301 yields and 61 literal units;
   // 18 more since #2065: one prefix's decision index counts its two settled stores' two names, 4 steps and 4 kept units,
   // costs its three whole stores' classes, 3, keeps its state from then on, 6, and one decided path then looks it up,
-  // 1: `holdersOf`)
-  assert.equal(budget.total, 22_963_069);
+  // 1: `holdersOf`; 12 fewer since #1906: the mixed errors' later element `b` is described by the kinds its comparison
+  // read, its value no longer read again at the two paths it offends at, `valueAt`'s 2 checks, 2 frames, 2 `invSteps`
+  // and 6 yields)
+  assert.equal(budget.total, 22_963_057);
 });
 
 test("each analysis's captured contracts are its own final pass's", () => {

@@ -17,7 +17,7 @@ import { copied, each, holds, mapped, passing, some, sorted, steps } from "../ch
 import { locationOf, pathKey, peel, removes, stablePath, type StablePath } from "./narrowings.js";
 import { countIn, lowerBound, type TreeBlock, type TreeStatement } from "./statement-tree.js";
 import { selectsElement } from "../method-categories.js";
-import { RouteTests, type Place } from "./route-tests.js";
+import { RouteTests, type Feasibility, type Place } from "./route-tests.js";
 import { propertyName } from "../program.js";
 
 /*
@@ -69,6 +69,8 @@ interface Layer {
   readonly closed: ReadonlyMap<number, readonly number[]>;
   readonly counts: ReadonlyMap<number, number>;
   readonly arms: ReadonlyMap<TreeStatement, number>;
+  /** The arms it closes, each counted once among the layers (a feasibility layer closes arms with no statement). */
+  readonly closedArms: ReadonlySet<TreeBlock>;
   /** The shared layer's applicability: calls close only for a key with an owner outside its activation (X6). */
   readonly calls: boolean;
 }
@@ -149,6 +151,13 @@ export class NarrowingRoutes extends RouteTests {
   readonly #properties = new Map<PlaceId, ReadonlyMap<string, PlaceId>>();
   /** The program's ledger. */
   readonly #work: WorkLedger = this.pass.program.work;
+  /**
+   * In a program the default holds, the arms its corridors pass through none of (`RouteTests.feasibility`), set by the
+   * first `required` there; `null` elsewhere, where every route query is main's.
+   */
+  #feasible: Feasibility | null = null;
+  /** The keys the program saves under, and whether it saves under a computed one (`#ownLoad`), made on first use. */
+  #saves: { readonly keys: ReadonlySet<string>; readonly computed: boolean } | null = null;
 
   /**
    * AD-1 (#1073, V30 §13) at a consumer's read of `value` whose items hold the offending `tag`: the writer of a
@@ -157,6 +166,12 @@ export class NarrowingRoutes extends RouteTests {
    * `load`, an `otherwise` or a selection read where it is used is its own producer, the writer where its value produces
    * the kind, unless a condition around the use tests it. Any other read keeps its warning: an element step or a
    * reference member, which the route query does not follow (#1073 PR 4, decision (A)).
+   *
+   * In a program that holds an arm no run is proved to enter (`holdsInfeasible`), a route promotes only through arms
+   * runs enter, between a writer and a use that stand in the session's first file's top level with nothing on their
+   * chains a run might not pass (`#plain`), and only by a certificate its own value proves: a literal, a scalar copy
+   * of one, an `otherwise` selected by its left side's own witness, a `load` whose literal default a run selects
+   * (`#ownLoad`). Everything else there keeps the warning (#1938).
    */
   public *required(
     value: PlaceId,
@@ -168,15 +183,18 @@ export class NarrowingRoutes extends RouteTests {
     const site = program.places[value]?.site ?? null;
     if (site === null) return null;
     const node = program.exprAt(site);
-    // (the default: no error in a program that holds an infeasible arm, the use keeps the warning, #1938)
-    if (yield* this.holdsInfeasible()) return null;
+    // (a program that holds an arm no run is proved to enter: its route queries pass only entered arms, #1938)
+    if ((yield* this.holdsInfeasible()) && this.#feasible === null)
+      this.#feasible = yield* this.feasibility();
     // (a value whose node reads no expression, a call's, a `get`'s or a `load`'s result, is its own producer; any other,
     // a compound assignment's operand among them, keeps its warning)
     if (node === null || node.expression === undefined) {
       const c = program.opOf.get(value)?.kind;
       return (c === "call" || c === "get" || c === "load" || c === "fallback") &&
         (node === null || program.live(node)) &&
-        (yield* this.#valueProduces(value, node, [], tag))
+        (this.#feasible === null
+          ? yield* this.#valueProduces(value, node, [], tag)
+          : this.#inlineLoad(value, node, tag))
         ? site
         : null;
     }
@@ -188,7 +206,9 @@ export class NarrowingRoutes extends RouteTests {
     if (path === null || (last?.kind === "property" && selectsElement(last.name)))
       return (path !== null || producerAt(expression, program.work)) &&
         !this.checked(node, this.text(site), tag, -1) &&
-        (yield* this.#valueProduces(value, node, [], tag))
+        (this.#feasible === null
+          ? yield* this.#valueProduces(value, node, [], tag)
+          : this.#inlineLoad(value, node, tag))
         ? site
         : null;
     if (some(program.work, "exactQueries", path.steps, (step) => step.kind !== "property"))
@@ -217,7 +237,11 @@ export class NarrowingRoutes extends RouteTests {
     this.#work.charge("eventSteps");
     // a chain of copies: each query waits on its source's, the last first
     const waiting: { readonly memo: string; readonly found: Candidate }[] = [];
-    let memo = joinParts(key, node.id, tag, this.#othersText(others));
+    // (a program the default holds asks its own queries, apart from main's: `#feasible`)
+    let memo =
+      this.#feasible === null
+        ? joinParts(key, node.id, tag, this.#othersText(others))
+        : joinParts(key, node.id, tag, this.#othersText(others), "entered");
     let answer: Definition | null = null;
     for (const _ of steps(this.#work, "exactQueries", () => true)) {
       const known = this.#witnesses.get(memo);
@@ -242,7 +266,10 @@ export class NarrowingRoutes extends RouteTests {
       waiting.push({ memo, found });
       ({ key, tag, node } = source);
       others = [];
-      memo = joinParts(key, node.id, tag, "");
+      memo =
+        this.#feasible === null
+          ? joinParts(key, node.id, tag, "")
+          : joinParts(key, node.id, tag, "", "entered");
     }
     // each copy is certified exactly when its source's read is
     for (const _ of steps(this.#work, "exactQueries", () => waiting.length > 0)) {
@@ -332,7 +359,9 @@ export class NarrowingRoutes extends RouteTests {
       d.weak ||
       d.value === undefined ||
       !CERTIFIED.has(d.how) ||
-      !lists.certain(d)
+      !lists.certain(d) ||
+      // (a parameter's default is selected by a call that omits it, which a merged answer may not prove, #1938)
+      (this.#feasible !== null && d.how === "parameter default")
     )
       return false;
     // a whole store of a prefix answers below it through its literal's properties, else through what its value holds
@@ -380,6 +409,8 @@ export class NarrowingRoutes extends RouteTests {
     // a scalar copy whose source read has a certified witness
     const read = left.length === 0 ? this.#scalarRead(value) : null;
     if (read !== null) return { key: read.key, tag, node: read.node };
+    // (in a program the default holds, only a `load`'s literal default proves itself, #1938)
+    if (this.#feasible !== null) return left.length === 0 && this.#ownLoad(value, tag, others);
     // any other producer, a whole copy below the copied path among them, by what its value holds there on some run,
     // neither stopped nor read under a failed test: one answer per read, never a route per field of each copy (W34)
     if (yield* this.#valueProduces(value, d.node, left, tag)) return true;
@@ -548,6 +579,9 @@ export class NarrowingRoutes extends RouteTests {
     const { program } = this.pass;
     const d = found.def;
     if (!program.live(d.node) || program.dom.edom(d.node) !== program.dom.edom(node)) return false;
+    // (in a program the default holds, the writer and the use stand where a route may promote: `#plain`)
+    if (this.#feasible !== null && (!this.#plain(d.node, found.chain) || !this.#plain(node, chain)))
+      return false;
     const layer = this.#testLayer(key, tag);
     const writer = found.chain;
     let level = 0;
@@ -572,6 +606,17 @@ export class NarrowingRoutes extends RouteTests {
       const { block, index } = writer[up]!;
       if (this.#closed(block, index + 1, block.statements.length, layer, layer.calls)) return false;
       if (block.owner !== null && !this.#leaves(block.owner, layer.calls)) return false;
+      // (in a program the default holds, nothing after the writer in its block that a run might not pass, #1938)
+      if (
+        this.#feasible !== null &&
+        countIn(
+          this.#work,
+          this.#feasible.hazards.get(block.id) ?? [],
+          index + 1,
+          block.statements.length,
+        ) > 0
+      )
+        return false;
     }
     // (c): the statements between
     if (this.#closed(shared, writer[level]!.index + 1, chain[level]!.index, layer, layer.calls))
@@ -609,14 +654,23 @@ export class NarrowingRoutes extends RouteTests {
   #killLayer(key: Key, calls: boolean): Layer {
     // (one unit per prefix the recursion climbs)
     this.#work.charge("indexSteps");
-    const memo = joinParts(key, calls ? "calls" : "leaves");
+    const memo =
+      this.#feasible === null
+        ? joinParts(key, calls ? "calls" : "leaves")
+        : joinParts(key, calls ? "calls" : "leaves", "entered");
     const known = this.#layers.get(memo);
     if (known !== undefined) return known;
     const { program, definitions, lists } = this.pass;
     // (only the parent's text, made and charged once per key by the memo: the whole prefix list at every ancestor kept
     // a chain's text cubic, #1748)
     const prefix = keptParent(program.work, key);
-    const parent = prefix === null ? null : this.#killLayer(prefix, calls);
+    // (a root key's kills lie over the feasibility layer in a program the default holds)
+    const parent =
+      prefix !== null
+        ? this.#killLayer(prefix, calls)
+        : this.#feasible === null
+          ? null
+          : this.#feasibilityLayer(calls);
     const seeds: TreeStatement[] = [];
     for (const d of each(program.work, "indexSteps", definitions.byKey.get(key) ?? [])) {
       if (
@@ -643,7 +697,7 @@ export class NarrowingRoutes extends RouteTests {
    */
   #testLayer(key: Key, tag: ItemTag): Layer {
     this.#work.charge("indexSteps");
-    const memo = joinParts(key, tag);
+    const memo = this.#feasible === null ? joinParts(key, tag) : joinParts(key, tag, "entered");
     const known = this.#layers.get(memo);
     if (known !== undefined) return known;
     const calls = this.pass.definitions.ownedAway(key);
@@ -674,6 +728,98 @@ export class NarrowingRoutes extends RouteTests {
     keepText(this.#work, memo.length);
     this.#layers.set(memo, layer);
     return layer;
+  }
+
+  /**
+   * In a program the default holds, the layer beneath every root kill layer (#1938): the arms no run is proved to enter
+   * closed (`Feasibility.unentered`), and every compound statement whose live arms they and the shared layer close;
+   * built once per applicability.
+   */
+  #feasibilityLayer(calls: boolean): Layer {
+    this.#work.charge("indexSteps");
+    const memo = joinParts("feasibility", calls ? "calls" : "leaves");
+    const known = this.#layers.get(memo);
+    if (known !== undefined) return known;
+    const { unentered, owners } = this.#feasible!;
+    const layer = this.#build(null, calls, owners, (arm) => {
+      this.#work.charge("indexSteps");
+      return unentered.has(arm);
+    });
+    keepText(this.#work, memo.length);
+    this.#layers.set(memo, layer);
+    return layer;
+  }
+
+  /**
+   * Whether a node stands where, in a program the default holds, a route may promote (#1938): in the top level of the
+   * file the session starts in (no boundary dominates it, and its chain starts at a file's body), with every arm of its
+   * chain one a run is proved to enter and none a loop's body, before it in each block of its chain only statements
+   * `PASSABLE` admits that hold no call and no handler's declaration (`Feasibility.hazards`), and no statement of its
+   * chain whose own expressions a run evaluates before going on, its own included, holding a call or a handler's
+   * declaration (`Feasibility.headed`). Anything else keeps the warning: that a run reaches it there is not proved.
+   */
+  #plain(node: FlowNode, chain: readonly Place[]): boolean {
+    this.#work.charge("eventSteps");
+    const work = this.#work;
+    const { unentered, files, hazards, headed } = this.#feasible!;
+    return (
+      chain.length > 0 &&
+      files.has(chain[0]!.block) &&
+      this.pass.program.dom.edom(node) === null &&
+      !some(
+        work,
+        "eventSteps",
+        chain,
+        (place) =>
+          unentered.has(place.block) ||
+          (place.block.owner !== null && place.block.owner.loop !== null) ||
+          (place.index >= 0 && headed.has(place.block.statements[place.index]!)) ||
+          countIn(work, hazards.get(place.block.id) ?? [], 0, place.index) > 0,
+      )
+    );
+  }
+
+  /**
+   * A `load` read where it is used, in a program the default holds (#1938): its literal default (`#ownLoad`) where the
+   * use stands where a route may promote (`#plain`); the warning where the use has no node or no chain.
+   */
+  #inlineLoad(value: PlaceId, node: FlowNode | null, tag: ItemTag): boolean {
+    this.#work.charge("exactQueries");
+    const chain = node === null ? null : this.chainOf(node);
+    return (
+      node !== null && chain !== null && this.#plain(node, chain) && this.#ownLoad(value, tag, [])
+    );
+  }
+
+  /**
+   * A certificate by a `load` (#1938): a `load` whose default is a literal of the kind, in a program that saves under
+   * neither its key nor a computed key, selects that default on a run whose storage holds no value under the key (V30
+   * §25: the default is "the value to use while the key holds none"; only `save` creates a stored value), whatever
+   * the program's other values hold.
+   */
+  #ownLoad(value: PlaceId, tag: ItemTag, others: readonly ItemTag[]): boolean {
+    this.#work.charge("exactQueries");
+    const program = this.pass.program;
+    const c = program.opOf.get(value);
+    if (c?.kind !== "load" || c.fallback === null) return false;
+    const literal = literalTag(program, c.fallback);
+    if (
+      literal === null ||
+      (literal !== tag && !some(this.#work, "exactQueries", others, (kind) => kind === literal))
+    )
+      return false;
+    if (this.#saves === null) {
+      const keys = new Set<string>();
+      let computed = false;
+      for (const constraint of each(this.#work, "indexSteps", program.constraints))
+        if (constraint.kind === "save") {
+          if (constraint.key === null) computed = true;
+          else keys.add(constraint.key);
+        }
+      this.#saves = { keys, computed };
+    }
+    const { keys, computed } = this.#saves;
+    return !computed && (c.key === null ? keys.size === 0 : !keys.has(c.key));
   }
 
   /**
@@ -717,7 +863,12 @@ export class NarrowingRoutes extends RouteTests {
       work.charge("eventSteps");
       return (
         arm[variant].length > 0 ||
-        some(work, "eventSteps", below(), (layer) => (layer.counts.get(arm.id) ?? 0) > 0)
+        some(
+          work,
+          "eventSteps",
+          below(),
+          (layer) => (layer.counts.get(arm.id) ?? 0) > 0 || layer.closedArms.has(arm),
+        )
       );
     };
     const pending: TreeStatement[] = [];
@@ -757,7 +908,7 @@ export class NarrowingRoutes extends RouteTests {
     }
     for (const list of each(work, "indexSteps", closed.values()))
       sorted(work, "indexSteps", list, (a, b) => a - b);
-    return { parent, statements, closed, counts, arms, calls };
+    return { parent, statements, closed, counts, arms, calls, closedArms: counted };
   }
 
   /** The refined location of a key without element steps: its properties' texts. */
@@ -787,7 +938,10 @@ export class NarrowingRoutes extends RouteTests {
     others: readonly ItemTag[],
   ): Work<ReadonlyMap<TreeBlock, Candidates>> {
     this.#work.charge("indexSteps");
-    const memo = joinParts(key, tag, this.#othersText(others));
+    const memo =
+      this.#feasible === null
+        ? joinParts(key, tag, this.#othersText(others))
+        : joinParts(key, tag, this.#othersText(others), "entered");
     const known = this.#candidates.get(memo);
     if (known !== undefined) return known;
     const layer = this.#testLayer(key, tag);

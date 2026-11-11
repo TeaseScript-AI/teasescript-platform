@@ -1,13 +1,9 @@
-import type {
-  ExpressionPlan,
-  Instruction,
-  InstructionPlan,
-  TypePlan,
-} from "../../src/plan/model.js";
+import type { ExpressionPlan, Instruction, InstructionPlan } from "../../src/plan/model.js";
 import { run } from "../../src/runtime/engine.js";
 import type { RuntimeScriptStorageEntrySnapshot } from "../../src/runtime/host-data/script-storage.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
+import { planText } from "./plan-checks.js";
 import {
   defaultSites,
   derivedText,
@@ -46,17 +42,6 @@ export function runGlobals(
       event.kind === "say" ? [{ text: event.text, at: event.span.start.offset }] : [],
     ),
   };
-}
-
-/** A checked type in full, its unions' members sorted: the plan's side of `derivedText`. */
-function planText(type: TypePlan | null): string {
-  if (type === null) return "any";
-  if (type.kind === "union") return type.members.map(planText).sort().join("|");
-  if (type.kind === "list" || type.kind === "set" || type.kind === "dict")
-    return `${type.kind}<${planText(type.element)}>`;
-  if (type.kind === "object")
-    return `{${[...type.properties.map(({ name, type: of }) => `${name}: ${planText(of)}`), ...(type.keepExtra === true ? ["..."] : [])].join(", ")}}`;
-  return type.kind;
 }
 
 function targetName(target: ExpressionPlan, plan: InstructionPlan): string {

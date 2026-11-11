@@ -407,11 +407,8 @@ export const HOT_CANDIDATE_WITNESSES: readonly (readonly [string, string, string
       "let grid=[{rows:[{score:false}]},{rows:[source]}]\n" +
       "let final=[grid.first.rows.first,source]\n",
     `outcome compile-error
-    D written-target warning 64:104 member
-    D written-target warning 64:104 member
-    D written-target error 138:144 -
-    C copy-type grid.element.rows.element.score [boolean] 64:104
-    C copy-type grid.element.rows.element.score [boolean] 64:104`,
+    D written-target error 88:103 -
+    D written-target error 138:144 -`,
   ],
   [
     "a whole-copy ring whose members decide two properties differently, two of them in a list (Astra's review B1 of #1311)",

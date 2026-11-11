@@ -8811,9 +8811,34 @@ export class TypeChecker {
   ): void {
     this.#report(
       code,
-      mayBeMessage(expression, failing, passing, !this.#changed.has(expression)),
+      mayBeMessage(
+        expression,
+        failing,
+        passing,
+        !this.#changed.has(expression),
+        failing.kind === "null" ? this.#nullCause(expression) : null,
+      ),
       expression.span,
     );
+  }
+
+  /**
+   * What makes a plain variable possibly null, where the checker holds it (owner, 2026-11-11, #2287): the type written
+   * for its `let`, `global` or parameter, where that type holds null, with its line; else `null`.
+   */
+  #nullCause(expression: Expression): string | null {
+    const node = unwrap(expression);
+    const variable = node.kind === "identifier" ? this.#reads.get(node) : undefined;
+    if (variable?.annotated !== true || !members(variable.type).some((m) => m.kind === "null"))
+      return null;
+    const declaration = this.#declarationOf.get(variable);
+    const written =
+      declaration !== undefined && "typeAnnotation" in declaration
+        ? declaration.typeAnnotation
+        : null;
+    return written === null
+      ? null
+      : `its type is '${typeName(variable.type)}' (${this.#line(written.span)})`;
   }
 
   /** Reports list and set literals that mix types and were not stored in a place of a declared element type. */

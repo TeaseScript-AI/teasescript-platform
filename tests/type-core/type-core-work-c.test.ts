@@ -18,7 +18,10 @@ import {
 } from "../helpers/type-core/families/admission-products.js";
 import { DECISION_HOLDER_FAMILIES } from "../helpers/type-core/families/copy-chains.js";
 import { LAYER_FAMILIES } from "../helpers/type-core/families/property-names.js";
-import { NARROWING_FAMILIES } from "../helpers/type-core/families/narrowing.js";
+import {
+  NARROWING_FAMILIES,
+  ROUTE_FEASIBILITY_FAMILIES,
+} from "../helpers/type-core/families/narrowing.js";
 import { type WorkFamily } from "../helpers/type-core/families/builders.js";
 import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import { narrowingPass } from "../helpers/type-core/type-core-narrowing.js";
@@ -277,6 +280,15 @@ test("stage 3b's N5 families grow with the program through the analysis too, in 
 });
 
 /**
+ * The route rule's narrowed default (#1938): in a program holding an arm no run enters, every use's route query passes
+ * one feasibility layer and its chains' arms; the same gate, in either order. The series to k = 1,024 is the step's
+ * evidence, outside CI.
+ */
+test("the route rule's queries beside arms no run enters grow with the program in either order (#1938)", () => {
+  assert.deepEqual(steepCounters(ROUTE_FEASIBILITY_FAMILIES), []);
+});
+
+/**
  * #1438: a decider group's region holds each path below the group as a node one step below its parent's, never an
  * array or a text, so the decision of a literal nested k deep grows with k: the largest decision's units per doubling
  * of the source, for a literal of two kinds in either order and for one copying a written union in the source order
@@ -322,7 +334,8 @@ test("a deep literal's decision grows with its depth, never with its square (#14
  * A): a regression check on the 64 → 128 step only, at its measured doubling, not a bound at larger sizes; a change to
  * admission's passes re-measures and proposes the gate with its counts, never retunes it. Copies interleaved with
  * conditional stores below their path (S6-CARRIERS §4.7, condition (b)) are gated in the same form, a known limit by
- * the owner's decision too, and so are copies separated by calls storing their source.
+ * the owner's decision too, and so are copies separated by calls storing their source and the dormant meetings a
+ * fitting ring makes owed again (#1338).
  */
 test("every admission family's work and each of its counters grow with the program in either order", () => {
   assert.deepEqual(steepCounters(ADMISSION_FAMILIES), []);
