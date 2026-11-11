@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { before, type TestContext } from "node:test";
-import { effectScope, type Ref } from "vue";
+import { effectScope, watch, type Ref } from "vue";
 
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import type { PlayerRuntimeSessionOptions } from "../../player/runtime/runtime-adapter.js";
@@ -8,7 +8,6 @@ import {
   playerRuntimeForeground,
   playerRuntimePacingGate,
   type PlayerSession,
-  type PlayerSessionView,
 } from "../../player/runtime/runtime-view.js";
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
 import {
@@ -44,6 +43,11 @@ import {
  * later, a stop acknowledged a round trip later) keeps each boundary's behaviour.
  */
 
+/** A session import's review, which a row passes back to the import as it got it. */
+interface ImportReview {
+  readonly [field: string]: unknown;
+}
+
 interface Host {
   readonly bridge: Promise<PlayerBridge>;
   readonly session: Readonly<Ref<PlayerSession | null>>;
@@ -61,8 +65,8 @@ interface Host {
   readTransfer(input: {
     readonly bytes: Uint8Array<ArrayBuffer>;
   }): Promise<{ readonly kind: string }>;
-  reviewSessionImport(transfer: SessionRead): Promise<unknown>;
-  importSession(review: unknown): Promise<void>;
+  reviewSessionImport(transfer: SessionRead): Promise<ImportReview>;
+  importSession(review: ImportReview): Promise<void>;
   debugRecording(): Promise<{
     readonly operations: readonly { readonly kind: string; readonly input?: string | null }[];
   } | null>;
@@ -187,15 +191,14 @@ async function start(
 
 /** The options of the choice `host` shows. */
 function choiceOptions(host: Host): readonly { readonly id: string; readonly label: string }[] {
-  const foreground = playerRuntimeForeground(host.session.value! as PlayerSessionView);
+  const foreground = playerRuntimeForeground(host.session.value!);
   assert.ok(foreground?.kind === "choose", "a choice is shown");
   return foreground.options;
 }
 
 /** Whether `host` shows a session that asks for an answer. */
 const asks = (host: Host) =>
-  host.session.value !== null &&
-  presentedAction(host.session.value as PlayerSessionView) !== undefined;
+  host.session.value !== null && presentedAction(host.session.value) !== undefined;
 
 /** The status of the session `host` shows now, read afresh. */
 const status = (host: Host) => host.session.value?.state.status;
@@ -245,8 +248,10 @@ RERUN.rows(
     );
     const input = await runtimeInput();
     const option = choiceOptions(host)[0]!;
-    // The answer's op is posted; its reply, and every later one, wait at the port while the replacement begins.
-    transport.hold("selectChoice");
+    // The answer's observation is posted; its reply, and every later one, wait at the port while the replacement
+    // begins, which clears the shown session. Released, the old answer's section resumes: only the checks that its
+    // session is still the shown one (the section's `owned` and `publishOwned`) keep it from posting its op and showing.
+    transport.hold("observeInput");
     const answering = answer(host, input.intents.choice(option.id, "button"));
     await transport.held();
     host.prepare(replacement);
@@ -257,10 +262,10 @@ RERUN.rows(
     await until(() => said(host).includes("replacement"), "the replacement shows");
     for (let index = 0; index < 10; index += 1) await turn();
     assert.deepEqual(said(host), ["replacement"], "nothing of the old session shows");
-    assert.equal(host.hostError.value, null);
-    // The old session was stopped before the replacement began: the stop precedes the replacement's `start`.
+    // An input op is posted only while its session owns the UI (`inputSection`).
     const ops = transport.posts.map((post) => post.op);
-    assert.ok(ops.lastIndexOf("halt") < ops.lastIndexOf("start"), ops.join(", "));
+    assert.equal(ops.indexOf("selectChoice"), -1, ops.join(", "));
+    assert.equal(host.hostError.value, null);
     return end();
   },
 );
@@ -314,6 +319,7 @@ RERUN.rows(
     assert.equal(status(host), "waiting");
     const posted = transport.posts.find((post) => post.op === "start");
     assert.ok(posted, "the Start was posted");
+    // EVIDENCE: fixture: a Start posts `{ plan, options, recording }` (`PlayerBridge.start`), its options as sampled.
     const args = posted.args as { readonly options: Record<string, unknown> };
     assert.equal(args.options.wallClockMs, sampled.wallClockMs);
     assert.deepEqual(args.options.playerProfile, sampled.playerProfile);
@@ -579,13 +585,19 @@ RERUN.rows(
       ),
       "the trace's variable crossed",
     );
-    // Off and on again while the first intent's reply is in transit: the newest intent wins, with a new trace.
-    transport.hold("setTracing");
+    // Off, on, off and on again while the first intent's reply is held: once the replies arrive, in order, only the
+    // newest intent's reply names the trace; the older ones name nothing, not even for a moment.
+    transport.hold("debugTracing");
     host.setDebugTracing(false);
     host.setDebugTracing(true);
-    for (let index = 0; index < 5; index += 1) await turn();
+    host.setDebugTracing(false);
+    host.setDebugTracing(true);
+    await transport.held();
+    const named: (number | null)[] = [];
+    context.after(watch(host.traceId, (id) => void named.push(id), { flush: "sync" }));
     transport.release();
     await until(() => host.traceId.value !== null && host.traceId.value !== first, "a new trace");
+    assert.deepEqual(named, [host.traceId.value], "only the newest intent's reply named a trace");
     const again = await host.debugView(VARIABLES);
     assert.equal(again?.traceId, host.traceId.value, "the view is of the newest trace");
     assert.notEqual(again?.traceId, first);
@@ -790,6 +802,23 @@ RERUN.rows(
     const observed = host.session.value!.state.observedSessionTimeMs;
     assert.ok(observed >= 1_000);
     assert.deepEqual(said(host), ["Done", `${Math.floor(observed / 10)} rounds`]);
+    // The late observation ran as a catch-up over the bridge: begun, stepped in tasks with a budget, and adopted.
+    const ops = transport.posts.map((post) => post.op);
+    const begun = ops.indexOf("beginCatchUp");
+    assert.ok(begun >= 0, ops.join(", "));
+    const steps = transport.posts.filter(
+      (post, index) => index > begun && post.op === "stepCatchUp",
+    );
+    const budgets = steps.map((post) =>
+      typeof post.args === "object" && post.args !== null && "budgetMs" in post.args
+        ? post.args.budgetMs
+        : undefined,
+    );
+    assert.ok(
+      budgets.length > 0 && budgets.every((budget) => typeof budget === "number"),
+      String(budgets),
+    );
+    assert.ok(ops.indexOf("adoptCatchUp", begun) > begun, ops.join(", "));
     return end();
   },
 );
