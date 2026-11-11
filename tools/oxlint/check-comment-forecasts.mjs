@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { remark } from "remark";
+import { markdownProcessor } from "../repository-checks/markdown.mjs";
 import { checkedFiles, fileComments } from "./comments.mjs";
 
 // A comment says what the code does now and never forecasts later work (IMPLEMENTATION-AND-REVIEW.md "Code that does
@@ -10,7 +10,8 @@ import { checkedFiles, fileComments } from "./comments.mjs";
 // "(as) before #N". The old design record is not in the repository (#1977), so a reference to it is no citation: a
 // line of any file Git lists, documents, strings and code included, that names it and then a revision or a section, on
 // it or the next line, is refused (`citingLines`, #2372); a revision number written as `r4.N` names the accepted
-// record's entry `r4-N`, so outside the record's own pages one with no such entry is refused (#2393); and the forms of `COUNTED_CITATIONS` have each file's exact count in comments in
+// record's entry `r4-N`, so outside the record's own pages one with no such entry is refused (#2393); and the forms
+// of `COUNTED_CITATIONS` have each file's exact count in comments in
 // `comment-citations.json`, which may only fall. A comment that points at the accepted record
 // (`docs/specifications/type-inference-accepted-record/<page>.md#<anchor>`, #2089) names a heading of that page; the
 // doc-links check reads Markdown only and never sees a comment. A label of the port plan or the research design (`S8c`,
@@ -227,7 +228,7 @@ export function unresolvedPointers(fileName, text, pages) {
   return found;
 }
 
-/** A revision number written in text: `r4.` and its digits as a whole token, naming the accepted record's entry `r4-N`. */
+/** A revision number in text: `r4.` and its digits as a whole token, naming the accepted record's entry `r4-N`. */
 const REVISION_NUMBER = /(?<![\p{L}\p{N}.])r4\.(\d+)(?!\p{N})/gu;
 
 /** Whether `file` is one of the accepted record's pages: a Markdown file anywhere in its folder. */
@@ -237,9 +238,10 @@ const isRecordPage = (file) => file.startsWith(`${RECORD}/`) && /\.(?:md|markdow
 const textOf = (node) => node.value ?? (node.children ?? []).map(textOf).join("");
 
 /**
- * The accepted record's entries by number: each level-3 heading whose text is `r4-N`, as remark (the doc-links check's
- * Markdown parser) reads the pages, so a heading's trailing spaces count as nothing and a line in a code block is none;
- * `pages` holds the pages' texts.
+ * The accepted record's entries by number: each level-3 heading whose text is `r4-N`, as the repository's Markdown
+ * reading (`markdownProcessor`, the doc-links check's own) parses the pages, so a heading's trailing spaces count as
+ * nothing, a line in a code block is none, and GitHub's inline marks around the text are read through; `pages` holds
+ * the pages' texts.
  */
 export function recordEntries(pages) {
   const numbers = new Set();
@@ -248,7 +250,8 @@ export function recordEntries(pages) {
     if (entry) numbers.add(entry[1]);
     for (const child of node.children ?? []) visit(child);
   };
-  for (const page of pages) visit(remark().parse(page));
+  const markdown = markdownProcessor();
+  for (const page of pages) visit(markdown.parse(page));
   return numbers;
 }
 
@@ -258,7 +261,7 @@ export function recordEntries(pages) {
  * lint's test are outside the rule; it proves that the entry exists, not that it carries the claim.
  */
 export function unresolvedRevisionsIn(fileName, text, entries) {
-  if (fileName === CITATION_FIXTURES || fileName.startsWith(`${RECORD}/`)) return [];
+  if (fileName === CITATION_FIXTURES || isRecordPage(fileName)) return [];
   const found = [];
   let line = 1;
   let counted = 0;
@@ -290,10 +293,11 @@ export function tableCitationsIn(fileName, text) {
 
 /**
  * Each citation of the old design record and each revision number with no entry (`unresolvedRevisionsIn`, against
- * the entries of every record page Git lists) in the files Git lists in `root` (tracked, and untracked but not ignored)
- * that are regular files, as `doc-links.mjs` reads them, as diagnostics. A file with a NUL byte is binary: the revision
- * rule reads it too, the record's name is not looked for in it. A name is decoded whole, a leading byte order mark kept;
- * a failed `git` throws, and so does a listed name that is not UTF-8, which could not be read unchanged.
+ * the entries of every record page Git lists) in the files Git lists in `root` (tracked, and untracked but not
+ * ignored) that are regular files, as `doc-links.mjs` reads them, as diagnostics. A file with a NUL byte is binary:
+ * the revision rule reads it too, the record's name is not looked for in it. A name is decoded whole, a leading byte
+ * order mark kept; a failed `git` throws, and so does a listed name that is not UTF-8, which could not be read
+ * unchanged.
  */
 export function listedTextFindings(root) {
   const listing = execFileSync(

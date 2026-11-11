@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
@@ -298,15 +298,26 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
     // the lint runner's entry, `checkCommentForecasts`, run on this repository: its module and the files it reads
     for (const file of ["check-comment-forecasts.mjs", "comments.mjs", "files.mjs"])
       write(`tools/oxlint/${file}`, readFileSync(new URL(file, import.meta.url)));
+    write(
+      "tools/repository-checks/markdown.mjs",
+      readFileSync(new URL("../repository-checks/markdown.mjs", import.meta.url)),
+    );
     write("tools/oxlint/comment-forecasts-allowed.json", "[]\n");
     write("tools/oxlint/comment-citations.json", "{}\n");
     // entries on every record page Git lists: the README, a nested page and another Markdown extension too
     const record = "docs/specifications/type-inference-accepted-record";
     write(`${record}/README.md`, "# Record\n\n## Labels\n\n### r4-40\n");
-    write(`${record}/sharing.md`, "# S\n\n### r4-38\n\nas r4.167\n");
+    // (a struck-through heading, GitHub's mark, read by the parser the doc-links check reads with)
+    write(`${record}/sharing.md`, "# S\n\n### r4-38\n\n### ~~r4-9997~~\n\nas r4.167\n");
+    // files in the record's folder that are no pages are under the rule
+    write(`${record}/notes.json`, '{"why": "r4.9994"}\n');
+    write(`${record}/nested/notes.txt`, "r4.9993\n");
     write(`${record}/nested/entry.md`, "# N\n\n### r4-41\n");
     write(`${record}/other.markdown`, "# O\n\n### r4-42\n");
-    write("docs/rev.md", "Kept r4.38, r4.40, r4.41 and r4.42.\n\nGone r4.9999.\n");
+    write(
+      "docs/rev.md",
+      `Kept r4.38, r4.40, r4.41 and r4.42.\n\nGone r4.9999.\n\nStruck [r4.9997](${record.slice(5)}/sharing.md#r4-9997).\n`,
+    );
     write("data/rev.json", '{"why": "r4.9995"}\n');
     write("src/rev.ts", 'const reason = "r4.9998 and r4.38";\n');
     symlinkSync(join(repositoryRoot, "node_modules"), join(root, "node_modules"));
@@ -334,6 +345,8 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
       "docs/rev.md:3",
       "src/rev.ts:1",
       "data/rev.json:1",
+      `${record}/notes.json:1`,
+      `${record}/nested/notes.txt:1`,
       // (a binary file is read for revision numbers, not for the record's name)
       "data.bin:1",
     ].sort();
@@ -343,6 +356,13 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
         .map(({ fileName, line }) => `${fileName}:${line}`)
         .sort();
     const listed = listedTextFindings(root);
+    // the doc-links check resolves the struck-through heading the revision rule takes as an entry
+    const links = spawnSync(
+      process.execPath,
+      [fileURLToPath(new URL("../repository-checks/doc-links.mjs", import.meta.url))],
+      { cwd: root, encoding: "utf8" },
+    );
+    assert.equal(links.status, 0, links.stderr);
     assert.deepEqual(at(listed, "cites a record that is not in the repository"), expected);
     assert.deepEqual(at(listed, "names no entry of the accepted record"), revisions);
     const entry = await import(
