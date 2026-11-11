@@ -188,6 +188,22 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
           ROUND,
       ],
     ],
+    // (a global's `default:` is a second stored value: its `null` would not fit the fix's type, the final review's B1
+    // on #2317, for a list and a set alike)
+    [
+      "let lives: integer = 3\nglobal scores = [lives], default: null\nscores.add(2.5)\nexit\n",
+      [
+        "E TSV041 '2.5': 'scores' holds whole numbers (integer[]) since line 2, so it cannot contain a number. " +
+          ROUND,
+      ],
+    ],
+    [
+      "let lives: integer = 3\nglobal seen = set[lives], default: null\nseen.add(2.5)\nexit\n",
+      [
+        "E TSV041 '2.5': 'seen' holds whole numbers (integer set) since line 2, so it cannot contain a number. " +
+          ROUND,
+      ],
+    ],
     [
       "let n: integer = hostValue\nexit\n",
       [
