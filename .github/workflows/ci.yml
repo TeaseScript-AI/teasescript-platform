@@ -158,9 +158,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
   check:
-    # A manual run tests the branch alone, not its merge, so its result is not the required check's: on a pull request's
-    # head commit, a passing manual `check` would stand in for a failed one.
-    name: ${{ github.event_name == 'workflow_dispatch' && 'check (manual run)' || 'check' }}
     needs: [check-1, check-2, check-3]
     if: ${{ always() }}
     runs-on: ubuntu-24.04
