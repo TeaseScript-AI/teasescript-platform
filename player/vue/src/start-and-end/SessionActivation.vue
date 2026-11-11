@@ -17,6 +17,11 @@ const props = defineProps<{
   debugRoom: boolean;
   /** Whether the debug room has a session or saved values to delete. */
   startAnew: boolean;
+  /**
+   * After a lost connection stopped a Start or Continue before its session showed, what the click recovers, shown where
+   * Start would be (PLAYER-UI "Session end and failure").
+   */
+  recovery?: "start" | "continue" | null;
 }>();
 defineEmits<{ activate: []; reload: []; reset: [] }>();
 const label = computed(() =>
@@ -39,7 +44,7 @@ function focusIfIdle() {
 onMounted(focusIfIdle);
 // The control appears once the kept session is known, after the page mounts.
 watch(
-  () => props.activation !== null,
+  () => props.activation !== null || !!props.recovery,
   (shown) => shown && focusIfIdle(),
   { flush: "post" },
 );
@@ -89,6 +94,18 @@ defineExpose({ focus });
           </Button>
         </div>
       </template>
+    </template>
+    <template v-else-if="recovery">
+      <p class="mb-4 max-w-md text-center text-balance" data-connection-lost>
+        {{
+          recovery === "continue"
+            ? "The session stopped unexpectedly. You can continue from the last kept point. Progress since then may be lost."
+            : "The session stopped unexpectedly."
+        }}
+      </p>
+      <PlayerActionButton data-session-start data-connection-recover @click="$emit('activate')">{{
+        recovery === "continue" ? "Continue from last kept point" : "Start again"
+      }}</PlayerActionButton>
     </template>
   </div>
 </template>
