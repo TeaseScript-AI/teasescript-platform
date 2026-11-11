@@ -27,6 +27,8 @@ class FakeElement implements MediaDeviceElement {
   deferSeeked = false;
   #seekPending = false;
   plays = 0;
+  /** The source of each `play()` call, in order. */
+  readonly playedSources: string[] = [];
   readonly listeners = new Map<string, Array<() => void>>();
   get currentTime() {
     return this.position;
@@ -44,6 +46,7 @@ class FakeElement implements MediaDeviceElement {
   }
   play(): Promise<void> {
     this.plays++;
+    this.playedSources.push(this.src);
     if (this.refuse) {
       const error = new Error("refused");
       error.name = "NotAllowedError";
