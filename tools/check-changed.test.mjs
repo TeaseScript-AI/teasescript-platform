@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -562,3 +563,131 @@ test("run as a lone copy outside its checkout, it says it needs its checkout in 
     rmSync(folder, { recursive: true, force: true });
   }
 });
+
+test(
+  "a merge commit fails `merge commits` unless it merges main or runtime-v2 into the other, plain and merged, and the other checks still run (#2106)",
+  { timeout: 120_000 },
+  () => {
+    // main and runtime-v2 grow apart from one base; `other` is another lane's branch off main
+    const cases = [
+      // [the branch's base, what its merge commit merges, the reason it fails, or null when it passes]
+      ["main", "main", "which the base already holds: rebase onto main instead"],
+      [
+        "main",
+        "other",
+        "which neither origin/main nor origin/runtime-v2 holds: rebase onto main instead, or, if it has landed on " +
+          "one of them since your last fetch, fetch main, origin/main, origin/runtime-v2 and run again",
+      ],
+      ["main", "runtime-v2", null],
+      ["runtime-v2", "main", null],
+      ["runtime-v2", "runtime-v2", "which the base already holds: rebase onto runtime-v2 instead"],
+      ["main", null, null],
+      // a ref the clone lacks: unproven, so it fails, with the advice to fetch, and a parent the other ref holds passes
+      [
+        "main",
+        "runtime-v2",
+        "which git cannot place (origin/runtime-v2: fatal: Not a valid object name origin/runtime-v2): fetch main, " +
+          "origin/main, origin/runtime-v2 and run again",
+        "origin/runtime-v2",
+      ],
+      ["runtime-v2", "main", null, "origin/runtime-v2"],
+      // a stale origin/main, which lacks the main commit merged: the advice names the fetch beside the rebase
+      [
+        "runtime-v2",
+        "main",
+        "which neither origin/main nor origin/runtime-v2 holds: rebase onto runtime-v2 instead, or, if it has " +
+          "landed on one of them since your last fetch, fetch runtime-v2, origin/main, origin/runtime-v2 and run again",
+        "stale",
+      ],
+      // a shallow clone, whose "no" proves nothing: unproven, with the advice to deepen it (Sol r2)
+      [
+        "origin/main",
+        "runtime-v2",
+        "which git cannot place (origin/main: the clone is shallow): deepen the clone (git fetch --unshallow) and " +
+          "run again",
+        "shallow",
+      ],
+    ];
+    for (const merged of [false, true])
+      for (const [base, merges, failure, tweak] of cases) {
+        const { directory } = repository({ passing: true });
+        // (the shallow case clones the branches, so its base is the clone's origin/main)
+        const branch = base.replace(/^origin\//u, "");
+        const git = (...args) => {
+          const result = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+            cwd: directory,
+            encoding: "utf8",
+          });
+          assert.equal(result.status, 0, result.stderr);
+          return result.stdout.trim();
+        };
+        const commit = (branch, file) => {
+          git("switch", "-q", branch);
+          writeFileSync(join(directory, file), `${branch}\n`);
+          git("add", file);
+          git("commit", "-q", "-m", `${branch} grows`);
+        };
+        try {
+          git("branch", "runtime-v2", "main");
+          git("branch", "other", "main");
+          commit("runtime-v2", "runtime-v2.md");
+          commit("other", "other.md");
+          commit("main", "main.md");
+          git("switch", "-q", "-c", "lane", branch);
+          commit("lane", "lane.md");
+          // (both grow after the lane branched, so merging either is a merge commit)
+          commit("main", "main-later.md");
+          commit("runtime-v2", "runtime-v2-later.md");
+          git("update-ref", "refs/remotes/origin/main", "main");
+          git("update-ref", "refs/remotes/origin/runtime-v2", "runtime-v2");
+          if (tweak === "origin/runtime-v2")
+            git("update-ref", "-d", "refs/remotes/origin/runtime-v2");
+          if (tweak === "stale") git("update-ref", "refs/remotes/origin/main", "main~1");
+          git("switch", "-q", "lane");
+          if (merges !== null) git("merge", "-q", "--no-edit", merges);
+          let cwd = directory;
+          if (tweak === "shallow") {
+            // (a branch deeper than the clone, so the clone lacks history, while main's and the lane's are whole)
+            git("branch", "deep", "main");
+            for (const step of [1, 2, 3, 4]) commit("deep", `deep-${step}.md`);
+            git("switch", "-q", "lane");
+            cwd = `${directory}-shallow`;
+            git("clone", "-q", "--depth=3", "--no-single-branch", `file://${directory}`, cwd);
+            cpSync(join(directory, "node_modules"), join(cwd, "node_modules"), { recursive: true });
+          }
+          const result = spawnSync(
+            process.execPath,
+            [tool, ...(merged ? ["--merged"] : []), "--base", base],
+            { cwd, encoding: "utf8", env: environment },
+          );
+          if (tweak === "shallow") rmSync(cwd, { recursive: true, force: true });
+          const at = `${merged ? "merged" : "plain"}: a branch of ${base} merging ${merges}`;
+          assert.equal(
+            result.status,
+            failure === null ? 0 : 1,
+            `${at}: ${result.stdout}${result.stderr}`,
+          );
+          assert.deepEqual(
+            result.stdout
+              .match(/^(?:PASS|FAIL) {2}\S.*$/gmu)
+              .map((line) => line.split(/ {2,}/u)[1]),
+            ["diff --check", "merge commits", "oxlint", "knip", "doc links", "imports"],
+            at,
+          );
+          assert.match(
+            result.stdout,
+            new RegExp(`^${failure === null ? "PASS" : "FAIL"} {2}merge commits `, "mu"),
+            at,
+          );
+          if (failure !== null) {
+            const mergeCommit = git("rev-parse", "--short=9", "lane");
+            const parent = git("rev-parse", "--short=9", "lane^2");
+            const expected = `--- merge commits ---\n${mergeCommit} Merge branch '${merges}' into lane: merges ${parent}, ${failure}\n`;
+            assert.ok(result.stdout.includes(expected), `${at}: ${result.stdout}`);
+          }
+        } finally {
+          rmSync(directory, { recursive: true, force: true });
+        }
+      }
+  },
+);
