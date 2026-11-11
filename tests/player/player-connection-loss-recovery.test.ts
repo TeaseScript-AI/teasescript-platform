@@ -177,7 +177,6 @@ interface ImportReview {
 let usePlayerSession: (options: {
   readonly bridge: Promise<PlayerBridge>;
   readonly nextConnection?: () => Promise<PlayerBridge>;
-  readonly debugHistorySpill: () => Promise<null>;
   readonly capabilities?: { readonly camera: boolean };
   readonly scriptStorage?: ScriptStorageProvider;
   readonly keptSessions?: KeptSessionStore;
@@ -293,7 +292,6 @@ async function page(
     usePlayerSession({
       bridge: Promise.resolve(connections.first.bridge),
       ...(replaceable && { nextConnection: () => connections.next() }),
-      debugHistorySpill: async () => null,
       scriptStorage,
       keptSessions: kept,
       capabilities: { camera },
