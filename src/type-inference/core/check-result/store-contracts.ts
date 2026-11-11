@@ -355,7 +355,9 @@ export class Contracts {
       if (!follow) return "unannotated";
       const key = `${place.id}\u0001${steps.join("\u0000")}\u0001${[...kinds].sort().join("|")}`;
       if (this.#bindingVerdicts.has(key)) return this.#bindingVerdicts.get(key)!;
-      const one = new Map([[steps.join("\u0000"), { path: [...steps], kinds: new Set(kinds) }]]);
+      const one = new Map([
+        [steps.join("\u0000"), { path: joinSteps(steps, []), kinds: new Set(kinds) }],
+      ]);
       const verdict = this.#sourcesAgree(place.id, [], one, null);
       this.#bindingVerdicts.set(key, verdict);
       return verdict;
@@ -409,7 +411,7 @@ export class Contracts {
         for (const read of atLevel(value, at.slice(definition.path.length))) {
           if (read.kind === "other") continue;
           if (read.kind === "unsure") return "unsure";
-          const verdict = this.#readAgrees(read.read, read.rest, kinds, false);
+          const verdict = this.#readAgrees(read.read, read.rest, kinds, own !== null);
           if (verdict !== null) return verdict;
         }
       }
@@ -975,10 +977,10 @@ function levelKinds(plan: TypePlan): Map<string, { path: string[]; kinds: Set<st
     levels.set(key, level);
     level.kinds?.add(at.kind);
     if ((at.kind === "list" || at.kind === "set" || at.kind === "dict") && at.element !== null)
-      pending.push([at.element, [...path, "element"]]);
+      pending.push([at.element, joinSteps(path, ["element"])]);
     else if (at.kind === "object")
       for (const property of at.properties)
-        pending.push([property.type, [...path, propertyStep(property.name)]]);
+        pending.push([property.type, joinSteps(path, [propertyStep(property.name)])]);
   }
   for (const level of levels.values())
     if (level.kinds?.has("number")) level.kinds.delete("integer");
@@ -1021,9 +1023,15 @@ function atLevel(
     case "stringLiteral":
       return [{ kind: "other" }];
     case "identifier":
-    case "propertyAccessExpression":
-    case "indexExpression":
       return [{ kind: "read", read: at, rest: path }];
+    case "propertyAccessExpression":
+    case "indexExpression": {
+      // (a projection of literal data is the parts it selects, `projectedLiteral`; else a read)
+      const selected = projectedLiteral(at);
+      return selected === undefined
+        ? [{ kind: "read", read: at, rest: path }]
+        : selected.flatMap((part) => atLevel(part, path));
+    }
     case "listLiteral":
     case "setLiteral":
       if (path.length === 0) return [{ kind: "other" }];
