@@ -74,7 +74,6 @@ interface StopHost {
 }
 let usePlayerSession: (options: {
   readonly bridge: Promise<PlayerBridge>;
-  readonly debugHistorySpill: () => Promise<null>;
   readonly resolveAsset?: (path: string) => string | null;
   readonly temporalContext?: () => TemporalContext;
   readonly scriptStorage?: ScriptStorageProvider;
@@ -142,7 +141,6 @@ async function mount(
   const player = scope.run(() =>
     usePlayerSession({
       bridge: Promise.resolve(bridge),
-      debugHistorySpill: async () => null,
       ...(resolveAsset === undefined ? {} : { resolveAsset }),
       ...(temporalContext === undefined ? {} : { temporalContext }),
     }),
@@ -969,7 +967,6 @@ for (const camera of [false, true])
       const player = scope.run(() =>
         usePlayerSession({
           bridge: Promise.resolve(bridge),
-          debugHistorySpill: async () => null,
           scriptStorage: storage,
           capabilities: { camera },
           temporalContext: () => temporal,

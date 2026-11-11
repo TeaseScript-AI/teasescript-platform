@@ -1,4 +1,5 @@
 import { playerBuildIdentity } from "../build-identity.js";
+import { sweepDebugHistories } from "../debug/debug-history-indexeddb.js";
 import { playerBridgeOps, playerOpsContext } from "./player-ops.js";
 import { startBridgeHost } from "./worker-host.js";
 
@@ -36,3 +37,6 @@ startBridgeHost(
   playerBuildIdentity,
   context.delivery,
 );
+// Rewind histories that pages which ended without deleting theirs left behind go now. The sweep runs in this realm,
+// whose histories it knows open and spares (`debug-history-indexeddb.ts`).
+void sweepDebugHistories();
