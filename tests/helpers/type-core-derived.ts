@@ -81,7 +81,7 @@ export interface DerivedStore {
   readonly type: DerivedType;
 }
 
-/** Where a record's obligation is discharged: by a checked store, or by the runtime itself (S3 §4). */
+/** Where a record's obligation is discharged: by a checked store, or by the runtime itself (S3). */
 export type Discharge =
   | { readonly by: "store"; readonly store: DerivedStore }
   | {
@@ -452,7 +452,7 @@ function structureAt(
 }
 
 /**
- * S3 §4's lowering of a store's checks by rule: the destination's structure at each target path (its written type,
+ * S3's lowering of a store's checks by rule: the destination's structure at each target path (its written type,
  * else its value's literal structure), with the record's required kinds at each, `null` kept.
  */
 function typeOf(
@@ -1715,7 +1715,7 @@ function writtenAt(
   }
 }
 
-/** Every obligation is mapped by S3 §4; S7 content is owed by that map and F18, never by the emitted plan. */
+/** Every obligation is mapped by S3; S7 content is owed by that map and F18, never by the emitted plan. */
 export function derive(
   syntax: Syntax,
   record: CompactRecord,

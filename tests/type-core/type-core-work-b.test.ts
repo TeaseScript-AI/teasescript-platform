@@ -37,7 +37,7 @@ import {
 } from "../helpers/type-core/type-core-work.js";
 
 /**
- * S3 §5, revision 14: an admission decision is a demand with the program's nodes' allowance, since a key's stores come
+ * S3, revision 14: an admission decision is a demand with the program's nodes' allowance, since a key's stores come
  * from every call site. W5's `shown` places, each a function's own, read a record that every chapter's call stores
  * (their callables' allowances it crossed 4.08 and 8.08 times, reversed): at k = 64 and 128 in either order no decision
  * stops, and the work stays linear.
@@ -407,7 +407,7 @@ test("W34's two known products grow no faster than measured", () => {
 });
 
 /**
- * S6-CARRIERS §4.4: a class's members are visited only where its side's quiet proof is not quiet, and each such visit
+ * S6-CARRIERS: a class's members are visited only where its side's quiet proof is not quiet, and each such visit
  * emits, so the visits are bounded by the output: per pass, at most the diagnostics, the checks and the decided paths.
  */
 test("every family's member visits are bounded by its output and its decided paths", () => {

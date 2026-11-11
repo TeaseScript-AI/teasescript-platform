@@ -51,7 +51,7 @@ import {
 import { sampled } from "./sweep.js";
 
 /*
- * Host data a script place holds through its stores, read after a settled program stop (#1432, #1415; S3 §5,
+ * Host data a script place holds through its stores, read after a settled program stop (#1432, #1415; S3,
  * the mark-ownership rule of S8: a stop changes nothing of the unstopped analysis but what its deferred marks
  * stand for, each carrying its obligation; at a combined stop the unstopped analysis is the run at the same demand
  * allowance, except where the finishing walk answers a read the demand stop left `unknown`,
@@ -1985,7 +1985,7 @@ export function provenRewording(
  *   and a call stack names no call; where (a) is denied only by such a read, the check is the counted class (`coarse`);
  * - (w) marks at its place (site, target, boundary), of any kind, the only checks owed there, together letting through
  *   exactly its domain (their domains' intersection: checks on one value): the reference satisfied in other words;
- * - (z) a boundary against `unknown`, no plan content (S3 §4), nothing owed at its slot, where an undecided store record
+ * - (z) a boundary against `unknown`, no plan content (S3), nothing owed at its slot, where an undecided store record
  *   stands at the site of a store whose value holds the boundary's value (`holds`).
  * A record goes with its obligations, never one the natural analysis reports itself. A check the stop owes by a more
  * precise label alone, the natural analysis's, is accepted (`provenRelabel`,
@@ -2418,7 +2418,7 @@ export function heldUnstopped(
 }
 
 /**
- * The stop kinds beside a settled program stop (S3 §5): demand allowances that stop a decision of a case, alone (a
+ * The stop kinds beside a settled program stop (S3): demand allowances that stop a decision of a case, alone (a
  * decision stop) and with a program stop (a combined one), each judged against the unstopped run at the same demand
  * allowance, a combined one under its rule (`combinedStop`). Tried one unit below each decision's work in the case's unstopped analysis, largest first, then halving
  * below the smallest; kept only where a decision then stops, up to three. A case with none has no such rows.

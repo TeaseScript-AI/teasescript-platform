@@ -96,8 +96,8 @@ const RECORD = "docs/specifications/type-inference-accepted-record";
 const CORE = "src/type-inference/core/";
 
 /**
- * A port-plan or research label: a step, an id, a checkpoint, the plan or a plan document. A section number (`V30 §3`,
- * `S3 §5`) is not a label; the glossary's one row for a bare `§N` is not checked against comments.
+ * A port-plan or research label: a step, an id, a checkpoint, the plan or a plan document. A section number (`V30 §3`)
+ * is not a label; the glossary's one row for a bare `§N` is not checked against comments.
  */
 const LABEL =
   /\b(?:S\d-[A-Z]+(?:-[A-Z]+)*|S\d{1,2}[a-z]?|[A-Z]{1,2}\d{1,3}[a-z]?|AD-\d|PLAN|checkpoint \d+)\b/gu;
@@ -387,14 +387,14 @@ const SECTION_NUMBER = /§§?[ \t]*[0-9]/gu;
  * The section lists a section number may stand in, a closed set: a document's name, one space, `§` or `§§` and a
  * whole number (dotted parts, a letter, a range), then any further `, §N`, ` and §N`, `, and §N` or ` or §N`, on one
  * line.
- * `V30` and `ADR NNNN` are repository documents. `PLAN`, `S3` and `S6-CARRIERS` name the port plan's documents
- * outside the repository; they are allowed as labels, which #2423 decides, not as citations.
+ * `V30` and `ADR NNNN` are the repository's documents; a section of any other document, the port plan's (`S3`,
+ * `S6-CARRIERS`) included, is outside the repository.
  */
 const NAMED_SECTIONS = (() => {
   // (a number ends where no letter or digit follows, and no `.`, `–` or `-` before a digit)
   const number = String.raw`\d+(?:\.\d+)*[a-z]?(?:[–-]\d+(?:\.\d+)*[a-z]?)?(?![\p{L}\p{N}]|[.–-]\p{N})`;
   return new RegExp(
-    String.raw`(?<![\p{L}\p{N}])(?:V30|ADR \d{4}|PLAN|S3|S6-CARRIERS) §§?${number}(?:(?:, | and |, and | or )§${number})*`,
+    String.raw`(?<![\p{L}\p{N}])(?:V30|ADR \d{4}) §§?${number}(?:(?:, | and |, and | or )§${number})*`,
     "gu",
   );
 })();

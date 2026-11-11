@@ -81,7 +81,7 @@ import {
 
 /*
  * The sharing differential: S6's sharing of answers between equivalent values (alias classes and chains
- * of copies, S6-CARRIERS §4.1; levels by structure; a walk's stops of one snapshot, the decider's and the named
+ * of copies, S6-CARRIERS; levels by structure; a walk's stops of one snapshot, the decider's and the named
  * data's; a literal's entries for the reads of one key) and S6c's (a choice's options, a run of adds, a
  * literal's computed values and a prefix's entries by their class, `Contract.classOf`) is an optimization,
  * so it is output-neutral: for every program below, in both orders, the published diagnostics, the owed checks, every
@@ -473,7 +473,7 @@ test("every occurrence over host data names each ingress's leaf with the sharing
 });
 
 /**
- * #1210: a projection of a host read carries its ingress's leaf (S6-CARRIERS §3.1), so a literal's one entry for k such
+ * #1210: a projection of a host read carries its ingress's leaf (S6-CARRIERS), so a literal's one entry for k such
  * reads unions their leaves and no identity merge drops a read. With the sharing on and off, in both orders, the
  * receiving place's contract and the receiving read name exactly the leaves of the reads the source marks, and the four
  * publish the same checks, each with its target, domain and site (a dropped read published a loose boundary).

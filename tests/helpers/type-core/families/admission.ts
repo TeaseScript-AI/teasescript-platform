@@ -273,7 +273,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
-  // S6-CARRIERS §4.1, §4.7: whole copies of a stable source path (R5-F1's projected copies), alias members of one class
+  // S6-CARRIERS: whole copies of a stable source path (R5-F1's projected copies), alias members of one class
   // where no event below the path separates them, and the conditional-write variants (Astra's fourth round M1, the
   // orchestrator's condition (a)): a conditional store below the path before or between the copies
   ...(
@@ -452,7 +452,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
-  // S6-CARRIERS §4.6, §4.7 (C9-fresh-wrappers) with Codex r20 B2 and B3: k stores of a wrapper holding a fresh host
+  // S6-CARRIERS (C9-fresh-wrappers) with Codex r20 B2 and B3: k stores of a wrapper holding a fresh host
   // value beside one k-field record, every field read; the level at the record's path holds it once
   ...(
     [
@@ -498,7 +498,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
-  // S6-CARRIERS §3.4 with Codex r20 B5: k merged host stores met by k consumers, each provenance node resolved once (the
+  // S6-CARRIERS with Codex r20 B5: k merged host stores met by k consumers, each provenance node resolved once (the
   // nested own defaults of guarded reads are a gated known limit)
   ...(["reads", "typed"] as const).map((variant): WorkFamily => ({
     name: `C9-merged-leaves-${variant}`,
@@ -514,7 +514,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   })),
-  // S6-CARRIERS §4.1: k stores of a literal whose one cell reads a k-field record of named host data, and k copies of a
+  // S6-CARRIERS: k stores of a literal whose one cell reads a k-field record of named host data, and k copies of a
   // literal index of one, every field read; each a class below its cell or path, never k candidates at every field
   ...(
     [
@@ -538,7 +538,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   })),
-  // S6-CARRIERS §4.1's chains: k copies `let a(i + 1) = a(i)` of a k-field record of named host data, each copied into
+  // S6-CARRIERS's chains: k copies `let a(i + 1) = a(i)` of a k-field record of named host data, each copied into
   // one place, every field read; each link's read stands for the chain's end, one class
   {
     name: "A2-alias-chain-heads",
@@ -557,7 +557,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
-  // S6-CARRIERS §4.1's chains under a guard (Codex r22 F4): k copies of one snapshot whose definition is read under k
+  // S6-CARRIERS's chains under a guard (Codex r22 F4): k copies of one snapshot whose definition is read under k
   // tests of the source's fields, every field read; the definition read's guards found once, whatever asks
   {
     name: "A2-alias-guarded-snapshot-copies",
@@ -578,7 +578,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
-  // guard marks with S6-CARRIERS §4.6 (Codex r21 B1): k stores of a computed child over a k-field record, each under a test of
+  // guard marks with S6-CARRIERS (Codex r21 B1): k stores of a computed child over a k-field record, each under a test of
   // a different field, one field read; each operand read's marks below it come from the guard regions holding it, never
   // from each tested field in turn
   ...(
@@ -600,7 +600,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   })),
-  // S6-CARRIERS §3.1 (Codex r23 F1): k reads of one host global in one literal, its element stored and decided at k
+  // S6-CARRIERS (Codex r23 F1): k reads of one host global in one literal, its element stored and decided at k
   // fields, each read; through an own read (a fallback's, a default's), inline, beside named data, as named data: each
   // occurrence its own leaf, the reads one entry of the literal, each path's decider and C1 site from its prefixes' stops
   ...(

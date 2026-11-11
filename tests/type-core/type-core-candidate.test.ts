@@ -226,7 +226,7 @@ function checksOf(plan: InstructionPlan): string[] {
   return typeChecks(plan).map(({ so, eo, type }) => `${so}:${eo} ${typeText(type)}`);
 }
 
-/** The code a checked store fails with (S3 §4). */
+/** The code a checked store fails with (S3). */
 const STORE_CODES: readonly (string | null)[] = ["TSR058"];
 
 /**
@@ -2456,7 +2456,7 @@ test("every carrier kind leaves an obligation for the external data it gives a p
             const end = source.indexOf("\n", holder);
             const [opening] = /^ *(?:let|for) \w+ (?:=|in) /.exec(source.slice(holder))!;
             const value = holder + opening.length;
-            // the complete C1, C9 and C10 multiset the rule function owes (S6-CARRIERS §5.1), the named source's own
+            // the complete C1, C9 and C10 multiset the rule function owes (S6-CARRIERS), the named source's own
             // boundary, every site and multiplicity included, in both orders (Astra r5 D2)
             const owes = typeof rule === "function" ? rule(endpoint) : rule;
             assert.deepEqual(
@@ -2612,11 +2612,11 @@ test("a copy of a written binding keeps its type beside a copy of the same sourc
 });
 
 /**
- * A checked store followed by an effect inside a branch (S6-CARRIERS §5.3, Astra r5 D3): the declaration owes exactly
+ * A checked store followed by an effect inside a branch (S6-CARRIERS, Astra r5 D3): the declaration owes exactly
  * its C1 and its boundary, the plan checks it against `integer` before the branch, the fitting host value says AFTER
  * and halts, and each bad one fails at the declaration's value before the branch's effect, nothing said.
  */
-test("a checked store's check runs before an effect inside a later branch (S6-CARRIERS §5.3)", () => {
+test("a checked store's check runs before an effect inside a later branch (S6-CARRIERS)", () => {
   const source = 'let n: integer = hostValue\nif true {\n  say "AFTER"\n}\nexit\n';
   const record = inBothOrders(() =>
     compactAnalysis(coreRequest([{ path: "main.tease", source }])!),

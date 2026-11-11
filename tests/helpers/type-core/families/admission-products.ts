@@ -17,7 +17,7 @@ import type { SourceFile } from "../../type-core-analysis.js";
  * (docs/specifications/type-inference-accepted-record/admission.md#r4-49, option A): its doubling at k = 64 → 128 as
  * measured, re-measured and proposed with its counts on a change to admission's passes, never retuned; its trigger, a
  * realistic script reaching the allowance through cascading rejections. Beside it, copies interleaved with conditional
- * stores below their path (S6-CARRIERS §4.7, condition (b)), accepted in the same form, copies separated by calls
+ * stores below their path (S6-CARRIERS, condition (b)), accepted in the same form, copies separated by calls
  * storing their source, accepted in it too, and the dormant meetings a fitting ring makes owed again (#1338, the
  * owner's decision of 2026-11-10, recorded in docs/RESOURCE-LIMITS.md).
  */
@@ -66,7 +66,7 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
       "condition (b): k copies of a k-field record of named host data, each after a conditional store below it",
     // A gated known limit by the owner's decision (option A): each copy sees one more conditional store below the
     // copied path, so each has its own signature, k classes, each answered at each of the k fields read
-    // (S6-CARRIERS §4.7's first unmerged shape; a rule beyond the class rule merges them). 377,525 / 1,357,501 units at k = 64, 128
+    // (S6-CARRIERS's first unmerged shape; a rule beyond the class rule merges them). 377,525 / 1,357,501 units at k = 64, 128
     // in both orders (3.6080; 3.6222 before Codex r23's repairs, 3.6236 earlier); the allowance
     // reached at k = 618; at k = 1,024 82,410,069 units under a raised test allowance, 274.7 % of its 30,000,000 (the
     // analysis itself stops at the allowance with the budget error)
@@ -89,7 +89,7 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
       "condition (b): k copies of a global another callable stores, each after a call storing it, at k fields",
     // A gated known limit by the owner's decision (option A): each copy reads the global after one more
     // call that stores it, so each has its own snapshot, k entries of the literal, each read at each of the k
-    // fields (S6-CARRIERS §4.7's second unmerged shape, copies separated by calls while the source is owned away; a rule
+    // fields (S6-CARRIERS's second unmerged shape, copies separated by calls while the source is owned away; a rule
     // beyond the class rule, or S6c's normalization, merges them). 190,319 / 660,474 units at k = 64, 128 in both orders
     // (3.5213; `main` 1.99, the output linear), without the narrowing index since #1251 (194,553 / 669,322 and 3.4908
     // before), X6's searches of the global's events charged by comparison since #1221 (132,548 / 453,830 and 3.4742).
@@ -111,7 +111,7 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
 ];
 
 /**
- * S6-CARRIERS §4.5, §4.7 and S6c: k adds of one record to one list, a choice of k options of one
+ * S6-CARRIERS and S6c: k adds of one record to one list, a choice of k options of one
  * record, and a literal of k `get`s of one list with one default, every field read; plain, and with a root of host data
  * whose fields admission reads (Astra r5 B2); the same through k stable aliases of the source (a chain whose first link
  * is a direct alias, `get`s whose alias writers cross, adds of aliases) and adds of two sources in two blocks (reviews r1, r2):
@@ -207,7 +207,7 @@ export const ADMISSION_SAME_SOURCES: readonly WorkFamily[] = [
       ),
   })),
   // Astra r5 B2: the same with a root of unknown-bearing fields, whose adds and options admission reads at every field:
-  // an add's class and a choice's options of one snapshot read once (S6-CARRIERS §4.5)
+  // an add's class and a choice's options of one snapshot read once (S6-CARRIERS)
   {
     name: "A5-same-source-adds-unknown",
     measures:

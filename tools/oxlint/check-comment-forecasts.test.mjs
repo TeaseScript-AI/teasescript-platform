@@ -641,7 +641,9 @@ test("only this test's own text is exempt from the TABLE citation check, by its 
 });
 
 // The document names a section list may follow, and the list's separators after its first number.
-const SECTION_NAMES = ["V30", "ADR 0021", "PLAN", "S3", "S6-CARRIERS"];
+const SECTION_NAMES = ["V30", "ADR 0021"];
+// The port plan's documents, outside the repository: a section of theirs is refused like any other.
+const PLAN_DOCUMENTS = ["PLAN", "S3", "S6-CARRIERS"];
 const SECTION_SEPARATORS = [", ", " and ", ", and ", " or "];
 const sectionsIn = (text) =>
   unnamedSectionsIn("tests/a.ts", text).map(({ line, section }) => `${line} ${section}`);
@@ -673,7 +675,7 @@ test("a section list right after a document's name is admitted, in every form th
   for (const name of SECTION_NAMES)
     assert.deepEqual(sectionsIn(`(${name} §1–2, §5)`), [], `${name} range`);
   // at the start of a line and of the text, and after a character that is no letter or digit
-  assert.deepEqual(sectionsIn("V30 §1\n(ADR 0021 §6.2)\n`S3 §5`, _V30 §2"), []);
+  assert.deepEqual(sectionsIn("V30 §1\n(ADR 0021 §6.2)\n`V30 §5`, _V30 §2"), []);
 });
 
 test("every other section number is found, with its line and as written", () => {
@@ -689,6 +691,8 @@ test("every other section number is found, with its line and as written", () => 
     "ADR 00211 §1",
     "xV30 §1",
     "S30 §1",
+    ...PLAN_DOCUMENTS.map((name) => `${name} §5`),
+    ...PLAN_DOCUMENTS.map((name) => `(${name} §§4.1–4.7)`),
     "S6 §1",
     "S6-CARRIERS-X §1",
     "2V30 §1",
@@ -711,6 +715,13 @@ test("every other section number is found, with its line and as written", () => 
   ])
     assert.equal(sectionsIn(text).length, 1, text);
   assert.deepEqual(sectionsIn("V30 §13ab, §2"), ["1 §13", "1 §2"]);
+  // every number of a plan document's list is refused
+  assert.deepEqual(sectionsIn("(S3 §1, §4) and S6-CARRIERS §4.5, §4.7"), [
+    "1 §1",
+    "1 §4",
+    "1 §4.5",
+    "1 §4.7",
+  ]);
   assert.deepEqual(sectionsIn(`§${" ".repeat(25)}1`), ["1 § 1"]);
   // each ASCII character but the one space, once and twice, between a name and its section
   for (const name of SECTION_NAMES)

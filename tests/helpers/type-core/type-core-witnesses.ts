@@ -1,7 +1,7 @@
 import type { SerializableRuntimeValue } from "../../../src/runtime/values/serializable-values.js";
 
 /*
- * S6-CARRIERS §6's carrier witnesses, each a name, its program before its final `exit` and its exact record: the cells
+ * S6-CARRIERS's carrier witnesses, each a name, its program before its final `exit` and its exact record: the cells
  * test compares them in both orders, the sharing differential runs them (the cells test's comment lists what each is).
  */
 export const CARRIER_WITNESSES: readonly (readonly [string, string, string])[] = (() => {

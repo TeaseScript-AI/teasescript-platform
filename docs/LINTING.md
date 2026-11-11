@@ -84,8 +84,8 @@ included) names an anchor of a record page Git lists, read and slugged as the do
 (`headingAnchors`); another mention of the record (its folder, a page without an anchor) is not its, and the check
 proves the anchor exists, not that it carries the comment's claim. A section number (`§` or `§§`, then a digit) stands,
 as a whole number, in a section list right after a repository document's name on its line (`V30 §13`, `ADR 0021 §6.2`,
-`V30 §5, §35`); `PLAN`, `S3` and `S6-CARRIERS` name the port plan's documents outside the repository and are allowed as
-labels while #2423 decides them. Any other section number is refused in every file
+`V30 §5, §35`); a section of the port plan's documents (`S3 §5`, `S6-CARRIERS §4.1`) cites what is outside the
+repository. Any other section number is refused in every file
 Git lists except `docs/`, whose documents number their own sections; `src/`, whose comments #2209 rewrites;
 `tests/fixtures/type-core/cells.jsonl`, whose section numbers are cell ids in recorded data whose bytes `MANIFEST.md`
 fixes; `tools/oxlint/comment-declarations-waiting.json`, which quotes comments word for word, its section numbers only
