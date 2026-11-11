@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { before, type TestContext } from "node:test";
 import { effectScope, watch, type Ref } from "vue";
 
-import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
+import type { PlayerBridge, SessionRequestOptions } from "../../player/runtime/player-bridge.js";
+import type { OpResult, SessionOp } from "../../player/engine-bridge/op-catalogue.js";
 import type { PlayerRuntimeSessionOptions } from "../../player/runtime/runtime-adapter.js";
 import {
   playerRuntimeForeground,
@@ -205,6 +206,9 @@ function choiceOptions(host: Host): readonly { readonly id: string; readonly lab
   assert.ok(foreground?.kind === "choose", "a choice is shown");
   return foreground.options;
 }
+
+/** A call of `PlayerBridge.request` with its overloads erased. */
+type Call = readonly [PlayerSession, SessionOp, unknown, SessionRequestOptions?];
 
 /** The label of the button `host` shows, if it shows one. */
 function buttonLabel(host: Host): string | undefined {
@@ -995,21 +999,17 @@ RERUN.rows(
     const refusals: unknown[] = [];
     // EVIDENCE: test: the bridge's erased overload; the row forwards each call unchanged and reads only its refusal.
     const request = transport.bridge.request.bind(transport.bridge) as (
-      ...call: readonly [PlayerSession, string, unknown, unknown?]
-    ) => Promise<unknown>;
-    context.mock.method(
-      transport.bridge,
-      "request",
-      async (...call: readonly [PlayerSession, string, unknown, unknown?]) => {
-        try {
-          return await request(...call);
-        } catch (error) {
-          if (call[1] === "beginCatchUp")
-            refusals.push(error instanceof Error && "code" in error ? error.code : error);
-          throw error;
-        }
-      },
-    );
+      ...call: Call
+    ) => Promise<OpResult<SessionOp>>;
+    context.mock.method(transport.bridge, "request", async (...call: Call) => {
+      try {
+        return await request(...call);
+      } catch (error) {
+        if (call[1] === "beginCatchUp")
+          refusals.push(error instanceof Error && "code" in error ? error.code : error);
+        throw error;
+      }
+    });
     await start(
       host,
       'let n = 0\ntimer(duration: 10 ms, async: true, repeat: true, display: "hidden") {\n  n += 1\n}\nshowButton "Next"\nshowButton "After"\nexit',
