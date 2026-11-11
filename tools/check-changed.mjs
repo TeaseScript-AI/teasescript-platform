@@ -50,8 +50,9 @@ const [{ costlyTestSeconds }, { summaryLine }, { isSuiteTestPath, isTypeCoreTest
 // belongs to the checks that read it, and needs no project when only those that always run do. A changed path no
 // project claims, other than documentation, runs every project's checks. Every change but documentation (a path ending
 // in `.md` or under `docs/`, `isDocumentation`) runs `test:lint` and `typecheck:player` (`everyChange`), which read
-// more than a claim can name but no documentation. The checks run side by side: with
-// `test:lint` a run peaked at about 5.5 GiB summed over its processes (#2431), and a queue job asks `--mem 8G` for it.
+// more than a claim can name but no documentation. The checks run side by side: for a `src/` change a run peaked at
+// about 8.9 GiB summed over its processes, which counts shared pages more than once, and its queue job at 6.5 GiB
+// (#2472); a queue job asks `--mem 8G` for it.
 // It never builds the TypeScript or runs the compiled test suite, which CI does: a change that shows only there, such
 // as the root tsconfig's emit settings, passes here. When a changed file is under `src/type-inference/core/`, it also prints the suites that pin the core's work or
 // its published answers, as `tools/repository-checks/pin-suites.mjs` lists them: the focused list such a change runs
