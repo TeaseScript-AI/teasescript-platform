@@ -10,13 +10,14 @@
 // is refused. What it cannot check: whether a running preview's server has reloaded the checkout's current files (Vite
 // serves edited files, but not an edited configuration until it restarts).
 //
-// One shutdown ends every run, also one stopped by SIGINT or SIGTERM: it stops the Playwright CLI command that runs,
-// closes the browser session and the server it started, and removes the dependency cache; it removes the scratch folder
-// after a pass and names it, with a failing group's screenshot and trace, otherwise. A cleanup error never replaces the
+// One shutdown ends every run, also one stopped by SIGINT or SIGTERM. Once it begins, no Playwright CLI command and no
+// server starts. It stops the Playwright CLI commands that run and waits for them to exit, closes the browser session,
+// waits for a server start under way, closes the server it started, and removes the dependency cache; it removes the
+// scratch folder after a pass and names it, with a failing group's screenshot and trace, otherwise. A cleanup error never replaces the
 // run's own failure. Stopped by a signal, also one during that shutdown, the run keeps and names its scratch folder and
 // exits with 128 plus the signal's number.
 import { spawn } from "node:child_process";
-import { mkdtempSync, realpathSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, realpathSync, writeFileSync, rmSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,27 +27,41 @@ const checkout = realpathSync(fileURLToPath(new URL("..", import.meta.url)));
 /** The run's scratch folder, made when the run starts. */
 let scratch = "";
 const session = `player-preview-${process.pid}`;
-/** The Playwright CLI commands that run, which the shutdown stops. */
-const running = new Set();
-/** The development server this run started, or `null`. */
+/** The Playwright CLI commands that run, each with its exit, which the shutdown stops and waits for. */
+const running = new Map();
+/** The development server this run started, or `null`; `starting` is its start, which the shutdown waits for. */
 let server = null;
-async function cli(...args) {
+let starting = null;
+/** The run's shutdown, once begun. */
+let shutdown = null;
+/** Called before each browser or server acquisition: none starts once the shutdown has begun. */
+function acquiring() {
+  if (shutdown !== null) throw new Error("the run is shutting down");
+}
+async function command(args) {
   const child = spawn("playwright-cli", [`-s=${session}`, ...args], {
     cwd: scratch,
     stdio: ["ignore", "pipe", "pipe"],
   });
-  running.add(child);
-  child.once("close", () => running.delete(child));
   let stdout = "";
   let stderr = "";
   child.stdout.setEncoding("utf8").on("data", (text) => (stdout += text));
   child.stderr.setEncoding("utf8").on("data", (text) => (stderr += text));
-  const status = await new Promise((resolve, reject) => {
+  const exit = new Promise((resolve, reject) => {
     child.once("error", reject);
     child.once("close", resolve);
   });
+  running.set(
+    child,
+    exit.catch(() => {}),
+  );
+  const status = await exit.finally(() => running.delete(child));
   if (status !== 0 || stdout.includes("### Error")) throw new Error(stderr + stdout);
   return stdout;
+}
+function cli(...args) {
+  acquiring();
+  return command(args);
 }
 
 /** A port of 127.0.0.1 that was free a moment ago; the server binds it strictly, so a port taken since fails. */
@@ -63,6 +78,7 @@ function freePort() {
 /** Starts this checkout's development preview and resolves to its URL; the shutdown closes it. */
 async function startPreview() {
   const { createServer } = await import("vite");
+  acquiring();
   // Vite registers its own SIGTERM and stdin-end handlers, which close the server and exit at once. While it creates the
   // server, those registrations (and any a plugin makes) are dropped: this run's shutdown handles both.
   const { on, once } = process;
@@ -88,22 +104,24 @@ async function startPreview() {
     Object.assign(process, { on, once });
     process.stdin.on = stdinOn;
   }
+  acquiring();
   await server.listen();
   return server.resolvedUrls.local[0];
 }
 
 /** The signal that stopped the run, with its exit status, or `null`. */
 let stopped = null;
-let shutdown = null;
 /**
  * Ends the run once, whatever ends it; resolves to the cleanup errors. A run stopped by a signal, also during this
  * shutdown, keeps and names its scratch folder as a failed one does.
  */
 function shutDown(failure) {
   shutdown ??= (async () => {
-    for (const child of running) child.kill("SIGTERM");
+    for (const child of running.keys()) child.kill("SIGTERM");
+    await Promise.all(running.values());
     const problems = [];
-    await cli("close").catch((error) => problems.push(error));
+    await command(["close"]).catch((error) => problems.push(error));
+    await starting?.catch(() => {});
     await server?.close().catch((error) => problems.push(error));
     const passed = failure === null && stopped === null;
     for (const folder of passed ? [scratch] : [join(scratch, "vite")])
@@ -831,7 +849,7 @@ async function main() {
     });
   let failure = null;
   try {
-    const url = process.argv[2] ?? (await startPreview());
+    const url = process.argv[2] ?? (await (starting = startPreview()));
     if (server !== null)
       console.log(`player-preview-checks: started this checkout's preview at ${url}`);
     await checkServedCheckout(url);
@@ -870,9 +888,11 @@ async function main() {
   if (problems.length > 0) throw problems[0];
 }
 
-// Run as a program only, so that importing this file starts nothing.
+// Run as a program only, so that importing this file starts nothing, also from standard input (`-`).
+const entry = process.argv[1];
 if (
-  process.argv[1] !== undefined &&
-  realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
+  entry !== undefined &&
+  existsSync(entry) &&
+  realpathSync(entry) === fileURLToPath(import.meta.url)
 )
   await main();
