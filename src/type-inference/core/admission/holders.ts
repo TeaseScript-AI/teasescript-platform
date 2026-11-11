@@ -9,6 +9,7 @@ import type { PrefixEntry, PrefixStores } from "../contract/model.js";
 import { writtenOf } from "../contract.js";
 import { keyOf, keyPath, keyPlace, type Definition, type Key } from "../definitions.js";
 import { REASON, type Item } from "../items.js";
+import { amend } from "../retained/retained.js";
 import type { Stop } from "./model.js";
 import { stopsOf } from "./walk.js";
 
@@ -125,6 +126,8 @@ function holdersOf(
       }),
     );
   }
+  // (a state kept from an earlier ask, filled in place below)
+  amend(state);
   state.list ??= list;
   state.stores ??= stores;
   if (state.supports === null) {
