@@ -256,13 +256,15 @@ test("a Player test bundle is not built from an input the stamp does not cover",
     return () =>
       write("compiler-options.json", JSON.stringify({ compilerOptions: { strict: true } }));
   });
-  // a project reference is a local path, also without "./"
+  // a project reference is a local path, also without "./" (TypeScript does not inherit references through `extends`)
   write("tools/tsconfig.json", "{}\n");
   for (const reference of ["tools", "tools/options.json"])
     refused(/references .*tools\/(?:tsconfig|options)\.json, outside the stamped area/u, () => {
-      write("compiler-options.json", JSON.stringify({ references: [{ path: reference }] }));
-      return () =>
-        write("compiler-options.json", JSON.stringify({ compilerOptions: { strict: true } }));
+      write(
+        "tsconfig.json",
+        JSON.stringify({ extends: "./compiler-options.json", references: [{ path: reference }] }),
+      );
+      return () => write("tsconfig.json", JSON.stringify({ extends: "./compiler-options.json" }));
     });
   // a link to a folder, in the area or in place of an area folder
   refused(/player\/tools cannot be stamped \(folder link /u, () => {
