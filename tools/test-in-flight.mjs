@@ -5,9 +5,20 @@ import { relative, resolve } from "node:path";
 // begins) and `test:complete` (it ends), each file's innermost running test is known, and when a test last began or
 // ended there. Once a file has gone `AFTER_MS` without either, a line on standard error names its innermost test with
 // its parents, and again each `AFTER_MS` while it stays so; files are looked at once a minute. The longest test of the
-// suite took 99 s at 15 files at once on desktop (2026-11-08), so a passing run of today's suite prints nothing; a
-// single test over 5 minutes would print its line and still pass. The timer does not keep a run alive.
+// suite took 99 s at 15 files at once on desktop (2026-11-08), so a passing run of today's suite prints nothing. A test
+// fails at `TEST_LIMIT_MS`, so this names what that limit does not end: a file stalled outside its tests (loading, or
+// between them), or a test given a longer `timeout` of its own. The timer does not keep a run alive.
 export const AFTER_MS = 5 * 60_000;
+
+/**
+ * The longest a test may run, its hooks included: past it the test fails, named, as `test timed out`, and with Node's
+ * `--test-force-exit` its file's process then ends although the test left work running. Both runners of the suite give
+ * it (`run-test-files.mjs`, and `test-output-filter.mjs` for named files, where a later `--test-timeout` replaces it),
+ * so a hang fails the run by name before a job's limit ends it unnamed (#2454). Measured: CI's costliest file took 177 s
+ * (`costly-test-files.mjs`), the longest test 125 s on a queue worker (2026-11-11); CI's test jobs take 5 to 7 of their
+ * 15 minutes. A test's own `timeout` option replaces it.
+ */
+export const TEST_LIMIT_MS = 5 * 60_000;
 const LOOK_MS = 60_000;
 
 /** `ms` as minutes and seconds: `10m 0s`. */
