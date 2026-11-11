@@ -111,12 +111,12 @@ const argumentChain = (k: number, step: (index: number) => string): string =>
  */
 export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link]): WorkFamily => ({
   name: `W34-${variant}`,
-  measures: "§13.3 W34: a copy chain resolved once per copy, projected per field",
+  measures: "W34: a copy chain resolved once per copy, projected per field",
   program: (k) => main(w34Chain(k, plainRecord, plainField, link)),
 })).concat([
   {
     name: "W34-nested",
-    measures: "§13.3 W34: a copy chain resolved once per copy, projected per field",
+    measures: "W34: a copy chain resolved once per copy, projected per field",
     program: (k) =>
       main(
         w34Chain(
@@ -129,7 +129,7 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
   },
   {
     name: "W34-exit-tested-every-copy",
-    measures: "§13.3 W34 r4.38: a chain's marks found per path, each copy read once",
+    measures: "W34 r4.38: a chain's marks found per path, each copy read once",
     program: (k) =>
       main(
         lines(
@@ -142,7 +142,7 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
   },
   {
     name: "W34-independent-stores",
-    measures: "§13.3 W34 r4.38: a store's stop found per path within its own copies",
+    measures: "W34 r4.38: a store's stop found per path within its own copies",
     program: (k) =>
       main(
         rows(
@@ -153,7 +153,7 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
   },
   {
     name: "W34-sibling-stores",
-    measures: "§13.3 W34 r4.38: a store's stop found per path within its own copies",
+    measures: "W34 r4.38: a store's stop found per path within its own copies",
     program: (k) =>
       main(
         lines(
@@ -170,7 +170,7 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
   },
   {
     name: "W34-fan-stores",
-    measures: "§13.3 W34 r4.38: a store's stop found per path within its own copies",
+    measures: "W34 r4.38: a store's stop found per path within its own copies",
     program: (k) =>
       main(
         lines(
@@ -183,7 +183,7 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
   },
   {
     name: "W34-redefined-exit-tested",
-    measures: "§13.3 W34 r4.38: k definitions of one source, each copied after a test",
+    measures: "W34 r4.38: k definitions of one source, each copied after a test",
     program: (k) =>
       main(
         w34Redefined(
@@ -195,8 +195,7 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
   },
   {
     name: "W34-redefined-exit-tested-own-fields",
-    measures:
-      "§13.3 W34 r4.38: k definitions of one source, each copied after a test of its own field",
+    measures: "W34 r4.38: k definitions of one source, each copied after a test of its own field",
     program: (k) =>
       main(
         w34Redefined(
@@ -208,7 +207,7 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
   },
   {
     name: "W34-redefined-stores",
-    measures: "§13.3 W34 r4.38: k definitions of one source, each copied, and k stores below it",
+    measures: "W34 r4.38: k definitions of one source, each copied, and k stores below it",
     program: (k) =>
       main(
         w34Redefined(
@@ -220,8 +219,7 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
   },
   {
     name: "W34-redefined-independent",
-    measures:
-      "§13.3 W34 r4.38: k sources of two copied definitions each, a store at one shared path",
+    measures: "W34 r4.38: k sources of two copied definitions each, a store at one shared path",
     program: (k) =>
       main(
         rows(
@@ -233,7 +231,7 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
   },
   {
     name: "W34-redefined-through-copies",
-    measures: "§13.3 W34 r4.38: a source redefined from its own copies k times, one test of it",
+    measures: "W34 r4.38: a source redefined from its own copies k times, one test of it",
     program: (k) =>
       main(
         lines(
@@ -249,8 +247,7 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
   },
   {
     name: "W34-redefined-five-times-independent",
-    measures:
-      "§13.3 W34 r4.38: k sources of five copied definitions each, a store at one shared path",
+    measures: "W34 r4.38: k sources of five copied definitions each, a store at one shared path",
     program: (k) =>
       main(
         lines(
@@ -267,7 +264,7 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
   {
     name: "W34-redefined-beside-tested-sources",
     measures:
-      "§13.3 W34 r4.38: a source tested at k paths and redefined k times beside four sources tested there",
+      "W34 r4.38: a source tested at k paths and redefined k times beside four sources tested there",
     program: (k) =>
       main(
         lines(
@@ -288,7 +285,7 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
   },
   {
     name: "W34-fan-marked",
-    measures: "§13.3 W34 r4.38: a copy's marks asked per path and guard scope",
+    measures: "W34 r4.38: a copy's marks asked per path and guard scope",
     program: (k) =>
       main(
         w34Fan(
@@ -300,7 +297,7 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
   },
   {
     name: "W34-fan-unmarked",
-    measures: "§13.3 W34 r4.38: a copy's marks asked per path and guard scope",
+    measures: "W34 r4.38: a copy's marks asked per path and guard scope",
     program: (k) =>
       main(
         w34Fan(
@@ -312,7 +309,7 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
   },
   {
     name: "W34-fan-narrowing",
-    measures: "§13.3 W34 r4.38: a copy's marks asked per path and guard scope",
+    measures: "W34 r4.38: a copy's marks asked per path and guard scope",
     program: (k) =>
       main(
         w34Fan(
@@ -323,7 +320,7 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
   },
   {
     name: "W34-fan-and-chain",
-    measures: "§13.3 W34 r4.38: k copies in one guard scope share its marks",
+    measures: "W34 r4.38: k copies in one guard scope share its marks",
     program: (k) =>
       main(
         lines(
@@ -337,27 +334,27 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
   },
   {
     name: "W34-argument-chain",
-    measures: "§13.3 W34 (review r5): a record passed down k calls and read at k fields",
+    measures: "W34 (review r5): a record passed down k calls and read at k fields",
     program: (k) => main(argumentChain(k, (j) => `use${j + 1}(p${j})`)),
   },
   {
     name: "W34-argument-operands",
     measures:
-      "§13.3 W34 r4.38 (review r5): the same, each call in an operand a test of an unread field guards",
+      "W34 r4.38 (review r5): the same, each call in an operand a test of an unread field guards",
     program: (k) =>
       main(argumentChain(k, (j) => `if p${j}.guard != null and use${j + 1}(p${j}) {}`)),
   },
   {
     name: "W34-argument-own-tests",
     measures:
-      "§13.3 W34 r4.38: the same, each call in an operand a test of the field it passes on guards",
+      "W34 r4.38: the same, each call in an operand a test of the field it passes on guards",
     program: (k) =>
       main(argumentChain(k, (j) => `if p${j}.f${j} != null and use${j + 1}(p${j}) {}`)),
   },
   {
     name: "W34-captured-own-tests",
     measures:
-      "§13.3 W34 (review r6): a record captured into one global down k calls, each testing its own field, read at k fields",
+      "W34 (review r6): a record captured into one global down k calls, each testing its own field, read at k fields",
     program: (k) =>
       main(
         lines(
@@ -380,8 +377,7 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
   },
   {
     name: "W34-fanout-tested-callables",
-    measures:
-      "§13.3 W34 (review r7): one source passed to k functions that each test it and copy it",
+    measures: "W34 (review r7): one source passed to k functions that each test it and copy it",
     program: (k) =>
       main(
         lines(
@@ -404,7 +400,7 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
   {
     name: "W34-fanout-tested-exits",
     measures:
-      "§13.3 W34 (review r7): k fields each tested in five functions that each pass the source on k times, read once",
+      "W34 (review r7): k fields each tested in five functions that each pass the source on k times, read once",
     program: (k) =>
       main(
         lines(
@@ -437,7 +433,7 @@ export const W34_VARIANTS: readonly WorkFamily[] = W34_LINKS.map(([variant, link
   {
     name: "W34-fanout-distinct-exits",
     measures:
-      "§13.3 W34 (review r8): k fields tested by one condition in five functions, each passing k redefinitions on",
+      "W34 (review r8): k fields tested by one condition in five functions, each passing k redefinitions on",
     program: (k) =>
       main(
         lines(
@@ -482,7 +478,7 @@ export const W34_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
     name: "W34-known-tested-anchors",
     measures:
-      "§13.3 W34: k sources each tested and redefined through five copies in one tree, read at k fields",
+      "W34: k sources each tested and redefined through five copies in one tree, read at k fields",
     // 114,507 / 347,723 / 1,170,507 / 4,241,483 units at k = 32 … 256 (review r5: 110,646 / 335,894 / 1,130,454)
     measured: 3.37,
     program: (k) =>
@@ -503,7 +499,7 @@ export const W34_KNOWN_PRODUCTS: readonly KnownProduct[] = [
   {
     name: "W34-known-stored-roots",
     measures:
-      "§13.3 W34: k sources copied from five shared roots, each stored at the path every copy reads",
+      "W34: k sources copied from five shared roots, each stored at the path every copy reads",
     // 49,782 / 113,942 / 285,910 / 803,158 units at k = 32 … 256 (review r5: 113,562 / 285,146 / 801,626 from 64)
     measured: 2.53,
     program: (k) =>

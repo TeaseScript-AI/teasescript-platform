@@ -273,7 +273,7 @@ test("a read below nested or shared joins asks only the layers holding its path 
  * N5's families through the analysis (S10 part 2b): a read in a stored value takes its narrowing, so the stores' own
  * preserving tests run as the analysis asks them, components included; the same gate.
  */
-test("stage 3b's N5 families grow with the program through the analysis too, in either order (§13.3)", () => {
+test("stage 3b's N5 families grow with the program through the analysis too, in either order", () => {
   assert.deepEqual(
     steepCounters(NARROWING_FAMILIES.filter((family) => family.name.startsWith("W29"))),
     [],
@@ -329,8 +329,8 @@ test("a deep literal's decision grows with its depth, never with its square (#14
 });
 
 /**
- * Admission (the port plan's §3.3): its decisions, rejections, candidates and boundary checks, gated as W34 is; A6's
- * chain of dependent rejections, which takes a pass per link (§8's passes × stores, each pass charged), is a gated
+ * Admission: its decisions, rejections, candidates and boundary checks, gated as W34 is; A6's
+ * chain of dependent rejections, which takes a pass per link (passes × stores, each pass charged), is a gated
  * known limit by the owner's decision (docs/specifications/type-inference-accepted-record/admission.md#r4-49, option
  * A): a regression check on the 64 → 128 step only, at its measured doubling, not a bound at larger sizes; a change to
  * admission's passes re-measures and proposes the gate with its counts, never retunes it. Copies interleaved with

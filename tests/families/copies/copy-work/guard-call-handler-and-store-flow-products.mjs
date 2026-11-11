@@ -1,7 +1,7 @@
 // Its id is its file name before its area was grouped, which keeps its sources' places in a stored baseline.
 export const id = "3a-spike14-gates.mjs";
 // spike 14's gates: the work families W1-W45 at k = 8 to 1,024 (`work.jsonl`), at least one program per
-// cell of §10.1 with the X conditions as pairs (`cells.jsonl`), and the pairwise product of §6's axes with §10.3's
+// cell of the design's cell table with the X conditions as pairs (`cells.jsonl`), and the pairwise product of its axes with its
 // targeted combinations (`axes.jsonl`); 3a checkpoint 9, spike 14
 // (R/3a-newcore/checkpoint-9/spike14/gates14/make-gates14.py), each program analysed by spike 14's `points14.mjs`.
 const rows = (n, f) => Array.from({ length: n }, (_, i) => f(i)).join("\n");

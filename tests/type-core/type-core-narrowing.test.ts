@@ -34,8 +34,8 @@ import type { CompactRecord } from "../helpers/type-core-records.js";
 /*
  * Stage 3b's narrowing index (S10's first part), asked directly, and the stored values that read it (S10
  * part 2b; the other consumers read it in part 2c). Per N1 form and per N2 event a control that holds and a case that
- * changes only the premise (§13.4), taken from the expectation set's 3b shapes; G's filter on items; N5's preserving and
- * breaking stores, one location and a component; N3's route witnesses for §13's own examples.
+ * changes only the premise, taken from the expectation set's 3b shapes; G's filter on items; N5's preserving and
+ * breaking stores, one location and a component; N3's route witnesses for the design's own examples.
  */
 
 const FLAG = 'let flagHost = askBoolean "flag"';
@@ -1131,7 +1131,7 @@ test("a read in a stored value takes its narrowing where it holds, and its mark 
     ),
     "warning-runtime-check",
   );
-  // a definition after the test answers the read itself (the nearest candidate, §13.2 (2))
+  // a definition after the test answers the read itself (the nearest candidate)
   assert.equal(
     outcome(
       FLAG,
@@ -1477,7 +1477,7 @@ test("a read below a selection takes its narrowing, each selected owner's own se
   }
 });
 
-test("a consumer reads the narrowing as a store does, in §13.2's order (#1073 PR 2, #1320)", () => {
+test("a consumer reads the narrowing as a store does, in the same order (#1073 PR 2, #1320)", () => {
   // (a record's outcome, its diagnostics' kinds and classes and its checks' kinds, in the three modes `record` asks)
   const answer = (...lines: readonly string[]): string => {
     const { outcome, diagnostics, checks } = record(...lines);
@@ -1504,7 +1504,7 @@ test("a consumer reads the narrowing as a store does, in §13.2's order (#1073 P
     answer(flag, "let n = 1", "if flag { n = null }", "if n != null { n = null\n repeat n {} }"),
     "compile-error, integer-use compile-error",
   );
-  // a test of the read's own key keeps its guard (§3.2)
+  // a test of the read's own key keeps its guard
   assert.equal(
     answer("let box = {n: 1.5}", "if box.n < 2 { repeat box.n {} }"),
     "warning-runtime-check, integer-use warning-runtime-check, integer-check",
@@ -1939,7 +1939,7 @@ function route(analysed: Analysed, marker: string, delta: number, tag: ItemTag =
   return witness === null ? "none" : analysed.pass.program.textAt(witness.site);
 }
 
-test("N3 proves a route without a check, and refuses every corridor §13 closes", () => {
+test("N3 proves a route without a check, and refuses every corridor the design closes", () => {
   const restore = "function restore { n = 2 }";
   const clear = 'let clear = askBoolean "c"';
   const fork = 'let fork = askBoolean "f"';

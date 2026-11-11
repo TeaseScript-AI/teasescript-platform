@@ -1,7 +1,7 @@
 import { type WorkFamily, rows, lines, cells, main, balancedSum, record } from "./builders.js";
 
 /**
- * Stage 3b's families (W27–W34 and the tested-copy variant), as §13.3 defines them: each makes the
+ * Stage 3b's families (W27–W34 and the tested-copy variant), as the design defines them: each makes the
  * narrowing index's construction or its queries a product of two program dimensions in some realization of it. They are
  * measured with every read's narrowing and route asked (`tests/helpers/type-core/type-core-narrowing.ts`), as the consumers will
  * ask them; N5's (W29 and its variants) through the analysis too, whose stored values read their narrowings (S10 part
@@ -358,8 +358,7 @@ export const NARROWING_FAMILIES: readonly WorkFamily[] = [
   },
   {
     name: "W34-tested-copies",
-    measures:
-      "§13.3: a test on a field of the source before each whole copy, k copies read at k fields",
+    measures: "a test on a field of the source before each whole copy, k copies read at k fields",
     program: (k) =>
       main(
         lines(

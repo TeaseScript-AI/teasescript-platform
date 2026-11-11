@@ -28,8 +28,8 @@ import {
 } from "../helpers/player/worker-topology.js";
 
 /*
- * The Player's file store for fileFromBase64, fileToBase64, hashFile, and toJson and fromJson with files (V30 §13 and
- * §33): files are session media of the kind of their type, durable only while a saved value references them, and only
+ * The Player's file store for fileFromBase64, fileToBase64, hashFile, and toJson and fromJson with files
+ * (V30 §13 and §33): files are session media of the kind of their type, durable only while a saved value references them, and only
  * an image is ever shown.
  */
 

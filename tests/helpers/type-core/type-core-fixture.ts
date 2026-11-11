@@ -47,7 +47,7 @@ const RELEASED_ADAPTER_RECORDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Stage 3b's records held back (§13: N1–N10, #1073 U6), each by name with its reason, its issue and the differences
+ * Stage 3b's records held back (N1–N10, #1073 U6), each by name with its reason, its issue and the differences
  * from its record its cause gives: a closed list. Every other record with an `N` cell is asserted, so one that breaks
  * fails the cells test; a held record whose differences change in any mode fails its completeness check, so a hold
  * cannot outlive its cause or change it unseen.
@@ -439,7 +439,7 @@ export const HELD_S10_RECORDS: ReadonlyMap<string, S10Hold> = new Map([
  * the tests that assert the set (the cells test's records, the candidate route's plans) hold back the same records.
  */
 export function heldBack(record: FixtureRecord): string | null {
-  // Its right-hand datetime has no subtraction row: §3.4 sites that operand, not the whole pair. Keep the set
+  // Its right-hand datetime has no subtraction row: the design's site rule sites that operand, not the whole pair. Keep the set
   // unchanged until its maintainer corrects this start as well as its end.
   if (record.name === "cp9-cells/F16/invalid-datetime-difference")
     return "operator site awaiting set correction";
@@ -467,7 +467,7 @@ export function heldBack(record: FixtureRecord): string | null {
   // released as S9b's checks give them (#1072)
   if (record.owner === "adapter" && !RELEASED_ADAPTER_RECORDS.has(record.name))
     return "the adapters' records (S9b)";
-  // stage 3b (§13: N1–N10): the records still held, each by name (`HELD_S10_RECORDS`); every other is asserted
+  // stage 3b (N1–N10): the records still held, each by name (`HELD_S10_RECORDS`); every other is asserted
   return HELD_S10_RECORDS.get(record.name)?.reason ?? null;
 }
 

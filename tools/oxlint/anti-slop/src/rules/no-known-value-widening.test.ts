@@ -1,4 +1,4 @@
-import { RuleTester } from "oxlint/plugins-dev";
+import { RuleTester } from "../shared/rule-tester.ts";
 
 import { noKnownValueWideningRule } from "./no-known-value-widening.ts";
 

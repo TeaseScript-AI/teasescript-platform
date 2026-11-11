@@ -20,7 +20,7 @@ import { DeadWays, placeKey, type WayFacts } from "../../../src/way-facts.js";
 import { HOST_GLOBALS, type FlowProgram } from "./type-core-flow-programs.js";
 
 /*
- * The coarse core's flow graph against the lowering (the coarse-core table's proof of §3.1 rests on their agreement).
+ * The coarse core's flow graph against the lowering (the coarse-core table's proof of the flow graph rests on their agreement).
  * For each program of the corpus, the lowering's control flow is the plan's (`PlanControlFlow`) without the ways the
  * type check rules out (`DeadWays`), with its blocks entered where they are created and a computed target leading to
  * every file's entry; calls are summarized alike, a call entering its callee and its summary edge standing for the

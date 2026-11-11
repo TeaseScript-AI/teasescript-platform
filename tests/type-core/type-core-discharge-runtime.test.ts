@@ -513,7 +513,7 @@ test("a get's and a conversion's selected default is checked against the result'
 });
 
 test("a default named by its key path is checked where it is selected, also with no store around it, in three layers, in both orders (C10, #1538)", () => {
-  // C10 names a default as every obligation names its value (§10.5): an element read `xs.element`, a written dict's
+  // C10 names a default as every obligation names its value: an element read `xs.element`, a written dict's
   // entry `d.entry`, a `get`'s result by its receiver's element, never by its text; a nested default owes its own check,
   // and a default no literal holds that stands in for a collection is checked against that value's whole contract (ADR
   // 0021 7.2), whether the call's value is stored, stored into a written place (whose own check stays), or read at once

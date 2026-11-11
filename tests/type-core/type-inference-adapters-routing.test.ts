@@ -7,7 +7,7 @@ import type { ContractFamily } from "../../src/type-inference/graph.js";
 import { request } from "../helpers/type-core/type-inference-graph.js";
 
 /**
- * The relations table has a relation for every operation the collector emits (work note §4); an injected host
+ * The relations table has a relation for every operation the collector emits (work note); an injected host
  * builtin's gives a result the compiler cannot know. Every family the collector can emit is listed, so a key the
  * modules forget is seen here. This checks the table alone: no backend's dispatch reads it.
  */

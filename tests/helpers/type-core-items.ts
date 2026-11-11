@@ -94,7 +94,7 @@ export class ItemSource {
           ingress = this.scope.ingress.union(ingress, this.scope.ingress.leaf(store));
     const word = tag === "null" && this.chance(0.2);
     const fan = this.chance(0.1) ? this.pick(["fan@0:7", "fan@0:14"]) : undefined;
-    // a guarded item is never definite (§3.2)
+    // a guarded item is never definite
     const guarded = this.chance(0.2);
     const fields: ItemFields = {
       cert: guarded ? "pos" : cert,

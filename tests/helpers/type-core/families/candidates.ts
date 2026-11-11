@@ -1,7 +1,7 @@
 import { type WorkFamily, rows, lines, fields, main } from "./builders.js";
 
 /**
- * Admission's hot-candidate discovery by touch tries (#1188, its design note's §1.3 and §4.1): one family per context
+ * Admission's hot-candidate discovery by touch tries (#1188, its design note): one family per context
  * that listed a contribution again before the tries, each beside a wide typed root. A place merging two copies, each
  * then copied beside a second wide record; a literal of a plain wide record beside k such merges (Sol r2); k
  * configuration prefixes, each copying the root under its own name and under one shared name (Sol r8); k records beside

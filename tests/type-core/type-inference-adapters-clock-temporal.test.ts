@@ -34,7 +34,7 @@ import {
 
 /**
  * Parity of the clock reads and of the members of date and time values and calendar durations with the legacy
- * checker (work note §5.3, §5.4, §6.3): every clock read, every method and field of `TEMPORAL_METHODS`,
+ * checker (work note): every clock read, every method and field of `TEMPORAL_METHODS`,
  * `TEMPORAL_FIELDS` and `CALENDAR_DURATION_PARTS` on a receiver of each date and time kind, a calendar duration and
  * an exact duration, with and without arguments, the finite values of a field, and date and time values among other
  * kinds of a receiver, which `members.ts` composes.

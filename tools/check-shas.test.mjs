@@ -111,17 +111,23 @@ test(
         "results in ~/jobs/results/clarity-a/11071351201ab1/out/ and /tmp/x/0c1d2e3f4a5b/",
         "see https://example.com/files/a1b2c3d4e5f6/report",
         "Number.MAX_VALUE is 1.7976931348623157e+308",
+        "thread mcp:0e63ae8e-efaf-446b-abad-52bba33d4f81",
       ].join("\n");
       const { status, out } = check(text, [directory]);
       assert.equal(status, 0, out);
       assert.match(
         out,
-        /10 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 10 skipped/u,
+        /12 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 12 skipped/u,
       );
       // A commit URL is checked; a path that holds a real SHA still reports it.
       const url = check("https://github.com/o/r/commit/0123abc4567", [directory]);
       assert.equal(url.status, 1, url.out);
       assert.match(check(`tree/${shas[0]}`, [directory]).out, /resolved/u);
+      // A UUID group that is a commit here is still reported as resolved.
+      const inUuid = check(`${shas[0].slice(0, 8)}-efaf-446b-abad-52bba33d4f81`, [directory]);
+      assert.equal(inUuid.status, 0, inUuid.out);
+      assert.match(inUuid.out, new RegExp(`resolved +${shas[0].slice(0, 8)} `, "u"));
+      assert.match(inUuid.out, /2 tokens: 1 resolved, .* 1 skipped/u);
       for (const [token, text, why] of [
         ["42406642863", "run 42406642863", "only digits, an id"],
         ["1107175450d1b5", "job 1107175450d1b5", "a queue job id"],
@@ -146,6 +152,25 @@ test(
         ["0c1d2e3f4a5b", "/tmp/x/0c1d2e3f4a5b/", "inside a URL or a path"],
         ["0123abc4567", "https://github.com/o/r/commit/0123abc4567", null],
         ["0123abc4567", "merged as 0123abc4567", null],
+        // A UUID's groups, in either case and wherever the UUID stands; not five groups of its lengths, or one touched by
+        // a word character
+        ["0e63ae8e", "mcp:0e63ae8e-efaf-446b-abad-52bba33d4f81", "a UUID, an id"],
+        ["52bba33d4f81", "mcp:0e63ae8e-efaf-446b-abad-52bba33d4f81", "a UUID, an id"],
+        ["52bba33d4f81", "id 0E63AE8E-EFAF-446B-ABAD-52bba33d4f81.", "a UUID, an id"],
+        ["0e63ae8e", "(0e63ae8e-efaf-446b-abad-52bba33d4f81)", "a UUID, an id"],
+        ["52bba33d4f8", "0e63ae8e-efaf-446b-abad-52bba33d4f8 is short", null],
+        ["52bba33d4f81a", "0e63ae8e-efaf-446b-abad-52bba33d4f81a", null],
+        ["0e63ae8e", "0e63ae8e-efaf-446b-abad", null],
+        ["52bba33d4f81", "x0e63ae8e-efaf-446b-abad-52bba33d4f81", null],
+        // (the first group, with the UUID's end at the text's end or touched by a letter, `_`, a Unicode letter, an astral
+        // digit, or an overlong last group)
+        ["0e63ae8e", "0e63ae8e-efaf-446b-abad-52bba33d4f81", "a UUID, an id"],
+        ["0e63ae8e", "0e63ae8e-efaf-446b-abad-52bba33d4f81x", null],
+        ["0e63ae8e", "0e63ae8e-efaf-446b-abad-52bba33d4f81_", null],
+        ["0e63ae8e", "0e63ae8e-efaf-446b-abad-52bba33d4f81é", null],
+        ["0e63ae8e", "0e63ae8e-efaf-446b-abad-52bba33d4f81\u{1D7CE}", null],
+        ["0e63ae8e", "0e63ae8e-efaf-446b-abad-52bba33d4f81a", null],
+        ["52bba33d4f81", "\u{1D7CE}0e63ae8e-efaf-446b-abad-52bba33d4f81", null],
       ])
         assert.equal(excuse(token, text, text.indexOf(token)), why, text);
     } finally {

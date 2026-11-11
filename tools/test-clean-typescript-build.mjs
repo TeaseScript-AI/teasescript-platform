@@ -67,7 +67,12 @@ try {
     })}\n`,
   );
   writeFileSync(resolve(fixtureRoot, "tests/required.test.ts"), "export {};\n");
-  writeFileSync(sourceBeforeRename, "export {};\n");
+  // (one test, as a focused run fails a file that runs none; node:test by a name typed as any, as the fixture has no
+  // Node types)
+  writeFileSync(
+    sourceBeforeRename,
+    'const runner: string = "node:test";\nvoid import(runner).then(({ test }) => test("focused", () => {}));\n',
+  );
   writeFileSync(playerArtifact, "required player artifact\n");
   writeFileSync(playerTestModulesArtifact, "required Player test modules artifact\n");
 

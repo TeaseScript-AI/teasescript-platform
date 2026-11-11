@@ -21,8 +21,8 @@ import { assertRuntimeResumeEquivalent, functionFrames } from "../helpers/runtim
 import { validateRuntimeSnapshot } from "../../src/runtime/snapshot/snapshot-validation.js";
 
 /*
- * Timer, media, and button blocks share the function, loop, and block variables of the code that creates them (V30
- * §14): one variable, kept in checkpointed scopes while a resource or block still uses it.
+ * Timer, media, and button blocks share the function, loop, and block variables of the code that creates them
+ * (V30 §14): one variable, kept in checkpointed scopes while a resource or block still uses it.
  */
 
 function said(events: readonly InterpreterEvent[]): string[] {

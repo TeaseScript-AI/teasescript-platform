@@ -12,7 +12,7 @@ import { coreRequest } from "../helpers/type-core-analysis.js";
 import { everyAnswer } from "../helpers/type-core-oracles.js";
 
 /*
- * The core's published answers per occurrence, projection and property (the port plan's S3 note §1), which the kept
+ * The core's published answers per occurrence, projection and property (the port plan's S3 note), which the kept
  * adapters will read: a statement that stores answers for its place, a read below a binding names its route and its
  * place, a projection of a value that is no place has none, and a value's properties come from every source the
  * contract and the literal index know (review r1).
@@ -511,8 +511,8 @@ test("a value an add or an addAll inserts has its properties, never the collecti
 });
 
 /**
- * #1203: below their root computed-key loads hold host data at every path (F19; never a kind from their default, ADR
- * 0021 §6.2), each naming its own ingress (C9), and the value side answers a literal's class of them once for every
+ * #1203: below their root computed-key loads hold host data at every path (F19; never a kind from their default,
+ * ADR 0021 §6.2), each naming its own ingress (C9), and the value side answers a literal's class of them once for every
  * path. A field read answers one unknown that holds the leaf of each load its list holds, whatever the key's form or the
  * default, and the root keeps a `null` default's `null`. With the sharing off (`withoutSharing`) each load is read at
  * each path by itself: every read's answer, its items whole with their leaves, and the program's diagnostics and checks

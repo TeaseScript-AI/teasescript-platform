@@ -62,7 +62,7 @@ import {
 /*
  * The contract's identity and mark controls (checkpoint 9): every path that
  * enters a source into the contract's indexes obtains its identity from one function, so k contributions of one source
- * are one entry on every path; the marks of §3.2 live in one holder per source and projection whose references
+ * are one entry on every path; the guard marks live in one holder per source and projection whose references
  * compose, so the mark structures a program makes and the lookups its reads make grow with k, never with k². The
  * programs are the reference model's ledger controls (`budget-check.mjs`, check 4), with the boolean host flag an
  * interaction, as the expectation set writes it.
@@ -279,7 +279,7 @@ test("the mark structures and lookups grow with the aliases, guards and wrappers
 });
 
 /**
- * §8 (review round 5 on #1027): the property a choice object's button value reads is decided once per
+ * Review round 5 on #1027: the property a choice object's button value reads is decided once per
  * record where its literal is indexed, so k reads below the button value inspect each record once per read, never its
  * properties: from 8 to 32 fields and reads a linear count grows four times, a square sixteen times.
  */
@@ -372,7 +372,7 @@ test("a chain of whole copies read at k fields resolves each copy once (W34)", (
 });
 
 /**
- * §8: the prefix index and the handler index do work linear in the copies and reads (review r1): an edited record
+ * The prefix index and the handler index do work linear in the copies and reads (review r1): an edited record
  * copied through k aliases inherits its source once per alias, not under each of its k fields; k reads of a record
  * with k stores below it look a block's stores up by the read's path (X7), never by the keys below it.
  */
@@ -826,7 +826,7 @@ test("a stop whose own entries merge into one publishes main's records, its answ
 /**
  * #1466: a read one holder's source answers asks that source by reference at the read's whole path, so
  * the answer is the source's own there (a reference at the path's first step alone answered the object at `g`,
- * `unknown`, for every property), and keeps the mark a tested path's guard leaves on the source's holder (§3.2): the
+ * `unknown`, for every property), and keeps the mark a tested path's guard leaves on the source's holder: the
  * host value stored at `a.g.n`, tested before `b` copies `a`, reads guarded through `b`'s layer, as the source read by
  * itself does. In the four modes.
  */
