@@ -123,24 +123,25 @@ and not an identity rebase. While a pull request waits on a design round, its la
 ## Structure and friction
 
 You own the structure of the whole: each pull request can be reasonable while the whole drifts. After each merged
-package, or at each milestone, run `node tools/structure-report.mjs --json FILE` and compare it with the last report
-kept in the evidence (`--compare PREVIOUS_FILE`). Before each merge, read the pull request's file signals in the job
-summary of CI's check-3 ([its structure step](TESTING.md#normal-and-diagnostic-verification)). When a signal shows a
-clear seam, plan the split or the folder move as its own pull request, scheduled between packages. Before a package, the
-brief names the signals and friction issues in the files it will touch, and HEAD 0 decides each ([Briefs](#briefs)); the
-check after the merge then finds only what the package added.
+package, or at each milestone, run `node tools/structure-report.mjs --json <file>` and compare it with the last report kept
+in the evidence (`--compare`). Before each merge, read the pull request's file signals in the job summary of CI's
+check-3 ([its structure step](TESTING.md#normal-and-diagnostic-verification)). When a signal shows a clear seam, plan the split or the folder move
+as its own pull request, scheduled between packages. Before a package, the brief names the signals and friction issues in the files
+it will touch, and HEAD 0 decides each ([Briefs](#briefs)); the check after the merge then finds only what the package
+added.
 
 Triage each [friction](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#report-what-cost-a-wrong-turn) line at the end of
 the package it arrived in, or at once when it blocks a lane or keeps wasting compute:
 
 - **fixed:** the line is its record;
-- **filed:** an issue, as [`FRICTION.md`](FRICTION.md) describes;
+- **filed:** an issue, as [`FRICTION.md`](FRICTION.md) describes, with its `Schedule:` line;
 - **a rule:** proposed like any other rule.
 
 Your own wrong turns are lines too. Keep the triage with your state. At each structure check, add the friction
 counts: lines per class since the last check, with their dispositions, and open issues per class with the age of the
-oldest, against the last check's counts. An issue open longer than two packages is triaged again: promoted, or closed
-with its reason. [`FRICTION.md`](FRICTION.md#priority) ranks the issues.
+oldest, against the last check's counts. No issue waits to be promoted: [`FRICTION.md`](FRICTION.md#priority) says
+when an issue is being built, waiting or free, and that a coordinator starts no other builder while one of its issues is
+free.
 
 Count the tax as well as the reports. Beside the structure report, count across the repository the lint disables,
 `@ts-expect-error` and `@ts-ignore` directives, and skipped tests, and compare them with the last check. The number

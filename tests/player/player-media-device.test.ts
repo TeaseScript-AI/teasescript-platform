@@ -123,6 +123,51 @@ test("refused playback reports no progress until a deliberate retry succeeds", a
   assert.deepEqual(player.texts(), ["after"]);
 });
 
+test("a retry plays every refused element, each with the source it was refused with, in the same turn and no other", async () => {
+  const player = harness(
+    [
+      'playAudio async "bell.mp3"',
+      'playAudio async "chime.mp3"',
+      'playAudio async "music.mp3"',
+      "wait 10 s",
+      "exit",
+    ].join("\n"),
+  );
+  player.start();
+  // Each playAudio runs once the one before it has loaded; the first two are refused, the third plays.
+  for (const refuse of [true, true, false]) {
+    const element = player.elements.at(-1)!;
+    element.refuse = refuse;
+    element.metadata(10);
+    await settle();
+  }
+  const [bell, chime, music] = player.elements;
+  assert.ok(bell !== undefined && chime !== undefined && music !== undefined);
+  assert.equal(player.blocked, true);
+  const refusedWith = [bell, chime].map((element) => element.playedSources.at(-1));
+  const plays = [bell, chime, music].map((element) => element.plays);
+  bell.refuse = false;
+  chime.refuse = false;
+  // Retry calls stay synchronous, so a caller can make them directly from a user-activation handler.
+  player.device.retryBlocked();
+  assert.deepEqual(
+    [bell, chime, music].map((element, index) => element.plays - plays[index]!),
+    [1, 1, 0],
+    "each refused element is retried once, during the call, and a playing one is not",
+  );
+  assert.deepEqual(
+    [bell, chime].map((element) => element.playedSources.at(-1)),
+    refusedWith,
+    "each is retried with the source it was refused with",
+  );
+  await settle();
+  assert.equal(player.blocked, false);
+  assert.deepEqual(
+    [bell, chime, music].map((element) => element.paused),
+    [false, false, false],
+  );
+});
+
 test("restore reconnects a fresh element at the saved playhead without reloading or repeating cues", () => {
   const source = [
     'let music = playAudio async "music.mp3" {',

@@ -1,3 +1,4 @@
+// pins: the published answers' digests (#2086) | line /^\s*upToOrder: "[0-9a-f]{16}",/u
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";

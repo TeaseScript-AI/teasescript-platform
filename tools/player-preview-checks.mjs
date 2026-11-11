@@ -1,12 +1,35 @@
-// Requires Playwright CLI and a running Player development preview (`npm run dev:player`).
+// Requires Playwright CLI and a running Player development preview of this checkout (`npm run dev:player`).
 // npm run test:player:preview -- http://localhost:5173/player/
+// Before any check, the preview must answer `<url>__checkout` (`player/vue/vite.config.ts`) with this checkout's real
+// path, as `text/plain`; a preview of another checkout, or one that does not say which checkout it serves, is refused.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const url = process.argv[2];
 if (!url) throw new Error("Pass the Player development preview URL.");
+const checkout = realpathSync(fileURLToPath(new URL("..", import.meta.url)));
+const endpoint = new URL("__checkout", url.endsWith("/") ? url : `${url}/`);
+const answer = await fetch(endpoint).catch((error) => error);
+// An older preview answers the path with its page, as it does any path it does not know.
+const served =
+  answer instanceof Response &&
+  answer.ok &&
+  answer.headers.get("content-type")?.startsWith("text/plain")
+    ? await answer.text()
+    : null;
+if (served !== checkout)
+  throw new Error(
+    `${url} is no development preview of this checkout (${checkout}): ${
+      served !== null
+        ? `it serves ${served}`
+        : answer instanceof Response
+          ? `${endpoint} answered ${answer.status} ${answer.headers.get("content-type") ?? "without a type"}, not a checkout`
+          : `${endpoint} failed: ${answer.message}`
+    }. Start this checkout's preview (\`npm run dev:player\`) and pass its URL.`,
+  );
 const scratch = mkdtempSync(join(tmpdir(), "player-preview-"));
 const session = `player-preview-${process.pid}`;
 function cli(...args) {
@@ -200,16 +223,27 @@ async function mediaPlaybackChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
   };
-  // Observe the Player's audio elements; the first play() is refused, as a browser without activation would.
+  // Observe the Player's audio elements. As in a browser that grants no audio, every play() is refused until a click on
+  // "Enable audio", the user's activation, and admitted from then on. This check does not say which play() the click
+  // caused: that the notice's action retries each refused element, with the source it was refused with, before it
+  // returns is `tests/player/player-session-images.test.ts`'s and `tests/player/player-media-device.test.ts`'s to prove.
   await page.addInitScript(() => {
     window.__played = [];
     const play = HTMLMediaElement.prototype.play;
-    let refused = false;
+    let activated = false;
+    window.addEventListener(
+      "click",
+      (event) => {
+        if (
+          event.target instanceof Element &&
+          event.target.closest("button")?.textContent.trim() === "Enable audio"
+        )
+          activated = true;
+      },
+      true,
+    );
     HTMLMediaElement.prototype.play = function () {
-      if (!refused) {
-        refused = true;
-        return Promise.reject(new DOMException("Refused", "NotAllowedError"));
-      }
+      if (!activated) return Promise.reject(new DOMException("Refused", "NotAllowedError"));
       window.__played.push(this);
       return play.call(this);
     };
@@ -226,12 +260,13 @@ async function mediaPlaybackChecks(page) {
   // The authored Stage image comes from the runtime and the host's asset resolution.
   await page.locator(".stage-media").waitFor();
   const firstImage = await page.locator(".stage-media").getAttribute("src");
-  // Refused audio offers a deliberate retry and reports no progress until it plays.
+  // Refused audio offers a deliberate retry. That the runtime records no progress meanwhile is
+  // `tests/player/player-media-device.test.ts`'s to prove; here no play() is admitted before Enable audio.
   const retry = page.getByRole("button", { name: "Enable audio", exact: true });
   await retry.waitFor();
   check(
     await page.evaluate(() => window.__played.length === 0),
-    "Refused audio was reported as playing",
+    "A play() was admitted before Enable audio",
   );
   // The toast may expire, so the panel keeps the retry; it is the only way to continue, so it has no dismissal.
   await page.locator("[data-notification-bell]").click();
@@ -243,16 +278,24 @@ async function mediaPlaybackChecks(page) {
     "The blocked-audio notice must not be dismissible",
   );
   await panelNotice.getByRole("button", { name: "Enable audio", exact: true }).click();
-  await page.waitForFunction(() => window.__played[0]?.currentTime > 0.2);
+  // After it, a story element plays: audibly, with measured progress, and the Player then releases it.
+  await page
+    .waitForFunction(() => {
+      window.__story ??= window.__played.find((element) => element.currentTime > 0.2);
+      return window.__story !== undefined;
+    })
+    .catch((error) => {
+      throw new Error("No admitted story audio exceeded 0.2 s after Enable audio.", {
+        cause: error,
+      });
+    });
   await retry.waitFor({ state: "hidden" });
   check(
-    await page.evaluate(() => !window.__played[0].muted && window.__played[0].volume > 0),
+    await page.evaluate(() => !window.__story.muted && window.__story.volume > 0),
     "Audio must play audibly, not muted",
   );
   // The runtime settles playback from measured progress and the Player releases the element.
-  await page.waitForFunction(() => !window.__played[0].getAttribute("src"), null, {
-    timeout: 5000,
-  });
+  await page.waitForFunction(() => !window.__story.getAttribute("src"), null, { timeout: 5000 });
   // A later showImage replaces the Stage image.
   await page.getByRole("button", { name: "Stay by the water", exact: true }).click();
   await page.getByRole("button", { name: "Continue", exact: true }).click();
@@ -261,7 +304,7 @@ async function mediaPlaybackChecks(page) {
     firstImage,
   );
   page.keepActivation = false;
-  return "PASS Start gating, runtime Stage image, refused-audio retry and measured audio playback";
+  return "PASS Start gating, runtime Stage image, no audio before Enable audio, then audible measured playback";
 }
 
 async function transcriptNativeWheelChecks(page) {

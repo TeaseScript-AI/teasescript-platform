@@ -1,3 +1,4 @@
+// pins: an integer rule's total and checks | line /^\s*assert\.deepEqual\(units, \[/u
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";

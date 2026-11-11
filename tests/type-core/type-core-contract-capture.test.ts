@@ -1,3 +1,4 @@
+// pins: one capture total | line /^\s*assert\.equal\(budget\.total,/u
 import assert from "node:assert/strict";
 import test from "node:test";
 

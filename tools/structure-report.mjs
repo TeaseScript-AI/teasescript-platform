@@ -59,26 +59,37 @@
 // over 300 lines, are appended to FILE (CI passes its job summary file) and printed after the report: a heading, the
 // command and the merge base's short sha, then a `text` block of one row per file, sorted by name,
 // `<file> | <lines at the merge base> → <lines at HEAD> | <signals>`, the signals `over 1000` and `gaining N`, N the
-// growth (with `, M moved discounted` under --moved); `no file signalled` when there is none, and `structure report
-// could not run: <reason>` on exit 2. The rows are read from the report's own signals; every other signal is in the
-// report only.
+// growth (with `, M moved discounted` under --moved); `no file signalled` when there is none, `structure report
+// could not run: <reason>` on exit 2, and `structure report failed: <error>` when the report throws, which it then
+// rethrows. The rows are read from the report's own signals; every other signal is in the report only.
 //
 // Options: each of --top, --json, --compare, --diff and --summary takes a value, as the next argument or after `=`
 // (`--json=FILE`); --top's is a whole number; --moved takes none. Every other argument is a root; one that starts with
 // `-` is refused as an unknown option, so a root of that name is written `./-name`.
 //
+// Without `node_modules` in its checkout, it links main's before it loads `ts-morph`, as `check-changed` does and through
+// its `linkMainNodeModules` (`TEASESCRIPT_MAIN` relative to the checkout), saying so on standard error; and, as
+// `check-changed`, it reports nothing unless npm's record of the install holds the checkout's lockfile.
+//
 // Exit status: 0 when the report is printed, a --diff report with files it could not measure included; 2, with the
 // usage, before anything is read or written, when an option has no value (it is the last argument, the argument after
 // it starts with `-`, or nothing follows its `=`), is given twice, or is unknown, or --top's value is not a whole
-// number; 2 when --diff cannot read the change's names (a name that is not UTF-8) or its moved lines, or --summary has
-// no --diff.
+// number; 2 when --diff cannot read the change's names (a name that is not UTF-8) or its moved lines, --summary has no
+// --diff, or there is no node_modules it can link, or one whose record does not hold the lockfile.
 import { execFileSync } from "node:child_process";
-import { appendFileSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ts } from "ts-morph";
+import {
+  CannotRun as LinkRefused,
+  linkMainNodeModules,
+  lockfileMismatch,
+} from "./check-changed.mjs";
 import { movedLinesOf, MovedLinesUnreadable } from "./moved-lines.mjs";
-import { verdictsOf } from "./pure-move-check.mjs";
+
+// `ts-morph`, and `pure-move-check.mjs`, which imports it, load once `main` has made sure of `node_modules`
+let ts;
+let verdictsOf;
 
 const SIGNALS = {
   fileLines: 1000,
@@ -727,27 +738,59 @@ function summaryRows(found) {
   return rows.length > 0 ? rows : ["no file signalled"];
 }
 
+// whether the summary has its block, so that a throw after it adds none
+let summaryWritten = false;
 /** Appends the summary `block` to the --summary file and prints it after the report. */
 function writeSummary(block) {
   appendFileSync(summaryOut, block);
+  summaryWritten = true;
   process.stdout.write(`\n${block}`);
 }
 
+/** The command line the summary names, without --summary and its file. */
+const command = [
+  "node tools/structure-report.mjs",
+  ...given.filter(
+    (arg, i) =>
+      arg !== "--summary" && !arg.startsWith("--summary=") && given[i - 1] !== "--summary",
+  ),
+].join(" ");
+
+/**
+ * Loads `ts-morph` from this checkout's `node_modules`: without one, main's, linked as `check-changed` links it. No
+ * `node_modules` it can link, or one whose record does not hold the lockfile, stops the report (exit 2).
+ */
+async function loadTypeScript() {
+  const root = path.resolve(import.meta.dirname, "..");
+  let refused;
+  try {
+    if (!existsSync(path.join(root, "node_modules")))
+      console.error(`structure-report: ${linkMainNodeModules(process.env, root)}`);
+    refused = lockfileMismatch(root);
+  } catch (error) {
+    if (!(error instanceof LinkRefused)) throw error;
+    refused = error.message;
+  }
+  if (refused !== null) {
+    const reason = `structure-report: ${refused}`;
+    console.error(reason);
+    if (summaryOut !== undefined)
+      writeSummary(summaryBlock(command, undefined, [`structure report could not run: ${reason}`]));
+    process.exit(2);
+  }
+  ({ ts } = await import("ts-morph"));
+  ({ verdictsOf } = await import("./pure-move-check.mjs"));
+}
+
 /** The report the command line asks for. */
-function main() {
-  const command = [
-    "node tools/structure-report.mjs",
-    ...given.filter(
-      (arg, i) =>
-        arg !== "--summary" && !arg.startsWith("--summary=") && given[i - 1] !== "--summary",
-    ),
-  ].join(" ");
+async function main() {
   if (summaryOut !== undefined && !diffBase) {
     const reason = "structure-report: --summary needs --diff";
     console.error(reason);
     writeSummary(summaryBlock(command, undefined, [`structure report could not run: ${reason}`]));
     process.exit(2);
   }
+  await loadTypeScript();
   if (diffBase) {
     let mergeBase, found;
     try {
@@ -846,5 +889,22 @@ function main() {
 if (
   process.argv[1] !== undefined &&
   realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
-)
-  main();
+) {
+  try {
+    await main();
+  } catch (error) {
+    // A throw is the tool's own failure: the summary says so, since a missing block reads as no signals. The error
+    // itself is what the run reports, also when the summary cannot be written (a summary file that is a folder).
+    if (summaryOut !== undefined && !summaryWritten) {
+      const reason = error instanceof Error ? error.message : String(error);
+      try {
+        writeSummary(
+          summaryBlock(command, undefined, [`structure report failed: ${reason.trimEnd()}`]),
+        );
+      } catch (unwritten) {
+        console.error(`structure-report: the summary could not be written: ${unwritten.message}`);
+      }
+    }
+    throw error;
+  }
+}

@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readdirSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -40,9 +41,9 @@ function project(files) {
 }
 
 /** The findings for `config` (the text of `.oxlintrc.json`) in `root`, as `line: message`; and the probe left over. */
-function check(root, config, linted) {
+async function check(root, config, linted) {
   writeFileSync(join(root, ".oxlintrc.json"), config);
-  const findings = checkWaitingOverrides(
+  const findings = await checkWaitingOverrides(
     root,
     ".oxlintrc.json",
     config,
@@ -80,7 +81,7 @@ const FILES = {
 test(
   "a listed path is kept exactly when oxlint reports more in it without the entry",
   { timeout: 60_000 },
-  () => {
+  async () => {
     const root = project(FILES);
     try {
       const config = `{
@@ -103,7 +104,7 @@ test(
   ]
 }
 `;
-      const { findings, leftover } = check(
+      const { findings, leftover } = await check(
         root,
         config,
         Object.keys(FILES).filter((path) => path.endsWith(".ts")),
@@ -145,7 +146,7 @@ test(
 test(
   "a finding points at its file's name in its own entry, and an unknown severity is refused",
   { timeout: 60_000 },
-  () => {
+  async () => {
     const root = project(FILES);
     try {
       // the first entry's options hold the strings "files" and "src/clean.ts"; the finding is the second entry's
@@ -157,7 +158,7 @@ test(
   ]
 }
 `;
-      const { findings } = check(root, config, ["src/clean.ts"]);
+      const { findings } = await check(root, config, ["src/clean.ts"]);
       assert.deepEqual(findings, [
         {
           at: '"src/clean.ts"], "rules": { "no-debugger": "off" } }',
@@ -166,7 +167,7 @@ test(
         },
       ]);
       // a severity oxlint's schema does not have is refused, and oxlint, which cannot parse it, does not run
-      const unknown = check(
+      const unknown = await check(
         root,
         '{\n  "overrides": [\n    { "files": ["src/other.ts"], "rules": { "no-debugger": "of" } },\n    { "files": ["src/clean.ts"], "rules": { "no-debugger": "off" } }\n  ]\n}\n',
         ["src/other.ts", "src/clean.ts"],
@@ -179,18 +180,22 @@ test(
         },
       ]);
       // the root rules too, and an entry with no files to point at
-      const rootRules = check(
+      const rootRules = await check(
         root,
         '{\n  "rules": { "eqeqeq": "of" },\n  "overrides": [\n    {\n      "files": [],\n      "rules": { "no-debugger": 3 }\n    }\n  ]\n}\n',
         [],
       );
       // a severity in an array, the last of a repeated key, and a configuration that extends another
-      const array = check(root, JSON.stringify({ rules: { eqeqeq: ["of", {}] } }, null, 2), []);
+      const array = await check(
+        root,
+        JSON.stringify({ rules: { eqeqeq: ["of", {}] } }, null, 2),
+        [],
+      );
       assert.deepEqual(
         array.findings.map(({ at }) => at),
         ['"of",'],
       );
-      const repeated = check(
+      const repeated = await check(
         root,
         '{\n "rules":{\n  "no-debugger":"error",\n  "no-debugger":"of"\n }\n}\n',
         [],
@@ -199,7 +204,7 @@ test(
         repeated.findings.map(({ at }) => at),
         ['"of"'],
       );
-      const extended = check(root, '{ "extends": ["./extra.json"] }', []);
+      const extended = await check(root, '{ "extends": ["./extra.json"] }', []);
       assert.deepEqual(extended.findings, [
         {
           at: '["./extra.json"] }',
@@ -225,31 +230,35 @@ test(
   },
 );
 
-test("the check stops when oxlint's output holds no findings to read", { timeout: 60_000 }, () => {
-  const root = project({ "src/clean.ts": "export const one = 1;\n" });
-  try {
-    const config =
-      '{ "overrides": [{ "files": ["src/clean.ts"], "rules": { "no-debugger": "off" } }] }';
-    writeFileSync(join(root, ".oxlintrc.json"), config);
-    assert.throws(
-      () =>
-        checkWaitingOverrides(
-          root,
-          ".oxlintrc.json",
-          config,
-          new Set(["src/clean.ts"]),
-          join(root, "missing"),
-        ),
-      /oxlint printed no findings to read/,
-    );
-    assert.deepEqual(
-      readdirSync(root).filter((name) => name.startsWith(".oxlintrc.probe-")),
-      [],
-    );
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
-});
+test(
+  "the check stops when oxlint's output holds no findings to read",
+  { timeout: 60_000 },
+  async () => {
+    const root = project({ "src/clean.ts": "export const one = 1;\n" });
+    try {
+      const config =
+        '{ "overrides": [{ "files": ["src/clean.ts"], "rules": { "no-debugger": "off" } }] }';
+      writeFileSync(join(root, ".oxlintrc.json"), config);
+      await assert.rejects(
+        () =>
+          checkWaitingOverrides(
+            root,
+            ".oxlintrc.json",
+            config,
+            new Set(["src/clean.ts"]),
+            join(root, "missing"),
+          ),
+        /oxlint printed no findings to read/,
+      );
+      assert.deepEqual(
+        readdirSync(root).filter((name) => name.startsWith(".oxlintrc.probe-")),
+        [],
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
 
 // A JS plugin whose one finding per file differs, between the two runs, in exactly one part: its message, its place or
 // its length. The difference comes from a global that only the waiting entry declares.
@@ -276,7 +285,7 @@ const MARKER_PLUGIN = `export default {
 test(
   "a finding is the whole diagnostic: a change in its message, place or length alone keeps the entry, and the file comes from its field",
   { timeout: 60_000 },
-  () => {
+  async () => {
     const root = project({
       "marker.mjs": MARKER_PLUGIN,
       "src/message.ts": "a = 1; b = 2;\nexport {};\n",
@@ -296,7 +305,7 @@ test(
   ]
 }
 `;
-      const { findings, leftover } = check(root, config, [
+      const { findings, leftover } = await check(root, config, [
         "src/message.ts",
         "src/place.ts",
         "src/length.ts",
@@ -315,19 +324,60 @@ const checker = fileURLToPath(new URL("./check-waiting-overrides.mjs", import.me
 const runner = (root, linted) => `import { readFileSync } from "node:fs";
 import { checkWaitingOverrides } from ${JSON.stringify(checker)};
 const config = readFileSync(".oxlintrc.json", "utf8");
-checkWaitingOverrides(${JSON.stringify(root)}, ".oxlintrc.json", config, new Set(${JSON.stringify(linted)}), ${JSON.stringify(executable)});
+await checkWaitingOverrides(${JSON.stringify(root)}, ".oxlintrc.json", config, new Set(${JSON.stringify(linted)}), ${JSON.stringify(executable)});
 console.log("done");
 `;
 
+const probes = (root) => readdirSync(root).filter((name) => name.startsWith(".oxlintrc.probe-"));
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+/** Runs `run.mjs` in `root` until its plugin holds oxlint, then sends it `signal`: its pid, how it ended, its output, the
+ * probes there when the signal came, and oxlint's pid. */
+async function interrupt(root, signal) {
+  rmSync(join(root, "started"), { force: true });
+  const run = spawn(process.execPath, ["run.mjs"], {
+    cwd: root,
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  let stdout = "";
+  run.stdout.on("data", (chunk) => (stdout += chunk));
+  const ended = new Promise((resolve) =>
+    run.on("close", (status, signal) => resolve({ status, signal })),
+  );
+  // oxlint's pid, whole, before the signal: the plugin publishes it by a rename
+  const deadline = Date.now() + 30_000;
+  while (!existsSync(join(root, "started")) && Date.now() < deadline)
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  const oxlint = existsSync(join(root, "started"))
+    ? Number(readFileSync(join(root, "started"), "utf8"))
+    : 0;
+  if (!(Number.isSafeInteger(oxlint) && oxlint > 0)) {
+    run.kill("SIGKILL");
+    await ended;
+    assert.fail(`oxlint did not start: ${oxlint}`);
+  }
+  const held = probes(root);
+  run.kill(signal);
+  const end = await ended;
+  return { pid: run.pid, end, stdout, held, oxlint };
+}
+
 test(
-  "interrupted, the check stops by the signal; the next run removes a dead owner's probe and leaves a live one's",
-  { timeout: 60_000 },
+  "a SIGINT, SIGTERM or SIGHUP removes the probe and stops oxlint and the check by that signal; after a SIGKILL, the next run removes a dead owner's probe and leaves a live one's",
+  { timeout: 120_000 },
   async () => {
-    // a plugin that marks the run as started, then holds it
+    // a plugin that marks the run as started with its process, then holds it
     const root = project({
-      "slow.mjs": `import { writeFileSync } from "node:fs";
+      "slow.mjs": `import { renameSync, writeFileSync } from "node:fs";
 export default { meta: { name: "slow" }, rules: { hold: { create: () => ({ Program() {
-  writeFileSync(${JSON.stringify("started")}, "");
+  writeFileSync("started.tmp", String(process.pid));
+  renameSync("started.tmp", ${JSON.stringify("started")});
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000);
 } }) } } };
 `,
@@ -344,25 +394,28 @@ export default { meta: { name: "slow" }, rules: { hold: { create: () => ({ Progr
         }),
       );
       writeFileSync(join(root, "run.mjs"), runner(root, ["src/a.ts"]));
-      const run = spawn(process.execPath, ["run.mjs"], {
-        cwd: root,
-        stdio: ["ignore", "pipe", "ignore"],
-      });
-      let stdout = "";
-      run.stdout.on("data", (chunk) => (stdout += chunk));
-      const ended = new Promise((resolve) =>
-        run.on("close", (status, signal) => resolve({ status, signal })),
-      );
-      const deadline = Date.now() + 30_000;
-      while (!existsSync(join(root, "started")) && Date.now() < deadline)
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      run.kill("SIGTERM");
-      assert.deepEqual(await ended, { status: null, signal: "SIGTERM" });
-      assert.equal(stdout, "");
-      // the interrupted run's probe is left, with its dead owner's pid
-      const left = readdirSync(root).filter((name) => name.startsWith(".oxlintrc.probe-"));
+      for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
+        const { pid, end, stdout, held, oxlint } = await interrupt(root, signal);
+        assert.deepEqual(end, { status: null, signal }, signal);
+        assert.equal(stdout, "", signal);
+        assert.deepEqual(
+          held.map((name) => name.split("-")[1]),
+          [String(pid)],
+          `${signal}: the probe was there when the signal came`,
+        );
+        assert.deepEqual(probes(root), [], `${signal}: and is gone`);
+        const deadline = Date.now() + 10_000;
+        while (alive(oxlint) && Date.now() < deadline)
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        assert.ok(!alive(oxlint), `${signal}: oxlint stopped`);
+      }
+
+      // a SIGKILL leaves the probe, with its dead owner's pid
+      const run = await interrupt(root, "SIGKILL");
+      if (alive(run.oxlint)) process.kill(run.oxlint, "SIGKILL");
+      assert.deepEqual(run.end, { status: null, signal: "SIGKILL" });
       assert.deepEqual(
-        left.map((name) => name.split("-")[1]),
+        probes(root).map((name) => name.split("-")[1]),
         [String(run.pid)],
       );
 
@@ -396,7 +449,7 @@ export default { meta: { name: "slow" }, rules: { hold: { create: () => ({ Progr
   },
 );
 
-test("two findings that differ only in their JSON's key order are one finding", () => {
+test("two findings that differ only in their JSON's key order are one finding", async () => {
   const root = project({
     "src/a.ts": "export const a = 1;\n",
     // a stand-in oxlint whose one finding has its keys in another order under the probe configuration
@@ -410,7 +463,7 @@ process.stdout.write(JSON.stringify({ diagnostics: [probe ? reversed(diagnostic)
   try {
     const config = '{ "overrides": [{ "files": ["src/a.ts"], "rules": { "eqeqeq": "off" } }] }';
     writeFileSync(join(root, ".oxlintrc.json"), config);
-    const findings = checkWaitingOverrides(
+    const findings = await checkWaitingOverrides(
       root,
       ".oxlintrc.json",
       config,

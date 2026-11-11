@@ -6,6 +6,7 @@ import { ROUND_COUNT_FIX } from "../../../loop-rules.js";
 import { isTemporalKind } from "../../../temporal-builtins.js";
 import type { ItemTag } from "../items.js";
 import type { DiagnosticRule, SiteExpectation, StoreRoot } from "../result.js";
+import { bindingsOf } from "../consumers/bindings.js";
 import type { MessageSource } from "./site.js";
 import {
   capitalized,
@@ -26,19 +27,115 @@ import { codeAt, type Diagnosed } from "./code-forms.js";
 export type StoreRule = Extract<DiagnosticRule, { rule: "store" }>;
 
 /**
- * A store's place as its sentence names it: declared with a type, or holding the type a store decided, since that
- * store's line; a collection's element or dict value as the collection itself (#1195), which contains it. `later`: the
- * deciding store comes after the warned line, so the place holds its type because of that line.
+ * A store's place as its sentence names it: declared with a type; a copy of a declared variable, where the source
+ * proves it (`copyOf`, #2289); or holding the type a store decided, since that store's line, a copy's too where no
+ * declared variable is proved; a collection's element or dict value as the collection itself (#1195), which contains
+ * it. `later`: the deciding store comes after the warned line, so the place holds its type because of that line.
  */
 export function storeSubject(rule: StoreRule, source: MessageSource, later = false): string {
   const line = rule.decider === null ? null : source.line(rule.decider);
   const since = line === null ? "" : later ? ` because of line ${line}` : ` since line ${line}`;
+  // (a copy decides the place: a written type with the store that decided it)
+  const copy = rule.written && rule.decider !== null ? copyOf(rule, source) : null;
+  const why =
+    copy === null
+      ? since
+      : ` because ${copy.form === "value" ? "it is a copy" : `its ${copy.form} are copies`} of ${copy.of}`;
   const collection = elementOf(rule);
   const type = collection === null ? null : typeText(rule.type);
   if (collection !== null && type !== null)
-    return `'${collection.name}' holds ${plural(rule.type)} (${collectionText(collection.kind, type)})${since}`;
-  if (rule.written) return `${capitalized(rule.into)} is declared as ${described(rule.type)}`;
-  return `${capitalized(rule.into)} holds ${described(rule.type)}${since}`;
+    return `'${collection.name}' holds ${plural(rule.type)} (${collectionText(collection.kind, type)})${why}`;
+  if (rule.written && rule.decider === null)
+    return `${capitalized(rule.into)} is declared as ${described(rule.type)}`;
+  return `${capitalized(rule.into)} holds ${described(rule.type)}${why}`;
+}
+
+/**
+ * The declared variable a copy-decided store's place copies, where the source proves it (#2289, #2317's closed test):
+ * the deciding value is the start value of the root's own `let` or `global` declaration, which stores it alone (its
+ * text after its first `=`, one trailing `;` aside, is that value), and read along the place's steps it is one read of
+ * a variable or parameter with its own written type, the place's: the value itself, an object literal's property for
+ * a property step, every element of a list or set literal or every value of a dict literal for the last step. `of`
+ * names it as a sentence does: `'lives', declared 'integer' on line 1`. `null` where any of it is not proved. The
+ * declared variable is looked up last, only for a sentence being made (`bindingsOf`).
+ */
+function copyOf(
+  rule: StoreRule,
+  source: MessageSource,
+): { readonly form: "value" | "elements" | "values"; readonly of: string } | null {
+  const { root, decider } = rule;
+  if (
+    !rule.written ||
+    root === null ||
+    (root.kind !== "let" && root.kind !== "global") ||
+    root.site === null ||
+    decider === null ||
+    decider.file !== root.site.file ||
+    decider.start < root.site.start ||
+    decider.end > root.site.end
+  )
+    return null;
+  const declaration = source.text(root.site);
+  const start = declaration.indexOf("=");
+  const value = source.text(decider);
+  if (
+    start === -1 ||
+    declaration
+      .slice(start + 1)
+      .trim()
+      .replace(/;$/, "")
+      .trimEnd() !== value
+  )
+    return null;
+  const parsed = parsedExpression(value);
+  if (parsed === null) return null;
+  let form: "value" | "elements" | "values" = "value";
+  let reads: readonly Expression[] = [parsed.expression];
+  for (const [index, step] of rule.steps.entries()) {
+    const [expression] = reads;
+    if ("property" in step) {
+      const found =
+        expression!.kind === "objectLiteral"
+          ? expression!.properties.filter((property) => property.name.name === step.property)
+          : [];
+      if (found.length !== 1) return null;
+      reads = [found[0]!.value];
+      continue;
+    }
+    // (a collection's elements or values: the last step alone)
+    if (index !== rule.steps.length - 1) return null;
+    if (step.collection === "dict" && expression!.kind === "dictLiteral") {
+      reads = expression!.entries.map((entry) => entry.value);
+      form = "values";
+    } else if (
+      (step.collection === "list" && expression!.kind === "listLiteral") ||
+      (step.collection === "set" && expression!.kind === "setLiteral")
+    ) {
+      reads = expression!.elements;
+      form = "elements";
+    } else return null;
+  }
+  const [first] = reads;
+  const name = first?.kind === "identifier" ? first.name : null;
+  if (name === null || reads.some((read) => read.kind !== "identifier" || read.name !== name))
+    return null;
+  const at = (offset: number): number => decider.start + offset - parsed.at;
+  const binding =
+    bindingsOf(rule)?.({
+      file: decider.file,
+      start: at(first!.span.start.offset),
+      end: at(first!.span.end.offset),
+    }) ?? null;
+  const declared = binding === null ? null : typeText(binding.type);
+  return binding === null ||
+    declared === null ||
+    binding.type.length !== rule.type.length ||
+    binding.type.some((kind) => !rule.type.includes(kind))
+    ? null
+    : {
+        form,
+        of: `'${binding.name}', declared '${declared}' on line ${source.line(binding.site)}`,
+      };
 }
 
 /**
@@ -107,32 +204,99 @@ export function declaration(
   const written = typeAt(type, diagnosed);
   if (root === null || root.kind === "result" || written === null) return null;
   const parameter = root.kind === "parameter";
-  // (its text up to the name, the type, and its text from the `=` on, which no written type holds: a global's
-  // `default:` stays with it)
-  const text = root.site === null ? "" : source.text(root.site);
-  const start = text.indexOf("=");
-  const declared = `${parameter ? "" : `${root.kind} `}${root.name}: ${written}`;
-  const code =
-    root.site === null
-      ? null
-      : codeAt(
-          {
-            code: start === -1 ? declared : `${declared} ${text.slice(start)}`,
-            takes: [],
-            diagnosed,
-            // (it restates the author's own declaration, its start value as written, and adds no read)
-            reads: "none",
-            holds: [root.site],
-            rulesOut: null,
-            gives: [],
-            elements: [],
-            writes: false,
-          },
-          parameter ? "parameter" : "statement",
-        );
+  const code = declarationCode(root, written, source, diagnosed);
   return code === null
     ? `declare ${parameter ? `the parameter '${root.name}'` : named} with the type '${written}'`
     : `declare ${parameter ? "the parameter" : subject} as '${code}'`;
+}
+
+/** `declaration`'s code: the root's declaration as the source writes it, with the written type `written`, or `null`. */
+function declarationCode(
+  root: StoreRoot,
+  written: string,
+  source: MessageSource,
+  diagnosed: Diagnosed,
+): string | null {
+  if (root.site === null) return null;
+  const parameter = root.kind === "parameter";
+  // (its text up to the name, the type, and its text from the `=` on, which no written type holds: a global's
+  // `default:` stays with it)
+  const text = source.text(root.site);
+  const start = text.indexOf("=");
+  const declared = `${parameter ? "" : `${root.kind} `}${root.name}: ${written}`;
+  return codeAt(
+    {
+      code: start === -1 ? declared : `${declared} ${text.slice(start)}`,
+      takes: [],
+      diagnosed,
+      // (it restates the author's own declaration, its start value as written, and adds no read)
+      reads: "none",
+      holds: [root.site],
+      rulesOut: null,
+      gives: [],
+      elements: [],
+      writes: false,
+    },
+    parameter ? "parameter" : "statement",
+  );
+}
+
+/**
+ * The owner's sentences (#2289) for a store of numbers into a place that holds whole numbers because a copy of a
+ * variable declared `integer` decided it (`copyOf`, A4): a variable declared as a copy of that variable's value, or a
+ * list, set or dict declared with elements or values that are copies of it, with the fix that declares the place with
+ * `number`, the declaration as written with one type written in; `null` for any other store, whose sentence is
+ * `storeSubject`'s with today's fix.
+ */
+export function copySentence(
+  rule: StoreRule,
+  kinds: readonly ItemTag[],
+  source: MessageSource,
+  diagnosed: Diagnosed,
+): string | null {
+  const { root } = rule;
+  const values = rule.type.filter((kind) => kind !== "null");
+  if (
+    root === null ||
+    values.length !== 1 ||
+    values[0] !== "integer" ||
+    kinds.length === 0 ||
+    kinds.some((kind) => kind !== "number")
+  )
+    return null;
+  const numbers = typeText(rule.type.map((kind) => (kind === "integer" ? "number" : kind)));
+  const copy = numbers === null ? null : copyOf(rule, source);
+  if (copy === null) return null;
+  // (one row per form a copy reaches the place by; a form without one does not compile)
+  switch (copy.form) {
+    case "value": {
+      // (the variable itself is the copy: no step below it)
+      if (rule.steps.length > 0) return null;
+      const code = typeAt(numbers!, diagnosed);
+      const fix = code === null ? null : declarationCode(root, code, source, diagnosed);
+      return fix === null
+        ? null
+        : `${capitalized(rule.into)} holds ${described(rule.type)} because it is a copy of ${copy.of}. ` +
+            `To store other numbers in it, write '${fix}'.`;
+    }
+    case "elements":
+    case "values": {
+      // (the root's own list's, set's or dict's elements or values are the copies)
+      const collection = elementOf(rule);
+      if (collection === null || !collection.root) return null;
+      const held = typeText(rule.type);
+      const code = typeAt(collectionText(collection.kind, numbers!), diagnosed);
+      const fix = code === null ? null : declarationCode(root, code, source, diagnosed);
+      return held === null || fix === null
+        ? null
+        : `'${collection.name}' holds ${plural(rule.type)} (${collectionText(collection.kind, held)}) because ` +
+            `its ${copy.form} are copies of ${copy.of}. To add other numbers to it, write '${fix}'.`;
+    }
+    default: {
+      const unknown: never = copy.form;
+      return unknown;
+    }
+  }
 }
 
 /**
