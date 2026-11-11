@@ -17,6 +17,7 @@ interface Call {
   readonly call: true;
   readonly case: string;
   readonly mode: number;
+  readonly result: number;
   readonly levels: readonly {
     readonly rest: string;
     readonly w0: string;
@@ -54,6 +55,18 @@ function run(cases: readonly (readonly [string, string])[]): {
   }
 }
 
+/** Each mode's alternates of the calls of `name`, as `rest:w0->alternate`. */
+function alternates(lines: readonly Record<string, unknown>[], name: string): string[][] {
+  return lines
+    .filter(
+      (line): line is Call & Record<string, unknown> =>
+        line["call"] === true && line["case"] === name,
+    )
+    .map((call) =>
+      call.levels.flatMap((level) => level.alts.map((alt) => `${level.rest}:${level.w0}->${alt}`)),
+    );
+}
+
 // The design round's witness (#1072, cyclic class, round 1): a typed call inside a literal whose destination a later
 // written copy decides. The call's level is `b.element`, and `number` is a second fixed point there beside none.
 const WITNESS =
@@ -82,23 +95,12 @@ test("receiving.mjs finds the witness's second fixed point, unchanged by an unre
       ["negative", "A", true],
     ],
   );
-  const alternates = (name: string): string[][] =>
-    lines
-      .filter(
-        (line): line is Call & Record<string, unknown> =>
-          line["call"] === true && line["case"] === name,
-      )
-      .map((call) =>
-        call.levels.flatMap((level) =>
-          level.alts.map((alt) => `${level.rest}:${level.w0}->${alt}`),
-        ),
-      );
   // (in every mode, at the call's root level, whose destination is `b.element`: `number` and its optional form)
   assert.deepEqual(
-    alternates("witness"),
+    alternates(lines, "witness"),
     Array(4).fill([":none->number", ':none->{"kind":"union","members":[number,null]}']),
   );
-  assert.deepEqual(alternates("control"), alternates("witness"));
+  assert.deepEqual(alternates(lines, "control"), alternates(lines, "witness"));
   // (every evaluation is a line: the analysis's and each query's)
   const queries = new Set(lines.filter((line) => "ev" in line).map((line) => line["query"]));
   assert.ok(["analysis", "w0", "w1"].every((query) => queries.has(query)));
@@ -118,6 +120,38 @@ test("receiving.mjs finds the witness's second fixed point, unchanged by an unre
   });
 });
 
+// A second fixed point that is a projection of the copied source (`a.first`), not of the destination's path; the
+// unrelated written binding must not be what finds it.
+const PROJECTED =
+  "let a: number[] = [0]\nlet b = fromJson(hostValue, default: 0)\nb = a.first\nsay b\nexit\n";
+// The constructor computes the call's contract (the receiver test of `b.first`) before the A4 proof reads it: the
+// proof's read of a memoised answer is a read all the same.
+const CONSTRUCTED =
+  "let a: number[] = [0]\nlet b = fromJson(hostValue, default: [0])\nb = a\nlet c = b.first\nsay c\nexit\n";
+
+test("receiving.mjs finds a source projection's fixed point and a read the constructor memoised", () => {
+  const { status, lines } = run([
+    ["projected", PROJECTED],
+    ["projected-control", `let witness: number = 0\n${PROJECTED}`],
+    ["constructed", CONSTRUCTED],
+  ]);
+  assert.equal(status, 0);
+  assert.deepEqual(
+    lines
+      .filter((line): line is Summary & Record<string, unknown> => line["summary"] === true)
+      .map((s) => [s.case, s.class]),
+    [
+      ["projected", "L"],
+      ["projected-control", "L"],
+      ["constructed", "L"],
+    ],
+  );
+  for (const each of alternates(lines, "projected")) assert.ok(each.includes(":none->number"));
+  assert.deepEqual(alternates(lines, "projected-control"), alternates(lines, "projected"));
+  for (const each of alternates(lines, "constructed"))
+    assert.ok(each.includes(':none->{"kind":"list","element":number}'));
+});
+
 // Two loads in one literal: with sharing on, one class's keys answer some of their levels, so the modes ask different
 // levels; their terms are compared on the levels every mode asked.
 const SHARED =
@@ -128,14 +162,18 @@ const SHARED =
 test("receiving.mjs compares the modes on the levels each asked", () => {
   const { status, lines } = run([["shared", SHARED]]);
   assert.equal(status, 0);
-  const asked = new Set(
-    lines
-      .filter((line): line is Call & Record<string, unknown> => line["call"] === true)
-      .map((call) => call.levels.map((level) => level.rest).join(",")),
-  );
+  // (one call's records, one per mode, ask different levels)
+  const byCall = new Map<number, string[]>();
+  for (const call of lines.filter(
+    (line): line is Call & Record<string, unknown> => line["call"] === true,
+  ))
+    byCall.set(call.result, [
+      ...(byCall.get(call.result) ?? []),
+      call.levels.map((level) => level.rest).join(","),
+    ]);
   assert.ok(
-    asked.size > 1,
-    "the modes ask the same levels: the case no longer shows the difference",
+    [...byCall.values()].some((asked) => asked.length === 4 && new Set(asked).size > 1),
+    "no call's modes ask different levels: the case no longer shows the difference",
   );
   const summaries = lines.filter(
     (line): line is Summary & Record<string, unknown> => line["summary"] === true,

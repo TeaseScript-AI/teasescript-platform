@@ -6,12 +6,16 @@
 //          none where two destinations disagree, none among them included;
 //   w1     the same with the call reading w0 at every level: the level is coherent where w1 = w0;
 //   alts   each candidate T other than w0 that is a fixed point of the call's whole assignment: T forced at the level and
-//          w0 at its other levels, every level's combined term equals its forced one. A level's candidates are the
-//          program's written types projected along each suffix of the level's destination path, each also with `null`.
+//          w0 at its other levels, every level's combined term equals its forced one. The candidates are every
+//          sub-term of every written type of the program (an element, a property, a union's member), each also with
+//          `null`, whatever path reaches the level.
+//   reads  whether an A4 proof the queries made read the call's value or contract: with every reader kept
+//          (`withEveryRecord`), forgetting the call's own finished demands forgets that proof, whether the proof
+//          computed the call's answer or found it memoised, by the constructor too.
 // A call's class, from the unshared forward mode (the call's own keys are asked there, never a class's): I where a
-// level is incoherent; L where a level has an alternate; R+ where the A4 query reads the call and a w0 is not none; R
-// where it reads the call; A otherwise. R and R+ are candidate-tested: no candidate is a second fixed point, which does
-// not prove the map constant. Every other call stays without a context throughout.
+// level is incoherent; L where a level has an alternate; R+ where an A4 proof reads the call and a w0 is not none; R
+// where one reads it; A otherwise, with no candidate tried. R and R+ are candidate-tested: no candidate is a second
+// fixed point, which does not prove the map constant. Every other call stays without a context throughout.
 // A call's context is applied by wrapping `Contract.expectedOf` and `Contract.landsIn` in this process: `landsIn` of the
 // call's value answers the forced level's term while the call's own reader runs. No file of the tree is written.
 // Output, one JSON line each: `{ev}` per evaluation of a reader (`expectedOf`), in the analysis that finds the calls
@@ -89,6 +93,7 @@ const { narrowingPass } = await load("tests/helpers/type-core/type-core-narrowin
   "narrowingPass",
 ]);
 const { inMode, MODES } = await load("tests/helpers/type-core-oracles.js", ["inMode", "MODES"]);
+const { withEveryRecord } = await load("src/type-inference/core/solver.js", ["withEveryRecord"]);
 /** The mode the classes come from: forward, unshared. */
 const CLASS_MODE = MODES.findIndex((mode) => !mode.reversed && mode.unshared);
 
@@ -164,29 +169,40 @@ function destinations(contract, value, at = [], depth = 0, out = { written: fals
 }
 
 /** The combined terms of `call`'s levels on a fresh pass, with `assignment` (rest -> term) as its context, or none;
- * whether the A4 queries read the call. Each reader evaluation is recorded under `label`. */
+ * whether an A4 proof the queries made read the call. Each reader evaluation is recorded under `label`. */
 function query(request, call, assignment, label) {
   forced = assignment === null ? null : new Map([[call.result, assignment]]);
   log = [];
   try {
-    const pass = narrowingPass(request);
-    const admission = new Admission(
-      pass,
-      { run: (work) => pass.solver.run(work) },
-      new Map(),
-      new Set(),
-    );
-    const keys = [`cop|${call.result}`, ...call.rests.map((rest) => `op|${call.result}|${rest}`)];
-    const before = keys.some((key) => pass.solver.answer(key) !== undefined);
-    const terms = new Map();
-    for (const rest of call.rests) {
-      const each = call.places.map((d) =>
-        inheritedAt(admission, d.place, [...d.path, ...(rest === "" ? [] : rest.split("."))]),
+    return withEveryRecord(() => {
+      const pass = narrowingPass(request);
+      const admission = new Admission(
+        pass,
+        { run: (work) => pass.solver.run(work) },
+        new Map(),
+        new Set(),
       );
-      terms.set(rest, new Set(each.map(show)).size === 1 ? each[0] : null);
-    }
-    const reads = !before && keys.some((key) => pass.solver.answer(key) !== undefined);
-    return { terms, reads };
+      const terms = new Map();
+      for (const rest of call.rests) {
+        const each = call.places.map((d) =>
+          inheritedAt(admission, d.place, [...d.path, ...(rest === "" ? [] : rest.split("."))]),
+        );
+        terms.set(rest, new Set(each.map(show)).size === 1 ? each[0] : null);
+      }
+      // (the call's own finished demands, its value's and its contract's at every path, and the proofs made; a
+      // forget of the first reaches each proof that read one of them, memoised or not)
+      const finished = pass.solver.demandWork().map((d) => d.key);
+      const own = finished.filter((key) => {
+        const [kind, of] = key.split("|");
+        return (
+          (kind === "cop" || kind === "op" || kind === "op-below") && of === String(call.result)
+        );
+      });
+      const proofs = finished.filter((key) => key.startsWith("a4|"));
+      pass.solver.forget(own);
+      const reads = proofs.some((key) => pass.solver.answer(key) === undefined);
+      return { terms, reads };
+    });
   } finally {
     for (const [at, e] of log.entries())
       emit({ ev: at, ...label, result: e.c.result, rest: e.rest });
@@ -195,24 +211,25 @@ function query(request, call, assignment, label) {
   }
 }
 
-/** A level's candidates: each written type of the program projected along each suffix of the level's paths, and each
- * with `null`, in a fixed order. */
-function candidates(program, call, rest) {
-  const written = new Map();
-  for (const place of program.places) {
-    const term = place?.kind === undefined ? null : writtenOf(place.kind);
-    if (term !== null) written.set(show(term), term);
-  }
+/** The candidates: every sub-term of every written type of the program (itself, an element, a property, a union's
+ * member, a union's element), each also with `null`, in a fixed order. */
+function candidates(program) {
   const out = new Map();
-  for (const d of call.places) {
-    const full = [...d.path, ...(rest === "" ? [] : rest.split("."))];
-    for (let from = 0; from <= full.length; from += 1)
-      for (const term of written.values()) {
-        const at = termAt(term, full.slice(from));
-        if (at === null) continue;
-        for (const each of [at, optionalOf(at, true)]) if (each !== null) out.set(show(each), each);
-      }
-  }
+  const walk = (term, depth) => {
+    if (term === null || term.kind === "ref" || depth > 32 || out.has(show(term))) return;
+    out.set(show(term), term);
+    const optional = optionalOf(term, true);
+    if (optional !== null && !out.has(show(optional))) out.set(show(optional), optional);
+    if (term.kind === "list" || term.kind === "set" || term.kind === "dict")
+      walk(term.element, depth + 1);
+    else if (term.kind === "object") for (const p of term.properties ?? []) walk(p.type, depth + 1);
+    else if (term.kind === "union") {
+      for (const member of term.members) walk(member, depth + 1);
+      walk(termAt(term, ["element"]), depth + 1);
+    }
+  };
+  for (const place of program.places)
+    walk(place?.kind === undefined ? null : writtenOf(place.kind), 0);
   return [...out.values()];
 }
 
@@ -286,31 +303,30 @@ for (const c of cases) {
             w1: show(one.terms.get(rest)),
             alts: [],
           }));
-          if (base.reads)
-            for (const level of levels)
-              for (const candidate of candidates(call.program, call, level.rest)) {
-                if (show(candidate) === level.w0) continue;
-                const assignment = new Map(kappa);
-                assignment.set(level.rest, candidate);
-                const got = query(request, call, assignment, {
-                  ...at,
-                  query: `alt ${level.rest} ${show(candidate)}`,
-                });
-                const fixed = call.rests.every(
-                  (rest) =>
-                    show(got.terms.get(rest) ?? null) === show(assignment.get(rest) ?? null),
-                );
-                emit({
-                  alt: true,
-                  case: c.name,
-                  mode: m,
-                  result: call.result,
-                  rest: level.rest,
-                  candidate: show(candidate),
-                  fixed,
-                });
-                if (fixed) level.alts.push(show(candidate));
-              }
+          const tried = base.reads ? candidates(call.program) : [];
+          for (const level of levels)
+            for (const candidate of tried) {
+              if (show(candidate) === level.w0) continue;
+              const assignment = new Map(kappa);
+              assignment.set(level.rest, candidate);
+              const got = query(request, call, assignment, {
+                ...at,
+                query: `alt ${level.rest} ${show(candidate)}`,
+              });
+              const fixed = call.rests.every(
+                (rest) => show(got.terms.get(rest) ?? null) === show(assignment.get(rest) ?? null),
+              );
+              emit({
+                alt: true,
+                case: c.name,
+                mode: m,
+                result: call.result,
+                rest: level.rest,
+                candidate: show(candidate),
+                fixed,
+              });
+              if (fixed) level.alts.push(show(candidate));
+            }
           const cls = levels.some((l) => l.w1 !== l.w0)
             ? "I"
             : levels.some((l) => l.alts.length > 0)
