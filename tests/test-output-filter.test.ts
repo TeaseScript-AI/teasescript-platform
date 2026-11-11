@@ -313,11 +313,15 @@ test("each file's line, with the file's own result, reconciles with node:test's 
     const alone = await Promise.all(files.map((file) => nodeAlone(directory, file, reporter)));
     for (const [index, file] of files.entries()) {
       const node = alone[index]!;
-      const line = new RegExp(
-        `^ℹ ${file.replace(/[.]/gu, "[.]")}: (\\d+) passed(?:, (\\d+) failed)?(?:, (\\d+) cancelled)?(?:, (\\d+) skipped)?(?:, (\\d+) todo)?(; the file failed outside any test)?$`,
-        "mu",
-      ).exec(filtered.stdout);
-      assert.ok(line, `${file}: a line\n${filtered.stdout}`);
+      // the file's line by its name as written, then its counts
+      const prefix = `ℹ ${file}: `;
+      const lines = filtered.stdout.split("\n").filter((each) => each.startsWith(prefix));
+      assert.equal(lines.length, 1, `${file}: one line\n${filtered.stdout}`);
+      const line =
+        /^(\d+) passed(?:, (\d+) failed)?(?:, (\d+) cancelled)?(?:, (\d+) skipped)?(?:, (\d+) todo)?(; the file failed outside any test)?$/u.exec(
+          lines[0]!.slice(prefix.length),
+        );
+      assert.ok(line, `${file}: its counts\n${lines[0]}`);
       const [passed, failed, cancelled, skipped, todo] = line
         .slice(1, 6)
         .map((count) => Number(count ?? 0));
