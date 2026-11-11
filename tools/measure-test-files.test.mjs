@@ -1,0 +1,187 @@
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import {
+  chmodSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import { test } from "node:test";
+
+// The tool and the helpers it imports, run in a checkout of their own, with `npm` and `gh` faked on the `PATH`.
+const TOOLS = [
+  "measure-test-files.mjs",
+  "test-shards.mjs",
+  "test-files-at-once.mjs",
+  "costly-test-files.mjs",
+];
+
+// The suite: a top-level file and one of the same name in a folder, a type-core file in a folder, a folder whose name
+// starts like a type-core file's, and a fixture, which is no test.
+const SUITE = ["a", "sub/a", "sub/type-core-z", "type-core-dir/plain", "fixtures/f"];
+
+/** A checkout with the suite's sources and compiled files, the tools, and fakes of `npm` and `gh`; its path. */
+function checkout() {
+  const root = mkdtempSync(join(tmpdir(), "measure-test-files-"));
+  const write = (path, text, mode) => {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), text);
+    if (mode) chmodSync(join(root, path), mode);
+  };
+  for (const tool of TOOLS) {
+    mkdirSync(join(root, "tools"), { recursive: true });
+    copyFileSync(new URL(`./${tool}`, import.meta.url), join(root, "tools", tool));
+  }
+  write("package.json", '{ "type": "module" }\n');
+  for (const name of SUITE) {
+    write(`tests/${name}.test.ts`, "");
+    write(
+      `dist/tests/${name}.test.js`,
+      'import { test } from "node:test";\ntest("t", () => {});\n',
+    );
+  }
+  // `npm run build` and `npm run check:pretest` pass at once: the files are compiled already.
+  write("bin/npm", "#!/bin/sh\nexit 0\n", 0o755);
+  // `gh` answers from `gh.json`: each run's commit, pre-test step seconds and test jobs' file seconds.
+  write(
+    "bin/gh",
+    `#!${process.execPath}
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+const runs = JSON.parse(readFileSync(${JSON.stringify(join(root, "gh.json"))}, "utf8"));
+const args = process.argv.slice(2);
+if (args[0] === "run" && args[1] === "download") {
+  runs[args[2]].jobs.forEach((seconds, n) => {
+    const folder = args[args.indexOf("--dir") + 1] + "/test-file-seconds-" + n;
+    mkdirSync(folder, { recursive: true });
+    writeFileSync(folder + "/test-file-seconds.json", JSON.stringify({ filesAtOnce: 3, seconds }));
+  });
+} else {
+  const [, id, jobs] = /actions\\/runs\\/(\\d+)(\\/jobs)?$/.exec(args[1]);
+  const run = runs[id];
+  const start = Date.parse("2026-11-01T00:00:00Z");
+  const steps = (n) => [
+    ...(n === run.jobs.length - 1
+      ? [{ name: "Check source before the tests", conclusion: "success",
+           started_at: new Date(start).toISOString(),
+           completed_at: new Date(start + run.pretest * 1000).toISOString() }]
+      : []),
+    { name: "Build and run tests (shard " + (n + 1) + ")", conclusion: "success" },
+  ];
+  process.stdout.write(JSON.stringify(jobs
+    ? run.jobs.map((_, n) => ({ steps: steps(n) }))
+    : { head_sha: id.repeat(40).slice(0, 40), conclusion: "success" }));
+}
+`,
+    0o755,
+  );
+  for (const args of [
+    ["init", "-q"],
+    ["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "c"],
+  ])
+    spawnSync("git", ["-C", root, ...args]);
+  return root;
+}
+
+/** The tool run with `args` in `root`: its exit status, its output, and the module it wrote. */
+function measure(root, args) {
+  const result = spawnSync(process.execPath, ["tools/measure-test-files.mjs", "--write", ...args], {
+    cwd: root,
+    encoding: "utf8",
+    // (without the runner's `NODE_TEST_CONTEXT`, as the tool's own `run()` would otherwise skip every file)
+    env: {
+      ...Object.fromEntries(
+        Object.entries(process.env).filter(([name]) => name !== "NODE_TEST_CONTEXT"),
+      ),
+      PATH: `${join(root, "bin")}:${process.env.PATH}`,
+      // (one file at once, whatever the machine)
+      SX_MEM_MIB: "4000",
+    },
+  });
+  return {
+    status: result.status,
+    out: result.stdout + result.stderr,
+    module: readFileSync(join(root, "tools/costly-test-files.mjs"), "utf8"),
+  };
+}
+
+/** The `costlyTestSeconds` entries of a written module. */
+const costly = (module) =>
+  /export const costlyTestSeconds = \{\n([^}]*)\};/u
+    .exec(module)?.[1]
+    .trim()
+    .split("\n")
+    .map((line) => line.trim());
+
+test(
+  "a local measurement names each file by its path under dist/tests/ and lists type-core files by their own name",
+  { timeout: 60_000 },
+  () => {
+    const root = checkout();
+    try {
+      const { status, out, module } = measure(root, []);
+      assert.equal(status, 0, out);
+      assert.match(out, /measure-test-files: 4 files, /u);
+      // (the local runs take well under the listing's 10 s, so only the type-core file is listed)
+      assert.deepEqual(costly(module), [`"sub/type-core-z.test.js": 1,`]);
+      assert.match(module, /every other test file in the same runs, their mean \(3 files\)/u);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "--from-ci takes each file's median over the runs, folders' files included, and refuses a file no run measured",
+  { timeout: 60_000 },
+  () => {
+    const root = checkout();
+    // Three runs of two test jobs each, the last job's pre-test step 100, 120 and 140 s.
+    const runs = (missing) =>
+      Object.fromEntries(
+        [
+          [11, 100, [12, 1, 2, 3]],
+          [12, 120, [30, 2, 2, 4]],
+          [13, 140, [14, 3, 2, 5]],
+        ].map(([id, pretest, [subA, a, typeCore, plain]]) => [
+          id,
+          {
+            pretest,
+            jobs: [
+              { "sub/a.test.js": subA, "a.test.js": a },
+              Object.fromEntries(
+                [
+                  ["sub/type-core-z.test.js", typeCore],
+                  ["type-core-dir/plain.test.js", plain],
+                ].filter(([file]) => file !== missing),
+              ),
+            ],
+          },
+        ]),
+      );
+    try {
+      writeFileSync(join(root, "gh.json"), JSON.stringify(runs(null)));
+      const { status, out, module } = measure(root, ["--from-ci", "11", "12", "13"]);
+      assert.equal(status, 0, out);
+      assert.match(module, /--write --from-ci 11 12 13/u);
+      // (listed: the 10 s file and the type-core file; the others' mean is that of 2 and 4)
+      assert.deepEqual(costly(module), [`"sub/a.test.js": 14,`, `"sub/type-core-z.test.js": 2,`]);
+      assert.match(module, /their mean \(2 files\)\. \*\/\nexport const otherTestSeconds = 3\.0;/u);
+      assert.match(module, /export const pretestSeconds = 120;/u);
+      assert.match(module, /export const testFilesAtOnce = 3;/u);
+
+      writeFileSync(join(root, "gh.json"), JSON.stringify(runs("type-core-dir/plain.test.js")));
+      const before = readFileSync(join(root, "tools/costly-test-files.mjs"), "utf8");
+      const refused = measure(root, ["--from-ci", "11", "12", "13"]);
+      assert.equal(refused.status, 1, refused.out);
+      assert.match(refused.out, /no CI run measured type-core-dir\/plain\.test\.js/u);
+      assert.equal(refused.module, before);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
