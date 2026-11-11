@@ -15,6 +15,8 @@ import {
   glossaryRows,
   labelsIn,
   listedTextFindings,
+  printedLabelsIn,
+  printedTexts,
   recordAnchors,
   recordEntries,
   tableCitationsIn,
@@ -489,10 +491,21 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
     const record = "docs/specifications/type-inference-accepted-record";
     write(
       `${record}/README.md`,
-      "# Record\n\n## Labels\n\n| label | meaning |\n| --- | --- |\n| `C9` | a rule |\n\n### r4-40\n",
+      "# Record\n\n## Labels\n\n| label | meaning |\n| --- | --- |\n| `C9` | a rule |\n| `W5` | a family |\n\n### r4-40\n",
     );
     // a core comment's label with its glossary row: no finding, so the glossary is the README Git lists
     write("src/type-inference/core/labelled.ts", "// C9 holds here\nexport const x = 1;\n");
+    // printed test text: a title's label without a row refused; a row only a `measures` string carries kept; an
+    // expected message not read
+    write(
+      "tests/printed.test.ts",
+      [
+        'test("W99 grows", () => {});',
+        'export const family = { measures: "W5: one preset" };',
+        'assert.equal(found, "TSV041 error L19");',
+        "",
+      ].join("\n"),
+    );
     // (a struck-through heading, GitHub's mark, and one with inline HTML, read as the doc-links check reads them)
     write(
       `${record}/sharing.md`,
@@ -597,8 +610,12 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
       ["src/pointers.ts:3 r4-9", "src/pointers.ts:4 twice-2", "src/pointers.ts:4 r4-41"],
     );
     assert.deepEqual(
-      entryFindings.filter(({ message }) => message.includes("glossary")),
-      [],
+      entryFindings
+        .filter(({ message }) => message.includes("glossary"))
+        .map(({ fileName, line, message }) => `${fileName}:${line} ${message.split(",")[0]}`),
+      [
+        "tests/printed.test.ts:1 a test's title or a measures or authority string carries the label W99",
+      ],
     );
     writeFileSync(
       Buffer.concat([Buffer.from(`${root}/name-`), Buffer.from([0xff]), Buffer.from(".md")]),
@@ -802,6 +819,64 @@ test("a comment's pointer at the accepted record names an anchor of the page it 
   );
 });
 
+test("printed text is a test's title and a measures or authority value, in every form the rule names, and nothing else", () => {
+  const source = [
+    'test("A1 one", f);',
+    "it.skip(`A2 ${x} A3`, f);",
+    'describe.only(("A4" + " A5"), g);',
+    'suite.todo("A6");',
+    't.test("A7", f);',
+    'node.describe("A8", f);',
+    "export const families = [",
+    '  { measures: "A9", authority: `A10 ${y}`, "measures": (k) => `A11 ${k}` },',
+    "];",
+    // not printed: another argument, another property, a block body, a variable, an expected value, a comment
+    'test(title, "B1");',
+    'const r = { rule: "B2", reason: "B3", name: "B4", measures: (k) => { return "B5"; } };',
+    'assert.equal(x, "B6"); // B7',
+    "check(`B8`);",
+    "",
+  ].join("\n");
+  assert.deepEqual(
+    printedLabelsIn("tests/a.test.ts", source).map(({ line, label }) => `${line} ${label}`),
+    ["1 A1", "2 A2", "2 A3", "3 A4", "3 A5", "4 A6", "5 A7", "6 A8", "8 A9", "8 A10", "8 A11"],
+  );
+  // a file with none of the callee or property names is not parsed
+  assert.deepEqual(printedTexts("tests/b.ts", 'const s = "A1";\n'), []);
+  // the label reading is the comments' own: review references and names that are no labels are none
+  assert.deepEqual(
+    printedLabelsIn(
+      "tests/c.test.ts",
+      "test(\"past V8 and RE2 (Codex r2's B1, #1027's F12) at C9\", f);\n",
+    ),
+    [{ line: 1, label: "C9" }],
+  );
+});
+
+test("a printed label without a row is refused, and a row printed text carries is carried", () => {
+  const glossary = new Map([
+    ["C9", 7],
+    ["W5", 8],
+  ]);
+  assert.deepEqual(
+    glossaryFindings(
+      [
+        { fileName: "src/type-inference/core/a.ts", line: 3, label: "C9" },
+        { fileName: "tests/a.test.ts", line: 2, label: "W5", printed: true },
+        { fileName: "tests/a.test.ts", line: 4, label: "W99", printed: true },
+      ],
+      glossary,
+    ).map(({ fileName, line, message }) => [fileName, line, message.split(",")[0]]),
+    [
+      [
+        "tests/a.test.ts",
+        4,
+        "a test's title or a measures or authority string carries the label W99",
+      ],
+    ],
+  );
+});
+
 test("a comment's port-plan or research label is found; a review reference, a document name and a string are not", () => {
   assert.deepEqual(
     labelsIn(
@@ -813,7 +888,7 @@ test("a comment's port-plan or research label is found; a review reference, a do
         "/* Codex r21",
         " * N1, Astra r1's",
         " * A1, Sol's final F7, Astra's reviews B5 and B6, Astra's recheck r3 F8, N9, Astra B7-r2, Codex r3 R3-F6 */",
-        "// V30 §19",
+        "// V30 §19, a V8 heap and an RE2 pattern",
         'const s = "C13";',
         "",
       ].join("\n"),

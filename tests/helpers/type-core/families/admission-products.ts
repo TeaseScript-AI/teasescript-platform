@@ -590,7 +590,7 @@ export const ADMISSION_INGRESS_PRESETS: readonly WorkFamily[] = [
   ["A8-added-parse-presets", 'fromJson("{}", default: seed)'],
 ].map(([name, ingress]) => ({
   name: name!,
-  measures: `A8: k literals of two \`${ingress}\` added to one list, every field read (Codex r12, Astra r2 D-W1)`,
+  measures: `A8: k literals of two \`${ingress}\` added to one list, every field read (Codex r12)`,
   program: (k: number) =>
     main(
       lines(
