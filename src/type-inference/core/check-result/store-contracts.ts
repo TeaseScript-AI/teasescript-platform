@@ -281,7 +281,46 @@ export class Contracts {
       })
     )
       throw new OutsideContract(call, "a typed parse or load into a copy of a written type");
+    if (expected !== null && this.coherence) this.#coherent(call, landing, fallback, expected);
     return expected;
+  }
+
+  /** PROBE (#2307 HEAD 0): whether the coherence check runs (`checkedResult` turns it off). */
+  public coherence = true;
+
+  /**
+   * PROBE (#2307 HEAD 0): the reader is coherent where, at every level of its plan, its kinds are the kinds the place it
+   * lands in admits there and the kinds every place its default reads admits there; anything else declines.
+   */
+  #coherent(
+    call: CallExpression | LoadExpression,
+    landing: Landing | null,
+    fallback: Expression | null,
+    expected: TypePlan,
+  ): void {
+    const levels = levelKinds(expected);
+    for (const { path, kinds } of levels.values()) {
+      if (kinds === null) continue;
+      if (landing !== null) {
+        const verdict = admits(
+          this.answers.place(landing.id, [...landing.path, ...path]).admitted,
+          kinds,
+        );
+        if (verdict !== "same") throw new OutsideContract(call, `PROBE receiving ${verdict}`);
+      }
+      if (fallback === null) continue;
+      for (const at of atLevel(fallback, path)) {
+        if (at.kind === "other") continue;
+        if (at.kind === "unsure") throw new OutsideContract(call, "PROBE default unsure");
+        const place = this.answers.at(nodeOf(this.answers, this.index, at.read))?.place ?? null;
+        if (place === null) throw new OutsideContract(call, "PROBE default no-place");
+        const verdict = admits(
+          this.answers.place(place.id, joinSteps(place.path, at.rest)).admitted,
+          kinds,
+        );
+        if (verdict !== "same") throw new OutsideContract(call, `PROBE default ${verdict}`);
+      }
+    }
   }
 
   /**
@@ -821,6 +860,94 @@ function levelsOf(plan: TypePlan): string[][] {
         pending.push([property.type, [...path, propertyStep(property.name)]]);
   }
   return [...levels.values()];
+}
+
+/** PROBE: each level of a plan with its kinds (a number family's integer folded into number); `null` for an open level. */
+function levelKinds(plan: TypePlan): Map<string, { path: string[]; kinds: Set<string> | null }> {
+  const levels = new Map<string, { path: string[]; kinds: Set<string> | null }>();
+  const pending: [TypePlan, string[]][] = [[plan, []]];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    const [at, path] = next;
+    const key = path.join("\u0000");
+    if (at === ANY_VALUE) {
+      levels.set(key, { path, kinds: null });
+      continue;
+    }
+    if (at.kind === "union") {
+      for (const member of at.members) pending.push([member, path]);
+      continue;
+    }
+    const level = levels.get(key) ?? { path, kinds: new Set<string>() };
+    levels.set(key, level);
+    level.kinds?.add(at.kind);
+    if ((at.kind === "list" || at.kind === "set" || at.kind === "dict") && at.element !== null)
+      pending.push([at.element, [...path, "element"]]);
+    else if (at.kind === "object")
+      for (const property of at.properties)
+        pending.push([property.type, [...path, propertyStep(property.name)]]);
+  }
+  for (const level of levels.values())
+    if (level.kinds?.has("number")) level.kinds.delete("integer");
+  return levels;
+}
+
+/** PROBE: whether an admitted type at a level is the reader's kinds there. */
+function admits(admitted: AdmittedType, kinds: ReadonlySet<string>): string {
+  if (admitted.by === "undecided") return "undecided";
+  if (admitted.kinds.includes("unknown")) return "same";
+  const own = new Set<string>(admitted.kinds);
+  if (own.has("number")) own.delete("integer");
+  if (own.size !== kinds.size || [...own].some((kind) => !kinds.has(kind)))
+    return `${admitted.by}-differs`;
+  return "same";
+}
+
+/**
+ * PROBE: the expressions of a default at a level below it, through parentheses, `otherwise`, list and set elements and
+ * object properties: a read of a place with the steps left below it, `other` for a value no place holds (a literal, an
+ * operation, a typed parse or load, which its own check covers), `unsure` for anything else.
+ */
+function atLevel(
+  value: Expression,
+  path: readonly string[],
+): (
+  | { kind: "read"; read: Expression; rest: readonly string[] }
+  | { kind: "other" }
+  | { kind: "unsure" }
+)[] {
+  const at = unwrap(value);
+  switch (at.kind) {
+    case "numberLiteral":
+    case "booleanLiteral":
+    case "nullLiteral":
+    case "stringLiteral":
+      return [{ kind: "other" }];
+    case "identifier":
+    case "propertyAccessExpression":
+    case "indexExpression":
+      return [{ kind: "read", read: at, rest: path }];
+    case "listLiteral":
+    case "setLiteral":
+      if (path.length === 0) return [{ kind: "other" }];
+      return path[0] === "element"
+        ? at.elements.flatMap((element) => atLevel(element, path.slice(1)))
+        : [{ kind: "unsure" }];
+    case "objectLiteral": {
+      if (path.length === 0) return [{ kind: "other" }];
+      const property = at.properties.find((p) => propertyStep(p.name.name) === path[0]);
+      return property === undefined ? [{ kind: "other" }] : atLevel(property.value, path.slice(1));
+    }
+    case "binaryExpression":
+      return at.operator === "otherwise"
+        ? [...atLevel(at.left, path), ...atLevel(at.right, path)]
+        : [{ kind: "other" }];
+    case "loadExpression":
+      return [{ kind: "other" }];
+    case "callExpression":
+      return typedDefault(at) !== undefined ? [{ kind: "other" }] : [{ kind: "unsure" }];
+    default:
+      return [{ kind: "unsure" }];
+  }
 }
 
 /** A value's contract at a path, and whether each level below it (by its steps) is a written domain. */

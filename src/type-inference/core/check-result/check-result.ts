@@ -350,6 +350,7 @@ export function checkedResult(answers: Answers, request: CoreAnalysisRequest): C
     let contracts: Contracts | null = null;
     const expected = (call: CallExpression): TypePlan | undefined => {
       contracts ??= new Contracts(answers, index, declarations(answers, index));
+      contracts.coherence = false;
       try {
         return contracts.expected(call) ?? undefined;
       } catch (error) {
