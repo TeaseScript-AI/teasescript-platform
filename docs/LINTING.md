@@ -93,8 +93,9 @@ fixes; `tools/oxlint/comment-declarations-waiting.json`, which quotes comments w
 carries the sentence's claim. A research label (a `LABEL` of the check: `C9`, `W34`, `S6-CARRIERS`) has a row in the
 record's glossary (its `README.md`, "Labels") where it stands in a comment under `src/type-inference/core/` or in
 printed test text: a test's title (the first argument of `test`, `it`, `describe` or `suite`, or of a property so
-named, with or without `.skip`, `.only` or `.todo`) or the value of a `measures` or `authority` property, read from its
-strings and template texts. A review reference (`Codex r2's B1`) and the names `V30`, `V8` and `RE2` are no labels. A
+named, with or without `.skip`, `.only` or `.todo`) or the value of a `measures` or `authority` property (an object's
+or a class's, its name bare, quoted or a string in brackets), read from its strings and template texts with escapes
+resolved. A review reference (`Codex r2's B1`) and the names `V30`, `V8` and `RE2` are no labels. A
 row counts as carried when such a comment or printed text uses it, and a row nothing carries is refused. Test comments,
 other strings and code are not read, and a row proves the label is defined, not that the text uses it in that sense.
 `comment-citations.json` holds each file's exact counts in comments of its other forms (a
