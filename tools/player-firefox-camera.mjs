@@ -1,11 +1,12 @@
 // Requires Playwright CLI and its Playwright-managed Firefox, after `npm run build`.
 // npm run test:player:firefox-camera
 import { execFile, spawnSync } from "node:child_process";
-import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { readdirSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { createPlaygroundServer } from "../dist/playground/server.js";
+import { artifactsFolder, settleArtifacts } from "./failure-artifacts.mjs";
 
 const firefox = playwrightFirefox();
 if (firefox === null || spawnSync("playwright-cli", ["--version"]).status !== 0) {
@@ -20,7 +21,8 @@ await new Promise((resolve, reject) => {
   server.once("error", reject);
   server.listen(0, "127.0.0.1", resolve);
 });
-const scratch = mkdtempSync(join(tmpdir(), "player-firefox-camera-"));
+// The browser's configuration and the Playwright CLI's output, kept only when the run fails (`tools/failure-artifacts.mjs`).
+const scratch = artifactsFolder("player-firefox-camera");
 const session = `player-firefox-camera-${process.pid}`;
 // Asynchronous, so this process keeps serving the Player while the browser loads it.
 async function cli(...args) {
@@ -240,8 +242,7 @@ try {
     await cli("close");
   } finally {
     await new Promise((resolve) => server.close(resolve));
-    if (passed) rmSync(scratch, { recursive: true, force: true });
-    else console.error(`player-firefox-camera: failure artifacts retained at ${scratch}`);
+    settleArtifacts("player-firefox-camera", scratch, passed);
   }
 }
 
