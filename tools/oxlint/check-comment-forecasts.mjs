@@ -154,8 +154,9 @@ const PRINTED_PROPERTIES = new Set(["measures", "authority"]);
  * The printed text of `text`, the whole of file `fileName`: each literal part, with its first line, of a test's title
  * (the first argument of a call to `test`, `it`, `describe` or `suite`, or to a property of those names, before
  * `.skip`, `.only` or `.todo` or not) and of a `measures` or `authority` property's value. A part is a string, a
- * template's text (not its `${}` expressions), either side of a `+`, inside parentheses, or what an arrow function's
- * expression body gives; any other expression is not read. A property is an object's or a class's, named by an
+ * template's text (not its `${}` expressions), either side of a `+`, inside parentheses or what TypeScript erases (an
+ * `as` or angle-bracket assertion, `satisfies`, a non-null assertion), or what an arrow function's expression body
+ * gives; any other expression is not read. A property is an object's or a class's, named by an
  * identifier, a string, or a string in brackets (`["measures"]`). Names and parts are read with their escapes
  * resolved; a part with an escape reports its first line.
  */
@@ -185,7 +186,14 @@ export function printedTexts(fileName, text) {
       ) {
         read(node.left);
         read(node.right);
-      } else if (ts.isParenthesizedExpression(node)) read(node.expression);
+      } else if (
+        ts.isParenthesizedExpression(node) ||
+        ts.isAsExpression(node) ||
+        ts.isTypeAssertionExpression(node) ||
+        ts.isSatisfiesExpression(node) ||
+        ts.isNonNullExpression(node)
+      )
+        read(node.expression);
       else if (ts.isArrowFunction(node) && !ts.isBlock(node.body)) read(node.body);
     };
     const isTestCallee = (callee) => {

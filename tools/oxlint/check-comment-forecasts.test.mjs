@@ -491,12 +491,12 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
     const record = "docs/specifications/type-inference-accepted-record";
     write(
       `${record}/README.md`,
-      "# Record\n\n## Labels\n\n| label | meaning |\n| --- | --- |\n| `C9` | a rule |\n| `W5` | a family |\n| `W6` | a family |\n\n### r4-40\n",
+      "# Record\n\n## Labels\n\n| label | meaning |\n| --- | --- |\n| `C9` | a rule |\n| `W5` | a family |\n| `W6` | a family |\n| `W7` | a family |\n| `W8` | a family |\n| `W9` | a family |\n| `W10` | a family |\n| `W11` | a family |\n\n### r4-40\n",
     );
     // a core comment's label with its glossary row: no finding, so the glossary is the README Git lists
     write("src/type-inference/core/labelled.ts", "// C9 holds here\nexport const x = 1;\n");
-    // printed test text: a title's label without a row refused, its callee escaped too; a row only a `measures`
-    // string carries kept, a bracketed name's too; an expected message not read
+    // printed text, not an expected message: a label without a row refused, a row only it carries kept, in a title (an
+    // escaped callee too), a bracketed name, each erased wrapper on a value (`as`, `<T>`, `satisfies`, `!`) or object
     write(
       "tests/printed.test.ts",
       [
@@ -504,7 +504,8 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
         'export const family = { measures: "W5: one preset" };',
         'assert.equal(found, "TSV041 error L19");',
         'te\\u0073t("W98 grows", () => {});',
-        'export const group = { ["authority"]: "W6" };',
+        'export const group = { ["authority"]: "W6" }; export const o = { measures: "W93 W11" } as const;',
+        'test("W97 W7" as const, f); test(<string>"W96 W8", f); const a = { measures: "W95 W9" satisfies string, authority: "W94 W10"! };',
         "",
       ].join("\n"),
     );
@@ -611,14 +612,13 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
         ),
       ["src/pointers.ts:3 r4-9", "src/pointers.ts:4 twice-2", "src/pointers.ts:4 r4-41"],
     );
-    assert.deepEqual(
+    const printed = /^a test's title or a measures or authority string carries the label (\w+),/u;
+    assert.equal(
       entryFindings
         .filter(({ message }) => message.includes("glossary"))
-        .map(({ fileName, line, message }) => `${fileName}:${line} ${message.split(",")[0]}`),
-      [
-        "tests/printed.test.ts:1 a test's title or a measures or authority string carries the label W99",
-        "tests/printed.test.ts:4 a test's title or a measures or authority string carries the label W98",
-      ],
+        .map(({ fileName, line, message }) => `${fileName}:${line} ${printed.exec(message)?.[1]}`)
+        .join(", "),
+      "tests/printed.test.ts:1 W99, tests/printed.test.ts:4 W98, tests/printed.test.ts:5 W93, tests/printed.test.ts:6 W97, tests/printed.test.ts:6 W96, tests/printed.test.ts:6 W95, tests/printed.test.ts:6 W94",
     );
     writeFileSync(
       Buffer.concat([Buffer.from(`${root}/name-`), Buffer.from([0xff]), Buffer.from(".md")]),
