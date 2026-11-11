@@ -44,23 +44,25 @@ import { untypedClient } from "../helpers/bridge/untyped.js";
 
 // The button press on a session the composable's host holds (`OnHost`).
 const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
+// A time jump on a session the composable's host holds.
+const advanceOnHost = onHost(advancePlayerRuntimeTime);
 
 // Debug's random draws (DEBUGGER.md "Random draws") through the real Vue session host and engine: with Choose outcomes
 // on in the debug room, a session pauses at every draw and goes on with the outcome the picker gives; Next time and
 // Least tried decide from what each site took; turning the feature off goes on naturally. The picker's code and
 // outcome presentation comes from the compiler's own lexer and parser.
 interface RandomHost {
-  readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
+  readonly session: Readonly<Ref<PlayerSession | null>>;
   readonly rooms: { readonly current: Readonly<Ref<"normal" | "debug">> };
   readonly bridge: Promise<PlayerBridge>;
   prepareScript(plan: string, create: PlanStart): Promise<void>;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   activate(): Promise<void>;
-  showSession(next: PlayerRuntimeSession | PlayerSession): void;
+  showSession(next: PlayerSession): void;
   prepareInput(): true | Promise<boolean>;
-  update(session: PlayerRuntimeSession): void;
-  prepareRestore(restored: PlayerRuntimeSession | PlayerSession): void;
+  update(session: PlayerSession): void;
+  prepareRestore(restored: PlayerSession): void;
   randomTried(
     site: string,
   ): Promise<{
@@ -332,7 +334,7 @@ test("with Choose outcomes on, a session pauses at each draw and goes on with th
   // Time cannot run on while the draw waits: a jump stops at once instead of looping.
   const paused = host.session.value!;
   assert.equal(playerRuntimeAwaitsHost(paused.state), true);
-  assert.equal(advancePlayerRuntimeTime(paused, 60_000), paused);
+  assert.deepEqual(advanceOnHost(paused, 60_000).state, paused.state, "no time ran");
 
   assert.equal(await random.resolve({ kind: "number", value: 6 }), true);
   assert.deepEqual(said(host), ["Roll: 6"]);

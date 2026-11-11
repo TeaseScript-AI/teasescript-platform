@@ -1,12 +1,8 @@
 import assert from "node:assert/strict";
-import test, { before, type TestContext } from "node:test";
+import { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
 
-import {
-  createPlayerRuntimeRestorePoint as rawCreatePlayerRuntimeRestorePoint,
-  restorePlayerRuntimeSession,
-  type PlayerRuntimeSession,
-} from "../../player/runtime/runtime-adapter.js";
+import { playerRuntimeSnapshot } from "../../player/runtime/runtime-adapter.js";
 import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
 import {
   pendingPlayerRuntimeStorageWrite,
@@ -16,17 +12,27 @@ import type { ScriptStorageProvider } from "../../player/persistence/script-stor
 import type { SerializableRuntimeValue } from "../../src/index.js";
 import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
-import { loadHostFacade, onHost, hostIntroduced } from "../helpers/player/host-sessions.js";
-import { preparedSource, sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
+import {
+  preparedPlan,
+  preparedSource,
+  sourceStart,
+  type PlanStart,
+} from "../helpers/prepared-plan.js";
+import {
+  checkpointSnapshot,
+  loadTopology,
+  rerunRegistry,
+  restoredSession,
+  TOPOLOGIES,
+  topologyBridge,
+  type TopologyBridge,
+} from "../helpers/player/worker-topology.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
-
-// The adapter's functions, also on the sessions the composables' host holds (`helpers/player/host-sessions.ts`).
-const createPlayerRuntimeRestorePoint = onHost(rawCreatePlayerRuntimeRestorePoint);
 
 // Load the real Vue composable through the existing build tool: its browser-source imports use Vite resolution.
 interface CameraHost {
   readonly bridge: Promise<PlayerBridge>;
-  readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
+  readonly session: Readonly<Ref<PlayerSession | null>>;
   readonly canClearScriptStorage: Readonly<Ref<boolean>>;
   readonly viewfinder: Readonly<Ref<FakeTrack | null>>;
   readonly viewfinderPlacement: Readonly<Ref<"window" | "stage" | null>>;
@@ -41,10 +47,11 @@ let usePlayerSession: (options: {
   scriptStorage?: ScriptStorageProvider;
   capabilities: { camera: boolean };
   capturedMedia?: { repository: FakeMediaRepository };
+  bridge?: Promise<PlayerBridge>;
 }) => CameraHost;
 
 before(async () => {
-  await loadHostFacade();
+  await loadTopology();
   const module: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/session/usePlayerSession.ts",
   );
@@ -103,119 +110,161 @@ function stubBrowser(context: TestContext) {
   return { grant, tracks };
 }
 
-function mount(context: TestContext, options: Parameters<typeof usePlayerSession>[0]): CameraHost {
+/** The real composable on `transport`'s bridge. */
+function mount(
+  context: TestContext,
+  transport: TopologyBridge,
+  options: Parameters<typeof usePlayerSession>[0],
+): CameraHost {
   const scope = effectScope();
-  const host = scope.run(() => usePlayerSession(options));
+  const host = scope.run(() =>
+    usePlayerSession({ ...options, bridge: Promise.resolve(transport.bridge) }),
+  );
   assert.ok(host);
   context.after(() => scope.stop());
   return host;
 }
 
-test("saved data cannot be cleared while a restored session waits for the camera", async (context) => {
-  const { grant } = stubBrowser(context);
-  const entries = new Map<string, SerializableRuntimeValue>([["first", 0]]);
-  const provider: ScriptStorageProvider = {
-    scope: "test",
-    load: async () => [...entries].map(([key, value]) => ({ key, value })),
-    write: async (key, value) =>
-      void (value === null ? entries.delete(key) : entries.set(key, value)),
-    replace: async (next) => {
-      entries.clear();
-      for (const { key, value } of next) entries.set(key, value);
-    },
-    clear: async () => entries.clear(),
-  };
-  const pending = createPlayerRuntimeSession('save 1 as "first"\nexit', {
-    scriptStorage: [{ key: "first", value: 0 }],
-    persistentScriptStorage: true,
-  });
-  assert.ok(pendingPlayerRuntimeStorageWrite(pending.state));
-  const host = mount(context, {
-    scriptStorage: provider,
-    capabilities: { camera: true },
-    capturedMedia: { repository: new FakeMediaRepository() },
-  });
-  await host.loadScriptStorage();
-  host.prepareRestore(
-    hostIntroduced(
-      await host.bridge,
-      restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(pending)),
-    ),
-  );
-
-  const activation = host.activate();
-  assert.equal(host.session.value, null);
-  assert.equal(host.canClearScriptStorage.value, false);
-  assert.equal(await host.clearScriptStorage(), false);
-  assert.deepEqual([...entries], [["first", 0]]);
-
-  grant();
-  await activation;
-  const status = () => host.session.value?.state.status;
-  assert.ok(status());
-  const deadline = Date.now() + 2_000;
-  while (status() !== "halted") {
-    assert.ok(Date.now() < deadline, "the restored write was not serviced");
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  assert.deepEqual([...entries], [["first", 1]]);
-  assert.equal(host.canClearScriptStorage.value, true);
+/*
+ * Every row runs on both topologies (L5i.7); a restore on the Worker goes through the test entry's `restoreForTest`.
+ * The file's end checks every registered row ran.
+ */
+const RERUN = rerunRegistry({
+  "clearing while a restored session waits": TOPOLOGIES,
+  "camera view": TOPOLOGIES,
+  "Start that throws": TOPOLOGIES,
 });
 
-test("the script's camera view previews the session camera where it places it, also after a restore", async (context) => {
-  const { grant, tracks } = stubBrowser(context);
-  grant();
-  const host = mount(context, { capabilities: { camera: true } });
-  const shown = 'let view = showCamera stage\nshowButton "Hide"\nexit';
-  host.prepare(await sourceStart(host.bridge, shown));
-  await host.activate();
-  const [camera] = tracks;
-  assert.ok(camera);
-  assert.equal(host.viewfinderPlacement.value, "stage");
-  assert.equal(host.viewfinder.value, camera);
-  const showing = host.session.value;
-  assert.ok(showing);
-  const saved = createPlayerRuntimeRestorePoint(showing);
-  // A camera the browser or the system ended opens again: the view keeps its picture until the reopened camera's
-  // arrives, and the script's placement stays.
-  camera.dispatchEvent(new Event("ended"));
-  assert.equal(host.viewfinder.value, camera);
-  const deadline = Date.now() + 2_000;
-  while (host.viewfinder.value === camera) {
-    assert.ok(Date.now() < deadline, "the ended camera did not open again");
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
-  assert.equal(host.viewfinder.value, tracks[1]);
-  assert.equal(host.viewfinderPlacement.value, "stage");
+RERUN.rows(
+  "clearing while a restored session waits",
+  "saved data cannot be cleared while a restored session waits for the camera",
+  async (context, topology, end) => {
+    const { grant } = stubBrowser(context);
+    const entries = new Map<string, SerializableRuntimeValue>([["first", 0]]);
+    const provider: ScriptStorageProvider = {
+      scope: "test",
+      load: async () => [...entries].map(([key, value]) => ({ key, value })),
+      write: async (key, value) =>
+        void (value === null ? entries.delete(key) : entries.set(key, value)),
+      replace: async (next) => {
+        entries.clear();
+        for (const { key, value } of next) entries.set(key, value);
+      },
+      clear: async () => entries.clear(),
+    };
+    const pending = createPlayerRuntimeSession('save 1 as "first"\nexit', {
+      scriptStorage: [{ key: "first", value: 0 }],
+      persistentScriptStorage: true,
+    });
+    assert.ok(pendingPlayerRuntimeStorageWrite(pending.state));
+    const transport = await topologyBridge(context, topology, { entry: "restore" });
+    const host = mount(context, transport, {
+      scriptStorage: provider,
+      capabilities: { camera: true },
+      capturedMedia: { repository: new FakeMediaRepository() },
+    });
+    await host.loadScriptStorage();
+    transport.assertTopology();
+    host.prepareRestore(
+      await restoredSession(
+        transport,
+        await preparedPlan(host.bridge, pending.plan),
+        JSON.stringify(playerRuntimeSnapshot(pending)),
+      ),
+    );
 
-  // Hiding the view keeps the camera open for `takePhoto()`.
-  host.prepare(await sourceStart(host.bridge, 'showCamera\nhideCamera\nshowButton "Done"\nexit'));
-  await host.activate();
-  assert.equal(host.viewfinderPlacement.value, null);
-  assert.equal(host.viewfinder.value, null);
-  assert.equal(tracks[2]?.readyState, "live");
+    const activation = host.activate();
+    assert.equal(host.session.value, null);
+    assert.equal(host.canClearScriptStorage.value, false);
+    assert.equal(await host.clearScriptStorage(), false);
+    assert.deepEqual([...entries], [["first", 0]]);
 
-  // A restored session shows the view where it was, with the camera Continue opens.
-  host.prepareRestore(hostIntroduced(await host.bridge, restorePlayerRuntimeSession(saved)));
-  await host.activate();
-  assert.equal(host.viewfinderPlacement.value, "stage");
-  assert.equal(host.viewfinder.value, tracks[3]);
-});
+    grant();
+    await activation;
+    const status = () => host.session.value?.state.status;
+    assert.ok(status());
+    const deadline = Date.now() + 2_000;
+    while (status() !== "halted") {
+      assert.ok(Date.now() < deadline, "the restored write was not serviced");
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.deepEqual([...entries], [["first", 1]]);
+    assert.equal(host.canClearScriptStorage.value, true);
+    return end();
+  },
+);
 
-test("a Start that throws after the camera opened releases the camera", async (context) => {
-  const { grant, tracks } = stubBrowser(context);
-  context.mock.method(console, "error", () => {});
-  grant();
-  const host = mount(context, { capabilities: { camera: true } });
-  // Its options are read as it begins, after the camera opened: a throw there is the Start's.
-  host.prepare({
-    plan: await preparedSource(host.bridge, "exit"),
-    options: () => {
-      throw new TypeError("The script could not start.");
-    },
-  });
-  await host.activate();
-  assert.equal(host.hostError.value, "TypeError");
-  assert.equal(tracks.length, 1);
-  assert.equal(tracks[0]?.readyState, "ended");
-});
+RERUN.rows(
+  "camera view",
+  "the script's camera view previews the session camera where it places it, also after a restore",
+  async (context, topology, end) => {
+    const { grant, tracks } = stubBrowser(context);
+    grant();
+    const transport = await topologyBridge(context, topology, { entry: "restore" });
+    const host = mount(context, transport, { capabilities: { camera: true } });
+    await host.bridge;
+    transport.assertTopology();
+    const shown = 'let view = showCamera stage\nshowButton "Hide"\nexit';
+    host.prepare(await sourceStart(host.bridge, shown));
+    await host.activate();
+    const [camera] = tracks;
+    assert.ok(camera);
+    assert.equal(host.viewfinderPlacement.value, "stage");
+    assert.equal(host.viewfinder.value, camera);
+    const showing = host.session.value;
+    assert.ok(showing);
+    // The state to restore later, read from the host over the bridge.
+    const saved = JSON.stringify(await checkpointSnapshot(await host.bridge, showing));
+    // A camera the browser or the system ended opens again: the view keeps its picture until the reopened camera's
+    // arrives, and the script's placement stays.
+    camera.dispatchEvent(new Event("ended"));
+    assert.equal(host.viewfinder.value, camera);
+    const deadline = Date.now() + 2_000;
+    while (host.viewfinder.value === camera) {
+      assert.ok(Date.now() < deadline, "the ended camera did not open again");
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    assert.equal(host.viewfinder.value, tracks[1]);
+    assert.equal(host.viewfinderPlacement.value, "stage");
+
+    // Hiding the view keeps the camera open for `takePhoto()`.
+    host.prepare(await sourceStart(host.bridge, 'showCamera\nhideCamera\nshowButton "Done"\nexit'));
+    await host.activate();
+    assert.equal(host.viewfinderPlacement.value, null);
+    assert.equal(host.viewfinder.value, null);
+    assert.equal(tracks[2]?.readyState, "live");
+
+    // A restored session shows the view where it was, with the camera Continue opens.
+    host.prepareRestore(await restoredSession(transport, showing.planToken, saved));
+    await host.activate();
+    assert.equal(host.viewfinderPlacement.value, "stage");
+    assert.equal(host.viewfinder.value, tracks[3]);
+    return end();
+  },
+);
+
+RERUN.rows(
+  "Start that throws",
+  "a Start that throws after the camera opened releases the camera",
+  async (context, topology, end) => {
+    const { grant, tracks } = stubBrowser(context);
+    context.mock.method(console, "error", () => {});
+    grant();
+    const transport = await topologyBridge(context, topology);
+    const host = mount(context, transport, { capabilities: { camera: true } });
+    await host.bridge;
+    transport.assertTopology();
+    // Its options are read as it begins, after the camera opened: a throw there is the Start's.
+    host.prepare({
+      plan: await preparedSource(host.bridge, "exit"),
+      options: () => {
+        throw new TypeError("The script could not start.");
+      },
+    });
+    await host.activate();
+    assert.equal(host.hostError.value, "TypeError");
+    assert.equal(tracks.length, 1);
+    assert.equal(tracks[0]?.readyState, "ended");
+    return end();
+  },
+);

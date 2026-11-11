@@ -38,9 +38,9 @@ import { startBridgeHost, type HostPort, type HostSessions } from "./worker-host
  * passes every message through `structuredClone`. A request a session op handles runs when it is posted; replies arrive
  * later, on a microtask or after `delayMs`, as from a Worker.
  *
- * The **transition facade** below lets code that has not moved to the bridge reach the host's session synchronously.
- * Every main-realm import of one of its names is a RATCHET entry (`inventory.ts`); the L5 gate requires this module
- * gone, not only RATCHET empty.
+ * The **facade** below reaches the host's sessions synchronously, for tests only: no production code calls it. Every
+ * main-realm import of this module is a RATCHET entry (`inventory.ts`); the L5 gate requires this module gone, not only
+ * RATCHET empty.
  */
 
 interface Backend {
@@ -72,11 +72,15 @@ function heldOf(backend: Backend, session: PlayerSession): HeldSession {
 /**
  * Starts the in-process backend, ready at once: the Player's ops served on a port pair in this realm. With `delayMs`,
  * replies arrive after that delay instead of on a microtask (the delayed smoke). `historySpill` and `historyBudget` set
- * Debug's rewind histories' spill store and admission bound (`playerOpsContext`).
+ * Debug's rewind histories' spill store and admission bound (`playerOpsContext`). `wrapPort` wraps the client's end of
+ * the port pair, for a test that observes or holds what crosses this connection alone.
  */
 export function createInProcessBackend(
   build: BuildIdentity,
-  options: { readonly delayMs?: number } & NonNullable<Parameters<typeof playerOpsContext>[0]> = {},
+  options: {
+    readonly delayMs?: number;
+    readonly wrapPort?: (port: ClientPort) => ClientPort;
+  } & NonNullable<Parameters<typeof playerOpsContext>[0]> = {},
 ): PlayerBridge {
   let toHost: ((data: unknown) => void) | null = null;
   let toClient: ((data: unknown) => void) | null = null;
@@ -118,7 +122,7 @@ export function createInProcessBackend(
       closeConnection(context, sessions);
     },
   };
-  const { client } = openBridge(clientPort, build);
+  const { client } = openBridge(options.wrapPort?.(clientPort) ?? clientPort, build);
   const context = playerOpsContext(options);
   const sessions = startBridgeHost(hostPort, playerBridgeOps(context), build, context.delivery);
   const bridge = new PlayerBridge(client);
@@ -197,8 +201,8 @@ export interface HostFactoryInput {
 
 /**
  * **Facade.** Registers the session `make` creates in the host, under a new bridge session, and returns its first
- * publication. `make` is a transitional factory: a Start with Debug's trace or random control, a restore, a transfer,
- * DevelopmentPreview's Start. A session that brought a plan of its own gets a new plan token. `{ plan, options }`
+ * publication, for tests. `make` is a factory: a session a test made or restored outside the host, or a Start with
+ * Debug's trace or random control. A session that brought a plan of its own gets a new plan token. `{ plan, options }`
  * starts a held plan instead. Either runs with the connection's value trace; a Start (`random`) also with its Player's
  * random control. A restore begins without ownership, until an explicit adoption (`adoptRandom`).
  *

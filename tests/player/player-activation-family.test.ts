@@ -10,7 +10,6 @@ import type { UntypedSend } from "../helpers/bridge/untyped.js";
 import type { DebugViewRequest } from "../../player/debug/debug-view.js";
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
-import type { PlayerRuntimeSession } from "../../player/runtime/runtime-adapter.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 import type { StartOptions } from "../../player/engine-bridge/ops/session.js";
 import type { InstructionPlan } from "../../src/index.js";
@@ -159,7 +158,7 @@ interface FamilyHost {
   readonly randomRevision: Readonly<Ref<number>>;
   readonly bridge: Promise<PlayerBridge>;
   prepare(create: PlanStart): void;
-  prepareRestore(restored: PlayerRuntimeSession | PlayerSession): void;
+  prepareRestore(restored: PlayerSession): void;
   activate(): Promise<void>;
   setDebugMode(enabled: boolean): void;
   setDebugTracing(on: boolean): void;

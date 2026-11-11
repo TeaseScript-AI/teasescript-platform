@@ -3,7 +3,6 @@ import { ref, type ShallowRef } from "vue";
 import { Activity, FlaskConical, ScanLine, SlidersHorizontal } from "@lucide/vue";
 import { Button } from "@/components/ui/button";
 import type { CapturedMediaRepository } from "../../../media/captured-media.js";
-import { DEMO_PLAYER_PROFILE } from "../../../demo-player-profile.js";
 import type { KeptRoomStore, KeptSessionStore } from "../../../persistence/kept-sessions.js";
 import type { PlayerTimerKind } from "../../../presentation/model.js";
 import {
@@ -11,8 +10,6 @@ import {
   playerNotices,
   type PlayerNotice,
 } from "../../../presentation/notices.js";
-import { createPlayerRuntimeSession } from "../../../runtime/compile-project.js";
-import type { PlayerRuntimeSession } from "../../../runtime/runtime-adapter.js";
 import { browserSavedData } from "../../../persistence/saved-data.js";
 import { createLocalScriptStorage } from "../../../persistence/script-storage.js";
 import type { PlayerThemeIntent } from "../../../theme/palette.js";
@@ -24,6 +21,7 @@ import type { PlayerTool } from "../shell/PlayerToolsShell.vue";
 import type { ScriptFailure } from "../start-and-end/ScriptProblems.vue";
 import { resolveDemoAsset } from "../demoHost";
 import { resolveDevelopmentAsset } from "./developmentMedia";
+import { prepareScenario } from "./scenarioStart";
 import {
   cameraScenarioSource,
   openingScenario,
@@ -37,7 +35,7 @@ import ThemeLab from "./ThemeLab.vue";
 import TimerFixtureRegion from "./TimerFixtureRegion.vue";
 import TimerRegion from "../interaction/TimerRegion.vue";
 import { browserStorage } from "../shell/usePlayerPreference";
-import { usePlayerSession, type PlayerSessionStart } from "../session/usePlayerSession";
+import { usePlayerSession } from "../session/usePlayerSession";
 import { defaultPlayerThemeIntents } from "../shell/usePlayerTheme";
 
 // Development preview root; main.ts loads it on the development server or with `?dev`.
@@ -135,41 +133,15 @@ function showSampleNotices() {
 function clearSampleNotices() {
   for (const notice of sampleNotices) player.withdrawNotice(notice.key);
 }
-// A scenario's factory, which the engine's host runs; no source `prepare` starts it.
-type ScenarioStart = Extract<PlayerSessionStart, (recording: never) => PlayerRuntimeSession>;
-// The zone, presentation and clock of the Start's click (`temporalCapture`).
-const startOptions = (recording: Parameters<ScenarioStart>[0]) => ({
-  ...recording,
-  ...player.temporalCapture(),
-  playerProfile: DEMO_PLAYER_PROFILE,
-});
-// A package is compiled and prepared like in the default build; a scenario is a fixed development script.
+// A package is compiled and prepared like in the default build; a scenario is a fixed development script, compiled in
+// the engine's host at page setup (`prepareScenario`).
 let failure: ShallowRef<ScriptFailure | null> | null = null;
 let identity: ShallowRef<ScriptIdentity> | null = null;
 if (packageHost !== null) ({ failure, identity } = prepareHostedScript(player, packageHost));
-else if (cameraScenario)
-  void player
-    .loadScriptStorage()
-    .then(() =>
-      player.prepare((recording) =>
-        createPlayerRuntimeSession(cameraScenarioSource, {
-          ...player.scriptStorageOptions(),
-          ...startOptions(recording),
-        }),
-      ),
-    );
-else if (viewfinderScenario)
-  player.prepare((recording) =>
-    createPlayerRuntimeSession(viewfinderScenarioSource, startOptions(recording)),
-  );
-else if (buttonsScenario)
-  player.prepare((recording) =>
-    createPlayerRuntimeSession(permanentButtonsScenarioSource, startOptions(recording)),
-  );
-else
-  player.prepare((recording) =>
-    createPlayerRuntimeSession(openingScenario, startOptions(recording)),
-  );
+else if (cameraScenario) void prepareScenario(player, cameraScenarioSource, { storage: true });
+else if (viewfinderScenario) void prepareScenario(player, viewfinderScenarioSource);
+else if (buttonsScenario) void prepareScenario(player, permanentButtonsScenarioSource);
+else void prepareScenario(player, openingScenario);
 </script>
 
 <template>

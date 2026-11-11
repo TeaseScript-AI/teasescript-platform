@@ -1,8 +1,5 @@
 import { ref, shallowRef, type Ref } from "vue";
-import { NO_MARKS, type HistoryMarks } from "../../../../debug/debug-history-marks.js";
 import type { DebugRecording } from "../../../../debug/debug-recorder.js";
-import { introduceNow } from "../../../../engine-bridge/in-process.js";
-import type { PlayerRuntimeSession } from "../../../../runtime/runtime-adapter.js";
 import { playerTemporalContext, type PlayerSession } from "../../../../runtime/runtime-view.js";
 import { bridgeOf, endsQuietly, type PlayerBridge } from "../../../../runtime/player-bridge.js";
 import type { RandomIntent, TracingIntent } from "../../../../engine-bridge/player-ops.js";
@@ -361,21 +358,15 @@ export function useSessionActivation({
     }
   }
   /**
-   * The capture of the activation's click while its `begin` runs (#1886): Start's factories and options and Continue's
-   * `begin` record it through `temporalCapture()`, whatever the activation waited for since the click.
+   * The capture of the activation's click while its `begin` runs (#1886): Start's options and Continue's `begin` record
+   * it through `temporalCapture()`, whatever the activation waited for since the click.
    */
   let clicked: ClickSample | null = null;
   /**
    * Shows the explicit Continue control for a restored session; its execution, time and media resume only then.
    * Continue records the wall clock and the player's zone and presentation as they are now.
    */
-  function prepareRestore(given: PlayerRuntimeSession, marks?: HistoryMarks): void;
-  function prepareRestore(given: PlayerSession): void;
-  function prepareRestore(given: PlayerSession | PlayerRuntimeSession, marks?: HistoryMarks) {
-    // A session restored outside the host, such as one an embedding host restored, is registered there first, with
-    // the marks it was given (none for an outside restore); a session the host holds keeps the host's.
-    const restored =
-      "lineage" in given ? given : introduceNow(requireBridge(), () => given, marks ?? NO_MARKS);
+  function prepareRestore(restored: PlayerSession) {
     supersede();
     beginning.value = false;
     camera.release();
@@ -472,35 +463,17 @@ export function useSessionActivation({
     }
   }
   /**
-   * The session `create` makes: a held plan over the bridge (`start`), a transitional factory in the host before its
-   * first run (`introduceNow`). Either runs with the host's value trace, and carries its Player's random ownership, as
-   * only a Start does; a restore takes it at its adoption.
+   * The session `create` starts over the bridge (`start`): its held plan, with the options it reads now, the click's
+   * capture among them. It runs with the host's value trace, and carries its Player's random ownership, as only a Start
+   * does; a restore takes it at its adoption.
    */
   function startedSession(
     create: PlayerSessionStart,
     recording: { readonly debugMode: boolean },
     origin: RunOrigin,
-  ): PlayerSession | Promise<PlayerSession> {
-    const random = startRandom();
-    const host = requireBridge();
-    // A factory, as the Start's options, records the click's capture through `temporalCapture()`, which `begin` binds.
-    if (typeof create === "function")
-      return introduceNow(
-        host,
-        (made) =>
-          create({
-            ...recording,
-            recorder: made.recorder,
-            ...(made.debugTrace === null ? {} : { debugTrace: made.debugTrace }),
-            ...(made.randomControl === null ? {} : { randomControl: made.randomControl }),
-          }),
-        NO_MARKS,
-        tracingIntent(),
-        random,
-        origin.begin,
-      );
+  ): Promise<PlayerSession> {
     const startOptions = { ...create.options(), debugMode: recording.debugMode };
-    return host.start(create.plan, startOptions, true, random, origin.begin);
+    return requireBridge().start(create.plan, startOptions, true, startRandom(), origin.begin);
   }
   /**
    * Starts the prepared session; an exception of the Player while it begins is reported, with what was recorded. A
@@ -518,7 +491,7 @@ export function useSessionActivation({
     // The activation's run begins before anything of it can fail, retiring the one before it.
     const origin = activationRun.begin(bridgeNow()!);
     let begun: PlayerSession | SessionTarget | Promise<PlayerSession | SessionTarget>;
-    // `begin` records the click's capture: it reads it before its first await, a Start in its factory or options.
+    // `begin` records the click's capture: it reads it before its first await, a Start in its options.
     clicked = sample;
     try {
       begun = pending.begin(origin);

@@ -24,8 +24,8 @@ This is a local inspection route, not the production cross-origin Player/host pr
   which run the adapter's sessions where the host is. The main realm holds a `PlayerSession` (`runtime/runtime-view.ts`), the
   published state with its transcript, which `persistence/session-store.ts` builds from each reply; `runtime/player-bridge.ts` sends the
   requests; it serves one live Player at a time (`claim`), and a later Player may reuse it. Until the Worker is
-  activated, the host runs in the page (`engine-bridge/in-process.ts`), whose transition facade the families not yet
-  converted use; `engine-bridge/inventory.ts` lists what still moves.
+  activated, the host runs in the page (`engine-bridge/in-process.ts`): the Player builds its backend there, and only
+  tests use its facade; `engine-bridge/inventory.ts` lists what still moves.
   The player's input reaches the host from one section of the shown session (`vue/src/session/runtime-input.ts`): it observes,
   checks that the session still owns the UI and that the action the player acted on is still presented, then posts the
   control's op. Input's ops read no basis; an answer to another action is refused by its action ID.

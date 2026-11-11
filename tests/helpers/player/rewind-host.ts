@@ -30,6 +30,7 @@ import { interceptSends } from "../bridge/sends.js";
 import type { PlayerBridge } from "../../../player/runtime/player-bridge.js";
 import type * as ClientModule from "../../../player/engine-bridge/client.js";
 import { sourceStart, type PlanStart } from "../prepared-plan.js";
+import { inProcessLoss } from "./worker-topology.js";
 
 // The adapter's functions, also on the sessions the composables' host holds (`helpers/player/host-sessions.ts`).
 export const selectPlayerRuntimeChoice = onHost(rawSelectPlayerRuntimeChoice);
@@ -232,16 +233,7 @@ function lossyBridge(): { readonly bridge: PlayerBridge; lose(): void } {
     mode: null,
     appVersion: null,
   });
-  const listeners: ((error: ClientModule.BridgeLostError) => void)[] = [];
-  bridge.client.onLoss = (listener) => void listeners.push(listener);
-  return {
-    bridge,
-    lose: () => {
-      bridge.client.terminate();
-      const lost = new BridgeLostError("The engine Worker failed: injected.");
-      for (const listener of listeners) listener(lost);
-    },
-  };
+  return { bridge, lose: inProcessLoss(bridge, BridgeLostError) };
 }
 
 /**
