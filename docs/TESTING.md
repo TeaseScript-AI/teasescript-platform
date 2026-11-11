@@ -48,15 +48,19 @@ declares. `npm run check:readme-paths` checks that every backticked path in the 
 spans it reads and which it skips. `npm run lint:design` and `npm run test:lint:design` check the [Player design
 contracts](LINTING.md#player-design-lint) and their positive/negative fixtures; both are included in `npm run check`.
 Independent pre-test gates and UI checks/builds run concurrently through `tools/run-parallel.mjs`.
-TypeScript compilation precedes UI work; compiled tests run only after all builds pass, as many files at once as
+`npm run check` (`tools/run-check.mjs`) runs the build and the compiled tests also when a pre-test check failed, and
+its last line names what ran, failed and did not run. TypeScript compilation precedes UI work; compiled tests run only
+after all builds pass, as many files at once as
 `node --test` runs, fewer under the job's memory: as many as fit at 3 GiB plus 640 MiB a file in `SX_MEM_MIB` (the
 queue's reservation, in MiB) or the smallest visible cgroup limit, whichever is smaller, so the variable can lower the
 figure but never raise it above a cap the runner can see (`tools/test-files-at-once.mjs`). A file that reports no test of
-its own, as one whose process ends before its tests report, fails the full suite and is named. Each command's output is printed together, including warnings. A failure stops the
-group and subsequent stages; SIGINT/SIGTERM also terminate
-child process groups, escalating after a grace period. A command stopped this way is labelled `ABORTED`, not `FAIL`,
-and prints after the failed one. `npm run test:verification` checks scheduling, diagnostics and
-process cleanup (POSIX cleanup assertions run on CI; Windows uses `taskkill /t /f`).
+its own, as one whose process ends before its tests report, fails the full suite and is named. Each command's output is printed together, including warnings. A failed command stops no
+other in its group, and its leftover process group is terminated. On SIGINT and SIGTERM, `run-parallel` stops its own
+command groups, escalating after a grace period, and starts no other; `run-check` forwards the signal and waits for its
+part, without a deadline. A command `run-parallel` stops this way is labelled `ABORTED`, not `FAIL`. `npm run test:verification` checks scheduling, diagnostics and
+process cleanup (POSIX cleanup assertions run on CI; Windows uses `taskkill /t /f`). A tool test that builds a git
+repository takes its git environment from `tools/fixture-git.mjs`, so that no host git configuration, ignore or
+attributes file, `GIT_*` variable or message language reaches the fixture; the helper's comment names what it keeps.
 
 Use `VERIFY_SERIAL=1 npm run check` for serial diagnosis or constrained machines; it runs the same commands.
 CI uses a job-local Node module compilation cache. Standard checks omit UI source maps because no configured check
@@ -84,8 +88,8 @@ The suite is every `tests/*.test.ts` and every `tests/<folder>/*.test.ts` one fo
 `helpers/`, which hold no tests (a closed list, `suiteTestFiles` in `tools/test-shards.mjs`); a file is named by its path
 under `tests/`, one at the top by its name alone.
 `npm run test -- dist/tests/<file>.test.js` runs one compiled test through the same compact filter, which fails before running anything when a passed path matches no file, and ends with each named file's test counts (`ℹ <file>: N passed`, `0 passed` when it ran no test, and `; the file failed outside any test` when it threw while loading or its process ended non-zero); use `npm run test:full-output -- dist/tests/<file>.test.js` only for diagnosis.
-`node tools/check-changed.mjs` runs before a push the checks CI fails on for what changed since the base (`git diff --check`, format, oxlint, knip, the doc links, the imports, and the changed projects' type checks and tool tests; its header lists them and its exit codes); CI still runs the tests. `--merged` runs them on HEAD merged into the base's current commit, as CI tests after a squash.
-`node tools/check-shas.mjs [--repo <path>]... [<file>]` checks that the commit SHAs a report or pull-request body names exist and are on a remote (a remote-tracking ref, or an archived or pull-request head on `origin`; a tree hash only exists), and finds its unfilled placeholders and its closing clauses that name several issues after one keyword; it names and counts, without failing, the paths it reads into the scratch area `/tmp/agent-work/`, a count that claims no completeness (its header lists the rules and what it does not read); it never fetches.
+`node tools/check-changed.mjs` runs before a push the checks CI fails on for what changed since the base (`git diff --check`, `merge commits`, format, oxlint, knip, the doc links, the imports, and the changed projects' type checks and tool tests; its header lists them and its exit codes); CI still runs the tests. `--merged` runs them on HEAD merged into the base's current commit, as CI tests after a squash. In a checkout the queue has already merged with its base (`--merged-with`), run `--merged-checkout <pushed head's full SHA> --base <base's full SHA>` instead, so that `merge commits` judges the head's merge commits and not the queue's own merge.
+`node tools/check-shas.mjs [--repo <path>]... [<file>]` checks that the commit SHAs a report or pull-request body names exist and are on a remote (a remote-tracking ref, or an archived or pull-request head on `origin`; a tree hash only exists), and finds its unfilled placeholders and its closing clauses that name several issues after one keyword; it names and counts, without failing, the paths it reads into the scratch area `/tmp/agent-work/`, a count that claims no completeness (its header lists the rules and what it does not read); it never fetches. `--append` writes its last line into the checked file as that file's last line, replacing its earlier one, so the report sent is that file.
 `tools/archive-replaced-heads.mjs` is a `pre-push` hook: before a push deletes or rewrites a ref on the remote, it pushes the old value to `refs/archive/<sha>` there and keeps the same ref in this clone, and refuses the push when it cannot or when the push would delete or rewrite an archive (its header lists the rules and the limit).
 CI's "Structure signals (advisory)" step, after `check:pretest` in the job that runs it, prints
 `node tools/structure-report.mjs --diff HEAD^1 --moved`: the structure signals the change adds to, against the merge's
@@ -261,7 +265,7 @@ shard by its lines and refuse differences without replacement; baseline status s
 build and every recorded area is complete.
 
 **Pinned work.** Some suites pin the core's exact work or its published answers: totals, listed copy and construction
-sites, work tables, and the published answers' digests (TABLE r4.185). Each file holding such pins says so in its first
+sites, work tables, and the published answers' digests. Each file holding such pins says so in its first
 line, a mark that `tools/repository-checks/pin-suites.mjs` reads (`// pins: <what> | line /<regex>/`, or
 `// pins for <suite>, ...: …` in a helper). A change under `src/type-inference/core/` runs all of them before
 it asks for review and before READY: `node tools/repository-checks/pin-suites.mjs --run`. A pin that moves is re-pinned
@@ -338,7 +342,7 @@ runtime oracle comparison after them. Every type-core test
 file and every other of 10 s or more is listed, costliest first, with its median seconds over three CI runs or more in
 `tools/costly-test-files.mjs`, beside the seconds of `check:pretest`: each test job keeps its files' seconds as an
 artifact for 7 days, and `node tools/measure-test-files.mjs --write --from-ci RUN ...` regenerates the module from them
-(its header names the runs; seconds measured on a worker do not predict CI's). A new type-core test file runs in full
+(`--from-ci --base-branch BRANCH` takes the first three matches among CI's latest hundred passed pull-request runs into BRANCH, which may be of one pull request or one head and may predate BRANCH's tip, while the current checkout supplies the file set; a refusal says how to find runs to give instead; its header names the runs; seconds measured on a worker do not predict CI's). A new type-core test file runs in full
 before it has an entry, at the other files' seconds; `check-changed` and the shard test name it, and the coordinator
 lands its entry from the merge's CI runs in a light pull request. The full suite starts the listed files
 first, and `tools/test-shards.mjs` shares the files out so that the jobs end together, `check-3`'s after its checks

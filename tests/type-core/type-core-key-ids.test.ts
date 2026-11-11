@@ -626,7 +626,7 @@ test("a wrapper's read inside a callable takes the route its text lane takes: th
   assert.equal(result, withTextKeys(routes));
 });
 
-test("a binding's wrapper shape is found once per pass whoever asks first, and each family's lane is frozen by it alone, whatever the analysis stops, rejects or finishes afresh, in every mode (TABLE r4.196)", () => {
+test("a binding's wrapper shape is found once per pass whoever asks first, and each family's lane is frozen by it alone, whatever the analysis stops, rejects or finishes afresh, in every mode", () => {
   const problems: string[] = [];
   const seen = { cursor: 0, text: 0, vetoed: 0, passes: 0, building: 0 };
   const sources = [

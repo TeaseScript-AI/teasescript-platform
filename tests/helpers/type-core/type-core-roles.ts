@@ -481,7 +481,7 @@ export const COMPOSITIONS: readonly (readonly [string, string, string])[] = (() 
       B copy-type raw [unknown] 10:19`,
     ],
     [
-      "inline and named data in one selected collection (TABLE r4.67 (3))",
+      "inline and named data in one selected collection",
       'let raw = hostValue\nlet out = [[1], [hostValue], [raw]][2]\nsay "AFTER"\n',
       `outcome warning-runtime-check
       D written-target warning 30:58 unknown
@@ -501,7 +501,7 @@ export const COMPOSITIONS: readonly (readonly [string, string, string])[] = (() 
       B copy-type out [list] 30:39`,
     ],
     [
-      "a host member beside an own read's named data (TABLE r4.70 (1))",
+      "a host member beside an own read's named data",
       'let raw = hostValue\nlet out = hostValue.field otherwise [raw]\nout = [1]\nsay "AFTER"\n',
       `outcome warning-runtime-check
       D written-target warning 30:45 later

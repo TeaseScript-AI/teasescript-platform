@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { isolateGit } from "./fixture-git.mjs";
+
+isolateGit();
 
 const TOOL = fileURLToPath(new URL("./move-sweep.mjs", import.meta.url));
 
@@ -15,11 +18,7 @@ function repository(t) {
   t.after(() => rmSync(fixture, { recursive: true, force: true }));
   const root = join(fixture, "repository");
   mkdirSync(root);
-  const git = (...args) =>
-    execFileSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
-      cwd: root,
-      encoding: "utf8",
-    }).trim();
+  const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
   git("init", "-q");
   const write = (files) => {
     for (const [file, text] of Object.entries(files)) {

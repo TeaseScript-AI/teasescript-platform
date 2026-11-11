@@ -579,7 +579,7 @@ test("the command: the verdict line, the gate's exit, the files it writes", (t) 
   assert.match(badName.stderr, /a name that is no text/);
 });
 
-test("the control's runs that left the slice are counted by exclusion rule, from the table itself, zeros included (r4.382)", async () => {
+test("the control's runs that left the slice are counted by exclusion rule, from the table itself, zeros included", async () => {
   const C = await load();
   // (one run at an exact text, one at a template's, one at a text no rule names; the fourth mode plans)
   const texts = ["this function declaration", "the name 'f'", "a text no rule names", null];

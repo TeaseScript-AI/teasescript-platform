@@ -337,7 +337,7 @@ test("the route's diagnostics pair one to one with a record's, so one expected d
   assert.equal(unmatchedDiagnostics(twice, record.expected.diagnostics).length, 2);
 });
 
-test("every positive-list record the candidate route reaches plans and runs as its record derives, in both orders (§5.2, r4.59)", (t) => {
+test("every positive-list record the candidate route reaches plans and runs as its record derives, in both orders (§5.2)", (t) => {
   const routed = new Set(Object.values(RECORD_CODES).flat());
   const accepted: string[] = [];
   const outside = new Map<string, number>();
@@ -1180,7 +1180,7 @@ test("external data a literal carries is warned and checked at its store before 
   }
 });
 
-test("C1 warns where some kind of the stored value fits and errs only where none does, in both orders (r4.46)", () => {
+test("C1 warns where some kind of the stored value fits and errs only where none does, in both orders", () => {
   // a list literal's element at an index: the items `integer` and `number`, both definite, one fitting; with a host value
   // the external item beside a `number`, and C9's boundary check at the host value. The context words (§3.4): the
   // element read that gathers several elements gives `member`, the host value its reason's `unknown`
@@ -2058,7 +2058,7 @@ test("a store below an object's own first, last or random checks the property it
  * its diagnostics, and its plan runs to the says and the failure its leaves give, in both orders. (Records, dicts and
  * sets are outside the slice until it is complete, S9b; the core's deep reads of them are `deep-literal-scale.test.ts`'s.)
  */
-test("deep and broad list literals compile and run as their leaves give, in both orders (TABLE r4.58)", () => {
+test("deep and broad list literals compile and run as their leaves give, in both orders", () => {
   const nested = (depth: number, leaf: string): string =>
     `${"[".repeat(depth)}${leaf}${"]".repeat(depth)}`;
   const reads = (name: string, depth: number): string => `${name}${"[0]".repeat(depth)}`;
@@ -2168,7 +2168,7 @@ function admittedOf(source: string, name: string, path: readonly string[] = []):
     : admitted.by;
 }
 
-test("a place published with a kind checks the external data stored into it, named or inline, at any endpoint (A7, C9 r4.12, r4.50 (1), R4-F1)", () => {
+test("a place published with a kind checks the external data stored into it, named or inline, at any endpoint (A7, C9, R4-F1)", () => {
   // the external reviewer's endpoint matrix: per kind (a known element, a fitting host value and bad ones, an integer's
   // fractional one too), projection (an index, a nested index, parentheses, an index held in a variable), host data
   // inline or named, and without or with a later store: the place is decided by the known element (or the later store),
@@ -2415,7 +2415,7 @@ const CARRIER_SHAPES: Readonly<Record<CarrierKind, readonly CarrierShape[]>> = {
  * fitting value says AFTER and halts, and each bad one fails at the declaration's value with nothing said; a shape
  * outside the slice is proved at the answers, the route's reason reported.
  */
-test("every carrier kind leaves an obligation for the external data it gives a place admitted a kind (O, A7, C9 r4.12, C10, r4.59)", (t) => {
+test("every carrier kind leaves an obligation for the external data it gives a place admitted a kind (O, A7, C9, C10)", (t) => {
   assert.deepEqual(Object.keys(CARRIER_SHAPES).sort(), [...CARRIER_KINDS].sort());
   const outside = new Map<string, string>();
   const none: string[] = [];
@@ -2533,7 +2533,7 @@ test("every carrier kind leaves an obligation for the external data it gives a p
  * three stores owes its C1 against the whole written type, the host data its boundary; the plan checks every store; the
  * fitting host value says AFTER and each bad one fails at the third store's value, nothing said.
  */
-test("a copy of a written binding keeps its type beside a copy of the same source, in both orders (A4, TABLE r4.72)", () => {
+test("a copy of a written binding keeps its type beside a copy of the same source, in both orders (A4)", () => {
   for (const nested of [false, true])
     for (const [first, second] of [
       ["a", "b"],
@@ -2872,7 +2872,7 @@ test("a dead store of host data into a written place is checked against its writ
  * place holds there (the host value's kind at the value's position: an element's, a nested element's). A fitting host
  * value says AFTER and halts; each bad one fails at that store's value with TSR058, nothing said.
  */
-test("a sample of the slice's cells checks host data in the plan and stops a bad value before the next effect (r4.59)", () => {
+test("a sample of the slice's cells checks host data in the plan and stops a bad value before the next effect", () => {
   const sample: readonly (readonly [
     name: string,
     body: string,
