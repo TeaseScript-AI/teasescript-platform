@@ -380,7 +380,8 @@ For `corpus`, add `--data ~/work/o4-m4-g3/cases.json` and `CASES_JSON=$HOME/work
 ## A pull request's replay
 
 `tools/compiler-replay.mjs` runs a compiler pull request's replay of its base against its head through the queue: the
-set and every area above, in 16 shards each. Each step's inputs, in order:
+set and every area above, in 16 shards each; each step is a module of `tools/compiler-replay/`. Each step's inputs, in
+order:
 
 - **`submit <base> <head> --owner <owner> [--campaign <prefix>] [--baseline] [--dry]`:** the two commits. It queues
   `<prefix>-set` and `<prefix>-areas` and prints each job's id.
