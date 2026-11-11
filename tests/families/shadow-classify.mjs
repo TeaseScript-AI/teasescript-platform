@@ -21,10 +21,10 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { gunzipSync } from "node:zlib";
 
 /** The taxonomy's version: a class added, removed or changed in its rule makes the next. */
-export const VERSION = 5;
+export const VERSION = 6;
 /** What the version changed from the one before, as the gate report states it. */
 export const VERSION_CHANGE =
-  "v4 → v5: the class declined/lost check (#1781), a program the core declines where a stop lost a check it requires, at the natural allowance and at the control alike";
+  "v5 → v6: the class excluded/a typed parse or load whose type the written types it lands beside do not prove (#2307), the candidate's decline where a written type could reach a typed call's value unchecked";
 
 const S9B = "S9b #1072 (candidate coverage; retired or deferred syntax is no release requirement)";
 const S10 = "S10 #1073";
@@ -32,7 +32,7 @@ const S10 = "S10 #1073";
  * Sol's 53 exclusion texts as 48 rules (each text exact, the two that name a variable as one template each), and from
  * version 2 the next blocker of a function's body, the four texts #1744's presence sources reach, and the open part
  * of a typed default once its default may read a variable (#1072 A1); from version 4 a typed default a stop left open
- * (#1775).
+ * (#1775); from version 6 a typed call its written surroundings do not prove (#2307).
  */
 const EXCLUSIONS = [
   ["this member or element read", S9B, "9a8e2a853d99 all:ar5-own::own/inferred-widens"],
@@ -137,6 +137,13 @@ const EXCLUSIONS = [
     "a typed parse's or load's default that a stop left open",
     S9B,
     "synthetic 'variable' (#1767's type-core-stop case: a typed default read after a stop)",
+  ],
+  // (v6, #2307's decline, `typed-reader.ts`'s `UNPROVED_READER`; no gate source has reached it yet, so its witness is
+  // the first declined case of #2307's test in `type-core-discharge-runtime.test.ts`)
+  [
+    "a typed parse or load whose type the written types it lands beside do not prove",
+    S9B,
+    "synthetic 'call-first' (#2307's type-core-discharge-runtime case: a written variable copied in after the call)",
   ],
   [
     /^the name '[^']+'$/,

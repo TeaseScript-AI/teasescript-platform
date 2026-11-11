@@ -167,6 +167,8 @@ test("every recorded witness falls in its class, each pair in exactly one", asyn
       "excluded/this tag query expression",
       // (v4's: #1775's decline, which no gate source has reached yet)
       "excluded/a typed parse's or load's default that a stop left open",
+      // (v6's: #2307's decline, likewise)
+      "excluded/a typed parse or load whose type the written types it lands beside do not prove",
       "failed/legacy-heap",
       "failed/other",
       "exception",
@@ -488,6 +490,7 @@ test("every pair of a generated grid over the pair rule's axes takes exactly one
     "the variable 'v', whose lists nest deeper than the slice follows",
     "this return statement",
     "a typed parse's or load's default that a stop left open",
+    "a typed parse or load whose type the written types it lands beside do not prove",
   ])
     facts.push([{ kind: "outside", outside: text }, "excluded/"]);
   facts.push([{ kind: "outside", outside: "the name x" }, null]);
@@ -515,7 +518,7 @@ test("every pair of a generated grid over the pair rule's axes takes exactly one
     else assert.equal(got.id, expected);
     checked += 1;
   }
-  assert.equal(checked, 8 + 128 * 8 + 7 + 6);
+  assert.equal(checked, 8 + 128 * 8 + 8 + 6);
 });
 
 test("the command: the verdict line, the gate's exit, the files it writes", (t) => {
@@ -534,7 +537,7 @@ test("the command: the verdict line, the gate's exit, the files it writes", (t) 
   assert.match(green.stdout, /^gate: green$/m);
   assert.match(
     readFileSync(join(folder, "out", "gate.md"), "utf8"),
-    /^# Shadow gate \(taxonomy v5\): green/,
+    /^# Shadow gate \(taxonomy v6\): green/,
   );
   // (a source the manifest owes without a record: open; the gate's run exits 1, the plain run 0)
   const owed = write("owed.jsonl", [{ key: "fine" }, { key: "missing" }]);
@@ -1023,7 +1026,7 @@ test("gate.md keeps a witness's | and line breaks inside their cell", async () =
 
 test("taxonomy v5's declined/lost check: a decline by the lost-check gate is its class at the natural allowance and at the control, any other decline text a problem (#1781)", async () => {
   const C = await load();
-  assert.equal(C.VERSION, 5);
+  assert.equal(C.VERSION, 6);
   const texts = [
     "a store whose check was lost at the budget",
     "a store whose required checks could not be established at the budget",
@@ -1083,7 +1086,7 @@ test("taxonomy v5's declined/lost check: a decline by the lost-check gate is its
     );
     assert.equal(ran.status, 0, ran.stderr);
     const md = readFileSync(join(folder, "out", "gate.md"), "utf8").split("\n");
-    assert.ok(md[0]!.startsWith("# Shadow gate (taxonomy v5): "), md[0]);
+    assert.ok(md[0]!.startsWith("# Shadow gate (taxonomy v6): "), md[0]);
     assert.equal(md[2], `Taxonomy ${C.VERSION_CHANGE}.`);
     assert.ok(
       md.some((l) =>
