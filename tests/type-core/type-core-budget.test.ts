@@ -277,7 +277,7 @@ test("a generator's shared build counts to the total, never to the asker, and en
  * store), an `else if` one level more: a check inside them is moved, an error outside stands, and one warning names the
  * deepest nesting's place.
  */
-test("statements nested past 256 levels are checked when the script runs, the rest proved (TABLE r4.55)", () => {
+test("statements nested past 256 levels are checked when the script runs, the rest proved", () => {
   const nested = (depth: number) =>
     `let k: integer = 1.5\n${"if hostValue == 1 {\n".repeat(depth)}say "\${hostValue}"\n${"}\n".repeat(depth)}exit`;
   const chained = (length: number) =>

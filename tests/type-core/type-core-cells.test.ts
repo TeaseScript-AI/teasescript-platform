@@ -62,7 +62,7 @@ test("the core gives the expected record for every record of the cells it comple
     "U4's consumer remainder (#2025)": 3,
     "a fixture expectation awaiting its ruling (#2025)": 3,
     "the numeric crossover (#1173, #2025)": 1,
-    "operator site awaiting set correction (TABLE §3.4, r4.62)": 1,
+    "operator site awaiting set correction": 1,
     "S9b's F18 copy of a written type as the receiving context (r4.77 (2))": 18,
     "fromJson with files: true outside the slice, and C13's text operand": 2,
     "a known-value error the record lacks (decision 3 on #1072)": 1,
@@ -3550,7 +3550,7 @@ test("a named collection in a literal or an add brings its elements' types to th
   assert.deepEqual(differing, []);
 });
 
-test("a property only copies of whole objects bring errs where the copy meets the place, read or not; a store or a literal's own field keeps its error (ADR 0021 rule 1.1, TABLE r4.131)", () => {
+test("a property only copies of whole objects bring errs where the copy meets the place, read or not; a store or a literal's own field keeps its error (ADR 0021 rule 1.1)", () => {
   // per program its errors as site text
   const programs: readonly (readonly [string, string, readonly string[]])[] = [
     [
@@ -4105,7 +4105,7 @@ test("A2's value origins: a written binding's copy errs where it meets the place
   assert.deepEqual(differing, []);
 });
 
-test("the copied-property check grows with the program, not with its copies times its fields, in either order (A2, TABLE r4.131)", () => {
+test("the copied-property check grows with the program, not with its copies times its fields, in either order (A2)", () => {
   // k copies of a record with k fields and a record of k other-typed fields, each field read: one error per field; the
   // copies as a list's elements, as stores into one variable, and wrapped in literals of both. The gate's shapes,
   // unread, in both orders of the copies: k copies of the first record in one list beside a copy of one that
@@ -4705,7 +4705,7 @@ test("a literal's verdicts are shared only where its named elements hold the sam
  * prove plan and run in `type-core-candidate.test.ts` (the projections of a literal, the endpoint matrix, the cell
  * sample).
  */
-test("a value any carrier gives brings its elements' types, decided and checked as a literal's, a removal's published as possible, in both orders (round 11, TABLE r4.67 (1))", () => {
+test("a value any carrier gives brings its elements' types, decided and checked as a literal's, a removal's published as possible, in both orders (round 11)", () => {
   const carriers: readonly (readonly [string, (value: string) => string])[] = [
     ["projection", (value) => `[${value}][0]`],
     ["otherwise", (value) => `${value} otherwise ${value}`],

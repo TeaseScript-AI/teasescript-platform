@@ -691,7 +691,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   {
     name: "S6c-nested-sum",
     measures:
-      "TABLE r4.88: a sum of k terms of one list of a k-field record, every field of its last element read",
+      "a sum of k terms of one list of a k-field record, every field of its last element read",
     program: (k) =>
       main(
         lines(
@@ -750,8 +750,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   // walked its whole nest)
   {
     name: "I1106-nested-choices",
-    measures:
-      'TABLE r4.93: `[askChoice "0", askChoice "1", …]` at k, k nested choices, its element read',
+    measures: '`[askChoice "0", askChoice "1", …]` at k, k nested choices, its element read',
     program: (k) =>
       main(
         lines(
@@ -764,7 +763,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   {
     name: "I1106-nested-choice-lists",
     measures:
-      'TABLE r4.93: `askChoice [(askChoice [(…), "alt"]), "alt"]` at k, k nested choices in lists of two, read',
+      '`askChoice [(askChoice [(…), "alt"]), "alt"]` at k, k nested choices in lists of two, read',
     program: (k) => {
       let expression = 'askChoice "seed"';
       for (let i = 1; i < k; i += 1) expression = `askChoice [(${expression}), "alt"]`;

@@ -259,7 +259,7 @@ shard by its lines and refuse differences without replacement; baseline status s
 build and every recorded area is complete.
 
 **Pinned work.** Some suites pin the core's exact work or its published answers: totals, listed copy and construction
-sites, work tables, and the published answers' digests (TABLE r4.185). Each file holding such pins says so in its first
+sites, work tables, and the published answers' digests. Each file holding such pins says so in its first
 line, a mark that `tools/repository-checks/pin-suites.mjs` reads (`// pins: <what> | line /<regex>/`, or
 `// pins for <suite>, ...: …` in a helper). A change under `src/type-inference/core/` runs all of them before
 it asks for review and before READY: `node tools/repository-checks/pin-suites.mjs --run`. A pin that moves is re-pinned

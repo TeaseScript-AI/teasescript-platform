@@ -981,7 +981,7 @@ const INTENDED: readonly Intended[] = [
   },
   {
     rule:
-      "TABLE r4.162: the new checker's code stands only where it is proved where it is pasted (no other diagnostic in " +
+      "the new checker's code stands only where it is proved where it is pasted (no other diagnostic in " +
       "the author's text it holds, a check that holds at its use), else its words: under-offers, a note (N)",
     matches: (pair) => {
       const words = unproved(pair);
@@ -1540,7 +1540,7 @@ test("a list fix's add, on a line of its own, compiles and runs where the fix of
  * code form its fix offers pasted at its own position compiles and runs to its end through it, a store that receives an
  * answer among them (#1586). The whole family, every offer at every site, is the step's evidence outside CI.
  */
-test("every code form a fix offers compiles and runs where pasted, on the paste family's sample (TABLE r4.151)", () => {
+test("every code form a fix offers compiles and runs where pasted, on the paste family's sample", () => {
   const failures: string[] = [];
   let pasted = 0;
   for (const { name, source, start, end } of pasteCases(true)) {

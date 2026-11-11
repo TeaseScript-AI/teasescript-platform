@@ -1262,7 +1262,7 @@ const IN_WORDS: readonly (readonly SourceFile[])[] = [
     ),
 ].map((source) => [{ path: "main.tease", source }]);
 
-test("the stop oracle takes a fix in words for the unstopped one's code, and nothing else (TABLE r4.162)", () => {
+test("the stop oracle takes a fix in words for the unstopped one's code, and nothing else", () => {
   const globals = ["hostValue", "hostOther"];
   const projects = [
     ...IN_WORDS,
@@ -2791,7 +2791,7 @@ const UNCHECKED: readonly string[] = [
   "function f(n) {\n  let ms = [1, null]\n  say ms[1] + 1\n  say n + 1\n  return 1\n}\nsay f(hostValue)\nexit\n",
 ];
 
-test("a stop's unchecked region gives words for a fix's code in it, never code it would hide (TABLE r4.162)", () => {
+test("a stop's unchecked region gives words for a fix's code in it, never code it would hide", () => {
   const globals = { globals: ["hostValue", "hostOther"] };
   const phases = new Set<string>();
   let inside = 0;
@@ -4267,7 +4267,7 @@ test("the stores' syntax through copies answers alike in either order of reads (
  * The finer reading, by the consumer invocation that emitted the check, has no entry to hook: the consumers are module
  * functions no test can replace, and a call stack names no call. Every settled stop of each.
  */
-test("a combined stop counts the coarse (a) reading's rejections with the read each leaves open (TABLE r4.299)", () => {
+test("a combined stop counts the coarse (a) reading's rejections with the read each leaves open", () => {
   const below = heldFamily(false).find((c) => c.name === "writtenObjectBelow-1-say-plain")!;
   const members = [
     {
@@ -5504,7 +5504,7 @@ test("a stop adds no boundary below a stopped decision and keeps toJson's checks
  * decision first stopped is not settled: finishing marks the stores, and the stop oracle holds, no boundary among it,
  * as in #1194's witness below of a second stop; the plain gate declines it (#2080 part 2).
  */
-test("a pass in which a decision stops is not settled: the next starts with its key stopped (TABLE r4.180)", () => {
+test("a pass in which a decision stops is not settled: the next starts with its key stopped", () => {
   const reversed = <T>(make: () => T): T =>
     withSolverSeam({ reverseWorklist: true }, () =>
       withConsumerOrder((list) => [...list].reverse(), make),
@@ -5662,7 +5662,7 @@ test("a pass in which a decision stops is not settled: the next starts with its 
  * narrows host data: under `is integer` the read is the integer the test itself proves, so its reason is the test's, not
  * `budget`; under `is not integer`, and unguarded, it stays `unknown` with `budget`. Both orders.
  */
-test("a narrowed read of a stopped decision's key is what its test proves, unguarded reads budget (TABLE r4.183)", () => {
+test("a narrowed read of a stopped decision's key is what its test proves, unguarded reads budget", () => {
   for (const [form, expected] of [
     ["is integer", ["integer/0"]],
     ["is not integer", ["unknown/16"]],
@@ -5722,7 +5722,7 @@ test("a narrowed read of a stopped decision's key is what its test proves, ungua
  * it, the sharing on only, #1703); at the demand allowance 1,024 the reversed order's deepest decision stops, and the
  * next path's in the restarted pass, with the sharing on and off.
  */
-test("a decision stopping in the restarted pass stops the analysis: #1194's copies reversed (TABLE r4.183)", () => {
+test("a decision stopping in the restarted pass stops the analysis: #1194's copies reversed", () => {
   const source = [
     `let typed: integer${"[]".repeat(64)} = []`,
     "let out = typed",

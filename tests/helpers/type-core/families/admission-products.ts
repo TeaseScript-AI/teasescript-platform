@@ -343,7 +343,7 @@ export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
   {
     name: "S6c-choice-crossed-gets",
     measures:
-      "TABLE r4.85, review r4 B1: a choice of k `l_i.get(0, default: a_(k-1-i))`, aliases of one list and one record, every field read",
+      "a choice of k `l_i.get(0, default: a_(k-1-i))`, aliases of one list and one record, every field read",
     // 83,231 / 166,448 units at k = 64, 128 in both orders (2.0059; `main` 375,053 / 1,355,246, 3.62: the choice's
     // options read one by one at each field, a computed value having no read class)
     program: (k) =>
@@ -361,8 +361,7 @@ export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
   },
   {
     name: "S6c-choice-records",
-    measures:
-      "TABLE r4.85: a choice of k records `{g: a_i}` of aliases of one record, every field read",
+    measures: "a choice of k records `{g: a_i}` of aliases of one record, every field read",
     // 69,454 / 139,052 units at k = 64, 128 (2.0071, reversed 2.0069; `main` 212,767 / 732,257, 3.45)
     program: (k) =>
       main(
@@ -378,7 +377,7 @@ export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
   {
     name: "S6c-nested-defaults",
     measures:
-      "TABLE r4.85: a literal of k `l_i.get(0, default: l_(k-1-i).get(0, default: a_i))` of one list and one record, every field read",
+      "a literal of k `l_i.get(0, default: l_(k-1-i).get(0, default: a_i))` of one list and one record, every field read",
     // 99,659 / 200,084 units at k = 64, 128 in both orders (2.0134; `main` 429,058 / 1,545,947, 3.61)
     program: (k) =>
       main(
@@ -413,7 +412,7 @@ export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
     ] as const
   ).map(([family, member, what]): WorkFamily => ({
     name: `S6c-choice-${family}`,
-    measures: `TABLE r4.87: a choice of k options whose values are ${what} of aliases of one k-field record, every field read`,
+    measures: `a choice of k options whose values are ${what} of aliases of one k-field record, every field read`,
     program: (k) =>
       main(
         lines(
@@ -435,7 +434,7 @@ export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
     ] as const
   ).map(([kind, ingress]): WorkFamily => ({
     name: `S6c-${kind}-adds`,
-    measures: `TABLE r4.87, review r6 B2: k adds of \`${ingress}\` of one k-field record, every field of the last read`,
+    measures: `k adds of \`${ingress}\` of one k-field record, every field of the last read`,
     program: (k) =>
       main(
         lines(
@@ -450,7 +449,7 @@ export const VALUE_CLASS_SITES: readonly WorkFamily[] = [
   {
     name: "S6c-record-adds-unknown",
     measures:
-      "TABLE r4.85: k `ys.add({g: a_i})` of aliases of one k-field record of host data, every field read",
+      "k `ys.add({g: a_i})` of aliases of one k-field record of host data, every field read",
     // 152,934 / 307,973 units at k = 64, 128 in both orders (2.0197; `main` 487,159 / 1,729,478, 3.56: the exact
     // add chain walked per field, a literal having no read class)
     program: (k) =>
