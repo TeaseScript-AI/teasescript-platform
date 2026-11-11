@@ -30,7 +30,7 @@ import { interceptSends } from "../bridge/sends.js";
 import type { PlayerBridge } from "../../../player/runtime/player-bridge.js";
 import type * as ClientModule from "../../../player/engine-bridge/client.js";
 import { sourceStart, type PlanStart } from "../prepared-plan.js";
-import { inProcessLoss } from "./worker-topology.js";
+import { inProcessLoss, inProcessBackend } from "./worker-topology.js";
 
 // The adapter's functions, also on the sessions the composables' host holds (`helpers/player/host-sessions.ts`).
 export const selectPlayerRuntimeChoice = onHost(rawSelectPlayerRuntimeChoice);
@@ -151,9 +151,8 @@ export interface Rewind {
   endWithPlayer(): void;
 }
 export let usePlayerSession: (options: {
-  bridge?: Promise<PlayerBridge>;
+  bridge: Promise<PlayerBridge>;
   scriptStorage: ScriptStorageProvider;
-  debugHistorySpill: () => Promise<DebugHistorySpill | null>;
   debugRooms?: KeptRoomStore;
 }) => RewindHost;
 export let useDebugRewind: (player: RewindHost) => Rewind;
@@ -373,9 +372,11 @@ export function createHost(
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
-      ...(lossy && { bridge: Promise.resolve(lossy.bridge) }),
+      bridge:
+        lossy === null
+          ? inProcessBackend({ historySpill: async () => spill.open() })
+          : Promise.resolve(lossy.bridge),
       scriptStorage: provider,
-      debugHistorySpill: async () => spill.open(),
       ...(options.debugRooms && { debugRooms: options.debugRooms }),
     }),
   );

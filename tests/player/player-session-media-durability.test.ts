@@ -26,6 +26,7 @@ import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js"
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { answerWith, type Intent } from "../helpers/player/player-input.js";
 import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
+import { inProcessBackend } from "../helpers/player/worker-topology.js";
 
 // A kept session or saved value names captured media only once its bytes are in the current destination (#1861): a
 // photo its store refused keeps the session kept before, a valid duplicate counts as stored, and a read that settles
@@ -61,6 +62,7 @@ interface Host {
   savedPhoto(reference: string): { readonly state: string };
 }
 let usePlayerSession: (options: {
+  readonly bridge: Promise<PlayerBridge>;
   scriptStorage: ScriptStorageProvider;
   capturedMedia: { repository: FakeMediaRepository };
   keptSessions: KeptSessionStore;
@@ -220,6 +222,7 @@ function page(context: TestContext, at: Browser, room?: "debug") {
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
+      bridge: inProcessBackend(),
       scriptStorage: createLocalScriptStorage(at.storage, SCOPE),
       capturedMedia: { repository: at.repository },
       keptSessions: at.kept,

@@ -10,6 +10,7 @@ import { loadPlayerModule } from "../helpers/player-modules.js";
 import { loadHostFacade, onHostAll } from "../helpers/player/host-sessions.js";
 import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
+import { inProcessBackend } from "../helpers/player/worker-topology.js";
 
 // The Player keeps the screen on while a session plays (PLAYER-UI "Session start and user activation"): from the Start
 // click until the script exits, ends with an error, or a Player error stops it. These tests fake the browser's screen
@@ -29,7 +30,10 @@ interface WakeLockHost {
     outcome: "natural",
   ): Promise<RandomDrawResolutionOutcome | null>;
 }
-let usePlayerSession: (options: { capabilities: { camera: boolean } }) => WakeLockHost;
+let usePlayerSession: (options: {
+  readonly bridge: Promise<PlayerBridge>;
+  capabilities: { camera: boolean };
+}) => WakeLockHost;
 let useDevelopmentTime: (
   player: WakeLockHost,
   initial: { readonly autoSkip: boolean },
@@ -164,7 +168,7 @@ function mount<T>(context: TestContext, create: () => T): T {
 
 function mountPlayer(context: TestContext, camera = false) {
   return mount(context, () => {
-    const host = usePlayerSession({ capabilities: { camera } });
+    const host = usePlayerSession({ bridge: inProcessBackend(), capabilities: { camera } });
     return { host, time: useDevelopmentTime(host, { autoSkip: false }, () => {}) };
   });
 }

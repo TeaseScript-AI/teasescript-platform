@@ -29,6 +29,7 @@ import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js"
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
+import { inProcessBackend } from "../helpers/player/worker-topology.js";
 
 interface ImportScript {
   readonly scope: string;
@@ -57,6 +58,7 @@ interface ImportHost {
   activate(): Promise<void>;
 }
 let usePlayerSession: (options: {
+  readonly bridge: Promise<PlayerBridge>;
   scriptStorage: ScriptStorageProvider;
   capturedMedia: { repository: FakeMediaRepository };
   savedData: SavedDataHost;
@@ -199,6 +201,7 @@ function createHost(context: TestContext, provider: MemoryProvider) {
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
+      bridge: inProcessBackend(),
       scriptStorage: provider,
       capturedMedia: { repository },
       savedData,

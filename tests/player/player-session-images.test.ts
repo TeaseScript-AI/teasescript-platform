@@ -39,6 +39,7 @@ import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js"
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { answerWith, type Intent } from "../helpers/player/player-input.js";
 import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
+import { inProcessBackend } from "../helpers/player/worker-topology.js";
 
 // The adapter's functions, also on the sessions the composables' host holds (`helpers/player/host-sessions.ts`).
 const submitPlayerRuntimeComposer = onHost(rawSubmitPlayerRuntimeComposer);
@@ -82,6 +83,7 @@ interface ImageHost {
   readonly stopped: Readonly<Ref<boolean>>;
 }
 let usePlayerSession: (options: {
+  readonly bridge: Promise<PlayerBridge>;
   resolveAsset?: (path: string) => string | null;
   scriptStorage?: ScriptStorageProvider;
   capturedMedia?: { repository: FakeMediaRepository };
@@ -183,6 +185,7 @@ test("a chosen image is session media: kept durably only when saved, and release
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
+      bridge: inProcessBackend(),
       scriptStorage: provider,
       capturedMedia: { repository },
       decodeImage: async () => ({ width: 2, height: 2 }),
@@ -226,7 +229,10 @@ test("a debug export candidate is the state when it was asked for, while play co
   stubBrowser(context);
   const scope = effectScope();
   const host = scope.run(() =>
-    usePlayerSession({ decodeImage: async () => ({ width: 1, height: 1 }) }),
+    usePlayerSession({
+      bridge: inProcessBackend(),
+      decodeImage: async () => ({ width: 1, height: 1 }),
+    }),
   );
   assert.ok(host);
   context.after(() => scope.stop());
@@ -289,6 +295,7 @@ test("after a reload, Continue's debug export offers the photo its state holds, 
     const scope = effectScope();
     const host = scope.run(() =>
       usePlayerSession({
+        bridge: inProcessBackend(),
         scriptStorage: provider,
         capturedMedia: { repository },
         keptSessions,
@@ -348,7 +355,10 @@ test("an image that never became the preview can be dropped, and Use image answe
   stubBrowser(context);
   const scope = effectScope();
   const host = scope.run(() =>
-    usePlayerSession({ decodeImage: async () => ({ width: 1, height: 1 }) }),
+    usePlayerSession({
+      bridge: inProcessBackend(),
+      decodeImage: async () => ({ width: 1, height: 1 }),
+    }),
   );
   assert.ok(host);
   context.after(() => scope.stop());
@@ -367,7 +377,7 @@ test("an image that never became the preview can be dropped, and Use image answe
 test("each image request that allows only the camera is reported as a Player notice while it waits", async (context) => {
   stubBrowser(context);
   const scope = effectScope();
-  const host = scope.run(() => usePlayerSession({}));
+  const host = scope.run(() => usePlayerSession({ bridge: inProcessBackend() }));
   assert.ok(host);
   context.after(() => scope.stop());
   const keys = () => host.notices.value.map((notice) => notice.key);
@@ -415,6 +425,7 @@ test("audio that loaded and then fails while it plays is a 'could not be played'
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
+      bridge: inProcessBackend(),
       resolveAsset: (path) => (path === "sounds/chime.wav" ? `/files/${path}` : null),
       decodeImage: async () => ({ width: 1, height: 1 }),
     }),
@@ -447,6 +458,7 @@ test("audio a Continue restores as loaded that then fails while it plays is also
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
+      bridge: inProcessBackend(),
       resolveAsset: (path) => (path === "sounds/chime.wav" ? `/files/${path}` : null),
       decodeImage: async () => ({ width: 1, height: 1 }),
     }),
@@ -490,6 +502,7 @@ test("media the script refers to but the Player cannot use is a warning, once pe
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
+      bridge: inProcessBackend(),
       resolveAsset: (path) => (packageFiles.has(path) ? `/files/${path}` : null),
       decodeImage: async () => ({ width: 1, height: 1 }),
     }),
@@ -555,6 +568,7 @@ test("a speaker's avatar that is no package file is a warning when a message fir
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
+      bridge: inProcessBackend(),
       resolveAsset: (path) => (path === "avatars/guide.png" ? `/files/${path}` : null),
     }),
   );
@@ -595,7 +609,9 @@ test("a speaker's avatar that is no package file is a warning when a message fir
 test("a package image the Stage cannot load is reported while the Stage shows it", async (context) => {
   stubBrowser(context);
   const scope = effectScope();
-  const host = scope.run(() => usePlayerSession({ resolveAsset: (path) => `/files/${path}` }));
+  const host = scope.run(() =>
+    usePlayerSession({ bridge: inProcessBackend(), resolveAsset: (path) => `/files/${path}` }),
+  );
   assert.ok(host);
   context.after(() => scope.stop());
   const script = 'showImage "images/corrupt.png"\nlet pick = askImage()\nexit';
@@ -634,7 +650,10 @@ test("a debug export whose photo read waits while a new Start retires its activa
   stubBrowser(context);
   const scope = effectScope();
   const host = scope.run(() =>
-    usePlayerSession({ decodeImage: async () => ({ width: 1, height: 1 }) }),
+    usePlayerSession({
+      bridge: inProcessBackend(),
+      decodeImage: async () => ({ width: 1, height: 1 }),
+    }),
   )!;
   context.after(() => scope.stop());
   host.prepare(
@@ -711,7 +730,7 @@ async function heldAdoption(
 ) {
   stubBrowser(context);
   const scope = effectScope();
-  const host = scope.run(() => usePlayerSession({}))!;
+  const host = scope.run(() => usePlayerSession({ bridge: inProcessBackend() }))!;
   context.after(() => scope.stop());
   const bridge = await host.bridge;
   const facade: Record<string, unknown> = await loadPlayerModule(
@@ -796,7 +815,7 @@ for (const [before, outcome] of [
 test("a Debug mode change whose failure arrives after a Continue of the same lineage began stops nothing of it", async (context) => {
   stubBrowser(context);
   const scope = effectScope();
-  const host = scope.run(() => usePlayerSession({}))!;
+  const host = scope.run(() => usePlayerSession({ bridge: inProcessBackend() }))!;
   context.after(() => scope.stop());
   const bridge = await host.bridge;
   const facade: Record<string, unknown> = await loadPlayerModule(
