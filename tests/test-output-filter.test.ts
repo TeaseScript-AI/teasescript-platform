@@ -193,15 +193,32 @@ test("compact output ends with each named file's counts, after Node's own output
   assert.deepEqual(compact.leftover, []);
   // after Node's own output: the summary and the failures
   assert.match(compact.stdout, /failing test[\s\S]*\nℹ \S*counted\.test\.mjs: /u);
-  // a name pattern that matches no test runs none
-  const unmatched = runFixtures(fixtures, false, (directory) => [
-    "--test-name-pattern=no such test",
-    resolve(directory, "counted.test.mjs"),
-  ]);
-  assert.equal(unmatched.status, 0, unmatched.stderr);
-  assert.match(unmatched.stdout, /^ℹ \S*counted\.test\.mjs: 0 passed$/mu);
-  // and so does one that passes
-  assert.deepEqual(unmatched.leftover, []);
+  // a file that ran no test fails the run, as in the full suite, and its line says so
+  for (const name of ["suites.test.mjs", "silent.test.mjs"]) {
+    const none = runFixtures(fixtures, false, (directory) => [resolve(directory, name)]);
+    assert.equal(none.status, 1, `${name}: ${none.stdout}${none.stderr}`);
+    assert.match(
+      none.stdout,
+      new RegExp(
+        `^ℹ \\S*${name.replace(".", "\\.")}: 0 passed; it ran no test, which fails the run as in the full suite$`,
+        "mu",
+      ),
+    );
+  }
+  // a name pattern that matches no test runs none, which its line says and the exit does not
+  for (const pattern of [["--test-name-pattern=no such test"], ["--test-skip-pattern", "."]]) {
+    const unmatched = runFixtures(fixtures, false, (directory) => [
+      ...pattern,
+      resolve(directory, "counted.test.mjs"),
+    ]);
+    assert.equal(unmatched.status, 0, unmatched.stderr);
+    assert.match(
+      unmatched.stdout,
+      /^ℹ \S*counted\.test\.mjs: 0 passed; the name pattern matched no test in it$/mu,
+    );
+    // and so does one that passes
+    assert.deepEqual(unmatched.leftover, []);
+  }
   // full output names every test, and adds no counts
   const full = runFixtures(fixtures, true);
   assert.doesNotMatch(full.stdout, /^ℹ \S*\.test\.mjs: /mu);
@@ -318,13 +335,19 @@ test("each file's line, with the file's own result, reconciles with node:test's 
       const lines = filtered.stdout.split("\n").filter((each) => each.startsWith(prefix));
       assert.equal(lines.length, 1, `${file}: one line\n${filtered.stdout}`);
       const line =
-        /^(\d+) passed(?:, (\d+) failed)?(?:, (\d+) cancelled)?(?:, (\d+) skipped)?(?:, (\d+) todo)?(; the file failed outside any test)?$/u.exec(
+        /^(\d+) passed(?:, (\d+) failed)?(?:, (\d+) cancelled)?(?:, (\d+) skipped)?(?:, (\d+) todo)?(; the file failed outside any test)?(; it ran no test, which fails the run as in the full suite)?$/u.exec(
           lines[0]!.slice(prefix.length),
         );
       assert.ok(line, `${file}: its counts\n${lines[0]}`);
       const [passed, failed, cancelled, skipped, todo] = line
         .slice(1, 6)
         .map((count) => Number(count ?? 0));
+      // (said exactly where the file ran no test and did not fail outside one)
+      assert.equal(
+        line[7] !== undefined,
+        passed! + failed! + cancelled! + skipped! + todo! === 0 && line[6] === undefined,
+        `${file}: ran no test\n${lines[0]}`,
+      );
       const own = line[6] === undefined ? (node.own === "passed" ? "passed" : null) : "failed";
       assert.deepEqual(
         {

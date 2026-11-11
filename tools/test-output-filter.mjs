@@ -89,12 +89,16 @@ if (unmatched.length > 0) {
 // first: started late, one of them would run alone at the end.
 // Beside the spec reporter, `test-in-flight.mjs` names on standard error a test still running long after it began.
 // Compact output of named files ends with one line per file and its tests' counts, the passing tests it leaves out among
-// them, so a file that ran nothing shows `0 passed` (the full suite fails such a file instead); a file that failed
-// outside its tests (it threw while loading, or its process ended non-zero) says so beside them. There
-// `test-file-counts.mjs` counts, and names a test in flight in that reporter's place.
+// them; a file that failed outside its tests (it threw while loading, or its process ended non-zero) says so beside
+// them. A file that ran no test fails the run, as in the full suite, unless a name pattern was given: then its line says
+// that the pattern matched no test in it. There `test-file-counts.mjs` counts, and names a test in flight in that
+// reporter's place.
 const countsFolder =
   fullSuite || fullOutput ? null : mkdtempSync(join(tmpdir(), "test-file-counts-"));
 const countsFile = countsFolder === null ? null : join(countsFolder, "counts.json");
+const namePattern = arguments_.some((argument) =>
+  /^--test-(?:name|skip)-pattern(?:=|$)/u.test(argument),
+);
 // The folder is removed when the run ends or the filter exits. The filter installs no signal handler, so a signal that
 // ends it leaves the folder in the system's temporary directory, where no run reads it: one counts file, empty until
 // the run ends, then one JSON entry per named file: its absolute path and five counts.
@@ -172,36 +176,56 @@ child.on("error", (error) => {
 
 /**
  * Each file's counts line, `ℹ <file>: N passed[, N failed][, N cancelled][, N skipped][, N todo][; the file failed
- * outside any test]`, or why there are none.
+ * outside any test][; <why it ran no test>]`, or why there are none; and whether a file ran no test without a name
+ * pattern to explain it.
  */
-function fileCountLines() {
+function fileCounts() {
   let counts;
   try {
     counts = JSON.parse(readFileSync(countsFile, "utf8"));
   } catch (error) {
-    return `ℹ test-output-filter: no counts per file: ${error.message}\n`;
+    return {
+      lines: `ℹ test-output-filter: no counts per file: ${error.message}\n`,
+      ranNothing: false,
+    };
   }
-  return Object.entries(counts)
+  let ranNothing = false;
+  const lines = Object.entries(counts)
     .map(([file, { passed, failed, cancelled, skipped, todo, fileFailed }]) => {
       const others = Object.entries({ failed, cancelled, skipped, todo })
         .filter(([, count]) => count > 0)
         .map(([word, count]) => `, ${count} ${word}`)
         .join("");
       const own = fileFailed ? "; the file failed outside any test" : "";
-      return `ℹ ${relative(process.cwd(), file)}: ${passed} passed${others}${own}\n`;
+      let none = "";
+      // (a file that failed outside its tests already fails the run, and says so)
+      if (passed + failed + cancelled + skipped + todo === 0 && !fileFailed) {
+        if (namePattern) none = "; the name pattern matched no test in it";
+        else {
+          ranNothing = true;
+          none = "; it ran no test, which fails the run as in the full suite";
+        }
+      }
+      return `ℹ ${relative(process.cwd(), file)}: ${passed} passed${others}${own}${none}\n`;
     })
     .join("");
+  return { lines, ranNothing };
 }
 
 child.on("close", (code, signal) => {
+  let ranNothing = false;
   if (countsFolder !== null) {
-    if (!refused && signal === null) process.stdout.write(fileCountLines());
+    if (!refused && signal === null) {
+      const counts = fileCounts();
+      process.stdout.write(counts.lines);
+      ranNothing = counts.ranNothing;
+    }
     removeCounts();
   }
   if (refused) return;
   if (signal !== null) {
     process.kill(process.pid, signal);
   } else {
-    process.exitCode = code ?? 1;
+    process.exitCode = code === 0 && ranNothing ? 1 : (code ?? 1);
   }
 });
