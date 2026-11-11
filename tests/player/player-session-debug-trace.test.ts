@@ -18,6 +18,7 @@ import {
   hostIntroduced,
 } from "../helpers/player/host-sessions.js";
 import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
+import { reportsInto } from "../helpers/player/rewind-host.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 
 /** The value trace the host's session runs with, as the host holds it. */
@@ -315,7 +316,11 @@ test("a view's reply of a trace turned off and on again never shows", async (con
 test("a session a Player error stopped is still viewed as it stopped", async (context) => {
   const { host, view, request, settle } = await viewed(context);
   const before = view.value!;
-  host.reportHostError(new TypeError("A component failed."));
+  const reported: unknown[] = [];
+  reportsInto(context, reported);
+  const failure = new TypeError("A component failed.");
+  host.reportHostError(failure);
+  assert.deepEqual(reported, [failure]);
   await settle();
   // Its view is asked for again, from the stopped session, and shows what it showed.
   request.value = recent({ recent: { choices: {}, pages: { none: 2 } } });

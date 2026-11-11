@@ -77,6 +77,9 @@ async function handoffRow(
     // The owner is a plain object, whose methods the composable calls through it.
     mutate?.(host.rewind.owner);
     const want = expectation(each);
+    // The host errors the Player reports, which may be only those this row raises itself (asserted last).
+    const reported: unknown[] = [];
+    reportsInto(context, reported);
     // An adoption that succeeds adopts by its answer, so the session runs on from the restored state; after a loss its
     // completion is refused, and nothing runs on.
     const adopted = each.operation.startsWith("adopt") && each.outcome === "succeeds" && !want.lost;
@@ -473,6 +476,22 @@ async function handoffRow(
     // The owner's return state: nothing waits once the gate settled, opened or failed.
     if (gated && !want.lost && (want.shows === "live" || want.shows === "restored"))
       assert.equal(host.rewind.owner.reinstatement.value, null, "the return's state");
+    // The row's own errors: its Player error, which is reported, a failing restart gate and a lost connection.
+    const raised = [
+      ...(each.event === "Player error" ? ["A Player error."] : []),
+      ...(gated && each.outcome === "fails" ? ["The restart gate failed."] : []),
+      ...(each.event === "loss" ? ["The engine Worker failed: injected."] : []),
+    ];
+    const messages = reported.map((error) =>
+      error instanceof Error ? error.message : String(error),
+    );
+    assert.deepEqual(
+      messages.filter((message) => !raised.includes(message)),
+      [],
+      "no host error but the row's own",
+    );
+    if (each.event === "Player error")
+      assert.ok(messages.includes("A Player error."), "the Player error is reported");
     if (mutate === undefined) lifecycleRun.push(each);
   }
 }

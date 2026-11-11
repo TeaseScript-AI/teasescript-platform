@@ -26,6 +26,7 @@ import { deliveryOwner } from "../../player/engine-bridge/delivery.js";
 import type { UntypedBridge } from "../helpers/bridge/untyped.js";
 import { untypedBridge } from "../helpers/bridge/untyped.js";
 import { hostIntroduced, loadHostFacade } from "../helpers/player/host-sessions.js";
+import { reportsInto } from "../helpers/player/rewind-host.js";
 
 /*
  * At a Player error stop, what is shown is what the host ran, which its export and recording hold, and nothing shows
@@ -178,9 +179,11 @@ test("an observation in transit at a stop shows before the stop line, and nothin
     { flush: "sync" },
   );
   document.dispatchEvent(new Event("visibilitychange"));
-  player.reportHostError(
-    new TypeError("a component failed while the observation's reply was in transit"),
-  );
+  const reported: unknown[] = [];
+  reportsInto(context, reported);
+  const failure = new TypeError("a component failed while the observation's reply was in transit");
+  player.reportHostError(failure);
+  assert.deepEqual(reported, [failure]);
   const line = stopLine(bridge, player);
   assert.ok(line.ui >= 1_000, "the observation the host ran shows");
   assert.deepEqual([line.store, line.export], [line.ui, line.ui]);
@@ -199,19 +202,21 @@ test("an adoption in transit at a stop shows, as the store and recording hold it
   const request = bridge.client.request;
   let stopped!: () => void;
   const stop = new Promise<void>((resolve) => (stopped = resolve));
+  const reported: unknown[] = [];
+  reportsInto(context, reported);
+  const failure = new TypeError("a component failed while the adoption was in transit");
   context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
     const result = request(...args);
     if (args[0] === "adoptCatchUp")
       queueMicrotask(() => {
-        player.reportHostError(
-          new TypeError("a component failed while the adoption was in transit"),
-        );
+        player.reportHostError(failure);
         stopped();
       });
     return result;
   });
   document.dispatchEvent(new Event("visibilitychange"));
   await stop;
+  assert.deepEqual(reported, [failure]);
   for (let index = 0; index < 10; index += 1) await turn();
   const line = stopLine(bridge, player);
   assert.ok(line.ui >= 1_000);
@@ -306,9 +311,12 @@ for (const ending of ["replaced", "stopped"] as const)
     const before = trace.status();
     assert.ok(before.records > 0);
     let ended = false;
+    const reported: unknown[] = [];
+    reportsInto(context, reported);
+    const failure = new TypeError("A component failed.");
     onceAsked(bridge, "beginRecording", () => {
       ended = true;
-      if (ending === "stopped") player.reportHostError(new TypeError("A component failed."));
+      if (ending === "stopped") player.reportHostError(failure);
     });
     player.prepareRestore(
       hostIntroduced(bridge, compiler.createPlayerRuntimeSession('showButton "Old"\nexit')),
@@ -323,6 +331,7 @@ for (const ending of ["replaced", "stopped"] as const)
     }
     await continuing.catch(() => {});
     for (let index = 0; index < 10; index += 1) await turn();
+    assert.deepEqual(reported, ending === "stopped" ? [failure] : []);
     const after = trace.status();
     if (ending === "stopped")
       assert.deepEqual(
@@ -517,7 +526,11 @@ for (const kind of [
     }
     const beginning = player.activate();
     if (kind === "continue-in-transit") await sent;
-    player.reportHostError(new TypeError(`a component failed during ${kind}`));
+    const reported: unknown[] = [];
+    reportsInto(context, reported);
+    const failure = new TypeError(`a component failed during ${kind}`);
+    player.reportHostError(failure);
+    assert.deepEqual(reported, [failure]);
     await compiled;
     await beginning;
     for (let index = 0; index < 10; index += 1) await turn();
@@ -550,7 +563,11 @@ test("a Start that replaces an error stop pending on a Start the host rejects ru
   // The host holds no such plan, so it rejects the Start.
   player.prepare({ plan: "missing-plan", options: () => ({ wallClockMs: 0 }) });
   const rejected = player.activate();
-  player.reportHostError(new TypeError("a component failed while a Start began"));
+  const reported: unknown[] = [];
+  reportsInto(context, reported);
+  const failure = new TypeError("a component failed while a Start began");
+  player.reportHostError(failure);
+  assert.deepEqual(reported, [failure]);
   assert.equal(player.stopped.value, true, "input stops while the stop waits for the Start");
   player.prepare(next);
   const replacement = player.activate();
@@ -616,11 +633,13 @@ for (const [completion, issue] of Object.entries(completions))
       const done = issue(bridge, player, issuer).catch(() => {});
       const changes: (string | null)[] = [];
       let at: PlayerSession | null = null;
+      const reported: unknown[] = [];
+      reportsInto(context, reported);
+      const failure = new TypeError("a component failed");
       if (interference === "a replacement") {
         player.prepare(replacement);
         await player.activate();
-      } else if (interference === "a stop")
-        player.reportHostError(new TypeError("a component failed"));
+      } else if (interference === "a stop") player.reportHostError(failure);
       else scope.stop();
       const stopWatch = watch(
         player.session,
@@ -637,6 +656,7 @@ for (const [completion, issue] of Object.entries(completions))
       at = player.session.value;
       await done;
       for (let index = 0; index < 10; index += 1) await turn();
+      assert.deepEqual(reported, interference === "a stop" ? [failure] : []);
       if (interference === "a replacement") {
         const shown = player.session.value!;
         assert.deepEqual(
@@ -747,9 +767,15 @@ test("a Continue whose capture throws fails after its recording began, so the fa
   );
   player.prepareRestore(hostIntroduced(bridge, restored));
   failing = true;
+  const reported: unknown[] = [];
+  reportsInto(context, reported);
   await player.activate();
   for (let index = 0; index < 10; index += 1) await turn();
   assert.equal(player.hostError.value, "TypeError");
+  assert.deepEqual(
+    reported.map((error) => (error instanceof Error ? error.message : String(error))),
+    ["no time zone"],
+  );
   // The recording is the restored session's, which the failed Continue began; not the earlier session's.
   const recording = facade.heldRecording(bridge)!;
   assert.notEqual(recording.plan, facade.heldPlan(bridge, earlier.planToken));
