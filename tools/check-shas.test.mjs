@@ -142,12 +142,12 @@ test(
 );
 
 test(
-  "a float's digits are skipped only when no word character touches the number: every ASCII character and each Unicode category, on both sides",
+  "a float's digits are skipped only when no word character touches the number: printable ASCII, tab, newline and each Unicode category, on both sides",
   { timeout: 30_000 },
   () => {
     const { directory } = repository();
     try {
-      // One character of every ASCII code and one of each Unicode general category (a lone surrogate, category Cs, cannot be
+      // Every printable ASCII character, tab and newline, and one of each Unicode general category (a lone surrogate, category Cs, cannot be
       // written as UTF-8 text). Pc and Nd beyond ASCII, and an astral letter, are named too.
       const characters = [
         ...Array.from({ length: 95 }, (_, n) => String.fromCharCode(32 + n)),
