@@ -162,7 +162,7 @@ const FORMATTED = /\.(?:ts|tsx|cts|mts|js|jsx|cjs|mjs|vue)$/u;
 const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim();
 
 /** A reason the checks cannot run: exit 2. */
-class CannotRun extends Error {}
+export class CannotRun extends Error {}
 
 function cannotRun(message) {
   throw new CannotRun(message);
@@ -326,23 +326,24 @@ export function notInstalled(lock, installed, host = HOST) {
 }
 
 /**
- * Why npm's record of the `node_modules` in the working folder does not hold its `package-lock.json` (#2087, as
- * `notInstalled` compares them), naming the first differences and the remedies, or `null` when it does. A folder without a lockfile has nothing to compare.
+ * Why npm's record of the `node_modules` in the folder `root` (the working folder by default) does not hold its
+ * `package-lock.json` (#2087, as `notInstalled` compares them), naming the first differences and the remedies, or `null`
+ * when it does. A folder without a lockfile has nothing to compare.
  */
-function lockfileMismatch() {
-  if (!existsSync("package-lock.json")) return null;
+export function lockfileMismatch(root = ".") {
+  if (!existsSync(join(root, "package-lock.json"))) return null;
   const why = (what) =>
-    `npm's record of node_modules (${realpathSync("node_modules")}) does not hold package-lock.json: ${what}. ` +
+    `npm's record of node_modules (${realpathSync(join(root, "node_modules"))}) does not hold package-lock.json: ${what}. ` +
     "Main's lockfile: wait for teasescript-main's refresh, and remove a node_modules link pinned to a slot instead of " +
     "`current` (check-changed then links `current`). A branch behind main's lockfile: rebase, or check with --merged. " +
     "A lockfile the branch changes: run the checks in the queue. Your own node_modules: run `npm ci`";
-  if (!existsSync("node_modules/.package-lock.json"))
+  if (!existsSync(join(root, "node_modules/.package-lock.json")))
     return why("it has no .package-lock.json, which npm writes at each install");
   let differences;
   try {
     differences = notInstalled(
-      JSON.parse(readFileSync("package-lock.json", "utf8")),
-      JSON.parse(readFileSync("node_modules/.package-lock.json", "utf8")),
+      JSON.parse(readFileSync(join(root, "package-lock.json"), "utf8")),
+      JSON.parse(readFileSync(join(root, "node_modules/.package-lock.json"), "utf8")),
     );
   } catch (error) {
     return `cannot compare node_modules with package-lock.json: ${error.message}`;

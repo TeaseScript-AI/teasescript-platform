@@ -60,15 +60,27 @@
 // could not run: <reason>` on exit 2, and `structure report failed: <error>` when the report throws, which it then
 // rethrows. The rows are read from the report's own signals; every other signal is in the report only.
 //
+// Without `node_modules` in its checkout, it links main's before it loads `ts-morph`, as `check-changed` does and through
+// its `linkMainNodeModules` (`TEASESCRIPT_MAIN` relative to the checkout), saying so on standard error; and, as
+// `check-changed`, it reports nothing unless npm's record of the install holds the checkout's lockfile.
+//
 // Exit status: 0 when the report is printed, 2 when an option has no value (the next argument missing or another
-// option), --diff cannot read the change as Git wrote it, or --summary has no --diff.
+// option), --diff cannot read the change as Git wrote it, --summary has no --diff, or there is no node_modules it can
+// link, or one whose record does not hold the lockfile.
 import { execFileSync } from "node:child_process";
-import { appendFileSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ts } from "ts-morph";
+import {
+  CannotRun as LinkRefused,
+  linkMainNodeModules,
+  lockfileMismatch,
+} from "./check-changed.mjs";
 import { movedLinesOf, MovedLinesUnreadable } from "./moved-lines.mjs";
-import { verdictsOf } from "./pure-move-check.mjs";
+
+// `ts-morph`, and `pure-move-check.mjs`, which imports it, load once `main` has made sure of `node_modules`
+let ts;
+let verdictsOf;
 
 const SIGNALS = {
   fileLines: 1000,
@@ -688,8 +700,34 @@ const command = [
   ...given.filter((_, i) => given[i] !== "--summary" && given[i - 1] !== "--summary"),
 ].join(" ");
 
+/**
+ * Loads `ts-morph` from this checkout's `node_modules`: without one, main's, linked as `check-changed` links it. No
+ * `node_modules` it can link, or one whose record does not hold the lockfile, stops the report (exit 2).
+ */
+async function loadTypeScript() {
+  const root = path.resolve(import.meta.dirname, "..");
+  let refused;
+  try {
+    if (!existsSync(path.join(root, "node_modules")))
+      console.error(`structure-report: ${linkMainNodeModules(process.env, root)}`);
+    refused = lockfileMismatch(root);
+  } catch (error) {
+    if (!(error instanceof LinkRefused)) throw error;
+    refused = error.message;
+  }
+  if (refused !== null) {
+    const reason = `structure-report: ${refused}`;
+    console.error(reason);
+    if (summaryOut !== undefined)
+      writeSummary(summaryBlock(command, undefined, [`structure report could not run: ${reason}`]));
+    process.exit(2);
+  }
+  ({ ts } = await import("ts-morph"));
+  ({ verdictsOf } = await import("./pure-move-check.mjs"));
+}
+
 /** The report the command line asks for. */
-function main() {
+async function main() {
   if (valueless !== undefined) {
     console.error(`structure-report: ${valueless} needs a value\n${USAGE}`);
     process.exit(2);
@@ -700,6 +738,7 @@ function main() {
     writeSummary(summaryBlock(command, undefined, [`structure report could not run: ${reason}`]));
     process.exit(2);
   }
+  await loadTypeScript();
   if (diffBase) {
     let mergeBase, found;
     try {
@@ -800,7 +839,7 @@ if (
   realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
 ) {
   try {
-    main();
+    await main();
   } catch (error) {
     // A throw is the tool's own failure: the summary says so, since a missing block reads as no signals. The error
     // itself is what the run reports, also when the summary cannot be written (a summary file that is a folder).
