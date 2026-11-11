@@ -5,6 +5,7 @@ import {
   mkdtempSync,
   readFileSync,
   readdirSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
 import { homedir, tmpdir } from "node:os";
@@ -220,6 +221,19 @@ export function batchOf(all, split) {
 /** An argument as a shell word, for `sx-job submit-batch`'s lines. */
 const quoted = (word) => `'${word.replaceAll("'", "'\\''")}'`;
 
+/**
+ * `use(folder)`'s result, `folder` a new temporary folder of this invocation (under `os.tmpdir()`: a queue job's own
+ * `TMPDIR`), removed by its path once `use` returns or throws (#2433); a signal that ends the process leaves it.
+ */
+function inTemporaryFolder(use) {
+  const folder = mkdtempSync(path.join(tmpdir(), "compiler-replay-"));
+  try {
+    return use(folder);
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+}
+
 /** `sx-job` with `args`: its job ids, or a usage error naming its output. */
 function queue(args) {
   const run = spawnSync("sx-job", args, { encoding: "utf8" });
@@ -296,11 +310,13 @@ function submit({ positional: [base, head], options }) {
   process.stdout.write(`jobs: ${shards.length} in one batch\n`);
   if (options.dry)
     for (const args of shards) process.stdout.write(`${JSON.stringify(["submit", ...args])}\n`);
-  else {
-    const file = path.join(mkdtempSync(path.join(tmpdir(), "compiler-replay-")), "batch.txt");
-    writeFileSync(file, shards.map((args) => `${args.map(quoted).join(" ")}\n`).join(""));
-    for (const id of queue(["submit-batch", file])) process.stdout.write(`${id}\n`);
-  }
+  else
+    // (`sx-job submit-batch` reads the file whole before it returns)
+    inTemporaryFolder((folder) => {
+      const file = path.join(folder, "batch.txt");
+      writeFileSync(file, shards.map((args) => `${args.map(quoted).join(" ")}\n`).join(""));
+      for (const id of queue(["submit-batch", file])) process.stdout.write(`${id}\n`);
+    });
   process.stdout.write(`campaigns: ${prefix}-set, ${prefix}-areas\n`);
 }
 
@@ -796,32 +812,35 @@ function rerunStalls({ positional: [prefix, base, head], options }) {
       const file = path.join(out, `${areaOf(name)}.work.jsonl`);
       return existsSync(file) ? [file] : [];
     });
-  const index = path.join(mkdtempSync(path.join(tmpdir(), "compiler-replay-")), "index.json");
-  if (work.length > 0) {
-    const run = spawnSync(
-      process.execPath,
-      [path.join(ROOT, "tests/families/stalls.mjs"), ...work, "--index", index],
-      { encoding: "utf8" },
-    );
-    // (a record stalls.mjs refuses is no index, never "no stalled source")
-    if (run.status !== 0 && run.status !== 1)
-      throw new Usage(
-        `stalls.mjs refused the work records: ${(run.stderr.trim() || run.stdout.trim()).split("\n").at(-1)}`,
+  // (`sx-job submit` copies `--in index.json` before it returns)
+  return inTemporaryFolder((folder) => {
+    const index = path.join(folder, "index.json");
+    if (work.length > 0) {
+      const run = spawnSync(
+        process.execPath,
+        [path.join(ROOT, "tests/families/stalls.mjs"), ...work, "--index", index],
+        { encoding: "utf8" },
       );
-  }
-  if (!existsSync(index) || JSON.parse(readFileSync(index, "utf8")).entries?.length === 0) {
-    process.stdout.write("no stalled source\n");
+      // (a record stalls.mjs refuses is no index, never "no stalled source")
+      if (run.status !== 0 && run.status !== 1)
+        throw new Usage(
+          `stalls.mjs refused the work records: ${(run.stderr.trim() || run.stdout.trim()).split("\n").at(-1)}`,
+        );
+    }
+    if (!existsSync(index) || JSON.parse(readFileSync(index, "utf8")).entries?.length === 0) {
+      process.stdout.write("no stalled source\n");
+      return 0;
+    }
+    for (const id of queue([
+      "submit",
+      ...stallsSubmission(prefix, base, head, index, {
+        ...options,
+        memory: options.memory ?? "12288",
+      }),
+    ]))
+      process.stdout.write(`${id}\n`);
     return 0;
-  }
-  for (const id of queue([
-    "submit",
-    ...stallsSubmission(prefix, base, head, index, {
-      ...options,
-      memory: options.memory ?? "12288",
-    }),
-  ]))
-    process.stdout.write(`${id}\n`);
-  return 0;
+  });
 }
 
 /**
@@ -984,43 +1003,45 @@ function aside({ positional: [prefix, base, head], options }) {
       })),
     ...[...new Set(r.set.differences.map((d) => d.name))].map((name) => ({ set: name })),
   ];
-  const folder = mkdtempSync(path.join(tmpdir(), "compiler-replay-"));
-  writeFileSync(
-    path.join(folder, "rows.jsonl"),
-    rows.map((row) => JSON.stringify(row)).join("\n") + "\n",
-  );
-  for (const { pattern, reason } of declared)
-    process.stdout.write(`set aside: /${pattern}/ (${reason})\n`);
-  for (const id of queue([
-    "submit",
-    "--name",
-    `${prefix}-aside`,
-    "--owner",
-    options.owner,
-    "--campaign",
-    `${prefix}-aside`,
-    "--commit",
-    `base=${base}`,
-    "--commit",
-    `head=${head}`,
-    "--data",
-    CASES,
-    "--mem",
-    "8G",
-    "--timeout",
-    "3h",
-    "--in",
-    `rows.jsonl=${path.join(folder, "rows.jsonl")}`,
-    "--in",
-    `declare.json=${options.declare}`,
-    "--",
-    "bash",
-    "-c",
-    'export CASES_JSON=$HOME/work/o4-m4-g3/cases.json; node "$SX_TREE_head/tools/compiler-replay.mjs" aside-run ' +
-      '"$SX_TREE_base" "$SX_TREE_head" "$SX_IN/rows.jsonl" "$SX_IN/declare.json" "$SX_OUT/aside.jsonl"',
-  ]))
-    process.stdout.write(`${id}\n`);
-  return 0;
+  // (`sx-job submit` copies `--in rows.jsonl` before it returns)
+  return inTemporaryFolder((folder) => {
+    writeFileSync(
+      path.join(folder, "rows.jsonl"),
+      rows.map((row) => JSON.stringify(row)).join("\n") + "\n",
+    );
+    for (const { pattern, reason } of declared)
+      process.stdout.write(`set aside: /${pattern}/ (${reason})\n`);
+    for (const id of queue([
+      "submit",
+      "--name",
+      `${prefix}-aside`,
+      "--owner",
+      options.owner,
+      "--campaign",
+      `${prefix}-aside`,
+      "--commit",
+      `base=${base}`,
+      "--commit",
+      `head=${head}`,
+      "--data",
+      CASES,
+      "--mem",
+      "8G",
+      "--timeout",
+      "3h",
+      "--in",
+      `rows.jsonl=${path.join(folder, "rows.jsonl")}`,
+      "--in",
+      `declare.json=${options.declare}`,
+      "--",
+      "bash",
+      "-c",
+      'export CASES_JSON=$HOME/work/o4-m4-g3/cases.json; node "$SX_TREE_head/tools/compiler-replay.mjs" aside-run ' +
+        '"$SX_TREE_base" "$SX_TREE_head" "$SX_IN/rows.jsonl" "$SX_IN/declare.json" "$SX_OUT/aside.jsonl"',
+    ]))
+      process.stdout.write(`${id}\n`);
+    return 0;
+  });
 }
 
 /** On a queue worker: each row compiled on both built trees (`aside`'s job). */
