@@ -168,6 +168,43 @@ export async function topologyBridge(
 }
 
 /**
+ * The connections of one Player on `topology`: the first, and each fresh one its `nextConnection` (`next`) opens after a
+ * loss, all of `topology` and ended after the test. `calls()` counts `next`'s calls; `failNext()` makes the next call
+ * reject, as a connection that cannot open.
+ */
+export async function topologyConnections(
+  context: TestContext,
+  topology: Topology,
+  options: { readonly delayMs?: number } = {},
+) {
+  const made: TopologyBridge[] = [await topologyBridge(context, topology, options)];
+  let calls = 0;
+  let failing = false;
+  return {
+    /** Each connection made, the first included, in order. */
+    get made(): readonly TopologyBridge[] {
+      return made;
+    },
+    first: made[0]!,
+    /** The connection opened last. */
+    current: () => made.at(-1)!,
+    calls: () => calls,
+    failNext: () => void (failing = true),
+    async next(): Promise<PlayerBridge> {
+      calls += 1;
+      if (failing) {
+        failing = false;
+        throw new Error("The engine Worker could not be opened.");
+      }
+      const fresh = await topologyBridge(context, topology, options);
+      made.push(fresh);
+      return fresh.bridge;
+    },
+  };
+}
+export type TopologyConnections = Awaited<ReturnType<typeof topologyConnections>>;
+
+/**
  * `port` with this connection's post log and reply gate: each request it posts is logged; once the gate's target op is
  * posted, every reply from then on waits at the port, the target's among them, until `release`.
  */
