@@ -1819,7 +1819,7 @@ test("parentheses answer for their content: a parenthesised count and index read
  * The derived evaluator against the engine where a value is parenthesised (Codex r20 H4): a count's, an index's and a checked
  * store's failure is sited at the content, as the engine reports it, and the store's checked value span with it.
  */
-test("the derived evaluator sites a parenthesised value's failure at its content, as the engine does (H4)", () => {
+test("the derived evaluator sites a parenthesised value's failure at its content, as the engine does", () => {
   for (const [source, hostValue, failure] of [
     ['repeat (hostValue) {\n  say "RUN"\n}\nexit\n', 2.5, "TSR043@8:17"],
     ["let xs = [1, 2]\nlet y = xs[(hostValue)]\nexit\n", 0.5, "TSR024@28:37"],
@@ -2168,7 +2168,7 @@ function admittedOf(source: string, name: string, path: readonly string[] = []):
     : admitted.by;
 }
 
-test("a place published with a kind checks the external data stored into it, named or inline, at any endpoint (A7, C9, R4-F1)", () => {
+test("a place published with a kind checks the external data stored into it, named or inline, at any endpoint (A7, C9)", () => {
   // the external reviewer's endpoint matrix: per kind (a known element, a fitting host value and bad ones, an integer's
   // fractional one too), projection (an index, a nested index, parentheses, an index held in a variable), host data
   // inline or named, and without or with a later store: the place is decided by the known element (or the later store),

@@ -5124,7 +5124,7 @@ test("a projection of a written binding keeps its written type at the projected 
   assert.deepEqual(differing, []);
 });
 
-test("literals of typed ingresses share their conflict paths only by the type their defaults give (A8, F18, Astra r2 D-W1)", () => {
+test("literals of typed ingresses share their conflict paths only by the type their defaults give (A8, F18)", () => {
   // a literal of one default's ingresses beside one of two defaults: the second still errs at the ingress of the other
   // default, as alone; a `load` beside a parse of one default, two classes of one kind, offends nowhere
   const seeds = 'let seed = {n: 1}\nlet other = {n: "x"}\nlet xs = []\n';
@@ -5334,7 +5334,7 @@ test("each store of one value whole owes its obligation once, however many lists
   }
 });
 
-test("named external data a carrier stores into a place published with a kind owes its check there (C9, R4-F1)", () => {
+test("named external data a carrier stores into a place published with a kind owes its check there (C9)", () => {
   // per carrier outside the candidate's slice (its plan and its run wait for the slice): the warning where the named
   // data is read, with a `copy-type` check against the published kind; a source decided at its own stores (a list whose
   // element `1` decides) keeps its check there only; a member of host data owes C5's obligation on the receiver and,
@@ -5507,7 +5507,7 @@ test("a choice list's earliest evaluated ingress names C1's site, in both elemen
  * computations over host data stay two contract entries and each keeps its leaf: a consumer that meets either
  * payload brings each store's boundary, at each host value. The whole record, in both orders.
  */
-test("two equal computations over host data keep each ingress's boundary (S6-CARRIERS §3.1, design B3)", () => {
+test("two equal computations over host data keep each ingress's boundary (S6-CARRIERS §3.1)", () => {
   const source =
     'let flagHost = askBoolean "flag"\nlet box = {payload: hostValue otherwise null}\n' +
     "if flagHost { box = {payload: hostValue otherwise null} }\nlet count: integer = box.payload\nexit\n";

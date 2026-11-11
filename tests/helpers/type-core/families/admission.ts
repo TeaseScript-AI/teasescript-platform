@@ -311,7 +311,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   {
     name: "A2-published-wide-copies-conditional",
     measures:
-      "A2, C9: A2-published-wide-copies with a conditional store into the record before the copies (M1)",
+      "A2, C9: A2-published-wide-copies with a conditional store into the record before the copies",
     program: (k) =>
       main(
         lines(

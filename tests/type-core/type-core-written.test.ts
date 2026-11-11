@@ -1023,7 +1023,7 @@ test("V30 §13's union rule at every place and depth: one compile error at the w
   assert.equal(analysed.size, 2 * new Set(UNION_RULE_MATRIX.map((c) => c.placement)).size);
 });
 
-test("a copy of an unannotated source has its whole-source type, a later fraction or null included (Q1, ADR 0021 1.1, 1.2)", (t) => {
+test("a copy of an unannotated source has its whole-source type, a later fraction or null included (ADR 0021 1.1, 1.2)", (t) => {
   const { wrong, full } = failing(INFERRED_COPY_MATRIX);
   t.diagnostic(
     `${INFERRED_COPY_MATRIX.length} sources (${full} in all three layers), both orders, sharing on and off`,

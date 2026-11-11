@@ -548,7 +548,7 @@ function w45(k: number, variant: "flag" | "plain" | "firsts" | "seconds"): strin
 export const WORK_FAMILIES: readonly WorkFamily[] = [
   {
     name: "W1",
-    measures: "O5, O7: k chapters calling a shared function that updates k scores",
+    measures: "k chapters calling a shared function that updates k scores",
     program: (k) =>
       main(
         lines(
@@ -593,7 +593,7 @@ export const WORK_FAMILIES: readonly WorkFamily[] = [
   },
   {
     name: "W4",
-    measures: "F12, O17: a list of records with k counters, k presets and a reset loop",
+    measures: "F12: a list of records with k counters, k presets and a reset loop",
     program: (k) =>
       main(
         lines(

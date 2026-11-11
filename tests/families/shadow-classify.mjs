@@ -199,7 +199,7 @@ export const PAIR_CLASSES = [
     id: "differs/surviving",
     state: "open",
     rule: "compared, the changed identities include no TSV076 and one of TSV010, TSV012, TSV052, TSV062, TSV065, TSV066 (surviving checks and reachability)",
-    authority: "S9b #1072; #1623 (an empty loop's warning); TSV052 is reachability's (PLAN T5)",
+    authority: "S9b #1072; #1623 (an empty loop's warning); TSV052 is reachability's",
     witness: "f824cdfe6f6c fallback-unused",
     match: (f) =>
       f.diag && !f.changed.has("TSV076") && [...f.changed].some((c) => SURVIVING.has(c)),
@@ -246,7 +246,7 @@ export const PAIR_CLASSES = [
     id: "differs/wording",
     state: "attributed",
     rule: "compared, only the diagnostics' text differs (identities, checks and plan equal)",
-    authority: "S11's message classification (#1708's receiver words are such a class)",
+    authority: "#1075's message classification (#1708's receiver words are such a class)",
     witness: "d746f603736f cell/C13/1",
     match: (f) =>
       f.kind === "compared" &&

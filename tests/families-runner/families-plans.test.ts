@@ -541,7 +541,7 @@ test("a worker's error delivered before the messages it posted first ends its so
   assert.equal(next!.stalled, undefined);
 });
 
-test("the plans comparison ends with exit 2 and writes no record where a worker posts a stray message during a source (#2342, R17)", (t) => {
+test("the plans comparison ends with exit 2 and writes no record where a worker posts a stray message during a source (#2342)", (t) => {
   const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
   built(folder, [
@@ -573,7 +573,7 @@ HELD_MODES[0].run = (f) => (port.postMessage({ note: "stray" }), run(f));
   assert.equal(readFileSync(out, "utf8"), before);
 });
 
-test("every record form the runner writes, at its allowance edges, passes the summary's check (#2341, R19, R20)", (t) => {
+test("every record form the runner writes, at its allowance edges, passes the summary's check (#2341)", (t) => {
   const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
   // (`--demands` as `map(Number)` reads it, unchecked: zero, negative, fractional, and NaN and Infinity, which JSON

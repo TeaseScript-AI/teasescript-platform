@@ -1180,7 +1180,7 @@ const AD2: readonly (readonly [
   ],
 ];
 
-test("a load repairs a stored record per field, the stored value kept, each bad field named by TSW016: AD-2's records and scenarios (ADR 0021 rule 6.5)", () => {
+test("a load repairs a stored record per field, the stored value kept, each bad field named by TSW016: the expectation set's records and scenarios (ADR 0021 rule 6.5)", () => {
   // the set's five AD-2 records, in the fixture since S6b's refresh
   const records = new Map(
     readFixture()
@@ -1269,7 +1269,7 @@ test("a load repairs a stored record per field, the stored value kept, each bad 
  * revisions both increase once for S7; a plan without it, such as every legacy plan, and its checkpoints stay valid and
  * run as before, and plan validation rejects the new fields where they do not belong.
  */
-test("a legacy plan's checkpoint restores at the current revisions and resumes as before, at every boundary (D7)", () => {
+test("a legacy plan's checkpoint restores at the current revisions and resumes as before, at every boundary", () => {
   // every row's construct in one script the production backend compiles: its plan has none of the new content
   const source =
     'let room = {count: 1}\nroom.name = "hall"\nlet xs = [1, 2]\nlet v = xs.get(5, default: 0)\n' +
