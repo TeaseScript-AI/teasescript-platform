@@ -40,10 +40,12 @@ import { isSuiteTestPath, isTypeCoreTestFile } from "./test-shards.mjs";
 //
 // Without `node_modules`, which it never installs, it links main's: that of the checkout `TEASESCRIPT_MAIN` names
 // (unset or empty, `/opt/teasescript-agents/teasescript-main/current`), as `linkMainNodeModules` says. It runs no
-// check with a `node_modules` that does not install the checked tree's `package-lock.json` (`notInstalled`).
+// check with a `node_modules` that does not install the checked tree's `package-lock.json` (`notInstalled`), and
+// gives no verdict when it no longer does once the checks ended.
 //
 // Exit status: 0 when every check passed, 1 when one failed, 2 when the checks cannot run (no base, a merge conflict,
-// a leftover it may not remove, no `node_modules` it can link, or one that does not install the lockfile).
+// a leftover it may not remove, no `node_modules` it can link, or one that does not install the lockfile, before or
+// after the checks).
 
 /** The projects a changed path can belong to, each with the npm scripts or commands that check it. */
 export const PROJECTS = {
@@ -234,20 +236,18 @@ export function notInstalled(lock, installed) {
 }
 
 /**
- * Refuses a `node_modules` in the working folder that does not install its `package-lock.json` (#2087), naming the
- * first differences. A folder without a lockfile has nothing to compare.
+ * Why the `node_modules` in the working folder does not install its `package-lock.json` (#2087), naming the first
+ * differences and the remedies, or `null` when it does. A folder without a lockfile has nothing to compare.
  */
-function requireInstalledLockfile() {
-  if (!existsSync("package-lock.json")) return;
-  const refuse = (what) =>
-    cannotRun(
-      `node_modules (${realpathSync("node_modules")}) does not install package-lock.json: ${what}. ` +
-        "Main's lockfile: wait for teasescript-main's refresh (a link to a slot, not `current`, never gets it: " +
-        "remove the link, and check-changed links `current`). A branch behind main's lockfile: rebase, or check " +
-        "with --merged. A lockfile the branch changes: run the checks in the queue",
-    );
+function lockfileMismatch() {
+  if (!existsSync("package-lock.json")) return null;
+  const why = (what) =>
+    `node_modules (${realpathSync("node_modules")}) does not install package-lock.json: ${what}. ` +
+    "Main's lockfile: wait for teasescript-main's refresh, and remove a node_modules link pinned to a slot instead of " +
+    "`current` (check-changed then links `current`). A branch behind main's lockfile: rebase, or check with --merged. " +
+    "A lockfile the branch changes: run the checks in the queue";
   if (!existsSync("node_modules/.package-lock.json"))
-    refuse("it has no .package-lock.json, which npm writes at each install");
+    return why("it has no .package-lock.json, which npm writes at each install");
   let differences;
   try {
     differences = notInstalled(
@@ -255,13 +255,14 @@ function requireInstalledLockfile() {
       JSON.parse(readFileSync("node_modules/.package-lock.json", "utf8")),
     );
   } catch (error) {
-    cannotRun(`cannot compare node_modules with package-lock.json: ${error.message}`);
+    return `cannot compare node_modules with package-lock.json: ${error.message}`;
   }
-  if (differences.length > 0)
-    refuse(
-      differences.slice(0, 5).join(", ") +
-        (differences.length > 5 ? `, and ${differences.length - 5} more` : ""),
-    );
+  return differences.length === 0
+    ? null
+    : why(
+        differences.slice(0, 5).join(", ") +
+          (differences.length > 5 ? `, and ${differences.length - 5} more` : ""),
+      );
 }
 
 /**
@@ -395,7 +396,8 @@ async function check(cleanups) {
     } catch {
       cannotRun(`no merge-base of HEAD and ${ref}: fetch it, or name one with --base`);
     }
-  requireInstalledLockfile();
+  const mismatch = lockfileMismatch();
+  if (mismatch !== null) cannotRun(mismatch);
 
   const changed = [
     ...git("diff", "--name-only", "--diff-filter=d", mergeBase).split("\n"),
@@ -453,6 +455,14 @@ async function check(cleanups) {
   for (const { name, passed, output, shown } of results)
     if (!passed || shown) process.stdout.write(`\n--- ${name} ---\n${output}`);
   process.exitCode = results.every(({ passed }) => passed) ? 0 : 1;
+  // (a link through main's `current` follows its refresh, which can switch it to another install while the checks run)
+  const after = lockfileMismatch();
+  if (after !== null) {
+    process.stderr.write(
+      `check-changed: node_modules changed while the checks ran, so their verdicts do not count: ${after}\n`,
+    );
+    process.exitCode = 2;
+  }
 }
 
 async function main() {

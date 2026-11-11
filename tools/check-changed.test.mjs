@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -618,6 +619,12 @@ test("notInstalled names each lockfile package the install lacks or holds otherw
     });
 });
 
+/** What a refusal of a node_modules that does not install the lockfile says to do. */
+const REMEDIES =
+  "Main's lockfile: wait for teasescript-main's refresh, and remove a node_modules link pinned to a slot instead of " +
+  "`current` (check-changed then links `current`). A branch behind main's lockfile: rebase, or check with --merged. " +
+  "A lockfile the branch changes: run the checks in the queue";
+
 test(
   "with a node_modules that does not install the lockfile it runs no check, plain or merged, says what differs, and exits 2 (#2087)",
   { timeout: 60_000 },
@@ -653,15 +660,67 @@ test(
           assert.equal(
             result.stderr,
             `check-changed: node_modules (${realpathSync(join(directory, "node_modules"))}) does not install ` +
-              `package-lock.json: ${what}. Main's lockfile: wait for teasescript-main's refresh (a link to a slot, ` +
-              "not `current`, never gets it: remove the link, and check-changed links `current`). A branch behind " +
-              "main's lockfile: rebase, or check with --merged. A lockfile the branch changes: run the checks in " +
-              "the queue\n",
+              `package-lock.json: ${what}. ${REMEDIES}\n`,
             at,
           );
         } finally {
           rmSync(directory, { recursive: true, force: true });
         }
       }
+  },
+);
+
+test(
+  "a node_modules link switched while the checks run to an install of another lockfile voids their verdicts: exit 2 (#2087)",
+  { timeout: 30_000 },
+  () => {
+    const remark = { version: "15.0.1", resolved: "r", integrity: "i" };
+    for (const switchedTo of [{}, { "node_modules/remark": remark }]) {
+      const { directory } = repository({
+        passing: true,
+        lock: { "node_modules/remark": remark },
+        installed: { "node_modules/remark": remark },
+      });
+      try {
+        // as teasescript-main's refresh does to `current`: the stand-in knip, a check, re-points the link to install b
+        const installs = join(directory, "..", `${basename(directory)}-installs`);
+        mkdirSync(installs);
+        cpSync(join(directory, "node_modules"), join(installs, "a"), { recursive: true });
+        cpSync(join(directory, "node_modules"), join(installs, "b"), { recursive: true });
+        rmSync(join(directory, "node_modules"), { recursive: true });
+        symlinkSync(join(installs, "a"), join(directory, "node_modules"));
+        // (the stand-in repository ignores a node_modules folder, not a link)
+        writeFileSync(join(directory, ".git", "info", "exclude"), "node_modules\n");
+        writeFileSync(
+          join(installs, "b", ".package-lock.json"),
+          JSON.stringify({ lockfileVersion: 3, packages: switchedTo }),
+        );
+        writeFileSync(
+          join(installs, "a", "knip", "bin", "knip.js"),
+          'import { rmSync, symlinkSync } from "node:fs";\n' +
+            `rmSync("node_modules"); symlinkSync(${JSON.stringify(join(installs, "b"))}, "node_modules");\n`,
+        );
+        const result = spawnSync(process.execPath, [tool, "--base", "main"], {
+          cwd: directory,
+          encoding: "utf8",
+          env: environment,
+        });
+        rmSync(installs, { recursive: true, force: true });
+        if (switchedTo["node_modules/remark"] !== undefined) {
+          assert.equal(result.status, 0, result.stdout + result.stderr);
+          continue;
+        }
+        assert.equal(result.status, 2, result.stdout + result.stderr);
+        assert.match(result.stdout, /^PASS {2}knip /mu);
+        assert.equal(
+          result.stderr,
+          "check-changed: node_modules changed while the checks ran, so their verdicts do not count: " +
+            `node_modules (${join(installs, "b")}) does not install package-lock.json: ` +
+            `node_modules/remark 15.0.1 (not installed). ${REMEDIES}\n`,
+        );
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
   },
 );
