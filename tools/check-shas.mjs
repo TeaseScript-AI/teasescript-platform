@@ -1,5 +1,17 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  accessSync,
+  chmodSync,
+  constants,
+  existsSync,
+  readFileSync,
+  realpathSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { basename, dirname, join } from "node:path";
 
 // Checks that the commit SHAs a report or pull-request body names exist and are on a remote, before it is sent:
 //
@@ -7,7 +19,9 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 //
 // `--append` writes the run's last line into <file> as its last line, after a blank line, replacing such a line of its
 // own already there (which is left out of the check), so that the report sent is that file and its line is never
-// copied by hand.
+// copied by hand. Only a whole last line in the tool's own form is its own; a quoted or partial one is text. The file
+// is replaced whole, by renaming a complete copy over it (a link's target, the link kept), so a failed write leaves it
+// as it was and exits 2.
 //
 // A SHA-shaped token is 7 to 40 lowercase hex characters, bounded by no letter, digit or `_`. Each is resolved with
 // `git rev-parse --verify --quiet <token>^{commit}` in each `--repo` (default: the current repository) and reported as
@@ -35,11 +49,35 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 //   or a job's name. A full 40-character SHA in a path, such as an evidence folder, must resolve.
 //
 // Exit status: 0 when every token that must be a commit resolved on a remote and no placeholder is left, 1 otherwise,
-// 2 when it
-// cannot run (bad arguments, an unreadable file, or a `--repo` that is no git repository).
+// 2 when it cannot run (bad arguments, an unreadable file, a `--repo` that is no git repository, or a failed
+// `--append` write).
 
-/** A last line this tool wrote with `--append`, with the blank lines and white space before it. */
-const OWN_LINE = /\s*\n?check-shas: \d+ tokens: [^\n]*\s*$/u;
+/** A whole last line in this tool's own form, as `--append` writes it. */
+const OWN_LINE =
+  /^check-shas: \d+ tokens: \d+ resolved, \d+ trees, \d+ ambiguous, \d+ unresolved, \d+ local only, \d+ skipped \(ids, words, paths, sha256s\); \d+ placeholders$/u;
+
+/** `text` without a last line of this tool's own and the white space around it, read from the end once. */
+function withoutOwnLine(text) {
+  const trimmed = text.trimEnd();
+  const start = trimmed.lastIndexOf("\n") + 1;
+  return OWN_LINE.test(trimmed.slice(start)) ? trimmed.slice(0, start).trimEnd() : text;
+}
+
+/** Replaces `file`'s content whole: a complete copy beside it, renamed over it; a failure leaves it as it was. */
+function replaceFile(file, content) {
+  let temporary;
+  try {
+    const target = realpathSync(file);
+    accessSync(target, constants.W_OK);
+    temporary = join(dirname(target), `.${basename(target)}.check-shas-${process.pid}`);
+    writeFileSync(temporary, content, { flag: "wx" });
+    chmodSync(temporary, statSync(target).mode & 0o7777);
+    renameSync(temporary, target);
+  } catch (error) {
+    if (temporary !== undefined) rmSync(temporary, { force: true });
+    cannotRun(`cannot write ${file} (${error.code ?? error.message}); it is as it was`);
+  }
+}
 
 /** The unfilled placeholders a report can carry, case-insensitive. */
 export const PLACEHOLDERS = [
@@ -209,7 +247,7 @@ function main() {
   if (files.length === 1 && !existsSync(files[0])) cannotRun(`no file ${files[0]}`);
   const read = readFileSync(files.length === 1 ? files[0] : 0, "utf8");
   // (with `--append`, a last line of this tool's own, written by an earlier run, is no part of the text)
-  const text = append ? read.replace(OWN_LINE, "") : read;
+  const text = append ? withoutOwnLine(read) : read;
 
   let failed = false;
   const counts = { resolved: 0, trees: 0, ambiguous: 0, unresolved: 0, local: 0, skipped: 0 };
@@ -320,7 +358,7 @@ function main() {
     `check-shas: ${tokens} tokens: ${counts.resolved} resolved, ${counts.trees} trees, ${counts.ambiguous} ambiguous, ` +
     `${counts.unresolved} unresolved, ${counts.local} local only, ${counts.skipped} skipped (ids, words, paths, sha256s); ` +
     `${placeholders.length} placeholders`;
-  if (append) writeFileSync(files[0], `${text.replace(/\s*$/u, "")}\n\n${line}\n`);
+  if (append) replaceFile(files[0], `${text.trimEnd()}\n\n${line}\n`);
   process.stdout.write(`${line}\n`);
   process.exitCode = failed ? 1 : 0;
 }

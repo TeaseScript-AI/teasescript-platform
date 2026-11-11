@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  chmodSync,
+  lstatSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -234,6 +243,74 @@ test(
       });
       assert.equal(piped.status, 2);
     } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "--append replaces only a whole last line of its own, and a failed write leaves the file as it was",
+  { timeout: 60_000 },
+  () => {
+    const { directory, shas } = repository();
+    const report = join(directory, "report.md");
+    const run = (file = report) =>
+      spawnSync(process.execPath, [tool, "--repo", directory, "--append", file], {
+        encoding: "utf8",
+        timeout: 20_000,
+      });
+    const own = (placeholders) =>
+      `check-shas: 1 tokens: 1 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); ${placeholders} placeholders`;
+    try {
+      // A quoted or partial line is the report's text: kept, and checked.
+      for (const [ending, placeholders] of [
+        ["Quoted check-shas: 0 tokens: <sha>", 1],
+        [`> ${own(0)}`, 0],
+        [`\`${own(0)}\``, 0],
+        ["check-shas: 0 tokens:\n<sha>", 1],
+        [`${own(0)} and more`, 0],
+      ]) {
+        const text = `READY at ${shas[0].slice(0, 9)}.\n\n${ending}\n`;
+        writeFileSync(report, text);
+        const result = run();
+        assert.equal(result.status, placeholders > 0 ? 1 : 0, `${ending}: ${result.stdout}`);
+        assert.equal(readFileSync(report, "utf8"), `${text}\n${own(placeholders)}\n`, ending);
+      }
+      // A link stays a link, its target written.
+      const target = join(directory, "target.md");
+      writeFileSync(target, `READY at ${shas[0].slice(0, 9)}.\n`);
+      symlinkSync(target, join(directory, "link.md"));
+      assert.equal(run(join(directory, "link.md")).status, 0);
+      assert.ok(lstatSync(join(directory, "link.md")).isSymbolicLink());
+      assert.match(readFileSync(target, "utf8"), /\n\ncheck-shas: 1 tokens: /u);
+      // A file or folder that cannot be written: exit 2, the file as it was.
+      const before = `READY at ${shas[0].slice(0, 9)}.\n`;
+      for (const [file, folder] of [
+        [0o444, 0o755],
+        [0o644, 0o555],
+      ]) {
+        writeFileSync(report, before);
+        chmodSync(report, file);
+        chmodSync(directory, folder);
+        const refused = run();
+        chmodSync(directory, 0o755);
+        chmodSync(report, 0o644);
+        assert.equal(refused.status, 2, refused.stderr);
+        assert.match(refused.stderr, /cannot write .*; it is as it was/u);
+        assert.equal(readFileSync(report, "utf8"), before);
+        assert.deepEqual(
+          readdirSync(directory).filter((name) => name.includes("check-shas-")),
+          [],
+        );
+      }
+      // Cost: a long run of white space is read once (an unanchored regex over it took quadratic time). The child is
+      // killed at 20 s, as a test's timeout stops no loop.
+      writeFileSync(report, `Report\n${" ".repeat(2 ** 20)}X\n${" ".repeat(2 ** 20)}\n`);
+      const long = run();
+      assert.equal(long.signal, null, "killed at 20 s");
+      assert.equal(long.status, 0, long.stderr);
+    } finally {
+      chmodSync(directory, 0o755);
       rmSync(directory, { recursive: true, force: true });
     }
   },
