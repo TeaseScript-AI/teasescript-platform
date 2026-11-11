@@ -14,16 +14,18 @@ import {
 // Checks that the commit SHAs a report or pull-request body names exist and are on a remote, before it is sent:
 //
 //   node tools/check-shas.mjs [--repo <path>]... [--append] [<file>]   (the text from <file>, else from standard input)
+//   (with --append, no other process writes <file> while it runs)
 //
 // `--append` writes the run's last line into <file> as its last line, after a blank line, replacing such a line of its
 // own already there (which is left out of the check), so that the report sent is that file and its line is never
 // copied by hand. Only a whole last line in the tool's own form is its own; a quoted or partial one is text. The file is
 // held through one descriptor from before its read until after its write, and written in place, through a link: read
 // again and cut after its text only if its name still names it and it is still as it was read, then the line written
-// there. A file that cannot be opened for reading and writing or is no regular file, one another writer changed or
-// replaced meanwhile, and a failure to read or cut leave it as it was (or as the other writer left it); one while
-// writing or closing leaves its text and maybe part of the line, which the message says to remove; all exit 2. Limit: a
-// writer that changes or replaces the file in the instant between that second read and the cut is not seen.
+// there. A file that cannot be opened for reading and writing or is no regular file, and a failure to read or cut leave
+// it as it was; one while writing or closing leaves its text and maybe part of the line, which the message says to
+// remove; all exit 2. Bound: the report is not written by another process while `--append` runs; a change it detects is
+// refused (exit 2, the file as the other writer left it): content between its reads, a replaced file; nothing else is
+// promised.
 //
 // A SHA-shaped token is 7 to 40 lowercase hex characters, bounded by no letter, digit or `_`. Each is resolved with
 // `git rev-parse --verify --quiet <token>^{commit}` in each `--repo` (default: the current repository) and reported as
@@ -409,7 +411,9 @@ function main() {
     } else if (argv[index].startsWith("-")) cannotRun(`unknown option ${argv[index]}`);
     else files.push(argv[index]);
   if (files.length > 1 || (append && files.length === 0))
-    cannotRun("usage: node tools/check-shas.mjs [--repo <path>]... [--append] [<file>]");
+    cannotRun(
+      "usage: node tools/check-shas.mjs [--repo <path>]... [--append] [<file>] (with --append, no other process writes <file> while it runs)",
+    );
   if (repositories.length === 0) repositories.push(".");
   for (const repository of repositories)
     if (
