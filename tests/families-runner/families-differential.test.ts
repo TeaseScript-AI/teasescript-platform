@@ -529,7 +529,7 @@ test("join --ignore reports a case one tree lacks, a record it cannot read, and 
   }
 });
 
-test("a run owns its output from its start: no exit leaves an earlier output, and none removes another run's (#2383)", async (t) => {
+test("a run owns its output from its claim: no exit leaves an earlier output, and none removes a later one (#2383)", async (t) => {
   const folder = mkdtempSync(join(tmpdir(), "families-differential-output-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
   const tree = standIn(folder);
@@ -585,24 +585,62 @@ test("a run owns its output from its start: no exit leaves an earlier output, an
   // published; the second's output stays, as the first removes nothing on its way out)
   const fifo = join(folder, "cases.fifo");
   assert.equal(spawnSync("mkfifo", [fifo]).status, 0);
+  // (whatever fails below, the first run is killed and reaped and the FIFO's writer closed, so no process outlives the test)
   const first = spawn(process.execPath, [tool, tree, fifo, "--out", out], { stdio: "ignore" });
-  const exited = new Promise<number | null>((done) => first.on("exit", done));
+  const exited = new Promise<number | null>((done, fail) => {
+    first.on("exit", done);
+    first.on("error", fail);
+  });
+  exited.catch(() => undefined);
+  t.after(async () => {
+    first.kill("SIGKILL");
+    await exited.catch(() => undefined);
+  });
   let writer: number | undefined;
-  for (let tries = 0; writer === undefined; tries += 1) {
-    try {
-      writer = openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK);
-    } catch (error) {
-      assert.ok(tries < 200, `the first run never read its cases: ${String(error)}`);
-      await new Promise((done) => setTimeout(done, 50));
+  try {
+    for (let tries = 0; writer === undefined; tries += 1) {
+      try {
+        writer = openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK);
+      } catch (error) {
+        assert.ok(tries < 200, `the first run never read its cases: ${String(error)}`);
+        await new Promise((done) => setTimeout(done, 50));
+      }
     }
+    const second = record(casesOf("second", ["MODAL"]));
+    assert.equal(second.status, 0, second.stderr);
+    const published = readFileSync(out, "utf8");
+    writeSync(writer, "{\n");
+    closeSync(writer);
+    writer = undefined;
+    const late = new Promise<never>((_, fail) => {
+      setTimeout(() => fail(new Error("the first run did not exit")), 30_000).unref();
+    });
+    assert.equal(await Promise.race([exited, late]), 2);
+    assert.equal(readFileSync(out, "utf8"), published);
+  } finally {
+    if (writer !== undefined) closeSync(writer);
   }
-  const second = record(casesOf("second", ["MODAL"]));
-  assert.equal(second.status, 0, second.stderr);
-  const published = readFileSync(out, "utf8");
-  writeSync(writer, "{\n");
-  closeSync(writer);
-  assert.equal(await exited, 2);
-  assert.equal(readFileSync(out, "utf8"), published);
+  // (a run creates its partial: a file already at that path, here the run's own input, is refused untouched; the shell
+  // execs the tool, so the partial's pid is the shell's)
+  const own =
+    'p="$1.partial-$$"; cp "$2" "$p"; shift 2; args=(); for a in "$@"; do [ "$a" = @partial ] && a="$p"; args+=("$a"); done; exec "${args[@]}"';
+  for (const [mode, input, args] of [
+    ["record", casesOf("own", ["MODAL"]), [tree, "@partial"]],
+    ["join", half, ["join", "--cases", casesOf("one", ["MODAL"]), "--base", "@partial"]],
+  ] as const) {
+    const ran = spawnSync(
+      "bash",
+      ["-c", own, "bash", out, input, process.execPath, tool, ...args, "--out", out],
+      { encoding: "utf8" },
+    );
+    assert.equal(ran.status, 2, `${mode}: ${ran.stderr}`);
+    assert.match(ran.stderr, /cannot create .*\.partial-\d+/u, mode);
+    assert.equal(
+      readFileSync(`${out}.partial-${ran.pid}`, "utf8"),
+      readFileSync(input, "utf8"),
+      mode,
+    );
+  }
 });
 
 test("the plan's check list lists each check planChecks counts, with its site and type (#2298)", () => {

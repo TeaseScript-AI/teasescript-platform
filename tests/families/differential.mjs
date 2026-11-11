@@ -17,13 +17,14 @@
 // cases that still differ and those whose records it cannot read as JSON.
 // Exit 0: every case recorded and nothing threw; 1: a record holds `threw`, or `join` found a case missing, repeated
 // or unknown (it then writes nothing), or with `--ignore` a case differs or is unread; 2: a refused usage, cases file
-// or tree, before any record is written. A run owns its `--out` from its start (#2383): it removes an earlier one at
-// once (an output that is one of its inputs, by any path or link, is refused instead), writes beside it a partial
-// named by its pid, and renames that onto `--out` once whole; no exit removes an output. So a run that ends without
-// writing leaves no earlier result as its own, and never touches a concurrent run's output.
+// or tree, before any record is written. A run claims its `--out` once its arguments are read (#2383): it removes what
+// stands there then (an output that is one of its inputs, by any path or link, is refused instead), writes beside it a
+// partial it creates, named by its pid, and renames that onto `--out` once whole; after its claim it removes nothing it
+// did not create. So a run that ends without writing leaves no earlier result as its own. Two runs on one `--out` at a
+// time are not supported: the later claim removes the earlier output, and the loss is a missing file, never another
+// run's records under this run's name.
 import { createHash } from "node:crypto";
 import {
-  appendFileSync,
   closeSync,
   existsSync,
   openSync,
@@ -32,7 +33,6 @@ import {
   renameSync,
   statSync,
   unlinkSync,
-  writeFileSync,
   writeSync,
 } from "node:fs";
 import path from "node:path";
@@ -43,7 +43,7 @@ const refuse = (why) => {
   process.stderr.write(`differential.mjs: ${why}\n`);
   process.exit(2);
 };
-/** Takes `out` for this run: refuses it where it is one of `inputs` by any path or link, else removes an earlier one. */
+/** Claims `out` for this run: refuses it where it is one of `inputs` by any path or link, else removes what stands there. */
 function claimOutput(out, inputs) {
   if (out === undefined || !existsSync(out)) return;
   const { dev, ino } = statSync(out);
@@ -56,15 +56,18 @@ function claimOutput(out, inputs) {
   unlinkSync(out);
 }
 
-/** The partial a run writes beside `out` and renames onto it once whole, named by its pid; created empty. */
+/**
+ * The partial a run writes beside `out` and renames onto it once whole, named by its pid and created by this run, open
+ * for writing: a path that exists already is refused untouched, so a run never writes over or moves a file it did not
+ * create.
+ */
 function startPartial(out) {
   const partial = `${out}.partial-${process.pid}`;
   try {
-    writeFileSync(partial, "");
+    return { partial, fd: openSync(partial, "wx") };
   } catch (error) {
-    refuse(`cannot write ${partial}: ${error.message}`);
+    return refuse(`cannot create ${partial}: ${error.message}`);
   }
-  return partial;
 }
 
 /** The start of a record's line: the tool writes each record with its name first. */
@@ -342,7 +345,7 @@ async function record() {
     return { agree: bare.every((each) => each === bare[0]), modes: list };
   };
 
-  const partial = startPartial(out);
+  const { partial, fd } = startPartial(out);
   for (const c of cases) {
     const { files, globals } = c;
     const row = {
@@ -407,8 +410,9 @@ async function record() {
       if (route.plan === "outside") return { outside: JSON.parse(route.text).outside };
       return compiled(route.plan, JSON.parse(route.text).diagnostics, c);
     });
-    appendFileSync(partial, `${JSON.stringify(row)}\n`);
+    writeSync(fd, `${JSON.stringify(row)}\n`);
   }
+  closeSync(fd);
   renameSync(partial, out);
   process.stdout.write(`${JSON.stringify({ cases: cases.length, threw })}\n`);
   process.exitCode = threw === 0 ? 0 : 1;
@@ -484,9 +488,8 @@ function join() {
     process.exit(1);
   }
   // (written beside the output and renamed onto it once whole, so that a failed copy leaves no output)
-  const partial = `${out}.partial-${process.pid}`;
+  const { partial, fd: output } = startPartial(out);
   const inputs = new Map();
-  const output = openSync(partial, "w");
   const write = (text) => writeSync(output, text);
   const copy = ({ file, start, end }) => {
     if (!inputs.has(file)) inputs.set(file, openSync(file, "r"));

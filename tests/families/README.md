@@ -458,10 +458,12 @@ copied or that the tree's runtime rejects (`validateScriptStorageEntries`) refus
 plan runs or record is written. A run's host values are checked by the runtime as each run starts: a value it rejects
 is that run's `threw`, and the run exits 1.
 
-A run owns its `--out` from its start (#2383). It removes an earlier `--out` at once; an output that is one of its
-inputs, by any path or link, is refused instead. It writes its records to a partial named by its pid and renames that
-onto `--out` once whole. No exit removes an output, so a run that ends without writing leaves no earlier result as its
-own, and never touches a concurrent run's output. A run that dies midway leaves only its partial.
+A run claims its `--out` once its arguments are read (#2383): it removes what stands there then; an output that is one
+of its inputs, by any path or link, is refused instead. It writes its records to a partial it creates, named by its pid,
+and renames that onto `--out` once whole. After its claim it removes nothing it did not create, so a run that ends
+without writing leaves no earlier result as its own, and a run that dies midway leaves only its partial. Two runs on one
+`--out` at a time are not supported: the later claim removes the earlier output, and the loss is a missing file, never
+another run's records under this run's name.
 
 A record is `{name, case, checker, core, candidate}`:
 - `checker`, and each mode of `candidate` that is not refused: `diagnostics` (severity, code, path, one-based line and
