@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { before, type TestContext } from "node:test";
 import { effectScope, watch, type Ref } from "vue";
 
-import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
+import type { PlayerBridge, SessionRequestOptions } from "../../player/runtime/player-bridge.js";
+import type { OpResult, SessionOp } from "../../player/engine-bridge/op-catalogue.js";
 import type { PlayerRuntimeSessionOptions } from "../../player/runtime/runtime-adapter.js";
 import {
   playerRuntimeForeground,
@@ -206,6 +207,15 @@ function choiceOptions(host: Host): readonly { readonly id: string; readonly lab
   return foreground.options;
 }
 
+/** A call of `PlayerBridge.request` with its overloads erased. */
+type Call = readonly [PlayerSession, SessionOp, unknown, SessionRequestOptions?];
+
+/** The label of the button `host` shows, if it shows one. */
+function buttonLabel(host: Host): string | undefined {
+  const foreground = host.session.value && playerRuntimeForeground(host.session.value);
+  return foreground?.kind === "show-button" ? foreground.label : undefined;
+}
+
 /** Whether `host` shows a session that asks for an answer. */
 const asks = (host: Host) =>
   host.session.value !== null && presentedAction(host.session.value) !== undefined;
@@ -237,6 +247,7 @@ const RERUN = rerunRegistry({
   "W8 transfer": TOPOLOGIES,
   "W9 keep and Continue": TOPOLOGIES,
   "W10 catch-up": TOPOLOGIES,
+  "W10b catch-up behind an answer": TOPOLOGIES,
   "W11 failure export": TOPOLOGIES,
   "W12 going back": TOPOLOGIES,
 });
@@ -972,6 +983,67 @@ RERUN.rows(
       String(budgets),
     );
     assert.ok(ops.indexOf("adoptCatchUp", begun) > begun, ops.join(", "));
+    return end();
+  },
+);
+
+RERUN.rows(
+  "W10b catch-up behind an answer",
+  "a late catch-up queued behind a button answer is refused for the revision it was sampled from; the clock observes afresh, the answer stands, and nothing is reported",
+  async (context, topology, end) => {
+    stubBrowser(context);
+    let nowMs = 0;
+    context.mock.method(performance, "now", () => (nowMs += 1));
+    const transport = await topologyBridge(context, topology);
+    const { host } = await mount(context, transport);
+    const refusals: unknown[] = [];
+    // EVIDENCE: test: the bridge's erased overload; the row forwards each call unchanged and reads only its refusal.
+    const request = transport.bridge.request.bind(transport.bridge) as (
+      ...call: Call
+    ) => Promise<OpResult<SessionOp>>;
+    context.mock.method(transport.bridge, "request", async (...call: Call) => {
+      try {
+        return await request(...call);
+      } catch (error) {
+        if (call[1] === "beginCatchUp")
+          refusals.push(error instanceof Error && "code" in error ? error.code : error);
+        throw error;
+      }
+    });
+    await start(
+      host,
+      'let n = 0\ntimer(duration: 10 ms, async: true, repeat: true, display: "hidden") {\n  n += 1\n}\nshowButton "Next"\nshowButton "After"\nexit',
+    );
+    const input = await runtimeInput();
+    // The answer's section holds the session's queue while its observation's reply waits at the port. A second later the
+    // page is shown again: the late observation's catch-up, sampled from the revision before the answer, queues behind it.
+    transport.hold("observeInput");
+    const answering = answer(host, input.intents.choice(null, "button"));
+    await transport.held();
+    const heldAt = transport.posts.length;
+    nowMs += 1_000;
+    document.dispatchEvent(new Event("visibilitychange"));
+    for (let index = 0; index < 5; index += 1) await turn();
+    const queued = transport.posts.slice(heldAt).map((post) => post.op);
+    assert.equal(queued.indexOf("beginCatchUp"), -1, queued.join(", "));
+    transport.release();
+    assert.equal((await answering).kind, "answered");
+    await until(() => refusals.length > 0, "the catch-up's refusal");
+    assert.deepEqual(refusals, ["basis"]);
+    await until(() => buttonLabel(host) === "After", "the answer's next button");
+    await until(
+      () => host.session.value!.state.observedSessionTimeMs >= 1_000,
+      "the fresh observation",
+    );
+    // Refused, the catch-up adopted nothing (a step already queued finds no copy); the clock observed the late second in
+    // one go instead. Read once that observation is in, so a later adoption is in the log.
+    const ops = transport.posts.slice(heldAt).map((post) => post.op);
+    const begun = ops.indexOf("beginCatchUp");
+    assert.ok(begun >= 0, ops.join(", "));
+    assert.equal(ops.indexOf("adoptCatchUp", begun), -1, ops.join(", "));
+    assert.ok(ops.indexOf("observeTime", begun) > begun, ops.join(", "));
+    assert.equal(host.hostError.value, null);
+    assert.equal(buttonLabel(host), "After", "the next button still asks");
     return end();
   },
 );
