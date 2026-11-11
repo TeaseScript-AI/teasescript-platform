@@ -718,6 +718,18 @@ test(
           false,
         ),
       );
+      // a throw, here Git refusing a base it cannot name, writes its block (the error's first line, then Git's own),
+      // and the report still fails with it
+      const thrown = run({ root: quiet.root, base: "no-such-ref" });
+      assert.equal(thrown.status, 1);
+      const thrownBlock = blockOf(
+        quiet,
+        `--diff no-such-ref --json ${join(quiet.root, "change.json")}`,
+        ["structure report failed: Command failed: git merge-base no-such-ref HEAD"],
+        false,
+      );
+      assert.ok(thrown.block.startsWith(thrownBlock.slice(0, -"```\n".length)), thrown.block);
+      assert.match(thrown.block, /\nfatal: [^\n]*no-such-ref\n```\n$/u);
       // --summary without its file stops the report; without --diff, its block says why
       const valueless = spawnSync(process.execPath, [tool, "--diff", quiet.base, "--summary"], {
         cwd: quiet.root,
