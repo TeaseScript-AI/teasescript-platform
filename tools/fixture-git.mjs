@@ -1,9 +1,11 @@
 /**
  * `environment` with the host's git setup kept out, for a test's fixture repositories: without each `GIT_*` variable,
  * git reading no global, XDG or system configuration, and no user or system ignore or attributes file (whose default
- * paths under `XDG_CONFIG_HOME` or `HOME` git reads without any configuration), and committing as `t <t@t>`. No host
- * hook path, template, signing, default branch, file-system monitor, ignore pattern, attribute or user setting then
- * reaches a fixture.
+ * paths under `XDG_CONFIG_HOME` or `HOME` git reads without any configuration), committing as `t <t@t>`, and its
+ * messages untranslated (`LANGUAGE=C`, which leaves the locale's reading of file names and bytes as it is). No host hook
+ * path, template setting, signing, default branch, file-system monitor, ignore pattern, attribute, user setting or
+ * message language then reaches a fixture. Kept: git's installation templates, and the process's inputs that are not
+ * git's setup, among them which `git` is first on `PATH`.
  */
 export function gitIsolated(environment) {
   return {
@@ -20,6 +22,7 @@ export function gitIsolated(environment) {
     GIT_AUTHOR_EMAIL: "t@t",
     GIT_COMMITTER_NAME: "t",
     GIT_COMMITTER_EMAIL: "t@t",
+    LANGUAGE: "C",
   };
 }
 

@@ -403,6 +403,7 @@ test(
           ],
         );
         assert.equal(given.GIT_CONFIG_GLOBAL, "/dev/null");
+        assert.equal(given.LANGUAGE, "C");
         assert.equal(given.HOME, join(root, "home"));
         const { status, out, module } = measure(root, []);
         assert.equal(status, 0, out);
