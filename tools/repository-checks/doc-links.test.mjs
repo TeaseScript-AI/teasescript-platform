@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { isolateGit } from "../fixture-git.mjs";
+
+isolateGit();
 
 // The wrapper's own part: Git's file list as the files remark reads, no configuration or ignore file of remark's, the
 // exit status and its messages. remark-validate-links' own suite covers how it reads links.
@@ -28,8 +31,6 @@ function checkout(files) {
   const root = mkdtempSync(join(tmpdir(), "doc-links-"));
   const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" });
   git("init", "-q");
-  git("config", "user.email", "t@t");
-  git("config", "user.name", "t");
   write(root, { ".gitignore": "node_modules\nignored/\nb.md\n", ...files });
   symlinkSync(join(repositoryRoot, "node_modules"), join(root, "node_modules"));
   git("add", "-A");

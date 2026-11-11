@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { gitIsolated } from "./fixture-git.mjs";
 
 // The tool and the helpers it imports, run in a checkout of their own, with `npm` and `gh` faked on the `PATH`.
 const TOOLS = [
@@ -28,26 +29,17 @@ const SUITE = ["a", "sub/a", "sub/type-core-z", "type-core-dir/plain", "fixtures
 
 /**
  * The environment of every git and tool process the test starts, in checkout `root`, built from the test's own
- * environment: git reads no global or system configuration, template or inherited `GIT_*` setting, and `HOME` is the
- * checkout's, so no host hook, signing, default branch or file-system monitor reaches the fixture. Also `npm` and
+ * environment: `gitIsolated`, and `HOME` the checkout's. Also `npm` and
  * `gh` faked first on the `PATH`, and the tool's temporary folders and compile cache inside the checkout, which the
  * test removes.
  */
 function boundary(root) {
   const host = Object.entries(process.env).filter(
-    ([name]) =>
-      !name.startsWith("GIT_") && !["HOME", "XDG_CONFIG_HOME", "NODE_TEST_CONTEXT"].includes(name),
+    ([name]) => !["HOME", "XDG_CONFIG_HOME", "NODE_TEST_CONTEXT"].includes(name),
   );
   return {
-    ...Object.fromEntries(host),
+    ...gitIsolated(Object.fromEntries(host)),
     HOME: join(root, "home"),
-    GIT_CONFIG_GLOBAL: "/dev/null",
-    GIT_CONFIG_NOSYSTEM: "1",
-    GIT_TEMPLATE_DIR: join(root, "home/templates"),
-    GIT_AUTHOR_NAME: "t",
-    GIT_AUTHOR_EMAIL: "t@t",
-    GIT_COMMITTER_NAME: "t",
-    GIT_COMMITTER_EMAIL: "t@t",
     PATH: `${join(root, "bin")}:${process.env.PATH}`,
     // (one file at once, whatever the machine)
     SX_MEM_MIB: "4000",
@@ -130,7 +122,7 @@ else if (args[0] === "api" && where && runs[where[1]] && where[2]) {
 `,
     0o755,
   );
-  mkdirSync(join(root, "home/templates"), { recursive: true });
+  mkdirSync(join(root, "home"), { recursive: true });
   for (const args of [
     ["init", "-q"],
     ["commit", "-q", "--allow-empty", "-m", "c"],
@@ -402,11 +394,9 @@ test(
             "GIT_COMMITTER_NAME",
             "GIT_CONFIG_GLOBAL",
             "GIT_CONFIG_NOSYSTEM",
-            "GIT_TEMPLATE_DIR",
           ],
         );
         assert.equal(given.GIT_CONFIG_GLOBAL, "/dev/null");
-        assert.equal(given.GIT_TEMPLATE_DIR, join(root, "home/templates"));
         assert.equal(given.HOME, join(root, "home"));
         const { status, out, module } = measure(root, []);
         assert.equal(status, 0, out);

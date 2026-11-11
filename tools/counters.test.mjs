@@ -5,6 +5,9 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, before, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { isolateGit } from "./fixture-git.mjs";
+
+isolateGit();
 
 const tool = fileURLToPath(new URL("./counters.mjs", import.meta.url));
 const folders = [];
@@ -13,9 +16,7 @@ after(() => folders.forEach((f) => rmSync(f, { recursive: true, force: true })))
 const run = (root, ...args) =>
   spawnSync(process.execPath, [tool, root, ...args], { encoding: "utf8" });
 const git = (root, ...args) => {
-  const r = spawnSync("git", ["-C", root, "-c", "user.name=t", "-c", "user.email=t@t", ...args], {
-    encoding: "utf8",
-  });
+  const r = spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
   assert.equal(r.status, 0, r.stderr);
   return r.stdout.trim();
 };
@@ -30,7 +31,7 @@ function checkout(files, untracked = []) {
   }
   git(root, "init", "-q");
   git(root, "add", ...Object.keys(files).filter((f) => !untracked.includes(f)));
-  git(root, "commit", "-q", "--no-gpg-sign", "-m", "fixture");
+  git(root, "commit", "-q", "-m", "fixture");
   return root;
 }
 

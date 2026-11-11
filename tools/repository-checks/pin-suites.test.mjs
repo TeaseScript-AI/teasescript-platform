@@ -16,6 +16,9 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ts } from "ts-morph";
 import { NOT_PINS, builtOf, pinFormsOf, readMarks, suitesFor, testFiles } from "./pin-suites.mjs";
+import { isolateGit } from "../fixture-git.mjs";
+
+isolateGit();
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 /** The repository's marks (`readMarks`). */
@@ -564,7 +567,7 @@ test("a file moved out of the core lists every pinning suite (#2049)", { timeout
     );
     git("init", "-q");
     git("add", ".");
-    git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "base");
+    git("commit", "-q", "-m", "base");
     git("mv", "src/type-inference/core/answers.ts", "src/type-inference/answers.ts");
     const run = spawnSync(
       process.execPath,

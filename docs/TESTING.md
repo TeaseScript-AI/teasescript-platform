@@ -54,7 +54,8 @@ its own, as one whose process ends before its tests report, fails the full suite
 group and subsequent stages; SIGINT/SIGTERM also terminate
 child process groups, escalating after a grace period. A command stopped this way is labelled `ABORTED`, not `FAIL`,
 and prints after the failed one. `npm run test:verification` checks scheduling, diagnostics and
-process cleanup (POSIX cleanup assertions run on CI; Windows uses `taskkill /t /f`).
+process cleanup (POSIX cleanup assertions run on CI; Windows uses `taskkill /t /f`). A tool test that builds a git
+repository takes its git environment from `tools/fixture-git.mjs`, so that no host git setting reaches the fixture.
 
 Use `VERIFY_SERIAL=1 npm run check` for serial diagnosis or constrained machines; it runs the same commands.
 CI uses a job-local Node module compilation cache. Standard checks omit UI source maps because no configured check
