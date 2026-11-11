@@ -69,7 +69,8 @@ export class TypedReaders {
     answered: ReadonlyMap<string, PlaceAnswer>,
   ): boolean {
     const levels = levelsWithKinds(expected, this.open);
-    if (landing !== null && !this.#storesAgree(landing.id, landing.path, levels, answered))
+    // PROBE P3 only: the destination's stores are not asked
+    if (landing !== null && levels.size < 0 && !this.#storesAgree(landing.id, landing.path, levels, answered))
       return false;
     if (fallback === null) return true;
     for (const { path, kinds } of levels.values()) {
