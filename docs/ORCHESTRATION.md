@@ -138,8 +138,8 @@ whether fixing the line is worth it: only a line that is worth fixing becomes an
 - **filed:** an issue, as [`FRICTION.md`](FRICTION.md) describes, with its `Schedule:` line;
 - **a rule:** proposed like any other rule;
 - **not planned:** the fix adds no value, or costs more than the problem does. The line gets no issue; its record says
-  so, with the reason. An issue already open that is not worth fixing is closed as not planned, and its closing comment
-  gives the reason and what would reopen it.
+  so, with the reason. An issue already open that is not worth fixing is closed at once as not planned, and its closing
+  comment gives the reason and what would reopen it.
 
 Friction may be reported often, and judging a line or an open issue not worth fixing is normal.
 

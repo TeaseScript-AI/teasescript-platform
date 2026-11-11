@@ -39,8 +39,8 @@ its record.
 An open friction issue is one its coordinator judges worth fixing. Triage comes before filing: a line whose fix adds no
 value or would cost more than the problem does gets no issue
 ([`ORCHESTRATION.md`](ORCHESTRATION.md#structure-and-friction)). An issue already open that is not worth fixing is
-closed as not planned: the closing comment gives the reason and what would reopen the issue, and it is reopened when
-that happens. A closed issue holds no builder back: the launch check under [Priority](#priority) reads open issues
+closed at once as not planned: the closing comment gives the reason and what would reopen the issue, and it is reopened
+when that happens. A closed issue holds no builder back: the launch check under [Priority](#priority) reads open issues
 only.
 
 ## Priority
