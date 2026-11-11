@@ -18,6 +18,7 @@ import {
   TOPOLOGIES,
   topologyBridge,
   type Topology,
+  withinHostTime,
 } from "../helpers/player/worker-topology.js";
 
 /*
@@ -391,10 +392,21 @@ for (const delay of [0, 50, 250] as const)
           await drainTasks();
         }
       };
-      for (let n = 0; !started && !startError && n < 2000; n++) await advance(1);
+      // How long a wait on the host may step the mocked clock. In-process, its replies come on mock time, within `steps`.
+      // A Worker's take real time, which no count of steps bounds and `until` cannot wait on here (the test mocks its
+      // timers), so they get as long as a wait on the host may take.
+      const waiting = (steps: number) => {
+        const within = withinHostTime();
+        let step = 0;
+        return () => (topology === "worker" ? within() : step++ < steps);
+      };
+      for (const more = waiting(2000); !started && !startError && more();) await advance(1);
       if (startError) throw startError;
       assert.equal(started, true, "start reply releases on mock time");
-      for (let n = 0; !player.elements.some((a) => a.src.endsWith("clock.mp3")) && n < 1000; n++)
+      for (
+        const more = waiting(1000);
+        !player.elements.some((a) => a.src.endsWith("clock.mp3")) && more();
+      )
         await advance(1);
       const audio = player.elements.find((a) => a.src.endsWith("clock.mp3"));
       assert.ok(audio, "audio created");
@@ -441,7 +453,7 @@ for (const delay of [0, 50, 250] as const)
           () => void (replied = true),
           () => void (replied = true),
         );
-        for (let n = 0; !replied && n < 1000; n++) await advance(1);
+        for (const more = waiting(1000); !replied && more();) await advance(1);
         assert.equal(replied, true, `${what} replies on mock time`);
         return reading;
       };

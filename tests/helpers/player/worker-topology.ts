@@ -104,19 +104,26 @@ export async function inProcessBackend(
 const HOST_MS = 30_000;
 
 /**
+ * Whether a wait on the engine's host that began now may still go on: for `HOST_MS`, on the process's monotonic clock,
+ * which no test mocks as it does `Date` and `performance`. For `until`, and for a wait that steps a mocked clock itself.
+ */
+export function withinHostTime(): () => boolean {
+  const deadline = process.hrtime.bigint() + BigInt(HOST_MS) * 1_000_000n;
+  return () => process.hrtime.bigint() < deadline;
+}
+
+/**
  * Waits, in short real-time turns, until `check` holds, and fails with `label` if it never does. A wait `on` an
  * in-process `"step"` gives up after 1,000 turns. A wait `on` the `"host"`, whose reply or publication makes `check`
- * hold and may still be under way when the wait starts, gives up after `HOST_MS` on the process's monotonic clock, which
- * no test mocks as it does `Date` and `performance`.
+ * hold and may still be under way when the wait starts, gives up after `HOST_MS` of real time (`withinHostTime`).
  */
 export async function until(
   check: () => boolean,
   label: string,
   on: "step" | "host" = "step",
 ): Promise<void> {
-  const deadline = process.hrtime.bigint() + BigInt(HOST_MS) * 1_000_000n;
-  const waiting = (turn: number) =>
-    on === "host" ? process.hrtime.bigint() < deadline : turn < 1_000;
+  const within = withinHostTime();
+  const waiting = (turn: number) => (on === "host" ? within() : turn < 1_000);
   for (let turn = 0; waiting(turn); turn += 1) {
     if (check()) return;
     await new Promise((resolve) => setTimeout(resolve, 2));
