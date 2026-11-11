@@ -700,10 +700,12 @@ test("a case's storage is what each run's load reads, on the checker and the cor
     const bad = join(folder, "bad.jsonl");
     const given = { name: "x", source, storage, ...(Array.isArray(storage) ? { runs } : {}) };
     writeFileSync(bad, `${JSON.stringify(given)}\n`);
-    const refused = spawnSync(process.execPath, [tool, resolve("."), bad, "--out", out], {
+    const refusedOut = join(folder, "refused.jsonl");
+    const refused = spawnSync(process.execPath, [tool, resolve("."), bad, "--out", refusedOut], {
       encoding: "utf8",
     });
     assert.equal(refused.status, 2, refused.stderr);
     assert.match(refused.stderr, why);
+    assert.equal(existsSync(refusedOut), false);
   }
 });

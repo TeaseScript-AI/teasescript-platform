@@ -263,8 +263,9 @@ async function record() {
   const runs = (plan, c) =>
     c.runs?.map((globals) => {
       const given = c.storage === undefined ? {} : { storage: c.storage };
+      const storage = entriesOf(c.storage);
       try {
-        return { globals, ...given, ...runGlobals(plan, globals, entriesOf(c.storage)) };
+        return { globals, ...given, ...runGlobals(plan, globals, storage) };
       } catch (error) {
         return { globals, ...given, threw: thrown(error) };
       }
