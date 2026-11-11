@@ -72,11 +72,13 @@ export function useEngineConnection({
   let settled: PlayerBridge | null = null;
   // The source the pages prepared last, with its plan token in the current host.
   let source: PreparedSource | null = null;
-  /** Takes `reached`, now ready, as this Player's connection. */
+  /** Takes `reached`, now ready, as this Player's connection; its loss counts only while it is the current one. */
   function take(reached: PlayerBridge) {
     claimed(reached.claim(claim));
     bridge = reached;
-    reached.client.onLoss(lost);
+    reached.client.onLoss((error) => {
+      if (bridge === reached) lost(error);
+    });
     ready(reached);
   }
   // Once the host is reachable, and only while this Player lives: it takes the bridge, observes its loss, and sends what
@@ -90,12 +92,15 @@ export function useEngineConnection({
   });
   connected.catch(() => unreachable());
 
-  /** Sends `script`'s `prepare` to `host`, and remembers it with the plan the reply names. */
+  /**
+   * Sends `script`'s `prepare` to `host`, and remembers it with the plan the reply names. Until the reply, the same
+   * script keeps the plan it had, so a connection lost while a replacement prepares it can still be replaced.
+   */
   function prepareIn(
     host: PlayerBridge,
     script: string | PlayerProject,
   ): Promise<BridgeResult<OpResult<"prepare">>> {
-    const asked: PreparedSource = { script, plan: null };
+    const asked: PreparedSource = { script, plan: source?.script === script ? source.plan : null };
     source = asked;
     const reply = host.client.request("prepare", { source: { kind: "source", script } });
     void reply.then(
@@ -152,7 +157,9 @@ export function useEngineConnection({
       const opening = nextConnection();
       connected = opening;
       const fresh = await opening;
-      if (isDisposed()) {
+      // Only the candidate still current is taken: not one a later replacement superseded, nor one an unmounted Player
+      // opened.
+      if (isDisposed() || connected !== opening) {
         fresh.client.terminate();
         throw new NoReplacement();
       }
