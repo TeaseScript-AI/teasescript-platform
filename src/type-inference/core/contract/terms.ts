@@ -1,11 +1,13 @@
 import type { TypeAnnotation } from "../../../ast.js";
 import { VALUE_KIND_NAMES } from "../../../value-kinds.js";
 import type { PlaceId, PlaceKind, TypeTerm } from "../../graph.js";
-import type { ItemTag } from "../items.js";
+import type { CorePass } from "../answers.js";
+import { makeItem, spelledBy, type Item, type ItemTag } from "../items.js";
 import { propertyStep, type ValueConstraint } from "../program.js";
 import type { TypeAt } from "./model.js";
 
-// Written types as terms: their kinds, their term at a path, a value's written type and its default.
+// Written types as terms: their kinds, their term at a path, a value's written type, its default and the default's
+// written type.
 
 /** The kinds a written type gives (F2): each V30 type its own tag, `unknown` for a type the core does not model. */
 export function typeTags(term: TypeTerm): ItemTag[] {
@@ -144,6 +146,104 @@ export function writtenOf(kind: PlaceKind): TypeTerm | null {
 /** The value of a `default:` named argument. */
 export function defaultOf(c: ValueConstraint): PlaceId | undefined {
   return "named" in c ? c.named.find((argument) => argument.name === "default")?.value : undefined;
+}
+
+/**
+ * A typed parse's or load's default at `rest` by its written type (ADR 0021 rule 2.6, "its default's type"; #1072),
+ * read from syntax alone, so the same in every mode, order and budget; `null` where the syntax gives none, and the
+ * default's demands (`dk`, `vdk`) then read the value it holds at the call. The forms it admits, a closed set:
+ * - a read of a binding or parameter with a written type: that type at the level;
+ * - a read of an unwritten binding whose declaration has a start value: that value, at the same level;
+ * - a list, set, dict or object literal above the level: its cells at the next step, which all give the same kinds.
+ * Anything else gives `null`: another expression, a binding without a start value (a loop variable, an unwritten
+ * parameter), a step the written type does not reach, a level whose kinds hold `unknown`, cells that disagree or a
+ * literal without cells. Each binding followed and each literal's cell charges a unit. One item per kind, spelled as written (#1398), certain where the
+ * written type has one kind and possible where it has several.
+ */
+export function writtenDefault(
+  pass: CorePass,
+  fallback: PlaceId,
+  rest: readonly string[],
+): readonly Item[] | null {
+  const { program, definitions } = pass;
+  let kinds: readonly ItemTag[] | null = null;
+  let frontier: PlaceId[] = [fallback];
+  for (let level = 0; frontier.length > 0; level += 1) {
+    // (the literals at this level, each walked once however many reads reach it)
+    const literals = new Set<PlaceId>();
+    for (const value of frontier) {
+      // (a cell's own visit is charged with its store below; a default that is neither a read nor a literal costs none)
+      const start = startOf(pass, value);
+      if (start === null) return null;
+      if (typeof start === "number") {
+        if (level === rest.length) return null;
+        literals.add(start);
+        continue;
+      }
+      const at = typeAtPath(start, rest, level);
+      if (at === null || !("term" in at)) return null;
+      const own = typeKinds(at.term);
+      if (own.includes("unknown")) return null;
+      if (
+        kinds !== null &&
+        (own.length !== kinds.length || own.some((tag, i) => tag !== kinds![i]))
+      )
+        return null;
+      kinds = own;
+    }
+    frontier = [];
+    for (const literal of literals)
+      for (const has of program.hasOf.get(literal) ?? []) {
+        program.work.charge("invSteps");
+        const cell = typeAtPath(has.type, [rest[level]!]);
+        if (cell === null || !("place" in cell) || cell.rest.length > 0) return null;
+        const stores = definitions.cellDefs.get(cell.place) ?? [];
+        if (stores.length === 0) return null;
+        for (const d of stores) {
+          program.work.charge("invSteps");
+          if (d.value === undefined) return null;
+          frontier.push(d.value);
+        }
+      }
+  }
+  if (kinds === null) return null;
+  const spelled = spelledBy(kinds);
+  if (kinds.length === 1) return [makeItem(kinds[0]!, null, { cert: "def", ...spelled })];
+  // (a written `T?` or union is a type a read can narrow at the call, ADR 0021 rules 5.1 and 5.2: whether rule 2.6's
+  // "its default's type" is then the written or the narrowed type is an open owner question, and this clause reads the
+  // written one; the narrowed reading gives `null` here)
+  return kinds.map((tag) => makeItem(tag, null, { cert: "pos", ...spelled }));
+}
+
+/**
+ * What a default's value is by its syntax (`writtenDefault`): a written binding's type, through unwritten bindings'
+ * start values; a collection or object literal's own value; `null` for anything else.
+ */
+function startOf(pass: CorePass, value: PlaceId): TypeTerm | PlaceId | null {
+  const { program, definitions } = pass;
+  let binding = program.occurrenceOf.get(value);
+  if (binding === undefined) return program.hasOf.has(value) ? value : null;
+  // (a chain of copies, followed in a loop; a binding met twice gives none)
+  const met = new Set<PlaceId>();
+  while (!met.has(binding)) {
+    program.work.charge("invSteps");
+    met.add(binding);
+    const written = writtenOf(program.place(binding).kind);
+    if (written !== null) return written;
+    const d = definitions.declOf.get(binding);
+    if (
+      d === undefined ||
+      d.how !== "initializer" ||
+      d.kind !== "whole" ||
+      d.path.length > 0 ||
+      d.value === undefined
+    )
+      return null;
+    const next = program.occurrenceOf.get(d.value);
+    if (next === undefined) return program.hasOf.has(d.value) ? d.value : null;
+    binding = next;
+  }
+  return null;
 }
 
 /** The kind of a unit literal: `2 s`, `1 calendar day`, `20 deg`. */

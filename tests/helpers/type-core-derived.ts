@@ -1,3 +1,5 @@
+import { isDeepStrictEqual } from "node:util";
+
 import type { Expression, IfStatement, Statement, TypeAnnotation } from "../../src/ast.js";
 import {
   booleanFromText,
@@ -650,7 +652,10 @@ function readDefault(
     return refuseVariableRead(root, statements, "a read through an unmodelled value");
   if (!declaredNames(statements).has(root.name)) return null;
   if (resolve === null) throw new Underivable("a default that reads a variable");
-  return valueType(partAt(resolve(root.name), steps));
+  const snap = resolve(root.name);
+  // (a bare read takes its written type where its syntax gives one, a read through a part the snapshot's)
+  if (steps.length > 0 || snap.chain === undefined) return valueType(partAt(snap, steps));
+  return snap.chain.t === "whole" ? snap.chain.type : chained(valueType(snap), snap.chain);
 }
 
 /** Whether a default is a read rooted at a variable the program declares. */
@@ -687,10 +692,81 @@ function declaredNames(statements: readonly Statement[]): ReadonlySet<string> {
  * A variable's abstract value in the snapshot reader (#1760): a checked type, `null` alone, no structure (`open`: host
  * data, or a value no source structure settles), or refused with why the reader does not model it.
  */
-type Snap =
+type Snap = (
   | { readonly t: "type"; readonly type: DerivedType }
   | { readonly t: "open" }
-  | { readonly t: "refused"; readonly why: string };
+  | { readonly t: "refused"; readonly why: string }
+) & {
+  /** A typed call's capture of a variable: its default's written type where its syntax gives one (`chainOf`). */
+  readonly chain?: Chain;
+};
+
+/**
+ * A default's written type as its syntax gives it (ADR 0021 rule 2.6, "its default's type"; #1072 step 0), derived
+ * apart from the core's `writtenDefault`: a written binding's type, at every level (`whole`); an unwritten `let`'s start
+ * value's; a list or set literal's elements, or an object literal's properties, where every cell gives the same
+ * (`null`: none there, the level and those below it read as the snapshot reads them).
+ */
+type Chain =
+  | { readonly t: "whole"; readonly type: DerivedType }
+  | { readonly t: "list" | "set"; readonly element: Chain | null }
+  | {
+      readonly t: "object";
+      readonly properties: readonly { readonly name: string; readonly chain: Chain | null }[];
+    };
+
+/** An expression's `Chain` with the chains of the bindings in scope by name; `null` for any other expression. */
+function chainOf(expression: Expression, chains: ReadonlyMap<string, Chain | null>): Chain | null {
+  const at = unwrap(expression);
+  switch (at.kind) {
+    case "identifier":
+      return chains.get(at.name) ?? null;
+    case "listLiteral":
+    case "setLiteral": {
+      const cells = at.elements.map((element) => chainOf(element, chains));
+      const first = cells[0] ?? null;
+      return {
+        t: at.kind === "listLiteral" ? "list" : "set",
+        element:
+          first !== null && cells.every((cell) => isDeepStrictEqual(cell, first)) ? first : null,
+      };
+    }
+    case "objectLiteral":
+      return {
+        t: "object",
+        properties: at.properties.map((property) => ({
+          name: property.name.name,
+          chain: chainOf(property.value, chains),
+        })),
+      };
+    default:
+      return null;
+  }
+}
+
+/** A snapshot's type with a chain's levels over it: the chain's where it gives one, the snapshot's elsewhere. */
+function chained(type: DerivedType | null, chain: Chain | null): DerivedType | null {
+  if (chain === null) return type;
+  if (chain.t === "whole") return chain.type;
+  if (type === null) return null;
+  if (chain.t === "object")
+    return type.kind !== "object"
+      ? type
+      : {
+          ...type,
+          properties: type.properties.map((property) => ({
+            ...property,
+            type:
+              chained(
+                property.type,
+                chain.properties.find((each) => each.name === property.name)?.chain ?? null,
+              ) ?? ALL,
+          })),
+        };
+  return type.kind === "list" || type.kind === "set"
+    ? { ...type, element: chained(type.element, chain.element) }
+    : type;
+}
 type Resolve = (name: string) => Snap;
 /** An index step of a snapshot's path, apart from every property name (a property may be named `element`). */
 const INDEX = "[]";
@@ -1002,7 +1078,12 @@ function snapshotsOf(program: readonly Statement[]): ReadonlyMap<Expression, Res
   // (each typed call of a statement reads the values of the names its statement holds, captured as they stand)
   // (a call no path reaches reads no value: the compiler takes none at a dead node, X1)
   const dead: Resolve = () => ({ t: "refused", why: "a variable read where no path reaches" });
-  const record = (statement: Statement, state: State, live: boolean) => {
+  const record = (
+    statement: Statement,
+    state: State,
+    chains: ReadonlyMap<string, Chain | null>,
+    live: boolean,
+  ) => {
     const calls = ownCalls(statement).filter((call) => !table.has(call));
     if (calls.length === 0) return;
     if (!live) {
@@ -1018,7 +1099,8 @@ function snapshotsOf(program: readonly Statement[]): ReadonlyMap<Expression, Res
     const captured = new Map<string, Snap>();
     for (const name of names) {
       const snap = state.get(name);
-      if (snap !== undefined) captured.set(name, snap);
+      const chain = chains.get(name) ?? null;
+      if (snap !== undefined) captured.set(name, chain === null ? snap : { ...snap, chain });
     }
     visits.captured += captured.size;
     for (const call of calls) {
@@ -1100,6 +1182,7 @@ function snapshotsOf(program: readonly Statement[]): ReadonlyMap<Expression, Res
     block: readonly Statement[],
     incoming: State,
     outer: ReadonlyMap<string, DerivedType>,
+    outerChains: ReadonlyMap<string, Chain | null>,
     live: boolean,
   ): {
     readonly state: Map<string, Snap>;
@@ -1109,6 +1192,8 @@ function snapshotsOf(program: readonly Statement[]): ReadonlyMap<Expression, Res
     const state = new Map(incoming);
     // (the written type of each binding in scope, by its name: a block's own `let`s are its own, a sibling's not seen)
     const written = new Map(outer);
+    // (each binding's `Chain`, scoped as its written type is)
+    const chains = new Map(outerChains);
     const stored = new Set<string>();
     let reached = live;
     const store = (name: string, snap: Snap) => {
@@ -1124,11 +1209,17 @@ function snapshotsOf(program: readonly Statement[]): ReadonlyMap<Expression, Res
           const name = receiverOf(node);
           if (name !== null) store(name, { t: "refused", why: "a method call on the variable" });
         }
-      record(statement, state, reached);
+      record(statement, state, chains, reached);
       switch (statement.kind) {
         case "letStatement":
           if (statement.typeAnnotation !== null)
             written.set(statement.name.name, writtenType(statement.typeAnnotation));
+          chains.set(
+            statement.name.name,
+            statement.typeAnnotation !== null
+              ? { t: "whole", type: writtenType(statement.typeAnnotation) }
+              : chainOf(statement.initializer, chains),
+          );
           state.set(statement.name.name, valueOf(statement.initializer, state));
           break;
         case "assignmentStatement": {
@@ -1155,7 +1246,7 @@ function snapshotsOf(program: readonly Statement[]): ReadonlyMap<Expression, Res
           const joined = new Set<string>();
           let open = reached;
           const arm = (block: readonly Statement[], runs: boolean) => {
-            const out = walk(block, state, written, runs);
+            const out = walk(block, state, written, chains, runs);
             if (runs && out.falls) {
               arms.push(out.state);
               for (const name of out.stored) joined.add(name);
@@ -1163,7 +1254,7 @@ function snapshotsOf(program: readonly Statement[]): ReadonlyMap<Expression, Res
           };
           let at: Statement | null = statement;
           while (at !== null && at.kind === "ifStatement") {
-            if (at !== statement) record(at, state, open);
+            if (at !== statement) record(at, state, chains, open);
             const truth = knownTruth(at.condition);
             arm(at.thenBlock.statements, open && truth !== false);
             if (truth === true) open = false;
@@ -1203,7 +1294,7 @@ function snapshotsOf(program: readonly Statement[]): ReadonlyMap<Expression, Res
               { t: "refused", why: "a variable read inside a loop" },
             ]),
           );
-          walk(statement.body.statements, inLoop, written, reached);
+          walk(statement.body.statements, inLoop, written, chains, reached);
           break;
         }
         case "exitStatement":
@@ -1224,7 +1315,7 @@ function snapshotsOf(program: readonly Statement[]): ReadonlyMap<Expression, Res
     }
     return { state, falls: reached, stored };
   };
-  walk(program, new Map(), new Map(), true);
+  walk(program, new Map(), new Map(), new Map(), true);
   snapshotTables.set(program, table);
   return table;
 }

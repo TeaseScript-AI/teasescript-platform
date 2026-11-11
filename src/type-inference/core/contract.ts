@@ -195,6 +195,7 @@ export {
   defaultOf,
   termAt,
   typeTags,
+  writtenDefault,
   writtenOf,
   writtenTypeSteps,
 } from "./contract/terms.js";
