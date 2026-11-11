@@ -143,7 +143,7 @@ function at(
   return path.length === 0 ? value : { n: value };
 }
 
-test("a typed default reads the call-site snapshot, the same domain in the answer, the admitted type, the plan and the runtime (F18, r4.81 (1))", () => {
+test("a typed default reads the call-site snapshot, the same domain in the answer, the admitted type, the plan and the runtime (F18)", () => {
   let compared = 0;
   for (const mode of MODES)
     for (const { form, call, data } of CALLS)

@@ -565,7 +565,7 @@ the differing pairs' parts, the research's inventory signatures (`signatures.tsv
 natural runs hold ordinary decision records and at least one run at the demand control, 16, reaches a receiving
 completion) and, as information only, the sources whose core differs across the four modes and the control's runs that
 left the slice, one row a class that names a text, `declined/lost check` and each rule of `EXCLUSIONS` (zeros
-included), and one a text no class names (`Unlisted control texts`, r4.382); the verdict line is `gate:
+included), and one a text no class names (`Unlisted control texts`); the verdict line is `gate:
 green` only with no `open` row, and `--gate` (S11's final run, with `--expect`) exits 1 otherwise. Over the research's
 records it reproduces its aggregate (`~/work/evidence/1728/`):
 

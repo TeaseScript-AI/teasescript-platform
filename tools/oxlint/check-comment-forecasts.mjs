@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { headingText, markdownProcessor } from "../repository-checks/markdown.mjs";
 import { checkedFiles, fileComments } from "./comments.mjs";
 
 // A comment says what the code does now and never forecasts later work (IMPLEMENTATION-AND-REVIEW.md "Code that does
@@ -8,7 +9,9 @@ import { checkedFiles, fileComments } from "./comments.mjs";
 // files' `<script>` blocks. A citation of a repository record matches no form: a bare `#N`, a completed stage, `PR N`,
 // "(as) before #N". The old design record is not in the repository (#1977), so a reference to it is no citation: a
 // line of any file Git lists, documents, strings and code included, that names it and then a revision or a section, on
-// it or the next line, is refused (`citingLines`, #2372), and the forms of `COUNTED_CITATIONS` have each file's exact count in comments in
+// it or the next line, is refused (`citingLines`, #2372); a revision number written as `r4.N` names the accepted
+// record's entry `r4-N`, so outside the record's own pages one with no such entry is refused (#2393); and the forms
+// of `COUNTED_CITATIONS` have each file's exact count in comments in
 // `comment-citations.json`, which may only fall. A comment that points at the accepted record
 // (`docs/specifications/type-inference-accepted-record/<page>.md#<anchor>`, #2089) names a heading of that page; the
 // doc-links check reads Markdown only and never sees a comment. A label of the port plan or the research design (`S8c`,
@@ -225,6 +228,55 @@ export function unresolvedPointers(fileName, text, pages) {
   return found;
 }
 
+/** A revision number in text: `r4.` and its digits as a whole token, naming the accepted record's entry `r4-N`. */
+const REVISION_NUMBER = /(?<![\p{L}\p{N}.])r4\.(\d+)(?!\p{N})/gu;
+
+/** Whether `file` is one of the accepted record's pages: a Markdown file anywhere in its folder. */
+const isRecordPage = (file) => file.startsWith(`${RECORD}/`) && /\.(?:md|markdown)$/u.test(file);
+
+/**
+ * The accepted record's entries by number: each level-3 heading whose text is `r4-N`, as the repository's Markdown
+ * reading (`markdownProcessor` and `headingText`, the doc-links check's own) parses the pages, so a heading's trailing
+ * spaces count as nothing, a line in a code block is none, and GitHub's inline marks and inline HTML around the text
+ * are read through; `pages` holds the pages' texts.
+ */
+export function recordEntries(pages) {
+  const numbers = new Set();
+  const visit = (node) => {
+    const entry =
+      node.type === "heading" && node.depth === 3 && /^r4-(\d+)$/u.exec(headingText(node));
+    if (entry) numbers.add(entry[1]);
+    for (const child of node.children ?? []) visit(child);
+  };
+  const markdown = markdownProcessor();
+  for (const page of pages) visit(markdown.parse(page));
+  return numbers;
+}
+
+/**
+ * Each revision number in `text`, the whole of file `fileName`, that names no entry of `entries`, with its line. Each
+ * end of a range is a number of its own. The record's own pages, which name revisions an entry superseded, and the
+ * lint's test are outside the rule; it proves that the entry exists, not that it carries the claim.
+ */
+export function unresolvedRevisionsIn(fileName, text, entries) {
+  if (fileName === CITATION_FIXTURES || isRecordPage(fileName)) return [];
+  const found = [];
+  let line = 1;
+  let counted = 0;
+  for (const match of text.matchAll(REVISION_NUMBER)) {
+    if (entries.has(match[1])) continue;
+    for (
+      let at = text.indexOf("\n", counted);
+      at !== -1 && at < match.index;
+      at = text.indexOf("\n", at + 1)
+    )
+      line += 1;
+    counted = match.index;
+    found.push({ line, number: match[1] });
+  }
+  return found;
+}
+
 /**
  * Each line of `text`, the whole of file `fileName`, that cites the old design record (`citingLines`), with its
  * 1-based line and its text from the record's name.
@@ -238,19 +290,21 @@ export function tableCitationsIn(fileName, text) {
 }
 
 /**
- * Each citation of the old design record in the files Git lists in `root` (tracked, and untracked but not ignored)
- * that are regular files, as `doc-links.mjs` reads them, as diagnostics; a file with a NUL byte is binary and is not
- * read as text. A name is decoded whole, a leading byte order mark kept; a failed `git` throws, and so does a listed
- * name that is not UTF-8, which could not be read unchanged.
+ * Each citation of the old design record and each revision number with no entry (`unresolvedRevisionsIn`, against
+ * the entries of every record page Git lists) in the files Git lists in `root` (tracked, and untracked but not
+ * ignored) that are regular files, as `doc-links.mjs` reads them, as diagnostics. A file with a NUL byte is binary:
+ * the revision rule reads it too, the record's name is not looked for in it. A name is decoded whole, a leading byte
+ * order mark kept; a failed `git` throws, and so does a listed name that is not UTF-8, which could not be read
+ * unchanged.
  */
-export function tableCitationFindings(root) {
+export function listedTextFindings(root) {
   const listing = execFileSync(
     "git",
     ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--deduplicate"],
     { cwd: root, maxBuffer: 1 << 28 },
   );
   const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
-  const findings = [];
+  const files = [];
   for (let start = 0, end; (end = listing.indexOf(0, start)) !== -1; start = end + 1) {
     const bytes = listing.subarray(start, end);
     let file;
@@ -258,11 +312,23 @@ export function tableCitationFindings(root) {
       file = utf8.decode(bytes);
     } catch {
       throw new Error(
-        `git lists a file whose name is not UTF-8 (${JSON.stringify(bytes.toString("latin1"))}): rename it, so the TABLE citation check can read it`,
+        `git lists a file whose name is not UTF-8 (${JSON.stringify(bytes.toString("latin1"))}): rename it, so the citation checks can read it`,
       );
     }
-    if (!lstatSync(resolve(root, file), { throwIfNoEntry: false })?.isFile()) continue;
-    const text = readFileSync(resolve(root, file), "utf8");
+    if (lstatSync(resolve(root, file), { throwIfNoEntry: false })?.isFile()) files.push(file);
+  }
+  const read = (file) => readFileSync(resolve(root, file), "utf8");
+  const entries = recordEntries(files.filter(isRecordPage).map(read));
+  const findings = [];
+  for (const file of files) {
+    const text = read(file);
+    for (const { line, number } of unresolvedRevisionsIn(file, text, entries))
+      findings.push({
+        fileName: file,
+        line,
+        column: 1,
+        message: `revision ${number} names no entry of the accepted record (${RECORD}, headings r4-N): state the fact, or point at an entry, an issue or a merged pull request`,
+      });
     if (text.includes("\0")) continue;
     for (const { line, text: citation } of tableCitationsIn(file, text))
       findings.push({
@@ -277,8 +343,8 @@ export function tableCitationFindings(root) {
 
 /**
  * Every forecast not in the allowlist, every allowlist entry no longer found, every file whose citation counts
- * differ from `comment-citations.json`'s, and every citation of the old design record in a file Git lists, as
- * diagnostics.
+ * differ from `comment-citations.json`'s, and every citation of the old design record or revision number with no
+ * entry in a file Git lists, as diagnostics.
  * @returns {{ fileName: string, line: number, column: number, message: string }[]}
  */
 export function checkCommentForecasts(root) {
@@ -327,7 +393,7 @@ export function checkCommentForecasts(root) {
     if (Object.keys(counts).length > 0) counted[file] = counts;
   }
   diagnostics.push(...glossaryFindings(carried, glossary));
-  diagnostics.push(...tableCitationFindings(root));
+  diagnostics.push(...listedTextFindings(root));
   for (const [index, item] of allowed.entries())
     if (!used.has(index))
       diagnostics.push({

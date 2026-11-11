@@ -63,7 +63,7 @@ test("the core gives the expected record for every record of the cells it comple
     "a fixture expectation awaiting its ruling (#2025)": 3,
     "the numeric crossover (#1173, #2025)": 1,
     "operator site awaiting set correction": 1,
-    "S9b's F18 copy of a written type as the receiving context (r4.77 (2))": 18,
+    "S9b's F18 copy of a written type as the receiving context": 18,
     "fromJson with files: true outside the slice, and C13's text operand": 2,
     "a known-value error the record lacks (decision 3 on #1072)": 1,
     "C13's warning of a choice value from outside the script the record lacks (#1437)": 3,
@@ -241,7 +241,7 @@ test("the record comparison the asserted records rest on reports each part: outc
  * The rule function as the set pins it (`cp9-cells/s6/rule-function/…`): its ten records, each compared
  * whole in both orders, but those `heldBack` names.
  */
-test("the core gives the expected record for every rule-function record, in both orders (r4.63–r4.66)", () => {
+test("the core gives the expected record for every rule-function record, in both orders", () => {
   const ruleFunction = records.filter((record) =>
     record.name.startsWith("cp9-cells/s6/rule-function/"),
   );
@@ -5334,7 +5334,7 @@ test("each store of one value whole owes its obligation once, however many lists
   }
 });
 
-test("named external data a carrier stores into a place published with a kind owes its check there (C9 r4.12, r4.50 (1), R4-F1)", () => {
+test("named external data a carrier stores into a place published with a kind owes its check there (C9, R4-F1)", () => {
   // per carrier outside the candidate's slice (its plan and its run wait for the slice): the warning where the named
   // data is read, with a `copy-type` check against the published kind; a source decided at its own stores (a list whose
   // element `1` decides) keeps its check there only; a member of host data owes C5's obligation on the receiver and,

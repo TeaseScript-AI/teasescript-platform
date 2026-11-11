@@ -5801,7 +5801,7 @@ const stoppedItems = (items: readonly Item[]): boolean =>
  * paths, and read again, in both read orders, directly and through a selection and an operation, and a proof read of
  * its deepest occurrence after the stop holds the stop too.
  */
-test("a property or index read's occurrence answers its key's stop at every depth from the stop on (r4.186)", () => {
+test("a property or index read's occurrence answers its key's stop at every depth from the stop on", () => {
   const shapes = [
     {
       source: "let tree = [{q: [{q: 1}]}]\nlet copy = tree[0].q[0].q\nsay copy\nexit\n",
@@ -5902,7 +5902,7 @@ test("a property or index read's occurrence answers its key's stop at every dept
  * another key stopped (the restarted pass) answers as a pass that starts with both. Between them the shapes reach
  * every memo that kept such an answer on `main`: forgetting all but one of them fails this test.
  */
-test("every answer kept before a key's decision stops answers the stop from the stop on (r4.186, #1403)", () => {
+test("every answer kept before a key's decision stops answers the stop from the stop on (#1403)", () => {
   const shapes = [
     "let box = [[{n: 1}]]\nsay box.first.first.n\nexit\n",
     "let v: integer? = null\nlet a = {n: v}\nsay a.n otherwise 2\nexit\n",

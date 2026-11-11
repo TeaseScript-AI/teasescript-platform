@@ -649,7 +649,7 @@ test("mutual copies stopped in the walk finish in work bounded by the program, i
 });
 
 /**
- * PLAN §6b's recursive record types (Astra's rounds 2–3): a linked list built by `chain(n)` and walked by `last(node)`
+ * Recursive record types (Astra's rounds 2–3): a linked list built by `chain(n)` and walked by `last(node)`
  * through `node.next` reaches any allowance; the stop answers every value it did not decide `unknown` with `budget`,
  * never asking its contract again, so the fallback is finite (S3 §5) and the count is checked when it runs.
  */
