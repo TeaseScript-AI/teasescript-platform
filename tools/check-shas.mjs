@@ -1,20 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { randomBytes } from "node:crypto";
-import {
-  accessSync,
-  chmodSync,
-  closeSync,
-  constants,
-  existsSync,
-  openSync,
-  readFileSync,
-  realpathSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from "node:fs";
-import { dirname, join } from "node:path";
+import { closeSync, existsSync, ftruncateSync, openSync, readFileSync, writeSync } from "node:fs";
 
 // Checks that the commit SHAs a report or pull-request body names exist and are on a remote, before it is sent:
 //
@@ -22,9 +7,10 @@ import { dirname, join } from "node:path";
 //
 // `--append` writes the run's last line into <file> as its last line, after a blank line, replacing such a line of its
 // own already there (which is left out of the check), so that the report sent is that file and its line is never
-// copied by hand. Only a whole last line in the tool's own form is its own; a quoted or partial one is text. The file
-// is replaced whole, by renaming a complete copy over it (a link's target, the link kept), so a failed write leaves it
-// as it was and exits 2.
+// copied by hand. Only a whole last line in the tool's own form is its own; a quoted or partial one is text. The file is
+// written in place, through a link: cut after its text, then the line written there. A failure to open or cut leaves it
+// as it was; one while writing leaves its text and maybe part of the line, which the message says to remove; both
+// exit 2.
 //
 // A SHA-shaped token is 7 to 40 lowercase hex characters, bounded by no letter, digit or `_`. Each is resolved with
 // `git rev-parse --verify --quiet <token>^{commit}` in each `--repo` (default: the current repository) and reported as
@@ -67,36 +53,34 @@ function withoutOwnLine(text) {
 }
 
 /**
- * Replaces `file`'s content whole: a complete copy beside it, under a short name of its own, renamed over it. A failure
- * leaves the file as it was, removes the copy only when this run created it, and exits 2.
+ * Writes `line` as `file`'s last line, in place: the file is cut where `kept`, its text before trailing white space and
+ * an own last line, ends, and the blank line and `line` are written there. A failure to open or cut leaves the file as
+ * it was; a failure while writing leaves its text, maybe with part of the line. Either exits 2, saying which.
  */
-function replaceFile(file, content) {
-  let temporary;
-  let created = false;
+function appendLine(file, bytes, kept, line) {
+  const end = Buffer.byteLength(kept);
+  // (the text was read as UTF-8: cut only where its bytes are the same, so no character is split)
+  if (!bytes.subarray(0, end).equals(Buffer.from(kept)))
+    cannotRun(`cannot write ${file}: it is not UTF-8 text; it is as it was`);
+  let descriptor;
   try {
-    const target = realpathSync(file);
-    accessSync(target, constants.W_OK);
-    temporary = join(dirname(target), `.check-shas-${randomBytes(6).toString("hex")}`);
-    const descriptor = openSync(temporary, "wx");
-    created = true;
-    try {
-      writeFileSync(descriptor, content);
-    } finally {
-      closeSync(descriptor);
-    }
-    chmodSync(temporary, statSync(target).mode & 0o7777);
-    renameSync(temporary, target);
+    descriptor = openSync(file, "r+");
+    ftruncateSync(descriptor, end);
   } catch (error) {
-    if (created)
-      try {
-        rmSync(temporary, { force: true });
-      } catch {
-        // (the failure below is the one reported; a copy left is named there)
-      }
+    if (descriptor !== undefined) closeSync(descriptor);
+    cannotRun(`cannot write ${file} (${error.code ?? error.message}); it is as it was`);
+  }
+  const tail = Buffer.from(`\n\n${line}\n`);
+  try {
+    for (let written = 0; written < tail.length;)
+      written += writeSync(descriptor, tail, written, tail.length - written, end + written);
+  } catch (error) {
     cannotRun(
-      `cannot write ${file} (${error.code ?? error.message}); it is as it was` +
-        (created && existsSync(temporary) ? `, and its copy ${temporary} is left` : ""),
+      `cannot write ${file}'s last line (${error.code ?? error.message}); its text is as it was, and part of the ` +
+        "line may stand after it: remove that by hand",
     );
+  } finally {
+    closeSync(descriptor);
   }
 }
 
@@ -266,7 +250,8 @@ function main() {
     )
       cannotRun(`${repository} is no git repository`);
   if (files.length === 1 && !existsSync(files[0])) cannotRun(`no file ${files[0]}`);
-  const read = readFileSync(files.length === 1 ? files[0] : 0, "utf8");
+  const bytes = readFileSync(files.length === 1 ? files[0] : 0);
+  const read = bytes.toString("utf8");
   // (with `--append`, a last line of this tool's own, written by an earlier run, is no part of the text)
   const text = append ? withoutOwnLine(read) : read;
 
@@ -379,7 +364,7 @@ function main() {
     `check-shas: ${tokens} tokens: ${counts.resolved} resolved, ${counts.trees} trees, ${counts.ambiguous} ambiguous, ` +
     `${counts.unresolved} unresolved, ${counts.local} local only, ${counts.skipped} skipped (ids, words, paths, sha256s); ` +
     `${placeholders.length} placeholders`;
-  if (append) replaceFile(files[0], `${text.trimEnd()}\n\n${line}\n`);
+  if (append) appendLine(files[0], bytes, text.trimEnd(), line);
   process.stdout.write(`${line}\n`);
   process.exitCode = failed ? 1 : 0;
 }
