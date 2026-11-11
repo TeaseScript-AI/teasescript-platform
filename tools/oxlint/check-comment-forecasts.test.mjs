@@ -854,6 +854,15 @@ test("printed text is a test's title and a measures or authority value, in every
   );
   // a file with none of the callee or property names is not parsed
   assert.deepEqual(printedTexts("tests/b.ts", 'const s = "A1";\n'), []);
+  // a file with a property alone, and none with a callee alone, is read
+  assert.deepEqual(
+    ["measures", "authority"].map((name) =>
+      printedLabelsIn("tests/f.ts", `export const f = { ${name}: "A1" };\n`).map(
+        ({ label }) => label,
+      ),
+    ),
+    [["A1"], ["A1"]],
+  );
   // the label reading is the comments' own: review references and names that are no labels are none
   assert.deepEqual(
     printedLabelsIn(
