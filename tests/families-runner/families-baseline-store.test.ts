@@ -679,3 +679,129 @@ test("the check and the baselines take one set of areas: each folder of tests/fa
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test("a stops run's decision stops are classified where both trees ran, never stored, and against a store unavailable, naming the base (#2355)", () => {
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    // (each source's stops on each tree: a place that stops at another pass, one the head alone stops, one the base
+    // alone stops, and stops alike where the stop set differs in another field; names in no order of the property)
+    const stopsOf = (head: boolean) => ({
+      moved: [[head ? 2 : 1, "r", "x", 2]],
+      added: head
+        ? [
+            [1, "r", "x", 1],
+            [1, "q", "y", 3],
+          ]
+        : [[1, "r", "x", 1]],
+      removed: head
+        ? [[1, "r", "x", 1]]
+        : [
+            [1, "r", "x", 1],
+            [1, "q", "y", 3],
+          ],
+      fields: [[1, "r", "x", 1]],
+    });
+    const library = (head: boolean) => `
+export function stopSet(files) {
+  const source = files[0].source;
+  return { stops: ${JSON.stringify(stopsOf(head))}[source], passes: 1, restarts: 0, outcome: "complete",
+    exhausted: null, record: ${head} && source === "fields" ? "other" : "same" };
+}
+`;
+    const names = ["moved", "added", "removed", "fields"];
+    const tree = (name: string, sha: string, head: boolean) => {
+      const folder = join(directory, name);
+      mkdirSync(join(folder, "dist", "tests", "helpers"), { recursive: true });
+      writeFileSync(join(folder, "package.json"), '{ "type": "module" }\n');
+      writeFileSync(join(folder, "package-lock.json"), "{}\n");
+      writeFileSync(
+        join(folder, "dist", "tests", "helpers", "type-core-oracles.js"),
+        storable(head) + library(head),
+      );
+      writeFileSync(join(folder, ".sha"), `${sha.repeat(40)}\n`);
+      writeSrc(folder, head ? "head\n" : "");
+      return folder;
+    };
+    const [base, head] = [tree("base", "1", false), tree("head", "2", true)];
+    const area = join(directory, "area");
+    mkdirSync(area);
+    writeFileSync(
+      join(area, "stopping.mjs"),
+      `export const cases = ${JSON.stringify(names.map((name) => [name, name]))};\nexport const checks = ["stops"];\n`,
+    );
+    const out = join(directory, "out.jsonl");
+    const run = (...args: string[]) => {
+      rmSync(out, { force: true });
+      const result = spawnSync(process.execPath, [runner, area, ...args, "--out", out], {
+        encoding: "utf8",
+      });
+      const kept = readFileSync(out, "utf8")
+        .trim()
+        .split("\n")
+        .map((line): Record<string, unknown> => JSON.parse(line))
+        .filter(({ mode, check }) => mode === "src-on" && check === "stops natural");
+      return { status: result.status, stderr: result.stderr, kept };
+    };
+    const stopsBy = (kept: Record<string, unknown>[]) =>
+      Object.fromEntries(kept.map(({ source, stops }) => [source, stops]));
+
+    // both trees run: each stop by its place, on the tree that has it
+    const beside = run(base, head);
+    assert.equal(beside.status, 1, beside.stderr);
+    assert.deepEqual(stopsBy(beside.kept), {
+      moved: {
+        added: [],
+        removed: [],
+        moved: [{ label: "r", path: "x", base: [1, 2], head: [2, 2] }],
+      },
+      added: {
+        added: [{ label: "q", path: "y", base: null, head: [1, 3] }],
+        removed: [],
+        moved: [],
+      },
+      removed: {
+        added: [],
+        removed: [{ label: "q", path: "y", base: [1, 3], head: null }],
+        moved: [],
+      },
+      fields: { listsEqual: true },
+    });
+
+    // stored: no stops in any stored run, and the store reads complete
+    const root = join(directory, "baselines");
+    const stored = spawnSync(
+      process.execPath,
+      [runner, area, base, "--store", root, "--shard", "0/1"],
+      { encoding: "utf8" },
+    );
+    assert.equal(stored.status, 0, stored.stderr);
+    const [src] = readdirSync(root);
+    const lines = readFileSync(join(root, src!, "area", "0of1.runs.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line): { runs?: Record<string, { value: Record<string, unknown> }> } =>
+        JSON.parse(line),
+      );
+    const values = lines.flatMap(({ runs }) => Object.values(runs ?? {}).map(({ value }) => value));
+    assert.equal(values.length, names.length * 4 * 3);
+    assert.ok(values.every((value) => !Object.hasOwn(value, "stops")));
+    const state = spawnSync(process.execPath, [baselines, "state", base, root, "--read-only"], {
+      encoding: "utf8",
+    });
+    assert.equal(state.status, 0, state.stderr);
+
+    // the head against the store: a difference whose stops say the base holds no list, never equal
+    const against = run(head, "--baseline", join(root, src!, "area"));
+    assert.equal(against.status, 1, against.stderr);
+    const unavailable = {
+      unavailable:
+        "the base's run holds no stop list (a stored run never does): a run of the differing sources on two trees gives it",
+    };
+    assert.deepEqual(
+      stopsBy(against.kept),
+      Object.fromEntries(names.map((name) => [name, unavailable])),
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
