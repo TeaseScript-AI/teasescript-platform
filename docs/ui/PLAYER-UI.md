@@ -489,7 +489,7 @@ to begin this Tease again.", in the card of a Tease that cannot start, whose **T
 error code and path when it refused the state, its message, and the saved and supported revisions, such as
 "Unsupported instruction-plan revision. Saved revision: 103. Supported revision: 104." (owner decision, 2026-10-28). A
 changed script, an ended session, or one that cannot be read shows Start alone. A session ends only with `exit`; there is no restart. Keeping is asynchronous browser storage, so a step after the last kept point, such as a reload in the
-moment after an answer, can be lost. A state this browser cannot write, such as one holding a list too long to save,
+moment after an answer or a lost engine connection ([session end](#session-end-and-failure)), can be lost. A state this browser cannot write, such as one holding a list too long to save,
 is not kept, and the session kept before is discarded, in the debug room without its saved data and photos, so a
 reload never goes on from an earlier point as if it were the current one; while the session runs or waits, a warning
 [notice](#player-notices) says that a reload would lose it, until a later state is kept. A saved-data import of the script discards its kept session
@@ -543,6 +543,19 @@ close it and open the debug export dialog, or the Debug panel's Now tab, which n
 **Close** returns focus to the line. Apart from those hand-overs, each dialog closes only with **Close** or Escape.
 Media warnings are notices, never failures. The transcript and Stage stay for inspection, with the transcript's end
 scrolling clear of the line. The dialogs fit narrow screens, and their buttons are at least 44px tall.
+
+A lost connection to the engine also stops a session that runs or waits, as a Player exception does, but the line says
+"The session stopped unexpectedly. You can continue from the last kept point. Progress since then may be lost." with
+**Continue from last kept point** when this browser keeps an unended session of the script; else it says only "The
+session stopped unexpectedly." with **Start again**. It has no **Details** and no error notice. With no session shown,
+as when a Start or Continue was lost before it showed, the start page shows it. Its click is the activation, as Start's
+and Continue's are: it replaces the connection, checks the kept session as Continue does, and goes on from it or starts
+anew; nothing restarts without a click, and a failed attempt shows the line again. A kept session the check refuses,
+such as one of another version, shows the start page with its explanation where one applies. Activity after the kept
+point can happen again, such as a question asked again, and saved values written since then stay. A start page lost
+before its click looks unchanged, and its Start or Continue recovers. A session that already ended keeps its end as
+shown: after `exit`, the start page's Start recovers; after a script error, as before, nothing does. A loss before the
+start page is ready stays a failure to open the script. An open session import closes without importing.
 
 The error dialog, Player Settings, and the Debug panel open one **Download debug export** dialog for a developer
 ([`DEBUGGER.md`](../DEBUGGER.md#debug-export)). The technical report is always included; each personal category is a

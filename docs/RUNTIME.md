@@ -13,7 +13,8 @@ independent action lifecycle.
 
 The Player's sessions live in the engine's host behind the bridge (`player/engine-bridge/`): the main realm holds a
 `PlayerSession`, the published state with its transcript, which it builds from each reply's publication; until the
-Worker is activated, the host runs in the page. Work that completes after a reply shows only while the session that
+Worker is activated, the host runs in the page. A lost connection is replaced only from the player's click
+([Player UI](ui/PLAYER-UI.md#session-end-and-failure)). Work that completes after a reply shows only while the session that
 issued it still owns the UI, and the player's input is posted only then. The Player runs each session on one
 [runtime session](#runtime-sessions). A `PlayerRuntimeSession` is one publication of it, as the host holds it: `state` holds the view, projections, active calls, and date and time presentation it shows. Each reply publishes the critical view: that state without its active calls, and the file, line and kind of the instructions its readers name (`instructions`). The active calls, with the instructions they name, come only while the main side views the session's calls (`viewCalls`, while Debug's Now view or the error dialog shows them), and with a stop's acknowledgement. The complete state
 is exported only where one is kept: checked for a restore point, a debug export, or a saved-data adoption, such as by
