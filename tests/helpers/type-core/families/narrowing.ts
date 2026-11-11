@@ -438,3 +438,73 @@ export const NARROWING_FAMILIES: readonly WorkFamily[] = [
       ),
   })),
 ];
+
+/**
+ * The route rule's narrowed default (#1938): in a program that holds an `if` arm no run enters, a route promotes only
+ * along the closed list (`NarrowingRoutes.#plain`: entered arms, passable statements, no loop before the use), over one
+ * feasibility layer built per program. Each family asks k route queries beside k such arms, through the analysis.
+ */
+export const ROUTE_FEASIBILITY_FAMILIES: readonly WorkFamily[] = [
+  {
+    name: "R-feasible-around",
+    measures:
+      "N3: k guards with an infeasible way past, each followed by a use whose route takes the guard's arm",
+    program: (k) =>
+      main(
+        lines(
+          "let n = 1",
+          "if hostValue is boolean { n = null }",
+          "let o = {k: 1}",
+          rows(k, () => 'if o != null { say "g" }\nrepeat n {}'),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "R-inline-selections",
+    measures:
+      "N3: k inline fallbacks, each of a value an infeasible arm's merge leaves null, each its own default",
+    program: (k) =>
+      main(
+        lines(
+          "let o = {k: 1}",
+          rows(
+            k,
+            (i) => `let a${i} = null\nif o != null { a${i} = 1 }\nrepeat (a${i} otherwise null) {}`,
+          ),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "R-break-only-loops",
+    measures:
+      "N3: k loops only an infeasible break leaves, each before a use, each route refused at its loop by the closed list",
+    program: (k) =>
+      main(
+        lines(
+          "let n = 1",
+          "if hostValue is boolean { n = null }",
+          "let o = {k: 1}",
+          rows(k, () => "while true { if o == null { break } }\nrepeat n {}"),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "R-loops-left",
+    measures:
+      "N3: k loops their header leaves, each before a use beside one infeasible arm, each route refused at its loop",
+    program: (k) =>
+      main(
+        lines(
+          "let n = 1",
+          "if hostValue is boolean { n = null }",
+          "let o = {k: 1}",
+          'if o != null { say "g" }',
+          rows(k, () => 'repeat 2 { say "r" }\nrepeat n {}'),
+          "exit",
+        ),
+      ),
+  },
+];

@@ -3,7 +3,7 @@
  * reads (`checked`), arm feasibility by entry narrowing and the program default (`holdsInfeasible`), and where a
  * node's statement stands in the statement tree (`chainOf`).
  */
-import type { Expression } from "../../../ast.js";
+import type { Expression, Statement } from "../../../ast.js";
 import type { SourceSite } from "../../graph.js";
 import type { CorePass } from "../answers.js";
 import { joinParts, keepText, type WorkLedger } from "../budget.js";
@@ -84,14 +84,85 @@ const ENDING: ReadonlySet<string> = new Set([
   "continueStatement",
 ]);
 
+/**
+ * Whether a statement of each kind may stand before a promoting route's use, or after its writer within its arm, in a
+ * program the default holds (#1938): one entry per kind, so a kind the language gains fails the type check until it is
+ * classified. Not passable: a loop, a label or a `goto`, a statement that ends or leaves (`exit`, `end`, `return`,
+ * `break`, `continue`), a file's `call`, and a statement that declares a timer, button or media block. A compound
+ * statement passes where every statement it holds does, and a statement holding a call of a function or a file, or a
+ * handler's declaration, never does (`feasibility`).
+ */
+const PASSABLE: Readonly<Record<Statement["kind"], boolean>> = {
+  speakerDeclaration: true,
+  speakerSetterStatement: true,
+  sayStatement: true,
+  showButtonStatement: false,
+  waitStatement: true,
+  timerStatement: false,
+  showImageStatement: true,
+  hideImageStatement: true,
+  showCameraStatement: true,
+  hideCameraStatement: true,
+  showPopupStatement: true,
+  openUrlStatement: true,
+  exportTextStatement: true,
+  showPermanentButtonStatement: false,
+  playMediaStatement: false,
+  stopAudioStatement: true,
+  saveStatement: true,
+  deleteStatement: true,
+  exitStatement: false,
+  endStatement: false,
+  labelStatement: false,
+  gotoStatement: false,
+  callFileStatement: false,
+  letStatement: true,
+  globalStatement: true,
+  assignmentStatement: true,
+  ifStatement: true,
+  switchStatement: true,
+  repeatStatement: false,
+  forStatement: false,
+  whileStatement: false,
+  breakStatement: false,
+  continueStatement: false,
+  functionDeclaration: true,
+  returnStatement: false,
+  expressionStatement: true,
+};
+
 /** The tree's blocks that end on every route through them, and per block its labels' indexes (`#ends`). */
 interface Endings {
   readonly ending: Set<TreeBlock>;
   readonly labels: Map<number, number[]>;
 }
 
-/** An `if` arm's feasibility for the route rule's default (`RouteTests.#infeasible`). */
+/** An `if` arm's or a `while` body's feasibility for the route rule's default (`RouteTests.#infeasible`). */
 type ArmFeasibility = "feasible" | "infeasible" | "unavailable";
+
+/**
+ * In a program that holds an arm no run is proved to enter, the arms the route rule's corridor passes through none of
+ * (#1938, `RouteTests.feasibility`).
+ */
+export interface Feasibility {
+  /** The live arms of tested `if`s and `while` bodies that are `infeasible` or `unavailable`: no chain enters one. */
+  readonly unentered: ReadonlySet<TreeBlock>;
+  /** The statements that own such an arm. */
+  readonly owners: readonly TreeStatement[];
+  /** The bodies of the program's files: a promoting route stands in one (`NarrowingRoutes.#plain`). */
+  readonly files: ReadonlySet<TreeBlock>;
+  /**
+   * Per block, the indexes (sorted) of its statements a promoting route may not pass: one `PASSABLE` refuses, or one
+   * that holds, at any depth, such a statement, a call of a function or a file, or a handler's declaration.
+   */
+  readonly hazards: ReadonlyMap<number, readonly number[]>;
+  /**
+   * The statements whose own expressions, not their arms', hold a call of a function or a file or a handler's
+   * declaration: a condition, a subject, a stored value, a statement's call. A route evaluates the own expressions of
+   * every statement of its chains before going on (`NarrowingRoutes.#plain`).
+   */
+  readonly headed: ReadonlySet<TreeStatement>;
+}
 
 /** A condition's own guards of a text and kind (`#ownGuarded`): their starts sorted, and the furthest end by each. */
 interface OwnGuards {
@@ -111,6 +182,10 @@ export class RouteTests {
   #endings: Endings | null = null;
   /** The program's `if`s whose conditions hold a test (`#testing`). */
   readonly #ifs: TreeStatement[] = [];
+  /** The program's `while`s whose conditions hold a test (`#testing`). */
+  readonly #whiles: TreeStatement[] = [];
+  /** The arms the corridor passes through none of, made on the first query of a program the default holds. */
+  #feasibility: Feasibility | null = null;
   /** Whether the program holds an `if` arm infeasible or unavailable (`holdsInfeasible`), made on the first query. */
   #holds: boolean | null = null;
   /** Per arm, its feasibility: infeasible, unavailable evidence, or feasible (`#infeasible`). */
@@ -311,6 +386,8 @@ export class RouteTests {
         if (facts === null) continue;
         if (statement.statement.kind === "ifStatement" && facts.list.length > 0)
           this.#ifs.push(statement);
+        if (statement.statement.kind === "whileStatement" && facts.list.length > 0)
+          this.#whiles.push(statement);
         for (const [text] of each(work, "indexSteps", facts.byText)) {
           const list = made.get(text);
           if (list === undefined) made.set(text, [statement]);
@@ -359,13 +436,13 @@ export class RouteTests {
   }
 
   /**
-   * The route rule's default (Sol's F2 on #1937, then Codex r6 and r7; the lead's ruling): the certificate promotes to
-   * an error only where no live `if` arm of the program's admitted callables is infeasible by entry narrowing (N1's
-   * forms over the core's items, `#infeasible`) or has a stopped tested read, so none on the use's witness chain or
-   * among the callables whose results or defaults reach it does; otherwise the use keeps the warning. An uncalled
-   * function contributes no live arm. An arm it does not prove counts as feasible: a comparison that is constant
-   * outside N1's forms (`o.k == 1`), a loop's exit, a `switch` case, another location's test. One answer per program,
-   * from the `if`s `#testing` finds once.
+   * The route rule's default (Sol's F2 on #1937, then Codex r6 and r7; the lead's ruling, narrowed by #1938): whether a
+   * live `if` arm of the program's admitted callables is infeasible by entry narrowing (N1's forms over the core's
+   * items, `#infeasible`) or has a stopped tested read. Where one is, `NarrowingRoutes.required` promotes only routes
+   * through arms runs enter (`feasibility`), by a certificate its own value proves; every other use keeps the warning.
+   * An uncalled function contributes no live arm. An arm it does not prove counts as feasible: a comparison that is
+   * constant outside N1's forms (`o.k == 1`), a loop's exit, a `switch` case, another location's test. One answer per
+   * program, from the `if`s `#testing` finds once.
    */
   protected *holdsInfeasible(): Work<boolean> {
     this.#work.charge("eventSteps");
@@ -386,7 +463,82 @@ export class RouteTests {
   }
 
   /**
-   * Whether an `if`'s arm is one no run enters (`infeasible`): a test of its condition (N1's form, `atEntry`) whose
+   * In a program the default holds (#1938): each live arm of a tested `if` and each tested `while`'s body that
+   * `#infeasible` does not answer `feasible`, the bodies of the program's files, and the blocks that hold a statement a
+   * promoting route may not pass (`PASSABLE`, a call site, a handler's declaration). One walk of the program's
+   * statements, call sites and regions, on the first query.
+   */
+  protected *feasibility(): Work<Feasibility> {
+    this.#work.charge("eventSteps");
+    if (this.#feasibility !== null) return this.#feasibility;
+    const work = this.#work;
+    this.#testing();
+    const unentered = new Set<TreeBlock>();
+    const owners: TreeStatement[] = [];
+    for (const list of each(work, "eventSteps", [this.#ifs, this.#whiles]))
+      for (const statement of each(work, "eventSteps", list)) {
+        let owns = false;
+        for (const arm of each(work, "eventSteps", statement.arms))
+          if (arm.live && (yield* this.#infeasible(arm)) !== "feasible") {
+            unentered.add(arm);
+            owns = true;
+          }
+        if (owns) owners.push(statement);
+      }
+    const program = this.pass.program;
+    const files = new Set<TreeBlock>();
+    for (const region of each(work, "eventSteps", program.flow.regions)) {
+      const root = region.kind === "file" ? this.tree.root(region.id) : undefined;
+      if (root !== undefined) files.add(root);
+    }
+    // (the statements a promoting route may not pass, then every statement holding one at any depth)
+    const marked: TreeStatement[] = [];
+    const calls: TreeStatement[] = [];
+    for (const block of each(work, "eventSteps", this.tree.blocks))
+      for (const statement of each(work, "eventSteps", block.statements))
+        if (statement.loop !== null || !PASSABLE[statement.statement.kind]) marked.push(statement);
+    for (const site of each(work, "eventSteps", program.flow.sites)) {
+      const at = site.callIn;
+      const statement =
+        at.span === null ? null : this.tree.statementAt(at.file, at.span.start.offset);
+      if (statement !== null) calls.push(statement);
+    }
+    for (const region of each(work, "eventSteps", program.flow.regions)) {
+      if (region.kind !== "handler") continue;
+      const statement = this.tree.statementAt(region.file, region.block.span.start.offset);
+      if (statement !== null) calls.push(statement);
+    }
+    // (a statement and each compound statement above it)
+    const above = (pending: TreeStatement[], into: Set<TreeStatement>): void => {
+      work.charge("eventSteps");
+      for (const _ of steps(work, "eventSteps", () => pending.length > 0)) {
+        const statement = pending.pop()!;
+        if (into.has(statement)) continue;
+        into.add(statement);
+        if (statement.block.owner !== null) pending.push(statement.block.owner);
+      }
+    };
+    const headed = new Set<TreeStatement>();
+    for (const statement of each(work, "eventSteps", calls)) headed.add(statement);
+    const calling = new Set<TreeStatement>();
+    above(calls, calling);
+    for (const statement of each(work, "eventSteps", calling)) marked.push(statement);
+    const hazardous = new Set<TreeStatement>();
+    above(marked, hazardous);
+    const hazards = new Map<number, number[]>();
+    for (const statement of each(work, "eventSteps", hazardous)) {
+      const list = hazards.get(statement.block.id);
+      if (list === undefined) hazards.set(statement.block.id, [statement.index]);
+      else list.push(statement.index);
+    }
+    for (const list of each(work, "eventSteps", hazards.values()))
+      sorted(work, "eventSteps", list, (a, b) => a - b);
+    this.#feasibility = { unentered, owners, files, hazards, headed };
+    return this.#feasibility;
+  }
+
+  /**
+   * Whether an `if`'s arm or a `while`'s body is one no run enters (`infeasible`): a test of its condition (N1's form, `atEntry`) whose
    * narrowing removes every kind its read holds at the condition. `unavailable`, which blocks the route rule's promotion
    * (Sol's final F1 on #1937, the lead's ruling), where a tested read's answer is missing: a stopped decision's (the
    * `budget` reason), an `unknown` without the `external` reason (admission lacking items, #2009, #2011), or empty.
@@ -400,7 +552,10 @@ export class RouteTests {
     const work = this.#work;
     const owner = arm.owner;
     let answer: ArmFeasibility = "feasible";
-    const facts = owner?.statement.kind === "ifStatement" ? this.#conditionFacts(owner) : null;
+    const facts =
+      owner?.statement.kind === "ifStatement" || owner?.statement.kind === "whileStatement"
+        ? this.#conditionFacts(owner)
+        : null;
     // (each location's narrowings at the entry once: a condition may test one location many times)
     const seen = new Set<string>();
     if (arm.entry !== null && facts !== null)

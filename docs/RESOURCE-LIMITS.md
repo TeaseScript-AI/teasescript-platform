@@ -227,6 +227,16 @@ changed warning or wording applies to the same change, the entry is its report:
   2026-11-10), other warnings, or a less precise reported type. Measured against the main before it: 1,081 settings
   (source, mode, allowance) with a refusal on one side and 475 where both compile with identical plans, on those 15
   sources.
+- **Where a stop falls in a program the route rule's default holds (#1938, PR #2270).** In a program that holds an `if`
+  arm no run is proved to enter, the route rule now does route work where it returned the warning at once: one
+  feasibility layer and one walk of the statements per program, and the closed list's checks per query. Such a program
+  needs more work to complete. Measured against main 9f0b3a1b7 on 15 constructed sources in four modes: 3.8% to 32.2%
+  more total work allowance, and none more for a program the default does not hold. A demand-allowance sweep (1 to 400)
+  moved no stop. A maker would notice nothing for a script that fits its budget. For a script whose budget falls
+  between the two: a stop where main completed, with the warnings a stop leaves and never an error. Over the corpus and
+  the families (67,155 sources, four modes, against 9f0b3a1b7's stored runs), 32 sources change their charged work. The
+  natural compiles' work rises by 0.0001% in total, and by 2.5% over the 32 changed sources (21.8% at most). No natural
+  compile newly reaches its allowance.
 - **Which property a runtime message names after a stop (#2216, 664f1183f; open #2218).** A store's check taken from the
   receiving completion lists an object's properties by the store's own records. Where another store asked that level
   first with records that rank the properties otherwise, the listed order still follows where the stop fell. A maker
