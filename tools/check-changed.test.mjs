@@ -187,6 +187,24 @@ test("loadedBy follows the string literals that name a file, and nothing else; p
         ["oxlint-rules"],
       );
       assert.deepEqual(unreadableLoads(root), []);
+      // read per root, also when each is the working folder ("."): one root's reading is not another's (Sol r2)
+      assert.deepEqual([...inside(root, () => projectsFor(["tools/check-shas.mjs"]))], ["tools"]);
+      assert.deepEqual([...inside(bare, () => projectsFor(["tools/check-shas.mjs"]))].sort(), [
+        "oxlint-rules",
+        "tools",
+      ]);
+      // a runner that is not there, with TypeScript there, fails the reading too: its loads are stale (Sol r2)
+      const stale = mkdtempSync(join(tmpdir(), "check-changed-loads-stale-"));
+      try {
+        symlinkSync(join(process.cwd(), "node_modules"), join(stale, "node_modules"));
+        assert.deepEqual([...projectsFor(["tools/check-shas.mjs"], stale)].sort(), [
+          "oxlint-rules",
+          "tools",
+        ]);
+        assert.match(unreadableLoads(stale)[0]?.error ?? "", /ENOENT.*tools\/oxlint\/test\.mjs/u);
+      } finally {
+        rmSync(stale, { recursive: true, force: true });
+      }
     } finally {
       rmSync(bare, { recursive: true, force: true });
     }
