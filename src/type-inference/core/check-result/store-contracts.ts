@@ -272,16 +272,22 @@ export class Contracts {
     // a copy of a written type is F18's receiving context (A4, (1a)), at every level the call's value
     // reaches, but the core answers the call by its default there while its later facts follow that answer: the
     // lowering cannot widen it alone
-    if (
-      landing !== null &&
-      expected !== null &&
-      levelsOf(expected).some((level) => {
-        const admitted = this.answers.place(landing.id, [...landing.path, ...level]).admitted;
-        return admitted.by === "decided" && admitted.inherited;
-      })
-    )
-      throw new OutsideContract(call, "a typed parse or load into a copy of a written type");
-    if (expected !== null && this.coherence) this.#coherent(call, landing, fallback, expected);
+    // PROBE v2: one read per landing level, as the guard reads them; the guard's reason first, then coherence
+    if (expected === null) return expected;
+    const kindsAt = levelKinds(expected);
+    let incoherent: string | null = null;
+    for (const level of levelsOf(expected)) {
+      if (landing === null) break;
+      const admitted = this.answers.place(landing.id, [...landing.path, ...level]).admitted;
+      if (admitted.by === "decided" && admitted.inherited)
+        throw new OutsideContract(call, "a typed parse or load into a copy of a written type");
+      const kinds = kindsAt.get(level.join("\u0000"))?.kinds ?? null;
+      const verdict = kinds === null ? "same" : admits(admitted, kinds);
+      if (incoherent === null && verdict !== "same") incoherent = `PROBE receiving ${verdict}`;
+    }
+    if (!this.coherence) return expected;
+    if (incoherent !== null) throw new OutsideContract(call, incoherent);
+    if (fallback !== null) this.#defaultCoherent(call, fallback, kindsAt);
     return expected;
   }
 
@@ -289,35 +295,34 @@ export class Contracts {
   public coherence = true;
 
   /**
-   * PROBE (#2307 HEAD 0): the reader is coherent where, at every level of its plan, its kinds are the kinds the place it
-   * lands in admits there and the kinds every place its default reads admits there; anything else declines.
+   * PROBE (#2307 HEAD 0) v2: the default side: at every level of the reader's plan, each place the default reads there
+   * admits the reader's kinds: a written binding by its annotation (no question), any other by admission.
    */
-  #coherent(
+  #defaultCoherent(
     call: CallExpression | LoadExpression,
-    landing: Landing | null,
-    fallback: Expression | null,
-    expected: TypePlan,
+    fallback: Expression,
+    kindsAt: ReadonlyMap<string, { path: string[]; kinds: Set<string> | null }>,
   ): void {
-    const levels = levelKinds(expected);
-    for (const { path, kinds } of levels.values()) {
+    for (const { path, kinds } of kindsAt.values()) {
       if (kinds === null) continue;
-      if (landing !== null) {
-        const verdict = admits(
-          this.answers.place(landing.id, [...landing.path, ...path]).admitted,
-          kinds,
-        );
-        if (verdict !== "same") throw new OutsideContract(call, `PROBE receiving ${verdict}`);
-      }
-      if (fallback === null) continue;
       for (const at of atLevel(fallback, path)) {
         if (at.kind === "other") continue;
         if (at.kind === "unsure") throw new OutsideContract(call, "PROBE default unsure");
         const place = this.answers.at(nodeOf(this.answers, this.index, at.read))?.place ?? null;
         if (place === null) throw new OutsideContract(call, "PROBE default no-place");
-        const verdict = admits(
-          this.answers.place(place.id, joinSteps(place.path, at.rest)).admitted,
-          kinds,
-        );
+        const steps = joinSteps(place.path, at.rest);
+        const annotation = this.lets.get(place.id)?.typeAnnotation ?? null;
+        let verdict: string;
+        if (annotation !== null) {
+          const plan = typePlan(typeFromAnnotation(annotation));
+          const written = plan === null ? undefined : levelKinds(plan).get(steps.join("\u0000"));
+          verdict =
+            written === undefined || written.kinds === null
+              ? "same"
+              : sameKinds(written.kinds, kinds)
+                ? "same"
+                : "written-differs";
+        } else verdict = admits(this.answers.place(place.id, steps).admitted, kinds);
         if (verdict !== "same") throw new OutsideContract(call, `PROBE default ${verdict}`);
       }
     }
@@ -895,11 +900,15 @@ function levelKinds(plan: TypePlan): Map<string, { path: string[]; kinds: Set<st
 function admits(admitted: AdmittedType, kinds: ReadonlySet<string>): string {
   if (admitted.by === "undecided") return "undecided";
   if (admitted.kinds.includes("unknown")) return "same";
-  const own = new Set<string>(admitted.kinds);
-  if (own.has("number")) own.delete("integer");
-  if (own.size !== kinds.size || [...own].some((kind) => !kinds.has(kind)))
-    return `${admitted.by}-differs`;
-  return "same";
+  return sameKinds(new Set<string>(admitted.kinds), kinds) ? "same" : `${admitted.by}-differs`;
+}
+
+/** PROBE: whether two kind sets are one, a number family's integer folded into number on each side. */
+function sameKinds(a: ReadonlySet<string>, b: ReadonlySet<string>): boolean {
+  const fold = (set: ReadonlySet<string>) =>
+    new Set([...set].filter((kind) => kind !== "integer" || !set.has("number")));
+  const [x, y] = [fold(a), fold(b)];
+  return x.size === y.size && [...x].every((kind) => y.has(kind));
 }
 
 /**
