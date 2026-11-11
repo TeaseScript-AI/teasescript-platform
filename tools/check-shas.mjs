@@ -1,9 +1,16 @@
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { closeSync, existsSync, ftruncateSync, openSync, readFileSync, writeSync } from "node:fs";
 
 // Checks that the commit SHAs a report or pull-request body names exist and are on a remote, before it is sent:
 //
-//   node tools/check-shas.mjs [--repo <path>]... [<file>]     (the text from <file>, else from standard input)
+//   node tools/check-shas.mjs [--repo <path>]... [--append] [<file>]   (the text from <file>, else from standard input)
+//
+// `--append` writes the run's last line into <file> as its last line, after a blank line, replacing such a line of its
+// own already there (which is left out of the check), so that the report sent is that file and its line is never
+// copied by hand. Only a whole last line in the tool's own form is its own; a quoted or partial one is text. The file is
+// written in place, through a link: cut after its text, then the line written there. A failure to open or cut leaves it
+// as it was; one while writing leaves its text and maybe part of the line, which the message says to remove; both
+// exit 2.
 //
 // A SHA-shaped token is 7 to 40 lowercase hex characters, bounded by no letter, digit or `_`. Each is resolved with
 // `git rev-parse --verify --quiet <token>^{commit}` in each `--repo` (default: the current repository) and reported as
@@ -43,7 +50,50 @@ import { existsSync, readFileSync } from "node:fs";
 //
 // Exit status: 0 when every token that must be a commit resolved on a remote and no placeholder or several-issue
 // closing clause is left (scratch paths do not change it), 1 otherwise, 2 when it cannot run (bad arguments, an
-// unreadable file, or a `--repo` that is no git repository).
+// unreadable file, a `--repo` that is no git repository, or a failed `--append` write).
+
+/** A whole last line in this tool's own form, as `--append` writes it. */
+const OWN_LINE =
+  /^check-shas: \d+ tokens: \d+ resolved, \d+ trees, \d+ ambiguous, \d+ unresolved, \d+ local only, \d+ skipped \(ids, words, paths, sha256s\); \d+ placeholders, \d+ multi-issue closing clauses, \d+ scratch paths$/u;
+
+/** `text` without a last line of this tool's own and the white space around it, read from the end once. */
+function withoutOwnLine(text) {
+  const trimmed = text.trimEnd();
+  const start = trimmed.lastIndexOf("\n") + 1;
+  return OWN_LINE.test(trimmed.slice(start)) ? trimmed.slice(0, start).trimEnd() : text;
+}
+
+/**
+ * Writes `line` as `file`'s last line, in place: the file is cut where `kept`, its text before trailing white space and
+ * an own last line, ends, and the blank line and `line` are written there. A failure to open or cut leaves the file as
+ * it was; a failure while writing leaves its text, maybe with part of the line. Either exits 2, saying which.
+ */
+function appendLine(file, bytes, kept, line) {
+  const end = Buffer.byteLength(kept);
+  // (the text was read as UTF-8: cut only where its bytes are the same, so no character is split)
+  if (!bytes.subarray(0, end).equals(Buffer.from(kept)))
+    cannotRun(`cannot write ${file}: it is not UTF-8 text; it is as it was`);
+  let descriptor;
+  try {
+    descriptor = openSync(file, "r+");
+    ftruncateSync(descriptor, end);
+  } catch (error) {
+    if (descriptor !== undefined) closeSync(descriptor);
+    cannotRun(`cannot write ${file} (${error.code ?? error.message}); it is as it was`);
+  }
+  const tail = Buffer.from(`\n\n${line}\n`);
+  try {
+    for (let written = 0; written < tail.length;)
+      written += writeSync(descriptor, tail, written, tail.length - written, end + written);
+  } catch (error) {
+    cannotRun(
+      `cannot write ${file}'s last line (${error.code ?? error.message}); its text is as it was, and part of the ` +
+        "line may stand after it: remove that by hand",
+    );
+  } finally {
+    closeSync(descriptor);
+  }
+}
 
 /** The unfilled placeholders a report can carry, case-insensitive. */
 export const PLACEHOLDERS = [
@@ -292,13 +342,16 @@ function main() {
   const argv = process.argv.slice(2);
   const repositories = [];
   const files = [];
+  let append = false;
   for (let index = 0; index < argv.length; index += 1)
-    if (argv[index] === "--repo") {
+    if (argv[index] === "--append") append = true;
+    else if (argv[index] === "--repo") {
       if (index + 1 >= argv.length) cannotRun("--repo needs a path");
       repositories.push(argv[(index += 1)]);
     } else if (argv[index].startsWith("-")) cannotRun(`unknown option ${argv[index]}`);
     else files.push(argv[index]);
-  if (files.length > 1) cannotRun("usage: node tools/check-shas.mjs [--repo <path>]... [<file>]");
+  if (files.length > 1 || (append && files.length === 0))
+    cannotRun("usage: node tools/check-shas.mjs [--repo <path>]... [--append] [<file>]");
   if (repositories.length === 0) repositories.push(".");
   for (const repository of repositories)
     if (
@@ -307,7 +360,10 @@ function main() {
     )
       cannotRun(`${repository} is no git repository`);
   if (files.length === 1 && !existsSync(files[0])) cannotRun(`no file ${files[0]}`);
-  const text = readFileSync(files.length === 1 ? files[0] : 0, "utf8");
+  const bytes = readFileSync(files.length === 1 ? files[0] : 0);
+  const read = bytes.toString("utf8");
+  // (with `--append`, a last line of this tool's own, written by an earlier run, is no part of the text)
+  const text = append ? withoutOwnLine(read) : read;
 
   let failed = false;
   const counts = { resolved: 0, trees: 0, ambiguous: 0, unresolved: 0, local: 0, skipped: 0 };
@@ -428,11 +484,12 @@ function main() {
     );
   }
   const tokens = Object.values(counts).reduce((sum, n) => sum + n, 0);
-  process.stdout.write(
+  const line =
     `check-shas: ${tokens} tokens: ${counts.resolved} resolved, ${counts.trees} trees, ${counts.ambiguous} ambiguous, ` +
-      `${counts.unresolved} unresolved, ${counts.local} local only, ${counts.skipped} skipped (ids, words, paths, sha256s); ` +
-      `${placeholders.length} placeholders, ${clauses.length} multi-issue closing clauses, ${scratch.length} scratch paths\n`,
-  );
+    `${counts.unresolved} unresolved, ${counts.local} local only, ${counts.skipped} skipped (ids, words, paths, sha256s); ` +
+    `${placeholders.length} placeholders, ${clauses.length} multi-issue closing clauses, ${scratch.length} scratch paths`;
+  if (append) appendLine(files[0], bytes, text.trimEnd(), line);
+  process.stdout.write(`${line}\n`);
   process.exitCode = failed ? 1 : 0;
 }
 
