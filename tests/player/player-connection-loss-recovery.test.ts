@@ -283,6 +283,30 @@ async function page(
   return { connections, player, kept, hostErrors, scope, start };
 }
 
+// How long a fresh connection may take to open: a real Worker's start, which the host's load decides, so it is bounded
+// in time rather than in `until`'s short turns. Measured: about 0.1 s on an idle desktop, up to about 1 s on a loaded
+// queue host.
+const OPENING_MS = 30_000;
+
+/**
+ * Arms `step` on the next fresh connection, as `armNext` does, and resolves with that connection once it opened and its
+ * step began.
+ */
+function nextOpened(
+  connections: TopologyConnections,
+  step: (fresh: TopologyBridge) => void | Promise<void>,
+): Promise<TopologyBridge> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("never: the fresh connection")), OPENING_MS);
+    timer.unref();
+    connections.armNext((fresh) => {
+      clearTimeout(timer);
+      resolve(fresh);
+      return step(fresh);
+    });
+  });
+}
+
 /** Whether `connection` still answers a request, sent through its client as it was made. */
 function answering(connection: TopologyBridge): () => Promise<boolean> {
   const client = connection.bridge.client;
@@ -569,10 +593,9 @@ RERUN.rows(
     await keptAtTheQuestion(player, kept);
     await connections.first.lose();
     await until(() => player.recovery.value !== null, "the offer");
-    connections.armNext((fresh) => fresh.hold("prepare"));
+    const opened = nextOpened(connections, (fresh) => fresh.hold("prepare"));
     const recovering = player.activate();
-    await until(() => connections.made.length === 2, "the fresh connection");
-    const fresh = connections.current();
+    const fresh = await opened;
     await fresh.held();
     await fresh.lose();
     fresh.release();
@@ -1033,10 +1056,9 @@ for (const op of ["restoreKept", "beginRecording", "continue"] as const)
       await keptAtTheQuestion(player, kept);
       await connections.first.lose();
       await until(() => player.recovery.value !== null, "the first offer");
-      connections.armNext((fresh) => fresh.hold(op));
+      const opened = nextOpened(connections, (fresh) => fresh.hold(op));
       const recovering = player.activate();
-      await until(() => connections.made.length === 2, "the fresh connection");
-      const fresh = connections.current();
+      const fresh = await opened;
       await fresh.held();
       await fresh.lose();
       fresh.release();
@@ -1109,11 +1131,11 @@ for (const [id, phase] of [
         "the loss released the camera",
       );
       if (phase === "rejected") connections.failNext();
-      else connections.armNext((fresh) => fresh.hold("prepare"));
+      const opened =
+        phase === "lost" ? nextOpened(connections, (fresh) => fresh.hold("prepare")) : null;
       const recovering = player.activate();
-      if (phase === "lost") {
-        await until(() => connections.made.length === 2, "the fresh connection");
-        const fresh = connections.current();
+      if (opened !== null) {
+        const fresh = await opened;
         await fresh.held();
         await fresh.lose();
         fresh.release();
@@ -1158,10 +1180,9 @@ RERUN.rows(
     await connections.first.lose();
     await until(() => player.recovery.value !== null, "the offer");
     assert.deepEqual(player.recovery.value, { offer: "continue", where: "line" });
-    connections.armNext((fresh) => fresh.hold("prepare"));
+    const opened = nextOpened(connections, (fresh) => fresh.hold("prepare"));
     const recovering = player.activate();
-    await until(() => connections.made.length === 2, "the fresh connection");
-    const fresh = connections.current();
+    const fresh = await opened;
     await fresh.held();
     // The family's state at a loss now: no session shown, still inspecting, the Continue click under way.
     assert.equal(player.session.value, null);
@@ -1320,10 +1341,9 @@ RERUN.rows(
   async (context, topology, end) => {
     const { connections, player } = await page(context, topology);
     await connections.first.lose();
-    connections.armNext((fresh) => fresh.hold("start"));
+    const opened = nextOpened(connections, (fresh) => fresh.hold("start"));
     const recovering = player.activate();
-    await until(() => connections.made.length === 2, "the fresh connection");
-    const fresh = connections.current();
+    const fresh = await opened;
     await fresh.held();
     await fresh.lose();
     fresh.release();
@@ -1609,10 +1629,9 @@ RERUN.rows(
     await keptAtTheQuestion(player, kept);
     await connections.first.lose();
     await until(() => player.recovery.value !== null, "the offer");
-    connections.armNext((fresh) => fresh.hold("prepare"));
+    const opened = nextOpened(connections, (fresh) => fresh.hold("prepare"));
     const recovering = player.activate();
-    await until(() => connections.made.length === 2, "the fresh connection");
-    const fresh = connections.current();
+    const fresh = await opened;
     const answers = answering(fresh);
     await fresh.held();
     scope.stop();
@@ -1642,16 +1661,15 @@ for (const [id, admitted] of [
       await connections.first.lose();
       await until(() => player.recovery.value !== null, "the offer");
       const gate: { open?: () => void } = {};
-      connections.armNext((fresh) =>
+      // Not admitted: its factory waits at `gate` once the connection opened.
+      const opened = nextOpened(connections, (fresh) =>
         admitted
           ? fresh.hold("prepare")
           : new Promise<void>((resolve) => void (gate.open = resolve)),
       );
       const superseded = player.activate();
-      await until(() => connections.made.length === 2, "the first fresh connection");
-      const candidate = connections.current();
+      const candidate = await opened;
       if (admitted) await candidate.held();
-      else await until(() => gate.open !== undefined, "its factory waits");
       // The trusted host's own calls, while the click's fresh connection opens or prepares.
       player.prepare(start);
       await player.activate();
