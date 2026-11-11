@@ -4,7 +4,7 @@ import { pipeline } from "node:stream/promises";
 import { run } from "node:test";
 import { spec } from "node:test/reporters";
 import { filesAtOnce } from "./test-files-at-once.mjs";
-import { trackInFlight } from "./test-in-flight.mjs";
+import { TEST_LIMIT_MS, trackInFlight } from "./test-in-flight.mjs";
 import { suiteName } from "./test-shards.mjs";
 
 // Runs the test files given as arguments in that order, each in its own process, with the reporter and exit status of
@@ -15,8 +15,8 @@ import { suiteName } from "./test-shards.mjs";
 // `node:test` passes it as its file entry alone), is named and fails the run. A signal cancels the run as it cancels
 // `node --test`, which stops the files' processes instead of leaving them running. Where `TEST_FILE_SECONDS` names a
 // file, it receives each file's seconds from its process's start to its end, as CI's test jobs keep them for
-// `tools/measure-test-files.mjs`. A test still running long after it began is named on standard error
-// (`tools/test-in-flight.mjs`).
+// `tools/measure-test-files.mjs`. A test or hook that waits past `TEST_LIMIT_MS` fails; a stall that limit does not end is named on
+// standard error (`tools/test-in-flight.mjs`).
 const atOnce = filesAtOnce();
 // A test runner option is any of Node's `--test…` or `--experimental-test…` options, also negated with `--no-`; Node
 // reads `_` in an option's name as `-`, so `--test_name_pattern=x` is one too.
@@ -41,6 +41,8 @@ const tests = run({
   files: process.argv.slice(2),
   concurrency: atOnce,
   isolation: "process",
+  timeout: TEST_LIMIT_MS,
+  // (no `forceExit`: with it, a full run reported 3899 of 3952 tests and exited 0, job 1111163300ceb7)
   signal: controller.signal,
 });
 trackInFlight((type, listener) => tests.on(type, listener));
