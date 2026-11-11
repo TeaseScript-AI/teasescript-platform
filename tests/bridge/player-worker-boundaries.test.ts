@@ -237,6 +237,7 @@ const RERUN = rerunRegistry({
   "W8 transfer": TOPOLOGIES,
   "W9 keep and Continue": TOPOLOGIES,
   "W10 catch-up": TOPOLOGIES,
+  "W10b catch-up behind an answer": TOPOLOGIES,
   "W11 failure export": TOPOLOGIES,
   "W12 going back": TOPOLOGIES,
 });
@@ -972,6 +973,70 @@ RERUN.rows(
       String(budgets),
     );
     assert.ok(ops.indexOf("adoptCatchUp", begun) > begun, ops.join(", "));
+    return end();
+  },
+);
+
+RERUN.rows(
+  "W10b catch-up behind an answer",
+  "W10b: a late catch-up queued behind a button answer is refused for the revision it was sampled from; the clock observes afresh, the answer stands, and nothing is reported",
+  async (context, topology, end) => {
+    stubBrowser(context);
+    let nowMs = 0;
+    context.mock.method(performance, "now", () => (nowMs += 1));
+    const transport = await topologyBridge(context, topology);
+    const { host } = await mount(context, transport);
+    const refusals: unknown[] = [];
+    const request = transport.bridge.request.bind(transport.bridge);
+    context.mock.method(
+      transport.bridge,
+      "request",
+      async (...call: Parameters<typeof request>) => {
+        try {
+          return await request(...call);
+        } catch (error) {
+          if (call[1] === "beginCatchUp")
+            refusals.push((error as { readonly code?: unknown }).code);
+          throw error;
+        }
+      },
+    );
+    await start(
+      host,
+      'let n = 0\ntimer(duration: 10 ms, async: true, repeat: true, display: "hidden") {\n  n += 1\n}\nshowButton "Next"\nshowButton "After"\nexit',
+    );
+    const input = await runtimeInput();
+    // The answer's section holds the session's queue while its observation's reply waits at the port. A second later the
+    // page is shown again: the late observation's catch-up, sampled from the revision before the answer, queues behind it.
+    transport.hold("observeInput");
+    const answering = answer(host, input.intents.choice(null, "button"));
+    await transport.held();
+    const heldAt = transport.posts.length;
+    nowMs += 1_000;
+    document.dispatchEvent(new Event("visibilitychange"));
+    for (let index = 0; index < 5; index += 1) await turn();
+    const queued = transport.posts.slice(heldAt).map((post) => post.op);
+    assert.equal(queued.indexOf("beginCatchUp"), -1, queued.join(", "));
+    transport.release();
+    assert.equal((await answering).kind, "answered");
+    await until(() => refusals.length > 0, "the catch-up's refusal");
+    assert.deepEqual(refusals, ["basis"]);
+    await until(
+      () => asks(host) && choiceOptions(host)[0]?.label === "After",
+      "the answer's next button",
+    );
+    // Refused, the catch-up stepped nothing; the clock observed the late second in one go instead.
+    const ops = transport.posts.slice(heldAt).map((post) => post.op);
+    const begun = ops.indexOf("beginCatchUp");
+    assert.ok(begun >= 0, ops.join(", "));
+    assert.equal(ops.indexOf("stepCatchUp", begun), -1, ops.join(", "));
+    assert.ok(ops.indexOf("observeTime", begun) > begun, ops.join(", "));
+    await until(
+      () => host.session.value!.state.observedSessionTimeMs >= 1_000,
+      "the fresh observation",
+    );
+    assert.equal(host.hostError.value, null);
+    assert.ok(asks(host), "the next button still asks");
     return end();
   },
 );

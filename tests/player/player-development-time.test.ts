@@ -15,19 +15,25 @@ import {
   type PlayerRuntimeSessionOptions,
   playerRuntimeSnapshot as rawPlayerRuntimeSnapshot,
 } from "../../player/runtime/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../../player/runtime/compile-project.js";
 import {
   nextPlayerRuntimeEventMs,
   pendingPlayerRuntimeStorageWrite,
   playerRuntimeDeadlines,
-  type PlayerSession,
 } from "../../player/runtime/runtime-view.js";
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
+import {
+  memoryKeptSessionStore,
+  type KeptSessionStore,
+} from "../../player/persistence/kept-sessions.js";
 import type { MediaProgressReport } from "../../src/index.js";
 import { harness } from "../helpers/player/player-media.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
-import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
+import { preparedPlan, sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import { inProcessBackend } from "../helpers/player/worker-topology.js";
 
@@ -303,8 +309,9 @@ interface SessionHost {
   readonly bridge: Promise<PlayerBridge>;
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly activation: Readonly<Ref<"start" | "continue" | null>>;
+  readonly hostError: Readonly<Ref<string | null>>;
   prepare(create: PlanStart): void;
-  prepareRestore(restored: PlayerSession): void;
+  prepareScript(plan: string, create: PlanStart): Promise<void>;
   activate(): Promise<void>;
   update(next: PlayerRuntimeSession): void;
   observe(): Promise<PlayerRuntimeSession | null>;
@@ -314,6 +321,7 @@ interface SessionHost {
 let usePlayerSession: (options: {
   readonly bridge: Promise<PlayerBridge>;
   scriptStorage?: ScriptStorageProvider;
+  keptSessions?: KeptSessionStore;
 }) => SessionHost;
 let useDevelopmentTime: (
   player: SessionHost,
@@ -334,14 +342,6 @@ let usePlayerDebug: (
   initial: { menu: boolean; autoSkip: boolean },
 ) => DebugHost;
 
-/**
- * The session the composable shows, as the host's session it is: this file declares it as an adapter session for its
- * adapter calls, which reach the host through `onHost`.
- */
-const shown = (host: { readonly session: Readonly<Ref<unknown>> }) => {
-  // EVIDENCE: invariant: the composable's `session` holds the host's sessions (`PlayerSession`), whatever this file declares.
-  return host.session.value as PlayerSession;
-};
 before(async () => {
   await loadHostFacade();
   const session: Record<string, unknown> = await loadPlayerModule(
@@ -600,10 +600,40 @@ test("Debug off ends auto-skip and a running jump, and Debug on again starts wit
 });
 
 test("a countdown shows while Debug runs, not before Continue, and follows display time", async (context) => {
-  const { player, debug } = await mountDebug(context, "wait 5 s\nexit", {
-    menu: false,
-    autoSkip: false,
-  });
+  // One browser: its kept sessions and the script's storage scope, which a reload finds again.
+  const kept = memoryKeptSessionStore();
+  const scriptStorage: ScriptStorageProvider = {
+    scope: "development-time:countdown",
+    load: async () => [],
+    write: async () => {},
+    replace: async () => {},
+    clear: async () => {},
+  };
+  const plan = compilePlayerProject("wait 5 s\nexit").plan!;
+  const page = async (initial: { menu: boolean; autoSkip: boolean }) => {
+    const scope = effectScope();
+    const mounted = scope.run(() => {
+      const player = usePlayerSession({
+        bridge: inProcessBackend(),
+        scriptStorage,
+        keptSessions: kept,
+      });
+      return { player, debug: usePlayerDebug(player, initial) };
+    });
+    assert.ok(mounted);
+    context.after(() => scope.stop());
+    await mounted.player.loadScriptStorage();
+    const held = await preparedPlan(mounted.player.bridge, plan);
+    await mounted.player.prepareScript(held, {
+      plan: held,
+      options: () => mounted.player.scriptStorageOptions(),
+    });
+    return { ...mounted, close: () => scope.stop() };
+  };
+  stubBrowser(context);
+  const { player, debug, close } = await page({ menu: false, autoSkip: false });
+  assert.equal(player.activation.value, "start");
+  await player.activate();
   assert.equal(debug.countdownText.value, null, "the Debug menu starts off");
   debug.menu.value = true;
   assert.equal(debug.countdownText.value, "Debug · Continues in 5 s");
@@ -612,10 +642,20 @@ test("a countdown shows while Debug runs, not before Continue, and follows displ
   debug.active.value = false;
   assert.equal(debug.countdownText.value, null);
   debug.active.value = true;
-  // A restored session waits for Continue before its countdown shows.
-  player.prepareRestore(shown(player));
-  assert.equal(player.activation.value, "continue");
-  assert.equal(debug.countdownText.value, null);
-  await player.activate();
-  assert.equal(debug.countdownText.value, "Debug · Continues in 4 s");
+  // The page is hidden, which keeps its session, and is reloaded: the kept session is restored and waits for Continue
+  // before its countdown shows.
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+  document.dispatchEvent(new Event("visibilitychange"));
+  for (let wait = 0; (await kept.session(scriptStorage.scope)) === null; wait += 1) {
+    assert.ok(wait < 400, "the hidden page kept its session");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  close();
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+  const reloaded = await page({ menu: true, autoSkip: false });
+  assert.equal(reloaded.player.activation.value, "continue");
+  assert.equal(reloaded.debug.countdownText.value, null);
+  await reloaded.player.activate();
+  assert.equal(reloaded.debug.countdownText.value, "Debug · Continues in 4 s");
+  assert.equal(reloaded.player.hostError.value, null);
 });
