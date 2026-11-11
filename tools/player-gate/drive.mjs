@@ -1,7 +1,7 @@
 // Runs one scenario of the L5 gate kit in one engine, for one build or an interleaved pair, and appends one JSON line
 // per sample (docs/TESTING.md "The L5 activation gate kit").
 //   PLAYWRIGHT_PACKAGE=<package.json> node tools/player-gate/drive.mjs --engine chromium|firefox|webkit|pixel
-//     --scenario session|sessionInstrumented|aa|taps|bridge|bridgeTaps|keepHandler|keepCompletion|keepDurable|demo
+//     --scenario session|sessionInstrumented|aa|taps|bridge|bridgeTaps|keepHandler|keepCompletion|keepDurable|demo|keys
 //     --build main=TREE[:PLAYER_APP] [--build worker=TREE[:PLAYER_APP]] --packages DIR [--bridge DIR --inputs DIR]
 //     [--script NAME] [--route source|plan] [--samples N] [--commit main=SHA] --out FILE
 // A pair's samples run in ABBA order in one browser. On the Pixel (PIXEL_SERIAL set, under the phone lock) each build's
@@ -22,6 +22,7 @@ import { calibrate, tapsSample } from "./scenarios/taps.mjs";
 import { bridge, bridgeUrl } from "./scenarios/bridge.mjs";
 import { keep } from "./scenarios/keep.mjs";
 import { demo } from "./scenarios/demo.mjs";
+import { keys } from "./scenarios/keys.mjs";
 
 const { values } = parseArgs({
   options: {
@@ -57,7 +58,9 @@ if (!values.engine || !values.scenario || builds.length === 0 || !values.package
   process.exit(2);
 }
 const scenario = values.scenario;
-const script = values.script ?? (scenario === "demo" ? "demo" : "CelebWorship");
+const script =
+  values.script ??
+  (scenario === "demo" ? "demo" : scenario === "keys" ? "answer-flight" : "CelebWorship");
 const samples = Number(values.samples);
 const pixel = values.engine === "pixel";
 // Every row names a declared cell: an undeclared value fails here, before any sample.
@@ -264,6 +267,8 @@ async function runSample(build, cell, rectangles, reopen, index) {
       return keep({ opened, origin, script, trial: scenario, reopen });
     case "demo":
       return demo({ opened, origin });
+    case "keys":
+      return keys({ opened, origin });
     default:
       return cannotRun(`unknown scenario '${scenario}'`);
   }

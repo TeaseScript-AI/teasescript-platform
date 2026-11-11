@@ -174,6 +174,23 @@ const workerLog = array(
 /** Every scenario's own summary fields at the result's top level, which the report never reads. */
 const summaries = (...keys) => Object.fromEntries(keys.map((key) => [key, ignored]));
 
+/** What the page shows once a `keys` case settled, and `main`'s outcome of it. */
+const keysShown = object({
+  value: string,
+  notice: string,
+  entries: count,
+  dialog: string,
+  pages: count,
+});
+const keysCase = object({
+  name: string,
+  residual: string,
+  expect: keysShown,
+  after: keysShown,
+  errors: array(string),
+  error: string,
+});
+
 /** A session's result fields; the headline session's also hold its byte account (`extra`), the instrumented its logs. */
 const sessionFields = {
   // The row's own `ok` (the header's) decides whether a sample that must complete failed; this one is a summary.
@@ -305,6 +322,13 @@ export const SHAPES = {
       turns: section("timing", count),
       failed: section("timing", boolean),
       ...summaries("ended", "last", "rows"),
+    }),
+  },
+  keys: {
+    header: HEADER,
+    result: object({
+      ok: section("timing", cached(boolean)),
+      cases: section("timing", array(keysCase)),
     }),
   },
   delayedSmoke: {
