@@ -237,6 +237,8 @@ with it.
   rewind restored and how many rewinds led to it, which an adopted state keeps. The debug recorder and the value trace
   begin anew at every restored state, so a replay never mixes branches. After a Player error, rewinding does not replace
   what the debug export replays: the export keeps the recording up to the error until the next Start.
+  A lost engine connection takes the host's history with it: its timeline stays read-only until a new session begins,
+  and Debug offers no rewind again until the page is reloaded. A debug export dialog already open keeps what it copied.
 
 ## Debug export
 
