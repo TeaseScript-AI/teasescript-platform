@@ -16,18 +16,18 @@ import { posix } from "node:path";
 //
 // So that the list follows the route, the report also prints `not classified: <path> (named in <file>)` for each `.md`
 // path that `AGENTS.md`, `docs/agents/README.md` or `docs/agents/DIRECT-REPOSITORY.md` names at REV and no list holds
-// (a name resolves from the naming file's folder, else from the root; `no such file` when neither exists). A
-// document named only in `README-FIRST.md` is not looked for. `reading-route-size.test.mjs` checks that every listed
-// document exists.
+// (a name resolves from the naming file's folder, else from the root; `no such file` when neither exists and no list
+// holds either). A document named only in `README-FIRST.md` is not looked for. `reading-route-size.test.mjs` checks
+// that every listed document exists.
 //
 // A size is the number of Unicode code points in the file's committed blob at REV (default `HEAD`), decoded as UTF-8
 // (a byte-order mark counts as one); the working tree is never read, so commit first. With --base, each line also
 // gives the difference from the same file at the base REV (CI passes a pull request's merge's first parent), `new`
 // where the base lacks it, and the total's difference. The lists are this tool's, for both sides.
 //
-// Exit status: 0 when every listed document exists at REV, whatever is not classified; 1 when one is missing (its line
-// says `missing`, and the total leaves it out); 2 when it cannot run (bad arguments, a revision that is no commit, a
-// file it reads that is not UTF-8).
+// Exit status: 0 when every measured document (the first two lists) exists at REV, whatever is not classified; 1 when
+// one is missing (its line says `missing`, and the total leaves it out); 2 when it cannot run (bad arguments, a
+// revision that is no commit, a file it reads that is not UTF-8).
 
 /** The start route, as the files named in the header state it. Paths are from the repository's root. */
 export const ROUTE = {
@@ -138,11 +138,12 @@ function unclassified(files) {
   const lines = new Set();
   for (const file of ROUTE_STATEMENTS.filter((statement) => files.has(statement))) {
     for (const [name] of files.text(file).matchAll(/[\w./-]+\.md\b/gu)) {
-      const path = [posix.join(posix.dirname(file), name), posix.normalize(name)].find(
-        (candidate) => files.has(candidate),
-      );
-      if (path === undefined) lines.add(`not classified: ${name} (named in ${file}; no such file)`);
-      else if (!classified.has(path)) lines.add(`not classified: ${path} (named in ${file})`);
+      const candidates = [posix.join(posix.dirname(file), name), posix.normalize(name)];
+      const path = candidates.find((candidate) => files.has(candidate));
+      if (path === undefined) {
+        if (!candidates.some((candidate) => classified.has(candidate)))
+          lines.add(`not classified: ${name} (named in ${file}; no such file)`);
+      } else if (!classified.has(path)) lines.add(`not classified: ${path} (named in ${file})`);
     }
   }
   return [...lines];

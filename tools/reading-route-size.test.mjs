@@ -166,7 +166,8 @@ test(
     const { directory } = repository({
       ...allRouted(),
       "AGENTS.md":
-        "Read `docs/NEW.md`, `README-FIRST.md`, [the guide](docs/agents/DIRECT-REPOSITORY.md) and `GONE.md`.",
+        "Read `docs/NEW.md`, `README-FIRST.md`, [the guide](docs/agents/DIRECT-REPOSITORY.md), `GONE.md` " +
+        "and `docs/PATCH-PUBLICATION.md`, which is classified though this commit lacks it.",
       "docs/agents/DIRECT-REPOSITORY.md": "`CONNECTOR-LOCAL.md`, `../NEW.md`, `PHASE-STATUS.md`",
       "docs/NEW.md": "n",
       "docs/agents/CONNECTOR-LOCAL.md": "c",
