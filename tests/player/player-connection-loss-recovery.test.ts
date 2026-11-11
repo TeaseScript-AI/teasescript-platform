@@ -55,13 +55,13 @@ const AXES = {
 } as const;
 
 /**
- * The feasible states: a click under way cleared the session shown and the prepared activation; Debug's rewind inspects
- * a shown state, and a recovery click keeps that inspection until the new session shows ("a Debug inspection at a
- * recovery click" below).
+ * The feasible states: a click under way cleared the session shown and the prepared activation. An inspection of
+ * Debug's rewind outlives the session shown until a new session shows, through a recovery click and after one that
+ * failed ("a Debug inspection at a recovery click", "... after a failed recovery click" below), so it goes with any
+ * other coordinate.
  */
 const feasible = (state: Coordinates) =>
-  (state.clicking === "none" || (state.shown === "none" && state.prepared === "none")) &&
-  (state.inspecting === "no" || state.shown !== "none" || state.clicking !== "none");
+  state.clicking === "none" || (state.shown === "none" && state.prepared === "none");
 
 function optional<T extends string>(value: string): T | null {
   if (value === "none") return null;
@@ -332,6 +332,12 @@ const RERUN = rerunRegistry({
   "a kept store that cannot be read": TOPOLOGIES,
   "a second loss during start": TOPOLOGIES,
   "a failed recompile": TOPOLOGIES,
+  "a Debug inspection after a failed recovery click": TOPOLOGIES,
+  "an ended record at the offer": TOPOLOGIES,
+  "a record with refused events at the offer": TOPOLOGIES,
+  "an unreadable record before the Continue click": TOPOLOGIES,
+  "an ended record before the Continue click": TOPOLOGIES,
+  "a kept point appearing before a Start again click": TOPOLOGIES,
 });
 
 RERUN.rows(
@@ -770,12 +776,11 @@ async function witnessAfter(
   const shown = player.session.value!;
   const posts = connection.posts;
   const from = posts.findIndex((post) => post.op === "restoreKept");
-  // Ids that are this connection's own (sessions, plans) are named by their first appearance; times, which depend on
-  // when each path ran (the click's capture, each observation), are left out.
+  // Ids that are this connection's own (sessions, plans) are named by their first appearance. Times are compared as
+  // they are: the page's clocks are fixed for the witness (`fixedClocks`).
   const names = new Map<string, string>();
   const normalized = (value: unknown) =>
     JSON.stringify(value, (key, field: unknown) => {
-      if (typeof field === "number" && TIMES.test(key)) return "time";
       if (typeof field !== "string" || !CONNECTION_LOCAL.has(key)) return field;
       if (!names.has(field)) names.set(field, `${key}#${names.size}`);
       return names.get(field);
@@ -795,8 +800,19 @@ async function witnessAfter(
   };
 }
 
-/** The fields that hold a time, in ms or as a clock reading. */
-const TIMES = /(?:Ms|ms|At|Time|time|clock|Clock|Seconds)$/u;
+/**
+ * Fixes the page's clocks for the rest of the test: the wall clock (`Date.now`, the click's capture) and the monotonic
+ * one (`performance.now`, each observation), so two runs of one schedule sample the same times.
+ */
+function fixedClocks(context: TestContext) {
+  const [now, monotonic] = [Date.now, performance.now];
+  Date.now = () => 1_800_000_000_000;
+  performance.now = () => 1_000;
+  context.after(() => {
+    Date.now = now;
+    performance.now = monotonic;
+  });
+}
 /** The fields of a post whose strings name something of one connection only. */
 const CONNECTION_LOCAL = new Set(["session", "plan", "ticket", "id"]);
 
@@ -804,6 +820,7 @@ RERUN.rows(
   "the reload witness",
   "Continue after a recovery repeats what a reload and Continue repeat: the save after the kept point runs again in both",
   async (context, topology, end) => {
+    fixedClocks(context);
     // R: the recovery in the page.
     const recovered = await witnessToLoss(context, topology);
     await until(() => recovered.player.recovery.value !== null, "the offer");
@@ -1309,6 +1326,162 @@ RERUN.rows(
     await player.activate();
     await until(() => player.session.value?.state.foregroundAction != null, "the kept question");
     assert.equal(connections.calls(), 2);
+    return end();
+  },
+);
+
+RERUN.rows(
+  "a Debug inspection after a failed recovery click",
+  "an inspection lost with its connection stays after a failed recovery click, and the next click's session clears it",
+  async (context, topology, end) => {
+    const { connections, player, kept } = await page(context, topology, { script: WITNESS });
+    const rewind = player.rewind.owner;
+    rewind.debugOn();
+    await player.activate();
+    await keptAtTheQuestion(player, kept);
+    await until(
+      () => (rewind.view.value?.timeline.points.length ?? 0) > 0,
+      "the first history point",
+    );
+    const point = rewind.view.value!.timeline.points[0]!.id;
+    await answerFirst(player);
+    await until(
+      () => (rewind.view.value?.timeline.points.length ?? 0) > 1,
+      "the next history point",
+    );
+    assert.equal(await rewind.back(point), true);
+    await connections.first.lose();
+    await until(() => player.recovery.value !== null, "the offer");
+    connections.failNext();
+    await player.activate();
+    await until(() => player.recovery.value !== null, "the offer again");
+    // The family's state after the failed click: no session shown, still inspecting, no click, nothing prepared.
+    assert.equal(player.session.value, null);
+    assert.equal(player.rewind.inspecting.value, true);
+    assert.equal(player.activation.value, null);
+    assert.deepEqual(player.recovery.value, { offer: "continue", where: "page" });
+    await player.activate();
+    await until(
+      () => player.session.value?.state.foregroundAction != null,
+      "the recovered question",
+    );
+    assert.equal(player.rewind.inspecting.value, false);
+    assert.equal(rewind.view.value, null);
+    return end();
+  },
+);
+
+/** A stored record of `kind`: a session that ended by `exit`, or one whose events the engine's checks refuse. */
+async function storedRecord(context: TestContext, topology: Topology, kind: "ended" | "refused") {
+  const kept = memoryKeptSessionStore();
+  const earlier = await page(context, topology, { kept });
+  await earlier.player.activate();
+  const stored = await keptAtTheQuestion(earlier.player, kept);
+  if (kind === "refused") {
+    earlier.scope.stop();
+    return {
+      ...stored,
+      events: [...stored.events, JSON.parse('{"kind":"notAnEvent","sequence":-1}')],
+    };
+  }
+  await answerFirst(earlier.player);
+  for (let turn = 0; ; turn++) {
+    const ended = await kept.session(SCOPE);
+    if (
+      ended !== null &&
+      ended.events.length > stored.events.length &&
+      earlier.player.session.value?.state.status === "halted"
+    )
+      return ended;
+    assert.ok(turn < 200, "the ended session was not kept");
+    await turns(1);
+  }
+}
+
+/** A store that gives `record` in place of its own once `swapped`. */
+function swappingStore(record: () => ReturnType<KeptSessionStore["session"]>) {
+  const store = memoryKeptSessionStore();
+  const swap = { on: false };
+  const kept: KeptSessionStore = {
+    session: (scope) => (swap.on ? record() : store.session(scope)),
+    media: store.media,
+    discard: (scope) => store.discard(scope),
+    publish: (scope, update) => store.publish(scope, update),
+  };
+  return { kept, swap };
+}
+
+for (const [id, kind] of [
+  ["an ended record at the offer", "ended"],
+  ["a record with refused events at the offer", "refused"],
+] as const)
+  RERUN.rows(id, `${id} offers Start again`, async (context, topology, end) => {
+    const record = await storedRecord(context, topology, kind);
+    const { kept, swap } = swappingStore(() => Promise.resolve(record));
+    const { connections, player } = await page(context, topology, { kept });
+    await player.activate();
+    await keptAtTheQuestion(player, kept);
+    swap.on = true;
+    await connections.first.lose();
+    await until(() => player.recovery.value !== null, "the offer");
+    assert.deepEqual(player.recovery.value, { offer: "start", where: "line" });
+    return end();
+  });
+
+for (const [id, kind] of [
+  ["an unreadable record before the Continue click", "unreadable"],
+  ["an ended record before the Continue click", "ended"],
+] as const)
+  RERUN.rows(
+    id,
+    `${id} shows the start page with Start, and nothing begins`,
+    async (context, topology, end) => {
+      const record =
+        kind === "ended"
+          ? await storedRecord(context, topology, "ended")
+          : JSON.parse('{"unreadable":true}');
+      const { kept, swap } = swappingStore(() => Promise.resolve(record));
+      const { connections, player } = await page(context, topology, { kept });
+      await player.activate();
+      await keptAtTheQuestion(player, kept);
+      await connections.first.lose();
+      await until(() => player.recovery.value !== null, "the offer");
+      assert.equal(player.recovery.value?.offer, "continue");
+      swap.on = true;
+      await player.activate();
+      await until(() => player.activation.value !== null, "the start page");
+      assert.equal(player.activation.value, "start");
+      assert.equal(player.session.value, null, "nothing begins");
+      return end();
+    },
+  );
+
+RERUN.rows(
+  "a kept point appearing before a Start again click",
+  "Start again starts anew, without the Continue check, also when a kept point appeared after the offer",
+  async (context, topology, end) => {
+    const store = memoryKeptSessionStore();
+    const hidden = { on: true };
+    const kept: KeptSessionStore = {
+      session: (scope) => (hidden.on ? Promise.resolve(null) : store.session(scope)),
+      media: store.media,
+      discard: (scope) => store.discard(scope),
+      publish: (scope, update) => store.publish(scope, update),
+    };
+    const { connections, player } = await page(context, topology, { kept });
+    await player.activate();
+    await until(() => player.session.value?.state.foregroundAction != null, "the question");
+    for (let turn = 0; (await store.session(SCOPE)) === null; turn++) {
+      assert.ok(turn < 200, "the session was not kept");
+      await turns(1);
+    }
+    await connections.first.lose();
+    await until(() => player.recovery.value !== null, "the offer");
+    assert.equal(player.recovery.value?.offer, "start");
+    hidden.on = false;
+    await player.activate();
+    await until(() => player.session.value?.state.foregroundAction != null, "the question");
+    assert.equal(player.session.value!.liveEventSequence, 0, "a session started anew");
     return end();
   },
 );
