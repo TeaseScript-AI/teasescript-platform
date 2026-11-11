@@ -68,13 +68,13 @@ test(
         {
           file: "allow.json",
           side: "removed",
-          line: 2,
+          text: '  "a.ts": 2',
           reason: "the allowance follows the moved function",
         },
         {
           file: "allow.json",
           side: "added",
-          line: 2,
+          text: '  "b.ts": 2',
           reason: "the allowance follows the moved function",
         },
       ];
@@ -94,13 +94,13 @@ test(
         "--declare",
         move.declare([
           ...entries,
-          { file: "allow.json", side: "added", line: 9, reason: "no such line" },
+          { file: "allow.json", side: "added", text: '  "c.ts": 2', reason: "no such line" },
         ]),
       );
       assert.equal(stale.status, 1, stale.out);
       assert.match(
         stale.out,
-        /declaration matching no unmoved line: allow\.json:9 \(added\): no such line/u,
+        /declaration matching no line that needs one \(.*\): allow\.json \(added\) "  \\"c\.ts\\": 2": no such line/u,
       );
     } finally {
       move.done();
@@ -151,17 +151,148 @@ test(
       const bare = elsewhere.run();
       assert.equal(bare.status, 1, bare.out);
       assert.match(bare.out, /unadmitted: a\.ts:\d+ \(added\): \/\/ used below/u);
-      const line = Number(/unadmitted: a\.ts:(\d+) \(added\): \/\/ used below/u.exec(bare.out)[1]);
       const declared = elsewhere.run(
         "--renames",
         elsewhere.renames(splitFamily),
         "--declare",
-        elsewhere.declare([{ file: "a.ts", side: "added", line, reason: "a note the move needs" }]),
+        elsewhere.declare([
+          { file: "a.ts", side: "added", text: "// used below", reason: "a note the move needs" },
+        ]),
       );
       assert.equal(declared.status, 0, declared.out);
     } finally {
       elsewhere.done();
     }
+  },
+);
+
+test(
+  "a declaration names its line by text: shifted lines stay declared, one declaration covers one line, a line number is refused (#2461)",
+  { timeout: 60_000 },
+  () => {
+    const reason = "the allowance follows the moved function";
+    const entries = [
+      { file: "allow.json", side: "removed", text: '  "a.ts": 2', reason },
+      { file: "allow.json", side: "added", text: '  "b.ts": 2', reason },
+    ];
+    // (as after a rebase onto a base that added a line above the declared ones)
+    const shifted = moveOf(
+      { "a.ts": main, "allow.json": '{\n  "other.ts": 1,\n  "a.ts": 2\n}\n' },
+      { ...split, "allow.json": '{\n  "other.ts": 1,\n  "b.ts": 2\n}\n' },
+    );
+    try {
+      const declared = shifted.run(
+        "--declare",
+        shifted.declare(entries),
+        "--renames",
+        shifted.renames(splitFamily),
+      );
+      assert.equal(declared.status, 0, declared.out);
+      assert.match(declared.out, /declared: allow\.json:3 \(added\): the allowance follows/u);
+      const numbered = shifted.run(
+        "--declare",
+        shifted.declare([{ file: "allow.json", side: "added", line: 3, reason }]),
+      );
+      assert.equal(numbered.status, 2, numbered.out);
+      assert.match(
+        numbered.out,
+        /names its line by "text" now, not "line": replace "line" with that line's exact text, LF-delimited, in that side's blob \(removed: the merge base; added: HEAD\), keeping any CR/u,
+      );
+    } finally {
+      shifted.done();
+    }
+    // two lines of one text: one declaration leaves the other unadmitted, two pass
+    const twice = moveOf(
+      { "a.ts": main, "allow.json": '[\n  "a.ts",\n  "a.ts",\n  "end"\n]\n' },
+      { ...split, "allow.json": '[\n  "b.ts",\n  "b.ts",\n  "end"\n]\n' },
+    );
+    try {
+      const removed = { file: "allow.json", side: "removed", text: '  "a.ts",', reason };
+      const added = { file: "allow.json", side: "added", text: '  "b.ts",', reason };
+      const run = (declarations) =>
+        twice.run(
+          "--declare",
+          twice.declare(declarations),
+          "--renames",
+          twice.renames(splitFamily),
+        );
+      const once = run([removed, added]);
+      assert.equal(once.status, 1, once.out);
+      assert.match(once.out, /declared 2; unadmitted 2/u);
+      const both = run([removed, removed, added, added]);
+      assert.equal(both.status, 0, both.out);
+      assert.match(both.out, /declared 4; unadmitted 0/u);
+    } finally {
+      twice.done();
+    }
+  },
+);
+
+test(
+  "a declaration is taken only by a line no form admits; a blob one names must be UTF-8; a CRLF line's text keeps its CR (#2461)",
+  { timeout: 60_000 },
+  () => {
+    const run = (before, after, entries) => {
+      const move = moveOf(before, after);
+      try {
+        return move.run("--declare", move.declare(entries));
+      } finally {
+        move.done();
+      }
+    };
+    const entry = (file, side, text) => ({ file, side, text, reason: "a witness" });
+    // the changed import line is admitted as an import: the declaration goes to the equal line inside the template
+    const imported = 'import x from "y";';
+    const template = run(
+      { "a.js": 'import {default as x} from "y";\nconst a = `start\nend`;\n' },
+      { "a.js": `${imported}\nconst a = \`start\n${imported}\nend\`;\n` },
+      [entry("a.js", "added", imported)],
+    );
+    assert.equal(template.status, 0, template.out);
+    assert.match(template.out, /declared: a\.js:3 \(added\): a witness/u);
+    // bytes that are not UTF-8 read as U+FFFD: the check stops before a declaration could match them
+    const replaced = [entry("a.txt", "added", "\uFFFD")];
+    for (const byte of [0xff, 0xfe]) {
+      const bytes = Buffer.concat([Buffer.from("anchor\n"), Buffer.from([byte, 0x0a])]);
+      const malformed = run({ "a.txt": "anchor\n" }, { "a.txt": bytes }, replaced);
+      assert.equal(malformed.status, 2, malformed.out);
+      assert.match(malformed.out, /a\.txt \(added\) is not UTF-8/u);
+    }
+    // a file that is not UTF-8, as the Latin-1 fixture `tests/fixtures/packages/unreadable-file/scene.tease`, moves as
+    // any file does, but no declaration may name it
+    const latin1 = Buffer.from('say "Caf\xe9"\nexit\n', "latin1");
+    const movedOnly = moveOf(
+      { "old/scene.tease": latin1 },
+      { "old/scene.tease": null, "new/scene.tease": latin1 },
+    );
+    try {
+      const plain = movedOnly.run();
+      assert.equal(plain.status, 0, plain.out);
+      const named = movedOnly.run(
+        "--declare",
+        movedOnly.declare([entry("new/scene.tease", "added", "exit")]),
+      );
+      assert.equal(named.status, 2, named.out);
+      assert.match(named.out, /new\/scene\.tease \(added\) is not UTF-8/u);
+    } finally {
+      movedOnly.done();
+    }
+    // a line that is U+FFFD, encoded, is declared by it
+    const genuine = run({ "a.txt": "anchor\n" }, { "a.txt": "anchor\n\uFFFD\n" }, replaced);
+    assert.equal(genuine.status, 0, genuine.out);
+    // a CRLF line's text keeps the CR: without it the declaration matches nothing
+    const crlf = { before: { "a.txt": "old\r\n" }, after: { "a.txt": "new\r\n" } };
+    const kept = run(crlf.before, crlf.after, [
+      entry("a.txt", "removed", "old\r"),
+      entry("a.txt", "added", "new\r"),
+    ]);
+    assert.equal(kept.status, 0, kept.out);
+    const dropped = run(crlf.before, crlf.after, [
+      entry("a.txt", "removed", "old\r"),
+      entry("a.txt", "added", "new"),
+    ]);
+    assert.equal(dropped.status, 1, dropped.out);
+    assert.match(dropped.out, /unadmitted: a\.txt:1 \(added\)/u);
   },
 );
 
@@ -462,8 +593,8 @@ test(
       "--declare",
       (move) =>
         move.declare([
-          { file: "src/sub", side: "removed", line: 1, reason },
-          { file: "src/sub", side: "added", line: 1, reason },
+          { file: "src/sub", side: "removed", text: `Subproject commit ${one}`, reason },
+          { file: "src/sub", side: "added", text: file.trimEnd(), reason },
         ]),
     );
     assert.equal(declared.status, 0, declared.out);
