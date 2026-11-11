@@ -39,10 +39,10 @@ const [{ costlyTestSeconds }, { summaryLine }, { isSuiteTestPath, isTypeCoreTest
 //
 // The base is `--base`, else the open pull request's base (`gh pr view`, as `origin/<base>`), else the long-lived branch
 // HEAD's own line leaves, `origin/main` or `origin/runtime-v2`, which it prints, or exit 2 when it cannot prove which
-// (`branchedFrom`); the changes are those since its merge-base with HEAD, committed or not, untracked files
-// included. Always: `git diff --check`, the format check of the changed files, oxlint, knip, the doc links and the
-// imports, each as CI runs it, and `merge commits`: since the merge-base, no merge commit but one whose later parents
-// are on origin/main or origin/runtime-v2 and not on the base (`strayMerges`).
+// (`branchedFrom`); the changes are those since its merge-base with HEAD, committed or not, untracked files, deleted
+// ones and both sides of a move included. Always: `git diff --check`, the format check of the changed files, oxlint,
+// knip, the doc links and the imports, each as CI runs it, and `merge commits`: since the merge-base, no merge commit
+// but one whose later parents are on origin/main or origin/runtime-v2 and not on the base (`strayMerges`).
 // Then each project a changed path belongs to (`projectsFor`): its type check and tests. A root configuration file
 // belongs to the checks that read it, and needs no project when only those that always run do. A changed path no
 // project claims, other than documentation, runs every project's checks. Every change but documentation (a path ending
@@ -725,25 +725,28 @@ async function check(cleanups) {
   const mismatch = lockfileMismatch();
   if (mismatch !== null) cannotRun(mismatch);
 
-  const changed = [
-    ...git("diff", "--name-only", "--diff-filter=d", mergeBase).split("\n"),
-    // (the merge's worktree has no untracked file but the linked `node_modules`)
-    ...(merged ? [] : git("ls-files", "--others", "--exclude-standard").split("\n")),
-  ].filter((path) => path !== "" && existsSync(path));
-  const projects = projectsFor(changed);
+  // Every path the change touches selects checks: a deleted one, whose project's checks or test:lint can then fail
+  // (#2431), and both sides of a move, which only `--no-renames` lists. Each as it is named (`-z`: Git quotes a name
+  // with a quote or, by default, a non-ASCII character in its other output). The checks that read the files get those
+  // that exist (`changed`).
+  const named = (...args) => execFileSync("git", args, { encoding: "utf8" }).split("\0");
+  const touched = [
+    ...new Set([
+      ...named("diff", "-z", "--name-only", "--no-renames", mergeBase),
+      // (the merge's worktree has no untracked file but the linked `node_modules`)
+      ...(merged ? [] : named("ls-files", "-z", "--others", "--exclude-standard")),
+    ]),
+  ].filter((path) => path !== "");
+  const changed = touched.filter((path) => existsSync(path));
+  const projects = projectsFor(touched);
   process.stdout.write(
-    `check-changed: ${changed.length} changed files since ${ref} (${mergeBase.slice(0, 9)}); ` +
+    `check-changed: ${touched.length} changed files since ${ref} (${mergeBase.slice(0, 9)}); ` +
       `projects: ${[...projects].join(", ") || "none"}\n`,
   );
   const unknown = unknownToCostly(changed);
   if (unknown.length > 0) process.stdout.write(`${unknown.join(", ")}: ${UNKNOWN_TO_COSTLY}\n`);
 
-  // (a deleted core file counts too, which `changed`, holding the files that exist, leaves out, and a file moved out of
-  // the core, whose old path only `--no-renames` lists)
-  const coreChanged = [
-    ...git("diff", "--name-only", "--no-renames", mergeBase).split("\n"),
-    ...changed,
-  ].some((path) => path.startsWith(CORE));
+  const coreChanged = touched.some((path) => path.startsWith(CORE));
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
   const formatted = changed.filter((path) => FORMATTED.test(path));
   const [formatter, ...formatterArgs] = prettier();
