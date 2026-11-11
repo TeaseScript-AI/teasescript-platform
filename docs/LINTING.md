@@ -75,18 +75,23 @@ so it cites nothing: in every file Git lists except the check's own test, a line
 holds the whole word `r4` or a section mark later on, or whose next line holds one anywhere, is refused. What stands
 between does not count, markup or words, so such a line is refused in prose too: state the fact, or keep the revision
 two lines away. A citation over three or more lines, in another letter case or inside a longer word is outside the check
-and left to review. A revision number `r4.N` (a whole token) names the accepted record's entry `r4-N`: outside the
-record's own pages and the check's test, one with no such heading is refused, in every file Git lists; the check proves
-the entry exists, not that it carries the sentence's claim, and other spellings (`R4.1`, an anchor `#r4-N`) are not its.
-A section number (`§` or `§§`, then a digit) stands, as a whole number, in a section list right after a repository
-document's name on its line (`V30 §13`, `ADR 0021 §6.2`, `V30 §5, §35`); `PLAN`, `S3` and `S6-CARRIERS` name the port plan's documents outside
-the repository and are allowed as labels while #2423 decides them. Any other section number is refused in every file
+and left to review. A revision number `r4.N` (a whole token) names the accepted record's entry `r4-N`, and so does a
+range's short second end (`66` in `r4.63–66` or `r4.63-66`; a spaced dash makes no range): outside the record's own
+pages and the check's test, one with no such heading is refused, in every file Git lists; the check proves the entry
+exists, not that it carries the sentence's claim, and other spellings (`R4.1`, an anchor `#r4-N`) are not its. A
+comment's pointer at the record (`…/type-inference-accepted-record/<page>.md#<anchor>`, a nested page or `.markdown`
+included) names an anchor of a record page Git lists, read and slugged as the doc-links check reads them
+(`headingAnchors`); another mention of the record (its folder, a page without an anchor) is not its, and the check
+proves the anchor exists, not that it carries the comment's claim. A section number (`§` or `§§`, then a digit) stands,
+as a whole number, in a section list right after a repository document's name on its line (`V30 §13`, `ADR 0021 §6.2`,
+`V30 §5, §35`); `PLAN`, `S3` and `S6-CARRIERS` name the port plan's documents outside the repository and are allowed as
+labels while #2423 decides them. Any other section number is refused in every file
 Git lists except `docs/`, whose documents number their own sections; `src/`, whose comments #2209 rewrites;
 `tests/fixtures/type-core/cells.jsonl`, whose section numbers are cell ids in recorded data whose bytes `MANIFEST.md`
 fixes; `tools/oxlint/comment-declarations-waiting.json`, which quotes comments word for word, its section numbers only
-`src/`'s, and shrinks with #2209; and the check's test. The check proves the form, not that the section exists or carries the sentence's claim.
-`comment-citations.json` holds each file's exact counts in comments of its other forms (a bare `r4.N`, the record's name
-with another id), which may only fall.
+`src/`'s, and shrinks with #2209; and the check's test. The check proves the form, not that the section exists or
+carries the sentence's claim. `comment-citations.json` holds each file's exact counts in comments of its other forms (a
+bare `r4.N`, read as the revision rule reads it, and the record's name with another id), which may only fall.
 `comment-forecasts-allowed.json` lists the forecasts the check accepts, and each entry must still be found.
 
 ## Comment declarations

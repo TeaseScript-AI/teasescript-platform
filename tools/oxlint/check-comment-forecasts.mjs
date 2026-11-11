@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
-import { lstatSync, readdirSync, readFileSync } from "node:fs";
+import { lstatSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { headingText, markdownProcessor } from "../repository-checks/markdown.mjs";
+import { headingAnchors, headingText, markdownProcessor } from "../repository-checks/markdown.mjs";
 import { checkedFiles, fileComments } from "./comments.mjs";
 
 // A comment says what the code does now and never forecasts later work (IMPLEMENTATION-AND-REVIEW.md "Code that does
@@ -14,8 +14,9 @@ import { checkedFiles, fileComments } from "./comments.mjs";
 // stands right after a document's name, outside the paths `outsideSectionRule` names (`unnamedSectionsIn`, #2404); and
 // the forms of `COUNTED_CITATIONS` have each file's exact count in comments in `comment-citations.json`, which may only
 // fall. A comment that points at the accepted record
-// (`docs/specifications/type-inference-accepted-record/<page>.md#<anchor>`, #2089) names a heading of that page; the
-// doc-links check reads Markdown only and never sees a comment. A label of the port plan or the research design (`S8c`,
+// (`docs/specifications/type-inference-accepted-record/<page>.md#<anchor>`, #2089) names an anchor of a record page
+// Git lists, read and slugged as the doc-links check reads them (#2422); that check reads Markdown only and never sees
+// a comment. A label of the port plan or the research design (`S8c`,
 // `C9`, `AD-1`) in a comment of the type core's modules has a row in the record's glossary, and every row is still
 // carried by such a comment; an id after a reviewer's round ("Codex r2's B1") is a review reference, not a label.
 // `comment-forecasts-allowed.json` lists the forecasts this check accepts, and every entry must still be found.
@@ -72,7 +73,8 @@ export const CITATION_FIXTURES = "tools/oxlint/check-comment-forecasts.test.mjs"
 
 /** The citations whose count per file in comments may only shrink, each counted in a comment's text. */
 const COUNTED_CITATIONS = {
-  "bare r4.N": (text) => text.match(/\br4\.\d+/gu)?.length ?? 0,
+  // (the revision rule's own token, so the lint has one reading of a revision number)
+  "bare r4.N": (text) => text.match(REVISION_NUMBER)?.length ?? 0,
   // (each occurrence of the record's name on a line that cites nothing; a citing line the text check refuses)
   "other TABLE": (text) => {
     const citing = new Set(citingLines(text).map(({ index }) => index));
@@ -200,32 +202,30 @@ export function citationCounts(fileName, text) {
   return counts;
 }
 
-/** The anchors of `page`'s headings, as Markdown renderers make them: lower case, punctuation dropped, spaces as `-`. */
-function recordAnchors(page) {
-  return new Set(
-    [...page.matchAll(/^#{1,6}\s+(.+?)\s*#*\s*$/gmu)].map(([, heading]) =>
-      heading
-        .toLowerCase()
-        .replace(/[^\p{L}\p{N}\s_-]/gu, "")
-        .replace(/\s/gu, "-"),
-    ),
-  );
+/**
+ * Each record page's anchors by its path under the record's folder (`sharing.md`, `nested/entry.markdown`): `pages`
+ * maps that path to the page's text, read as the doc-links check reads it (`headingAnchors`).
+ */
+export function recordAnchors(pages) {
+  const markdown = markdownProcessor();
+  return new Map([...pages].map(([page, text]) => [page, headingAnchors(markdown.parse(text))]));
 }
 
 /**
- * Each pointer at the accepted record in `text`'s comments whose anchor is no heading of the page it names, with its
- * line; `pages` maps a page's name to its text, and a pointer at the record's old single page names none.
+ * Each pointer at the accepted record in `text`'s comments whose anchor is none of the page it names, with its line;
+ * `anchors` maps a page's path under the record's folder to its anchors (`recordAnchors`). A pointer names its page by
+ * that path, nested folders and either extension included; a pointer at the record's old single page names none. A
+ * mention of the record in another form (its folder, a page without an anchor) is not read.
  */
-export function unresolvedPointers(fileName, text, pages) {
+export function unresolvedPointers(fileName, text, anchors) {
   const pointer = new RegExp(
-    `${RECORD.replaceAll(".", "\\.")}(?:/([\\w-]+))?\\.md#([\\w-]+)`,
+    `${RECORD.replaceAll(".", "\\.")}(?:/([\\w-]+(?:/[\\w-]+)*\\.(?:md|markdown))|\\.md)#([\\w-]+)`,
     "gu",
   );
   const found = [];
   for (const comment of fileComments(fileName, text))
     for (const [, page, anchor] of comment.text.matchAll(pointer))
-      if (!(pages.has(page) && recordAnchors(pages.get(page)).has(anchor)))
-        found.push({ line: comment.line, page, anchor });
+      if (!anchors.get(page)?.has(anchor)) found.push({ line: comment.line, page, anchor });
   return found;
 }
 
@@ -255,8 +255,14 @@ export function recordEntries(pages) {
 }
 
 /**
+ * A range's short second end right after a revision number, `–66` or `-66` in `r4.63–66`: a dash, then digits that no
+ * letter, digit or `.` and digit follows. A spaced dash or `to` makes no range.
+ */
+const SHORT_END = /^[–-](\d+)(?![\p{L}\p{N}]|\.\p{N})/u;
+
+/**
  * Each revision number in `text`, the whole of file `fileName`, that names no entry of `entries`, with its line. Each
- * end of a range is a number of its own. The record's own pages, which name revisions an entry superseded, and the
+ * end of a range is a number of its own, a short second end (`SHORT_END`) included. The record's own pages, which name revisions an entry superseded, and the
  * lint's test are outside the rule; it proves that the entry exists, not that it carries the claim.
  */
 export function unresolvedRevisionsIn(fileName, text, entries) {
@@ -265,7 +271,13 @@ export function unresolvedRevisionsIn(fileName, text, entries) {
   let line = 1;
   let counted = 0;
   for (const match of text.matchAll(REVISION_NUMBER)) {
-    if (entries.has(match[1])) continue;
+    const short = SHORT_END.exec(
+      text.slice(match.index + match[0].length, match.index + match[0].length + 16),
+    );
+    const missing = [match[1], short?.[1]].filter(
+      (number) => number !== undefined && !entries.has(number),
+    );
+    if (missing.length === 0) continue;
     for (
       let at = text.indexOf("\n", counted);
       at !== -1 && at < match.index;
@@ -273,7 +285,7 @@ export function unresolvedRevisionsIn(fileName, text, entries) {
     )
       line += 1;
     counted = match.index;
-    found.push({ line, number: match[1] });
+    for (const number of missing) found.push({ line, number });
   }
   return found;
 }
@@ -358,14 +370,11 @@ export function tableCitationsIn(fileName, text) {
 }
 
 /**
- * Each citation of the old design record and each revision number with no entry (`unresolvedRevisionsIn`, against
- * the entries of every record page Git lists) in the files Git lists in `root` (tracked, and untracked but not
- * ignored) that are regular files, as `doc-links.mjs` reads them, as diagnostics. A file with a NUL byte is binary:
- * the revision rule reads it too, the record's name is not looked for in it. A name is decoded whole, a leading byte
- * order mark kept; a failed `git` throws, and so does a listed name that is not UTF-8, which could not be read
- * unchanged.
+ * The files Git lists in `root` (tracked, and untracked but not ignored) that are regular files, as `doc-links.mjs`
+ * reads them. A name is decoded whole, a leading byte order mark kept; a failed `git` throws, and so does a listed name
+ * that is not UTF-8, which could not be read unchanged.
  */
-export function listedTextFindings(root) {
+export function listedFiles(root) {
   const listing = execFileSync(
     "git",
     ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--deduplicate"],
@@ -385,6 +394,16 @@ export function listedTextFindings(root) {
     }
     if (lstatSync(resolve(root, file), { throwIfNoEntry: false })?.isFile()) files.push(file);
   }
+  return files;
+}
+
+/**
+ * Each citation of the old design record, each revision number with no entry (`unresolvedRevisionsIn`, against the
+ * entries of every record page Git lists) and each section number outside a section list (`unnamedSectionsIn`) in
+ * `files`, by default `listedFiles(root)`, as diagnostics. A file with a NUL byte is binary: the revision rule reads
+ * it too, the other two do not.
+ */
+export function listedTextFindings(root, files = listedFiles(root)) {
   const read = (file) => readFileSync(resolve(root, file), "utf8");
   const entries = recordEntries(files.filter(isRecordPage).map(read));
   const findings = [];
@@ -426,12 +445,14 @@ export function checkCommentForecasts(root) {
   const read = (name) => JSON.parse(readFileSync(new URL(name, import.meta.url), "utf8"));
   const allowed = read("./comment-forecasts-allowed.json");
   const recorded = read("./comment-citations.json");
+  const files = listedFiles(root);
   const pages = new Map(
-    readdirSync(resolve(root, RECORD))
-      .filter((name) => name.endsWith(".md"))
-      .map((name) => [name.slice(0, -3), readFileSync(resolve(root, RECORD, name), "utf8")]),
+    files
+      .filter(isRecordPage)
+      .map((file) => [file.slice(RECORD.length + 1), readFileSync(resolve(root, file), "utf8")]),
   );
-  const glossary = glossaryRows(pages.get("README") ?? "");
+  const anchors = recordAnchors(pages);
+  const glossary = glossaryRows(pages.get("README.md") ?? "");
   const carried = [];
   const diagnostics = [];
   const used = new Set();
@@ -455,12 +476,12 @@ export function checkCommentForecasts(root) {
           message: `a comment forecasts later work ("${forecast.text}", form "${forecast.form}"): say what holds now, and keep the plan in its issue`,
         });
     }
-    for (const { line, page, anchor } of unresolvedPointers(file, text, pages))
+    for (const { line, page, anchor } of unresolvedPointers(file, text, anchors))
       diagnostics.push({
         fileName: file,
         line,
         column: 1,
-        message: `a comment points at ${RECORD}${page ? `/${page}` : ""}.md#${anchor}, which is no heading of that accepted-record page`,
+        message: `a comment points at ${RECORD}${page ? `/${page}` : ".md"}#${anchor}, which is no anchor of an accepted-record page Git lists`,
       });
     if (file.startsWith(CORE))
       for (const found of labelsIn(file, text)) carried.push({ fileName: file, ...found });
@@ -468,7 +489,7 @@ export function checkCommentForecasts(root) {
     if (Object.keys(counts).length > 0) counted[file] = counts;
   }
   diagnostics.push(...glossaryFindings(carried, glossary));
-  diagnostics.push(...listedTextFindings(root));
+  diagnostics.push(...listedTextFindings(root, files));
   for (const [index, item] of allowed.entries())
     if (!used.has(index))
       diagnostics.push({
