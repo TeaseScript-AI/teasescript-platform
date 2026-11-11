@@ -191,7 +191,7 @@ test("a core change lists every pinning suite; another change lists none, a suit
 function netOf(root, suites, notPins) {
   const marked = new Set(suites.map((suite) => suite.file));
   const declared = new Set(notPins.map((entry) => entry.file));
-  const formsOf = (file) => pinFormsOf(readFileSync(join(root, file), "utf8"));
+  const formsOf = (file) => pinFormsOf(readFileSync(join(root, file), "utf8"), file);
   return [
     ...testFiles(root)
       .filter((file) => !marked.has(file) && !declared.has(file) && formsOf(file).length > 0)
@@ -215,7 +215,7 @@ test("the net names an unmarked pin, a marked file declared no pin, and a declar
   const root = mkdtempSync(join(tmpdir(), "pin-suites-net-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const files = {
-    "tests/digest.test.ts": '  upToOrder: "8ec84600facd682a",\n',
+    "tests/type-core/digest.test.ts": '  upToOrder: "8ec84600facd682a",\n',
     "tests/marked.test.ts": "// pins: a total | line /total/u\n  assert.equal(r.total, 1234);\n",
     "tests/plain.test.ts": "const n = 12;\n",
   };
@@ -225,11 +225,11 @@ test("the net names an unmarked pin, a marked file declared no pin, and a declar
   }
   const { suites } = readMarks(root);
   assert.deepEqual(netOf(root, suites, []), [
-    "tests/digest.test.ts holds a pin form (digest) but carries no mark and is not in NOT_PINS (tools/repository-checks/pin-suites.mjs)",
+    "tests/type-core/digest.test.ts holds a pin form (digest) but carries no mark and is not in NOT_PINS (tools/repository-checks/pin-suites.mjs)",
   ]);
   assert.deepEqual(
     netOf(root, suites, [
-      { file: "tests/digest.test.ts" },
+      { file: "tests/type-core/digest.test.ts" },
       { file: "tests/marked.test.ts" },
       { file: "tests/plain.test.ts" },
     ]),
@@ -402,20 +402,27 @@ test("main and measured occur in a family only at an admitted position; any othe
 });
 
 test("the four pin forms are found by their text, and a pin written another way is not", () => {
+  const CONTRACT = "tests/type-core/type-core-contract.test.ts";
   assert.deepEqual(pinFormsOf("  assert.equal(budget.total, 22_962_573);"), ["total"]);
   assert.deepEqual(pinFormsOf("    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],"), [
     "table",
   ]);
   assert.deepEqual(pinFormsOf('  decide: [\n    6,\n    "a stopped decision\'s path"'), ["listed"]);
-  assert.deepEqual(pinFormsOf('      upToOrder: "8ec84600facd682a",'), ["digest"]);
+  assert.deepEqual(pinFormsOf('      upToOrder: "8ec84600facd682a",', CONTRACT), ["digest"]);
   // (the named limits: another assertion, a short total, a nested table)
   assert.deepEqual(pinFormsOf("  assert.strictEqual(budget.total, 22_962_573);"), []);
   assert.deepEqual(pinFormsOf("  assert.equal(budget.total, 573);"), []);
   assert.deepEqual(pinFormsOf("    [7995, 60],\n    [7081, 60],"), []);
   // (a digest's limits: under 16 digits, in an array, in a comment)
-  assert.deepEqual(pinFormsOf('  upToOrder: "8ec84600facd682",'), []);
-  assert.deepEqual(pinFormsOf('  parts: ["0123456789abcdef"],'), []);
-  assert.deepEqual(pinFormsOf(" * the set's records (set `486ac8093b597b45`)"), []);
+  assert.deepEqual(pinFormsOf('  upToOrder: "8ec84600facd682",', CONTRACT), []);
+  assert.deepEqual(pinFormsOf('  parts: ["0123456789abcdef"],', CONTRACT), []);
+  assert.deepEqual(pinFormsOf(" * the set's records (set `486ac8093b597b45`)", CONTRACT), []);
+  // (and only in the type core's tests: there, by folder or by the name they had before it, not in the Player's)
+  const digest =
+    '  randomness: "1466a6cd24e327188770752f6134001c64d6efcc590ccc26b721611ad96f165a",';
+  assert.deepEqual(pinFormsOf(digest, "tests/type-core-contract.test.ts"), ["digest"]);
+  assert.deepEqual(pinFormsOf(digest, "tests/type-core/type-enforcement.test.ts"), ["digest"]);
+  assert.deepEqual(pinFormsOf(digest, "tests/player/player-encryption.test.ts"), []);
 });
 
 test("the test files are the suite as the runner finds it: one folder down too, none in helpers/", (t) => {

@@ -25,20 +25,21 @@ import { suiteTestFiles } from "../test-shards.mjs";
 //
 // The marks are the authority; each mark's regex must find a line of its file other than the mark. Their test
 // (`pin-suites.test.mjs`) finds four pin forms by their text (`PIN_FORMS`): an `assert.equal` of `.total` to a literal
-// of four or more digits, a table of four or more such literals, a `[count, "reason"]` record, and a property set to a
-// hex digest of 16 or more digits. A pin written another way (`strictEqual`, `deepEqual` of a short tuple or an object,
-// a total under four digits, a helper's table, a nested table such as work-a's) is not found; that test is a net for a
-// suite with no mark, and `NOT_PINS` declares the test files it finds that pin no work. Under
-// `tests/helpers/type-core/families/` it also requires every recorded bound to be a line a mark of that file finds, and
-// claims a position, not a meaning: in the code of that folder, neither `main` nor `measured` occurs outside the
-// admitted positions. Comments, JSDoc and marks included, are not code and are not read there: they cannot record or
-// change a bound. The code is every node `forEachChild` reaches from a file's source; every identifier, private name,
-// string and template without substitutions spelled so is classified by its role. Admitted are `main: <object literal>`
-// and `measured: <numeric literal>` (the two records), a property signature, and the identifier `main` as a declared,
-// imported or exported binding or as a callee (the program builder). Any other occurrence fails, naming its file, line
-// and role, and so does every object spread and every computed name that is not a literal. Not claimed: a bound
-// recorded under a third property name, a bound outside that folder, and a bound changed at run time by code that names
-// neither property (a key built at run time, a write through an alias).
+// of four or more digits, a table of four or more such literals, a `[count, "reason"]` record, and, in the type core's
+// tests only (`FORM_SCOPES`), a property set to a hex digest of 16 or more digits: a digest pin written in another test
+// file is not found. A pin written another way (`strictEqual`, `deepEqual` of a short tuple or an object, a total under
+// four digits, a helper's table, a nested table such as work-a's) is not found; that test is a net for a suite with no
+// mark, and `NOT_PINS` declares the test files it finds that pin no work. Under `tests/helpers/type-core/families/` it
+// also requires every recorded bound to be a line a mark of that file finds, and claims a position, not a meaning: in
+// the code of that folder, neither `main` nor `measured` occurs outside the admitted positions. Comments, JSDoc and
+// marks included, are not code and are not read there: they cannot record or change a bound. The code is every node
+// `forEachChild` reaches from a file's source; every identifier, private name, string and template without
+// substitutions spelled so is classified by its role. Admitted are `main: <object literal>` and `measured: <numeric
+// literal>` (the two records), a property signature, and the identifier `main` as a declared, imported or exported
+// binding or as a callee (the program builder). Any other occurrence fails, naming its file, line and role, and so does
+// every object spread and every computed name that is not a literal. Not claimed: a bound recorded under a third
+// property name, a bound outside that folder, and a bound changed at run time by code that names neither property (a
+// key built at run time, a write through an alias).
 
 /** The core, whose every file can move a pin. */
 const CORE = "src/type-inference/core/";
@@ -115,9 +116,6 @@ export const NOT_PINS = [
   { file: "tests/runtime/message-markup.test.ts", is: "character codes" },
   { file: "tests/runtime/runtime-random.test.ts", is: "a generator's expected states" },
   { file: "tests/type-core/type-core-message-parity.test.ts", is: "random seeds" },
-  { file: "tests/player/player-encryption.test.ts", is: "encryption test vectors" },
-  { file: "tests/player/player-lock-service.test.ts", is: "encryption test vectors" },
-  { file: "tests/player/player-stored-files.test.ts", is: "a stored file's hash" },
 ];
 
 /** The four pin forms the marks' test finds by their text. */
@@ -128,9 +126,20 @@ export const PIN_FORMS = {
   digest: /^\s*[\w$]+:\s*"[0-9a-f]{16,}"/mu,
 };
 
-/** The pin forms `text` holds, by name. */
-export function pinFormsOf(text) {
-  return Object.keys(PIN_FORMS).filter((name) => PIN_FORMS[name].test(text));
+/**
+ * The files a form is looked for in, where it is not every file: a digest only in the type core's tests, under
+ * `tests/type-core/` or named `type-core-…` (as they were before that folder), where a pin of the core's published
+ * answers is written; elsewhere such a literal is a test vector or a stored hash.
+ */
+const FORM_SCOPES = {
+  digest: (file) => file.startsWith("tests/type-core/") || /(?:^|\/)type-core-[^/]*$/u.test(file),
+};
+
+/** The pin forms `text`, the text of `file`, holds, by name. */
+export function pinFormsOf(text, file) {
+  return Object.keys(PIN_FORMS).filter(
+    (name) => (FORM_SCOPES[name]?.(file) ?? true) && PIN_FORMS[name].test(text),
+  );
 }
 
 /**
