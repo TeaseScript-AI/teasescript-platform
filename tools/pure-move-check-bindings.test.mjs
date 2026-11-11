@@ -43,6 +43,7 @@ test(
       assert.equal(status, 1, out);
       assert.match(out, /binding only after: a\.ts:1 import from "\.\/b\.js": weighted/u);
       assert.match(out, /the move relocates or adds b\.ts: name its family with --renames FILE/u);
+      assert.doesNotMatch(out, /both change/u);
     } finally {
       unnamed.done();
     }
@@ -63,8 +64,52 @@ test(
         out,
         /binding only after: a\.ts:1 re-export from "\.\/c\.js": helperName as renamed/u,
       );
+      // c.ts is not edited, so no family is named
+      assert.doesNotMatch(out, /both change/u);
     } finally {
       reexport.done();
+    }
+  },
+);
+
+test(
+  "code moved between two files one of which imports the other fails naming the family that admits it",
+  { timeout: 60_000 },
+  () => {
+    const other = "export const other = 1;\n";
+    const apart = { "a.ts": main, "c.ts": other };
+    const together = {
+      "a.ts": `import { weighted } from "./c.js";\n\n${helper("sumOfSquares")}\n\nexport const used = sumOfSquares([1]) + weighted([2]);\n`,
+      "c.ts": `${other}\nexport ${helper("weighted")}\n`,
+    };
+    // out of a file that still calls it, into a file already there, which the family admits; and back in, the import
+    // gone (where the dropped `export` stays unadmitted)
+    for (const [before, after, side] of [
+      [apart, together, "after"],
+      [together, apart, "before"],
+    ]) {
+      const move = moveOf(before, after);
+      try {
+        const failed = move.run();
+        assert.equal(failed.status, 1, failed.out);
+        assert.match(
+          failed.out,
+          new RegExp(`binding only ${side}: a\\.ts:1 import from "\\./c\\.js": weighted`, "u"),
+        );
+        assert.ok(
+          failed.out.includes(
+            'a.ts and c.ts both change, and a binding between them is on one side only: if the move took code from one into the other, name them one family with --renames FILE, as {"renames":{"a.ts":["a.ts","c.ts"]}}',
+          ),
+          failed.out,
+        );
+        assert.doesNotMatch(failed.out, /relocates or adds/u);
+        const admitted = move.run("--renames", move.renames({ "a.ts": ["a.ts", "c.ts"] }));
+        assert.match(admitted.out, /bindings differing 0/u);
+        assert.doesNotMatch(admitted.out, /both change/u);
+        if (side === "after") assert.equal(admitted.status, 0, admitted.out);
+      } finally {
+        move.done();
+      }
     }
   },
 );
