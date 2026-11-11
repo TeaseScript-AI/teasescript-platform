@@ -42,6 +42,7 @@ import {
   type InputSectionHost,
 } from "../session/runtime-input";
 import { useComposerFields } from "./useComposerFields";
+import { useAnswerFlight } from "./useAnswerFlight";
 import type { ImageCapture } from "../stage/useImageCapture";
 
 /** How the host stores an image file the player chose for `askImage`. */
@@ -181,6 +182,7 @@ function loadFormEditor(current: PlayerFormPresentation | null): boolean {
     return false;
   }
   composerOwner = { actionId: current.actionId, fieldId: current.editor.fieldId };
+  flight.release();
   writeField(
     "input",
     typedTexts()?.get(typedKey(current.actionId, current.editor.fieldId)) ?? current.editor.text,
@@ -291,7 +293,7 @@ const composition = computed(() => root.value?.closest<HTMLElement>(".player-com
 // Composer is generic over the image request it reports, so its instance type is named by what is used.
 const composer = ref<{ focusInput(): void; selectInput(): void; openPicker(): void } | null>(null);
 // The composer's text and repeat, which this component reads with `text` and writes only with `writeField`.
-const { text, writeField } = useComposerFields();
+const { text, writeField, interceptInput } = useComposerFields();
 const feedback = ref("");
 const submitting = ref(false);
 let feedbackTimeout: ReturnType<typeof setTimeout> | undefined;
@@ -316,7 +318,10 @@ function showFeedback(message: string) {
   feedbackTimeout = setTimeout(clearFeedback, 6000);
 }
 
-watch(() => text("input"), clearFeedback);
+watch(
+  () => text("input"),
+  () => flight.noteChange() && clearFeedback(),
+);
 // Typing the repeat again clears the notice that the passwords do not match, which empties it.
 watch(
   () => text("repeat"),
@@ -326,6 +331,59 @@ watch(
 // The composer edits one form field at a time: it opens with the field's text selected, so typing replaces it and
 // Enter keeps it; after the field closes, focus returns to the field's button.
 const formEditor = computed(() => form.value?.editor ?? null);
+const composerDisabled = computed(
+  () =>
+    (!foreground.value && !pacing.value && !lockField.value) ||
+    foreground.value?.kind === "popup" ||
+    foreground.value?.kind === "export-text" ||
+    foreground.value?.kind === "open-url",
+);
+const composerShortcuts = computed(() => ({
+  pacing: !foreground.value && !!pacing.value,
+  preselected: preselected.value !== undefined,
+  buttonsOnly:
+    foreground.value?.kind === "choose" ||
+    foreground.value?.kind === "show-button" ||
+    (foreground.value?.kind === "form" && !formEditor.value),
+}));
+const composerInputType = computed(() =>
+  formEditor.value
+    ? formEditor.value.inputType
+    : foreground.value && "isoText" in foreground.value && foreground.value.isoText
+      ? "text"
+      : foreground.value?.kind === "ask-date"
+        ? "date"
+        : foreground.value?.kind === "ask-time"
+          ? "time"
+          : foreground.value?.kind === "ask-datetime"
+            ? "datetime-local"
+            : "text",
+);
+// An answer in flight keeps the composer's plain text or password field writable, and plays what is typed and given
+// meanwhile against what the answer leaves, with this component's own rules.
+const flight = useAnswerFlight({
+  owner: () =>
+    props.session && {
+      connection: props.session.connection,
+      id: props.session.id,
+      reset: props.reset,
+    },
+  text: () => text("input"),
+  writeField: (typed) => writeField("input", typed),
+  interceptInput,
+  holds: () =>
+    !composerDisabled.value &&
+    !lockField.value &&
+    !formEditor.value &&
+    composerInputType.value === "text",
+  disabled: () => composerDisabled.value,
+  shortcuts: () => composerShortcuts.value,
+  submit: (source, typed) => submit(source, typed),
+  skip: () => skipPacing(true),
+  activate: activatePreselected,
+  keepTyped,
+  clearFeedback,
+});
 watch(
   () => (form.value?.editor ? typedKey(form.value.actionId, form.value.editor.fieldId) : null),
   async (key, previousKey) => {
@@ -363,13 +421,7 @@ watch(
   () => text("input"),
   (typed) => {
     clearTimeout(draftTimer);
-    // A password typed but not sent is never kept: a question that resumes after a block asks for it again.
-    if (
-      actionId.value !== undefined &&
-      form.value === null &&
-      foreground.value?.kind !== "ask-password"
-    )
-      typedTexts()?.set(typedKey(actionId.value, ""), typed);
+    keepTyped(typed);
     if (!ownsPresentedEditor() || !props.session) return;
     const target = composerOwner!;
     const { planToken: plan } = props.session;
@@ -388,6 +440,16 @@ watch(
   },
 );
 onUnmounted(() => clearTimeout(draftTimer));
+/** Keeps a text typed for the presented question, for its return after a block interrupted it. */
+function keepTyped(typed: string) {
+  // A password typed but not sent is never kept: a question that resumes after a block asks for it again.
+  if (
+    actionId.value !== undefined &&
+    form.value === null &&
+    foreground.value?.kind !== "ask-password"
+  )
+    typedTexts()?.set(typedKey(actionId.value, ""), typed);
+}
 /** The composer's text, which the edited form field takes before any other edit of its form. */
 function formDraft(): string | undefined {
   return ownsPresentedEditor() ? text("input") : undefined;
@@ -540,8 +602,11 @@ async function complete(
     !!document.activeElement?.closest("[data-foreground-controls]");
   // From the click until the answer settles, the composer and the form's controls are read-only (`submitting`): the
   // answer is the text of the click, and nothing typed meanwhile is lost to the next interaction's text. The composer ends
-  // a composition under way as it turns read-only.
+  // a composition under way as it turns read-only. The plain text or password field stays writable instead, while the
+  // flight holds it (`useAnswerFlight`).
   submitting.value = true;
+  flight.begin();
+  let settled: "completed" | "refused" | null = null;
   try {
     const targetId = (current: PlayerSession) =>
       target === "pacing"
@@ -550,18 +615,27 @@ async function complete(
     const presented = expectedActionId ?? targetId(props.session);
     // Ordinary input is evaluated at once; a session that must be readied first is evaluated once it is.
     const ready = props.prepareInput?.() ?? true;
-    if (ready !== true && !(await ready)) return;
-    if (!props.inputSection) return;
+    // An answer that is not taken settles as a refusal without a notice; like every settlement, after a flush.
+    if ((ready !== true && !(await ready)) || !props.inputSection) {
+      settled = "refused";
+      await nextTick();
+      return;
+    }
     // The interaction the composer serves now; its answer's publication may present the next one before the chain
     // returns, whose own watch then sets the composer.
     const before = actionId.value;
     const result = await runInput(props.inputSection, presented, targetId, intent);
     // A session that no longer owns the UI, replaced, stopped or unmounted meanwhile, gets no result and no feedback.
-    if (result.kind === "retired") return;
+    if (result.kind === "retired") {
+      flight.release();
+      return;
+    }
+    settled = "refused";
     // Elapsed time may have ended or replaced the presented action; input never targets another action.
     if (result.kind === "unavailable") {
       // A skipped message that already finished needs no feedback.
       if (target === "interaction") showFeedback("This interaction is no longer available.");
+      await nextTick();
       return;
     }
     if (result.kind === "unanswered") {
@@ -573,6 +647,7 @@ async function complete(
             : imageTextFeedback.value,
       );
       if (refocusInput) focusInput();
+      await nextTick();
       return;
     }
     emit("update:session", result.session);
@@ -581,9 +656,11 @@ async function complete(
     // the field it edits, if any.
     // The composer gives up its field before its text changes, so the change is never typed text of another one.
     if (result.outcome.kind === "updated" || result.outcome.kind === "unchanged") {
+      settled = "completed";
       if (!loadFormEditor(playerRuntimeForm(result.session))) writeField("input", "");
       clearFeedback();
     } else if (result.outcome.kind === "completed") {
+      settled = "completed";
       // The answered text goes, unless the next interaction already shows: its prefill or typed text stays.
       if (actionId.value === before) {
         composerOwner = null;
@@ -602,9 +679,14 @@ async function complete(
     }
     // Hold the guard until the parent has published the new canonical session.
     await nextTick();
+  } catch (error) {
+    flight.fail();
+    throw error;
   } finally {
     submitting.value = false;
     suppressComposerRefocus = false;
+    // What was typed and given in the flight plays against what the answer left, at once.
+    if (settled !== null) flight.settle(settled);
   }
 }
 // The Player's controls and fields, which keep their own clicks and keys.
@@ -784,6 +866,7 @@ watch(
   async (key) => {
     writeField("repeat", "");
     // A question or form that came back meanwhile already holds the composer; its text stays.
+    if (key !== undefined) flight.release();
     if (key !== undefined || actionId.value === undefined) {
       writeField("input", "");
       clearFeedback();
@@ -800,7 +883,9 @@ watch(
   },
 );
 
-function submit(source: "input" | "button") {
+/** Submits the composer's text, or `typed`, a text given while an earlier answer was in flight. */
+function submit(source: "input" | "button", typed = text("input")) {
+  if (flight.submit(source)) return;
   const field = lockField.value;
   if (field) {
     // As for askPassword, an empty field answers nothing.
@@ -816,10 +901,7 @@ function submit(source: "input" | "button") {
     props.lock?.submit({ password: text("input"), timeLockMs: null });
     return;
   }
-  void complete(
-    intents.composer(text("input"), source === "input" ? "enter" : "send"),
-    source === "input",
-  );
+  void complete(intents.composer(typed, source === "input" ? "enter" : "send"), source === "input");
 }
 </script>
 
@@ -908,21 +990,13 @@ function submit(source: "input" | "button") {
         />
         <Composer
           ref="composer"
-          :disabled="
-            (!foreground && !pacing && !lockField) ||
-            foreground?.kind === 'popup' ||
-            foreground?.kind === 'export-text' ||
-            foreground?.kind === 'open-url'
-          "
-          :pacing="!foreground && !!pacing"
-          :preselected="preselected !== undefined"
-          :buttons-only="
-            foreground?.kind === 'choose' ||
-            foreground?.kind === 'show-button' ||
-            (foreground?.kind === 'form' && !formEditor)
-          "
+          :disabled="composerDisabled"
+          :pacing="composerShortcuts.pacing"
+          :preselected="composerShortcuts.preselected"
+          :buttons-only="composerShortcuts.buttonsOnly"
           :fresh-after="presentedAt"
           :submitting="submitting || readingImage || !!lockField?.busy"
+          :holding="flight.holding.value"
           :placeholder="
             lockField
               ? (lockField.hint ?? 'Type your response…')
@@ -952,24 +1026,13 @@ function submit(source: "input" | "button") {
                   ? 'numeric'
                   : 'decimal'
           "
-          :input-type="
-            formEditor
-              ? formEditor.inputType
-              : foreground && 'isoText' in foreground && foreground.isoText
-                ? 'text'
-                : foreground?.kind === 'ask-date'
-                  ? 'date'
-                  : foreground?.kind === 'ask-time'
-                    ? 'time'
-                    : foreground?.kind === 'ask-datetime'
-                      ? 'datetime-local'
-                      : 'text'
-          "
+          :input-type="composerInputType"
           :feedback="feedback"
           @submit="submit"
           @skip="skipPacing(true)"
           @activate="activatePreselected"
           @escape="formEditor && complete(intents.formDismiss, false)"
+          @held="flight.hold"
           @files="submitImage"
         />
       </template>

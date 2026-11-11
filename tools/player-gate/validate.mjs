@@ -23,6 +23,7 @@ import {
 } from "./lib/evidence.mjs";
 import { sectionsOf } from "./lib/records.mjs";
 import { keepOutcome } from "./scenarios/keep.mjs";
+import { keysCasePassed } from "./scenarios/keys.mjs";
 import { tapCounts } from "./scenarios/taps.mjs";
 
 /**
@@ -297,6 +298,9 @@ const agrees = (what, recorded, derived, problems) => {
     problems.push(`the recorded ${what} (${recorded}) is not its records' (${derived})`);
 };
 
+/** The keys' pass, from its records: every case that is no residual ends as on `main`, with no error. */
+const keysPassed = (result) => result.cases.length > 0 && result.cases.every(keysCasePassed);
+
 /** The demo's pass, from its records: at least four turns and fewer than its cap, no error, no failure. */
 const demoPassed = (result) =>
   result.errors.length === 0 && result.turns >= 4 && result.turns < 80 && result.failed === false;
@@ -367,6 +371,16 @@ const PARTS = {
     },
   },
   delayedSmoke: PASS_FAIL_PART((result) => result.exit === 0, "ok"),
+  keys: {
+    timing: {
+      ...PASS_FAIL_PART(keysPassed, "ok").timing,
+      derive: (result) => ({
+        passed: keysPassed(result) ? 1 : 0,
+        cases: result.cases.length,
+        asserted: result.cases.filter((item) => item.residual === "").length,
+      }),
+    },
+  },
 };
 
 /** The scenarios whose samples must complete: a row that failed fails each of its parts. */
@@ -611,6 +625,11 @@ const NUMBERS = {
     ["turns", "count", (r) => r.turns, always, true],
   ],
   delayedSmoke: [["passed", "boolean", (r) => r.passed, always, true]],
+  keys: [
+    ["passed", "boolean", (r) => r.passed, always, true],
+    ["cases", "count", (r) => r.cases, always, true],
+    ["asserted cases", "count", (r) => r.asserted, always, true],
+  ],
 };
 NUMBERS.sessionInstrumented = [
   ...NUMBERS.session.filter((field) => !BYTES.includes(field)),
@@ -786,7 +805,7 @@ export const isHeadline = (field) => cellOf(field) === "timing";
 export { NUMBERS };
 
 /** The scenarios whose result is pass or fail: a measured failure is their cell's value, never an incomplete cell. */
-export const PASS_FAIL = new Set(["demo", "delayedSmoke"]);
+export const PASS_FAIL = new Set(["demo", "delayedSmoke", "keys"]);
 
 /**
  * Each part of `cell`'s scenario run over the parsed row `handle`: `name → { sample, problems }`, `sample` `null` when

@@ -5,13 +5,19 @@ import { Eye, EyeOff, Paperclip } from "@lucide/vue";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { usePlayerConditions } from "./usePlayerConditions";
-import { playerKeys } from "./playerKeys";
+import { shortcutOutcome } from "./playerKeys";
 import { useComposerModel, type ComposerField } from "./useComposerFields";
 
 const props = withDefaults(
   defineProps<{
     disabled?: boolean;
     submitting?: boolean;
+    /**
+     * While `submitting`, the field stays writable and the answer's flight holds the composer's commands: Enter submits
+     * as always, and a shortcut key that an interaction could take in the empty field is held (`held`) for the one
+     * that the answer leaves. Send stays disabled.
+     */
+    holding?: boolean;
     placeholder?: string;
     accessibleName?: string;
     inputMode?: "text" | "decimal" | "numeric";
@@ -49,6 +55,7 @@ const props = withDefaults(
   {
     disabled: false,
     submitting: false,
+    holding: false,
     placeholder: "Type your response…",
     accessibleName: "Response",
     inputMode: "text",
@@ -71,6 +78,8 @@ const emit = defineEmits<{
   activate: [];
   /** Escape in the input, which closes an edited form field. */
   escape: [];
+  /** A shortcut key pressed in the empty field while `holding`, and whether the press was fresh. */
+  held: [key: string, fresh: boolean];
   /** Files the player chose or dropped, with the `attach.request` offered when the picker opened or at the drop. */
   files: [files: readonly File[], request: Request];
 }>();
@@ -126,17 +135,28 @@ function handleKeydown(event: KeyboardEvent): void {
   }
   const element = input.value;
   const empty = value.value === "" && element?.selectionStart === element?.selectionEnd;
-  if (event.key === playerKeys.skipPacing.key && props.pacing && empty) {
-    event.preventDefault();
-    emit("skip");
-  } else if (
-    event.key === playerKeys.preselectedButton.key &&
-    (props.preselected || props.buttonsOnly) &&
-    empty
-  ) {
-    event.preventDefault();
-    if (props.preselected && fresh) emit("activate");
-  }
+  // While an answer is in flight, the interaction that will take the key is not known yet: a key that any interaction
+  // could take is held for it.
+  const outcome = props.holding
+    ? shortcutOutcome(event.key, {
+        empty,
+        fresh,
+        pacing: true,
+        preselected: true,
+        buttonsOnly: true,
+      })
+    : shortcutOutcome(event.key, {
+        empty,
+        fresh,
+        pacing: props.pacing,
+        preselected: props.preselected,
+        buttonsOnly: props.buttonsOnly,
+      });
+  if (outcome === "type") return;
+  event.preventDefault();
+  if (props.holding) emit("held", event.key, fresh);
+  else if (outcome === "skip") emit("skip");
+  else if (outcome === "activate") emit("activate");
 }
 
 /** Send keeps the fresh-press rule of Enter in the input: a held Enter or an earlier press does not submit again. */
@@ -319,10 +339,11 @@ function writeField(field: ComposerField, text: string): void {
   }
 }
 onBeforeUnmount(model.attach(writeField));
-// Whatever makes the fields read-only (an answer in flight, an image being read, a lock at work) ends a composition
-// first, so none stays open in a read-only field.
+// Whatever makes the fields read-only (an answer in flight that does not hold, an image being read, a lock at work)
+// ends a composition first, so none stays open in a read-only field.
+const readOnly = computed(() => props.submitting && !props.holding);
 watch(
-  () => props.submitting,
+  readOnly,
   (busy) => {
     if (busy) endComposition();
   },
@@ -392,7 +413,7 @@ defineExpose({ focusInput, selectInput, openPicker });
               :type="shown ? 'text' : 'password'"
               v-model="value"
               :placeholder="placeholder"
-              :readonly="submitting"
+              :readonly="readOnly"
               :enterkeyhint="repeat ? 'next' : undefined"
               :aria-label="accessibleName"
               :aria-invalid="feedback ? true : undefined"
@@ -437,7 +458,7 @@ defineExpose({ focusInput, selectInput, openPicker });
               :type="repeatShown ? 'text' : 'password'"
               v-model="repeatedValue"
               placeholder="Repeat password"
-              :readonly="submitting"
+              :readonly="readOnly"
               aria-label="Repeat password"
               :aria-invalid="feedback ? true : undefined"
               :aria-describedby="feedback ? `${feedbackId} ${capsLockId}` : capsLockId"
@@ -491,7 +512,7 @@ defineExpose({ focusInput, selectInput, openPicker });
             :aria-describedby="feedback ? feedbackId : undefined"
             :inputmode="effectiveInputMode"
             :disabled="disabled"
-            :readonly="submitting"
+            :readonly="readOnly"
             class="composer-input composer-picker"
             @input="updateFromPicker"
             @keydown="handleKeydown"
@@ -511,7 +532,7 @@ defineExpose({ focusInput, selectInput, openPicker });
           :placeholder="placeholder"
           :inputmode="effectiveInputMode"
           :disabled="disabled"
-          :readonly="submitting"
+          :readonly="readOnly"
           variant="embedded"
           class="composer-input"
           @update:model-value="value = String($event)"

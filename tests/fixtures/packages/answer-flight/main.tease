@@ -1,0 +1,22 @@
+---
+title: "Answer flight"
+---
+// The composer while an answer is in flight (#2430): each case answers a first question, then presents what the
+// browser kit's `keys` scenario types into.
+let which = askChoice "Prefill", "Password", "Popup", "Export", "Link", "Form"
+let first = askText "First?"
+if which == "Prefill" {
+    let next = askText "Next?", prefill: "Ada"
+} else if which == "Password" {
+    let secret = askPassword "Secret?"
+} else if which == "Popup" {
+    showPopup "Hello"
+} else if which == "Export" {
+    exportText("Hello")
+} else if which == "Link" {
+    openUrl("https://example.com", alwaysButton: true)
+} else {
+    let form = askForm("The form", fields: { name: "Ada" }, submit: "Continue")
+}
+showButton "Done"
+exit
