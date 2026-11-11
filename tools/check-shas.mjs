@@ -19,9 +19,9 @@ import { existsSync, readFileSync } from "node:fs";
 // but a tree, such as a stored baseline's `src` tree hash, is reported as a tree, resolved, without the remote check:
 // proving a tree reachable from a remote ref is costly.
 // Unfilled placeholders (`PLACEHOLDERS`) outside fenced code blocks are reported too, and so is a closing clause that
-// names several issues after one keyword, in code too, which closes only the first (`closingClausesOf`). Every run
-// that completes ends with one line counting the tokens by result, the placeholders and those clauses, so no output
-// means it did not run.
+// names several issues after one keyword, in code too, which as closing syntax closes only the first
+// (`closingClausesOf`). Every run that completes ends with one line counting the tokens by result, the placeholders
+// and those clauses, so no output means it did not run.
 //
 // Tokens that need not be commits are checked, and skipped when no repository resolves them, so no rule hides a SHA:
 // - only digits: a CI run, comment or issue id;
@@ -84,7 +84,8 @@ export function placeholdersOf(text) {
 
 /**
  * The closing clauses of `text` that name several issues after one keyword, such as `Closes #1970, #1965`, each with
- * the one issue GitHub closes by it, the first: GitHub closes only an issue its own keyword names. Every closing
+ * its first reference: used as GitHub's closing syntax, it closes only that one, as GitHub closes only an issue its own
+ * keyword names. The separators are matched without overlapping white space, so the work stays linear. Every closing
  * keyword followed by more than one issue reference is found, wherever it stands in the text, code included; a quoted
  * example must be written so that it is not such a clause. A keyword is `close`, `closes`, `closed`, `fix`, `fixes`,
  * `fixed`, `resolve`, `resolves` or `resolved` in any case, with an optional `:`; a reference is `#N`, `owner/repo#N`
@@ -95,7 +96,7 @@ export function placeholdersOf(text) {
 export function closingClausesOf(text) {
   const issue = String.raw`(?:https?:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/\d+|(?:[\w.-]+\/[\w.-]+)?#\d+)`;
   const clause = new RegExp(
-    String.raw`\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+(${issue})(?:\s*(?:,\s*(?:and\b|&)?|\band\b|&)\s*${issue})+`,
+    String.raw`\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+(${issue})(?:\s*(?:,\s*(?:and\b|&)|,|\band\b|&)\s*${issue})+`,
     "giu",
   );
   return [...text.matchAll(clause)].map((m) => ({ clause: m[0], closes: m[1] }));
@@ -328,7 +329,7 @@ function main() {
   for (const { clause, closes } of clauses) {
     failed = true;
     process.stdout.write(
-      `closing     "${clause}" closes only ${closes}: one keyword per issue (Closes #1, Closes #2)\n`,
+      `closing     "${clause}" names several issues after one keyword; as closing syntax it closes only ${closes}: one keyword per issue (Closes #1, Closes #2)\n`,
     );
   }
   const tokens = Object.values(counts).reduce((sum, n) => sum + n, 0);

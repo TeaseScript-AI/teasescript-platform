@@ -165,7 +165,7 @@ test(
       assert.equal(status, 1, out);
       assert.match(
         out,
-        /closing +"Closes #1970, #1965, #1956" closes only #1970: one keyword per issue/u,
+        /closing +"Closes #1970, #1965, #1956" names several issues after one keyword; as closing syntax it closes only #1970: one keyword per issue/u,
       );
       assert.match(
         out.trim().split("\n").at(-1),
@@ -175,6 +175,9 @@ test(
       const listed = check("Closes #12,\nand #13\n", [directory]);
       assert.equal(listed.status, 1, listed.out);
       assert.match(listed.out, /closes only #12: one keyword per issue/u);
+      // (a cost witness: a comma and 60,000 spaces before no reference, which an overlapping separator walked quadratically)
+      const spaces = check(`Closes #12,${" ".repeat(60_000)}x`, [directory]);
+      assert.equal(spaces.status, 0, spaces.out);
       for (const [text, closes] of [
         ["fixes: #1 and #2", ["#1"]],
         ["Closes #12, and #13", ["#12"]],
