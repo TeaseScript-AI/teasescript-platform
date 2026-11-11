@@ -16,7 +16,11 @@ import { isAbsolute, join, resolve } from "node:path";
 // exits 2 instead of failing on an import (#2366).
 let siblings;
 try {
-  siblings = await Promise.all([import("./costly-test-files.mjs"), import("./test-shards.mjs")]);
+  siblings = await Promise.all([
+    import("./costly-test-files.mjs"),
+    import("./run-parallel.mjs"),
+    import("./test-shards.mjs"),
+  ]);
 } catch (error) {
   if (error?.code !== "ERR_MODULE_NOT_FOUND") throw error;
   process.stderr.write(
@@ -25,7 +29,7 @@ try {
   );
   process.exit(2);
 }
-const [{ costlyTestSeconds }, { isSuiteTestPath, isTypeCoreTestFile }] = siblings;
+const [{ costlyTestSeconds }, { summaryLine }, { isSuiteTestPath, isTypeCoreTestFile }] = siblings;
 
 // Runs, before a push, the checks CI fails on for what changed since a base, in parallel, and prints one line per check
 // with its verdict and seconds, and the full output of a check that failed:
@@ -43,7 +47,8 @@ const [{ costlyTestSeconds }, { isSuiteTestPath, isTypeCoreTestFile }] = sibling
 // its published answers, as `tools/repository-checks/pin-suites.mjs` lists them: the focused list such a change runs
 // before review (`docs/TESTING.md`, "Pinned work"), which it does not run itself. When a changed type-core test file has
 // no entry in `tools/costly-test-files.mjs`, it prints one line saying so: the file runs in full, as every file does,
-// and the entry lands from CI at merge.
+// and the entry lands from CI at merge. Its last line, also when the checks cannot run, names what ran, failed and did
+// not run, the compiled suite and the checks no changed path needs included (`summaryLine`, #2106).
 //
 // `--merged` checks what CI tests after a squash instead: HEAD merged into the base's current commit, in a temporary
 // detached worktree (`git merge --no-commit --no-ff`) with this worktree's `node_modules` linked in. Uncommitted
@@ -132,6 +137,9 @@ export function projectsFor(paths) {
 export function checksOf(projects) {
   return [...new Set([...projects].flatMap((project) => PROJECTS[project].checks))];
 }
+
+/** What it never runs, named in its last line. */
+export const NEVER_RUN = "the compiled test suite (CI runs it)";
 
 /** The core, a change to which prints the suites that pin its work. */
 const CORE = "src/type-inference/core/";
@@ -402,24 +410,50 @@ function prettier() {
   return [process.execPath, "node_modules/prettier/bin/prettier.cjs"];
 }
 
+/**
+ * The checks this run started, in order, the verdicts of those that ended, and, once every check has started, the
+ * project checks no changed path needs: what the last line names (`lastLine`).
+ */
+const progress = { started: [], ended: new Map(), notNeeded: null };
+
 /** A check's run: its verdict, seconds and output; `shown` prints the output also when it passes. */
 function run(name, command, args, shown = false) {
   const start = performance.now();
+  progress.started.push(name);
   return new Promise((resolve) => {
     const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], detached: true });
     running.add(child);
     let output = "";
     child.stdout.on("data", (chunk) => (output += chunk));
     child.stderr.on("data", (chunk) => (output += chunk));
-    child.on("error", (error) =>
-      resolve({ name, passed: false, seconds: 0, output: error.message, shown }),
-    );
+    child.on("error", (error) => {
+      progress.ended.set(name, false);
+      resolve({ name, passed: false, seconds: 0, output: error.message, shown });
+    });
     child.on("close", (code) => {
       running.delete(child);
+      progress.ended.set(name, code === 0);
       const seconds = (performance.now() - start) / 1000;
       resolve({ name, passed: code === 0, seconds, output, shown });
     });
   });
+}
+
+/**
+ * The last line (#2106), so that no run, also one that cannot run or is stopped, can be read as one that ran more: what
+ * ran, failed, and did not run, a check a signal stopped, a project check no changed path needs and the compiled suite
+ * included.
+ */
+function lastLine() {
+  if (progress.notNeeded === null)
+    return `check-changed: ${summaryLine([{ name: "every check", status: "NOT RUN" }])}`;
+  const verdict = (name) =>
+    progress.ended.has(name) ? (progress.ended.get(name) ? "PASS" : "FAIL") : "ABORTED";
+  return `check-changed: ${summaryLine([
+    ...progress.started.map((name) => ({ name, status: verdict(name) })),
+    ...progress.notNeeded.map((name) => ({ name, status: "NOT RUN" })),
+    { name: NEVER_RUN, status: "NOT RUN" },
+  ])}`;
 }
 
 /**
@@ -537,6 +571,8 @@ async function check(cleanups) {
         ? run("tsc", "node_modules/.bin/tsc", ["--noEmit", "-p", "tsconfig.json"])
         : run(check, npm, ["run", "--silent", check]),
     );
+  const selected = checksOf(projects);
+  progress.notNeeded = checksOf(Object.keys(PROJECTS)).filter((check) => !selected.includes(check));
   const results = await Promise.all(checks);
   for (const { name, passed, seconds } of results)
     process.stdout.write(
@@ -544,6 +580,7 @@ async function check(cleanups) {
     );
   for (const { name, passed, output, shown } of results)
     if (!passed || shown) process.stdout.write(`\n--- ${name} ---\n${output}`);
+  process.stdout.write(`\n${lastLine()}\n`);
   process.exitCode = results.every(({ passed }) => passed) ? 0 : 1;
   // (a link through main's `current` follows its refresh, which can switch it to another install while the checks run)
   const after = lockfileMismatch();
@@ -564,20 +601,26 @@ async function main() {
     stop();
     for (const step of cleanups) step();
   };
+  // (installed for the whole run: the first signal stops the checks, cleans up and writes the last line, once; a later
+  // one, during that cleanup, changes nothing)
+  let stopping = false;
   for (const [signal, code] of [
     ["SIGINT", 130],
     ["SIGTERM", 143],
     ["SIGHUP", 129],
   ])
-    process.once(signal, () => {
+    process.on(signal, () => {
+      if (stopping) return;
+      stopping = true;
       cleanup();
-      process.exit(code);
+      process.stdout.write(`\n${lastLine()}\n`, () => process.exit(code));
     });
   try {
     await check(cleanups);
   } catch (error) {
     if (!(error instanceof CannotRun)) throw error;
     process.stderr.write(`check-changed: ${error.message}\n`);
+    process.stdout.write(`${lastLine()}\n`);
     process.exitCode = 2;
   } finally {
     cleanup();
