@@ -238,11 +238,14 @@ try {
   console.log(`player-firefox-camera: ${result}`);
   passed = true;
 } finally {
+  // A run passes only when its check passes and its browser closes: any other end keeps the artifacts.
+  let closed = false;
   try {
     await cli("close");
+    closed = true;
   } finally {
     await new Promise((resolve) => server.close(resolve));
-    settleArtifacts("player-firefox-camera", scratch, passed);
+    settleArtifacts("player-firefox-camera", scratch, passed && closed);
   }
 }
 

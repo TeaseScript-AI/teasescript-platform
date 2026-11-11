@@ -1,7 +1,7 @@
 // Requires Playwright CLI and a Player development preview of this checkout.
 // npm run test:player:preview [-- http://localhost:5173/player/]
 // Without a URL, it starts the preview itself (`tools/player-preview-server.mjs`): on 127.0.0.1, on a port Vite
-// chooses, with a dependency cache in a temporary folder of its own, removed when the run ends. The preview's standard input is a pipe this process holds,
+// chooses, with a dependency cache in a temporary folder of its own, removed in the run's cleanup. The preview's standard input is a pipe this process holds,
 // and the preview exits when that input ends, so it ends with this run however the run ends.
 // Before any check, the preview must answer `<url>__checkout` (`player/vue/vite.config.ts`) with this checkout's real
 // path, as `text/plain`; a preview of another checkout, or one that does not say which checkout it serves, is refused.
@@ -30,7 +30,7 @@ const session = `player-preview-${process.pid}-${randomBytes(6).toString("hex")}
  * Playwright CLI's output, a failing group's screenshot and trace, and a started preview's log.
  */
 let artifacts = "";
-/** A started preview's dependency cache, in a temporary folder of its own: no failure artifact, removed when the run ends. */
+/** A started preview's dependency cache, in a temporary folder of its own: removed in the run's cleanup, never kept. */
 let cache;
 
 /** Refuses a URL whose preview does not answer `__checkout` with this checkout's real path. */
@@ -873,8 +873,11 @@ async function main(given) {
     }
     passed = true;
   } finally {
+    // A run passes only when its checks pass and its browser closes: any other end keeps the artifacts.
+    let closed = false;
     try {
       cli("close");
+      closed = true;
     } finally {
       try {
         // Its input's end ends the preview; `ended` settles however and whenever it ended.
@@ -884,7 +887,7 @@ async function main(given) {
         }
       } finally {
         if (cache !== undefined) rmSync(cache, { recursive: true, force: true });
-        settleArtifacts("player-preview-checks", artifacts, passed);
+        settleArtifacts("player-preview-checks", artifacts, passed && closed);
       }
     }
   }
