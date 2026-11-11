@@ -253,8 +253,8 @@ test("compact output ends with each named file's counts, after Node's own output
 
 /** `child`'s exit status, once it has closed. */
 async function statusOf(child: ReturnType<typeof spawn>) {
-  const [code] = (await once(child, "close")) as [number | null];
-  return code;
+  const [code]: unknown[] = await once(child, "close");
+  return typeof code === "number" ? code : null;
 }
 
 test("wherever Node applies a selection given in NODE_OPTIONS, the filter reads one: Node itself decides each case", async () => {
