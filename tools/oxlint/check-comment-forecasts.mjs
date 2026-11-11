@@ -10,9 +10,10 @@ import { checkedFiles, fileComments } from "./comments.mjs";
 // "(as) before #N". The old design record is not in the repository (#1977), so a reference to it is no citation: a
 // line of any file Git lists, documents, strings and code included, that names it and then a revision or a section, on
 // it or the next line, is refused (`citingLines`, #2372); a revision number written as `r4.N` names the accepted
-// record's entry `r4-N`, so outside the record's own pages one with no such entry is refused (#2393); and the forms
-// of `COUNTED_CITATIONS` have each file's exact count in comments in
-// `comment-citations.json`, which may only fall. A comment that points at the accepted record
+// record's entry `r4-N`, so outside the record's own pages one with no such entry is refused (#2393); a section number
+// stands right after a document's name, outside the paths `outsideSectionRule` names (`unnamedSectionsIn`, #2404); and
+// the forms of `COUNTED_CITATIONS` have each file's exact count in comments in `comment-citations.json`, which may only
+// fall. A comment that points at the accepted record
 // (`docs/specifications/type-inference-accepted-record/<page>.md#<anchor>`, #2089) names a heading of that page; the
 // doc-links check reads Markdown only and never sees a comment. A label of the port plan or the research design (`S8c`,
 // `C9`, `AD-1`) in a comment of the type core's modules has a row in the record's glossary, and every row is still
@@ -91,7 +92,7 @@ const RECORD = "docs/specifications/type-inference-accepted-record";
 const CORE = "src/type-inference/core/";
 
 /**
- * A port-plan or research label: a step, an id, a checkpoint, the plan or a plan document. A section number (`§3.2`,
+ * A port-plan or research label: a step, an id, a checkpoint, the plan or a plan document. A section number (`V30 §3`,
  * `S3 §5`) is not a label; the glossary's one row for a bare `§N` is not checked against comments.
  */
 const LABEL =
@@ -278,6 +279,71 @@ export function unresolvedRevisionsIn(fileName, text, entries) {
 }
 
 /**
+ * A section number: `§` or `§§`, then spaces or tabs, then a digit; a `§` before anything else (a test source's
+ * cursor mark) is none. The one reading of a section number, for `unnamedSectionsIn`, which any other count of them
+ * calls. The old record's rule reads a wider set on purpose (`REVISION_OR_SECTION`: any `§` beside its name), so a
+ * line that names the old record and then a section number gets a finding from each rule.
+ */
+const SECTION_NUMBER = /§§?[ \t]*[0-9]/gu;
+
+/**
+ * The section lists a section number may stand in, a closed set: a document's name, one space, `§` or `§§` and a
+ * number (dotted parts, a letter, a range), then any further `, §N`, ` and §N`, `, and §N` or ` or §N`, on one line.
+ * `V30` and `ADR NNNN` are repository documents. `PLAN`, `S3` and `S6-CARRIERS` name the port plan's documents
+ * outside the repository; they are allowed as labels, which #2423 decides, not as citations.
+ */
+const NAMED_SECTIONS = (() => {
+  const number = String.raw`\d+(?:\.\d+)*[a-z]?(?:[–-]\d+(?:\.\d+)*[a-z]?)?`;
+  return new RegExp(
+    String.raw`(?<![\p{L}\p{N}])(?:V30|ADR \d{4}|PLAN|S3|S6-CARRIERS) §§?${number}(?:(?:, | and |, and | or )§${number})*`,
+    "gu",
+  );
+})();
+
+/**
+ * The files outside the section rule: documents, whose bare section numbers name their own sections; `src/`, whose
+ * comments #2209 rewrites; the expectation set's cell ids inside recorded data whose bytes `MANIFEST.md` fixes; the
+ * waiting list, which quotes comments word for word and whose section numbers are all in quotes of `src/`; and this
+ * lint's test.
+ */
+const outsideSectionRule = (file) =>
+  file.startsWith("docs/") ||
+  file.startsWith("src/") ||
+  file === "tests/fixtures/type-core/cells.jsonl" ||
+  file === "tools/oxlint/comment-declarations-waiting.json" ||
+  file === CITATION_FIXTURES;
+
+/**
+ * Each section number in `text`, the whole of file `fileName`, that stands in no section list after a document's
+ * name (`NAMED_SECTIONS`), with its line and the number as written. It proves the form, not that the section exists
+ * or carries the sentence's claim.
+ */
+export function unnamedSectionsIn(fileName, text) {
+  if (outsideSectionRule(fileName) || !text.includes("§")) return [];
+  const named = new Set();
+  for (const list of text.matchAll(NAMED_SECTIONS))
+    for (const mark of list[0].matchAll(/§§?/gu)) named.add(list.index + mark.index);
+  const found = [];
+  let line = 1;
+  let counted = 0;
+  for (const match of text.matchAll(SECTION_NUMBER)) {
+    if (named.has(match.index)) continue;
+    for (
+      let at = text.indexOf("\n", counted);
+      at !== -1 && at < match.index;
+      at = text.indexOf("\n", at + 1)
+    )
+      line += 1;
+    counted = match.index;
+    found.push({
+      line,
+      section: /^§§?[ \t]*[\d.]*\d/u.exec(text.slice(match.index, match.index + 24))[0],
+    });
+  }
+  return found;
+}
+
+/**
  * Each line of `text`, the whole of file `fileName`, that cites the old design record (`citingLines`), with its
  * 1-based line and its text from the record's name.
  */
@@ -336,6 +402,13 @@ export function listedTextFindings(root) {
         line,
         column: 1,
         message: `"${citation.length > 60 ? `${citation.slice(0, 60)}…` : citation}": a line that names the old design record and then a revision or a section of it cites a record that is not in the repository; state the fact, or point at the accepted record, an issue or a merged pull request, and in prose about the old record keep any revision or section off its line and the next`,
+      });
+    for (const { line, section } of unnamedSectionsIn(file, text))
+      findings.push({
+        fileName: file,
+        line,
+        column: 1,
+        message: `"${section}": a section number without a repository document's name right before it (written "V30 §N" or "ADR NNNN §N") names a document outside the repository; state the fact, write the name before it, or point at the accepted record, an issue or a merged pull request`,
       });
   }
   return findings;
