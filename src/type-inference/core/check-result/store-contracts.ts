@@ -327,6 +327,7 @@ export class Contracts {
   readonly #definitionsOf = new Map<string, readonly Definition[]>();
   readonly #bindingVerdicts = new Map<string, string | null>();
   readonly #asking = new Set<string>();
+  readonly #readPlaces = new Map<Expression, { id: PlaceId; path: readonly string[] } | null>();
 
   #definitions(id: PlaceId, path: readonly string[], answer?: PlaceAnswer): readonly Definition[] {
     const key = `${id}\u0001${path.join("\u0000")}`;
@@ -348,7 +349,11 @@ export class Contracts {
     kinds: ReadonlySet<string>,
     follow: boolean,
   ): string | null {
-    const place = this.answers.at(nodeOf(this.answers, this.index, read))?.place ?? null;
+    let place = this.#readPlaces.get(read);
+    if (place === undefined) {
+      place = this.answers.at(nodeOf(this.answers, this.index, read))?.place ?? null;
+      this.#readPlaces.set(read, place);
+    }
     if (place === null) return "no-place";
     const steps = joinSteps(place.path, rest);
     const annotation = this.lets.get(place.id)?.typeAnnotation ?? null;
