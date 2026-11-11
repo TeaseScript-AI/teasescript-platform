@@ -4,7 +4,9 @@
 // what the page shows once every answer settled. `expect` is `main`'s measured outcome of the same keys, whose answers
 // settle at once (#2430), except where `main` loses a prefill the answer presents (its completion empties the composer
 // after the next question wrote it; this branch's keeps it): there it is this branch's outcome of the keys pressed after
-// the answer settled. A case with a `residual` is a difference #2430 accepts, recorded beside it and never asserted.
+// the answer settled; and where a password field departs or settles, outside the flight's domain: there it is the
+// domain's outcome, nothing typed or given in the flight taken (#2463, residual 6). A case with a `residual` is a
+// difference #2430 accepts, recorded beside it and never asserted.
 import { cdpSession } from "../lib/engines.mjs";
 import { countedError } from "../lib/probe.mjs";
 
@@ -183,7 +185,25 @@ function cases(engine) {
       KEYS["continue-enter-edit"],
       shown("x", "", 5),
     ),
-    fixture("password key", "Password", press("x"), shown("x", "", 4)),
+    // Outside the domain: a password field departs or settles, and nothing typed or given in the flight is taken.
+    // `main` takes what is typed after the answer settled: `x`, the pasted lines, a line break, or `x` after the empty
+    // password's refusal.
+    fixture("password key", "Password", press("x"), shown("", "", 4)),
+    { ...fixture("password paste", "Password", KEYS.paste, shown("", "", 4)), clipboard: "a\nb" },
+    ...[
+      ["from-password shift-enter", "hunter2", press("Shift+Enter"), shown("", "", 4)],
+      ["from-password paste", "hunter2", KEYS.paste, shown("", "", 4)],
+      ["refused-password key", "", press("x"), shown("", "", 4)],
+    ].map(([name, answer, keys, expect]) => ({
+      ...fixture(name, "Password", keys, expect),
+      before: ["Password", { type: "Stay" }],
+      answer,
+      clipboard: "a\nb",
+    })),
+    // A lock's choose-a-code field, with a repeat: the flight ends at the lock, so the Enter is dropped. On `main` it
+    // depends on whether the code field shows before the key: in Chromium it does not yet, and the key is dropped; in
+    // Firefox and WebKit it does, and Enter moves to the repeat field (#2463, residual 6).
+    fixture("code enter", "Code", press("Enter"), shown("", "", 4), R(6)),
     // On `main` the second Enter acts on the control that took the focus: it closes the popup, copies the export and
     // opens the link's tab (residual 6).
     fixture("popup enter", "Popup", press("Enter"), shown("", "", 3), R(6)),
@@ -267,11 +287,11 @@ async function runCase(opened, origin, item) {
     }
     await input.waitFor();
     if (item.name.endsWith("paste")) {
-      await page.evaluate(() => {
-        const copy = Object.assign(document.createElement("textarea"), { value: "PASTE" });
+      await page.evaluate((value) => {
+        const copy = Object.assign(document.createElement("textarea"), { value });
         document.body.append(copy);
         copy.select();
-      });
+      }, item.clipboard ?? "PASTE");
       await page.keyboard.press("Control+c");
       await page.evaluate(() => document.querySelector("body > textarea:last-of-type")?.remove());
     }

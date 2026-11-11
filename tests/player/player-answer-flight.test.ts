@@ -6,6 +6,7 @@ import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import {
   playerRuntimeForeground,
   playerRuntimeForm,
+  playerRuntimeInteractionActionIds,
   playerRuntimePacingGate,
   type PlayerSession,
   type PlayerSessionView,
@@ -262,6 +263,16 @@ function composer(
     preselected: preselected() !== undefined,
     buttonsOnly: foreground()?.kind === "choose" || foreground()?.kind === "show-button",
   });
+  // The composer's field, as `RuntimeInteraction.vue`'s `composerField`: a lock's password field is not modelled.
+  const fieldKind = () => {
+    const ask = foreground();
+    if (ask?.kind === "ask-password") return "password";
+    return ask !== null &&
+      ["ask-date", "ask-time", "ask-datetime"].includes(ask.kind) &&
+      !("isoText" in ask && ask.isoText)
+      ? "picker"
+      : "text";
+  };
   const writeField = (text: string) => {
     if (interceptor) interceptor(text);
     else field.value = text;
@@ -301,15 +312,15 @@ function composer(
           },
         };
       },
-      // As `RuntimeInteraction.vue`'s: the composer's text field, with no form editor, and no date or time control.
+      // As `RuntimeInteraction.vue`'s: the plain text field, with no form editor.
       holds: () => {
         const shown = session();
-        const ask = foreground();
-        const picker =
-          ask !== null &&
-          ["ask-date", "ask-time", "ask-datetime"].includes(ask.kind) &&
-          !("isoText" in ask && ask.isoText);
-        return holds && !disabled() && !picker && !(shown && playerRuntimeForm(shown)?.editor);
+        return (
+          holds &&
+          !disabled() &&
+          fieldKind() === "text" &&
+          !(shown && playerRuntimeForm(shown)?.editor)
+        );
       },
       disabled,
       shortcuts,
@@ -327,6 +338,12 @@ function composer(
       },
       keepTyped,
       clearFeedback: () => void (notice.value = ""),
+    });
+    // Only the questions that can still be answered keep their text, as `RuntimeInteraction.vue`'s watch prunes it.
+    watch(actionId, () => {
+      const shown = session();
+      const pending = new Set(shown ? playerRuntimeInteractionActionIds(shown.state) : []);
+      for (const id of kept.keys()) if (!pending.has(id)) kept.delete(id);
     });
     watch(actionId, () => {
       const id = actionId.value;
@@ -404,10 +421,16 @@ function composer(
   /** A key in the composer's field, as `Composer.vue`'s key handler and the browser take it. */
   function press(key: string): Promise<void> | void {
     if (disabled()) return;
-    if (key === "Enter") return submit("input");
+    // A password field has one line: Shift+Enter is Enter there.
+    if (key === "Enter" || (key === "Shift+Enter" && fieldKind() === "password"))
+      return submit("input");
     const readOnly = submitting.value && !flight.holding.value;
+    if (key === "Shift+Enter") {
+      if (!readOnly && fieldKind() === "text") field.value += "\n";
+      return;
+    }
     if (key === "Backspace") {
-      if (!readOnly) field.value = field.value.slice(0, -1);
+      if (!readOnly && fieldKind() !== "picker") field.value = field.value.slice(0, -1);
       return;
     }
     const empty = field.value === "";
@@ -421,7 +444,7 @@ function composer(
         })
       : shortcutOutcome(key, { empty, fresh: true, ...shortcuts() });
     if (outcome === "type") {
-      if (!readOnly) field.value += key;
+      if (!readOnly && fieldKind() !== "picker") field.value += key;
     } else if (flight.holding.value) flight.hold(key, true);
     else if (outcome === "skip") return skip();
     else if (outcome === "activate") return activate();
@@ -466,6 +489,7 @@ function composer(
 const FIRST = {
   text: { script: 'let a = askText "First?"', aside: "Stay" },
   password: { script: 'let a = askPassword "Secret?"', aside: "hunter2" },
+  picker: { script: 'let a = askDate "When?"', aside: "2024-01-02" },
   unselected: { script: 'let a = askChoice "Yes", "No thanks"', aside: "Not an option" },
   preselected: {
     script: 'let a = askChoice "Yes", "No thanks", prefill: "Yes"',
@@ -480,6 +504,8 @@ const NEXT = {
   unselected: 'let b = askChoice "Red", "Blue"\nshowButton "Done"',
   preselected: 'let b = askChoice "Red", "Blue", prefill: "Blue"\nshowButton "Done"',
   pacing: 'say "Wait."\nlet b = askText "Next?"\nshowButton "Done"',
+  password: 'let b = askPassword "Next?"\nshowButton "Done"',
+  picker: 'let b = askDate "Next?"\nshowButton "Done"',
   ended: 'say "Bye.", instant',
 } as const;
 const QUEUES = {
@@ -490,6 +516,7 @@ const QUEUES = {
   "two-submits": ["Enter", "Enter"],
   "held-space": [" "],
   "space-after-text": ["x", " "],
+  "shift-enter": ["Shift+Enter"],
 } as const satisfies Record<string, readonly string[]>;
 // The text typed last, after every command: whether the player changed the field there. `edit` deletes within the
 // flight, where it does not reach the text the settlement puts in the field (#2463, residual 1): its rows are recorded.
@@ -501,22 +528,32 @@ const HISTORY = {
 } as const;
 const DOMAINS = {
   settle: ["completed", "prefill", "refused", "unavailable", "unprepared"],
-  // The interaction the composer serves once the answer settled: a refused one's own.
-  presents: ["text", "unselected", "preselected", "pacing"],
+  // The field the answer was given in, of each kind the composer shows: the plain text field, a password field, or a
+  // date control.
+  departs: ["text", "password", "picker"],
+  // The interaction the composer serves once the answer settled, a refused one's own: in the plain text field, or a
+  // question in a password field or a date control.
+  presents: ["text", "unselected", "preselected", "pacing", "password", "picker"],
   // What the composer held at Enter: the answer's text, or nothing.
   aside: ["typed", "empty"],
   queue: Object.keys(QUEUES),
   history: Object.keys(HISTORY),
-  kind: ["text", "password"],
 };
+
+/** Whether the flight's domain holds the row: it departs from the plain text field and settles in it. */
+const inDomain = (row: Coordinates) =>
+  row.departs === "text" && row.presents !== "password" && row.presents !== "picker";
 
 /** Whether a row can be produced: each settlement presents what its scripts can present, from what Enter can send. */
 function feasible(row: Coordinates): boolean {
-  if (row.kind === "password")
+  // Outside the domain, a completed answer goes from each field kind to each, and a refused one presents its own;
+  // the keys typed last stay, so what was typed is there to drop.
+  if (!inDomain(row))
     return (
-      ["completed", "unprepared"].includes(row.settle!) &&
-      row.presents === "text" &&
-      row.aside === "typed"
+      row.aside === "typed" &&
+      row.history === "stays" &&
+      ["text", "password", "picker"].includes(row.presents!) &&
+      (row.settle === "completed" || (row.settle === "unprepared" && row.presents === row.departs))
     );
   if (row.settle === "completed") return row.aside === "typed";
   // Enter on the empty composer refuses only where no button is preselected.
@@ -534,26 +571,36 @@ function family(): Coordinates[] {
     for (const queue of Object.keys(QUEUES))
       for (const history of Object.keys(HISTORY)) rows.push({ ...base, queue, history });
   };
-  const typed = { aside: "typed", kind: "text" };
+  const typed = { aside: "typed", departs: "text" };
   for (const presents of ["text", "unselected", "preselected", "pacing"])
     each({ settle: "completed", presents, ...typed });
-  each({ settle: "completed", presents: "text", aside: "typed", kind: "password" });
   each({ settle: "prefill", presents: "text", ...typed });
   each({ settle: "refused", presents: "unselected", ...typed });
-  each({ settle: "refused", presents: "unselected", aside: "empty", kind: "text" });
+  each({ settle: "refused", presents: "unselected", aside: "empty", departs: "text" });
   each({ settle: "refused", presents: "preselected", ...typed });
   each({ settle: "unavailable", presents: "text", ...typed });
   each({ settle: "unprepared", presents: "text", ...typed });
-  each({ settle: "unprepared", presents: "text", aside: "typed", kind: "password" });
+  // Outside the domain: from each field kind to each, and a refused answer in a password field or a date control.
+  for (const departs of ["text", "password", "picker"])
+    for (const presents of ["text", "password", "picker"]) {
+      const base = { aside: "typed", departs, presents };
+      const settles = presents === departs ? ["completed", "unprepared"] : ["completed"];
+      if (departs === "text" && presents === "text") continue;
+      for (const settle of settles)
+        for (const queue of Object.keys(QUEUES))
+          rows.push({ ...base, settle, queue, history: "stays" });
+    }
   return rows;
 }
 
 function scriptOf(row: Coordinates): { readonly script: string; readonly aside: string } {
   // EVIDENCE: invariant: `feasible` gives a refused row a choice that `FIRST` and a completed one a next that `NEXT` holds.
-  const presents = row.presents as "text" | "unselected" | "preselected" | "pacing";
+  const presents = row.presents as keyof typeof NEXT;
+  // EVIDENCE: invariant: `DOMAINS.departs` holds only `text`, `password` and `picker`.
+  const departs = row.departs as "text" | "password" | "picker";
   const first =
-    row.kind === "password"
-      ? FIRST.password
+    departs !== "text"
+      ? FIRST[departs]
       : row.settle === "refused"
         ? presents === "preselected"
           ? FIRST.preselected
@@ -640,7 +687,11 @@ async function inFlight(at: Page, row: Coordinates, keys: readonly string[], pha
   if (row.settle === "unavailable") at.elapse(61_000);
   const answering = ui.press("Enter");
   if (row.settle !== "unprepared") await at.transport.held();
-  assert.equal(ui.flight.holding.value, true, "the flight holds the composer");
+  assert.equal(
+    ui.flight.holding.value,
+    row.departs === "text",
+    "the flight holds the plain text field",
+  );
   await ui.type(keys);
   if (row.settle === "unprepared") prepared(false);
   else at.transport.release();
@@ -664,7 +715,8 @@ for (const topology of TOPOLOGIES)
         ...QUEUES[row.queue as keyof typeof QUEUES],
         ...HISTORY[row.history as keyof typeof HISTORY],
       ];
-      const expected = await reference(at, row, keys);
+      // Outside the domain, nothing typed or given in the flight takes effect: the row ends as the answer alone does.
+      const expected = await reference(at, row, inDomain(row) ? keys : []);
       // A preparation that refuses posts nothing to hold, nor does an answer no longer available past its observation;
       // a queue that holds an answer also runs with the first answer's own reply held.
       const phases =
@@ -680,12 +732,13 @@ for (const topology of TOPOLOGIES)
         // answers posted and where the session went are compared.
         if (row.history === "edit") {
           assert.deepEqual([actual.posts, actual.status], [expected.posts, expected.status], where);
-          assert.equal(actual.password, 0, where);
         } else assert.deepEqual(actual, expected, where);
       }
       // Outcomes written down from the Player's keyboard contract and `main`'s measured rows, not computed by the
-      // predicate under test.
-      if (row.queue === "held-space" && row.history !== "edit") {
+      // predicate under test. Outside the domain, a completed answer leaves the next field empty, with no notice.
+      if (!inDomain(row) && row.settle === "completed")
+        assert.deepEqual([expected.field, expected.notice], ["", ""], JSON.stringify(row));
+      if (inDomain(row) && row.queue === "held-space" && row.history !== "edit") {
         const last = row.history === "stays" ? "y" : "";
         if (row.settle === "completed" && row.presents === "unselected")
           assert.equal(expected.field, last, "Space types nothing");
@@ -717,6 +770,48 @@ for (const topology of TOPOLOGIES)
       ran.push(row);
     }
     assert.deepEqual(coverageGaps(family(), ran, { tuples: true }), []);
+  });
+
+// Text typed in the flight of an answer whose settle shows a password field was typed in clear, and may be what the
+// player meant as the password: once the flight ends it is in no text the composer holds or keeps, nor in what a debug
+// export reads (the session's state, recording and transcript).
+for (const topology of TOPOLOGIES)
+  test(`text typed in a flight that settles into a password field is kept nowhere (${topology})`, async (context) => {
+    const at = await page(context, topology);
+    const clear = "plain4secret";
+    await at.start(`${FIRST.text.script}\n${NEXT.password}\nexit`);
+    const ui = composer(at.host, { flight: true });
+    ui.field.value = FIRST.text.aside;
+    at.transport.hold("observeInput");
+    const answering = ui.press("Enter");
+    await at.transport.held();
+    await ui.type([...clear]);
+    assert.equal(ui.field.value, clear, "typed in the plain text field during the flight");
+    at.transport.release();
+    await answering;
+    const seen = await observe(at, ui, 0);
+    assert.equal(
+      at.host.session.value && playerRuntimeForeground(at.host.session.value)?.kind,
+      "ask-password",
+    );
+    assert.equal(seen.field, "");
+    assert.deepEqual(
+      [...ui.kept.values()].filter((text) => text.includes(clear)),
+      [],
+      "in no text kept for a question",
+    );
+    assert.equal(
+      occurrences(
+        JSON.stringify(
+          await at.host.debugExportCandidate(() => ({}), new AbortController().signal),
+          (_key, value: unknown) => (typeof value === "bigint" ? String(value) : value),
+        ),
+        clear,
+      ),
+      0,
+      "in no debug export",
+    );
+    ui.unmount();
   });
 
 // A queued answer whose question the first answer ended: the composer takes no input there, so it is dropped, and the

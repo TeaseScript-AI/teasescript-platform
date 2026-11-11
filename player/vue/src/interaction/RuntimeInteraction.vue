@@ -359,8 +359,17 @@ const composerInputType = computed(() =>
             ? "datetime-local"
             : "text",
 );
-// An answer in flight keeps the composer's plain text or password field writable, and plays what is typed and given
-// meanwhile against what the answer leaves, with this component's own rules.
+// The composer's field, as `Composer.vue` shows it: the plain text field, a password field (`askPassword`'s, or a
+// lock's), or a date or time control.
+const composerField = computed(() =>
+  foreground.value?.kind === "ask-password" || lockField.value
+    ? "password"
+    : composerInputType.value === "text"
+      ? "text"
+      : "picker",
+);
+// An answer in flight keeps the composer's plain text field writable, and plays what is typed and given meanwhile
+// against what the answer leaves, with this component's own rules.
 const flight = useAnswerFlight({
   owner: () =>
     props.session && {
@@ -371,11 +380,7 @@ const flight = useAnswerFlight({
   text: () => text("input"),
   writeField: (typed) => writeField("input", typed),
   interceptInput,
-  holds: () =>
-    !composerDisabled.value &&
-    !lockField.value &&
-    !formEditor.value &&
-    composerInputType.value === "text",
+  holds: () => !composerDisabled.value && !formEditor.value && composerField.value === "text",
   disabled: () => composerDisabled.value,
   shortcuts: () => composerShortcuts.value,
   submit: (source, typed) => submit(source, typed),
@@ -602,8 +607,8 @@ async function complete(
     !!document.activeElement?.closest("[data-foreground-controls]");
   // From the click until the answer settles, the composer and the form's controls are read-only (`submitting`): the
   // answer is the text of the click, and nothing typed meanwhile is lost to the next interaction's text. The composer ends
-  // a composition under way as it turns read-only. The plain text or password field stays writable instead, while the
-  // flight holds it (`useAnswerFlight`).
+  // a composition under way as it turns read-only. The plain text field stays writable instead, while the flight holds
+  // it (`useAnswerFlight`).
   submitting.value = true;
   flight.begin();
   let settled: "completed" | "refused" | null = null;
@@ -1012,7 +1017,7 @@ function submit(source: "input" | "button", typed = text("input")) {
                     : 'Type your response…'
           "
           :attach="attach"
-          :password="foreground?.kind === 'ask-password' || lockField !== null"
+          :password="composerField === 'password'"
           :repeat="lockField?.repeat ?? false"
           :accessible-name="
             lockField ? 'Password' : (formEditor?.label ?? foreground?.accessibleName ?? 'Response')
