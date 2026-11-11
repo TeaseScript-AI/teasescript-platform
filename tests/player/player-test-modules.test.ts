@@ -3,19 +3,27 @@ import { spawnSync } from "node:child_process";
 import {
   copyFileSync,
   cpSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  statSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
-import { walkSources } from "../../player/vue/test-modules-sources.js";
+import ts from "typescript-vue";
+import {
+  extendedFiles,
+  tsconfigClosure,
+  walkSources,
+} from "../../player/vue/test-modules-sources.js";
 
 // A compiled-only run after a Player or engine edit used the bundle of the code before it, and passed (#2141). The
 // fixture is a checkout with the real stamp plugin, the compiled loader and its compiled walk: a Player module importing
@@ -233,7 +241,17 @@ test("a Player test bundle is not built from an input the stamp does not cover",
     write("player/vue/vite.test-modules.config.ts", config('import "../../tools/round.ts";\n'));
     return () => write("player/vue/vite.test-modules.config.ts", config());
   });
-  refused(/reaches .*tools\/options\.json, outside the stamped area/u, () => {
+  refused(/reads \.env files from .*tools, outside the stamped area/u, () => {
+    write(
+      "player/vue/vite.test-modules.config.ts",
+      config().replace(
+        "publicDir: false,",
+        'publicDir: false,\n  envDir: fileURLToPath(new URL("../../tools", import.meta.url)),',
+      ),
+    );
+    return () => write("player/vue/vite.test-modules.config.ts", config());
+  });
+  refused(/extends .*tools\/options\.json, outside the stamped area/u, () => {
     write("compiler-options.json", JSON.stringify({ extends: "./tools/options.json" }));
     return () =>
       write("compiler-options.json", JSON.stringify({ compilerOptions: { strict: true } }));
@@ -241,7 +259,7 @@ test("a Player test bundle is not built from an input the stamp does not cover",
   // a project reference is a local path, also without "./"
   write("tools/tsconfig.json", "{}\n");
   for (const reference of ["tools", "tools/options.json"])
-    refused(/reaches .*tools\/(?:tsconfig|options)\.json, outside the stamped area/u, () => {
+    refused(/references .*tools\/(?:tsconfig|options)\.json, outside the stamped area/u, () => {
       write("compiler-options.json", JSON.stringify({ references: [{ path: reference }] }));
       return () =>
         write("compiler-options.json", JSON.stringify({ compilerOptions: { strict: true } }));
@@ -278,3 +296,119 @@ test("the stamp's root entries are its files and links to files, apart from the 
     [".fourth", "README.md", "file-link.txt", "target.txt"],
   );
 });
+
+// The entry rule, generated: a name, a kind and a placement; each expected stamp follows from the clauses. A file or a
+// link to one is an entry everywhere; a folder is entered in the area unless it is named `node_modules`, and is no root
+// entry; a link to a folder is skipped where it is named `node_modules` or lies in the root, and fails anywhere else.
+for (const name of ["node_modules", "other"])
+  for (const kind of ["file", "file link", "folder", "folder link"])
+    for (const placement of ["the root", "an area folder", "a nested folder"])
+      test(`a ${kind} named ${name} in ${placement}`, (t) => {
+        const root = mkdtempSync(join(tmpdir(), "player-test-modules-entry-"));
+        t.after(() => rmSync(root, { recursive: true, force: true }));
+        const folder = {
+          "the root": "",
+          "an area folder": "player",
+          "a nested folder": "player/nested",
+        }[placement]!;
+        const path = join(folder, name).replaceAll("\\", "/");
+        mkdirSync(join(root, folder), { recursive: true });
+        mkdirSync(join(root, "targets/folder"), { recursive: true });
+        writeFileSync(join(root, "targets/file.ts"), "file");
+        writeFileSync(join(root, "targets/folder/inner.ts"), "inner");
+        if (kind === "file") writeFileSync(join(root, path), "entry");
+        else if (kind === "file link") symlinkSync(join(root, "targets/file.ts"), join(root, path));
+        else if (kind === "folder") {
+          mkdirSync(join(root, path));
+          writeFileSync(join(root, path, "inner.ts"), "inner");
+        } else symlinkSync(join(root, "targets/folder"), join(root, path), "junction");
+        const stamp = walkSources(root);
+        const inRoot = placement === "the root";
+        const expected =
+          kind === "file" || kind === "file link"
+            ? [path]
+            : kind === "folder"
+              ? inRoot || name === "node_modules"
+                ? []
+                : [`${path}/inner.ts`]
+              : inRoot || name === "node_modules"
+                ? []
+                : [path];
+        assert.deepEqual(
+          [...stamp.keys()].filter((key) => key.startsWith(path)),
+          expected,
+        );
+        if (kind === "folder link" && expected.length > 0)
+          assert.match(stamp.get(path) ?? "", /^folder link /u, "a folder link fails the build");
+      });
+
+// The compiler edges, generated: an edge kind, its spelling and the files beside it. The expected result is
+// TypeScript's own: its resolved target must exist and lie in the area (`src/`, `player/`, a root file), or, for an
+// `extends`, in a package under `node_modules`.
+const EDGE_LAYOUTS: Record<string, readonly string[]> = {
+  "nothing there": [],
+  "a root x.json": ["x.json"],
+  "a root folder x": ["x/tsconfig.json"],
+  "a root x.json and a root folder x": ["x.json", "x/tsconfig.json"],
+  "a root file x": ["x"],
+  "player/x.json": ["player/x.json"],
+  "a folder player/x": ["player/x/tsconfig.json"],
+  "tools/x.json": ["tools/x.json"],
+  "a package x": ["node_modules/x/tsconfig.json"],
+};
+const inTheArea = (root: string, file: string) => {
+  const parts = relative(root, file).replaceAll("\\", "/").split("/");
+  if (parts[0] === ".." || parts.slice(0, -1).includes("node_modules")) return false;
+  return parts.length === 1 || parts[0] === "src" || parts[0] === "player";
+};
+for (const kind of ["extends", "references"] as const)
+  for (const edge of [
+    "./x",
+    "x",
+    "./x.json",
+    "./player/x",
+    "player/x",
+    "./player/x.json",
+    "./tools/x",
+  ])
+    for (const [layout, files] of Object.entries(EDGE_LAYOUTS))
+      test(`${kind} "${edge}" with ${layout}`, async (t) => {
+        const root = realpathSync(mkdtempSync(join(tmpdir(), "player-test-modules-edge-")));
+        t.after(() => rmSync(root, { recursive: true, force: true }));
+        for (const file of files) {
+          mkdirSync(dirname(join(root, file)), { recursive: true });
+          writeFileSync(join(root, file), "{}\n");
+        }
+        const start = join(root, "tsconfig.json");
+        writeFileSync(
+          start,
+          JSON.stringify(kind === "extends" ? { extends: edge } : { references: [{ path: edge }] }),
+        );
+        // TypeScript's own answer: the file it resolves the edge to, and whether it reports the edge.
+        const parsed = ts.getParsedCommandLineOfConfigFile(start, undefined, {
+          ...ts.sys,
+          onUnRecoverableConfigFileDiagnostic: () => {},
+        });
+        const target =
+          kind === "extends"
+            ? extendedFiles(parsed?.options ?? {})[0]
+            : ts.resolveProjectReferencePath({ path: resolve(root, edge) });
+        const reported = (parsed?.errors ?? []).some(
+          (diagnostic) =>
+            diagnostic.category === ts.DiagnosticCategory.Error && diagnostic.code !== 18003,
+        );
+        const passes =
+          !reported &&
+          target !== undefined &&
+          existsSync(target) &&
+          statSync(target).isFile() &&
+          (inTheArea(root, target) ||
+            (kind === "extends" &&
+              relative(root, target).replaceAll("\\", "/").startsWith("node_modules/")));
+        const outcome = await tsconfigClosure(root, start).then(
+          () => "passes",
+          (error: unknown) => (error instanceof Error ? error.message : String(error)),
+        );
+        if (passes) assert.equal(outcome, "passes", `TypeScript resolves it to ${target}`);
+        else assert.notEqual(outcome, "passes", `TypeScript resolves it to ${target ?? "nothing"}`);
+      });
