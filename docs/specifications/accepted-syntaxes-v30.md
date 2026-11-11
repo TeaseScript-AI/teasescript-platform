@@ -1628,6 +1628,8 @@ warns instead of giving a false error, and the copy is checked when the script r
 
 The required-check rules are not affected: a use that needs a check and has none on some route stays a compile error,
 as `n + 1` does after `let n = 1` and `if askBoolean "Clear?" { n = null }` ([narrowing](#type-tests-and-narrowing)).
+This also holds where two conditions exclude each other: after `if c { n = null }`, a use of `n` inside
+`if not c { … }` still needs its check.
 
 The compiler never hangs and never rejects a script because it is too large or too deeply nested for the analysis.
 Where a place exceeds the compiler's work budget, that place, and the checks that need what the compiler would have
