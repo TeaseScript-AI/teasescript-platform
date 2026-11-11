@@ -18,9 +18,10 @@ import { existsSync, readFileSync } from "node:fs";
 // may be a commit not fetched yet: the message says to fetch it; this tool never fetches. A token that is no commit
 // but a tree, such as a stored baseline's `src` tree hash, is reported as a tree, resolved, without the remote check:
 // proving a tree reachable from a remote ref is costly.
-// Unfilled placeholders (`PLACEHOLDERS`) outside fenced code blocks are reported too, and so is every path under the
-// disposable scratch area `/tmp/agent-work/`, anywhere in the text (`scratchPathsOf`): its files are deleted after
-// inactivity, often before a reader checks them. Every run that completes ends with one line counting the tokens by
+// Unfilled placeholders (`PLACEHOLDERS`) outside fenced code blocks are reported too, and so is every path into the
+// disposable scratch area `/tmp/agent-work/`, anywhere in the text and however the folders before it are spelled
+// (`scratchPathsOf`, which names what it cannot see): its files are deleted after inactivity, often before a reader
+// checks them. Every run that completes ends with one line counting the tokens by
 // result, the placeholders and those paths, so no output means it did not run.
 //
 // Tokens that need not be commits are checked, and skipped when no repository resolves them, so no rule hides a SHA:
@@ -71,13 +72,33 @@ export function tokensOf(text) {
 }
 
 /**
- * The paths of `text` under the scratch area `/tmp/agent-work/`, also as `file:///tmp/agent-work/…`, wherever they
- * stand, code included: a path that names a file there is evidence that will be gone. A folder named by a placeholder,
- * such as `/tmp/agent-work/<task>/`, describes the area and is no path.
+ * The paths of `text` that name something inside a folder `agent-work`, as the scratch area `/tmp/agent-work/` is
+ * named, wherever they stand, code included: such a path is evidence that will be gone. A path is a run of characters
+ * other than white space, quotes, backticks, brackets and `|` (a compact table's cell separator), read with `%XX`
+ * decoded and without the sentence punctuation that ends it; it names the area's content when a component
+ * `agent-work` is followed by one other than `.` or `..`. So any spelling of the folders before it counts (absolute,
+ * relative, a variable, `file://`, doubled slashes, `.` components), and the area itself (`/tmp/agent-work/.`) or a
+ * folder named by a placeholder (`/tmp/agent-work/<task>/`) is no such path. Not seen: a path broken by white space or
+ * a line break, and one that reaches the area through a name other than `agent-work` (`$SCRATCH/report.out`).
  */
 export function scratchPathsOf(text) {
-  const path = /(?:(?<=file:\/\/)|(?<![\w.~/-]))\/tmp\/agent-work\/[\w.-][^\s`'"()[\]<>]*/gu;
-  return [...new Set([...text.matchAll(path)].map((m) => m[0].replace(/[.,;:!?]+$/u, "")))];
+  const found = new Set();
+  for (const [run] of text.matchAll(/[^\s`'"()[\]<>|]+/gu)) {
+    if (!run.includes("agent-work") && !run.includes("%")) continue;
+    // (from the end, so that punctuation inside the path is read once)
+    let end = run.length;
+    while (end > 0 && ".,;:!?".includes(run[end - 1])) end -= 1;
+    const path = run.slice(0, end);
+    const parts = path
+      .replace(/%([\da-f]{2})/giu, (_, hex) => String.fromCharCode(Number.parseInt(hex, 16)))
+      .split("/");
+    const inside = (at) => {
+      while (parts[at] === "" || parts[at] === ".") at += 1;
+      return at < parts.length && parts[at] !== "..";
+    };
+    if (parts.some((part, at) => part === "agent-work" && inside(at + 1))) found.add(path);
+  }
+  return [...found];
 }
 
 /**
