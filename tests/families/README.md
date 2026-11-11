@@ -461,9 +461,10 @@ is that run's `threw`, and the run exits 1.
 A run claims its `--out` once its arguments are read (#2383): it removes what stands there then; an output that is one
 of its inputs, by any path or link, is refused instead. It writes its records to a partial it creates, named by its pid,
 and renames that onto `--out` once whole. After its claim it removes nothing it did not create, so a run that ends
-without writing leaves no earlier result as its own, and a run that dies midway leaves only its partial. Two runs on one
-`--out` at a time are not supported: the later claim removes the earlier output, and the loss is a missing file, never
-another run's records under this run's name.
+without publishing leaves no earlier result at `--out`, and a run that dies midway leaves only its partial. The
+exception is a file the file system forbids removing: the claim then refuses (exit 2) and says the file standing there
+is not this run's output. Two runs on one `--out` at a time are not supported: the later claim removes the earlier
+output, and the loss is a missing file, never another run's records under this run's name.
 
 A record is `{name, case, checker, core, candidate}`:
 - `checker`, and each mode of `candidate` that is not refused: `diagnostics` (severity, code, path, one-based line and

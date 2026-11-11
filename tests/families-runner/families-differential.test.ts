@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
   closeSync,
   constants,
   cpSync,
@@ -15,6 +16,7 @@ import {
   rmSync,
   statSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
   writeSync,
 } from "node:fs";
@@ -659,6 +661,37 @@ test("a run owns its output from its claim: no exit leaves an earlier output, an
     });
     assert.notEqual(ran.status, 0, `${mode}: ${ran.stderr}`);
     assert.equal(existsSync(out), false, mode);
+  }
+  // (a claim the file system forbids is a refusal that says so: in a directory the run may not write, the earlier file
+  // stays byte for byte; first shown to refuse the removal, so the test cannot pass where it would succeed, as for root)
+  const locked = join(folder, "locked");
+  mkdirSync(locked);
+  const kept = join(locked, "out.jsonl");
+  const probe = join(locked, "probe");
+  writeFileSync(kept, stale);
+  writeFileSync(probe, "");
+  chmodSync(locked, 0o555);
+  try {
+    assert.throws(
+      () => unlinkSync(probe),
+      { code: "EACCES" },
+      "the directory must refuse a removal",
+    );
+    for (const [mode, args] of [
+      ["record", [tree, single]],
+      ["join", ["join", "--cases", single, "--base", records]],
+    ] as const) {
+      const ran = spawnSync(process.execPath, [tool, ...args, "--out", kept], { encoding: "utf8" });
+      assert.equal(ran.status, 2, `${mode}: ${ran.stderr}`);
+      assert.match(
+        ran.stderr,
+        /cannot claim the output .*out\.jsonl: EACCES.*; the file standing there is not this run's output/u,
+        mode,
+      );
+      assert.equal(readFileSync(kept, "utf8"), stale, mode);
+    }
+  } finally {
+    chmodSync(locked, 0o755);
   }
 });
 

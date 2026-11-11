@@ -20,9 +20,10 @@
 // or tree, before any record is written. A run claims its `--out` once its arguments are read (#2383): it removes what
 // stands there then (an output that is one of its inputs, by any path or link, is refused instead), writes beside it a
 // partial it creates, named by its pid, and renames that onto `--out` once whole; after its claim it removes nothing it
-// did not create. So a run that ends without writing leaves no earlier result as its own. Two runs on one `--out` at a
-// time are not supported: the later claim removes the earlier output, and the loss is a missing file, never another
-// run's records under this run's name.
+// did not create. So a run that ends without publishing leaves no earlier result at `--out`, except where the file
+// system forbids removing it: the claim then refuses (exit 2) and says the file standing there is not this run's
+// output. Two runs on one `--out` at a time are not supported: the later claim removes the earlier output, and the loss
+// is a missing file, never another run's records under this run's name.
 import { createHash } from "node:crypto";
 import {
   closeSync,
@@ -53,7 +54,14 @@ function claimOutput(out, inputs) {
       if (input.dev === dev && input.ino === ino) refuse(`the output ${out} is the input ${file}`);
     }
   if (!statSync(out).isFile()) refuse(`the output ${out} is no file`);
-  unlinkSync(out);
+  try {
+    unlinkSync(out);
+  } catch (error) {
+    if (!["EACCES", "EPERM", "EROFS"].includes(error.code)) throw error;
+    refuse(
+      `cannot claim the output ${out}: ${error.message}; the file standing there is not this run's output`,
+    );
+  }
 }
 
 /**
