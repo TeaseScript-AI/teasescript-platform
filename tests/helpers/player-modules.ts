@@ -31,7 +31,7 @@ function staleBundle(): Error | null {
   if (changed.length === 0) return null;
   const named = changed.slice(0, 5);
   return new Error(
-    `The Player test bundle is older than its sources (${named.join(", ")}${changed.length > 5 ? `, and ${changed.length - 5} more` : ""}): run \`npm run build:player-test-modules\`, or \`npm test -- dist/tests/<file>.test.js\`, before a compiled-only run.`,
+    `The Player test bundle was built before a file of this checkout changed (${named.join(", ")}${changed.length > 5 ? `, and ${changed.length - 5} more` : ""}): run \`npm run build:player-test-modules\` to rebuild it.`,
   );
 }
 
@@ -39,9 +39,8 @@ function staleBundle(): Error | null {
  * Loads a Player browser-source module, named by its source path such as `player/vue/src/usePlayerSession.ts`, from the
  * server-side bundle that `npm run build` writes (`player/vue/vite.test-modules.config.ts` lists the modules). All
  * modules loaded in one test process share that bundle's module graph, so their classes and state are the same. The
- * first call in a process compares the bundle's stamp with the checkout's files under `src/` and `player/` and in the
- * root, and every call in that process refuses a bundle built from others, as one is after an edit there that only
- * `npm run build:typescript` followed.
+ * first call in a process compares the bundle's stamp with the checkout's files, and every call in that process refuses
+ * a bundle built before one of them changed, as one is after any edit that only `npm run build:typescript` followed.
  */
 export async function loadPlayerModule(source: string): Promise<Record<string, unknown>> {
   if (checked === undefined) checked = staleBundle();
