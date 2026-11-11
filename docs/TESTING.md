@@ -53,9 +53,9 @@ after all builds pass, as many files at once as
 queue's reservation, in MiB) or the smallest visible cgroup limit, whichever is smaller, so the variable can lower the
 figure but never raise it above a cap the runner can see (`tools/test-files-at-once.mjs`). A file that reports no test of
 its own, as one whose process ends before its tests report, fails the full suite and is named. Each command's output is printed together, including warnings. A failed command stops no
-other in its group, and its leftover process group is terminated; SIGINT/SIGTERM terminate every running command's
-process group, escalating after a grace period, and start no other. A command stopped this way is labelled `ABORTED`,
-not `FAIL`. `npm run test:verification` checks scheduling, diagnostics and
+other in its group, and its leftover process group is terminated. On SIGINT and SIGTERM, `run-parallel` stops its own
+command groups, escalating after a grace period, and starts no other; `run-check` forwards the signal and waits for its
+part, without a deadline. A command `run-parallel` stops this way is labelled `ABORTED`, not `FAIL`. `npm run test:verification` checks scheduling, diagnostics and
 process cleanup (POSIX cleanup assertions run on CI; Windows uses `taskkill /t /f`).
 
 Use `VERIFY_SERIAL=1 npm run check` for serial diagnosis or constrained machines; it runs the same commands.

@@ -5,7 +5,8 @@
 // tests start through `spawnTool`, `runTool` or `slowReader` runs in its own process group, which the test's end
 // SIGKILLs; `runSync` SIGKILLs only its command. The groups a runner detaches (run-parallel's steps, check-changed's
 // checks) are not the test's: every process a fixture starts there ends by itself within `BOUND_SECONDS`
-// (`idleBounded`, `awaitFile`), and one whose pid a fixture records is SIGKILLed at the test's end (`killRecorded`).
+// (`idleBounded`, `awaitFile`), and one whose pid a fixture records is SIGKILLed at the test's end when `/proc` shows
+// it still works in the fixture's folder (`killRecorded`).
 
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
@@ -125,19 +126,25 @@ export const idleBounded = `setTimeout(() => process.exit(0), ${BOUND_SECONDS * 
 
 /**
  * Registers, before the test waits for anything, the SIGKILL at its end of the process whose pid the fixture in `cwd`
- * writes to `file`, if it has, and if that pid, where `/proc` tells, still works in `cwd`: a reused pid is not killed.
+ * writes to `file`, if it has, and only once `/proc` shows that pid still working in `cwd`: a reused pid is not killed.
+ * Where `/proc` cannot show it, nothing is killed, and the fixture's own bound ends the process.
  */
 export function killRecorded(t, cwd, file) {
   t.after(() => {
-    let pid = 0;
+    let pid;
     try {
       pid = Number(readFileSync(join(cwd, file), "utf8"));
-      if (existsSync("/proc/self/cwd") && readlinkSync(`/proc/${pid}/cwd`) !== cwd) return;
     } catch (error) {
       if (error.code === "ENOENT") return;
       throw error;
     }
-    if (pid > 0)
+    let working;
+    try {
+      working = pid > 0 && readlinkSync(`/proc/${pid}/cwd`) === cwd;
+    } catch {
+      working = false;
+    }
+    if (working)
       try {
         process.kill(pid, "SIGKILL");
       } catch (error) {
