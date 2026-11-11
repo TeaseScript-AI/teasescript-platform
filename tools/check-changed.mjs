@@ -305,8 +305,12 @@ function options(argv) {
  * read as first-parent lines (`git rev-list --first-parent`), so a merge into either, as main merged into a branch of
  * runtime-v2, does not count. Main lands squashed, and runtime-v2 takes main through merges whose first parent is its
  * own, so a commit after the two split is on one line only; a commit on both is from before the split, and gives
- * `origin/main`. Returns that ref and a line naming it, with the commit where HEAD's line leaves it. Exit 2 when it
- * cannot prove which: in a shallow clone, without either ref, or when HEAD's line meets neither (#2409).
+ * `origin/main`. That landing premise is assumed, not checked; if it fails, the inference can return a wrong ref rather
+ * than exit 2. Merges keep it by their route: main reaches runtime-v2 only through a pull request merged with a merge
+ * commit, whose first parent is runtime-v2's tip. History is read as Git presents it, replaced refs and grafts
+ * included. A branch stacked on another lane is given its long-lived line, not the lane: its pull request's base, or
+ * `--base`, names the lane. Returns that ref and a line naming it, with the commit where HEAD's line leaves it. Exit 2
+ * when it cannot prove which: in a shallow clone, without either ref, or when HEAD's line meets neither (#2409).
  */
 export function branchedFrom() {
   const pass = "name the base with --base";
