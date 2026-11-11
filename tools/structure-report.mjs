@@ -37,9 +37,12 @@
 // 100644 and 100755) are measured, so a symlink and a submodule are not; a name that is not UTF-8 stops the report
 // (exit 2). The lines it adds, by file and position, are the `+` lines of each file's own `git diff -M -U0
 // --inter-hunk-context=0`, each hunk's body read inside its header's counts, with `GIT_DIFF_OPTS` removed from Git's
-// environment; their count per file is `git diff --numstat`'s, which the tool checks (exit 2 when they differ). A
-// file's text is its blob (`git cat-file blob`). Every `git diff` runs with --no-ext-diff, --no-textconv, --no-color
-// and --no-relative, whatever the user's configuration says.
+// environment; their count per file is `git diff -M -U0 --inter-hunk-context=0 --numstat`'s, which the tool checks. The
+// two run with the same context because Git enables a common-tail optimization at zero context only (it drops matching
+// 1 KB blocks of the two files' common tail before it diffs), which can change where it matches a line it could place
+// in either of two spots (a lone `}`). A file whose counts still differ, or whose patch ends inside a hunk, is reported
+// as not measured, and the report goes on. A file's text is its blob (`git cat-file blob`). Every `git diff` runs with
+// --no-ext-diff, --no-textconv, --no-color and --no-relative, whatever the user's configuration says.
 //
 // The residual, Git's own choices: its diff algorithm and indent heuristic place the added lines, and can change their
 // count; rename detection's similarity threshold (50% by default) and its limit decide what a move is, so an edited
@@ -68,10 +71,11 @@
 // its `linkMainNodeModules` (`TEASESCRIPT_MAIN` relative to the checkout), saying so on standard error; and, as
 // `check-changed`, it reports nothing unless npm's record of the install holds the checkout's lockfile.
 //
-// Exit status: 0 when the report is printed; 2, with the usage, before anything is read or written, when an option has
-// no value (it is the last argument, the argument after it starts with `-`, or nothing follows its `=`), is given
-// twice, or is unknown, or --top's value is not a whole number; 2 when --diff cannot read the change as Git wrote it,
-// --summary has no --diff, or there is no node_modules it can link, or one whose record does not hold the lockfile.
+// Exit status: 0 when the report is printed, a --diff report with files it could not measure included; 2, with the
+// usage, before anything is read or written, when an option has no value (it is the last argument, the argument after
+// it starts with `-`, or nothing follows its `=`), is given twice, or is unknown, or --top's value is not a whole
+// number; 2 when --diff cannot read the change's names (a name that is not UTF-8) or its moved lines, --summary has no
+// --diff, or there is no node_modules it can link, or one whose record does not hold the lockfile.
 import { execFileSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -355,7 +359,9 @@ const REGULAR = new Set(["100644", "100755"]);
  */
 export function addedLinesOfPatch(patch) {
   const added = [];
+  // the empty string after a patch's final newline is its end, not a line: a hunk still open there is cut short
   const lines = patch.split("\n");
+  if (lines.at(-1) === "") lines.pop();
   for (let index = 0; index < lines.length; index += 1) {
     const hunk = /^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/u.exec(lines[index]);
     if (hunk === null) continue;
@@ -395,6 +401,37 @@ function regularFilesAt(ref) {
     if (REGULAR.has(mode) && CODE.test(name)) files.set(name, mode);
   }
   return files;
+}
+
+/**
+ * Git's own count of each file's added lines (`-` for a binary file), the check on the hunks `changeSignals` reads, and
+ * of its removed lines, which count against its growth, at those hunks' context: `<added>\t<deleted>\t<name>`, or for
+ * a move `<added>\t<deleted>\t` and then its two names, each a field of its own.
+ */
+function gitLineCounts(mergeBase) {
+  const numstat = fieldsOf(
+    gitDiff("-M", "-U0", "--inter-hunk-context=0", "--numstat", "-z", mergeBase, "HEAD"),
+  );
+  const [added, removed] = [new Map(), new Map()];
+  for (let i = 0; i < numstat.length;) {
+    const record = numstat[i];
+    const firstTab = record.indexOf(9);
+    const secondTab = record.indexOf(9, firstTab + 1);
+    const nameStart = secondTab + 1;
+    const addedCount = record.subarray(0, firstTab).toString("latin1");
+    const removedCount = record.subarray(firstTab + 1, secondTab).toString("latin1");
+    let file;
+    if (nameStart === record.length) {
+      file = nameOf(numstat[i + 2]);
+      i += 3;
+    } else {
+      file = nameOf(record.subarray(nameStart));
+      i += 1;
+    }
+    added.set(file, addedCount);
+    removed.set(file, removedCount === "-" ? 0 : Number(removedCount));
+  }
+  return { added, removed };
 }
 
 /**
@@ -524,30 +561,12 @@ function changeSignals(base) {
       i += 2;
     }
   }
-  // Git's own count of each file's added lines (`-` for a binary file), the check on the hunks read below, and of its
-  // removed lines, which count against its growth: `<added>\t<deleted>\t<name>`, or for a move `<added>\t<deleted>\t`
-  // and then its two names, each a field of its own.
-  const numstat = fieldsOf(gitDiff("-M", "--numstat", "-z", mergeBase, "HEAD"));
-  const [gitAdded, gitRemoved] = [new Map(), new Map()];
-  for (let i = 0; i < numstat.length;) {
-    const record = numstat[i];
-    const firstTab = record.indexOf(9);
-    const secondTab = record.indexOf(9, firstTab + 1);
-    const nameStart = secondTab + 1;
-    const added = record.subarray(0, firstTab).toString("latin1");
-    const removed = record.subarray(firstTab + 1, secondTab).toString("latin1");
-    let file;
-    if (nameStart === record.length) {
-      file = nameOf(numstat[i + 2]);
-      i += 3;
-    } else {
-      file = nameOf(record.subarray(nameStart));
-      i += 1;
-    }
-    gitAdded.set(file, added);
-    gitRemoved.set(file, removed === "-" ? 0 : Number(removed));
-  }
-  /** The line numbers `change` adds to its file, from its own patch, checked against `--numstat`. */
+  const { added: gitAdded, removed: gitRemoved } = gitLineCounts(mergeBase);
+  /**
+   * The line numbers `change` adds to its file, from its own patch, checked against `--numstat`: `{ lines }`, or
+   * `{ unread }` with the reason when the two disagree or a hunk ends before its counts, so the file is reported as not
+   * measured.
+   */
   const addedLinesOf = (change) => {
     const paths = change.code === "R" ? [change.old, change.file] : [change.file];
     const patch = gitDiff(
@@ -559,13 +578,19 @@ function changeSignals(base) {
       "--",
       ...paths.map((file) => `:(literal)${file}`),
     ).toString("utf8");
-    const lines = addedLinesOfPatch(patch);
+    let lines;
+    try {
+      lines = addedLinesOfPatch(patch);
+    } catch (error) {
+      if (!(error instanceof CannotRun)) throw error;
+      return { unread: "a hunk ends before its counts" };
+    }
     const counted = gitAdded.get(change.file);
     if (String(lines.length) !== (counted === "-" ? "0" : counted))
-      throw new CannotRun(
-        `structure-report: the hunks of ${shown(change.file)} add ${lines.length} lines, but git diff --numstat counts ${counted}: the patch was not read as Git wrote it`,
-      );
-    return lines;
+      return {
+        unread: `its hunks add ${lines.length} lines, git diff --numstat counts ${counted}`,
+      };
+    return { lines };
   };
   const blob = (ref, file) => git("cat-file", "blob", `${ref}:${file}`);
 
@@ -583,7 +608,15 @@ function changeSignals(base) {
     .sort((one, other) => (one.file < other.file ? -1 : one.file > other.file ? 1 : 0));
   for (const change of relevant) {
     const { file } = change;
-    const added = addedLinesOf(change);
+    const read = addedLinesOf(change);
+    if (read.unread !== undefined) {
+      found.push({
+        signal: "unread",
+        line: `file whose change the report could not read as Git wrote it, not measured: ${shown(file)} (${read.unread})`,
+      });
+      continue;
+    }
+    const added = read.lines;
     if (added.length === 0) continue;
     const text = blob("HEAD", file);
     const lines = lineCount(text);
@@ -666,6 +699,7 @@ export const SUMMARY_KINDS = {
   folder: null,
   "top level": null,
   names: null,
+  unread: null,
 };
 
 /** The summary's block: a heading, `command` and the merge base's short sha `base`, then `rows` in a text block. */
