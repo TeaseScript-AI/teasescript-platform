@@ -349,7 +349,8 @@ export function checkedResult(answers: Answers, request: CoreAnalysisRequest): C
   return asked(answers, (answers) => {
     let contracts: Contracts | null = null;
     const expected = (call: CallExpression): TypePlan | undefined => {
-      contracts ??= new Contracts(answers, index, declarations(answers, index));
+      // (the core's own answer at the call: the route's proof of it against the written types around it is the route's)
+      contracts ??= new Contracts(answers, index, declarations(answers, index), false);
       try {
         return contracts.expected(call) ?? undefined;
       } catch (error) {

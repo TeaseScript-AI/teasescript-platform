@@ -349,6 +349,10 @@ const STORED: Readonly<Record<string, readonly [number, string]>> = {
     1,
     "the candidate's lowering after the analysis (no ledger): a memo key of a store target's path, cut below",
   ],
+  "check-result/typed-reader.ts levelsWithKinds inline": [
+    2,
+    "the candidate's lowering after the analysis (no ledger): a typed call's type's levels, walked once for its proof",
+  ],
   "answers.ts received inline": [
     1,
     "the candidate's lowering after the analysis (no ledger): the receiving completion's results by place and path",

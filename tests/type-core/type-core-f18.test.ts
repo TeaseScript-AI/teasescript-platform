@@ -3,8 +3,9 @@ import test from "node:test";
 
 import { compileProjectWithBackend } from "../../src/compiler.js";
 import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
-import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { nodeOf, SliceIndex } from "../../src/type-inference/core/check-result/slice-index.js";
+import { UNPROVED_READER } from "../../src/type-inference/core/check-result/typed-reader.js";
 import { CoreProgram } from "../../src/type-inference/core/program.js";
 import { VALUE_KIND_NAMES } from "../../src/value-kinds.js";
 import { compactAnalysis, coreRequest } from "../helpers/type-core-analysis.js";
@@ -358,11 +359,15 @@ const FLAG = 'load("flag", default: false)';
 const X2 =
   "the plan's joined part takes every store of its variable, one after the call or in an arm that exits";
 const LOOP = { refused: "a variable a loop stores" };
+/** A written variable's type is the default's type (ADR 0021 rule 2.6, V30 §12); the core reads its value's (#1072). */
+const WRITTEN =
+  "the core reads a written variable by the value it holds, not its written type (#1072); the route declines it (#2307)";
 
 /**
  * #1760's witnesses, from #1755's reviews r1 to r3: a source, `@` where `let result = <typed call>` stands, the read
  * the call defaults to, and the type the S7 oracle derives at the call from the syntax alone (`null`: no structure), or
- * the reason it refuses. `finding` names a row where the plan's per-site type differs: reported, not adjusted to it.
+ * the reason it refuses. `finding` names a row where the plan's per-site type differs: reported, not adjusted to it; with
+ * `WRITTEN` the candidate route declines the call (#2307).
  */
 const WITNESSES: readonly {
   readonly name: string;
@@ -486,6 +491,7 @@ const WITNESSES: readonly {
     source: "let d: number = 0\n@",
     read: "d",
     derived: "integer",
+    finding: WRITTEN,
   },
   {
     name: "both arms",
@@ -588,18 +594,21 @@ const WITNESSES: readonly {
     source: `let d: number = 0\nif ${FLAG} {\n  if false { d = 1.5 }\n}\n@`,
     read: "d",
     derived: "integer",
+    finding: WRITTEN,
   },
   {
     name: "X2 written, a store in an else ruled out",
     source: `let d: number = 0\nif ${FLAG} { say "a" } else if true { say "b" } else { d = 1.5 }\n@`,
     read: "d",
     derived: "integer",
+    finding: WRITTEN,
   },
   {
     name: "X2 written, a store after a nested exit",
     source: `let d: number = 0\nif ${FLAG} {\n  if true { exit }\n  d = 1.5\n}\n@`,
     read: "d",
     derived: "integer",
+    finding: WRITTEN,
   },
   {
     name: "a self-copy after a join",
@@ -754,9 +763,22 @@ test("the S7 oracle reads a typed default's variable at its call's snapshot, fro
               throw error;
             }
           })();
-          // (every witness has a plan: a refusal is of a source the slice admits)
-          const compiled = compileProjectWithBackend(files, { globals: GLOBALS }, CORE_BACKEND);
-          assert.ok(compiled.plan !== null, `${where}: ${compiled.diagnostics.map((d) => d.code)}`);
+          // (every witness has a plan, a refusal is of a source the slice admits, but the route's decline of a written
+          // variable read by its value)
+          const compile = () =>
+            compileProjectWithBackend(files, { globals: GLOBALS }, CORE_BACKEND);
+          let compiled: ReturnType<typeof compile> | null = null;
+          if (witness.finding !== WRITTEN) compiled = compile();
+          else
+            assert.throws(
+              compile,
+              (error) => error instanceof CandidateOutsideSlice && error.what === UNPROVED_READER,
+              where,
+            );
+          assert.ok(
+            compiled === null || compiled.plan !== null,
+            `${where}: ${compiled?.diagnostics.map((d) => d.code)}`,
+          );
           if (typeof witness.derived === "object" && witness.derived !== null) {
             assert.ok(derivation instanceof Underivable, where);
             assert.equal(derivation.message, witness.derived.refused, where);
@@ -774,10 +796,12 @@ test("the S7 oracle reads a typed default's variable at its call's snapshot, fro
             return text === undefined || text === "any" ? null : text;
           };
           assert.equal(type(derived), witness.derived, where);
-          const planned = atCall(plannedContent(compiled.plan, source));
+          const planned = compiled?.plan ? atCall(plannedContent(compiled.plan, source)) : [];
           if (witness.finding === undefined) assert.deepEqual(planned, derived, where);
           else if (mode === MODES[0])
-            t.diagnostic(`finding (${witness.finding}): ${where}: the plan ${planned.join("; ")}`);
+            t.diagnostic(
+              `finding (${witness.finding}): ${where}: ${compiled === null ? "declined" : `the plan ${planned.join("; ")}`}`,
+            );
           compared += 1;
         });
     }

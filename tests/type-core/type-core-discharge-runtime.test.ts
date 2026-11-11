@@ -23,6 +23,7 @@ import {
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import { analyseCore } from "../../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
+import { UNPROVED_READER } from "../../src/type-inference/core/check-result/typed-reader.js";
 import { withConsumerOrder } from "../../src/type-inference/core/consumers.js";
 import { propertyStep } from "../../src/type-inference/core/program.js";
 import { withSolverSeam } from "../../src/type-inference/core/solver.js";
@@ -31,6 +32,7 @@ import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacin
 import { assertRuntimeResumeEquivalent } from "../helpers/runtime-equivalence.js";
 import { compactAnalysis, coreRequest } from "../helpers/type-core-analysis.js";
 import { readFixture } from "../helpers/type-core/type-core-fixture.js";
+import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import { type CompactRecord, recordDifferences } from "../helpers/type-core-records.js";
 
 /*
@@ -2052,6 +2054,63 @@ test("a typed parse or load into a place its own store or literal decides reads 
       copied,
     );
   }
+});
+
+// #2307: the candidate route publishes a typed parse's or load's type only where the written types its value lands
+// beside prove it (`check-result/typed-reader.ts`); else a host value of the written type would read as the default
+test("a typed parse or load whose type the written types around its value do not prove is declined, in four modes (#2307)", () => {
+  const parse = "fromJson(hostValue, default: 0, files: false)";
+  const declined = [
+    // a later copy of a written variable decides the place it lands in
+    `let a: number = 0\nlet v = ${parse}\nsay v\nv = a\nexit\n`,
+    "let a: number[] = [0]\nlet v = fromJson(hostValue, default: [0], files: false)\nsay v[0]\nv = a\nexit\n",
+    `let a: number = 0\nlet c = a\nlet v = ${parse}\nsay v\nv = c\nexit\n`,
+    `let a: number = 0\nlet o = {n: ${parse}}\nsay o.n\no.n = a\nexit\n`,
+    `let w: number = 0\nlet seed = {n: w}\nlet o = {n: ${parse}}\nsay o.n\no = seed\nexit\n`,
+    `let a: number = 0\nlet v = fromJson(hostValue, default: fromJson("x", default: 0, files: false), files: false)\nsay v\nv = a\nexit\n`,
+    'let a: number = 0\nlet v = load("k", default: 0)\nsay v\nv = a\nexit\n',
+    // a written default, and one a written variable is copied into later
+    `let fallback: number = 1\nlet v = fromJson(hostValue, default: fallback, files: false)\nsay v\nexit\n`,
+    `let a: number = 0\nlet d = 0\nlet v = fromJson(hostValue, default: d, files: false)\nsay v\nd = a\nexit\n`,
+    // a ring of unwritten copies proves nothing
+    `let x = 0\nlet y = x\nx = y\nlet v = ${parse}\nsay v\nv = x\nexit\n`,
+  ];
+  for (const source of declined)
+    for (const mode of HELD_MODES)
+      assert.throws(
+        () => mode.run(() => compileSourceWithBackend(source, OPTIONS, CORE_BACKEND)),
+        (error) => error instanceof CandidateOutsideSlice && error.what === UNPROVED_READER,
+        `${source} (${mode.name})`,
+      );
+  // a written destination reads a host value of its type; a default or a copy without a written type proves nothing
+  // against the call, so it publishes
+  const published: [
+    string,
+    SerializableRuntimeValue,
+    readonly RuntimeScriptStorageEntrySnapshot[],
+    string,
+  ][] = [
+    [`let v: number = ${parse}\nsay v\nexit\n`, "1.5", [], "1.5"],
+    [
+      'let v: number = load("k", default: 0)\nsay v\nexit\n',
+      null,
+      [{ key: "k", value: 1.5 }],
+      "1.5",
+    ],
+    [
+      `let d = 0\nlet v = fromJson(hostValue, default: d, files: false)\nsay v\nexit\n`,
+      "2",
+      [],
+      "2",
+    ],
+    [`let x = 3\nlet v = ${parse}\nsay v\nv = x\nexit\n`, "2", [], "2"],
+  ];
+  for (const [source, host, storage, said] of published)
+    for (const mode of HELD_MODES) {
+      const plan = mode.run(() => compileSourceWithBackend(source, OPTIONS, CORE_BACKEND).plan);
+      assert.ok(plan !== null, `${source} (${mode.name})`);
+      assert.deepEqual(ran(runWith(plan, host, storage)).said, [said], `${source} (${mode.name})`);
+    }
 });
 
 /** A list value as the runtime holds it. */

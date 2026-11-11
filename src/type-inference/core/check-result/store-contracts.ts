@@ -15,7 +15,13 @@ import { typePlan } from "../../../type-plans.js";
 import { lazyDefaultArgument } from "../../../lazy-defaults.js";
 import { type ValueKind, VALUE_KIND_NAMES } from "../../../value-kinds.js";
 import type { PlaceId, TypeTerm } from "../../graph.js";
-import { type Answers, type ValueAnswer, type AdmittedType, closedType } from "../answers.js";
+import {
+  type Answers,
+  type ValueAnswer,
+  type AdmittedType,
+  type PlaceAnswer,
+  closedType,
+} from "../answers.js";
 import { joinSteps } from "../budget.js";
 import {
   ContractDescriptors,
@@ -40,6 +46,14 @@ import {
   outsideStructure,
   unwrap,
 } from "./slice-index.js";
+import {
+  TypedReaders,
+  UNPROVED_READER,
+  defaultOf,
+  getReceiver,
+  projectedLiteral,
+  typedDefault,
+} from "./typed-reader.js";
 
 /** The plan of the kinds an obligation requires: each kind, a collection's elements and an object's properties left open. */
 export function kindsPlan(kinds: readonly (ItemTag | RequiredKind)[]): TypePlan | null {
@@ -85,11 +99,17 @@ export class Contracts {
   /** Each store's label of the place it stores into (`destination`), once. */
   readonly #destinations = new Map<Store, string | undefined>();
 
+  /** The proof of each typed parse's or load's type against the written types around it, `null` where it is not asked. */
+  readonly #readers: TypedReaders | null;
+
   public constructor(
     private readonly answers: Answers,
     private readonly index: SliceIndex,
     private readonly lets: ReadonlyMap<PlaceId, LetStatement>,
+    /** Whether `expected` proves a call's type against the written types around it (#2307): the published route's. */
+    readers = true,
   ) {
+    this.#readers = readers ? new TypedReaders(answers, index, lets, ANY_VALUE) : null;
     this.#descriptors = new ContractDescriptors(
       {
         level: (id, path) => {
@@ -269,18 +289,21 @@ export class Contracts {
         [call],
       ),
     );
+    if (expected === null) return expected;
     // a copy of a written type is F18's receiving context (A4, (1a)), at every level the call's value
     // reaches, but the core answers the call by its default there while its later facts follow that answer: the
     // lowering cannot widen it alone
-    if (
-      landing !== null &&
-      expected !== null &&
-      levelsOf(expected).some((level) => {
-        const admitted = this.answers.place(landing.id, [...landing.path, ...level]).admitted;
-        return admitted.by === "decided" && admitted.inherited;
-      })
-    )
-      throw new OutsideContract(call, "a typed parse or load into a copy of a written type");
+    const answered = new Map<string, PlaceAnswer>();
+    if (landing !== null)
+      for (const level of levelsOf(expected)) {
+        const answer = this.answers.place(landing.id, [...landing.path, ...level]);
+        if (answer.admitted.by === "decided" && answer.admitted.inherited)
+          throw new OutsideContract(call, "a typed parse or load into a copy of a written type");
+        answered.set(level.join("\u0000"), answer);
+      }
+    // and every other written type that reaches the value, through the place's stores and the default's reads (#2307)
+    if (this.#readers !== null && !this.#readers.proved(expected, landing, fallback, answered))
+      throw new OutsideContract(call, UNPROVED_READER);
     return expected;
   }
 
@@ -597,19 +620,6 @@ interface AnsweredCall {
 }
 
 /**
- * A typed parse's or load's default, which its value is where it gives one: `null` for a typed one without a default,
- * `undefined` for any other expression.
- */
-function typedDefault(node: Expression): Expression | null | undefined {
-  if (node.kind === "loadExpression") return node.defaultValue;
-  return node.kind === "callExpression" &&
-    node.callee.kind === "identifier" &&
-    node.callee.name === "fromJson"
-    ? defaultOf(node)
-    : undefined;
-}
-
-/**
  * The literal data one step below `values`, found once per level: a list's or set's elements, and each record field's
  * values by name, the names in the order the records first write them.
  */
@@ -653,15 +663,6 @@ function fieldOrder(names: Iterable<string>, below: RecordsBelow, index: SliceIn
     ...[...below.fields.keys()].filter((name) => all.has(name)),
     ...index.inWrittenOrder([...all].filter((name) => !below.fields.has(name))),
   ];
-}
-
-/** The `default:` a call's value falls back on, or `null`. */
-function defaultOf(call: CallExpression): Expression | null {
-  return (
-    call.arguments.find(
-      (argument) => argument.kind === "namedArgument" && argument.name.name === "default",
-    )?.value ?? null
-  );
 }
 
 /** The kinds whose levels below a typed call's answer its default answers (#1767). */
@@ -722,37 +723,6 @@ function readsPlace(fallback: Expression): boolean {
     }
   }
   return false;
-}
-
-/**
- * What an expression may select through parentheses and projections of literals: an object literal's literal property,
- * or any element of a list literal, whatever the index reads (Codex r9: `[0][load("i", default: 0)]` and
- * `[0][({i: 0}).i]` are elements of `[0]`); a selected part that is itself a projection is followed (Codex r8:
- * `({p: ({n: 0}).n}).p`); an empty list's none. `undefined` where a step leaves the literal's syntax: another receiver,
- * a missing property. Recursive over the syntax alone.
- */
-function projectedLiteral(expression: Expression): readonly Expression[] | undefined {
-  const at = unwrap(expression);
-  if (at.kind !== "propertyAccessExpression" && at.kind !== "indexExpression") return [at];
-  const holders = projectedLiteral(at.object);
-  if (holders === undefined) return undefined;
-  const selected: Expression[] = [];
-  for (const holder of holders) {
-    let values: readonly (Expression | undefined)[];
-    if (at.kind === "propertyAccessExpression")
-      values =
-        holder.kind === "objectLiteral"
-          ? [holder.properties.find((property) => property.name.name === at.property.name)?.value]
-          : [undefined];
-    // (an element of a list literal at any index, a literal or computed one alike: its elements are of one type)
-    else values = holder.kind === "listLiteral" ? holder.elements : [undefined];
-    for (const value of values) {
-      const parts = value === undefined ? undefined : projectedLiteral(value);
-      if (parts === undefined) return undefined;
-      selected.push(...parts);
-    }
-  }
-  return selected;
 }
 
 /**
@@ -901,15 +871,6 @@ function numberFamily(
     default:
       return plan;
   }
-}
-
-/** A `get` call's receiver, else `null`. */
-function getReceiver(expression: Expression): Expression | null {
-  return expression.kind === "callExpression" &&
-    expression.callee.kind === "propertyAccessExpression" &&
-    expression.callee.property.name === "get"
-    ? expression.callee.object
-    : null;
 }
 
 /** A plan's members: a union's, else the plan itself. */
