@@ -161,7 +161,11 @@ test(
       assert.equal(status, 0, out);
       assert.match(out, /measure-test-files: 4 files, /u);
       // (the local runs take well under the listing's 10 s, so only the type-core file is listed)
-      assert.deepEqual(costly(module), [`"sub/type-core-z.test.js": 1,`]);
+      // (by name only: a local run's seconds depend on the machine's load)
+      assert.deepEqual(
+        costly(module).map((line) => line.split(":")[0]),
+        [`"sub/type-core-z.test.js"`],
+      );
       assert.match(module, /every other test file in the same runs, their mean \(3 files\)/u);
     } finally {
       rmSync(root, { recursive: true, force: true });
