@@ -9,15 +9,15 @@ import { ts } from "ts-morph";
  * an owner as made, which is the closed set below; any other place (a class field, a private field, a member's or a
  * module's variable's assignment, a module's mutable variable, a parameter property's default) is refused.
  * - inside a function: a variable's initializer or an assignment to a variable bound inside a function (not passed on
- *   by a chained assignment to anything else), a `return`'s
- *   value or an arrow's body, an argument of a call or of a `new`, a spread, a `for…of`'s source, the object of a
- *   member access;
+ *   by a chained assignment to anything else), a `return`'s value or an arrow's body, an argument of a call or of a
+ *   `new`, a spread, a `for…of`'s source, the object of a member access;
  * - at a module's top level: a `const` annotated `ReadonlyMap` or `ReadonlySet` (a constant table);
  * - a parameter's default, where the parameter is no parameter property or is annotated `ReadonlyMap` or `ReadonlySet`;
  * each through parentheses, `as`, `satisfies`, `!`, a conditional's branch, a `??` or `||`'s operand, and an array's
  * element or an object literal's property: such a literal is judged where it stands.
  * What the check does not see is the recorder's: a local filled after it is stored in retained state is walked there by
- * value. In a file scoped `module`, only the top level is checked: its other classes keep no retained state.
+ * value. In a file scoped `module`, only the top level is checked: its other classes keep no retained state. The scope
+ * is the recorder's domain (`tests/helpers/retained-recorder.ts`): the admission's files and narrowing's are not in it.
  */
 const SCOPE = [
   { glob: "src/type-inference/core/contract.ts", level: "file" },
@@ -33,7 +33,6 @@ const SCOPE = [
   { glob: "src/type-inference/core/consumers.ts", level: "module" },
   { glob: "src/type-inference/core/contract-descriptors.ts", level: "module" },
   { glob: "src/type-inference/core/messages/site.ts", level: "module" },
-  { glob: "src/type-inference/core/narrowing/narrowings.ts", level: "module" },
   { glob: "src/type-inference/core/property-names.ts", level: "module" },
 ];
 

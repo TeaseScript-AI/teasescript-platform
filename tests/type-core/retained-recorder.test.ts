@@ -8,7 +8,10 @@ import {
   withRetainedRecorder,
 } from "../../src/type-inference/core/retained/retained.js";
 import { Solver, type Demand, type Work } from "../../src/type-inference/core/solver.js";
+import { readFixture } from "../helpers/type-core/type-core-fixture.js";
+import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import { itemScope } from "../helpers/type-core-items.js";
+import { publishedRoute } from "../helpers/type-core-oracles.js";
 import { Recorder, type RecorderReport } from "../helpers/retained-recorder.js";
 
 // #1072 step 1b: the recorder's negative controls. Each shape changes retained state in a later solver run than the one
@@ -210,4 +213,73 @@ test("an instance of a class not compared by identity is named in retained state
     "an instance of Unlisted, a class not in IDENTITY_CLASSES, in retained state",
   ]);
   assert.deepEqual(named(new RecorderProbe()), []);
+});
+
+/**
+ * The recorder's sample of real sources: each type-core fixture family's first source (in the fixture's order) that
+ * reaches the core and takes at most 600 ms under the recorder in the four held modes, as #1072 1b measured them
+ * (pull request text, "Recorder cost"). The recorder walks every entry at every run switch, so its cost grows with a
+ * source's size; the evidence runs the whole of the fixture's small sources and the #1072 cases.
+ */
+const SAMPLE: readonly string[] = [
+  "cp9-cells/F1/let",
+  "cp9-cells/F2/written-pass",
+  "cp9-cells/F3/whole",
+  "cp9-cells/F8/sort",
+  "cp9-cells/F12/first",
+  "cp9-cells/F14/list",
+  "cp9-cells/F17a/otherwise",
+  "cp9-cells/F18/json-integer",
+  "cp9-cells/F19/json-unknown",
+  "cp9-cells/F26a/say-object",
+  "cp9-cells/F27a/list",
+  "cp9-cells/F27c/range",
+  "cp9-cells/F28/earliest-admitted",
+  "cp9-cells/X1/live",
+  "cp9-cells/X5/body-definition",
+  "cp9-cells/C3/condition",
+  "cp9-cells/C5a/definite-null",
+  "cp9-cells/C5b/no-member",
+  "cp9-cells/C5c/never",
+  "cp9-cells/C6/last",
+  "cp9-cells/C10/otherwise",
+  "cp9-cells/C13/bad-iterable",
+  "cp9-cells/A2/source-order",
+  "cp9-cells/A3/numeric-family",
+  "cp9-cells/P7/literal-condition",
+  "cp9-cells/guard/ordinary-receiver",
+  "cp9-cells/r4/null-otherwise",
+  "cp9-cells/C2/index-fractional",
+  "cp9-cells/r42/store-present-property",
+  "cp9-cells/r46/guard/branch-is/guarded",
+  "cp9-cells/r47/primitive-elements/singleton",
+  "cp9-cells/r49/sharing/scalar-copy/guarded",
+  "cp9-cells/3b/numeric/positive-2.0",
+  "cp9-cells/r422/for-empty/held",
+  "cp9-cells/r6-bugs/admission/overwritten",
+  "cp9-cells/r7-bugs/numeric/scalar-inferred",
+  "cp9-cells/r8/get-dispatch/unknown",
+  "cp9-cells/r9/numeric/direct-number-external",
+  "cp9-cells/s4/followup/temporal/property-absent-in-every-source",
+  "cp9-cells/s6/rule-function/loop/decided",
+  "cp9-cells/s9b/f18-held/named/load/definite-integer",
+];
+
+test("the recorder finds no unrecorded change in its sample of the fixture, in the four held modes (#1072)", () => {
+  const fixture = new Map(readFixture().map((record) => [record.name, record]));
+  const found: string[] = [];
+  for (const name of SAMPLE) {
+    const record = fixture.get(name);
+    assert.ok(record !== undefined, `${name}: in the fixture`);
+    for (const mode of HELD_MODES) {
+      const recorder = new Recorder();
+      withRetainedRecorder(recorder, () =>
+        mode.run(() => publishedRoute(record.files, ["hostValue", "hostOther", "hostInit"])),
+      );
+      const report = recorder.report();
+      assert.ok(report.entries > 0, `${name} (${mode.name}): reaches retained state`);
+      for (const violation of report.violations) found.push(`${name} (${mode.name}): ${violation}`);
+    }
+  }
+  assert.deepEqual(found, []);
 });
