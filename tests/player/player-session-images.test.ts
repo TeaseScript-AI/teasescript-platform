@@ -29,7 +29,15 @@ import { loadPlayerModule } from "../helpers/player-modules.js";
 
 interface ImageHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
-  readonly notices: Readonly<Ref<readonly { readonly key: string; readonly message: string }[]>>;
+  readonly notices: Readonly<
+    Ref<
+      readonly {
+        readonly key: string;
+        readonly message: string;
+        readonly action?: { run(): void };
+      }[]
+    >
+  >;
   dismissNotice(key: string): void;
   resolveAsset(path: string): string | null;
   stageImageFailure(src: string | null): void;
@@ -77,8 +85,16 @@ before(async () => {
   usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
 });
 
-// Audio elements the Player host created, so a test can make one fail to load.
-const audioElements: EventTarget[] = [];
+// Audio elements the Player host created, so a test can make one fail to load or refuse to play.
+interface FakeAudio extends EventTarget {
+  src: string;
+  duration: number;
+  /** The source of each `play()` call, in order. */
+  readonly plays: string[];
+}
+const audioElements: FakeAudio[] = [];
+/** Whether `play()` is refused, as a browser that grants no audio refuses it. */
+let refusingAudio = false;
 
 // The browser surface the Player host touches without a camera; no Web Locks, so durable writes are not coordinated.
 function stubBrowser(context: TestContext) {
@@ -86,14 +102,26 @@ function stubBrowser(context: TestContext) {
     document: new EventTarget(),
     window: new EventTarget(),
     navigator: {},
-    Audio: class extends EventTarget {
+    Audio: class extends EventTarget implements FakeAudio {
       constructor() {
         super();
         audioElements.push(this);
       }
       src = "";
-      play = async () => {};
-      pause() {}
+      duration = Number.NaN;
+      paused = true;
+      ended = false;
+      currentTime = 0;
+      volume = 1;
+      readonly plays: string[] = [];
+      play = async () => {
+        this.plays.push(this.src);
+        if (refusingAudio) throw new DOMException("Refused", "NotAllowedError");
+        this.paused = false;
+      };
+      pause() {
+        this.paused = true;
+      }
       load() {}
       removeAttribute() {}
     },
@@ -512,4 +540,40 @@ test("a package image the Stage cannot load is reported while the Stage shows it
   await host.activate();
   await nextTick();
   assert.equal(host.notices.value.length, 0);
+});
+
+test("the blocked-audio notice's action retries the refused audio, with the source it was refused with, before it returns", async (context) => {
+  stubBrowser(context);
+  refusingAudio = true;
+  context.after(() => (refusingAudio = false));
+  const scope = effectScope();
+  const host = scope.run(() =>
+    usePlayerSession({
+      resolveAsset: (path) => `/files/${path}`,
+      decodeImage: async () => ({ width: 1, height: 1 }),
+    }),
+  );
+  assert.ok(host);
+  context.after(() => scope.stop());
+  host.prepare(() => createPlayerRuntimeSession('playAudio "sounds/bell.wav"\nexit'));
+  await host.activate();
+  const bell = () => audioElements.find((element) => element.src === "/files/sounds/bell.wav");
+  await until(() => bell() !== undefined, "the audio was not given its source");
+  const element = bell()!;
+  element.duration = 10;
+  element.dispatchEvent(new Event("loadedmetadata"));
+  const blocked = () => host.notices.value.find((notice) => notice.key === "audio-blocked");
+  await until(() => blocked() !== undefined, "the refused audio was not reported");
+  const refusedWith = element.plays.at(-1);
+  const plays = element.plays.length;
+  refusingAudio = false;
+  // The notice's own action, as the player's click on "Enable audio" runs it; its retry must not wait for later work.
+  blocked()!.action!.run();
+  assert.equal(
+    element.plays.length,
+    plays + 1,
+    "the action retried the refused audio before it returned",
+  );
+  assert.equal(element.plays.at(-1), refusedWith, "with the source it was refused with");
+  await until(() => blocked() === undefined, "the notice stayed after the retry played");
 });
