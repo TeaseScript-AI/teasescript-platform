@@ -680,6 +680,40 @@ test("the check and the baselines take one set of areas: each folder of tests/fa
   }
 });
 
+// (each source's stops on each tree: a place that stops at another pass, one the head alone stops, one the base
+// alone stops, and stops alike where the stop set differs in another field; names in no order of the property)
+const stopsOf = (head: boolean) => ({
+  moved: [[head ? 2 : 1, "r", "x", 2]],
+  added: head
+    ? [
+        [1, "r", "x", 1],
+        [1, "q", "y", 3],
+      ]
+    : [[1, "r", "x", 1]],
+  removed: head
+    ? [[1, "r", "x", 1]]
+    : [
+        [1, "r", "x", 1],
+        [1, "q", "y", 3],
+      ],
+  fields: [[1, "r", "x", 1]],
+  // (a place that stops in passes 1 and 2 on the base and in pass 2 alone on the head: the pass-1 stop removed, the
+  // identical pass-2 stops paired first, never one moved and one removed)
+  restarted: head
+    ? [[2, "p", "z", 1]]
+    : [
+        [1, "p", "z", 1],
+        [2, "p", "z", 1],
+      ],
+});
+const stopsLibrary = (head: boolean) => `
+export function stopSet(files) {
+  const source = files[0].source;
+  return { stops: ${JSON.stringify(stopsOf(head))}[source], passes: 1, restarts: 0, outcome: "complete",
+exhausted: null, record: ${head} && source === "fields" ? "other" : "same" };
+}
+`;
+
 test("a stops run's decision stops are classified where both trees ran, never stored, and against a store unavailable, naming the base, each read by compiler-replay's verdict (#2355)", async () => {
   // (the replay's reader of an area's records, which the runner's records below must pass, every form)
   const { areaRecordForm, apartText } = await import(
@@ -691,39 +725,6 @@ test("a stops run's decision stops are classified where both trees ran, never st
     );
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
-    // (each source's stops on each tree: a place that stops at another pass, one the head alone stops, one the base
-    // alone stops, and stops alike where the stop set differs in another field; names in no order of the property)
-    const stopsOf = (head: boolean) => ({
-      moved: [[head ? 2 : 1, "r", "x", 2]],
-      added: head
-        ? [
-            [1, "r", "x", 1],
-            [1, "q", "y", 3],
-          ]
-        : [[1, "r", "x", 1]],
-      removed: head
-        ? [[1, "r", "x", 1]]
-        : [
-            [1, "r", "x", 1],
-            [1, "q", "y", 3],
-          ],
-      fields: [[1, "r", "x", 1]],
-      // (a place that stops in passes 1 and 2 on the base and in pass 2 alone on the head: the pass-1 stop removed, the
-      // identical pass-2 stops paired first, never one moved and one removed)
-      restarted: head
-        ? [[2, "p", "z", 1]]
-        : [
-            [1, "p", "z", 1],
-            [2, "p", "z", 1],
-          ],
-    });
-    const library = (head: boolean) => `
-export function stopSet(files) {
-  const source = files[0].source;
-  return { stops: ${JSON.stringify(stopsOf(head))}[source], passes: 1, restarts: 0, outcome: "complete",
-    exhausted: null, record: ${head} && source === "fields" ? "other" : "same" };
-}
-`;
     const names = ["moved", "added", "removed", "fields", "restarted"];
     const tree = (name: string, sha: string, head: boolean) => {
       const folder = join(directory, name);
@@ -732,7 +733,7 @@ export function stopSet(files) {
       writeFileSync(join(folder, "package-lock.json"), "{}\n");
       writeFileSync(
         join(folder, "dist", "tests", "helpers", "type-core-oracles.js"),
-        storable(head) + library(head),
+        storable(head) + stopsLibrary(head),
       );
       writeFileSync(join(folder, ".sha"), `${sha.repeat(40)}\n`);
       writeSrc(folder, head ? "head\n" : "");
