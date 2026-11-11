@@ -394,9 +394,13 @@ export class Contracts {
         answered.get(path.join("\u0000")),
       ))
         definitions.set(definition.uid, definition);
-    for (let depth = 0; depth < base.length; depth += 1)
-      for (const definition of this.#definitions(id, base.slice(0, depth)))
-        definitions.set(definition.uid, definition);
+    // (and every level above each: a store into an enclosing object or list covers it)
+    for (const { path } of kindsAt.values()) {
+      const full = joinSteps(base, path);
+      for (let depth = 0; depth < full.length; depth += 1)
+        for (const definition of this.#definitions(id, full.slice(0, depth)))
+          definitions.set(definition.uid, definition);
+    }
     for (const { path, kinds } of kindsAt.values()) {
       if (kinds === null) continue;
       const at = joinSteps(base, path);
