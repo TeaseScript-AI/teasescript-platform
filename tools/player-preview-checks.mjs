@@ -804,6 +804,7 @@ async function main(given) {
     if (url === undefined) {
       preview = startPreview();
       url = await readyPreview(preview);
+      console.log(`player-preview-checks: started this checkout's preview at ${url}`);
       await checkIdentity(url);
     }
     const config = join(scratch, "browser.json");
@@ -824,20 +825,29 @@ async function main(given) {
     cli("open", url, "--config", config);
     for (const group of groups) {
       console.log(`player-preview-checks: RUN ${group.name}`);
-      const output = cli(
-        "run-code",
-        `async page => (${runGroup.toString()})(page, ${group.toString()}, ${JSON.stringify(url)}, ${JSON.stringify(join(scratch, group.name))})`,
-      );
-      const result = output.match(/^### Result\r?\n"(PASS [^"\n]+)"$/mu)?.[1];
-      if (!result) throw new Error(output);
-      // A started preview that ended during the group fails it: the browser may have passed on what it had loaded.
+      let output;
+      let failure;
+      try {
+        output = cli(
+          "run-code",
+          `async page => (${runGroup.toString()})(page, ${group.toString()}, ${JSON.stringify(url)}, ${JSON.stringify(join(scratch, group.name))})`,
+        );
+      } catch (error) {
+        failure = error;
+      }
+      // A started preview that ended during the group fails it, whatever the browser made of it: the group may have
+      // passed on what it had loaded, or failed for the preview's end, which its own error does not say.
       if (preview !== undefined) {
         await new Promise((resolve) => setTimeout(resolve, 10));
         if (preview.status !== undefined)
           throw new Error(
             `The preview ${preview.status} during ${group.name}:\n${logTail(preview)}`,
+            { cause: failure },
           );
       }
+      if (failure !== undefined) throw failure;
+      const result = output.match(/^### Result\r?\n"(PASS [^"\n]+)"$/mu)?.[1];
+      if (!result) throw new Error(output);
       console.log(`player-preview-checks: ${result}`);
     }
     passed = true;
