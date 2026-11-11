@@ -292,8 +292,8 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
       [
         // (no check in code: 'v' may also lack the method there, which a null check does not rule out, #1449;
         // the load's null reaches the call by a route without a check: the route rule's error, AD-1)
-        `E TSV043 'v.add(2)': 'v' can be null here because of 'load(key, default: null)' on line 2. Check that 'v' is ` +
-          "not null first.",
+        `E TSV043 'v.add(2)': 'v' must be checked for null before it is used here: 'load' on line 2 can give null. ` +
+          "Check that 'v' is not null first.",
         `W TSV043 'v.add(2)': 'v' may not have method 'add' here. If it does not, the Tease stops with an error at ` +
           `this line. ${OUTSIDE("v")}`,
       ],
@@ -302,8 +302,8 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
       'let key = "k"\nlet value = load(key, default: null)\nsay value.get(0, default: 3)\nexit\n',
       [
         // (the load's null reaches the call by a route without a check: the route rule's error, AD-1)
-        `E TSV043 'value.get(0, default: 3)': 'value' can be null here because of 'load(key, default: null)' on ` +
-          "line 2. Check that 'value' is not null first, or give a fallback of the same type with 'otherwise'.",
+        `E TSV043 'value.get(0, default: 3)': 'value' must be checked for null before it is used here: 'load' on ` +
+          "line 2 can give null. Check that 'value' is not null first, or give a fallback of the same type with 'otherwise'.",
         "W TSV043 'value.get(0, default: 3)': 'value' may not have method 'get' here. If it does not, the Tease " +
           `stops with an error at this line. ${OUTSIDE("value")}`,
         `W TSV043 '0': A list index must be a whole number (integer), but '0' may be a value of another type here. ${STOPS}`,
@@ -315,8 +315,8 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
       'let key = "k"\nlet value = load(key, default: null)\nsay value.get("a\\"b", default: 3)\nexit\n',
       [
         // (the load's null reaches the call by a route without a check: the route rule's error, AD-1)
-        `E TSV043 'value.get("a\\"b", default: 3)': 'value' can be null here because of 'load(key, default: null)' ` +
-          "on line 2. Check that 'value' is not null first, or give a fallback of the same type with 'otherwise'.",
+        `E TSV043 'value.get("a\\"b", default: 3)': 'value' must be checked for null before it is used here: 'load' ` +
+          "on line 2 can give null. Check that 'value' is not null first, or give a fallback of the same type with 'otherwise'.",
         `W TSV043 'value.get("a\\"b", default: 3)': 'value' may not have method 'get' here. If it does not, the ` +
           `Tease stops with an error at this line. ${OUTSIDE("value")}`,
         `W TSV043 '"a\\"b"': A list index must be a whole number (integer), but '"a\\"b"' may be a value of another ` +
@@ -484,6 +484,91 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
   ];
   for (const [source, expected] of cases)
     assert.deepEqual(messages(main(source)), expected, source);
+});
+
+/**
+ * The route rule's error for a null names what brings it, one sentence per cause (the owner, 2026-11-11, #2287): each
+ * row of `nullCause` once, the line its own, and the error's code, site and advice as the rule gives them.
+ */
+test("the route rule's error for a null says it must be checked, and what brings the null, by its writer (#2287)", () => {
+  const first = (subject: string, cause: string): string =>
+    `'${subject}' must be checked for null before it is used here: ${cause}.`;
+  const cases: readonly (readonly [string, string, string])[] = [
+    // a `null` stored: #2287's own script, where the arms exclude each other
+    [
+      "let n = 1\nif hostValue is boolean { n = null }\nif hostValue is not boolean { repeat n {} }\nexit\n",
+      "n",
+      first("n", "it is set to null on line 2"),
+    ],
+    // a parameter's default some call omits, and a property of an object written with null, also two lines down
+    [
+      "function f(n: integer? = null) {\n  repeat n {}\n}\nf()\nf(2)\nexit\n",
+      "n",
+      first("n", "it is set to null on line 1"),
+    ],
+    [
+      "let o = { p: { x: 1 } }\nif hostValue is boolean {\n  o = {\n    p: { x: null }\n  }\n}\nrepeat o.p.x {}\nexit\n",
+      "o.p.x",
+      first("o.p.x", "it is set to null on line 4"),
+    ],
+    // a `load`, stored and where it is used
+    [
+      'let a: integer? = load("k", default: null)\nif a != null { let b: integer? = load("k", default: null)\nrepeat b {} }\nexit\n',
+      "b",
+      first("b", "'load' on line 2 can give null"),
+    ],
+    // a copy, of a variable and of a property (#2287's second form)
+    [
+      "let n: integer? = 1\nif hostValue is boolean { n = null }\nlet b = n\nrepeat b {}\nexit\n",
+      "b",
+      first("b", "it is a copy of 'n' (line 3), which can hold null"),
+    ],
+    [
+      "let o = { x: 1 }\nif hostValue is boolean { o.x = null }\nlet b = o.x\nrepeat b {}\nexit\n",
+      "b",
+      first("b", "it is a copy of 'o.x' (line 3), which can hold null"),
+    ],
+    // an `otherwise` whose fallback is null (#2287's third form)
+    [
+      "let a = null\nif hostValue is boolean { a = 1 }\nlet b = a otherwise null\nrepeat b {}\nexit\n",
+      "b",
+      first("b", "'a otherwise null' on line 3 can give null"),
+    ],
+    // another call, by its function's name
+    [
+      'let p = "abc".indexOf("b")\nrepeat p {}\nexit\n',
+      "p",
+      first("p", "'indexOf' on line 1 can give null"),
+    ],
+    [
+      'let v: integer? = fromJson("1", default: null)\nrepeat v {}\nexit\n',
+      "v",
+      first("v", "'fromJson' on line 1 can give null"),
+    ],
+    // a selection, where it is used
+    [
+      "let xs = [1, null]\nrepeat xs.last {}\nexit\n",
+      "xs.last",
+      first("xs.last", "'xs.last' on line 2 can give null"),
+    ],
+    // an element, of a list and of a dict
+    [
+      "let xs = [1, null]\nlet e = xs[0]\nrepeat e {}\nexit\n",
+      "e",
+      first("e", "an element of 'xs' (line 2) can be null"),
+    ],
+    [
+      'let d = dict{"a": 1, "b": null}\nlet v = d["a"]\nsay v + 1\nexit\n',
+      "v",
+      first("v", "an element of 'd' (line 2) can be null"),
+    ],
+  ];
+  for (const [source, subject, sentence] of cases) {
+    const errors = reported(main(source)).filter(({ error }) => error);
+    assert.equal(errors.length, 1, source);
+    assert.ok(errors[0]!.message.startsWith(`${sentence} `), `${source}\n${errors[0]!.message}`);
+    assert.ok(errors[0]!.message.includes(`'${subject}'`), source);
+  }
 });
 
 /**

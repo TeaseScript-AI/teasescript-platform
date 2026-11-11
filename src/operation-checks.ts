@@ -1267,12 +1267,16 @@ function getProblems(
  * The message for a value that may be of a member type an operation does not support, naming the test that makes it
  * safe: `!= null` for null, which also narrows it. Only a plain variable narrows, so a property or element is first
  * kept in a variable. For null, the message also names a fallback, unless the value is what the operation changes.
+ * A null's first sentence is the owner's (2026-11-11, #2287): the value must be checked before it is used, and
+ * `cause`, where the checker holds one for a plain variable, what makes it possibly null, as in
+ * `its type is 'integer?' (line 2)`.
  */
 export function mayBeMessage(
   expression: Expression,
   failing: StaticType,
   passing: readonly StaticType[],
   fallback = true,
+  cause: string | null = null,
 ): string {
   const node = withoutParentheses(expression);
   const label = node.kind === "identifier" ? node.name : null;
@@ -1283,9 +1287,16 @@ export function mayBeMessage(
       ? "of a type that no value decided yet, such as an element of an empty list without a written type"
       : describeValue(failing);
   const or = failing.kind === "null" && fallback ? fallbackFix(label ?? "value", passing) : "";
+  const subject = label === null ? "This value" : `'${label}'`;
+  const first =
+    failing.kind !== "null"
+      ? `${subject} may be ${what}.`
+      : cause === null || label === null
+        ? `${subject} must be checked for null before it is used here.`
+        : `${subject} must be checked for null before it is used here: ${cause}.`;
   return label === null
-    ? `This value may be ${what}. Keep it in a variable and check it first, as in: if value ${test} { ... }${or}`
-    : `'${label}' may be ${what}. Check it first: if ${label} ${test} { ... }${or}`;
+    ? `${first} Keep it in a variable and check it first, as in: if value ${test} { ... }${or}`
+    : `${first} Check it first: if ${label} ${test} { ... }${or}`;
 }
 
 /**

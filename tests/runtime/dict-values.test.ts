@@ -670,7 +670,7 @@ test("get takes a default of any type, and its result joins the value type with 
     [
       [
         "TSV043",
-        "'s' may be null. Check it first: if s != null { ... }, or give a fallback: s otherwise 0",
+        "'s' must be checked for null before it is used here. Check it first: if s != null { ... }, or give a fallback: s otherwise 0",
         "s",
       ],
       [
