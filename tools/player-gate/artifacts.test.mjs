@@ -63,10 +63,23 @@ test("a JavaScript file no root reaches fails the inventory", (context) => {
 });
 
 test("an import() of a form the inventory does not read fails it", (context) => {
-  const app = buildOf(context, {
-    ...PLAYER,
-    "assets/engine-host-e.js":
-      'const name = "./compiler-g.js";\nconst compile = () => import(name);',
-  });
-  assert.throws(() => inventoryOf(app, "worker"), /engine-host-e\.js: 1 import\(\) of a form/u);
+  // A variable; a template with a substitution, whose file the page also reaches (so no unreached file would show the
+  // lost Worker edge); and a variable after a space or a comment.
+  for (const call of [
+    "import(name)",
+    "import(`./${name}.js`)",
+    "import (name)",
+    "import/* chunk */(name)",
+  ]) {
+    const app = buildOf(context, {
+      ...PLAYER,
+      "assets/index-a.js": `${PLAYER["assets/index-a.js"]}\nimport "./compiler-g.js";`,
+      "assets/engine-host-e.js": `import { plan } from "./plan-f.js";\nconst name = "compiler-g";\nconst compile = () => ${call};`,
+    });
+    assert.throws(
+      () => inventoryOf(app, "worker"),
+      /engine-host-e\.js: 1 import\(\) of a form/u,
+      call,
+    );
+  }
 });
