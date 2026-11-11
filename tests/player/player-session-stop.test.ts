@@ -14,7 +14,7 @@ import {
   parseDebugExport,
   replayDebugExport,
 } from "../../player/debug/debug-export.js";
-import type { DebugRecorder, DebugRecording } from "../../player/debug/debug-recorder.js";
+import type { DebugRecording } from "../../player/debug/debug-recorder.js";
 import type * as CompileProject from "../../player/runtime/compile-project.js";
 import type * as InProcess from "../../player/engine-bridge/in-process.js";
 import type * as RuntimeAdapter from "../../player/runtime/runtime-adapter.js";
@@ -27,11 +27,14 @@ import { published } from "../helpers/debug-readers.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { answerWith, type Intent } from "../helpers/player/player-input.js";
 import { loadHostFacade, onHostAll } from "../helpers/player/host-sessions.js";
+import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
+import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 
 // A Player error stops the session where it stands (PLAYER-UI "Session end and failure"). Input and the work that
 // continues it take their session from `observe()`, which gives none once stopped; these include continuations that
 // were under way when the error came.
 interface StopHost {
+  readonly bridge: Promise<PlayerBridge>;
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly hostError: Readonly<Ref<string | null>>;
   readonly stopped: Readonly<Ref<boolean>>;
@@ -59,7 +62,7 @@ interface StopHost {
   ): Promise<DebugExportCandidate>;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): RuntimeAdapter.PlayerRuntimeSessionOptions;
-  prepare(create: (options: { readonly recorder: DebugRecorder }) => PlayerRuntimeSession): void;
+  prepare(create: PlanStart): void;
   activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
   resolveAsset(path: string): string | null;
@@ -250,10 +253,11 @@ test("a Player error stops the session where it stands, and late writes do not c
     usePlayerSession({ scriptStorage: provider, capabilities: { camera: false } }),
   );
   await host.loadScriptStorage();
-  host.prepare(() =>
-    runtime.createPlayerRuntimeSession(
+  host.prepare(
+    await sourceStart(
+      host.bridge,
       'say "first", instant\nwait 0.1 s\nsave 1 as "count"\nsay "second", instant\nexit',
-      { persistentScriptStorage: true },
+      () => ({ persistentScriptStorage: true }),
     ),
   );
   await host.activate();
@@ -268,10 +272,10 @@ test("a Player error stops the session where it stands, and late writes do not c
   assert.equal(await host.observe(), null);
 
   // A save written before the stop does not continue the session when it settles.
-  host.prepare(() =>
-    runtime.createPlayerRuntimeSession('save 1 as "count"\nsay "saved", instant\nexit', {
+  host.prepare(
+    await sourceStart(host.bridge, 'save 1 as "count"\nsay "saved", instant\nexit', () => ({
       persistentScriptStorage: true,
-    }),
+    })),
   );
   await host.activate();
   assert.equal(host.stopped.value, false, "a new Start runs again");
@@ -298,8 +302,9 @@ test("a session a Player error stopped shows its calls without a demand, which a
     }),
   );
   await host.loadScriptStorage();
-  host.prepare(() =>
-    runtime.createPlayerRuntimeSession(
+  host.prepare(
+    await sourceStart(
+      host.bridge,
       'function inner {\n  wait 5 s\n}\ninner()\nsay "after", instant\nexit',
     ),
   );
@@ -362,10 +367,10 @@ test("a save that settles while the stop waits for its acknowledgement is not is
   };
   const host = mount(context, () => usePlayerSession(options));
   await host.loadScriptStorage();
-  host.prepare(() =>
-    runtime.createPlayerRuntimeSession('save 1 as "count"\nsay "after", instant\nexit', {
+  host.prepare(
+    await sourceStart(host.bridge, 'save 1 as "count"\nsay "after", instant\nexit', () => ({
       persistentScriptStorage: true,
-    }),
+    })),
   );
   await host.activate();
   assert.equal(writes, 1);
@@ -389,8 +394,9 @@ test("a save that settles while the stop waits for its acknowledgement is not is
 test("input admitted just before a Player error does not run after it", async (context) => {
   stubBrowser(context);
   const host = mount(context, () => usePlayerSession({ capabilities: { camera: false } }));
-  host.prepare(() =>
-    runtime.createPlayerRuntimeSession(
+  host.prepare(
+    await sourceStart(
+      host.bridge,
       'showPermanentButton "Help" {\n  say "pressed", instant\n}\nshowButton "Done"\nexit',
     ),
   );
@@ -424,8 +430,9 @@ test("an observation whose publish causes a Player error admits neither the inpu
       { flush: "sync" },
     ),
   );
-  host.prepare(() =>
-    runtime.createPlayerRuntimeSession(
+  host.prepare(
+    await sourceStart(
+      host.bridge,
       'showPermanentButton "Help" {\n  say "pressed", instant\n}\nwait 5 s\nsay "waited", instant\nshowButton "Done"\nexit',
     ),
   );
@@ -440,8 +447,8 @@ test("an observation whose publish causes a Player error admits neither the inpu
   await settle();
   assert.deepEqual(said(host), []);
 
-  host.prepare(() =>
-    runtime.createPlayerRuntimeSession('wait 5 s\nsay "waited", instant\nshowButton "Done"\nexit'),
+  host.prepare(
+    await sourceStart(host.bridge, 'wait 5 s\nsay "waited", instant\nshowButton "Done"\nexit'),
   );
   await host.activate();
   await settle(5);
@@ -455,10 +462,10 @@ test("an observation whose publish causes a Player error admits neither the inpu
 test("a photo used in the same task as a Player error does not answer", async (context) => {
   stubBrowser(context);
   const host = mount(context, () => usePlayerSession({ capabilities: { camera: false } }));
-  host.prepare(({ recorder }) =>
-    runtime.createPlayerRuntimeSession(
+  host.prepare(
+    await sourceStart(
+      host.bridge,
       'let photo = askImage("Photo")\nsay "after photo", instant\nshowButton "Done"\nexit',
-      { recorder },
     ),
   );
   await host.activate();
@@ -491,10 +498,11 @@ test("a jump waiting for a save ends when a Player error stops the session", asy
   );
   const time = mount(context, () => useDevelopmentTime(host, { autoSkip: false }, () => {}));
   await host.loadScriptStorage();
-  host.prepare(() =>
-    runtime.createPlayerRuntimeSession(
+  host.prepare(
+    await sourceStart(
+      host.bridge,
       'wait 5 s\nsave 1 as "count"\nsay "after save", instant\nshowButton "Done"\nexit',
-      { persistentScriptStorage: true },
+      () => ({ persistentScriptStorage: true }),
     ),
   );
   await host.activate();
@@ -533,10 +541,11 @@ test("Resume after a Player error is refused before the saved data are replaced"
   );
   const rewind = mount(context, () => useDebugRewind(host));
   await host.loadScriptStorage();
-  host.prepare(({ recorder }) =>
-    runtime.createPlayerRuntimeSession(
+  host.prepare(
+    await sourceStart(
+      host.bridge,
       'showButton "First"\nsave 1 as "count"\nshowButton "Second"\nexit',
-      { recorder, persistentScriptStorage: true },
+      () => ({ persistentScriptStorage: true }),
     ),
   );
   await host.activate();
@@ -575,10 +584,10 @@ test("after a Player error, a Debug edit does not wait for the dropped save, whi
     usePlayerSession({ scriptStorage: provider, capabilities: { camera: false } }),
   );
   await host.loadScriptStorage();
-  host.prepare(() =>
-    runtime.createPlayerRuntimeSession('save 1 as "count"\nsay "after save", instant\nexit', {
+  host.prepare(
+    await sourceStart(host.bridge, 'save 1 as "count"\nsay "after save", instant\nexit', () => ({
       persistentScriptStorage: true,
-    }),
+    })),
   );
   await host.activate();
   assert.deepEqual(writes, [["count", 1]]);
@@ -603,10 +612,7 @@ test("after a Player error, a debug export keeps the recording up to the error t
   stubBrowser(context);
   const host = mount(context, () => usePlayerSession({ capabilities: { camera: false } }));
   const rewind = mount(context, () => useDebugRewind(host));
-  const create = ({ recorder }: { readonly recorder: DebugRecorder }) =>
-    runtime.createPlayerRuntimeSession('showButton "First"\nshowButton "Second"\nexit', {
-      recorder,
-    });
+  const create = await sourceStart(host.bridge, 'showButton "First"\nshowButton "Second"\nexit');
   host.prepare(create);
   await host.activate();
   await nextTick();
@@ -649,10 +655,10 @@ test("a debug export of a failed state the session cannot export names the failu
       throw new RangeError("Too many properties to enumerate");
     return ownKeys(target);
   });
-  host.prepare(({ recorder }) =>
-    runtime.createPlayerRuntimeSession(
+  host.prepare(
+    await sourceStart(
+      host.bridge,
       'say "Counting", instant\nlet xs = (1..=1500).toList()\nlet zero = dynamic(0)\nlet result = 1 / zero\nexit\nfunction dynamic(value) {\n    return value\n}',
-      { recorder },
     ),
   );
   await host.activate();
@@ -731,10 +737,11 @@ test("a debug export offers a photo only the replay saves, also after a Player e
   );
   const rewind = mount(context, () => useDebugRewind(host));
   await host.loadScriptStorage();
-  host.prepare(({ recorder }) =>
-    runtime.createPlayerRuntimeSession(
+  host.prepare(
+    await sourceStart(
+      host.bridge,
       'let picture = load "picture", default: ""\ndelete "picture"\nshowButton "First"\nsave picture as "picture"\nshowButton "Second"\nexit',
-      { recorder, ...host.scriptStorageOptions() },
+      () => ({ ...host.scriptStorageOptions() }),
     ),
   );
   // The candidate's photos with their uses, and the file with every category and the photo chosen, read back.
@@ -808,8 +815,9 @@ for (const atDraw of [false, true])
     const host = mount(context, () => usePlayerSession({ capabilities: { camera: true } }));
     const rewind = mount(context, () => useDebugRewind(host));
     if (atDraw) host.setRandomControl({ sites: [] });
-    host.prepare(({ recorder }) =>
-      runtime.createPlayerRuntimeSession(
+    host.prepare(
+      await sourceStart(
+        host.bridge,
         [
           "let a = takePhoto()",
           'showButton "Next"',
@@ -818,7 +826,6 @@ for (const atDraw of [false, true])
           'showButton "Done"',
           "exit",
         ].join("\n"),
-        { recorder },
       ),
     );
     await host.activate();
@@ -884,8 +891,9 @@ test("a photo held back at a random draw the capture's observation reaches is re
   context.mock.method(performance, "now", () => now);
   const host = mount(context, () => usePlayerSession({ capabilities: { camera: true } }));
   host.setRandomControl({ sites: [] });
-  host.prepare(({ recorder }) =>
-    runtime.createPlayerRuntimeSession(
+  host.prepare(
+    await sourceStart(
+      host.bridge,
       [
         "let first = takePhoto()",
         'showButton "Next"',
@@ -894,7 +902,6 @@ test("a photo held back at a random draw the capture's observation reaches is re
         'showButton "Done"',
         "exit",
       ].join("\n"),
-      { recorder },
     ),
   );
   const binding = (name: string) =>

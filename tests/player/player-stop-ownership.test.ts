@@ -5,25 +5,27 @@ import { effectScope, nextTick, watch, type Ref } from "vue";
 import type * as CompileProject from "../../player/runtime/compile-project.js";
 import type * as InProcess from "../../player/engine-bridge/in-process.js";
 import type * as RuntimeAdapter from "../../player/runtime/runtime-adapter.js";
-import type { StartOptions } from "../../player/engine-bridge/ops/session.js";
 import { startBridgeHost, type HostSession } from "../../player/engine-bridge/worker-host.js";
 import { BRIDGE_VERSION } from "../../player/engine-bridge/protocol.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import type { DebugView, DebugViewRequest } from "../../player/debug/debug-view.js";
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
-import type {
-  PlayerRuntimeSession,
-  PlayerRuntimeSessionOptions,
-} from "../../player/runtime/runtime-adapter.js";
+import type { PlayerRuntimeSessionOptions } from "../../player/runtime/runtime-adapter.js";
 import type * as RuntimeView from "../../player/runtime/runtime-view.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 import { DEFAULT_TEMPORAL_CONTEXT, type TemporalContext } from "../../src/temporal.js";
 import { clockTicket } from "../helpers/clock-ticket.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
-import { preparedPlan } from "../helpers/prepared-plan.js";
+import {
+  preparedPlan,
+  preparedSource,
+  sourceStart,
+  type PlanStart,
+} from "../helpers/prepared-plan.js";
 import { deliveryOwner } from "../../player/engine-bridge/delivery.js";
 import type { UntypedBridge } from "../helpers/bridge/untyped.js";
 import { untypedBridge } from "../helpers/bridge/untyped.js";
+import { hostIntroduced, loadHostFacade } from "../helpers/player/host-sessions.js";
 
 /*
  * At a Player error stop, what is shown is what the host ran, which its export and recording hold, and nothing shows
@@ -36,12 +38,8 @@ interface StopHost {
   readonly hostError: Readonly<Ref<string | null>>;
   readonly stopped: Readonly<Ref<boolean>>;
   readonly bridge: Promise<PlayerBridge>;
-  prepare(
-    create:
-      | { readonly plan: string; readonly options: () => StartOptions }
-      | ((recording: PlayerRuntimeSessionOptions) => PlayerRuntimeSession),
-  ): void;
-  prepareRestore(restored: PlayerRuntimeSession): void;
+  prepare(create: PlanStart): void;
+  prepareRestore(restored: PlayerSession): void;
   activate(): Promise<void>;
   temporalCapture(): PlayerRuntimeSessionOptions;
   debugExportCandidate(
@@ -77,6 +75,7 @@ let adapter: typeof RuntimeAdapter;
 let view: typeof RuntimeView;
 
 before(async () => {
+  await loadHostFacade();
   const module = await loadPlayerModule("player/vue/src/session/usePlayerSession.ts");
   assert.equal(typeof module.usePlayerSession, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its host API.
@@ -141,10 +140,9 @@ async function mount(
   return { bridge, player, scope };
 }
 
-const factory =
-  (script: string) =>
-  (recording: PlayerRuntimeSessionOptions): PlayerRuntimeSession =>
-    compiler.createPlayerRuntimeSession(script, { ...recording, wallClockMs: 0 });
+/** A Start of `script` with the clock at 0, compiled in `player`'s host. */
+const startOf = (player: { readonly bridge: Promise<PlayerBridge> }, script: string) =>
+  sourceStart(player.bridge, script, () => ({ wallClockMs: 0 }));
 
 /** Moves the page's monotonic clock on by `milliseconds` for the rest of the test. */
 function later(context: TestContext, milliseconds: number) {
@@ -166,7 +164,9 @@ function stopLine(bridge: PlayerBridge, player: StopHost) {
 test("an observation in transit at a stop shows before the stop line, and nothing after it", async (context) => {
   const { bridge, player } = await mount(context);
   player.setDebugTracing(true); // Debug observes in one go, not on a catch-up copy.
-  player.prepare(factory('wait 1 s\nsay "arrived", instant\nshowButton "Done"\nexit'));
+  player.prepare(
+    await startOf(player, 'wait 1 s\nsay "arrived", instant\nshowButton "Done"\nexit'),
+  );
   await player.activate();
   later(context, 1_000);
   const afterStop: number[] = [];
@@ -191,7 +191,9 @@ test("an observation in transit at a stop shows before the stop line, and nothin
 
 test("an adoption in transit at a stop shows, as the store and recording hold it", async (context) => {
   const { bridge, player } = await mount(context);
-  player.prepare(factory('wait 1 s\nsay "caught up", instant\nshowButton "Done"\nexit'));
+  player.prepare(
+    await startOf(player, 'wait 1 s\nsay "caught up", instant\nshowButton "Done"\nexit'),
+  );
   await player.activate();
   later(context, 2_000);
   const request = bridge.client.request;
@@ -216,8 +218,9 @@ test("an adoption in transit at a stop shows, as the store and recording hold it
   assert.deepEqual([line.store, line.export, line.recording], [line.ui, line.ui, line.ui]);
 });
 
-test("a Start queued behind prepare that a factory Start replaced leaves the recorder to the replacement", async (context) => {
+test("a Start queued behind prepare that a Start replaced leaves the recorder to the replacement", async (context) => {
   const { bridge, player } = await mount(context);
+  const replacement = await startOf(player, 'say "replacement", instant\nshowButton "New"\nexit');
   const obsolete = compiler.compilePlayerProject(
     'say "obsolete", instant\nshowButton "Old"\nexit',
   ).plan!;
@@ -227,7 +230,7 @@ test("a Start queued behind prepare that a factory Start replaced leaves the rec
     source: { kind: "source", script: 'showButton "Compile"\nexit' },
   });
   const replaced = player.activate();
-  player.prepare(factory('say "replacement", instant\nshowButton "New"\nexit'));
+  player.prepare(replacement);
   const replacing = player.activate();
   await compiling;
   await replaced;
@@ -242,10 +245,16 @@ test("a Start queued behind prepare that a factory Start replaced leaves the rec
 
 test("a Continue a Start replaced while its reply was in transit leaves the replacement's trace as it is", async (context) => {
   const { player, bridge } = await mount(context);
+  const fresh = await startOf(
+    player,
+    'let fresh = 123\nsay "fresh ${fresh}", instant\nshowButton "New"\nexit',
+  );
   player.setDebugTracing(true);
-  player.prepareRestore(compiler.createPlayerRuntimeSession('showButton "Old"\nexit'));
+  player.prepareRestore(
+    hostIntroduced(bridge, compiler.createPlayerRuntimeSession('showButton "Old"\nexit')),
+  );
   const continuing = player.activate();
-  player.prepare(factory('let fresh = 123\nsay "fresh ${fresh}", instant\nshowButton "New"\nexit'));
+  player.prepare(fresh);
   await player.activate();
   const trace = facade.heldTrace(bridge)!;
   const before = trace.status();
@@ -284,8 +293,14 @@ function onceAsked(bridge: PlayerBridge, op: string, then: () => void) {
 for (const ending of ["replaced", "stopped"] as const)
   test(`a Continue ${ending} after its recording began in the host leaves the trace as it was`, async (context) => {
     const { player, bridge } = await mount(context);
+    const fresh = await startOf(
+      player,
+      'let fresh = 2\nsay "fresh ${fresh}", instant\nshowButton "New"\nexit',
+    );
     player.setDebugTracing(true);
-    player.prepare(factory('let first = 1\nsay "first ${first}", instant\nshowButton "Go"\nexit'));
+    player.prepare(
+      await startOf(player, 'let first = 1\nsay "first ${first}", instant\nshowButton "Go"\nexit'),
+    );
     await player.activate();
     const trace = facade.heldTrace(bridge)!;
     const before = trace.status();
@@ -295,15 +310,15 @@ for (const ending of ["replaced", "stopped"] as const)
       ended = true;
       if (ending === "stopped") player.reportHostError(new TypeError("A component failed."));
     });
-    player.prepareRestore(compiler.createPlayerRuntimeSession('showButton "Old"\nexit'));
+    player.prepareRestore(
+      hostIntroduced(bridge, compiler.createPlayerRuntimeSession('showButton "Old"\nexit')),
+    );
     const continuing = player.activate();
     for (let index = 0; index < 5 && !ended; index += 1) await turn();
     assert.ok(ended, "the Continue's recording began in the host");
     if (ending === "replaced") {
       // A Start replaces it while that reply is in transit; it begins its own epoch.
-      player.prepare(
-        factory('let fresh = 2\nsay "fresh ${fresh}", instant\nshowButton "New"\nexit'),
-      );
+      player.prepare(fresh);
       await player.activate();
     }
     await continuing.catch(() => {});
@@ -332,7 +347,8 @@ const pause = (milliseconds: number) => new Promise((resolve) => setTimeout(reso
 test("Debug mode turned on and off again before the host answered ends as last asked", async (context) => {
   const { player } = await mount(context, 80);
   player.prepare(
-    factory(
+    await startOf(
+      player,
       'let answer = askText "Ready?"\nsay "mode ${debugMode}", instant\nshowButton "Done"\nexit',
     ),
   );
@@ -354,7 +370,8 @@ test("a shown view of an older publication goes once a newer one shows, until it
   player.setDebugTracing(true);
   await pause(160);
   player.prepare(
-    factory(
+    await startOf(
+      player,
       'let mood = "calm"\nsay "${mood}", instant\nlet answer = askText "Ready?"\nsay "${answer}", instant\nshowButton "Done"\nexit',
     ),
   );
@@ -484,7 +501,10 @@ for (const kind of [
       if (kind === "continue-queued")
         compiled = bridge.client.request("prepare", { source: { kind: "source", script: "exit" } });
       player.prepareRestore(
-        compiler.createPlayerRuntimeSession('say "restored", instant\nshowButton "Next"\nexit'),
+        hostIntroduced(
+          bridge,
+          compiler.createPlayerRuntimeSession('say "restored", instant\nshowButton "Next"\nexit'),
+        ),
       );
       if (kind === "continue-in-transit") {
         const request = bridge.client.request;
@@ -526,12 +546,13 @@ for (const kind of [
 
 test("a Start that replaces an error stop pending on a Start the host rejects runs unstopped", async (context) => {
   const { bridge, player } = await mount(context);
+  const next = await startOf(player, 'say "replacement", instant\nshowButton "Next"\nexit');
   // The host holds no such plan, so it rejects the Start.
   player.prepare({ plan: "missing-plan", options: () => ({ wallClockMs: 0 }) });
   const rejected = player.activate();
   player.reportHostError(new TypeError("a component failed while a Start began"));
   assert.equal(player.stopped.value, true, "input stops while the stop waits for the Start");
-  player.prepare(factory('say "replacement", instant\nshowButton "Next"\nexit'));
+  player.prepare(next);
   const replacement = player.activate();
   await rejected;
   await replacement;
@@ -578,9 +599,16 @@ for (const [completion, issue] of Object.entries(completions))
   for (const interference of ["a replacement", "a stop", "an unmount"] as const)
     test(`${completion} in transit at ${interference} shows nothing of the session it was issued for`, async (context) => {
       const { bridge, player, scope } = await mount(context, 250);
+      const replacement = await startOf(
+        player,
+        'say "replacement", instant\nshowButton "New"\nexit',
+      );
       player.setDebugTracing(true);
       player.prepare(
-        factory('say "old paced"\nwait 10 s\nsay "old late", instant\nshowButton "Done"\nexit'),
+        await startOf(
+          player,
+          'say "old paced"\nwait 10 s\nsay "old late", instant\nshowButton "Done"\nexit',
+        ),
       );
       await player.activate();
       const issuer = player.session.value!;
@@ -589,7 +617,7 @@ for (const [completion, issue] of Object.entries(completions))
       const changes: (string | null)[] = [];
       let at: PlayerSession | null = null;
       if (interference === "a replacement") {
-        player.prepare(factory('say "replacement", instant\nshowButton "New"\nexit'));
+        player.prepare(replacement);
         await player.activate();
       } else if (interference === "a stop")
         player.reportHostError(new TypeError("a component failed"));
@@ -662,7 +690,7 @@ test("a jump another publication overtook seeks media to what shows, not to the 
     },
   });
   context.mock.method(performance, "now", () => 0);
-  player.prepare(factory('playAudio async "voice.mp3"\nwait 10 s\nexit'));
+  player.prepare(await startOf(player, 'playAudio async "voice.mp3"\nwait 10 s\nexit'));
   await player.activate();
   await turn();
   const audio = elements.find((element) => element.src === "https://fixture/voice.mp3");
@@ -710,14 +738,14 @@ test("a Continue whose capture throws fails after its recording began, so the fa
     return DEFAULT_TEMPORAL_CONTEXT;
   });
   // A session that played before, whose recording the host's recorder held.
-  player.prepare(factory('say "earlier", instant\nshowButton "Next"\nexit'));
+  player.prepare(await startOf(player, 'say "earlier", instant\nshowButton "Next"\nexit'));
   await player.activate();
   const earlier = player.session.value!;
   assert.equal(facade.heldRecording(bridge)?.plan, facade.heldPlan(bridge, earlier.planToken));
   const restored = compiler.createPlayerRuntimeSession(
     'say "restored", instant\nshowButton "Next"\nexit',
   );
-  player.prepareRestore(restored);
+  player.prepareRestore(hostIntroduced(bridge, restored));
   failing = true;
   await player.activate();
   for (let index = 0; index < 10; index += 1) await turn();
@@ -747,11 +775,16 @@ test("a Continue serialized behind one still beginning records its own click's z
     first = false;
     return reply.then(async (result) => (await held, result));
   });
-  player.prepareRestore(compiler.createPlayerRuntimeSession('showButton "Old"\nexit'));
+  player.prepareRestore(
+    hostIntroduced(bridge, compiler.createPlayerRuntimeSession('showButton "Old"\nexit')),
+  );
   const obsolete = player.activate();
   assert.equal(captures, 1);
   player.prepareRestore(
-    compiler.createPlayerRuntimeSession('say "new", instant\nshowButton "New"\nexit'),
+    hostIntroduced(
+      bridge,
+      compiler.createPlayerRuntimeSession('say "new", instant\nshowButton "New"\nexit'),
+    ),
   );
   const replacing = player.activate();
   assert.equal(captures, 2, "the second Continue captured in its click");
@@ -765,18 +798,19 @@ test("a Continue serialized behind one still beginning records its own click's z
   assert.equal(capture.epochMs, 1_793_966_400_000, "the clock of its own click");
 });
 
-for (const form of ["a factory", "a held plan"] as const)
+for (const form of ["a source prepare", "a held plan"] as const)
   test(`a Start serialized behind a Continue still beginning records its click's zone and clock (${form})`, async (context) => {
     let epoch = 1_793_966_400_000;
     let temporal = DEFAULT_TEMPORAL_CONTEXT;
     context.mock.method(Date, "now", () => epoch);
     const { bridge, player } = await mount(context, 0, undefined, () => temporal);
     const script = 'showButton "Go"\nexit';
-    // Held before anything is timed, as a host's `prepare` holds it.
-    const token = await preparedPlan(
-      Promise.resolve(bridge),
-      compiler.compilePlayerProject(script).plan!,
-    );
+    // Held before anything is timed, as a host's `prepare` holds it: as published plan text, or compiled from source as
+    // the development preview's scenarios are.
+    const token =
+      form === "a held plan"
+        ? await preparedPlan(Promise.resolve(bridge), compiler.compilePlayerProject(script).plan!)
+        : await preparedSource(Promise.resolve(bridge), script);
     // The Continue's `beginRecording` reply is held, so the Start waits for it (`begunInFlight`).
     const request = bridge.client.request.bind(bridge.client);
     let release!: () => void;
@@ -788,19 +822,18 @@ for (const form of ["a factory", "a held plan"] as const)
       first = false;
       return reply.then(async (result) => (await held, result));
     });
-    player.prepareRestore(compiler.createPlayerRuntimeSession('showButton "Old"\nexit'));
+    player.prepareRestore(
+      hostIntroduced(bridge, compiler.createPlayerRuntimeSession('showButton "Old"\nexit')),
+    );
     const obsolete = player.activate();
-    if (form === "a held plan")
-      player.prepare({
-        plan: token,
-        // As `hostedScript.ts` asks for it.
-        options: () => player.temporalCapture(),
-      });
-    else
-      // As `DevelopmentPreview.vue`'s factories ask for it.
-      player.prepare((recording) =>
-        compiler.createPlayerRuntimeSession(script, { ...recording, ...player.temporalCapture() }),
-      );
+    player.prepare({
+      plan: token,
+      // As `hostedScript.ts` asks for it, or the development preview's scenarios.
+      options:
+        form === "a held plan"
+          ? () => player.temporalCapture()
+          : () => ({ ...player.temporalCapture() }),
+    });
     const starting = player.activate();
     // After the click: the clock moves on, and the zone changes.
     epoch += 20_000;
@@ -820,7 +853,7 @@ for (const form of ["a factory", "a held plan"] as const)
   });
 
 for (const camera of [false, true])
-  for (const form of ["a factory", "a held plan"] as const)
+  for (const form of ["a source prepare", "a held plan"] as const)
     test(`a Start that reads the stored values records the click's capture, or the camera's answer's (${form}, camera ${camera ? "on" : "off"})`, async (context) => {
       const gate = () => {
         let open!: () => void;
@@ -889,19 +922,17 @@ for (const camera of [false, true])
       });
       await player.bridge;
       const script = 'showButton "Ready"\nexit';
-      const token = await preparedPlan(
-        Promise.resolve(bridge),
-        compiler.compilePlayerProject(script).plan!,
-      );
-      if (form === "a held plan")
-        player.prepare({ plan: token, options: () => player.temporalCapture() });
-      else
-        player.prepare((recording) =>
-          compiler.createPlayerRuntimeSession(script, {
-            ...recording,
-            ...player.temporalCapture(),
-          }),
-        );
+      const token =
+        form === "a held plan"
+          ? await preparedPlan(Promise.resolve(bridge), compiler.compilePlayerProject(script).plan!)
+          : await preparedSource(Promise.resolve(bridge), script);
+      player.prepare({
+        plan: token,
+        options:
+          form === "a held plan"
+            ? () => player.temporalCapture()
+            : () => ({ ...player.temporalCapture() }),
+      });
       const starting = player.activate();
       // The camera answers a second after the click; the read of the stored values then takes 20 seconds more, and the
       // zone changes meanwhile.

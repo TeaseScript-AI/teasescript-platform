@@ -16,18 +16,16 @@ import {
   compilePlayerProject,
   createPlayerRuntimeSession,
 } from "../../player/runtime/compile-project.js";
-import { preparedPlan } from "../helpers/prepared-plan.js";
+import { preparedPlan, type PlanStart } from "../helpers/prepared-plan.js";
 import { playerRuntimeAwaitsHost, type PlayerSession } from "../../player/runtime/runtime-view.js";
 import {
   memoryKeptRoomStore,
   memoryKeptSessionStore,
 } from "../../player/persistence/kept-sessions.js";
-import type { DebugRecorder } from "../../player/debug/debug-recorder.js";
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
 import {
   listRandomSites,
   type InstructionPlan,
-  type RandomControlOptions,
   type RandomDrawView,
   type RandomOutcome,
   type RandomSite,
@@ -40,7 +38,7 @@ import { drawCode, fileCode, outcomeLines } from "../../player/debug/random-draw
 import { loadSourceDebugSidecar } from "../../src/runtime/debug/source-sidecar.js";
 import { createSourceDebugSidecar } from "../../src/index.js";
 import { NO_MARKS } from "../../player/debug/debug-history-marks.js";
-import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
+import { loadHostFacade, onHost, hostIntroduced } from "../helpers/player/host-sessions.js";
 import { clockTicket } from "../helpers/clock-ticket.js";
 import { untypedClient } from "../helpers/bridge/untyped.js";
 
@@ -55,16 +53,7 @@ interface RandomHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly rooms: { readonly current: Readonly<Ref<"normal" | "debug">> };
   readonly bridge: Promise<PlayerBridge>;
-  prepareScript(
-    plan: string,
-    create:
-      | ((recording: {
-          readonly recorder: DebugRecorder;
-          readonly debugMode: boolean;
-          readonly randomControl?: RandomControlOptions;
-        }) => PlayerRuntimeSession)
-      | { readonly plan: string; readonly options: () => object },
-  ): Promise<void>;
+  prepareScript(plan: string, create: PlanStart): Promise<void>;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   activate(): Promise<void>;
@@ -277,9 +266,11 @@ async function mount(context: TestContext, plan: InstructionPlan) {
   })!;
   context.after(() => scope.stop());
   await mounted.host.loadScriptStorage();
-  await mounted.host.prepareScript(await preparedPlan(mounted.host.bridge, plan), (recording) =>
-    createPlayerRuntimeSession(plan, { ...recording, ...mounted.host.scriptStorageOptions() }),
-  );
+  const held = await preparedPlan(mounted.host.bridge, plan);
+  await mounted.host.prepareScript(held, {
+    plan: held,
+    options: () => mounted.host.scriptStorageOptions(),
+  });
   await settle(context);
   mounted.random.enabled.value = true;
   return mounted;
@@ -496,7 +487,9 @@ for (const { path, transition, name } of BOUNDARY_CASES)
     // Kept at its first draw, as a session the adapter's own control paused there.
     const kept = createPlayerRuntimeSession(plan, { randomControl: {} });
     if (path === "a raw restore, Continue")
-      host.prepareRestore(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(kept)));
+      host.prepareRestore(
+        hostIntroduced(bridge, restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(kept))),
+      );
     else if (path === "a kept restore, Continue")
       host.prepareRestore(await hostRestored(host, bridge, plan, kept));
     else if (path === "a Start's own session, Continue") {
@@ -650,9 +643,8 @@ test("a site's history lasts through Choose outcomes off and on, and goes when t
   const featureScope = effectScope();
   const random = featureScope.run(() => useDebugRandom(host))!;
   await host.loadScriptStorage();
-  await host.prepareScript(await preparedPlan(host.bridge, plan), (recording) =>
-    createPlayerRuntimeSession(plan, { ...recording, ...host.scriptStorageOptions() }),
-  );
+  const held = await preparedPlan(host.bridge, plan);
+  await host.prepareScript(held, { plan: held, options: () => host.scriptStorageOptions() });
   random.enabled.value = true;
   await settle(context);
   await host.activate();

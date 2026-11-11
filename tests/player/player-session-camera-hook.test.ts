@@ -8,18 +8,24 @@ import {
   type PlayerRuntimeSession,
 } from "../../player/runtime/runtime-adapter.js";
 import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
-import { pendingPlayerRuntimeStorageWrite } from "../../player/runtime/runtime-view.js";
+import {
+  pendingPlayerRuntimeStorageWrite,
+  type PlayerSession,
+} from "../../player/runtime/runtime-view.js";
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
 import type { SerializableRuntimeValue } from "../../src/index.js";
 import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
-import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
+import { loadHostFacade, onHost, hostIntroduced } from "../helpers/player/host-sessions.js";
+import { preparedSource, sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
+import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 
 // The adapter's functions, also on the sessions the composables' host holds (`helpers/player/host-sessions.ts`).
 const createPlayerRuntimeRestorePoint = onHost(rawCreatePlayerRuntimeRestorePoint);
 
 // Load the real Vue composable through the existing build tool: its browser-source imports use Vite resolution.
 interface CameraHost {
+  readonly bridge: Promise<PlayerBridge>;
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly canClearScriptStorage: Readonly<Ref<boolean>>;
   readonly viewfinder: Readonly<Ref<FakeTrack | null>>;
@@ -27,8 +33,8 @@ interface CameraHost {
   readonly hostError: Readonly<Ref<string | null>>;
   loadScriptStorage(): Promise<void>;
   clearScriptStorage(): Promise<boolean>;
-  prepare(create: () => PlayerRuntimeSession): void;
-  prepareRestore(restored: PlayerRuntimeSession): void;
+  prepare(create: PlanStart): void;
+  prepareRestore(restored: PlayerSession): void;
   activate(): Promise<void>;
 }
 let usePlayerSession: (options: {
@@ -130,7 +136,12 @@ test("saved data cannot be cleared while a restored session waits for the camera
     capturedMedia: { repository: new FakeMediaRepository() },
   });
   await host.loadScriptStorage();
-  host.prepareRestore(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(pending)));
+  host.prepareRestore(
+    hostIntroduced(
+      await host.bridge,
+      restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(pending)),
+    ),
+  );
 
   const activation = host.activate();
   assert.equal(host.session.value, null);
@@ -156,7 +167,7 @@ test("the script's camera view previews the session camera where it places it, a
   grant();
   const host = mount(context, { capabilities: { camera: true } });
   const shown = 'let view = showCamera stage\nshowButton "Hide"\nexit';
-  host.prepare(() => createPlayerRuntimeSession(shown));
+  host.prepare(await sourceStart(host.bridge, shown));
   await host.activate();
   const [camera] = tracks;
   assert.ok(camera);
@@ -178,14 +189,14 @@ test("the script's camera view previews the session camera where it places it, a
   assert.equal(host.viewfinderPlacement.value, "stage");
 
   // Hiding the view keeps the camera open for `takePhoto()`.
-  host.prepare(() => createPlayerRuntimeSession('showCamera\nhideCamera\nshowButton "Done"\nexit'));
+  host.prepare(await sourceStart(host.bridge, 'showCamera\nhideCamera\nshowButton "Done"\nexit'));
   await host.activate();
   assert.equal(host.viewfinderPlacement.value, null);
   assert.equal(host.viewfinder.value, null);
   assert.equal(tracks[2]?.readyState, "live");
 
   // A restored session shows the view where it was, with the camera Continue opens.
-  host.prepareRestore(restorePlayerRuntimeSession(saved));
+  host.prepareRestore(hostIntroduced(await host.bridge, restorePlayerRuntimeSession(saved)));
   await host.activate();
   assert.equal(host.viewfinderPlacement.value, "stage");
   assert.equal(host.viewfinder.value, tracks[3]);
@@ -196,8 +207,12 @@ test("a Start that throws after the camera opened releases the camera", async (c
   context.mock.method(console, "error", () => {});
   grant();
   const host = mount(context, { capabilities: { camera: true } });
-  host.prepare(() => {
-    throw new TypeError("The script could not start.");
+  // Its options are read as it begins, after the camera opened: a throw there is the Start's.
+  host.prepare({
+    plan: await preparedSource(host.bridge, "exit"),
+    options: () => {
+      throw new TypeError("The script could not start.");
+    },
   });
   await host.activate();
   assert.equal(host.hostError.value, "TypeError");

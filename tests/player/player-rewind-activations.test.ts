@@ -4,17 +4,17 @@
  */
 
 import assert from "node:assert/strict";
-import test, { type TestContext } from "node:test";
+import test, { before, type TestContext } from "node:test";
 import { isDeepStrictEqual } from "node:util";
 import { effectScope } from "vue";
 import {
   restorePlayerRuntimeSessionAt,
   type PlayerRuntimeSession,
 } from "../../player/runtime/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
 import { coverageGaps, product, type Coordinates } from "../helpers/family-coverage.js";
-import { onHost } from "../helpers/player/host-sessions.js";
+import { onHost, hostIntroduced, loadHostFacade } from "../helpers/player/host-sessions.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
+import { preparedSource } from "../helpers/prepared-plan.js";
 import {
   playerRuntimeSnapshot,
   RewindHost,
@@ -32,7 +32,11 @@ import {
   choose,
   shownView,
   holdRead,
+  untilShown,
 } from "../helpers/player/rewind-host.js";
+
+// `hostIntroduced` registers adapter sessions through the facade of the bundle the composable runs in.
+before(loadHostFacade);
 
 /*
  * L5h.3b, orchestrator 2's ruling on 21.7: while a rewind lifecycle gate is pending, a debug export captures the shown
@@ -350,13 +354,13 @@ test("the host holds only the latest activation's run, whether activations succe
 
 /*
  * L5h.3b, B2-L-C (orchestrator 2's invariant): every host message that names an activation's run carries its begin, and
- * the host begins the run the first time it sees it, whatever the message: a Start's or an introduction's, Continue's
- * handoff, a halt's or an incident's stop arguments. Generated over the activation × where it fails × how its Player
+ * the host begins the run the first time it sees it, whatever the message: a Start's, Continue's handoff, a halt's or an
+ * incident's stop arguments. Generated over the activation × where it fails × how its Player
  * error reaches the host; each case then Starts anew and disposes of the Player. The host holds the latest activation's
  * run only, and none after the disposal.
  */
 const RUN_AXES = {
-  activation: ["heldStart", "factoryStart", "continue"],
+  activation: ["heldStart", "continue"],
   failure: ["none", "beforeHost", "afterHost"],
   path: ["none", "commitIncident", "halt"],
 } as const;
@@ -376,8 +380,6 @@ function runInfeasible({ activation, failure, path }: RunCase): string | null {
     return "a Continue has its restored session, which its error stops";
   if (activation !== "continue" && failure === "beforeHost" && path === "halt")
     return "a Start that failed before the host has no session to halt";
-  if (activation === "factoryStart" && failure === "beforeHost")
-    return "a factory Start's first host step is its introduction; nothing fallible precedes it";
   return null;
 }
 
@@ -398,10 +400,13 @@ test("each activation's run reaches the host once, however the activation ends, 
       if (c.activation === "continue") {
         const first = host.session.value!;
         host.prepareRestore(
-          restorePlayerRuntimeSessionAt(
-            onHost((session: PlayerRuntimeSession) => session.plan)(first),
-            JSON.stringify(playerRuntimeSnapshot(first)),
-            first.events,
+          hostIntroduced(
+            bridge,
+            restorePlayerRuntimeSessionAt(
+              onHost((session: PlayerRuntimeSession) => session.plan)(first),
+              JSON.stringify(playerRuntimeSnapshot(first)),
+              first.events,
+            ),
           ),
         );
         if (c.failure === "beforeHost") {
@@ -415,15 +420,7 @@ test("each activation's run reaches the host once, however the activation ends, 
           });
         }
         host.activate();
-      } else if (c.activation === "factoryStart")
-        host.prepare((recording) => {
-          if (c.failure === "afterHost" && c.path === "commitIncident") throw failed;
-          return createPlayerRuntimeSession(script, {
-            ...host.scriptStorageOptions(),
-            ...recording,
-          });
-        });
-      else {
+      } else {
         const prepared = await bridge.client.request("prepare", {
           source: { kind: "source", script },
         });
@@ -565,12 +562,19 @@ function holdTransport(context: TestContext) {
 
 /** What the page posts over `bridge`, in order, with the retirement count it was posted after. */
 function postsOf(context: TestContext, bridge: PlayerBridge) {
-  const posts: { readonly op: string; readonly args: unknown; readonly phase: number }[] = [];
+  const posts: {
+    readonly op: string;
+    readonly args: unknown;
+    readonly phase: number;
+    /** A request's reply, as the page receives it; none for a post or a signal. */
+    readonly reply?: Promise<unknown>;
+  }[] = [];
   const state = { phase: 0 };
   const request = bridge.client.request.bind(bridge.client);
   context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
-    posts.push({ op: args[0], args: args[1], phase: state.phase });
-    return request(...args);
+    const reply = request(...args);
+    posts.push({ op: args[0], args: args[1], phase: state.phase, reply });
+    return reply;
   });
   const post = bridge.client.post.bind(bridge.client);
   context.mock.method(bridge.client, "post", (...args: Parameters<typeof post>) => {
@@ -613,6 +617,22 @@ function runOfShown(host: RewindHost): number | null {
     readonly diagnostic?: { readonly run: number | null };
   } | null;
   return shown?.diagnostic?.run ?? null;
+}
+
+/** The host's ID of the session the Player shows, or `null` before one shows. */
+function shownId(host: RewindHost): string | null {
+  // EVIDENCE: fixture: a host session's publication carries its host ID (`PlayerSession.id`).
+  const shown = host.session.value as { readonly id?: string } | null;
+  return shown?.id ?? null;
+}
+
+/** Starts `host` on `plan`, prepared before any hold: under a held transport (`held`) its show waits for the release. */
+async function startOn(context: TestContext, host: RewindHost, plan: string, held: boolean) {
+  await host.loadScriptStorage();
+  host.prepare({ plan, options: () => ({ ...host.scriptStorageOptions() }) });
+  host.activate();
+  if (held) await settle(context);
+  else await untilShown(context, host);
 }
 
 /** A further Player on `bridge`, as a page that claims the connection after another gave it up. */
@@ -712,9 +732,13 @@ test("an activation's completions act only while it lives, whichever reply is in
       const first = { host: made.host, rewind: made.rewind, stop: () => made.scope.stop() };
       const bridge = await first.host.bridge;
       await first.host.loadScriptStorage();
+      // The successor's plan, prepared before any hold: a source prepare behind held replies would wait for them.
+      const successorPlan = await preparedSource(bridge, script);
       const traffic = postsOf(subtest, bridge);
       const failed = new TypeError("The activation failed.");
       let transport: ReturnType<typeof holdTransport>;
+      // Where the activation under test begins in the traffic: a Continue's comes after its Start's own `start` post.
+      let carrierFrom = 0;
       if (c.boundary === "startReply") {
         const prepared = await bridge.client.request("prepare", {
           source: { kind: "source", script },
@@ -730,13 +754,17 @@ test("an activation's completions act only while it lives, whichever reply is in
         await start(subtest, first.host);
         const shown = first.host.session.value!;
         first.host.prepareRestore(
-          restorePlayerRuntimeSessionAt(
-            onHost((session: PlayerRuntimeSession) => session.plan)(shown),
-            JSON.stringify(playerRuntimeSnapshot(shown)),
-            shown.events,
+          hostIntroduced(
+            bridge,
+            restorePlayerRuntimeSessionAt(
+              onHost((session: PlayerRuntimeSession) => session.plan)(shown),
+              JSON.stringify(playerRuntimeSnapshot(shown)),
+              shown.events,
+            ),
           ),
         );
         transport = holdTransport(subtest);
+        carrierFrom = traffic.posts.length;
         first.host.activate();
         await settle(subtest);
       } else {
@@ -751,16 +779,20 @@ test("an activation's completions act only while it lives, whichever reply is in
         transport.passOne();
         await settle(subtest);
       }
-      const carrierPost = traffic.posts.find(
-        (post) =>
-          (post.op === "halt" && post.args !== null) ||
-          post.op === "commitIncident" ||
-          post.op === "start" ||
-          post.op === "beginRecording",
-      );
+      const carrierPost = traffic.posts
+        .slice(carrierFrom)
+        .find(
+          (post) =>
+            (post.op === "halt" && post.args !== null) ||
+            post.op === "commitIncident" ||
+            post.op === "start" ||
+            post.op === "beginRecording",
+        );
       const startRun = (args: unknown) => {
         // EVIDENCE: fixture: a Start's arguments carry its run's begin.
-        const { run } = args as { readonly run: unknown };
+        const { run } = args as {
+          readonly run: { readonly run: number; readonly retires: number | null };
+        };
         return run;
       };
       const carrierArgs =
@@ -778,7 +810,7 @@ test("an activation's completions act only while it lives, whichever reply is in
         traffic.retired();
         if (c.retirement === "disposal") first.stop();
         else {
-          await start(subtest, first.host);
+          await startOn(subtest, first.host, successorPlan, c.order === "afterSuccessor");
           live = first;
         }
         await settle(subtest);
@@ -786,7 +818,7 @@ test("an activation's completions act only while it lives, whichever reply is in
       const begin2 = async () => {
         if (c.successor === "newPlayer") {
           later.player = await playerOn(subtest, bridge);
-          await start(subtest, later.player.host);
+          await startOn(subtest, later.player.host, successorPlan, c.order === "afterSuccessor");
           live = later.player;
         }
       };
@@ -801,18 +833,25 @@ test("an activation's completions act only while it lives, whichever reply is in
       }
       await begin2();
       if (c.order === "afterSuccessor") {
-        // The successor's own replies wait behind the stale ones and then show: what stale work could change is the
-        // shown lineage, its run and the page's error.
-        const shownOf = (host: RewindHost) => ({
-          // EVIDENCE: fixture: a host session's publication carries its lineage.
-          lineage: (host.session.value as { readonly lineage?: string } | null)?.lineage,
-          run: runOfShown(host),
-          error: host.hostError.value,
-        });
-        const before = shownOf(live!.host);
+        // The successor's own replies, its Start's too, wait behind the stale ones and then show: stale work that acted
+        // would show another session, another run or the page's error in place of the successor's own.
+        const successorStart = traffic.posts.findLast((post) => post.op === "start")!;
+        const successorRun = startRun(successorStart.args).run;
         transport.release();
-        await settle(subtest);
-        untouched = isDeepStrictEqual(shownOf(live!.host), before);
+        for (let round = 0; round < 20 && runOfShown(live!.host) !== successorRun; round += 1)
+          await settle(subtest);
+        // EVIDENCE: fixture: a `start` reply names the session it began.
+        const { session: successorSession } = (await successorStart.reply) as {
+          readonly session: string;
+        };
+        untouched = isDeepStrictEqual(
+          {
+            session: shownId(live!.host),
+            run: runOfShown(live!.host),
+            error: live!.host.hostError.value,
+          },
+          { session: successorSession, run: successorRun, error: null },
+        );
       }
       const runsWhileLive = heldRuns(bridge);
       let exported: LifetimeObserved["exported"] = null;
@@ -889,10 +928,13 @@ test("a Continue's trace restart that fails after a successor began reports noth
   await start(context, host);
   const shown = host.session.value!;
   host.prepareRestore(
-    restorePlayerRuntimeSessionAt(
-      onHost((session: PlayerRuntimeSession) => session.plan)(shown),
-      JSON.stringify(playerRuntimeSnapshot(shown)),
-      shown.events,
+    hostIntroduced(
+      bridge,
+      restorePlayerRuntimeSessionAt(
+        onHost((session: PlayerRuntimeSession) => session.plan)(shown),
+        JSON.stringify(playerRuntimeSnapshot(shown)),
+        shown.events,
+      ),
     ),
   );
   const restart = holdOp(context, bridge, "restartTrace");

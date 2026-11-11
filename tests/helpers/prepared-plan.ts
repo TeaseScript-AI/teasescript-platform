@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 
+import type { StartOptions } from "../../player/engine-bridge/ops/session.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
+import type { PlayerProject } from "../../player/runtime/runtime-adapter.js";
 import type { InstructionPlan } from "../../src/index.js";
 import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkpoint-json.js";
 
@@ -36,4 +38,47 @@ export async function preparedPlan(
     "the host prepared the plan",
   );
   return result.plan;
+}
+
+/**
+ * `script`, compiled in the host of `bridge` by a source `prepare`, as a hosted script's is; resolves with its plan
+ * token. A script that does not compile rejects with its first error.
+ */
+export async function preparedSource(
+  bridge: PlayerBridge | Promise<PlayerBridge>,
+  script: string | PlayerProject,
+): Promise<string> {
+  const reply = await (
+    await bridge
+  ).client.request("prepare", { source: { kind: "source", script } });
+  const result = reply.result;
+  if (result.kind === "notCompiled") {
+    const error = result.diagnostics.find((diagnostic) => diagnostic.severity === "error");
+    throw new Error(
+      error === undefined
+        ? "The script did not compile."
+        : `${error.path}:${error.line}:${error.column}: ${error.message}`,
+    );
+  }
+  assert.equal(result.kind, "prepared", "the host prepared the script");
+  // EVIDENCE: invariant: a source `prepare` that compiled holds the plan under `plan`.
+  return (result as { readonly plan: string }).plan;
+}
+
+/**
+ * A Start of a plan the host holds, as `PlayerSessionStart`'s plan form gives it: its token and its Start options. The
+ * test loaders take only this form; `player-factory-start.test.ts`, held until PR B, alone admits a factory.
+ */
+export interface PlanStart {
+  readonly plan: string;
+  readonly options: () => Omit<StartOptions, "debugMode">;
+}
+
+/** A Start of `script`, compiled in the host of `bridge`, with `options` read at the activation. */
+export async function sourceStart(
+  bridge: PlayerBridge | Promise<PlayerBridge>,
+  script: string | PlayerProject,
+  options: () => Omit<StartOptions, "debugMode"> = () => ({}),
+): Promise<PlanStart> {
+  return { plan: await preparedSource(bridge, script), options };
 }

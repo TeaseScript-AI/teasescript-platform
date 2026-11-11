@@ -9,10 +9,7 @@ import type * as CompileProject from "../../player/runtime/compile-project.js";
 import type * as InProcess from "../../player/engine-bridge/in-process.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import type * as RuntimeAdapter from "../../player/runtime/runtime-adapter.js";
-import type {
-  PlayerRuntimeSession,
-  PlayerRuntimeSessionOptions,
-} from "../../player/runtime/runtime-adapter.js";
+import type { PlayerRuntimeSessionOptions } from "../../player/runtime/runtime-adapter.js";
 import {
   playerRuntimeForeground,
   playerRuntimePacingGate,
@@ -32,6 +29,8 @@ import type { ClockTicket } from "../../player/runtime/clock-ticket.js";
 import { clockTicket } from "../helpers/clock-ticket.js";
 import type { InputSectionHost } from "../../player/vue/src/session/runtime-input.js";
 import { untypedClient } from "../helpers/bridge/untyped.js";
+import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
+import type { StartOptions } from "../../player/engine-bridge/ops/session.js";
 
 /*
  * The Player's input over the engine's bridge (L5c), through the production intents, the input chain
@@ -47,7 +46,7 @@ interface InputHost {
   readonly hostError: Readonly<Ref<string | null>>;
   readonly bridge: Promise<PlayerBridge>;
   readonly inputSection: unknown;
-  prepare(create: (recording: PlayerRuntimeSessionOptions) => PlayerRuntimeSession): void;
+  prepare(create: PlanStart): void;
   activate(): Promise<void>;
   reportHostError(error: unknown): void;
   update(next: PlayerSession): void;
@@ -216,13 +215,15 @@ function track(context: TestContext, bridge: PlayerBridge) {
   };
 }
 
-const factory =
-  (script: string, extra: () => PlayerRuntimeSessionOptions = () => ({})) =>
-  (recording: PlayerRuntimeSessionOptions): PlayerRuntimeSession =>
-    compiler.createPlayerRuntimeSession(script, { ...recording, ...extra(), wallClockMs: 0 });
+/** A Start of `script` with the clock at 0, compiled in `host`'s host; `extra` adds options read at the activation. */
+const startOf = (
+  host: { readonly bridge: Promise<PlayerBridge> },
+  script: string,
+  extra: () => Omit<StartOptions, "debugMode"> = () => ({}),
+) => sourceStart(host.bridge, script, () => ({ ...extra(), wallClockMs: 0 }));
 
 async function start(host: InputHost, script: string, storage = false) {
-  host.prepare(factory(script, () => (storage ? host.scriptStorageOptions() : {})));
+  host.prepare(await startOf(host, script, () => (storage ? host.scriptStorageOptions() : {})));
   await host.activate();
   assert.ok(host.session.value);
   return host.session.value;
@@ -340,6 +341,7 @@ test("an input to an action no longer presented posts no op", async (context) =>
 for (const interference of ["a replacement", "a stop", "an unmount"] as const)
   test(`${interference} while the observation's reply is in transit opens no tab and posts no answer`, async (context) => {
     const { host, scope, posted } = await mount(context);
+    const replacement = await startOf(host, 'say "replacement", instant\nshowButton "New"\nexit');
     await start(host, 'openUrl("https://example.com")\nsay "after", instant\nexit');
     let opened = 0;
     const answering = answer(
@@ -350,7 +352,7 @@ for (const interference of ["a replacement", "a stop", "an unmount"] as const)
       }, "button"),
     );
     if (interference === "a replacement") {
-      host.prepare(factory('say "replacement", instant\nshowButton "New"\nexit'));
+      host.prepare(replacement);
       await host.activate();
     } else if (interference === "a stop") host.reportHostError(new TypeError("a component failed"));
     else scope.stop();
@@ -412,6 +414,7 @@ test("an answer dispatched before a stop shows through the stop's commit, and no
 for (const interference of ["a replacement", "an unmount"] as const)
   test(`${interference} while an answer's reply is in transit shows nothing of the old session`, async (context) => {
     const { host, scope, posted } = await mount(context);
+    const replacement = await startOf(host, 'say "replacement", instant\nshowButton "New"\nexit');
     await start(
       host,
       'let pick = askChoice "A", "B"\nsay "picked ${pick}", instant\nshowButton "End"\nexit',
@@ -422,7 +425,7 @@ for (const interference of ["a replacement", "an unmount"] as const)
       atStart = host.session.value;
       if (interference === "an unmount") scope.stop();
       else {
-        host.prepare(factory('say "replacement", instant\nshowButton "New"\nexit'));
+        host.prepare(replacement);
         replaced = host.activate();
       }
     });
@@ -640,6 +643,7 @@ for (const interference of ["a replacement", "a stop", "an unmount"] as const)
       delayMs: 50,
       scriptStorage: store.storage,
     });
+    const replacement = await startOf(host, 'say "replacement", instant\nshowButton "New"\nexit');
     await start(
       host,
       'showButton "Go"\nsave 1 as "kept"\nsay "saved", instant\nshowButton "End"\nexit',
@@ -648,7 +652,7 @@ for (const interference of ["a replacement", "a stop", "an unmount"] as const)
     let replaced: Promise<void> = Promise.resolve();
     posted.on("completeStorageWrite", () => {
       if (interference === "a replacement") {
-        host.prepare(factory('say "replacement", instant\nshowButton "New"\nexit'));
+        host.prepare(replacement);
         replaced = host.activate();
       } else if (interference === "a stop")
         host.reportHostError(new TypeError("a component failed"));
@@ -792,6 +796,7 @@ test("an image answer keeps its image held, also when the capture moved on befor
 
 test("a permanent button is pressed at the observed time, and a replaced session's press posts nothing", async (context) => {
   const { host, posted } = await mount(context);
+  const replacement = await startOf(host, 'say "replacement", instant\nshowButton "New"\nexit');
   await start(
     host,
     'showPermanentButton "Tick" {\n    say "tick", instant\n}\nshowButton "End"\nexit',
@@ -802,7 +807,7 @@ test("a permanent button is pressed at the observed time, and a replaced session
   // A replacement while the press's observation is in transit: the press goes to neither session.
   let replaced: Promise<void> = Promise.resolve();
   posted.on("observeInput", () => {
-    host.prepare(factory('say "replacement", instant\nshowButton "New"\nexit'));
+    host.prepare(replacement);
     replaced = host.activate();
   });
   await host.pressPermanentButton(1);

@@ -16,10 +16,12 @@ import {
 } from "../../player/runtime/runtime-adapter.js";
 import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
 import { pendingPlayerRuntimeStorageWrite } from "../../player/runtime/runtime-view.js";
-import type { DebugRecorder, DebugRecording } from "../../player/debug/debug-recorder.js";
+import type { DebugRecording } from "../../player/debug/debug-recorder.js";
 import { rebuildRecordedSession } from "../../player/debug/debug-export.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
+import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
+import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 
 // The adapter's functions, also on the sessions the composables' host holds (`helpers/player/host-sessions.ts`).
 const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
@@ -99,13 +101,9 @@ test("a save during a catch-up waits for the host at the scene time one late obs
 
 // The Vue session host and its scene clock, loaded through the build tool like the Player loads them.
 interface SessionHost {
+  readonly bridge: Promise<PlayerBridge>;
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
-  prepare(
-    create: (recording: {
-      readonly recorder: DebugRecorder;
-      readonly debugMode: boolean;
-    }) => PlayerRuntimeSession,
-  ): void;
+  prepare(create: PlanStart): void;
   activate(): Promise<void>;
   observe(): Promise<PlayerRuntimeSession | null>;
   update(next: PlayerRuntimeSession): void;
@@ -165,9 +163,7 @@ async function mount(
   context.after(() => scope.stop());
   if (randomControl !== undefined) host.setRandomControl(randomControl);
   // Recorded as every Player session is, so the debug export's replay can be checked.
-  host.prepare((recording) =>
-    createPlayerRuntimeSession(source, { ...sessionOptions, ...recording }),
-  );
+  host.prepare(await sourceStart(host.bridge, source, () => ({ ...sessionOptions })));
   await host.activate();
   return {
     host,

@@ -6,10 +6,6 @@ import type * as CompileProject from "../../player/runtime/compile-project.js";
 import type * as InProcess from "../../player/engine-bridge/in-process.js";
 import type { BridgeClient } from "../../player/engine-bridge/client.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
-import type {
-  PlayerRuntimeSession,
-  PlayerRuntimeSessionOptions,
-} from "../../player/runtime/runtime-adapter.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 import { runtimeInput, presentedAction } from "../helpers/player/player-input.js";
 import { rebuildRecordedSession } from "../../player/debug/debug-export.js";
@@ -17,6 +13,7 @@ import { playerRuntimeSnapshot } from "../../player/runtime/runtime-adapter.js";
 import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import type { BridgeResult } from "../../player/engine-bridge/client.js";
+import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
 
 /*
  * L5d in the Player: its media load reports over the bridge, through the real composable on a host that replies late,
@@ -34,7 +31,7 @@ interface MediaHost {
   readonly bridge: Promise<PlayerBridge>;
   readonly inputSection: import("../../player/vue/src/session/runtime-input.js").InputSectionHost;
   debugRecording(): Promise<import("../../player/debug/debug-recorder.js").DebugRecording | null>;
-  prepare(create: (recording: PlayerRuntimeSessionOptions) => PlayerRuntimeSession): void;
+  prepare(create: PlanStart): void;
   activate(): Promise<void>;
 }
 let usePlayerSession: (options: {
@@ -168,9 +165,7 @@ async function mount(context: TestContext, delayMs: number) {
   });
   await player.bridge;
   const start = async (script: string) => {
-    player.prepare((recording) =>
-      compiler.createPlayerRuntimeSession(script, { ...recording, wallClockMs: 0 }),
-    );
+    player.prepare(await sourceStart(player.bridge, script, () => ({ wallClockMs: 0 })));
     await player.activate();
   };
   const reports = () => posted.filter((request) => request.op === "reportMediaLoad");
@@ -383,10 +378,13 @@ for (const delay of [0, 50, 250])
     context.mock.method(performance, "now", () => now);
     const player = await mount(context, delay);
     let started = false;
+    // The page's clock when the Start showed, its scene time's 0: after its script's prepare and its `start` reply.
+    let startedAt = 0;
     let startError: unknown;
     void player.start('playAudio async "clock.mp3"\nwait 1.5 s\nshowButton "Done"\nexit').then(
       () => {
         started = true;
+        startedAt = now;
       },
       (e) => {
         startError = e;
@@ -431,7 +429,9 @@ for (const delay of [0, 50, 250])
       "multiple loaded-media observations",
     );
     assert.ok(
-      buttonAt !== null && waitDeadline !== null && buttonAt <= waitDeadline + 3 * delay,
+      buttonAt !== null &&
+        waitDeadline !== null &&
+        buttonAt - startedAt <= waitDeadline + 3 * delay,
       "shown button by wait plus three replies",
     );
     assert.ok(Math.max(...lags) - Math.min(...lags) < 0.001, "turn freshness");

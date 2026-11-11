@@ -20,12 +20,15 @@ import {
   nextPlayerRuntimeEventMs,
   pendingPlayerRuntimeStorageWrite,
   playerRuntimeDeadlines,
+  type PlayerSession,
 } from "../../player/runtime/runtime-view.js";
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
 import type { MediaProgressReport } from "../../src/index.js";
 import { harness } from "../helpers/player/player-media.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
+import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
+import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 
 // The adapter's functions, also on the sessions the composables' host holds (`helpers/player/host-sessions.ts`).
 const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
@@ -296,10 +299,11 @@ interface DevelopmentTimeHost {
   advanceBy(milliseconds: number): Promise<void>;
 }
 interface SessionHost {
+  readonly bridge: Promise<PlayerBridge>;
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly activation: Readonly<Ref<"start" | "continue" | null>>;
-  prepare(create: () => PlayerRuntimeSession): void;
-  prepareRestore(restored: PlayerRuntimeSession): void;
+  prepare(create: PlanStart): void;
+  prepareRestore(restored: PlayerSession): void;
   activate(): Promise<void>;
   update(next: PlayerRuntimeSession): void;
   observe(): Promise<PlayerRuntimeSession | null>;
@@ -326,6 +330,14 @@ let usePlayerDebug: (
   initial: { menu: boolean; autoSkip: boolean },
 ) => DebugHost;
 
+/**
+ * The session the composable shows, as the host's session it is: this file declares it as an adapter session for its
+ * adapter calls, which reach the host through `onHost`.
+ */
+const shown = (host: { readonly session: Readonly<Ref<unknown>> }) => {
+  // EVIDENCE: invariant: the composable's `session` holds the host's sessions (`PlayerSession`), whatever this file declares.
+  return host.session.value as PlayerSession;
+};
 before(async () => {
   await loadHostFacade();
   const session: Record<string, unknown> = await loadPlayerModule(
@@ -388,8 +400,8 @@ async function mount(
   assert.ok(mounted);
   context.after(() => scope.stop());
   await mounted.player.loadScriptStorage();
-  mounted.player.prepare(() =>
-    createPlayerRuntimeSession(source, mounted.player.scriptStorageOptions()),
+  mounted.player.prepare(
+    await sourceStart(mounted.player.bridge, source, () => mounted.player.scriptStorageOptions()),
   );
   await mounted.player.activate();
   return mounted;
@@ -542,7 +554,7 @@ async function mountDebug(
   });
   assert.ok(mounted);
   context.after(() => scope.stop());
-  mounted.player.prepare(() => createPlayerRuntimeSession(source));
+  mounted.player.prepare(await sourceStart(mounted.player.bridge, source));
   await mounted.player.activate();
   return mounted;
 }
@@ -594,7 +606,7 @@ test("a countdown shows while Debug runs, not before Continue, and follows displ
   assert.equal(debug.countdownText.value, null);
   debug.active.value = true;
   // A restored session waits for Continue before its countdown shows.
-  player.prepareRestore(player.session.value!);
+  player.prepareRestore(shown(player));
   assert.equal(player.activation.value, "continue");
   assert.equal(debug.countdownText.value, null);
   await player.activate();

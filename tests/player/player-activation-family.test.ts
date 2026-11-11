@@ -10,18 +10,16 @@ import type { UntypedSend } from "../helpers/bridge/untyped.js";
 import type { DebugViewRequest } from "../../player/debug/debug-view.js";
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
-import type {
-  PlayerRuntimeSession,
-  PlayerRuntimeSessionOptions,
-} from "../../player/runtime/runtime-adapter.js";
+import type { PlayerRuntimeSession } from "../../player/runtime/runtime-adapter.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 import type { StartOptions } from "../../player/engine-bridge/ops/session.js";
 import type { InstructionPlan } from "../../src/index.js";
 import { coverageGaps, product, type Coordinates } from "../helpers/family-coverage.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
-import { preparedPlan } from "../helpers/prepared-plan.js";
+import { preparedPlan, type PlanStart } from "../helpers/prepared-plan.js";
 import { clockTicket } from "../helpers/clock-ticket.js";
 import { untypedClient } from "../helpers/bridge/untyped.js";
+import { hostIntroduced, loadHostFacade } from "../helpers/player/host-sessions.js";
 
 /*
  * Session split S2's runtime family (HEAD 0 §7): an activation's completions act only while it lives. Each case is a
@@ -160,11 +158,7 @@ interface FamilyHost {
   observe(): Promise<PlayerSession | null>;
   readonly randomRevision: Readonly<Ref<number>>;
   readonly bridge: Promise<PlayerBridge>;
-  prepare(
-    create:
-      | { readonly plan: string; readonly options: () => StartOptions }
-      | ((recording: PlayerRuntimeSessionOptions) => PlayerRuntimeSession),
-  ): void;
+  prepare(create: PlanStart): void;
   prepareRestore(restored: PlayerRuntimeSession | PlayerSession): void;
   activate(): Promise<void>;
   setDebugMode(enabled: boolean): void;
@@ -200,6 +194,7 @@ let compiler: typeof CompileProject;
 let client: typeof ClientModule;
 
 before(async () => {
+  await loadHostFacade();
   const session = await loadPlayerModule("player/vue/src/session/usePlayerSession.ts");
   assert.equal(typeof session.usePlayerSession, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its host API.
@@ -242,10 +237,11 @@ function planOf(script: string): InstructionPlan {
   return plan;
 }
 
-const factory =
-  (script: string) =>
-  (recording: PlayerRuntimeSessionOptions): PlayerRuntimeSession =>
-    compiler.createPlayerRuntimeSession(planOf(script), { ...recording, wallClockMs: 0 });
+/** A Start of `script`'s cached plan with the clock at 0, prepared in `player`'s host as plan text. */
+const startOf = async (player: { readonly bridge: Promise<PlayerBridge> }, script: string) => ({
+  plan: await preparedPlan(player.bridge, planOf(script)),
+  options: () => ({ wallClockMs: 0 }),
+});
 
 /** A browser surface with event targets, and audio elements the test can find. */
 function browser(context: TestContext) {
@@ -603,6 +599,13 @@ async function run(context: TestContext, c: Case, mode: Mode): Promise<Seen> {
   const tokenOf = async (script: string) => preparedPlan(Promise.resolve(bridge), planOf(script));
   // A replacement Start of a held plan, whose begin posts `start`.
   const successorPlan = c.transition === "replacement" ? await tokenOf(SUCCESSOR) : null;
+  // The other Starts of the case, prepared before anything is timed.
+  const preparedAgain =
+    c.transition === "preparation" ? await tokenOf('say "prepared", instant\nexit') : null;
+  const nextPlayerPlan =
+    c.successor === "newPlayer"
+      ? await tokenOf('say "next Player", instant\nlet next = askChoice "Go"\nexit')
+      : null;
 
   // Up to the held reply.
   let pending: Promise<unknown> | null = null;
@@ -611,7 +614,7 @@ async function run(context: TestContext, c: Case, mode: Mode): Promise<Seen> {
   let held: Hold;
   const script = c.handle === "mediaLoad" ? `playAudio async "bell.mp3"\n${SCRIPT}` : SCRIPT;
   const begin = async () => {
-    host.prepare(factory(script));
+    host.prepare({ plan: await tokenOf(script), options: () => ({ wallClockMs: 0 }) });
     await host.activate();
     await settle();
   };
@@ -642,7 +645,12 @@ async function run(context: TestContext, c: Case, mode: Mode): Promise<Seen> {
       await settle();
       held = traffic.arm("setDebugMode");
       // A session kept with Debug off: Continue tells it Debug is on.
-      host.prepareRestore(compiler.createPlayerRuntimeSession(planOf(script), { wallClockMs: 0 }));
+      host.prepareRestore(
+        hostIntroduced(
+          bridge,
+          compiler.createPlayerRuntimeSession(planOf(script), { wallClockMs: 0 }),
+        ),
+      );
       pending = host.activate();
       break;
     case "adoption":
@@ -818,7 +826,7 @@ async function run(context: TestContext, c: Case, mode: Mode): Promise<Seen> {
         lose();
         return null;
       case "preparation":
-        host.prepare(factory('say "prepared", instant\nexit'));
+        host.prepare({ plan: preparedAgain!, options: () => ({ wallClockMs: 0 }) });
         return null;
       case "errorStop":
         host.reportHostError(new RangeError("The Player failed while it began."));
@@ -835,7 +843,7 @@ async function run(context: TestContext, c: Case, mode: Mode): Promise<Seen> {
       players.push(second);
       watchOn(second.player, "second");
       await second.player.bridge;
-      second.player.prepare(factory('say "next Player", instant\nlet next = askChoice "Go"\nexit'));
+      second.player.prepare({ plan: nextPlayerPlan!, options: () => ({ wallClockMs: 0 }) });
       await bounded(second.player.activate(), "the new Player's Start begins");
     }
     await settle();
@@ -1047,7 +1055,8 @@ test("the activation family completed every feasible full tuple, and nothing els
  * reporters, whose plain order here is unchanged. Since #2262 a request of no session posts when it is made, behind no
  * earlier reply: the later peer's reply (`reply after`) comes before the effects of an entry's session work in `draw`,
  * `export` and `mediaLoad`, an order the bridge does not promise; and a lost request rejects with no hop through the
- * connection's queue, so `reply before lost` comes before the later microtask in `loss`. With `ACTIVATION_LEDGER_OUT` set, the ledgers are written there as
+ * connection's queue, so `reply before lost` comes before the later microtask in `loss`. Since every Start takes the plan
+ * form (L5i.7), `start` shows on the host's reply, as `heldStart` does, and no longer before its peers. With `ACTIVATION_LEDGER_OUT` set, the ledgers are written there as
  * JSON, so that another head's run can be compared with this one's.
  */
 
@@ -1082,9 +1091,12 @@ async function ledgerOf(context: TestContext, entry: Entry): Promise<string[]> {
   if (entry === "draw" || entry === "adoption") host.setRandomControl({ sites: [] });
   if (entry === "debugView") host.setDebugTracing(true);
   // A Start of a held plan, prepared in the host first.
-  const token = entry === "heldStart" ? await preparedPlan(host.bridge, planOf(script)) : null;
+  const token =
+    entry === "heldStart" || entry === "start"
+      ? await preparedPlan(host.bridge, planOf(script))
+      : null;
   if (entry !== "start" && entry !== "heldStart" && entry !== "initialExport") {
-    host.prepare(factory(script));
+    host.prepare(await startOf(host, script));
     await host.activate();
     await settle();
   }
@@ -1111,7 +1123,7 @@ async function ledgerOf(context: TestContext, entry: Entry): Promise<string[]> {
   peer("before");
   switch (entry) {
     case "start":
-      host.prepare(factory(script));
+      host.prepare({ plan: token!, options: () => ({ wallClockMs: 0 }) });
       settled(host.activate());
       break;
     case "heldStart":
@@ -1164,11 +1176,11 @@ async function ledgerOf(context: TestContext, entry: Entry): Promise<string[]> {
 
 const LEDGER: Readonly<Record<Entry, readonly string[]>> = {
   start: [
-    "show waiting @0 [rolled]",
     "microtask before",
     "microtask after",
-    "settled undefined",
     "reply before",
+    "show waiting @0 [rolled]",
+    "settled undefined",
     "reply after",
   ],
   heldStart: [
@@ -1283,7 +1295,7 @@ test("a Debug mode reply clears only its own request's marker, so a later change
   context.after(made.stop);
   const host = made.player;
   await host.bridge;
-  host.prepare(factory(SCRIPT));
+  host.prepare(await startOf(host, SCRIPT));
   await host.activate();
   await settle();
   // The second change's reply waits with its application: what shows meanwhile is the first's.

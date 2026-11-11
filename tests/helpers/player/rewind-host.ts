@@ -10,14 +10,12 @@ import type { HistoryPoint } from "../../../player/engine-bridge/history/core.js
 import type { DebugHistorySpill } from "../../../player/engine-bridge/history/snapshots.js";
 import type { DebugHistoryView } from "../../../player/debug/debug-history.js";
 import type { LifecycleAction } from "../../../player/debug/rewind-lifecycle.js";
-import type { DebugRecorder } from "../../../player/debug/debug-recorder.js";
 import {
   selectPlayerRuntimeChoice as rawSelectPlayerRuntimeChoice,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
   playerRuntimeSnapshot as rawPlayerRuntimeSnapshot,
 } from "../../../player/runtime/runtime-adapter.js";
-import { createPlayerRuntimeSession } from "../../../player/runtime/compile-project.js";
 import {
   playerRuntimeForeground,
   type PlayerSession,
@@ -25,13 +23,13 @@ import {
 import type { ScriptStorageProvider } from "../../../player/persistence/script-storage.js";
 import type { KeptRoomStore } from "../../../player/persistence/kept-sessions.js";
 import type { RuntimeSnapshot, SerializableRuntimeValue } from "../../../src/index.js";
-import type { RuntimeDebugContext } from "../../../src/runtime/debug/debug-trace.js";
 import { published } from "../debug-readers.js";
 import { loadPlayerModule } from "../player-modules.js";
 import { loadHostFacade, onHost } from "./host-sessions.js";
 import { interceptSends } from "../bridge/sends.js";
 import type { PlayerBridge } from "../../../player/runtime/player-bridge.js";
 import type * as ClientModule from "../../../player/engine-bridge/client.js";
+import { sourceStart, type PlanStart } from "../prepared-plan.js";
 
 // The adapter's functions, also on the sessions the composables' host holds (`helpers/player/host-sessions.ts`).
 export const selectPlayerRuntimeChoice = onHost(rawSelectPlayerRuntimeChoice);
@@ -67,16 +65,9 @@ export interface RewindHost {
   };
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
-  prepare(
-    create:
-      | ((recording: {
-          readonly recorder: DebugRecorder;
-          readonly debugTrace?: RuntimeDebugContext;
-        }) => PlayerRuntimeSession)
-      | { readonly plan: string; readonly options: () => PlayerRuntimeSessionOptions },
-  ): void;
+  prepare(create: PlanStart): void;
   activate(): void;
-  prepareRestore(given: PlayerRuntimeSession): void;
+  prepareRestore(given: PlayerSession): void;
   reportHostError(error: unknown): void;
   setDebugTracing(on: boolean): void;
   readonly hostError: Readonly<Ref<string | null>>;
@@ -433,11 +424,17 @@ export const script = [
 
 export async function start(context: TestContext, host: RewindHost) {
   await host.loadScriptStorage();
-  host.prepare((recording) =>
-    createPlayerRuntimeSession(script, { ...host.scriptStorageOptions(), ...recording }),
-  );
+  host.prepare(await sourceStart(host.bridge, script, () => ({ ...host.scriptStorageOptions() })));
   host.activate();
-  await settle(context);
+  await untilShown(context, host);
+}
+
+/** Settles until the prepared session shows: a Start of a held plan shows once its reply is applied, a few turns after the click. */
+export async function untilShown(context: TestContext, host: RewindHost) {
+  const before = host.session.value;
+  for (let round = 0; round < 20 && host.session.value === before; round += 1)
+    await settle(context);
+  assert.notEqual(host.session.value, before, "the activation shows its session");
 }
 
 // Chooses as the Player's interaction does: the session is readied for input first, and only then is input evaluated.

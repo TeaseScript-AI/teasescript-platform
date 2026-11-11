@@ -3,6 +3,7 @@ import type { PlayerBridge } from "../../../player/runtime/player-bridge.js";
 import type { PlayerRuntimeSession } from "../../../player/runtime/runtime-adapter.js";
 import type { PlayerSession } from "../../../player/runtime/runtime-view.js";
 import type { RuntimeDebugContext } from "../../../src/runtime/debug/debug-trace.js";
+import { NO_MARKS, type HistoryMarks } from "../../../player/debug/debug-history-marks.js";
 import { loadPlayerModule } from "../player-modules.js";
 
 /*
@@ -32,6 +33,9 @@ export interface OnHost<A extends unknown[], R extends AdapterResult> {
 
 let hatch: Hatch | null = null;
 let heldTrace: ((bridge: PlayerBridge) => RuntimeDebugContext | null) | null = null;
+let introduceNow:
+  | ((bridge: PlayerBridge, make: () => PlayerRuntimeSession, marks: HistoryMarks) => PlayerSession)
+  | null = null;
 
 /** Loads the facade of the bundle the composables run in; call it in `before`, before any `onHost` call runs. */
 export async function loadHostFacade(): Promise<void> {
@@ -42,6 +46,23 @@ export async function loadHostFacade(): Promise<void> {
   if (typeof facade.heldTrace !== "function") throw new Error("The bundle's facade has no trace.");
   // EVIDENCE: validation: checked as a function above; it is the bundle facade's `heldTrace`.
   heldTrace = facade.heldTrace as typeof heldTrace;
+  if (typeof facade.introduceNow !== "function")
+    throw new Error("The bundle's facade has no introduction.");
+  // EVIDENCE: validation: checked as a function above; it is the bundle facade's `introduceNow`.
+  introduceNow = facade.introduceNow as typeof introduceNow;
+}
+
+/**
+ * `session`, an adapter session a test restored or made, as a session the composable's in-process host on `bridge` now
+ * holds, with `marks` (none by default), before the test passes it to `prepareRestore`.
+ */
+export function hostIntroduced(
+  bridge: PlayerBridge,
+  session: PlayerRuntimeSession,
+  marks: HistoryMarks = NO_MARKS,
+): PlayerSession {
+  if (introduceNow === null) throw new Error("Call loadHostFacade first.");
+  return introduceNow(bridge, () => session, marks);
 }
 
 /** The value trace a composable's in-process host holds on `bridge` (L5i.3), or `null` while Debug does not run. */
