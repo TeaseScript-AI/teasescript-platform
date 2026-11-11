@@ -20,6 +20,7 @@ import {
 import { withoutEmpty } from "../exact-path.js";
 import type { FlowNode } from "../flow-graph.js";
 import type { Item, ItemTag } from "../items.js";
+import { amend } from "../retained/retained.js";
 import { sharing } from "../sharing.js";
 import { addRest } from "./classes.js";
 import { eligibleOf } from "./eligibility.js";
@@ -215,7 +216,10 @@ export function* scanAt(
     const items = yield* evaluate(d, at);
     // (#2065: a store holding nothing at the path, which the prefix's index, once made, does not read)
     const holders = scans[best]!.holders;
-    if (holders !== null && first === null && holdsNothing(items)) holders.wasted += 1;
+    if (holders !== null && first === null && holdsNothing(items)) {
+      holders.wasted += 1;
+      amend(holders);
+    }
     const definite =
       first === null && items.some((item) => item.tag === "unknown") ? [] : deciding(items);
     sawNull ||= items.some((item) => item.tag === "null");

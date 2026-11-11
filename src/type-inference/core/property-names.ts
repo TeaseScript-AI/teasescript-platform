@@ -26,7 +26,7 @@ import { keptPath, recordPath, type Key } from "./definitions.js";
 import { dictList } from "./method-categories.js";
 import { propertyName } from "./program.js";
 import type { Work } from "./solver.js";
-import { Retained, retainedModule } from "./retained/retained.js";
+import { amend, Retained, retainedModule } from "./retained/retained.js";
 
 /** A task of a property name search (`propertyNames`): a value at a path, a key, or a literal at a path. */
 export type PropertyNamesTask =
@@ -327,10 +327,10 @@ function listingMemo(pass: CorePass): ListingMemo {
   const memo: ListingMemo = {
     stops: contract.stoppedCount,
     stopped: work.stopped,
-    listings: new Map(),
+    listings: Retained.map("ListingMemo.listings"),
     // (a stores object's single top reads the prefix index alone, which no stop changes: kept for the pass once found)
-    tops: known?.tops ?? new Map(),
-    contributions: new Map(),
+    tops: known?.tops ?? Retained.map("ListingMemo.tops"),
+    contributions: Retained.map("ListingMemo.contributions"),
   };
   listingMemos().set(contract, memo);
   return memo;
@@ -456,13 +456,13 @@ function byRest(
   let at = memo.listings.get(of);
   if (at === undefined) {
     if (!make) return undefined;
-    memo.listings.set(of, (at = { listing: undefined, next: new Map() }));
+    memo.listings.set(of, (at = { listing: undefined, next: Retained.map("ListingMemo.next") }));
   }
   for (const step of rest) {
     let next: ByRest | undefined = at.next.get(step);
     if (next === undefined) {
       if (!make) return undefined;
-      at.next.set(step, (next = { listing: undefined, next: new Map() }));
+      at.next.set(step, (next = { listing: undefined, next: Retained.map("ListingMemo.next") }));
     }
     at = next;
   }
@@ -487,7 +487,9 @@ function remember(
   rest: readonly string[],
   listing: Listing,
 ): Listing {
-  byRest(memo, of, rest, true)!.listing = listing;
+  const at = byRest(memo, of, rest, true)!;
+  at.listing = listing;
+  amend(at);
   return listing;
 }
 
@@ -542,6 +544,7 @@ function classify(
   if (contribution.steps === null && !pumps) {
     contribution.steps = followersOf(pass, contribution.place, contribution.path);
     contribution.followed = true;
+    amend(contribution);
   }
   const { names, steps } = contribution;
   const adds = (step: Planned | Made): boolean => {

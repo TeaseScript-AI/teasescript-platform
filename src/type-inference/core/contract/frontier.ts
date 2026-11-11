@@ -1444,6 +1444,8 @@ function builtSlot(
   if (heldStopped(frontier)) return null;
   if (frontier.reads.has(slot)) return frontier.reads.get(slot) === null ? null : slot;
   const work = contract.pass.program.work;
+  // (a slot's build grows the frontier in place, in the run that asks it: its nodes, sets, pending sets and goals)
+  amend(frontier);
   const reach = work.shared((): Reach | null => {
     try {
       if (!cyclic(frontier, place)) return null;
@@ -1463,6 +1465,8 @@ function builtSlot(
     }
   });
   frontier.reads.set(slot, reach);
+  // (and its product's shapes, a frontier of their own, where the build has made or grown them)
+  if (frontier.product !== null) amend(frontier.product.shapes);
   return reach === null ? null : slot;
 }
 

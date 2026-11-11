@@ -301,7 +301,10 @@ function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): De
     for (const entry of holding ?? stored.list) {
       work.charge("checks");
       const items = admission.run(contract.entryAt(entry, rest));
-      if (holders !== null && holdsNothing(items)) holders.wasted += 1;
+      if (holders !== null && holdsNothing(items)) {
+        holders.wasted += 1;
+        amend(holders);
+      }
       if (offends(items)) takeAll(entry.ds);
     }
     // (the prefix's layers' summaries: an offending item in one is an offending source of it, whose layer's stores

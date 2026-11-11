@@ -251,6 +251,8 @@ export function* propertyItems(
       index.holding = holding;
     }
     index.saved += sources.length - (index.holding.get(rest.at(0)!) ?? 0);
+    // (the index made at an earlier read, its holding and savings filled here)
+    amend(index);
     if (index.saved < cost) return null;
     // (#1323: with the sharing on every group, F11's earliest lacking named among them as among entries off)
     const shared = groups === null ? null : { groups };
