@@ -84,6 +84,7 @@ export function compileProjectWithBackend(files) {
   if (source === "settling" && settling) (settling = false), wait(1800);
   if (source === "slow") wait(700);
   if (source === "hang") wait(6000);
+  if (source === "failing" && import.meta.url.includes("/base/")) throw new Error("fails");
   if (source === "exits") process.exit(3);
   // (a throw that waits for the compile and its record: the worker's event loop runs it only after both, #2426)
   if (source === "async-after" && !thrown) (thrown = true), setTimeout(() => { throw new Error("async after record"); });
@@ -867,14 +868,34 @@ test("the plans summary refuses, naming file, line and fault, any line that is n
       },
     ],
   });
-  // (each row one fault, which only its own clause refuses; the valid record first, which must pass)
-  // (a row whose fault is null passes)
+  const stopList = (stops: [string, number][]) =>
+    stops.map(([phase, allowance]) => ({ allowance, phase }));
+  const apartStops = {
+    count: 2,
+    sameSet: false,
+    differ: [],
+    base: stopList([
+      ["walk", 1],
+      ["walk", 2],
+    ]),
+    head: stopList([
+      ["walk", 2],
+      ["walk", 3],
+    ]),
+  };
+  const withStops = (r: ReturnType<typeof valid>, stops: Record<string, unknown>) => ({
+    ...r,
+    modes: [{ ...r.modes[0], stops }],
+  });
+  // (each row one fault, which only its own clause refuses; a row whose fault is null passes: the valid records first,
+  // one with apart stops)
   const rows: (readonly [
     string,
     (r: ReturnType<typeof valid>) => object | string,
     RegExp | null,
   ])[] = [
     ["a valid record", (r) => r, null],
+    ["a valid record with apart stops", (r) => withStops(r, apartStops), null],
     ["not JSON", () => "{not json", /no JSON/],
     ["a key that is no hash", (r) => ({ ...r, key: "k" }), /no sha256/],
     ["an unknown field", (r) => ({ ...r, extra: 1 }), /no source record/],
@@ -1018,6 +1039,96 @@ test("the plans summary refuses, naming file, line and fault, any line that is n
       () => ({ set: "s", name: "n", uncharged: "timeout", run: null }),
       /does not word so/,
     ],
+    // (#2340: the stops a held mode records, and the lists of both trees where its sets differ)
+    [
+      "stops unavailable without a reason",
+      (r) => withStops(r, { unavailable: 1 }),
+      /without its reason/,
+    ],
+    [
+      "stops with an unknown field",
+      (r) => withStops(r, { ...apartStops, extra: 1 }),
+      /stops not one/,
+    ],
+    [
+      "one tree's list alone",
+      (r) => withStops(r, { ...apartStops, head: undefined }),
+      /without the other's/,
+    ],
+    [
+      "lists where the sets are the same",
+      (r) => withStops(r, { ...apartStops, sameSet: true }),
+      /the same on both trees/,
+    ],
+    [
+      "a count not the base's",
+      (r) => withStops(r, { ...apartStops, count: 9 }),
+      /not the base's stops/,
+    ],
+    [
+      "lists equal where the sets differ",
+      (r) => withStops(r, { ...apartStops, head: apartStops.base }),
+      /lists equal/,
+    ],
+    [
+      "a stop with an extra field",
+      (r) => withStops(r, { ...apartStops, head: [{ allowance: 1, phase: "walk", at: 0 }] }),
+      /no \{allowance, phase\}/,
+    ],
+    [
+      "a non-positive allowance",
+      (r) => withStops(r, { ...apartStops, head: [{ allowance: 0, phase: "walk" }] }),
+      /positive whole allowance/,
+    ],
+    [
+      "allowances out of order",
+      (r) =>
+        withStops(r, {
+          ...apartStops,
+          head: stopList([
+            ["walk", 2],
+            ["walk", 1],
+          ]),
+        }),
+      /consecutive and ascending/,
+    ],
+    [
+      "an allowance twice",
+      (r) =>
+        withStops(r, {
+          ...apartStops,
+          head: stopList([
+            ["walk", 1],
+            ["walk", 1],
+          ]),
+        }),
+      /consecutive and ascending/,
+    ],
+    [
+      "a gap in a phase",
+      (r) =>
+        withStops(r, {
+          ...apartStops,
+          head: stopList([
+            ["walk", 1],
+            ["walk", 3],
+          ]),
+        }),
+      /consecutive and ascending/,
+    ],
+    [
+      "a phase in two blocks",
+      (r) =>
+        withStops(r, {
+          ...apartStops,
+          head: stopList([
+            ["walk", 1],
+            ["read", 5],
+            ["walk", 2],
+          ]),
+        }),
+      /two blocks/,
+    ],
   ];
   for (const [at, [label, change, fault]] of rows.entries()) {
     const changed = change(valid());
@@ -1032,4 +1143,133 @@ test("the plans summary refuses, naming file, line and fault, any line that is n
       assert.equal(ran.stdout, "", label);
     }
   }
+});
+
+test("the plans summary says which tree added, removed or moved each stop, by its phase, and an unrecorded list is unavailable (#2340)", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  const side = {
+    plan: digest("p"),
+    diagnostics: digest("d"),
+    checks: 0,
+    error: null,
+    trace: "1/1/a0",
+    questions: "1/b0",
+    units: 1,
+  };
+  /** A stop list as `heldStops` gives it: each phase's allowances ascending, the phases from the highest down. */
+  const stopsOf = (phases: [string, number, number][]) =>
+    phases.flatMap(([phase, low, high]) =>
+      Array.from({ length: high - low + 1 }, (_, i) => ({ allowance: low + i, phase })),
+    );
+  // (phase names in neither alphabetical nor allowance order; a phase the base alone has, one the head alone has, one
+  // shifted by 43, as #2064's analysis units moved, a record from before #2340 without lists, and phase blocks in
+  // another order alone; a malformed list is refused, in the summary's table of faults)
+  const walk: [string, number, number] = ["walk", 5, 7];
+  const publication: [string, number, number] = ["publication", 1121, 1125];
+  const extraction: [string, number, number] = ["extraction", 300, 301];
+  const entries: [string, Record<string, unknown>][] = [
+    ["removed", { base: stopsOf([publication, walk]), head: stopsOf([publication]) }],
+    ["added", { base: stopsOf([publication]), head: stopsOf([publication, extraction]) }],
+    [
+      "moved",
+      { base: stopsOf([publication, walk]), head: stopsOf([["publication", 1164, 1168], walk]) },
+    ],
+    ["unrecorded", {}],
+    ["reordered", { base: stopsOf([publication, walk]), head: stopsOf([walk, publication]) }],
+  ];
+  const modes = entries.map(([mode, lists]) => ({
+    mode,
+    base: side,
+    head: side,
+    same: true,
+    stops: {
+      count: Array.isArray(lists.base) ? lists.base.length : 1,
+      sameSet: false,
+      differ: [],
+      ...lists,
+    },
+  }));
+  const failing = {
+    mode: "failing",
+    base: side,
+    head: side,
+    same: true,
+    stops: { unavailable: "the base's unstopped compile failed: Error: no" },
+  };
+  const file = join(folder, "records.jsonl");
+  const record = { set: "held", name: "c", runs: 6, differing: 5, modes: [...modes, failing] };
+  writeFileSync(file, `${JSON.stringify(record)}\n`);
+  const ran = spawnSync(process.execPath, [tool, "summary", file, "--list", "100"], {
+    encoding: "utf8",
+  });
+  assert.equal(ran.status, 0, ran.stderr);
+  const [countsLine, ...lines] = ran.stdout.trim().split("\n");
+  const counts = JSON.parse(countsLine!);
+  assert.deepEqual(
+    ["stopSet", "stopsAdded", "stopsRemoved", "stopsMoved", "stopsUnavailable"].map(
+      (key) => counts[key],
+    ),
+    [5, 1, 1, 1, 3],
+  );
+  const apart = (mode: string, count: number) =>
+    `held c mode "${mode}": STOP SET apart (main ${count} stops)`;
+  assert.deepEqual(lines, [
+    apart("removed", 8),
+    'held c mode "removed": stop phase "walk" removed: base 5..7 (3), head none (0)',
+    apart("added", 5),
+    'held c mode "added": stop phase "extraction" added: base none (0), head 300..301 (2)',
+    apart("moved", 8),
+    'held c mode "moved": stop phase "publication" moved: base 1121..1125 (5), head 1164..1168 (5)',
+    apart("unrecorded", 1),
+    'held c mode "unrecorded": which stops moved is unavailable (no stop lists recorded, a record from before #2340)',
+    apart("reordered", 8),
+    'held c mode "reordered": which stops moved is unavailable (the lists differ, no phase does)',
+    'held c mode "failing": stop set unavailable (the base\'s unstopped compile failed: Error: no)',
+  ]);
+});
+
+test("the plans comparison keeps both trees' stops where they differ, and says a held case's stop search did not run (#2340)", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  built(folder, [["fine", "fine"]]);
+  // (one held case whose stops move by tree, and one whose base compile fails)
+  for (const tree of ["base", "head"])
+    writeFileSync(
+      join(folder, tree, "dist", "tests/helpers/type-core-held-host.js"),
+      `export const HELD_MODES = ${JSON.stringify(ORDERS.base)}.map((name) => ({ name, run: (f) => f() }));
+export const heldFamily = () => ["moving", "failing"].map((name) => ({ name, source: name, slice: true }));
+export const heldStops = () => [{ allowance: ${tree === "head" ? 12 : 10}, phase: "walk" }];
+`,
+    );
+  const out = join(folder, "held.jsonl");
+  const ran = spawnSync(
+    process.execPath,
+    [tool, join(folder, "base"), join(folder, "head"), "held", "--stops", "--out", out],
+    { encoding: "utf8" },
+  );
+  assert.equal(ran.status, 1, ran.stderr);
+  const records = readFileSync(out, "utf8")
+    .trim()
+    .split("\n")
+    .map((line): Record<string, unknown> => JSON.parse(line));
+  const stopsOf = (name: string) => {
+    const { modes } = records.find((record) => record.name === name)!;
+    assert.ok(Array.isArray(modes));
+    return modes.map((entry: Record<string, unknown>) => entry.stops);
+  };
+  assert.deepEqual(
+    stopsOf("moving"),
+    ORDERS.base.map(() => ({
+      count: 1,
+      sameSet: false,
+      differ: [],
+      base: [{ allowance: 10, phase: "walk" }],
+      head: [{ allowance: 12, phase: "walk" }],
+    })),
+  );
+  assert.deepEqual(
+    stopsOf("failing"),
+    ORDERS.base.map(() => ({ unavailable: "the base's unstopped compile failed: Error: fails" })),
+  );
 });
