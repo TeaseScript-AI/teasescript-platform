@@ -14,6 +14,7 @@ import { readFileSync } from "node:fs";
 //   refuses too.
 // - A push whose lines delete or rewrite a ref under `refs/archive/` is refused.
 // - It judges only those lines, never the command, and pushes its archives with `--no-verify`, so it runs once per push.
+// - Containment is read from the commits themselves, not from this clone's replacement refs or graft file.
 // - Git prunes on the remote only refs that no ref of this clone maps onto, so the local archive refs keep a mirror or
 //   pruning push from deleting the archives.
 //
@@ -26,7 +27,13 @@ import { readFileSync } from "node:fs";
 
 const ZERO = /^0+$/u;
 const ARCHIVE = "refs/archive/";
-const git = (...args) => spawnSync("git", args, { encoding: "utf8" });
+// (git reading the history the objects store: no replacement ref or graft file of this clone, which a push does not
+// send, can make a rewrite look like a fast-forward)
+const git = (...args) =>
+  spawnSync("git", args, {
+    encoding: "utf8",
+    env: { ...process.env, GIT_NO_REPLACE_OBJECTS: "1", GIT_GRAFT_FILE: "/dev/null" },
+  });
 
 /** The push's ref lines, `{ local, ref, old }` each. */
 const parse = (lines) =>
