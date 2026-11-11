@@ -455,8 +455,8 @@ or `{name, set, unit, key?, runs?, storage?}` for a unit of a set as `stop-runs.
 of stored values by key, is the script storage each run starts with, so a `load` reads it (#2338). A name twice, an
 unknown key, a malformed line, a set's unit missing or ambiguous, `storage` without `runs`, or storage that cannot be
 copied or that the tree's runtime rejects (`validateScriptStorageEntries`) refuses the whole file (exit 2) before any
-plan runs or record is written. A run that writes nothing (a refusal, or `join`'s exit 1 below) removes an earlier
-run's `--out`, unless that file is one of its inputs, and says so on stderr.
+plan runs or record is written. A run's host values are checked by the runtime as each run starts: a value it rejects
+is that run's `threw`, and the run exits 1.
 
 A record is `{name, case, checker, core, candidate}`:
 - `checker`, and each mode of `candidate` that is not refused: `diagnostics` (severity, code, path, one-based line and

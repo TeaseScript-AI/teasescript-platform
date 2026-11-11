@@ -389,11 +389,6 @@ test("join refuses an output that is one of its inputs, by path or link, and lea
   const ran = joinOf(folder, { base: rows }, join(folder, "out.jsonl"));
   assert.equal(ran.ran.status, 0, ran.ran.stderr);
   assert.equal(ran.text, before);
-  // (a later join that writes nothing, a case missing, removes that earlier output rather than leave it as its own)
-  const failed = joinOf(folder, { base: rows, head: rows.slice(0, 2) }, join(folder, "out.jsonl"));
-  assert.equal(failed.ran.status, 1, failed.ran.stderr);
-  assert.match(failed.ran.stderr, /removed .*out\.jsonl, an earlier run's output/);
-  assert.equal(failed.text, null);
   assert.deepEqual(
     readdirSync(folder).filter((file) => file.includes(".partial-")),
     [],
@@ -716,7 +711,7 @@ test("a case's storage is what each run's load reads, on the checker and the cor
     assert.equal(existsSync(refusedOut), false);
   }
   // (a seed that cannot be copied, or that the runtime rejects, is found before any plan runs: after a valid case, the
-  // file is refused and no record written; an earlier run's output on that path is removed, never left standing)
+  // file is refused and no record written)
   type Nested = number | { kind: "list"; items: Nested[] };
   let deep: Nested = 1;
   for (let depth = 0; depth < 2000; depth += 1) deep = { kind: "list", items: [deep] };
@@ -734,15 +729,12 @@ test("a case's storage is what each run's load reads, on the checker and the cor
         .map((c) => `${JSON.stringify(c)}\n`)
         .join(""),
     );
-    const earlier = readFileSync(out, "utf8");
-    const again = join(folder, "again.jsonl");
-    writeFileSync(again, earlier);
-    const refused = spawnSync(process.execPath, [tool, resolve("."), bad, "--out", again], {
+    const fresh = join(folder, "fresh.jsonl");
+    const refused = spawnSync(process.execPath, [tool, resolve("."), bad, "--out", fresh], {
       encoding: "utf8",
     });
     assert.equal(refused.status, 2, refused.stderr);
     assert.match(refused.stderr, why);
-    assert.match(refused.stderr, /removed .*again\.jsonl, an earlier run's output/);
-    assert.equal(existsSync(again), false);
+    assert.equal(existsSync(fresh), false);
   }
 });
