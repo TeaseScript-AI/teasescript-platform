@@ -36,11 +36,12 @@ const [{ costlyTestSeconds }, { summaryLine }, { isSuiteTestPath, isTypeCoreTest
 //
 //   node tools/check-changed.mjs [--merged | --merged-checkout <commit>] [--base <ref>]
 //
-// The base is `--base`, else the open pull request's base (`gh pr view`, as `origin/<base>`), else `origin/main`; the
-// changes are those since its merge-base with HEAD, committed or not, untracked files included. Always: `git diff
-// --check`, the format check of the changed files, oxlint, knip, the doc links and the imports, each as CI runs it, and
-// `merge commits`: since the merge-base, no merge commit but one whose later parents are on origin/main or
-// origin/runtime-v2 and not on the base (`strayMerges`).
+// The base is `--base`, else the open pull request's base (`gh pr view`, as `origin/<base>`), else the long-lived branch
+// whose merge-base with HEAD is fewest commits back, `origin/main` or `origin/runtime-v2`, which it prints
+// (`nearestLongLived`); the changes are those since its merge-base with HEAD, committed or not, untracked files
+// included. Always: `git diff --check`, the format check of the changed files, oxlint, knip, the doc links and the
+// imports, each as CI runs it, and `merge commits`: since the merge-base, no merge commit but one whose later parents
+// are on origin/main or origin/runtime-v2 and not on the base (`strayMerges`).
 // Then each project a changed path belongs to (`projectsFor`): its type check and tests. A root configuration file
 // belongs to the checks that read it, and needs no project when only those that always run do. A changed path no
 // project claims, other than documentation, runs every project's checks. It never builds the TypeScript or runs the
@@ -265,7 +266,7 @@ const USAGE =
 
 /**
  * `--merged`, `--merged-checkout`'s commit (or null), and the base: `--base`, else the open pull request's base, else
- * `origin/main`.
+ * `nearestLongLived`'s, which it prints.
  */
 function options(argv) {
   let merged = false;
@@ -287,10 +288,36 @@ function options(argv) {
   const pr = spawnSync("gh", ["pr", "view", "--json", "baseRefName", "-q", ".baseRefName"], {
     encoding: "utf8",
   });
+  if (pr.status === 0 && pr.stdout.trim() !== "")
+    return { merged, mergedCheckout, ref: `origin/${pr.stdout.trim()}` };
+  const { ref, line } = nearestLongLived();
+  process.stdout.write(`${line}\n`);
+  return { merged, mergedCheckout, ref };
+}
+
+/**
+ * The base of a branch without a pull request: of `origin/main` and `origin/runtime-v2`, the one whose merge-base with
+ * HEAD is fewest commits back from HEAD, `origin/main` on a tie or when neither has one; and a line naming it, with
+ * each one's distance. A branch of runtime-v2 is so checked against runtime-v2, not against main (#2409).
+ */
+export function nearestLongLived() {
+  const distances = MERGED_INTO_EACH_OTHER.map((ref) => {
+    const mergeBase = spawnSync("git", ["merge-base", "HEAD", ref], { encoding: "utf8" });
+    if (mergeBase.status !== 0) return [ref, null];
+    const count = spawnSync("git", ["rev-list", "--count", `${mergeBase.stdout.trim()}..HEAD`], {
+      encoding: "utf8",
+    });
+    return [ref, count.status === 0 ? Number(count.stdout) : null];
+  });
+  const [ref] = distances.reduce((nearest, next) =>
+    next[1] !== null && (nearest[1] === null || next[1] < nearest[1]) ? next : nearest,
+  );
+  const each = distances
+    .map(([name, count]) => `${name} ${count === null ? "none" : `${count} back`}`)
+    .join(", ");
   return {
-    merged,
-    mergedCheckout,
-    ref: pr.status === 0 && pr.stdout.trim() !== "" ? `origin/${pr.stdout.trim()}` : "origin/main",
+    ref,
+    line: `check-changed: no --base and no pull request: base ${ref}, the long-lived branch whose merge-base with HEAD is nearest (${each})`,
   };
 }
 
