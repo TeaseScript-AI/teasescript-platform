@@ -1,3 +1,4 @@
+// pins: work totals at two demands, four modes | line /^const OUTSIDE\b/u
 import assert from "node:assert/strict";
 import test from "node:test";
 

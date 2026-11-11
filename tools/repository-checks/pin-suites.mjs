@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { readdirSync, readFileSync } from "node:fs";
+import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { suiteTestFiles } from "../test-shards.mjs";
 
@@ -7,124 +8,99 @@ import { suiteTestFiles } from "../test-shards.mjs";
 //
 //   node tools/repository-checks/pin-suites.mjs [--base <ref>] [--run]
 //
-// `PIN_SUITES` declares the suites, by hand: each one pins a whole-analysis count (a work total, a table of totals or
-// of `main`'s recorded work as bounds, a count of listed copy or construction sites) or a digest of what an analysis
-// publishes, so any change under `src/type-inference/core/` can move it, and the suite itself is listed when it or a
-// file holding its pins changes: a suite whose pins are in two files has a declaration for each, and is listed once.
+// Each file that holds such pins says so in its first line, a mark (`readMarks`): `// pins: <what> | line /<regex>/`
+// in a suite, or `// pins for <suite>, ...: <what> | line /<regex>/` in a file holding pins those suites run (`in`).
+// Each suite pins a whole-analysis count (a work total, a table of totals or of `main`'s recorded work as bounds, a
+// count of listed copy or construction sites) or a digest of what an analysis publishes, so any change under
+// `src/type-inference/core/` can move it, and the suite itself is listed when it or a file holding its pins changes: a
+// suite whose pins are in two files is named by a mark in each, and is listed once.
 // The changes are those since the merge-base of HEAD and `--base` (default `origin/main`), committed or not, untracked
 // files included, as `check-changed.mjs` reads them. A change to a test helper lists only the suites whose pins it holds
 // (`in`), not every suite that imports it.
 //
 // Without options it prints the pinning suites the changes reach, one `dist/tests/…` line each, or `none`; exit 0.
 // `--run` runs them through `tools/test-output-filter.mjs` (built tests are needed: `npm run build:typescript`); exit 1
-// when one fails. Exit 2 on another option, or when the changes cannot be read (no merge-base).
+// when one fails. Exit 2 on another option, when the changes cannot be read (no merge-base), or on a mark `readMarks`
+// faults.
 //
-// The list is the authority. Its test (`pin-suites.test.mjs`) requires each suite's `pin` to find a line in the file
-// holding its pins, and finds three pin forms by their text (`PIN_FORMS`): an `assert.equal` of `.total` to a literal of
-// four or more digits, a table of four or more such literals, and a `[count, "reason"]` record. A pin written another
-// way (`strictEqual`, `deepEqual` of a short tuple or an object, a total under four digits, a helper's table, a nested
-// table such as work-a's) is not found; that test is a net for a forgotten suite, and `NOT_PINS` declares the files it
-// finds that pin no work. Under `tests/helpers/type-core/families/` it also requires every recorded bound to be a line
-// some declaration's `pin` finds in that file, and claims a position, not a meaning: in the code of that folder, neither
-// `main` nor `measured` occurs outside the admitted positions. Comments, JSDoc included, are not code and are not read:
-// they cannot record or change a bound. The code is every node `forEachChild` reaches from a file's source; every
-// identifier, private name, string and template without substitutions spelled so is classified by its role. Admitted
-// are `main: <object literal>` and `measured: <numeric literal>` (the two records), a property signature, and the
-// identifier `main` as a declared, imported or exported binding or as a callee (the program builder). Any other
-// occurrence fails, naming its file, line and role, and so does every object spread and every computed name that is
-// not a literal. Not claimed: a bound recorded under a third property name, a bound outside that folder, and a bound
-// changed at run time by code that names neither property (a key built at run time, a write through an alias).
+// The marks are the authority; each mark's regex must find a line of its file other than the mark. Their test
+// (`pin-suites.test.mjs`) finds four pin forms by their text (`PIN_FORMS`): an `assert.equal` of `.total` to a literal
+// of four or more digits, a table of four or more such literals, a `[count, "reason"]` record, and a property set to a
+// hex digest of 16 or more digits. A pin written another way (`strictEqual`, `deepEqual` of a short tuple or an object,
+// a total under four digits, a helper's table, a nested table such as work-a's) is not found; that test is a net for a
+// suite with no mark, and `NOT_PINS` declares the test files it finds that pin no work. Under
+// `tests/helpers/type-core/families/` it also requires every recorded bound to be a line a mark of that file finds, and
+// claims a position, not a meaning: in the code of that folder, neither `main` nor `measured` occurs outside the
+// admitted positions. Comments, JSDoc and marks included, are not code and are not read there: they cannot record or
+// change a bound. The code is every node `forEachChild` reaches from a file's source; every identifier, private name,
+// string and template without substitutions spelled so is classified by its role. Admitted are `main: <object literal>`
+// and `measured: <numeric literal>` (the two records), a property signature, and the identifier `main` as a declared,
+// imported or exported binding or as a callee (the program builder). Any other occurrence fails, naming its file, line
+// and role, and so does every object spread and every computed name that is not a literal. Not claimed: a bound
+// recorded under a third property name, a bound outside that folder, and a bound changed at run time by code that names
+// neither property (a key built at run time, a write through an alias).
 
 /** The core, whose every file can move a pin. */
 const CORE = "src/type-inference/core/";
 
 /**
- * Each suite that pins the core's exact work or its published answers: its file, what it pins, a line its pins hold
- * (`pin`), and, when its pins are elsewhere, the file holding them (`in`); one declaration per file holding its pins.
+ * A mark, the first line of a file under `tests/` that holds pins: `// pins: <what> | line /<regex>/<flags>` in a
+ * suite, or `// pins for <suite>, <suite>: <what> | line /<regex>/<flags>` in a file holding pins those suites run.
  */
-export const PIN_SUITES = [
-  {
-    file: "tests/type-core/type-core-candidate.test.ts",
-    pins: "an integer rule's total and checks",
-    pin: /^\s*assert\.deepEqual\(units, \[/u,
-  },
-  {
-    file: "tests/type-core/type-core-closure.test.ts",
-    pins: "work totals at two demands, four modes",
-    pin: /^const OUTSIDE\b/u,
-  },
-  {
-    file: "tests/type-core/type-core-contract-capture.test.ts",
-    pins: "one capture total",
-    pin: /^\s*assert\.equal\(budget\.total,/u,
-  },
-  {
-    file: "tests/type-core/type-core-declared-escapes.test.ts",
-    pins: "main's stop states and plan and runs digests at the declared difference's window edges, and main's publication and runs at the first-asker windows",
-    pin: /^export const MAIN: /u,
-    in: "tests/helpers/type-core/type-core-declared-escapes-main.ts",
-  },
-  {
-    file: "tests/type-core/type-core-f18.test.ts",
-    pins: "a literal default's total, decision and default work",
-    pin: /^\s*\{ total: \d/u,
-  },
-  {
-    file: "tests/type-core/type-core-key-ids.test.ts",
-    pins: "listed copy sites",
-    pin: /^const COPIES_LISTED\b/u,
-  },
-  {
-    file: "tests/type-core/type-core-kept.test.ts",
-    pins: "listed construction sites",
-    pin: /^const (?:LISTED|STORED)\b/u,
-  },
-  {
-    file: "tests/type-core/type-core-work-a.test.ts",
-    pins: "a store check's work per mode",
-    pin: /^\s*assert\.deepEqual\(measured, \[/u,
-  },
-  {
-    file: "tests/type-core/type-core-work-a.test.ts",
-    pins: "main's 64 → 128 growth step of the read chains and mixed-source adds, as gates",
-    pin: /\bmeasured: \d/u,
-    in: "tests/helpers/type-core/families/admission-products.ts",
-  },
-  {
-    file: "tests/type-core/type-core-work-b.test.ts",
-    pins: "main's work per family, as bounds",
-    pin: /^\s*main: \{\s*$/u,
-    in: "tests/helpers/type-core/families/output-bound.ts",
-  },
-  {
-    file: "tests/type-core/type-core-work-b.test.ts",
-    pins: "main's 64 → 128 growth step of W34's two known products, as gates",
-    pin: /^\s*measured: \d/u,
-    in: "tests/helpers/type-core/families/w34-links.ts",
-  },
-  {
-    file: "tests/type-core/type-core-work-c.test.ts",
-    pins: "main's work per shape, as bounds",
-    pin: /^\s*(?:(?:shared|unshared): \{|setup: \[|"checks \d|\[\d{4,}(?:, \d{4,}){3}\])/u,
-  },
-  {
-    file: "tests/type-core/type-core-work-c.test.ts",
-    pins: "main's 64 → 128 growth step of admission's known products, as gates",
-    pin: /^\s*measured: \d/u,
-    in: "tests/helpers/type-core/families/admission-products.ts",
-  },
-  {
-    file: "tests/type-core/type-core-work-c.test.ts",
-    pins: "main's growth per doubling of the listing chains, as bounds",
-    pin: /^\s*main: \{ total: \d/u,
-    in: "tests/helpers/type-core/families/property-names.ts",
-  },
-  {
-    file: "tests/type-core/type-core-contract.test.ts",
-    pins: "the published answers' digests (TABLE r4.185)",
-    pin: /^\s*upToOrder: "[0-9a-f]{16}",/u,
-  },
-];
+const MARK = /^\/\/ pins(?: for ([^:]+))?: (.+?) \| line \/(.+)\/([a-z]*)$/u;
+/** A line that begins a mark, wherever it stands. */
+const MARK_START = /^\s*\/\/\s*pins\b/u;
+
+/**
+ * The pinning suites the marks under `root`'s `tests/` declare, one record per suite and marked file: its `file`, what
+ * it pins (`pins`), a line its pins hold (`pin`) and, when the mark is in another file, that file (`in`); in path order.
+ * `faults` names each mark that does not parse, names no test file as its suite, finds no line of its file but itself,
+ * or is not a file's first line.
+ */
+export function readMarks(root) {
+  const tests = new Set(testFiles(root));
+  const suites = [];
+  const faults = [];
+  const files = readdirSync(join(root, "tests"), { recursive: true })
+    .filter((name) => /\.(?:ts|mts|cts|js|mjs|cjs)$/u.test(name))
+    .map((name) => `tests/${name.split(sep).join("/")}`)
+    .sort();
+  for (const file of files) {
+    const lines = readFileSync(join(root, file), "utf8").split("\n");
+    for (const [at, line] of lines.entries())
+      if (at > 0 && MARK_START.test(line))
+        faults.push(`${file}:${at + 1}: a mark is a file's first line`);
+    if (!MARK_START.test(lines[0])) continue;
+    const found = MARK.exec(lines[0]);
+    if (found === null) {
+      faults.push(`${file}:1: no mark: use // pins[ for <suite>, ...]: <what> | line /<regex>/`);
+      continue;
+    }
+    let pin;
+    try {
+      pin = new RegExp(found[3], found[4]);
+    } catch (error) {
+      faults.push(`${file}:1: the mark's line is no regex: ${error.message}`);
+      continue;
+    }
+    if (!lines.slice(1).some((line) => pin.test(line)))
+      faults.push(`${file}:1: no line of the file but the mark's own is a line ${pin} finds`);
+    const named = found[1]?.split(",").map((suite) => suite.trim());
+    for (const suite of named ?? [file]) {
+      if (!tests.has(suite)) faults.push(`${file}:1: ${suite} is no test file`);
+      else
+        suites.push({
+          file: suite,
+          pins: found[2],
+          pin,
+          ...(named === undefined ? {} : { in: file }),
+        });
+    }
+  }
+  const key = (suite) => `${suite.file}\n${suite.in ?? ""}`;
+  suites.sort((a, b) => (key(a) < key(b) ? -1 : 1));
+  return { suites, faults };
+}
 
 /** The files the pin forms find that pin no work, each with what its numbers are. */
 export const NOT_PINS = [
@@ -137,13 +113,17 @@ export const NOT_PINS = [
   { file: "tests/runtime/message-markup.test.ts", is: "character codes" },
   { file: "tests/runtime/runtime-random.test.ts", is: "a generator's expected states" },
   { file: "tests/type-core/type-core-message-parity.test.ts", is: "random seeds" },
+  { file: "tests/player/player-encryption.test.ts", is: "encryption test vectors" },
+  { file: "tests/player/player-lock-service.test.ts", is: "encryption test vectors" },
+  { file: "tests/player/player-stored-files.test.ts", is: "a stored file's hash" },
 ];
 
-/** The three pin forms the list's test finds by their text. */
+/** The four pin forms the marks' test finds by their text. */
 export const PIN_FORMS = {
   total: /assert\.equal\([^;\n]*\.total\b[^;\n]*,\s*\d[\d_]{3,}\s*\)/u,
   table: /\[\s*\d[\d_]{3,}(?:\s*,\s*\d[\d_]{3,}){3,}\s*,?\s*\]/u,
   listed: /^\s*(?:"[^"\n]+"|[\w$]+):\s*\[\s*\n?\s*\d+,\s*\n?\s*"/mu,
+  digest: /^\s*[\w$]+:\s*"[0-9a-f]{16,}"/mu,
 };
 
 /** The pin forms `text` holds, by name. */
@@ -152,13 +132,13 @@ export function pinFormsOf(text) {
 }
 
 /**
- * The pinning suites `paths` reach: all of them for a core file, else those whose file or pins changed. Each suite once,
- * in the list's order, with the `pins` of the declarations reached.
+ * The pinning suites of `suites` (`readMarks`) that `paths` reach: all of them for a core file, else those whose file
+ * or pins changed. Each suite once, in path order, with the `pins` of the marks reached.
  */
-export function suitesFor(paths) {
+export function suitesFor(suites, paths) {
   const core = paths.some((path) => path.startsWith(CORE));
   const reached = new Map();
-  for (const suite of PIN_SUITES)
+  for (const suite of suites)
     if (core || paths.includes(suite.file) || (suite.in !== undefined && paths.includes(suite.in)))
       reached.set(suite.file, [...(reached.get(suite.file) ?? []), suite.pins]);
   return [...reached].map(([file, pins]) => ({ file, pins: pins.join("; ") }));
@@ -206,9 +186,14 @@ function main(argv) {
     return 2;
   }
   const short = mergeBase.slice(0, 9);
+  const marks = readMarks(root);
+  if (marks.faults.length > 0) {
+    console.error(`pin-suites: the marks cannot be read:\n  ${marks.faults.join("\n  ")}`);
+    return 2;
+  }
   const paths = changedSince(root, mergeBase);
   const core = paths.filter((path) => path.startsWith(CORE)).length;
-  const suites = suitesFor(paths);
+  const suites = suitesFor(marks.suites, paths);
   if (suites.length === 0)
     console.log(`pin-suites: no core file or pinning suite changed since ${ref} (${short}); none`);
   else {
@@ -231,7 +216,7 @@ function main(argv) {
   return status;
 }
 
-/** The test files under `tests/`, as the suite finds them (`suiteTestFiles`; the list's test reads them). */
+/** The test files under `tests/`, as the suite finds them (`suiteTestFiles`; the marks' test reads them). */
 export function testFiles(root) {
   return suiteTestFiles(join(root, "tests"), ".test.ts").map((name) => `tests/${name}`);
 }

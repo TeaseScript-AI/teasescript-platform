@@ -1,3 +1,4 @@
+// pins for tests/type-core/type-core-work-b.test.ts: main's work per family, as bounds | line /^\s*main: \{\s*$/u
 import { sharedReads } from "./builders.js";
 
 /** A family whose summaries' demands are its answers' own pairs, with `main`'s work measured once. */

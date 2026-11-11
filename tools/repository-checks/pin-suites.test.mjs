@@ -14,11 +14,14 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ts } from "ts-morph";
-import { NOT_PINS, PIN_SUITES, builtOf, pinFormsOf, suitesFor, testFiles } from "./pin-suites.mjs";
+import { NOT_PINS, builtOf, pinFormsOf, readMarks, suitesFor, testFiles } from "./pin-suites.mjs";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
-/** Each declared suite once, in the list's order. */
-const SUITES = [...new Set(PIN_SUITES.map((suite) => suite.file))];
+/** The repository's marks (`readMarks`). */
+const MARKS = readMarks(ROOT);
+const MARKED = MARKS.suites;
+/** Each marked suite once, in path order. */
+const SUITES = [...new Set(MARKED.map((suite) => suite.file))];
 const WORK_B = "tests/type-core/type-core-work-b.test.ts";
 /** The folder whose families record `main`'s bounds (`WorkFamily.main`, `KnownProduct.measured`). */
 const FAMILIES = "tests/helpers/type-core/families/";
@@ -120,50 +123,56 @@ function recordedBoundsOf(text) {
 
 test("a core change lists every pinning suite; another change lists none, a suite's own change or its pins' file itself", () => {
   assert.deepEqual(
-    suitesFor(["src/type-inference/core/admission/literals/join.ts"]).map((suite) => suite.file),
+    suitesFor(MARKED, ["src/type-inference/core/admission/literals/join.ts"]).map(
+      (suite) => suite.file,
+    ),
     SUITES,
   );
   // (the published answers' digests move with the core too: #2074 passed the local check and failed CI on
   // one, #2086)
   assert.ok(
-    suitesFor(["src/type-inference/core/values.ts"]).some(
+    suitesFor(MARKED, ["src/type-inference/core/values.ts"]).some(
       (suite) => suite.file === "tests/type-core/type-core-contract.test.ts",
     ),
   );
-  assert.deepEqual(suitesFor(["src/runtime/engine.ts", "docs/TESTING.md"]), []);
-  assert.deepEqual(suitesFor(["src/type-inference/core-like.ts"]), []);
+  assert.deepEqual(suitesFor(MARKED, ["src/runtime/engine.ts", "docs/TESTING.md"]), []);
+  assert.deepEqual(suitesFor(MARKED, ["src/type-inference/core-like.ts"]), []);
   assert.deepEqual(
-    suitesFor(["tests/type-core/type-core-kept.test.ts"]).map((suite) => suite.file),
+    suitesFor(MARKED, ["tests/type-core/type-core-kept.test.ts"]).map((suite) => suite.file),
     ["tests/type-core/type-core-kept.test.ts"],
   );
   assert.deepEqual(
-    suitesFor(["tests/helpers/type-core/families/output-bound.ts"]).map((suite) => suite.file),
+    suitesFor(MARKED, ["tests/helpers/type-core/families/output-bound.ts"]).map(
+      (suite) => suite.file,
+    ),
     [WORK_B],
   );
   assert.deepEqual(
-    suitesFor(["tests/helpers/type-core/families/admission-products.ts"]).map(
+    suitesFor(MARKED, ["tests/helpers/type-core/families/admission-products.ts"]).map(
       (suite) => suite.file,
     ),
     ["tests/type-core/type-core-work-a.test.ts", "tests/type-core/type-core-work-c.test.ts"],
   );
   assert.deepEqual(
-    suitesFor(["tests/helpers/type-core/families/property-names.ts"]).map((suite) => suite.file),
+    suitesFor(MARKED, ["tests/helpers/type-core/families/property-names.ts"]).map(
+      (suite) => suite.file,
+    ),
     ["tests/type-core/type-core-work-c.test.ts"],
   );
   // (work-b's pins are in two files: either lists it, and both list it once, with each declaration's pins)
   assert.deepEqual(
-    suitesFor(["tests/helpers/type-core/families/w34-links.ts"]).map((suite) => suite.file),
+    suitesFor(MARKED, ["tests/helpers/type-core/families/w34-links.ts"]).map((suite) => suite.file),
     [WORK_B],
   );
   assert.deepEqual(
-    suitesFor([
+    suitesFor(MARKED, [
       "tests/helpers/type-core/families/w34-links.ts",
       "tests/helpers/type-core/families/output-bound.ts",
     ]),
     [
       {
         file: WORK_B,
-        pins: PIN_SUITES.filter((suite) => suite.file === WORK_B)
+        pins: MARKED.filter((suite) => suite.file === WORK_B)
           .map((suite) => suite.pins)
           .join("; "),
       },
@@ -175,30 +184,107 @@ test("a core change lists every pinning suite; another change lists none, a suit
   );
 });
 
-test("the list is kept true: each file a pin form finds is declared, and each suite's pin is found", () => {
-  const declared = new Set([...PIN_SUITES, ...NOT_PINS].map((entry) => entry.file));
-  const unlisted = testFiles(ROOT).filter(
-    (file) => !declared.has(file) && pinFormsOf(readFileSync(join(ROOT, file), "utf8")).length > 0,
-  );
-  assert.deepEqual(
-    unlisted.map(
-      (file) =>
-        `${file} holds a pin form (${pinFormsOf(readFileSync(join(ROOT, file), "utf8")).join(", ")}) but is in neither PIN_SUITES nor NOT_PINS (tools/repository-checks/pin-suites.mjs)`,
-    ),
-    [],
-  );
-  for (const suite of PIN_SUITES) {
-    const lines = readFileSync(join(ROOT, suite.in ?? suite.file), "utf8").split("\n");
-    assert.ok(
-      lines.some((line) => suite.pin.test(line)),
-      `${suite.in ?? suite.file} holds no line ${suite.pin} finds (${suite.file})`,
-    );
+/**
+ * The net's findings under `root`: each test file a pin form finds that no mark names and `notPins` does not declare,
+ * and each `notPins` file that is marked or holds no pin form.
+ */
+function netOf(root, suites, notPins) {
+  const marked = new Set(suites.map((suite) => suite.file));
+  const declared = new Set(notPins.map((entry) => entry.file));
+  const formsOf = (file) => pinFormsOf(readFileSync(join(root, file), "utf8"));
+  return [
+    ...testFiles(root)
+      .filter((file) => !marked.has(file) && !declared.has(file) && formsOf(file).length > 0)
+      .map(
+        (file) =>
+          `${file} holds a pin form (${formsOf(file).join(", ")}) but carries no mark and is not in NOT_PINS (tools/repository-checks/pin-suites.mjs)`,
+      ),
+    ...[...declared].flatMap((file) => [
+      ...(marked.has(file) ? [`${file} is marked: drop it from NOT_PINS`] : []),
+      ...(formsOf(file).length === 0 ? [`${file} holds no pin form: drop it from NOT_PINS`] : []),
+    ]),
+  ];
+}
+
+test("the marks are kept true: each reads, and each test file a pin form finds is marked or declared no pin", () => {
+  assert.deepEqual(MARKS.faults, []);
+  assert.deepEqual(netOf(ROOT, MARKED, NOT_PINS), []);
+});
+
+test("the net names an unmarked pin, a marked file declared no pin, and a declaration with no pin form", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "pin-suites-net-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const files = {
+    "tests/digest.test.ts": '  upToOrder: "8ec84600facd682a",\n',
+    "tests/marked.test.ts": "// pins: a total | line /total/u\n  assert.equal(r.total, 1234);\n",
+    "tests/plain.test.ts": "const n = 12;\n",
+  };
+  for (const [file, text] of Object.entries(files)) {
+    mkdirSync(join(root, file, ".."), { recursive: true });
+    writeFileSync(join(root, file), text);
   }
-  for (const { file } of NOT_PINS)
-    assert.ok(
-      pinFormsOf(readFileSync(join(ROOT, file), "utf8")).length > 0,
-      `${file} holds no pin form: drop it from NOT_PINS`,
-    );
+  const { suites } = readMarks(root);
+  assert.deepEqual(netOf(root, suites, []), [
+    "tests/digest.test.ts holds a pin form (digest) but carries no mark and is not in NOT_PINS (tools/repository-checks/pin-suites.mjs)",
+  ]);
+  assert.deepEqual(
+    netOf(root, suites, [
+      { file: "tests/digest.test.ts" },
+      { file: "tests/marked.test.ts" },
+      { file: "tests/plain.test.ts" },
+    ]),
+    [
+      "tests/marked.test.ts is marked: drop it from NOT_PINS",
+      "tests/plain.test.ts holds no pin form: drop it from NOT_PINS",
+    ],
+  );
+});
+
+test("a mark is read from a file's first line only, whole, naming test files, and finding a line besides itself", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "pin-suites-marks-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const files = {
+    "tests/b.test.ts": "// pins: b's total | line /^const B\\b/u\nconst B = 1;\n",
+    "tests/a.test.ts": "import x from 'x';\n",
+    // (a helper's mark names the suites its pins run in, each once, in path order)
+    "tests/helpers/h.ts":
+      "// pins for tests/b.test.ts, tests/a.test.ts: shared bounds | line /^\\s*measured: \\d/u\n  measured: 3,\n",
+    "tests/helpers/late.ts": "// a header\n  // pins: moved below it | line /x/u\nx\n",
+    "tests/c.test.ts": "// pins a total, no line\nconst C = 1;\n",
+    "tests/d.test.ts": "// pins: a bad line | line /(/u\n(\n",
+    "tests/e.test.ts": "// pins: only itself | line /only itself/u\nconst E = 1;\n",
+    "tests/helpers/f.ts": "// pins for tests/none.test.ts: nothing | line /^y/u\ny\n",
+  };
+  for (const [file, text] of Object.entries(files)) {
+    mkdirSync(join(root, file, ".."), { recursive: true });
+    writeFileSync(join(root, file), text);
+  }
+  const { suites, faults } = readMarks(root);
+  assert.deepEqual(
+    suites.map(({ file, pins, pin, in: holder }) => ({ file, pins, pin: String(pin), in: holder })),
+    [
+      {
+        file: "tests/a.test.ts",
+        pins: "shared bounds",
+        pin: "/^\\s*measured: \\d/u",
+        in: "tests/helpers/h.ts",
+      },
+      { file: "tests/b.test.ts", pins: "b's total", pin: "/^const B\\b/u", in: undefined },
+      {
+        file: "tests/b.test.ts",
+        pins: "shared bounds",
+        pin: "/^\\s*measured: \\d/u",
+        in: "tests/helpers/h.ts",
+      },
+    ],
+  );
+  assert.deepEqual(faults, [
+    "tests/c.test.ts:1: no mark: use // pins[ for <suite>, ...]: <what> | line /<regex>/",
+    "tests/d.test.ts:1: the mark's line is no regex: Invalid regular expression: /(/u: Unterminated group",
+    "tests/e.test.ts:1: no line of the file but the mark's own is a line /only itself/u finds",
+    "tests/helpers/f.ts:1: tests/none.test.ts is no test file",
+    "tests/helpers/late.ts:2: a mark is a file's first line",
+  ]);
 });
 
 test("every bound a family records is a line some declaration's pin finds in that file", () => {
@@ -215,20 +301,20 @@ test("every bound a family records is a line some declaration's pin finds in tha
     for (const { line, form } of escapes)
       failures.push(`${file}:${line}: ${form}, not a position a family may name it at`);
     for (const line of recorded) {
-      const declarations = PIN_SUITES.filter(
+      const declarations = MARKED.filter(
         (suite) => suite.in === file && suite.pin.test(lines[line - 1]),
       );
       if (declarations.length === 0)
         failures.push(
-          `${file}:${line} records a bound (${lines[line - 1].trim()}) no PIN_SUITES declaration with it as \`in\` finds (tools/repository-checks/pin-suites.mjs)`,
+          `${file}:${line} records a bound (${lines[line - 1].trim()}) no mark of that file finds (its first line)`,
         );
       for (const suite of declarations) finding.add(suite);
     }
   }
   assert.deepEqual(failures, []);
-  // (and each declaration of a family's file finds one of its recorded bounds)
+  // (and each mark of a family's file finds one of its recorded bounds)
   assert.deepEqual(
-    PIN_SUITES.filter((suite) => suite.in?.startsWith(FAMILIES) && !finding.has(suite)).map(
+    MARKED.filter((suite) => suite.in?.startsWith(FAMILIES) && !finding.has(suite)).map(
       (suite) => `${suite.file} (${suite.in}): its pin ${suite.pin} finds no recorded bound`,
     ),
     [],
@@ -315,16 +401,21 @@ test("main and measured occur in a family only at an admitted position; any othe
   });
 });
 
-test("the three pin forms are found by their text, and a pin written another way is not", () => {
+test("the four pin forms are found by their text, and a pin written another way is not", () => {
   assert.deepEqual(pinFormsOf("  assert.equal(budget.total, 22_962_573);"), ["total"]);
   assert.deepEqual(pinFormsOf("    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],"), [
     "table",
   ]);
   assert.deepEqual(pinFormsOf('  decide: [\n    6,\n    "a stopped decision\'s path"'), ["listed"]);
+  assert.deepEqual(pinFormsOf('      upToOrder: "8ec84600facd682a",'), ["digest"]);
   // (the named limits: another assertion, a short total, a nested table)
   assert.deepEqual(pinFormsOf("  assert.strictEqual(budget.total, 22_962_573);"), []);
   assert.deepEqual(pinFormsOf("  assert.equal(budget.total, 573);"), []);
   assert.deepEqual(pinFormsOf("    [7995, 60],\n    [7081, 60],"), []);
+  // (a digest's limits: under 16 digits, in an array, in a comment)
+  assert.deepEqual(pinFormsOf('  upToOrder: "8ec84600facd682",'), []);
+  assert.deepEqual(pinFormsOf('  parts: ["0123456789abcdef"],'), []);
+  assert.deepEqual(pinFormsOf(" * the set's records (set `486ac8093b597b45`)"), []);
 });
 
 test("the test files are the suite as the runner finds it: one folder down too, none in helpers/", (t) => {
@@ -356,8 +447,12 @@ test("a file moved out of the core lists every pinning suite (#2049)", { timeout
       "tools/repository-checks/pin-suites.mjs",
       "tools/test-shards.mjs",
       "tools/costly-test-files.mjs",
-    ])
+      // (and the marked files, the suites among them)
+      ...new Set(MARKED.flatMap((suite) => [suite.file, suite.in ?? suite.file])),
+    ]) {
+      mkdirSync(join(directory, file, ".."), { recursive: true });
       copyFileSync(join(ROOT, file), join(directory, file));
+    }
     mkdirSync(join(directory, "src/type-inference/core"), { recursive: true });
     writeFileSync(
       join(directory, "src/type-inference/core/answers.ts"),

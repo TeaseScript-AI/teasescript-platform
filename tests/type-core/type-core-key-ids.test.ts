@@ -1,3 +1,4 @@
+// pins: listed copy sites | line /^const COPIES_LISTED\b/u
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
