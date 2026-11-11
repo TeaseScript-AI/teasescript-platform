@@ -236,6 +236,9 @@ export function useSessionActivation({
   function lose(error: unknown) {
     const name = error instanceof Error ? error.name : "Error";
     console.error("[player] host error", error);
+    // Already stopped by a loss: the stop's cleanup ran then, so a camera open now is the recovery click's.
+    const wasLost = lost.value;
+    recoveryBegin = null;
     // What the player can recover, decided before the activation's state is cleared (`recoveryKind`).
     const shown = session.value;
     const recovery = recoveryKind({
@@ -263,6 +266,7 @@ export function useSessionActivation({
       return;
     }
     lost.value = true;
+    if (wasLost) camera.release();
     recoveryShown.value = recovery;
     offer.value = null;
     if (recovery.kind === "start" || recovery.kind === "continue") offer.value = recovery.kind;
@@ -282,6 +286,8 @@ export function useSessionActivation({
    * at a Player error, and the next Start or Continue first replaces the connection.
    */
   const lost = ref(false);
+  /** The activation token of a recovery's begin until its session shows, or `null`. */
+  let recoveryBegin: number | null = null;
   /** What the loss left the player to recover (`recoveryKind`), until a click replaced the connection. */
   const recoveryShown = shallowRef<Recovery | null>(null);
   /** What the stop offers once decided: Continue from the last kept point, or Start again; `null` while it reads. */
@@ -591,14 +597,23 @@ export function useSessionActivation({
         recipe = continueRecipe(found.session);
       } else recipe = startRecipe(create);
       endRecovery();
+      // Until its session shows, a begin the fresh host refuses offers the same choice again (`startFrom`).
+      recoveryBegin = activationToken;
       await startFrom(recipe, sample);
     } catch (error) {
       if (!owns()) return;
       console.error("[player] host error", error);
-      // The click cleared the session: the choice shows again on the start page.
+      // The click cleared the session: the choice shows again on the start page, and the camera the click opened goes,
+      // which no stop releases while the Player stays stopped.
+      camera.release();
       recoveryShown.value = { kind, shown: true };
       offer.value = kind;
     }
+  }
+  /** A begin's failure: the error stop, or, for a recovery's begin, the same offer again, as after a loss. */
+  function beginFailed(token: number, origin: Origin, error: unknown) {
+    if (recoveryBegin === token) lose(error);
+    else reportActivationError(origin, error);
   }
   /** The connection was replaced: the stop and its offer end. */
   function endRecovery() {
@@ -640,7 +655,7 @@ export function useSessionActivation({
     try {
       begun = pending.begin(origin);
     } catch (error) {
-      reportActivationError(origin, error);
+      beginFailed(token, origin, error);
       return;
     } finally {
       clicked = null;
@@ -656,7 +671,7 @@ export function useSessionActivation({
         return undefined;
       },
       failed: (error) => {
-        if (!isDisposed() && token === activationToken) reportActivationError(origin, error);
+        if (!isDisposed() && token === activationToken) beginFailed(token, origin, error);
         return undefined;
       },
     };
@@ -672,6 +687,7 @@ export function useSessionActivation({
     return settled;
   }
   function started(pending: Activation, next: PlayerSession, origin: RunOrigin) {
+    recoveryBegin = null;
     if (continuing?.id === next.id) continuing = null;
     showSession(next, origin);
     // A new session replaces the one kept before.
