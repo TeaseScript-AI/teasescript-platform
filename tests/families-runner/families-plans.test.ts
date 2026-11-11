@@ -307,18 +307,21 @@ test("the plans comparison refuses trees whose modes are not the same names once
   const held = (tree: string) => join(folder, tree, "dist", "tests/helpers/type-core-held-host.js");
   const original = readFileSync(held("base"), "utf8");
   let at = 0;
+  /** A table of `names` in place of the tree's four modes, each mode named so (`null` unnamed). */
+  const table = (names: (string | null)[]) =>
+    `HELD_MODES.splice(0, 4, ...${JSON.stringify(names)}.map((name) => ({ name, run: (f) => f() })));`;
+  const wrong = [
+    table(["forward", "reversed", "forward, unshared", "sideways"]),
+    table(["forward", "reversed", "forward, unshared"]),
+    table(["forward", "reversed", "forward, unshared", "forward"]),
+    table(["forward", "reversed", "forward, unshared", null]),
+    // (a hole: a slot `map` and `some` skip, Codex round 1's case)
+    "delete HELD_MODES[1];",
+  ];
   for (const tree of ["head", "base"])
-    for (const names of [
-      ["forward", "reversed", "forward, unshared", "sideways"],
-      ["forward", "reversed", "forward, unshared"],
-      ["forward", "reversed", "forward, unshared", "forward"],
-      ["forward", "reversed", "forward, unshared", null],
-    ]) {
+    for (const change of wrong) {
       for (const each of ["base", "head"]) writeFileSync(held(each), original);
-      writeFileSync(
-        held(tree),
-        `${original}\nHELD_MODES.splice(0, 4, ...${JSON.stringify(names)}.map((name) => ({ name, run: (f) => f() })));\n`,
-      );
+      writeFileSync(held(tree), `${original}\n${change}\n`);
       at += 1;
       const out = join(folder, `refused-${at}.jsonl`);
       const ran = spawnSync(
@@ -326,7 +329,7 @@ test("the plans comparison refuses trees whose modes are not the same names once
         [tool, join(folder, "base"), join(folder, "head"), "area", "--out", out],
         { encoding: "utf8" },
       );
-      const named = `${tree} ${JSON.stringify(names)}`;
+      const named = `${tree}: ${change}`;
       assert.equal(ran.status, 2, `${named}: ${ran.stderr}`);
       assert.match(ran.stderr, /held modes are not the same names once each/, named);
       assert.equal(existsSync(out), false, named);

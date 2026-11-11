@@ -524,32 +524,39 @@ if (isMainThread && process.argv[2] === "summary") {
 
   const base = await load(baseRoot, "base");
   const head = await load(headRoot, "head");
-  // (each of the base's modes with the head's of its name, the identity a record names, #2342: never by position)
-  const names = (tree) => tree.held.HELD_MODES.map((mode) => mode?.name);
+  // (each of the base's modes with the head's of its name, the identity a record names, #2342: never by position; every
+  // slot read, a hole as no name, and no table but an array)
+  const names = (tree) =>
+    Array.isArray(tree.held.HELD_MODES)
+      ? Array.from(tree.held.HELD_MODES, (mode) => mode?.name)
+      : null;
   const [baseNames, headNames] = [names(base), names(head)];
   const unnamed = (list) =>
+    list === null ||
     list.some((name) => typeof name !== "string" || name === "") ||
     new Set(list).size !== list.length;
-  if (
+  const refused =
     unnamed(baseNames) ||
     unnamed(headNames) ||
     baseNames.length !== headNames.length ||
-    baseNames.some((name) => !headNames.includes(name))
-  ) {
+    baseNames.some((name) => !headNames.includes(name));
+  // (refused: said once, and no source runs; the runner ends the worker as it exits)
+  if (refused)
     parentPort.postMessage({
       refused: `the trees' held modes are not the same names once each: base ${JSON.stringify(baseNames)}, head ${JSON.stringify(headNames)}`,
     });
-    await new Promise(() => {});
-  }
-  const modes = base.held.HELD_MODES.map((mode) => [
-    mode,
-    head.held.HELD_MODES.find((other) => other.name === mode.name),
-  ]);
+  const modes = refused
+    ? []
+    : Array.from(base.held.HELD_MODES, (mode) => [
+        mode,
+        head.held.HELD_MODES.find((other) => other.name === mode.name),
+      ]);
   const sources = await unitsOf(set, baseRoot, headRoot);
   const heldCases = sources.some((unit) => unit.held)
     ? new Map(base.held.heldFamily().map((c) => [c.name, c]))
     : null;
   parentPort.on("message", (index) => {
+    if (refused) return;
     const unit = sources[index];
     const record = {
       set: path.basename(set),
