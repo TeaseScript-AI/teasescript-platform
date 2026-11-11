@@ -149,7 +149,7 @@ test("a retry plays every refused element, each with the source it was refused w
   const plays = [bell, chime, music].map((element) => element.plays);
   bell.refuse = false;
   chime.refuse = false;
-  // A browser admits play() only while the click that asked for it is dispatched, so the retry calls it at once.
+  // Retry calls stay synchronous, so a caller can make them directly from a user-activation handler.
   player.device.retryBlocked();
   assert.deepEqual(
     [bell, chime, music].map((element, index) => element.plays - plays[index]!),

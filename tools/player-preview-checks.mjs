@@ -202,8 +202,8 @@ async function mediaPlaybackChecks(page) {
   };
   // Observe the Player's audio elements. As in a browser that grants no audio, every play() is refused until a click on
   // "Enable audio", the user's activation, and admitted from then on. This check does not say which play() the click
-  // caused: that its retry plays each refused element, with the source it was refused with, during the click is
-  // `tests/player/player-media-device.test.ts`'s to prove.
+  // caused: that the notice's action retries each refused element, with the source it was refused with, before it
+  // returns is `tests/player/player-session-images.test.ts`'s and `tests/player/player-media-device.test.ts`'s to prove.
   await page.addInitScript(() => {
     window.__played = [];
     const play = HTMLMediaElement.prototype.play;
