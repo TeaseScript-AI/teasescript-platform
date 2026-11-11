@@ -65,20 +65,24 @@ export function testModulesSources(): Plugin {
       }
       return null;
     },
-    // Written by hand: Vite emits no assets from a server-side build.
-    writeBundle(options, bundle) {
-      if (options.dir === undefined)
-        this.error("test-modules-sources: the build has no output folder");
-      for (const output of Object.values(bundle))
-        if (output.type === "chunk")
-          for (const id of output.moduleIds)
-            if (stamped(id) && !hashes.has(key(id)))
-              this.error(`test-modules-sources: ${id} was bundled without being hashed`);
-      const sorted = [...hashes].sort(([a], [b]) => (a < b ? -1 : 1));
-      writeFileSync(
-        join(options.dir, "sources.json"),
-        `${JSON.stringify(Object.fromEntries(sorted), null, 1)}\n`,
-      );
+    // Written by hand, as Vite emits no assets from a server-side build, and last, after any other stamping plugin.
+    writeBundle: {
+      order: "post",
+      sequential: true,
+      handler(options, bundle) {
+        if (options.dir === undefined)
+          this.error("test-modules-sources: the build has no output folder");
+        for (const output of Object.values(bundle))
+          if (output.type === "chunk")
+            for (const id of output.moduleIds)
+              if (stamped(id) && !hashes.has(key(id)))
+                this.error(`test-modules-sources: ${id} was bundled without being hashed`);
+        const sorted = [...hashes].sort(([a], [b]) => (a < b ? -1 : 1));
+        writeFileSync(
+          join(options.dir, "sources.json"),
+          `${JSON.stringify(Object.fromEntries(sorted), null, 1)}\n`,
+        );
+      },
     },
   };
 }
