@@ -142,6 +142,11 @@ interface RecoveryHost {
     plan: string,
     create: { readonly plan: string; readonly options: () => PlayerRuntimeSessionOptions },
   ): Promise<void>;
+  /** The host's Start of `create` (`PlayerSessionStart`), shown on the start page. */
+  prepare(create: {
+    readonly plan: string;
+    readonly options: () => PlayerRuntimeSessionOptions;
+  }): void;
   activate(): Promise<void>;
   toStartPage(): Promise<void>;
   setDebugTracing(on: boolean): void;
@@ -273,11 +278,20 @@ async function page(
   const plan = prepared.result.plan;
   assert.ok(plan !== undefined, "the script was prepared");
   // The session's saves go to the page's script storage, as the hosted page starts it.
-  await player.prepareScript(plan, {
-    plan,
-    options: () => ({ ...player.scriptStorageOptions(), wallClockMs: 0 }),
-  });
-  return { connections, player, kept, hostErrors, scope };
+  const start = { plan, options: () => ({ ...player.scriptStorageOptions(), wallClockMs: 0 }) };
+  await player.prepareScript(plan, start);
+  return { connections, player, kept, hostErrors, scope, start };
+}
+
+/** Whether `connection` still answers a request, sent through its client as it was made. */
+function answering(connection: TopologyBridge): () => Promise<boolean> {
+  const client = connection.bridge.client;
+  const request = client.request.bind(client);
+  return () =>
+    request("prepare", { source: { kind: "source", script: KEEPS_AT_A_QUESTION } }).then(
+      () => true,
+      () => false,
+    );
 }
 
 /** Waits until the session shows its question, and the store keeps it there. */
@@ -340,6 +354,11 @@ const RERUN = rerunRegistry({
   "an ended record before the Continue click": TOPOLOGIES,
   "a kept point appearing before a Start again click": TOPOLOGIES,
   "a discarded review": TOPOLOGIES,
+  "a rejected preparation": TOPOLOGIES,
+  "unmounted while the fresh connection prepares": TOPOLOGIES,
+  "the host's prepare and activate while a candidate opens": TOPOLOGIES,
+  "the host's prepare and activate while a candidate prepares": TOPOLOGIES,
+  "unmounted after a recovery": TOPOLOGIES,
 });
 
 RERUN.rows(
@@ -566,6 +585,7 @@ RERUN.rows(
     await player.activate();
     await until(() => player.session.value?.state.foregroundAction != null, "the question again");
     assert.equal(connections.calls(), 2);
+    assert.equal(connections.ends(fresh), 1, "the lost fresh connection is ended once");
     await onTheFreshConnection(player, connections);
     return end();
   },
@@ -1013,6 +1033,7 @@ for (const op of ["restoreKept", "beginRecording", "continue"] as const)
       await player.activate();
       await until(() => player.session.value?.state.foregroundAction != null, "the question again");
       assert.equal(connections.calls(), 2);
+      assert.equal(connections.ends(fresh), 1, "the lost fresh connection is ended once");
       await onTheFreshConnection(player, connections);
       return end();
     },
@@ -1160,9 +1181,13 @@ RERUN.rows(
     assert.equal(player.hostError.value, null);
     assert.equal(player.session.value, null);
     assert.equal(connections.calls(), 1);
+    const refusing = connections.current();
+    assert.equal(connections.ends(refusing), 1, "the refusing connection is ended");
+    assert.equal(await answering(refusing)(), false);
     await player.activate();
     await until(() => player.session.value?.state.foregroundAction != null, "the question");
     assert.equal(connections.calls(), 2);
+    assert.equal(connections.ends(refusing), 1, "once");
     return end();
   },
 );
@@ -1294,6 +1319,7 @@ RERUN.rows(
     await player.activate();
     await until(() => player.session.value?.state.foregroundAction != null, "the question");
     assert.equal(connections.calls(), 2);
+    assert.equal(connections.ends(fresh), 1, "the lost fresh connection is ended once");
     return end();
   },
 );
@@ -1513,6 +1539,163 @@ RERUN.rows(
     await assert.rejects(player.importSession(review), /let go of/u);
     assert.deepEqual([...storage.entries], [["local", "keep"]]);
     assert.deepEqual(await kept.session(SCOPE), before);
+    return end();
+  },
+);
+
+RERUN.rows(
+  "a rejected preparation",
+  "a fresh connection whose preparation is rejected is ended once with the click's camera, and the choice shows again",
+  async (context, topology, end) => {
+    const tracks = fakeCamera(context);
+    const { connections, player, kept } = await page(context, topology, { camera: true });
+    await player.activate();
+    await keptAtTheQuestion(player, kept);
+    await connections.first.lose();
+    await until(() => player.recovery.value !== null, "the first offer");
+    const probe: { answers?: () => Promise<boolean> } = {};
+    connections.armNext((fresh) => {
+      probe.answers = answering(fresh);
+      const client = fresh.bridge.client;
+      const request = client.request.bind(client);
+      // EVIDENCE: invariant: every op but `prepare` is forwarded unchanged; a rejection is an answer any op may give.
+      client.request = ((...args: Parameters<typeof client.request>) =>
+        args[0] === "prepare"
+          ? Promise.reject(new Error("The fresh host refused the preparation."))
+          : request(...args)) as typeof client.request;
+    });
+    await player.activate();
+    await until(() => player.recovery.value !== null, "the second offer");
+    assert.deepEqual(player.recovery.value, { offer: "continue", where: "page" });
+    assert.equal(player.hostError.value, null);
+    const rejecting = connections.current();
+    assert.equal(connections.ends(rejecting), 1, "the fresh connection is ended once");
+    assert.equal(await probe.answers!(), false, "and answers nothing more");
+    assert.deepEqual(
+      tracks.map((track) => track.readyState),
+      ["ended", "ended"],
+      "the click's camera is released",
+    );
+    await player.activate();
+    await until(() => player.session.value?.state.foregroundAction != null, "the question again");
+    assert.equal(connections.calls(), 2);
+    assert.equal(connections.ends(rejecting), 1, "the next click does not end it again");
+    await onTheFreshConnection(player, connections);
+    return end();
+  },
+);
+
+RERUN.rows(
+  "unmounted while the fresh connection prepares",
+  "a Player unmounted while its fresh connection prepares the script ends that connection once",
+  async (context, topology, end) => {
+    const { connections, player, kept, scope } = await page(context, topology);
+    await player.activate();
+    await keptAtTheQuestion(player, kept);
+    await connections.first.lose();
+    await until(() => player.recovery.value !== null, "the offer");
+    connections.armNext((fresh) => fresh.hold("prepare"));
+    const recovering = player.activate();
+    await until(() => connections.made.length === 2, "the fresh connection");
+    const fresh = connections.current();
+    const answers = answering(fresh);
+    await fresh.held();
+    scope.stop();
+    fresh.release();
+    await recovering;
+    await turns(5);
+    assert.equal(connections.ends(fresh), 1, "the fresh connection is ended once");
+    assert.equal(await answers(), false, "and answers nothing more");
+    assert.equal(player.session.value, null);
+    return end();
+  },
+);
+
+for (const [id, admitted] of [
+  ["the host's prepare and activate while a candidate opens", false],
+  ["the host's prepare and activate while a candidate prepares", true],
+] as const)
+  RERUN.rows(
+    id,
+    `a click's fresh connection is ended once when the host's own prepare and activate replace the click ${admitted ? "after it was taken" : "before it opened"}`,
+    async (context, topology, end) => {
+      const { connections, player, kept, start } = await page(context, topology);
+      await player.activate();
+      await keptAtTheQuestion(player, kept);
+      await connections.first.lose();
+      await until(() => player.recovery.value !== null, "the offer");
+      const gate: { open?: () => void } = {};
+      connections.armNext((fresh) =>
+        admitted
+          ? fresh.hold("prepare")
+          : new Promise<void>((resolve) => void (gate.open = resolve)),
+      );
+      const superseded = player.activate();
+      await until(() => connections.made.length === 2, "the first fresh connection");
+      const candidate = connections.current();
+      if (admitted) await candidate.held();
+      else await until(() => gate.open !== undefined, "its factory waits");
+      // The trusted host's own calls, while the click's fresh connection opens or prepares.
+      player.prepare(start);
+      await player.activate();
+      await until(() => player.session.value?.state.foregroundAction != null, "the host's session");
+      if (admitted) candidate.release();
+      else gate.open!();
+      await superseded;
+      await turns(5);
+      assert.equal(connections.calls(), 2);
+      assert.equal(connections.ends(candidate), 1, "the first fresh connection is ended once");
+      if (!admitted) assert.deepEqual(candidate.posts, [], "one that opened late is never taken");
+      const current = connections.current();
+      assert.equal(await player.bridge, current.bridge);
+      assert.equal(connections.ends(current), 0, "the host's session keeps its connection");
+      assert.ok(player.session.value?.state.foregroundAction != null);
+      return end();
+    },
+  );
+
+RERUN.rows(
+  "unmounted after a recovery",
+  "a Player unmounted after a recovery ends the connection its factory opened once; a bridge it was given stays",
+  async (context, topology, end) => {
+    const rejections: unknown[] = [];
+    const unhandled = (reason: unknown) => void rejections.push(reason);
+    process.on("unhandledRejection", unhandled);
+    context.after(() => void process.off("unhandledRejection", unhandled));
+    const { connections, player, kept, scope } = await page(context, topology);
+    // The trace and Debug's random control are on: the disposal ends them on the connection it then ends, which rejects
+    // what of them is still waiting; nothing may be left unhandled.
+    player.setDebugTracing(true);
+    player.setRandomControl({ sites: [] });
+    await player.activate();
+    await keptAtTheQuestion(player, kept);
+    await connections.first.lose();
+    await until(() => player.recovery.value !== null, "the offer");
+    await player.activate();
+    await until(() => player.session.value?.state.foregroundAction != null, "the question again");
+    const fresh = connections.current();
+    const answers = answering(fresh);
+    const before = fresh.posts.length;
+    assert.equal(connections.ends(fresh), 0);
+    scope.stop();
+    assert.ok(
+      fresh.posts.slice(before).some((post) => post.op === "debugTracing"),
+      "the disposal ends the trace there first",
+    );
+    await turns(5);
+    assert.equal(connections.ends(fresh), 1, "the factory's connection is ended once");
+    assert.equal(await answers(), false, "and answers nothing more");
+    assert.equal(
+      connections.ends(connections.first),
+      1,
+      "the lost given one was ended once, at the click",
+    );
+    const given = await page(context, topology);
+    given.scope.stop();
+    await turns(5);
+    assert.equal(given.connections.ends(given.connections.first), 0, "a given bridge is not ended");
+    assert.equal(await answering(given.connections.first)(), true, "and still answers");
+    assert.deepEqual(rejections, [], "nothing rejected unhandled");
     return end();
   },
 );

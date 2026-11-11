@@ -336,6 +336,8 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
     "before the activation's record begins; the click's token decides (`owns`)",
   "useSessionActivation.ts: useSessionActivation > recover: await connection.replace":
     "before the activation's record begins; the click's token decides (`owns`)",
+  "useSessionActivation.ts: useSessionActivation > recover: await replacement.prepared":
+    "before the activation's record begins; the click's token decides (`owns`)",
   "useSessionActivation.ts: useSessionActivation > recover: await keptOwner.restoreForRecovery":
     "before the activation's record begins; the click's token decides (`owns`)",
   "useSessionActivation.ts: useSessionActivation > activate: await camera.open":

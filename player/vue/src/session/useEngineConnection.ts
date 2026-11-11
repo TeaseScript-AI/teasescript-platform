@@ -39,6 +39,12 @@ class NoReplacement extends Error {
   override readonly name = "NoReplacement";
 }
 
+/** A fresh connection a replacement took, and its preparation of the remembered source there. */
+interface Replacement {
+  readonly host: PlayerBridge;
+  readonly prepared: Promise<BridgeResult<OpResult<"prepare">>>;
+}
+
 export function useEngineConnection({
   options,
   isDisposed,
@@ -69,10 +75,19 @@ export function useEngineConnection({
   const claim = Symbol("Player");
   // The current connection's bridge once its source promise yields it, before the claim and the readiness hook, either
   // of which can still reject `connected`; kept also for a Player disposed meanwhile, which does not take it. `null`
-  // before, and while a replacement opens.
+  // before, while a replacement opens, and once this Player gave its connection up for good (`end`).
   let settled: PlayerBridge | null = null;
   // The source the pages prepared last, with its plan token in the current host.
   let source: PreparedSource | null = null;
+  // Whether the bridge is one this Player's factory opened, which it ends at its disposal; a given one stays the host's.
+  let opened = false;
+  /** Gives the bridge up for good: unclaimed, terminated (no loss), and no connection until a replacement. */
+  function end() {
+    bridge?.unclaim(claim);
+    bridge?.client.terminate();
+    bridge = null;
+    settled = null;
+  }
   /** Takes `reached`, now ready, as this Player's connection; its loss counts only while it is the current one. */
   function take(reached: PlayerBridge) {
     claimed(reached.claim(claim));
@@ -144,17 +159,15 @@ export function useEngineConnection({
      */
     replaceablePlan: (): string | null => (nextConnection === null ? null : (source?.plan ?? null)),
     /**
-     * Replaces the lost connection with a fresh one, from the player's click only: the lost one is given up, the fresh
-     * one is taken once ready, and the remembered source is prepared in it. Resolves with that preparation's reply;
-     * rejects when the fresh connection cannot be opened or the Player was unmounted meanwhile (`NoReplacement`).
+     * Replaces the lost connection with a fresh one, from the player's click only: the lost one, or the one an earlier
+     * click took, is given up, the fresh one is taken once ready, and the remembered source is prepared in it. Resolves
+     * with the fresh connection and that preparation; rejects when the fresh connection cannot be opened or the Player
+     * was unmounted meanwhile (`NoReplacement`).
      */
-    async replace(): Promise<BridgeResult<OpResult<"prepare">>> {
+    async replace(): Promise<Replacement> {
       const script = source?.script;
       if (nextConnection === null || script === undefined) throw new NoReplacement();
-      bridge?.unclaim(claim);
-      bridge?.client.terminate();
-      bridge = null;
-      settled = null;
+      end();
       const opening = nextConnection();
       connected = opening;
       const fresh = await opening;
@@ -165,13 +178,25 @@ export function useEngineConnection({
         throw new NoReplacement();
       }
       settled = fresh;
+      opened = true;
       replaced();
       take(fresh);
-      return prepareIn(fresh, script);
+      return { host: fresh, prepared: prepareIn(fresh, script) };
     },
-    /** Gives the bridge up at the Player's disposal, for a later Player to claim. */
+    /**
+     * Gives up `candidate`, the fresh connection of a click whose recovery failed, if it is still this Player's
+     * connection: once, and never one a later replacement took.
+     */
+    giveUp(candidate: PlayerBridge): void {
+      if (bridge === candidate) end();
+    },
+    /**
+     * At the Player's disposal: a bridge the host gave is given up for a later Player to claim; one this Player's factory
+     * opened ends with it.
+     */
     release(): void {
-      bridge?.unclaim(claim);
+      if (opened) end();
+      else bridge?.unclaim(claim);
     },
   };
 }

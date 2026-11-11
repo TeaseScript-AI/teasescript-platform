@@ -147,6 +147,7 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     "useEngineConnection.replace":
       "replaces a lost connection from the player's click, and prepares the script in it: it reaches no store",
     "useEngineConnection.release": SETUP,
+    end: "gives a connection up for good (its claim, `terminate`): it reaches no store",
   },
   "session/useCallView.ts": { viewCalls: SESSION },
   "session/useDebugModeAndTrace.ts": { issueTracing: SESSION, debugView: SESSION },
