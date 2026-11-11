@@ -88,9 +88,10 @@ import {
  * store, its photos, the saved values' provider, the media store, the debug rooms and the host: its admission, with the
  * store it went to and the async context that made it, and its settlement apart. It fails a call no context owns, and a
  * write in the move's context the move does not make itself (`MOVE_WRITES`). Every row also asserts that a stale
- * operation changes nothing of the page (activation, the loaded saved values and the stored files they name,
- * `savedDataRevision`, the notices, the importing mark, the room and the debug room's marks) but releasing its own
- * importing mark, that its failure is neither shown nor thrown, and that no rejection goes unhandled; a current one
+ * operation changes nothing of the page (activation, the loaded saved values and the stored files they name, the
+ * notices, the importing mark, the room and the debug room's marks) but releasing its own importing mark; that the saved
+ * data's revision, which is no state of the page, moves once where its change landed on the route shown, and not
+ * otherwise (`persistence-ownership.ts`); that its failure is neither shown nor thrown, and that no rejection goes unhandled; a current one
  * goes on, and a current failure surfaces. Each read of the saved values gives values of its own, so a stale read's
  * values are seen if shown.
  */
@@ -1135,15 +1136,49 @@ async function ownershipRun(
     [],
     `the stale ${producer} made calls after the move`,
   );
-  // No page effect after the move but releasing its own importing mark, which shows what the mark held back.
+  // No page effect after the move but releasing its own importing mark, which shows what the mark held back, and the
+  // saved data's revision, which is no state of the page: it follows the store of the route shown
+  // (`persistence-ownership.ts`). The held call's completion moves it once where it changed that store, resolved, on the
+  // route the page still shows: after a re-prepare the same route; after a room change only on the captured route, whose
+  // switch waits for the call, so the route it leaves is still the one shown, while the plain route's switch does not
+  // wait and the call lands after it. The debug room's import of the script's own values bypasses the route shown. Nothing
+  // else of the stale operation moves it.
+  const landsOnShownRoute =
+    /^provider\.(write|replace|clear)$/.test(at.name) &&
+    heldCall.settled === "resolved" &&
+    variant.route !== "debug" &&
+    move !== "disposed" &&
+    (move !== "room" || (moveWaits && variant.route === "captured"));
+  let revisionMoves = 0;
   for (const change of log.changes.slice(changesAtMark).filter((made) => made.by === OPERATION)) {
-    const { importing: markFrom, activation: _from, ...restFrom } = change.from;
-    const { importing: markTo, activation: _to, ...restTo } = change.to;
+    const {
+      importing: markFrom,
+      activation: activationFrom,
+      savedDataRevision: revisionFrom,
+      ...restFrom
+    } = change.from;
+    const {
+      importing: markTo,
+      activation: activationTo,
+      savedDataRevision: revisionTo,
+      ...restTo
+    } = change.to;
+    const moved = revisionTo - revisionFrom;
+    revisionMoves += moved;
+    // Each change releases the importing mark or moves the revision once, the activation as it was; nothing else.
     assert.ok(
-      markFrom && !markTo && JSON.stringify(restFrom) === JSON.stringify(restTo),
+      (moved === 0 || moved === 1) &&
+        ((markFrom && !markTo) ||
+          (markFrom === markTo && moved === 1 && activationFrom === activationTo)) &&
+        JSON.stringify(restFrom) === JSON.stringify(restTo),
       `the stale ${producer} changed the page: ${JSON.stringify(change)}`,
     );
   }
+  assert.equal(
+    revisionMoves,
+    landsOnShownRoute ? 1 : 0,
+    `the stale ${producer}'s moves of the saved data's revision`,
+  );
   // The page stays as the move left it, where the move did not wait for the operation.
   if (!moveWaits)
     assert.deepEqual(
@@ -1152,6 +1187,7 @@ async function ownershipRun(
         ...before,
         importing: false,
         activation: before.importing ? after.activation : before.activation,
+        savedDataRevision: before.savedDataRevision + revisionMoves,
       },
       `the page after the stale ${producer}`,
     );

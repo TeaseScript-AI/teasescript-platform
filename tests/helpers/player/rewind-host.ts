@@ -96,6 +96,11 @@ export interface RewindHost {
     expected: SerializableRuntimeValue | undefined;
   }): Promise<{ readonly kind: string }>;
   observe(): Promise<PlayerRuntimeSession | null>;
+  /** Moves once a change to the shown route's saved values landed, and at each fresh read (`useSavedValues.ts`). */
+  readonly savedDataRevision: Readonly<Ref<number>>;
+  readSavedData(): Promise<
+    readonly { readonly key: string; readonly value: SerializableRuntimeValue }[]
+  >;
   demandCallView(): { release(): void };
   debugRecording(): Promise<{
     readonly anchorSnapshot: RuntimeSnapshot;
@@ -239,7 +244,10 @@ function lossyBridge(): { readonly bridge: PlayerBridge; lose(): void } {
   };
 }
 
-/** Saved data in memory, recording each provider call; the next `replace` can be made to fail. */
+/**
+ * Saved data in memory, recording each provider call; the next `replace` can be made to fail. It does not keep the
+ * Player's issue order (`captured-media-persistence.ts`): a `load` during a held `replace` reads the earlier values.
+ */
 export function memoryStorage() {
   const entries = new Map<string, SerializableRuntimeValue>();
   const calls: string[] = [];

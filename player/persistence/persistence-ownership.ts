@@ -12,7 +12,9 @@ import type { ScriptStorageProvider } from "./script-storage.js";
  * the captured-media wrapper of the saved values. A handle admits each call of a store method only while the operation
  * is current, checked when the call is made; a refused call never reaches the store and ends the operation
  * (`StaleOperation`). An admitted call runs to its end as the store makes it, also after the operation went stale. Every
- * page effect is applied synchronously through `commit`.
+ * page effect is applied synchronously through `commit`, except the saved data's revision, which is no state of the page:
+ * it follows the store of the route shown, and moves when a change to that store completes, also when the operation that
+ * issued it went stale.
  */
 
 export interface PersistenceOwnership {

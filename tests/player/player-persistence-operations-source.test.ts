@@ -200,6 +200,7 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
     "useStorageRoute.debugRoomsNow": RESOURCE,
     "useStorageRoute.debugRoomStorageNow": RESOURCE,
     "useStorageRoute.storageRouteNow": RESOURCE,
+    "useStorageRoute.handOverValues": RESOURCE,
     routed: RESOURCE,
     switchStorage: MOVE,
     enterDebugRoom: MOVE,
@@ -271,7 +272,9 @@ const DERIVED: Readonly<Record<string, string>> = {
   keptOwner:
     "the kept session's owner, made from the options, the route and the media store: its own places are checked in its module",
   savedValues:
-    "the saved values in use, made from the route's provider: its own places are checked in its module",
+    "the saved values in use, made from the route's provider, which the route hands over once: its own places are checked in its module",
+  shownRoute:
+    "the route the page shows, made from the normal route: the route's change reports compare against its identity, and it writes no store",
   route:
     "the room and the route of the saved values, made from the options and the media store: its own places are checked in its module",
   rewind:

@@ -67,28 +67,46 @@ export function useStorageRoute({
   // Where storage operations go: the route in use, or a switch to another one, which operations issued meanwhile wait
   // for, in issue order.
   let storageRoute: StorageRoute | Promise<StorageRoute> | undefined = normalRoute;
+  // The route the page shows: the one in use, and while a switch is pending the one it leaves; its resolution changes it.
+  let shownRoute: StorageRoute | undefined = normalRoute;
   const routed = <T>(operation: (route: StorageRoute) => Promise<T>): Promise<T> => {
     const route = storageRoute!;
     return route instanceof Promise ? route.then(operation) : operation(route);
+  };
+  // This route's one job for the saved data's revision, which `useSavedValues` owns: it says when a change landed on the
+  // route shown (`whenLanded`), which only the route can tell.
+  let landed: (() => void) | null = null;
+  /** `change`, made on `route`: once it resolved there, and that route is still the one shown, it says so. */
+  const reported = (route: StorageRoute, change: Promise<void>): Promise<void> => {
+    change.then(
+      () => {
+        if (route === shownRoute) landed?.();
+      },
+      () => {},
+    );
+    return change;
   };
   /** The saved values in use, for the persistence operation `owner`: every call it makes there is admitted. */
   const operationStorage = (owner: PersistenceOwnership): ScriptStorageProvider => ({
     scope: normalStorage!.scope,
     load: () => routed((route) => route.forOperation(owner).load()),
-    write: (key, value) => routed((route) => route.forOperation(owner).write(key, value)),
-    replace: (entries) => routed((route) => route.forOperation(owner).replace(entries)),
-    clear: () => routed((route) => route.forOperation(owner).clear()),
+    write: (key, value) =>
+      routed((route) => reported(route, route.forOperation(owner).write(key, value))),
+    replace: (entries) =>
+      routed((route) => reported(route, route.forOperation(owner).replace(entries))),
+    clear: () => routed((route) => reported(route, route.forOperation(owner).clear())),
   });
   const storageProvider: ScriptStorageProvider | undefined = normalStorage && {
     scope: normalStorage.scope,
     load: () => routed((route) => route.provider.load()),
-    write: (key, value) => routed((route) => route.provider.write(key, value)),
-    replace: (entries) => routed((route) => route.provider.replace(entries)),
-    clear: () => routed((route) => route.provider.clear()),
+    write: (key, value) => routed((route) => reported(route, route.provider.write(key, value))),
+    replace: (entries) => routed((route) => reported(route, route.provider.replace(entries))),
+    clear: () => routed((route) => reported(route, route.provider.clear())),
   };
   /**
-   * Sends storage operations where `next` resolves from now on, once the operations issued before have finished where
-   * they were issued. `next` must not reject.
+   * Sends storage operations where `next` resolves from now on. Leaving the debug room's route or the captured route, it
+   * first lets the operations issued before finish where they were issued (`flush`); the plain route does not wait, so
+   * an operation issued before can finish after the switch. `next` must not reject.
    */
   function switchStorage(next: () => Promise<StorageRoute>): Promise<void> {
     const previous = storageRoute!;
@@ -99,7 +117,9 @@ export function useStorageRoute({
     })();
     storageRoute = switched;
     return switched.then((route) => {
-      if (storageRoute === switched) storageRoute = route;
+      if (storageRoute !== switched) return;
+      storageRoute = route;
+      shownRoute = route;
     });
   }
   /** Sends saved values and photos to the scope's debug room, which exists; `durable` are its photos this Player holds. */
@@ -179,12 +199,28 @@ export function useStorageRoute({
     }
   }
 
+  let handedOver = false;
   return {
     normalStorage,
     room,
     debugRoom,
-    operationStorage,
-    storageProvider,
+    /**
+     * Hands over the saved values' two entry points, each of which reports a change that landed on the route shown, and
+     * `whenLanded`, which takes the one note of those reports: the revision's owner's (`useSavedValues`). A second call
+     * of either throws, so that note has one taker.
+     */
+    handOverValues() {
+      if (handedOver) throw new Error("The saved values' entry points were handed over already.");
+      handedOver = true;
+      return {
+        storageProvider,
+        operationStorage,
+        whenLanded: (note: () => void) => {
+          if (landed !== null) throw new Error("The saved values' change note is taken already.");
+          landed = note;
+        },
+      };
+    },
     switchStorage,
     enterDebugRoom,
     createDebugRoom,
