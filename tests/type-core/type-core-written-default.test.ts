@@ -93,6 +93,18 @@ const WRITTEN_DEFAULTS: readonly {
     ],
   },
   {
+    // (its kinds certain: as possible ones the plan's later copy `v = a` left the slice, #1072 step 0's R7)
+    name: "number? holding a whole number, a written copy stored later (#2307's nullable callfirst)",
+    source: "let a: number? = 0\nlet fb: number? = 0\nlet v = @\nsay v\nv = a",
+    fallback: "fb",
+    reader: "null|number",
+    runs: [
+      ["1.5", "1.5"],
+      ["null", "null"],
+      ["2", "2"],
+    ],
+  },
+  {
     name: "string? holding null",
     source: "let fb: string? = null\nlet v = @\nsay v",
     fallback: "fb",
@@ -146,7 +158,7 @@ test("a default with a written type is read by that type, in the plan and at run
   assert.equal(compared, MODES.length * WRITTEN_DEFAULTS.length);
 });
 
-test("a default's written type: certain where it has one kind, so a number default is no repeat count (#1072 step 0, ADR 0021 1.2)", () => {
+test("a default's written type is certain: a number default is no repeat count (#1072 step 0, ADR 0021 1.2)", () => {
   const source =
     "let fb: number = 0\nlet v = fromJson(hostValue, default: fb, files: false)\nrepeat v {}\nexit\n";
   for (const mode of MODES) {
@@ -201,19 +213,24 @@ test("a written parameter or global, which the candidate route declines, and a c
 });
 
 test("a default's written type is none outside the forms the rule admits, the default then read as it holds at the call (#1072 step 0)", () => {
-  const sources = [
+  const sources: readonly (string | readonly [string, readonly (readonly string[])[]])[] = [
     // #2307's open residual: a default that starts as `null` and takes its type from a later copy
     "let w: integer? = null\nlet fb = null\nfb = w\n@",
-    // cells that disagree
+    // cells that disagree, by syntax or by their written types; a written type silent at the level
     "let w: number = 0\nlet fb = [w, 1]\n@",
+    "let w: number = 0\nlet u: integer = 1\nlet fb = [w, u]\n@",
+    ["let fb: list = [1]\n@", ["element"]],
     // a loop variable, a part of a written list, a computed default, an unwritten parameter
     "let xs: number[] = [0]\nfor fb in xs {\n  @\n}",
     "let xs: number[] = [0]\nlet fb = xs[0]\n@",
     "let w: number? = 0\nlet fb = w otherwise 1\n@",
     "function f(fb) {\n  @\n}\nf(0)",
   ];
-  for (const text of sources)
+  for (const source of sources) {
+    // (a written `list` gives its kind at the root and nothing below it)
+    const [text, rests] = typeof source === "string" ? [source, [[], ["element"]]] : source;
     for (const reversed of [false, true])
-      for (const rest of [[], ["element"]])
+      for (const rest of rests)
         assert.equal(ruleAt(text, rest, reversed).items, null, `${text} at ${rest.join(".")}`);
+  }
 });

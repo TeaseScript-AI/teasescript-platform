@@ -157,8 +157,8 @@ export function defaultOf(c: ValueConstraint): PlaceId | undefined {
  * - a list, set, dict or object literal above the level: its cells at the next step, which all give the same kinds.
  * Anything else gives `null`: another expression, a binding without a start value (a loop variable, an unwritten
  * parameter), a step the written type does not reach, a level whose kinds hold `unknown`, cells that disagree or a
- * literal without cells. Each binding followed and each literal's cell charges a unit. One item per kind, spelled as written (#1398), certain where the
- * written type has one kind and possible where it has several.
+ * literal without cells. Each binding followed and each literal's cell charges a unit. One item per kind, spelled as
+ * written (#1398) and certain, as the finishing read gives a written type's kinds (`typedRead`).
  */
 export function writtenDefault(
   pass: CorePass,
@@ -211,8 +211,8 @@ export function writtenDefault(
   if (kinds.length === 1) return [makeItem(kinds[0]!, null, { cert: "def", ...spelled })];
   // (a written `T?` or union is a type a read can narrow at the call, ADR 0021 rules 5.1 and 5.2: whether rule 2.6's
   // "its default's type" is then the written or the narrowed type is an open owner question, and this clause reads the
-  // written one; the narrowed reading gives `null` here)
-  return kinds.map((tag) => makeItem(tag, null, { cert: "pos", ...spelled }));
+  // written one)
+  return kinds.map((tag) => makeItem(tag, null, { cert: "def", ...spelled }));
 }
 
 /**
