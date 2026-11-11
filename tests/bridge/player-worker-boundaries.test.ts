@@ -20,16 +20,19 @@ import type { DebugView, DebugViewRequest } from "../../player/debug/debug-view.
 import type { SessionTransfer } from "../../player/persistence/session-transfer.js";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import { DEMO_PLAYER_PROFILE } from "../../player/demo-player-profile.js";
+import { playerProfileFromInput } from "../../src/runtime/host-data/player-profile.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { presentedAction, runtimeInput, type Intent } from "../helpers/player/player-input.js";
 import { sourceStart, preparedSource, type PlanStart } from "../helpers/prepared-plan.js";
 import { readForImport, type SessionRead } from "../helpers/player/transfer-read.js";
 import {
+  checkpointSnapshot,
   loadTopology,
   rerunRegistry,
   TOPOLOGIES,
   topologyBridge,
   until,
+  type Posted,
   type Topology,
   type TopologyBridge,
 } from "../helpers/player/worker-topology.js";
@@ -79,6 +82,13 @@ interface Host {
   readonly imageCapture: { choose(reference: string): boolean; answer(input: "button"): Intent };
   readonly traceId: Readonly<Ref<number | null>>;
   setDebugTracing(on: boolean): void;
+  setDebugMode(enabled: boolean): void;
+  readonly rooms: { readonly current: Readonly<Ref<"normal" | "debug">> };
+  editSavedData(edit: {
+    readonly key: string;
+    readonly value: SerializableRuntimeValue;
+    readonly expected: SerializableRuntimeValue | undefined;
+  }): Promise<{ readonly kind: string; readonly live?: boolean }>;
   debugView(request: DebugViewRequest): Promise<DebugView | null>;
   debugExportCandidate(
     details: () => Record<string, never>,
@@ -272,58 +282,108 @@ RERUN.rows(
 
 RERUN.rows(
   "W2 claim reused",
-  "W2: a bridge a disposed Player held is claimed by the next Player, which prepares and starts on it",
+  "W2: a bridge a disposed Player traced on is claimed by the next Player, which sends its own tracing setting before it starts",
   async (context, topology, end) => {
     stubBrowser(context);
     const transport = await topologyBridge(context, topology);
     const first = await mount(context, transport);
+    first.host.setDebugTracing(true);
     await start(first.host, 'say "first", instant\nshowButton "End"\nexit');
+    await until(() => first.host.traceId.value !== null, "the first Player's trace");
     first.stop();
+    for (let index = 0; index < 5; index += 1) await turn();
+    const from = transport.posts.length;
     const second = await mount(context, transport);
     await start(second.host, 'say "second", instant\nshowButton "End"\nexit');
     assert.deepEqual(said(second.host), ["second"]);
     assert.equal(second.host.hostError.value, null);
+    // The first Player's serials may still mark work in the bridge's queue: the second sends its own setting, off,
+    // with a newer serial, ahead of its Start.
+    const tracing = (post: Posted) => {
+      const args = post.args;
+      return post.op === "debugTracing" &&
+        typeof args === "object" &&
+        args !== null &&
+        "on" in args &&
+        "intent" in args &&
+        typeof args.intent === "number"
+        ? { on: args.on, intent: args.intent }
+        : null;
+    };
+    const earlier = transport.posts.slice(0, from).flatMap((post) => tracing(post) ?? []);
+    const later = transport.posts.slice(from);
+    const ops = later.map((post) => post.op).join(", ");
+    const sent = later.findIndex((post) => tracing(post) !== null);
+    assert.ok(sent >= 0 && sent < later.findIndex((post) => post.op === "start"), ops);
+    const intent = tracing(later[sent]!)!;
+    assert.equal(intent.on, false);
+    assert.ok(earlier.length > 0 && earlier.every((each) => each.intent < intent.intent), ops);
+    assert.equal(second.host.traceId.value, null);
     return end();
   },
 );
 
 RERUN.rows(
   "W3 click activation and Start options",
-  "W3: a Start unlocks audio and keeps the screen on within the click, and its options reach the host as sampled",
+  "W3: a Start, a Continue and a camera Start do their browser work within the click, and the Start's options reach the host as sampled",
   async (context, topology, end) => {
     const calls = stubBrowser(context);
-    const transport = await topologyBridge(context, topology);
-    const { host } = await mount(context, transport);
-    const sampled = {
+    const at = keptBrowser();
+    await at.provider.write("seen", "before");
+    const extra = {
       wallClockMs: Date.UTC(2026, 10, 11, 9, 30),
       playerProfile: DEMO_PLAYER_PROFILE,
     };
-    host.prepare(
-      await sourceStart(
-        host.bridge,
-        'say "Stare at the screen.", instant\nwait 10 s\nexit',
-        () => ({ ...host.temporalCapture(), ...sampled }),
-      ),
+    const first = await page(context, topology, at, KEPT, { extra });
+    const within = () => calls.filter((call, index, all) => call !== all[index - 1]);
+    first.transport.hold("start");
+    const starting = first.host.activate();
+    assert.deepEqual(within(), ["play", "wakeLock"], "the Start's audio unlock and wake lock");
+    await first.transport.held();
+    assert.equal(first.host.session.value, null, "the host has not replied yet");
+    first.transport.release();
+    await starting;
+    await until(() => asks(first.host), "the first question is asked");
+    // The options as the host holds them: its checkpoint of the started session.
+    const sampled = first.sampled();
+    assert.ok(sampled?.temporalContext, "the click sampled a temporal context");
+    const snapshot = await checkpointSnapshot(first.transport.bridge, first.host.session.value!);
+    assert.equal(snapshot.temporalCaptures[0]?.epochMs, extra.wallClockMs);
+    assert.deepEqual(snapshot.temporalCaptures[0]?.context, sampled.temporalContext);
+    assert.deepEqual(snapshot.playerProfile, playerProfileFromInput(DEMO_PLAYER_PROFILE));
+    assert.deepEqual(snapshot.scriptStorage.map(({ key, value }) => [key, value]).sort(), [
+      ["seen", "before"],
+      ["visits", 1],
+    ]);
+    const input = await runtimeInput();
+    assert.equal(
+      (await answer(first.host, input.intents.composer("one", "enter"))).kind,
+      "answered",
     );
-    transport.hold("start");
-    const activating = host.activate();
+    await keptWith(at, "Got one.");
+    first.stop();
+    // A Continue on the next page: the same browser work, within its click.
+    const second = await page(context, topology, at);
+    await until(() => second.host.activation.value === "continue", "the next page offers Continue");
+    calls.length = 0;
+    const continuing = second.host.activate();
+    assert.deepEqual(within(), ["play", "wakeLock"], "the Continue's audio unlock and wake lock");
+    assert.equal(second.host.session.value, null, "the host has not replied yet");
+    await continuing;
+    assert.ok(said(second.host).includes("Got one."), said(second.host).join(" | "));
+    second.stop();
+    // A Start with the camera asks for it within the click; the stub's camera never answers.
+    const transport = await topologyBridge(context, topology);
+    const camera = await mount(context, transport, { capabilities: { camera: true } });
+    camera.host.prepare(await sourceStart(camera.host.bridge, 'say "Look.", instant\nexit'));
+    calls.length = 0;
+    void camera.host.activate();
     assert.deepEqual(
-      calls.filter((call, index, all) => call !== all[index - 1]),
-      ["play", "wakeLock"],
-      "the audio unlock and the wake lock within the click",
+      [...new Set(calls)].sort(),
+      ["getUserMedia", "play", "wakeLock"],
+      calls.join(", "),
     );
-    await transport.held();
-    assert.equal(host.session.value, null, "the host has not replied yet");
-    transport.release();
-    await activating;
-    assert.equal(status(host), "waiting");
-    const posted = transport.posts.find((post) => post.op === "start");
-    assert.ok(posted, "the Start was posted");
-    // EVIDENCE: fixture: a Start posts `{ plan, options, recording }` (`PlayerBridge.start`), its options as sampled.
-    const args = posted.args as { readonly options: Record<string, unknown> };
-    assert.equal(args.options.wallClockMs, sampled.wallClockMs);
-    assert.deepEqual(args.options.playerProfile, sampled.playerProfile);
-    assert.ok(args.options.temporalContext, "the click's temporal context crossed");
+    camera.stop();
     return end();
   },
 );
@@ -451,18 +511,30 @@ async function page(
   topology: Topology,
   at: ReturnType<typeof keptBrowser>,
   script = KEPT,
+  {
+    extra = {},
+    rooms,
+  }: { readonly extra?: PlayerRuntimeSessionOptions; readonly rooms?: KeptRoomStore } = {},
 ) {
   const transport = await topologyBridge(context, topology);
   const opened = await mount(context, transport, {
     scriptStorage: at.provider,
     keptSessions: at.kept,
+    ...(rooms === undefined ? {} : { debugRooms: rooms }),
   });
   const token = await preparedSource(opened.host.bridge, script);
+  // What the Start's click sampled last.
+  let sampled: PlayerRuntimeSessionOptions | null = null;
   await opened.host.prepareScript(token, {
     plan: token,
-    options: () => ({ ...opened.host.scriptStorageOptions(), ...opened.host.temporalCapture() }),
+    options: () =>
+      (sampled = {
+        ...opened.host.scriptStorageOptions(),
+        ...opened.host.temporalCapture(),
+        ...extra,
+      }),
   });
-  return { ...opened, transport };
+  return { ...opened, transport, sampled: () => sampled };
 }
 
 /** Waits until `at` keeps a session whose events hold `text`. */
@@ -496,7 +568,7 @@ async function playToSecondQuestion(host: Host) {
 
 RERUN.rows(
   "W9 keep and Continue",
-  "W9: a session kept on a page continues on the next page of the same browser, at the kept point",
+  "W9: a session kept on a page continues on the next page at the kept point, takes a Debug edit while it waits, and goes on in the debug room",
   async (context, topology, end) => {
     stubBrowser(context);
     const at = keptBrowser();
@@ -506,17 +578,38 @@ RERUN.rows(
     await keptWith(at, "Got one.");
     const shown = said(first.host);
     first.stop();
-    const second = await page(context, topology, at);
+    const second = await page(context, topology, at, KEPT, { rooms: memoryKeptRoomStore() });
     await until(() => second.host.activation.value === "continue", "the next page offers Continue");
     await second.host.activate();
     assert.deepEqual(said(second.host), shown, "the transcript up to the kept point");
     assert.equal(at.entries.get("visits"), 1);
+    // A Debug edit while the session waits at its question is stored and reaches the host's session.
+    const edit = await second.host.editSavedData({ key: "visits", value: 5, expected: 1 });
+    assert.deepEqual([edit.kind, edit.live], ["saved", true]);
+    assert.equal(at.entries.get("visits"), 5);
+    const edited = await checkpointSnapshot(second.transport.bridge, second.host.session.value!);
+    assert.equal(edited.scriptStorage.find((entry) => entry.key === "visits")?.value, 5);
+    // Debug on carries the session into the debug room, where it goes on; the normal room keeps it where it was.
+    second.host.setDebugMode(true);
+    await until(() => second.host.rooms.current.value === "debug", "the debug room");
+    assert.deepEqual(said(second.host), shown, "the debug room's copy of the session");
+    const copied = await checkpointSnapshot(second.transport.bridge, second.host.session.value!);
+    assert.equal(copied.debugMode, true);
     const input = await runtimeInput();
     assert.equal(
       (await answer(second.host, input.intents.composer("two", "enter"))).kind,
       "answered",
     );
-    await until(() => said(second.host).includes("Then two."), "the continued session runs on");
+    await until(
+      () => said(second.host).includes("Then two."),
+      "the copy runs on in the debug room",
+    );
+    const normal = await at.kept.session(at.provider.scope);
+    assert.ok(normal !== null && JSON.stringify(normal.events).includes("Got one."));
+    assert.ok(
+      !JSON.stringify(normal.events).includes("Then two."),
+      "the normal room's session stays",
+    );
     return end();
   },
 );
