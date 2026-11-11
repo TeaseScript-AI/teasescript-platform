@@ -89,12 +89,26 @@ if (unmatched.length > 0) {
 // first: started late, one of them would run alone at the end.
 // Beside the spec reporter, `test-in-flight.mjs` names on standard error a test still running long after it began.
 // Compact output of named files ends with one line per file and its tests' counts, the passing tests it leaves out among
-// them, so a file that ran nothing shows `0 passed` (the full suite fails such a file instead); a file that failed
-// outside its tests (it threw while loading, or its process ended non-zero) says so beside them. There
-// `test-file-counts.mjs` counts, and names a test in flight in that reporter's place.
+// them; a file that failed outside its tests (it threw while loading, or its process ended non-zero) says so beside
+// them. A file that ran no test (a suite alone is none) fails the run, unless the tests may be selected (a name or
+// skip pattern, or `--test-only`, in any spelling Node takes, as an argument or anywhere in `NODE_OPTIONS`): then its
+// line says the selection matched no test in it. A selection's spelling given as another option's value, or joined by
+// a stray `"` or `\` in `NODE_OPTIONS`, reads as a selection too. A selection the filter does not read (from
+// `--config-file`, from an `--env-file` given after the filter, or `--experimental-test-tag-filter`) fails the run; one
+// in the environment must be in the filter's own. The per-file counts, and with them this check, need Node's default
+// process isolation (under `--test-isolation=none` a passing test counts as none), and a watch run is not checked per
+// cycle. There `test-file-counts.mjs` counts, and names a test in flight in that reporter's place.
 const countsFolder =
   fullSuite || fullOutput ? null : mkdtempSync(join(tmpdir(), "test-file-counts-"));
 const countsFile = countsFolder === null ? null : join(countsFolder, "counts.json");
+// (the arguments are tokens. `NODE_OPTIONS` selects when it names a selection anywhere once every `"` and `\` is
+// removed: Node only ever removes those two characters when it reads it, and no selection's name holds either, so any
+// selection Node applies stands whole in what is left. A selection's spelling inside another option's value, or one
+// that a stray `"` or `\` joins, then reads as one too, which only spares that file the failure)
+const selection = /--test[-_](?:(?:name|skip)[-_]pattern|only)/u;
+const selected =
+  arguments_.some((option) => new RegExp(`^${selection.source}(?:=|$)`, "u").test(option)) ||
+  selection.test((process.env.NODE_OPTIONS ?? "").replaceAll(/["\\]/gu, ""));
 // The folder is removed when the run ends or the filter exits. The filter installs no signal handler, so a signal that
 // ends it leaves the folder in the system's temporary directory, where no run reads it: one counts file, empty until
 // the run ends, then one JSON entry per named file: its absolute path and five counts.
@@ -172,36 +186,56 @@ child.on("error", (error) => {
 
 /**
  * Each file's counts line, `ℹ <file>: N passed[, N failed][, N cancelled][, N skipped][, N todo][; the file failed
- * outside any test]`, or why there are none.
+ * outside any test][; <why it ran no test>]`, or why there are none; and whether a file ran no test without a selection
+ * to explain it.
  */
-function fileCountLines() {
+function fileCounts() {
   let counts;
   try {
     counts = JSON.parse(readFileSync(countsFile, "utf8"));
   } catch (error) {
-    return `ℹ test-output-filter: no counts per file: ${error.message}\n`;
+    return {
+      lines: `ℹ test-output-filter: no counts per file: ${error.message}\n`,
+      ranNothing: false,
+    };
   }
-  return Object.entries(counts)
+  let ranNothing = false;
+  const lines = Object.entries(counts)
     .map(([file, { passed, failed, cancelled, skipped, todo, fileFailed }]) => {
       const others = Object.entries({ failed, cancelled, skipped, todo })
         .filter(([, count]) => count > 0)
         .map(([word, count]) => `, ${count} ${word}`)
         .join("");
       const own = fileFailed ? "; the file failed outside any test" : "";
-      return `ℹ ${relative(process.cwd(), file)}: ${passed} passed${others}${own}\n`;
+      let none = "";
+      // (a file that failed outside its tests already fails the run, and says so)
+      if (passed + failed + cancelled + skipped + todo === 0 && !fileFailed) {
+        if (selected) none = "; the selection matched no test in it";
+        else {
+          ranNothing = true;
+          none = "; it ran no test, which fails the run";
+        }
+      }
+      return `ℹ ${relative(process.cwd(), file)}: ${passed} passed${others}${own}${none}\n`;
     })
     .join("");
+  return { lines, ranNothing };
 }
 
 child.on("close", (code, signal) => {
+  let ranNothing = false;
   if (countsFolder !== null) {
-    if (!refused && signal === null) process.stdout.write(fileCountLines());
+    if (!refused && signal === null) {
+      const counts = fileCounts();
+      process.stdout.write(counts.lines);
+      ranNothing = counts.ranNothing;
+    }
     removeCounts();
   }
   if (refused) return;
   if (signal !== null) {
     process.kill(process.pid, signal);
   } else {
-    process.exitCode = code ?? 1;
+    process.exitCode = code === 0 && ranNothing ? 1 : (code ?? 1);
   }
 });

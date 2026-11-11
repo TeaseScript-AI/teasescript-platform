@@ -20,11 +20,15 @@ import { pathToFileURL } from "node:url";
 
 const filterPath = resolve(process.cwd(), "tools/test-output-filter.mjs");
 
-/** Runs the filter on `fixtures`, or on the arguments `argumentsIn` gives for the fixtures' directory. */
+/**
+ * Runs the filter on `fixtures`, or on the arguments `argumentsIn` gives for the fixtures' directory, with `variables`
+ * added to its environment.
+ */
 function runFixtures(
   fixtures: Record<string, string>,
   fullOutput = false,
   argumentsIn?: (directory: string) => string[],
+  variables: NodeJS.ProcessEnv = {},
 ) {
   const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
   // the filter's own temporary folders, apart from everyone else's
@@ -35,6 +39,7 @@ function runFixtures(
     TMPDIR: temporary,
     TEMP: temporary,
     TMP: temporary,
+    ...variables,
   };
   delete environment.NODE_TEST_CONTEXT;
 
@@ -193,18 +198,128 @@ test("compact output ends with each named file's counts, after Node's own output
   assert.deepEqual(compact.leftover, []);
   // after Node's own output: the summary and the failures
   assert.match(compact.stdout, /failing test[\s\S]*\nℹ \S*counted\.test\.mjs: /u);
-  // a name pattern that matches no test runs none
-  const unmatched = runFixtures(fixtures, false, (directory) => [
-    "--test-name-pattern=no such test",
-    resolve(directory, "counted.test.mjs"),
-  ]);
-  assert.equal(unmatched.status, 0, unmatched.stderr);
-  assert.match(unmatched.stdout, /^ℹ \S*counted\.test\.mjs: 0 passed$/mu);
-  // and so does one that passes
-  assert.deepEqual(unmatched.leftover, []);
+  // a file that ran no test fails the run, a suite alone included, and its line says so; NODE_OPTIONS without a
+  // selection's name changes nothing
+  for (const [name, variables] of [
+    ["suites.test.mjs", {}],
+    ["silent.test.mjs", {}],
+    ["silent.test.mjs", { NODE_OPTIONS: "--title=label --no-warnings" }],
+  ] as const) {
+    const none = runFixtures(fixtures, false, (directory) => [resolve(directory, name)], variables);
+    assert.equal(none.status, 1, `${name}: ${none.stdout}${none.stderr}`);
+    assert.match(
+      none.stdout,
+      new RegExp(
+        `^ℹ \\S*${name.replace(".", "\\.")}: 0 passed; it ran no test, which fails the run$`,
+        "mu",
+      ),
+    );
+  }
+  // a selection that matches no test runs none, which its line says and the exit does not: a name or skip pattern, or
+  // --test-only, in each spelling Node takes, or in NODE_OPTIONS
+  for (const [selection, variables] of [
+    [["--test-name-pattern=no such test"], {}],
+    [["--test-skip-pattern", "."], {}],
+    [["--test_name_pattern=nosuch"], {}],
+    [["--test-skip_pattern", "."], {}],
+    [["--test-only"], {}],
+    [[], { NODE_OPTIONS: "--test-name-pattern=nosuch" }],
+    // (anywhere in NODE_OPTIONS, quoted or not)
+    [[], { NODE_OPTIONS: '"--test-name-pattern=no such test"' }],
+  ] as const) {
+    const unmatched = runFixtures(
+      fixtures,
+      false,
+      (directory) => [...selection, resolve(directory, "counted.test.mjs")],
+      variables,
+    );
+    assert.equal(
+      unmatched.status,
+      0,
+      `${selection.join(" ")}: ${unmatched.stdout}${unmatched.stderr}`,
+    );
+    assert.match(
+      unmatched.stdout,
+      /^ℹ \S*counted\.test\.mjs: 0 passed; the selection matched no test in it$/mu,
+      selection.join(" "),
+    );
+    // and so does one that passes
+    assert.deepEqual(unmatched.leftover, []);
+  }
   // full output names every test, and adds no counts
   const full = runFixtures(fixtures, true);
   assert.doesNotMatch(full.stdout, /^ℹ \S*\.test\.mjs: /mu);
+});
+
+/** `child`'s exit status, once it has closed. */
+async function statusOf(child: ReturnType<typeof spawn>) {
+  const [code]: unknown[] = await once(child, "close");
+  return typeof code === "number" ? code : null;
+}
+
+test("wherever Node applies a selection given in NODE_OPTIONS, the filter reads one: Node itself decides each case", async () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
+  try {
+    // One test, which leaves a marker file when it runs: a selection Node applied leaves none.
+    const file = resolve(directory, "one.test.mjs");
+    writeFileSync(
+      file,
+      'import test from "node:test"; import { writeFileSync } from "node:fs"; test("real", () => writeFileSync(process.env.MARKER, ""));\n',
+    );
+    // Each selection option with a quote pair, or a backslash inside quotes, put into its name at three places, the
+    // whole option quoted, and a quote pair after it; after another option and one or two spaces. And round 3's three.
+    const insert = [
+      (option: string, at: number) => `${option.slice(0, at)}""${option.slice(at)}`,
+      (option: string, at: number) =>
+        `${option.slice(0, at)}"\\${option[at]}"${option.slice(at + 1)}`,
+    ];
+    const forms = ["--test-name-pattern=nosuch", "--test-skip-pattern=.", "--test-only"].flatMap(
+      (option) => [
+        ...[2, 7, 9].flatMap((at) => insert.map((put) => put(option, at))),
+        `"${option}"`,
+        `${option}""`,
+      ],
+    );
+    const values = [
+      ...forms.flatMap((form) => [`--no-warnings ${form}`, `--no-warnings  ${form}`]),
+      '--test-"name"-pattern=missing',
+      '"--test-na\\me-pattern=missing"',
+      '--test-""only',
+    ];
+    const environment: NodeJS.ProcessEnv = { ...process.env };
+    delete environment.NODE_TEST_CONTEXT;
+    const results = await Promise.all(
+      values.map(async (value, n) => {
+        const marker = resolve(directory, `ran-${n}`);
+        const env = { ...environment, NODE_OPTIONS: value, MARKER: marker };
+        const node = await statusOf(
+          spawn(process.execPath, ["--test", "--test-reporter=dot", file], {
+            env,
+            stdio: "ignore",
+          }),
+        );
+        const applied = node === 0 && !existsSync(marker);
+        const filter = await statusOf(
+          spawn(process.execPath, [filterPath, file], { env, stdio: "ignore" }),
+        );
+        return { value, applied, filter };
+      }),
+    );
+    // (the family is not vacuous: Node applies most of these)
+    assert.ok(
+      results.filter(({ applied }) => applied).length >= values.length / 2,
+      JSON.stringify(results),
+    );
+    for (const { value, applied, filter } of results)
+      if (applied)
+        assert.equal(
+          filter,
+          0,
+          `NODE_OPTIONS=${value}: Node applied a selection, the filter failed the run`,
+        );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 /**
@@ -318,13 +433,19 @@ test("each file's line, with the file's own result, reconciles with node:test's 
       const lines = filtered.stdout.split("\n").filter((each) => each.startsWith(prefix));
       assert.equal(lines.length, 1, `${file}: one line\n${filtered.stdout}`);
       const line =
-        /^(\d+) passed(?:, (\d+) failed)?(?:, (\d+) cancelled)?(?:, (\d+) skipped)?(?:, (\d+) todo)?(; the file failed outside any test)?$/u.exec(
+        /^(\d+) passed(?:, (\d+) failed)?(?:, (\d+) cancelled)?(?:, (\d+) skipped)?(?:, (\d+) todo)?(; the file failed outside any test)?(; it ran no test, which fails the run)?$/u.exec(
           lines[0]!.slice(prefix.length),
         );
       assert.ok(line, `${file}: its counts\n${lines[0]}`);
       const [passed, failed, cancelled, skipped, todo] = line
         .slice(1, 6)
         .map((count) => Number(count ?? 0));
+      // (said exactly where the file ran no test and did not fail outside one)
+      assert.equal(
+        line[7] !== undefined,
+        passed! + failed! + cancelled! + skipped! + todo! === 0 && line[6] === undefined,
+        `${file}: ran no test\n${lines[0]}`,
+      );
       const own = line[6] === undefined ? (node.own === "passed" ? "passed" : null) : "failed";
       assert.deepEqual(
         {
