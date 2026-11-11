@@ -245,6 +245,8 @@ function repository({
     "tools/oxlint/run.mjs",
     slowOxlint ? `${awaitFile("release-oxlint", "the test to release oxlint")}\n` : "\n",
   );
+  // (test:lint's runner, which loads nothing here: `loads` then adds no project)
+  write("tools/oxlint/test.mjs", "\n");
   // (a stand-in for the pin-suite mapper that says how it was asked)
   write(
     "tools/repository-checks/pin-suites.mjs",
@@ -280,6 +282,8 @@ function repository({
     JSON.stringify({ lockfileVersion: 3, packages: installed }),
   );
   write("node_modules/prettier/package.json", JSON.stringify({ version: "0.0.0" }));
+  // (the TypeScript that reads what a project's runner loads, as main's install has it)
+  symlinkSync(realpathSync("node_modules/typescript"), join(directory, "node_modules/typescript"));
   write("node_modules/prettier/bin/prettier.cjs", "\n");
   if (passing) {
     write("node_modules/knip/bin/knip.js", "\n");
