@@ -85,7 +85,8 @@ ROWS.jsonl...`. Beside each number it writes the conditions it depends on. The r
   - a cell has a failing sample;
   - there is no artifact inventory.
 - **`cells.mjs`** decides every cell: required, or excluded with its reason.
-- **`artifacts.mjs`** lists a build's files with raw, gzip and brotli sizes, each marked eager, lazy or Worker.
+- **`artifacts.mjs`** lists a build's files with raw, gzip and brotli sizes, each marked eager, lazy or Worker (what a
+  Worker entry imports, also by `import()`); a JavaScript file no root reaches, or an `import(` it cannot read, fails it.
 - **`inputs.mjs`** writes the bridge page's inputs from a built tree: a package's project and its plan text.
 
 Every number names its route (the full Player compiles source; plan text exists only on the bridge page), its backend
