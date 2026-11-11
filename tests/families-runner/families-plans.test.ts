@@ -43,10 +43,11 @@ const ORDERS = {
  * net, together past it), `lost` 6 s as its search starts. (#1850: margins of over a second either way, which a loaded
  * worker keeps, where a 0.5 s net left 200 ms.) Each tree's four modes are named as `HELD_MODES`' are, in an order of its
  * own (`ORDERS`), and a compile's plan holds the name of the mode it ran in, so modes paired by position differ. For
- * every record form (R20): `exits` ends its worker; `over at demand <n>` charges 5,000 at that demand, `overstop` at its
- * stop's allowance of 10; an `apart…` source's plan on the head names its demand and allowance, so every pair differs;
+ * every record form (R20): `exits` ends its worker; `over at demand <n>` charges 5,000 at that demand, and `overstop`
+ * at its stop's allowance; an `apart…` source's plan on the head names its demand and allowance, so every pair differs;
  * the stop search throws for `throws`; the analysis charges 5,000 for `overanalysis` and nothing for
- * `apart-zero-questions`; and `apart-zero-stop`'s one stop is at an allowance of 0.
+ * `apart-zero-questions`; and the one stop of `apart-stop <n>` and `overstop <n>` is at the allowance `<n>`, of any
+ * other at 10.
  */
 const MODULES: Record<string, string> = {
   "src/type-inference/core/budget.js": `let test = null;
@@ -86,7 +87,7 @@ export function compileProjectWithBackend(files) {
   const over =
     source === "over" ||
     source === \`over at demand \${globalThis.demand}\` ||
-    (source === "overstop" && ledger().allowance === 10);
+    (source.startsWith("overstop") && ledger().allowance !== 1000);
   ledger().charge("frames", over ? 5000 : source === "hang" ? 1 : 300);
   const apart = import.meta.url.includes("/head/") && source.startsWith("apart")
     ? { demand: String(globalThis.demand), allowance: ledger().allowance }
@@ -127,7 +128,8 @@ export function heldStops(c, mode) {
   if (c.name === "lost") wait(6000);
   if (c.name === "throws") throw new Error("search failed");
   mode.run(() => new WorkLedger(10).charge("frames", c.name === "searched" ? 5000 : 300));
-  return [{ allowance: c.name === "apart-zero-stop" ? 0 : 10, phase: "admission" }];
+  const [, at] = /^(?:apart-stop|overstop) (.+)$/.exec(c.name) ?? [];
+  return [{ allowance: at === undefined ? 10 : Number(at), phase: "admission" }];
 }
 `,
 };
@@ -452,14 +454,19 @@ test("every record form the runner writes, at its allowance edges, passes the su
     ...["fine", "apart", "over", "hang", "exits"].map((name) => [name, name]),
     ...demands.map((demand) => [`over at demand ${demand}`, `over at demand ${demand}`]),
   ]);
-  // (the held family of every held form; the waits shortened to 2.5 s against a 1 s safety net)
-  const family = ["stopped", "searched", "overstop", "overanalysis", "throws", "lost"];
+  // (the held family of every held form, a stop pair and a stall at each allowance a tree's `heldStops` may give; the
+  // waits shortened to 2.5 s against a 1 s safety net)
+  const edges = ["0", "-1", "0.5", "NaN", "Infinity"];
+  const family = [
+    ...["stopped", "searched", "overstop", "overanalysis", "throws", "lost"],
+    ...edges.flatMap((edge) => [`apart-stop ${edge}`, `overstop ${edge}`]),
+  ];
   for (const tree of ["base", "head"]) {
     for (const [file, from, to] of [
       [
         "tests/helpers/type-core-held-host.js",
         '["stopped", "searched", "settling", "lost"]',
-        JSON.stringify([...family, "apart-zero-stop", "apart-zero-questions"]),
+        JSON.stringify([...family, "apart-zero-questions"]),
       ],
       ["tests/helpers/type-core-held-host.js", "wait(6000)", "wait(2500)"],
       ["src/compiler.js", "wait(6000)", "wait(2500)"],
@@ -518,6 +525,7 @@ test("every record form the runner writes, at its allowance edges, passes the su
       "safety net 1 s at natural",
       "safety net 1 s at stop search, between",
       "units at allowance 10",
+      ...edges.map((edge) => `units at allowance ${edge}`),
       "units at analysis",
       ...demands.map((demand) => `units at demand ${demand}`),
       "units at natural",
@@ -536,8 +544,11 @@ test("every record form the runner writes, at its allowance edges, passes the su
     "null",
   ]);
   assert.deepEqual(values(modes.flatMap((m) => (m.stops?.differ ?? []).map((d) => d.allowance))), [
+    "-1",
     "0",
+    "0.5",
     "10",
+    "null",
   ]);
   assert.ok(modes.some((m) => m.questions?.differ.some((d) => d.allowance === 0)));
   assert.ok(records.some((r) => r.name === "cases.mjs/fine" && r.differing === 0));
