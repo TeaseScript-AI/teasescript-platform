@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import {
   chmodSync,
   copyFileSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -250,8 +251,8 @@ test(
 );
 
 test(
-  "no git setting of the host reaches the fixture: each hostile one alone, and all at once",
-  { timeout: 120_000 },
+  "no git setting of the host reaches the fixture: each hostile one, and all at once, through each channel",
+  { timeout: 240_000 },
   () => {
     const hostile = mkdtempSync(join(tmpdir(), "measure-test-files-host-"));
     const script = (path, code) => {
@@ -275,63 +276,105 @@ test(
       ["another default branch", [["init.defaultBranch", "elsewhere"]]],
       ["a file-system monitor", [["core.fsmonitor", join(hostile, "fsmonitor")]]],
     ];
-    const saved = { ...process.env };
-    const restore = () => {
-      for (const name of Object.keys(process.env)) if (!(name in saved)) delete process.env[name];
-      Object.assign(process.env, saved);
+    const ini = (settings) =>
+      settings
+        .map(([key, value]) => {
+          const [section, name] = key.split(".");
+          return `[${section}]\n\t${name} = ${value}\n`;
+        })
+        .join("");
+    // Each channel a host gives git a setting through, alone: its variables, and the origin `git config
+    // --show-origin` names for a setting it gives.
+    const channels = {
+      global: (file) => [{ GIT_CONFIG_GLOBAL: file }, `file:${file}`],
+      system: (file) => [{ GIT_CONFIG_SYSTEM: file }, `file:${file}`],
+      "HOME's file": (file, home) => {
+        writeFileSync(join(home, ".gitconfig"), readFileSync(file));
+        return [{}, `file:${join(home, ".gitconfig")}`];
+      },
+      "XDG's file": (file, home) => {
+        mkdirSync(join(home, "xdg/git"), { recursive: true });
+        writeFileSync(join(home, "xdg/git/config"), readFileSync(file));
+        return [{ XDG_CONFIG_HOME: join(home, "xdg") }, `file:${join(home, "xdg/git/config")}`];
+      },
+      "the environment's entries": (file, home, settings) => [
+        Object.fromEntries([
+          ["GIT_CONFIG_COUNT", String(settings.length)],
+          ...settings.flatMap(([key, value], n) => [
+            [`GIT_CONFIG_KEY_${n}`, key],
+            [`GIT_CONFIG_VALUE_${n}`, value],
+          ]),
+        ]),
+        "command line:",
+      ],
     };
-    try {
-      for (const [label, settings] of [
-        ...members,
-        ["all at once", members.flatMap(([, entries]) => entries)],
-      ]) {
-        // Every way a host gives git a setting: global, system and HOME's files, the environment's own entries, and
-        // a template folder.
-        const home = mkdtempSync(join(hostile, "home-"));
-        const file = join(home, ".gitconfig");
-        writeFileSync(
-          file,
-          settings
-            .map(([key, value]) => {
-              const [section, name] = key.split(".");
-              return `[${section}]\n\t${name} = ${value}\n`;
-            })
-            .join(""),
-        );
-        Object.assign(process.env, {
-          HOME: home,
-          GIT_CONFIG_GLOBAL: file,
-          GIT_CONFIG_SYSTEM: file,
-          GIT_TEMPLATE_DIR: join(hostile, "templates"),
-          GIT_CONFIG_COUNT: String(settings.length),
-          ...Object.fromEntries(
-            settings.flatMap(([key, value], n) => [
-              [`GIT_CONFIG_KEY_${n}`, key],
-              [`GIT_CONFIG_VALUE_${n}`, value],
-            ]),
-          ),
-        });
-        // (the host's git sees each setting)
-        for (const [key, value] of settings)
-          assert.equal(
-            spawnSync("git", ["config", "--get", key], { encoding: "utf8" }).stdout.trim(),
-            value,
-            `${label}: ${key}`,
-          );
+    const saved = { ...process.env };
+    // (the test's own environment without any git input it inherited, so that each case enables one channel only)
+    const clean = Object.fromEntries(
+      Object.entries(saved).filter(
+        ([name]) => !name.startsWith("GIT_") && !["HOME", "XDG_CONFIG_HOME"].includes(name),
+      ),
+    );
+    const become = (environment) => {
+      for (const name of Object.keys(process.env)) delete process.env[name];
+      Object.assign(process.env, environment);
+    };
+    const builds = (label, environment) => {
+      become(environment);
+      try {
         const root = checkout();
         try {
-          if (label === "all at once") {
+          if (label.startsWith("all at once")) {
             const { status, out, module } = measure(root, []);
-            assert.equal(status, 0, out);
-            assert.match(module, /sub\/type-core-z\.test\.js/u);
+            assert.equal(status, 0, `${label}: ${out}`);
+            assert.match(module, /sub\/type-core-z\.test\.js/u, label);
           }
         } finally {
           rmSync(root, { recursive: true, force: true });
         }
-        restore();
+      } finally {
+        become(saved);
       }
+    };
+    try {
+      let n = 0;
+      for (const [channel, give] of Object.entries(channels))
+        for (const [member, settings] of [
+          ...members,
+          ["all at once", members.flatMap(([, entries]) => entries)],
+        ]) {
+          const label = `${member}, through ${channel}`;
+          const home = join(hostile, `home-${(n += 1)}`);
+          mkdirSync(home);
+          const file = join(home, "hostile.gitconfig");
+          writeFileSync(file, ini(settings));
+          const [variables, origin] = give(file, home, settings);
+          const environment = { ...clean, HOME: home, ...variables };
+          // (the host's git, in this environment, takes each setting from this channel)
+          for (const [key, value] of settings)
+            assert.equal(
+              spawnSync("git", ["config", "--show-origin", "--get", key], {
+                cwd: hostile,
+                env: environment,
+                encoding: "utf8",
+              }).stdout,
+              `${origin}\t${value}\n`,
+              `${label}: ${key}`,
+            );
+          builds(label, environment);
+        }
+      // A template folder given by the environment's variable.
+      const home = join(hostile, "home-template");
+      mkdirSync(home);
+      const environment = { ...clean, HOME: home, GIT_TEMPLATE_DIR: join(hostile, "templates") };
+      spawnSync("git", ["init", "-q", join(hostile, "probe")], { env: environment });
+      assert.ok(
+        existsSync(join(hostile, "probe/.git/hooks/pre-commit")),
+        "the host's git copies the hook",
+      );
+      builds("a template folder, through GIT_TEMPLATE_DIR", environment);
     } finally {
-      restore();
+      become(saved);
       rmSync(hostile, { recursive: true, force: true });
     }
   },
