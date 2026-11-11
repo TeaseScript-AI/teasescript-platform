@@ -253,7 +253,27 @@ function cases(engine) {
   ];
 }
 
-const OVERTAKEN = "This interaction is no longer available.";
+/** Records, from the answer's flight on, when a timer's block first shows and when Send is first enabled again. */
+const watchOvertake = () => {
+  const state = { block: null, enabled: null };
+  globalThis.__gateOvertake = state;
+  const observer = new MutationObserver(() => {
+    const now = performance.now();
+    const send = document.querySelector("[data-runtime-interaction] button[type=submit]");
+    if (state.enabled === null && send?.disabled === false) state.enabled = now;
+    const shown = [...document.querySelectorAll(".transcript-entry")].some((entry) =>
+      /Block\?|Choose a code/u.test(entry.textContent ?? ""),
+    );
+    if (state.block === null && shown) state.block = now;
+    if (state.block !== null && state.enabled !== null) observer.disconnect();
+  });
+  observer.observe(document.body, {
+    subtree: true,
+    childList: true,
+    characterData: true,
+    attributes: true,
+  });
+};
 /** Whether an answer is in flight while the composer stays writable: Send disabled, the field neither read-only nor
  * disabled. */
 const inFlight = () => {
@@ -379,17 +399,21 @@ async function runCase(opened, origin, item) {
     if (aim > 0) await page.waitForTimeout(Math.max(0, aim - Date.now()));
     await page.keyboard.press("Enter");
     // A block case's answer is in flight at Enter (Send disabled, the field writable), and the block overtakes it: the
-    // answer meets its question no longer presented, whose notice the Player shows. A missed window fails the case.
+    // block shows before Send is enabled again, which the answer's settlement does. A missed window fails the case.
     if (item.block && !(await page.evaluate(inFlight)))
       throw new Error("The answer was not in flight after Enter");
+    if (item.block) await page.evaluate(watchOvertake);
     await item.keys(page, at);
-    if (item.block)
-      await page
-        .getByText(OVERTAKEN, { exact: true })
-        .waitFor({ timeout: 5_000 })
-        .catch(() => {
-          throw new Error("The block did not overtake the answer in flight");
-        });
+    if (item.block) {
+      await page.waitForFunction(() => globalThis.__gateOvertake.block !== null, null, {
+        timeout: 10_000,
+      });
+      const { block, enabled } = await page.evaluate(() => globalThis.__gateOvertake);
+      if (enabled !== null && enabled < block)
+        throw new Error(
+          "The answer settled before the block: the block did not overtake it in flight",
+        );
+    }
     let after = await settled(page, () => opens);
     if (item.block) {
       await answerBlock(page);
