@@ -178,6 +178,7 @@ function layerOf(
     front,
   };
   contract.layersById.push(layer);
+  amend(contract.layersById);
   return layer;
 }
 
@@ -223,7 +224,10 @@ function ownPaths(contract: Contract, sub: Key): ReadonlySet<string> {
     contract.keep(1);
     const subs = contract.subsByPath.get(path);
     if (subs === undefined) contract.subsByPath.set(path, new Set([sub]));
-    else subs.add(sub);
+    else {
+      subs.add(sub);
+      amend(subs);
+    }
   }
   contract.subPaths.set(sub, paths);
   return paths;
@@ -352,6 +356,8 @@ export function atPath(contract: Contract, layer: SubLayer, path: number): Layer
     contract.facts.supportEdges += 1;
     amend(contract.facts);
   }
+  // (its one way in: the caller fills the layer's answers there in place, `support` and `demand`)
+  amend(layer);
   return at;
 }
 
