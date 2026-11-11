@@ -7,8 +7,9 @@
 // checkout with `dist/`, or `dist/` itself), in the four modes (source and reversed order, the sharing on and off), and
 // compares what the sources publish (`publication`, part by part: a difference names the first part that differs,
 // #1503) and, for a generator whose `checks` include "stops", which decisions stop and when (`stopSet`) at each demand
-// allowance, a difference naming the stops each tree added, removed or moved (`stopsApart`, #2355, never stored).
-// Each tree's own oracle library (`dist/tests/helpers/type-core-oracles.js`) analyses its sources, in a
+// allowance. A stops difference names each differing stop by its place, pass and ordinal: at each place the stops
+// identical on both trees pair first and the rest in order, a pair `moved` and a surplus `added` or `removed`; which of
+// the rest pair is that order, not a fact the oracle gives (`stopsApart`, #2355; never stored). Each tree's own oracle library (`dist/tests/helpers/type-core-oracles.js`) analyses its sources, in a
 // child process: a run (a source's mode and check on one tree) whose charged units pass `--units` times its program's
 // allowance (`units`, the same on every machine, #1647; a publication run's, also its oracle's units per cell for each
 // cell its own questions returned, #1837), or a source that takes more than `--memory` MB of heap or ends
@@ -249,12 +250,13 @@ const decisionStops = (stops) =>
   );
 
 /**
- * Which decision stops two stops runs differ in (#2355), a stop known by its place (label and path): a place stopping on
- * the head alone is `added`, on the base alone `removed`, on both at another pass or ordinal `moved`, each with both
- * trees' `[pass, ordinal]`; `listsEqual` where the lists agree and the difference is in the stop set's other fields.
- * Known limit: a place that stops a different number of times on each tree pairs its stops in order, so its extra ones
- * read as added or removed. Where a side holds no list (a stored run never does), `unavailable`, naming that side, never
- * equal.
+ * Which decision stops two stops runs differ in (#2355), each stop known by its place (label and path) and its pass and
+ * ordinal: at each place the stops identical on both trees pair first, and the rest pair in the oracle's order, a pair
+ * at another pass or ordinal `moved` and a surplus on the head `added`, on the base `removed`, each with both trees'
+ * `[pass, ordinal]` (`null` where that tree has none); `listsEqual` where the lists agree and the difference is in the
+ * stop set's other fields. Known limit: which of a place's remaining stops pair is that order, not a fact the oracle
+ * gives, so two stops of one place that both shift read as two moves in order. Where a side holds no list (a stored run
+ * never does), `unavailable`, naming that side, never equal.
  */
 function stopsApart(was, is) {
   if (was?.stops === undefined && is?.stops === undefined) return {};
@@ -280,17 +282,28 @@ function stopsApart(was, is) {
     }
     return places;
   };
+  /** `stops` without those `other` holds too, as a multiset, in their order. */
+  const unpaired = (stops, other) => {
+    const left = new Map();
+    for (const stop of other) left.set(stop.join(" "), (left.get(stop.join(" ")) ?? 0) + 1);
+    return stops.filter((stop) => {
+      const count = left.get(stop.join(" ")) ?? 0;
+      if (count > 0) left.set(stop.join(" "), count - 1);
+      return count === 0;
+    });
+  };
   const [b, h] = [byPlace(was.stops), byPlace(is.stops)];
   const apart = { added: [], removed: [], moved: [] };
   for (const place of new Set([...b.keys(), ...h.keys()])) {
     const [label, path] = JSON.parse(place);
-    const [before, after] = [b.get(place) ?? [], h.get(place) ?? []];
+    const [onBase, onHead] = [b.get(place) ?? [], h.get(place) ?? []];
+    // (no stop is left on both trees, so each remaining pair is at another pass or ordinal)
+    const [before, after] = [unpaired(onBase, onHead), unpaired(onHead, onBase)];
     for (let at = 0; at < Math.max(before.length, after.length); at += 1) {
       const [base, head] = [before[at] ?? null, after[at] ?? null];
       if (base === null) apart.added.push({ label, path, base, head });
       else if (head === null) apart.removed.push({ label, path, base, head });
-      else if (base[0] !== head[0] || base[1] !== head[1])
-        apart.moved.push({ label, path, base, head });
+      else apart.moved.push({ label, path, base, head });
     }
   }
   const none = Object.values(apart).every((list) => list.length === 0);

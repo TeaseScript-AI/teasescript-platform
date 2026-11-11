@@ -106,12 +106,13 @@ Each source runs in the four modes (source and reversed order, the sharing on an
 publishes (`publication`) part by part (`publicationHashes`: the answers, the record, each occurrence's answer and the
 route, in that order, each hashed as it is made), so a publication of any size is compared without one string of it, and
 a difference names its first differing part by that index and each tree's count of parts (#1503); and, for a generator
-whose `checks` include `"stops"`, which decisions stop and when at each demand allowance (`stopSet`). A stops difference
-names its stops by place (label and path): `added` on the head alone, `removed` on the base alone, `moved` at another
-pass or ordinal, each with both trees' pass and ordinal, or `listsEqual` where the difference is in the stop set's other
-fields (#2355). A place that stops a different number of times on each tree pairs its stops in order. A stored run holds
-no stops, as a reader before #2355 refuses them, so against a baseline the line reads `unavailable`, naming the base; a
-run of the differing sources on two trees gives it.
+whose `checks` include `"stops"`, which decisions stop and when at each demand allowance (`stopSet`). Unlike the held
+set's stops in `plans.mjs` (per phase, over allowances), a stops difference here is classified per decision place (label
+and path), over pass and ordinal (#2355): a place's stops identical on both trees pair first and the rest pair in
+order, a pair `moved` and a surplus `added` on the head or `removed` on the base, each with both trees' pass and
+ordinal; `listsEqual` where the difference is in the stop set's other fields. Which of a place's remaining stops pair is
+that order, not a fact the oracle gives. A stored run holds no stops, as a reader before #2355 refuses them, so against
+a baseline the line reads `unavailable`, naming the base; a run of the differing sources on two trees gives it.
 
 A run (a source's mode and check on one tree) stalls where the units it charges pass `--units` times its program's
 allowance (#1647): every `WorkLedger.charge` of the run (the analysis, its finishing work after a stop, the lowering's
