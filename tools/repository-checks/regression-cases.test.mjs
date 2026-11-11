@@ -149,23 +149,27 @@ export class Bridge {
 }
 `;
 // a Player module the tests load from the bundles (`tests/helpers/player-modules.ts`): the base's must be built
-const CLOCK_BASE =
-  "export const minutes = (seconds: number): number => Math.round(seconds / 60);\n";
-const CLOCK_HEAD =
-  "export const minutes = (seconds: number): number => Math.floor(seconds / 60);\n";
+const CLOCK = "export const minutes = (seconds: number): number => Math.floor(seconds / 60);\n";
+// The base's configuration is built as \`vite build\` builds it: a function of its environment, with a plugin it gives
+// as a promise, and without the head's stamping plugin. That plugin makes the base's defect: the case is a witness only
+// when it runs.
 const BUNDLES_CONFIG = `import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vite";
 
-export default defineConfig({
-  root: fileURLToPath(new URL("../..", import.meta.url)),
-  logLevel: "warn",
-  publicDir: false,
-  build: {
-    ssr: true,
-    outDir: "dist/player-test-modules",
-    emptyOutDir: true,
-    rolldownOptions: { input: { "player/clock": "player/clock.ts" }, output: { entryFileNames: "[name].js" } },
-  },
+export default defineConfig(({ command, isSsrBuild }) => {
+  if (command !== "build" || isSsrBuild !== false) throw new Error(\`not as vite build: \${command} \${isSsrBuild}\`);
+  return {
+    root: fileURLToPath(new URL("../..", import.meta.url)),
+    logLevel: "warn",
+    publicDir: false,
+    plugins: [Promise.resolve([{ name: "rounds", transform: (code, id) => (id.endsWith("/clock.ts") ? code.replace("Math.floor", "Math.round") : null) }])],
+    build: {
+      ssr: true,
+      outDir: "dist/player-test-modules",
+      emptyOutDir: true,
+      rolldownOptions: { input: { "player/clock": "player/clock.ts" }, output: { entryFileNames: "[name].js" } },
+    },
+  };
 });
 `;
 const PLAYER = `import assert from "node:assert/strict";
@@ -207,7 +211,7 @@ function repository(head) {
       include: ["src/**/*.ts", "tests/**/*.ts"],
     }),
     "src/bridge.ts": BRIDGE_BASE,
-    "player/clock.ts": CLOCK_BASE,
+    "player/clock.ts": CLOCK,
     "player/vue/vite.test-modules.config.ts": BUNDLES_CONFIG,
     ...Object.fromEntries(
       ["tests/helpers/regression-case.ts", "tests/helpers/player-modules.ts"].map((path) => [
@@ -220,7 +224,15 @@ function repository(head) {
   git("add", "-A");
   git("commit", "-q", "-m", "Keep a session store (#3)");
   const base = git("rev-parse", "HEAD");
-  write(root, { "src/bridge.ts": BRIDGE_HEAD, "player/clock.ts": CLOCK_HEAD, ...head });
+  // The head adds the plugin that stamps the bundles' sources, which its loader requires; the base has none.
+  write(root, {
+    "src/bridge.ts": BRIDGE_HEAD,
+    "player/vue/test-modules-sources.ts": readFileSync(
+      join(repositoryRoot, "player/vue/test-modules-sources.ts"),
+      "utf8",
+    ),
+    ...head,
+  });
   git("add", "-A");
   git("commit", "-q", "-m", "Refuse a session of another bridge");
   spawnSync(
