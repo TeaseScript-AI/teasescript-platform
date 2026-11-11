@@ -278,22 +278,29 @@ test(
       const earlier = git("commit-tree", tree, "-p", "origin/main", "-m", "pr 1");
       const prHead = git("commit-tree", tree, "-p", earlier, "-m", "pr 2");
       git("push", "-q", "origin", `${prHead}:refs/pull/7/head`);
+      // (an annotated tag archived: listed as the tag and, peeled, as `refs/archive/tagged^{}`)
+      const tagged = git("commit-tree", tree, "-p", "origin/main", "-m", "tagged");
+      git("tag", "-a", "-m", "t", "tagged", tagged);
+      git("push", "-q", "origin", "refs/tags/tagged:refs/archive/tagged");
       const stray = git("commit-tree", tree, "-p", "origin/main", "-m", "stray");
       git("fetch", "-q", "origin");
-      const text = [local, prHead, earlier, stray].map((sha) => sha.slice(0, 10)).join(", ");
+      const text = [local, prHead, earlier, tagged, stray]
+        .map((sha) => sha.slice(0, 10))
+        .join(", ");
       const { status, out } = check(text, [directory]);
       assert.equal(status, 1, out);
       for (const [sha, ref] of [
         [local, `refs/archive/item/${local}`],
         [prHead, "refs/pull/7/head"],
         [earlier, "refs/pull/7/head"],
+        [tagged, "refs/archive/tagged"],
       ])
         assert.match(
           out,
           new RegExp(`resolved +${sha.slice(0, 10)} +${sha} in .*, on origin at ${ref}\n`, "u"),
         );
       assert.match(out, new RegExp(`local only +${stray.slice(0, 10)} `, "u"));
-      assert.match(out.trim().split("\n").at(-1), /4 tokens: 3 resolved, .* 1 local only,/u);
+      assert.match(out.trim().split("\n").at(-1), /5 tokens: 4 resolved, .* 1 local only,/u);
       // An origin that cannot be listed is named, and leaves the commit local only.
       git("remote", "set-url", "origin", join(origin, "missing"));
       const unlisted = check(local, [directory]);

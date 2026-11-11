@@ -12,8 +12,8 @@ import { existsSync, readFileSync } from "node:fs";
 // repository that resolves it must contain it (`git for-each-ref --contains` over `refs/remotes`), or a ref on its
 // `origin` that the default fetch does not mirror must: an archived head (`refs/archive/*`) or a pull request's head
 // (`refs/pull/<n>/head`, which keeps a squash-merged branch's commits). Those come from one `git ls-remote origin` per
-// repository, asked only for a commit on no remote-tracking ref; a ref's tip counts when this clone has it, and the
-// commit is reported as on origin at that ref. Else it is local only, such as a head from before a rebase. A
+// repository, asked only for a commit on no remote-tracking ref; a tip commit this clone has counts with its history,
+// and the commit is reported as on origin at that ref. Else it is local only, such as a head from before a rebase. A
 // repository without remote-tracking refs is named once, and its tokens are not checked for that. An unresolved token
 // may be a commit not fetched yet: the message says to fetch it; this tool never fetches. A token that is no commit
 // but a tree, such as a stored baseline's `src` tree hash, is reported as a tree, resolved, without the remote check:
@@ -127,28 +127,34 @@ function resolve(token, repository) {
  * has is walked, as the tool never fetches; a commit a remote-tracking ref has is left out, as it is never local only.
  */
 function unmirroredOriginRefs(repository) {
+  // (why a run failed: its error, such as a timeout or a full buffer, else its last line of standard error)
+  const why = (result, command) =>
+    result.error?.message ||
+    result.stderr?.trim().split("\n").at(-1) ||
+    `${command} exit ${result.status}`;
   const listed = spawnSync("git", ["-C", repository, "ls-remote", "origin"], {
     encoding: "utf8",
     env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
     maxBuffer: 1 << 28,
     timeout: 60_000,
   });
-  if (listed.status !== 0)
-    return {
-      error: listed.stderr?.trim().split("\n").at(-1) || `exit ${listed.status ?? "timeout"}`,
-    };
+  if (listed.status !== 0) return { error: why(listed, "git ls-remote") };
   const refOf = new Map();
   for (const line of listed.stdout.split("\n")) {
-    const [tip, ref] = line.split("\t");
+    // (an annotated tag's ref is listed twice: as the tag, and peeled to its commit with `^{}`, which is no ref name)
+    const [tip, listedRef] = line.split("\t");
+    const ref = listedRef?.replace(/\^\{\}$/u, "");
     if (/^refs\/(?:archive\/.+|pull\/\d+\/head)$/u.test(ref ?? "") && !refOf.has(tip))
       refOf.set(tip, ref);
   }
-  const tips = spawnSync(
+  const checked = spawnSync(
     "git",
     ["-C", repository, "cat-file", "--batch-check=%(objectname) %(objecttype)"],
     { input: [...refOf.keys(), ""].join("\n"), encoding: "utf8", maxBuffer: 1 << 28 },
-  )
-    .stdout.split("\n")
+  );
+  if (checked.status !== 0) return { error: why(checked, "git cat-file") };
+  const tips = checked.stdout
+    .split("\n")
     .filter((line) => line.endsWith(" commit"))
     .map((line) => line.split(" ")[0]);
   const contains = new Map();
@@ -159,8 +165,7 @@ function unmirroredOriginRefs(repository) {
     ["-C", repository, "log", "--source", "--format=%H %S", "--stdin", "--not", "--remotes"],
     { input: [...tips, ""].join("\n"), encoding: "utf8", maxBuffer: 1 << 28 },
   );
-  if (walked.status !== 0)
-    return { error: walked.stderr?.trim().split("\n").at(-1) || `git log exit ${walked.status}` };
+  if (walked.status !== 0) return { error: why(walked, "git log") };
   for (const line of walked.stdout.split("\n")) {
     const [commit, tip] = line.split(" ");
     if (refOf.has(tip)) contains.set(commit, refOf.get(tip));
