@@ -229,6 +229,13 @@ test("a written parameter or global, which the candidate route declines, a chain
       built: 10,
       walked: 2,
     },
+    // (a literal in a literal: each entered once, by the index and by the walk)
+    {
+      text: "let w: number = 0\nlet a = [w]\nlet fb = [a, a]\n@",
+      rest: ["element", "element"],
+      built: 9,
+      walked: 3,
+    },
   ];
   for (const { text, rest = [], built, walked } of rows)
     for (const reversed of [false, true])
