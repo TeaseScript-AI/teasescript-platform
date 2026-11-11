@@ -112,7 +112,7 @@ const answer = <O extends InputOp>(...[op, args, input]: AnswerCall<O>): InputIn
 
 /** The op each of the Player's controls answers with; `input` is how the player answered, which the recording keeps. */
 export const intents = {
-  // The values a control submits are those of the click; the composer is read-only while the answer is in flight.
+  // The values a control submits are those of the click, which the intent holds whatever the composer shows meanwhile.
   composer: (text: string, input: DebugAnswerInput) =>
     answer("submitComposer", () => ({ text }), input),
   /** A choice's option, or the button of `showButton` for `null`. */
