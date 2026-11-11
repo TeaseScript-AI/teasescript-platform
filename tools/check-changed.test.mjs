@@ -21,12 +21,13 @@ import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  CannotRun,
   PROJECTS,
   UNKNOWN_TO_COSTLY,
   checksOf,
   MAIN_CHECKOUT,
+  branchedFrom,
   linkMainNodeModules,
-  nearestLongLived,
   notInstalled,
   projectsFor,
   removeTemporaryWorktree,
@@ -1201,37 +1202,89 @@ test("`merge commits` runs in every run, plain, merged and in a merged checkout,
   }
 });
 
-test("without --base or a pull request, the base is the long-lived branch whose merge-base is nearest, named (#2409)", () => {
+test("without --base or a pull request, the base is the long-lived line HEAD's own line leaves, named, or exit 2 when unproven (#2409)", () => {
   const graph = mergeGraph();
   const { directory, git } = graph;
-  const line = (ref, main, runtimeV2) =>
-    `check-changed: no --base and no pull request: base ${ref}, the long-lived branch whose merge-base with HEAD is ` +
-    `nearest (origin/main ${main}, origin/runtime-v2 ${runtimeV2})`;
+  const base = (ref, at, back) => ({
+    ref,
+    line:
+      `check-changed: no --base and no pull request: base ${ref}, whose own line HEAD's leaves at ` +
+      `${git("rev-parse", "--short=9", at)}, ${back} commits back`,
+  });
+  const fails = (at, message, cwd = directory) =>
+    assert.throws(
+      () => inside(cwd, branchedFrom),
+      (error) => error instanceof CannotRun && error.message === message,
+      at,
+    );
   try {
-    // [the lane's base, what the clone lacks, the base chosen, origin/main's and origin/runtime-v2's distance]
-    for (const [base, missing, ref, main, runtimeV2] of [
-      ["runtime-v2", null, "origin/runtime-v2", "2 back", "1 back"],
-      ["main", null, "origin/main", "1 back", "2 back"],
-      // a tie: off the commit both hold
-      ["main~1", null, "origin/main", "1 back", "1 back"],
-      ["runtime-v2", "origin/runtime-v2", "origin/main", "2 back", "none"],
-      ["runtime-v2", "origin/main", "origin/runtime-v2", "none", "1 back"],
-      ["main", "both", "origin/main", "none", "none"],
-    ]) {
-      graph.lane(base, null);
-      for (const name of missing === "both" ? ["origin/main", "origin/runtime-v2"] : [missing])
-        if (name !== null) git("update-ref", "-d", `refs/remotes/${name}`);
-      try {
-        assert.deepEqual(
-          inside(directory, nearestLongLived),
-          { ref, line: line(ref, main, runtimeV2) },
-          base,
-        );
-      } finally {
-        git("update-ref", "refs/remotes/origin/main", "main");
-        git("update-ref", "refs/remotes/origin/runtime-v2", "runtime-v2");
-      }
+    graph.lane("runtime-v2", null);
+    assert.deepEqual(
+      inside(directory, branchedFrom),
+      base("origin/runtime-v2", "runtime-v2~1", 1),
+      "runtime-v2",
+    );
+    graph.lane("main", null);
+    assert.deepEqual(inside(directory, branchedFrom), base("origin/main", "main~1", 1), "main");
+    // off the commit both lines hold, from before they split: main
+    graph.lane("main~1", null);
+    assert.deepEqual(
+      inside(directory, branchedFrom),
+      base("origin/main", "main~2", 1),
+      "before the split",
+    );
+    // a lane of main merging runtime-v2, and one of runtime-v2 merging main: each its own line's, though the other's
+    // tip is nearer by commits (Sol r1)
+    graph.lane("main", "runtime-v2");
+    assert.deepEqual(
+      inside(directory, branchedFrom),
+      base("origin/main", "main~1", 2),
+      "main merging runtime-v2",
+    );
+    git("switch", "-q", "runtime-v2");
+    git("merge", "-q", "--no-edit", "main~1");
+    git("update-ref", "refs/remotes/origin/runtime-v2", "runtime-v2");
+    for (const step of [1, 2, 3, 4, 5]) graph.commit("main", `main-${step}.md`);
+    git("update-ref", "refs/remotes/origin/main", "main");
+    git("switch", "-q", "-C", "lane", "runtime-v2");
+    graph.commit("lane", "lane.md");
+    git("merge", "-q", "--no-edit", "main");
+    assert.deepEqual(
+      inside(directory, branchedFrom),
+      base("origin/runtime-v2", "runtime-v2", 2),
+      "runtime-v2, holding an older main, merging a newer main",
+    );
+    const lane = git("rev-parse", "lane");
+    // unproven: a missing ref, and a shallow clone
+    git("update-ref", "-d", "refs/remotes/origin/runtime-v2");
+    fails(
+      "no origin/runtime-v2",
+      "no --base and no pull request, and no origin/runtime-v2 to tell the base by: fetch origin/main and " +
+        "origin/runtime-v2, or name the base with --base",
+    );
+    git("update-ref", "refs/remotes/origin/runtime-v2", "runtime-v2");
+    const shallow = `${directory}-shallow`;
+    git("clone", "-q", "--depth=2", "--no-single-branch", `file://${directory}`, shallow);
+    try {
+      fails(
+        "shallow",
+        "no --base and no pull request, and the clone is shallow: deepen it (git fetch --unshallow), or name the " +
+          "base with --base",
+        shallow,
+      );
+    } finally {
+      rmSync(shallow, { recursive: true, force: true });
     }
+    // --merged-checkout needs --base: the queue's merge of a lane of runtime-v2 with main, its second parent main
+    git("switch", "-q", "--detach", "lane");
+    git("merge", "-q", "--no-ff", "--no-edit", "origin/main~1");
+    const merged = runSync(process.execPath, [tool, "--merged-checkout", lane], {
+      cwd: directory,
+      encoding: "utf8",
+      env: environment,
+    });
+    assert.equal(merged.status, 2, `${merged.stdout}${merged.stderr}`);
+    assert.match(merged.stderr, /usage: .* --merged-checkout <commit> --base <ref>/u);
     // the run itself: a lane of runtime-v2 checked against runtime-v2, its one commit the change
     graph.lane("runtime-v2", null);
     const result = runSync(process.execPath, [tool], {
@@ -1239,8 +1292,9 @@ test("without --base or a pull request, the base is the long-lived branch whose 
       encoding: "utf8",
       env: environment,
     });
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
     assert.ok(
-      result.stdout.startsWith(`${line("origin/runtime-v2", "2 back", "1 back")}\n`),
+      result.stdout.startsWith(`${base("origin/runtime-v2", "runtime-v2~1", 1).line}\n`),
       result.stdout,
     );
     assert.match(

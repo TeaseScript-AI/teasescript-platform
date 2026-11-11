@@ -34,11 +34,12 @@ const [{ costlyTestSeconds }, { summaryLine }, { isSuiteTestPath, isTypeCoreTest
 // Runs, before a push, the checks CI fails on for what changed since a base, in parallel, and prints one line per check
 // with its verdict and seconds, and the full output of a check that failed:
 //
-//   node tools/check-changed.mjs [--merged | --merged-checkout <commit>] [--base <ref>]
+//   node tools/check-changed.mjs [--merged] [--base <ref>]
+//   node tools/check-changed.mjs --merged-checkout <commit> --base <ref>
 //
 // The base is `--base`, else the open pull request's base (`gh pr view`, as `origin/<base>`), else the long-lived branch
-// whose merge-base with HEAD is fewest commits back, `origin/main` or `origin/runtime-v2`, which it prints
-// (`nearestLongLived`); the changes are those since its merge-base with HEAD, committed or not, untracked files
+// HEAD's own line leaves, `origin/main` or `origin/runtime-v2`, which it prints, or exit 2 when it cannot prove which
+// (`branchedFrom`); the changes are those since its merge-base with HEAD, committed or not, untracked files
 // included. Always: `git diff --check`, the format check of the changed files, oxlint, knip, the doc links and the
 // imports, each as CI runs it, and `merge commits`: since the merge-base, no merge commit but one whose later parents
 // are on origin/main or origin/runtime-v2 and not on the base (`strayMerges`).
@@ -59,9 +60,9 @@ const [{ costlyTestSeconds }, { summaryLine }, { isSuiteTestPath, isTypeCoreTest
 // end, also on SIGINT, SIGTERM and SIGHUP; only killing this process outright (`kill -9`) leaves it, for `git worktree
 // prune` and the temporary folder's cleanup.
 //
-// `--merged-checkout <commit>` checks a checkout that already is that merge, made by a runner such as the queue's
-// `--merged-with`: HEAD is the commit merged with the base's (`git merge --no-ff`: its first parent the commit, its
-// second the base's), or the commit itself when it already holds the base. Anything else is exit 2. `merge commits`
+// `--merged-checkout <commit> --base <ref>` checks a checkout that already is that merge, made by a runner such as the
+// queue's `--merged-with`: HEAD is the commit merged with the base's (`git merge --no-ff`: its first parent the commit,
+// its second the base's), or the commit itself when it already holds the base. Anything else is exit 2. `merge commits`
 // then reads the commit's side only, so the runner's merge is not judged. Only the commit named tells that merge from a
 // builder's merge of the base into the branch, which has the same shape and fails.
 //
@@ -262,11 +263,11 @@ function cannotRun(message) {
 }
 
 const USAGE =
-  "usage: node tools/check-changed.mjs [--merged | --merged-checkout <commit>] [--base <ref>]";
+  "usage: node tools/check-changed.mjs [--merged] [--base <ref>], or --merged-checkout <commit> --base <ref>";
 
 /**
- * `--merged`, `--merged-checkout`'s commit (or null), and the base: `--base`, else the open pull request's base, else
- * `nearestLongLived`'s, which it prints.
+ * `--merged`, `--merged-checkout`'s commit (or null), and the base: `--base`, which `--merged-checkout` needs, else the
+ * open pull request's base, else `branchedFrom`'s, which it prints.
  */
 function options(argv) {
   let merged = false;
@@ -283,42 +284,55 @@ function options(argv) {
     else cannotRun(USAGE);
   }
   const mergedCheckout = values.get("--merged-checkout") ?? null;
-  if (merged && mergedCheckout !== null) cannotRun(USAGE);
+  if (mergedCheckout !== null && (merged || !values.has("--base"))) cannotRun(USAGE);
   if (values.has("--base")) return { merged, mergedCheckout, ref: values.get("--base") };
   const pr = spawnSync("gh", ["pr", "view", "--json", "baseRefName", "-q", ".baseRefName"], {
     encoding: "utf8",
   });
   if (pr.status === 0 && pr.stdout.trim() !== "")
     return { merged, mergedCheckout, ref: `origin/${pr.stdout.trim()}` };
-  const { ref, line } = nearestLongLived();
+  const { ref, line } = branchedFrom();
   process.stdout.write(`${line}\n`);
   return { merged, mergedCheckout, ref };
 }
 
 /**
- * The base of a branch without a pull request: of `origin/main` and `origin/runtime-v2`, the one whose merge-base with
- * HEAD is fewest commits back from HEAD, `origin/main` on a tie or when neither has one; and a line naming it, with
- * each one's distance. A branch of runtime-v2 is so checked against runtime-v2, not against main (#2409).
+ * The base of a branch without a pull request: the long-lived branch whose own line HEAD's own line leaves. Both are
+ * read as first-parent lines (`git rev-list --first-parent`), so a merge into either, as main merged into a branch of
+ * runtime-v2, does not count. Main lands squashed, and runtime-v2 takes main through merges whose first parent is its
+ * own, so a commit after the two split is on one line only; a commit on both is from before the split, and gives
+ * `origin/main`. Returns that ref and a line naming it, with the commit where HEAD's line leaves it. Exit 2 when it
+ * cannot prove which: in a shallow clone, without either ref, or when HEAD's line meets neither (#2409).
  */
-export function nearestLongLived() {
-  const distances = MERGED_INTO_EACH_OTHER.map((ref) => {
-    const mergeBase = spawnSync("git", ["merge-base", "HEAD", ref], { encoding: "utf8" });
-    if (mergeBase.status !== 0) return [ref, null];
-    const count = spawnSync("git", ["rev-list", "--count", `${mergeBase.stdout.trim()}..HEAD`], {
-      encoding: "utf8",
-    });
-    return [ref, count.status === 0 ? Number(count.stdout) : null];
+export function branchedFrom() {
+  const pass = "name the base with --base";
+  if (git("rev-parse", "--is-shallow-repository") === "true")
+    cannotRun(
+      `no --base and no pull request, and the clone is shallow: deepen it (git fetch --unshallow), or ${pass}`,
+    );
+  const lines = MERGED_INTO_EACH_OTHER.map((ref) => {
+    const line = spawnSync("git", ["rev-list", "--first-parent", ref, "--"], { encoding: "utf8" });
+    if (line.status !== 0)
+      cannotRun(
+        `no --base and no pull request, and no ${ref} to tell the base by: fetch ` +
+          `${MERGED_INTO_EACH_OTHER.join(" and ")}, or ${pass}`,
+      );
+    return [ref, new Set(line.stdout.split("\n"))];
   });
-  const [ref] = distances.reduce((nearest, next) =>
-    next[1] !== null && (nearest[1] === null || next[1] < nearest[1]) ? next : nearest,
+  const own = git("rev-list", "--first-parent", "HEAD", "--").split("\n");
+  for (const [back, commit] of own.entries()) {
+    const on = lines.find(([, line]) => line.has(commit));
+    if (on !== undefined)
+      return {
+        ref: on[0],
+        line:
+          `check-changed: no --base and no pull request: base ${on[0]}, whose own line HEAD's leaves at ` +
+          `${commit.slice(0, 9)}, ${back} commits back`,
+      };
+  }
+  return cannotRun(
+    `no --base and no pull request, and HEAD's line meets neither ${MERGED_INTO_EACH_OTHER.join(" nor ")}'s: ${pass}`,
   );
-  const each = distances
-    .map(([name, count]) => `${name} ${count === null ? "none" : `${count} back`}`)
-    .join(", ");
-  return {
-    ref,
-    line: `check-changed: no --base and no pull request: base ${ref}, the long-lived branch whose merge-base with HEAD is nearest (${each})`,
-  };
 }
 
 /**
