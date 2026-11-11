@@ -413,7 +413,6 @@ test("join --ignore names the cases whose base and head differ with those fields
   assert.equal(plain.ran.status, 0, plain.ran.stderr);
   assert.deepEqual(JSON.parse(plain.ran.stdout), { cases: 3, sides: 2 });
   const once = joinOf(folder, { base, head }, join(folder, "once.jsonl"), ["--ignore", "message"]);
-  assert.equal(once.ran.status, 1, once.ran.stderr);
   assert.deepEqual(JSON.parse(once.ran.stdout), {
     cases: 3,
     sides: 2,
@@ -422,6 +421,7 @@ test("join --ignore names the cases whose base and head differ with those fields
     differing: ["b", "c"],
     unread: [],
   });
+  assert.equal(once.ran.status, 1, once.ran.stderr);
   // (the joined records are written as without --ignore)
   assert.equal(once.text, plain.text);
   const twice = joinOf(folder, { base, head }, join(folder, "twice.jsonl"), [
@@ -430,7 +430,6 @@ test("join --ignore names the cases whose base and head differ with those fields
     "--ignore",
     "messageKind",
   ]);
-  assert.equal(twice.ran.status, 1, twice.ran.stderr);
   assert.deepEqual(JSON.parse(twice.ran.stdout), {
     cases: 3,
     sides: 2,
@@ -439,13 +438,13 @@ test("join --ignore names the cases whose base and head differ with those fields
     differing: ["c"],
     unread: [],
   });
+  assert.equal(twice.ran.status, 1, twice.ran.stderr);
   const all = joinOf(folder, { base, head }, join(folder, "all.jsonl"), [
     "--ignore",
     "message",
     "messageKind",
     "code",
   ]);
-  assert.equal(all.ran.status, 0, all.ran.stderr);
   assert.deepEqual(JSON.parse(all.ran.stdout), {
     cases: 3,
     sides: 2,
@@ -454,6 +453,7 @@ test("join --ignore names the cases whose base and head differ with those fields
     differing: [],
     unread: [],
   });
+  assert.equal(all.ran.status, 0, all.ran.stderr);
 });
 
 test("join --ignore reports a case one tree lacks, a record it cannot read, and an empty join (#2316)", (t) => {
@@ -480,7 +480,6 @@ test("join --ignore reports a case one tree lacks, a record it cannot read, and 
     undefined,
     ignore,
   );
-  assert.equal(broken.ran.status, 1, broken.ran.stderr);
   assert.deepEqual(JSON.parse(broken.ran.stdout), {
     cases: 3,
     sides: 2,
@@ -489,10 +488,10 @@ test("join --ignore reports a case one tree lacks, a record it cannot read, and 
     differing: [],
     unread: ["b"],
   });
+  assert.equal(broken.ran.status, 1, broken.ran.stderr);
   // (an empty join compares nothing and says so by its count)
   mkdirSync(join(folder, "empty"));
   const empty = joinOf(join(folder, "empty"), { base: [], head: [] }, undefined, ignore, []);
-  assert.equal(empty.ran.status, 0, empty.ran.stderr);
   assert.deepEqual(JSON.parse(empty.ran.stdout), {
     cases: 0,
     sides: 2,
@@ -501,6 +500,7 @@ test("join --ignore reports a case one tree lacks, a record it cannot read, and 
     differing: [],
     unread: [],
   });
+  assert.equal(empty.ran.status, 0, empty.ran.stderr);
   assert.equal(empty.text, "");
   // (--ignore needs a field and a head)
   mkdirSync(join(folder, "refused"));

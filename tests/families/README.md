@@ -14,6 +14,7 @@ Which tool answers which question:
 | Where does the core's route differ from the current checker on one tree (the shadow gate)? | `shadow.mjs`, `shadow-classify.mjs` ([Shadow](#shadow)) |
 | Does a stop let a value through that the natural plan rejects? | `stop-runs.mjs` ([Stop runs](#stop-runs)) |
 | What do the checker, the core and the core's route each answer for a list of cases, plans and runs included? | `differential.mjs` ([Differential records](#differential-records)) |
+| Are two trees' records of a list of cases equal but for some fields, such as a changed message's `message`? | `differential.mjs join --ignore` ([Differential records](#differential-records)) |
 | A compiler pull request's whole replay of base against head | `tools/compiler-replay.mjs` |
 | Does a change outside the type core keep the current checker's output? | `tools/compiler-differential.mjs` |
 
@@ -474,6 +475,13 @@ writes them in the cases' order: the record, or `{name, base, head}`. It reads e
 line and copies the line as bytes, so a record longer than V8's longest string still joins; a line cut short, or an
 output that is one of its inputs by any path or link, is refused (exit 2), and the output appears only once whole.
 Writing a record that long ends the run with an error instead, and `join` then finds its case missing.
+
+`join … --ignore <field>...` (repeatable; base and head both given) writes the same output and also compares each case's
+base and head as JSON values with every field of those names removed at any depth (`--ignore message` masks the
+checker's, the core's and the route's messages; `messageKind` is another field). Its summary line adds `ignore`,
+`differ` (a count), `differing` (the names of the cases that still differ) and `unread` (cases whose differing records
+do not parse, such as a record longer than V8's longest string); it exits 1 when either list is not empty. Records equal
+as bytes are equal without being parsed.
 
 A batch of an item pool is itself a cases file, so the queue sizes the jobs; the plan's check list comes from the
 tool's own build, so the tool's tree may be newer than the tree it reads:
