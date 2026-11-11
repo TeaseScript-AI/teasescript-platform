@@ -66,6 +66,9 @@ export default defineConfig(({ mode }) => ({
   optimizeDeps: { rolldownOptions: { plugins: [rekaScrollThumbPatch()] } },
   publicDir: false,
   resolve: { alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) } },
+  // Module Workers, bundled as ES modules: the engine Worker's entry loads its host by `import()`, and its compiler is a
+  // chunk of its own that only a source preparation loads, which Vite's default classic-script format cannot split.
+  worker: { format: "es" },
   build: {
     outDir: fileURLToPath(new URL("../../dist/player-app", import.meta.url)),
     emptyOutDir: true,

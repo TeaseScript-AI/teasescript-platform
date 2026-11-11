@@ -89,7 +89,6 @@ interface InputHost {
 }
 let usePlayerSession: (options: {
   readonly bridge: Promise<PlayerBridge>;
-  readonly debugHistorySpill: () => Promise<null>;
   readonly scriptStorage?: ScriptStorageProvider;
   readonly decodeImage?: () => Promise<{ readonly width: number; readonly height: number }>;
 }) => InputHost;
@@ -154,7 +153,6 @@ async function mount(
   const host = scope.run(() =>
     usePlayerSession({
       bridge: Promise.resolve(bridge),
-      debugHistorySpill: async () => null,
       decodeImage: async () => ({ width: 1, height: 1 }),
       ...(scriptStorage === undefined ? {} : { scriptStorage }),
     }),
