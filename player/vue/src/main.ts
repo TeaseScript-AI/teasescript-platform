@@ -22,8 +22,10 @@ import "./style.css";
 // or with `?package=<id>` a package of the playground server's development package root; the development preview
 // plays that package too, with its development tools.
 // The engine's module Worker, started first so that its fetch and start overlap the page's IndexedDB opens: the one
-// backend of this page, given to whichever page it shows.
+// backend of this page, given to whichever page it shows. A Worker that cannot start rejects it before the page is
+// built; the page shows that failure once it is, so the rejection is observed here and not reported as unhandled.
 const bridge = openEngineWorker();
+bridge.catch(() => {});
 const query = new URLSearchParams(window.location.search);
 const developmentPreview = import.meta.env.DEV || query.has("dev");
 const packageId = query.get("package");
