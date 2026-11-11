@@ -18,7 +18,22 @@ import {
   hostIntroduced,
 } from "../helpers/player/host-sessions.js";
 import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
+import { reportsInto } from "../helpers/player/rewind-host.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
+
+/** Ends the capture `reportsInto` began, at the check of what it captured, so that a later host error prints again. */
+function endCapture() {
+  // EVIDENCE: fixture: `reportsInto` replaced `console.error` by a mock of the test's context, a proxy whose `mock` a read finds but `in` does not.
+  const capture: unknown = (console.error as { readonly mock?: unknown }).mock;
+  assert.ok(
+    typeof capture === "object" &&
+      capture !== null &&
+      "restore" in capture &&
+      typeof capture.restore === "function",
+    "the capture reportsInto began",
+  );
+  capture.restore();
+}
 
 /** The value trace the host's session runs with, as the host holds it. */
 const sessionTrace = (session: PlayerRuntimeSession | null | undefined) =>
@@ -315,7 +330,12 @@ test("a view's reply of a trace turned off and on again never shows", async (con
 test("a session a Player error stopped is still viewed as it stopped", async (context) => {
   const { host, view, request, settle } = await viewed(context);
   const before = view.value!;
-  host.reportHostError(new TypeError("A component failed."));
+  const reported: unknown[] = [];
+  reportsInto(context, reported);
+  const failure = new TypeError("A component failed.");
+  host.reportHostError(failure);
+  endCapture();
+  assert.deepEqual(reported, [failure]);
   await settle();
   // Its view is asked for again, from the stopped session, and shows what it showed.
   request.value = recent({ recent: { choices: {}, pages: { none: 2 } } });

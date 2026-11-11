@@ -32,8 +32,23 @@ import {
   choose,
   shownView,
   holdRead,
+  reportsInto,
   untilShown,
 } from "../helpers/player/rewind-host.js";
+
+/** Ends the capture `reportsInto` began, at the check of what it captured, so that a later host error prints again. */
+function endCapture() {
+  // EVIDENCE: fixture: `reportsInto` replaced `console.error` by a mock of the test's context, a proxy whose `mock` a read finds but `in` does not.
+  const capture: unknown = (console.error as { readonly mock?: unknown }).mock;
+  assert.ok(
+    typeof capture === "object" &&
+      capture !== null &&
+      "restore" in capture &&
+      typeof capture.restore === "function",
+    "the capture reportsInto began",
+  );
+  capture.restore();
+}
 
 // `hostIntroduced` registers adapter sessions through the facade of the bundle the composable runs in.
 before(loadHostFacade);
@@ -145,8 +160,13 @@ test("a debug export's incident is the run's: kept through Back and Return, gone
   await start(context, host);
   await choose(context, host, "One");
   assert.deepEqual(await exported(host), { hostError: null, rewound: 0 });
-  host.reportHostError(new TypeError("A component failed."));
+  const reported: unknown[] = [];
+  reportsInto(context, reported);
+  const failure = new TypeError("A component failed.");
+  host.reportHostError(failure);
   await settle(context);
+  endCapture();
+  assert.deepEqual(reported, [failure]);
   assert.equal(host.hostError.value, "TypeError");
   assert.deepEqual(await exported(host), { hostError: "TypeError", rewound: 0 });
   assert.equal(await backTo(rewind, 0), true);
@@ -192,11 +212,16 @@ test("a Player error whose recording capture failed exports no recording, also a
       ? Promise.reject(new Error("The capture failed."))
       : request(...args);
   });
-  host.reportHostError(new TypeError("A component failed."));
+  const reported: unknown[] = [];
+  reportsInto(context, reported);
+  const failures = [new TypeError("A component failed."), new RangeError("A later failure.")];
+  host.reportHostError(failures[0]);
   await settle(context);
   assert.equal(await backTo(rewind, 0), true);
-  host.reportHostError(new RangeError("A later failure."));
+  host.reportHostError(failures[1]);
   await settle(context);
+  endCapture();
+  assert.deepEqual(reported, failures);
   const candidate = await host.debugExportCandidate(() => ({}), new AbortController().signal);
   assert.equal(candidate.hostError, "TypeError");
   assert.equal(
@@ -230,12 +255,17 @@ test("a Player error's captured recording stays the export's through Back and a 
     if (args[0] === "captureRecording") captures += 1;
     return request(...args);
   });
-  host.reportHostError(new TypeError("A component failed."));
+  const reported: unknown[] = [];
+  reportsInto(context, reported);
+  const failures = [new TypeError("A component failed."), new RangeError("A later failure.")];
+  host.reportHostError(failures[0]);
   await settle(context);
   assert.deepEqual(heldTickets(bridge), ["r1"]);
   assert.equal(await backTo(rewind, 0), true);
-  host.reportHostError(new RangeError("A later failure."));
+  host.reportHostError(failures[1]);
   await settle(context);
+  endCapture();
+  assert.deepEqual(reported, failures);
   const candidate = await host.debugExportCandidate(() => ({}), new AbortController().signal);
   assert.equal(candidate.hostError, "TypeError");
   assert.deepEqual(heldTickets(bridge), ["r1", "r2"]);
@@ -265,6 +295,8 @@ test("a Start that fails before it reaches the host commits its incident in its 
   // EVIDENCE: fixture: `prepare` of a source replies with its held plan's token.
   const plan = (prepared.result as { readonly plan: string }).plan;
   // A fresh Player whose first Start's options throw.
+  const reported: unknown[] = [];
+  reportsInto(context, reported);
   host.prepare({
     plan,
     options: () => {
@@ -287,6 +319,11 @@ test("a Start that fails before it reaches the host commits its incident in its 
   host.activate();
   await settle(context);
   assert.equal(host.hostError.value, "RangeError");
+  endCapture();
+  assert.deepEqual(
+    reported.map((error) => (error instanceof Error ? error.message : String(error))),
+    ["The options could not be read.", "The options are out of range."],
+  );
   assert.equal(await exported(), "RangeError");
   made.scope.stop();
   await settle(context);
@@ -336,6 +373,8 @@ test("the host holds only the latest activation's run, whether activations succe
     return settle(context);
   };
   const held: number[][] = [];
+  const reported: unknown[] = [];
+  reportsInto(context, reported);
   await start(context, host);
   held.push(heldRuns(bridge));
   await failing();
@@ -350,6 +389,11 @@ test("the host holds only the latest activation's run, whether activations succe
   await settle(context);
   held.push(heldRuns(bridge));
   assert.deepEqual(held, [[1], [2], [3], [4], [5], []]);
+  endCapture();
+  assert.deepEqual(
+    reported.map((error) => (error instanceof Error ? error.message : String(error))),
+    Array(3).fill("The options could not be read."),
+  );
 });
 
 /*
@@ -394,6 +438,8 @@ test("each activation's run reaches the host once, however the activation ends, 
       const made = createHost(subtest, memoryStorage().provider, { lossy: true });
       const { host } = made;
       const bridge = await host.bridge;
+      const reported: unknown[] = [];
+      reportsInto(subtest, reported);
       await start(subtest, host);
       const held = [heldRuns(bridge)];
       const failed = new TypeError("The activation failed.");
@@ -468,6 +514,12 @@ test("each activation's run reaches the host once, however the activation ends, 
             : "TypeError";
       assert.deepEqual(errors, [own, null]);
       assert.deepEqual(heldTickets(bridge), []);
+      // The activation's own error, the host's `Error` for a plan it does not hold, and no other.
+      endCapture();
+      assert.deepEqual(
+        reported.map((error) => (error instanceof Error ? error.name : String(error))),
+        own === null ? [] : [own],
+      );
     });
     observed.push(coordinates);
   }
@@ -772,6 +824,8 @@ test("an activation's completions act only while it lives, whichever reply is in
         await choose(subtest, first.host, "One");
         transport = holdTransport(subtest);
       }
+      const reported: unknown[] = [];
+      reportsInto(subtest, reported);
       first.host.reportHostError(failed);
       await settle(subtest);
       // The capture's reply waits behind the halt's acknowledgement, which arrives first.
@@ -888,6 +942,8 @@ test("an activation's completions act only while it lives, whichever reply is in
         },
         lifetimeExpected(c),
       );
+      endCapture();
+      assert.deepEqual(reported, [failed], "only the activation's own error is reported");
     });
     observed.push(coordinates);
   }
@@ -971,8 +1027,13 @@ test("an export that waits for a failure capture while its activation retires gi
   await start(context, host);
   await choose(context, host, "One");
   const capture = holdOp(context, bridge, "captureRecording");
-  host.reportHostError(new TypeError("A component failed."));
+  const reported: unknown[] = [];
+  reportsInto(context, reported);
+  const failure = new TypeError("A component failed.");
+  host.reportHostError(failure);
   await settle(context);
+  endCapture();
+  assert.deepEqual(reported, [failure]);
   const traffic = postsOf(context, bridge);
   const pending = host.debugExportCandidate(() => ({}), new AbortController().signal);
   await settle(context);

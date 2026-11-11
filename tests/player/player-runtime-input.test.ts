@@ -25,12 +25,27 @@ import {
   type RuntimeInput,
 } from "../helpers/player/player-input.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
+import { reportsInto } from "../helpers/player/rewind-host.js";
 import type { ClockTicket } from "../../player/runtime/clock-ticket.js";
 import { clockTicket } from "../helpers/clock-ticket.js";
 import type { InputSectionHost } from "../../player/vue/src/session/runtime-input.js";
 import { untypedClient } from "../helpers/bridge/untyped.js";
 import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
 import type { StartOptions } from "../../player/engine-bridge/ops/session.js";
+
+/** Ends the capture `reportsInto` began, at the check of what it captured, so that a later host error prints again. */
+function endCapture() {
+  // EVIDENCE: fixture: `reportsInto` replaced `console.error` by a mock of the test's context, a proxy whose `mock` a read finds but `in` does not.
+  const capture: unknown = (console.error as { readonly mock?: unknown }).mock;
+  assert.ok(
+    typeof capture === "object" &&
+      capture !== null &&
+      "restore" in capture &&
+      typeof capture.restore === "function",
+    "the capture reportsInto began",
+  );
+  capture.restore();
+}
 
 /*
  * The Player's input over the engine's bridge (L5c), through the production intents, the input chain
@@ -351,13 +366,18 @@ for (const interference of ["a replacement", "a stop", "an unmount"] as const)
         return true;
       }, "button"),
     );
+    const reported: unknown[] = [];
+    reportsInto(context, reported);
+    const failure = new TypeError("a component failed");
     if (interference === "a replacement") {
       host.prepare(replacement);
       await host.activate();
-    } else if (interference === "a stop") host.reportHostError(new TypeError("a component failed"));
+    } else if (interference === "a stop") host.reportHostError(failure);
     else scope.stop();
     const result = await answering;
     await settle();
+    endCapture();
+    assert.deepEqual(reported, interference === "a stop" ? [failure] : []);
     assert.equal(result.kind, "retired");
     assert.equal(opened, 0, "no tab opened");
     assert.equal(posted.ops().includes("openUrl"), false, "no answer posted");
@@ -371,7 +391,12 @@ test("a request still queued in the host at a stop is refused without effect, an
     source: { kind: "source", script: "exit" },
   });
   const answering = answer(host, input.intents.choice(null, "button"));
-  host.reportHostError(new TypeError("a component failed"));
+  const reported: unknown[] = [];
+  reportsInto(context, reported);
+  const failure = new TypeError("a component failed");
+  host.reportHostError(failure);
+  endCapture();
+  assert.deepEqual(reported, [failure]);
   await compiling;
   const result = await answering;
   assert.equal(result.kind, "retired");
@@ -395,14 +420,17 @@ test("an answer dispatched before a stop shows through the stop's commit, and no
     { flush: "sync" },
   );
   context.after(stopWatch);
-  posted.on("selectChoice", () =>
-    queueMicrotask(() => host.reportHostError(new TypeError("a component failed"))),
-  );
+  const reported: unknown[] = [];
+  reportsInto(context, reported);
+  const failure = new TypeError("a component failed");
+  posted.on("selectChoice", () => queueMicrotask(() => host.reportHostError(failure)));
   const result = await answer(
     host,
     input.intents.choice(options(host.session.value!)[1]!.id, "button"),
   );
   await settle();
+  endCapture();
+  assert.deepEqual(reported, [failure]);
   assert.equal(result.kind, "retired", "no feedback after the stop");
   assert.equal(host.hostError.value, "TypeError");
   assert.ok(said(host).includes("picked B"), "the dispatched answer shows");
@@ -650,18 +678,22 @@ for (const interference of ["a replacement", "a stop", "an unmount"] as const)
       true,
     );
     let replaced: Promise<void> = Promise.resolve();
+    const reported: unknown[] = [];
+    reportsInto(context, reported);
+    const failure = new TypeError("a component failed");
     posted.on("completeStorageWrite", () => {
       if (interference === "a replacement") {
         host.prepare(replacement);
         replaced = host.activate();
-      } else if (interference === "a stop")
-        host.reportHostError(new TypeError("a component failed"));
+      } else if (interference === "a stop") host.reportHostError(failure);
       else scope.stop();
     });
     await answer(host, input.intents.choice(null, "button"));
     await replaced;
     const atInterference = host.session.value;
     await wait(200);
+    endCapture();
+    assert.deepEqual(reported, interference === "a stop" ? [failure] : []);
     assert.deepEqual(store.writes, ["kept"]);
     if (interference === "a replacement") assert.deepEqual(said(host), ["replacement"]);
     else if (interference === "an unmount") assert.equal(host.session.value, atInterference);
