@@ -28,6 +28,18 @@ const SUITE = ["a", "sub/a", "sub/type-core-z", "type-core-dir/plain", "fixtures
 /** A checkout with the suite's sources and compiled files, the tools, and fakes of `npm` and `gh`; its path. */
 function checkout() {
   const root = mkdtempSync(join(tmpdir(), "measure-test-files-"));
+  // (a setup that fails removes the checkout, as the test's own cleanup has not started yet)
+  try {
+    fill(root);
+    return root;
+  } catch (error) {
+    rmSync(root, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+/** Fills `root` as `checkout` describes. */
+function fill(root) {
   const write = (path, text, mode) => {
     mkdirSync(dirname(join(root, path)), { recursive: true });
     writeFileSync(join(root, path), text);
@@ -104,7 +116,6 @@ else if (args[0] === "api" && where && runs[where[1]] && where[2]) {
     const git = spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
     assert.equal(git.status, 0, `git ${args.join(" ")}: ${git.stderr}`);
   }
-  return root;
 }
 
 /** The tool run with `args` in `root`: its exit status, its output, and the module it wrote. */
