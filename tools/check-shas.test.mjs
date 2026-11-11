@@ -245,17 +245,22 @@ test("closingClausesOf, over generated clauses: a reference ends where its numbe
   const forms = [(n) => `#${n}`, (n) => `o/r#${n}`, (n) => `https://github.com/o/r/issues/${n}`];
   const separators = [", ", " and ", ", and ", " & "];
   // What stands directly after a reference's digits, and whether the reference still ends there: a word character
-  // (a letter of any script, a digit's continuation, a connector) runs the number on, so there is no reference.
+  // (a letter of any script, a connector, a combining mark, a digit of any script) runs the number on, so there is no
+  // reference.
+  // (`null` is the end of the text after the second reference, and nothing but the separator after the first)
   const after = [
-    ["", true],
+    [null, true],
     [" ", true],
     [".", true],
     [")", true],
     ["-", true],
     ["\n", true],
     ["abc", false],
-    ["_x", false],
     ["é", false],
+    ["_x", false],
+    ["\u203f", false],
+    ["\u0301", false],
+    ["١", false],
   ];
   let cases = 0;
   for (const keyword of keywords)
@@ -264,10 +269,12 @@ test("closingClausesOf, over generated clauses: a reference ends where its numbe
         for (const separator of separators)
           for (const [first, firstEnds] of after)
             for (const [second, secondEnds] of after) {
-              // (a first reference's continuation must leave a separator after it to stay a list: only the
-              // word-character ones are put before the separator, the others stand after the clause)
-              if (firstEnds && first !== "") continue;
-              const text = `${spell(keyword)} ${form(12)}${first}${separator}${form(13)}${second} rest`;
+              // (a first reference stays in a list only when the separator follows it, so after it stands nothing
+              // or a word character; any other character ends the clause before the list)
+              if (firstEnds && first !== null) continue;
+              const text =
+                `${spell(keyword)} ${form(12)}${first ?? ""}${separator}${form(13)}` +
+                (second === null ? "" : `${second} rest`);
               const expected = firstEnds && secondEnds ? [form(12)] : [];
               assert.deepEqual(
                 closingClausesOf(text).map((found) => found.closes),
@@ -276,7 +283,7 @@ test("closingClausesOf, over generated clauses: a reference ends where its numbe
               );
               cases += 1;
             }
-  assert.equal(cases, 9 * 3 * 3 * 4 * 4 * 9);
+  assert.equal(cases, 9 * 3 * 3 * 4 * 7 * 12);
 });
 
 test(
