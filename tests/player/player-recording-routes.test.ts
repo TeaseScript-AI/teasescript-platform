@@ -329,6 +329,9 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
     "the activation itself, or its recovery after a loss",
   "useSessionActivation.ts: useSessionActivation > recover: await startFrom":
     "the activation itself",
+  // A recovery's refused begin reaches the loss's stop (`beginFailed`), whose offer reads the store once.
+  "useSessionActivation.ts: useSessionActivation > lose: then keptOwner.keptPointFound":
+    "sets the offer only while the loss it was read for is still the one shown (`recoveryShown === asked`)",
   "useSessionActivation.ts: useSessionActivation > recover: await keptOwner.settleKeepWork":
     "before the activation's record begins; the click's token decides (`owns`)",
   "useSessionActivation.ts: useSessionActivation > recover: await connection.replace":

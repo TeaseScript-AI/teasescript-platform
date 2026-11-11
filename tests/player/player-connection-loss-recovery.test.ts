@@ -17,6 +17,7 @@ import {
   type ShownStatus,
 } from "../../player/vue/src/session/activation/recoveryKind.js";
 import type { SessionTransfer } from "../../player/persistence/session-transfer.js";
+import type { RewindOwner } from "../../player/vue/src/session/rewindOwner.js";
 import { coverageGaps, product, type Coordinates } from "../helpers/family-coverage.js";
 import { readForImport, type SessionRead } from "../helpers/player/transfer-read.js";
 import { presentedAction, runtimeInput } from "../helpers/player/player-input.js";
@@ -30,7 +31,9 @@ import {
   topologyConnections,
   until,
   type Topology,
+  type TopologyBridge,
   type TopologyConnections,
+  checkpointSnapshot,
 } from "../helpers/player/worker-topology.js";
 
 /*
@@ -52,13 +55,13 @@ const AXES = {
 } as const;
 
 /**
- * The feasible states: a click under way cleared the session shown and the prepared activation, and only a shown state
- * can be one Debug's rewind restored.
+ * The feasible states: a click under way cleared the session shown and the prepared activation; Debug's rewind inspects
+ * a shown state, and a recovery click keeps that inspection until the new session shows ("a Debug inspection at a
+ * recovery click" below).
  */
 const feasible = (state: Coordinates) =>
-  (state.clicking === "none" ||
-    (state.shown === "none" && state.prepared === "none" && state.inspecting === "no")) &&
-  (state.inspecting === "no" || state.shown !== "none");
+  (state.clicking === "none" || (state.shown === "none" && state.prepared === "none")) &&
+  (state.inspecting === "no" || state.shown !== "none" || state.clicking !== "none");
 
 function optional<T extends string>(value: string): T | null {
   if (value === "none") return null;
@@ -129,6 +132,7 @@ interface RecoveryHost {
     Ref<{ readonly offer: "start" | "continue"; readonly where: "line" | "page" } | null>
   >;
   readonly connectionLosses: Readonly<Ref<number>>;
+  readonly rewind: { readonly owner: RewindOwner; readonly inspecting: Readonly<Ref<boolean>> };
   readonly bridge: Promise<PlayerBridge>;
   loadScriptStorage(): Promise<void>;
   prepareScriptSource(
@@ -159,6 +163,7 @@ let usePlayerSession: (options: {
   readonly bridge: Promise<PlayerBridge>;
   readonly nextConnection?: () => Promise<PlayerBridge>;
   readonly debugHistorySpill: () => Promise<null>;
+  readonly capabilities?: { readonly camera: boolean };
   readonly scriptStorage?: ScriptStorageProvider;
   readonly keptSessions?: KeptSessionStore;
 }) => RecoveryHost;
@@ -230,11 +235,13 @@ async function page(
     script = KEEPS_AT_A_QUESTION,
     replaceable = true,
     storage,
+    camera = false,
   }: {
     kept?: KeptSessionStore;
     script?: string;
     replaceable?: boolean;
     storage?: ScriptStorageProvider;
+    camera?: boolean;
   } = {},
 ) {
   browser(context);
@@ -255,6 +262,7 @@ async function page(
       debugHistorySpill: async () => null,
       scriptStorage,
       keptSessions: kept,
+      capabilities: { camera },
     }),
   )!;
   context.after(() => scope.stop());
@@ -308,6 +316,22 @@ const RERUN = rerunRegistry({
   "a late loss of the replaced connection": ["in-process"],
   "the reload witness": TOPOLOGIES,
   "a refused keep after a recovered Continue": TOPOLOGIES,
+  "a session review finishing after the loss": TOPOLOGIES,
+  "an old review beside a fresh ticket": TOPOLOGIES,
+  "a second loss during restoreKept": TOPOLOGIES,
+  "a second loss during beginRecording": TOPOLOGIES,
+  "a second loss during continue": TOPOLOGIES,
+  "the camera of a rejected replacement": TOPOLOGIES,
+  "the camera of a second loss during the preparation": TOPOLOGIES,
+  "a Debug inspection at a recovery click": TOPOLOGIES,
+  "a refused begin of a recovery": TOPOLOGIES,
+  "a prepared Continue lost before its click": TOPOLOGIES,
+  "a Continue lost before its session showed": TOPOLOGIES,
+  "running before the first keep": TOPOLOGIES,
+  "an unreadable kept record": TOPOLOGIES,
+  "a kept store that cannot be read": TOPOLOGIES,
+  "a second loss during start": TOPOLOGIES,
+  "a failed recompile": TOPOLOGIES,
 });
 
 RERUN.rows(
@@ -589,11 +613,22 @@ for (const [id, name, offWhileLost] of [
     await until(() => player.session.value?.state.foregroundAction != null, "the question again");
     await onTheFreshConnection(player, connections);
     // Only the settings are compared: the fresh connection also prepares, restores and continues the session.
-    const settings = connections
-      .current()
-      .posts.map((post) => post.op)
-      .filter((op) => op === "debugTracing" || op === "randomControl");
-    assert.deepEqual(settings, offWhileLost ? [] : ["debugTracing", "randomControl"]);
+    const posts = connections.current().posts;
+    const ops = posts.map((post) => post.op);
+    const settings = posts.filter(
+      (post) => post.op === "debugTracing" || post.op === "randomControl",
+    );
+    assert.deepEqual(
+      settings.map((post) => post.op),
+      offWhileLost ? [] : ["debugTracing", "randomControl"],
+    );
+    // They go before the session's restore, as at a page load, with the settings asked for.
+    for (const post of settings)
+      assert.ok(ops.indexOf(post.op) < ops.indexOf("restoreKept"), post.op);
+    if (!offWhileLost) {
+      assert.match(JSON.stringify(settings[0]!.args), /"on":true/u);
+      assert.match(JSON.stringify(settings[1]!.args), /"control":\{"sites":\[\]\}/u);
+    }
     return end();
   });
 
@@ -716,11 +751,15 @@ async function witnessToLoss(context: TestContext, topology: Topology) {
 /** What the witness compares once the continued session answered again and shows its next choice. */
 async function witnessAfter(
   player: RecoveryHost,
-  connection: { readonly posts: readonly { readonly op: string }[] },
+  connection: TopologyBridge,
   storage: ReturnType<typeof memoryStorage>,
 ) {
   await until(() => player.session.value?.state.foregroundAction != null, "the kept question");
   const transcriptAtContinue = player.session.value!.transcriptEntries.length;
+  // The kept state as the restore gave it, as `captureKeep` exports it.
+  const restoredState = JSON.stringify(
+    await checkpointSnapshot(connection.bridge, player.session.value!),
+  );
   await answerFirst(player);
   await until(
     () =>
@@ -728,17 +767,38 @@ async function witnessAfter(
       player.session.value?.state.foregroundAction != null,
     "the next question",
   );
-  const ops = connection.posts.map((post) => post.op);
+  const shown = player.session.value!;
+  const posts = connection.posts;
+  const from = posts.findIndex((post) => post.op === "restoreKept");
+  // Ids that are this connection's own (sessions, plans) are named by their first appearance; times, which depend on
+  // when each path ran (the click's capture, each observation), are left out.
+  const names = new Map<string, string>();
+  const normalized = (value: unknown) =>
+    JSON.stringify(value, (key, field: unknown) => {
+      if (typeof field === "number" && TIMES.test(key)) return "time";
+      if (typeof field !== "string" || !CONNECTION_LOCAL.has(key)) return field;
+      if (!names.has(field)) names.set(field, `${key}#${names.size}`);
+      return names.get(field);
+    });
   return {
     writes: storage.writes,
     entries: [...storage.entries],
-    events: player.session.value!.events.map((event) => event.kind),
+    events: normalized(shown.events),
     transcriptAtContinue,
-    transcript: player.session.value!.transcriptEntries.length,
+    transcript: normalized(shown.transcriptEntries),
+    restoredState: normalized(JSON.parse(restoredState)),
+    state: normalized(await checkpointSnapshot(connection.bridge, shown)),
     // The begin's posts, from the kept session's restore on; the preparation's come before it on either path.
-    begin: ops.slice(ops.indexOf("restoreKept")),
+    begin: posts
+      .slice(from)
+      .map((post) => normalized({ op: post.op, session: post.session, args: post.args })),
   };
 }
+
+/** The fields that hold a time, in ms or as a clock reading. */
+const TIMES = /(?:Ms|ms|At|Time|time|clock|Clock|Seconds)$/u;
+/** The fields of a post whose strings name something of one connection only. */
+const CONNECTION_LOCAL = new Set(["session", "plan", "ticket", "id"]);
 
 RERUN.rows(
   "the reload witness",
@@ -773,7 +833,11 @@ RERUN.rows(
       ],
       "the save runs again",
     );
-    assert.equal(r.begin[0], "restoreKept", "the begin's posts are compared from the restore");
+    assert.match(
+      r.begin[0]!,
+      /^\{"op":"restoreKept"/u,
+      "the begin's posts are compared from the restore",
+    );
     assert.deepEqual(r, b);
     return end();
   },
@@ -814,6 +878,437 @@ RERUN.rows(
     await connections.current().lose();
     await until(() => player.recovery.value !== null, "the offer again");
     assert.deepEqual(player.recovery.value, { offer: "continue", where: "line" });
+    return end();
+  },
+);
+
+/** Script storage in memory that `replace` changes, as the browser provider's does. */
+function replacingStorage(initial: Record<string, string>) {
+  const storage = memoryStorage(initial);
+  const gate: { holdLoad: boolean; release: (() => void) | null } = {
+    holdLoad: false,
+    release: null,
+  };
+  const provider: ScriptStorageProvider = {
+    ...storage.provider,
+    scope: SCOPE,
+    replace: async (entries) => {
+      storage.entries.clear();
+      for (const { key, value } of entries) storage.entries.set(key, value);
+    },
+    load: async () => {
+      if (gate.holdLoad) {
+        gate.holdLoad = false;
+        await new Promise<void>((resolve) => (gate.release = resolve));
+      }
+      return storage.provider.load();
+    },
+  };
+  return { storage, provider, gate };
+}
+
+RERUN.rows(
+  "a session review finishing after the loss",
+  "a session review that finishes after the loss is refused, and changes no saved value or kept point",
+  async (context, topology, end) => {
+    const { storage, provider, gate } = replacingStorage({ local: "keep" });
+    const { connections, player, kept } = await page(context, topology, { storage: provider });
+    await player.activate();
+    await keptAtTheQuestion(player, kept);
+    const { transfer } = await player.exportSession();
+    const read = await readForImport(player, {
+      ...transfer,
+      entries: [{ key: "foreign", value: "imported" }],
+    });
+    // The review's last step, its read of the saved values, waits while the connection is lost.
+    gate.holdLoad = true;
+    const reviewing = player.reviewSessionImport(read);
+    await until(() => gate.release !== null, "the review reading the saved values");
+    await connections.first.lose();
+    const keptBefore = await kept.session(SCOPE);
+    gate.release!();
+    await assert.rejects(reviewing, /lost with the engine's connection/u);
+    assert.deepEqual([...storage.entries], [["local", "keep"]]);
+    assert.deepEqual(await kept.session(SCOPE), keptBefore);
+    return end();
+  },
+);
+
+RERUN.rows(
+  "an old review beside a fresh ticket",
+  "a review from before the loss imports nothing, also once the fresh host issued the same ticket; the fresh one imports",
+  async (context, topology, end) => {
+    const { storage, provider } = replacingStorage({ local: "keep" });
+    const { connections, player, kept } = await page(context, topology, { storage: provider });
+    await player.activate();
+    await keptAtTheQuestion(player, kept);
+    const { transfer } = await player.exportSession();
+    const oldRead = await readForImport(player, {
+      ...transfer,
+      entries: [{ key: "old", value: "old" }],
+    });
+    const oldReview = await player.reviewSessionImport(oldRead);
+    await connections.first.lose();
+    await until(() => player.recovery.value !== null, "the offer");
+    await player.activate();
+    await until(
+      () => player.session.value?.state.foregroundAction != null,
+      "the recovered question",
+    );
+    const freshRead = await readForImport(player, {
+      ...transfer,
+      entries: [{ key: "new", value: "new" }],
+    });
+    const freshReview = await player.reviewSessionImport(freshRead);
+    assert.equal(oldRead.ticket, freshRead.ticket, "each host numbers its tickets alike");
+    await assert.rejects(player.importSession(oldReview), /lost with the engine's connection/u);
+    assert.deepEqual([...storage.entries], [["local", "keep"]]);
+    await player.importSession(freshReview);
+    assert.deepEqual([...storage.entries], [["new", "new"]]);
+    return end();
+  },
+);
+
+for (const op of ["restoreKept", "beginRecording", "continue"] as const)
+  RERUN.rows(
+    `a second loss during ${op}`,
+    `a fresh connection lost during the recovery's ${op} offers the same choice again`,
+    async (context, topology, end) => {
+      const { connections, player, kept } = await page(context, topology);
+      await player.activate();
+      await keptAtTheQuestion(player, kept);
+      await connections.first.lose();
+      await until(() => player.recovery.value !== null, "the first offer");
+      connections.armNext((fresh) => fresh.hold(op));
+      const recovering = player.activate();
+      await until(() => connections.made.length === 2, "the fresh connection");
+      const fresh = connections.current();
+      await fresh.held();
+      await fresh.lose();
+      fresh.release();
+      await recovering;
+      await until(() => player.recovery.value !== null, "the second offer");
+      assert.deepEqual(player.recovery.value, { offer: "continue", where: "page" });
+      assert.equal(player.hostError.value, null);
+      assert.equal(connections.calls(), 1);
+      await player.activate();
+      await until(() => player.session.value?.state.foregroundAction != null, "the question again");
+      assert.equal(connections.calls(), 2);
+      await onTheFreshConnection(player, connections);
+      return end();
+    },
+  );
+
+/** A camera the composable opens: each `getUserMedia` gives one track, recorded with its state. */
+function fakeCamera(context: TestContext) {
+  class FakeTrack extends EventTarget {
+    readonly kind = "video";
+    readonly label = "fake camera";
+    readyState: "live" | "ended" = "live";
+    stop() {
+      this.readyState = "ended";
+    }
+    getSettings() {
+      return { deviceId: "fake camera" };
+    }
+  }
+  const tracks: FakeTrack[] = [];
+  const previous = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  Object.defineProperty(globalThis, "navigator", {
+    configurable: true,
+    value: {
+      mediaDevices: Object.assign(new EventTarget(), {
+        getUserMedia: async () => {
+          const track = new FakeTrack();
+          tracks.push(track);
+          return { getTracks: () => [track] };
+        },
+        enumerateDevices: async () => [],
+      }),
+    },
+  });
+  context.after(() => {
+    if (previous) Object.defineProperty(globalThis, "navigator", previous);
+    else Reflect.deleteProperty(globalThis, "navigator");
+  });
+  return tracks;
+}
+
+for (const [id, phase] of [
+  ["the camera of a rejected replacement", "rejected"],
+  ["the camera of a second loss during the preparation", "lost"],
+] as const)
+  RERUN.rows(
+    id,
+    `${id} is released; a recovery that succeeds keeps its own`,
+    async (context, topology, end) => {
+      const tracks = fakeCamera(context);
+      const { connections, player, kept } = await page(context, topology, { camera: true });
+      await player.activate();
+      await keptAtTheQuestion(player, kept);
+      await connections.first.lose();
+      await until(() => player.recovery.value !== null, "the first offer");
+      assert.deepEqual(
+        tracks.map((track) => track.readyState),
+        ["ended"],
+        "the loss released the camera",
+      );
+      if (phase === "rejected") connections.failNext();
+      else connections.armNext((fresh) => fresh.hold("prepare"));
+      const recovering = player.activate();
+      if (phase === "lost") {
+        await until(() => connections.made.length === 2, "the fresh connection");
+        const fresh = connections.current();
+        await fresh.held();
+        await fresh.lose();
+        fresh.release();
+      }
+      await recovering;
+      await until(() => player.recovery.value !== null, "the second offer");
+      assert.deepEqual(
+        tracks.map((track) => track.readyState),
+        ["ended", "ended"],
+      );
+      await player.activate();
+      await until(() => player.session.value?.state.foregroundAction != null, "the question again");
+      assert.deepEqual(
+        tracks.map((track) => track.readyState),
+        ["ended", "ended", "live"],
+      );
+      return end();
+    },
+  );
+
+RERUN.rows(
+  "a Debug inspection at a recovery click",
+  "an inspection lost with its connection stays until the recovered session shows, which clears the old view",
+  async (context, topology, end) => {
+    const { connections, player, kept } = await page(context, topology, { script: WITNESS });
+    const rewind = player.rewind.owner;
+    rewind.debugOn();
+    await player.activate();
+    await keptAtTheQuestion(player, kept);
+    await until(
+      () => (rewind.view.value?.timeline.points.length ?? 0) > 0,
+      "the first history point",
+    );
+    const point = rewind.view.value!.timeline.points[0]!.id;
+    await answerFirst(player);
+    await until(
+      () => (rewind.view.value?.timeline.points.length ?? 0) > 1,
+      "the next history point",
+    );
+    assert.equal(await rewind.back(point), true);
+    assert.equal(player.rewind.inspecting.value, true);
+    await connections.first.lose();
+    await until(() => player.recovery.value !== null, "the offer");
+    assert.deepEqual(player.recovery.value, { offer: "continue", where: "line" });
+    connections.armNext((fresh) => fresh.hold("prepare"));
+    const recovering = player.activate();
+    await until(() => connections.made.length === 2, "the fresh connection");
+    const fresh = connections.current();
+    await fresh.held();
+    // The family's state at a loss now: no session shown, still inspecting, the Continue click under way.
+    assert.equal(player.session.value, null);
+    assert.equal(player.rewind.inspecting.value, true);
+    fresh.release();
+    await recovering;
+    await until(
+      () => player.session.value?.state.foregroundAction != null,
+      "the recovered question",
+    );
+    assert.equal(rewind.view.value, null, "the recovered session cleared the old view");
+    assert.equal(player.rewind.inspecting.value, false);
+    assert.equal(rewind.state.sealed, "loss", "no rewind until a reload");
+    return end();
+  },
+);
+
+RERUN.rows(
+  "a refused begin of a recovery",
+  "a begin the fresh host refuses before its session shows offers the same choice again, without the error stop",
+  async (context, topology, end) => {
+    const { connections, player } = await page(context, topology);
+    await connections.first.lose();
+    connections.armNext((fresh) => {
+      fresh.bridge.start = async () => {
+        throw new Error("The fresh host could not begin the session.");
+      };
+    });
+    await player.activate();
+    await until(() => player.recovery.value !== null, "the offer again");
+    assert.deepEqual(player.recovery.value, { offer: "start", where: "page" });
+    assert.equal(player.hostError.value, null);
+    assert.equal(player.session.value, null);
+    assert.equal(connections.calls(), 1);
+    await player.activate();
+    await until(() => player.session.value?.state.foregroundAction != null, "the question");
+    assert.equal(connections.calls(), 2);
+    return end();
+  },
+);
+
+/** A page whose store keeps a session at the question from an earlier page, so its start page offers Continue. */
+async function continuePage(context: TestContext, topology: Topology) {
+  const kept = memoryKeptSessionStore();
+  const earlier = await page(context, topology, { kept });
+  await earlier.player.activate();
+  await keptAtTheQuestion(earlier.player, kept);
+  earlier.scope.stop();
+  const later = await page(context, topology, { kept });
+  assert.equal(later.player.activation.value, "continue");
+  return later;
+}
+
+RERUN.rows(
+  "a prepared Continue lost before its click",
+  "a start page offering Continue looks unchanged after the loss, and its Continue recovers",
+  async (context, topology, end) => {
+    const { connections, player } = await continuePage(context, topology);
+    await connections.first.lose();
+    await turns(5);
+    assert.equal(player.activation.value, "continue");
+    assert.equal(player.recovery.value, null);
+    assert.equal(player.hostError.value, null);
+    await player.activate();
+    await until(() => player.session.value?.state.foregroundAction != null, "the kept question");
+    assert.equal(connections.calls(), 1);
+    await onTheFreshConnection(player, connections);
+    return end();
+  },
+);
+
+RERUN.rows(
+  "a Continue lost before its session showed",
+  "a Continue lost before its session showed offers Continue from last kept point on the start page",
+  async (context, topology, end) => {
+    const { connections, player } = await continuePage(context, topology);
+    connections.first.hold("continue");
+    const continuing = player.activate();
+    await connections.first.held();
+    await connections.first.lose();
+    connections.first.release();
+    await continuing;
+    await until(() => player.recovery.value !== null, "the offer");
+    assert.deepEqual(player.recovery.value, { offer: "continue", where: "page" });
+    await player.activate();
+    await until(() => player.session.value?.state.foregroundAction != null, "the kept question");
+    await onTheFreshConnection(player, connections);
+    return end();
+  },
+);
+
+RERUN.rows(
+  "running before the first keep",
+  "a session lost while it runs, before anything was kept, offers Start again on the line",
+  async (context, topology, end) => {
+    const { connections, player, kept } = await page(context, topology, {
+      script: 'say "Waiting", instant\nwait 60 s\nexit',
+    });
+    // Its first keep is held: nothing is kept when the connection is lost.
+    connections.first.hold("captureKeep");
+    await player.activate();
+    await connections.first.held();
+    assert.equal(
+      player.session.value!.state.foregroundAction?.kind,
+      "delay",
+      "it waits on its timer",
+    );
+    assert.equal(await kept.session(SCOPE), null);
+    await connections.first.lose();
+    connections.first.release();
+    await until(() => player.recovery.value !== null, "the offer");
+    assert.deepEqual(player.recovery.value, { offer: "start", where: "line" });
+    return end();
+  },
+);
+
+for (const [id, read] of [
+  // A record no validation accepts, as a store of another version can hold (`JSON.parse` gives it untyped).
+  [
+    "an unreadable kept record",
+    (): ReturnType<KeptSessionStore["session"]> =>
+      Promise.resolve(JSON.parse('{"unreadable":true}')),
+  ],
+  [
+    "a kept store that cannot be read",
+    (): ReturnType<KeptSessionStore["session"]> =>
+      Promise.reject(new Error("The store cannot be read.")),
+  ],
+] as const)
+  RERUN.rows(id, `${id} at the loss offers Start again`, async (context, topology, end) => {
+    const store = memoryKeptSessionStore();
+    const reading = { broken: false };
+    const kept: KeptSessionStore = {
+      session: (scope) => (reading.broken ? read() : store.session(scope)),
+      media: store.media,
+      discard: (scope) => store.discard(scope),
+      publish: (scope, update) => store.publish(scope, update),
+    };
+    const { connections, player } = await page(context, topology, { kept });
+    await player.activate();
+    await keptAtTheQuestion(player, kept);
+    reading.broken = true;
+    await connections.first.lose();
+    await until(() => player.recovery.value !== null, "the offer");
+    assert.deepEqual(player.recovery.value, { offer: "start", where: "line" });
+    return end();
+  });
+
+RERUN.rows(
+  "a second loss during start",
+  "a fresh connection lost during a recovered Start's begin offers Start again",
+  async (context, topology, end) => {
+    const { connections, player } = await page(context, topology);
+    await connections.first.lose();
+    connections.armNext((fresh) => fresh.hold("start"));
+    const recovering = player.activate();
+    await until(() => connections.made.length === 2, "the fresh connection");
+    const fresh = connections.current();
+    await fresh.held();
+    await fresh.lose();
+    fresh.release();
+    await recovering;
+    await until(() => player.recovery.value !== null, "the offer");
+    assert.deepEqual(player.recovery.value, { offer: "start", where: "page" });
+    assert.equal(player.hostError.value, null);
+    await player.activate();
+    await until(() => player.session.value?.state.foregroundAction != null, "the question");
+    assert.equal(connections.calls(), 2);
+    return end();
+  },
+);
+
+RERUN.rows(
+  "a failed recompile",
+  "a fresh connection that does not compile the script again offers the same choice again",
+  async (context, topology, end) => {
+    const { connections, player, kept } = await page(context, topology);
+    await player.activate();
+    await keptAtTheQuestion(player, kept);
+    await connections.first.lose();
+    await until(() => player.recovery.value !== null, "the offer");
+    connections.armNext((fresh) => {
+      const client = fresh.bridge.client;
+      // EVIDENCE: fixture: the client's own request, called with the arguments the Player passes it.
+      const original = client.request.bind(client) as (
+        op: string,
+        ...rest: unknown[]
+      ) => ReturnType<typeof client.request>;
+      // EVIDENCE: fixture: the host's reply to a source that does not compile, in place of its own reply.
+      client.request = ((op: string, ...rest: unknown[]) =>
+        op === "prepare"
+          ? Promise.resolve({ result: { kind: "notCompiled", diagnostics: [] } })
+          : original(op, ...rest)) as typeof client.request;
+    });
+    await player.activate();
+    await until(() => player.recovery.value !== null, "the offer again");
+    assert.deepEqual(player.recovery.value, { offer: "continue", where: "page" });
+    assert.equal(player.hostError.value, null);
+    assert.equal(connections.calls(), 1);
+    await player.activate();
+    await until(() => player.session.value?.state.foregroundAction != null, "the kept question");
+    assert.equal(connections.calls(), 2);
     return end();
   },
 );
