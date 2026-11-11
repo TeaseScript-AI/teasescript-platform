@@ -191,8 +191,7 @@ export const PAIR_CLASSES = [
     id: "differs/stop",
     state: "open",
     rule: "compared, and the diagnostics whose identity (path, code, severity, offsets) one route has more often than the other include TSV076, the core's budget stop",
-    authority:
-      "S8 stop acceptance (#1526, #1654, #1658, #1659); budget stops and lost checks apart (the owner's #1526 phase B decision, PR #1606)",
+    authority: "S8 stop acceptance (#1526, #1654, #1658, #1659, phase B's PR #1606)",
     witness: "d0b20230b9aa copies32",
     match: (f) => f.diag && f.changed.has("TSV076"),
   },
