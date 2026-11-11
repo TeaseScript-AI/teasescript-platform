@@ -23,6 +23,7 @@ import {
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
 import { preparedPlan, sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
+import { reportsInto } from "../helpers/player/rewind-host.js";
 import { serviceSection } from "../helpers/service-section.js";
 import { clockTicket } from "../helpers/clock-ticket.js";
 import type { InputSection } from "../../player/vue/src/session/runtime-input.js";
@@ -619,6 +620,8 @@ RERUN.rows(
     }
     const before = await kept.session("loss");
     assert.ok(before, "a session is kept");
+    const reported: unknown[] = [];
+    reportsInto(context, reported);
     const unhandled = await unhandledDuring(async () => {
       // The button times out and the question shows: its keep's capture is posted, its reply held.
       transport.hold("captureKeep");
@@ -629,6 +632,10 @@ RERUN.rows(
     assert.deepEqual(unhandled, []);
     assert.deepEqual(await kept.session("loss"), before, "the session kept before stays");
     assert.equal(player.hostError.value, "BridgeLostError");
+    assert.deepEqual(
+      reported.map((error) => (error instanceof Error ? error.name : String(error))),
+      ["BridgeLostError"],
+    );
     return end();
   },
 );
@@ -652,6 +659,8 @@ RERUN.rows(
       }
     }
     const { transport, player, token } = await keepingPage(context, kept, topology, 50);
+    const reported: unknown[] = [];
+    reportsInto(context, reported);
     const unhandled = await unhandledDuring(async () => {
       transport.hold("restoreKept");
       const preparing = player.prepareScript(token, {
@@ -666,6 +675,10 @@ RERUN.rows(
     });
     assert.deepEqual(unhandled, []);
     assert.notEqual(player.activation.value, "continue");
+    assert.deepEqual(
+      reported.map((error) => (error instanceof Error ? error.name : String(error))),
+      ["BridgeLostError"],
+    );
     return end();
   },
 );

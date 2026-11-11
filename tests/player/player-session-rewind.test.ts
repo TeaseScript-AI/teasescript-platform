@@ -244,11 +244,18 @@ test("Debug off during a pending adoption, then a loss: the adoption's late outc
       // Input adopts the inspected state; the adoption waits for its read.
       const chosen = Promise.resolve(host.prepareInput());
       await held.arrived;
+      const reported: unknown[] = [];
+      reportsInto(subtest, reported);
       made.debug.stop();
       made.lose!();
       held.release();
       await chosen.catch(() => {});
       await settle(subtest);
+      assert.deepEqual(
+        reported.map((error) => (error instanceof Error ? error.message : String(error))),
+        ["The engine Worker failed: injected."],
+        "only the loss is reported",
+      );
       assert.notEqual(
         host.session.value === null ? null : shownView(host).lineage,
         tip.lineage,
@@ -306,8 +313,15 @@ for (const end of ["Debug off", "unmount"] as const)
     await choose(context, host, "One");
     assert.equal(await backTo(rewind, 0), true);
     const inspected = host.session.value;
+    const reported: unknown[] = [];
+    reportsInto(context, reported);
     made.lose!();
     await settle(context);
+    assert.deepEqual(
+      reported.map((error) => (error instanceof Error ? error.message : String(error))),
+      ["The engine Worker failed: injected."],
+      "the loss is reported",
+    );
     // The lost host's states are gone, and with them Debug's history: the rewind is sealed by the loss.
     assert.equal(host.rewind.owner.state.sealed, "loss");
     if (end === "Debug off") debug.stop();
@@ -812,6 +826,8 @@ for (const each of exitCases())
     );
     const step = each.read === "back" ? backTo(rewind, 0) : rewind.resume();
     await held.arrived;
+    const reported: unknown[] = [];
+    reportsInto(context, reported);
     if (each.lifecycle === "publication") {
       // The page shows a newer publication of the session, which the read did not see: a later observation.
       context.mock.timers.tick(1_000);
@@ -832,6 +848,16 @@ for (const each of exitCases())
     held.release();
     const done = await step.catch(() => false);
     await settle(context);
+    // The host errors the Player reports: the case's own Player error or loss, and nothing else.
+    assert.deepEqual(
+      reported.map((error) => (error instanceof Error ? error.message : String(error))),
+      each.lifecycle === "stopped"
+        ? ["A Player error."]
+        : each.lifecycle === "lost"
+          ? ["The engine Worker failed: injected."]
+          : [],
+      "the host errors reported",
+    );
     const want = exitOutcome(each);
     assert.equal(done, want.done, "the step's result");
     assert.equal(

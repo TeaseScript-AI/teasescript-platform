@@ -19,6 +19,7 @@ import { preparedPlan, type PlanStart } from "../helpers/prepared-plan.js";
 import { clockTicket } from "../helpers/clock-ticket.js";
 import { untypedClient } from "../helpers/bridge/untyped.js";
 import { hostIntroduced, loadHostFacade } from "../helpers/player/host-sessions.js";
+import { reportsInto } from "../helpers/player/rewind-host.js";
 
 /*
  * Session split S2's runtime family (HEAD 0 §7): an activation's completions act only while it lives. Each case is a
@@ -571,8 +572,33 @@ const VIEW: DebugViewRequest = {
 
 const SUCCESSOR = 'say "successor", instant\nlet next = askChoice "Go"\nexit';
 
+/**
+ * The host errors `c`'s own schedule raises, as `<name>: <message>`: the only ones its Player may report. A same-lineage
+ * Continue of a session a Player error stopped is refused, and so is the Debug mode publication a same-lineage Continue
+ * overtook; the Player reports both refusals.
+ */
+function ownErrors(c: Case): readonly string[] {
+  const playerError = ["haltAck", "captureReply", "exportWaiting"].includes(c.handle);
+  return [
+    ...(c.settlement === "rejection" ? ["TypeError: The held reply failed."] : []),
+    ...(c.transition === "loss" ? ["BridgeLostError: The engine Worker failed: injected."] : []),
+    ...(c.handle === "lateStartStop" ? ["TypeError: The Player failed while it began."] : []),
+    ...(playerError ? ["TypeError: The Player failed."] : []),
+    ...(c.transition === "errorStop" ? ["RangeError: The Player failed while it began."] : []),
+    ...(playerError && c.transition === "sameLineage"
+      ? ["BridgeRefusal: The Player stopped this session."]
+      : []),
+    ...(c.handle === "debugModePublish" && c.transition === "sameLineage"
+      ? ["BridgeRefusal: The request was made from a revision the session no longer accepts."]
+      : []),
+  ];
+}
+
 /** Runs `c` on a page of its own, ending the held reply as `mode` says. */
 async function run(context: TestContext, c: Case, mode: Mode): Promise<Seen> {
+  // The host errors the Player reports, which may be only the case's own (asserted at the end).
+  const reported: unknown[] = [];
+  reportsInto(context, reported);
   const elements = browser(context);
   // The page's clock moves only where the case moves it, so that both runs observe the same times.
   const page = { now: 1_000 };
@@ -918,6 +944,14 @@ async function run(context: TestContext, c: Case, mode: Mode): Promise<Seen> {
     c.transition === "loss" ||
     (facade.heldRuns(bridge).length === 0 && facade.heldTickets(bridge).length === 0);
   const after = traffic.posts.filter((post) => post.phase > 0);
+  const own = ownErrors(c);
+  assert.deepEqual(
+    reported
+      .map((error) => (error instanceof Error ? `${error.name}: ${error.message}` : String(error)))
+      .filter((error) => !own.includes(error)),
+    [],
+    "no host error but the case's own",
+  );
   return {
     shows,
     errors,
