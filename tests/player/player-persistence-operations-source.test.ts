@@ -123,7 +123,6 @@ const SERVICES =
 const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   [MAIN]: {
     usePlayerSession: SETUP,
-    "usePlayerSession.ready": SETUP,
     "usePlayerSession.hasNormalStorage": MOVE,
     "usePlayerSession.hasScriptStorage": SESSION,
     "usePlayerSession.showSession": SESSION,
@@ -265,7 +264,6 @@ const DERIVED: Readonly<Record<string, string>> = {
   resolvePackageAsset: "the host's asset resolver, from the options: no store",
   connection:
     "the engine bridge and its readiness, from the options: its requests are checked as host members",
-  bridge: "the engine bridge, from the options: its requests are checked as host members",
   connected: "the bridge once ready, from the options: its requests are checked as host members",
   capturedMedia: "the media store, from the options: checked by `MEDIA`",
   room: "the room shown, from the options and the saved values: a value, no store",
