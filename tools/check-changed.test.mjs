@@ -1254,8 +1254,23 @@ test("without --base or a pull request, the base is the long-lived line HEAD's o
       base("origin/runtime-v2", "runtime-v2", 2),
       "runtime-v2, holding an older main, merging a newer main",
     );
-    const lane = git("rev-parse", "lane");
-    // unproven: a missing ref, and a shallow clone
+    // a lane of the branch that merges main for runtime-v2, which lands with a merge commit, as #2408: its head is in
+    // runtime-v2's history, but not on its own line, which HEAD's line meets at runtime-v2's tip before the landing
+    // (Sol r2)
+    git("switch", "-q", "-C", "merge-main", "runtime-v2");
+    git("merge", "-q", "--no-edit", "main");
+    const before = git("rev-parse", "runtime-v2");
+    git("switch", "-q", "runtime-v2");
+    git("merge", "-q", "--no-ff", "--no-edit", "merge-main");
+    git("update-ref", "refs/remotes/origin/runtime-v2", "runtime-v2");
+    git("switch", "-q", "-C", "lane", "merge-main");
+    graph.commit("lane", "lane.md");
+    assert.deepEqual(
+      inside(directory, branchedFrom),
+      base("origin/runtime-v2", before, 2),
+      "a lane of runtime-v2's merge branch",
+    );
+    // unproven: a missing ref, a shallow clone, and a HEAD whose line meets neither
     git("update-ref", "-d", "refs/remotes/origin/runtime-v2");
     fails(
       "no origin/runtime-v2",
@@ -1275,9 +1290,20 @@ test("without --base or a pull request, the base is the long-lived line HEAD's o
     } finally {
       rmSync(shallow, { recursive: true, force: true });
     }
+    git("switch", "-q", "--orphan", "unrelated");
+    writeFileSync(join(directory, "unrelated.md"), "unrelated\n");
+    git("add", "unrelated.md");
+    git("commit", "-q", "-m", "unrelated");
+    fails(
+      "unrelated",
+      "no --base and no pull request, and HEAD's line meets neither origin/main nor origin/runtime-v2's: name the " +
+        "base with --base",
+    );
     // --merged-checkout needs --base: the queue's merge of a lane of runtime-v2 with main, its second parent main
+    const lane = graph.lane("runtime-v2", null);
     git("switch", "-q", "--detach", "lane");
-    git("merge", "-q", "--no-ff", "--no-edit", "origin/main~1");
+    git("merge", "-q", "--no-ff", "--no-edit", "origin/main");
+    assert.equal(git("rev-parse", "HEAD^2"), git("rev-parse", "origin/main"));
     const merged = runSync(process.execPath, [tool, "--merged-checkout", lane], {
       cwd: directory,
       encoding: "utf8",

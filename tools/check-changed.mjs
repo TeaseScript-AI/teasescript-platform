@@ -174,7 +174,11 @@ export function unknownToCostly(paths) {
   );
 }
 
-/** The long-lived branches the workflow merges into each other, on merge branches such as `rt2/merge-main-…`. */
+/**
+ * The long-lived branches the workflow merges into each other, on merge branches such as `rt2/merge-main-…`. Both the
+ * default base (`branchedFrom`) and `merge commits` (`strayMerges`) read them here; once runtime-v2 is retired, a
+ * missing `origin/runtime-v2` is the normal state, and its entry goes from here, for both.
+ */
 const MERGED_INTO_EACH_OTHER = ["origin/main", "origin/runtime-v2"];
 
 /**
