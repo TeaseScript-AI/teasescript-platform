@@ -27,6 +27,7 @@ import {
   notInstalled,
   projectsFor,
   removeTemporaryWorktree,
+  strayMerges,
   unknownToCostly,
 } from "./check-changed.mjs";
 
@@ -886,12 +887,70 @@ test(
   },
 );
 
-test(
-  "a merge commit fails `merge commits` unless it merges main or runtime-v2 into the other, plain, merged and in a merged checkout, and the other checks still run (#2106)",
-  { timeout: 120_000 },
-  () => {
-    // main and runtime-v2 grow apart from one base; `other` is another lane's branch off main
-    const cases = [
+/**
+ * One repository for the merge-commit tests: from one base, `runtime-v2`, `other` (another lane's branch) and `main`
+ * each grow a commit, then `main` and `runtime-v2` grow another, with `origin/main` and `origin/runtime-v2` at their
+ * tips. `lane(base, merges)` makes `lane` anew off `base`'s commit before that last growth, with a commit of its own and
+ * then a merge of `merges` (none for null), and returns its SHA; merging main or runtime-v2 is so a merge commit.
+ * `queueMerge(base)` checks out `lane` merged with `base` as the queue's `--merged-with` makes it (`git merge --no-ff`,
+ * which makes no commit when the lane already holds the base).
+ */
+function mergeGraph() {
+  const { directory } = repository({ passing: true });
+  const git = (...args) => {
+    const result = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+      cwd: directory,
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  const commit = (branch, file) => {
+    git("switch", "-q", branch);
+    writeFileSync(join(directory, file), `${branch}\n`);
+    git("add", file);
+    git("commit", "-q", "-m", `${branch} grows`);
+  };
+  git("branch", "runtime-v2", "main");
+  git("branch", "other", "main");
+  commit("runtime-v2", "runtime-v2.md");
+  commit("other", "other.md");
+  commit("main", "main.md");
+  commit("main", "main-later.md");
+  commit("runtime-v2", "runtime-v2-later.md");
+  git("update-ref", "refs/remotes/origin/main", "main");
+  git("update-ref", "refs/remotes/origin/runtime-v2", "runtime-v2");
+  const lane = (base, merges) => {
+    git("switch", "-q", "-C", "lane", `${base.replace(/^origin\//u, "")}~1`);
+    writeFileSync(join(directory, "lane.md"), "lane\n");
+    git("add", "lane.md");
+    git("commit", "-q", "-m", "lane grows");
+    if (merges !== null) git("merge", "-q", "--no-edit", merges);
+    return git("rev-parse", "lane");
+  };
+  const queueMerge = (base) => {
+    git("switch", "-q", "--detach", "lane");
+    git("merge", "-q", "--no-ff", "--no-edit", base);
+  };
+  return { directory, git, commit, lane, queueMerge };
+}
+
+/** `fn()` run with the working folder at `directory`, as `strayMerges` reads git there. */
+function inside(directory, fn) {
+  const before = process.cwd();
+  process.chdir(directory);
+  try {
+    return fn();
+  } finally {
+    process.chdir(before);
+  }
+}
+
+test("strayMerges fails a merge commit unless it merges main or runtime-v2 into the other, and says what git cannot place (#2106)", () => {
+  const graph = mergeGraph();
+  const { directory, git } = graph;
+  try {
+    for (const [base, merges, failure, tweak] of [
       // [the branch's base, what its merge commit merges, the reason it fails, or null when it passes]
       ["main", "main", "which the base already holds: rebase onto main instead"],
       [
@@ -929,139 +988,161 @@ test(
           "run again",
         "shallow",
       ],
-    ];
-    // ("merged checkout": HEAD is the lane merged with its base as the queue's `--merged-with` merges it, `git merge
-    // --no-ff` in a checkout of the lane, checked as the READY command does)
-    for (const mode of ["plain", "merged", "merged checkout"])
-      for (const [base, merges, failure, tweak] of cases) {
-        // (the shallow clone's own case: the queue merges in a full clone)
-        if (mode === "merged checkout" && tweak === "shallow") continue;
-        const { directory } = repository({ passing: true });
-        // (the shallow case clones the branches, so its base is the clone's origin/main)
-        const branch = base.replace(/^origin\//u, "");
-        const git = (...args) => {
-          const result = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
-            cwd: directory,
-            encoding: "utf8",
-          });
-          assert.equal(result.status, 0, result.stderr);
-          return result.stdout.trim();
-        };
-        const commit = (branch, file) => {
-          git("switch", "-q", branch);
-          writeFileSync(join(directory, file), `${branch}\n`);
-          git("add", file);
-          git("commit", "-q", "-m", `${branch} grows`);
-        };
-        try {
-          git("branch", "runtime-v2", "main");
-          git("branch", "other", "main");
-          commit("runtime-v2", "runtime-v2.md");
-          commit("other", "other.md");
-          commit("main", "main.md");
-          git("switch", "-q", "-c", "lane", branch);
-          commit("lane", "lane.md");
-          // (both grow after the lane branched, so merging either is a merge commit)
-          commit("main", "main-later.md");
-          commit("runtime-v2", "runtime-v2-later.md");
-          git("update-ref", "refs/remotes/origin/main", "main");
-          git("update-ref", "refs/remotes/origin/runtime-v2", "runtime-v2");
-          if (tweak === "origin/runtime-v2")
-            git("update-ref", "-d", "refs/remotes/origin/runtime-v2");
-          if (tweak === "stale") git("update-ref", "refs/remotes/origin/main", "main~1");
-          git("switch", "-q", "lane");
-          if (merges !== null) git("merge", "-q", "--no-edit", merges);
-          let cwd = directory;
-          if (tweak === "shallow") {
-            // (a branch deeper than the clone, so the clone lacks history, while main's and the lane's are whole)
-            git("branch", "deep", "main");
-            for (const step of [1, 2, 3, 4]) commit("deep", `deep-${step}.md`);
-            git("switch", "-q", "lane");
-            cwd = `${directory}-shallow`;
-            git("clone", "-q", "--depth=3", "--no-single-branch", `file://${directory}`, cwd);
-            cpSync(join(directory, "node_modules"), join(cwd, "node_modules"), { recursive: true });
-          }
-          const lane = git("rev-parse", "lane");
-          if (mode === "merged checkout") {
-            git("switch", "-q", "--detach", "lane");
-            git("merge", "-q", "--no-ff", "--no-edit", base);
-          }
-          const check = (...args) =>
-            spawnSync(process.execPath, [tool, ...args], {
-              cwd,
-              encoding: "utf8",
-              env: environment,
-            });
-          const result = check(
-            ...{ plain: [], merged: ["--merged"], "merged checkout": ["--merged-checkout", lane] }[
-              mode
-            ],
-            "--base",
-            base,
-          );
-          if (tweak === "shallow") rmSync(cwd, { recursive: true, force: true });
-          const at = `${mode}: a branch of ${base} merging ${merges}`;
-          assert.equal(
-            result.status,
-            failure === null ? 0 : 1,
-            `${at}: ${result.stdout}${result.stderr}`,
-          );
-          assert.deepEqual(
-            result.stdout
-              .match(/^(?:PASS|FAIL) {2}\S.*$/gmu)
-              .map((line) => line.split(/ {2,}/u)[1]),
-            ["diff --check", "merge commits", "oxlint", "knip", "doc links", "imports"],
-            at,
-          );
-          assert.match(
-            result.stdout,
-            new RegExp(`^${failure === null ? "PASS" : "FAIL"} {2}merge commits `, "mu"),
-            at,
-          );
-          // The queue's merged checkout, named first when HEAD merges exactly the base's commit, as the lane's merge of
-          // its own base does here, outside `--merged-checkout`; still a failure, as it may be the builder's own
-          const queueHint = (first, baseName) =>
-            `the base's commit itself, as the queue's merged checkout does: if this is one, run it as ` +
-            `--merged-checkout ${first} --base ${baseName}; if you merged the base into your branch yourself, rebase ` +
-            `onto ${baseName} instead`;
-          if (failure !== null) {
-            const mergeCommit = git("rev-parse", "--short=9", "lane");
-            const parent = git("rev-parse", "--short=9", "lane^2");
-            const why =
-              mode !== "merged checkout" && merges === base
-                ? queueHint(git("rev-parse", "lane^1"), base)
-                : failure;
-            const expected = `--- merge commits ---\n${mergeCommit} Merge branch '${merges}' into lane: merges ${parent}, ${why}\n`;
-            assert.ok(result.stdout.includes(expected), `${at}: ${result.stdout}`);
-          }
-          if (mode === "merged checkout" && merges === null) {
-            // the branch is behind its base, so the queue made a merge commit: by shape alone, as `--base HEAD^2`
-            // reads it, that is the base merged into the branch, and fails, naming the queue's case first
-            const runner = git("rev-parse", "--short=9", "HEAD");
-            const parent = git("rev-parse", "--short=9", "HEAD^2");
-            const byShape = check("--base", "HEAD^2");
-            assert.equal(byShape.status, 1, `${at}: ${byShape.stdout}`);
-            assert.ok(
-              byShape.stdout.includes(
-                `${runner} Merge branch '${base}' into HEAD: merges ${parent}, ${queueHint(lane, "HEAD^2")}\n`,
-              ),
-              `${at}: ${byShape.stdout}`,
-            );
-            // a commit that is not the merge's first parent, or both forms at once, cannot run
-            const wrong = check("--merged-checkout", `${lane}~1`, "--base", base);
-            assert.equal(wrong.status, 2, `${at}: ${wrong.stdout}${wrong.stderr}`);
-            assert.match(
-              wrong.stderr,
-              new RegExp(
-                `--merged-checkout ${lane}~1 \\(\\w{9}\\): HEAD \\(${runner}\\) is neither `,
-                "u",
-              ),
-            );
-            assert.equal(check("--merged", "--merged-checkout", lane).status, 2);
-          }
-        } finally {
-          rmSync(directory, { recursive: true, force: true });
-        }
+    ]) {
+      const head = graph.lane(base, merges);
+      let cwd = directory;
+      if (tweak === "origin/runtime-v2") git("update-ref", "-d", "refs/remotes/origin/runtime-v2");
+      if (tweak === "stale") git("update-ref", "refs/remotes/origin/main", "main~1");
+      if (tweak === "shallow") {
+        // (a branch deeper than the clone, so the clone lacks history, while main's and the lane's are whole)
+        git("branch", "-f", "deep", "main");
+        for (const step of [1, 2, 3, 4]) graph.commit("deep", `deep-${step}.md`);
+        git("switch", "-q", "lane");
+        cwd = `${directory}-shallow`;
+        git("clone", "-q", "--depth=3", "--no-single-branch", `file://${directory}`, cwd);
       }
+      try {
+        const stray = inside(cwd, () =>
+          strayMerges(git("-C", cwd, "merge-base", "HEAD", base), head, base, base),
+        );
+        const at = `a branch of ${base} merging ${merges}${tweak ? `, ${tweak}` : ""}`;
+        assert.deepEqual(
+          stray,
+          failure === null
+            ? []
+            : [
+                `${head.slice(0, 9)} Merge branch '${merges}' into lane: merges ` +
+                  `${git("rev-parse", "--short=9", "lane^2")}, ${failure}`,
+              ],
+          at,
+        );
+      } finally {
+        if (tweak === "shallow") rmSync(cwd, { recursive: true, force: true });
+        git("update-ref", "refs/remotes/origin/main", "main");
+        git("update-ref", "refs/remotes/origin/runtime-v2", "runtime-v2");
+      }
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test(
+  "`merge commits` runs in every run, plain, merged and in a merged checkout, judging the head's merge commits and not the queue's own merge, and the other checks still run (#2106)",
+  { timeout: 120_000 },
+  () => {
+    const graph = mergeGraph();
+    const { directory, git } = graph;
+    const check = (...args) =>
+      spawnSync(process.execPath, [tool, ...args], {
+        cwd: directory,
+        encoding: "utf8",
+        env: environment,
+      });
+    /** `check(...args)`'s run, asserted: its status, every check in it, and `merge commits`' lines (none when it passes). */
+    const verdict = (at, args, status, lines = []) => {
+      const result = check(...args);
+      assert.equal(result.status, status, `${at}: ${result.stdout}${result.stderr}`);
+      assert.deepEqual(
+        result.stdout.match(/^(?:PASS|FAIL) {2}\S.*$/gmu).map((line) => line.split(/ {2,}/u)[1]),
+        ["diff --check", "merge commits", "oxlint", "knip", "doc links", "imports"],
+        at,
+      );
+      if (lines.length > 0)
+        assert.ok(
+          result.stdout.includes(
+            `--- merge commits ---\n${lines.map((line) => `${line}\n`).join("")}`,
+          ),
+          `${at}: ${result.stdout}`,
+        );
+      else assert.match(result.stdout, /^PASS {2}merge commits /mu, at);
+    };
+    // The queue's merged checkout, named first when HEAD merges exactly the base's commit outside `--merged-checkout`;
+    // still a failure, as it may be the builder's own merge of its base
+    const queueHint = (first, baseName) =>
+      `the base's commit itself, as the queue's merged checkout does: if this is one, run it as ` +
+      `--merged-checkout ${first} --base ${baseName}; if you merged the base into your branch yourself, rebase ` +
+      `onto ${baseName} instead`;
+    const mergeLine = (commit, merges, why) =>
+      `${git("rev-parse", "--short=9", commit)} Merge branch '${merges}' into lane: merges ` +
+      `${git("rev-parse", "--short=9", `${commit}^2`)}, ${why}`;
+    try {
+      // plain and --merged: the lane's merge of its own base's tip fails, with the queue's case named first; a merge of
+      // the other long-lived line passes
+      for (const mode of [[], ["--merged"]]) {
+        const own = graph.lane("main", "main");
+        verdict(`${mode} own base`, [...mode, "--base", "main"], 1, [
+          mergeLine("lane", "main", queueHint(git("rev-parse", `${own}^1`), "main")),
+        ]);
+        graph.lane("main", "runtime-v2");
+        verdict(`${mode} runtime-v2 into a lane of main`, [...mode, "--base", "main"], 0);
+      }
+      // --merged-checkout, HEAD as the queue makes it. Behind its base, the queue made a merge commit: not judged
+      const behind = graph.lane("main", null);
+      graph.queueMerge("main");
+      verdict(
+        "merged checkout behind its base",
+        ["--merged-checkout", behind, "--base", "main"],
+        0,
+      );
+      // by shape alone, as `--base HEAD^2` reads it, that merge is the base merged into the branch: it fails, naming
+      // the queue's case first
+      const runner = git("rev-parse", "--short=9", "HEAD");
+      const byShape = check("--base", "HEAD^2");
+      assert.equal(byShape.status, 1, byShape.stdout);
+      assert.ok(
+        byShape.stdout.includes(
+          `${runner} Merge branch 'main' into HEAD: merges ${git("rev-parse", "--short=9", "HEAD^2")}, ` +
+            `${queueHint(behind, "HEAD^2")}\n`,
+        ),
+        byShape.stdout,
+      );
+      // a commit that is not the merge's first parent, or both forms at once, cannot run
+      const wrong = check("--merged-checkout", `${behind}~1`, "--base", "main");
+      assert.equal(wrong.status, 2, `${wrong.stdout}${wrong.stderr}`);
+      assert.match(
+        wrong.stderr,
+        new RegExp(
+          `--merged-checkout ${behind}~1 \\(\\w{9}\\): HEAD \\(${runner}\\) is neither `,
+          "u",
+        ),
+      );
+      assert.equal(check("--merged", "--merged-checkout", behind).status, 2);
+      // a stray merge on the branch's side is still judged, and so is the lane's own merge of its base, when the queue
+      // merges nothing, without the queue's case
+      const stray = graph.lane("main", "other");
+      graph.queueMerge("main");
+      verdict(
+        "merged checkout, another lane merged",
+        ["--merged-checkout", stray, "--base", "main"],
+        1,
+        [
+          mergeLine(
+            stray,
+            "other",
+            "which neither origin/main nor origin/runtime-v2 holds: rebase onto main instead, or, if it has landed on " +
+              "one of them since your last fetch, fetch main, origin/main, origin/runtime-v2 and run again",
+          ),
+        ],
+      );
+      const own = graph.lane("main", "main");
+      graph.queueMerge("main");
+      verdict(
+        "merged checkout, its own base merged",
+        ["--merged-checkout", own, "--base", "main"],
+        1,
+        [mergeLine(own, "main", "which the base already holds: rebase onto main instead")],
+      );
+      // main merged into a lane of runtime-v2, checked as the queue merges it with runtime-v2
+      const rt2 = graph.lane("runtime-v2", "main");
+      graph.queueMerge("runtime-v2");
+      verdict(
+        "merged checkout, main into a lane of runtime-v2",
+        ["--merged-checkout", rt2, "--base", "runtime-v2"],
+        0,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
   },
 );
