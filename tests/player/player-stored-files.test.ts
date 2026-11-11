@@ -4,11 +4,7 @@ import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
 
 import { CapturedMediaStore } from "../../player/media/captured-media.js";
-import {
-  playerRuntimeSnapshot,
-  type PlayerRuntimeSessionOptions,
-} from "../../player/runtime/runtime-adapter.js";
-import type * as InProcess from "../../player/engine-bridge/in-process.js";
+import type { PlayerRuntimeSessionOptions } from "../../player/runtime/runtime-adapter.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
@@ -21,6 +17,14 @@ import type {
 import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
+import {
+  checkpointSnapshot,
+  loadTopology,
+  rerunRegistry,
+  TOPOLOGIES,
+  topologyBridge,
+  type Topology,
+} from "../helpers/player/worker-topology.js";
 
 /*
  * The Player's file store for fileFromBase64, fileToBase64, hashFile, and toJson and fromJson with files (V30 §13 and
@@ -161,9 +165,6 @@ interface FileHost {
   prepare(create: PlanStart): void;
   activate(): Promise<void>;
 }
-// The transition facade of the composable's own bundle: its host holds the sessions the host shows.
-let hatch: typeof InProcess.hatch;
-let createInProcessBackend: typeof InProcess.createInProcessBackend;
 let usePlayerSession: (options: {
   scriptStorage?: ScriptStorageProvider;
   capturedMedia?: { repository: FakeMediaRepository };
@@ -178,13 +179,7 @@ before(async () => {
   assert.equal(typeof module.usePlayerSession, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
   usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
-  const inProcess: Record<string, unknown> = await loadPlayerModule(
-    "player/engine-bridge/in-process.ts",
-  );
-  // EVIDENCE: validation: the facade of the bundle the composable runs in, whose sessions only it reaches.
-  hatch = inProcess.hatch as typeof hatch;
-  // EVIDENCE: validation: the same bundle's backend, whose sessions that facade reaches.
-  createInProcessBackend = inProcess.createInProcessBackend as typeof createInProcessBackend;
+  await loadTopology();
 });
 
 // The browser surface the Player host touches without a camera; no Web Locks, so durable writes are not coordinated.
@@ -227,34 +222,33 @@ function memoryStorage(scope: string) {
   return { entries, provider };
 }
 
-/** Plays `source` in a mounted Player with `storage` and `repository` until it ends, and gives its variables. */
+/**
+ * Plays `source` in a mounted Player with `storage` and `repository` until it ends, and gives its variables, read from
+ * the host's checkpoint. With `topology`, on that topology (in-process, replies after `delayMs`); else the Player's own.
+ */
 async function playInPlayer(
   context: TestContext,
   source: string,
   storage: ScriptStorageProvider,
   repository: FakeMediaRepository,
-  delayMs?: number,
+  { topology, delayMs }: { readonly topology?: Topology; readonly delayMs?: number } = {},
 ) {
+  const transport =
+    topology === undefined
+      ? null
+      : await topologyBridge(context, topology, delayMs === undefined ? {} : { delayMs });
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
       scriptStorage: storage,
       capturedMedia: { repository },
-      ...(delayMs === undefined
-        ? {}
-        : {
-            bridge: Promise.resolve(
-              createInProcessBackend(
-                { commit: null, dirty: null, mode: null, appVersion: null },
-                { delayMs },
-              ),
-            ),
-          }),
+      ...(transport === null ? {} : { bridge: Promise.resolve(transport.bridge) }),
     }),
   );
   assert.ok(host);
   context.after(() => scope.stop());
   await host.loadScriptStorage();
+  transport?.assertTopology();
   host.prepare(await sourceStart(host.bridge, source, () => host.scriptStorageOptions()));
   await host.activate();
   const deadline = Date.now() + 2_000;
@@ -265,125 +259,151 @@ async function playInPlayer(
     );
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
-  const snapshot = hatch(host.session.value, playerRuntimeSnapshot);
+  const ended = host.session.value;
+  const snapshot = await checkpointSnapshot(await host.bridge, ended);
   return {
     host,
     scope,
-    events: host.session.value.events,
+    snapshot,
+    events: ended.events,
     variables: Object.fromEntries(
       snapshot.frames[0]!.bindings.map((binding) => [binding.name, binding.value]),
     ),
   };
 }
 
-test("a Player stores and reads files, shows only images, and knows saved files in its next session", async (context) => {
-  stubBrowser(context);
-  const repository = new FakeMediaRepository();
-  const { entries, provider } = memoryStorage("files");
-  const first = await playInPlayer(
-    context,
-    [
-      `let picture = fileFromBase64("${PNG}", default: "")`,
-      `let page = fileFromBase64("data:image/svg+xml;base64,${SVG}", default: "")`,
-      'save picture as "picture"',
-      'save page as "page"',
-      "let json = toJson([picture, page])",
-      "let read = fromJson(json, default: null)",
-      "exit",
-    ].join("\n"),
-    provider,
-    repository,
-  );
-  const { picture, page, json, read } = first.variables;
-  assert.ok(typeof picture === "string" && typeof page === "string");
-  assert.equal(
-    json,
-    JSON.stringify([`data:image/png;base64,${PNG}`, `data:application/octet-stream;base64,${SVG}`]),
-  );
-  // The image becomes a new stored file; the SVG, of no recognized type, stays its data URL.
-  assert.ok(read !== null && typeof read === "object" && read.kind === "list");
-  assert.equal(read.items[1], `data:application/octet-stream;base64,${SVG}`);
-  assert.notEqual(first.host.resolveAsset(picture), null);
-  const restored = read.items[0];
-  assert.ok(typeof restored === "string");
-  assert.notEqual(first.host.resolveAsset(restored), null);
-  assert.equal(first.host.resolveAsset(page), null);
-  // Saved files became durable under the script's scope, the SVG as a file.
-  assert.deepEqual(
-    [...entries],
-    [
-      ["picture", picture],
-      ["page", page],
-    ],
-  );
-  assert.deepEqual(
-    [...repository.records.values()].map((record) => [
-      record.reference,
-      record.kind,
-      record.mimeType,
-    ]),
-    [
-      [picture, "image", "image/png"],
-      [page, "file", "application/octet-stream"],
-    ],
-  );
-  first.scope.stop();
-
-  const second = await playInPlayer(
-    context,
-    [
-      'let picture: string = load("picture", default: "")',
-      'let page: string = load("page", default: "")',
-      "let data = fileToBase64(page)",
-      "let hash = hashFile(page)",
-      "let json = toJson({ picture: picture })",
-      "exit",
-    ].join("\n"),
-    provider,
-    repository,
-  );
-  assert.deepEqual(second.variables, {
-    picture,
-    page,
-    data: SVG,
-    hash: "900fbe934249ad120004bd24adf66aad8817d89586273c0cc50e187bddebb601",
-    json: JSON.stringify({ picture: `data:image/png;base64,${PNG}` }),
-  });
+/*
+ * The rows that run on both topologies (L5i.7), in-process and on a Worker; the late replies' row in-process at 50 ms
+ * and on a Worker once. The file's end checks every registered row ran.
+ */
+const RERUN = rerunRegistry({
+  "stores and reads files": TOPOLOGIES,
+  "storage full": TOPOLOGIES,
+  "replies late": TOPOLOGIES,
 });
 
-test("when the browser's storage is full a save of a file keeps the previous value, and the file stays usable", async (context) => {
-  stubBrowser(context);
-  class FullRepository extends FakeMediaRepository {
-    override async add(): Promise<void> {
-      throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+RERUN.rows(
+  "stores and reads files",
+  "a Player stores and reads files, shows only images, and knows saved files in its next session",
+  async (context, topology) => {
+    stubBrowser(context);
+    const repository = new FakeMediaRepository();
+    const { entries, provider } = memoryStorage("files");
+    const first = await playInPlayer(
+      context,
+      [
+        `let picture = fileFromBase64("${PNG}", default: "")`,
+        `let page = fileFromBase64("data:image/svg+xml;base64,${SVG}", default: "")`,
+        'save picture as "picture"',
+        'save page as "page"',
+        "let json = toJson([picture, page])",
+        "let read = fromJson(json, default: null)",
+        "exit",
+      ].join("\n"),
+      provider,
+      repository,
+      { topology },
+    );
+    const { picture, page, json, read } = first.variables;
+    assert.ok(typeof picture === "string" && typeof page === "string");
+    assert.equal(
+      json,
+      JSON.stringify([
+        `data:image/png;base64,${PNG}`,
+        `data:application/octet-stream;base64,${SVG}`,
+      ]),
+    );
+    // The image becomes a new stored file; the SVG, of no recognized type, stays its data URL.
+    assert.ok(read !== null && typeof read === "object" && read.kind === "list");
+    assert.equal(read.items[1], `data:application/octet-stream;base64,${SVG}`);
+    assert.notEqual(first.host.resolveAsset(picture), null);
+    const restored = read.items[0];
+    assert.ok(typeof restored === "string");
+    assert.notEqual(first.host.resolveAsset(restored), null);
+    assert.equal(first.host.resolveAsset(page), null);
+    // Saved files became durable under the script's scope, the SVG as a file.
+    assert.deepEqual(
+      [...entries],
+      [
+        ["picture", picture],
+        ["page", page],
+      ],
+    );
+    assert.deepEqual(
+      [...repository.records.values()].map((record) => [
+        record.reference,
+        record.kind,
+        record.mimeType,
+      ]),
+      [
+        [picture, "image", "image/png"],
+        [page, "file", "application/octet-stream"],
+      ],
+    );
+    first.scope.stop();
+
+    const second = await playInPlayer(
+      context,
+      [
+        'let picture: string = load("picture", default: "")',
+        'let page: string = load("page", default: "")',
+        "let data = fileToBase64(page)",
+        "let hash = hashFile(page)",
+        "let json = toJson({ picture: picture })",
+        "exit",
+      ].join("\n"),
+      provider,
+      repository,
+      { topology },
+    );
+    assert.deepEqual(second.variables, {
+      picture,
+      page,
+      data: SVG,
+      hash: "900fbe934249ad120004bd24adf66aad8817d89586273c0cc50e187bddebb601",
+      json: JSON.stringify({ picture: `data:image/png;base64,${PNG}` }),
+    });
+  },
+);
+
+RERUN.rows(
+  "storage full",
+  "when the browser's storage is full a save of a file keeps the previous value, and the file stays usable",
+  async (context, topology) => {
+    stubBrowser(context);
+    class FullRepository extends FakeMediaRepository {
+      override async add(): Promise<void> {
+        throw new DOMException("The quota has been exceeded.", "QuotaExceededError");
+      }
     }
-  }
-  const repository = new FullRepository();
-  const { entries, provider } = memoryStorage("full");
-  entries.set("picture", "previous");
-  const played = await playInPlayer(
-    context,
-    [
-      `let picture = fileFromBase64("${PNG}", default: "")`,
-      'save picture as "picture"',
-      "let data = fileToBase64(picture)",
-      'let kept: string = load("picture", default: "")',
-      "exit",
-    ].join("\n"),
-    provider,
-    repository,
-  );
-  const { picture, data, kept } = played.variables;
-  assert.deepEqual([data, kept], [PNG, "previous"]);
-  assert.deepEqual([...entries], [["picture", "previous"]]);
-  assert.deepEqual(
-    played.events.flatMap((event) => (event.kind === "developerWarning" ? [event.code] : [])),
-    ["TSW014"],
-  );
-  assert.ok(typeof picture === "string");
-  assert.notEqual(played.host.resolveAsset(picture), null);
-  assert.equal(repository.size, 0);
-});
+    const repository = new FullRepository();
+    const { entries, provider } = memoryStorage("full");
+    entries.set("picture", "previous");
+    const played = await playInPlayer(
+      context,
+      [
+        `let picture = fileFromBase64("${PNG}", default: "")`,
+        'save picture as "picture"',
+        "let data = fileToBase64(picture)",
+        'let kept: string = load("picture", default: "")',
+        "exit",
+      ].join("\n"),
+      provider,
+      repository,
+      { topology },
+    );
+    const { picture, data, kept } = played.variables;
+    assert.deepEqual([data, kept], [PNG, "previous"]);
+    assert.deepEqual([...entries], [["picture", "previous"]]);
+    assert.deepEqual(
+      played.events.flatMap((event) => (event.kind === "developerWarning" ? [event.code] : [])),
+      ["TSW014"],
+    );
+    assert.ok(typeof picture === "string");
+    assert.notEqual(played.host.resolveAsset(picture), null);
+    assert.equal(repository.size, 0);
+  },
+);
 
 test("saved text that only has the shape of a reference stays text in a later session", async (context) => {
   stubBrowser(context);
@@ -429,29 +449,33 @@ test("saved text that only has the shape of a reference stays text in a later se
       picture: `data:image/png;base64,${PNG}`,
     }),
   );
-  assert.deepEqual(hatch(later.host.session.value!, playerRuntimeSnapshot).storedFiles, [picture]);
+  assert.deepEqual(later.snapshot.storedFiles, [picture]);
 });
 
-test("a Player stores, reads and hashes files once each when the engine's replies come 50 ms late", async (context) => {
-  stubBrowser(context);
-  // A completed answer shows at once; were it to wait for a later observation, the next service would make it again.
-  const digest = context.mock.method(crypto.subtle, "digest");
-  const { provider } = memoryStorage("late files");
-  const played = await playInPlayer(
-    context,
-    [
-      `let picture = fileFromBase64("${PNG}", default: "")`,
-      "let data = fileToBase64(picture)",
-      "let hash = hashFile(picture)",
-      "exit",
-    ].join("\n"),
-    provider,
-    new FakeMediaRepository(),
-    50,
-  );
-  const { picture, data, hash } = played.variables;
-  assert.ok(typeof picture === "string" && played.host.resolveAsset(picture) !== null);
-  assert.equal(data, PNG);
-  assert.equal(hash, createHash("sha256").update(Buffer.from(PNG, "base64")).digest("hex"));
-  assert.equal(digest.mock.callCount(), 1);
-});
+RERUN.rows(
+  "replies late",
+  "a Player stores, reads and hashes files once each when the engine's replies come 50 ms late",
+  async (context, topology) => {
+    stubBrowser(context);
+    // A completed answer shows at once; were it to wait for a later observation, the next service would make it again.
+    const digest = context.mock.method(crypto.subtle, "digest");
+    const { provider } = memoryStorage("late files");
+    const played = await playInPlayer(
+      context,
+      [
+        `let picture = fileFromBase64("${PNG}", default: "")`,
+        "let data = fileToBase64(picture)",
+        "let hash = hashFile(picture)",
+        "exit",
+      ].join("\n"),
+      provider,
+      new FakeMediaRepository(),
+      { topology, delayMs: 50 },
+    );
+    const { picture, data, hash } = played.variables;
+    assert.ok(typeof picture === "string" && played.host.resolveAsset(picture) !== null);
+    assert.equal(data, PNG);
+    assert.equal(hash, createHash("sha256").update(Buffer.from(PNG, "base64")).digest("hex"));
+    assert.equal(digest.mock.callCount(), 1);
+  },
+);

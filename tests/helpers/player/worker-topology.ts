@@ -9,6 +9,9 @@ import type * as Bridge from "../../../player/runtime/player-bridge.js";
 import type { PlayerBridge } from "../../../player/runtime/player-bridge.js";
 import { coverageGaps, type Coordinates } from "../family-coverage.js";
 import { loadPlayerModule } from "../player-modules.js";
+import { deserializeCheckpoint } from "../../../src/runtime/snapshot/checkpoint.js";
+import type { RuntimeSnapshot } from "../../../src/index.js";
+import type { PlayerSession } from "../../../player/runtime/runtime-view.js";
 
 /*
  * The composable's engine bridge on either topology (L5i.7): the in-process host, or a Node Worker thread running the
@@ -29,11 +32,13 @@ import { loadPlayerModule } from "../player-modules.js";
 export type Topology = "in-process" | "worker";
 export const TOPOLOGIES: readonly Topology[] = ["in-process", "worker"];
 
-/** A request the client posted, as it reached the port. */
+/** A request the client posted, as it reached the port, with the page's clock then (`performance.now()`). */
 export interface Posted {
   readonly id: number;
   readonly op: string;
   readonly session: string | null;
+  readonly args: unknown;
+  readonly at: number;
 }
 
 export interface TopologyBridge {
@@ -101,13 +106,34 @@ function decoded(
   readonly id: number;
   readonly op?: string;
   readonly session?: string | null;
+  readonly args?: unknown;
 } | null {
   const value: unknown = decodeMessage(message);
   if (typeof value !== "object" || value === null || !("kind" in value) || !("id" in value))
     return null;
-  // EVIDENCE: fixture: the bridge's requests and replies carry `kind` and a numeric `id`; a request, `op` and `session`.
-  return value as { kind: string; id: number; op?: string; session?: string | null };
+  // EVIDENCE: fixture: the bridge's requests and replies carry `kind` and a numeric `id`; a request, `op`, `session` and `args`.
+  return value as {
+    kind: string;
+    id: number;
+    op?: string;
+    session?: string | null;
+    args?: unknown;
+  };
 }
+
+/** The log's entry for a request as it reaches the port. */
+const postOf = (request: {
+  readonly id: number;
+  readonly op?: string;
+  readonly session?: string | null;
+  readonly args?: unknown;
+}): Posted => ({
+  id: request.id,
+  op: request.op!,
+  session: request.session ?? null,
+  args: request.args ?? null,
+  at: performance.now(),
+});
 
 /** A bridge of `topology`, ended after the test. In-process, its replies arrive after `delayMs` (needed to hold). */
 export async function topologyBridge(
@@ -148,7 +174,7 @@ function inProcess(
     (value: unknown, options?: StructuredSerializeOptions) => {
       const message = decoded(value);
       if (message?.kind === "request") {
-        posts.push({ id: message.id, op: message.op!, session: message.session ?? null });
+        posts.push(postOf(message));
         if (gate.target !== null && message.op === gate.target && gate.ids.size === 0) {
           gate.ids.add(message.id);
           holdDeliveries();
@@ -216,7 +242,7 @@ async function onWorker(): Promise<Omit<TopologyBridge, "topology" | "assertTopo
     post: (message) => {
       const request = decoded(message);
       if (request?.kind === "request") {
-        posts.push({ id: request.id, op: request.op!, session: request.session ?? null });
+        posts.push(postOf(request));
         if (gate.target !== null && request.op === gate.target && gate.ids.size === 0) {
           gate.ids.add(request.id);
           gate.holding = true;
@@ -295,4 +321,13 @@ export function rerunRegistry<Id extends string>(cases: Readonly<Record<Id, read
         });
     },
   };
+}
+
+/** The host's snapshot of `session`, read over the bridge as its checkpoint (`captureCheckpoint`), on either topology. */
+export async function checkpointSnapshot(
+  bridge: PlayerBridge,
+  session: PlayerSession,
+): Promise<RuntimeSnapshot> {
+  const { checkpointJson } = await bridge.read(session, "captureCheckpoint");
+  return deserializeCheckpoint(checkpointJson).snapshot;
 }
