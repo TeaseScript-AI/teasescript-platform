@@ -45,9 +45,10 @@ const [{ costlyTestSeconds }, { summaryLine }, { isSuiteTestPath, isTypeCoreTest
 // are on origin/main or origin/runtime-v2 and not on the base (`strayMerges`).
 // Then each project a changed path belongs to (`projectsFor`): its type check and tests. A root configuration file
 // belongs to the checks that read it, and needs no project when only those that always run do. A changed path no
-// project claims, other than documentation, runs every project's checks. It never builds the TypeScript or runs the
-// compiled test suite, which CI does: a change that shows only there, such as the root tsconfig's emit settings, passes
-// here. When a changed file is under `src/type-inference/core/`, it also prints the suites that pin the core's work or
+// project claims, other than documentation, runs every project's checks. Every change but documentation (a path ending
+// in `.md` or under `docs/`, `isDocumentation`) runs `test:lint` (`everyChange`). It never builds the TypeScript or runs
+// the compiled test suite, which CI does: a change that shows only there, such as the root tsconfig's emit settings,
+// passes here. When a changed file is under `src/type-inference/core/`, it also prints the suites that pin the core's work or
 // its published answers, as `tools/repository-checks/pin-suites.mjs` lists them: the focused list such a change runs
 // before review (`docs/TESTING.md`, "Pinned work"), which it does not run itself. When a changed type-core test file has
 // no entry in `tools/costly-test-files.mjs`, it prints one line saying so: the file runs in full, as every file does,
@@ -95,9 +96,14 @@ export const PROJECTS = {
     claims: (path) => path.startsWith("player/vue/"),
     checks: ["typecheck:player", "lint:design"],
   },
+  // `test:lint`'s rule tests read far more than a claim can name: `.oxlintrc.json`, the tools that run and count them
+  // (one by a computed path), and the repository's own sources and test helpers, which they lint as fixtures; a trace
+  // found 859 tracked files (#2431). So it runs for every change that is not documentation only, as oxlint does, which
+  // takes longer and runs beside it. Its claim stays, so that a path under it is not an unknown kind (every project).
   // (`tools/oxlint/tsconfig.json`, which `test:lint` compiles the rules with, extends the root one)
   "oxlint-rules": {
     claims: (path) => path.startsWith("tools/oxlint/") || path === "tsconfig.json",
+    everyChange: true,
     checks: ["test:lint"],
   },
   tools: {
@@ -122,25 +128,28 @@ export const PROJECTS = {
   },
 };
 
-/** Root configuration files that only the checks run for every change read: oxlint's. */
+/** Root configuration files that only the checks run for every change read: oxlint's, which `test:lint` reads too. */
 const READ_BY_ALWAYS_RUN_CHECKS = new Set([".oxlintrc.json"]);
 
 /** A documentation path selects no project's checks; its Markdown links are checked on every run (`doc links`). */
 const isDocumentation = (path) => path.endsWith(".md") || path.startsWith("docs/");
 
 /**
- * The projects whose checks `paths` need. A path no project claims, documentation and the configuration only the checks
- * run for every change read aside, needs every project: an unknown kind of path is checked by everything, never by
- * nothing.
+ * The projects whose checks `paths` need. A project with `everyChange` is needed by every path but documentation. A path
+ * no project claims, documentation and the configuration only the checks run for every change read aside, needs every
+ * project: an unknown kind of path is checked by everything, never by nothing.
  */
 export function projectsFor(paths) {
   const projects = new Set();
   for (const path of paths) {
-    if (isDocumentation(path) || READ_BY_ALWAYS_RUN_CHECKS.has(path)) continue;
+    if (isDocumentation(path)) continue;
+    for (const name of Object.keys(PROJECTS)) if (PROJECTS[name].everyChange) projects.add(name);
+    if (READ_BY_ALWAYS_RUN_CHECKS.has(path)) continue;
     const claiming = Object.keys(PROJECTS).filter((name) => PROJECTS[name].claims(path));
     for (const name of claiming.length > 0 ? claiming : Object.keys(PROJECTS)) projects.add(name);
   }
-  return projects;
+  // (in `PROJECTS`' order, whatever path came first)
+  return new Set(Object.keys(PROJECTS).filter((name) => projects.has(name)));
 }
 
 /** The checks `projects` run, each once although several projects name it, in the order the projects name them. */
