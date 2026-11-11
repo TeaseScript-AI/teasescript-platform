@@ -20,7 +20,18 @@ import { lintFiles, OXLINT_OPTIONS, repositoryRoot } from "./files.mjs";
 //
 // The own checks print their findings first; oxlint always runs after them, so one finding does not hide the other's.
 // When the own checks found anything, a last line counts their findings, as oxlint's output would bury them.
-// Exit status: oxlint's when it failed, else 1 when the own checks found anything, else 0.
+// It takes no arguments: it lints the whole repository, and refuses (exit 2) any argument, such as a file, it would
+// otherwise ignore, naming the command that runs oxlint alone on named files.
+// Exit status: 2 for an argument, else oxlint's when it failed, else 1 when the own checks found anything, else 0.
+
+if (process.argv.length > 2) {
+  process.stderr.write(
+    "oxlint/run.mjs takes no arguments: it lints the whole repository, its own checks and then oxlint over every file, " +
+      "as `npm run lint` does, which takes minutes.\n" +
+      `oxlint alone on named files, without the repository's own checks: node node_modules/oxlint/bin/oxlint ${OXLINT_OPTIONS.join(" ")} <files>\n`,
+  );
+  process.exit(2);
+}
 
 const files = lintFiles();
 const executable = fileURLToPath(
@@ -45,13 +56,13 @@ for (const diagnostic of [
   ...checkObligationInventory(repositoryRoot),
   ...checkQuestionSources(repositoryRoot),
   ...checkSiteKeys(repositoryRoot),
-  ...checkWaitingOverrides(
+  ...(await checkWaitingOverrides(
     repositoryRoot,
     ".oxlintrc.json",
     readFileSync(resolve(repositoryRoot, ".oxlintrc.json"), "utf8"),
     new Set(files),
     executable,
-  ),
+  )),
 ]) {
   console.error(
     `${diagnostic.fileName}:${diagnostic.line}:${diagnostic.column}: ${diagnostic.message}`,

@@ -9,26 +9,41 @@ import { existsSync, readFileSync } from "node:fs";
 // `git rev-parse --verify --quiet <token>^{commit}` in each `--repo` (default: the current repository) and reported as
 // resolved (in which repository, to which full SHA), ambiguous (a short token several commits share), or unresolved.
 // A resolved commit must also be on a remote, as a reader outside this clone needs it: a remote-tracking ref of a
-// repository that resolves it must contain it (`git for-each-ref --contains` over `refs/remotes`), else it is local
-// only, such as a head from before a rebase. A repository without remote-tracking refs is named once, and its tokens
-// are not checked for that. An unresolved token may be a commit not fetched yet: the message says to fetch it; this
-// tool never fetches. A token that is no commit but a tree, such as a stored baseline's `src` tree hash, is reported
-// as a tree, resolved, without the remote check: proving a tree reachable from a remote ref is costly.
-// Unfilled placeholders (`PLACEHOLDERS`) outside fenced code blocks are reported too. Every run that completes ends
-// with one line counting the tokens by result and the placeholders, so no output means it did not run.
+// repository that resolves it must contain it (`git for-each-ref --contains` over `refs/remotes`), or a ref on its
+// `origin` that the default fetch does not mirror must: an archived head (`refs/archive/*`) or a pull request's head
+// (`refs/pull/<n>/head`, which keeps a squash-merged branch's commits). Those come from one `git ls-remote origin` per
+// repository, asked only for a commit on no remote-tracking ref; a tip commit this clone has counts with its history,
+// and the commit is reported as on origin at that ref. Else it is local only, such as a head from before a rebase. A
+// repository without remote-tracking refs is named once, and its tokens are not checked for that. An unresolved token
+// may be a commit not fetched yet: the message says to fetch it; this tool never fetches. A token that is no commit
+// but a tree, such as a stored baseline's `src` tree hash, is reported as a tree, resolved, without the remote check:
+// proving a tree reachable from a remote ref is costly.
+// Unfilled placeholders (`PLACEHOLDERS`) outside fenced code blocks are reported too, and so is a closing clause that
+// names several issues after one keyword, in code too, which as closing syntax closes only the first
+// (`closingClausesOf`). Paths into the disposable scratch area `/tmp/agent-work/`, whose files are deleted after
+// inactivity, are named and counted, not failed: a report may mention one rightly (a command it ran, a reviewer's
+// folder), and a reader who needs the file needs a retained copy (`scratchPathsOf` says which spellings it reads).
+// Every run that completes ends with one line counting the tokens by result, the placeholders, those clauses and those
+// paths, so no output means it did not run.
 //
 // Tokens that need not be commits are checked, and skipped when no repository resolves them, so no rule hides a SHA:
 // - only digits: a CI run, comment or issue id;
 // - 14 characters whose first 10 are digits: a queue job id (`sx-job`: the month to the second, then 4 hex), such as
 //   `1107175450d1b5`;
 // - only the letters a-f: a word, such as `defaced`;
+// - a number's fractional digits followed by `e` and its exponent, the number standing alone: no word character of
+//   any script (a letter, mark, number or connector) touches it on either side, and no `.` precedes it, so `v1.`, `β1.`
+//   and a dotted version stay checked, while any quote, backtick, bracket, operator or white space admits it
+//   (`floatDigits`): a float's digits, such as `1.7976931348623157e+308` or `6.02214076e23`. A token of that shape
+//   after any punctuation is therefore skipped when unresolved, which is acceptable as the rule reaches only a token no
+//   repository resolves, of digits, one `e` and an exponent, directly after `<digits>.`;
 // - right after the word `sha256` (with a space, `:` or `=` between): a file's hash, such as `sha256 4322b2e0e668`;
 // - shorter than 40 and inside a URL or a path, except after `/commit/`, `/commits/`, `/tree/` or `/blob/`: a file's
 //   or a job's name. A full 40-character SHA in a path, such as an evidence folder, must resolve.
 //
-// Exit status: 0 when every token that must be a commit resolved on a remote and no placeholder is left, 1 otherwise,
-// 2 when it
-// cannot run (bad arguments, an unreadable file, or a `--repo` that is no git repository).
+// Exit status: 0 when every token that must be a commit resolved on a remote and no placeholder or several-issue
+// closing clause is left (scratch paths do not change it), 1 otherwise, 2 when it cannot run (bad arguments, an
+// unreadable file, or a `--repo` that is no git repository).
 
 /** The unfilled placeholders a report can carry, case-insensitive. */
 export const PLACEHOLDERS = [
@@ -38,11 +53,48 @@ export const PLACEHOLDERS = [
 
 const TOKEN = /(?<![0-9A-Za-z_])[0-9a-f]{7,40}(?![0-9A-Za-z_])/gu;
 
+/** A word character of any script: a letter, mark, number or connector (the Unicode categories L, M, N and Pc). */
+const WORD = /^[\p{L}\p{M}\p{N}\p{Pc}]/u;
+
+/** The code point that ends right before `at` in `text`, as a string, or `""` at the start. */
+function charBefore(text, at) {
+  if (at <= 0) return "";
+  return at >= 2 && /[\udc00-\udfff]/u.test(text[at - 1]) && /[\ud800-\udbff]/u.test(text[at - 2])
+    ? text.slice(at - 2, at)
+    : text[at - 1];
+}
+
+/**
+ * Whether the token at `index`, of `length` characters, is a float's digits standing alone: digits ending in `e` and
+ * the exponent's digits (in the token, or after it behind a sign), right after an integer part (ASCII digits, an
+ * optional sign) and a `.`, with no word character (`WORD`) touching the number on either side and no `.` before it.
+ */
+function floatDigits(text, index, length) {
+  const token = text.slice(index, index + length);
+  let end = index + length;
+  if (/^\d+e$/u.test(token)) {
+    const exponent = /^[+-]\d+/u.exec(text.slice(end, end + 32));
+    if (exponent === null) return false;
+    end += exponent[0].length;
+    while (/\d/u.test(text[end] ?? "")) end += 1;
+  } else if (!/^\d+e\d+$/u.test(token)) return false;
+  let at = index - 1;
+  if (text[at] !== ".") return false;
+  const point = at;
+  while (at > 0 && /\d/u.test(text[at - 1])) at -= 1;
+  if (at === point) return false;
+  if (/[+-]/u.test(text[at - 1] ?? "")) at -= 1;
+  const left = charBefore(text, at);
+  const right = String.fromCodePoint(text.codePointAt(end) ?? 32);
+  return left !== "." && !WORD.test(left) && !WORD.test(right);
+}
+
 /** Why a token need not be a commit, or `null` when it must resolve. */
 export function excuse(token, text, index) {
   if (/^\d+$/u.test(token)) return "only digits, an id";
   if (/^\d{10}[0-9a-f]{4}$/u.test(token)) return "a queue job id";
   if (/^[a-f]+$/u.test(token)) return "a word";
+  if (floatDigits(text, index, token.length)) return "a float's digits";
   if (/\bsha256[\s:=]+$/iu.test(text.slice(Math.max(0, index - 16), index)))
     return "a file's sha256";
   // The run of non-space characters the token is in: a URL or a path, unless it names the commit itself.
@@ -66,6 +118,38 @@ export function tokensOf(text) {
 }
 
 /**
+ * The paths of `text` that name something inside a folder `agent-work`, as the scratch area `/tmp/agent-work/` is
+ * named, wherever they stand, code included, each once with the line it first stands on. A path is a run of
+ * characters other than white space, quotes, backticks, brackets and `|` (a compact table's cell separator), without
+ * the sentence punctuation that ends it; it names the area's content when a slash-separated component is exactly
+ * `agent-work` and is followed by one other than `.` or `..`. The area itself (`/tmp/agent-work/.`) or a folder named
+ * by a placeholder (`/tmp/agent-work/<task>/`) is no such path. This is a count, not a guarantee: a path written
+ * otherwise is not seen, such as one broken by white space, a JSON value with escaped slashes, a relative path assigned
+ * to a shell variable (`NAME=agent-work/…`), or one reaching the area through another name (`$SCRATCH/report.out`).
+ */
+export function scratchPathsOf(text) {
+  const found = new Map();
+  let line = 1;
+  let at = 0;
+  for (const { 0: run, index } of text.matchAll(/[^\s`'"()[\]<>|]+/gu)) {
+    if (!run.includes("agent-work")) continue;
+    for (; at < index; at += 1) if (text[at] === "\n") line += 1;
+    // (from the end, so that punctuation inside the path is read once)
+    let end = run.length;
+    while (end > 0 && ".,;:!?".includes(run[end - 1])) end -= 1;
+    const path = run.slice(0, end);
+    const parts = path.split("/");
+    const inside = (from) => {
+      while (parts[from] === "" || parts[from] === ".") from += 1;
+      return from < parts.length && parts[from] !== "..";
+    };
+    if (!found.has(path) && parts.some((part, from) => part === "agent-work" && inside(from + 1)))
+      found.set(path, line);
+  }
+  return [...found].map(([path, first]) => ({ path, line: first }));
+}
+
+/**
  * The unfilled placeholders of `text`, outside fenced code blocks: a fenced block shows a command's form, such as
  * `git worktree add <dir> <base commit>`, while a report's own values stand inline.
  */
@@ -74,6 +158,36 @@ export function placeholdersOf(text) {
   return [
     ...new Set(PLACEHOLDERS.flatMap((pattern) => [...prose.matchAll(pattern)].map((m) => m[0]))),
   ];
+}
+
+/**
+ * The closing clauses of `text` that name several issues after one keyword, such as `Closes #1970, #1965`, each with
+ * its first reference: used as GitHub's closing syntax, it closes only that one, as GitHub closes only an issue its own
+ * keyword names. The separators are matched without overlapping white space, so the work stays linear. Every closing
+ * keyword followed by more than one issue reference is found, wherever it stands in the text, code included; a quoted
+ * example must be written so that it is not such a clause. A keyword is `close`, `closes`, `closed`, `fix`, `fixes`,
+ * `fixed`, `resolve`, `resolves` or `resolved` in any case, with an optional `:`; a reference is `#N`, `owner/repo#N`
+ * or `https://github.com/owner/repo/issues/N`, its number not running on into a word character; references are joined
+ * by `,`, `and`, `, and` or `&`. A form GitHub closes on that these patterns do not match, such as a reference inside
+ * emphasis or a link, is the way left to fail open. The text cannot tell an issue from a pull request, nor what the
+ * author means to close: a second reference to a companion pull request or into the first issue's comments fails
+ * too, and the refusal names the ways out.
+ */
+export function closingClausesOf(text) {
+  // (a reference ends where its number ends: digits that run on into a word character, as a colour's, are none)
+  const number = String.raw`\d+(?![\p{L}\p{M}\p{N}\p{Pc}])`;
+  const issue = String.raw`(?:https?:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/${number}|(?:[\w.-]+\/[\w.-]+)?#${number})`;
+  const clause = new RegExp(
+    String.raw`\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+(${issue})(?:\s*(?:,\s*(?:and\b|&)|,|\band\b|&)\s*${issue})+`,
+    "giu",
+  );
+  // (each clause's line, counted on from the one before, so the text is read once)
+  let line = 1;
+  let at = 0;
+  return [...text.matchAll(clause)].map((m) => {
+    for (; at < m.index; at += 1) if (text[at] === "\n") line += 1;
+    return { clause: m[0], closes: m[1], line };
+  });
 }
 
 /**
@@ -115,6 +229,58 @@ function resolve(token, repository) {
               }).stdout.trim() === "commit",
           );
   return commits.length > 1 ? { ambiguous: commits.length } : null;
+}
+
+/**
+ * The commits that a ref on `repository`'s `origin` under `refs/archive/*` or `refs/pull/<n>/head` contains, each
+ * with that ref, from one `git ls-remote origin`; `{ error }` when that fails. Only the history of a tip this clone
+ * has is walked, as the tool never fetches; a commit a remote-tracking ref has is left out, as it is never local only.
+ */
+function unmirroredOriginRefs(repository) {
+  // (why a run failed: its error, such as a timeout or a full buffer, else its last line of standard error)
+  const why = (result, command) =>
+    result.error?.message ||
+    result.stderr?.trim().split("\n").at(-1) ||
+    `${command} exit ${result.status}`;
+  const listed = spawnSync("git", ["-C", repository, "ls-remote", "origin"], {
+    encoding: "utf8",
+    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    maxBuffer: 1 << 28,
+    timeout: 60_000,
+  });
+  if (listed.status !== 0) return { error: why(listed, "git ls-remote") };
+  const refOf = new Map();
+  for (const line of listed.stdout.split("\n")) {
+    // (an annotated tag's ref is listed twice: as the tag, and peeled to its commit with `^{}`, which is no ref name)
+    const [tip, listedRef] = line.split("\t");
+    const ref = listedRef?.replace(/\^\{\}$/u, "");
+    if (/^refs\/(?:archive\/.+|pull\/\d+\/head)$/u.test(ref ?? "") && !refOf.has(tip))
+      refOf.set(tip, ref);
+  }
+  const checked = spawnSync(
+    "git",
+    ["-C", repository, "cat-file", "--batch-check=%(objectname) %(objecttype)"],
+    { input: [...refOf.keys(), ""].join("\n"), encoding: "utf8", maxBuffer: 1 << 28 },
+  );
+  if (checked.status !== 0) return { error: why(checked, "git cat-file") };
+  const tips = checked.stdout
+    .split("\n")
+    .filter((line) => line.endsWith(" commit"))
+    .map((line) => line.split(" ")[0]);
+  const contains = new Map();
+  // (no tips: `git log --stdin` would walk `HEAD` instead)
+  if (tips.length === 0) return { contains };
+  const walked = spawnSync(
+    "git",
+    ["-C", repository, "log", "--source", "--format=%H %S", "--stdin", "--not", "--remotes"],
+    { input: [...tips, ""].join("\n"), encoding: "utf8", maxBuffer: 1 << 28 },
+  );
+  if (walked.status !== 0) return { error: why(walked, "git log") };
+  for (const line of walked.stdout.split("\n")) {
+    const [commit, tip] = line.split(" ");
+    if (refOf.has(tip)) contains.set(commit, refOf.get(tip));
+  }
+  return { contains };
 }
 
 function cannotRun(message) {
@@ -171,6 +337,20 @@ function main() {
           { encoding: "utf8" },
         ).stdout.trim() !== ""
       : null;
+  // The ref on origin that contains `sha` though no remote-tracking ref does, or `undefined`; asked once per
+  // repository, and a failure is named once.
+  const originRefs = new Map();
+  const onOriginAt = (sha, repository) => {
+    if (!originRefs.has(repository)) {
+      const refs = unmirroredOriginRefs(repository);
+      originRefs.set(repository, refs.contains ?? new Map());
+      if (refs.error)
+        process.stdout.write(
+          `check-shas: cannot list origin's refs in ${repository} (${refs.error}): archived and pull-request heads not checked\n`,
+        );
+    }
+    return originRefs.get(repository).get(sha);
+  };
   for (const [token, why] of tokensOf(text)) {
     const answers = repositories.map((repository) => ({
       repository,
@@ -180,7 +360,11 @@ function main() {
     const found = answers
       .filter(({ answer }) => answer?.sha)
       .map((entry) => ({ ...entry, remote: onRemote(entry.answer.sha, entry.repository) }));
-    const resolved = found.find(({ remote }) => remote !== false);
+    const resolved =
+      found.find(({ remote }) => remote !== false) ??
+      found
+        .map((entry) => ({ ...entry, at: onOriginAt(entry.answer.sha, entry.repository) }))
+        .find(({ at }) => at !== undefined);
     const local = resolved ? undefined : found[0];
     const tree = resolved || local ? undefined : answers.find(({ answer }) => answer?.tree);
     const ambiguous = answers.find(({ answer }) => answer?.ambiguous);
@@ -209,7 +393,8 @@ function main() {
       );
     else if (resolved)
       process.stdout.write(
-        `resolved    ${token}  ${resolved.answer.sha} in ${resolved.repository}\n`,
+        `resolved    ${token}  ${resolved.answer.sha} in ${resolved.repository}` +
+          `${resolved.at ? `, on origin at ${resolved.at}` : ""}\n`,
       );
     else if (ambiguous) {
       failed = true;
@@ -223,16 +408,30 @@ function main() {
       );
     }
   }
+  const scratch = scratchPathsOf(text);
+  for (const { path, line } of scratch)
+    process.stdout.write(
+      `scratch     line ${line}: ${path}  under /tmp/agent-work, deleted after inactivity: if a reader needs the file, move it to retained evidence and cite that copy\n`,
+    );
   const placeholders = placeholdersOf(text);
   for (const placeholder of placeholders) {
     failed = true;
     process.stdout.write(`placeholder ${placeholder}  unfilled\n`);
   }
+  const clauses = closingClausesOf(text);
+  for (const { clause, closes, line } of clauses) {
+    failed = true;
+    process.stdout.write(
+      `closing     line ${line}: "${clause}" names several issues after one keyword; as closing syntax it closes only ${closes}. ` +
+        `Give each issue meant to close its own keyword (Closes #1, Closes #2); otherwise end the clause after the first ` +
+        `reference (a new sentence for the rest), or split a quoted example so that no keyword stands before the list\n`,
+    );
+  }
   const tokens = Object.values(counts).reduce((sum, n) => sum + n, 0);
   process.stdout.write(
     `check-shas: ${tokens} tokens: ${counts.resolved} resolved, ${counts.trees} trees, ${counts.ambiguous} ambiguous, ` +
       `${counts.unresolved} unresolved, ${counts.local} local only, ${counts.skipped} skipped (ids, words, paths, sha256s); ` +
-      `${placeholders.length} placeholders\n`,
+      `${placeholders.length} placeholders, ${clauses.length} multi-issue closing clauses, ${scratch.length} scratch paths\n`,
   );
   process.exitCode = failed ? 1 : 0;
 }

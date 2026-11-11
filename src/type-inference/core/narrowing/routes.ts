@@ -13,11 +13,17 @@ import {
 import type { FlowNode } from "../flow-graph.js";
 import { REASON, type Item, type ItemTag } from "../items.js";
 import type { Work } from "../solver.js";
-import { copied, each, holds, mapped, passing, some, sorted, steps } from "../charged-iteration.js";
+import { copied, each, holds, mapped, some, sorted, steps } from "../charged-iteration.js";
 import { locationOf, pathKey, peel, removes, stablePath, type StablePath } from "./narrowings.js";
-import { countIn, lowerBound, type TreeBlock, type TreeStatement } from "./statement-tree.js";
+import { countIn, type TreeBlock, type TreeStatement } from "./statement-tree.js";
 import { selectsElement } from "../method-categories.js";
-import { RouteTests, type Feasibility, type Place } from "./route-tests.js";
+import type { Feasibility, Place } from "./route-tests.js";
+import {
+  RouteCandidates,
+  type Candidate,
+  type Candidates,
+  type Layer,
+} from "./route-candidates.js";
 import { propertyName } from "../program.js";
 
 /*
@@ -39,41 +45,6 @@ import { propertyName } from "../program.js";
  * consumer's own statement's compulsory calls (the nearest call-in dominating n). An unsuitable candidate yields the
  * warning. The consumers ask it through `required`, the route rule's one decision (`consumers/warnings.ts`).
  */
-
-/** A candidate D′ of a key: its definition, where it stands, and the end of the block its writer side reaches. */
-interface Candidate {
-  readonly def: Definition;
-  readonly chain: readonly Place[];
-  readonly start: number;
-  readonly reach: number;
-}
-
-/** A key's candidates in one callable's body, by where they start, with a tree of the maximum reach below each node. */
-interface Candidates {
-  readonly list: readonly Candidate[];
-  readonly starts: readonly number[];
-  readonly reaches: readonly number[];
-  readonly size: number;
-}
-
-/**
- * A sparse layer of closed statements (N3, §13.3) over a parent layer: a key's kill layer over its parent key's (the
- * key's own kills, and the compound statements they close beside the shared layer and every layer below), or a key's
- * test layer for one offending kind over its kill layer (the blocking tests of the needed form, and what they close).
- * A prefix's kills stay in the prefix's layer, never copied into a descendant's. Per block, the indexes it closes
- * (sorted) and their number; per compound statement, how many of its live arms it closes.
- */
-interface Layer {
-  readonly parent: Layer | null;
-  readonly statements: ReadonlySet<TreeStatement>;
-  readonly closed: ReadonlyMap<number, readonly number[]>;
-  readonly counts: ReadonlyMap<number, number>;
-  readonly arms: ReadonlyMap<TreeStatement, number>;
-  /** The arms it closes, each counted once among the layers (a feasibility layer closes arms with no statement). */
-  readonly closedArms: ReadonlySet<TreeBlock>;
-  /** The shared layer's applicability: calls close only for a key with an owner outside its activation (X6). */
-  readonly calls: boolean;
-}
 
 /** A literal's kind as N3's seeds read it: `null`, a whole or fractional number, text, a truth value. */
 function literalTag(program: CorePass["program"], value: PlaceId): ItemTag | null {
@@ -140,11 +111,9 @@ const CERTIFIED: ReadonlySet<string> = new Set([
   "parameter default",
 ]);
 
-export class NarrowingRoutes extends RouteTests {
+export class NarrowingRoutes extends RouteCandidates {
   /** Per key and applicability its kill layer, per (key, offending kind) its test layer. */
   readonly #layers = new Map<string, Layer>();
-  /** Per (key, offending kind) its certified own definitions, and per key (`*`) its whole stores, by callable body. */
-  readonly #candidates = new Map<string, ReadonlyMap<TreeBlock, Candidates>>();
   /** Per (key, node, offending kind): the witness found, or `null`. */
   readonly #witnesses = new Map<string, Definition | null>();
   /** Per object literal: its properties' places by name, made on its first projection. */
@@ -309,12 +278,12 @@ export class NarrowingRoutes extends RouteTests {
     const consider = (lists: ReadonlyMap<TreeBlock, Candidates>): void => {
       program.work.charge("eventSteps");
       const candidates = lists.get(body);
-      const found = candidates === undefined ? null : this.#last(candidates, at);
+      const found = candidates === undefined ? null : this.last(candidates, at);
       if (found !== null && (best === null || found.start > best.start)) best = found;
     };
     consider(yield* this.#ownCandidates(key, tag, others));
     for (const prefix of each(program.work, "eventSteps", keptPrefixes(program.work, key)))
-      consider(this.#wholeStores(prefix));
+      consider(this.wholeStores(prefix));
     // EVIDENCE: `consider` assigns `best` in its closure, which TypeScript's flow analysis does not track.
     const found = best as Candidate | null;
     if (found === null) return null;
@@ -513,56 +482,6 @@ export class NarrowingRoutes extends RouteTests {
   }
 
   /**
-   * Whether a segment of a block, statements `low` to `high` exclusive, holds a closed statement: in the shared layer
-   * (its applicability) or in a layer of the chain, two binary searches each.
-   */
-  #closed(
-    block: TreeBlock,
-    low: number,
-    high: number,
-    layer: Layer | null,
-    calls: boolean,
-  ): boolean {
-    this.#work.charge("eventSteps");
-    const work = this.#work;
-    if (countIn(work, calls ? block.calls : block.leaves, low, high) > 0) return true;
-    let at = layer;
-    for (const _ of steps(work, "eventSteps", () => at !== null)) {
-      const own = at!.closed.get(block.id);
-      if (own !== undefined && countIn(work, own, low, high) > 0) return true;
-      at = at!.parent;
-    }
-    return false;
-  }
-
-  /**
-   * The end of the block a definition's open writer side reaches (N3 (a)): from its statement up, each block's
-   * statements after the one left open; out of a loop's body only where its header leaves it, its header open. N3's "no
-   * back edge between" is the read never before the candidate in a body they share: a round's end that reaches the code
-   * after the loop is the route out of it (the set's `3b/loop/nested/changed` errs on a `null` stored in an inner loop's
-   * body and read after it); a loop only a `break` leaves stops the writer side.
-   */
-  #reach(chain: readonly Place[], layer: Layer | null, calls: boolean): number {
-    this.#work.charge("eventSteps");
-    let level = chain.length;
-    for (const _ of steps(this.#work, "eventSteps", () => level > 0)) {
-      level -= 1;
-      const { block, index } = chain[level]!;
-      if (this.#closed(block, index + 1, block.statements.length, layer, calls)) return block.end;
-      const owner = block.owner;
-      if (owner === null) return Infinity;
-      if (!this.#leaves(owner, calls)) return block.end;
-    }
-    return Infinity;
-  }
-
-  /** Whether a round of a loop's body reaches the code after it: its header leaves it, and calls in it are open. */
-  #leaves(owner: TreeStatement, calls: boolean): boolean {
-    this.#work.charge("eventSteps");
-    return owner.loop === null || (owner.exits && !(calls && owner.called));
-  }
-
-  /**
    * The corridor from a candidate to the read (N3 (a)–(e)): one boundary; the read's statement after the candidate's
    * in the lowest block they share; the writer side up to it, the statements between, and on the consumer side each
    * entered block's statements before the read's, all open in both layers; and no call-in a possible overwriter makes
@@ -604,8 +523,8 @@ export class NarrowingRoutes extends RouteTests {
     for (const _ of steps(this.#work, "eventSteps", () => up - 1 > level)) {
       up -= 1;
       const { block, index } = writer[up]!;
-      if (this.#closed(block, index + 1, block.statements.length, layer, layer.calls)) return false;
-      if (block.owner !== null && !this.#leaves(block.owner, layer.calls)) return false;
+      if (this.closed(block, index + 1, block.statements.length, layer, layer.calls)) return false;
+      if (block.owner !== null && !this.leaves(block.owner, layer.calls)) return false;
       // (in a program the default holds, nothing after the writer in its block that a run might not pass, #1938)
       if (
         this.#feasible !== null &&
@@ -619,13 +538,13 @@ export class NarrowingRoutes extends RouteTests {
         return false;
     }
     // (c): the statements between
-    if (this.#closed(shared, writer[level]!.index + 1, chain[level]!.index, layer, layer.calls))
+    if (this.closed(shared, writer[level]!.index + 1, chain[level]!.index, layer, layer.calls))
       return false;
     // (d): each entered block's statements before the read's
     let down = level + 1;
     for (const _ of steps(this.#work, "eventSteps", () => down < chain.length)) {
       const { block, index } = chain[down]!;
-      if (this.#closed(block, 0, index, layer, layer.calls)) return false;
+      if (this.closed(block, 0, index, layer, layer.calls)) return false;
       down += 1;
     }
     // (d), (e): a compulsory call before the read inside its top statement (a header entered, an earlier operand)
@@ -942,15 +861,15 @@ export class NarrowingRoutes extends RouteTests {
       this.#feasible === null
         ? joinParts(key, tag, this.#othersText(others))
         : joinParts(key, tag, this.#othersText(others), "entered");
-    const known = this.#candidates.get(memo);
+    const known = this.candidates.get(memo);
     if (known !== undefined) return known;
     const layer = this.#testLayer(key, tag);
     const carrying: Definition[] = [];
     for (const d of each(this.#work, "indexSteps", this.pass.definitions.byKey.get(key) ?? []))
       if (yield* this.#carries(d, tag, others)) carrying.push(d);
-    const made = this.#candidateLists(carrying, layer, layer.calls);
+    const made = this.candidateLists(carrying, layer, layer.calls);
     keepText(this.#work, memo.length);
-    this.#candidates.set(memo, made);
+    this.candidates.set(memo, made);
     return made;
   }
 
@@ -972,102 +891,5 @@ export class NarrowingRoutes extends RouteTests {
     for (const kind of each(program.work, "indexSteps", others))
       if (yield* this.#valueProduces(d.value, d.node, [], kind)) return true;
     return false;
-  }
-
-  /** A prefix's whole stores, by callable body, their reach by the shared layer alone (checked whole when examined). */
-  #wholeStores(prefix: Key): ReadonlyMap<TreeBlock, Candidates> {
-    this.#work.charge("indexSteps");
-    const memo = joinParts(prefix, "*");
-    const known = this.#candidates.get(memo);
-    if (known !== undefined) return known;
-    const made = this.#candidateLists(
-      passing(
-        this.#work,
-        "indexSteps",
-        this.pass.definitions.byKey.get(prefix) ?? [],
-        (d) => d.kind === "whole" && !d.weak && d.value !== undefined,
-      ),
-      null,
-      false,
-    );
-    keepText(this.#work, memo.length);
-    this.#candidates.set(memo, made);
-    return made;
-  }
-
-  /** Candidates by callable body, sorted by where they start, with a tree of their reaches' maxima. */
-  #candidateLists(
-    definitions: readonly Definition[],
-    layer: Layer | null,
-    calls: boolean,
-  ): ReadonlyMap<TreeBlock, Candidates> {
-    this.#work.charge("indexSteps");
-    const { program, lists } = this.pass;
-    const work = program.work;
-    const byBody = new Map<TreeBlock, Candidate[]>();
-    for (const d of each(work, "indexSteps", definitions)) {
-      if (!lists.live(d) || !program.live(d.node) || program.inBlockCode(d.node)) continue;
-      const chain = this.chainOf(d.node);
-      if (chain === null) continue;
-      const last = chain.at(-1)!;
-      const statement = last.index < 0 ? undefined : last.block.statements[last.index];
-      const candidate: Candidate = {
-        def: d,
-        chain,
-        start: statement?.start ?? -1,
-        reach: this.#reach(chain, layer, calls),
-      };
-      const list = byBody.get(chain[0]!.block);
-      if (list === undefined) byBody.set(chain[0]!.block, [candidate]);
-      else list.push(candidate);
-    }
-    const made = new Map<TreeBlock, Candidates>();
-    for (const [body, list] of each(work, "indexSteps", byBody)) {
-      sorted(
-        work,
-        "indexSteps",
-        list,
-        (a, b) => a.start - b.start || a.def.site.start - b.def.site.start,
-      );
-      let size = 1;
-      for (const _ of steps(work, "indexSteps", () => size < list.length)) size *= 2;
-      // a tree of maxima over the reaches, its leaves from `size` on
-      const reaches: number[] = [];
-      for (const _ of steps(work, "indexSteps", () => reaches.length < 2 * size)) {
-        const leaf = reaches.length - size;
-        reaches.push(leaf >= 0 && leaf < list.length ? list[leaf]!.reach : -Infinity);
-      }
-      let index = size;
-      for (const _ of steps(work, "indexSteps", () => index > 1)) {
-        index -= 1;
-        reaches[index] = Math.max(reaches[2 * index]!, reaches[2 * index + 1]!);
-      }
-      made.set(body, {
-        list,
-        starts: mapped(work, "indexSteps", list, (candidate) => candidate.start),
-        reaches,
-        size,
-      });
-    }
-    return made;
-  }
-
-  /** The last candidate starting before `at` whose writer side reaches `at`: a binary search and a descent. */
-  #last(candidates: Candidates, at: number): Candidate | null {
-    this.#work.charge("eventSteps");
-    const work = this.#work;
-    const before = lowerBound(work, candidates.starts, at);
-    const { reaches, size } = candidates;
-    // the rightmost leaf below `before` whose reach is at least `at`
-    const search = (node: number, low: number, high: number): number => {
-      work.charge("eventSteps");
-      if (low >= before || reaches[node]! < at) return -1;
-      if (high - low === 1) return low;
-      const middle = (low + high) >> 1;
-      const right = search(2 * node + 1, middle, high);
-      return right >= 0 ? right : search(2 * node, low, middle);
-    };
-    const found = search(1, 0, size);
-    return found < 0 ? null : candidates.list[found]!;
   }
 }

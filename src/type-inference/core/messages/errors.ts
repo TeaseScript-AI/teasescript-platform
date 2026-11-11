@@ -62,7 +62,15 @@ import {
   unlike,
   UNPROVED,
 } from "./code-forms.js";
-import { declaration, elementOf, storeFix, storeSubject, textOf, typeAt } from "./stores.js";
+import {
+  copySentence,
+  declaration,
+  elementOf,
+  storeFix,
+  storeSubject,
+  textOf,
+  typeAt,
+} from "./stores.js";
 
 // An error's first sentence and its rules' fixes, and a written type's error.
 
@@ -835,7 +843,10 @@ export function errorSentence(
           `${source.line(rule.brought)} brings ${described(kinds)} into that property. Use a separate property for a ` +
           "value of another type."
         );
-      return `${storeSubject(rule, source)}, so it cannot ${elementOf(rule) === null ? "take" : "contain"} ${described(kinds)}.${storeFix(rule, kinds, text, site, source, diagnosed)}`;
+      return (
+        copySentence(rule, kinds, source, diagnosed) ??
+        `${storeSubject(rule, source)}, so it cannot ${elementOf(rule) === null ? "take" : "contain"} ${described(kinds)}.${storeFix(rule, kinds, text, site, source, diagnosed)}`
+      );
     case "fallback": {
       // ADR 0021 rule 7.3: a written union of the place the value lands in directly holds both
       const both = typeText([...rule.type, ...kinds]);

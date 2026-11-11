@@ -1,3 +1,5 @@
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join } from "node:path";
 import type { Plugin } from "vite";
 
 /**
@@ -10,30 +12,83 @@ import type { Plugin } from "vite";
  *    unmounted, so a page with a scroll area, such as the transcript, never went frame-idle. The loop now stops once the
  *    position has not changed for {@link SETTLED_FRAMES} frames, and the next scroll starts it again.
  *
- * The build fails when either patched line is not found exactly once, so an upgrade cannot drop the patch silently.
- * Remove this plugin once reka-ui moves the thumb outside the scroll event and stops the loop when scrolling settles.
+ * The plugin judges the module IDs the Player's production build and dependency optimizer give it: an absolute path,
+ * perhaps followed by `?` and a query. It skips any other ID, as it skips a virtual module. A module's file is
+ * whichever of two readings of its ID names a regular file: the whole ID, or the ID cut at the first `?` or `#`. When
+ * neither does, it is no file (a virtual module); when both do, the build fails, naming the ID, as the plugin cannot
+ * tell which one was read. A module belongs to reka-ui when the nearest `package.json` with a `name` above its file's
+ * real path names `reka-ui`; that manifest's folder is the package's root, and `dist/ScrollArea/ScrollAreaThumb.js`
+ * under it is its thumb. A build that bundles a module of a reka-ui root patches that root's thumb, or fails naming the
+ * root; a build that bundles no reka-ui module, as the development server's dependency scan, passes. It fails too when
+ * either patched line is not found exactly once, so an upgrade cannot drop the patch silently. A copy whose manifest
+ * was renamed, or a fork published under another name, is not reka-ui. Each build is judged alone, also when one plugin
+ * serves several (Vite's dependency optimizer reuses it). Remove this plugin once reka-ui moves the thumb outside the
+ * scroll event and stops the loop when scrolling settles.
  */
 export function rekaScrollThumbPatch(): Plugin {
-  let patched = false;
+  /** Each reka-ui root the build bundles a module of, and whether its thumb was patched. */
+  const roots = new Map<string, boolean>();
+  /** The folder of the nearest named manifest at or above each folder looked up, and that name; `null` for none. */
+  const owners = new Map<string, { root: string; name: string } | null>();
+  function owner(folder: string): { root: string; name: string } | null {
+    const known = owners.get(folder);
+    if (known !== undefined) return known;
+    const manifest = join(folder, "package.json");
+    let found: { root: string; name: string } | null = null;
+    // A manifest that is no JSON fails the build.
+    const parsed: unknown = existsSync(manifest)
+      ? JSON.parse(readFileSync(manifest, "utf8"))
+      : null;
+    const name =
+      typeof parsed === "object" && parsed !== null && "name" in parsed ? parsed.name : undefined;
+    if (typeof name === "string" && name !== "") found = { root: folder, name };
+    else if (dirname(folder) !== folder) found = owner(dirname(folder));
+    owners.set(folder, found);
+    return found;
+  }
   return {
     name: "reka-scroll-thumb-patch",
+    buildStart() {
+      roots.clear();
+      owners.clear();
+    },
     transform(code, id) {
-      if (!id.replaceAll("\\", "/").endsWith("/reka-ui/dist/ScrollArea/ScrollAreaThumb.js")) return;
+      // The IDs judged are the shapes the Player's builds give this hook: an absolute path, perhaps with a `?` and a query
+      // (measured in queue job 111108091160ff). Any other ID, such as a virtual module or one with a `#`, is skipped.
+      if (!isAbsolute(id) || id.includes("#")) return;
+      const readings = [...new Set([id, id.replace(/[?#].*$/su, "")])].filter(
+        (reading) => existsSync(reading) && statSync(reading).isFile(),
+      );
+      if (readings.length > 1)
+        this.error(
+          `reka-scroll-thumb-patch: ${id} names two files (${readings.join(", ")}); the plugin cannot tell which one was read.`,
+        );
+      const file = readings[0];
+      if (file === undefined) return;
+      const real = realpathSync(file);
+      const found = owner(dirname(real));
+      if (found?.name !== "reka-ui") return;
+      if (!roots.has(found.root)) roots.set(found.root, false);
+      if (real !== join(found.root, "dist/ScrollArea/ScrollAreaThumb.js")) return;
       let result = code;
       for (const [line, replacement] of PATCHES) {
-        const found = result.match(line);
-        if (found === null || found.length !== 1)
+        const matches = result.match(line);
+        if (matches === null || matches.length !== 1)
           this.error(
             `reka-ui's ScrollAreaThumb changed; review reka-scroll-thumb-patch.ts (${line}).`,
           );
         result = result.replace(line, replacement);
       }
-      patched = true;
+      roots.set(found.root, true);
       return { code: `${result}\n${SETTLING_SCROLL_LISTENER}`, map: null };
     },
     buildEnd(error) {
-      if (error === undefined && !patched)
-        this.error("reka-ui's ScrollAreaThumb was not patched; review reka-scroll-thumb-patch.ts.");
+      if (error !== undefined) return;
+      for (const [root, patched] of roots)
+        if (!patched)
+          this.error(
+            `reka-ui at ${root} was bundled without its ScrollAreaThumb (dist/ScrollArea/ScrollAreaThumb.js) patched; review reka-scroll-thumb-patch.ts.`,
+          );
     },
   };
 }

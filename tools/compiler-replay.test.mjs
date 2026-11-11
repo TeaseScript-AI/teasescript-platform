@@ -267,6 +267,19 @@ test("collect: a set mode differing in its diagnostics alone stands until aside 
         .status,
       0,
     );
+    // (a mode named by `HELD_MODES`' name, #2342: "forward, unshared" is src-off, which a position in either table
+    // (2 in HELD_MODES', 1 in the oracle's MODES') would not give as rev-on's or src-on's agreement)
+    const named = {
+      ...r,
+      set: { ...r.set, differences: [{ ...r.set.differences[0], mode: "forward, unshared" }] },
+    };
+    const agreed = (label) => ({
+      ...named,
+      aside: [{ source: "n", mode: label, planEqual: true, asideEqual: true }],
+    });
+    assert.equal(verdict(agreed("src-off")).status, 0);
+    for (const label of ["rev-on", "src-on", "rev-off"])
+      assert.equal(verdict(agreed(label)).status, 1, label);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

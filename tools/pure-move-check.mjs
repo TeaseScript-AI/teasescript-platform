@@ -39,7 +39,9 @@
 // { "old": "new" | ["new", …] } }`, old and new paths joined where they share one), and the bindings within one family
 // (a split's files importing each other) are left out. A binding on one side only fails, with its file, line and
 // specifier; form 1 admits an import line's presence, this rule its content. A target the move relocates or adds
-// without a family in `--renames` fails, and the report names the flag. A relative specifier either side cannot
+// without a family in `--renames` fails, and the report names the flag. So does a binding on one side only between two
+// files the change edits, its target there on both sides, as when code moves out of a file that still calls it, and the
+// report names the family that would join the two. A relative specifier either side cannot
 // resolve, to no file or in a file whose configuration the tree does not establish (a config with an error, such as an
 // `extends` the tree does not hold, or a TypeScript file no config includes or none is above), is refused by name:
 // reported unless a declaration names its side and line, never passed; the move's compiler run is the witness for what
@@ -719,6 +721,11 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
   };
   const sides = { before: new Map(), after: new Map() };
   const relocated = new Set();
+  // the files the change edits, on each side
+  const changed = {
+    before: new Set(files.map((change) => change.old)),
+    after: new Set(files.map((change) => change.file)),
+  };
   const refusals = new Map();
   for (const change of files) {
     if (change.binary) continue;
@@ -746,6 +753,9 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
         const other = side === "before" ? trees.after : trees.before;
         const { type, path: at } = binding.target;
         if (type === "file" && !other.has(at) && !family.has(at)) relocated.add(at);
+        // another file the change edits, there on both sides: one a family could join with the importer
+        const sibling =
+          type === "file" && at !== file && other.has(at) && changed[side].has(at) ? at : null;
         const key = JSON.stringify([
           binding.kind,
           target,
@@ -753,7 +763,7 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
           binding.as,
           binding.typeOnly,
         ]);
-        if (!sides[side].has(key)) sides[side].set(key, { ...binding, file, target });
+        if (!sides[side].has(key)) sides[side].set(key, { ...binding, file, target, sibling });
       }
     }
   }
@@ -761,9 +771,14 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
     [...sides[side]]
       .filter(([key]) => !sides[other].has(key))
       .map(([, binding]) => ({ side, ...binding }));
+  const differing = [...only("before", "after"), ...only("after", "before")];
+  const joinable = new Map();
+  for (const { file, sibling } of differing)
+    if (sibling !== null) joinable.set(JSON.stringify([file, sibling]), [file, sibling]);
   return {
-    differing: [...only("before", "after"), ...only("after", "before")],
+    differing,
     relocated: [...relocated],
+    joinable: [...joinable.values()],
     refusals: [...refusals.values()],
   };
 }
@@ -952,6 +967,10 @@ export function reportOf(base, result) {
   if (bindings.differing.length > 0 && !renames && bindings.relocated.length > 0)
     out.push(
       `  the move relocates or adds ${bindings.relocated.join(", ")}: name its family with --renames FILE (the move sweep's map)`,
+    );
+  for (const [importer, sibling] of bindings.joinable)
+    out.push(
+      `  ${importer} and ${sibling} both change, and a binding between them is on one side only: if the move took code from one into the other, name them one family with --renames FILE, as {"renames":{${JSON.stringify(importer)}:[${JSON.stringify(importer)},${JSON.stringify(sibling)}]}}`,
     );
   out.push(
     `shape: moved +${counts.movedAdded} -${counts.movedRemoved}; admitted ${FORMS.map((form) => `${form} ${counts[form]}`).join(", ")}; declared ${counts.declared}; unadmitted ${counts.unadmitted}; bindings differing ${bindings.differing.length}; refused ${counts.refused}`,

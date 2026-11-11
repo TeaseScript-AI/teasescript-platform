@@ -4,14 +4,17 @@ on:
   push:
     branches: [main]
   pull_request:
+  # A manual run of a branch's tip, such as the three runs on one head that `tools/measure-test-files.mjs --from-ci`
+  # needs (a re-run replaces a run's artifacts): `gh workflow run ci.yml --ref <branch>`.
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 # A new push to a pull request supersedes its running check. A push to main gets its own group, so every main commit's
-# check finishes (a pending run in a shared group would be cancelled by the next one).
+# check finishes (a pending run in a shared group would be cancelled by the next one), and so does each manual run.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || (github.event_name == 'workflow_dispatch' && github.run_id) || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:

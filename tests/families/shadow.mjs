@@ -8,7 +8,9 @@
 //   <set>: corpus (CASES_JSON=<cases.json>), fixture (the tree's tools/corpus/fixture), or an area of tests/families by
 //   its name or folder (its generators' sources at their own sizes, `sources.mjs`).
 // Each route runs in a process of its own (#1738) with `--memory` MB of old generation, which takes its runs (one route
-// in one mode) in turn until one fails, so a heap abort or any other end of that process ends that run only; the runner refuses Node options and NODE_OPTIONS, whose heap flags would override it. A run fails where its heap is exhausted, where its charged units pass
+// in one mode) in turn until one fails, so a heap abort or any other end of that process ends that run only. A route's
+// process starts without the caller's NODE_OPTIONS, whose heap flags would set its limit beside `--memory` (#2329), and
+// gets no other Node option from the caller either. A run fails where its heap is exhausted, where its charged units pass
 // `--units` times the largest allowance of a ledger it charged (#1647's rule; the legacy route charges none), where it
 // passes the safety net of `--timeout` seconds, or where its worker ends. A failed run is recorded with its route, mode,
 // the phase it was in (`phase`: `parse and names`, `analysis`, `analysis pass k`, `completion`, `lowering`, the core's
@@ -53,9 +55,10 @@ class RouteProcess extends EventEmitter {
     super();
     this.tail = "";
     this.line = "";
+    const { NODE_OPTIONS: _, ...env } = process.env;
     this.child = fork(file, [], {
       execArgv: [`--max-old-space-size=${memory}`],
-      env: { ...process.env, [CHILD]: JSON.stringify(settings) },
+      env: { ...env, [CHILD]: JSON.stringify(settings) },
       stdio: ["ignore", "ignore", "pipe", "ipc"],
       serialization: "advanced",
     });
@@ -144,18 +147,7 @@ function delta(a, b, limit = 80) {
   return { diffs, more };
 }
 
-if (
-  isMainThread &&
-  (process.execArgv.length > 0 || (process.env.NODE_OPTIONS ?? "").trim() !== "")
-) {
-  // (a V8 heap flag there, in any of its spellings, would override every worker's --memory: Codex r1 and r2 on #1713;
-  // the queue sets one in NODE_OPTIONS)
-  process.stderr.write(
-    "shadow.mjs: run it without Node options and NODE_OPTIONS (env -u NODE_OPTIONS node tests/families/shadow.mjs …), " +
-      "so that --memory is each worker's heap\n",
-  );
-  process.exit(2);
-} else if (isMainThread) {
+if (isMainThread) {
   const [root, given, ...rest] = process.argv.slice(2);
   const option = (name) => {
     const at = rest.indexOf(name);

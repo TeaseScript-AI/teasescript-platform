@@ -1,17 +1,24 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
+  chmodSync,
+  closeSync,
+  constants,
   cpSync,
   existsSync,
   linkSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
+  writeSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
@@ -36,6 +43,7 @@ const MODULES: Record<string, string> = {
   "src/compiler.js": `export const compileProject = (files) => {
   const source = files[0].source;
   if (source.includes("THROW")) throw new TypeError("the stand-in throws");
+  if (source.includes("EXIT")) process.exit(9);
   const error = source.includes("ERROR");
   return { plan: error ? null : ${PLAN},
     diagnostics: error ? [${diagnostic('"TSV001"', "error")}] : [${diagnostic('"TSV052"', "warning")}] };
@@ -73,6 +81,8 @@ export const publishedRoute = (files) => {
   return { plan, text: JSON.stringify({ plan, diagnostics: [${diagnostic('"TSV0" + globalThis.MODE', "warning")}] }) };
 };
 `,
+  "src/runtime/host-data/script-storage.js":
+    "export const validateScriptStorageEntries = () => null;\n",
   "tests/helpers/type-core-route.js": `export const runGlobals = (plan, globals) =>
   globals.hostValue === 2.5
     ? { status: "failed", failure: "TSR058@0:5", said: [] }
@@ -114,7 +124,13 @@ interface Entry {
   readonly mode: string;
   readonly diagnostics: readonly { readonly severity?: string; readonly code: string }[];
   readonly plan: { readonly hash: string; readonly checks: readonly unknown[] } | null;
-  readonly runs?: readonly { readonly status: string }[];
+  readonly runs?: readonly {
+    readonly globals: unknown;
+    readonly storage?: unknown;
+    readonly status: string;
+    readonly failure?: string | null;
+    readonly said?: readonly { readonly text: string }[];
+  }[];
   readonly outside?: string;
   readonly threw?: string;
 }
@@ -124,6 +140,7 @@ interface Row {
     readonly files: readonly { readonly source: string }[];
     readonly globals: readonly string[];
     readonly key?: string;
+    readonly storage?: unknown;
   };
   readonly checker: Omit<Entry, "mode">;
   readonly core: {
@@ -515,6 +532,190 @@ test("join --ignore reports a case one tree lacks, a record it cannot read, and 
   }
 });
 
+test("a run owns its output from its claim: no exit leaves an earlier output, and none removes a later one (#2383)", async (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "families-differential-output-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  const tree = standIn(folder);
+  const out = join(folder, "out.jsonl");
+  const casesOf = (name: string, sources: string[]) => {
+    const file = join(folder, `${name}.jsonl`);
+    writeFileSync(
+      file,
+      sources.map((source, at) => `${JSON.stringify({ name: `c${at}`, source })}\n`).join(""),
+    );
+    return file;
+  };
+  const record = (cases: string, tree_ = tree) =>
+    spawnSync(process.execPath, [tool, tree_, cases, "--out", out], { encoding: "utf8" });
+  const stale = "an earlier run's records\n";
+  // (each run below finds an earlier output at --out and ends without writing: none is left standing)
+  const malformed = join(folder, "malformed.jsonl");
+  writeFileSync(malformed, "{\n");
+  const half = join(folder, "half.jsonl");
+  writeFileSync(half, `${JSON.stringify({ name: "c0" })}\n`);
+  const broken = join(folder, "broken");
+  cpSync(tree, broken, { recursive: true });
+  writeFileSync(join(broken, "dist/src/compiler.js"), 'throw new Error("the import fails");\n');
+  const ends = {
+    refused: () => record(malformed),
+    "import fails": () => record(casesOf("fine", ["MODAL"]), broken),
+    "process ends midway": () => record(casesOf("midway", ["MODAL", "EXIT"])),
+    "join finds a case missing": () =>
+      spawnSync(
+        process.execPath,
+        [tool, "join", "--cases", casesOf("two", ["MODAL", "MODAL"]), "--base", half, "--out", out],
+        { encoding: "utf8" },
+      ),
+  };
+  for (const [end, run] of Object.entries(ends)) {
+    writeFileSync(out, stale);
+    const ran = run();
+    assert.notEqual(ran.status, 0, `${end}: ${ran.stderr}`);
+    assert.equal(existsSync(out), false, end);
+  }
+  // (a whole run publishes its records at once, and leaves nothing beside them; the run that ended midway left its
+  // partial, which no reader takes for --out)
+  const partials = () =>
+    readdirSync(folder).filter((file) => file.startsWith("out.jsonl.partial-"));
+  const before = partials();
+  assert.equal(before.length, 1);
+  writeFileSync(out, stale);
+  const whole = record(casesOf("whole", ["MODAL"]));
+  assert.equal(whole.status, 0, whole.stderr);
+  assert.equal(lines<Row>(readFileSync(out, "utf8")).length, 1);
+  assert.deepEqual(partials(), before);
+  // (two runs on one --out: the first claims it, then blocks reading its cases, and is refused after the second
+  // published; the second's output stays, as the first removes nothing on its way out)
+  const fifo = join(folder, "cases.fifo");
+  assert.equal(spawnSync("mkfifo", [fifo]).status, 0);
+  // (whatever fails below, the first run is killed and reaped and the FIFO's writer closed, so no process outlives the test)
+  const first = spawn(process.execPath, [tool, tree, fifo, "--out", out], { stdio: "ignore" });
+  const exited = new Promise<number | null>((done, fail) => {
+    first.on("exit", done);
+    first.on("error", fail);
+  });
+  exited.catch(() => undefined);
+  t.after(async () => {
+    first.kill("SIGKILL");
+    await exited.catch(() => undefined);
+  });
+  let writer: number | undefined;
+  try {
+    for (let tries = 0; writer === undefined; tries += 1) {
+      try {
+        writer = openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK);
+      } catch (error) {
+        assert.ok(tries < 200, `the first run never read its cases: ${String(error)}`);
+        await new Promise((done) => setTimeout(done, 50));
+      }
+    }
+    const second = record(casesOf("second", ["MODAL"]));
+    assert.equal(second.status, 0, second.stderr);
+    const published = readFileSync(out, "utf8");
+    writeSync(writer, "{\n");
+    closeSync(writer);
+    writer = undefined;
+    const late = new Promise<never>((_, fail) => {
+      setTimeout(() => fail(new Error("the first run did not exit")), 30_000).unref();
+    });
+    assert.equal(await Promise.race([exited, late]), 2);
+    assert.equal(readFileSync(out, "utf8"), published);
+  } finally {
+    if (writer !== undefined) closeSync(writer);
+  }
+  // (a run creates its partial: a file already at that path, here the run's own input, is refused untouched; the shell
+  // execs the tool, so the partial's pid is the shell's)
+  const own =
+    'p="$1.partial-$$"; cp "$2" "$p"; shift 2; args=(); for a in "$@"; do [ "$a" = @partial ] && a="$p"; args+=("$a"); done; exec "${args[@]}"';
+  for (const [mode, input, args] of [
+    ["record", casesOf("own", ["MODAL"]), [tree, "@partial"]],
+    ["join", half, ["join", "--cases", casesOf("one", ["MODAL"]), "--base", "@partial"]],
+  ] as const) {
+    const ran = spawnSync(
+      "bash",
+      ["-c", own, "bash", out, input, process.execPath, tool, ...args, "--out", out],
+      { encoding: "utf8" },
+    );
+    assert.equal(ran.status, 2, `${mode}: ${ran.stderr}`);
+    assert.match(ran.stderr, /cannot create .*\.partial-\d+/u, mode);
+    assert.equal(
+      readFileSync(`${out}.partial-${ran.pid}`, "utf8"),
+      readFileSync(input, "utf8"),
+      mode,
+    );
+  }
+  // (a write the file system cuts short is never published: under a file-size limit of half one record, each mode fails
+  // and leaves no --out; Node ignores the limit's signal, so the write itself comes back short)
+  const single = casesOf("single", ["MODAL"]);
+  assert.equal(record(single).status, 0);
+  const records = join(folder, "records.jsonl");
+  cpSync(out, records);
+  const limit = `--fsize=${Math.floor(statSync(records).size / 2)}`;
+  for (const [mode, args] of [
+    ["record", [tree, single]],
+    ["join", ["join", "--cases", single, "--base", records]],
+  ] as const) {
+    writeFileSync(out, stale);
+    const ran = spawnSync("prlimit", [limit, process.execPath, tool, ...args, "--out", out], {
+      encoding: "utf8",
+    });
+    assert.notEqual(ran.status, 0, `${mode}: ${ran.stderr}`);
+    assert.equal(existsSync(out), false, mode);
+  }
+  // (a claim that cannot reach or remove what stands at --out refuses and says so, whatever the cause: a directory the
+  // run may not search, one it may not write, and a name too long; each directory is first shown to refuse, so the test
+  // cannot pass where the call would succeed, as for root; an earlier file there stays byte for byte)
+  const lockedAs = (name: string, permissions: number) => {
+    const dir = join(folder, name);
+    mkdirSync(dir);
+    writeFileSync(join(dir, "out.jsonl"), stale);
+    writeFileSync(join(dir, "probe"), "");
+    chmodSync(dir, permissions);
+    return dir;
+  };
+  const unsearchable = lockedAs("unsearchable", 0o600);
+  const unwritable = lockedAs("unwritable", 0o555);
+  try {
+    assert.throws(
+      () => statSync(join(unsearchable, "probe")),
+      { code: "EACCES" },
+      "a search must be refused",
+    );
+    assert.throws(
+      () => unlinkSync(join(unwritable, "probe")),
+      { code: "EACCES" },
+      "a removal must be refused",
+    );
+    for (const [target, cause] of [
+      [join(unsearchable, "out.jsonl"), "EACCES"],
+      [join(unwritable, "out.jsonl"), "EACCES"],
+      [join(folder, "x".repeat(300)), "ENAMETOOLONG"],
+    ] as const)
+      for (const [mode, args] of [
+        ["record", [tree, single]],
+        ["join", ["join", "--cases", single, "--base", records]],
+      ] as const) {
+        const ran = spawnSync(process.execPath, [tool, ...args, "--out", target], {
+          encoding: "utf8",
+        });
+        assert.equal(ran.status, 2, `${mode}, ${cause}: ${ran.stderr}`);
+        assert.match(
+          ran.stderr,
+          new RegExp(
+            `cannot claim the output .*: ${cause}\\b.*; any file standing there is not this run's output`,
+            "u",
+          ),
+          `${mode}, ${cause}`,
+        );
+      }
+  } finally {
+    chmodSync(unsearchable, 0o755);
+    chmodSync(unwritable, 0o755);
+  }
+  for (const dir of [unsearchable, unwritable])
+    assert.equal(readFileSync(join(dir, "out.jsonl"), "utf8"), stale, dir);
+});
+
 test("the plan's check list lists each check planChecks counts, with its site and type (#2298)", () => {
   const span = (so: number, sl: number) => ({ so, sl, sc: 0, eo: so + 2, el: sl, ec: 2 });
   const type = { kind: "integer" };
@@ -634,4 +835,98 @@ test("the differential record of the repository's own build: four modes, a plan'
   assert.equal(errorRow.checker.plan, null);
   assert.equal("runs" in errorRow.checker, false);
   assert.ok(errorRow.checker.diagnostics.some((d) => d.severity === "error"));
+  // (a case without storage records none)
+  assert.equal("storage" in hostRow.case, false);
+  assert.equal("storage" in hostRow.checker.runs![0]!, false);
+});
+
+test("a case's storage is what each run's load reads, on the checker and the core's route, and is recorded (#2338)", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "families-differential-storage-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  // (a load whose value a repeat count reads: it takes the stored value, and without one its default)
+  const source = 'let v = load("k", default: 0)\nsay v\nrepeat v {}\nexit\n';
+  const runs = [{ hostValue: 0 }, { hostValue: 1 }];
+  const cases = join(folder, "cases.jsonl");
+  writeFileSync(
+    cases,
+    [
+      { name: "stored", source, runs, storage: { k: 2 } },
+      { name: "none", source, runs },
+    ]
+      .map((c) => `${JSON.stringify(c)}\n`)
+      .join(""),
+  );
+  const out = join(folder, "records.jsonl");
+  const ran = spawnSync(process.execPath, [tool, resolve("."), cases, "--out", out], {
+    encoding: "utf8",
+  });
+  assert.equal(ran.status, 0, ran.stderr);
+  const rows = lines<Row>(readFileSync(out, "utf8"));
+  const outcomes = (row: Row) =>
+    [row.checker, ...row.candidate.modes].map((entry) =>
+      entry.runs!.map((r) => [
+        r.storage,
+        r.status,
+        r.said!.map((said) => said.text),
+        r.failure !== null,
+      ]),
+    );
+  // (each run of a case, two of them, on the checker and in each of the route's four modes)
+  const expected = {
+    stored: [{ k: 2 }, "halted", ["2"], false],
+    none: [undefined, "halted", ["0"], false],
+  };
+  assert.deepEqual(
+    Object.fromEntries(rows.map((row) => [row.name, outcomes(row)])),
+    Object.fromEntries(
+      Object.entries(expected).map(([name, run]) => [name, Array(5).fill([run, run])]),
+    ),
+  );
+  assert.deepEqual(
+    rows.map((row) => row.case.storage),
+    [{ k: 2 }, undefined],
+  );
+  // (storage without runs, or not an object of values by key, refuses the cases file before any record)
+  for (const [storage, why] of [
+    [{ k: 1 }, /bad\.jsonl:1: storage is for runs/],
+    [[{ key: "k", value: 1 }], /bad\.jsonl:1: storage is an object of the stored values by key/],
+  ] as const) {
+    const bad = join(folder, "bad.jsonl");
+    const given = { name: "x", source, storage, ...(Array.isArray(storage) ? { runs } : {}) };
+    writeFileSync(bad, `${JSON.stringify(given)}\n`);
+    const refusedOut = join(folder, "refused.jsonl");
+    const refused = spawnSync(process.execPath, [tool, resolve("."), bad, "--out", refusedOut], {
+      encoding: "utf8",
+    });
+    assert.equal(refused.status, 2, refused.stderr);
+    assert.match(refused.stderr, why);
+    assert.equal(existsSync(refusedOut), false);
+  }
+  // (a seed that cannot be copied, or that the runtime rejects, is found before any plan runs: after a valid case, the
+  // file is refused and no record written)
+  type Nested = number | { kind: "list"; items: Nested[] };
+  let deep: Nested = 1;
+  for (let depth = 0; depth < 2000; depth += 1) deep = { kind: "list", items: [deep] };
+  for (const [storage, why] of [
+    [{ unused: deep }, /bad\.jsonl:2: storage cannot be copied: /],
+    [{ k: { not: "a runtime value" } }, /bad\.jsonl:2: storage\b/],
+  ] as const) {
+    const bad = join(folder, "bad.jsonl");
+    writeFileSync(
+      bad,
+      [
+        { name: "fine", source, runs },
+        { name: "seeded", source, runs, storage },
+      ]
+        .map((c) => `${JSON.stringify(c)}\n`)
+        .join(""),
+    );
+    const fresh = join(folder, "fresh.jsonl");
+    const refused = spawnSync(process.execPath, [tool, resolve("."), bad, "--out", fresh], {
+      encoding: "utf8",
+    });
+    assert.equal(refused.status, 2, refused.stderr);
+    assert.match(refused.stderr, why);
+    assert.equal(existsSync(fresh), false);
+  }
 });

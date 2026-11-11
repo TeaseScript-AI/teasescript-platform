@@ -1,3 +1,4 @@
+// pins: work totals at two demands, four modes | line /\[\d+(?:, \d+){7}\]/u
 import assert from "node:assert/strict";
 import test from "node:test";
 

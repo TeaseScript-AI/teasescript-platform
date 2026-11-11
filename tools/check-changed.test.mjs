@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import {
   chmodSync,
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -23,6 +24,7 @@ import {
   checksOf,
   MAIN_CHECKOUT,
   linkMainNodeModules,
+  notInstalled,
   projectsFor,
   removeTemporaryWorktree,
   unknownToCostly,
@@ -133,7 +135,8 @@ test(
  * also changes a file of the type core on `feature` ("added", or "deleted" or "renamed" out of the core, the file being
  * on `main` for those);
  * `mapper` is code the stand-in pin-suite mapper runs after its line. `passing` leaves `a.mjs` as it was and gives every
- * other check a stand-in that passes, so the mapper's verdict alone decides the run.
+ * other check a stand-in that passes, so the mapper's verdict alone decides the run. `lock` is the lockfile's packages
+ * and `installed` those the stand-in `node_modules` records as installed.
  */
 function repository({
   conflict = false,
@@ -141,6 +144,8 @@ function repository({
   core = false,
   mapper = "",
   passing = false,
+  lock = {},
+  installed = {},
 } = {}) {
   const directory = mkdtempSync(join(tmpdir(), "check-changed-repo-"));
   const run = (...args) => spawnSync("git", args, { cwd: directory, encoding: "utf8" });
@@ -151,7 +156,7 @@ function repository({
   run("init", "-q", "-b", "main");
   write("a.mjs", "export const a = 1;\n");
   write("package.json", JSON.stringify({ devDependencies: { prettier: "0.0.0" } }));
-  write("package-lock.json", "{}\n");
+  write("package-lock.json", JSON.stringify({ lockfileVersion: 3, packages: { "": {}, ...lock } }));
   write(".gitignore", "node_modules/\n");
   // (the checks the merge runs: oxlint waits when asked, so a signal meets a running check)
   write("tools/oxlint/run.mjs", slowOxlint ? "setTimeout(() => {}, 60_000);\n" : "\n");
@@ -186,6 +191,10 @@ function repository({
     run("switch", "-q", "feature");
   }
   // A stand-in `node_modules` whose Prettier is the pinned one and does nothing.
+  write(
+    "node_modules/.package-lock.json",
+    JSON.stringify({ lockfileVersion: 3, packages: installed }),
+  );
   write("node_modules/prettier/package.json", JSON.stringify({ version: "0.0.0" }));
   write("node_modules/prettier/bin/prettier.cjs", "\n");
   if (passing) {
@@ -489,6 +498,17 @@ test("it links the node_modules main's checkout has, replaces only a stale link,
     linkMainNodeModules({ TEASESCRIPT_MAIN: "./link/../x" }, repo);
     assert.equal(linked(), "slots/x");
     rmSync(target);
+    // a link through main's `current` follows it when the refresh switches it to the other slot (#2087)
+    checkout("main/slot-a");
+    checkout("main/slot-b");
+    const current = join(root, "main", "current");
+    symlinkSync("slot-a", current);
+    linkMainNodeModules({ TEASESCRIPT_MAIN: current }, repo);
+    assert.equal(linked(), "main/slot-a");
+    rmSync(current);
+    symlinkSync("slot-b", current);
+    assert.equal(linked(), "main/slot-b");
+    rmSync(target);
     // it refuses by name a checkout without a node_modules folder, and links nothing
     writeFileSync(join(root, "file"), "");
     mkdirSync(join(root, "bare"));
@@ -547,3 +567,325 @@ test("it links the node_modules main's checkout has, replaces only a stale link,
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("run as a lone copy outside its checkout, it says it needs its checkout in one line and exits 2 (#2366)", () => {
+  const folder = mkdtempSync(join(tmpdir(), "check-changed-alone-"));
+  try {
+    const copy = join(folder, "check-changed.mjs");
+    writeFileSync(copy, readFileSync(new URL("./check-changed.mjs", import.meta.url)));
+    const result = spawnSync(process.execPath, [copy], { cwd: folder, encoding: "utf8" });
+    assert.equal(result.status, 2, result.stderr);
+    assert.equal(result.stdout, "");
+    assert.equal(
+      result.stderr,
+      "check-changed: run it from its checkout, whose tools/ holds the modules it imports (Cannot find module " +
+        `'${join(folder, "costly-test-files.mjs")}' imported from ${copy}); on a branch that predates it, run main's ` +
+        "from your worktree: node /opt/teasescript-agents/teasescript-main/current/tools/check-changed.mjs\n",
+    );
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
+
+test("notInstalled names each lockfile package the install lacks or holds otherwise, and refuses a lockfile without packages", () => {
+  const remark = {
+    version: "15.0.1",
+    resolved: "https://registry.npmjs.org/remark/-/remark-15.0.1.tgz",
+    integrity: "sha512-a",
+  };
+  const platform = { version: "1.0.0", resolved: "r", integrity: "i", optional: true };
+  const lock = {
+    packages: {
+      "": { name: "root" },
+      "node_modules/remark": remark,
+      "node_modules/@x/linux": platform,
+    },
+  };
+  // as the lockfile names it, its root and another platform's optional package not installed, and extra packages
+  assert.deepEqual(
+    notInstalled(lock, {
+      packages: { "node_modules/remark": remark, "node_modules/extra": remark },
+    }),
+    [],
+  );
+  // missing, another version, another tarball (`resolved`, `integrity`), or no install record at all
+  for (const [installed, expected] of [
+    [{}, ["node_modules/remark 15.0.1 (not installed)"]],
+    [{ packages: {} }, ["node_modules/remark 15.0.1 (not installed)"]],
+    [
+      { packages: { "node_modules/remark": { ...remark, version: "15.0.0" } } },
+      ["node_modules/remark 15.0.1 (installed: 15.0.0)"],
+    ],
+    [
+      { packages: { "node_modules/remark": { ...remark, resolved: "elsewhere" } } },
+      ["node_modules/remark 15.0.1 (installed: 15.0.1)"],
+    ],
+    [
+      { packages: { "node_modules/remark": { ...remark, integrity: "sha512-b" } } },
+      ["node_modules/remark 15.0.1 (installed: 15.0.1)"],
+    ],
+  ])
+    assert.deepEqual(notInstalled(lock, installed), expected);
+  // an optional package installed at another version is no install of the lockfile either
+  assert.deepEqual(
+    notInstalled(lock, {
+      packages: {
+        "node_modules/remark": remark,
+        "node_modules/@x/linux": { ...platform, version: "0.9.0" },
+      },
+    }),
+    ["node_modules/@x/linux 1.0.0 (installed: 0.9.0)"],
+  );
+  for (const unknown of [{}, { lockfileVersion: 1, dependencies: {} }, { packages: null }])
+    assert.throws(() => notInstalled(unknown, { packages: {} }), {
+      message: "package-lock.json has no `packages` to compare node_modules with",
+    });
+});
+
+test("notInstalled excuses an absent optional package only when its os, cpu or libc exclude the host, or nothing recorded needs it (Sol final r3 on #2322)", () => {
+  const host = { os: "linux", cpu: "x64", libc: "glibc" };
+  const tool = (extra) => ({
+    version: "1.0.0",
+    resolved: "t",
+    integrity: "i",
+    optionalDependencies: {
+      "@x/binding-linux-x64-gnu": "1",
+      "@x/binding-darwin-arm64": "1",
+      "@x/binding-linux-x64-musl": "1",
+      "@x/binding-not-windows": "1",
+      "@x/wasm": "1",
+    },
+    ...extra,
+  });
+  const binding = (os, cpu, libc) => ({
+    version: "1.0.0",
+    resolved: "b",
+    integrity: "i",
+    optional: true,
+    os,
+    cpu,
+    ...(libc === undefined ? {} : { libc }),
+  });
+  const lock = {
+    packages: {
+      "": { devDependencies: { x: "1" } },
+      "node_modules/x": tool(),
+      "node_modules/@x/binding-linux-x64-gnu": binding(["linux"], ["x64"], ["glibc"]),
+      "node_modules/@x/binding-linux-x64-musl": binding(["linux"], ["x64"], ["musl"]),
+      "node_modules/@x/binding-darwin-arm64": binding(["darwin"], ["arm64"]),
+      "node_modules/@x/binding-not-windows": binding(["!win32"], ["x64"]),
+      // (the WebAssembly binding, excluded by its cpu, and a helper only it needs, with no platform field)
+      "node_modules/@x/wasm": { ...binding(undefined, ["wasm32"]), dependencies: { helper: "1" } },
+      "node_modules/helper": { version: "1.0.0", resolved: "h", integrity: "i", optional: true },
+    },
+  };
+  const record = (...paths) => ({
+    packages: Object.fromEntries(paths.map((path) => [path, lock.packages[path]])),
+  });
+  // a correct install on this host: its binding recorded; another platform's, the musl one and the wasm side absent
+  assert.deepEqual(
+    notInstalled(lock, record("node_modules/x", "node_modules/@x/binding-linux-x64-gnu"), host),
+    ["node_modules/@x/binding-not-windows 1.0.0 (not installed)"],
+  );
+  const complete = record(
+    "node_modules/x",
+    "node_modules/@x/binding-linux-x64-gnu",
+    "node_modules/@x/binding-not-windows",
+  );
+  assert.deepEqual(notInstalled(lock, complete, host), []);
+  // this host's binding absent, which its tool needs: missing, like any other package
+  assert.deepEqual(
+    notInstalled(lock, record("node_modules/x", "node_modules/@x/binding-not-windows"), host),
+    ["node_modules/@x/binding-linux-x64-gnu 1.0.0 (not installed)"],
+  );
+  // a helper with no platform field: absent is fine while only an excluded package needs it, missing once a recorded
+  // one does
+  const needed = structuredClone(lock);
+  needed.packages["node_modules/x"].dependencies = { helper: "1" };
+  assert.deepEqual(notInstalled(needed, complete, host), [
+    "node_modules/helper 1.0.0 (not installed)",
+  ]);
+  // the same lockfile on a musl host or a Mac: their own binding is the needed one
+  assert.deepEqual(notInstalled(lock, complete, { os: "linux", cpu: "x64", libc: "musl" }), [
+    "node_modules/@x/binding-linux-x64-musl 1.0.0 (not installed)",
+  ]);
+  assert.deepEqual(notInstalled(lock, complete, { os: "darwin", cpu: "arm64", libc: null }), [
+    "node_modules/@x/binding-darwin-arm64 1.0.0 (not installed)",
+  ]);
+});
+
+test("notInstalled reads a libc field as npm does: it excludes a host without a C library it knows, off Linux or not (Sol r4 on #2322)", () => {
+  const glibcOnly = {
+    version: "1.0.0",
+    resolved: "g",
+    integrity: "i",
+    optional: true,
+    libc: ["glibc"],
+  };
+  const lock = {
+    packages: { "": { optionalDependencies: { g: "1" } }, "node_modules/g": glibcOnly },
+  };
+  const none = { packages: {} };
+  // absent: missing on glibc Linux, which it applies to; excluded on musl, on a Mac and on a Linux of unknown libc
+  assert.deepEqual(notInstalled(lock, none, { os: "linux", cpu: "x64", libc: "glibc" }), [
+    "node_modules/g 1.0.0 (not installed)",
+  ]);
+  for (const host of [
+    { os: "linux", cpu: "x64", libc: "musl" },
+    { os: "darwin", cpu: "arm64", libc: null },
+    { os: "linux", cpu: "x64", libc: null },
+  ])
+    assert.deepEqual(notInstalled(lock, none, host), [], JSON.stringify(host));
+});
+
+/** What a refusal of a node_modules whose record does not hold the lockfile says to do. */
+const REMEDIES =
+  "Main's lockfile: wait for teasescript-main's refresh, and remove a node_modules link pinned to a slot instead of " +
+  "`current` (check-changed then links `current`). A branch behind main's lockfile: rebase, or check with --merged. " +
+  "A lockfile the branch changes: run the checks in the queue. Your own node_modules: run `npm ci`";
+
+test(
+  "with a node_modules that does not install the lockfile it runs no check, plain or merged, says what differs, and exits 2 (#2087)",
+  { timeout: 60_000 },
+  () => {
+    const remark = { version: "15.0.1", resolved: "r", integrity: "i" };
+    const platform = { version: "1.0.0", resolved: "p", integrity: "i", optional: true };
+    const lock = { "node_modules/remark": remark, "node_modules/@x/linux": platform };
+    for (const merged of [false, true])
+      for (const [installed, what] of [
+        [{}, "node_modules/remark 15.0.1 (not installed)"],
+        [
+          { "node_modules/remark": { ...remark, version: "15.0.0" } },
+          "node_modules/remark 15.0.1 (installed: 15.0.0)",
+        ],
+        [null, "it has no .package-lock.json, which npm writes at each install"],
+        [{ "node_modules/remark": remark }, null],
+      ]) {
+        const { directory } = repository({ passing: true, lock, installed: installed ?? {} });
+        try {
+          if (installed === null) rmSync(join(directory, "node_modules/.package-lock.json"));
+          const result = spawnSync(
+            process.execPath,
+            [tool, ...(merged ? ["--merged"] : []), "--base", "main"],
+            { cwd: directory, encoding: "utf8", env: environment },
+          );
+          const at = `${merged ? "merged" : "plain"}, ${what}`;
+          if (what === null) {
+            assert.equal(result.status, 0, `${at}: ${result.stdout}${result.stderr}`);
+            continue;
+          }
+          assert.equal(result.status, 2, at);
+          assert.doesNotMatch(result.stdout, /PASS|FAIL/u, at);
+          assert.equal(
+            result.stderr,
+            `check-changed: npm's record of node_modules (${realpathSync(join(directory, "node_modules"))}) does ` +
+              `not hold package-lock.json: ${what}. ${REMEDIES}\n`,
+            at,
+          );
+        } finally {
+          rmSync(directory, { recursive: true, force: true });
+        }
+      }
+  },
+);
+
+test(
+  "a node_modules link switched while the checks run to an install of another lockfile voids their verdicts: exit 2 (#2087)",
+  { timeout: 30_000 },
+  () => {
+    const remark = { version: "15.0.1", resolved: "r", integrity: "i" };
+    for (const switchedTo of [{}, { "node_modules/remark": remark }]) {
+      const { directory } = repository({
+        passing: true,
+        lock: { "node_modules/remark": remark },
+        installed: { "node_modules/remark": remark },
+      });
+      try {
+        // as teasescript-main's refresh does to `current`: the stand-in knip, a check, re-points the link to install b
+        const installs = join(directory, "..", `${basename(directory)}-installs`);
+        mkdirSync(installs);
+        cpSync(join(directory, "node_modules"), join(installs, "a"), { recursive: true });
+        cpSync(join(directory, "node_modules"), join(installs, "b"), { recursive: true });
+        rmSync(join(directory, "node_modules"), { recursive: true });
+        symlinkSync(join(installs, "a"), join(directory, "node_modules"));
+        // (the stand-in repository ignores a node_modules folder, not a link)
+        writeFileSync(join(directory, ".git", "info", "exclude"), "node_modules\n");
+        writeFileSync(
+          join(installs, "b", ".package-lock.json"),
+          JSON.stringify({ lockfileVersion: 3, packages: switchedTo }),
+        );
+        writeFileSync(
+          join(installs, "a", "knip", "bin", "knip.js"),
+          'import { rmSync, symlinkSync } from "node:fs";\n' +
+            `rmSync("node_modules"); symlinkSync(${JSON.stringify(join(installs, "b"))}, "node_modules");\n`,
+        );
+        const result = spawnSync(process.execPath, [tool, "--base", "main"], {
+          cwd: directory,
+          encoding: "utf8",
+          env: environment,
+        });
+        rmSync(installs, { recursive: true, force: true });
+        if (switchedTo["node_modules/remark"] !== undefined) {
+          assert.equal(result.status, 0, result.stdout + result.stderr);
+          continue;
+        }
+        assert.equal(result.status, 2, result.stdout + result.stderr);
+        assert.match(result.stdout, /^PASS {2}knip /mu);
+        assert.equal(
+          result.stderr,
+          "check-changed: node_modules changed while the checks ran, so their verdicts do not count: " +
+            `npm's record of node_modules (${join(installs, "b")}) does not hold package-lock.json: ` +
+            `node_modules/remark 15.0.1 (not installed). ${REMEDIES}\n`,
+        );
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+  },
+);
+
+test(
+  "with this host's platform binding absent from the install record it runs no check and exits 2; another platform's absent passes (Sol final r3 on #2322)",
+  { timeout: 60_000 },
+  () => {
+    const entry = (extra) => ({ version: "1.0.0", resolved: "r", integrity: "i", ...extra });
+    const binding = (os, cpu) => entry({ optional: true, os: [os], cpu: [cpu] });
+    const lock = {
+      "node_modules/x": entry({
+        optionalDependencies: { "@x/binding-here": "1", "@x/binding-elsewhere": "1" },
+      }),
+      "node_modules/@x/binding-here": binding(process.platform, process.arch),
+      "node_modules/@x/binding-elsewhere": binding(
+        process.platform === "aix" ? "sunos" : "aix",
+        "ppc64",
+      ),
+    };
+    for (const [installed, status] of [
+      [["node_modules/x", "node_modules/@x/binding-here"], 0],
+      [["node_modules/x"], 2],
+    ]) {
+      const { directory } = repository({
+        passing: true,
+        lock,
+        installed: Object.fromEntries(installed.map((path) => [path, lock[path]])),
+      });
+      try {
+        const result = spawnSync(process.execPath, [tool, "--base", "main"], {
+          cwd: directory,
+          encoding: "utf8",
+          env: environment,
+        });
+        assert.equal(result.status, status, result.stdout + result.stderr);
+        if (status === 2) {
+          assert.doesNotMatch(result.stdout, /PASS|FAIL/u);
+          assert.match(
+            result.stderr,
+            /does not hold package-lock\.json: node_modules\/@x\/binding-here 1\.0\.0 \(not installed\)\. /u,
+          );
+        }
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+  },
+);

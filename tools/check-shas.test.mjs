@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { excuse } from "./check-shas.mjs";
+import { closingClausesOf, excuse, scratchPathsOf } from "./check-shas.mjs";
 
 const tool = fileURLToPath(new URL("./check-shas.mjs", import.meta.url));
 
@@ -85,7 +85,7 @@ test("a short SHA several commits share is ambiguous", { timeout: 60_000 }, () =
 });
 
 test(
-  "ids, job ids, hex words and paths that resolve nowhere are skipped; each still resolves when it can",
+  "ids, job ids, hex words, float digits and paths that resolve nowhere are skipped; each still resolves when it can",
   { timeout: 30_000 },
   () => {
     const { directory, shas } = repository();
@@ -97,12 +97,13 @@ test(
         "a defaced cafebabe",
         "results in ~/jobs/results/clarity-a/11071351201ab1/out/ and /tmp/x/0c1d2e3f4a5b/",
         "see https://example.com/files/a1b2c3d4e5f6/report",
+        "Number.MAX_VALUE is 1.7976931348623157e+308",
       ].join("\n");
       const { status, out } = check(text, [directory]);
       assert.equal(status, 0, out);
       assert.match(
         out,
-        /9 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 9 skipped/u,
+        /10 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 10 skipped/u,
       );
       // A commit URL is checked; a path that holds a real SHA still reports it.
       const url = check("https://github.com/o/r/commit/0123abc4567", [directory]);
@@ -120,6 +121,10 @@ test(
           null,
         ],
         ["defaced", "a defaced wall", "a word"],
+        ["7976931348623157e", "MAX_VALUE 1.7976931348623157e+308", "a float's digits"],
+        ["02214076e23", "about 6.02214076e23", "a float's digits"],
+        ["7976931348623157e", "1.7976931348623157e is cut", null],
+        ["7976931348623157e", "v7976931348623157e+308", null],
         ["4322b2e0e668", "the runner's sha256 4322b2e0e668", "a file's sha256"],
         ["7ce49d8d3ba1", "(sha256: 7ce49d8d3ba1)", "a file's sha256"],
         ["7ce49d8d3ba1", "SHA256=7ce49d8d3ba1", "a file's sha256"],
@@ -130,6 +135,73 @@ test(
         ["0123abc4567", "merged as 0123abc4567", null],
       ])
         assert.equal(excuse(token, text, text.indexOf(token)), why, text);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "a float's digits are skipped only when no word character touches the number: printable ASCII, tab, newline and each Unicode category, on both sides",
+  { timeout: 30_000 },
+  () => {
+    const { directory } = repository();
+    try {
+      // Every printable ASCII character, tab and newline, and one of each Unicode general category (a lone surrogate, category Cs, cannot be
+      // written as UTF-8 text). Pc and Nd beyond ASCII, and an astral letter, are named too.
+      const characters = [
+        ...Array.from({ length: 95 }, (_, n) => String.fromCharCode(32 + n)),
+        "\t",
+        "\n",
+        ..."AaǅʰĀ版\u0301\u0903\u20dd\u0663\u216b\u00b2\u203f\u2010“”‘’·±€ˆ©\u00a0\u2028\u2029\u0085\u200b\ue000\u0378",
+        "\u{1d463}",
+      ];
+      const word = /^[\p{L}\p{M}\p{N}\p{Pc}]/u;
+      // The claim, applied independently: the integer part is the ASCII digits (and a sign) before the `.`; the number
+      // stands alone when the character before them is neither a word character nor a `.`, and the one after the
+      // exponent's digits is no word character.
+      const cases = [];
+      for (const [n, character] of characters.entries()) {
+        const exponent = 100 + n;
+        const left = `${character}1.2100e${exponent}`;
+        const before = left.slice(0, left.indexOf("1.2100e")).replace(/[+-]?\d*$/u, "");
+        const leftChar = [...before].at(-1) ?? "";
+        cases.push({
+          text: left,
+          token: `2100e${exponent}`,
+          skipped: leftChar !== "." && !word.test(leftChar),
+        });
+        const mantissa = 2_100_000 + n;
+        const right = `1.${mantissa}e+${exponent}${character}`;
+        const after = right.slice(right.indexOf("+") + 1).replace(/^\d+/u, "");
+        cases.push({
+          text: right,
+          token: `${mantissa}e`,
+          skipped: !word.test([...after][0] ?? " "),
+        });
+      }
+      // (each on its own line, so that no case's text reaches another's; every token differs, so each is reported)
+      const { out } = check(cases.map((found) => `\n${found.text}\n`).join(""), [directory]);
+      for (const found of cases)
+        assert.equal(
+          !new RegExp(`unresolved +${found.token} `, "u").test(out),
+          found.skipped,
+          JSON.stringify(found.text),
+        );
+      assert.ok(cases.length > 2 * 120, `${cases.length} cases`);
+      // The issue's two numbers, in backticks and in curly quotes, and the forms earlier rounds named.
+      for (const [text, skipped] of [
+        ["`1.7976931348623157e+308`", true],
+        ["“6.02214076e23”", true],
+        ["tagged v1.210e785", false],
+        ["tagged β1.210e785", false],
+        ["tagged \u{1d463}1.210e785", false],
+        ["version 1.2.210e785", false],
+        ["1.1234567e+8oops", false],
+      ]) {
+        const { out } = check(text, [directory]);
+        assert.equal(/^unresolved /mu.test(out), !skipped, text);
+      }
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -152,6 +224,264 @@ test("an unfilled placeholder fails", { timeout: 30_000 }, () => {
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+test(
+  "a closing clause that names several issues after one keyword fails",
+  { timeout: 30_000 },
+  () => {
+    const { directory } = repository();
+    try {
+      const { status, out } = check("Closes #1970, #1965, #1956 (by the ruled reading)\n", [
+        directory,
+      ]);
+      assert.equal(status, 1, out);
+      assert.match(
+        out,
+        /closing +line 1: "Closes #1970, #1965, #1956" names several issues after one keyword; as closing syntax it closes only #1970\. Give each issue meant to close its own keyword \(Closes #1, Closes #2\); otherwise end the clause after the first reference \(a new sentence for the rest\), or split a quoted example so that no keyword stands before the list$/mu,
+      );
+      // (the final's colour: digits that run on into a word character are no reference)
+      const colour = check("Fixes #2147" + ", #123abc now normalizes identically.\n", [directory]);
+      assert.equal(colour.status, 0, colour.out);
+      assert.match(
+        out.trim().split("\n").at(-1),
+        /0 placeholders, 1 multi-issue closing clauses, 0 scratch paths$/u,
+      );
+      // (a comma and a conjunction together, across a line break)
+      const listed = check("text\nCloses #12,\nand #13\n", [directory]);
+      assert.equal(listed.status, 1, listed.out);
+      assert.match(listed.out, /line 2: "Closes #12,\nand #13" .* closes only #12\. /u);
+      // (a cost witness: a comma and 60,000 spaces before no reference, which an overlapping separator walked quadratically)
+      const spaces = check(`Closes #12,${" ".repeat(60_000)}x`, [directory]);
+      assert.equal(spaces.status, 0, spaces.out);
+      for (const [text, closes] of [
+        ["fixes: #1 and #2", ["#1"]],
+        ["Closes #12, and #13", ["#12"]],
+        ["closes: https://github.com/o/r/issues/1, #2", ["https://github.com/o/r/issues/1"]],
+        ["Closes #1, https://github.com/o/r/issues/2", ["#1"]],
+        // (code is read like any text: a quoted clause fails, whatever code or delimiters surround it)
+        ["``a`b`` Closes #12, #13 `tail`", ["#12"]],
+        ["    ```\n\nCloses #12, #13\n\n    ```\n", ["#12"]],
+        ["``Closes #1, #2``", ["#1"]],
+        ["~~~\nCloses #1, #2\n~~~\n", ["#1"]],
+        ["\\` Closes #12, #13 `tail`", ["#12"]],
+        ["literal `\n# Heading\nCloses #12, #13 `tail`", ["#12"]],
+        ["literal `\r\n\r\nCloses #12, #13\r\n\r\n`tail`", ["#12"]],
+        ["```bad`info\n\nCloses #12, #13\n\n```\n", ["#12"]],
+        // (a cost witness: a 60,000-backtick line, which the earlier code stripping walked superlinearly)
+        [`${"`".repeat(60_000)}\nCloses #12, #13\n`, ["#12"]],
+        ["Closes #1 `x` #2", []],
+        ["Resolved o/r#3 & #4", ["o/r#3"]],
+        ["closed #5,#6", ["#5"]],
+        ["Closes #1, closes #2", []],
+        ["Closes #1\nRefs #2, #3", []],
+        ["Closes #1. #2 follows", []],
+        ["the comment `Closes #1, #2` closed only #1", ["#1"]],
+        ["```\nCloses #1, #2\n```\n", ["#1"]],
+        // (each keyword and reference form, so that a pattern missing one fails its row)
+        ["close #1, #2", ["#1"]],
+        ["Fixed #1, #2", ["#1"]],
+        ["FIX #1, #2", ["#1"]],
+        ["resolve #1, #2", ["#1"]],
+        ["resolves #1 & #2", ["#1"]],
+        ["Closes o/r#1, #2", ["o/r#1"]],
+        ["encloses #1, #2", []],
+      ])
+        assert.deepEqual(
+          closingClausesOf(text).map((found) => found.closes),
+          closes,
+          JSON.stringify(text),
+        );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test("closingClausesOf, over generated clauses: a reference ends where its number ends", () => {
+  const keywords = [
+    "close",
+    "closes",
+    "closed",
+    "fix",
+    "fixes",
+    "fixed",
+    "resolve",
+    "resolves",
+    "resolved",
+  ];
+  const spellings = [
+    (k) => k,
+    (k) => k[0].toUpperCase() + k.slice(1),
+    (k) => `${k.toUpperCase()}:`,
+  ];
+  const forms = [(n) => `#${n}`, (n) => `o/r#${n}`, (n) => `https://github.com/o/r/issues/${n}`];
+  const separators = [", ", " and ", ", and ", " & "];
+  // What stands directly after a reference's digits, and whether the reference still ends there: a word character
+  // (a letter of any script, a connector, a combining mark, a digit of any script) runs the number on, so there is no
+  // reference.
+  // (`null` is the end of the text after the second reference, and nothing but the separator after the first)
+  const after = [
+    [null, true],
+    [" ", true],
+    [".", true],
+    [")", true],
+    ["-", true],
+    ["\n", true],
+    ["abc", false],
+    ["é", false],
+    ["_x", false],
+    ["\u203f", false],
+    ["\u0301", false],
+    ["١", false],
+  ];
+  let cases = 0;
+  for (const keyword of keywords)
+    for (const spell of spellings)
+      for (const form of forms)
+        for (const separator of separators)
+          for (const [first, firstEnds] of after)
+            for (const [second, secondEnds] of after) {
+              // (a first reference stays in a list only when the separator follows it, so after it stands nothing
+              // or a word character; any other character ends the clause before the list)
+              if (firstEnds && first !== null) continue;
+              const text =
+                `${spell(keyword)} ${form(12)}${first ?? ""}${separator}${form(13)}` +
+                (second === null ? "" : `${second} rest`);
+              const expected = firstEnds && secondEnds ? [form(12)] : [];
+              assert.deepEqual(
+                closingClausesOf(text).map((found) => found.closes),
+                expected,
+                JSON.stringify(text),
+              );
+              cases += 1;
+            }
+  assert.equal(cases, 9 * 3 * 3 * 4 * 7 * 12);
+});
+
+test(
+  "a path into the scratch area is named with its line and counted, and fails nothing",
+  { timeout: 60_000 },
+  () => {
+    const { directory } = repository();
+    try {
+      const { status, out } = check(
+        "Report\nEvidence /tmp/agent-work/lane3/cross64.tsv, retained at ~/work/evidence/lane3/cross64.tsv.\n",
+        [directory],
+      );
+      assert.equal(status, 0, out);
+      assert.match(
+        out,
+        /^scratch +line 2: \/tmp\/agent-work\/lane3\/cross64\.tsv +under \/tmp\/agent-work, deleted after inactivity: if a reader needs the file, move it to retained evidence and cite that copy$/mu,
+      );
+      assert.match(
+        out.trim().split("\n").at(-1),
+        /0 placeholders, 0 multi-issue closing clauses, 1 scratch paths$/u,
+      );
+      // The count beside a failure: a scratch path changes no exit status either way.
+      assert.equal(check("<sha> in /tmp/agent-work/a/b\n", [directory]).status, 1);
+      for (const [text, count] of [
+        ["|/tmp/agent-work/a|/tmp/agent-work/b|", 2],
+        [
+          "The scratch area is /tmp/agent-work/. Or /tmp/agent-work/... or /tmp/agent-work/<task>/",
+          0,
+        ],
+      ]) {
+        const result = check(`${text}\n`, [directory]);
+        assert.equal(result.status, 0, `${text}: ${result.out}`);
+        assert.match(
+          result.out.trim().split("\n").at(-1),
+          new RegExp(` ${count} scratch paths$`, "u"),
+          text,
+        );
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "scratchPathsOf, over generated descendants, containers and endings",
+  { timeout: 30_000 },
+  () => {
+    const before = ["/tmp/", "../"];
+    const area = ["agent-work"];
+    const inside = ["a", "@lane/r.out", "+run/r.out", "épreuve/r.out", "./a/b.txt", "a/../b"];
+    const outside = ["", ".", "./", "..", "../a", "<task>/", "./."];
+    const containers = [
+      (p) => p,
+      (p) => `\`${p}\``,
+      (p) => `(${p})`,
+      (p) => `[r](${p})`,
+      (p) => `| ${p} |`,
+      (p) => `'${p}'`,
+      (p) => `"${p}"`,
+    ];
+    const endings = ["", ".", ",", ";", ":", "!", "?", "..."];
+    let cases = 0;
+    for (const head of before)
+      for (const name of area)
+        for (const [tails, named] of [
+          [inside, true],
+          [outside, false],
+        ])
+          for (const tail of tails)
+            for (const contain of containers)
+              for (const end of endings) {
+                const path = `${head}${name}/${tail}`;
+                const text = `see ${contain(path)}${end} next`;
+                // (a path's own last characters that are sentence punctuation are no part of what it names)
+                const expected = named ? [path.replace(/[.,;:!?]+$/u, "")] : [];
+                assert.deepEqual(
+                  scratchPathsOf(text).map((found) => found.path),
+                  expected,
+                  text,
+                );
+                cases += 1;
+              }
+    assert.equal(cases, 2 * 13 * 7 * 8);
+    for (const [text, paths] of [
+      ["/tmp/agent-work/a and /tmp/agent-work/a", ["/tmp/agent-work/a"]],
+      ["/tmp/agent-workshop/a bin/prepare-agent-workspace.sh", []],
+      ["~/work/evidence/friction/a.out", []],
+      // (the area's name is what is seen, wherever the folder is: a folder of that name elsewhere counts too)
+      ["/home/x/tmp/agent-work/a", ["/home/x/tmp/agent-work/a"]],
+    ])
+      assert.deepEqual(
+        scratchPathsOf(text).map((found) => found.path),
+        paths,
+        text,
+      );
+    // Each path once, with the line it first stands on.
+    assert.deepEqual(
+      scratchPathsOf("a\r\nb /tmp/agent-work/x\n\n/tmp/agent-work/y /tmp/agent-work/x"),
+      [
+        { path: "/tmp/agent-work/x", line: 2 },
+        { path: "/tmp/agent-work/y", line: 4 },
+      ],
+    );
+    // Cost: punctuation inside or at the end of a long path is read once. A regex trimming the end took quadratic time,
+    // about 400 s here; linear takes milliseconds. The child is killed at 20 s, as a test's timeout stops no loop.
+    const cost = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `import { scratchPathsOf } from ${JSON.stringify(tool)};
+const dots = ".".repeat(2 ** 19);
+const found = [
+  scratchPathsOf("/tmp/agent-work/a" + dots + "x").length,
+  scratchPathsOf("/tmp/agent-work/" + dots).length,
+  scratchPathsOf("/tmp/agent-work" + "/.".repeat(2 ** 18) + "/a").length,
+];
+process.stdout.write(found.join(" "));`,
+      ],
+      { encoding: "utf8", timeout: 20_000 },
+    );
+    assert.equal(cost.signal, null, "killed at 20 s");
+    assert.equal(cost.stdout, "1 0 1", cost.stderr);
+  },
+);
 
 test(
   "each --repo is asked, and a token resolves in the one that has it",
@@ -183,11 +513,11 @@ test(
       for (const [text, line] of [
         [
           "",
-          "0 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 0 placeholders",
+          "0 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 0 placeholders, 0 multi-issue closing clauses, 0 scratch paths",
         ],
         [
           `at ${shas[0].slice(0, 9)}, <sha>`,
-          "1 tokens: 1 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 1 placeholders",
+          "1 tokens: 1 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 1 placeholders, 0 multi-issue closing clauses, 0 scratch paths",
         ],
       ]) {
         const { out } = check(text, [directory]);
@@ -255,6 +585,61 @@ test(
         off.out.trim().split("\n").at(-1),
         /1 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 1 local only, 0 skipped/u,
       );
+    } finally {
+      for (const path of [directory, origin]) rmSync(path, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "a commit on origin only under refs/archive/* or in a refs/pull/<n>/head resolves at that ref",
+  { timeout: 30_000 },
+  () => {
+    const { directory, origin, local } = withRemote();
+    const git = (...args) =>
+      spawnSync("git", ["-C", directory, "-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+        encoding: "utf8",
+      }).stdout.trim();
+    try {
+      // A pre-rebase head archived under its item, and a squash-merged pull request whose earlier head is cited too;
+      // the default fetch mirrors neither.
+      git("push", "-q", "origin", `${local}:refs/archive/item/${local}`);
+      const tree = git("rev-parse", "main^{tree}");
+      const earlier = git("commit-tree", tree, "-p", "origin/main", "-m", "pr 1");
+      const prHead = git("commit-tree", tree, "-p", earlier, "-m", "pr 2");
+      git("push", "-q", "origin", `${prHead}:refs/pull/7/head`);
+      // (an annotated tag archived: listed as the tag and, peeled, as `refs/archive/tagged^{}`)
+      const tagged = git("commit-tree", tree, "-p", "origin/main", "-m", "tagged");
+      git("tag", "-a", "-m", "t", "tagged", tagged);
+      git("push", "-q", "origin", "refs/tags/tagged:refs/archive/tagged");
+      const stray = git("commit-tree", tree, "-p", "origin/main", "-m", "stray");
+      git("fetch", "-q", "origin");
+      const text = [local, prHead, earlier, tagged, stray]
+        .map((sha) => sha.slice(0, 10))
+        .join(", ");
+      const { status, out } = check(text, [directory]);
+      assert.equal(status, 1, out);
+      for (const [sha, ref] of [
+        [local, `refs/archive/item/${local}`],
+        [prHead, "refs/pull/7/head"],
+        [earlier, "refs/pull/7/head"],
+        [tagged, "refs/archive/tagged"],
+      ])
+        assert.match(
+          out,
+          new RegExp(`resolved +${sha.slice(0, 10)} +${sha} in .*, on origin at ${ref}\n`, "u"),
+        );
+      assert.match(out, new RegExp(`local only +${stray.slice(0, 10)} `, "u"));
+      assert.match(out.trim().split("\n").at(-1), /5 tokens: 4 resolved, .* 1 local only,/u);
+      // An origin that cannot be listed is named, and leaves the commit local only.
+      git("remote", "set-url", "origin", join(origin, "missing"));
+      const unlisted = check(local, [directory]);
+      assert.equal(unlisted.status, 1, unlisted.out);
+      assert.match(
+        unlisted.out,
+        /cannot list origin's refs in .*: archived and pull-request heads not checked/u,
+      );
+      assert.match(unlisted.out, /1 tokens: 0 resolved, .* 1 local only,/u);
     } finally {
       for (const path of [directory, origin]) rmSync(path, { recursive: true, force: true });
     }
