@@ -22,7 +22,8 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const checkout = realpathSync(fileURLToPath(new URL("..", import.meta.url)));
-const scratch = mkdtempSync(join(tmpdir(), "player-preview-"));
+/** The run's scratch folder, made when the run starts. */
+let scratch = "";
 const session = `player-preview-${process.pid}`;
 /** The Playwright CLI commands that run, which the shutdown stops. */
 const running = new Set();
@@ -96,17 +97,6 @@ function shutDown(failure) {
   })();
   return shutdown;
 }
-for (const [signal, number] of [
-  ["SIGINT", 2],
-  ["SIGTERM", 15],
-])
-  // Kept for the whole shutdown: a stopped Playwright CLI command can signal its process group, this process included.
-  process.on(signal, () => {
-    if (shutdown !== null) return;
-    console.error(`player-preview-checks: stopped by ${signal}`);
-    void shutDown(new Error(`stopped by ${signal}`)).finally(() => process.exit(128 + number));
-  });
-
 /** Refuses a server that does not say it serves this checkout. */
 async function checkServedCheckout(url) {
   const endpoint = new URL("__checkout", url.endsWith("/") ? url : `${url}/`);
@@ -803,41 +793,62 @@ async function runGroup(browserPage, run, url, artifacts) {
   }
 }
 
-let failure = null;
-try {
-  const url = process.argv[2] ?? (await startPreview());
-  if (server !== null)
-    console.log(`player-preview-checks: started this checkout's preview at ${url}`);
-  await checkServedCheckout(url);
-  const config = join(scratch, "browser.json");
-  writeFileSync(
-    config,
-    JSON.stringify({
-      browser: {
-        contextOptions: { ignoreHTTPSErrors: true },
-        // X11 agents may report no pointer; exercise the real desktop hover CSS as well as touch tests.
-        launchOptions: {
-          args: [
-            "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4",
-          ],
+/** Runs every group against the preview: this checkout's own when no URL is given. */
+async function main() {
+  scratch = mkdtempSync(join(tmpdir(), "player-preview-"));
+  for (const [signal, number] of [
+    ["SIGINT", 2],
+    ["SIGTERM", 15],
+  ])
+    // Kept for the whole shutdown: a stopped Playwright CLI command can signal its process group, this process included.
+    process.on(signal, () => {
+      if (shutdown !== null) return;
+      console.error(`player-preview-checks: stopped by ${signal}`);
+      void shutDown(new Error(`stopped by ${signal}`)).finally(() => process.exit(128 + number));
+    });
+  let failure = null;
+  try {
+    const url = process.argv[2] ?? (await startPreview());
+    if (server !== null)
+      console.log(`player-preview-checks: started this checkout's preview at ${url}`);
+    await checkServedCheckout(url);
+    const config = join(scratch, "browser.json");
+    writeFileSync(
+      config,
+      JSON.stringify({
+        browser: {
+          contextOptions: { ignoreHTTPSErrors: true },
+          // X11 agents may report no pointer; exercise the real desktop hover CSS as well as touch tests.
+          launchOptions: {
+            args: [
+              "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4",
+            ],
+          },
         },
-      },
-    }),
-  );
-  await cli("open", url, "--config", config);
-  for (const group of groups) {
-    console.log(`player-preview-checks: RUN ${group.name}`);
-    const output = await cli(
-      "run-code",
-      `async page => (${runGroup.toString()})(page, ${group.toString()}, ${JSON.stringify(url)}, ${JSON.stringify(join(scratch, group.name))})`,
+      }),
     );
-    const result = output.match(/^### Result\r?\n"(PASS [^"\n]+)"$/mu)?.[1];
-    if (!result) throw new Error(output);
-    console.log(`player-preview-checks: ${result}`);
+    await cli("open", url, "--config", config);
+    for (const group of groups) {
+      console.log(`player-preview-checks: RUN ${group.name}`);
+      const output = await cli(
+        "run-code",
+        `async page => (${runGroup.toString()})(page, ${group.toString()}, ${JSON.stringify(url)}, ${JSON.stringify(join(scratch, group.name))})`,
+      );
+      const result = output.match(/^### Result\r?\n"(PASS [^"\n]+)"$/mu)?.[1];
+      if (!result) throw new Error(output);
+      console.log(`player-preview-checks: ${result}`);
+    }
+  } catch (error) {
+    failure = error;
   }
-} catch (error) {
-  failure = error;
+  const problems = await shutDown(failure);
+  if (failure !== null) throw failure;
+  if (problems.length > 0) throw problems[0];
 }
-const problems = await shutDown(failure);
-if (failure !== null) throw failure;
-if (problems.length > 0) throw problems[0];
+
+// Run as a program only, so that importing this file starts nothing.
+if (
+  process.argv[1] !== undefined &&
+  realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
+)
+  await main();
