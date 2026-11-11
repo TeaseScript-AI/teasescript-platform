@@ -1,10 +1,14 @@
-// pins: a written default's walk units | line /units: \d/u
+// pins: a written default's index and walk units | line /built: \d/u
 import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileProjectWithBackend } from "../../src/compiler.js";
 import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
-import { defaultOf, writtenDefault } from "../../src/type-inference/core/contract.js";
+import {
+  defaultOf,
+  writtenDefault,
+  WrittenDefaults,
+} from "../../src/type-inference/core/contract.js";
 import { coreRequest } from "../helpers/type-core-analysis.js";
 import { narrowingPassIn } from "../helpers/type-core/type-core-narrowing.js";
 import { inMode, MODES } from "../helpers/type-core-oracles.js";
@@ -18,8 +22,9 @@ const GLOBALS = ["hostValue"];
 /**
  * #1072 step 0: a default with a written type is read by that type (ADR 0021 rule 2.6, "its default's type";
  * `writtenDefault`): a row per form the rule admits and per class of its acceptance rows, `@` the typed call, its reader
- * in the plan and what the call's value shows of each JSON text. The written `T?` rows read the written type where the
- * owner has not yet decided between it and the narrowed one (rules 5.1, 5.2; the pull request's open question).
+ * in the plan and what the call's value shows of each JSON text. A row named "awaits the owner" reads the written type
+ * where the narrowed one (rules 5.1, 5.2) reads otherwise: which of the two rule 2.6 means is the owner's open question
+ * (`writtenAt`).
  */
 const WRITTEN_DEFAULTS: readonly {
   readonly name: string;
@@ -70,7 +75,7 @@ const WRITTEN_DEFAULTS: readonly {
     ],
   },
   {
-    name: "integer? holding null (R11's let-through)",
+    name: "integer? holding null (R11's let-through), awaits the owner",
     source: "let fb: integer? = null\nlet v = @\nsay v",
     fallback: "fb",
     reader: "integer|null",
@@ -83,7 +88,7 @@ const WRITTEN_DEFAULTS: readonly {
     ],
   },
   {
-    name: "number? holding null, through a copy",
+    name: "number? holding null, through a copy, awaits the owner",
     source: "let w: number? = null\nlet fb = w\nlet v = @\nsay v",
     fallback: "fb",
     reader: "null|number",
@@ -94,7 +99,7 @@ const WRITTEN_DEFAULTS: readonly {
   },
   {
     // (its kinds certain: as possible ones the plan's later copy `v = a` left the slice, #1072 step 0's R7)
-    name: "number? holding a whole number, a written copy stored later (#2307's nullable callfirst)",
+    name: "number? holding a whole number, a written copy stored later (#2307's nullable callfirst), awaits the owner",
     source: "let a: number? = 0\nlet fb: number? = 0\nlet v = @\nsay v\nv = a",
     fallback: "fb",
     reader: "null|number",
@@ -105,7 +110,7 @@ const WRITTEN_DEFAULTS: readonly {
     ],
   },
   {
-    name: "string? holding null",
+    name: "string? holding null, awaits the owner",
     source: "let fb: string? = null\nlet v = @\nsay v",
     fallback: "fb",
     reader: "null|string",
@@ -177,12 +182,15 @@ test("a default's written type is certain: a number default is no repeat count (
   }
 });
 
-/** The rule's answer for the one typed call of `text` (`@`, its default `fb`) at `rest`, and the units it charged. */
+/**
+ * The rule's answer for the one typed call of `text` (`@`, its default `fb`) at `rest`, the units its index charges
+ * where it is built and the units its walk charges.
+ */
 function ruleAt(
   text: string,
   rest: readonly string[],
   reversed: boolean,
-): { readonly items: string[] | null; readonly units: number } {
+): { readonly items: string[] | null; readonly built: number; readonly walked: number } {
   const source = `${text.replace("@", "let v = fromJson(hostValue, default: fb, files: false)")}\nexit\n`;
   const request = coreRequest([{ path: "main.tease", source }], GLOBALS);
   assert.ok(request !== null, text);
@@ -193,25 +201,42 @@ function ruleAt(
   });
   const [fallback] = fallbacks;
   assert.ok(fallbacks.length === 1 && fallback !== undefined, text);
-  const before = pass.program.work.counts().get("invSteps") ?? 0;
+  const count = (counter: "indexSteps" | "invSteps") =>
+    pass.program.work.counts().get(counter) ?? 0;
+  const indexed = count("indexSteps");
+  void new WrittenDefaults(pass.program, pass.definitions);
+  const built = count("indexSteps") - indexed;
+  const before = count("invSteps");
   const items = writtenDefault(pass, fallback, rest);
   return {
     items: items === null ? null : items.map((item) => `${item.tag} ${item.cert}`),
-    units: (pass.program.work.counts().get("invSteps") ?? 0) - before,
+    built,
+    walked: count("invSteps") - before,
   };
 }
 
-test("a written parameter or global, which the candidate route declines, and a chain of copies give their written type, a unit per binding followed (#1072 step 0)", () => {
+test("a written parameter or global, which the candidate route declines, a chain of copies and a literal's cells give their written type; the index pays per binding and cell, the walk per literal and type (#1072 step 0)", () => {
   const rows = [
-    { text: "function f(fb: number) {\n  @\n}\nf(0)", units: 1 },
-    { text: "global fb: number = 0\n@", units: 1 },
-    { text: "let w: number = 0\nlet f1 = w\nlet fb = f1\n@", units: 3 },
-    // (its binding, its literal, the literal's two cells and the binding each reads)
-    { text: "let w: number = 0\nlet fb = [w, w]\n@", rest: ["element"], units: 6 },
+    { text: "function f(fb: number) {\n  @\n}\nf(0)", built: 1, walked: 1 },
+    { text: "global fb: number = 0\n@", built: 1, walked: 1 },
+    { text: "let w: number = 0\nlet f1 = w\nlet fb = f1\n@", built: 3, walked: 1 },
+    // (the index: the binding, the literal's step, each cell and the binding each reads; the walk: the literal and the
+    // one written type its cells hold, however many cells hold it)
+    { text: "let w: number = 0\nlet fb = [w, w]\n@", rest: ["element"], built: 6, walked: 2 },
+    {
+      text: "let w: number = 0\nlet fb = [w, w, w, w]\n@",
+      rest: ["element"],
+      built: 10,
+      walked: 2,
+    },
   ];
-  for (const { text, rest = [], units } of rows)
+  for (const { text, rest = [], built, walked } of rows)
     for (const reversed of [false, true])
-      assert.deepEqual(ruleAt(text, rest, reversed), { items: ["number def"], units }, text);
+      assert.deepEqual(
+        ruleAt(text, rest, reversed),
+        { items: ["number def"], built, walked },
+        text,
+      );
 });
 
 test("a default's written type is none outside the forms the rule admits, the default then read as it holds at the call (#1072 step 0)", () => {
