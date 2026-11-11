@@ -11,5 +11,9 @@ RuleTester.describe = (text, cases) => {
 RuleTester.it = (text, check) => {
   void it(text, check);
 };
+// (after `it`, whose setter clears it: a case with `only: true`, and `RuleTester.only`, use it)
+RuleTester.itOnly = (text, check) => {
+  void it.only(text, check);
+};
 
 export { RuleTester };

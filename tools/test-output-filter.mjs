@@ -97,7 +97,31 @@ if (unmatched.length > 0) {
 const countsFolder =
   fullSuite || fullOutput ? null : mkdtempSync(join(tmpdir(), "test-file-counts-"));
 const countsFile = countsFolder === null ? null : join(countsFolder, "counts.json");
-const selected = [...arguments_, ...(process.env.NODE_OPTIONS ?? "").split(/\s+/u)].some((option) =>
+/**
+ * `NODE_OPTIONS`' options as Node splits them (`ParseNodeOptionsEnvVar` in its `src/node_options.cc`): at a space outside
+ * double quotes, the quotes dropped, a backslash inside them taking the next character as it is.
+ */
+function nodeOptions(text) {
+  const options = [];
+  let quoted = false;
+  let next = true;
+  for (let index = 0; index < text.length; index += 1) {
+    let character = text[index];
+    if (character === "\\" && quoted) character = text[(index += 1)] ?? "";
+    else if (character === " " && !quoted) {
+      next = true;
+      continue;
+    } else if (character === '"') {
+      quoted = !quoted;
+      continue;
+    }
+    if (next) options.push(character);
+    else options[options.length - 1] += character;
+    next = false;
+  }
+  return options;
+}
+const selected = [...arguments_, ...nodeOptions(process.env.NODE_OPTIONS ?? "")].some((option) =>
   /^--test[-_](?:(?:name|skip)[-_]pattern|only)(?:=|$)/u.test(option),
 );
 // The folder is removed when the run ends or the filter exits. The filter installs no signal handler, so a signal that

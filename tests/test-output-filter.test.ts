@@ -198,9 +198,14 @@ test("compact output ends with each named file's counts, after Node's own output
   assert.deepEqual(compact.leftover, []);
   // after Node's own output: the summary and the failures
   assert.match(compact.stdout, /failing test[\s\S]*\nℹ \S*counted\.test\.mjs: /u);
-  // a file that ran no test fails the run, a suite alone included, and its line says so
-  for (const name of ["suites.test.mjs", "silent.test.mjs"]) {
-    const none = runFixtures(fixtures, false, (directory) => [resolve(directory, name)]);
+  // a file that ran no test fails the run, a suite alone included, and its line says so; so does one whose
+  // NODE_OPTIONS hold a selection's words inside another option's value
+  for (const [name, variables] of [
+    ["suites.test.mjs", {}],
+    ["silent.test.mjs", {}],
+    ["silent.test.mjs", { NODE_OPTIONS: '--title="label --test-only --test-name-pattern=x"' }],
+  ] as const) {
+    const none = runFixtures(fixtures, false, (directory) => [resolve(directory, name)], variables);
     assert.equal(none.status, 1, `${name}: ${none.stdout}${none.stderr}`);
     assert.match(
       none.stdout,
@@ -219,6 +224,10 @@ test("compact output ends with each named file's counts, after Node's own output
     [["--test-skip_pattern", "."], {}],
     [["--test-only"], {}],
     [[], { NODE_OPTIONS: "--test-name-pattern=nosuch" }],
+    // (NODE_OPTIONS split as Node splits it: quoted, with a space inside, and an option and its value apart)
+    [[], { NODE_OPTIONS: '"--test-name-pattern=no such test"' }],
+    [[], { NODE_OPTIONS: '--test-name-pattern="no such test"' }],
+    [[], { NODE_OPTIONS: '"--test-skip-pattern" "."' }],
   ] as const) {
     const unmatched = runFixtures(
       fixtures,
