@@ -124,11 +124,13 @@ export function contextSentence(
 /**
  * The properties the subject reads below the place its writer's value lands in (`o.x` below `o = { x: null }`: `x`),
  * where both are plain paths of one root; none where the writer is the read itself (a call, a `load`, a selection used
- * where it stands); `null` where it cannot be told.
+ * where it stands, as an argument too); `null` where it cannot be told.
  */
 function readBelow(required: RequiredCheck, source: MessageSource): readonly string[] | null {
+  // (the writer read where it is used, an argument among them: its own value)
+  if (source.text(required.writer) === required.subject) return [];
   const landing = source.landing(required.writer);
-  if (landing === null) return source.text(required.writer) === required.subject ? [] : null;
+  if (landing === null) return null;
   const names: string[] = [];
   let at = parsedExpression(required.subject)?.expression;
   while (at?.kind === "propertyAccessExpression" && !selectsElement(at.property.name)) {
