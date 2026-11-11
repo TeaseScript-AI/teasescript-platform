@@ -29,63 +29,61 @@ import type { RetainedRecorder } from "../../src/type-inference/core/retained/re
  * one through retained state: `census` where the reason is a test (`Recorder`'s `census` option walks them by value).
  * A class met in retained state and missing here fails the recorder.
  */
-export const IDENTITY_CLASSES: ReadonlyMap<
-  string,
-  { readonly reason: string; readonly census: boolean }
-> = new Map([
-  [
-    "Solver",
-    {
-      reason:
-        "the solver's own records: a run reads them through solver reads, which the rule's reads govern, never as retained data",
-      census: false,
-    },
-  ],
-  [
-    "WorkLedger",
-    {
-      reason:
-        "the work ledger: every charge changes it by design, and a stop reads it under the resource rule, not as retained data",
-      census: false,
-    },
-  ],
-  [
-    "IngressGraph",
-    {
-      reason:
-        "the item scope's ingress cells: every run that makes an item may add one, as every charge adds to the ledger; an item names its cells, and items compare by their own signature",
-      census: false,
-    },
-  ],
-  [
-    "CoreProgram",
-    {
-      reason:
-        "the program, indexed before the first pass and read by every pass: the census run finds no change",
-      census: true,
-    },
-  ],
-  [
-    "NestedSpans",
-    {
-      reason:
-        "built whole in its constructor: its private fields are written nowhere else (src/type-inference/core/exact-path.ts)",
-      census: false,
-    },
-  ],
-  [
-    "RecorderProbe",
-    {
-      reason: "a negative control's own marker (tests/type-core/retained-recorder.test.ts)",
-      census: false,
-    },
-  ],
-]);
+const IDENTITY_CLASSES: ReadonlyMap<string, { readonly reason: string; readonly census: boolean }> =
+  new Map([
+    [
+      "Solver",
+      {
+        reason:
+          "the solver's own records: a run reads them through solver reads, which the rule's reads govern, never as retained data",
+        census: false,
+      },
+    ],
+    [
+      "WorkLedger",
+      {
+        reason:
+          "the work ledger: every charge changes it by design, and a stop reads it under the resource rule, not as retained data",
+        census: false,
+      },
+    ],
+    [
+      "IngressGraph",
+      {
+        reason:
+          "the item scope's ingress cells: every run that makes an item may add one, as every charge adds to the ledger; an item names its cells, and items compare by their own signature",
+        census: false,
+      },
+    ],
+    [
+      "CoreProgram",
+      {
+        reason:
+          "the program, indexed before the first pass and read by every pass: the census run finds no change",
+        census: true,
+      },
+    ],
+    [
+      "NestedSpans",
+      {
+        reason:
+          "built whole in its constructor: its private fields are written nowhere else (src/type-inference/core/exact-path.ts)",
+        census: false,
+      },
+    ],
+    [
+      "RecorderProbe",
+      {
+        reason: "a negative control's own marker (tests/type-core/retained-recorder.test.ts)",
+        census: false,
+      },
+    ],
+  ]);
 
 /** One run's marks: the entries its collections' writes named, and the objects it amended. */
 interface Marks {
   readonly written: Set<string>;
-  readonly amended: WeakSet<object>;
+  readonly amended: WeakSet<WeakKey>;
 }
 
 interface Registered {
@@ -100,8 +98,10 @@ interface Recording extends Registered {
 }
 
 interface OwnerRecord extends Registered {
-  readonly owner: WeakRef<object>;
-  readonly hidden: ((owner: object) => Readonly<Record<string, unknown>>) | null;
+  /** The owner's fields, its private ones that hold retained state too; `null` once it is gone. */
+  readonly fields: () => readonly (readonly [string, unknown])[] | null;
+  /** Whether the run's marks amend the owner itself. */
+  readonly amendedBy: (amended: WeakSet<WeakKey>) => boolean;
 }
 
 /** A recorder's findings: each violation once per entry and run, and the writes made outside a solver run. */
@@ -153,18 +153,18 @@ export class Recorder implements RetainedRecorder {
   readonly #locate: boolean;
   readonly #census: boolean;
   /** Each object's fingerprint at the last checkpoint, kept only where `locate` asks for it. */
-  #lastMemo = new Map<object, { readonly hash: string; readonly amended: boolean }>();
-  readonly #ids = new WeakMap<object, number>();
+  #lastMemo = new Map<WeakKey, { readonly hash: string; readonly amended: boolean }>();
+  readonly #ids = new WeakMap<WeakKey, number>();
   readonly #symbols = new Map<symbol, number>();
   #next = 1;
   readonly #collections: WeakRef<Recording & object>[] = [];
   readonly #owners: OwnerRecord[] = [];
   /** Each registered collection and owner, by itself: met inside a value, it is a reference. */
-  readonly #registered = new WeakMap<object, string>();
+  readonly #registered = new WeakMap<WeakKey, string>();
   /** The current run, and its marks; an interval outside any solver run is a run of its own. */
-  #run: object = { outside: true };
+  #run: WeakKey = { outside: true };
   #outside = true;
-  readonly #marks = new WeakMap<object, Marks>();
+  readonly #marks = new WeakMap<WeakKey, Marks>();
   /** Each entry's fingerprint at the last checkpoint. */
   #before = new Map<string, string>();
   readonly #violations: string[] = [];
@@ -192,13 +192,13 @@ export class Recorder implements RetainedRecorder {
     };
   }
 
-  #id(object: object): number {
-    let id = this.#ids.get(object);
-    if (id === undefined) this.#ids.set(object, (id = this.#next++));
+  #id(value: WeakKey): number {
+    let id = this.#ids.get(value);
+    if (id === undefined) this.#ids.set(value, (id = this.#next++));
     return id;
   }
 
-  #marksOf(run: object): Marks {
+  #marksOf(run: WeakKey): Marks {
     let marks = this.#marks.get(run);
     if (marks === undefined)
       this.#marks.set(run, (marks = { written: new Set(), amended: new WeakSet() }));
@@ -241,11 +241,11 @@ export class Recorder implements RetainedRecorder {
       }
       default:
         // EVIDENCE: invariant: past the primitive cases, `value` is an object or a function.
-        return value === null ? "null" : `o${this.#id(value as object)}`;
+        return value === null ? "null" : `o${this.#id(value as WeakKey)}`;
     }
   }
 
-  #register<T extends object>(made: T & Recording): T {
+  #register<T extends WeakKey>(made: T & Recording): T {
     this.#collections.push(new WeakRef(made));
     this.#registered.set(made, `R${made.id}`);
     // (made by the current run: its membership is that run's write)
@@ -253,22 +253,27 @@ export class Recorder implements RetainedRecorder {
     return made;
   }
 
+  /** A collection's write, as its methods hear it. */
+  #writer(): (collection: Registered, key: unknown, membership: boolean) => void {
+    return (collection, key, membership) => this.#wrote(collection, key, membership);
+  }
+
   public map<K, V>(name: string, entries: Iterable<readonly [K, V]> | null): Map<K, V> {
-    const recorder = this;
+    const wrote = this.#writer();
     const id = this.#next++;
     class RecordingMap extends Map<K, V> implements Recording {
       readonly id = id;
       readonly name = name;
       public override set(key: K, value: V): this {
-        recorder.#wrote(this, key, !super.has(key));
+        wrote(this, key, !super.has(key));
         return super.set(key, value);
       }
       public override delete(key: K): boolean {
-        if (super.has(key)) recorder.#wrote(this, key, true);
+        if (super.has(key)) wrote(this, key, true);
         return super.delete(key);
       }
       public override clear(): void {
-        for (const key of super.keys()) recorder.#wrote(this, key, true);
+        for (const key of super.keys()) wrote(this, key, true);
         super.clear();
       }
       public *list(): Iterable<readonly [unknown, unknown, boolean]> {
@@ -281,13 +286,34 @@ export class Recorder implements RetainedRecorder {
   }
 
   public set<T>(name: string, values: Iterable<T> | null): Set<T> {
-    const made = this.#recordingSet<T>(name, Set) as Set<T> & Recording;
+    const wrote = this.#writer();
+    const id = this.#next++;
+    class RecordingSet extends Set<T> implements Recording {
+      readonly id = id;
+      readonly name = name;
+      public override add(value: T): this {
+        if (!super.has(value)) wrote(this, value, true);
+        return super.add(value);
+      }
+      public override delete(value: T): boolean {
+        if (super.has(value)) wrote(this, value, true);
+        return super.delete(value);
+      }
+      public override clear(): void {
+        for (const value of super.values()) wrote(this, value, true);
+        super.clear();
+      }
+      public *list(): Iterable<readonly [unknown, unknown, boolean]> {
+        for (const value of super.values()) yield [value, undefined, false];
+      }
+    }
+    const made = new RecordingSet();
     for (const value of values ?? []) made.add(value);
     return this.#register(made);
   }
 
   public weakMap<K extends object, V>(name: string): WeakMap<K, V> {
-    const recorder = this;
+    const wrote = this.#writer();
     const id = this.#next++;
     class RecordingWeakMap extends WeakMap<K, V> {
       readonly id = id;
@@ -295,12 +321,12 @@ export class Recorder implements RetainedRecorder {
       /** Its keys, kept so its entries can be listed (test-only: it holds them alive). */
       readonly keys = new Set<K>();
       public override set(key: K, value: V): this {
-        recorder.#wrote(this, key, !this.keys.has(key));
+        wrote(this, key, !this.keys.has(key));
         this.keys.add(key);
         return super.set(key, value);
       }
       public override delete(key: K): boolean {
-        if (this.keys.delete(key)) recorder.#wrote(this, key, true);
+        if (this.keys.delete(key)) wrote(this, key, true);
         return super.delete(key);
       }
       public *list(): Iterable<readonly [unknown, unknown, boolean]> {
@@ -311,61 +337,63 @@ export class Recorder implements RetainedRecorder {
   }
 
   public weakSet<T extends object>(name: string): WeakSet<T> {
-    return this.#register(this.#recordingSet<T>(name, WeakSet) as WeakSet<T> & Recording);
-  }
-
-  #recordingSet<T>(name: string, base: typeof Set | typeof WeakSet): object {
-    const recorder = this;
+    const wrote = this.#writer();
     const id = this.#next++;
-    const members = new Set<T>();
-    // EVIDENCE: invariant: `base` is `Set` or `WeakSet`, whose `add`, `has` and `delete` take one member.
-    const Base = base as unknown as new () => {
-      add(value: T): unknown;
-      delete(value: T): boolean;
-      clear?(): void;
-    };
-    class RecordingSet extends Base {
+    class RecordingWeakSet extends WeakSet<T> implements Recording {
       readonly id = id;
       readonly name = name;
+      /** Its members, kept so they can be listed (test-only: it holds them alive). */
+      readonly members = new Set<T>();
       public override add(value: T): this {
-        if (!members.has(value)) recorder.#wrote(this, value, true);
-        members.add(value);
-        super.add(value);
-        return this;
+        if (!this.members.has(value)) wrote(this, value, true);
+        this.members.add(value);
+        return super.add(value);
       }
       public override delete(value: T): boolean {
-        if (members.delete(value)) recorder.#wrote(this, value, true);
+        if (this.members.delete(value)) wrote(this, value, true);
         return super.delete(value);
       }
-      public override clear(): void {
-        for (const value of members) recorder.#wrote(this, value, true);
-        members.clear();
-        super.clear?.();
-      }
-      public list(): Iterable<readonly [unknown, unknown, boolean]> {
-        return [...members].map((value) => [value, undefined, false] as const);
+      public *list(): Iterable<readonly [unknown, unknown, boolean]> {
+        for (const value of this.members) yield [value, undefined, false];
       }
     }
-    return new RecordingSet();
+    return this.#register(new RecordingWeakSet());
   }
 
-  public owner(
-    owner: object,
+  public owner<T extends object>(
+    owner: T,
     name: string,
-    hidden: ((owner: object) => Readonly<Record<string, unknown>>) | null,
+    hidden: ((owner: T) => Readonly<Record<string, unknown>>) | null,
   ): void {
     const id = this.#next++;
-    this.#owners.push({ id, name, owner: new WeakRef(owner), hidden });
+    const ref = new WeakRef(owner);
+    this.#owners.push({
+      id,
+      name,
+      fields: () => {
+        const held = ref.deref();
+        if (held === undefined) return null;
+        const fields: (readonly [string, unknown])[] = Object.entries(held);
+        if (hidden !== null)
+          for (const [field, value] of Object.entries(hidden(held)))
+            fields.push([`#${field}`, value]);
+        return fields;
+      },
+      amendedBy: (amended) => {
+        const held = ref.deref();
+        return held !== undefined && amended.has(held);
+      },
+    });
     this.#registered.set(owner, `O${id}`);
     this.#marksOf(this.#run).amended.add(owner);
   }
 
-  public amend(target: object): void {
+  public amend<T extends object>(target: T): void {
     this.#marksOf(this.#run).amended.add(target);
-    this.#outsideWrite(this.#registered.get(target) ?? (target.constructor?.name || "object"));
+    this.#outsideWrite(this.#registered.get(target) ?? className(target));
   }
 
-  public run(run: object | null): void {
+  public run<T extends object>(run: T | null): void {
     const next = run ?? { outside: true };
     if (run === this.#run || (run === null && this.#outside)) return;
     this.checkpoint();
@@ -380,7 +408,7 @@ export class Recorder implements RetainedRecorder {
   public checkpoint(): void {
     this.#checkpoints += 1;
     const marks = this.#marksOf(this.#run);
-    const memo = new Map<object, { readonly hash: string; readonly amended: boolean }>();
+    const memo = new Map<WeakKey, { readonly hash: string; readonly amended: boolean }>();
     const after = new Map<string, string>();
     const changed = (
       entry: string,
@@ -424,13 +452,9 @@ export class Recorder implements RetainedRecorder {
       }
     }
     for (const record of this.#owners) {
-      const owner = record.owner.deref();
-      if (owner === undefined) continue;
-      const fields: [string, unknown][] = Object.entries(owner);
-      if (record.hidden !== null)
-        for (const [field, value] of Object.entries(record.hidden(owner)))
-          fields.push([`#${field}`, value]);
-      const ownerAmended = marks.amended.has(owner);
+      const fields = record.fields();
+      if (fields === null) continue;
+      const ownerAmended = record.amendedBy(marks.amended);
       for (const [field, value] of fields) {
         const node = this.#value(value, memo, marks.amended, []);
         changed(
@@ -451,9 +475,9 @@ export class Recorder implements RetainedRecorder {
   /** A value's fingerprint, and whether it reaches an object the run amended. */
   #value(
     value: unknown,
-    memo: Map<object, { readonly hash: string; readonly amended: boolean }>,
-    amended: WeakSet<object>,
-    stack: object[],
+    memo: Map<WeakKey, { readonly hash: string; readonly amended: boolean }>,
+    amended: WeakSet<WeakKey>,
+    stack: WeakKey[],
   ): { readonly hash: string; readonly amended: boolean } {
     if ((typeof value !== "object" && typeof value !== "function") || value === null)
       return { hash: this.#atom(value), amended: false };
@@ -477,8 +501,8 @@ export class Recorder implements RetainedRecorder {
       parts.push("[");
       for (const element of value) part(element);
     } else if (ArrayBuffer.isView(value)) {
-      // (a typed array's elements are plain data)
-      parts.push(`T${String(value)}`);
+      // (a typed array's or a data view's bytes are plain data)
+      parts.push(`T${new Uint8Array(value.buffer, value.byteOffset, value.byteLength).join(",")}`);
     } else if (value instanceof Map) {
       parts.push("M");
       for (const [key, element] of value) {
@@ -519,7 +543,7 @@ export class Recorder implements RetainedRecorder {
    * Where within `value` its change stands: down the children whose fingerprints changed since the last checkpoint, to
    * the object whose own fields changed (`locate`).
    */
-  #where(value: unknown, memo: Map<object, { readonly hash: string }>, path: string): string {
+  #where(value: unknown, memo: Map<WeakKey, { readonly hash: string }>, path: string): string {
     if (typeof value !== "object" || value === null) return path || "(the value itself)";
     const children: [string, unknown][] = Array.isArray(value)
       ? value.map((each, index) => [`[${index}]`, each])
@@ -535,8 +559,7 @@ export class Recorder implements RetainedRecorder {
       if (now !== undefined && then !== undefined && now !== then)
         return this.#where(child, memo, path + step);
     }
-    const name = (value.constructor as { name?: string } | undefined)?.name ?? "object";
-    return `${path || "(the value)"} (${name})`;
+    return `${path || "(the value)"} (${className(value)})`;
   }
 
   #violation(text: string): void {
@@ -547,8 +570,10 @@ export class Recorder implements RetainedRecorder {
 }
 
 /** An object's class's name, as its constructor gives it. */
-function className(value: object): string {
-  return (value.constructor as { name?: string } | undefined)?.name ?? "anonymous";
+function className(value: WeakKey): string {
+  // EVIDENCE: invariant: an object's `constructor` is a function or absent (a null-prototype object), never anything else.
+  const made = (value as { readonly constructor?: { readonly name?: string } }).constructor;
+  return made?.name ?? "anonymous";
 }
 
 /** A recording collection's membership and values. */
