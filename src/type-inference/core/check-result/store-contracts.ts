@@ -278,11 +278,22 @@ export class Contracts {
     let incoherent: string | null = null;
     for (const level of levelsOf(expected)) {
       if (landing === null) break;
-      const admitted = this.answers.place(landing.id, [...landing.path, ...level]).admitted;
+      const { admitted, contract } = this.answers.place(landing.id, [...landing.path, ...level]);
       if (admitted.by === "decided" && admitted.inherited)
         throw new OutsideContract(call, "a typed parse or load into a copy of a written type");
       const kinds = kindsAt.get(level.join("\u0000"))?.kinds ?? null;
-      const verdict = kinds === null ? "same" : admits(admitted, kinds);
+      const held = new Set<string>(contract.kinds.map((item) => item.tag));
+      if (kinds !== null && held.has("number")) held.delete("integer");
+      const verdict =
+        kinds === null
+          ? "same"
+          : admits(admitted, kinds) !== "same"
+            ? admits(admitted, kinds)
+            : [...held].every(
+                  (kind) => kinds.has(kind) || (kind === "integer" && kinds.has("number")),
+                )
+              ? "same"
+              : "holds-more";
       if (incoherent === null && verdict !== "same") incoherent = `PROBE receiving ${verdict}`;
     }
     if (!this.coherence) return expected;
