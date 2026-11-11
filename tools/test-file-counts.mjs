@@ -7,6 +7,9 @@ import { trackInFlight } from "./test-in-flight.mjs";
 // is no test; a skipped, then a todo test counts as that, whatever its result; a test that timed out or whose parent
 // ended first is cancelled. Every file the run started is there, also one whose process ended before any test
 // reported, or that holds suites alone, with all counts 0.
+// The file itself is no test: node:test reports its own result only when it ran no test or failed outside its tests
+// (it threw while loading, or its process ended non-zero), and adds that to its totals. Its failure is `fileFailed:
+// true` beside the counts; its pass is not kept.
 // It also names on standard error a test still running long after it began, as `test-in-flight.mjs`'s reporter does,
 // in its place: node:test warns of a possible listener leak on a third reporter beside the spec reporter.
 // node:test's failure types of a cancelled test
@@ -23,7 +26,10 @@ export default async function* testFileCounts(source) {
     if (type !== "test:pass" && type !== "test:fail") continue;
     // a file's own entry: the file, with no entry file of its own
     if (data.entryFile === undefined) {
-      if (data.nesting === 0 && data.file !== undefined) of(data.file);
+      if (data.nesting === 0 && data.file !== undefined) {
+        const count = of(data.file);
+        if (type === "test:fail") count.fileFailed = true;
+      }
       continue;
     }
     const count = of(data.entryFile);

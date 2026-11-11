@@ -156,7 +156,7 @@ test("filter leaves skipped output and todo totals untouched", () => {
   assert.match(result.stdout, /ℹ todo 1/);
 });
 
-test("compact output ends with each named file's counts, 0 passed for a file that ran no test", () => {
+test("compact output ends with each named file's counts, after Node's own output, and only in compact mode", () => {
   const fixtures = {
     "counted.test.mjs": `
       import assert from "node:assert/strict";
@@ -181,15 +181,14 @@ test("compact output ends with each named file's counts, 0 passed for a file tha
       test("never reported", () => process.exit(0));
     `,
   };
-  const counted = /^ℹ \S*counted\.test\.mjs: 2 passed, 1 failed, 1 cancelled, 1 skipped, 1 todo$/mu;
-  const silent = /^ℹ \S*silent\.test\.mjs: 0 passed$/mu;
-  const suites = /^ℹ \S*suites\.test\.mjs: 0 passed$/mu;
+  // (what each line counts is the next test's)
   const compact = runFixtures(fixtures);
   assert.equal(compact.status, 1, compact.stderr);
   assert.doesNotMatch(compact.stdout, /first row|second row/);
-  assert.match(compact.stdout, counted);
-  assert.match(compact.stdout, silent);
-  assert.match(compact.stdout, suites);
+  assert.match(
+    compact.stdout,
+    /^ℹ \S*counted\.test\.mjs: 2 passed, 1 failed, 1 cancelled, 1 skipped, 1 todo$/mu,
+  );
   // a run with a failing test removes the counts' folder
   assert.deepEqual(compact.leftover, []);
   // after Node's own output: the summary and the failures
@@ -206,6 +205,140 @@ test("compact output ends with each named file's counts, 0 passed for a file tha
   // full output names every test, and adds no counts
   const full = runFixtures(fixtures, true);
   assert.doesNotMatch(full.stdout, /^ℹ \S*\.test\.mjs: /mu);
+});
+
+/**
+ * The counting family: files whose tests node:test classes differently (nested subtests, suites, skip and todo by option
+ * and by call, a timeout, a cancelled child, a helper-registered test, a path with a space), and files that fail
+ * outside their tests or run none. Each final review's probe file (#2357, round 7) as it wrote it, and the earlier
+ * fixtures of this file's counts.
+ */
+const COUNTED_FAMILY: Readonly<Record<string, string>> = {
+  "deep.test.mjs":
+    "import test from 'node:test'; test('one', async t=>{await t.test('two',async t=>{await t.test('three',async t=>{await t.test('four',()=>{});});});});\n",
+  "empty.test.mjs": "export const noTests=true;\n",
+  "exit-code.test.mjs":
+    "import test,{after} from 'node:test'; test('passed',()=>{}); after(()=>{process.exitCode=7;});\n",
+  "failing.test.mjs":
+    "import test from 'node:test';test('fail',()=>{throw Error('expected failure')});\n",
+  "flags.test.mjs":
+    "import test from 'node:test'; test('skip option',{skip:true},()=>{throw Error('never')}); test('skip call pass',t=>t.skip()); test('skip call fail',t=>{t.skip();throw Error('skip fail')}); test('todo option pass',{todo:true},()=>{}); test('todo option fail',{todo:true},()=>{throw Error('todo fail')}); test('todo call pass',t=>t.todo()); test('todo call fail',t=>{t.todo();throw Error('todo fail')}); test('false flags',{skip:false,todo:false},()=>{}); test('skip and todo',{skip:true,todo:true},()=>{});\n",
+  "helper.mjs": "import test from 'node:test'; test('registered in helper',()=>{});\n",
+  "imported.test.mjs": "import './helper.mjs';\n",
+  "parent.test.mjs":
+    "import test from 'node:test'; test('parent',t=>{t.test('cancelled child',()=>new Promise(r=>setTimeout(r,150)));throw Error('parent ends');});\n",
+  "passing.test.mjs": "import test from 'node:test';test('pass',()=>{});\n",
+  "shared-a.test.mjs": "import './helper.mjs'; import test from 'node:test'; test('a',()=>{});\n",
+  "shared-b.test.mjs": "import './helper.mjs'; import test from 'node:test'; test('b',()=>{});\n",
+  "space name.test.mjs": "import test from 'node:test';test('space',()=>{});\n",
+  "suites.test.mjs":
+    "import {describe,it} from 'node:test'; describe('outer',()=>{describe('inner',()=>{it('row1',()=>{});it('row2',()=>{});});describe('empty',()=>{});});\n",
+  "throws.test.mjs": "throw Error('load failed');\n",
+  "timeout.test.mjs":
+    "import test from 'node:test'; test('timeout',{timeout:30},()=>new Promise(r=>setTimeout(r,150)));\n",
+  "counted.test.mjs": `
+    import assert from "node:assert/strict";
+    import test, { describe, it } from "node:test";
+    describe("a family", () => {
+      it("first row", () => {});
+      it("second row", () => {});
+    });
+    test("failing test", () => assert.equal(1, 2));
+    test("timed out test", { timeout: 10 }, () => new Promise(() => setTimeout(() => {}, 100)));
+    test.skip("skipped test", () => {});
+    test.todo("todo test");
+  `,
+  "suites-alone.test.mjs": `import { describe } from "node:test"; describe("an empty family", () => {});`,
+  // its process ends before its test reports
+  "silent.test.mjs": `import test from "node:test"; test("never reported", () => process.exit(0));`,
+};
+
+/** A reporter that prints the file's own result, `passed` or `failed`, when node:test reports one. */
+const OWN_RESULT_REPORTER = `export default async function* (source) {
+  for await (const { type, data } of source)
+    if ((type === "test:pass" || type === "test:fail") && data.entryFile === undefined && data.nesting === 0)
+      yield type === "test:pass" ? "passed\\n" : "failed\\n";
+}
+`;
+
+/** What `node --test` gives for `file` run alone: its spec totals, and the file's own result, if it reports one. */
+async function nodeAlone(directory: string, file: string, reporter: string) {
+  const environment: NodeJS.ProcessEnv = { ...process.env };
+  delete environment.NODE_TEST_CONTEXT;
+  const child = spawn(
+    process.execPath,
+    [
+      "--test",
+      "--test-reporter=spec",
+      "--test-reporter-destination=stdout",
+      `--test-reporter=${pathToFileURL(reporter).href}`,
+      "--test-reporter-destination=stderr",
+      file,
+    ],
+    { cwd: directory, env: environment, stdio: ["ignore", "pipe", "pipe"] },
+  );
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8").on("data", (chunk: string) => (stdout += chunk));
+  child.stderr.setEncoding("utf8").on("data", (chunk: string) => (stderr += chunk));
+  await once(child, "close");
+  const total = (name: string) =>
+    Number(new RegExp(`^ℹ ${name} (\\d+)$`, "mu").exec(stdout)?.[1] ?? NaN);
+  return {
+    tests: total("tests"),
+    passed: total("pass"),
+    failed: total("fail"),
+    cancelled: total("cancelled"),
+    skipped: total("skipped"),
+    todo: total("todo"),
+    own: /^(passed|failed)$/mu.exec(stderr)?.[1] ?? null,
+  };
+}
+
+test("each file's line, with the file's own result, reconciles with node:test's totals for that file run alone", async () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
+  try {
+    for (const [name, source] of Object.entries(COUNTED_FAMILY))
+      writeFileSync(resolve(directory, name), source);
+    const reporter = resolve(directory, "own-result-reporter.mjs");
+    writeFileSync(reporter, OWN_RESULT_REPORTER);
+    const files = Object.keys(COUNTED_FAMILY).filter((name) => name.endsWith(".test.mjs"));
+    const environment: NodeJS.ProcessEnv = { ...process.env };
+    delete environment.NODE_TEST_CONTEXT;
+    const filtered = spawnSync(process.execPath, [filterPath, ...files], {
+      cwd: directory,
+      encoding: "utf8",
+      env: environment,
+    });
+    const alone = await Promise.all(files.map((file) => nodeAlone(directory, file, reporter)));
+    for (const [index, file] of files.entries()) {
+      const node = alone[index]!;
+      const line = new RegExp(
+        `^ℹ ${file.replace(/[.]/gu, "[.]")}: (\\d+) passed(?:, (\\d+) failed)?(?:, (\\d+) cancelled)?(?:, (\\d+) skipped)?(?:, (\\d+) todo)?(; the file failed outside any test)?$`,
+        "mu",
+      ).exec(filtered.stdout);
+      assert.ok(line, `${file}: a line\n${filtered.stdout}`);
+      const [passed, failed, cancelled, skipped, todo] = line
+        .slice(1, 6)
+        .map((count) => Number(count ?? 0));
+      const own = line[6] === undefined ? (node.own === "passed" ? "passed" : null) : "failed";
+      assert.deepEqual(
+        {
+          tests: passed! + failed! + cancelled! + skipped! + todo! + (own === null ? 0 : 1),
+          passed: passed! + (own === "passed" ? 1 : 0),
+          failed: failed! + (own === "failed" ? 1 : 0),
+          cancelled,
+          skipped,
+          todo,
+          own,
+        },
+        node,
+        file,
+      );
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
 });
 
 test("filter refuses a path that matches no test file before Node runs any", () => {

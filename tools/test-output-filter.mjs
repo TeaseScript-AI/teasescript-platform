@@ -88,9 +88,10 @@ if (unmatched.length > 0) {
 // Node's command line sorts the files it runs, so the full suite goes through a runner that keeps the costly files
 // first: started late, one of them would run alone at the end.
 // Beside the spec reporter, `test-in-flight.mjs` names on standard error a test still running long after it began.
-// Compact output of named files ends with one line per file and its counts, the passing tests it leaves out among them,
-// so a file that ran nothing shows `0 passed` (the full suite fails such a file instead): there `test-file-counts.mjs`
-// counts, and names a test in flight in that reporter's place.
+// Compact output of named files ends with one line per file and its tests' counts, the passing tests it leaves out among
+// them, so a file that ran nothing shows `0 passed` (the full suite fails such a file instead); a file that failed
+// outside its tests (it threw while loading, or its process ended non-zero) says so beside them. There
+// `test-file-counts.mjs` counts, and names a test in flight in that reporter's place.
 const countsFolder =
   fullSuite || fullOutput ? null : mkdtempSync(join(tmpdir(), "test-file-counts-"));
 const countsFile = countsFolder === null ? null : join(countsFolder, "counts.json");
@@ -169,7 +170,10 @@ child.on("error", (error) => {
   process.exitCode = 1;
 });
 
-/** Each file's counts line, `ℹ <file>: N passed[, N failed][, N cancelled][, N skipped][, N todo]`, or why there are none. */
+/**
+ * Each file's counts line, `ℹ <file>: N passed[, N failed][, N cancelled][, N skipped][, N todo][; the file failed
+ * outside any test]`, or why there are none.
+ */
 function fileCountLines() {
   let counts;
   try {
@@ -178,12 +182,13 @@ function fileCountLines() {
     return `ℹ test-output-filter: no counts per file: ${error.message}\n`;
   }
   return Object.entries(counts)
-    .map(([file, { passed, failed, cancelled, skipped, todo }]) => {
+    .map(([file, { passed, failed, cancelled, skipped, todo, fileFailed }]) => {
       const others = Object.entries({ failed, cancelled, skipped, todo })
         .filter(([, count]) => count > 0)
         .map(([word, count]) => `, ${count} ${word}`)
         .join("");
-      return `ℹ ${relative(process.cwd(), file)}: ${passed} passed${others}\n`;
+      const own = fileFailed ? "; the file failed outside any test" : "";
+      return `ℹ ${relative(process.cwd(), file)}: ${passed} passed${others}${own}\n`;
     })
     .join("");
 }
