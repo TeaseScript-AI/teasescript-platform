@@ -42,17 +42,20 @@ defineExpose({ focus });
       {{ props.description }}
     </p>
     <div class="flex items-center gap-2">
-      <!-- No saved or suggested passwords: a lock password typed on the player's device must not stay in its browser. -->
+      <!-- No saved or suggested passwords: a browser offers, fills or saves passwords only in a password-type field, so the
+      mask is a style. -->
       <Input
         :id="id"
         ref="input"
         v-model="model"
-        :type="shown ? 'text' : 'password'"
+        type="text"
+        :class="shown ? undefined : '[-webkit-text-security:disc]'"
         autocomplete="off"
         :readonly="props.busy"
         :aria-invalid="props.error ? 'true' : undefined"
         :aria-describedby="props.description ? `${descriptionId} ${statusId}` : statusId"
         autocapitalize="off"
+        autocorrect="off"
         spellcheck="false"
         data-password-input
         @keydown="readCapsLock"
