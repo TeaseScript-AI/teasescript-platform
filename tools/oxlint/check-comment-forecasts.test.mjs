@@ -275,6 +275,24 @@ test("a revision number names an entry of the accepted record, each end of a ran
     [1, "9997"],
   ]);
   assert.deepEqual(missing("tests/a.json", '{"closes": "r4.9996 until #1"}\r\n'), [[1, "9996"]]);
+  // a short end is read whole, however long: its digits and the edge after them are its own
+  const long = "r4.38–1234567890123456\n";
+  assert.deepEqual(
+    unresolvedRevisionsIn(
+      "tests/c.ts",
+      long,
+      recordEntries(["### r4-38\n\n### r4-123456789012345\n"]),
+    ).map(({ number }) => number),
+    ["1234567890123456"],
+  );
+  assert.deepEqual(
+    unresolvedRevisionsIn(
+      "tests/c.ts",
+      long,
+      recordEntries(["### r4-38\n\n### r4-1234567890123456\n"]),
+    ),
+    [],
+  );
   // a range's short second end is a number of its own; a spaced dash, a longer token or a full end is none
   assert.deepEqual(
     missing(

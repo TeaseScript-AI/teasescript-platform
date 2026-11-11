@@ -258,7 +258,7 @@ export function recordEntries(pages) {
  * A range's short second end right after a revision number (the `–66` after a number 63): a dash, then digits that
  * no letter, digit or `.` and digit follows. A spaced dash or `to` makes no range.
  */
-const SHORT_END = /^[–-](\d+)(?![\p{L}\p{N}]|\.\p{N})/u;
+const SHORT_END = /[–-](\d+)(?![\p{L}\p{N}]|\.\p{N})/uy;
 
 /**
  * Each revision number in `text`, the whole of file `fileName`, that names no entry of `entries`, with its line. Each
@@ -271,9 +271,9 @@ export function unresolvedRevisionsIn(fileName, text, entries) {
   let line = 1;
   let counted = 0;
   for (const match of text.matchAll(REVISION_NUMBER)) {
-    const short = SHORT_END.exec(
-      text.slice(match.index + match[0].length, match.index + match[0].length + 16),
-    );
+    // (read from the number's end in the whole text, so the end's digits and the edge after them are its own)
+    SHORT_END.lastIndex = match.index + match[0].length;
+    const short = SHORT_END.exec(text);
     const missing = [match[1], short?.[1]].filter(
       (number) => number !== undefined && !entries.has(number),
     );
