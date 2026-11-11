@@ -1,7 +1,7 @@
 // Requires Playwright CLI and a Player development preview of this checkout.
 // npm run test:player:preview [-- http://localhost:5173/player/]
 // Without a URL, it starts the preview itself (`tools/player-preview-server.mjs`): on 127.0.0.1, on a port Vite
-// chooses, with a dependency cache in its scratch folder. The preview's standard input is a pipe this process holds,
+// chooses, with a dependency cache in a temporary folder of its own, removed in the run's cleanup. The preview's standard input is a pipe this process holds,
 // and the preview exits when that input ends, so it ends with this run however the run ends.
 // Before any check, the preview must answer `<url>__checkout` (`player/vue/vite.config.ts`) with this checkout's real
 // path, as `text/plain`; a preview of another checkout, or one that does not say which checkout it serves, is refused.
@@ -19,13 +19,19 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { artifactsFolder, settleArtifacts } from "./failure-artifacts.mjs";
 
 const checkout = realpathSync(fileURLToPath(new URL("..", import.meta.url)));
 // Playwright CLI keeps its sessions by name for the whole user, across checkouts and jobs, so a name from the process id
 // alone could meet a session another run left behind under a reused id; this run's session is its own.
 const session = `player-preview-${process.pid}-${randomBytes(6).toString("hex")}`;
-/** The run's scratch folder: browser configuration, failure artifacts, and a started preview's cache and log. */
-let scratch = "";
+/**
+ * The run's artifacts (`tools/failure-artifacts.mjs`), kept only when it fails: the browser's configuration and the
+ * Playwright CLI's output, a failing group's screenshot and trace, and a started preview's log.
+ */
+let artifacts = "";
+/** A started preview's dependency cache, in a temporary folder of its own: removed in the run's cleanup, never kept. */
+let cache;
 
 /** Refuses a URL whose preview does not answer `__checkout` with this checkout's real path. */
 async function checkIdentity(url) {
@@ -58,12 +64,12 @@ const logTail = (preview) => readFileSync(preview.log, "utf8").split("\n").slice
  * `status`, so that an end that comes while this process is blocked in a browser command is still known afterwards.
  */
 function startPreview() {
-  const log = join(scratch, "preview.log");
+  const log = join(artifacts, "preview.log");
   // A file, not a pipe: a pipe this process does not read while a browser command blocks it would stall the server.
   const output = openSync(log, "w");
   const child = spawn(
     process.execPath,
-    [fileURLToPath(new URL("player-preview-server.mjs", import.meta.url)), join(scratch, "vite")],
+    [fileURLToPath(new URL("player-preview-server.mjs", import.meta.url)), cache],
     { cwd: checkout, stdio: ["pipe", output, output] },
   );
   closeSync(output);
@@ -95,7 +101,7 @@ async function readyPreview(preview) {
 
 function cli(...args) {
   const result = spawnSync("playwright-cli", [`-s=${session}`, ...args], {
-    cwd: scratch,
+    cwd: artifacts,
     encoding: "utf8",
   });
   if (result.error) throw result.error;
@@ -823,18 +829,19 @@ async function whilePreviewRuns(preview, phase, step) {
 /** Runs every group against `given`, or against a preview it starts when `given` is undefined. */
 async function main(given) {
   if (given !== undefined) await checkIdentity(given);
-  scratch = mkdtempSync(join(tmpdir(), "player-preview-"));
+  artifacts = artifactsFolder("player-preview-checks");
   let preview;
   let passed = false;
   try {
     let url = given;
     if (url === undefined) {
+      cache = mkdtempSync(join(tmpdir(), "player-preview-cache-"));
       preview = startPreview();
       url = await readyPreview(preview);
       console.log(`player-preview-checks: started this checkout's preview at ${url}`);
       await whilePreviewRuns(preview, "the identity check", () => checkIdentity(url));
     }
-    const config = join(scratch, "browser.json");
+    const config = join(artifacts, "browser.json");
     writeFileSync(
       config,
       JSON.stringify({
@@ -857,7 +864,7 @@ async function main(given) {
       const output = await whilePreviewRuns(preview, group.name, () =>
         cli(
           "run-code",
-          `async page => (${runGroup.toString()})(page, ${group.toString()}, ${JSON.stringify(url)}, ${JSON.stringify(join(scratch, group.name))})`,
+          `async page => (${runGroup.toString()})(page, ${group.toString()}, ${JSON.stringify(url)}, ${JSON.stringify(join(artifacts, group.name))})`,
         ),
       );
       const result = output.match(/^### Result\r?\n"(PASS [^"\n]+)"$/mu)?.[1];
@@ -866,8 +873,11 @@ async function main(given) {
     }
     passed = true;
   } finally {
+    // A run passes only when its checks pass and its browser closes: any other end keeps the artifacts.
+    let closed = false;
     try {
       cli("close");
+      closed = true;
     } finally {
       try {
         // Its input's end ends the preview; `ended` settles however and whenever it ended.
@@ -876,8 +886,8 @@ async function main(given) {
           await preview.ended;
         }
       } finally {
-        if (passed) rmSync(scratch, { recursive: true, force: true });
-        else console.error(`player-preview-checks: failure artifacts retained at ${scratch}`);
+        if (cache !== undefined) rmSync(cache, { recursive: true, force: true });
+        settleArtifacts("player-preview-checks", artifacts, passed && closed);
       }
     }
   }
