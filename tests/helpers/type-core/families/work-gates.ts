@@ -899,7 +899,7 @@ export const W45_VARIANTS: readonly WorkFamily[] = (
   ["flag", "plain", "firsts", "seconds"] as const
 ).map((variant) => ({
   name: `W45-${variant}`,
-  measures: "r4.46 (3): a joined copy's sources referenced once per destination",
+  measures: "a joined copy's sources referenced once per destination",
   program: (k: number) => main(w45(k, variant)),
 }));
 
@@ -910,7 +910,7 @@ export const W45_VARIANTS: readonly WorkFamily[] = (
 export const W44_VARIANTS: readonly WorkFamily[] = [
   ...(["fields", "dict", "deep"] as const).map((variant) => ({
     name: `W44-${variant}`,
-    measures: "r4.46 (3): a projected copy's stores found below its path alone",
+    measures: "a projected copy's stores found below its path alone",
     program: (k: number) => main(w44(k, variant)),
   })),
   {

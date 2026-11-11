@@ -237,7 +237,7 @@ const CLASSES: readonly RuleClass[] = [
   },
 ];
 
-test("the carrier floor's complete C1, C9 and C10 records are what the rule function owes, in both orders (§6, §5.1, r4.60, r4.63–r4.66)", (t) => {
+test("the carrier floor's complete C1, C9 and C10 records are what the rule function owes, in both orders (§6, §5.1)", (t) => {
   const all = shapesOf(CLASSES);
   assert.equal(all.length, 184);
   assert.equal(new Set(all.map((shape) => shape.name)).size, 184);

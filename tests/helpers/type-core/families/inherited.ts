@@ -17,7 +17,7 @@ import { type WorkFamily, rows, lines, fields, main, copiesOf } from "./builders
 export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
   ...(["chain", "fan-out"] as const).map((form): WorkFamily => ({
     name: `A4-inherited-${form}`,
-    measures: `A4 through copies, r4.80: a root of k written-typed fields and a ${form} of k whole copies, no field read`,
+    measures: `A4 through copies: a root of k written-typed fields and a ${form} of k whole copies, no field read`,
     program: (k) =>
       main(
         lines(
@@ -31,7 +31,7 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
   {
     name: "A4-inherited-repeated",
     measures:
-      "A4 through copies, r4.80: a root of k written-typed fields stored k times into one destination",
+      "A4 through copies: a root of k written-typed fields stored k times into one destination",
     program: (k) =>
       main(
         lines(
@@ -46,7 +46,7 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
   {
     name: "A4-inherited-objects",
     measures:
-      "A4 through copies, r4.80 (2): k records with a written field, another field of each stored into one list, read through a copy",
+      "A4 through copies: k records with a written field, another field of each stored into one list, read through a copy",
     program: (k) =>
       main(
         lines(
@@ -65,13 +65,14 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
   {
     name: "A4-inherited-plain-chain",
     measures:
-      "r4.80's control: a root of k plain fields and a chain of k whole copies, no written type",
+      "A4 through copies, control: a root of k plain fields and a chain of k whole copies, no written type",
     program: (k) =>
       main(lines(`let root = {${fields(k, () => "1")}}`, copiesOf(k, "chain"), "exit")),
   },
   {
     name: "A4-inherited-narrow-chain",
-    measures: "r4.80's control: a root of four written-typed fields and a chain of k whole copies",
+    measures:
+      "A4 through copies, control: a root of four written-typed fields and a chain of k whole copies",
     program: (k) =>
       main(
         lines(
@@ -84,7 +85,8 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
   },
   {
     name: "A4-inherited-few-copies",
-    measures: "r4.80's control: a root of k written-typed fields and a chain of four whole copies",
+    measures:
+      "A4 through copies, control: a root of k written-typed fields and a chain of four whole copies",
     program: (k) =>
       main(
         lines(
@@ -97,7 +99,7 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
   },
   {
     name: "A4-inherited-read",
-    measures: "r4.80's control: A4-inherited-chain with one field of the last copy read",
+    measures: "A4 through copies, control: A4-inherited-chain with one field of the last copy read",
     program: (k) =>
       main(
         lines(
@@ -112,7 +114,7 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
   {
     name: "A4-inherited-changed-root",
     measures:
-      "r4.80's control: A4-inherited-fan-out with host data stored into one field of the root between its copies",
+      "A4 through copies, control: A4-inherited-fan-out with host data stored into one field of the root between its copies",
     // (each copy made after the host store owes a check of the whole root, an object node and its k typed fields, and the
     // host store one of its field: output-bound)
     output: (k) => (k - (k >> 1)) * (k + 1) + 1,
@@ -130,7 +132,7 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
   },
   {
     name: "A4-inherited-own-fields",
-    measures: "r4.80's control: A4-inherited-chain with each copy storing its own field",
+    measures: "A4 through copies, control: A4-inherited-chain with each copy storing its own field",
     program: (k) =>
       main(
         lines(
@@ -173,7 +175,7 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
   {
     name: "A4-inherited-closed-chain",
     measures:
-      "r4.80's control: A4-inherited-chain closed into a cycle of whole copies, its first copy taking the last",
+      "A4 through copies, control: A4-inherited-chain closed into a cycle of whole copies, its first copy taking the last",
     program: (k) =>
       main(
         lines(
@@ -349,7 +351,7 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
   {
     name: "A4-inherited-self-copy",
     measures:
-      "r4.80's control: a root of k written-typed fields copied into itself at another path (`root.q = root`), then k whole copies",
+      "A4 through copies, control: a root of k written-typed fields copied into itself at another path (`root.q = root`), then k whole copies",
     program: (k) =>
       main(
         lines(

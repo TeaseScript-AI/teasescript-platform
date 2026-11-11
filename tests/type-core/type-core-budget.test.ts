@@ -277,7 +277,7 @@ test("a generator's shared build counts to the total, never to the asker, and en
  * store), an `else if` one level more: a check inside them is moved, an error outside stands, and one warning names the
  * deepest nesting's place.
  */
-test("statements nested past 256 levels are checked when the script runs, the rest proved (TABLE r4.55)", () => {
+test("statements nested past 256 levels are checked when the script runs, the rest proved", () => {
   const nested = (depth: number) =>
     `let k: integer = 1.5\n${"if hostValue == 1 {\n".repeat(depth)}say "\${hostValue}"\n${"}\n".repeat(depth)}exit`;
   const chained = (length: number) =>
@@ -649,7 +649,7 @@ test("mutual copies stopped in the walk finish in work bounded by the program, i
 });
 
 /**
- * PLAN §6b's recursive record types (Astra's rounds 2–3): a linked list built by `chain(n)` and walked by `last(node)`
+ * Recursive record types (Astra's rounds 2–3): a linked list built by `chain(n)` and walked by `last(node)`
  * through `node.next` reaches any allowance; the stop answers every value it did not decide `unknown` with `budget`,
  * never asking its contract again, so the fallback is finite (S3 §5) and the count is checked when it runs.
  */
