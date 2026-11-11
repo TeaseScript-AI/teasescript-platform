@@ -251,8 +251,8 @@ test(
 );
 
 test(
-  "no git setting of the host reaches the fixture: each hostile one, and all at once, through each channel",
-  { timeout: 240_000 },
+  "no git setting of the host reaches the fixture: each hostile one live through each channel, and all at once kept out",
+  { timeout: 60_000 },
   () => {
     const hostile = mkdtempSync(join(tmpdir(), "measure-test-files-host-"));
     const script = (path, code) => {
@@ -319,60 +319,79 @@ test(
       for (const name of Object.keys(process.env)) delete process.env[name];
       Object.assign(process.env, environment);
     };
-    const builds = (label, environment) => {
-      become(environment);
-      try {
-        const root = checkout();
-        try {
-          if (label.startsWith("all at once")) {
-            const { status, out, module } = measure(root, []);
-            assert.equal(status, 0, `${label}: ${out}`);
-            assert.match(module, /sub\/type-core-z\.test\.js/u, label);
-          }
-        } finally {
-          rmSync(root, { recursive: true, force: true });
-        }
-      } finally {
-        become(saved);
-      }
-    };
     try {
+      // Each channel alone, with each member and all at once: the host's git, in that environment, takes each setting
+      // from that channel. One git call each, no fixture.
+      const all = members.flatMap(([, entries]) => entries);
       let n = 0;
       for (const [channel, give] of Object.entries(channels))
-        for (const [member, settings] of [
-          ...members,
-          ["all at once", members.flatMap(([, entries]) => entries)],
-        ]) {
+        for (const [member, settings] of [...members, ["all at once", all]]) {
           const label = `${member}, through ${channel}`;
           const home = join(hostile, `home-${(n += 1)}`);
           mkdirSync(home);
           const file = join(home, "hostile.gitconfig");
           writeFileSync(file, ini(settings));
           const [variables, origin] = give(file, home, settings);
-          const environment = { ...clean, HOME: home, ...variables };
-          // (the host's git, in this environment, takes each setting from this channel)
           for (const [key, value] of settings)
             assert.equal(
               spawnSync("git", ["config", "--show-origin", "--get", key], {
                 cwd: hostile,
-                env: environment,
+                env: { ...clean, HOME: home, ...variables },
                 encoding: "utf8",
               }).stdout,
               `${origin}\t${value}\n`,
               `${label}: ${key}`,
             );
-          builds(label, environment);
         }
-      // A template folder given by the environment's variable.
-      const home = join(hostile, "home-template");
-      mkdirSync(home);
-      const environment = { ...clean, HOME: home, GIT_TEMPLATE_DIR: join(hostile, "templates") };
-      spawnSync("git", ["init", "-q", join(hostile, "probe")], { env: environment });
+      // The template variable alone: the host's git copies its hook.
+      const templates = join(hostile, "templates");
+      spawnSync("git", ["init", "-q", join(hostile, "probe")], {
+        env: { ...clean, HOME: join(hostile, "home-1"), GIT_TEMPLATE_DIR: templates },
+      });
       assert.ok(
         existsSync(join(hostile, "probe/.git/hooks/pre-commit")),
         "the host's git copies the hook",
       );
-      builds("a template folder, through GIT_TEMPLATE_DIR", environment);
+
+      // Every channel with every member at once, and the template variable: the boundary hands git none of them, and
+      // the fixture builds and the tool runs. One build covers each channel's own build, as every channel carries the
+      // same hostile values: whichever one leaked, its effect would fail this build.
+      const home = join(hostile, "home-all");
+      mkdirSync(home);
+      const file = join(home, "hostile.gitconfig");
+      writeFileSync(file, ini(all));
+      become({
+        ...clean,
+        HOME: home,
+        GIT_TEMPLATE_DIR: templates,
+        ...Object.assign({}, ...Object.values(channels).map((give) => give(file, home, all)[0])),
+      });
+      const root = checkout();
+      try {
+        const given = boundary(root);
+        assert.deepEqual(
+          Object.keys(given)
+            .filter((name) => name.startsWith("GIT_") || name === "XDG_CONFIG_HOME")
+            .sort(),
+          [
+            "GIT_AUTHOR_EMAIL",
+            "GIT_AUTHOR_NAME",
+            "GIT_COMMITTER_EMAIL",
+            "GIT_COMMITTER_NAME",
+            "GIT_CONFIG_GLOBAL",
+            "GIT_CONFIG_NOSYSTEM",
+            "GIT_TEMPLATE_DIR",
+          ],
+        );
+        assert.equal(given.GIT_CONFIG_GLOBAL, "/dev/null");
+        assert.equal(given.GIT_TEMPLATE_DIR, join(root, "home/templates"));
+        assert.equal(given.HOME, join(root, "home"));
+        const { status, out, module } = measure(root, []);
+        assert.equal(status, 0, out);
+        assert.match(module, /sub\/type-core-z\.test\.js/u);
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
     } finally {
       become(saved);
       rmSync(hostile, { recursive: true, force: true });
