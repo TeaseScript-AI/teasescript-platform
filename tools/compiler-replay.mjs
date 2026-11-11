@@ -47,15 +47,17 @@ import {
 // `collect` reads the campaigns' results (`~/jobs/results/<owner>/<campaign>/<job>/out`, or `--results`): per area its
 // shards, sources, runs, differences and what did not compare; the set's records; the stall verdicts of
 // `tests/families/stalls.mjs` over the areas' work records, with `<prefix>-rerun`'s records where `rerun-stalls` ran;
-// each area difference by its first differing part ("route only": the last part, both trees with as many parts); each
-// set difference by what differs; and `<prefix>-aside`'s rows where `aside` ran. A shard is its job name
-// (`<area>-<i>of<N>`; an area ran when its shards 0 to N-1 of one N stand), and of its attempts one is read: the one
-// that left a summary line and whose queue record (`meta.json`) shows its runner's own ending (`ranOut`: exit 0 or 1, 3
-// as well for an area job, with the queue's outcome for that exit, no OOM kill, no timeout, no lost test file). Any
-// other attempt is listed, with its host and outcome, as replaced and never read; a shard none of whose attempts stands
-// is "not run", never equal. Several attempts that could stand are refused (exit 2) unless all but one are replaced: by
-// a rerun's record (`rerun-shard`) or by `--replace <failed>=<rerun>`, which is refused when the jobs are not one
-// shard's attempts or the rerun cannot stand. It prints a table and, with `--json`, writes the report.
+// each area difference by its first differing part ("route only": the last part, both trees with as many parts), a run
+// without parts (a stops run's) as its check apart; an area record of no form `run.mjs` writes (`areaRecordForm`) as
+// unread, which differs, never equal; each set difference by what differs; and `<prefix>-aside`'s rows where `aside`
+// ran. A shard is its job name (`<area>-<i>of<N>`; an area ran when its shards 0 to N-1 of one N stand), and of its
+// attempts one is read: the one that left a summary line and whose queue record (`meta.json`) shows its runner's own
+// ending (`ranOut`: exit 0 or 1, 3 as well for an area job, with the queue's outcome for that exit, no OOM kill, no
+// timeout, no lost test file). Any other attempt is listed, with its host and outcome, as replaced and never read; a
+// shard none of whose attempts stands is "not run", never equal. Several attempts that could stand are refused (exit 2)
+// unless all but one are replaced: by a rerun's record (`rerun-shard`) or by `--replace <failed>=<rerun>`, which is
+// refused when the jobs are not one shard's attempts or the rerun cannot stand. It prints a table and, with `--json`,
+// writes the report.
 //
 // `rerun-shard` submits one shard again into its campaign, `submit`'s own submission with the shard written in, as the
 // rerun of `<job>` (a split shard by the costs file its record names, from `~/work/replay-costs/`, refused where that
@@ -440,6 +442,20 @@ export function shardsOf(jobs, summaryOf, exits, replace = []) {
 /** Whether an area difference is the candidate route's alone: the last part, with as many parts on both trees. */
 export const routeOnly = (d) => d.parts?.[0] === d.parts?.[1] && d.part === d.parts?.[0] - 1;
 
+const isObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
+
+/**
+ * The form of an area record that names a run (`mode`), out of those `tests/families/run.mjs` writes: `exception`
+ * (`thrown`, from either tree or both) and `unanswered` (no `head` hash), which the area's summary counts, or
+ * `difference` (both trees' hashes, `parts` where the run is a publication's); any other record is `unread`.
+ */
+export function areaRecordForm(d) {
+  if (isObject(d.thrown)) return "exception";
+  if (isObject(d.unanswered) && d.head === undefined) return "unanswered";
+  if (typeof d.base === "string" && typeof d.head === "string") return "difference";
+  return "unread";
+}
+
 /** What differs in a set record's mode: `null` where nothing does. */
 export function setDifference({ base: b, head: h, same }) {
   if (same) return null;
@@ -498,6 +514,8 @@ export function report(prefix, results, expected = areasOf(ROOT).map((a) => a.na
   const notRun = [];
   const work = [];
   const differences = [];
+  // (an area record of no form `areaRecordForm` knows: never read as no difference)
+  const unread = [];
   const { areaShards, setShards } = shardsRead(prefix, results, replace);
   for (const { name, read } of areaShards) {
     const area = areaOf(name);
@@ -524,8 +542,12 @@ export function report(prefix, results, expected = areasOf(ROOT).map((a) => a.na
     for (const key of Object.keys(row)) if (key !== "shards") row[key] += summary[key] ?? 0;
     if (existsSync(path.join(out, `${area}.work.jsonl`)))
       work.push(path.join(out, `${area}.work.jsonl`));
-    for (const d of lines(path.join(out, `${area}.differences.jsonl`)))
-      if (d.mode !== undefined) differences.push({ area, ...d, routeOnly: routeOnly(d) });
+    for (const d of lines(path.join(out, `${area}.differences.jsonl`))) {
+      if (d.mode === undefined) continue;
+      const form = areaRecordForm(d);
+      if (form === "difference") differences.push({ area, ...d, routeOnly: routeOnly(d) });
+      else if (form === "unread") unread.push({ area, job: name, record: d });
+    }
   }
   const set = { shards: 0, sources: 0, runs: 0, stalled: 0, uncharged: 0, differences: [] };
   for (const { name, read } of setShards) {
@@ -593,6 +615,7 @@ export function report(prefix, results, expected = areasOf(ROOT).map((a) => a.na
     stalls,
     reruns: reruns.length,
     differences,
+    unread,
     aside,
     notRun,
     attempts: [...areaShards, ...setShards]
@@ -621,8 +644,14 @@ export function verdict(r) {
   for (const d of r.differences)
     if (!(d.routeOnly && agreed.has(`${d.source} ${d.mode}`)))
       reasons.push(
-        `${d.area} ${d.generator} ${d.source} ${d.mode}: part ${d.part} of ${d.parts.join("/")}`,
+        `${d.area} ${d.generator} ${d.source} ${d.mode}: ${
+          Array.isArray(d.parts) ? `part ${d.part} of ${d.parts.join("/")}` : `${d.check} apart`
+        }`,
       );
+  for (const { area, job, record } of r.unread)
+    reasons.push(
+      `${area} (${job}): a record of no form run.mjs writes: ${JSON.stringify(record).slice(0, 300)}`,
+    );
   for (const d of r.set.differences)
     if (!(d.what === "diagnostics only" && agreed.has(`${d.name} ${labelOf(d.mode)}`)))
       reasons.push(`set ${d.name} mode ${d.mode}: ${d.what}`);
