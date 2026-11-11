@@ -987,16 +987,19 @@ RERUN.rows(
     const transport = await topologyBridge(context, topology);
     const { host } = await mount(context, transport);
     const refusals: unknown[] = [];
-    const request = transport.bridge.request.bind(transport.bridge);
+    // EVIDENCE: test: the bridge's erased overload; the row forwards each call unchanged and reads only its refusal.
+    const request = transport.bridge.request.bind(transport.bridge) as (
+      ...call: readonly [PlayerSession, string, unknown, unknown?]
+    ) => Promise<unknown>;
     context.mock.method(
       transport.bridge,
       "request",
-      async (...call: Parameters<typeof request>) => {
+      async (...call: readonly [PlayerSession, string, unknown, unknown?]) => {
         try {
           return await request(...call);
         } catch (error) {
           if (call[1] === "beginCatchUp")
-            refusals.push((error as { readonly code?: unknown }).code);
+            refusals.push(error instanceof Error && "code" in error ? error.code : error);
           throw error;
         }
       },
