@@ -594,11 +594,20 @@ function ownErrors(c: Case): readonly string[] {
   ];
 }
 
+/** That `reported` holds no host error but `c`'s own. */
+function assertOwnErrors(c: Case, reported: readonly unknown[]) {
+  const own = ownErrors(c);
+  assert.deepEqual(
+    reported
+      .map((error) => (error instanceof Error ? `${error.name}: ${error.message}` : String(error)))
+      .filter((error) => !own.includes(error)),
+    [],
+    "no host error but the case's own",
+  );
+}
+
 /** Runs `c` on a page of its own, ending the held reply as `mode` says. */
 async function run(context: TestContext, c: Case, mode: Mode): Promise<Seen> {
-  // The host errors the Player reports, which may be only the case's own (asserted at the end).
-  const reported: unknown[] = [];
-  reportsInto(context, reported);
   const elements = browser(context);
   // The page's clock moves only where the case moves it, so that both runs observe the same times.
   const page = { now: 1_000 };
@@ -944,14 +953,6 @@ async function run(context: TestContext, c: Case, mode: Mode): Promise<Seen> {
     c.transition === "loss" ||
     (facade.heldRuns(bridge).length === 0 && facade.heldTickets(bridge).length === 0);
   const after = traffic.posts.filter((post) => post.phase > 0);
-  const own = ownErrors(c);
-  assert.deepEqual(
-    reported
-      .map((error) => (error instanceof Error ? `${error.name}: ${error.message}` : String(error)))
-      .filter((error) => !own.includes(error)),
-    [],
-    "no host error but the case's own",
-  );
   return {
     shows,
     errors,
@@ -983,6 +984,14 @@ const completed: Coordinates[] = [];
 for (const coordinates of FEASIBLE) {
   const c = asCase(coordinates);
   test(`activation family: ${Object.values(c).join(" ")}`, async (context) => {
+    // Every host error the test's Players report, both runs' and their teardown's: one capture for the test, checked
+    // once the case completed, in a hook registered after the runs' own teardown hooks, so it runs after them.
+    const reported: unknown[] = [];
+    reportsInto(context, reported);
+    const completes = () => {
+      context.after(() => assertOwnErrors(c, reported));
+      completed.push(coordinates);
+    };
     const released = await run(context, c, "release");
     // A begin whose reply settled before its successor began: the successor waits for the begin's own reaction
     // (`begunInFlight`), so the completion acts while its activation lives, and only then the successor replaces it.
@@ -992,7 +1001,7 @@ for (const coordinates of FEASIBLE) {
       assert.ok(released.cleaned, "the host holds no run or ticket of the Players once they went");
       const last = released.shows.at(-1) ?? "";
       assert.ok(last.includes("[successor]"), `the replacement shows last: ${last}`);
-      completed.push(coordinates);
+      completes();
       return;
     }
     // A Continue of the same lineage waits for the section that holds a queued draw, so no run without letting it go
@@ -1007,7 +1016,7 @@ for (const coordinates of FEASIBLE) {
         "the retired draw's body sends nothing",
       );
       assert.deepEqual(released.revisions, [], "nor writes a revision");
-      completed.push(coordinates);
+      completes();
       return;
     }
     const dropped = await run(context, c, reference(c));
@@ -1073,7 +1082,7 @@ for (const coordinates of FEASIBLE) {
         { ...effects(dropped), teardown: dropped.teardown },
         "the completion has its own effect",
       );
-    completed.push(coordinates);
+    completes();
   });
 }
 

@@ -21,6 +21,21 @@ import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
 import { reportsInto } from "../helpers/player/rewind-host.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 
+/** Ends the capture `reportsInto` began, at the check of what it captured, so that a later host error prints again. */
+function endCapture() {
+  // `reportsInto` replaced `console.error` by a mock of the test's context, which carries its `mock`.
+  const error: unknown = console.error;
+  const capture = typeof error === "function" && "mock" in error ? error.mock : undefined;
+  assert.ok(
+    typeof capture === "object" &&
+      capture !== null &&
+      "restore" in capture &&
+      typeof capture.restore === "function",
+    "the capture reportsInto began",
+  );
+  capture.restore();
+}
+
 /** The value trace the host's session runs with, as the host holds it. */
 const sessionTrace = (session: PlayerRuntimeSession | null | undefined) =>
   session === null || session === undefined
@@ -320,6 +335,7 @@ test("a session a Player error stopped is still viewed as it stopped", async (co
   reportsInto(context, reported);
   const failure = new TypeError("A component failed.");
   host.reportHostError(failure);
+  endCapture();
   assert.deepEqual(reported, [failure]);
   await settle();
   // Its view is asked for again, from the stopped session, and shows what it showed.

@@ -33,6 +33,21 @@ import { untypedClient } from "../helpers/bridge/untyped.js";
 import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
 import type { StartOptions } from "../../player/engine-bridge/ops/session.js";
 
+/** Ends the capture `reportsInto` began, at the check of what it captured, so that a later host error prints again. */
+function endCapture() {
+  // `reportsInto` replaced `console.error` by a mock of the test's context, which carries its `mock`.
+  const error: unknown = console.error;
+  const capture = typeof error === "function" && "mock" in error ? error.mock : undefined;
+  assert.ok(
+    typeof capture === "object" &&
+      capture !== null &&
+      "restore" in capture &&
+      typeof capture.restore === "function",
+    "the capture reportsInto began",
+  );
+  capture.restore();
+}
+
 /*
  * The Player's input over the engine's bridge (L5c), through the production intents, the input chain
  * (`runtime-input.ts`) and the composable's input section, on a host that replies after 250 ms. Each input is posted
@@ -362,6 +377,7 @@ for (const interference of ["a replacement", "a stop", "an unmount"] as const)
     else scope.stop();
     const result = await answering;
     await settle();
+    endCapture();
     assert.deepEqual(reported, interference === "a stop" ? [failure] : []);
     assert.equal(result.kind, "retired");
     assert.equal(opened, 0, "no tab opened");
@@ -380,6 +396,7 @@ test("a request still queued in the host at a stop is refused without effect, an
   reportsInto(context, reported);
   const failure = new TypeError("a component failed");
   host.reportHostError(failure);
+  endCapture();
   assert.deepEqual(reported, [failure]);
   await compiling;
   const result = await answering;
@@ -413,6 +430,7 @@ test("an answer dispatched before a stop shows through the stop's commit, and no
     input.intents.choice(options(host.session.value!)[1]!.id, "button"),
   );
   await settle();
+  endCapture();
   assert.deepEqual(reported, [failure]);
   assert.equal(result.kind, "retired", "no feedback after the stop");
   assert.equal(host.hostError.value, "TypeError");
@@ -675,6 +693,7 @@ for (const interference of ["a replacement", "a stop", "an unmount"] as const)
     await replaced;
     const atInterference = host.session.value;
     await wait(200);
+    endCapture();
     assert.deepEqual(reported, interference === "a stop" ? [failure] : []);
     assert.deepEqual(store.writes, ["kept"]);
     if (interference === "a replacement") assert.deepEqual(said(host), ["replacement"]);
