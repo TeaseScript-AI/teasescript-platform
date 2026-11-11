@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
+import { isDeepStrictEqual } from "node:util";
+import { Worker } from "node:worker_threads";
 import { effectScope, type Ref } from "vue";
 
 import { CapturedMediaStore } from "../../player/media/captured-media.js";
@@ -7,7 +9,6 @@ import { createPlayerRuntimeSession } from "../../player/runtime/compile-project
 import { BridgeLostError } from "../../player/engine-bridge/client.js";
 import { loadAge, loadTlock } from "../../player/encryption/content-lock.js";
 import type * as Client from "../../player/engine-bridge/client.js";
-import type * as InProcess from "../../player/engine-bridge/in-process.js";
 import { LockService } from "../../player/encryption/lock-service.js";
 import type { PlayerBridge, ServiceSection } from "../../player/runtime/player-bridge.js";
 import type { PlayerRuntimeSessionOptions } from "../../player/runtime/runtime-adapter.js";
@@ -25,6 +26,15 @@ import { loadPlayerModule } from "../helpers/player-modules.js";
 import { serviceSection } from "../helpers/service-section.js";
 import { clockTicket } from "../helpers/clock-ticket.js";
 import type { InputSection } from "../../player/vue/src/session/runtime-input.js";
+import {
+  inProcessLoss,
+  loadTopology,
+  rerunRegistry,
+  TOPOLOGIES,
+  topologyBridge,
+  until,
+  type Topology,
+} from "../helpers/player/worker-topology.js";
 
 /*
  * When the engine's Worker is lost, every request still waiting for its reply ends its caller quietly: the loss is the
@@ -78,47 +88,15 @@ async function unhandledDuring(body: () => Promise<void>): Promise<unknown[]> {
   return unhandled;
 }
 
-/** Makes `bridge`'s client lose its Worker on `lose()`, as a real loss: `Lost` is the client module's error class. */
-function injectLoss(bridge: PlayerBridge, Lost: typeof BridgeLostError) {
-  const listeners: ((error: BridgeLostError) => void)[] = [];
-  const client = bridge.client;
-  client.onLoss = (listener) => void listeners.push(listener);
-  return () => {
-    client.terminate();
-    const lost = new Lost("The engine Worker failed: injected.");
-    for (const listener of listeners) listener(lost);
-  };
-}
-
 const turns = async (count: number) => {
   for (let turn = 0; turn < count; turn++) await new Promise((resolve) => setTimeout(resolve, 5));
 };
-
-/**
- * Holds the replies the in-process host schedules `delayMs` after a request, until the returned release: what is posted
- * meanwhile is in flight however long the test's own turns take, as on a loaded machine they may take longer.
- */
-function holdReplies(context: TestContext, delayMs: number): () => void {
-  const timeout = globalThis.setTimeout;
-  const held: (() => void)[] = [];
-  const hold = (callback: () => void, ms?: number) => {
-    if (ms !== delayMs) return timeout(callback, ms);
-    held.push(callback);
-    return timeout(() => {}, 0);
-  };
-  // EVIDENCE: invariant: `hold` keeps `setTimeout`'s call shape for the callbacks these tests and the host schedule.
-  const scheduled = context.mock.method(globalThis, "setTimeout", hold as typeof setTimeout);
-  return () => {
-    scheduled.mock.restore();
-    for (const callback of held.splice(0)) timeout(callback, 0);
-  };
-}
 
 // The services, through the same section host as their own tests, on a host whose replies take 50 ms.
 
 /** A service's host around `session`: its section, and the op it sends, with a loss at the post of `lossAt`. */
 function serviceHost(bridge: PlayerBridge, session: PlayerSession, lossAt: string) {
-  const lose = injectLoss(bridge, BridgeLostError);
+  const lose = inProcessLoss(bridge, BridgeLostError);
   const state: { session: PlayerSession | null; sent: string[]; diagnostics: number } = {
     session,
     sent: [],
@@ -280,13 +258,13 @@ let usePlayerSession: (options: {
   readonly scriptStorage?: ScriptStorageProvider;
   readonly keptSessions?: KeptSessionStore;
 }) => LossHost;
-let facade: typeof InProcess;
 let client: typeof Client;
+let bridgeModule: typeof import("../../player/runtime/player-bridge.js");
 let compiler: typeof import("../../player/runtime/compile-project.js");
-/** What `prepareHostedScript` reads of the Player, as `startPage` gives it. */
+/** What `prepareHostedScript` reads of the Player, as `startPage` gives it, or the real composable. */
 type StartPagePlayer = ReturnType<typeof startPage>["player"];
 let prepareHostedScript: (
-  player: StartPagePlayer,
+  player: StartPagePlayer | LossHost,
   host: { load(): Promise<{ readonly project: string }> },
 ) => { readonly failure: Readonly<Ref<object | null>> };
 /** A connection as the Stage preload reads it. */
@@ -308,8 +286,9 @@ before(async () => {
   const module = await loadPlayerModule("player/vue/src/session/usePlayerSession.ts");
   // EVIDENCE: validation: Vite loaded the real source module; this is its host API.
   usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
-  // EVIDENCE: validation: the bundle's in-process backend, whose sessions the composable's facade reaches.
-  facade = (await loadPlayerModule("player/engine-bridge/in-process.ts")) as typeof facade;
+  await loadTopology();
+  // EVIDENCE: validation: the bundle's bridge module, whose `PlayerBridge` the composable runs with.
+  bridgeModule = (await loadPlayerModule("player/runtime/player-bridge.ts")) as typeof bridgeModule;
   // EVIDENCE: validation: the bundle's client module, whose error classes the bundle's code tests for.
   client = (await loadPlayerModule("player/engine-bridge/client.ts")) as typeof client;
   // EVIDENCE: validation: the bundle's compiler module, from the same module graph.
@@ -327,8 +306,28 @@ const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
 /** Fake audio elements the composable makes, which a test makes load. */
 type FakeAudio = EventTarget & { src: string };
 
-/** The real composable on its in-process engine, with replies after `delayMs`, and a loss to inject. */
-async function mount(context: TestContext, delayMs: number) {
+/*
+ * The composable's rows run on both topologies (L5i.7): the in-process host, and the engine's Worker entry in a Node
+ * Worker thread, whose loss is the thread's real exit. Each is registered here; the file's end checks every registered
+ * row ran on each of its topologies. An in-flight row holds the request's own reply, loses the Worker while it is held,
+ * then lets the held replies go.
+ */
+const RERUN = rerunRegistry({
+  "input-section observation in flight": TOPOLOGIES,
+  "input-section op in flight": TOPOLOGIES,
+  "observation queued in the client": TOPOLOGIES,
+  "op queued in the client": TOPOLOGIES,
+  "media load report in flight": TOPOLOGIES,
+  "call view in flight": TOPOLOGIES,
+  "keep's capture in flight": TOPOLOGIES,
+  "Continue's restore in flight": TOPOLOGIES,
+  "hosted script's preparation in flight": TOPOLOGIES,
+  // Only a Worker thread can exit before it is ready; the in-process host is ready at once.
+  "Worker lost before ready": ["worker"],
+});
+
+/** The browser surface the composable uses, with fake audio elements a test makes load. */
+function browser(context: TestContext): FakeAudio[] {
   const elements: FakeAudio[] = [];
   const surface = {
     document: Object.assign(new EventTarget(), { visibilityState: "visible" }),
@@ -359,150 +358,204 @@ async function mount(context: TestContext, delayMs: number) {
       else Reflect.deleteProperty(globalThis, name);
     });
   }
+  return elements;
+}
+
+/** The host errors the Player logs, as the loss's error stop logs one. */
+function hostErrorLog(context: TestContext) {
   const errors: string[] = [];
   const log = console.error;
   console.error = (...args: unknown[]) => void errors.push(String(args[0]));
   context.after(() => void (console.error = log));
-  const bridge = facade.createInProcessBackend(BUILD, { delayMs });
-  const lose = injectLoss(bridge, client.BridgeLostError);
+  return () => errors.filter((line) => line.includes("host error")).length;
+}
+
+/** A choice, with an audio cue started before it. */
+const AT_A_CHOICE = 'playAudio async "bell.mp3"\nlet pick = askChoice "Go"\nexit';
+/** A script that waits for its medium's load before it goes on: its load report is sent. */
+const AWAITS_ITS_MEDIUM =
+  'playAudio async "bell.mp3"\nsay "after", instant\nshowButton "Done"\nexit';
+
+/** The real composable on `topology`, in-process with replies after `delayMs`, started on `script` with its audio. */
+async function mount(
+  context: TestContext,
+  topology: Topology,
+  delayMs: number,
+  script: string = AT_A_CHOICE,
+) {
+  const elements = browser(context);
+  const hostErrors = hostErrorLog(context);
+  const transport = await topologyBridge(context, topology, { delayMs });
   const scope = effectScope();
   const player = scope.run(() =>
     usePlayerSession({
-      bridge: Promise.resolve(bridge),
+      bridge: Promise.resolve(transport.bridge),
       debugHistorySpill: async () => null,
       resolveAsset: (path) => `https://fixture/${path}`,
     }),
   )!;
   context.after(() => scope.stop());
   await player.bridge;
-  player.prepare(
-    await sourceStart(
-      player.bridge,
-      'playAudio async "bell.mp3"\nlet pick = askChoice "Go"\nexit',
-      () => ({ wallClockMs: 0 }),
-    ),
-  );
+  transport.assertTopology();
+  player.prepare(await sourceStart(player.bridge, script, () => ({ wallClockMs: 0 })));
   await player.activate();
-  const hostErrors = () => errors.filter((line) => line.includes("host error")).length;
-  return { bridge, player, lose, elements, hostErrors };
+  if (script === AT_A_CHOICE)
+    await until(() => player.session.value?.state.foregroundAction != null, "the choice shows");
+  await until(() => elements.some((element) => element.src.endsWith("bell.mp3")), "the audio");
+  return { transport, player, elements, hostErrors };
 }
 
-for (const [consumer, run] of [
+for (const [consumer, id, run] of [
   [
     "an input section's observation",
+    "input-section observation in flight",
     (player: LossHost) => player.inputSection("inputAnswer", async (_s, observed) => observed),
   ],
   [
     "an input section's op",
+    "input-section op in flight",
     (player: LossHost) =>
       // A row that observes nothing, so the op is the section's first post.
       player.inputSection("inputDraft", (s) => s.send("observeInput", { atMs: 0, media: [] })),
   ],
-] as const)
-  test(`${consumer} in flight when the Worker is lost ends quietly, and the loss is the error stop once`, async (context) => {
-    covered.add(consumer);
-    const { player, lose, hostErrors } = await mount(context, 50);
-    let result: Awaited<ReturnType<typeof run>> | "pending" = "pending";
-    const unhandled = await unhandledDuring(async () => {
-      const release = holdReplies(context, 50);
+] as const) {
+  RERUN.rows(
+    id,
+    `${consumer} in flight when the Worker is lost ends quietly, and the loss is the error stop once`,
+    async (context, topology) => {
+      covered.add(consumer);
+      const { transport, player, hostErrors } = await mount(context, topology, 50);
+      let result: Awaited<ReturnType<typeof run>> | "pending" = "pending";
+      const unhandled = await unhandledDuring(async () => {
+        transport.hold("observeInput");
+        const pending = run(player);
+        // Posted; its own reply is held until after the loss, so it is in flight then.
+        await transport.held();
+        await transport.lose();
+        transport.release();
+        result = await pending;
+      });
+      assert.deepEqual(unhandled, []);
+      // A lost observation gives no session; a lost op is retired, as one the stop refused.
+      assert.ok(
+        result === null || (typeof result === "symbol" && String(result).includes("retired")),
+        String(result),
+      );
+      assert.equal(player.hostError.value, "BridgeLostError");
+      assert.equal(hostErrors(), 1);
+    },
+  );
+  RERUN.rows(
+    id,
+    `control: ${consumer} on the same schedule without a loss succeeds`,
+    async (context, topology) => {
+      const { transport, player, hostErrors } = await mount(context, topology, 50);
+      transport.hold("observeInput");
       const pending = run(player);
-      // Posted; its reply is held until after the loss, so it is in flight then.
-      await turns(2);
-      lose();
-      release();
-      result = await pending;
-    });
-    assert.deepEqual(unhandled, []);
-    // A lost observation gives no session; a lost op is retired, as one the stop refused.
-    assert.ok(
-      result === null || (typeof result === "symbol" && String(result).includes("retired")),
-      String(result),
-    );
-    assert.equal(player.hostError.value, "BridgeLostError");
-    assert.equal(hostErrors(), 1);
-  });
+      await transport.held();
+      transport.release();
+      const result = await pending;
+      assert.ok(result !== null && typeof result !== "symbol", String(result));
+      assert.equal(player.hostError.value, null);
+      assert.equal(hostErrors(), 0);
+    },
+  );
+}
 
-for (const [consumer, run] of [
+for (const [consumer, id, run] of [
   [
     "an observation still queued in the client",
+    "observation queued in the client",
     (player: LossHost) => player.inputSection("inputAnswer", async (_s, observed) => observed),
   ],
   [
     "an op still queued in the client",
+    "op queued in the client",
     (player: LossHost) =>
       player.inputSection("inputDraft", (s) => s.send("observeInput", { atMs: 0, media: [] })),
   ],
 ] as const)
-  test(`control: ${consumer} at the loss never posts, as the stop ends it first`, async (context) => {
-    covered.add(consumer);
-    const { bridge, player, lose, hostErrors } = await mount(context, 0);
-    // Another section of the session holds it, so this one waits in the client.
-    let release = () => {};
-    void bridge.section(
-      player.session.value!,
-      clockTicket(),
-      () => new Promise<void>((resolve) => (release = resolve)),
+  RERUN.rows(
+    id,
+    `control: ${consumer} at the loss never posts, as the stop ends it first`,
+    async (context, topology) => {
+      covered.add(consumer);
+      const { transport, player, hostErrors } = await mount(context, topology, 0);
+      // Another section of the session holds it, so this one waits in the client.
+      let release = () => {};
+      void transport.bridge.section(
+        player.session.value!,
+        clockTicket(),
+        () => new Promise<void>((resolve) => (release = resolve)),
+      );
+      const before = transport.posts.length;
+      const unhandled = await unhandledDuring(async () => {
+        const pending = run(player);
+        await transport.lose();
+        release();
+        await pending;
+      });
+      assert.deepEqual(unhandled, []);
+      assert.deepEqual(transport.posts.slice(before), [], "nothing reached the port");
+      assert.equal(hostErrors(), 1);
+    },
+  );
+
+RERUN.rows(
+  "media load report in flight",
+  "control: a media load report in flight when the Worker is lost ends quietly",
+  async (context, topology) => {
+    covered.add("a media load report");
+    const { transport, player, elements, hostErrors } = await mount(
+      context,
+      topology,
+      50,
+      AWAITS_ITS_MEDIUM,
     );
     const unhandled = await unhandledDuring(async () => {
-      const pending = run(player);
-      lose();
-      release();
-      await pending;
+      transport.hold("reportMediaLoad");
+      elements
+        .find((element) => element.src.endsWith("bell.mp3"))!
+        .dispatchEvent(new Event("loadedmetadata"));
+      await transport.held();
+      await transport.lose();
+      transport.release();
     });
     assert.deepEqual(unhandled, []);
+    assert.equal(player.hostError.value, "BridgeLostError");
     assert.equal(hostErrors(), 1);
-  });
+  },
+);
 
-test("control: a media load report in flight when the Worker is lost ends quietly", async (context) => {
-  covered.add("a media load report");
-  const { player, lose, elements, hostErrors } = await mount(context, 50);
-  const unhandled = await unhandledDuring(async () => {
-    elements
-      .find((element) => element.src.endsWith("bell.mp3"))!
-      .dispatchEvent(new Event("loadedmetadata"));
-    await turns(2);
-    lose();
-  });
-  assert.deepEqual(unhandled, []);
-  assert.equal(player.hostError.value, "BridgeLostError");
-  assert.equal(hostErrors(), 1);
-});
-
-test("a call view request in flight when the Worker is lost ends quietly, and the loss is the error stop once", async (context) => {
-  covered.add("a call view request");
-  const { player, lose, hostErrors } = await mount(context, 50);
-  const unhandled = await unhandledDuring(async () => {
-    // Debug's Now view opens: its call view request is posted, its reply 50 ms away.
-    player.demandCallView();
-    await turns(2);
-    lose();
-  });
-  assert.deepEqual(unhandled, []);
-  assert.equal(player.hostError.value, "BridgeLostError");
-  assert.equal(hostErrors(), 1);
-});
-
-/** A page whose script keeps its session, on its in-process engine with replies after `delayMs`, and a loss to inject. */
-async function keepingPage(context: TestContext, kept: KeptSessionStore, delayMs: number) {
-  for (const [name, value] of Object.entries({
-    document: Object.assign(new EventTarget(), { visibilityState: "visible" }),
-    window: new EventTarget(),
-    // A Start primes the audio elements it may need.
-    Audio: class {
-      src = "";
-      play = async () => {};
-      pause() {}
-      load() {}
-      removeAttribute() {}
-    },
-  })) {
-    const previous = Object.getOwnPropertyDescriptor(globalThis, name);
-    Object.defineProperty(globalThis, name, { configurable: true, value });
-    context.after(() => {
-      if (previous) Object.defineProperty(globalThis, name, previous);
-      else Reflect.deleteProperty(globalThis, name);
+RERUN.rows(
+  "call view in flight",
+  "a call view request in flight when the Worker is lost ends quietly, and the loss is the error stop once",
+  async (context, topology) => {
+    covered.add("a call view request");
+    const { transport, player, hostErrors } = await mount(context, topology, 50);
+    const unhandled = await unhandledDuring(async () => {
+      // Debug's Now view opens: its call view request is posted, its reply held.
+      transport.hold("viewCalls");
+      player.demandCallView();
+      await transport.held();
+      await transport.lose();
+      transport.release();
     });
-  }
+    assert.deepEqual(unhandled, []);
+    assert.equal(player.hostError.value, "BridgeLostError");
+    assert.equal(hostErrors(), 1);
+  },
+);
+
+/** A page whose script keeps its session, on `topology` (in-process, replies after `delayMs`). */
+async function keepingPage(
+  context: TestContext,
+  kept: KeptSessionStore,
+  topology: Topology,
+  delayMs: number,
+  script = 'let pick = askChoice "Go"\nsay "x", instant\nexit',
+) {
+  browser(context);
   const scriptStorage: ScriptStorageProvider = {
     scope: "loss",
     load: async () => [],
@@ -510,12 +563,11 @@ async function keepingPage(context: TestContext, kept: KeptSessionStore, delayMs
     replace: async () => {},
     clear: async () => {},
   };
-  const bridge = facade.createInProcessBackend(BUILD, { delayMs });
-  const lose = injectLoss(bridge, client.BridgeLostError);
+  const transport = await topologyBridge(context, topology, { delayMs });
   const scope = effectScope();
   const player = scope.run(() =>
     usePlayerSession({
-      bridge: Promise.resolve(bridge),
+      bridge: Promise.resolve(transport.bridge),
       debugHistorySpill: async () => null,
       scriptStorage,
       keptSessions: kept,
@@ -523,66 +575,155 @@ async function keepingPage(context: TestContext, kept: KeptSessionStore, delayMs
   )!;
   context.after(() => scope.stop());
   await player.loadScriptStorage();
-  const plan = compiler.compilePlayerProject(
-    'let pick = askChoice "Go"\nsay "x", instant\nexit',
-  ).plan!;
+  transport.assertTopology();
+  const plan = compiler.compilePlayerProject(script).plan!;
   const token = await preparedPlan(player.bridge, plan);
-  return { bridge, player, lose, token };
+  return { transport, player, token };
 }
 
-test("a keep's capture in flight when the Worker is lost keeps the session kept before, and ends quietly", async (context) => {
-  covered.add("a keep's capture");
-  const kept = memoryKeptSessionStore();
-  const { player, lose, token } = await keepingPage(context, kept, 50);
-  await player.prepareScript(token, { plan: token, options: () => ({ wallClockMs: 0 }) });
-  await player.activate();
-  // The session is kept at the question it presents.
-  for (let turn = 0; (await kept.session("loss")) === null; turn++) {
-    assert.ok(turn < 100, "the session was not kept");
-    await turns(1);
-  }
-  const before = await kept.session("loss");
-  const unhandled = await unhandledDuring(async () => {
-    // Hiding the page keeps the session again; its capture is posted, its reply 50 ms away.
-    Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
-    document.dispatchEvent(new Event("visibilitychange"));
-    await turns(2);
-    lose();
-  });
-  assert.deepEqual(unhandled, []);
-  assert.deepEqual(await kept.session("loss"), before, "the session kept before stays");
-  assert.equal(player.hostError.value, "BridgeLostError");
-});
-
-test("Continue's restore in flight when the Worker is lost ends quietly, and offers no Continue", async (context) => {
-  covered.add("Continue's restore");
-  const kept = memoryKeptSessionStore();
-  {
-    const first = await keepingPage(context, kept, 0);
-    await first.player.prepareScript(first.token, {
-      plan: first.token,
-      options: () => ({ wallClockMs: 0 }),
-    });
-    await first.player.activate();
+RERUN.rows(
+  "keep's capture in flight",
+  "a keep's capture in flight when the Worker is lost keeps the session kept before, and ends quietly",
+  async (context, topology) => {
+    covered.add("a keep's capture");
+    const kept = memoryKeptSessionStore();
+    // A button that times out, then a question: the session is kept at each, the second without input.
+    const { transport, player, token } = await keepingPage(
+      context,
+      kept,
+      topology,
+      50,
+      'showButton "One", timeout: 300 ms\nlet pick = askChoice "Go"\nsay "x", instant\nexit',
+    );
+    await player.prepareScript(token, { plan: token, options: () => ({ wallClockMs: 0 }) });
+    await player.activate();
+    // The session is kept at the button it presents.
     for (let turn = 0; (await kept.session("loss")) === null; turn++) {
       assert.ok(turn < 100, "the session was not kept");
       await turns(1);
     }
-  }
-  const { player, lose, token } = await keepingPage(context, kept, 50);
-  const unhandled = await unhandledDuring(async () => {
-    const preparing = player.prepareScript(token, {
-      plan: token,
-      options: () => ({ wallClockMs: 0 }),
+    const before = await kept.session("loss");
+    assert.ok(before, "a session is kept");
+    const unhandled = await unhandledDuring(async () => {
+      // The button times out and the question shows: its keep's capture is posted, its reply held.
+      transport.hold("captureKeep");
+      await transport.held();
+      await transport.lose();
+      transport.release();
     });
-    // The restore is posted, its reply 50 ms away.
-    await turns(2);
-    lose();
-    await preparing;
-  });
-  assert.deepEqual(unhandled, []);
-  assert.notEqual(player.activation.value, "continue");
-});
+    assert.deepEqual(unhandled, []);
+    assert.deepEqual(await kept.session("loss"), before, "the session kept before stays");
+    assert.equal(player.hostError.value, "BridgeLostError");
+  },
+);
+
+RERUN.rows(
+  "Continue's restore in flight",
+  "Continue's restore in flight when the Worker is lost ends quietly, and offers no Continue",
+  async (context, topology) => {
+    covered.add("Continue's restore");
+    const kept = memoryKeptSessionStore();
+    {
+      const first = await keepingPage(context, kept, "in-process", 0);
+      await first.player.prepareScript(first.token, {
+        plan: first.token,
+        options: () => ({ wallClockMs: 0 }),
+      });
+      await first.player.activate();
+      for (let turn = 0; (await kept.session("loss")) === null; turn++) {
+        assert.ok(turn < 100, "the session was not kept");
+        await turns(1);
+      }
+    }
+    const { transport, player, token } = await keepingPage(context, kept, topology, 50);
+    const unhandled = await unhandledDuring(async () => {
+      transport.hold("restoreKept");
+      const preparing = player.prepareScript(token, {
+        plan: token,
+        options: () => ({ wallClockMs: 0 }),
+      });
+      // The restore is posted, its reply held.
+      await transport.held();
+      await transport.lose();
+      transport.release();
+      await preparing;
+    });
+    assert.deepEqual(unhandled, []);
+    assert.notEqual(player.activation.value, "continue");
+  },
+);
+
+RERUN.rows(
+  "hosted script's preparation in flight",
+  "the hosted script's preparation in flight when the Worker is lost ends quietly, and shows no failure",
+  async (context, topology) => {
+    browser(context);
+    const hostErrors = hostErrorLog(context);
+    const transport = await topologyBridge(context, topology, { delayMs: 50 });
+    const scope = effectScope();
+    const player = scope.run(() =>
+      usePlayerSession({
+        bridge: Promise.resolve(transport.bridge),
+        debugHistorySpill: async () => null,
+      }),
+    )!;
+    context.after(() => scope.stop());
+    await player.bridge;
+    transport.assertTopology();
+    let failure: object | null | "unset" = "unset";
+    const unhandled = await unhandledDuring(async () => {
+      transport.hold("prepare");
+      const prepared = prepareHostedScript(player, {
+        load: async () => ({ project: 'say "x"\nexit' }),
+      });
+      await transport.held();
+      await transport.lose();
+      transport.release();
+      await turns(4);
+      failure = prepared.failure.value;
+    });
+    assert.deepEqual(unhandled, []);
+    assert.equal(failure, null, "a lost preparation is no failure to show");
+    assert.equal(player.hostError.value, "BridgeLostError");
+    assert.equal(hostErrors(), 1);
+  },
+);
+
+RERUN.rows(
+  "Worker lost before ready",
+  "a Worker lost before it is ready leaves no rejection unhandled",
+  async (context) => {
+    browser(context);
+    // A thread that exits before it sends `ready`.
+    const worker = new Worker("process.exit(3)", { eval: true });
+    const connecting = client
+      .connectBridge(
+        {
+          post: (message) => worker.postMessage(message),
+          listen: (listener) => worker.on("message", listener),
+          onFailure: (listener) => {
+            worker.on("error", listener);
+            worker.on("exit", (code) =>
+              listener(new Error(`The worker exited with code ${code}.`)),
+            );
+          },
+          terminate: () => void worker.terminate(),
+        },
+        BUILD,
+      )
+      .then((connected) => new bridgeModule.PlayerBridge(connected));
+    const scope = effectScope();
+    const unhandled = await unhandledDuring(async () => {
+      const player = scope.run(() =>
+        usePlayerSession({ bridge: connecting, debugHistorySpill: async () => null }),
+      )!;
+      // The host's own callers see the failure; nothing else leaves it unhandled.
+      await assert.rejects(player.bridge);
+    });
+    scope.stop();
+    assert.deepEqual(unhandled, []);
+  },
+);
 
 test("the Worker's readiness that fails leaves no rejection unhandled", async () => {
   covered.add("the Worker's readiness");
@@ -691,4 +832,153 @@ test("control: a Stage photo preload whose metadata the Worker's loss ends prelo
   });
   scope.stop();
   assert.deepEqual([unhandled, preloaded], [[], []]);
+});
+
+// The no-loss controls: each row above on the same schedule, its reply held and let go without a loss, completes.
+
+RERUN.rows(
+  "media load report in flight",
+  "control: a media load report held and let go without a loss lets the script go on",
+  async (context, topology) => {
+    const { transport, player, elements, hostErrors } = await mount(
+      context,
+      topology,
+      50,
+      AWAITS_ITS_MEDIUM,
+    );
+    transport.hold("reportMediaLoad");
+    elements
+      .find((element) => element.src.endsWith("bell.mp3"))!
+      .dispatchEvent(new Event("loadedmetadata"));
+    await transport.held();
+    transport.release();
+    await until(
+      () =>
+        player.session.value?.transcriptEntries.some((entry) => entry.text === "after") ?? false,
+      "the script goes on",
+    );
+    assert.equal(player.hostError.value, null);
+    assert.equal(hostErrors(), 0);
+  },
+);
+
+RERUN.rows(
+  "call view in flight",
+  "control: a call view request held and let go without a loss shows the call view",
+  async (context, topology) => {
+    const { transport, player, hostErrors } = await mount(context, topology, 50);
+    transport.hold("viewCalls");
+    player.demandCallView();
+    await transport.held();
+    transport.release();
+    await until(() => player.session.value?.callView != null, "the call view shows");
+    assert.equal(hostErrors(), 0);
+  },
+);
+
+RERUN.rows(
+  "keep's capture in flight",
+  "control: a keep's capture held and let go without a loss keeps the new point",
+  async (context, topology) => {
+    const kept = memoryKeptSessionStore();
+    const { transport, player, token } = await keepingPage(
+      context,
+      kept,
+      topology,
+      50,
+      'showButton "One", timeout: 300 ms\nlet pick = askChoice "Go"\nsay "x", instant\nexit',
+    );
+    await player.prepareScript(token, { plan: token, options: () => ({ wallClockMs: 0 }) });
+    await player.activate();
+    for (let turn = 0; (await kept.session("loss")) === null; turn++) {
+      assert.ok(turn < 100, "the session was not kept");
+      await turns(1);
+    }
+    const before = await kept.session("loss");
+    transport.hold("captureKeep");
+    await transport.held();
+    transport.release();
+    for (let turn = 0; isDeepStrictEqual(await kept.session("loss"), before); turn++) {
+      assert.ok(turn < 100, "the new point was not kept");
+      await turns(1);
+    }
+    assert.equal(player.hostError.value, null);
+  },
+);
+
+RERUN.rows(
+  "Continue's restore in flight",
+  "control: Continue's restore held and let go without a loss offers Continue",
+  async (context, topology) => {
+    const kept = memoryKeptSessionStore();
+    {
+      const first = await keepingPage(context, kept, "in-process", 0);
+      await first.player.prepareScript(first.token, {
+        plan: first.token,
+        options: () => ({ wallClockMs: 0 }),
+      });
+      await first.player.activate();
+      for (let turn = 0; (await kept.session("loss")) === null; turn++) {
+        assert.ok(turn < 100, "the session was not kept");
+        await turns(1);
+      }
+    }
+    const { transport, player, token } = await keepingPage(context, kept, topology, 50);
+    transport.hold("restoreKept");
+    const preparing = player.prepareScript(token, {
+      plan: token,
+      options: () => ({ wallClockMs: 0 }),
+    });
+    await transport.held();
+    transport.release();
+    await preparing;
+    assert.equal(player.activation.value, "continue");
+  },
+);
+
+RERUN.rows(
+  "hosted script's preparation in flight",
+  "control: the hosted script's preparation held and let go without a loss offers Start",
+  async (context, topology) => {
+    browser(context);
+    const hostErrors = hostErrorLog(context);
+    const transport = await topologyBridge(context, topology, { delayMs: 50 });
+    const scope = effectScope();
+    const player = scope.run(() =>
+      usePlayerSession({
+        bridge: Promise.resolve(transport.bridge),
+        debugHistorySpill: async () => null,
+      }),
+    )!;
+    context.after(() => scope.stop());
+    await player.bridge;
+    transport.hold("prepare");
+    const prepared = prepareHostedScript(player, {
+      load: async () => ({ project: 'say "x"\nexit' }),
+    });
+    await transport.held();
+    transport.release();
+    await until(() => player.activation.value === "start", "Start is offered");
+    assert.equal(prepared.failure.value, null);
+    assert.equal(hostErrors(), 0);
+  },
+);
+
+test("the rows' Worker loss is the thread's real exit, and each topology is the one asked for", async (context) => {
+  for (const topology of TOPOLOGIES) {
+    const transport = await topologyBridge(context, topology, { delayMs: 50 });
+    transport.assertTopology();
+    let reported = "";
+    transport.bridge.client.onLoss((error) => (reported = error.message));
+    await transport.lose();
+    if (topology === "worker") {
+      // The client ends the thread on any loss, so the exit alone would not tell an injected loss from the thread's own.
+      assert.match(
+        reported,
+        /exited with code/u,
+        "the loss the client reports is the thread's exit",
+      );
+      assert.equal(typeof (await transport.exited), "number");
+    } else assert.equal(transport.exited, null);
+  }
 });
