@@ -19,6 +19,11 @@
  * identity. Anything else is the conservative default: a native weak collection is a violation (its entries cannot be
  * listed), and an instance of a class not in `IDENTITY_CLASSES` is a violation too.
  *
+ * Outside the domain in #1072 1b, by name: the admission's own state (`Admission`, `core/admission/`); narrowing's
+ * indexes (`NarrowingIndex` and its module capture, `GuardIndex`'s narrowing queries); what a query gathers in
+ * `contract/objects.ts` and a run's flow in `contract/contributions.ts` (the solver's records, as the lint's
+ * `EXCLUDED` says).
+ *
  * The fingerprint is a detached string hash computed at the run switch (object identities as this recorder's own ids),
  * never the live object.
  */
