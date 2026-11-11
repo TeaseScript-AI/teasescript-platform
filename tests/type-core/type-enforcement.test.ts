@@ -619,7 +619,7 @@ test("optional types keep their non-null type in operations, elements, and loops
       [
         [
           code,
-          "'n' may be null. Check it first: if n != null { ... }, or give a fallback: n otherwise 0",
+          "'n' must be checked for null before it is used here: its type is 'integer?' (line 2). Check it first: if n != null { ... }, or give a fallback: n otherwise 0",
           "n",
         ],
       ],
@@ -639,26 +639,26 @@ test("optional types keep their non-null type in operations, elements, and loops
   assert.deepEqual(mismatches("function f(v: number?) {\n    return round(v)\n}\nexit"), [
     [
       "TSV043",
-      "'v' may be null. Check it first: if v != null { ... }, or give a fallback: v otherwise 0",
+      "'v' must be checked for null before it is used here: its type is 'number?' (line 1). Check it first: if v != null { ... }, or give a fallback: v otherwise 0",
       "v",
     ],
   ]);
   assert.deepEqual(codes('let t: string? = "a"\nlet r = round(t)\nexit'), [["TSV043", "t"]]);
   // Also beside an operand of unknown type, as a timer range, or as the receiver of a new property. The fallback the
   // message names is of the value's type, or a placeholder for a type without a short literal (owner decision on #850).
-  for (const [source, fallback, code] of [
-    ["function f(n: integer?, other) {\n    return n + other\n}\nexit", "0", "TSV043"],
-    ["function f(n: integer?) {\n    return n + n\n}\nexit", "0", "TSV043"],
+  for (const [source, fallback, code, type] of [
+    ["function f(n: integer?, other) {\n    return n + other\n}\nexit", "0", "TSV043", "integer?"],
+    ["function f(n: integer?) {\n    return n + n\n}\nexit", "0", "TSV043", "integer?"],
     // Text joins other text, so beside an operand of unknown type only null needs a check.
-    ["function f(n: string?, other) {\n    return n + other\n}\nexit", '""', "TSV043"],
-    ["function f(n: range?) {\n    timer async n s\n}\nexit", "...", "TSV043"],
+    ["function f(n: string?, other) {\n    return n + other\n}\nexit", '""', "TSV043", "string?"],
+    ["function f(n: range?) {\n    timer async n s\n}\nexit", "...", "TSV043", "range?"],
   ] as const)
     assert.deepEqual(
       mismatches(source).map(([code, message]) => [code, message]),
       [
         [
           code,
-          `'n' may be null. Check it first: if n != null { ... }, or give a fallback: n otherwise ${fallback}`,
+          `'n' must be checked for null before it is used here: its type is '${type}' (line 1). Check it first: if n != null { ... }, or give a fallback: n otherwise ${fallback}`,
         ],
       ],
       source,
@@ -2357,7 +2357,7 @@ test("a message handle has one text property, takes text, and stays out of text,
   // A handle that may be null is checked first, and a nullable global can take one later.
   assert.match(
     mismatches('function f(m: messageHandle?) {\n    m.text = "z"\n}\nexit')[0]?.[1] ?? "",
-    /may be null/u,
+    /must be checked for null before it is used here/u,
   );
   assert.deepEqual(
     mismatches(

@@ -566,10 +566,7 @@ test("the route rule's error for a null says it must be checked, and what brings
   for (const [source, subject, sentence] of cases) {
     const errors = reported(main(source)).filter(({ error }) => error);
     assert.equal(errors.length, 1, source);
-    assert.ok(
-      errors[0]!.message.startsWith(`${sentence} Check `),
-      `${source}\n${errors[0]!.message}`,
-    );
+    assert.ok(errors[0]!.message.startsWith(`${sentence} `), `${source}\n${errors[0]!.message}`);
     assert.ok(errors[0]!.message.includes(`'${subject}'`), source);
   }
 });

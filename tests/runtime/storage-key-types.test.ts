@@ -68,7 +68,7 @@ test("every load needs a default, and null says the value may be missing", () =>
     [
       [
         "TSV043",
-        "'visits' may be null. Check it first: if visits != null { ... }, or give a fallback: visits otherwise 0",
+        "'visits' must be checked for null before it is used here: its type is 'integer?' (line 1). Check it first: if visits != null { ... }, or give a fallback: visits otherwise 0",
         "visits",
       ],
     ],
@@ -96,7 +96,7 @@ test("every load needs a default, and null says the value may be missing", () =>
     [
       [
         "TSV043",
-        `'name' may be null. Check it first: if name != null { ... }, or give a fallback: name otherwise ""`,
+        `'name' must be checked for null before it is used here. Check it first: if name != null { ... }, or give a fallback: name otherwise ""`,
         "name",
       ],
     ],

@@ -132,7 +132,7 @@ test("indexOf and lastIndexOf give null for a part that does not occur, so a pos
     ["true true 1 3", "Hello", "null 3", "start", "no extension"],
   );
   const check = (name: string, fallback = "0") =>
-    `'${name}' may be null. Check it first: if ${name} != null { ... }, or give a fallback: ${name} otherwise ${fallback}`;
+    `'${name}' must be checked for null before it is used here. Check it first: if ${name} != null { ... }, or give a fallback: ${name} otherwise ${fallback}`;
   assert.deepEqual(
     [
       'let path = "a/b"\nsay path.substring(0, path.indexOf("/"))\nexit',
@@ -145,7 +145,7 @@ test("indexOf and lastIndexOf give null for a part that does not occur, so a pos
       [
         [
           "TSV043",
-          "This value may be null. Keep it in a variable and check it first, as in: if value != null { ... }, or give a fallback: value otherwise 0",
+          "This value must be checked for null before it is used here. Keep it in a variable and check it first, as in: if value != null { ... }, or give a fallback: value otherwise 0",
           'path.indexOf("/")',
         ],
       ],
