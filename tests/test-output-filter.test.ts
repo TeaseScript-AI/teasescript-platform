@@ -496,6 +496,33 @@ test("filter refuses a path that matches no test file before Node runs any", () 
   ]);
   assert.equal(option.status, 0, option.stderr);
   assert.match(option.stdout, /ℹ pass 1/);
+
+  // A missing path counts after an option that takes no value, and after the first path, where Node reads every
+  // argument as a path (`tools/test-arguments.test.mjs` covers each option).
+  for (const argumentsIn of [
+    (directory: string) => [
+      "--test-only",
+      resolve(directory, "missing.test.mjs"),
+      resolve(directory, "passing.test.mjs"),
+    ],
+    (directory: string) => [
+      resolve(directory, "passing.test.mjs"),
+      "--test-name-pattern",
+      resolve(directory, "missing.test.mjs"),
+    ],
+  ]) {
+    const missing = runFixtures(fixtures, false, argumentsIn);
+    assert.equal(missing.status, 1, missing.stderr);
+    assert.match(missing.stderr, /no test file matches '.*missing\.test\.mjs'/);
+    assert.doesNotMatch(missing.stdout, /ℹ tests/);
+  }
+  // An option the filter does not know is refused, since it cannot tell whether the next argument is its value.
+  const unknown = runFixtures(fixtures, false, (directory) => [
+    "--test-unknown",
+    resolve(directory, "passing.test.mjs"),
+  ]);
+  assert.equal(unknown.status, 1, unknown.stderr);
+  assert.match(unknown.stderr, /'--test-unknown' is not an option it knows/);
 });
 
 test("filter refuses a pattern whose only matches are in a node_modules folder, which Node leaves out", () => {
