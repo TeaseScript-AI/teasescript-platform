@@ -859,9 +859,9 @@ Select by these settings, not by test title: a title filter skips Worker tests w
 registries then fail for rows they still owe. The runner's exit status is the result. The normal limit per test and
 per hook is not raised for the challenge.
 
-A change to a Worker row's synchronization premises (what it waits for before an assertion, a held reply, a scene
-clock) or to `worker-topology.ts` runs the challenge on each affected complete file in the queue. Its handoff gives the
-result, the selection and the delay, and the cost per file.
+The challenge is a diagnostic, not a gate: no pull request owes a passing challenge. Run it on the affected file when a
+Worker row failed on a loaded host with no defect behind it, or when `worker-topology.ts`'s delivery changes. It takes
+3 s for every reply a row waits for, so a file of many rows runs for hours.
 
 The challenge fails a positive wait bounded in turns while a host reply is still under way, and a premise that real
 time stays short. It cannot fail an absence check made before the absent effect could arrive: a delay makes such a
