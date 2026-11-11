@@ -251,6 +251,77 @@ test("compact output ends with each named file's counts, after Node's own output
   assert.doesNotMatch(full.stdout, /^ℹ \S*\.test\.mjs: /mu);
 });
 
+/** `child`'s exit status, once it has closed. */
+async function statusOf(child: ReturnType<typeof spawn>) {
+  const [code] = (await once(child, "close")) as [number | null];
+  return code;
+}
+
+test("wherever Node applies a selection given in NODE_OPTIONS, the filter reads one: Node itself decides each case", async () => {
+  const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
+  try {
+    // One test, which leaves a marker file when it runs: a selection Node applied leaves none.
+    const file = resolve(directory, "one.test.mjs");
+    writeFileSync(
+      file,
+      'import test from "node:test"; import { writeFileSync } from "node:fs"; test("real", () => writeFileSync(process.env.MARKER, ""));\n',
+    );
+    // Each selection option with a quote pair, or a backslash inside quotes, put into its name at three places, the
+    // whole option quoted, and a quote pair after it; after another option and one or two spaces. And round 3's three.
+    const insert = [
+      (option: string, at: number) => `${option.slice(0, at)}""${option.slice(at)}`,
+      (option: string, at: number) =>
+        `${option.slice(0, at)}"\\${option[at]}"${option.slice(at + 1)}`,
+    ];
+    const forms = ["--test-name-pattern=nosuch", "--test-skip-pattern=.", "--test-only"].flatMap(
+      (option) => [
+        ...[2, 7, 9].flatMap((at) => insert.map((put) => put(option, at))),
+        `"${option}"`,
+        `${option}""`,
+      ],
+    );
+    const values = [
+      ...forms.flatMap((form) => [`--no-warnings ${form}`, `--no-warnings  ${form}`]),
+      '--test-"name"-pattern=missing',
+      '"--test-na\\me-pattern=missing"',
+      '--test-""only',
+    ];
+    const environment: NodeJS.ProcessEnv = { ...process.env };
+    delete environment.NODE_TEST_CONTEXT;
+    const results = await Promise.all(
+      values.map(async (value, n) => {
+        const marker = resolve(directory, `ran-${n}`);
+        const env = { ...environment, NODE_OPTIONS: value, MARKER: marker };
+        const node = await statusOf(
+          spawn(process.execPath, ["--test", "--test-reporter=dot", file], {
+            env,
+            stdio: "ignore",
+          }),
+        );
+        const applied = node === 0 && !existsSync(marker);
+        const filter = await statusOf(
+          spawn(process.execPath, [filterPath, file], { env, stdio: "ignore" }),
+        );
+        return { value, applied, filter };
+      }),
+    );
+    // (the family is not vacuous: Node applies most of these)
+    assert.ok(
+      results.filter(({ applied }) => applied).length >= values.length / 2,
+      JSON.stringify(results),
+    );
+    for (const { value, applied, filter } of results)
+      if (applied)
+        assert.equal(
+          filter,
+          0,
+          `NODE_OPTIONS=${value}: Node applied a selection, the filter failed the run`,
+        );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
 /**
  * The counting family: files whose tests node:test classes differently (nested subtests, suites, skip and todo by option
  * and by call, a timeout, a cancelled child, a helper-registered test, a path with a space), and files that fail

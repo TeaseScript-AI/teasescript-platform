@@ -92,17 +92,19 @@ if (unmatched.length > 0) {
 // them; a file that failed outside its tests (it threw while loading, or its process ended non-zero) says so beside
 // them. A file that ran no test (a suite alone is none) fails the run, unless the tests may be selected (a name or
 // skip pattern, or `--test-only`, in any spelling Node takes, as an argument or anywhere in `NODE_OPTIONS`): then its
-// line says the selection matched no test in it. A selection's spelling given as another option's value reads as a
-// selection too. There `test-file-counts.mjs` counts, and names a test in flight in that reporter's place.
+// line says the selection matched no test in it. A selection's spelling given as another option's value, or joined by
+// a stray `"` or `\` in `NODE_OPTIONS`, reads as a selection too. There `test-file-counts.mjs` counts, and names a test in flight in that reporter's place.
 const countsFolder =
   fullSuite || fullOutput ? null : mkdtempSync(join(tmpdir(), "test-file-counts-"));
 const countsFile = countsFolder === null ? null : join(countsFolder, "counts.json");
-// (the arguments are tokens; `NODE_OPTIONS` selects when it names a selection anywhere, unsplit: a selection's spelling
-// inside another option's value then reads as one too, which only spares that file the failure)
+// (the arguments are tokens. `NODE_OPTIONS` selects when it names a selection anywhere once every `"` and `\` is
+// removed: Node only ever removes those two characters when it reads it, and no selection's name holds either, so any
+// selection Node applies stands whole in what is left. A selection's spelling inside another option's value, or one
+// that a stray `"` or `\` joins, then reads as one too, which only spares that file the failure)
 const selection = /--test[-_](?:(?:name|skip)[-_]pattern|only)/u;
 const selected =
   arguments_.some((option) => new RegExp(`^${selection.source}(?:=|$)`, "u").test(option)) ||
-  selection.test(process.env.NODE_OPTIONS ?? "");
+  selection.test((process.env.NODE_OPTIONS ?? "").replaceAll(/["\\]/gu, ""));
 // The folder is removed when the run ends or the filter exits. The filter installs no signal handler, so a signal that
 // ends it leaves the folder in the system's temporary directory, where no run reads it: one counts file, empty until
 // the run ends, then one JSON entry per named file: its absolute path and five counts.
