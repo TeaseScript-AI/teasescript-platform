@@ -114,7 +114,13 @@ interface Entry {
   readonly mode: string;
   readonly diagnostics: readonly { readonly severity?: string; readonly code: string }[];
   readonly plan: { readonly hash: string; readonly checks: readonly unknown[] } | null;
-  readonly runs?: readonly { readonly status: string }[];
+  readonly runs?: readonly {
+    readonly globals: unknown;
+    readonly storage?: unknown;
+    readonly status: string;
+    readonly failure?: string | null;
+    readonly said?: readonly { readonly text: string }[];
+  }[];
   readonly outside?: string;
   readonly threw?: string;
 }
@@ -124,6 +130,7 @@ interface Row {
     readonly files: readonly { readonly source: string }[];
     readonly globals: readonly string[];
     readonly key?: string;
+    readonly storage?: unknown;
   };
   readonly checker: Omit<Entry, "mode">;
   readonly core: {
@@ -261,6 +268,16 @@ test("the differential record keeps every case's columns, its four modes, refusa
     /unknown keys global/,
   );
   refused("neither", [JSON.stringify({ name: "x" })], /exactly one of source, files and set/);
+  refused(
+    "storage alone",
+    [JSON.stringify({ name: "x", source: "", storage: { k: 1 } })],
+    /storage alone\.jsonl:1: storage is for runs/,
+  );
+  refused(
+    "storage listed",
+    [JSON.stringify({ name: "x", source: "", runs: [{}], storage: [{ key: "k", value: 1 }] })],
+    /storage is an object of the stored values by key/,
+  );
   refused(
     "no set",
     [JSON.stringify({ name: "x", set: "absent", unit: "u" })],
@@ -634,4 +651,58 @@ test("the differential record of the repository's own build: four modes, a plan'
   assert.equal(errorRow.checker.plan, null);
   assert.equal("runs" in errorRow.checker, false);
   assert.ok(errorRow.checker.diagnostics.some((d) => d.severity === "error"));
+  // (a case without storage records none)
+  assert.equal("storage" in hostRow.case, false);
+  assert.equal("storage" in hostRow.checker.runs![0]!, false);
+});
+
+test("a case's storage is what each run's load reads, on the checker and the core's route, and is recorded (#2338)", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "families-differential-storage-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  // (a typed load: its reader takes the stored value, refuses one of another type, and without one gives the default)
+  const source =
+    'let key = "k"\nlet n: integer = load(key, default: 3)\nsay n\nsave n + 1 as key\nexit\n';
+  const runs = [{ hostValue: 0 }, { hostValue: 1 }];
+  const cases = join(folder, "cases.jsonl");
+  writeFileSync(
+    cases,
+    [
+      { name: "stored", source, runs, storage: { k: 7 } },
+      { name: "wrong", source, runs, storage: { k: "seven" } },
+      { name: "none", source, runs },
+    ]
+      .map((c) => `${JSON.stringify(c)}\n`)
+      .join(""),
+  );
+  const out = join(folder, "records.jsonl");
+  const ran = spawnSync(process.execPath, [tool, resolve("."), cases, "--out", out], {
+    encoding: "utf8",
+  });
+  assert.equal(ran.status, 0, ran.stderr);
+  const rows = lines<Row>(readFileSync(out, "utf8"));
+  const outcomes = (row: Row) =>
+    [row.checker, ...row.candidate.modes].map((entry) =>
+      entry.runs!.map((r) => [
+        r.storage,
+        r.status,
+        r.said!.map((said) => said.text),
+        r.failure !== null,
+      ]),
+    );
+  // (every run of a case starts from the same storage, whatever an earlier run saved)
+  const expected = {
+    stored: [{ k: 7 }, "halted", ["7"], false],
+    wrong: [{ k: "seven" }, "failed", [], true],
+    none: [undefined, "halted", ["3"], false],
+  };
+  assert.deepEqual(
+    Object.fromEntries(rows.map((row) => [row.name, outcomes(row)])),
+    Object.fromEntries(
+      Object.entries(expected).map(([name, run]) => [name, Array(5).fill([run, run])]),
+    ),
+  );
+  assert.deepEqual(
+    rows.map((row) => row.case.storage),
+    [{ k: 7 }, { k: "seven" }, undefined],
+  );
 });

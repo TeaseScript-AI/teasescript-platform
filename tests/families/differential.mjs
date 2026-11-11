@@ -6,8 +6,9 @@
 // and compiled through the core's candidate route (`publishedRoute`), the core and the route in the four modes
 // (`HELD_MODES`); one JSON line per case to `--out`, in the cases file's order, the same bytes for the same tree and
 // cases. It judges nothing; its record and its cases are in tests/families/README.md, "Differential records".
-//   A case is a JSON line: `{name, source | files, globals?, runs?}` or `{name, set, unit, key?, runs?}` (a unit of a
-//   set as `stop-runs.mjs` names one, `unitResolver`); `runs` a list of host globals' values, each run on every plan.
+//   A case is a JSON line: `{name, source | files, globals?, runs?, storage?}` or `{name, set, unit, key?, runs?,
+//   storage?}` (a unit of a set as `stop-runs.mjs` names one, `unitResolver`); `runs` a list of host globals' values,
+//   each run on every plan; `storage` the script storage each run starts with, by key (#2338).
 //   The compiler's and the core's modules come from <tree>; the plan's check list (`planCheckList`) from this file's
 //   own build, so a record's form does not depend on the tree's age.
 // `join` checks the records of one or two trees against the whole cases file (each case recorded once on each side, no
@@ -42,7 +43,17 @@ const refuse = (why) => {
 /** The start of a record's line: the tool writes each record with its name first. */
 const NAME_FIELD = Buffer.from('{"name":"');
 
-const CASE_KEYS = new Set(["name", "source", "files", "globals", "runs", "set", "unit", "key"]);
+const CASE_KEYS = new Set([
+  "name",
+  "source",
+  "files",
+  "globals",
+  "runs",
+  "storage",
+  "set",
+  "unit",
+  "key",
+]);
 const isObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 const isTexts = (value) => Array.isArray(value) && value.every((each) => typeof each === "string");
 
@@ -97,6 +108,9 @@ function readCases(file) {
       refuse(`${where}: globals are a list of names`);
     if (c.runs !== undefined && !(Array.isArray(c.runs) && c.runs.every(isObject)))
       refuse(`${where}: runs are a list of objects of the globals' values`);
+    if (c.storage !== undefined && !isObject(c.storage))
+      refuse(`${where}: storage is an object of the stored values by key`);
+    if (c.storage !== undefined && c.runs === undefined) refuse(`${where}: storage is for runs`);
     cases.push({ ...c, where });
   }
   return cases;
@@ -238,12 +252,21 @@ async function record() {
     end: d.span.end.offset,
     message: d.message,
   });
+  // (each run starts from its own copy of the case's storage, which a run's save changes)
   const runs = (plan, c) =>
     c.runs?.map((globals) => {
+      const given = c.storage === undefined ? {} : { storage: c.storage };
+      const storage =
+        c.storage === undefined
+          ? undefined
+          : Object.entries(c.storage).map(([key, value]) => ({
+              key,
+              value: structuredClone(value),
+            }));
       try {
-        return { globals, ...runGlobals(plan, globals) };
+        return { globals, ...given, ...runGlobals(plan, globals, storage) };
       } catch (error) {
-        return { globals, threw: thrown(error) };
+        return { globals, ...given, threw: thrown(error) };
       }
     });
   /** A compile's diagnostics, its plan's hash and checks, and where the case names them, its runs. */
@@ -285,6 +308,7 @@ async function record() {
         files,
         globals,
         ...(c.runs === undefined ? {} : { runs: c.runs }),
+        ...(c.storage === undefined ? {} : { storage: c.storage }),
       },
     };
     try {
