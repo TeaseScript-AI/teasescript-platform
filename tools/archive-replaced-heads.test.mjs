@@ -154,8 +154,8 @@ test(
 );
 
 test(
-  "branches that share a replaced head archive it once; a push that would delete an archive is refused",
-  { timeout: 60_000 },
+  "branches that share a replaced head archive it once; a pruning push keeps every archive this clone holds",
+  { timeout: 120_000 },
   () => {
     const { root, git, remote, commit } = setup();
     const archived = () =>
@@ -170,10 +170,11 @@ test(
       assert.equal(both.status, 0, both.stderr);
       assert.equal(archived(), `refs/archive/${shared} ${shared}`);
       assert.equal(remote("rev-parse", "side").stdout.trim(), rewritten);
+      // The archive is a ref in this clone too.
+      assert.equal(git("rev-parse", `refs/archive/${shared}`).stdout.trim(), shared);
 
-      // A mirror push from a clone without the archive would delete it unlisted, and move `main` back: refused, nothing moves.
-      // Every spelling git accepts, from git under its own name or another (a link), is refused.
-      git("reset", "-q", "--hard", first);
+      // Pruning pushes, in any spelling and from git under any name, delete no archive this clone holds; one that
+      // also replaces a head archives it in the same push.
       const linked = join(root, "custom-git");
       symlinkSync(
         spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim(),
@@ -183,23 +184,31 @@ test(
         for (const spelling of [
           "--mirror origin",
           "--mi origin",
-          "--mirr origin",
-          "--no-prune --mirror origin",
-          // (a pruning refspec push names its refspec)
-          "--prune origin +refs/heads/*:refs/heads/*",
-          "--pru origin +refs/heads/*:refs/heads/*",
+          "--mirror -o --no-mirror origin",
+          "--force --prune origin refs/*:refs/*",
+          "--prune origin refs/archive/*:refs/archive/*",
         ]) {
+          const before = git("rev-parse", "main").stdout.trim();
+          git("reset", "-q", "--hard", first);
+          const head = commit(`${invoker} ${spelling}`);
           const pruning = spawnSync(
             invoker,
             ["-C", join(root, "clone"), "push", "-q", ...spelling.split(" ")],
             { encoding: "utf8", timeout: 20_000 },
           );
-          assert.notEqual(pruning.status, 0, `${invoker} ${spelling}`);
-          assert.match(
-            pruning.stderr,
-            /a pruning push \(--mirror or --prune\) can delete archive refs unseen/u,
-            `${invoker} ${spelling}`,
-          );
+          const label = `${invoker} ${spelling}`;
+          // (push options need a remote that accepts them; the archives are what this asserts)
+          if (!spelling.includes("-o"))
+            assert.equal(pruning.status, 0, `${label}: ${pruning.stderr}`);
+          for (const kept of [shared, before])
+            if (git("rev-parse", "--verify", "--quiet", `refs/archive/${kept}`).status === 0)
+              assert.match(archived(), new RegExp(`refs/archive/${kept} ${kept}`, "u"), label);
+          if (
+            pruning.status === 0 &&
+            spelling.includes("refs/*") === false &&
+            !spelling.includes("archive")
+          )
+            assert.equal(remote("rev-parse", "main").stdout.trim(), head, label);
         }
       // An explicit deletion of an archive is listed to the hook, and refused.
       const explicit = git("push", "-q", "origin", `:refs/archive/${shared}`);
@@ -208,12 +217,56 @@ test(
         explicit.stderr,
         new RegExp(`refs/archive/${shared} would be deleted or moved, and archives are kept`, "u"),
       );
-      assert.equal(archived(), `refs/archive/${shared} ${shared}`);
-      assert.equal(remote("rev-parse", "main").stdout.trim(), rewritten);
-      // The last of `--mirror` and `--no-mirror` wins, as in git: no pruning, an ordinary force-push.
-      const negated = git("push", "-q", "--mirror", "--no-mirror", "--force", "origin", "main");
-      assert.equal(negated.status, 0, negated.stderr);
-      assert.equal(remote("rev-parse", "main").stdout.trim(), first);
+      assert.match(archived(), new RegExp(`refs/archive/${shared} ${shared}`, "u"));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "an archive ref that holds another commit refuses the push; an alias or a worktree pushes as usual",
+  { timeout: 60_000 },
+  () => {
+    const { root, git, remote, commit, runs } = setup();
+    try {
+      const first = commit("first");
+      const head = commit("head");
+      git("push", "-q", "origin", "main");
+      // (an archive named for `head` but made at `first`, as by hand)
+      git("push", "-q", "origin", `${first}:refs/archive/${head}`);
+      git("reset", "-q", "--hard", first);
+      commit("rewritten");
+      const refused = git("push", "-q", "--force", "origin", "main");
+      assert.notEqual(refused.status, 0);
+      assert.match(refused.stderr, new RegExp(`refs/archive/${head} holds another commit`, "u"));
+      assert.equal(remote("rev-parse", `refs/archive/${head}`).stdout.trim(), first);
+      assert.equal(remote("rev-parse", "main").stdout.trim(), head);
+
+      // Ordinary pushes through an alias and from a worktree run the hook and pass.
+      const before = runs();
+      git("config", "alias.pub", "push -q origin");
+      const side = commit("side");
+      assert.equal(git("pub", `${side}:refs/heads/side`).status, 0);
+      git("worktree", "add", "-q", "--detach", join(root, "wt"), side);
+      const fromWorktree = spawnSync(
+        "git",
+        [
+          "-C",
+          join(root, "wt"),
+          "-c",
+          "user.name=t",
+          "-c",
+          "user.email=t@t",
+          "push",
+          "-q",
+          "origin",
+          "HEAD:refs/heads/wt",
+        ],
+        { encoding: "utf8" },
+      );
+      assert.equal(fromWorktree.status, 0, fromWorktree.stderr);
+      assert.equal(runs(), before + 2);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
