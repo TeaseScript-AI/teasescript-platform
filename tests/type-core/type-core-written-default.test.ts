@@ -206,10 +206,12 @@ test("a written parameter or global, which the candidate route declines, and a c
     { text: "function f(fb: number) {\n  @\n}\nf(0)", units: 1 },
     { text: "global fb: number = 0\n@", units: 1 },
     { text: "let w: number = 0\nlet f1 = w\nlet fb = f1\n@", units: 3 },
+    // (its binding, its literal, the literal's two cells and the binding each reads)
+    { text: "let w: number = 0\nlet fb = [w, w]\n@", rest: ["element"], units: 6 },
   ];
-  for (const { text, units } of rows)
+  for (const { text, rest = [], units } of rows)
     for (const reversed of [false, true])
-      assert.deepEqual(ruleAt(text, [], reversed), { items: ["number def"], units }, text);
+      assert.deepEqual(ruleAt(text, rest, reversed), { items: ["number def"], units }, text);
 });
 
 test("a default's written type is none outside the forms the rule admits, the default then read as it holds at the call (#1072 step 0)", () => {
