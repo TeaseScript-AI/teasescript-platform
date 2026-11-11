@@ -702,7 +702,7 @@ test("every record form the runner writes, at its allowance edges, passes the su
         [...(m.stops?.base ?? []), ...(m.stops?.head ?? [])].map((stop) => stop.allowance),
       ),
     ),
-    ["-1", "0", "0.5", "10", "2", "null"],
+    ["-1", "0", "0.5", "1", "10", "2", "5", "null"],
   );
   assert.ok(modes.some((m) => m.stops?.unavailable !== undefined));
   assert.ok(records.some((r) => r.name === "cases.mjs/fine" && r.differing === 0));
