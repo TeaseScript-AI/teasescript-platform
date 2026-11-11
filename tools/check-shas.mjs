@@ -27,8 +27,9 @@ import { existsSync, readFileSync } from "node:fs";
 //   `1107175450d1b5`;
 // - only the letters a-f: a word, such as `defaced`;
 // - a number's fractional digits followed by `e` and its exponent, the number standing alone (its integer digits,
-//   with an optional sign, after the start, a space or a punctuation mark other than `.`, never after a letter, such as
-//   `v1.`): a float's digits, such as `1.7976931348623157e+308` or `6.02214076e23`;
+//   with an optional sign, after only the start, white space or one of `( [ { = : , ; < > " ' * |`; any other
+//   character before them, such as a letter of any script in `v1.`, leaves the token checked): a float's digits, such
+//   as `1.7976931348623157e+308` or `6.02214076e23`;
 // - right after the word `sha256` (with a space, `:` or `=` between): a file's hash, such as `sha256 4322b2e0e668`;
 // - shorter than 40 and inside a URL or a path, except after `/commit/`, `/commits/`, `/tree/` or `/blob/`: a file's
 //   or a job's name. A full 40-character SHA in a path, such as an evidence folder, must resolve.
@@ -45,7 +46,12 @@ export const PLACEHOLDERS = [
 
 const TOKEN = /(?<![0-9A-Za-z_])[0-9a-f]{7,40}(?![0-9A-Za-z_])/gu;
 
-/** Whether `text` has a number's integer part and `.` right before `index`, after no letter, digit, `_` or `.`. */
+/**
+ * Whether `text` has a number's integer part and `.` right before `index`, after only the start, white space or a
+ * `BOUNDARY` character.
+ */
+const BOUNDARY = "([{=:,;<>\"'*|";
+
 function standsAloneBefore(text, index) {
   let at = index - 1;
   if (text[at] !== ".") return false;
@@ -53,7 +59,7 @@ function standsAloneBefore(text, index) {
   while (at > 0 && /\d/u.test(text[at - 1])) at -= 1;
   if (at === end) return false;
   if (at > 0 && /[+-]/u.test(text[at - 1])) at -= 1;
-  return at === 0 || !/[\w.]/u.test(text[at - 1]);
+  return at === 0 || /\s/u.test(text[at - 1]) || BOUNDARY.includes(text[at - 1]);
 }
 
 /** Why a token need not be a commit, or `null` when it must resolve. */

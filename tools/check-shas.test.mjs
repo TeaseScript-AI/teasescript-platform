@@ -106,9 +106,11 @@ test(
         /10 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 10 skipped/u,
       );
       // A version label before a SHA is no number: the SHA is checked.
-      const version = check("tagged v1.210e785", [directory]);
-      assert.equal(version.status, 1, version.out);
-      assert.match(version.out, /unresolved +210e785 /u);
+      for (const label of ["v", "β", "\u{1d463}"]) {
+        const version = check(`tagged ${label}1.210e785`, [directory]);
+        assert.equal(version.status, 1, `${label}: ${version.out}`);
+        assert.match(version.out, /unresolved +210e785 /u, label);
+      }
       // A commit URL is checked; a path that holds a real SHA still reports it.
       const url = check("https://github.com/o/r/commit/0123abc4567", [directory]);
       assert.equal(url.status, 1, url.out);
@@ -133,6 +135,11 @@ test(
         ["210e785", "x_1.210e785", null],
         ["210e785", "1.1.210e785", null],
         ["210e785", "(-1.210e785)", "a float's digits"],
+        ["210e785", "x=1.210e785", "a float's digits"],
+        ["210e785", "#1.210e785", null],
+        ["210e785", "β1.210e785", null],
+        ["210e785", "版1.210e785", null],
+        ["210e785", "\u{1d463}1.210e785", null],
         ["4322b2e0e668", "the runner's sha256 4322b2e0e668", "a file's sha256"],
         ["7ce49d8d3ba1", "(sha256: 7ce49d8d3ba1)", "a file's sha256"],
         ["7ce49d8d3ba1", "SHA256=7ce49d8d3ba1", "a file's sha256"],
