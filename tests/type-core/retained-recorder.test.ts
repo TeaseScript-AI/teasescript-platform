@@ -11,10 +11,8 @@ import { Solver, type Demand, type Work } from "../../src/type-inference/core/so
 import { itemScope } from "../helpers/type-core-items.js";
 import { Recorder, type RecorderReport } from "../helpers/retained-recorder.js";
 
-/**
- * #1072 step 1b: the recorder's negative controls. Each shape changes retained state in a later solver run than the
- * one that made it; without its mark the recorder names the change, with it the recorder is quiet.
- */
+// #1072 step 1b: the recorder's negative controls. Each shape changes retained state in a later solver run than the one
+// that made it; without its mark the recorder names the change, with it the recorder is quiet.
 
 /**
  * Makes a shape's steps under a recorder (so its collections are the recorder's), then runs each as its own solver run:
@@ -46,10 +44,9 @@ function recorded(shape: () => readonly (() => void)[]): RecorderReport {
 }
 
 /** The violations of a shape run without its marks, and with them. */
-function controlled(shape: (mark: (target: object) => void) => readonly (() => void)[]): {
-  readonly unmarked: readonly string[];
-  readonly marked: readonly string[];
-} {
+function controlled(
+  shape: (mark: <T extends object>(target: T) => void) => readonly (() => void)[],
+): { readonly unmarked: readonly string[]; readonly marked: readonly string[] } {
   return {
     unmarked: recorded(() => shape(() => {})).violations,
     marked: recorded(() => shape(amend)).violations,
@@ -80,15 +77,13 @@ test("a plain field of an owner changed in a later run is named unless amended",
 
 /** `KeyTrie`'s shape: a private slot filled on its first question, its nodes' maps filled later. */
 class Trie {
-  static readonly #hidden = (trie: Trie): Readonly<Record<string, unknown>> => ({
-    roots: trie.#roots,
-  });
+  static readonly #hidden = (trie: Trie) => ({ roots: trie.#roots });
   #roots: Map<number, { readonly children: Map<string, number> }> | null = null;
   public constructor() {
     Retained.owner(this, "Trie", Trie.#hidden);
   }
   public roots(
-    mark: (target: object) => void,
+    mark: (target: Trie | { readonly children: Map<string, number> }) => void,
   ): Map<number, { readonly children: Map<string, number> }> {
     if (this.#roots === null) {
       this.#roots = new Map([[1, { children: new Map() }]]);
@@ -206,9 +201,9 @@ test("an instance of a class not compared by identity is named in retained state
     value = 1;
   }
   class RecorderProbe {}
-  const named = (made: object): readonly string[] =>
+  const named = (made: Unlisted | RecorderProbe): readonly string[] =>
     recorded(() => {
-      const map = Retained.map<string, object>("T.classes");
+      const map = Retained.map<string, Unlisted | RecorderProbe>("T.classes");
       return [() => map.set("c", made)];
     }).violations;
   assert.deepEqual(named(new Unlisted()), [
