@@ -80,6 +80,18 @@ export async function loadTopology(): Promise<void> {
   facade = (await loadPlayerModule("player/engine-bridge/in-process.ts")) as typeof InProcess;
 }
 
+/**
+ * The in-process backend of the bundle the composable runs in, for a test to pass as the composable's `bridge`. Its
+ * options are the backend's: replies after `delayMs`, and Debug's rewind histories' spill store and admission bound.
+ */
+export async function inProcessBackend(
+  options: NonNullable<Parameters<typeof InProcess.createInProcessBackend>[1]> = {},
+): Promise<PlayerBridge> {
+  // EVIDENCE: validation: the bundle's own module, whose instances the composable runs with.
+  const module = (await loadPlayerModule("player/engine-bridge/in-process.ts")) as typeof InProcess;
+  return module.createInProcessBackend(BUILD, options);
+}
+
 /** Waits, in short real-time turns, until `check` holds. */
 export async function until(check: () => boolean, label: string): Promise<void> {
   for (let turn = 0; turn < 1_000; turn += 1) {

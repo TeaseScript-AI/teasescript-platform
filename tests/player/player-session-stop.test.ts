@@ -29,6 +29,7 @@ import { answerWith, type Intent } from "../helpers/player/player-input.js";
 import { loadHostFacade, onHostAll } from "../helpers/player/host-sessions.js";
 import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
+import { inProcessBackend } from "../helpers/player/worker-topology.js";
 
 // A Player error stops the session where it stands (PLAYER-UI "Session end and failure"). Input and the work that
 // continues it take their session from `observe()`, which gives none once stopped; these include continuations that
@@ -71,6 +72,7 @@ interface StopHost {
   readonly inputSection: unknown;
 }
 let usePlayerSession: (options: {
+  readonly bridge: Promise<PlayerBridge>;
   scriptStorage?: ScriptStorageProvider;
   capturedMedia?: { repository: FakeMediaRepository };
   capabilities: { camera: boolean };
@@ -250,7 +252,11 @@ test("a Player error stops the session where it stands, and late writes do not c
     clear: async () => {},
   };
   const host = mount(context, () =>
-    usePlayerSession({ scriptStorage: provider, capabilities: { camera: false } }),
+    usePlayerSession({
+      bridge: inProcessBackend(),
+      scriptStorage: provider,
+      capabilities: { camera: false },
+    }),
   );
   await host.loadScriptStorage();
   host.prepare(
@@ -291,6 +297,7 @@ test("a session a Player error stopped shows its calls without a demand, which a
   stubBrowser(context);
   const host = mount(context, () =>
     usePlayerSession({
+      bridge: inProcessBackend(),
       scriptStorage: {
         scope: "test",
         load: async () => [],
@@ -393,7 +400,9 @@ test("a save that settles while the stop waits for its acknowledgement is not is
 
 test("input admitted just before a Player error does not run after it", async (context) => {
   stubBrowser(context);
-  const host = mount(context, () => usePlayerSession({ capabilities: { camera: false } }));
+  const host = mount(context, () =>
+    usePlayerSession({ bridge: inProcessBackend(), capabilities: { camera: false } }),
+  );
   host.prepare(
     await sourceStart(
       host.bridge,
@@ -414,7 +423,7 @@ test("input admitted just before a Player error does not run after it", async (c
 test("an observation whose publish causes a Player error admits neither the input nor a jump", async (context) => {
   stubBrowser(context);
   const { host, time } = mount(context, () => {
-    const host = usePlayerSession({ capabilities: { camera: false } });
+    const host = usePlayerSession({ bridge: inProcessBackend(), capabilities: { camera: false } });
     return { host, time: useDevelopmentTime(host, { autoSkip: false }, () => {}) };
   });
   // A component that fails while it renders the observed session, as Vue reports it to the Player at once.
@@ -461,7 +470,9 @@ test("an observation whose publish causes a Player error admits neither the inpu
 
 test("a photo used in the same task as a Player error does not answer", async (context) => {
   stubBrowser(context);
-  const host = mount(context, () => usePlayerSession({ capabilities: { camera: false } }));
+  const host = mount(context, () =>
+    usePlayerSession({ bridge: inProcessBackend(), capabilities: { camera: false } }),
+  );
   host.prepare(
     await sourceStart(
       host.bridge,
@@ -494,7 +505,11 @@ test("a jump waiting for a save ends when a Player error stops the session", asy
     clear: async () => {},
   };
   const host = mount(context, () =>
-    usePlayerSession({ scriptStorage: provider, capabilities: { camera: false } }),
+    usePlayerSession({
+      bridge: inProcessBackend(),
+      scriptStorage: provider,
+      capabilities: { camera: false },
+    }),
   );
   const time = mount(context, () => useDevelopmentTime(host, { autoSkip: false }, () => {}));
   await host.loadScriptStorage();
@@ -537,7 +552,11 @@ test("Resume after a Player error is refused before the saved data are replaced"
     clear: async () => values.clear(),
   };
   const host = mount(context, () =>
-    usePlayerSession({ scriptStorage: provider, capabilities: { camera: false } }),
+    usePlayerSession({
+      bridge: inProcessBackend(),
+      scriptStorage: provider,
+      capabilities: { camera: false },
+    }),
   );
   const rewind = mount(context, () => useDebugRewind(host));
   await host.loadScriptStorage();
@@ -581,7 +600,11 @@ test("after a Player error, a Debug edit does not wait for the dropped save, whi
     clear: async () => {},
   };
   const host = mount(context, () =>
-    usePlayerSession({ scriptStorage: provider, capabilities: { camera: false } }),
+    usePlayerSession({
+      bridge: inProcessBackend(),
+      scriptStorage: provider,
+      capabilities: { camera: false },
+    }),
   );
   await host.loadScriptStorage();
   host.prepare(
@@ -610,7 +633,9 @@ test("after a Player error, a Debug edit does not wait for the dropped save, whi
 
 test("after a Player error, a debug export keeps the recording up to the error through Back, until the next Start", async (context) => {
   stubBrowser(context);
-  const host = mount(context, () => usePlayerSession({ capabilities: { camera: false } }));
+  const host = mount(context, () =>
+    usePlayerSession({ bridge: inProcessBackend(), capabilities: { camera: false } }),
+  );
   const rewind = mount(context, () => useDebugRewind(host));
   const create = await sourceStart(host.bridge, 'showButton "First"\nshowButton "Second"\nexit');
   host.prepare(create);
@@ -646,7 +671,9 @@ test("after a Player error, a debug export keeps the recording up to the error t
 
 test("a debug export of a failed state the session cannot export names the failure and carries the last good state", async (context) => {
   stubBrowser(context);
-  const host = mount(context, () => usePlayerSession({ capabilities: { camera: false } }));
+  const host = mount(context, () =>
+    usePlayerSession({ bridge: inProcessBackend(), capabilities: { camera: false } }),
+  );
   // V8 cannot enumerate the keys of a list of about 134 million elements, so a state that holds one cannot be exported;
   // a list of 1,500 stands for it.
   const ownKeys = Reflect.ownKeys;
@@ -730,6 +757,7 @@ test("a debug export offers a photo only the replay saves, also after a Player e
   });
   const host = mount(context, () =>
     usePlayerSession({
+      bridge: inProcessBackend(),
       scriptStorage: provider,
       capturedMedia: { repository },
       capabilities: { camera: false },
@@ -812,7 +840,9 @@ for (const atDraw of [false, true])
   test(`a photo still encoded when Back ${atDraw ? "leaves a session held at a random draw" : "leaves its session"} is released, and the one the session took stays`, async (context) => {
     stubBrowser(context);
     encoding.started = 0;
-    const host = mount(context, () => usePlayerSession({ capabilities: { camera: true } }));
+    const host = mount(context, () =>
+      usePlayerSession({ bridge: inProcessBackend(), capabilities: { camera: true } }),
+    );
     const rewind = mount(context, () => useDebugRewind(host));
     if (atDraw) host.setRandomControl({ sites: [] });
     host.prepare(
@@ -889,7 +919,9 @@ test("a photo held back at a random draw the capture's observation reaches is re
   encoding.started = 0;
   let now = 0;
   context.mock.method(performance, "now", () => now);
-  const host = mount(context, () => usePlayerSession({ capabilities: { camera: true } }));
+  const host = mount(context, () =>
+    usePlayerSession({ bridge: inProcessBackend(), capabilities: { camera: true } }),
+  );
   host.setRandomControl({ sites: [] });
   host.prepare(
     await sourceStart(

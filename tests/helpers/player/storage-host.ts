@@ -19,6 +19,7 @@ import { loadHostFacade, onHost } from "./host-sessions.js";
 import { sourceStart, type PlanStart } from "../prepared-plan.js";
 import type { PlayerSession } from "../../../player/runtime/runtime-view.js";
 import type { PlayerBridge } from "../../../player/runtime/player-bridge.js";
+import { inProcessBackend } from "./worker-topology.js";
 
 export const playerRuntimeSnapshot = onHost(rawPlayerRuntimeSnapshot);
 
@@ -68,6 +69,7 @@ interface StorageHost {
   }>;
 }
 let usePlayerSession: (options: {
+  readonly bridge: Promise<PlayerBridge>;
   scriptStorage: ScriptStorageProvider;
   temporalContext?: () => TemporalContext;
 }) => StorageHost;
@@ -127,6 +129,7 @@ export function createHost(
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
+      bridge: inProcessBackend(),
       scriptStorage: provider,
       ...(temporalContext === undefined ? {} : { temporalContext }),
     }),

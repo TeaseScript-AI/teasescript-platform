@@ -31,6 +31,7 @@ import { readForImport, type SessionRead } from "../helpers/player/transfer-read
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { answerWith, type Intent } from "../helpers/player/player-input.js";
 import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
+import { inProcessBackend } from "../helpers/player/worker-topology.js";
 
 // The adapter's functions, also on the sessions the composables' host holds (`helpers/player/host-sessions.ts`).
 const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
@@ -75,6 +76,7 @@ interface TransferHost {
   readonly inputSection: unknown;
 }
 let usePlayerSession: (options: {
+  readonly bridge: Promise<PlayerBridge>;
   scriptStorage: ScriptStorageProvider;
   capturedMedia: { repository: FakeMediaRepository };
   keptSessions: KeptSessionStore;
@@ -147,6 +149,7 @@ async function page(context: TestContext, at: ReturnType<typeof browser>, plan: 
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
+      bridge: inProcessBackend(),
       scriptStorage: at.provider,
       capturedMedia: { repository: at.repository },
       keptSessions: at.kept,

@@ -23,6 +23,7 @@ import { loadHostFacade, onHost } from "./host-sessions.js";
 import { loadPlayerModule } from "../player-modules.js";
 import type { ClockTicket } from "../../../player/runtime/clock-ticket.js";
 import { untypedClient } from "../bridge/untyped.js";
+import { inProcessBackend } from "./worker-topology.js";
 
 interface SessionHost {
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
@@ -254,7 +255,7 @@ export async function mount(
       : create({ commit: null, dirty: null, mode: null, appVersion: null }, { delayMs });
   const host = scope.run(() =>
     usePlayerSession({
-      ...(backend === null ? {} : { bridge: Promise.resolve(backend) }),
+      bridge: backend === null ? inProcessBackend() : Promise.resolve(backend),
       resolveAsset: (path: string) => `https://fixture/${path}`,
       scriptStorage: provider,
       keptSessions: memoryKeptSessionStore(),
