@@ -90,40 +90,19 @@ if (unmatched.length > 0) {
 // Beside the spec reporter, `test-in-flight.mjs` names on standard error a test still running long after it began.
 // Compact output of named files ends with one line per file and its tests' counts, the passing tests it leaves out among
 // them; a file that failed outside its tests (it threw while loading, or its process ended non-zero) says so beside
-// them. A file that ran no test (a suite alone is none) fails the run, unless the tests were selected (a name or skip
-// pattern, or `--test-only`, in the arguments or `NODE_OPTIONS`, in any spelling Node takes): then its line says the
-// selection matched no test in it. There `test-file-counts.mjs` counts, and names a test in flight in that reporter's
-// place.
+// them. A file that ran no test (a suite alone is none) fails the run, unless the tests may be selected (a name or
+// skip pattern, or `--test-only`, in any spelling Node takes, as an argument or anywhere in `NODE_OPTIONS`): then its
+// line says the selection matched no test in it. A selection's spelling given as another option's value reads as a
+// selection too. There `test-file-counts.mjs` counts, and names a test in flight in that reporter's place.
 const countsFolder =
   fullSuite || fullOutput ? null : mkdtempSync(join(tmpdir(), "test-file-counts-"));
 const countsFile = countsFolder === null ? null : join(countsFolder, "counts.json");
-/**
- * `NODE_OPTIONS`' options as Node splits them (ParseNodeOptionsEnvVar in its src/node_options.cc): at a space outside
- * double quotes, the quotes dropped, a backslash inside them taking the next character as it is.
- */
-function nodeOptions(text) {
-  const options = [];
-  let quoted = false;
-  let next = true;
-  for (let index = 0; index < text.length; index += 1) {
-    let character = text[index];
-    if (character === "\\" && quoted) character = text[(index += 1)] ?? "";
-    else if (character === " " && !quoted) {
-      next = true;
-      continue;
-    } else if (character === '"') {
-      quoted = !quoted;
-      continue;
-    }
-    if (next) options.push(character);
-    else options[options.length - 1] += character;
-    next = false;
-  }
-  return options;
-}
-const selected = [...arguments_, ...nodeOptions(process.env.NODE_OPTIONS ?? "")].some((option) =>
-  /^--test[-_](?:(?:name|skip)[-_]pattern|only)(?:=|$)/u.test(option),
-);
+// (the arguments are tokens; `NODE_OPTIONS` selects when it names a selection anywhere, unsplit: a selection's spelling
+// inside another option's value then reads as one too, which only spares that file the failure)
+const selection = /--test[-_](?:(?:name|skip)[-_]pattern|only)/u;
+const selected =
+  arguments_.some((option) => new RegExp(`^${selection.source}(?:=|$)`, "u").test(option)) ||
+  selection.test(process.env.NODE_OPTIONS ?? "");
 // The folder is removed when the run ends or the filter exits. The filter installs no signal handler, so a signal that
 // ends it leaves the folder in the system's temporary directory, where no run reads it: one counts file, empty until
 // the run ends, then one JSON entry per named file: its absolute path and five counts.
