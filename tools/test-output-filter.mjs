@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from "node:child_process";
-import { fstatSync, globSync } from "node:fs";
-import { join } from "node:path";
+import { fstatSync, globSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, relative } from "node:path";
 import { shardFiles, shardOption, suiteTestFiles } from "./test-shards.mjs";
 
 // oxlint-disable-next-line no-control-regex -- EVIDENCE: fixture: the pattern matches the ESC character that starts an ANSI escape sequence.
@@ -87,14 +88,27 @@ if (unmatched.length > 0) {
 // Node's command line sorts the files it runs, so the full suite goes through a runner that keeps the costly files
 // first: started late, one of them would run alone at the end.
 // Beside the spec reporter, `test-in-flight.mjs` names on standard error a test still running long after it began.
+// Compact output of named files ends with one line per file and its counts, the passing tests it leaves out among them,
+// so a file that ran nothing shows `0 passed` (the full suite fails such a file instead): there `test-file-counts.mjs`
+// counts, and names a test in flight in that reporter's place.
+const countsFolder =
+  fullSuite || fullOutput ? null : mkdtempSync(join(tmpdir(), "test-file-counts-"));
+const countsFile = countsFolder === null ? null : join(countsFolder, "counts.json");
 const nodeArguments = fullSuite
   ? [join(import.meta.dirname, "run-test-files.mjs"), ...testFiles]
   : [
       "--test",
       "--test-reporter=spec",
       "--test-reporter-destination=stdout",
-      `--test-reporter=${join(import.meta.dirname, "test-in-flight.mjs")}`,
-      "--test-reporter-destination=stderr",
+      ...(countsFile === null
+        ? [
+            `--test-reporter=${join(import.meta.dirname, "test-in-flight.mjs")}`,
+            "--test-reporter-destination=stderr",
+          ]
+        : [
+            `--test-reporter=${join(import.meta.dirname, "test-file-counts.mjs")}`,
+            `--test-reporter-destination=${countsFile}`,
+          ]),
       ...testFiles,
     ];
 // (without `TEST_FULL_OUTPUT`: a test that runs this filter itself chooses its own output)
@@ -150,7 +164,30 @@ child.on("error", (error) => {
   process.exitCode = 1;
 });
 
+/** Each file's counts line, `ℹ <file>: N passed[, N failed][, N skipped][, N todo]`, or why there are none. */
+function fileCountLines() {
+  let counts;
+  try {
+    counts = JSON.parse(readFileSync(countsFile, "utf8"));
+  } catch (error) {
+    return `ℹ test-output-filter: no counts per file: ${error.message}\n`;
+  }
+  return Object.entries(counts)
+    .map(([file, { passed, failed, skipped, todo }]) => {
+      const others = Object.entries({ failed, skipped, todo })
+        .filter(([, count]) => count > 0)
+        .map(([word, count]) => `, ${count} ${word}`)
+        .join("");
+      return `ℹ ${relative(process.cwd(), file)}: ${passed} passed${others}\n`;
+    })
+    .join("");
+}
+
 child.on("close", (code, signal) => {
+  if (countsFolder !== null) {
+    if (!refused && signal === null) process.stdout.write(fileCountLines());
+    rmSync(countsFolder, { recursive: true, force: true });
+  }
   if (refused) return;
   if (signal !== null) {
     process.kill(process.pid, signal);

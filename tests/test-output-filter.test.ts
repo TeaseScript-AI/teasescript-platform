@@ -146,6 +146,46 @@ test("filter leaves skipped output and todo totals untouched", () => {
   assert.match(result.stdout, /ℹ todo 1/);
 });
 
+test("compact output ends with each named file's counts, 0 passed for a file that ran no test", () => {
+  const fixtures = {
+    "counted.test.mjs": `
+      import assert from "node:assert/strict";
+      import test, { describe, it } from "node:test";
+      describe("a family", () => {
+        it("first row", () => {});
+        it("second row", () => {});
+      });
+      test("failing test", () => assert.equal(1, 2));
+      test.skip("skipped test", () => {});
+      test.todo("todo test");
+    `,
+    // its process ends before its test reports
+    "silent.test.mjs": `
+      import test from "node:test";
+      test("never reported", () => process.exit(0));
+    `,
+  };
+  const counted = /^ℹ \S*counted\.test\.mjs: 2 passed, 1 failed, 1 skipped, 1 todo$/mu;
+  const silent = /^ℹ \S*silent\.test\.mjs: 0 passed$/mu;
+  const compact = runFixtures(fixtures);
+  assert.equal(compact.status, 1, compact.stderr);
+  assert.doesNotMatch(compact.stdout, /first row|second row/);
+  assert.match(compact.stdout, counted);
+  assert.match(compact.stdout, silent);
+  // after Node's own output: the summary and the failures
+  assert.match(compact.stdout, /failing test[\s\S]*\nℹ \S*counted\.test\.mjs: /u);
+  // a name pattern that matches no test runs none
+  const unmatched = runFixtures(fixtures, false, (directory) => [
+    "--test-name-pattern=no such test",
+    resolve(directory, "counted.test.mjs"),
+  ]);
+  assert.equal(unmatched.status, 0, unmatched.stderr);
+  assert.match(unmatched.stdout, /^ℹ \S*counted\.test\.mjs: 0 passed$/mu);
+  // full output names every test, and adds no counts
+  const full = runFixtures(fixtures, true);
+  assert.doesNotMatch(full.stdout, /^ℹ \S*\.test\.mjs: /mu);
+});
+
 test("filter refuses a path that matches no test file before Node runs any", () => {
   const fixtures = {
     "passing.test.mjs": `
