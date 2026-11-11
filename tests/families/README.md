@@ -449,17 +449,21 @@ give the same bytes. It judges nothing: a reader compares the records, and two t
 It has no unit limit and no process of its own per run, so it is for case lists; areas and the corpus at scale stay
 with `plans.mjs` and `shadow.mjs`.
 
-A case is one JSON line: `{name, source | files, globals?, runs?}` (`globals` `["hostValue"]` by default), or
-`{name, set, unit, key?, runs?}` for a unit of a set as `stop-runs.mjs` names one (`unitResolver`, `units.mjs`).
-`runs` is a list of the host globals' values, each run on every plan (`runGlobals`). A name twice, an unknown key, a
-malformed line or a set's unit missing or ambiguous refuses the whole file (exit 2) before any record is written.
+A case is one JSON line: `{name, source | files, globals?, runs?, storage?}` (`globals` `["hostValue"]` by default),
+or `{name, set, unit, key?, runs?, storage?}` for a unit of a set as `stop-runs.mjs` names one (`unitResolver`,
+`units.mjs`). `runs` is a list of the host globals' values, each run on every plan (`runGlobals`); `storage`, an object
+of stored values by key, is the script storage each run starts with, so a `load` reads it (#2338). A name twice, an
+unknown key, a malformed line, a set's unit missing or ambiguous, `storage` without `runs`, or storage that cannot be
+copied or that the tree's runtime rejects (`validateScriptStorageEntries`) refuses the whole file (exit 2) before any
+plan runs or record is written. A run's host values are checked by the runtime as each run starts: a value it rejects
+is that run's `threw`, and the run exits 1.
 
 A record is `{name, case, checker, core, candidate}`:
 - `checker`, and each mode of `candidate` that is not refused: `diagnostics` (severity, code, path, one-based line and
   column, offsets, message), `plan` (`null`, or its `hash`, the first 32 hex digits of the sha256 of `jsonText(plan)`, as
   `plans.mjs` hashes a plan, and `checks`, `planCheckList` in `tests/helpers/plan-checks.ts`: each check's field, path,
   line, offsets and, where it names them, type, place and part), and `runs` where the case names some and there is a
-  plan (`{globals, status, failure, said}`);
+  plan (`{globals, storage?, status, failure, said}`, `storage` where the case names it);
 - a refused mode of `candidate` is `{mode, outside}` with the refusal's text and no diagnostics;
 - `core` is `{unparsed: true}` where the files do not parse or resolve, else each mode's `outcome`, `diagnostics` (class,
   kind, code, path, line, offsets, the site's text, `coreMessage`) and `checks` (`coreRecord`'s run-time checks: kind,
