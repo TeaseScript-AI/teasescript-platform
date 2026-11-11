@@ -325,8 +325,21 @@ const ACTIVATION_WAITS: Readonly<Record<string, string>> = {
   "useDebugExport.ts: useDebugExport > watch:callback: await measuredDebugExportFile": "as above",
   "useSessionActivation.ts: useSessionActivation > activate: await begunInFlight":
     "before the activation's record begins (`startFrom`); the click's token decides",
-  "useSessionActivation.ts: useSessionActivation > activate: await startFrom":
+  "useSessionActivation.ts: useSessionActivation > activate: await beginClicked":
+    "the activation itself, or its recovery after a loss",
+  "useSessionActivation.ts: useSessionActivation > recover: await startFrom":
     "the activation itself",
+  // A recovery's refused begin reaches the loss's stop (`beginFailed`), whose offer reads the store once.
+  "useSessionActivation.ts: useSessionActivation > lose: then keptOwner.keptPointFound":
+    "sets the offer only while the loss it was read for is still the one shown (`recoveryShown === asked`)",
+  "useSessionActivation.ts: useSessionActivation > recover: await keptOwner.settleKeepWork":
+    "before the activation's record begins; the click's token decides (`owns`)",
+  "useSessionActivation.ts: useSessionActivation > recover: await connection.replace":
+    "before the activation's record begins; the click's token decides (`owns`)",
+  "useSessionActivation.ts: useSessionActivation > recover: await replacement.prepared":
+    "before the activation's record begins; the click's token decides (`owns`)",
+  "useSessionActivation.ts: useSessionActivation > recover: await keptOwner.restoreForRecovery":
+    "before the activation's record begins; the click's token decides (`owns`)",
   "useSessionActivation.ts: useSessionActivation > activate: await camera.open":
     "before the activation's record begins; the click's token decides",
   "useSessionActivation.ts: useSessionActivation > activate: await loadScriptStorage":

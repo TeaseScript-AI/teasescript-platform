@@ -72,6 +72,7 @@ const OPERATIONS = [
   "discardKeptSession",
   "prepareKept",
   "restoreKept",
+  "restoreForRecovery",
   "importSession",
   "readScriptStorage",
   "importSavedData",
@@ -140,8 +141,13 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   "session/activation/useActivationRun.ts": { "useActivationRun.retire": READ },
   "session/useEngineConnection.ts": {
     useEngineConnection: SETUP,
-    send: "compiles the script in the host (`prepare`): it reaches no store",
+    inProcess: SETUP,
+    take: SETUP,
+    prepareIn: "compiles the script in the host (`prepare`): it reaches no store",
+    "useEngineConnection.replace":
+      "replaces a lost connection from the player's click, and prepares the script in it: it reaches no store",
     "useEngineConnection.release": SETUP,
+    end: "gives a connection up for good (its claim, `terminate`): it reaches no store",
   },
   "session/useCallView.ts": { viewCalls: SESSION },
   "session/useDebugModeAndTrace.ts": { issueTracing: SESSION, debugView: SESSION },
@@ -185,6 +191,7 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   },
   "session/persistence/useKeptSession.ts": {
     keptStore: RESOURCE,
+    keptPointFound: "a read of the kept session for the offer after a loss: it writes no store",
     settlePlanJson: SESSION,
     "useKeptSession.keptSessionsNow": RESOURCE,
     "useKeptSession.startKeeping": SETUP,
@@ -267,6 +274,8 @@ const DERIVED: Readonly<Record<string, string>> = {
     "the engine bridge and its readiness, from the options: its requests are checked as host members",
   bridge: "the engine bridge, from the options: its requests are checked as host members",
   connected: "the bridge once ready, from the options: its requests are checked as host members",
+  nextConnection:
+    "the factory of a fresh engine bridge after a loss, from the options: its requests are checked as host members",
   capturedMedia: "the media store, from the options: checked by `MEDIA`",
   room: "the room shown, from the options and the saved values: a value, no store",
   resolveTemporalContext: "the host's time zone source, from the options: no store",
@@ -823,6 +832,7 @@ function assignedOnce(host: ts.FunctionDeclaration, name: string): ts.Expression
 const OWNING: Readonly<Record<string, Operated>> = {
   keepOnce: "captureKeep",
   prepareKept: "restoreKept",
+  restoreForRecovery: "restoreKept",
   importSession: "planText",
   importSavedData: "savedDataImport",
 };

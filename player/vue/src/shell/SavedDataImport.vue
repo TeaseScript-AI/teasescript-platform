@@ -42,6 +42,8 @@ const props = defineProps<{
   /** Lets go of a session read for an import that is not imported now. */
   discardSession: (transfer: SessionTransferRead) => void;
   commitSession: (review: SessionImportReview) => Promise<void>;
+  /** Changes whenever the engine's connection is lost: a session review read in the lost host closes, unimported. */
+  losses?: number;
 }>();
 
 const open = ref(false);
@@ -84,6 +86,13 @@ onBeforeUnmount(() => {
   leaveSessionReview();
 });
 
+// A lost engine connection takes a session read or reviewed for an import with it: the dialog closes without importing.
+watch(
+  () => props.losses,
+  () => {
+    if (step.value.kind === "reading" || step.value.kind === "sessionReview") open.value = false;
+  },
+);
 watch(open, () => {
   attempt++;
   leaveSessionReview();

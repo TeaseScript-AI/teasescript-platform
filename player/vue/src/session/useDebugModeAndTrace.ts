@@ -216,6 +216,16 @@ export function useDebugModeAndTrace({
     dropPending() {
       pendingTracing = false;
     },
+    /**
+     * A fresh connection replaced the lost one: what was issued to the lost host is forgotten, and the tracing setting
+     * goes to the fresh one once it is ready; a reply of the lost one sets nothing.
+     */
+    reconnected() {
+      lastIssued = undefined;
+      tracingToggles += 1;
+      traceId.value = null;
+      pendingTracing = debugTracing.value;
+    },
     /** Ends this Player's trace at its disposal, on `bridge`. */
     dispose(bridge: PlayerBridge | null) {
       // The trace was this Player's: it ends with it, as when the trace lived in the page, and a Player that uses the

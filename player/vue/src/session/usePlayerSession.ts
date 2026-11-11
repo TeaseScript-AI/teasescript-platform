@@ -74,6 +74,13 @@ export interface PlayerSessionOptions {
    */
   bridge?: Promise<PlayerBridge>;
   /**
+   * Opens a fresh connection to the engine's host, ready, when the player chooses to go on after the connection was lost
+   * (PLAYER-UI "Session end and failure"); called only from that click, never to revive the lost one. Without `bridge` a
+   * new in-process backend is the default; with `bridge` and without this, a lost connection stays the Player's error
+   * stop.
+   */
+  nextConnection?: () => Promise<PlayerBridge>;
+  /**
    * Trusted host resolution of authored, package-relative media references (for example `sounds/bell.mp3`) to
    * playable URLs. Returning `null` makes the runtime treat the source as not loadable; there is no default access to
    * arbitrary URLs.
@@ -155,8 +162,9 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const drawPending = computed(() => session.value?.state.randomDraw != null);
   // An exception of the Player itself stops the session where it stands (PLAYER-UI "Session end and failure"): nothing
   // of it runs, observes time, or takes input any more, and late answers, reports, and writes are dropped. Its
-  // transcript, Stage, and recording stay for the error dialog and a debug export, until the next Start.
-  const stopped = computed(() => hostError.value !== null || halting.value);
+  // transcript, Stage, and recording stay for the error dialog and a debug export, until the next Start. A lost engine
+  // connection stops it the same way, until the player's click replaced the connection (`lost`).
+  const stopped = computed(() => hostError.value !== null || halting.value || lost.value);
   const held = computed(() => inspecting.value || drawPending.value || stopped.value);
   // The session as other parts of the Player service it: none while a restored state is inspected or a draw is paused.
   const servicedSession = computed(() => (held.value ? null : session.value));
@@ -169,6 +177,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const connection = useEngineConnection({
     options,
     isDisposed: () => disposed,
+    replaced() {
+      debug.reconnected();
+      random.reconnected();
+    },
     claimed: (generation) => random.claimed(generation),
     lost: (error) => bridgeLost(error),
     ready(ready) {
@@ -189,6 +201,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     activationRun,
     heldDebugRecording,
     hostError,
+    lost,
+    recoveryOffer,
     halting,
     reportActivationError,
     reportPageError,
@@ -212,6 +226,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     bridgeNow,
     currentConnection,
     requireBridge: connection.require,
+    connection,
+    inspecting: () => inspecting.value,
     isDisposed: () => disposed,
     showSession,
     camera: { open: (capability) => camera.open(capability), release: () => camera.release() },
@@ -241,6 +257,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
    */
   function bridgeLost(error: Error) {
     if (disposed) return;
+    connectionLosses.value += 1;
     // The host's trace and random control went with it.
     debug.dropPending();
     random.dropPending();
@@ -250,6 +267,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     retireRewind("loss");
     lose(error);
   }
+  // Counts the engine connections this Player lost: what was read in a lost host, such as a session import's review, goes.
+  const connectionLosses = ref(0);
   // Debug's value trace and Debug mode (`session/useDebugModeAndTrace.ts`).
   const debug = useDebugModeAndTrace({
     bridgeNow,
@@ -806,6 +825,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     options,
     bridgeNow,
     currentConnection,
+    losses: () => connectionLosses.value,
     session,
     room,
     scriptStorage,
@@ -1128,6 +1148,14 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     hostError: computed(() => hostError.value),
     /** Whether an exception of the Player itself stopped the session where it stands; until the next Start. */
     stopped,
+    /**
+     * What the stop after a lost engine connection offers (PLAYER-UI "Session end and failure"): Continue from the last
+     * kept point or Start again, over the stopped session (`line`) or on the start page (`page`); `null` without one.
+     * Its click is `activate`.
+     */
+    recovery: computed(() => recoveryOffer.value),
+    /** Changes whenever the engine's connection is lost. */
+    connectionLosses: computed(() => connectionLosses.value),
     /** Reports an exception of the Player's interface or host: the page's error reporter (`reportPageError`). */
     reportHostError: reportPageError,
     /** What a debug export can contain, frozen (`useExportCandidate`). */
