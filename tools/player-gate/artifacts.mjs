@@ -3,21 +3,43 @@
 // - eager: what `index.html` names, and the files those import statically;
 // - Worker: each Worker entry (a file whose name says Worker), and the files it imports, statically or by `import()`;
 // - lazy: the rest of what `index.html`'s files reach by `import()`, and every file that is not JavaScript.
-// A file in two classes is listed once, under both, and counted once in the overall total. An import is read only in
-// the forms the build writes, `from "./x.js"`, `import "./x.js"` and `import("./x.js")`, the last also with a template
-// string without substitutions: a JavaScript file that no root reaches, or an `import(` of any other form, fails the
-// inventory, as its class would be a guess.
+// A file in two classes is listed once, under both, and counted once in the overall total. Imports are read from each
+// file's syntax tree (TypeScript's parser), so text that only looks like one, in a string or a comment, is none: an
+// import declaration, an `export … from` and an `import()` call. Each must name a file of the build as `./name`, an
+// `import()` by a string or a template without substitutions; a JavaScript file that no root reaches, or an import of
+// any other form, fails the inventory, as its class would be a guess.
 //   node tools/player-gate/artifacts.mjs --app DIR --build NAME > inventory.json
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 import { parseArgs } from "node:util";
 import { brotliCompressSync, constants, gzipSync } from "node:zlib";
+import ts from "typescript";
 
-const STATIC = /(?:\bfrom|\bimport)\s*["']\.\/([^"']+)["']/gu;
-// A path with a substitution (`${…}`) is no path the inventory can read, so it is left to ANY_DYNAMIC's count.
-const DYNAMIC = /(?<![\w$.])import\(\s*(["'`])\.\/([^"'`$]+)\1\s*\)/gu;
-// Every `import(`, also with spaces or comments before its parenthesis.
-const ANY_DYNAMIC = /(?<![\w$.])import(?:\s|\/\*[\s\S]*?\*\/)*\(/gu;
+/**
+ * The imports of the script `source` (named `file` in errors), as `{ name, dynamic }` with `name` the imported file's
+ * name; throws for an import whose target is not a literal `./name`.
+ */
+function importsOf(file, source) {
+  const found = [];
+  const target = (node, what) => {
+    const literal =
+      node !== undefined && (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node));
+    if (!literal || !node.text.startsWith("./") || node.text.slice(2).includes("/"))
+      throw new Error(
+        `${file}: an ${what} of a form the inventory does not read: ${node?.getText() ?? "none"}`,
+      );
+    return node.text.slice(2);
+  };
+  const visit = (node) => {
+    if ((ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) && node.moduleSpecifier)
+      found.push({ name: target(node.moduleSpecifier, "import"), dynamic: false });
+    else if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword)
+      found.push({ name: target(node.arguments[0], "import()"), dynamic: true });
+    ts.forEachChild(node, visit);
+  };
+  visit(ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS));
+  return found;
+}
 
 /** The inventory of the build in `app`, named `build`; throws for a file it cannot class. */
 export function inventoryOf(app, build) {
@@ -33,25 +55,25 @@ export function inventoryOf(app, build) {
   const text = (file) => readFileSync(join(app, file), "utf8");
   const byName = new Map(files.map((file) => [file.split("/").at(-1), file]));
   const isScript = (file) => file.endsWith(".js");
-
-  /** The files `file` imports by `pattern`'s form, by their output path. */
-  const imports = (file, pattern) =>
-    isScript(file)
-      ? [...text(file).matchAll(pattern)].map((match) => byName.get(match.at(-1))).filter(Boolean)
-      : [];
-  for (const file of files.filter(isScript)) {
-    const all = [...text(file).matchAll(ANY_DYNAMIC)].length;
-    const read = [...text(file).matchAll(DYNAMIC)].length;
-    if (all !== read)
-      throw new Error(`${file}: ${all - read} import() of a form the inventory does not read`);
-  }
-  /** `roots` and what they import by the given forms. */
-  const closure = (roots, patterns) => {
+  /** Each script's imports, by output path. */
+  const edges = new Map(
+    files.filter(isScript).map((file) => [
+      file,
+      importsOf(file, text(file)).map(({ name, dynamic }) => {
+        const path = byName.get(name);
+        if (path === undefined)
+          throw new Error(`${file}: imports ./${name}, which the build does not hold`);
+        return { path, dynamic };
+      }),
+    ]),
+  );
+  /** `roots` and what they import, statically, or also by `import()` when `dynamic`. */
+  const closure = (roots, dynamic) => {
     const seen = new Set();
     const visit = (file) => {
       if (seen.has(file)) return;
       seen.add(file);
-      for (const pattern of patterns) for (const next of imports(file, pattern)) visit(next);
+      for (const edge of edges.get(file) ?? []) if (dynamic || !edge.dynamic) visit(edge.path);
     };
     for (const root of roots) visit(root);
     return seen;
@@ -60,11 +82,11 @@ export function inventoryOf(app, build) {
   const named = [...text("index.html").matchAll(/(?:src|href)="[^"]*\/([^"/]+)"/gu)]
     .map((match) => byName.get(match[1]))
     .filter((file) => file !== undefined);
-  const eager = closure(["index.html", ...named], [STATIC]);
-  const lazy = closure(eager, [STATIC, DYNAMIC]);
+  const eager = closure(["index.html", ...named], false);
+  const lazy = closure(eager, true);
   const worker = closure(
     files.filter((file) => /worker/iu.test(file.split("/").at(-1))),
-    [STATIC, DYNAMIC],
+    true,
   );
   const unreached = files.filter((file) => isScript(file) && !lazy.has(file) && !worker.has(file));
   if (unreached.length > 0)
