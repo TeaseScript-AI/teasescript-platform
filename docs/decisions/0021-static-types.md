@@ -256,7 +256,7 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
    `fromJson` does (rule 2.6): a missing or wrong-typed field takes that field's value from the default, and `TSW016`
    names the field. An undeclared `load` keeps stored properties its default lacks, and reading one is checked when
    the script runs; this difference from `fromJson`, which ignores extra keys (rule 2.6), is deliberate, so that
-   loading a value and saving it back never drops what was stored. A saved value that the compiler cannot know is
+   loading a value and saving it back keeps those properties. A saved value that the compiler cannot know is
    checked when the script runs against the type every
    load of its key accepts.
 
