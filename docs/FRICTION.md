@@ -39,9 +39,9 @@ its record.
 ## Priority
 
 An open friction issue is either being built, or waits on an open issue or pull request named in its `Schedule:` line,
-or is free; a coordinator starts no other builder while one of its issues is free; the coordinators' launch check
-refuses it. The line is the newest one in the issue or its comments that begins `Schedule:`, and names the track's
-coordinator:
+or is free; a coordinator starts no other builder while one of its issues is free: the coordinators' launch check
+refuses the launch. The line is the newest one in the issue or its comments that begins `Schedule:`, and names the
+track's coordinator:
 
 - `Schedule: taken, <coordinator>, lane <name>`: it is being built. An open pull request that closes the issue counts
   the same without a line.
@@ -62,9 +62,9 @@ deferring costs, not by date:
 - **Otherwise:** a single, cheap instance that no lane is near is free like any other. A scope cut's residual is left
   to an issue only when it cannot bite ([Design rounds](DEVELOPMENT-WORKFLOW.md#design-rounds)).
 
-A friction issue is not `spare capacity` unless its triage shows that deferring it costs nothing more. A fix in the
-repository never enters another lane's open pull request. A backward-compatible fix in the agent environment may land at
-once, and every lane hears of it in the same turn.
+The `spare capacity` label changes none of this: a friction issue is built, waits or is free the same with or without
+it. A fix in the repository never enters another lane's open pull request. A backward-compatible fix in the agent
+environment may land at once, and every lane hears of it in the same turn.
 
 ## Known friction
 
