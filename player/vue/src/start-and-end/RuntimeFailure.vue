@@ -30,19 +30,20 @@ defineExpose({
 
 <template>
   <div v-if="recovery" ref="line" class="runtime-end" data-runtime-end>
+    <!-- The button goes below the sentence where both do not fit side by side. -->
     <p
-      class="flex items-center gap-2 rounded-md border bg-card py-1 ps-3 pe-1 text-sm text-destructive shadow-sm"
+      class="flex flex-wrap items-center gap-x-2 gap-y-1 rounded-md border bg-card py-1 ps-3 pe-1 text-sm text-destructive shadow-sm"
       data-connection-lost
     >
       <CircleAlert class="size-4 shrink-0" aria-hidden="true" />
-      <span class="min-w-0">{{
+      <span class="min-w-0 flex-1 basis-48">{{
         recovery === "continue"
           ? "The session stopped unexpectedly. You can continue from the last kept point. Progress since then may be lost."
           : "The session stopped unexpectedly."
       }}</span>
       <Button
         variant="outline"
-        class="min-h-11 shrink-0"
+        class="ms-auto min-h-11 shrink-0"
         data-connection-recover
         @click="emit('activate')"
       >
