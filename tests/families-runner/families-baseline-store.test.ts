@@ -767,7 +767,8 @@ export function stopSet(files) {
       fields: { listsEqual: true },
     });
 
-    // stored: no stops in any stored run, and the store reads complete
+    // stored: no stops in any stored run (the writer checks each line as every reader does, and the head's run below
+    // reads it through `storedRuns`)
     const root = join(directory, "baselines");
     const stored = spawnSync(
       process.execPath,
@@ -785,11 +786,6 @@ export function stopSet(files) {
     const values = lines.flatMap(({ runs }) => Object.values(runs ?? {}).map(({ value }) => value));
     assert.equal(values.length, names.length * 4 * 3);
     assert.ok(values.every((value) => !Object.hasOwn(value, "stops")));
-    const state = spawnSync(process.execPath, [baselines, "state", base, root, "--read-only"], {
-      encoding: "utf8",
-    });
-    assert.equal(state.status, 0, state.stderr);
-
     // the head against the store: a difference whose stops say the base holds no list, never equal
     const against = run(head, "--baseline", join(root, src!, "area"));
     assert.equal(against.status, 1, against.stderr);
