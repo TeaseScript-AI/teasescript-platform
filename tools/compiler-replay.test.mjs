@@ -1063,8 +1063,8 @@ test("collect reads every area record form the real run.mjs writes, and a record
       ...apart("stopping.mjs", "stops", "stops natural apart"),
     ];
     const r = report("p", root, ["rings"]);
-    assert.deepEqual(r.unread, []);
     assert.deepEqual(verdict(r), { status: 1, reasons: expected });
+    assert.deepEqual(r.unread, []);
     // a record of no form the runner writes: unread, named, never dropped
     const odd = { generator: "g", source: "s", mode: "src-on", check: "publication", base: 1 };
     writeFileSync(join(out, "rings.differences.jsonl"), `${JSON.stringify(odd)}\n`, { flag: "a" });
