@@ -6,9 +6,9 @@ import { checkedFiles, fileComments } from "./comments.mjs";
 // A comment says what the code does now and never forecasts later work (IMPLEMENTATION-AND-REVIEW.md "Code that does
 // not mislead", #1977). Its comment rules read comments only, never strings or code, in the linted files and in `.vue`
 // files' `<script>` blocks. A citation of a repository record matches no form: a bare `#N`, a completed stage, `PR N`,
-// "(as) before #N". The old design record is not in the repository (#1977), so a reference to it is no citation: its
-// name followed by a revision (`r4`) or a section (`§`) is refused in the text of every file Git lists, documents,
-// strings and code included (#2372), and the forms of `COUNTED_CITATIONS` have each file's exact count in comments in
+// "(as) before #N". The old design record is not in the repository (#1977), so a reference to it is no citation: a
+// line of any file Git lists, documents, strings and code included, that names it and then a revision or a section is
+// refused (`citesFrom`, #2372), and the forms of `COUNTED_CITATIONS` have each file's exact count in comments in
 // `comment-citations.json`, which may only fall. A comment that points at the accepted record
 // (`docs/specifications/type-inference-accepted-record/<page>.md#<anchor>`, #2089) names a heading of that page; the
 // doc-links check reads Markdown only and never sees a comment. A label of the port plan or the research design (`S8c`,
@@ -33,34 +33,45 @@ export const FORECASTS = [
   { form: "TODO", pattern: /\bTODO\b/u },
 ];
 
-/**
- * What may stand between the old design record's name and a revision or section it cites: any run of characters that
- * are no letter or digit by their Unicode class (white space, line breaks, punctuation, a comment's or quote's marks,
- * emphasis, a Markdown table's cell border), HTML tags and comments on one line, and character entities (`&nbsp;`), so
- * a citation wrapped over lines or markup is one. A `<` or `&` is one character unless it opens a tag or an entity, so
- * each text has one reading.
- */
-const BETWEEN = String.raw`(?:[^\p{L}\p{N}<&]|<[^<>\n]*>|<(?![^<>\n]*>)|&#?[\p{L}\p{N}]+;|&(?!#?[\p{L}\p{N}]+;))*?`;
+/** The old design record's name, as a whole word: no letter or digit on either side. */
+const RECORD_NAME = /(?<![\p{L}\p{N}])TABLE(?![\p{L}\p{N}])/gu;
 
-/** A word's edge: no letter or digit on that side. */
-const EDGE = String.raw`[\p{L}\p{N}]`;
+/** A revision or a section of that record: the whole word `r4`, or a section mark. */
+const REVISION_OR_SECTION = /(?<![\p{L}\p{N}])r4(?![\p{L}\p{N}])|§/u;
 
-/** A citation of the old design record's revisions or sections. Written so this file's own text has none. */
-const TABLE_CITATION = new RegExp(
-  String.raw`(?<!${EDGE})TABLE(?!${EDGE})${BETWEEN}(?:r4(?!${EDGE})|§)`,
-  "gu",
+/** A line's rest that holds no letter or digit, and a next line that begins with a revision or section after such. */
+const ONLY_MARKS = /^[^\p{L}\p{N}]*$/u;
+const CONTINUES_CITING = new RegExp(
+  String.raw`^[^\p{L}\p{N}]*?(?:${REVISION_OR_SECTION.source})`,
+  "u",
 );
+
+/**
+ * Whether the record's name ending at `end` in `text` starts a citation: a revision or section later on its line,
+ * whatever stands between (markup and words alike, so no spelling between the two escapes); or only marks after it on
+ * its line and a revision or section after only marks at the start of the next, a citation wrapped over a line break.
+ * Its cost: a line that names the old record together with a revision or a section is refused, in prose too.
+ */
+function citesFrom(text, end) {
+  const lineEnd = text.indexOf("\n", end);
+  const rest = text.slice(end, lineEnd === -1 ? text.length : lineEnd);
+  if (REVISION_OR_SECTION.test(rest)) return true;
+  if (lineEnd === -1 || !ONLY_MARKS.test(rest)) return false;
+  const nextEnd = text.indexOf("\n", lineEnd + 1);
+  return CONTINUES_CITING.test(text.slice(lineEnd + 1, nextEnd === -1 ? text.length : nextEnd));
+}
 
 /** The one file whose text holds such citations on purpose: this check's own test, whose fixtures must be ones. */
 export const CITATION_FIXTURES = "tools/oxlint/check-comment-forecasts.test.mjs";
 
-/** The citations whose count per file in comments may only shrink, each by its pattern over a comment's text. */
+/** The citations whose count per file in comments may only shrink, each counted in a comment's text. */
 const COUNTED_CITATIONS = {
-  "bare r4.N": /(?<!TABLE )\br4\.\d+/gu,
-  "other TABLE": new RegExp(
-    String.raw`(?<!${EDGE})TABLE(?!${EDGE})(?!${BETWEEN}(?:r4(?!${EDGE})|§))`,
-    "gu",
-  ),
+  "bare r4.N": (text) => text.match(/\br4\.\d+/gu)?.length ?? 0,
+  // (each occurrence of the record's name that starts no citation, which the text check refuses instead)
+  "other TABLE": (text) =>
+    [...text.matchAll(RECORD_NAME)].filter(
+      (match) => !citesFrom(text, match.index + match[0].length),
+    ).length,
 };
 
 /** The accepted record's folder of pages, which a comment may point at by a page and a heading's anchor. */
@@ -171,8 +182,8 @@ export function forecastsIn(fileName, text) {
 export function citationCounts(fileName, text) {
   const counts = {};
   for (const comment of fileComments(fileName, text))
-    for (const [citation, pattern] of Object.entries(COUNTED_CITATIONS)) {
-      const n = comment.text.match(pattern)?.length ?? 0;
+    for (const [citation, count] of Object.entries(COUNTED_CITATIONS)) {
+      const n = count(comment.text);
       if (n > 0) counts[citation] = (counts[citation] ?? 0) + n;
     }
   return counts;
@@ -207,13 +218,26 @@ export function unresolvedPointers(fileName, text, pages) {
   return found;
 }
 
-/** Each citation of the old design record in `text`, the whole of file `fileName`, with its 1-based line. */
+/**
+ * Each line of `text`, the whole of file `fileName`, that cites the old design record (`citesFrom`), with its 1-based
+ * line and its text from the record's name. One pass over the lines: a line's first name finds a citation on its line,
+ * and its last name, after which no other stands, one wrapped onto the next.
+ */
 export function tableCitationsIn(fileName, text) {
-  if (fileName === CITATION_FIXTURES) return [];
-  return [...text.matchAll(TABLE_CITATION)].map((match) => ({
-    line: text.slice(0, match.index).split("\n").length,
-    text: match[0],
-  }));
+  if (fileName === CITATION_FIXTURES || !text.includes("TABLE")) return [];
+  const found = [];
+  for (let line = 1, start = 0; start <= text.length; line++) {
+    const newline = text.indexOf("\n", start);
+    const end = newline === -1 ? text.length : newline;
+    const names = [...text.slice(start, end).matchAll(RECORD_NAME)];
+    if (names.length > 0) {
+      const [first, last] = [names[0], names.at(-1)].map(({ index }) => start + index);
+      if (citesFrom(text, first + names[0][0].length) || citesFrom(text, last + names[0][0].length))
+        found.push({ line, text: text.slice(first, end).trim() });
+    }
+    start = end + 1;
+  }
+  return found;
 }
 
 /**
@@ -248,7 +272,7 @@ export function tableCitationFindings(root) {
         fileName: file,
         line,
         column: 1,
-        message: `"${citation.replace(/\s+/gu, " ")}" cites the old design record, which is not in the repository: state the fact, or point at the accepted record, an issue or a merged pull request`,
+        message: `"${citation.length > 60 ? `${citation.slice(0, 60)}…` : citation}": a line that names the old design record and then a revision or a section of it cites a record that is not in the repository; state the fact, or point at the accepted record, an issue or a merged pull request, and in prose about the old record keep any revision or section off its line`,
       });
   }
   return findings;

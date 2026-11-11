@@ -70,10 +70,13 @@ removes the probe configuration an interrupted run left.
 
 `tools/oxlint/check-comment-forecasts.mjs` refuses a comment that forecasts later work, in the forms
 [Code that does not mislead](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-that-does-not-mislead) lists (its
-`FORECASTS` table); a citation of a repository record passes. The old design record (TABLE) is not in the repository, so
-it cites nothing: `TABLE` followed by `r4` or `§`, also across line breaks, markup or table cells, is refused in every
-file Git lists except the check's own test, and `comment-citations.json` holds each file's exact counts of its other
-forms in comments (a bare `r4.N`, `TABLE` with another id), which may only fall.
+`FORECASTS` table); a citation of a repository record passes. The old design record (TABLE) is not in the repository,
+so it cites nothing: in every file Git lists except the check's own test, a line that names it as a whole word and later
+holds the whole word `r4` or a section mark is refused, and so is a line ending in its name and marks whose next line
+starts with marks and then one of those. What stands between does not matter, markup or words, so a line that names the
+old record together with a revision or a section is refused in prose too: state the fact, or keep the revision off it.
+`comment-citations.json` holds each file's exact counts in comments of its other forms (a bare `r4.N`, the record's name
+with another id), which may only fall.
 `comment-forecasts-allowed.json` lists the forecasts the check accepts, and each entry must still be found.
 
 ## Comment declarations

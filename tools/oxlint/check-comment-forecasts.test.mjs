@@ -107,11 +107,11 @@ test("the counted citations are counted in comments only", () => {
 test("a TABLE revision or section, wrapped or not, is no counted form: the text check finds it", () => {
   assert.deepEqual(
     citationCounts("a.ts", `/* TABLE r4.1, r4.2 and F19 (r4.3), TABLE B1, TABLE\n * § 3 */\n`),
-    { "bare r4.N": 2, "other TABLE": 1 },
+    { "bare r4.N": 3, "other TABLE": 1 },
   );
 });
 
-test("a TABLE revision or section is found in any file's text, wrapped or not, with its line", () => {
+test("a line naming TABLE and then r4 or § is found in any file's text, wrapped or not, with its line", () => {
   const found = (fileName, text) =>
     tableCitationsIn(fileName, text).map(({ line, text: citation }) => [line, citation]);
   // a document, wrapped in a paragraph and in a block quote
@@ -121,9 +121,9 @@ test("a TABLE revision or section is found in any file's text, wrapped or not, w
       "# A\n\nAs ruled (TABLE r4.390).\nThe pins (TABLE\nr4.50 states)\n\n> TABLE\n> § 2\n",
     ),
     [
-      [3, "TABLE r4"],
-      [4, "TABLE\nr4"],
-      [7, "TABLE\n> §"],
+      [3, "TABLE r4.390)."],
+      [4, "TABLE"],
+      [7, "TABLE"],
     ],
   );
   // a string, code and a comment over two lines, and data
@@ -133,29 +133,24 @@ test("a TABLE revision or section is found in any file's text, wrapped or not, w
       'test("a site (TABLE §3.4, r4.62)", () => {});\n/*\n * TABLE\n * r4.1\n */\n',
     ),
     [
-      [1, "TABLE §"],
-      [3, "TABLE\n * r4"],
+      [1, 'TABLE §3.4, r4.62)", () => {});'],
+      [3, "TABLE"],
     ],
   );
-  assert.deepEqual(found("tests/a.json", '{"reason": "TABLE r4.2"}\n'), [[1, "TABLE r4"]]);
-  // markup between the two: an HTML break, an entity, an HTML comment, a Markdown table's cells
+  assert.deepEqual(found("tests/a.json", '{"reason": "TABLE r4.2"}\r\n'), [[1, 'TABLE r4.2"}']]);
+  // one finding per line, from its first name; a wrapped one after another name on its line
   assert.deepEqual(
-    found(
-      "docs/c.md",
-      "TABLE<br>r4.1\nTABLE&nbsp;r4.2\nTABLE<!-- revision --> r4.3\n| record | revision |\n| TABLE | r4.4 |\n",
-    ),
+    found("docs/d.md", "TABLE B1 and TABLE r4.1, TABLE §2\nTABLE B1, see TABLE\n§ 3\n"),
     [
-      [1, "TABLE<br>r4"],
-      [2, "TABLE&nbsp;r4"],
-      [3, "TABLE<!-- revision --> r4"],
-      [5, "TABLE | r4"],
+      [1, "TABLE B1 and TABLE r4.1, TABLE §2"],
+      [2, "TABLE B1, see TABLE"],
     ],
   );
-  // other ids, a longer revision number, a longer word, and the form that describes the citation
+  // other ids, a longer revision number or word, a revision before the name, words after a wrapped name, a blank line
   assert.deepEqual(
     found(
       "docs/b.md",
-      "TABLE B1, TABLE F18 and TABLE r40; TABLEr4; `TABLE` followed by `r4` or `§`\n",
+      "TABLE B1, TABLE F18 and TABLE r40 or xr4.1\nTABLEr4.1 and TABLE² r4.1\nr4.1 before TABLE\nTABLE (see\nr4.1)\nTABLE\n\nr4.1\n",
     ),
     [],
   );
@@ -172,11 +167,52 @@ test("every ASCII character that is no letter or digit may stand between TABLE a
     for (const cited of ["r4.1", "§3"])
       assert.equal(
         tableCitationsIn("docs/a.md", `See TABLE${text}${cited}.\n`).length,
-        1,
+        // (two line breaks leave a blank line between: no longer one line or a wrapped one)
+        text === "\n\n" ? 0 : 1,
         JSON.stringify(`TABLE${text}${cited}`),
       );
   // emphasis around the whole citation
-  assert.equal(tableCitationsIn("docs/a.md", "_TABLE r4.1_ and __TABLE §2__\n").length, 2);
+  assert.equal(tableCitationsIn("docs/a.md", "_TABLE r4.1_ and\n__TABLE §2__\n").length, 2);
+});
+
+test("whatever stands between TABLE and r4 or § on its line, markup or words, the line is found", () => {
+  // review round 3's eight misses, by name
+  for (const text of [
+    "TABLE<!-- a < b -->r4.1",
+    "TABLE<!-- a < b -->§3",
+    "TABLE<!-- a > b -->r4.1",
+    "TABLE<!-- a > b -->§3",
+    'TABLE<span title="a>b">r4.1',
+    'TABLE<span title="a>b">§3',
+    'TABLE<span title="a<b">r4.1',
+    'TABLE<span title="a<b">§3',
+  ])
+    assert.equal(tableCitationsIn("docs/a.md", `${text}\n`).length, 1, text);
+  const fillers = [
+    "<br>",
+    "&nbsp;",
+    "<!-- revision -->",
+    "<!-- <b> -->",
+    '<span title="r4">',
+    '<a href="x.md">',
+    "](TABLE.md) ",
+    " _",
+    " **",
+    " | record | ",
+    " revision ",
+    " see the row ",
+    " é ٣ ",
+    " (B1, F18) and ",
+    " TABLE ",
+    " –​",
+  ];
+  for (const filler of fillers)
+    for (const cited of ["r4.1", "§3"])
+      assert.equal(
+        tableCitationsIn("docs/a.md", `TABLE${filler}${cited}\n`).length,
+        1,
+        JSON.stringify(`TABLE${filler}${cited}`),
+      );
 });
 
 test("the TABLE citation check reads every file Git lists, by its exact path, and refuses a name it cannot read", async () => {
@@ -226,7 +262,9 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
       at(
         entry
           .checkCommentForecasts(root)
-          .filter(({ message }) => message.includes("cites the old design record")),
+          .filter(({ message }) =>
+            message.includes("cites a record that is not in the repository"),
+          ),
       ),
       expected,
     );
