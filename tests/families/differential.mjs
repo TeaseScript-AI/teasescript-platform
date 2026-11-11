@@ -192,9 +192,12 @@ async function loadTree(root) {
 }
 
 /** A case's `storage` as script storage entries, a copy of its own for each run, or `undefined` where it has none. */
-const entriesOf = (storage) =>
-  storage &&
-  Object.entries(storage).map(([key, value]) => ({ key, value: structuredClone(value) }));
+function entriesOf(storage) {
+  return (
+    storage &&
+    Object.entries(storage).map(([key, value]) => ({ key, value: structuredClone(value) }))
+  );
+}
 
 /** Each case's files and globals, a set's from its unit; a set unreadable, or its unit missing or ambiguous, refuses the file. */
 async function resolveCases(cases, root) {
