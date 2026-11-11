@@ -2,10 +2,9 @@
 // answer's replies are delayed, end as on `main`, whose answers settle before the next key. Each case answers the
 // opening development scenario (`/player/?dev`) or the `answer-flight` fixture package, presses its keys, and records
 // what the page shows once every answer settled. `expect` is `main`'s measured outcome of the same keys, whose answers
-// settle at once (#2430), except where `main` loses a prefill the answer presents (its completion empties the composer
-// after the next question wrote it; this branch's keeps it): there it is this branch's outcome of the keys pressed after
-// the answer settled; and where a password field departs or settles, outside the flight's domain: there it is the
-// domain's outcome, nothing typed or given in the flight taken (#2463, residual 6). A case with a `residual` is a
+// settle at once (#2430; since 54806a4d6, #2465, `main` keeps a prefill the answer presents, as this branch does),
+// except where a password field departs or settles, outside the flight's domain: there it is the domain's outcome,
+// nothing typed or given in the flight taken (#2463, residual 6). A case with a `residual` is a
 // difference #2430 accepts, recorded beside it and never asserted.
 import { cdpSession } from "../lib/engines.mjs";
 import { countedError } from "../lib/probe.mjs";
@@ -202,7 +201,8 @@ function cases(engine) {
     })),
     // A lock's choose-a-code field, with a repeat: the flight ends at the lock, so the Enter is dropped. On `main` it
     // depends on whether the code field shows before the key: in Chromium it does not yet, and the key is dropped; in
-    // Firefox and WebKit it does, and Enter moves to the repeat field (#2463, residual 6).
+    // Firefox and WebKit it does, and Enter moves to the repeat field (#2463, residual 6). The snapshot shows no focus,
+    // so the case records the field's text only.
     fixture("code enter", "Code", press("Enter"), shown("", "", 4), R(6)),
     // On `main` the second Enter acts on the control that took the focus: it closes the popup, copies the export and
     // opens the link's tab (residual 6).
