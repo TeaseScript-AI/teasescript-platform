@@ -30,6 +30,7 @@ const CHARGED_FILES = [
   "src/type-inference/core/narrowing/events.ts",
   "src/type-inference/core/narrowing/routes.ts",
   "src/type-inference/core/narrowing/route-tests.ts",
+  "src/type-inference/core/narrowing/route-candidates.ts",
   "src/type-inference/core/narrowing/statement-tree.ts",
 ];
 
