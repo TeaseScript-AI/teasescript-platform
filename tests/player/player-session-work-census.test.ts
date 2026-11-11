@@ -584,7 +584,8 @@ const ESCAPES: Readonly<Record<string, Policy>> = {
     "bridge plumbing",
   "player/encryption/lock-service.ts LockService > #present > wake {wake}": "own observation",
   "player/vue/src/session/useCallView.ts useCallView {followCallView}": "lifecycle",
-  // The script's preparation, sent once the Player holds the bridge when it did not yet: what the page's preparers send.
+  // The script's preparation, sent once the bridge's source promise yielded it, when it had not yet: what the page's
+  // preparers send, which both wait for the readiness first.
   "player/vue/src/session/useEngineConnection.ts useEngineConnection > prepareScriptSource {send}":
     "creation",
   "player/vue/src/session/useEngineConnection.ts useEngineConnection > then:callback {lost}":

@@ -47,8 +47,8 @@ export function useEngineConnection({
       : null;
   // This Player's hold on its bridge (`PlayerBridge.claim`): one live Player per bridge.
   const claim = Symbol("Player");
-  // The bridge once the connection is ready (`connected` settled with it), or `null` before; also for a Player disposed
-  // meanwhile, which does not take it.
+  // The bridge once its source promise yields it, before the claim and the readiness hook, either of which can still
+  // reject `connected`; kept also for a Player disposed meanwhile, which does not take it. `null` before.
   let settled: PlayerBridge | null = null;
   // Once the host is reachable, and only while this Player lives: it takes the bridge, observes its loss, and sends what
   // waited for it before any Start that waits for it. A host that never became reachable, or one another Player holds,
