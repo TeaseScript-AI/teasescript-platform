@@ -856,21 +856,22 @@ test("printed text is a test's title and a measures or authority value, in every
     "check(`B8`);",
     "",
   ].join("\n");
-  assert.deepEqual(
-    printedLabelsIn("tests/a.test.ts", source).map(({ line, label }) => `${line} ${label}`),
-    [
-      ...["1 A1", "2 A2", "2 A3", "3 A4", "3 A5", "4 A6", "5 A7", "6 A8", "8 A9", "8 A10", "8 A11"],
-      ...["10 A12", "10 A13", "11 A14", "11 A15", "12 A16", "12 A17"],
-    ],
+  assert.equal(
+    printedLabelsIn("tests/a.test.ts", source)
+      .map(({ line, label }) => `${line} ${label}`)
+      .join(", "),
+    "1 A1, 2 A2, 2 A3, 3 A4, 3 A5, 4 A6, 5 A7, 6 A8, 8 A9, 8 A10, 8 A11, 10 A12, 10 A13, 11 A14, 11 A15, 12 A16, 12 A17",
   );
   // a file with none of the callee or property names, and no backslash, is not parsed; one with a backslash is
   assert.deepEqual(printedTexts("tests/b.ts", 'const s = "A1";\n'), []);
   assert.deepEqual(
-    printedLabelsIn("tests/b.ts", 'const s = { "measur\\u0065s": "A1" };\n').map(({ label }) => label),
+    printedLabelsIn("tests/b.ts", 'const s = { "measur\\u0065s": "A1" };\n').map(
+      ({ label }) => label,
+    ),
     ["A1"],
   );
   // a part with an escape reports its first line
-  assert.deepEqual(printedLabelsIn("tests/b.ts", 'test(`A1\\n\nA2`, f);\n'), [
+  assert.deepEqual(printedLabelsIn("tests/b.ts", "test(`A1\\n\nA2`, f);\n"), [
     { line: 1, label: "A1" },
     { line: 1, label: "A2" },
   ]);
