@@ -468,7 +468,7 @@ async function handoffRow(
           `the log at ${JSON.stringify(position)} resolves`,
         );
     } else assert.equal(view, null, "no history is open");
-    // The return's state, which the Player shows: nothing waits once the gate settled, opened or failed.
+    // The owner's return state: nothing waits once the gate settled, opened or failed.
     if (gated && !want.lost && (want.shows === "live" || want.shows === "restored"))
       assert.equal(host.rewind.owner.reinstatement.value, null, "the return's state");
     if (mutate === undefined) lifecycleRun.push(each);
