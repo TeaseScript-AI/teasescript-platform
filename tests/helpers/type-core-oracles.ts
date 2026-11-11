@@ -51,6 +51,7 @@ export {
 } from "./type-core-oracles-publication.js";
 export type { PublicationParts, PublicationHashes } from "./type-core-oracles-publication.js";
 export {
+  /** @public (a probe over many compiles reads it from a built tree, not by an import) */
   requireRecords,
   decisionKey,
   decisionsByKey,
