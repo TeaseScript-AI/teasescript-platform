@@ -793,6 +793,30 @@ async function runGroup(browserPage, run, url, artifacts) {
   }
 }
 
+/**
+ * Runs `step`; if a started preview has ended by then, fails with that end and the preview's log instead, the step's own
+ * failure as its cause: the step may have passed on what it had loaded, or failed for the end, which its error does not
+ * say.
+ */
+async function whilePreviewRuns(preview, phase, step) {
+  let result;
+  let failure;
+  try {
+    result = await step();
+  } catch (error) {
+    failure = error;
+  }
+  if (preview !== undefined) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    if (preview.status !== undefined)
+      throw new Error(`The preview ${preview.status} during ${phase}:\n${logTail(preview)}`, {
+        cause: failure,
+      });
+  }
+  if (failure !== undefined) throw failure;
+  return result;
+}
+
 /** Runs every group against `given`, or against a preview it starts when `given` is undefined. */
 async function main(given) {
   if (given !== undefined) await checkIdentity(given);
@@ -805,7 +829,7 @@ async function main(given) {
       preview = startPreview();
       url = await readyPreview(preview);
       console.log(`player-preview-checks: started this checkout's preview at ${url}`);
-      await checkIdentity(url);
+      await whilePreviewRuns(preview, "the identity check", () => checkIdentity(url));
     }
     const config = join(scratch, "browser.json");
     writeFileSync(
@@ -822,30 +846,17 @@ async function main(given) {
         },
       }),
     );
-    cli("open", url, "--config", config);
+    await whilePreviewRuns(preview, "the browser's start", () =>
+      cli("open", url, "--config", config),
+    );
     for (const group of groups) {
       console.log(`player-preview-checks: RUN ${group.name}`);
-      let output;
-      let failure;
-      try {
-        output = cli(
+      const output = await whilePreviewRuns(preview, group.name, () =>
+        cli(
           "run-code",
           `async page => (${runGroup.toString()})(page, ${group.toString()}, ${JSON.stringify(url)}, ${JSON.stringify(join(scratch, group.name))})`,
-        );
-      } catch (error) {
-        failure = error;
-      }
-      // A started preview that ended during the group fails it, whatever the browser made of it: the group may have
-      // passed on what it had loaded, or failed for the preview's end, which its own error does not say.
-      if (preview !== undefined) {
-        await new Promise((resolve) => setTimeout(resolve, 10));
-        if (preview.status !== undefined)
-          throw new Error(
-            `The preview ${preview.status} during ${group.name}:\n${logTail(preview)}`,
-            { cause: failure },
-          );
-      }
-      if (failure !== undefined) throw failure;
+        ),
+      );
       const result = output.match(/^### Result\r?\n"(PASS [^"\n]+)"$/mu)?.[1];
       if (!result) throw new Error(output);
       console.log(`player-preview-checks: ${result}`);
