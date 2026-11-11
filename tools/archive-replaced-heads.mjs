@@ -4,17 +4,56 @@ import { readFileSync } from "node:fs";
 // A `pre-push` hook: before a push replaces a branch's head on the remote with one that does not contain it (a
 // force-push) or deletes the branch, it pushes that old head to `refs/archive/<full sha>` on the same remote, so a
 // commit a report or review cites stays readable there (`tools/check-shas.mjs` reads such refs on origin). A
-// fast-forward, a new branch and any ref outside `refs/heads/` cost nothing.
+// fast-forward, a new branch and any other ref outside `refs/archive/` cost nothing. A push that would delete or move
+// an archive ref is refused: archives are kept. So is a pruning push (`--mirror`, `--prune`, or a remote with
+// `remote.<name>.mirror`): git lists the refs it prunes to no hook, so it could delete an archive unseen. The pruning
+// flags are read from the `git push` process this hook runs under (`/proc`); where that cannot be read, they are not
+// checked.
 //
 //   node tools/archive-replaced-heads.mjs <remote name> <remote URL>     (git's pre-push arguments; its ref lines on
 //                                                                        standard input)
 //
 // It prints each head it archived. When an old head cannot be archived (this clone lacks it, or the archive push
 // fails), it exits 1 and git refuses the whole push. The archive push runs with `--no-verify`, so it never runs this
-// hook again.
+// hook again. Git gives the hook no sign of `--dry-run`, so a dry run that would replace a head archives it too.
 
 const ZERO = /^0+$/u;
 const git = (...args) => spawnSync("git", args, { encoding: "utf8" });
+
+/**
+ * Whether the push this hook runs under prunes (`--mirror`, `--prune`, or `remote.<remote>.mirror`); `null` when no
+ * `git push` process is found among this process's ancestors.
+ */
+function pruningPush(remote) {
+  if (git("config", "--bool", `remote.${remote}.mirror`).stdout.trim() === "true") return true;
+  for (let pid = process.ppid; pid > 1;) {
+    let argv;
+    let stat;
+    try {
+      argv = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0");
+      stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    } catch {
+      return null;
+    }
+    const push = argv.indexOf("push");
+    if (push > 0 && /(?:^|\/)git$/u.test(argv[0]))
+      return argv.slice(push + 1).some((arg) => /^--(?:mirror|prune)(?:=|$)/u.test(arg));
+    // (the parent's id: the second field after the parenthesized command name)
+    pid = Number(stat.slice(stat.lastIndexOf(")") + 2).split(" ")[1]);
+  }
+  return null;
+}
+
+/** The archive refs the pushed `lines` would delete or move. */
+export function movedArchives(lines) {
+  return lines
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/u))
+    .filter(
+      ([, local, ref, old]) => ref?.startsWith("refs/archive/") && !ZERO.test(old) && local !== old,
+    )
+    .map(([, , ref]) => ref);
+}
 
 /** The old heads the pushed `lines` replace without containing them, or delete: `{ ref, old }` each. */
 export function replacedHeads(lines) {
@@ -30,13 +69,19 @@ export function replacedHeads(lines) {
 }
 
 function main() {
-  const [, url] = process.argv.slice(2);
+  const [remote, url] = process.argv.slice(2);
   const fail = (message) => {
     process.stderr.write(`archive-replaced-heads: ${message}; push refused\n`);
     process.exit(1);
   };
   if (url === undefined) fail("usage: node tools/archive-replaced-heads.mjs <remote> <url>");
-  const replaced = replacedHeads(readFileSync(0, "utf8"));
+  const lines = readFileSync(0, "utf8");
+  if (pruningPush(remote))
+    fail("a pruning push (--mirror or --prune) can delete archive refs unseen: push without it");
+  const moved = movedArchives(lines);
+  if (moved.length > 0)
+    fail(`${moved.join(", ")} would be deleted or moved, and archives are kept`);
+  const replaced = replacedHeads(lines);
   if (replaced.length === 0) return;
   const missing = replaced.filter(
     ({ old }) => git("cat-file", "-e", `${old}^{commit}`).status !== 0,
@@ -52,7 +97,8 @@ function main() {
     "--no-verify",
     "--quiet",
     url,
-    ...replaced.map(({ old }) => `${old}:refs/archive/${old}`),
+    // (each old head once: branches that shared it share its archive)
+    ...new Set(replaced.map(({ old }) => `${old}:refs/archive/${old}`)),
   );
   if (pushed.status !== 0)
     fail(`cannot archive the replaced heads (${pushed.stderr.trim().split("\n").at(-1)})`);
