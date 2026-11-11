@@ -83,8 +83,10 @@ export function readMarks(root) {
       faults.push(`${file}:1: the mark's line is no regex: ${error.message}`);
       continue;
     }
-    if (!lines.slice(1).some((line) => pin.test(line)))
+    if (!lines.slice(1).some((line) => pin.test(line))) {
       faults.push(`${file}:1: no line of the file but the mark's own is a line ${pin} finds`);
+      continue;
+    }
     const named = found[1]?.split(",").map((suite) => suite.trim());
     for (const suite of named ?? [file]) {
       if (!tests.has(suite)) faults.push(`${file}:1: ${suite} is no test file`);
