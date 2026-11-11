@@ -18,10 +18,10 @@ import { existsSync, readFileSync } from "node:fs";
 // may be a commit not fetched yet: the message says to fetch it; this tool never fetches. A token that is no commit
 // but a tree, such as a stored baseline's `src` tree hash, is reported as a tree, resolved, without the remote check:
 // proving a tree reachable from a remote ref is costly.
-// Unfilled placeholders (`PLACEHOLDERS`) outside fenced code blocks are reported too, and so is every path into the
-// disposable scratch area `/tmp/agent-work/`, anywhere in the text and however the folders before it are spelled
-// (`scratchPathsOf`, which names what it cannot see): its files are deleted after inactivity, often before a reader
-// checks them. Every run that completes ends with one line counting the tokens by
+// Unfilled placeholders (`PLACEHOLDERS`) outside fenced code blocks are reported too. Paths into the disposable scratch
+// area `/tmp/agent-work/`, whose files are deleted after inactivity, are named and counted, not failed: a report may
+// mention one rightly (a command it ran, a reviewer's folder), and a reader who needs the file needs a retained copy
+// (`scratchPathsOf` says which spellings it reads). Every run that completes ends with one line counting the tokens by
 // result, the placeholders and those paths, so no output means it did not run.
 //
 // Tokens that need not be commits are checked, and skipped when no repository resolves them, so no rule hides a SHA:
@@ -33,8 +33,8 @@ import { existsSync, readFileSync } from "node:fs";
 // - shorter than 40 and inside a URL or a path, except after `/commit/`, `/commits/`, `/tree/` or `/blob/`: a file's
 //   or a job's name. A full 40-character SHA in a path, such as an evidence folder, must resolve.
 //
-// Exit status: 0 when every token that must be a commit resolved on a remote and no placeholder or scratch path is
-// left, 1 otherwise, 2 when it cannot run (bad arguments, an unreadable file, or a `--repo` that is no git repository).
+// Exit status: 0 when every token that must be a commit resolved on a remote and no placeholder is left (scratch paths
+// do not change it), 1 otherwise, 2 when it cannot run (bad arguments, an unreadable file, or a `--repo` that is no git repository).
 
 /** The unfilled placeholders a report can carry, case-insensitive. */
 export const PLACEHOLDERS = [
@@ -73,32 +73,34 @@ export function tokensOf(text) {
 
 /**
  * The paths of `text` that name something inside a folder `agent-work`, as the scratch area `/tmp/agent-work/` is
- * named, wherever they stand, code included: such a path is evidence that will be gone. A path is a run of characters
- * other than white space, quotes, backticks, brackets and `|` (a compact table's cell separator), read with `%XX`
- * decoded and without the sentence punctuation that ends it; it names the area's content when a component
- * `agent-work` is followed by one other than `.` or `..`. So any spelling of the folders before it counts (absolute,
- * relative, a variable, `file://`, doubled slashes, `.` components), and the area itself (`/tmp/agent-work/.`) or a
- * folder named by a placeholder (`/tmp/agent-work/<task>/`) is no such path. Not seen: a path broken by white space or
- * a line break, and one that reaches the area through a name other than `agent-work` (`$SCRATCH/report.out`).
+ * named, wherever they stand, code included, each once with the line it first stands on. A path is a run of
+ * characters other than white space, quotes, backticks, brackets and `|` (a compact table's cell separator), without
+ * the sentence punctuation that ends it; it names the area's content when a slash-separated component is exactly
+ * `agent-work` and is followed by one other than `.` or `..`. The area itself (`/tmp/agent-work/.`) or a folder named
+ * by a placeholder (`/tmp/agent-work/<task>/`) is no such path. This is a count, not a guarantee: a path written
+ * otherwise is not seen, such as one broken by white space, a JSON value with escaped slashes, a relative path assigned
+ * to a shell variable (`NAME=agent-work/…`), or one reaching the area through another name (`$SCRATCH/report.out`).
  */
 export function scratchPathsOf(text) {
-  const found = new Set();
-  for (const [run] of text.matchAll(/[^\s`'"()[\]<>|]+/gu)) {
-    if (!run.includes("agent-work") && !run.includes("%")) continue;
+  const found = new Map();
+  let line = 1;
+  let at = 0;
+  for (const { 0: run, index } of text.matchAll(/[^\s`'"()[\]<>|]+/gu)) {
+    if (!run.includes("agent-work")) continue;
+    for (; at < index; at += 1) if (text[at] === "\n") line += 1;
     // (from the end, so that punctuation inside the path is read once)
     let end = run.length;
     while (end > 0 && ".,;:!?".includes(run[end - 1])) end -= 1;
     const path = run.slice(0, end);
-    const parts = path
-      .replace(/%([\da-f]{2})/giu, (_, hex) => String.fromCharCode(Number.parseInt(hex, 16)))
-      .split("/");
-    const inside = (at) => {
-      while (parts[at] === "" || parts[at] === ".") at += 1;
-      return at < parts.length && parts[at] !== "..";
+    const parts = path.split("/");
+    const inside = (from) => {
+      while (parts[from] === "" || parts[from] === ".") from += 1;
+      return from < parts.length && parts[from] !== "..";
     };
-    if (parts.some((part, at) => part === "agent-work" && inside(at + 1))) found.add(path);
+    if (!found.has(path) && parts.some((part, from) => part === "agent-work" && inside(from + 1)))
+      found.set(path, line);
   }
-  return [...found];
+  return [...found].map(([path, first]) => ({ path, line: first }));
 }
 
 /**
@@ -331,12 +333,10 @@ function main() {
     }
   }
   const scratch = scratchPathsOf(text);
-  for (const path of scratch) {
-    failed = true;
+  for (const { path, line } of scratch)
     process.stdout.write(
-      `scratch     ${path}  under /tmp/agent-work, deleted before a reader looks: cite a retained copy\n`,
+      `scratch     line ${line}: ${path}  under /tmp/agent-work, deleted after inactivity: if a reader needs the file, move it to retained evidence and cite that copy\n`,
     );
-  }
   const placeholders = placeholdersOf(text);
   for (const placeholder of placeholders) {
     failed = true;

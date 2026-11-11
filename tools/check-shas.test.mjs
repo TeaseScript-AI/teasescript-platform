@@ -153,61 +153,51 @@ test("an unfilled placeholder fails", { timeout: 30_000 }, () => {
   }
 });
 
-test("a path into the scratch area fails, however it is spelled", { timeout: 60_000 }, () => {
-  const { directory } = repository();
-  try {
-    const { status, out } = check(
-      "Evidence /tmp/agent-work/lane3/cross64.tsv, retained at ~/work/evidence/lane3/cross64.tsv.\n",
-      [directory],
-    );
-    assert.equal(status, 1, out);
-    assert.match(out, /scratch +\/tmp\/agent-work\/lane3\/cross64\.tsv +under \/tmp\/agent-work/u);
-    assert.match(out.trim().split("\n").at(-1), /0 placeholders, 1 scratch paths$/u);
-    // Round 1's spellings, through the CLI: each a path into the area, so the text fails; the bare area passes.
-    for (const [text, count] of [
-      ["Evidence: /tmp/agent-work/@lane/report.out", 1],
-      ["/tmp/agent-work/+run/report.out and /tmp/agent-work/épreuve/report.out", 2],
-      ["/tmp//agent-work/a /tmp/./agent-work/a //tmp/agent-work/a", 3],
-      ["file:///tmp/agent%2Dwork/a and file://localhost/tmp/agent-work/a", 2],
-      [
-        "$TMPDIR/agent-work/a ${TMPDIR:-/tmp}/agent-work/a ../agent-work/a /private/tmp/agent-work/a",
-        4,
-      ],
-      ["|/tmp/agent-work/a|/tmp/agent-work/b|", 2],
-      [
-        "The scratch area is /tmp/agent-work/. Or /tmp/agent-work/... or /tmp/agent-work/<task>/",
-        0,
-      ],
-    ]) {
-      const result = check(`${text}\n`, [directory]);
-      assert.equal(result.status, count > 0 ? 1 : 0, `${text}: ${result.out}`);
-      assert.match(
-        result.out.trim().split("\n").at(-1),
-        new RegExp(` ${count} scratch paths$`, "u"),
-        text,
+test(
+  "a path into the scratch area is named with its line and counted, and fails nothing",
+  { timeout: 60_000 },
+  () => {
+    const { directory } = repository();
+    try {
+      const { status, out } = check(
+        "Report\nEvidence /tmp/agent-work/lane3/cross64.tsv, retained at ~/work/evidence/lane3/cross64.tsv.\n",
+        [directory],
       );
+      assert.equal(status, 0, out);
+      assert.match(
+        out,
+        /^scratch +line 2: \/tmp\/agent-work\/lane3\/cross64\.tsv +under \/tmp\/agent-work, deleted after inactivity: if a reader needs the file, move it to retained evidence and cite that copy$/mu,
+      );
+      assert.match(out.trim().split("\n").at(-1), /0 placeholders, 1 scratch paths$/u);
+      // The count beside a failure: a scratch path changes no exit status either way.
+      assert.equal(check("<sha> in /tmp/agent-work/a/b\n", [directory]).status, 1);
+      for (const [text, count] of [
+        ["|/tmp/agent-work/a|/tmp/agent-work/b|", 2],
+        [
+          "The scratch area is /tmp/agent-work/. Or /tmp/agent-work/... or /tmp/agent-work/<task>/",
+          0,
+        ],
+      ]) {
+        const result = check(`${text}\n`, [directory]);
+        assert.equal(result.status, 0, `${text}: ${result.out}`);
+        assert.match(
+          result.out.trim().split("\n").at(-1),
+          new RegExp(` ${count} scratch paths$`, "u"),
+          text,
+        );
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
     }
-  } finally {
-    rmSync(directory, { recursive: true, force: true });
-  }
-});
+  },
+);
 
 test(
-  "scratchPathsOf, over generated spellings, containers and endings",
+  "scratchPathsOf, over generated descendants, containers and endings",
   { timeout: 30_000 },
   () => {
-    const before = [
-      "/tmp/",
-      "/tmp//",
-      "/tmp/./",
-      "//tmp/",
-      "file:///tmp/",
-      "file://localhost/tmp/",
-      "$TMPDIR/",
-      "../",
-      "",
-    ];
-    const area = ["agent-work", "agent%2Dwork", "agent%2dwork"];
+    const before = ["/tmp/", "../"];
+    const area = ["agent-work"];
     const inside = ["a", "@lane/r.out", "+run/r.out", "épreuve/r.out", "./a/b.txt", "a/../b"];
     const outside = ["", ".", "./", "..", "../a", "<task>/", "./."];
     const containers = [
@@ -234,10 +224,14 @@ test(
                 const text = `see ${contain(path)}${end} next`;
                 // (a path's own last characters that are sentence punctuation are no part of what it names)
                 const expected = named ? [path.replace(/[.,;:!?]+$/u, "")] : [];
-                assert.deepEqual(scratchPathsOf(text), expected, text);
+                assert.deepEqual(
+                  scratchPathsOf(text).map((found) => found.path),
+                  expected,
+                  text,
+                );
                 cases += 1;
               }
-    assert.equal(cases, 9 * 3 * 13 * 7 * 8);
+    assert.equal(cases, 2 * 13 * 7 * 8);
     for (const [text, paths] of [
       ["/tmp/agent-work/a and /tmp/agent-work/a", ["/tmp/agent-work/a"]],
       ["/tmp/agent-workshop/a bin/prepare-agent-workspace.sh", []],
@@ -245,7 +239,19 @@ test(
       // (the area's name is what is seen, wherever the folder is: a folder of that name elsewhere counts too)
       ["/home/x/tmp/agent-work/a", ["/home/x/tmp/agent-work/a"]],
     ])
-      assert.deepEqual(scratchPathsOf(text), paths, text);
+      assert.deepEqual(
+        scratchPathsOf(text).map((found) => found.path),
+        paths,
+        text,
+      );
+    // Each path once, with the line it first stands on.
+    assert.deepEqual(
+      scratchPathsOf("a\r\nb /tmp/agent-work/x\n\n/tmp/agent-work/y /tmp/agent-work/x"),
+      [
+        { path: "/tmp/agent-work/x", line: 2 },
+        { path: "/tmp/agent-work/y", line: 4 },
+      ],
+    );
     // Cost: punctuation inside or at the end of a long path is read once. A regex trimming the end took quadratic time,
     // about 400 s here; linear takes milliseconds. The child is killed at 20 s, as a test's timeout stops no loop.
     const cost = spawnSync(
