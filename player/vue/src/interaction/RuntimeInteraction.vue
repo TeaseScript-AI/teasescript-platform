@@ -152,7 +152,7 @@ const form = computed(() => (props.session ? playerRuntimeForm(props.session) : 
 /**
  * The composer's latest text for each field being edited, by action and field, for this session, so a form shows it
  * again when it resumes after a block interrupted it, also before the text reached the form, and also when that block
- * opened a form of its own. A question that is not a form keeps its text under the field ID `""` in the same way.
+ * opened a form of its own. A date or time question keeps its control's value under the field ID `""` in the same way.
  */
 let typed: {
   readonly plan: string;
@@ -175,6 +175,30 @@ function parseTypedKey(key: string): { readonly actionId: number; readonly field
  * replaces the composer's text otherwise clears it first, so the text never becomes another action's or field's.
  */
 let composerOwner: { readonly actionId: number; readonly fieldId: string } | null = null;
+/**
+ * The composer's text while another field takes the plain field's place (a date or time control, an edited form field,
+ * a password field), else `null`. Only the player's typing, deleting and sending change that text (Owner decision,
+ * 2026-11-11, #2463): nothing that arrives does, so it waits here, unchanged, until the plain field shows it again.
+ */
+let parked: string | null = null;
+/** Whether the presented field drops the composer's text instead: `askPassword`'s, as before, until the Owner decides. */
+const dropsComposerText = () => foreground.value?.kind === "ask-password";
+/** Sets the composer's text aside as `typed`, while another field takes the plain field's place. */
+function setAside(typed: string) {
+  parked = dropsComposerText() ? "" : typed;
+}
+/** Shows another field's own text in the composer's place, after setting the composer's text aside. */
+function showOwnField(own: string) {
+  if (parked === null || dropsComposerText()) setAside(text("input"));
+  writeField("input", own);
+}
+/** Shows the composer's text in the plain field again, if another field took its place. */
+function showComposerText() {
+  if (parked === null) return;
+  const back = parked;
+  parked = null;
+  writeField("input", back);
+}
 /** Loads a form's edited field into the composer, with the text typed for it, else the form's; `false` without one. */
 function loadFormEditor(current: PlayerFormPresentation | null): boolean {
   if (!current?.editor) {
@@ -183,11 +207,30 @@ function loadFormEditor(current: PlayerFormPresentation | null): boolean {
   }
   composerOwner = { actionId: current.actionId, fieldId: current.editor.fieldId };
   flight.end();
-  writeField(
-    "input",
+  showOwnField(
     typedTexts()?.get(typedKey(current.actionId, current.editor.fieldId)) ?? current.editor.text,
   );
   return true;
+}
+/**
+ * Puts the field the presented interaction asks for in the composer's place: a lock's password field, a form's edited
+ * field, `askPassword`'s field, a date or time control with its own value, else the plain field with the composer's
+ * text, which a prefill fills while it is empty.
+ */
+function placeComposerField() {
+  if (lockField.value) return showOwnField("");
+  if (loadFormEditor(form.value)) return;
+  const presented = foreground.value;
+  const prefill = presented !== null && "prefill" in presented ? (presented.prefill ?? "") : "";
+  if (presented?.kind === "ask-password") showOwnField("");
+  else if (composerInputType.value !== "text") {
+    const kept =
+      actionId.value === undefined ? undefined : typedTexts()?.get(typedKey(actionId.value, ""));
+    showOwnField(kept ?? prefill);
+  } else {
+    showComposerText();
+    if (prefill !== "" && text("input") === "") writeField("input", prefill);
+  }
 }
 /** Whether the composer holds the text of the presented form's edited field. */
 function ownsPresentedEditor(): boolean {
@@ -386,15 +429,21 @@ const flight = useAnswerFlight({
   submit: (source, typed) => submit(source, typed),
   skip: () => skipPacing(true),
   activate: activatePreselected,
-  origin: () => {
-    const action = actionId.value;
-    return action === undefined ? undefined : { action, keeps: keepsTyped() };
-  },
-  pending: (action) =>
-    !!props.session && playerRuntimeInteractionActionIds(props.session.state).includes(action),
-  keep: (action, typed) => typedTexts()?.set(typedKey(action, ""), typed),
+  origin: () => actionId.value,
+  parked: () => parked !== null,
+  park: setAside,
   clearFeedback,
 });
+// The composer's text belongs to its session: a new or restarted one starts with it empty, before any field is placed.
+watch(
+  [() => props.session?.planToken, () => props.reset],
+  (now, before) => {
+    if (now[0] === undefined || (now[0] === before[0] && now[1] === before[1])) return;
+    parked = null;
+    writeField("input", "");
+  },
+  { flush: "sync" },
+);
 watch(
   () => (form.value?.editor ? typedKey(form.value.actionId, form.value.editor.fieldId) : null),
   async (key, previousKey) => {
@@ -432,8 +481,9 @@ watch(
   () => text("input"),
   (typed) => {
     clearTimeout(draftTimer);
-    // While an answer's flight owns the composer, its text is provisional: the flight's end keeps it where it belongs.
-    if (!flight.owns()) keepTyped(typed);
+    // A date or time question keeps its control's value for its return after a block, as a form's field does.
+    if (parked !== null && pickerShown() && actionId.value !== undefined)
+      typedTexts()?.set(typedKey(actionId.value, ""), typed);
     if (!ownsPresentedEditor() || !props.session) return;
     const target = composerOwner!;
     const { planToken: plan } = props.session;
@@ -452,17 +502,9 @@ watch(
   },
 );
 onUnmounted(() => clearTimeout(draftTimer));
-/**
- * Whether the presented question keeps the text typed for it, for its return after a block interrupted it: a question
- * that is no form. A password typed but not sent is never kept: a question that resumes after a block asks for it again.
- */
-function keepsTyped() {
-  return form.value === null && foreground.value?.kind !== "ask-password";
-}
-/** Keeps a text typed for the presented question. */
-function keepTyped(typed: string) {
-  if (actionId.value !== undefined && keepsTyped())
-    typedTexts()?.set(typedKey(actionId.value, ""), typed);
+/** Whether a question's date or time control shows in the composer's place (not a form's, nor a lock's field). */
+function pickerShown() {
+  return form.value === null && !lockField.value && composerField.value === "picker";
 }
 /** The composer's text, which the edited form field takes before any other edit of its form. */
 function formDraft(): string | undefined {
@@ -546,22 +588,7 @@ watch(
     const returnToChoice = restoreChoiceFocus;
     restoreChoiceFocus = false;
     const keyboardNavigation = document.documentElement.dataset.playerKeyboardFocus === "true";
-    // A prefill starts in the composer; the player submits it unchanged or edits it first.
-    const presentedInput = foreground.value;
-    // A form field being edited, and a question, also one that resumes after an interruption, keeps the text typed
-    // for it.
-    const typedHere =
-      actionId.value !== undefined && form.value === null
-        ? typedTexts()?.get(typedKey(actionId.value, ""))
-        : undefined;
-    if (!loadFormEditor(form.value))
-      writeField(
-        "input",
-        typedHere ??
-          (presentedInput !== null && "prefill" in presentedInput
-            ? (presentedInput.prefill ?? "")
-            : ""),
-      );
+    placeComposerField();
     clearFeedback();
     await nextTick();
     // Completion releases the disabled guard after publishing the session.
@@ -607,6 +634,8 @@ async function complete(
   target: "interaction" | "pacing" = "interaction",
   // The action the user acted on, when the input began earlier than this call (a held press).
   expectedActionId?: number,
+  // Whether the answer is the composer's text, which it takes out of the composer if the answer is taken.
+  sent = false,
 ) {
   // While a chosen image is checked, it is the answer under way; a typed skip waits too.
   if (!props.session || submitting.value || readingImage.value) return;
@@ -619,7 +648,7 @@ async function complete(
   // a composition under way as it turns read-only. The plain text field stays writable instead, while the flight holds
   // it (`useAnswerFlight`).
   submitting.value = true;
-  flight.begin();
+  flight.begin(sent);
   let settled: "completed" | "refused" | null = null;
   try {
     const targetId = (current: PlayerSession) =>
@@ -641,7 +670,7 @@ async function complete(
     const result = await runInput(props.inputSection, presented, targetId, intent);
     // A session that no longer owns the UI, replaced, stopped or unmounted meanwhile, gets no result and no feedback.
     if (result.kind === "retired") {
-      flight.release();
+      flight.abandon();
       return;
     }
     settled = "refused";
@@ -664,6 +693,8 @@ async function complete(
       await nextTick();
       return;
     }
+    const taken = ["updated", "unchanged", "completed"].includes(result.outcome.kind);
+    if (taken) flight.taken();
     emit("update:session", result.session);
     clearTimeout(draftTimer);
     // A form edit, also an unchanged one, succeeds without completing the form; the composer then shows the text of
@@ -671,14 +702,15 @@ async function complete(
     // The composer gives up its field before its text changes, so the change is never typed text of another one.
     if (result.outcome.kind === "updated" || result.outcome.kind === "unchanged") {
       settled = "completed";
-      if (!loadFormEditor(playerRuntimeForm(result.session))) writeField("input", "");
+      if (!loadFormEditor(playerRuntimeForm(result.session))) showComposerText();
       clearFeedback();
     } else if (result.outcome.kind === "completed") {
       settled = "completed";
-      // The answered text goes, unless the next interaction already shows: its prefill or typed text stays.
+      // An answered field of its own (a date, a password, a form's) empties, unless the next interaction already shows;
+      // what the composer's text sent leaves it with the flight.
       if (actionId.value === before) {
         composerOwner = null;
-        writeField("input", "");
+        if (parked !== null) writeField("input", "");
       }
       clearFeedback();
     } else {
@@ -879,12 +911,10 @@ watch(
   () => lockField.value?.key,
   async (key) => {
     writeField("repeat", "");
-    // A question or form that came back meanwhile already holds the composer; its text stays.
+    // The lock's field takes the composer's place, which, once it closes, the presented interaction's field takes back.
     if (key !== undefined) flight.end();
-    if (key !== undefined || actionId.value === undefined) {
-      writeField("input", "");
-      clearFeedback();
-    }
+    placeComposerField();
+    if (key !== undefined || actionId.value === undefined) clearFeedback();
     if (key === undefined) return;
     presentedAt.value = performance.now();
     const active = document.activeElement;
@@ -915,7 +945,13 @@ function submit(source: "input" | "button", typed = text("input")) {
     props.lock?.submit({ password: text("input"), timeLockMs: null });
     return;
   }
-  void complete(intents.composer(typed, source === "input" ? "enter" : "send"), source === "input");
+  void complete(
+    intents.composer(typed, source === "input" ? "enter" : "send"),
+    source === "input",
+    "interaction",
+    undefined,
+    true,
+  );
 }
 </script>
 

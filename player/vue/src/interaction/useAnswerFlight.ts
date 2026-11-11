@@ -3,29 +3,27 @@ import { shortcutOutcome } from "./playerKeys";
 
 /*
  * The composer while an answer is in flight (#2430): its field stays a real, writable field, which the browser edits,
- * instead of turning read-only and losing what is typed. This module owns what the flight holds and gives it back:
- * - the text the flight took from the field (`aside`), and the text its settlement writes, taken instead of applied;
+ * instead of turning read-only and losing what is typed. The composer has one text, which only the player's typing,
+ * deleting and sending change (Owner decision, 2026-11-11, #2463): nothing typed in the flight is lost. This module
+ * holds what the flight took and was given, and gives it back once the answer's result is known:
+ * - the text the answer sent from the composer (`aside`), and the text its settlement writes, taken instead of applied;
  * - the composer's commands given meanwhile, in order: a submit, with the text typed before it, and a shortcut key held
  *   in the empty field;
  * - for each text typed after a command, whether the player changed the field.
- * Until the answer's result names a destination, what is typed and given in the flight is provisional: no question
- * keeps it (the host's retention waits while the flight `owns` the composer). One end decides where it goes:
- * - the answer was refused, or it presents a next question in the plain text field: the commands run serially through
- *   the live handlers, and the text that results is the presented question's, once;
- * - the answer's question is still pending under another interaction (a block suspended it): the text it was sent with,
- *   the texts of later Enters and the text typed last stay with that question, and no command acts on the other;
- * - otherwise (another control, or the end of the flight's owner): what was typed and given goes nowhere.
- * These are destination rules, not equivalence with a Player whose answers settle at once (#2463, design round 2).
+ * The answer's settlement ends the flight one of two ways:
+ * - the plain text field holds, and the answer was taken or its question is still presented: the commands run serially
+ *   through the live handlers, against what the answer left, as if given after it settled;
+ * - otherwise (another field in the composer's place, a disabled composer, or a block that overtook a refused answer):
+ *   no command runs, and the unsent text (the answer's own if it was not taken, each later Enter's, and the text typed
+ *   last) is the composer's text, in its field or set aside (`parked`) until the plain field is back.
+ * An end without a settlement (the owner's change, a throw) leaves the unsent text in the same way.
  * The live handlers are shared: what a held key does is `shortcutOutcome`'s; whether the composer takes input, what a
  * submit does and what skip and activate do are the host's functions; a notice is cleared, as the text's watch clears
- * it, by a change of the text, and an answer's own `complete` sets or clears its notice. Unsent text never crosses into
- * another control's field, drafts or runtime input; a suspended plain question keeps its own draft, and a password
- * field keeps no unsent draft.
+ * it, by a change of the text, and an answer's own `complete` sets or clears its notice.
  *
- * Its domain: it holds only while the departing field is the plain text field. A completed answer that advances to
- * anything else than the plain text field ends the flight and drops what was typed in it (a question a block suspends
- * keeps it, above). A password field is read-only during its own answer's flight. Only between two fields of the same element does the browser enter a paste, an IME's text or a
- * phone's capitalisation alike (#2463, residual 6). Within the domain, the Composer decides nothing by the field:
+ * Its domain: it holds only while the departing field is the plain text field, the one that shows the composer's text;
+ * a password field is read-only during its own answer's flight. Within the domain, the Composer decides nothing by the
+ * field:
  * - Enter queues a submit, which the host's `submit` runs; Space in the empty field is held, and `shortcutOutcome`
  *   decides it against the settled interaction; any other key is the browser's, in the field;
  * - Shift+Enter, which a password field takes as Enter, and Enter in a lock's first password field, which moves to its
@@ -33,10 +31,10 @@ import { shortcutOutcome } from "./playerKeys";
  * - Escape does nothing, as no form editor holds; Send, the paperclip and a dropped file do not run while the answer is
  *   being submitted; Caps Lock, the eye buttons and the focus handlers change no text.
  *
- * The ordinary drain prefixes the text typed in the flight with three things only: the text of an answer that was
- * refused (`aside`), the text the settlement wrote (`settled`, such as a prefill), and a key held in the empty field,
- * typed as its character. None of them is in the field during the flight, so an edit made within the flight does not
- * reach them (#2463, residual 1).
+ * The drain prefixes the text typed in the flight with three things only: the text of an answer that was not taken
+ * (`aside`), the text the settlement wrote (`settled`, such as a prefill), and a key held in the empty field, typed as
+ * its character. None of them is in the field during the flight, so an edit made within the flight does not reach them
+ * (#2463, residual 1).
  */
 
 type Source = "input" | "button";
@@ -58,15 +56,15 @@ type Command =
       readonly after: Segment;
     };
 type Owner = { readonly connection: unknown; readonly id: string; readonly reset: number } | null;
-/** The question an answer was given at, and whether that question keeps typed text (a plain question, not a form). */
-export type FlightOrigin = { readonly action: number; readonly keeps: boolean };
 interface Flight {
   readonly owner: Owner;
-  /** The question the answer in flight was given at; each answer the drain starts has its own. */
-  origin: FlightOrigin | undefined;
+  /** The interaction the answer in flight was given at; each answer the drain starts has its own. */
+  origin: number | undefined;
   readonly intercept: { write(text: string): void; release(): void };
-  /** The text the flight answered with, which the field holds again if the answer is refused. */
+  /** The text the answer sent from the composer, which is the composer's again if the answer is not taken. */
   aside: string;
+  /** Whether the answer was taken, known before its settlement (`taken`). */
+  taken: boolean;
   /** The last text the settlement wrote into the field, if any. */
   settled: string | undefined;
   readonly queue: Command[];
@@ -98,12 +96,12 @@ export interface AnswerFlightHost {
   submit(source: Source, text: string): void;
   skip(): void;
   activate(): void;
-  /** The presented question, and whether it keeps typed text; `undefined` without one. */
-  origin(): FlightOrigin | undefined;
-  /** Whether a question can still be answered: presented, or suspended under a block. */
-  pending(action: number): boolean;
-  /** Keeps `text` as the typed text of the question `action`. */
-  keep(action: number, text: string): void;
+  /** The presented interaction's action, `undefined` without one. */
+  origin(): number | undefined;
+  /** Whether another field takes the composer's place, so that its text is set aside meanwhile. */
+  parked(): boolean;
+  /** Sets the composer's text aside as `text`, while another field takes its place. */
+  park(text: string): void;
   clearFeedback(): void;
 }
 
@@ -117,16 +115,15 @@ export function useAnswerFlight(host: AnswerFlightHost) {
   let starting: { readonly aside: string; readonly after: Segment } | null = null;
   // A write of the flight's own, until the flush that publishes it: it is no change of the player's.
   let ownWrite = false;
-  // From a flight's start until the flush after its end, it owns the composer's text: no question keeps it but by `keep`.
-  let owning = false;
 
-  function write(target: Flight, text: string) {
+  function write(target: Flight | null, text: string) {
     ownWrite = true;
-    target.intercept.write(text);
+    if (target) target.intercept.write(text);
+    else host.writeField(text);
     void nextTick(() => (ownWrite = false));
   }
 
-  /** Ends the flight at once: nothing it held stays, and no command of it runs. */
+  /** Ends the flight at once: no command of it runs. */
   function release() {
     const ended = flight;
     if (!ended) return;
@@ -135,50 +132,63 @@ export function useAnswerFlight(host: AnswerFlightHost) {
     holding.value = false;
     ended.queue.length = 0;
     ended.intercept.release();
-    void nextTick(() => (owning = flight !== null));
   }
 
-  /** The text a flight leaves unsent: its answer's, each later Enter's, and the text typed last, in order. */
-  function unsent(current: Flight) {
+  /** The text a flight leaves unsent: its answer's, unless taken, each later Enter's, and the text typed last. */
+  function unsent(current: Flight, taken: boolean) {
     const entered = current.queue.map((command) => (command.kind === "submit" ? command.text : ""));
-    return current.aside + entered.join("") + host.text();
-  }
-
-  /** Keeps `text`, which the field now shows, for the presented question, as its normal path does for typed text. */
-  function keepPresented(text: string) {
-    const here = host.origin();
-    if (here?.keeps) host.keep(here.action, text);
-  }
-
-  /** Whether the flight's question is still pending under another interaction: a block suspended it. */
-  function suspended(current: Flight) {
-    const origin = current.origin;
-    return (
-      origin !== undefined && host.origin()?.action !== origin.action && host.pending(origin.action)
-    );
+    return (taken ? "" : current.aside) + entered.join("") + host.text();
   }
 
   /**
-   * Ends the flight where another owner takes the composer next (a form editor, a lock), before it writes: what the
-   * flight left unsent stays with its question if a block suspended it, and goes nowhere otherwise.
+   * Ends the flight with `text` as the composer's text, no command run: set aside while another field takes the
+   * composer's place, else in the field (or, if the field would be empty, what the settlement wrote, such as a prefill).
    */
-  function end() {
-    const current = flight;
-    if (!current) return;
-    if (suspended(current) && current.origin!.keeps)
-      host.keep(current.origin!.action, unsent(current));
+  function leave(current: Flight, text: string) {
+    const settled = current.settled;
+    // A change of the text typed after the answer clears its notice, as the drain's does.
+    if (current.current.changed || current.queue.some((command) => command.after.changed))
+      host.clearFeedback();
+    if (host.parked()) {
+      host.park(text);
+      write(current, settled ?? "");
+    } else write(current, text === "" ? (settled ?? "") : text);
     release();
   }
 
   /**
-   * A flight begins: call it once `complete` holds its guard. It holds the composer if `host.holds()`: it takes the
-   * field's text (the answer read it already) and empties the field, as a submit does. A flight a queued command starts
-   * continues the earlier one, and takes the text that command answers with.
+   * Ends the flight where another field takes the composer's place before its answer settled (a form editor, a lock),
+   * before that field's own text is written: what the flight left unsent is set aside.
    */
-  function begin() {
+  function end() {
+    const current = flight;
+    if (!current) return;
+    const text = unsent(current, current.taken);
+    release();
+    host.park(text);
+  }
+
+  /** Ends the flight without a settlement (the owner's change, a throw): what it left unsent stays the composer's. */
+  function abandon() {
+    const current = flight;
+    if (!current) return;
+    const text = unsent(current, current.taken);
+    release();
+    if (host.parked()) host.park(text);
+    else write(null, text);
+  }
+
+  /**
+   * A flight begins: call it once `complete` holds its guard. It holds the composer if `host.holds()`. An answer `sent`
+   * from the composer takes the field's text (the answer read it already) and empties the field, as a submit does;
+   * another (a button, a skip) leaves the field as it is. A flight a queued command starts continues the earlier one,
+   * and takes the text that command answers with.
+   */
+  function begin(sent: boolean) {
     if (flight && starting) {
       flight.origin = host.origin();
       flight.aside = starting.aside;
+      flight.taken = false;
       flight.current = starting.after;
       flight.settled = undefined;
       starting = null;
@@ -193,16 +203,16 @@ export function useAnswerFlight(host: AnswerFlightHost) {
       intercept: host.interceptInput((text) => {
         if (flight === started) started.settled = text;
       }),
-      aside: host.text(),
+      aside: sent ? host.text() : "",
+      taken: false,
       settled: undefined,
       queue: [],
       current: first,
       tail: first,
     };
     flight = started;
-    owning = true;
     holding.value = true;
-    write(started, "");
+    if (sent) write(started, "");
   }
 
   function queue(command: Command) {
@@ -245,27 +255,15 @@ export function useAnswerFlight(host: AnswerFlightHost) {
     const current = flight;
     if (!current) return;
     holding.value = false;
-    // The text the field holds on `main` once the answer settled: what the settlement wrote, else, if the answer was
-    // refused, its own text.
-    let prefix = current.settled ?? (settlement === "refused" ? current.aside : "");
-    // A block suspended the answer's question: the field shows the block's own text, and what was left unsent stays
-    // with the question for its return.
-    if (suspended(current)) {
-      const kept = unsent(current);
-      write(current, current.settled ?? "");
-      keepPresented(current.settled ?? "");
-      if (current.origin!.keeps) host.keep(current.origin!.action, kept);
-      release();
+    const taken = settlement === "completed" || current.taken;
+    // The plain text field no longer holds, or a block overtook an answer that was not taken: commands given before
+    // either was on screen run on nothing, and what was left unsent stays the composer's.
+    if (!host.holds() || (!taken && host.origin() !== current.origin)) {
+      leave(current, unsent(current, taken));
       return;
     }
-    // The answer left a field other than the plain text field (a password field, a picker, a form editor, a lock) or a
-    // disabled composer: the flight ends, and what was typed or given meanwhile goes.
-    if (!host.holds()) {
-      write(current, prefix);
-      keepPresented(prefix);
-      release();
-      return;
-    }
+    // The text the field holds once the answer settled: what the settlement wrote, else an answer's own if not taken.
+    let prefix = current.settled ?? (taken ? "" : current.aside);
     // A change of the text clears a notice, as the text's watch does when the change comes after the answer.
     if (current.current.changed) host.clearFeedback();
     for (let command = current.queue.shift(); command; command = current.queue.shift()) {
@@ -291,9 +289,7 @@ export function useAnswerFlight(host: AnswerFlightHost) {
       }
       if (command.after.changed) host.clearFeedback();
     }
-    const text = prefix + host.text();
-    if (prefix !== "") write(current, text);
-    keepPresented(text);
+    if (prefix !== "") write(current, prefix + host.text());
     release();
   }
 
@@ -316,7 +312,7 @@ export function useAnswerFlight(host: AnswerFlightHost) {
           owner?.id !== current?.id ||
           owner?.reset !== current?.reset)
       )
-        release();
+        abandon();
     },
     { flush: "sync" },
   );
@@ -331,19 +327,13 @@ export function useAnswerFlight(host: AnswerFlightHost) {
     noteChange,
     settle,
     end,
-    release,
-    /** Whether a flight owns the composer's text, until the flush after it ended: no question keeps it meanwhile. */
-    owns: () => owning,
-    /** Ends the flight after a throw: its question, if still presented, holds what was left unsent. */
-    fail() {
-      const ended = flight;
-      if (!ended) return;
-      const here = host.origin();
-      const text = here?.action === ended.origin?.action ? unsent(ended) : undefined;
-      release();
-      if (text === undefined) return;
-      host.writeField(text);
-      if (here?.keeps) host.keep(here.action, text);
+    /** The answer in flight was taken: what it sent is no longer unsent. Call it before its result is published. */
+    taken() {
+      if (flight) flight.taken = true;
     },
+    /** Ends the flight whose answer's session no longer owns the composer (retired): what it left stays. */
+    abandon,
+    /** Ends the flight after a throw: what it left unsent is the composer's text. */
+    fail: abandon,
   };
 }

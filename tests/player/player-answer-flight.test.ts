@@ -30,14 +30,14 @@ import {
 } from "../helpers/player/worker-topology.js";
 
 /*
- * The composer while an answer is in flight (#2430). In the ordinary family, within the flight's domain, what is typed
- * and given during the flight ends as if it came after the answer settled, as on a Player whose answers settle at
- * once; outside it, and where a block suspends the question, the end table of #2463's design round 2 decides where it
- * goes. Each row runs the real session composable and the
- * real flight owner (`useAnswerFlight`) on both bridge topologies, through a model of how `RuntimeInteraction.vue` and
- * `Composer.vue` call them, twice: once with the keys pressed while the answer's reply is held, and once, as the
- * reference, with no flight and every key pressed after the answer settled. The browser kit's `keys` scenario witnesses
- * the components themselves.
+ * The composer while an answer is in flight (#2430), with one text that only the player's typing, deleting and sending
+ * change (Owner decision, 2026-11-11, #2463). Where the plain text field holds the answer's settlement, what is typed and
+ * given during the flight ends as if it came after the answer settled, as on a Player whose answers settle at once;
+ * elsewhere no command runs, and what was left unsent stays the composer's text, in its field or set aside while
+ * another field takes its place. Each row runs the real session composable and the real flight owner
+ * (`useAnswerFlight`) on both bridge topologies, through a model of how `RuntimeInteraction.vue` and `Composer.vue` call
+ * them, twice: once with the keys pressed while the answer's reply is held, and once, as the reference, with every key
+ * pressed after the answer settled. The browser kit's `keys` scenario witnesses the components themselves.
  */
 
 type Source = "input" | "button";
@@ -45,14 +45,14 @@ type Outcome = "skip" | "activate" | "consume" | "type";
 type Owner = { readonly connection: unknown; readonly id: string; readonly reset: number } | null;
 interface Flight {
   readonly holding: Readonly<Ref<boolean>>;
-  begin(): void;
+  begin(sent: boolean): void;
   submit(source: Source): boolean;
   hold(key: string, fresh: boolean): void;
   noteChange(): boolean;
   settle(settlement: "completed" | "refused"): void;
   end(): void;
-  release(): void;
-  owns(): boolean;
+  taken(): void;
+  abandon(): void;
   fail(): void;
 }
 let useAnswerFlight: (host: {
@@ -66,9 +66,9 @@ let useAnswerFlight: (host: {
   submit(source: Source, text: string): void;
   skip(): void;
   activate(): void;
-  origin(): { readonly action: number; readonly keeps: boolean } | undefined;
-  pending(action: number): boolean;
-  keep(action: number, text: string): void;
+  origin(): number | undefined;
+  parked(): boolean;
+  park(text: string): void;
   clearFeedback(): void;
 }) => Flight;
 let shortcutOutcome: (
@@ -215,10 +215,11 @@ type Page = Awaited<ReturnType<typeof page>>;
 
 /**
  * The composer as `RuntimeInteraction.vue` and `Composer.vue` run it, with what they call of the flight: the composer's
- * text, its notice, the text kept per question, `complete` and `submit`, the key handler, and the watches of the
- * presented action and of the text. `flight: false` is a Player without a flight, the reference. `section` stands in for
- * the composable's input section: `null` for none, as before a session is prepared. A lock's password field, which the
- * Player's lock service shows, is not modelled.
+ * text, the text set aside while another field takes its place (`parked`), its notice, a date question's own value
+ * (`kept`), `complete` and `submit`, the key handler, and the watches of the presented action, of the session and of
+ * the text. `flight: false` is a Player whose composer turns read-only while an answer is in flight. `section` stands
+ * in for the composable's input section: `null` for none, as before a session is prepared. A lock's password field,
+ * which the Player's lock service shows, and a form's edited field are not modelled.
  */
 function composer(
   host: SessionHost,
@@ -231,6 +232,7 @@ function composer(
   const field = ref("");
   const notice = ref("");
   const submitting = ref(false);
+  let parked: string | null = null;
   const kept = new Map<number, string>();
   const stopped = ref(false);
   const reset = ref(0);
@@ -269,7 +271,10 @@ function composer(
   const shortcuts = () => ({
     pacing: !foreground() && !!pacing(),
     preselected: preselected() !== undefined,
-    buttonsOnly: foreground()?.kind === "choose" || foreground()?.kind === "show-button",
+    buttonsOnly:
+      foreground()?.kind === "choose" ||
+      foreground()?.kind === "show-button" ||
+      foreground()?.kind === "form",
   });
   // The composer's field, as `RuntimeInteraction.vue`'s `composerField`: a lock's password field is not modelled.
   const fieldKind = () => {
@@ -285,19 +290,36 @@ function composer(
     if (interceptor) interceptor(text);
     else field.value = text;
   };
-  // As `RuntimeInteraction.vue`'s `keepsTyped`: a question that is no form and no password keeps its typed text.
-  const keepsTyped = () => {
-    const shown = session();
-    return !(shown && playerRuntimeForm(shown)) && foreground()?.kind !== "ask-password";
-  };
-  const keepTyped = (text: string) => {
-    const id = actionId.value;
-    if (id !== undefined && keepsTyped()) kept.set(id, text);
-  };
   const actionId = computed(() => {
     const shown = session();
     return shown ? presentedAction(shown) : undefined;
   });
+  // As `RuntimeInteraction.vue`'s `dropsComposerText`, `setAside`, `showOwnField`, `showComposerText` and
+  // `placeComposerField`.
+  const dropsText = () => foreground()?.kind === "ask-password";
+  const setAside = (text: string) => void (parked = dropsText() ? "" : text);
+  const showOwn = (own: string) => {
+    if (parked === null || dropsText()) setAside(field.value);
+    writeField(own);
+  };
+  const showText = () => {
+    if (parked === null) return;
+    const back = parked;
+    parked = null;
+    writeField(back);
+  };
+  const place = () => {
+    const ask = foreground();
+    const prefill = ask !== null && "prefill" in ask ? (ask.prefill ?? "") : "";
+    const id = actionId.value;
+    if (ask?.kind === "ask-password") showOwn("");
+    else if (fieldKind() === "picker")
+      showOwn((id === undefined ? undefined : kept.get(id)) ?? prefill);
+    else {
+      showText();
+      if (prefill !== "" && field.value === "") writeField(prefill);
+    }
+  };
   const flight = scope.run(() => {
     watch(host.session, (shown) => (published.value = shown), { flush: "sync" });
     const owned = useAnswerFlight({
@@ -349,42 +371,51 @@ function composer(
         ran.push(performance.now());
         void activate();
       },
-      origin: () => {
-        const action = actionId.value;
-        return action === undefined ? undefined : { action, keeps: keepsTyped() };
-      },
-      pending: (action) => {
-        const shown = session();
-        return !!shown && playerRuntimeInteractionActionIds(shown.state).includes(action);
-      },
-      keep: (action, text) => void kept.set(action, text),
+      origin: () => actionId.value,
+      parked: () => parked !== null,
+      park: setAside,
       clearFeedback: () => void (notice.value = ""),
     });
-    // Only the questions that can still be answered keep their text, as `RuntimeInteraction.vue`'s watch prunes it.
+    // A new or restarted session starts with an empty composer.
+    watch(
+      reset,
+      () => {
+        parked = null;
+        writeField("");
+      },
+      { flush: "sync" },
+    );
+    // Only the questions that can still be answered keep a value, as `RuntimeInteraction.vue`'s watch prunes it.
     watch(actionId, () => {
       const shown = session();
       const pending = new Set(shown ? playerRuntimeInteractionActionIds(shown.state) : []);
       for (const id of kept.keys()) if (!pending.has(id)) kept.delete(id);
     });
-    watch(actionId, () => {
-      const id = actionId.value;
-      const shown = foreground();
-      const typed = id === undefined ? undefined : kept.get(id);
-      writeField(typed ?? (shown !== null && "prefill" in shown ? (shown.prefill ?? "") : ""));
-      notice.value = "";
-    });
+    watch(
+      actionId,
+      () => {
+        place();
+        notice.value = "";
+      },
+      { immediate: true },
+    );
     watch(field, (text) => {
       if (owned.noteChange()) notice.value = "";
-      if (!owned.owns()) keepTyped(text);
+      const id = actionId.value;
+      if (parked !== null && fieldKind() === "picker" && id !== undefined) kept.set(id, text);
     });
     return owned;
   })!;
 
-  async function complete(intent: Intent, target: "interaction" | "pacing" = "interaction") {
+  async function complete(
+    intent: Intent,
+    target: "interaction" | "pacing" = "interaction",
+    sent = false,
+  ) {
     const shown = session();
     if (!shown || submitting.value) return;
     submitting.value = true;
-    flight.begin();
+    flight.begin(sent);
     let settled: "completed" | "refused" | null = null;
     try {
       const targetId = (current: PlayerSessionView) =>
@@ -401,7 +432,7 @@ function composer(
       const result = await input.runInput(section, presented, targetId, intent);
       afterReply?.();
       if (result.kind === "retired") {
-        flight.release();
+        flight.abandon();
         return;
       }
       settled = "refused";
@@ -410,13 +441,16 @@ function composer(
         await nextTick();
         return;
       }
+      const kind = result.outcome!.kind;
+      const taken = kind === "completed" || kind === "updated" || kind === "unchanged";
+      if (taken) flight.taken();
       // As `complete` publishes it (`update:session`).
       // EVIDENCE: invariant: the input chain answers with the section's session, a `PlayerSession`.
       published.value = result.session as PlayerSession;
-      const kind = result.outcome!.kind;
-      if (kind === "completed" || kind === "updated" || kind === "unchanged") {
+      if (taken) {
         settled = "completed";
-        if (kind !== "completed" || actionId.value === before) writeField("");
+        if (kind !== "completed") showText();
+        else if (actionId.value === before && parked !== null) writeField("");
         notice.value = "";
       } else notice.value = kind;
       await nextTick();
@@ -430,7 +464,11 @@ function composer(
   }
   function submit(source: Source, text = field.value) {
     if (flight.submit(source)) return;
-    return complete(input.intents.composer(text, source === "input" ? "enter" : "send"));
+    return complete(
+      input.intents.composer(text, source === "input" ? "enter" : "send"),
+      "interaction",
+      true,
+    );
   }
   function skip() {
     if (pacing()) return complete(input.intents.pacing, "pacing");
@@ -488,6 +526,10 @@ function composer(
     field,
     notice,
     kept,
+    /** The composer's text set aside while another field takes its place, else `null`. */
+    parked: () => parked,
+    /** The composer's text, wherever it is: set aside, else in the field. */
+    text: () => parked ?? field.value,
     actionId,
     flight,
     flightWrites,
@@ -540,7 +582,7 @@ const QUEUES = {
   "shift-enter": ["Shift+Enter"],
 } as const satisfies Record<string, readonly string[]>;
 // The text typed last, after every command: whether the player changed the field there. `edit` deletes within the
-// flight, where it does not reach the text the settlement puts in the field (#2463, residual 1): its rows are recorded.
+// flight, where it does not reach the text the settlement puts in the field (#2463, residual 1).
 const HISTORY = {
   none: [],
   undone: ["y", "Backspace"],
@@ -564,6 +606,8 @@ const DOMAINS = {
 /** Whether the flight's domain holds the row: it departs from the plain text field and settles in it. */
 const inDomain = (row: Coordinates) =>
   row.departs === "text" && row.presents !== "password" && row.presents !== "picker";
+/** Whether the row's commands run at its settlement: within the domain, unless a later question overtook the answer. */
+const drains = (row: Coordinates) => inDomain(row) && row.settle !== "unavailable";
 
 /** Whether a row can be produced: each settlement presents what its scripts can present, from what Enter can send. */
 function feasible(row: Coordinates): boolean {
@@ -641,32 +685,22 @@ function scriptOf(row: Coordinates): { readonly script: string; readonly aside: 
   };
 }
 
-const prefillOf = (session: PlayerSession | null) => {
-  const shown = session ? playerRuntimeForeground(session) : null;
-  return shown !== null && "prefill" in shown ? (shown.prefill ?? "") : "";
-};
-
 const occurrences = (text: string | undefined, part: string) => (text ?? "").split(part).length - 1;
 
-/** What a row ends with: the field, the notice, the answers posted after the first, and the text kept for the question. */
+/** What a row ends with: the field, the text set aside, the notice, and the answers posted after the first. */
 async function observe(at: Page, ui: ReturnType<typeof composer>, from: number) {
   await ui.idle();
   const posts = at.transport.posts
     .slice(from)
     .filter((post) => post.op !== "observeInput")
     .map((post) => [post.op, JSON.stringify(post.args)]);
-  const id = ui.actionId.value;
   return {
     field: ui.field.value,
+    parked: ui.parked(),
     notice: ui.notice.value,
     posts,
     status: at.host.session.value?.state.status,
-    // What the question shows if it returns after a block interrupted it: the text kept for it, else its prefill.
-    kept: id === undefined ? null : (ui.kept.get(id) ?? prefillOf(at.host.session.value)),
-    // The text kept for the presented question itself, without the prefill's fallback.
-    record: id === undefined ? null : (ui.kept.get(id) ?? null),
-    // How often the password is in a text the composer keeps, and in what a debug export reads.
-    password: [...ui.kept.values()].filter((text) => text.includes("hunter2")).length,
+    // How often the password is in what a debug export reads.
     exported: occurrences(
       JSON.stringify(
         await at.host.debugExportCandidate(() => ({}), new AbortController().signal),
@@ -681,7 +715,7 @@ async function observe(at: Page, ui: ReturnType<typeof composer>, from: number) 
 async function reference(at: Page, row: Coordinates, keys: readonly string[]) {
   const { script, aside } = scriptOf(row);
   await at.start(script);
-  const ui = composer(at.host, { flight: false });
+  const ui = composer(at.host, { flight: true });
   const from = at.transport.posts.length;
   ui.field.value = aside;
   if (row.settle === "unprepared") ui.prepareWith(async () => false);
@@ -732,99 +766,114 @@ const phasesOf = (row: Coordinates) =>
     : row.settle === "unavailable" || !row.queue!.includes("submit")
       ? ["observeInput"]
       : ["observeInput", "submitComposer"];
-/** The family in chunks of at most ten runs each (a reference and each held phase), so that every test stays within
- * the limit per test under the Worker's delayed challenge (docs/TESTING.md, "Worker-topology settings"). */
-const CHUNKS = family().reduce<Coordinates[][]>((chunks, row) => {
-  const last = chunks.at(-1);
-  const runs = (rows: Coordinates[]) =>
-    rows.reduce((sum, each) => sum + 1 + phasesOf(each).length, 0);
-  if (last && runs(last) + 1 + phasesOf(row).length <= 10) last.push(row);
-  else chunks.push([row]);
-  return chunks;
-}, []);
 
-test("the family's rows are those its axes and feasibility give, each in one chunk", () => {
-  assert.deepEqual(coverageGaps(product(DOMAINS).filter(feasible), family(), { tuples: true }), []);
-  assert.deepEqual(coverageGaps(family(), CHUNKS.flat(), { tuples: true }), []);
-  assert.equal(CHUNKS.flat().length, family().length);
-});
+/**
+ * What keys typed in a flight leave unsent, written apart from the composable: each Enter's text, then the text typed
+ * last; a Space in the empty field is held, a command and no text. `changed`: whether any key changed the field.
+ */
+function unsentOf(keys: readonly string[]) {
+  let entered = "";
+  let typed = "";
+  let changed = false;
+  for (const key of keys) {
+    const before = typed;
+    if (key === "Enter") {
+      entered += typed;
+      typed = "";
+    } else if (key === "Shift+Enter") typed += "\n";
+    else if (key === "Backspace") typed = typed.slice(0, -1);
+    else if (key !== " " || typed !== "") typed += key;
+    if (key !== "Enter" && typed !== before) changed = true;
+  }
+  return { text: entered + typed, typed, changed };
+}
 
 for (const topology of TOPOLOGIES)
-  for (const [index, rows] of CHUNKS.entries())
-    test(`what is typed while an answer is in flight ends by the family's rule, chunk ${index + 1} of ${CHUNKS.length} (${topology})`, async (context) => {
-      const at = await page(context, topology);
-      for (const row of rows) {
-        // EVIDENCE: invariant: `family` takes each row's queue and history from the keys of `QUEUES` and `HISTORY`.
-        const keys = [
-          ...QUEUES[row.queue as keyof typeof QUEUES],
-          ...HISTORY[row.history as keyof typeof HISTORY],
-        ];
-        // Outside the domain, nothing typed or given in the flight takes effect: the row ends as the answer alone does.
-        const expected = await reference(at, row, inDomain(row) ? keys : []);
-        for (const phase of phasesOf(row)) {
-          const actual = await inFlight(at, row, keys, phase);
-          const where = `${JSON.stringify(row)} holding ${phase}`;
-          // An edit within the flight does not reach text the settlement puts in the field (#2463, residual 1): only the
-          // answers posted and where the session went are compared.
-          if (row.history === "edit") {
-            assert.deepEqual(
-              [actual.posts, actual.status],
-              [expected.posts, expected.status],
-              where,
-            );
-          }
-          // The raw record is compared outside the domain (the destination's own text, kept as its normal path keeps
-          // it); within it, what the question shows on its return (`kept`), as an unchanged field keeps no record.
-          else if (inDomain(row))
-            assert.deepEqual({ ...actual, record: null }, { ...expected, record: null }, where);
-          else assert.deepEqual(actual, expected, where);
-        }
-        // Outcomes written down from the Player's keyboard contract and `main`'s measured rows, not computed by the
-        // predicate under test. Outside the domain, a completed answer leaves the next field empty, with no notice.
-        if (!inDomain(row) && row.settle === "completed")
-          assert.deepEqual(
-            [expected.field, expected.notice],
-            [row.presents === "picker" ? "2026-10-04" : "", ""],
-            JSON.stringify(row),
-          );
-        if (inDomain(row) && row.queue === "held-space" && row.history !== "edit") {
-          const last = row.history === "stays" ? "y" : "";
-          if (row.settle === "completed" && row.presents === "unselected")
-            assert.equal(expected.field, last, "Space types nothing");
-          if (row.settle === "completed" && row.presents === "preselected")
-            assert.equal(
-              expected.posts.at(-1)?.[0],
-              "selectChoice",
-              "Space activates the preselected button",
-            );
-          if (row.settle === "completed" && row.presents === "pacing")
-            assert.ok(
-              expected.posts.some(([op]) => op === "skipPacing"),
-              "Space skips the pause",
-            );
-          if (row.settle === "completed" && row.presents === "text")
-            assert.equal(expected.field, ` ${last}`, "Space types a space");
-          // Enter on the empty composer refused, then Space on the unselected choices: the notice stays (#2463, round 1).
-          if (row.settle === "refused" && row.aside === "empty") {
-            assert.equal(expected.field, last);
-            assert.equal(expected.notice, row.history === "none" ? "invalidPayload" : "");
-          }
-          if (row.settle === "refused" && row.aside === "typed")
-            assert.equal(
-              expected.field,
-              `Not an option ${last}`,
-              "Space types after the refused text",
-            );
+  test(`what is typed while an answer is in flight ends as typed after it settled, or stays unsent (${topology})`, async (context) => {
+    const at = await page(context, topology);
+    assert.deepEqual(
+      coverageGaps(product(DOMAINS).filter(feasible), family(), { tuples: true }),
+      [],
+    );
+    for (const row of family()) {
+      // EVIDENCE: invariant: `family` takes each row's queue and history from the keys of `QUEUES` and `HISTORY`.
+      const keys = [
+        ...QUEUES[row.queue as keyof typeof QUEUES],
+        ...HISTORY[row.history as keyof typeof HISTORY],
+      ];
+      // Where the commands do not run, the row ends as the answer alone does, with what was left unsent added.
+      const expected = await reference(at, row, drains(row) ? keys : []);
+      const unsent = unsentOf(keys);
+      // A prefill that arrives while the field holds text is the Owner's open question (#2463): only the answers
+      // posted and where the session went are compared there.
+      const pending = row.settle === "prefill" && unsent.typed !== "";
+      if (!drains(row) && row.departs === "text") {
+        const left = (row.settle === "completed" ? "" : scriptOf(row).aside) + unsent.text;
+        if (row.presents === "picker") expected.parked = left;
+        else if (row.presents !== "password") {
+          expected.field = left;
+          if (unsent.changed) expected.notice = "";
         }
       }
-    });
+      for (const phase of phasesOf(row)) {
+        const actual = await inFlight(at, row, keys, phase);
+        const where = `${JSON.stringify(row)} holding ${phase}`;
+        // An edit within the flight does not reach text the settlement puts in the field (#2463, residual 1); a
+        // password field drops the composer's text until the Owner decides (#2463): only the answers posted and where
+        // the session went are compared there.
+        if (
+          pending ||
+          row.history === "edit" ||
+          (row.presents === "password" && row.departs === "text")
+        )
+          assert.deepEqual([actual.posts, actual.status], [expected.posts, expected.status], where);
+        else assert.deepEqual(actual, expected, where);
+      }
+      // Outcomes written down from the Player's keyboard contract and `main`'s measured rows, not computed by the
+      // predicate under test. A completed answer into a field of its own shows that field's value, with no notice.
+      if (!inDomain(row) && row.settle === "completed")
+        assert.deepEqual(
+          [expected.field, expected.notice],
+          [row.presents === "picker" ? "2026-10-04" : "", ""],
+          JSON.stringify(row),
+        );
+      if (drains(row) && row.queue === "held-space" && row.history !== "edit") {
+        const last = row.history === "stays" ? "y" : "";
+        if (row.settle === "completed" && row.presents === "unselected")
+          assert.equal(expected.field, last, "Space types nothing");
+        if (row.settle === "completed" && row.presents === "preselected")
+          assert.equal(
+            expected.posts.at(-1)?.[0],
+            "selectChoice",
+            "Space activates the preselected button",
+          );
+        if (row.settle === "completed" && row.presents === "pacing")
+          assert.ok(
+            expected.posts.some(([op]) => op === "skipPacing"),
+            "Space skips the pause",
+          );
+        if (row.settle === "completed" && row.presents === "text")
+          assert.equal(expected.field, ` ${last}`, "Space types a space");
+        // Enter on the empty composer refused, then Space on the unselected choices: the notice stays (#2463, round 1).
+        if (row.settle === "refused" && row.aside === "empty") {
+          assert.equal(expected.field, last);
+          assert.equal(expected.notice, row.history === "none" ? "invalidPayload" : "");
+        }
+        if (row.settle === "refused" && row.aside === "typed")
+          assert.equal(
+            expected.field,
+            `Not an option ${last}`,
+            "Space types after the refused text",
+          );
+      }
+    }
+  });
 
-// Text typed in the flight of a completed answer whose next question is a password was typed in clear: the completed
-// question advances to another control, so once the flight ends the text is in no text the composer holds or keeps,
-// nor in what a debug export reads (the session's state, recording and transcript). A question a block suspends keeps
-// it instead (the suspension rows below).
+// Text typed in clear in the flight of a completed answer whose next question is a password: the password field shows
+// none of it, nor does what a debug export reads (the session's state, recording and transcript). Whether the composer
+// keeps it meanwhile, set aside, is the Owner's open question (#2463).
 for (const topology of TOPOLOGIES)
-  test(`text typed in the flight of a completed answer whose next question is a password is kept nowhere (${topology})`, async (context) => {
+  test(`text typed in the flight before a password field shows is never in it, nor exported (${topology})`, async (context) => {
     const at = await page(context, topology);
     const clear = "plain4secret";
     await at.start(`${FIRST.text.script}\n${NEXT.password}\nexit`);
@@ -837,17 +886,12 @@ for (const topology of TOPOLOGIES)
     assert.equal(ui.field.value, clear, "typed in the plain text field during the flight");
     at.transport.release();
     await answering;
-    const seen = await observe(at, ui, 0);
+    await ui.idle();
     assert.equal(
       at.host.session.value && playerRuntimeForeground(at.host.session.value)?.kind,
       "ask-password",
     );
-    assert.equal(seen.field, "");
-    assert.deepEqual(
-      [...ui.kept.values()].filter((text) => text.includes(clear)),
-      [],
-      "in no text kept for a question",
-    );
+    assert.equal(ui.field.value, "", "the password field starts empty");
     assert.equal(
       occurrences(
         JSON.stringify(
@@ -862,22 +906,31 @@ for (const topology of TOPOLOGIES)
     ui.unmount();
   });
 
-// The end table of design round 2 (#2463), where a timer's block suspends the question whose answer is in flight: the
-// answer, sent after the block's due time, reaches it suspended. Each block is answered, and the question returns.
+// A timer's block that overtakes the answer in flight: the answer, sent after the block's due time, is not taken, no
+// command acts on the block, and the composer keeps what was left unsent: in the block's field where that is the plain
+// field (`shows`), else set aside. Each block is answered, and the question returns with it. A password block, which
+// drops the composer's text until the Owner decides (#2463), is checked for an empty field and the commands only.
 const BLOCKS = {
-  text: { script: 'let b = askText "B?"', answer: () => input.intents.composer("B", "enter") },
+  text: {
+    script: 'let b = askText "B?"',
+    answer: () => input.intents.composer("B", "enter"),
+    shows: true,
+  },
   password: {
     script: 'let b = askPassword "B?"',
     answer: () => input.intents.composer("pw", "enter"),
+    shows: null,
   },
   date: {
     script: 'let b = askDate "B?"',
     answer: () => input.intents.composer("2024-01-02", "enter"),
+    shows: false,
   },
-  popup: { script: 'showPopup "B"', answer: () => input.intents.popupClose("button") },
+  popup: { script: 'showPopup "B"', answer: () => input.intents.popupClose("button"), shows: true },
   form: {
     script: 'let b = askForm("B", fields: { name: "Ada" }, submit: "Continue")',
     answer: () => input.intents.formSubmit(undefined, "button"),
+    shows: true,
   },
 } as const;
 // What is typed in the flight: the native tail, an Enter's segment before it, or a held Space (a command, not text).
@@ -886,14 +939,13 @@ const TYPED = {
   segment: ["M", "I", "D", "Enter", "T", "A", "I", "L"],
   space: [" ", "T", "A", "I", "L"],
 } as const;
-/** The end table's rule, written apart from the composable: what stays with the suspended question. */
-const unsentOf = (sent: string, typed: string) =>
-  sent + (typed === "segment" ? "MID" : "") + "TAIL";
+/** What the overtaken answer leaves unsent, written apart from the composable. */
+const leftBy = (sent: string, typed: string) => sent + (typed === "segment" ? "MID" : "") + "TAIL";
 const markers = (text: string) => ["MID", "TAIL"].filter((marker) => text.includes(marker));
 
 for (const topology of TOPOLOGIES)
   for (const [name, block] of Object.entries(BLOCKS))
-    test(`a ${name} block that suspends the answer's question keeps the unsent text with it (${topology})`, async (context) => {
+    test(`a ${name} block that overtakes the answer leaves its unsent text in the composer (${topology})`, async (context) => {
       const at = await page(context, topology);
       for (const sent of ["", "SENT"])
         for (const [typed, keys] of Object.entries(TYPED)) {
@@ -904,27 +956,21 @@ for (const topology of TOPOLOGIES)
           const original = ui.actionId.value!;
           ui.field.value = sent;
           await nextTick();
-          const before = JSON.stringify([...ui.kept]);
           at.transport.hold("observeInput");
           at.elapse(61_000);
           const answering = ui.press("Enter");
           await at.transport.held();
           await ui.type(keys);
-          assert.equal(
-            JSON.stringify([...ui.kept]),
-            before,
-            `${where}: no record changes in the flight`,
-          );
           at.transport.release();
           await answering;
           await ui.idle();
-          const shown = ui.actionId.value;
-          assert.notEqual(shown, original, `${where}: the block is presented`);
-          assert.equal(ui.field.value, "", `${where}: the block's field shows its own text`);
-          assert.equal(ui.kept.get(original), unsentOf(sent, typed), where);
-          for (const [action, text] of ui.kept)
-            if (action !== original)
-              assert.deepEqual(markers(text), [], `${where}: in no other record`);
+          assert.notEqual(ui.actionId.value, original, `${where}: the block is presented`);
+          const left = leftBy(sent, typed);
+          if (block.shows === null) assert.equal(ui.field.value, "", `${where}: an empty field`);
+          else {
+            assert.equal(ui.text(), left, `${where}: the composer keeps what was left unsent`);
+            assert.equal(ui.field.value, block.shows ? left : "", `${where}: in the field shown`);
+          }
           const posts = at.transport.posts.slice(from).filter((post) => post.op !== "observeInput");
           assert.deepEqual(
             markers(JSON.stringify(posts)),
@@ -943,19 +989,21 @@ for (const topology of TOPOLOGIES)
           await ui.complete(block.answer());
           await ui.idle();
           assert.equal(ui.actionId.value, original, `${where}: the question returns`);
-          assert.equal(ui.field.value, unsentOf(sent, typed), `${where}: with its unsent text`);
+          if (block.shows !== null) assert.equal(ui.field.value, left, `${where}: with its text`);
           ui.unmount();
         }
     });
 
-// An answer the drain sends has its own question: a block that suspends that one keeps the drain's text with it.
+// An answer the drain sends, which a block overtakes: no later command acts on the block, and what it left unsent stays
+// in the composer, in the block's plain field, and with the question the block gives back.
 for (const topology of TOPOLOGIES)
-  test(`a drained answer that a block overtakes keeps its text with its own question (${topology})`, async (context) => {
+  test(`a drained answer that a block overtakes leaves its text in the composer (${topology})`, async (context) => {
     const at = await page(context, topology);
     await at.start(
-      `let a = askText "A?"\ntimer async hidden 60 s { ${BLOCKS.password.script} }\nlet c = askText "C?"\nexit`,
+      `let a = askText "A?"\ntimer async hidden 60 s { ${BLOCKS.text.script} }\nlet c = askText "C?"\nexit`,
     );
     const ui = composer(at.host, { flight: true });
+    const from = at.transport.posts.length;
     ui.field.value = FIRST.text.aside;
     at.transport.hold("observeInput");
     const answering = ui.press("Enter");
@@ -965,54 +1013,30 @@ for (const topology of TOPOLOGIES)
     at.transport.release();
     await answering;
     await ui.idle();
-    const next = [...ui.kept.keys()].find((action) => ui.kept.get(action) === "MIDTAIL");
-    assert.ok(next !== undefined, "the drained answer's question keeps its text");
-    await ui.complete(BLOCKS.password.answer());
+    assert.equal(ui.field.value, "MIDTAIL", "the block's field shows it");
+    const answers = at.transport.posts
+      .slice(from)
+      .filter((post) => post.op === "submitComposer")
+      .map((post) => JSON.stringify(post.args));
+    assert.ok(!answers.some((args) => args.includes("TAIL")), "no command acts on the block");
+    await ui.complete(BLOCKS.text.answer());
     await ui.idle();
-    assert.equal(ui.actionId.value, next);
-    assert.equal(ui.field.value, "MIDTAIL");
+    assert.equal(ui.field.value, "MIDTAIL", "the question the block gives back shows it");
     ui.unmount();
   });
 
-// An owner's change while the reply of a refused answer is held: the question stays, and no record keeps the flight's
-// text for it (design round 2's end table: reset and replacement discard).
+// A queued answer whose question the first answer ended: the composer takes no input there, so it is dropped, and what
+// it would have sent stays the composer's text, in the greyed field or set aside while a date control takes its place.
+// On `main` the same Enter reaches the control that took the focus (residual 6 of #2430), which this model has no focus
+// to show; the kit's `keys` scenario measures it.
 for (const topology of TOPOLOGIES)
-  for (const exit of ["reset", "replacement"] as const)
-    test(`a question that outlives its flight's owner keeps none of its text (${exit}, ${topology})`, async (context) => {
-      const at = await page(context, topology);
-      await at.start(`${FIRST.unselected.script}\nexit`);
-      const ui = composer(at.host, { flight: true });
-      const original = ui.actionId.value;
-      ui.field.value = FIRST.unselected.aside;
-      at.transport.hold("observeInput");
-      const answering = ui.press("Enter");
-      await at.transport.held();
-      await ui.type(["x", "Enter", "y"]);
-      if (exit === "reset") ui.reset();
-      else ui.replace();
-      at.transport.release();
-      await answering;
-      await ui.idle();
-      assert.equal(ui.actionId.value, original, "the question stays");
-      assert.deepEqual(
-        [...ui.kept.values()].filter((text) => text.includes("x")),
-        [],
-      );
-      ui.unmount();
-    });
-
-// A queued answer whose question the first answer ended: the composer takes no input there, so it is dropped, and the
-// flight ends with what the answer wrote. On `main` the same Enter reaches the control that took the focus (residual 6
-// of #2430), which this model has no focus to show; the kit's `keys` scenario measures it.
-for (const topology of TOPOLOGIES)
-  test(`a queued answer whose question the first ended is dropped (${topology})`, async (context) => {
+  test(`a queued answer whose question the first ended is dropped, its text kept (${topology})`, async (context) => {
     const at = await page(context, topology);
     for (const next of [
       NEXT.ended,
       'showPopup "Hello"\nshowButton "Done"',
       'exportText("Hello")\nshowButton "Done"',
       'openUrl("https://example.com", alwaysButton: true)\nshowButton "Done"',
-      // A date control in place of the text field: the flight leaves the composer to it.
       'let when = askDate "When?"\nshowButton "Done"',
     ]) {
       await at.start(`${FIRST.text.script}\n${next}\nexit`);
@@ -1031,15 +1055,40 @@ for (const topology of TOPOLOGIES)
         ["submitComposer"],
         `${next}: only the first answer`,
       );
-      assert.equal(seen.field, "", next);
+      assert.equal(ui.text(), "xy", next);
+      assert.equal(seen.field, next.includes("askDate") ? "" : "xy", next);
       assert.equal(ui.flight.holding.value, false);
       assert.equal(ui.isIntercepted(), false, "the flight released the composer's writer");
       ui.unmount();
     }
   });
 
+// What the composer keeps outside a flight: a button that answers leaves the text, a date control sets it aside with
+// its own value in its place, and the next text question shows it again.
+for (const topology of TOPOLOGIES)
+  test(`the composer's text waits while a date control takes its place (${topology})`, async (context) => {
+    const at = await page(context, topology);
+    await at.start(
+      'let a = askChoice "Red", "Blue"\nlet b = askDate "When?", prefill: toDate("2026-10-04")\nlet c = askText "C?"\nexit',
+    );
+    const ui = composer(at.host, { flight: true });
+    const choice = playerRuntimeForeground(at.host.session.value!);
+    assert.equal(choice?.kind, "choose");
+    await ui.type([..."hello"]);
+    await ui.complete(input.intents.choice(choice.options[0]!.id, "button"));
+    await ui.idle();
+    assert.equal(ui.field.value, "2026-10-04", "the date control shows its own value");
+    assert.equal(ui.parked(), "hello", "the composer's text waits");
+    await ui.press("Enter");
+    await ui.idle();
+    assert.equal(ui.field.value, "hello", "the next text question shows it");
+    assert.equal(ui.parked(), null);
+    ui.unmount();
+  });
+
 // The exits of a flight, each taken while the reply is held: the flight ends at once, and the reply, once it arrives,
-// runs none of its commands and writes nothing of its own.
+// runs none of its commands and writes nothing of its own. What the flight left unsent stays the composer's text while
+// its session goes on; a restarted session starts with an empty composer.
 const EXITS = ["stop", "loss", "reset", "replacement", "unmount", "throw"] as const;
 for (const topology of TOPOLOGIES)
   for (const exit of EXITS)
@@ -1076,20 +1125,18 @@ for (const topology of TOPOLOGIES)
         at.transport.release();
         if (exit === "throw") {
           await assert.rejects(Promise.resolve(answering), /injected/u);
-          // The question holds what was left unsent: the answer's text, each later Enter's text, and the text typed
-          // last (design round 2's end table, the throw row).
+          // The composer holds what was left unsent: the answer's text, each later Enter's text, and the text typed last.
           assert.equal(ui.field.value, `${FIRST.text.aside}xy`);
-          assert.equal(ui.kept.get(ui.actionId.value!), `${FIRST.text.aside}xy`);
         } else await answering;
         await ui.idle();
         assert.equal(ui.flight.holding.value, false);
         assert.equal(ui.isIntercepted(), false);
         assert.equal(ui.flightWrites.length, writes, "no write of the flight after it ended");
-        // What the flight left unsent goes nowhere when its owner ends: no question keeps the Enter's text.
-        if (exit !== "throw")
-          assert.deepEqual(
-            [...ui.kept.values()].filter((text) => text.includes("x")),
-            [],
+        if (exit !== "unmount")
+          assert.equal(
+            ui.text(),
+            exit === "reset" ? "" : `${FIRST.text.aside}xy`,
+            "the unsent text",
           );
         const answered = at.transport.posts
           .slice(from)
@@ -1108,8 +1155,8 @@ for (const topology of TOPOLOGIES)
         }
       });
 
-// The exits the input section decides: an answer it retires ends the flight at once, as one whose session is gone; with
-// no section, as before a session is prepared, the answer is not taken, and what was typed and given plays as after a
+// The exits the input section decides: an answer it retires ends the flight at once, as one whose session is gone, and
+// leaves what was unsent in the composer; with no section, as before a session is prepared, the answer is not taken, and what was typed and given plays as after a
 // refusal without a notice: each queued answer is not taken either.
 for (const topology of TOPOLOGIES)
   test(`a flight ends with the input section's retirement, or settles without a section (${topology})`, async (context) => {
@@ -1126,6 +1173,7 @@ for (const topology of TOPOLOGIES)
     retire();
     await answering;
     await retired.idle();
+    assert.equal(retired.field.value, `${FIRST.text.aside}xy`, "what was left unsent stays");
     assert.equal(retired.flight.holding.value, false);
     assert.equal(retired.isIntercepted(), false);
     assert.equal(retired.flightWrites.length, writes, "no write of the flight after it ended");
