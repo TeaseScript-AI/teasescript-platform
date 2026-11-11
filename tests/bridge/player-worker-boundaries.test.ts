@@ -206,6 +206,12 @@ function choiceOptions(host: Host): readonly { readonly id: string; readonly lab
   return foreground.options;
 }
 
+/** The label of the button `host` shows, if it shows one. */
+function buttonLabel(host: Host): string | undefined {
+  const foreground = host.session.value && playerRuntimeForeground(host.session.value);
+  return foreground?.kind === "show-button" ? foreground.label : undefined;
+}
+
 /** Whether `host` shows a session that asks for an answer. */
 const asks = (host: Host) =>
   host.session.value !== null && presentedAction(host.session.value) !== undefined;
@@ -1024,10 +1030,7 @@ RERUN.rows(
     assert.equal((await answering).kind, "answered");
     await until(() => refusals.length > 0, "the catch-up's refusal");
     assert.deepEqual(refusals, ["basis"]);
-    await until(
-      () => asks(host) && choiceOptions(host)[0]?.label === "After",
-      "the answer's next button",
-    );
+    await until(() => buttonLabel(host) === "After", "the answer's next button");
     // Refused, the catch-up stepped nothing; the clock observed the late second in one go instead.
     const ops = transport.posts.slice(heldAt).map((post) => post.op);
     const begun = ops.indexOf("beginCatchUp");
@@ -1039,7 +1042,7 @@ RERUN.rows(
       "the fresh observation",
     );
     assert.equal(host.hostError.value, null);
-    assert.ok(asks(host), "the next button still asks");
+    assert.equal(buttonLabel(host), "After", "the next button still asks");
     return end();
   },
 );

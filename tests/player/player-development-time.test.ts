@@ -26,7 +26,9 @@ import {
 } from "../../player/runtime/runtime-view.js";
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
 import {
+  memoryKeptRoomStore,
   memoryKeptSessionStore,
+  type KeptRoomStore,
   type KeptSessionStore,
 } from "../../player/persistence/kept-sessions.js";
 import type { MediaProgressReport } from "../../src/index.js";
@@ -322,6 +324,8 @@ let usePlayerSession: (options: {
   readonly bridge: Promise<PlayerBridge>;
   scriptStorage?: ScriptStorageProvider;
   keptSessions?: KeptSessionStore;
+  debugRooms?: KeptRoomStore;
+  room?: "normal" | "debug";
 }) => SessionHost;
 let useDevelopmentTime: (
   player: SessionHost,
@@ -600,8 +604,9 @@ test("Debug off ends auto-skip and a running jump, and Debug on again starts wit
 });
 
 test("a countdown shows while Debug runs, not before Continue, and follows display time", async (context) => {
-  // One browser: its kept sessions and the script's storage scope, which a reload finds again.
+  // One browser: its kept sessions and debug rooms under the script's storage scope, which a reload finds again.
   const kept = memoryKeptSessionStore();
+  const rooms = memoryKeptRoomStore();
   const scriptStorage: ScriptStorageProvider = {
     scope: "development-time:countdown",
     load: async () => [],
@@ -610,13 +615,15 @@ test("a countdown shows while Debug runs, not before Continue, and follows displ
     clear: async () => {},
   };
   const plan = compilePlayerProject("wait 5 s\nexit").plan!;
-  const page = async (initial: { menu: boolean; autoSkip: boolean }) => {
+  const page = async (initial: { menu: boolean; autoSkip: boolean }, room?: "debug") => {
     const scope = effectScope();
     const mounted = scope.run(() => {
       const player = usePlayerSession({
         bridge: inProcessBackend(),
         scriptStorage,
         keptSessions: kept,
+        debugRooms: rooms,
+        ...(room === undefined ? {} : { room }),
       });
       return { player, debug: usePlayerDebug(player, initial) };
     });
@@ -630,11 +637,13 @@ test("a countdown shows while Debug runs, not before Continue, and follows displ
     });
     return { ...mounted, close: () => scope.stop() };
   };
+  const tasks = () => new Promise((resolve) => setTimeout(resolve, 5));
   stubBrowser(context);
   const { player, debug, close } = await page({ menu: false, autoSkip: false });
   assert.equal(player.activation.value, "start");
   await player.activate();
   assert.equal(debug.countdownText.value, null, "the Debug menu starts off");
+  // Debug on goes on in the script's debug room, with a copy of the session.
   debug.menu.value = true;
   assert.equal(debug.countdownText.value, "Debug · Continues in 5 s");
   player.update(observePlayerRuntimeTime(player.session.value!, 1_200).session);
@@ -642,17 +651,18 @@ test("a countdown shows while Debug runs, not before Continue, and follows displ
   debug.active.value = false;
   assert.equal(debug.countdownText.value, null);
   debug.active.value = true;
-  // The page is hidden, which keeps its session, and is reloaded: the kept session is restored and waits for Continue
-  // before its countdown shows.
+  // The page is hidden, which keeps the debug room's session, and the debug room is opened again: the kept session is
+  // restored afresh and waits for Continue before its countdown shows.
   Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
   document.dispatchEvent(new Event("visibilitychange"));
-  for (let wait = 0; (await kept.session(scriptStorage.scope)) === null; wait += 1) {
-    assert.ok(wait < 400, "the hidden page kept its session");
-    await new Promise((resolve) => setTimeout(resolve, 5));
+  for (let wait = 0; (await rooms.session(scriptStorage.scope)) === null; wait += 1) {
+    assert.ok(wait < 400, "the hidden page kept the debug room's session");
+    await tasks();
   }
+  for (let wait = 0; wait < 4; wait += 1) await tasks();
   close();
   Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
-  const reloaded = await page({ menu: true, autoSkip: false });
+  const reloaded = await page({ menu: true, autoSkip: false }, "debug");
   assert.equal(reloaded.player.activation.value, "continue");
   assert.equal(reloaded.debug.countdownText.value, null);
   await reloaded.player.activate();
