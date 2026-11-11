@@ -93,6 +93,25 @@ const regular = (file, mode) => file !== null && (mode === "100644" || mode === 
 class CannotRun extends Error {}
 
 /**
+ * `text`'s line starts by Git's lines (an LF alone ends one; TypeScript also ends one at a CR or U+2028), and `lineOf`,
+ * the line of an offset, found among them by binary search: made once per blob.
+ */
+function gitLines(text) {
+  const starts = [0];
+  for (let at = text.indexOf("\n"); at !== -1; at = text.indexOf("\n", at + 1)) starts.push(at + 1);
+  const lineOf = (offset) => {
+    let [low, high] = [0, starts.length];
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (starts[middle] <= offset) low = middle + 1;
+      else high = middle;
+    }
+    return low;
+  };
+  return { starts, lineOf };
+}
+
+/**
  * A blob's shape by Git's lines (a newline alone ends one), each line's whole content classified: its import and
  * re-export lines, holding nothing else but whitespace and comments; the lines of comments and whitespace alone above
  * its first import or export statement; and the lines where a top-level declaration starts, each with whether it
@@ -126,17 +145,7 @@ function shapeOf(file, text) {
       if (range.pos >= from && range.end <= to) kind.fill(1, range.pos, range.end);
   };
   visit(source);
-  const starts = [0];
-  for (let at = text.indexOf("\n"); at !== -1; at = text.indexOf("\n", at + 1)) starts.push(at + 1);
-  const lineOf = (offset) => {
-    let [low, high] = [0, starts.length];
-    while (low < high) {
-      const middle = (low + high) >> 1;
-      if (starts[middle] <= offset) low = middle + 1;
-      else high = middle;
-    }
-    return low;
-  };
+  const { starts, lineOf } = gitLines(text);
   let first = null;
   for (const statement of source.statements) {
     const start = statement.getStart(source);
@@ -510,6 +519,7 @@ function bindingsOf(file, text, resolver) {
     },
     true,
   );
+  const { lineOf } = gitLines(text);
   const resolve = (node) => {
     const specifier = node.text;
     if (!specifier.startsWith(".")) return { type: "bare", path: specifier };
@@ -536,7 +546,7 @@ function bindingsOf(file, text, resolver) {
   const out = [];
   const compared = new Set();
   for (const statement of source.statements) {
-    const line = source.getLineAndCharacterOfPosition(statement.getStart(source)).line + 1;
+    const line = lineOf(statement.getStart(source));
     if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
       compared.add(statement);
       const specifier = statement.moduleSpecifier.text;
@@ -606,7 +616,7 @@ function bindingsOf(file, text, resolver) {
       });
     }
   }
-  out.push(...otherReferencesOf(source, text, compared));
+  out.push(...otherReferencesOf(source, text, compared, lineOf));
   return out;
 }
 
@@ -615,11 +625,11 @@ function bindingsOf(file, text, resolver) {
  * is `refused`: an `import` keyword (not `import.meta`) or a `require` identifier outside the `compared` statements, a
  * triple-slash reference directive, or a comment (JSDoc included) holding `import(` or `@import`.
  */
-function otherReferencesOf(source, text, compared) {
+function otherReferencesOf(source, text, compared, lineOf) {
   const out = [];
   const lines = new Set();
   const refuse = (at, shown, what) => {
-    const line = source.getLineAndCharacterOfPosition(at).line + 1;
+    const line = lineOf(at);
     if (lines.has(line)) return;
     lines.add(line);
     const specifier = shown.split("\n")[0].slice(0, 60);
@@ -858,17 +868,18 @@ export function checkMove(
       .map(([file, mode]) => `${file} (${mode})`),
   );
   const declarations = declare === null ? [] : declarationsOf(declare);
-  const used = new Set();
+  // each declaration binds to the one line it first matches, by the line's number on its side
+  const bound = new Map();
   const declaredFor = (entry) => {
     const index = declarations.findIndex(
       (d, at) =>
-        !used.has(at) &&
+        !bound.has(at) &&
         d.file === entry.file &&
         d.side === entry.side &&
         d.text === entry.row.text,
     );
     if (index === -1) return null;
-    used.add(index);
+    bound.set(index, entry.row.line);
     return declarations[index].reason;
   };
   const { verdicts, moved } = verdictsOf(mergeBase, "HEAD", files, { cwd, declaredFor });
@@ -898,25 +909,29 @@ export function checkMove(
     renames === null ? null : renamesOf(renames),
     git,
   );
-  // a refusal is declared by a declaration of its side and its line's text, used or not, even where the line is no
-  // changed one; each is printed with the refusal reason it covers
+  // a refusal is declared by the declaration bound to its line, a changed one or not, else by one of its side and its
+  // line's text bound to none, which it binds; each is printed with the refusal reason it covers
   const refused = [];
   const covered = [];
+  const ofSide = (d, refusal) => d.file === refusal.file && d.side === refusal.side;
   for (const refusal of bindings.refusals) {
-    const index = declarations.findIndex(
-      (d) => d.file === refusal.file && d.side === refusal.side && d.text === refusal.text,
+    let index = declarations.findIndex(
+      (d, at) => ofSide(d, refusal) && bound.get(at) === refusal.line,
     );
-    if (index === -1) refused.push(refusal);
-    else {
-      covered.push({ ...refusal, declared: declarations[index].reason });
-      if (!used.has(index)) {
-        used.add(index);
+    if (index === -1) {
+      index = declarations.findIndex(
+        (d, at) => ofSide(d, refusal) && !bound.has(at) && d.text === refusal.text,
+      );
+      if (index !== -1) {
+        bound.set(index, refusal.line);
         counts.declared += 1;
       }
     }
+    if (index === -1) refused.push(refusal);
+    else covered.push({ ...refusal, declared: declarations[index].reason });
   }
   counts.refused = refused.length;
-  const stale = declarations.filter((_, at) => !used.has(at));
+  const stale = declarations.filter((_, at) => !bound.has(at));
   return {
     mergeBase,
     unadmitted,
