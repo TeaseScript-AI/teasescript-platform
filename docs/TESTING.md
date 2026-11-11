@@ -141,9 +141,9 @@ then classifies every legacy/core pair, and every source's core with sharing on 
 Per set, its manifest from a built tree of that commit, then its shards on the central queue:
 
 ```shell
-env -u NODE_OPTIONS node <tree>/tests/families/shadow.mjs <tree> <set> --manifest > expect-<set>.jsonl
-sx-job submit --commit <main sha> --shards 16 --mem 6G --timeout 2h --campaign <T>-<set> -- bash -c 'env -u NODE_OPTIONS \
-  node "$SX_TREE/tests/families/shadow.mjs" "$SX_TREE" <set> --shard {i}/{n} --demands 16 --out "$SX_OUT/shadow.jsonl" \
+node <tree>/tests/families/shadow.mjs <tree> <set> --manifest > expect-<set>.jsonl
+sx-job submit --commit <main sha> --shards 16 --mem 6G --timeout 2h --campaign <T>-<set> -- bash -c \
+  'node "$SX_TREE/tests/families/shadow.mjs" "$SX_TREE" <set> --shard {i}/{n} --demands 16 --out "$SX_OUT/shadow.jsonl" \
   > "$SX_OUT/shadow.log"'
 ```
 
@@ -157,7 +157,7 @@ node tests/families/shadow-classify.mjs <every shard's shadow.jsonl> --expect ex
 with one `--expect` per set's manifest (the flag takes one file).
 
 For `corpus`, both commands also need `CASES_JSON=<cases.json>` before `node`, and the job `--data <cases.json>`.
-`env -u NODE_OPTIONS` keeps the queue's heap flag from overriding each route's `--memory`. `--demands 16` is the
+Each route's `--memory` holds whatever `NODE_OPTIONS` the queue sets: a route starts without it. `--demands 16` is the
 completion control: nothing stops at the natural allowance on current `main`, so only a demand-allowance run reaches
 a receiving completion. The gate table also counts, as information only, the control's runs that left the slice by
 the class that names their text (`declined/lost check` or an exclusion rule), every such class a row and a text no class
