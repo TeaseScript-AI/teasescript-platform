@@ -502,8 +502,8 @@ backend and the core (`decisionRecords`), in the four modes, and writes one JSON
 core's decision records to `--decisions`. Each route runs in its own process with `--memory` MB of old generation
 (2,048, the families runner's, so both compare a source under the same cap; a route's process starts without the
 caller's `NODE_OPTIONS`, such as the queue's heap flag, and with no other Node option of the caller's, #2329), under
-the unit limit below (the legacy route charges no ledger) and the safety net. A run that fails (heap, units, safety net, the process's end, a V8
-abort at its heap limit included: #1738) leaves the source's other runs and is recorded as `{ outcome: "failed",
+the unit limit below (the legacy route charges no ledger) and the safety net. A run that fails (heap, units, safety
+net, the process's end, a V8 abort at its heap limit included: #1738) leaves the source's other runs and is recorded as `{ outcome: "failed",
 failure, phase, runsBeforeFailure, heapMiB }` (`heapMiB`: the worker's heap limit as V8 measured it) in its row and in
 the record's `failed` list, with `incomplete: true` and the first failure as `reason`; the next run starts in a fresh
 worker. A reused worker's heap failure or safety net is retried once in a fresh one, whose result is the run's
