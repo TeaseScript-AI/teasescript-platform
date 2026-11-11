@@ -19,14 +19,15 @@ import {
   keptSteps,
 } from "../budget.js";
 import type { Consumers } from "../consumers.js";
-import { writtenOf } from "../contract.js";
+import { typeTags, writtenOf } from "../contract.js";
 import { stepIndex, stepsArray, stepsRest, type Steps } from "../contract/key-ids.js";
 import { labelText } from "../contract/labels.js";
 import { keyPlace, type Definition } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import { REASON, type Item, type ItemTag, type Writer } from "../items.js";
-import { propertyStep } from "../program.js";
-import { offendingKinds, type DiagnosticRule } from "../result.js";
+import { propertyStep, siteKey } from "../program.js";
+import { offendingKinds, type CopiedBinding, type DiagnosticRule } from "../result.js";
+import { parsedExpression } from "../messages/words.js";
 import { error } from "./diagnostics.js";
 import { kindsOf, quietKinds } from "./names.js";
 import { copiesOnly, deferred, storeReach } from "./reach.js";
@@ -144,6 +145,58 @@ function writtenGroups(
 }
 
 /**
+ * The variable or parameter with its own written type that a copy's deciding store `d` copies (A4), as `copied`: the
+ * store's value a read of it, or a list or set literal whose every element is one; else nothing. The place's sentence
+ * names it (#2289). Map reads and a parse of the literal's text alone, nothing charged: no decision depends on it.
+ */
+function copiedBinding(
+  walk: Consumers,
+  d: Definition,
+): { readonly copied: CopiedBinding } | undefined {
+  const { program } = walk.pass;
+  const bound = (value: PlaceId | undefined): PlaceId | undefined =>
+    value === undefined ? undefined : program.occurrenceOf.get(value);
+  let form: CopiedBinding["form"] = "value";
+  let binding = bound(d.value);
+  if (binding === undefined) {
+    const parsed = parsedExpression(program.textAt(d.site));
+    const literal = parsed?.expression;
+    if (
+      literal === undefined ||
+      (literal.kind !== "listLiteral" && literal.kind !== "setLiteral") ||
+      literal.elements.length === 0
+    )
+      return undefined;
+    // (each element's read by its site in the file: the literal's start, the element's offset in the parsed text)
+    const at = (offset: number): number => d.site.start + offset - parsed!.at;
+    const reads = new Set(
+      literal.elements.map((element) =>
+        bound(
+          program.placeBySite.get(
+            siteKey({
+              file: d.site.file,
+              start: at(element.span.start.offset),
+              end: at(element.span.end.offset),
+            }),
+          ),
+        ),
+      ),
+    );
+    [binding] = reads;
+    if (reads.size !== 1 || binding === undefined) return undefined;
+    form = "elements";
+  }
+  const { kind, site } = program.place(binding);
+  const written = writtenOf(kind);
+  const declared =
+    kind.kind === "parameter" ||
+    (kind.kind === "binding" && (kind.declared === "let" || kind.declared === "global"));
+  return written === null || site === null || !declared
+    ? undefined
+    : { copied: { form, name: kind.name, site, type: typeTags(written) } };
+}
+
+/**
  * C1, C7 against a place's admitted type (A1–A9): every candidate store admission names is checked against the
  * decided type, the store's value at its node by §3. A definite contribution that does not fit, where no kind of the
  * value fits, is an error at the innermost offending expression and the store is rejected (A6); a store of a
@@ -193,6 +246,15 @@ export function admittedStores(
       written || !admission.admitted(root, path()).includes("null")
         ? nullableTags
         : [...tags, "null"];
+    // (the copied binding a sentence names, found once per decision where a diagnostic asks for it)
+    let found: { readonly copied: CopiedBinding } | undefined | null = null;
+    const copied = (): { readonly copied: CopiedBinding } | undefined =>
+      found !== null
+        ? found
+        : (found =
+            written && !decision.own && decider !== null
+              ? copiedBinding(walk, decider)
+              : undefined);
     const rule = (brought: SourceSite | null = null): DiagnosticRule => ({
       rule: "store",
       into: placeText(walk, root, path()),
@@ -202,6 +264,7 @@ export function admittedStores(
       brought,
       root: storeRoot(walk, root),
       steps: storeSteps(walk, root, path(), written ? writtenOf(program.place(root).kind) : null),
+      ...copied(),
     });
     // C9: a place published with its contract's kinds owes the check of external data another store
     // brought, at each candidate carrying it, against those kinds; data a store brings inline has its boundary there,
