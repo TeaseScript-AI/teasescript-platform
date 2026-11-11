@@ -42,7 +42,11 @@ const ORDERS = {
  * 300; `settling` waits 1.8 s in the head's first compile and as the base's next search starts (each within a 3 s
  * net, together past it), `lost` 6 s as its search starts. (#1850: margins of over a second either way, which a loaded
  * worker keeps, where a 0.5 s net left 200 ms.) Each tree's four modes are named as `HELD_MODES`' are, in an order of its
- * own (`ORDERS`), and a compile's plan holds the name of the mode it ran in, so modes paired by position differ.
+ * own (`ORDERS`), and a compile's plan holds the name of the mode it ran in, so modes paired by position differ. For
+ * every record form (R20): `exits` ends its worker; `over at demand <n>` charges 5,000 at that demand, `overstop` at its
+ * stop's allowance of 10; an `apart…` source's plan on the head names its demand and allowance, so every pair differs;
+ * the analysis throws for `throws`, charges 5,000 for `overanalysis` and nothing for `apart-zero-questions`; and
+ * `apart-zero-stop`'s one stop is at an allowance of 0.
  */
 const MODULES: Record<string, string> = {
   "src/type-inference/core/budget.js": `let test = null;
@@ -61,7 +65,14 @@ export function withTestAllowance(allowance, run) {
     test = null;
   }
 }
-export const withTestDemandAllowance = (_, run) => run();
+export function withTestDemandAllowance(demand, run) {
+  globalThis.demand = demand;
+  try {
+    return run();
+  } finally {
+    globalThis.demand = undefined;
+  }
+}
 `,
   "src/compiler.js": `import { ledger } from "./type-inference/core/budget.js";
 const wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -71,8 +82,16 @@ export function compileProjectWithBackend(files) {
   if (source === "settling" && settling) (settling = false), wait(1800);
   if (source === "slow") wait(700);
   if (source === "hang") wait(6000);
-  ledger().charge("frames", source === "over" ? 5000 : source === "hang" ? 1 : 300);
-  return { plan: { instructions: [], mode: globalThis.heldMode }, diagnostics: [] };
+  if (source === "exits") process.exit(3);
+  const over =
+    source === "over" ||
+    source === \`over at demand \${globalThis.demand}\` ||
+    (source === "overstop" && ledger().allowance === 10);
+  ledger().charge("frames", over ? 5000 : source === "hang" ? 1 : 300);
+  const apart = import.meta.url.includes("/head/") && source.startsWith("apart")
+    ? { demand: String(globalThis.demand), allowance: ledger().allowance }
+    : {};
+  return { plan: { instructions: [], mode: globalThis.heldMode, ...apart }, diagnostics: [] };
 }
 export const compileSourceWithBackend = (source) => compileProjectWithBackend([{ source }]);
 `,
@@ -80,7 +99,9 @@ export const compileSourceWithBackend = (source) => compileProjectWithBackend([{
   "src/type-inference/core/answers.js": `import { ledger } from "./budget.js";
 class Answers {}
 export function analyseCore(request) {
-  if (request.source !== undefined) ledger().charge("frames", 300);
+  if (request.source === "throws") throw new Error("analysis failed");
+  if (request.source !== undefined && request.source !== "apart-zero-questions")
+    ledger().charge("frames", request.source === "overanalysis" ? 5000 : 300);
   return new Answers();
 }
 `,
@@ -106,7 +127,7 @@ export function heldStops(c, mode) {
   if (c.name === "settling" && settling) (settling = false), wait(1800);
   if (c.name === "lost") wait(6000);
   mode.run(() => new WorkLedger(10).charge("frames", c.name === "searched" ? 5000 : 300));
-  return [{ allowance: 10, phase: "admission" }];
+  return [{ allowance: c.name === "apart-zero-stop" ? 0 : 10, phase: "admission" }];
 }
 `,
 };
@@ -421,6 +442,111 @@ HELD_MODES[0].run = (f) => (port.postMessage({ note: "stray" }), run(f));
   assert.equal(readFileSync(out, "utf8"), before);
 });
 
+test("every record form the runner writes, at its allowance edges, passes the summary's check (#2341, R19, R20)", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  // (`--demands` as `map(Number)` reads it, unchecked: zero, negative, fractional, and NaN and Infinity, which JSON
+  // records as null)
+  const demands = ["16", "0", "-1", "0.5", "NaN", "Infinity"];
+  built(folder, [
+    ...["fine", "apart", "over", "hang", "exits"].map((name) => [name, name]),
+    ...demands.map((demand) => [`over at demand ${demand}`, `over at demand ${demand}`]),
+  ]);
+  // (the held family of every held form; the waits shortened to 2.5 s against a 1 s safety net)
+  const family = ["stopped", "searched", "overstop", "overanalysis", "throws", "lost"];
+  for (const tree of ["base", "head"]) {
+    for (const [file, from, to] of [
+      [
+        "tests/helpers/type-core-held-host.js",
+        '["stopped", "searched", "settling", "lost"]',
+        JSON.stringify([...family, "apart-zero-stop", "apart-zero-questions"]),
+      ],
+      ["tests/helpers/type-core-held-host.js", "wait(6000)", "wait(2500)"],
+      ["src/compiler.js", "wait(6000)", "wait(2500)"],
+    ] as const) {
+      const at = join(folder, tree, "dist", file);
+      writeFileSync(at, readFileSync(at, "utf8").replace(from, to));
+    }
+  }
+  const run = (set: string, ...more: string[]) => {
+    const out = join(folder, `${set}.jsonl`);
+    const ran = spawnSync(
+      process.execPath,
+      [
+        tool,
+        join(folder, "base"),
+        join(folder, "head"),
+        set,
+        "--timeout",
+        "1",
+        "--out",
+        out,
+        ...more,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(ran.status, 1, ran.stderr);
+    return out;
+  };
+  const files = [run("area", "--demands", demands.join(",")), run("held", "--stops")];
+  /** A written record, as far as this test reads it. */
+  type Written = {
+    name: string;
+    differing?: number;
+    stalled?: string;
+    uncharged?: string;
+    run?: { at: string };
+    modes?: {
+      demands?: { demand: unknown }[];
+      stops?: { differ: { allowance: unknown }[] };
+      questions?: { differ: { allowance: unknown }[] };
+    }[];
+  };
+  const records = files.flatMap((file) =>
+    readFileSync(file, "utf8")
+      .trim()
+      .split("\n")
+      .map((line): Written => JSON.parse(line)),
+  );
+  // (every form is among them, so that one the writer stops writing fails here too)
+  assert.deepEqual(
+    records
+      .flatMap((r) => (r.run === undefined ? [] : [`${r.stalled ?? r.uncharged} at ${r.run.at}`]))
+      .sort(),
+    [
+      "Error: analysis failed at analysis",
+      "safety net 1 s at natural",
+      "safety net 1 s at stop search, between",
+      "units at allowance 10",
+      "units at analysis",
+      ...demands.map((demand) => `units at demand ${demand}`),
+      "units at natural",
+      "units at stop search",
+      "worker exit 3 at natural",
+    ].sort(),
+  );
+  const modes = records.flatMap((r) => r.modes ?? []);
+  const values = (allowances: unknown[]) =>
+    [...new Set(allowances.map((allowance) => JSON.stringify(allowance)))].sort();
+  assert.deepEqual(values(modes.flatMap((m) => (m.demands ?? []).map((d) => d.demand))), [
+    "-1",
+    "0",
+    "0.5",
+    "16",
+    "null",
+  ]);
+  assert.deepEqual(values(modes.flatMap((m) => (m.stops?.differ ?? []).map((d) => d.allowance))), [
+    "0",
+    "10",
+  ]);
+  assert.ok(modes.some((m) => m.questions?.differ.some((d) => d.allowance === 0)));
+  assert.ok(records.some((r) => r.name === "cases.mjs/fine" && r.differing === 0));
+  // (and the summary reads every line)
+  const summary = spawnSync(process.execPath, [tool, "summary", ...files], { encoding: "utf8" });
+  assert.equal(summary.stderr, "");
+  assert.equal(summary.status, 0);
+});
+
 test("the plans summary prints a recorded mode as recorded and says once what a number is (#2342)", (t) => {
   const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
@@ -709,10 +835,10 @@ test("the plans summary refuses, naming file, line and fault, any line that is n
       /do not differ/,
     ],
     [
-      "a demand of zero",
+      "a demand as text",
       (r) => ({
         ...r,
-        modes: [{ ...r.modes[0], demands: [{ ...r.modes[0]!.demands[0]!, demand: 0 }] }],
+        modes: [{ ...r.modes[0], demands: [{ ...r.modes[0]!.demands[0]!, demand: "16" }] }],
       }),
       /demand not one/,
     ],

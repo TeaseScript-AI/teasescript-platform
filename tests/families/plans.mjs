@@ -35,8 +35,10 @@
 // sequence apart; a publication difference; at a demand allowance apart, each row in the same one class and named by
 // every part apart, with which tree's output the allowance stops against that tree's own unstopped compile (#2341); for
 // the held family, a stop set or a stopped compile apart, each by its parts, and the analysis's units apart; and lists
-// each with the stalled and uncharged sources. It reads only records it has proved one of the forms the runner writes
-// (`recordFault`): any other line refuses the input, exit 2, naming its file, line and fault. A record from
+// each with the stalled and uncharged sources. Before any output it checks every line's keys, types and value formats
+// against those the runner writes (`recordFault`), a gate against malformed, foreign and truncated lines, not a proof
+// of the invariants between one record's fields: a line it refuses ends the summary, exit 2, naming its file, line and
+// fault. A record from
 // before #2342 names its mode by a number, its index in `HELD_MODES` at the commit that wrote it: printed as that number,
 // never translated, with one line that says so.
 import { createHash } from "node:crypto";
@@ -92,6 +94,17 @@ const shaped = (value, required, optional = []) =>
   !Array.isArray(value) &&
   required.every((key) => Object.hasOwn(value, key)) &&
   Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
+/**
+ * An allowance as a pair records it (R19): every runner on main writes what `--demands`' `map(Number)`, the tree's
+ * `heldStops` or the questions phase's sums give, unchecked, so any number, and `null` for one JSON cannot hold (NaN,
+ * an infinity).
+ */
+const allowanceOf = (n) => n === null || typeof n === "number";
+/** A run's place at an allowance (`demand 16`, `allowance 0`), the allowance in JavaScript's own text of that number. */
+const atAllowance = (at) => {
+  const [, number] = /^(?:demand|allowance) (.+)$/.exec(at) ?? [];
+  return number !== undefined && String(Number(number)) === number;
+};
 /** A mode as a record names it: a `HeldMode` name, or before #2342 its index, 0 to 3. */
 const modeName = (mode) =>
   (text(mode) && mode !== "") || (Number.isInteger(mode) && mode >= 0 && mode < 4);
@@ -137,9 +150,9 @@ const listOf = (value, fault) =>
   Array.isArray(value) ? value.map(fault).find((each) => each !== undefined) : "no list";
 
 /**
- * Why a records line is not one `plans.mjs` writes (#2341, under the lead's ruling R13 on #2364's plan), else undefined:
- * the closed set of its forms, a source's (its runs, or a stall or a safety net reached) with its modes, compiles and
- * pairs. `summary` reads nothing it has not proved.
+ * Why a records line is not one `plans.mjs` writes (#2341, under the lead's rulings R13 and R21), else undefined: the
+ * closed set of its keys, types and value formats, a source's (its runs, or a stall or a safety net reached) with its
+ * modes, compiles and pairs. It does not prove the invariants between one record's fields.
  */
 function recordFault(r) {
   if (
@@ -172,9 +185,7 @@ function recordFault(r) {
         (["stop search", "stop search, between"].includes(run.at)
           ? whole(run.analysis)
           : run.analysis === undefined &&
-            (run.at === "natural" ||
-              run.at === "analysis" ||
-              /^(demand|allowance) [1-9]\d*$/.test(run.at)))
+            (run.at === "natural" || run.at === "analysis" || atAllowance(run.at)))
       )
     )
       return "a stall's run not one the runner names";
@@ -195,7 +206,7 @@ function recordFault(r) {
       pairFault({ base: m.base, head: m.head }, {}, false) ??
       (m.demands === undefined
         ? undefined
-        : listOf(m.demands, (d) => pairFault(d, { demand: (n) => whole(n) && n > 0 }, true))) ??
+        : listOf(m.demands, (d) => pairFault(d, { demand: allowanceOf }, true))) ??
       stopsFault(m.stops) ??
       questionsFault(m.questions);
     if (fault !== undefined) return fault;
@@ -211,9 +222,7 @@ function stopsFault(stops) {
   if (!shaped(stops, ["count", "sameSet", "differ"])) return "stops not one the runner writes";
   if (!whole(stops.count) || typeof stops.sameSet !== "boolean")
     return "stops' count or sameSet malformed";
-  return listOf(stops.differ, (d) =>
-    pairFault(d, { allowance: (n) => whole(n) && n > 0, phase: text }, true),
-  );
+  return listOf(stops.differ, (d) => pairFault(d, { allowance: allowanceOf, phase: text }, true));
 }
 
 /** Why a mode's `questions` (the questions phase) is not one the runner writes, else undefined. */
@@ -227,7 +236,7 @@ function questionsFault(q) {
     !whole(q.sampled)
   )
     return "questions phase's units malformed";
-  return listOf(q.differ, (d) => pairFault(d, { allowance: (n) => whole(n) && n > 0 }, true));
+  return listOf(q.differ, (d) => pairFault(d, { allowance: allowanceOf }, true));
 }
 
 /**
