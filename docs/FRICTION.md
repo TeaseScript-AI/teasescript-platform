@@ -36,6 +36,12 @@ touches. The open backlog
 per class is the open `friction` issues grouped by that first line. A line fixed in place needs no issue: its report is
 its record.
 
+An open friction issue is one its coordinator judges worth fixing. Triage closes an issue as not planned when its fix
+adds no value or would cost more than the problem does
+([`ORCHESTRATION.md`](ORCHESTRATION.md#structure-and-friction)), and so does any later look at the open ones. The
+closing comment gives the reason and what would reopen the issue, and it is reopened when that happens. A closed issue
+holds no builder back: the launch check under [Priority](#priority) reads open issues only.
+
 ## Priority
 
 An open friction issue is either being built, or waits on an open issue or pull request named in its `Schedule:` line,
@@ -59,7 +65,8 @@ deferring costs, not by date:
     it is small.
   - A fix in files no open lane owns, or in tooling, is the coordinator's light-route pull request between packages,
     as a move is. A friction fix never waits behind a lane's queue.
-- **Otherwise:** a single, cheap instance that no lane is near is free like any other. A scope cut's residual is left
+- **Otherwise:** a single, cheap instance that no lane is near is free like any other, unless triage closed it as
+  not planned. A scope cut's residual is left
   to an issue only when it cannot bite ([Design rounds](DEVELOPMENT-WORKFLOW.md#design-rounds)).
 
 The `spare capacity` label changes none of this: a friction issue is built, waits or is free the same with or without
