@@ -13,7 +13,8 @@ import { isTypeCoreTestFile, shardFiles, suiteName, suiteTestFiles } from "./tes
 // `--from-ci RUN ...` (with `gh`) takes them from CI's own runs of the suite, the machines the shards balance: each test
 // job keeps its files' seconds as an artifact for 7 days (`TEST_FILE_SECONDS`, `.github/workflows/ci.yml`), the jobs
 // API gives the pre-test step's seconds, and each file counts its median over the runs, at least three since CI's
-// runners vary. A run counts its last attempt (re-running a run removes its earlier attempts' artifacts).
+// runners vary. A run counts its last attempt (re-running a run removes its earlier attempts' artifacts), when every
+// test step ("Build and run tests, shard i of N") and its pre-test step passed, whatever the run's own conclusion.
 //
 // Without it, the build, the full suite in `npm test`'s order and concurrency, and then `check:pretest` (after the
 // suite, with the new seconds written: `test:verification` checks that every listed file exists, costliest first) run
@@ -74,9 +75,25 @@ function ciRuns(ids) {
     // (a run's last attempt: re-running a run removes the artifacts of its earlier attempts)
     const where = `repos/{owner}/{repo}/actions/runs/${runId}`;
     const { head_sha: commit, conclusion } = JSON.parse(gh("api", where));
-    // (a run that did not pass may lack a test job that never started, whose files the other runs would then cover)
-    if (conclusion !== "success") fail([`run ${runId} did not pass (${conclusion})`]);
     const jobs = JSON.parse(gh("api", `${where}/jobs`, "-q", ".jobs"));
+    // (the run counts by its test steps, "shard i of N": all N passed, so no shard is missing whose files the other
+    // runs would then cover alone; the run's own conclusion can differ, as a run cancelled after its jobs passed)
+    const shards = jobs
+      .flatMap((job) => job.steps ?? [])
+      .filter((found) => found.name.startsWith("Build and run tests"));
+    const counts = new Set(shards.map((found) => /, shard \d+ of (\d+)$/u.exec(found.name)?.[1]));
+    const count = Number([...counts][0]);
+    if (
+      counts.size !== 1 ||
+      !(count > 0) ||
+      shards.length !== count ||
+      shards.some((found) => found.conclusion !== "success")
+    )
+      fail([`run ${runId}'s test jobs did not all pass (run ${conclusion})`]);
+    if (conclusion !== "success")
+      process.stderr.write(
+        `measure-test-files: run ${runId} ended ${conclusion}, but its ${count} test jobs passed: counted\n`,
+      );
     const step = jobs
       .flatMap((job) => job.steps ?? [])
       .find((found) => found.name === "Check source before the tests");
@@ -87,12 +104,8 @@ function ciRuns(ids) {
     const kept = readdirSync(folder).map((name) =>
       JSON.parse(readFileSync(join(folder, name, "test-file-seconds.json"), "utf8")),
     );
-    // (a test job is one with a step that runs a shard of the tests)
-    const testJobs = jobs.filter((job) =>
-      (job.steps ?? []).some((found) => found.name.startsWith("Build and run tests")),
-    ).length;
-    if (testJobs === 0 || kept.length !== testJobs)
-      fail([`run ${runId} kept ${kept.length} test jobs' seconds, not ${testJobs}`]);
+    if (kept.length !== count)
+      fail([`run ${runId} kept ${kept.length} test jobs' seconds, not ${count}`]);
     const atOnce = new Set(kept.map((found) => found.filesAtOnce));
     if (atOnce.size !== 1)
       fail([`run ${runId}'s test jobs ran ${[...atOnce].join(" and ")} files at once`]);
