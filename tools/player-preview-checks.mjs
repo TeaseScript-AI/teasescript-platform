@@ -200,21 +200,28 @@ async function mediaPlaybackChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
   };
-  // Observe the Player's audio elements. As in a browser that grants no audio, every play() is refused until one is
-  // called from the player's click on "Enable audio" itself (`window.event` is that click only while it is dispatched),
-  // so silent priming cannot use up the refusal and only a deliberate retry can start playback. Later calls are
-  // admitted, as after a user activation.
+  // Observe the Player's audio elements. As in a browser that grants no audio, every play() is refused until the
+  // player's click on "Enable audio" retries the element refused last, with the source it was refused with: that is the
+  // story's audio, as silent priming happens at Start, before it. The retry must call play() while the click is
+  // dispatched or in its microtasks (`window.event` is that click only then); a retry after a timer is outside this
+  // check. Any other call, during the click or after it, stays refused until that retry, and later calls are admitted,
+  // as after a user activation.
   await page.addInitScript(() => {
     window.__played = [];
     const play = HTMLMediaElement.prototype.play;
     let refusing = true;
-    const retrying = () =>
+    let refused = null;
+    const retrying = (element) =>
       window.event?.type === "click" &&
       window.event.target instanceof Element &&
-      window.event.target.closest("button")?.textContent.trim() === "Enable audio";
+      window.event.target.closest("button")?.textContent.trim() === "Enable audio" &&
+      refused?.element === element &&
+      refused.source === element.src;
     HTMLMediaElement.prototype.play = function () {
-      if (refusing && !retrying())
+      if (refusing && !retrying(this)) {
+        refused = { element: this, source: this.src };
         return Promise.reject(new DOMException("Refused", "NotAllowedError"));
+      }
       refusing = false;
       window.__played.push(this);
       return play.call(this);
