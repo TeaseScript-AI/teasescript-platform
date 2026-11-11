@@ -132,6 +132,14 @@ jobs:
       - name: Structure signals (advisory)
         continue-on-error: true
         run: node tools/structure-report.mjs --diff HEAD^1 --moved --summary "$GITHUB_STEP_SUMMARY"
+      # The size of what the start route sends an implementing agent to read (`tools/reading-route-size.mjs`), with a
+      # pull request's difference from the merge's first parent: reported only, never failing.
+      - name: Reading route size (reported)
+        continue-on-error: true
+        timeout-minutes: 2
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && 'HEAD^1' || '' }}
+        run: node tools/reading-route-size.mjs ${BASE:+--base "$BASE"}
       - name: Build and run tests, shard 3 of 3
         env:
           NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
