@@ -96,17 +96,26 @@ const shaped = (value, required, optional = []) =>
 const modeName = (mode) =>
   (text(mode) && mode !== "") || (Number.isInteger(mode) && mode >= 0 && mode < 4);
 
+// (the forms every runner on main writes: a digest is sha256's first 32 hex digits; a count is a whole number's text; a
+// trace or questions hash is two 32-bit words, each in hex without leading zeros, side by side)
+const DIGEST = /^[0-9a-f]{32}$/;
+const COUNT = "(?:0|[1-9]\\d*)";
+const WORDS = "(?:0|[1-9a-f][0-9a-f]{0,7})(?:0|[1-9a-f][0-9a-f]{0,7})";
+const TRACE = new RegExp(`^${COUNT}/(${COUNT})/${WORDS}$`);
+const QUESTIONS = new RegExp(`^${COUNT}/${WORDS}$`);
+
 /** Why `c` is no compile `compile` writes, else undefined. */
 function compileFault(c) {
   if (!shaped(c, ["plan", "diagnostics", "checks", "error", "trace", "questions", "units"]))
     return "a compile without exactly its seven parts";
-  if (!textOrNull(c.plan) || !textOrNull(c.diagnostics) || !textOrNull(c.error))
-    return "a compile's plan, diagnostics or error neither text nor null";
-  if (!text(c.trace) || !/^\d+\/\d+\/[0-9a-f]+$/.test(c.trace))
-    return "a compile's trace not n/units/hash";
-  if (!text(c.questions) || !/^\d+\/[0-9a-f]+$/.test(c.questions))
-    return "a compile's questions not n/hash";
+  if (![c.plan, c.diagnostics].every((part) => part === null || (text(part) && DIGEST.test(part))))
+    return "a compile's plan or diagnostics neither a digest nor null";
+  if (!textOrNull(c.error)) return "a compile's error neither text nor null";
+  const trace = text(c.trace) ? TRACE.exec(c.trace) : null;
+  if (trace === null) return "a compile's trace not n/units/hash";
+  if (!text(c.questions) || !QUESTIONS.test(c.questions)) return "a compile's questions not n/hash";
   if (!whole(c.checks) || !whole(c.units)) return "a compile's checks or units no whole number";
+  if (c.units !== Number(trace[1])) return "a compile's units not its trace's";
   return undefined;
 }
 
@@ -144,6 +153,8 @@ function recordFault(r) {
   if (!text(r.set) || !text(r.name)) return "a set or name that is no text";
   if (r.key !== undefined && !(text(r.key) && /^[0-9a-f]{64}$/.test(r.key)))
     return "a key that is no sha256";
+  if (r.uncharged !== undefined && !(text(r.uncharged) && /^safety net .+ s$/.test(r.uncharged)))
+    return "a safety net reached that the runner does not word so";
   const ends = ["stalled", "uncharged"].filter((key) => r[key] !== undefined);
   if (ends.length > 0) {
     if (ends.length > 1 || !text(r[ends[0]])) return "a stall that is not one text";
@@ -157,7 +168,13 @@ function recordFault(r) {
         ["base", "head"].includes(run.tree) &&
         modeName(run.mode) &&
         text(run.at) &&
-        (run.analysis === undefined || whole(run.analysis))
+        // (a compile's run, or the stop search's, which alone counts its analyses)
+        (["stop search", "stop search, between"].includes(run.at)
+          ? whole(run.analysis)
+          : run.analysis === undefined &&
+            (run.at === "natural" ||
+              run.at === "analysis" ||
+              /^(demand|allowance) [1-9]\d*$/.test(run.at)))
       )
     )
       return "a stall's run not one the runner names";

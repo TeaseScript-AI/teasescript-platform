@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   cpSync,
   existsSync,
@@ -17,6 +18,9 @@ import { sharing } from "../../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../../src/type-inference/core/solver.js";
 import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import { inMode, MODES } from "../helpers/type-core-oracles.js";
+
+/** A plan or diagnostics digest as the runner writes one (sha256's first 32 hex digits), here of `label`. */
+const digest = (label: string) => createHash("sha256").update(label).digest("hex").slice(0, 32);
 
 const tool = resolve("tests/families/plans.mjs");
 
@@ -421,12 +425,12 @@ test("the plans summary prints a recorded mode as recorded and says once what a 
   const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
   const side = (units: number) => ({
-    plan: "p",
-    diagnostics: "d",
+    plan: digest("p"),
+    diagnostics: digest("d"),
     checks: 0,
     error: null,
-    trace: `1/${units}/0`,
-    questions: "1/0",
+    trace: `1/${units}/00`,
+    questions: "1/00",
     units,
   });
   const mode = (name: unknown) => ({ mode: name, base: side(3), head: side(2), same: false });
@@ -504,12 +508,12 @@ test("the plans summary names what differs in a demand row, gives it one class, 
   const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
   const compile = (plan: string, diagnostics: string, more: Record<string, unknown> = {}) => ({
-    plan,
-    diagnostics,
+    plan: digest(plan),
+    diagnostics: digest(diagnostics),
     checks: 1,
     error: null,
-    trace: "1/5/0",
-    questions: "1/0",
+    trace: "1/5/00",
+    questions: "1/00",
     units: 5,
     ...more,
   });
@@ -526,13 +530,13 @@ test("the plans summary names what differs in a demand row, gives it one class, 
         // (the base's output at the allowance is the head's unstopped plan, not its own: the base's stop alone)
         {
           demand: 64,
-          base: compile("B", "d", { questions: "2/0", trace: "1/4/0", units: 4 }),
-          head: compile("B", "e", { questions: "3/0", trace: "1/6/0", units: 6 }),
+          base: compile("B", "d", { questions: "2/00", trace: "1/4/00", units: 4 }),
+          head: compile("B", "e", { questions: "3/00", trace: "1/6/00", units: 6 }),
         },
         {
           demand: 16,
-          base: compile("X", "d", { trace: "1/4/0", units: 4 }),
-          head: compile("Y", "e", { trace: "1/3/0", units: 3 }),
+          base: compile("X", "d", { trace: "1/4/00", units: 4 }),
+          head: compile("Y", "e", { trace: "1/3/00", units: 3 }),
         },
       ],
     },
@@ -543,13 +547,13 @@ test("the plans summary names what differs in a demand row, gives it one class, 
       demands: [
         {
           demand: 32,
-          base: compile("P", "d", { questions: "2/0" }),
-          head: compile("P", "d", { questions: "3/0" }),
+          base: compile("P", "d", { questions: "2/00" }),
+          head: compile("P", "d", { questions: "3/00" }),
         },
         {
           demand: 8,
-          base: compile("P", "d", { trace: "1/4/0", units: 4 }),
-          head: compile("P", "d", { trace: "1/3/0", units: 3 }),
+          base: compile("P", "d", { trace: "1/4/00", units: 4 }),
+          head: compile("P", "d", { trace: "1/3/00", units: 3 }),
         },
       ],
     },
@@ -586,12 +590,12 @@ test("the plans summary refuses, naming file, line and fault, any line that is n
   const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
   const compile = (more: Record<string, unknown> = {}) => ({
-    plan: "p",
-    diagnostics: "d",
+    plan: digest("p"),
+    diagnostics: digest("d"),
     checks: 0,
     error: null,
-    trace: "1/5/a",
-    questions: "1/b",
+    trace: "1/5/811c9dc5c2b2ae3d",
+    questions: "1/a0",
     units: 5,
     ...more,
   });
@@ -607,13 +611,18 @@ test("the plans summary refuses, naming file, line and fault, any line that is n
         base: compile(),
         head: compile(),
         same: true,
-        demands: [{ demand: 16, base: compile(), head: compile({ trace: "1/4/a", units: 4 }) }],
+        demands: [{ demand: 16, base: compile(), head: compile({ trace: "1/4/a0", units: 4 }) }],
       },
     ],
   });
   // (each row one fault, which only its own clause refuses; the valid record first, which must pass)
-  const rows: [string, (r: ReturnType<typeof valid>) => object | string, RegExp][] = [
-    ["a valid record", (r) => r, /^$/],
+  // (a row whose fault is null passes)
+  const rows: (readonly [
+    string,
+    (r: ReturnType<typeof valid>) => object | string,
+    RegExp | null,
+  ])[] = [
+    ["a valid record", (r) => r, null],
     ["not JSON", () => "{not json", /no JSON/],
     ["a key that is no hash", (r) => ({ ...r, key: "k" }), /no sha256/],
     ["an unknown field", (r) => ({ ...r, extra: 1 }), /no source record/],
@@ -641,10 +650,38 @@ test("the plans summary refuses, naming file, line and fault, any line that is n
       /exactly its seven parts/,
     ],
     [
-      "a plan neither text nor null",
+      "a plan neither a digest nor null",
       (r) => ({ ...r, modes: [{ ...r.modes[0], base: compile({ plan: 1 }) }] }),
-      /neither text nor null/,
+      /neither a digest nor null/,
     ],
+    // (each value format the runner writes, one malformed value a row: round 2's B1)
+    ...(
+      [
+        ["a plan of no digest", { plan: "not-a-hash" }, /neither a digest nor null/],
+        ["diagnostics of 33 digits", { diagnostics: "b".repeat(33) }, /neither a digest nor null/],
+        ["a digest in capitals", { plan: "A".repeat(32) }, /neither a digest nor null/],
+        ["an error that is no text", { error: 1 }, /error neither text nor null/],
+        ["a trace hash of one word", { trace: "1/5/a" }, /trace not/],
+        ["a trace hash of 17 digits", { trace: `1/5/${"a".repeat(17)}` }, /trace not/],
+        ["a trace word with a leading zero", { trace: "1/5/00a" }, /trace not/],
+        ["a trace count with a leading zero", { trace: "01/5/a0" }, /trace not/],
+        ["a questions hash of one word", { questions: "1/a" }, /questions not/],
+        ["a questions hash of 17 digits", { questions: `1/${"a".repeat(17)}` }, /questions not/],
+        ["units apart from the trace's", { units: 6 }, /units not its trace's/],
+      ] as const
+    ).map(
+      ([label, part, fault]) =>
+        [
+          label,
+          (r: ReturnType<typeof valid>) => ({
+            ...r,
+            modes: [
+              { ...r.modes[0], demands: [{ demand: 16, base: compile(), head: compile(part) }] },
+            ],
+          }),
+          fault,
+        ] as const,
+    ),
     [
       "checks below zero",
       (r) => ({ ...r, modes: [{ ...r.modes[0], base: compile({ checks: -1 }) }] }),
@@ -690,13 +727,52 @@ test("the plans summary refuses, naming file, line and fault, any line that is n
       }),
       /run not one the runner names/,
     ],
+    ...(
+      [
+        // (the runs a stall names, as every runner on main words them: null fault, the record passes)
+        [{ at: "natural" }, null],
+        [{ at: "demand 16" }, null],
+        [{ at: "allowance 1027" }, null],
+        [{ at: "analysis" }, null],
+        [{ at: "stop search", analysis: 0 }, null],
+        [{ at: "stop search, between", analysis: 3 }, null],
+        [{ at: "somewhere" }, /run not one the runner names/],
+        [{ at: "demand 016" }, /run not one the runner names/],
+        [{ at: "natural", analysis: 1 }, /run not one the runner names/],
+        [{ at: "stop search" }, /run not one the runner names/],
+      ] as const
+    ).map(
+      ([run, fault]) =>
+        [
+          `a stall at ${JSON.stringify(run)}`,
+          () => ({
+            set: "s",
+            name: "n",
+            stalled: "units",
+            run: { tree: "head", mode: "forward", ...run },
+            work: 9,
+            allowance: 2,
+          }),
+          fault,
+        ] as const,
+    ),
+    [
+      "a safety net reached",
+      () => ({ set: "s", name: "n", uncharged: "safety net 1800 s", run: null }),
+      null,
+    ],
+    [
+      "a safety net worded otherwise",
+      () => ({ set: "s", name: "n", uncharged: "timeout", run: null }),
+      /does not word so/,
+    ],
   ];
   for (const [at, [label, change, fault]] of rows.entries()) {
     const changed = change(valid());
     const file = join(folder, `row-${at}.jsonl`);
     writeFileSync(file, `${typeof changed === "string" ? changed : JSON.stringify(changed)}\n`);
     const ran = spawnSync(process.execPath, [tool, "summary", file], { encoding: "utf8" });
-    if (at === 0) assert.equal(ran.status, 0, `${label}: ${ran.stderr}`);
+    if (fault === null) assert.equal(ran.status, 0, `${label}: ${ran.stderr}`);
     else {
       assert.equal(ran.status, 2, `${label}: ${ran.stdout}`);
       assert.match(ran.stderr, new RegExp(`row-${at}\\.jsonl:1: `), label);
