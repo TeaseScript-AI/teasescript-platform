@@ -34,6 +34,7 @@ import {
   type TopologyBridge,
   type TopologyConnections,
   checkpointSnapshot,
+  withinHostTime,
 } from "../helpers/player/worker-topology.js";
 
 /*
@@ -321,10 +322,11 @@ function answering(connection: TopologyBridge): () => Promise<boolean> {
 /** Waits until the session shows its question, and the store keeps it there. */
 async function keptAtTheQuestion(player: RecoveryHost, kept: KeptSessionStore) {
   await until(() => player.session.value?.state.foregroundAction != null, "the question shows");
-  for (let turn = 0; ; turn++) {
+  // The keep follows the host's capture of the session, which a Worker gives in its own time.
+  for (const within = withinHostTime(); ;) {
     const stored = await kept.session(SCOPE);
     if (stored !== null && stored.events.length > 0) return stored;
-    assert.ok(turn < 200, "the session was not kept");
+    assert.ok(within(), "the session was not kept");
     await turns(1);
   }
 }
@@ -729,7 +731,7 @@ RERUN.rows(
     });
     holding = true;
     await player.activate();
-    await until(() => gate.held !== null, "the publish held");
+    await until(() => gate.held !== null, "the publish held", "host");
     await connections.first.lose();
     await turns(10);
     assert.equal(player.recovery.value, null, "the offer waits for the publish");
@@ -1455,7 +1457,7 @@ async function storedRecord(context: TestContext, topology: Topology, kind: "end
     };
   }
   await answerFirst(earlier.player);
-  for (let turn = 0; ; turn++) {
+  for (const within = withinHostTime(); ;) {
     const ended = await kept.session(SCOPE);
     if (
       ended !== null &&
@@ -1463,7 +1465,7 @@ async function storedRecord(context: TestContext, topology: Topology, kind: "end
       earlier.player.session.value?.state.status === "halted"
     )
       return ended;
-    assert.ok(turn < 200, "the ended session was not kept");
+    assert.ok(within(), "the ended session was not kept");
     await turns(1);
   }
 }
@@ -1541,8 +1543,8 @@ RERUN.rows(
     const { connections, player } = await page(context, topology, { kept });
     await player.activate();
     await until(() => player.session.value?.state.foregroundAction != null, "the question");
-    for (let turn = 0; (await store.session(SCOPE)) === null; turn++) {
-      assert.ok(turn < 200, "the session was not kept");
+    for (const within = withinHostTime(); (await store.session(SCOPE)) === null;) {
+      assert.ok(within(), "the session was not kept");
       await turns(1);
     }
     await connections.first.lose();

@@ -717,7 +717,11 @@ RERUN.rows(
     const named: (number | null)[] = [];
     context.after(watch(host.traceId, (id) => void named.push(id), { flush: "sync" }));
     transport.release();
-    await until(() => host.traceId.value !== null && host.traceId.value !== first, "a new trace");
+    await until(
+      () => host.traceId.value !== null && host.traceId.value !== first,
+      "a new trace",
+      "host",
+    );
     assert.deepEqual(named, [host.traceId.value], "only the newest intent's reply named a trace");
     const again = await host.debugView(VARIABLES);
     assert.equal(again?.traceId, host.traceId.value, "the view is of the newest trace");

@@ -169,15 +169,18 @@ for (const delayMs of [0, 50, 250] as const)
     async (context, topology, end) => {
       const { player, elements, start, reports } = await mount(context, topology, delayMs);
       await start('playAudio async "bell.mp3"\nsay "after", instant\nshowButton "Done"\nexit');
-      for (let turn = 0; !elements.some((element) => element.src.endsWith("bell.mp3")); turn++) {
-        assert.ok(turn < 200, "the medium did not start");
+      for (
+        const within = withinHostTime();
+        !elements.some((element) => element.src.endsWith("bell.mp3"));
+      ) {
+        assert.ok(within(), "the medium did not start");
         await later();
       }
       elements
         .find((element) => element.src.endsWith("bell.mp3"))!
         .dispatchEvent(new Event("loadedmetadata"));
-      for (let turn = 0; !transcript(player).includes("after"); turn++) {
-        assert.ok(turn < 400, "the script did not go on");
+      for (const within = withinHostTime(); !transcript(player).includes("after");) {
+        assert.ok(within(), "the script did not go on");
         await later();
       }
       await later(delayMs + 20);
@@ -192,8 +195,11 @@ RERUN.rows(
   async (context, topology, end) => {
     const { player, elements, start, reports } = await mount(context, topology, 50);
     await start('playAudio async "old.mp3"\nshowButton "Old"\nexit');
-    for (let turn = 0; !elements.some((element) => element.src.endsWith("old.mp3")); turn++) {
-      assert.ok(turn < 200, "the old medium did not start");
+    for (
+      const within = withinHostTime();
+      !elements.some((element) => element.src.endsWith("old.mp3"));
+    ) {
+      assert.ok(within(), "the old medium did not start");
       await later();
     }
     const old = elements.find((element) => element.src.endsWith("old.mp3"))!;
@@ -201,15 +207,18 @@ RERUN.rows(
     await start('playAudio async "new.mp3"\nsay "new after", instant\nshowButton "New"\nexit');
     const replacing = player.session.value!.id;
     old.dispatchEvent(new Event("loadedmetadata"));
-    for (let turn = 0; !elements.some((element) => element.src.endsWith("new.mp3")); turn++) {
-      assert.ok(turn < 200, "the new medium did not start");
+    for (
+      const within = withinHostTime();
+      !elements.some((element) => element.src.endsWith("new.mp3"));
+    ) {
+      assert.ok(within(), "the new medium did not start");
       await later();
     }
     elements
       .find((element) => element.src.endsWith("new.mp3"))!
       .dispatchEvent(new Event("loadedmetadata"));
-    for (let turn = 0; !transcript(player).includes("new after"); turn++) {
-      assert.ok(turn < 400, "the new session did not go on");
+    for (const within = withinHostTime(); !transcript(player).includes("new after");) {
+      assert.ok(within(), "the new session did not go on");
       await later();
     }
     await later(80);
