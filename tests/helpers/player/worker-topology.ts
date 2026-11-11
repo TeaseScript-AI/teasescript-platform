@@ -117,8 +117,10 @@ export function inProcessLoss(
 ): () => void {
   const listeners: ((error: Client.BridgeLostError) => void)[] = [];
   bridge.client.onLoss = (listener) => void listeners.push(listener);
+  // The loss ends the client itself, not through a `terminate` a test counts as the Player's.
+  const end = bridge.client.terminate.bind(bridge.client);
   return () => {
-    bridge.client.terminate();
+    end();
     const lost = new Lost("The engine Worker failed: injected.");
     for (const listener of listeners) listener(lost);
   };
@@ -194,14 +196,25 @@ export async function topologyBridge(
  * The connections of one Player on `topology`: the first, and each fresh one its `nextConnection` (`next`) opens after a
  * loss, all of `topology` and ended after the test. `calls()` counts `next`'s calls; `failNext()` makes the next call
  * reject, as a connection that cannot open; `armNext(step)` runs `step` on the next fresh connection, and waits for it,
- * before `next` gives it.
+ * before `next` gives it. `ends(connection)` counts the calls of its client's `terminate()` during the test.
  */
 export async function topologyConnections(
   context: TestContext,
   topology: Topology,
   options: { readonly delayMs?: number } = {},
 ) {
-  const made: TopologyBridge[] = [await topologyBridge(context, topology, options)];
+  const ends = new Map<TopologyBridge, number>();
+  const counted = (connection: TopologyBridge) => {
+    const client = connection.bridge.client;
+    const terminate = client.terminate.bind(client);
+    ends.set(connection, 0);
+    client.terminate = () => {
+      ends.set(connection, (ends.get(connection) ?? 0) + 1);
+      terminate();
+    };
+    return connection;
+  };
+  const made: TopologyBridge[] = [counted(await topologyBridge(context, topology, options))];
   let calls = 0;
   let failing = false;
   let armed: ((fresh: TopologyBridge) => void | Promise<void>) | null = null;
@@ -214,6 +227,7 @@ export async function topologyConnections(
     /** The connection opened last. */
     current: () => made.at(-1)!,
     calls: () => calls,
+    ends: (connection: TopologyBridge) => ends.get(connection) ?? 0,
     failNext: () => void (failing = true),
     armNext: (step: (fresh: TopologyBridge) => void | Promise<void>) => void (armed = step),
     async next(): Promise<PlayerBridge> {
@@ -222,7 +236,7 @@ export async function topologyConnections(
         failing = false;
         throw new Error("The engine Worker could not be opened.");
       }
-      const fresh = await topologyBridge(context, topology, options);
+      const fresh = counted(await topologyBridge(context, topology, options));
       made.push(fresh);
       const step = armed;
       armed = null;

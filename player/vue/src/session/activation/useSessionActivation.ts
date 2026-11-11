@@ -68,8 +68,15 @@ interface SessionActivationHost {
   readonly connection: {
     /** The plan token of the source a replacement prepares again, or `null` when none can. */
     replaceablePlan(): string | null;
-    /** Opens a fresh connection and prepares the remembered source in it; resolves with that preparation's reply. */
-    replace(): Promise<{ readonly result: { readonly kind: string; readonly plan?: string } }>;
+    /** Opens a fresh connection and prepares the remembered source in it; resolves with both. */
+    replace(): Promise<{
+      readonly host: PlayerBridge;
+      readonly prepared: Promise<{
+        readonly result: { readonly kind: string; readonly plan?: string };
+      }>;
+    }>;
+    /** Gives up the fresh connection of a failed recovery, if it is still the current one. */
+    giveUp(candidate: PlayerBridge): void;
   };
   /** Whether a state Debug's rewind restored is shown for inspection. */
   readonly inspecting: () => boolean;
@@ -571,10 +578,14 @@ export function useSessionActivation({
    */
   async function recover(kind: "start" | "continue", token: number, sample: ClickSample) {
     const owns = () => !isDisposed() && token === activationToken;
+    // The fresh connection this click took: the Player's once its session shows or the start page offers Start.
+    let candidate: PlayerBridge | null = null;
     try {
       await keptOwner().settleKeepWork();
       if (!owns()) return;
-      const prepared = await connection.replace();
+      const replacement = await connection.replace();
+      candidate = replacement.host;
+      const prepared = await replacement.prepared;
       if (!owns()) return;
       const plan = prepared.result.kind === "prepared" ? prepared.result.plan : undefined;
       if (plan === undefined || lastStart.value === null)
@@ -603,11 +614,17 @@ export function useSessionActivation({
     } catch (error) {
       if (!owns()) return;
       console.error("[player] host error", error);
-      // The click cleared the session: the choice shows again on the start page, and the camera the click opened goes,
-      // which no stop releases while the Player stays stopped.
-      camera.release();
+      // The click cleared the session: the choice shows again on the start page.
       recoveryShown.value = { kind, shown: true };
       offer.value = kind;
+    } finally {
+      // Every way out that leaves the Player lost (a failure, a refused begin, another loss) gives up what the click
+      // acquired: its fresh connection, and while it still owns the click, its camera, which no stop releases while the
+      // Player stays stopped. An unmount gives the connection up at the disposal, which a held reply never reaches.
+      if (lost.value) {
+        if (candidate !== null) connection.giveUp(candidate);
+        if (owns()) camera.release();
+      }
     }
   }
   /** A begin's failure: the error stop, or, for a recovery's begin, the same offer again, as after a loss. */
