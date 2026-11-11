@@ -104,8 +104,9 @@ export function useStorageRoute({
     clear: () => routed((route) => reported(route, route.provider.clear())),
   };
   /**
-   * Sends storage operations where `next` resolves from now on, once the operations issued before have finished where
-   * they were issued. `next` must not reject.
+   * Sends storage operations where `next` resolves from now on. Leaving the debug room's route or the captured route, it
+   * first lets the operations issued before finish where they were issued (`flush`); the plain route does not wait, so
+   * an operation issued before can finish after the switch. `next` must not reject.
    */
   function switchStorage(next: () => Promise<StorageRoute>): Promise<void> {
     const previous = storageRoute!;
