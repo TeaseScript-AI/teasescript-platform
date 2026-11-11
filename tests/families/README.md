@@ -11,6 +11,7 @@ Which tool answers which question:
 | --- | --- |
 | Does an area's analysis (its publication, its stops) differ between two trees? | `run.mjs`, `stalls.mjs` ([Running an area](#running-an-area)) |
 | Does a set's plan, diagnostics, charge trace or questions on the core's route differ between two trees? | `plans.mjs` ([Plans](#plans)) |
+| What differs in a differing demand row, and which tree's output does the allowance stop? | `plans.mjs summary` ([Plans](#plans)) |
 | Where does the core's route differ from the current checker on one tree (the shadow gate)? | `shadow.mjs`, `shadow-classify.mjs` ([Shadow](#shadow)) |
 | Does a stop let a value through that the natural plan rejects? | `stop-runs.mjs` ([Stop runs](#stop-runs)) |
 | What do the checker, the core and the core's route each answer for a list of cases, plans and runs included? | `differential.mjs` ([Differential records](#differential-records)) |
@@ -345,8 +346,11 @@ units past `--units` (4) times its program's allowance, the allowance of the sou
 test allowance; a run past the safety net, `--timeout` (1,800 s), makes its source `uncharged`, never a stall. One JSON
 line per source (its set, name and `key`) goes to `--out`, whose sources, by name and key, a rerun with it counts as
 recorded without running them again, and a summary to stdout; `plans.mjs summary <records>...` classifies the records
-(identical, work only, questions, publication, stops) and lists each difference, stall and uncharged source. A record
-and a stall's run name their mode by that `name`; a record from before #2342 holds a number, the mode's index in
+(identical, work only, questions, publication, stops) and lists each difference, stall and uncharged source. A
+differing demand row takes the same one class (publication where the plan, the diagnostics or the error differ, else
+questions, else work; unavailable where a part is unrecorded), lists every part apart, and says which tree's output the
+allowance stops against that tree's own unstopped compile in the mode (base, head, both or neither), each counted. A
+record and a stall's run name their mode by that `name`; a record from before #2342 holds a number, the mode's index in
 `HELD_MODES` at the commit that wrote it (`forward`, `reversed`, `forward, unshared`, `reversed, unshared` from
 3804b7d3f, where the table began, to this day; the oracle's `MODES` orders them otherwise), printed as that number and
 never translated. A builder runs the head tree's copy instead of copying a kit, and extends it here where a comparison
