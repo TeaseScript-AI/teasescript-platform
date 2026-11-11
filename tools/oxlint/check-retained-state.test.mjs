@@ -6,9 +6,9 @@ import { repositoryRoot } from "./files.mjs";
 
 /** The lines the check reports in one scratch file's `text`, checked whole or at its top level only. */
 const reported = (text, level = "file") =>
-  retainedStateDiagnostics([{ file: "src/type-inference/core/scratch.ts", text, level }]).map(
-    ({ line }) => line,
-  );
+  retainedStateDiagnostics([{ file: "src/type-inference/core/scratch.ts", text, level }])
+    .map(({ line }) => line)
+    .sort((x, y) => x - y);
 
 test("the type core's owners make every collection they keep through `Retained` (#1072)", () => {
   assert.deepEqual(checkRetainedState(repositoryRoot), []);
@@ -41,7 +41,8 @@ test("a collection made where an owner can keep it is refused, in every such pla
         "}",
       ].join("\n"),
     ),
-    [2, 3, 4, 4, 5, 6, 7, 10, 11, 12, 15, 16, 20],
+    // (line 3's private field twice: a collection kept as made, and a private field the recorder cannot see)
+    [2, 3, 3, 4, 4, 5, 6, 7, 10, 11, 12, 15, 16, 20],
   );
 });
 
@@ -86,5 +87,42 @@ test("a file scoped at its top level is checked there only: its classes keep no 
     "}",
   ].join("\n");
   assert.deepEqual(reported(text, "module"), [1]);
-  assert.deepEqual(reported(text, "file"), [1, 3]);
+  assert.deepEqual(reported(text, "file"), [1, 3, 3]);
+});
+
+test("a private field is a readonly `Retained` collection, exposed by its class's `hidden`, or refused (#1072)", () => {
+  assert.deepEqual(
+    reported(
+      [
+        "class Owner {",
+        "  readonly #made = Retained.map<string, number>('Owner.#made');",
+        "  #lazy: Map<string, number> | null = null;",
+        "  #size: Set<string> | null = null;",
+        "  readonly #given: Owner | null;",
+        "  #slot = Retained.set<string>('Owner.#slot');",
+        "  public constructor(given: Owner | null) {",
+        "    this.#given = given;",
+        "    Retained.owner(this, 'Owner', (owner) => ({ lazy: owner.#lazy, size: owner.#size?.size }));",
+        "  }",
+        "}",
+        "class Static {",
+        "  static readonly #hidden = (owner: Static) => ({ count: owner.#count });",
+        "  #count = 0;",
+        "  #other = 0;",
+        "  public constructor() {",
+        "    Retained.owner(this, 'Static', Static.#hidden);",
+        "  }",
+        "}",
+        "class GuardIndex {",
+        "  #narrowing = null;",
+        "  #queries = null;",
+        "  #other = null;",
+        "}",
+        "class Unregistered {",
+        "  #state = 0;",
+        "}",
+      ].join("\n"),
+    ),
+    [4, 5, 6, 15, 23, 26],
+  );
 });
