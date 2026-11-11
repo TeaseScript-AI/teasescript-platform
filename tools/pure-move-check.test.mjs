@@ -100,7 +100,7 @@ test(
       assert.equal(stale.status, 1, stale.out);
       assert.match(
         stale.out,
-        /declaration matching no unmoved line: allow\.json \(added\) "  \\"c\.ts\\": 2": no such line/u,
+        /declaration matching no line that needs one \(.*\): allow\.json \(added\) "  \\"c\.ts\\": 2": no such line/u,
       );
     } finally {
       move.done();
@@ -196,7 +196,7 @@ test(
       assert.equal(numbered.status, 2, numbered.out);
       assert.match(
         numbered.out,
-        /a declaration is not \{ file, side: "added" \| "removed", text, reason \}/u,
+        /names its line by "text" now, not "line": replace "line" with that line's exact text, LF-delimited, in that side's blob \(removed: the merge base; added: HEAD\), keeping any CR/u,
       );
     } finally {
       shifted.done();
@@ -225,6 +225,55 @@ test(
     } finally {
       twice.done();
     }
+  },
+);
+
+test(
+  "a declaration is taken only by a line no form admits; a blob one names must be UTF-8; a CRLF line's text keeps its CR (#2461)",
+  { timeout: 60_000 },
+  () => {
+    const run = (before, after, entries) => {
+      const move = moveOf(before, after);
+      try {
+        return move.run("--declare", move.declare(entries));
+      } finally {
+        move.done();
+      }
+    };
+    const entry = (file, side, text) => ({ file, side, text, reason: "a witness" });
+    // the changed import line is admitted as an import: the declaration goes to the equal line inside the template
+    const imported = 'import x from "y";';
+    const template = run(
+      { "a.js": 'import {default as x} from "y";\nconst a = `start\nend`;\n' },
+      { "a.js": `${imported}\nconst a = \`start\n${imported}\nend\`;\n` },
+      [entry("a.js", "added", imported)],
+    );
+    assert.equal(template.status, 0, template.out);
+    assert.match(template.out, /declared: a\.js:3 \(added\): a witness/u);
+    // bytes that are not UTF-8 read as U+FFFD: the check stops before a declaration could match them
+    const replaced = [entry("a.txt", "added", "\uFFFD")];
+    for (const byte of [0xff, 0xfe]) {
+      const bytes = Buffer.concat([Buffer.from("anchor\n"), Buffer.from([byte, 0x0a])]);
+      const malformed = run({ "a.txt": "anchor\n" }, { "a.txt": bytes }, replaced);
+      assert.equal(malformed.status, 2, malformed.out);
+      assert.match(malformed.out, /a\.txt \(added\) is not UTF-8/u);
+    }
+    // a line that is U+FFFD, encoded, is declared by it
+    const genuine = run({ "a.txt": "anchor\n" }, { "a.txt": "anchor\n\uFFFD\n" }, replaced);
+    assert.equal(genuine.status, 0, genuine.out);
+    // a CRLF line's text keeps the CR: without it the declaration matches nothing
+    const crlf = { before: { "a.txt": "old\r\n" }, after: { "a.txt": "new\r\n" } };
+    const kept = run(crlf.before, crlf.after, [
+      entry("a.txt", "removed", "old\r"),
+      entry("a.txt", "added", "new\r"),
+    ]);
+    assert.equal(kept.status, 0, kept.out);
+    const dropped = run(crlf.before, crlf.after, [
+      entry("a.txt", "removed", "old\r"),
+      entry("a.txt", "added", "new"),
+    ]);
+    assert.equal(dropped.status, 1, dropped.out);
+    assert.match(dropped.out, /unadmitted: a\.txt:1 \(added\)/u);
   },
 );
 
