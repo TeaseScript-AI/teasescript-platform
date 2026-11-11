@@ -47,7 +47,8 @@ import {
 } from "./key-ids.js";
 import { contractOfOp } from "./operations.js";
 import { projected } from "./positions.js";
-import { defaultOf, termAt, typeKinds, writtenDefault, writtenOf } from "./terms.js";
+import { defaultOf, termAt, typeKinds, writtenOf } from "./terms.js";
+import { writtenDefault } from "./written-default.js";
 
 // The kinds a value can have, by its kind and at a path, mirroring the value side's dispatch.
 
