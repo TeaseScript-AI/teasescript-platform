@@ -47,16 +47,17 @@ export function useEngineConnection({
       : null;
   // This Player's hold on its bridge (`PlayerBridge.claim`): one live Player per bridge.
   const claim = Symbol("Player");
-  // The bridge once this Player took it, or `null` before.
-  let held: PlayerBridge | null = null;
+  // The bridge once the connection is ready (`connected` settled with it), or `null` before; also for a Player disposed
+  // meanwhile, which does not take it.
+  let settled: PlayerBridge | null = null;
   // Once the host is reachable, and only while this Player lives: it takes the bridge, observes its loss, and sends what
   // waited for it before any Start that waits for it. A host that never became reachable, or one another Player holds,
   // is the `bridge` promise's failure, which its own callers handle.
   const connected = (options.bridge ?? Promise.resolve(bridge!)).then((reached) => {
+    settled = reached;
     if (isDisposed()) return reached;
     claimed(reached.claim(claim));
     bridge = reached;
-    held = reached;
     reached.client.onLoss(lost);
     ready(reached);
     return reached;
@@ -77,14 +78,14 @@ export function useEngineConnection({
     currentConnection: (): Promise<PlayerBridge> => connected,
     /**
      * Compiles `script` in the engine's host without running it (`prepare`): the one place the Player's pages send it.
-     * It is sent at once when this Player holds the bridge, else as soon as it does.
+     * It is sent at once when the connection is ready, else as soon as it is.
      */
     prepareScriptSource(
       script: string | PlayerProject,
     ): Promise<BridgeResult<OpResult<"prepare">>> {
       const send = (host: PlayerBridge) =>
         host.client.request("prepare", { source: { kind: "source", script } });
-      return held !== null ? send(held) : connected.then(send);
+      return settled !== null ? send(settled) : connected.then(send);
     },
     /** Gives the bridge up at the Player's disposal, for a later Player to claim. */
     release(): void {
