@@ -39,20 +39,6 @@ import {
 } from "../helpers/player/rewind-host.js";
 import { sourceStart } from "../helpers/prepared-plan.js";
 
-/** Ends the capture `reportsInto` began, at the check of what it captured, so that a later host error prints again. */
-function endCapture() {
-  // EVIDENCE: fixture: `reportsInto` replaced `console.error` by a mock of the test's context, a proxy whose `mock` a read finds but `in` does not.
-  const capture: unknown = (console.error as { readonly mock?: unknown }).mock;
-  assert.ok(
-    typeof capture === "object" &&
-      capture !== null &&
-      "restore" in capture &&
-      typeof capture.restore === "function",
-    "the capture reportsInto began",
-  );
-  capture.restore();
-}
-
 /*
  * L5i.6's handoff, by the lifecycle grammar (`tests/helpers/player/rewind-lifecycle.ts`): each schedule holds one step or
  * adoption at one boundary, inserts one lifecycle event there, lets the operation go, and compares the quiescent page
@@ -91,424 +77,443 @@ async function handoffRow(
     // The owner is a plain object, whose methods the composable calls through it.
     mutate?.(host.rewind.owner);
     const want = expectation(each);
-    // The host errors the Player reports, which may be only those this row raises itself (asserted last).
+    // The host errors the Player reports: exactly those this row raises itself, compared however the row ends, in a
+    // hook registered after the row's own teardown hooks, so that a negative control's expected failure hides none.
     const reported: unknown[] = [];
     reportsInto(context, reported);
-    // An adoption that succeeds adopts by its answer, so the session runs on from the restored state; after a loss its
-    // completion is refused, and nothing runs on.
-    const adopted = each.operation.startsWith("adopt") && each.outcome === "succeeds" && !want.lost;
-    // Traced, so a restart shows as a new epoch of the value trace.
-    host.setDebugTracing(true);
-    // Each shown state as the page showed it, captured apart from the history: the first point Back restores, and the
-    // tip Forward does.
-    const shownStates: { readonly snapshot: RuntimeSnapshot; readonly sceneTimeMs: number }[] = [];
-    const capture = () => {
-      const page = shownView(host);
-      shownStates.push({
-        snapshot: playerRuntimeSnapshot(page),
-        sceneTimeMs: page.state.observedSessionTimeMs,
-      });
-    };
-    await start(context, host);
-    capture();
-    await choose(context, host, "One");
-    capture();
-    await choose(context, host, "Red");
-    capture();
-    // A clear is admitted only once the session ended.
-    if (each.event === "clear on an ended session") {
-      await choose(context, host, "A");
-      assert.equal(host.session.value?.state.status, "halted");
-      capture();
-    }
-    const bridge = await host.bridge;
-    // The event's Start is prepared before anything is held: a held read can hold the host's queue, behind which a
-    // `prepare` would wait for the hold that the event comes before.
-    const eventStart =
-      each.event === "Start prepared" || each.event === "replacement"
-        ? await sourceStart(host.bridge, script, () => ({ ...host.scriptStorageOptions() }))
-        : null;
-    const live = shownView(host);
-    let restored: PlayerSession | null = null;
-    if (each.operation !== "back") {
-      assert.equal(await backTo(rewind, 1), true);
-      await settle(context);
-      restored = shownView(host);
-    }
-    // The candidates the host prepares, from their replies, and the adoptions' captures, by their requests.
-    const candidates: string[] = [];
-    let captures = 0;
-    const replaces = () => storage?.calls.filter((call) => call === "replace").length ?? 0;
-    interceptSends(context, bridge.client, async (op, _args, send) => {
-      if (op === "captureStorage") captures += 1;
-      const reply = await send();
-      if ((op === "rewindBack" || op === "rewindForward") && typeof reply.session === "string")
-        candidates.push(reply.session);
-      return reply;
-    });
-    // The hold: a step's snapshot read or its restart gate, or an adoption's saved-data write; `reached` says whether
-    // the operation arrived there.
-    let release: () => void;
-    let reached: () => boolean;
-    let acknowledged: Promise<void> = Promise.resolve();
-    const arrival = (arrived: Promise<void>) => {
-      let at = false;
-      void arrived.then(() => (at = true));
-      return () => at;
-    };
-    if (each.boundary === "read") {
-      const held = made.holdGets();
-      release = held;
-      reached = held.reached;
-    } else if (each.boundary === "acknowledgement") {
-      const held = holdRead(context, bridge, "rewindCommit", "reply", false);
-      acknowledged = held.arrived;
-      reached = arrival(held.arrived);
-      release = held.release;
-    } else if (each.boundary === "gate") {
-      let open!: () => void;
-      let at = false;
-      const gate = new Promise<void>((resolve) => (open = resolve));
-      const original = host.rewind.beforeRestart.bind(host.rewind);
-      host.rewind.beforeRestart = async () => {
-        at = true;
-        await gate;
-        if (gated && each.outcome === "fails") throw new Error("The restart gate failed.");
-        await original();
-      };
-      release = () => open();
-      reached = () => at;
-    } else if (local) {
-      // Saved data that live only in the session: held where the adoption reads them; a failing one fails that read.
-      const held = holdRead(context, bridge, "captureStorage", "reply", each.outcome === "fails");
-      release = held.release;
-      reached = arrival(held.arrived);
-    } else {
-      // The provider's replacement, admitted and held; a failing one fails there.
-      // The import's own replacement, later, is not the adoption's and succeeds.
-      if (each.outcome === "fails") storage!.failNextReplace();
-      const held = storage!.holdReplaces();
-      release = held;
-      reached = held.reached;
-    }
-    const recordingBefore = await host.debugRecording();
-    const epochBefore = hostTrace(bridge)!.status().epoch;
-    // What each identity is before the operation, and the events a step restores as the history names them: Back's
-    // first point, or the state Forward restores.
-    const before = {
-      live: { snapshot: playerRuntimeSnapshot(live), events: live.events, marks: live.marks },
-      restored:
-        restored === null
-          ? null
-          : {
-              snapshot: playerRuntimeSnapshot(restored),
-              events: restored.events,
-              marks: restored.marks,
-            },
-    };
-    const history = host.rewind.owner.view.value!;
-    const target =
-      each.operation === "forward"
-        ? history.timeline.inspection?.future
-        : history.timeline.points[0];
-    const targetEvents = target === undefined || target === null ? null : history.eventsAt(target);
-    if (!each.operation.startsWith("adopt")) assert.ok(targetEvents !== null, "the step's target");
-    const replacesBefore = replaces();
-    let inputAdmitted: boolean | null = null;
-    const operation: Promise<unknown> =
-      each.operation === "forward"
-        ? rewind.forward()
-        : each.operation === "Return"
-          ? rewind
-              .returnToSession()
-              .then((returned) =>
-                assert.equal(
-                  returned,
-                  each.outcome === "succeeds" && !want.lost && each.event !== "disposal",
-                  "returned",
-                ),
-              )
-          : each.operation === "reinstate"
-            ? Promise.resolve(made.debug.stop())
-            : each.operation.startsWith("adopt")
-              ? (async () => {
-                  // The answer adopts the restored state; it is evaluated only if its input is admitted.
-                  // A preparation that rejects (its host lost) admits nothing either.
-                  inputAdmitted = await Promise.resolve(host.prepareInput()).catch(() => false);
-                  if (!inputAdmitted) return;
-                  const session = host.session.value!;
-                  const foreground = playerRuntimeForeground(session);
-                  assert.ok(foreground?.kind === "choose");
-                  host.update(
-                    selectPlayerRuntimeChoice(session, foreground.options[1]!.id)!.session,
-                  );
-                })()
-              : backTo(rewind, 0);
-    await settle(context);
-    // The commit's reply is held only once the page accepted the step.
-    await acknowledged;
-    assert.equal(reached(), true, "the operation reached its hold");
-    // The event, while the operation is held.
-    let atError: RuntimeSnapshot | null = null;
-    let event: Promise<unknown> = Promise.resolve();
-    switch (each.event) {
-      case "publication":
-        context.mock.timers.tick(1_000);
-        event = host.observe();
-        break;
-      case "Return":
-        event = rewind.returnToSession().then((returned) => assert.equal(returned, false));
-        break;
-      case "clear":
-      case "clear on an ended session":
-        event = host
-          .clearScriptStorage()
-          .then((cleared) => assert.equal(cleared, want.clears, "the clear's admission"));
-        break;
-      case "Player error":
-        host.reportHostError(new Error("A Player error."));
-        await settle(context);
-        atError = playerRuntimeSnapshot(host.session.value!);
-        break;
-      case "Start prepared":
-        host.prepare(eventStart!);
-        break;
-      case "Debug off":
-        made.debug.stop();
-        break;
-      case "Debug off and on": {
-        made.debug.stop();
-        const again = effectScope();
-        again.run(() => useDebugRewind(host));
-        context.after(() => again.stop());
-        break;
-      }
-      case "replacement":
-        // A replacement Start begins while the operation is held.
-        await host.loadScriptStorage();
-        host.prepare(eventStart!);
-        event = Promise.resolve(host.activate());
-        break;
-      case "import ending the session": {
-        // Reviewed first, so the import ends the session before the hold is let go.
-        const review = await host.reviewSavedDataImport({
-          scripts: [{ scope: "test", name: null, photos: [], entries: [] }],
-          images: [],
+    try {
+      // An adoption that succeeds adopts by its answer, so the session runs on from the restored state; after a loss
+      // its completion is refused, and nothing runs on.
+      const adopted =
+        each.operation.startsWith("adopt") && each.outcome === "succeeds" && !want.lost;
+      // Traced, so a restart shows as a new epoch of the value trace.
+      host.setDebugTracing(true);
+      // Each shown state as the page showed it, captured apart from the history: the first point Back restores, and the
+      // tip Forward does.
+      const shownStates: { readonly snapshot: RuntimeSnapshot; readonly sceneTimeMs: number }[] =
+        [];
+      const capture = () => {
+        const page = shownView(host);
+        shownStates.push({
+          snapshot: playerRuntimeSnapshot(page),
+          sceneTimeMs: page.state.observedSessionTimeMs,
         });
-        event = host.importSavedData(review, new Set(["test"]));
-        break;
+      };
+      await start(context, host);
+      capture();
+      await choose(context, host, "One");
+      capture();
+      await choose(context, host, "Red");
+      capture();
+      // A clear is admitted only once the session ended.
+      if (each.event === "clear on an ended session") {
+        await choose(context, host, "A");
+        assert.equal(host.session.value?.state.status, "halted");
+        capture();
       }
-      case "disposal":
-        rewind.endWithPlayer();
-        made.debug.stop();
-        made.scope.stop();
-        break;
-      // Attempts to adopt while the return waits: refused, they read, write and evaluate nothing.
-      case "answer":
-        event = Promise.resolve(host.prepareInput()).then((prepared) =>
-          assert.equal(prepared, false, "the answer is refused"),
+      const bridge = await host.bridge;
+      // The event's Start is prepared before anything is held: a held read can hold the host's queue, behind which a
+      // `prepare` would wait for the hold that the event comes before.
+      const eventStart =
+        each.event === "Start prepared" || each.event === "replacement"
+          ? await sourceStart(host.bridge, script, () => ({ ...host.scriptStorageOptions() }))
+          : null;
+      const live = shownView(host);
+      let restored: PlayerSession | null = null;
+      if (each.operation !== "back") {
+        assert.equal(await backTo(rewind, 1), true);
+        await settle(context);
+        restored = shownView(host);
+      }
+      // The candidates the host prepares, from their replies, and the adoptions' captures, by their requests.
+      const candidates: string[] = [];
+      let captures = 0;
+      const replaces = () => storage?.calls.filter((call) => call === "replace").length ?? 0;
+      interceptSends(context, bridge.client, async (op, _args, send) => {
+        if (op === "captureStorage") captures += 1;
+        const reply = await send();
+        if ((op === "rewindBack" || op === "rewindForward") && typeof reply.session === "string")
+          candidates.push(reply.session);
+        return reply;
+      });
+      // The hold: a step's snapshot read or its restart gate, or an adoption's saved-data write; `reached` says whether
+      // the operation arrived there.
+      let release: () => void;
+      let reached: () => boolean;
+      let acknowledged: Promise<void> = Promise.resolve();
+      const arrival = (arrived: Promise<void>) => {
+        let at = false;
+        void arrived.then(() => (at = true));
+        return () => at;
+      };
+      if (each.boundary === "read") {
+        const held = made.holdGets();
+        release = held;
+        reached = held.reached;
+      } else if (each.boundary === "acknowledgement") {
+        const held = holdRead(context, bridge, "rewindCommit", "reply", false);
+        acknowledged = held.arrived;
+        reached = arrival(held.arrived);
+        release = held.release;
+      } else if (each.boundary === "gate") {
+        let open!: () => void;
+        let at = false;
+        const gate = new Promise<void>((resolve) => (open = resolve));
+        const original = host.rewind.beforeRestart.bind(host.rewind);
+        host.rewind.beforeRestart = async () => {
+          at = true;
+          await gate;
+          if (gated && each.outcome === "fails") throw new Error("The restart gate failed.");
+          await original();
+        };
+        release = () => open();
+        reached = () => at;
+      } else if (local) {
+        // Saved data that live only in the session: held where the adoption reads them; a failing one fails that read.
+        const held = holdRead(context, bridge, "captureStorage", "reply", each.outcome === "fails");
+        release = held.release;
+        reached = arrival(held.arrived);
+      } else {
+        // The provider's replacement, admitted and held; a failing one fails there.
+        // The import's own replacement, later, is not the adoption's and succeeds.
+        if (each.outcome === "fails") storage!.failNextReplace();
+        const held = storage!.holdReplaces();
+        release = held;
+        reached = held.reached;
+      }
+      const recordingBefore = await host.debugRecording();
+      const epochBefore = hostTrace(bridge)!.status().epoch;
+      // What each identity is before the operation, and the events a step restores as the history names them: Back's
+      // first point, or the state Forward restores.
+      const before = {
+        live: { snapshot: playerRuntimeSnapshot(live), events: live.events, marks: live.marks },
+        restored:
+          restored === null
+            ? null
+            : {
+                snapshot: playerRuntimeSnapshot(restored),
+                events: restored.events,
+                marks: restored.marks,
+              },
+      };
+      const history = host.rewind.owner.view.value!;
+      const target =
+        each.operation === "forward"
+          ? history.timeline.inspection?.future
+          : history.timeline.points[0];
+      const targetEvents =
+        target === undefined || target === null ? null : history.eventsAt(target);
+      if (!each.operation.startsWith("adopt"))
+        assert.ok(targetEvents !== null, "the step's target");
+      const replacesBefore = replaces();
+      let inputAdmitted: boolean | null = null;
+      const operation: Promise<unknown> =
+        each.operation === "forward"
+          ? rewind.forward()
+          : each.operation === "Return"
+            ? rewind
+                .returnToSession()
+                .then((returned) =>
+                  assert.equal(
+                    returned,
+                    each.outcome === "succeeds" && !want.lost && each.event !== "disposal",
+                    "returned",
+                  ),
+                )
+            : each.operation === "reinstate"
+              ? Promise.resolve(made.debug.stop())
+              : each.operation.startsWith("adopt")
+                ? (async () => {
+                    // The answer adopts the restored state; it is evaluated only if its input is admitted.
+                    // A preparation that rejects (its host lost) admits nothing either.
+                    inputAdmitted = await Promise.resolve(host.prepareInput()).catch(() => false);
+                    if (!inputAdmitted) return;
+                    const session = host.session.value!;
+                    const foreground = playerRuntimeForeground(session);
+                    assert.ok(foreground?.kind === "choose");
+                    host.update(
+                      selectPlayerRuntimeChoice(session, foreground.options[1]!.id)!.session,
+                    );
+                  })()
+                : backTo(rewind, 0);
+      await settle(context);
+      // The commit's reply is held only once the page accepted the step.
+      await acknowledged;
+      assert.equal(reached(), true, "the operation reached its hold");
+      // The event, while the operation is held.
+      let atError: RuntimeSnapshot | null = null;
+      let event: Promise<unknown> = Promise.resolve();
+      switch (each.event) {
+        case "publication":
+          context.mock.timers.tick(1_000);
+          event = host.observe();
+          break;
+        case "Return":
+          event = rewind.returnToSession().then((returned) => assert.equal(returned, false));
+          break;
+        case "clear":
+        case "clear on an ended session":
+          event = host
+            .clearScriptStorage()
+            .then((cleared) => assert.equal(cleared, want.clears, "the clear's admission"));
+          break;
+        case "Player error":
+          host.reportHostError(new Error("A Player error."));
+          await settle(context);
+          atError = playerRuntimeSnapshot(host.session.value!);
+          break;
+        case "Start prepared":
+          host.prepare(eventStart!);
+          break;
+        case "Debug off":
+          made.debug.stop();
+          break;
+        case "Debug off and on": {
+          made.debug.stop();
+          const again = effectScope();
+          again.run(() => useDebugRewind(host));
+          context.after(() => again.stop());
+          break;
+        }
+        case "replacement":
+          // A replacement Start begins while the operation is held.
+          await host.loadScriptStorage();
+          host.prepare(eventStart!);
+          event = Promise.resolve(host.activate());
+          break;
+        case "import ending the session": {
+          // Reviewed first, so the import ends the session before the hold is let go.
+          const review = await host.reviewSavedDataImport({
+            scripts: [{ scope: "test", name: null, photos: [], entries: [] }],
+            images: [],
+          });
+          event = host.importSavedData(review, new Set(["test"]));
+          break;
+        }
+        case "disposal":
+          rewind.endWithPlayer();
+          made.debug.stop();
+          made.scope.stop();
+          break;
+        // Attempts to adopt while the return waits: refused, they read, write and evaluate nothing.
+        case "answer":
+          event = Promise.resolve(host.prepareInput()).then((prepared) =>
+            assert.equal(prepared, false, "the answer is refused"),
+          );
+          break;
+        case "Resume":
+          event = rewind
+            .resume()
+            .then((resumed) => assert.equal(resumed, false, "Resume is refused"));
+          break;
+        case "loss":
+          made.lose!();
+          break;
+      }
+      release();
+      // A gated operation's own assertion stands; a step's or an adoption's rejection is its outcome, compared below.
+      await (gated ? operation : operation.catch(() => false));
+      await event;
+      await settle(context);
+      // An adoption's answer is admitted only where the adoption runs on: a completion the owner refused admits none.
+      if (each.operation.startsWith("adopt"))
+        assert.equal(inputAdmitted, want.recording === "continued", "the answer's input admitted");
+      // A refused attempt read nothing in the host and replaced no saved data.
+      if (each.event === "answer" || each.event === "Resume")
+        assert.deepEqual(
+          { captures, replaces: replaces() - replacesBefore },
+          { captures: 0, replaces: 0 },
+          "a refused attempt's effects",
         );
-        break;
-      case "Resume":
-        event = rewind
-          .resume()
-          .then((resumed) => assert.equal(resumed, false, "Resume is refused"));
-        break;
-      case "loss":
-        made.lose!();
-        break;
-    }
-    release();
-    // A gated operation's own assertion stands; a step's or an adoption's rejection is its outcome, compared below.
-    await (gated ? operation : operation.catch(() => false));
-    await event;
-    await settle(context);
-    // An adoption's answer is admitted only where the adoption runs on: a completion the owner refused admits none.
-    if (each.operation.startsWith("adopt"))
-      assert.equal(inputAdmitted, want.recording === "continued", "the answer's input admitted");
-    // A refused attempt read nothing in the host and replaced no saved data.
-    if (each.event === "answer" || each.event === "Resume")
-      assert.deepEqual(
-        { captures, replaces: replaces() - replacesBefore },
-        { captures: 0, replaces: 0 },
-        "a refused attempt's effects",
-      );
 
-    const page = host.session.value === null ? null : shownView(host);
-    const candidate = candidates.at(-1) ?? null;
-    const lineages = { live: live.lineage, restored: restored?.lineage };
-    if (want.shows !== "none") {
-      assert.ok(page !== null, "a session shows");
-      const shown =
-        page.lineage === lineages.live
-          ? "live"
-          : page.lineage === lineages.restored
-            ? "restored"
-            : page.id === candidate
-              ? "candidate"
-              : "new";
-      assert.equal(shown, want.shows, "the session shown");
-      assert.equal(host.rewind.inspecting.value, want.inspecting, "inspected");
-      // Shown on the surviving bridge: usable through a real host read, at the revision it shows.
-      if (!want.lost)
-        assert.equal((await bridge.read(page, "captureStorage")).revision, page.revision);
-      // The state the session shows is the one it was: a candidate shows its target's events with one rewind more;
-      // a live or restored session shows its own state, events and marks unchanged. A new session's state is the
-      // Start's, which this family does not compare.
-      if (shown === "candidate") {
-        assert.deepEqual(page.events, targetEvents, "the target's events");
-        // Its state is the target's as the page showed it, and its marks one rewind of it.
-        const target = shownStates[each.operation === "forward" ? shownStates.length - 1 : 0]!;
-        const expected = wrongTarget
-          ? {
-              ...target.snapshot,
-              scriptStorage: target.snapshot.scriptStorage.map((entry) =>
-                entry.key === "k" ? { ...entry, value: 999 } : entry,
-              ),
-            }
-          : target.snapshot;
-        assert.equal(
-          plain({ at: playerRuntimeSnapshot(page) }),
-          plain({ at: expected }),
-          "the target's state",
-        );
+      const page = host.session.value === null ? null : shownView(host);
+      const candidate = candidates.at(-1) ?? null;
+      const lineages = { live: live.lineage, restored: restored?.lineage };
+      if (want.shows !== "none") {
+        assert.ok(page !== null, "a session shows");
+        const shown =
+          page.lineage === lineages.live
+            ? "live"
+            : page.lineage === lineages.restored
+              ? "restored"
+              : page.id === candidate
+                ? "candidate"
+                : "new";
+        assert.equal(shown, want.shows, "the session shown");
+        assert.equal(host.rewind.inspecting.value, want.inspecting, "inspected");
+        // Shown on the surviving bridge: usable through a real host read, at the revision it shows.
+        if (!want.lost)
+          assert.equal((await bridge.read(page, "captureStorage")).revision, page.revision);
+        // The state the session shows is the one it was: a candidate shows its target's events with one rewind more;
+        // a live or restored session shows its own state, events and marks unchanged. A new session's state is the
+        // Start's, which this family does not compare.
+        if (shown === "candidate") {
+          assert.deepEqual(page.events, targetEvents, "the target's events");
+          // Its state is the target's as the page showed it, and its marks one rewind of it.
+          const target = shownStates[each.operation === "forward" ? shownStates.length - 1 : 0]!;
+          const expected = wrongTarget
+            ? {
+                ...target.snapshot,
+                scriptStorage: target.snapshot.scriptStorage.map((entry) =>
+                  entry.key === "k" ? { ...entry, value: 999 } : entry,
+                ),
+              }
+            : target.snapshot;
+          assert.equal(
+            plain({ at: playerRuntimeSnapshot(page) }),
+            plain({ at: expected }),
+            "the target's state",
+          );
+          assert.deepEqual(
+            plain({ marks: page.marks }),
+            plain({
+              marks: {
+                editedWhileDebugging: null,
+                rewoundWhileDebugging: { restoredSceneTimeMs: target.sceneTimeMs, rewindCount: 1 },
+              },
+            }),
+            "the candidate's marks",
+          );
+        } else if (shown === "restored" && adopted) {
+          // Adopted by its answer: the restored session's events, then the answer's.
+          const was = before.restored!;
+          assert.deepEqual(
+            page.events.slice(0, was.events.length),
+            was.events,
+            "the restored events",
+          );
+          assert.notEqual(
+            plain({ at: playerRuntimeSnapshot(page) }),
+            plain({ at: was.snapshot }),
+            "the answer's state",
+          );
+        } else if (shown !== "new") {
+          const was = before[shown]!;
+          // After a loss its state is no longer the host's to read: its events and marks still are the page's.
+          assert.deepEqual(
+            plain({
+              ...(want.lost ? {} : { snapshot: playerRuntimeSnapshot(page) }),
+              events: page.events,
+              marks: page.marks,
+            }),
+            plain({
+              ...(want.lost ? {} : { snapshot: was.snapshot }),
+              events: was.events,
+              marks: was.marks,
+            }),
+            "the session shown, unchanged",
+          );
+        }
+      }
+      const ids: Record<"live" | "restored" | "candidate", string | null> = {
+        live: live.id,
+        restored: restored?.id ?? null,
+        candidate,
+      };
+      for (const identity of ["live", "restored", "candidate"] as const) {
+        const held = want.held[identity];
+        if (held === undefined) continue;
+        const id = ids[identity];
+        if (id === null) assert.equal(held, false, `${identity} was never made`);
+        else assert.equal(await heldInHost(bridge, id), held, `the host holds ${identity}`);
+      }
+      // The recording begun once at the shown session, with nothing recorded since; or the one before, unchanged. Read
+      // only in rows that compare one: a row that ends the connection has no host to read from.
+      const recording = want.recording === null ? null : await host.debugRecording();
+      // Read only where a recording is compared: the Player's end takes the trace with it.
+      const epochs = () => hostTrace(bridge)!.status().epoch - epochBefore;
+      if (want.recording === "shown") {
+        const at = playerRuntimeSnapshot(page!);
         assert.deepEqual(
-          plain({ marks: page.marks }),
           plain({
-            marks: {
-              editedWhileDebugging: null,
-              rewoundWhileDebugging: { restoredSceneTimeMs: target.sceneTimeMs, rewindCount: 1 },
-            },
-          }),
-          "the candidate's marks",
-        );
-      } else if (shown === "restored" && adopted) {
-        // Adopted by its answer: the restored session's events, then the answer's.
-        const was = before.restored!;
-        assert.deepEqual(
-          page.events.slice(0, was.events.length),
-          was.events,
-          "the restored events",
-        );
-        assert.notEqual(
-          plain({ at: playerRuntimeSnapshot(page) }),
-          plain({ at: was.snapshot }),
-          "the answer's state",
-        );
-      } else if (shown !== "new") {
-        const was = before[shown]!;
-        // After a loss its state is no longer the host's to read: its events and marks still are the page's.
-        assert.deepEqual(
-          plain({
-            ...(want.lost ? {} : { snapshot: playerRuntimeSnapshot(page) }),
-            events: page.events,
-            marks: page.marks,
+            anchor: recording?.anchorSnapshot,
+            end: recording?.endSnapshot,
+            operations: recording?.operations,
+            complete: recording?.complete,
+            epochs: epochs(),
           }),
           plain({
-            ...(want.lost ? {} : { snapshot: was.snapshot }),
-            events: was.events,
-            marks: was.marks,
+            anchor: at,
+            end: at,
+            operations: [],
+            complete: true,
+            epochs: want.restarts ?? 1,
           }),
-          "the session shown, unchanged",
+          "begun once at the shown session",
         );
       }
-    }
-    const ids: Record<"live" | "restored" | "candidate", string | null> = {
-      live: live.id,
-      restored: restored?.id ?? null,
-      candidate,
-    };
-    for (const identity of ["live", "restored", "candidate"] as const) {
-      const held = want.held[identity];
-      if (held === undefined) continue;
-      const id = ids[identity];
-      if (id === null) assert.equal(held, false, `${identity} was never made`);
-      else assert.equal(await heldInHost(bridge, id), held, `the host holds ${identity}`);
-    }
-    // The recording begun once at the shown session, with nothing recorded since; or the one before, unchanged. Read
-    // only in rows that compare one: a row that ends the connection has no host to read from.
-    const recording = want.recording === null ? null : await host.debugRecording();
-    // Read only where a recording is compared: the Player's end takes the trace with it.
-    const epochs = () => hostTrace(bridge)!.status().epoch - epochBefore;
-    if (want.recording === "shown") {
-      const at = playerRuntimeSnapshot(page!);
-      assert.deepEqual(
-        plain({
-          anchor: recording?.anchorSnapshot,
-          end: recording?.endSnapshot,
-          operations: recording?.operations,
-          complete: recording?.complete,
-          epochs: epochs(),
-        }),
-        plain({ anchor: at, end: at, operations: [], complete: true, epochs: want.restarts ?? 1 }),
-        "begun once at the shown session",
-      );
-    }
-    if (want.recording === "continued") {
-      // The same recording, run on by the answer: its anchor, and its operations before, then the answer's.
-      const was = recordingBefore!.operations;
-      assert.deepEqual(
-        plain({
-          anchor: recording?.anchorSnapshot,
-          operations: recording?.operations.slice(0, was.length),
-          epochs: epochs(),
-        }),
-        plain({ anchor: recordingBefore?.anchorSnapshot, operations: was, epochs: 0 }),
-        "the recording before it, run on",
-      );
-      assert.ok(recording!.operations.length > was.length, "the answer is recorded");
-    }
-    if (want.recording === "kept")
-      assert.deepEqual(
-        plain({ recording, epochs: epochs() }),
-        plain({ recording: recordingBefore, epochs: 0 }),
-        "the recording before it",
-      );
-    if (want.recording === "error")
-      assert.deepEqual(recording?.endSnapshot, atError, "the recording up to the error");
-    // The page's timeline is the host's, and every point's log resolves from a session the page holds.
-    const view = host.rewind.owner.view.value;
-    if (want.lost) assert.ok(view !== null, "the history's view stays, read-only");
-    else if (want.history) {
-      assert.ok(view !== null, "a history is open");
-      const timeline = await bridge.historyTimeline(view.timeline.history);
-      assert.ok(timeline !== null, "the host holds the history");
-      assert.deepEqual(view.timeline.inspection, timeline.inspection);
-      assert.deepEqual(view.timeline.points, timeline.points);
-      // Every retained position's log resolves: each point, and the shown and future states of an inspection.
-      const { inspection } = view.timeline;
-      for (const position of [
-        ...view.timeline.points,
-        ...(inspection === null ? [] : [inspection.shown]),
-        ...(inspection?.future == null ? [] : [inspection.future]),
-      ])
-        assert.ok(
-          view.eventsAt(position) !== null,
-          `the log at ${JSON.stringify(position)} resolves`,
+      if (want.recording === "continued") {
+        // The same recording, run on by the answer: its anchor, and its operations before, then the answer's.
+        const was = recordingBefore!.operations;
+        assert.deepEqual(
+          plain({
+            anchor: recording?.anchorSnapshot,
+            operations: recording?.operations.slice(0, was.length),
+            epochs: epochs(),
+          }),
+          plain({ anchor: recordingBefore?.anchorSnapshot, operations: was, epochs: 0 }),
+          "the recording before it, run on",
         );
-    } else assert.equal(view, null, "no history is open");
-    // The owner's return state: nothing waits once the gate settled, opened or failed.
-    if (gated && !want.lost && (want.shows === "live" || want.shows === "restored"))
-      assert.equal(host.rewind.owner.reinstatement.value, null, "the return's state");
-    // The row's own errors: its Player error, which is reported, a failing restart gate and a lost connection.
-    const raised = [
-      ...(each.event === "Player error" ? ["A Player error."] : []),
-      ...(gated && each.outcome === "fails" ? ["The restart gate failed."] : []),
-      ...(each.event === "loss" ? ["The engine Worker failed: injected."] : []),
-    ];
-    endCapture();
-    const messages = reported.map((error) =>
-      error instanceof Error ? error.message : String(error),
-    );
-    assert.deepEqual(
-      messages.filter((message) => !raised.includes(message)),
-      [],
-      "no host error but the row's own",
-    );
-    if (each.event === "Player error")
-      assert.ok(messages.includes("A Player error."), "the Player error is reported");
-    if (mutate === undefined) lifecycleRun.push(each);
+        assert.ok(recording!.operations.length > was.length, "the answer is recorded");
+      }
+      if (want.recording === "kept")
+        assert.deepEqual(
+          plain({ recording, epochs: epochs() }),
+          plain({ recording: recordingBefore, epochs: 0 }),
+          "the recording before it",
+        );
+      if (want.recording === "error")
+        assert.deepEqual(recording?.endSnapshot, atError, "the recording up to the error");
+      // The page's timeline is the host's, and every point's log resolves from a session the page holds.
+      const view = host.rewind.owner.view.value;
+      if (want.lost) assert.ok(view !== null, "the history's view stays, read-only");
+      else if (want.history) {
+        assert.ok(view !== null, "a history is open");
+        const timeline = await bridge.historyTimeline(view.timeline.history);
+        assert.ok(timeline !== null, "the host holds the history");
+        assert.deepEqual(view.timeline.inspection, timeline.inspection);
+        assert.deepEqual(view.timeline.points, timeline.points);
+        // Every retained position's log resolves: each point, and the shown and future states of an inspection.
+        const { inspection } = view.timeline;
+        for (const position of [
+          ...view.timeline.points,
+          ...(inspection === null ? [] : [inspection.shown]),
+          ...(inspection?.future == null ? [] : [inspection.future]),
+        ])
+          assert.ok(
+            view.eventsAt(position) !== null,
+            `the log at ${JSON.stringify(position)} resolves`,
+          );
+      } else assert.equal(view, null, "no history is open");
+      // The owner's return state: nothing waits once the gate settled, opened or failed.
+      if (gated && !want.lost && (want.shows === "live" || want.shows === "restored"))
+        assert.equal(host.rewind.owner.reinstatement.value, null, "the return's state");
+      if (mutate === undefined) lifecycleRun.push(each);
+    } finally {
+      context.after(() => assertRowErrors(each, gated, reported));
+    }
   }
+}
+
+/**
+ * That `reported` is exactly the host errors row `each` raises, each as often: its Player error; a failing restart
+ * gate, unless a disposal or a loss ended the Player before the gate failed; and the lost connection.
+ */
+function assertRowErrors(each: LifecycleCase, gated: boolean, reported: readonly unknown[]) {
+  const raised = [
+    ...(each.event === "Player error" ? ["Error: A Player error."] : []),
+    ...(gated && each.outcome === "fails" && each.event !== "disposal" && each.event !== "loss"
+      ? ["Error: The restart gate failed."]
+      : []),
+    ...(each.event === "loss" ? ["BridgeLostError: The engine Worker failed: injected."] : []),
+  ];
+  assert.deepEqual(
+    reported
+      .map((error) => (error instanceof Error ? `${error.name}: ${error.message}` : String(error)))
+      .sort(),
+    raised.sort(),
+    "the host errors the row raises, each as often",
+  );
 }
 
 /*

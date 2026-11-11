@@ -573,14 +573,22 @@ const VIEW: DebugViewRequest = {
 const SUCCESSOR = 'say "successor", instant\nlet next = askChoice "Go"\nexit';
 
 /**
- * The host errors `c`'s own schedule raises, as `<name>: <message>`: the only ones its Player may report. A same-lineage
- * Continue of a session a Player error stopped is refused, and so is the Debug mode publication a same-lineage Continue
- * overtook; the Player reports both refusals.
+ * The host errors one run of `c` reports, ending its held reply as `mode` says, as `<name>: <message>`: those its own
+ * schedule raises, each as often as the run reports it.
+ * - The held reply's rejection, once it is let go, with no transition: an activation that is stopped, replaced or gone
+ *   reports nothing of its own, and the Player's own error stop (`lateStartStop`, `captureReply`, `exportWaiting`) and
+ *   the export's caller, which takes its failure, report it instead.
+ * - The injected loss, the Player errors the schedule reports, and the error stop's error.
+ * - A same-lineage Continue of a session a Player error stopped is refused, and so is the Debug mode publication a
+ *   same-lineage Continue overtook, unless the publication succeeded before the Continue; the Player reports both.
  */
-function ownErrors(c: Case): readonly string[] {
+function runErrors(c: Case, mode: Mode): readonly string[] {
   const playerError = ["haltAck", "captureReply", "exportWaiting"].includes(c.handle);
+  const ownStop = ["lateStartStop", "captureReply", "exportWaiting", "export"].includes(c.handle);
   return [
-    ...(c.settlement === "rejection" ? ["TypeError: The held reply failed."] : []),
+    ...(mode === "release" && c.settlement === "rejection" && c.transition === "none" && !ownStop
+      ? ["TypeError: The held reply failed."]
+      : []),
     ...(c.transition === "loss" ? ["BridgeLostError: The engine Worker failed: injected."] : []),
     ...(c.handle === "lateStartStop" ? ["TypeError: The Player failed while it began."] : []),
     ...(playerError ? ["TypeError: The Player failed."] : []),
@@ -588,21 +596,22 @@ function ownErrors(c: Case): readonly string[] {
     ...(playerError && c.transition === "sameLineage"
       ? ["BridgeRefusal: The Player stopped this session."]
       : []),
-    ...(c.handle === "debugModePublish" && c.transition === "sameLineage"
+    ...(c.handle === "debugModePublish" &&
+    c.transition === "sameLineage" &&
+    !(c.window === "settled" && c.settlement === "success")
       ? ["BridgeRefusal: The request was made from a revision the session no longer accepts."]
       : []),
   ];
 }
 
-/** That `reported` holds no host error but `c`'s own. */
-function assertOwnErrors(c: Case, reported: readonly unknown[]) {
-  const own = ownErrors(c);
+/** That `reported` is exactly the host errors of `c`'s runs, ended as `runs` say, each as often. */
+function assertOwnErrors(c: Case, runs: readonly Mode[], reported: readonly unknown[]) {
   assert.deepEqual(
     reported
       .map((error) => (error instanceof Error ? `${error.name}: ${error.message}` : String(error)))
-      .filter((error) => !own.includes(error)),
-    [],
-    "no host error but the case's own",
+      .sort(),
+    runs.flatMap((mode) => runErrors(c, mode)).sort(),
+    "the host errors the case's schedule raises, each as often",
   );
 }
 
@@ -984,105 +993,119 @@ const completed: Coordinates[] = [];
 for (const coordinates of FEASIBLE) {
   const c = asCase(coordinates);
   test(`activation family: ${Object.values(c).join(" ")}`, async (context) => {
-    // Every host error the test's Players report, both runs' and their teardown's: one capture for the test, checked
-    // once the case completed, in a hook registered after the runs' own teardown hooks, so it runs after them.
+    // Every host error the test's Players report, both runs' and their teardown's: one capture for the test, compared
+    // with the runs' own however the case ends, in a hook registered after the runs' own teardown hooks, so it runs
+    // after them.
     const reported: unknown[] = [];
     reportsInto(context, reported);
-    const completes = () => {
-      context.after(() => assertOwnErrors(c, reported));
-      completed.push(coordinates);
-    };
-    const released = await run(context, c, "release");
-    // A begin whose reply settled before its successor began: the successor waits for the begin's own reaction
-    // (`begunInFlight`), so the completion acts while its activation lives, and only then the successor replaces it.
-    // No run without the reply begins the successor; the oracle is the order of their effects.
-    if (BEGINS.includes(c.handle) && c.transition === "replacement" && c.window === "settled") {
+    const runs: Mode[] = ["release"];
+    try {
+      const released = await run(context, c, "release");
+      // A begin whose reply settled before its successor began: the successor waits for the begin's own reaction
+      // (`begunInFlight`), so the completion acts while its activation lives, and only then the successor replaces it.
+      // No run without the reply begins the successor; the oracle is the order of their effects.
+      if (BEGINS.includes(c.handle) && c.transition === "replacement" && c.window === "settled") {
+        assert.equal(released.unhandled, 0, "no rejection is left unhandled");
+        assert.ok(
+          released.cleaned,
+          "the host holds no run or ticket of the Players once they went",
+        );
+        const last = released.shows.at(-1) ?? "";
+        assert.ok(last.includes("[successor]"), `the replacement shows last: ${last}`);
+        completed.push(coordinates);
+        return;
+      }
+      // A Continue of the same lineage waits for the section that holds a queued draw, so no run without letting it go
+      // continues: the draw's own effects are what this case checks.
+      if (c.handle === "drawQueued" && c.transition === "sameLineage") {
+        assert.equal(released.unhandled, 0, "no rejection is left unhandled");
+        assert.ok(
+          released.cleaned,
+          "the host holds no run or ticket of the Players once they went",
+        );
+        assert.equal(released.result, "null", "the retired draw gives nothing");
+        assert.deepEqual(
+          released.posts.filter((post) => post === "resolveDraw:chosen"),
+          [],
+          "the retired draw's body sends nothing",
+        );
+        assert.deepEqual(released.revisions, [], "nor writes a revision");
+        completed.push(coordinates);
+        return;
+      }
+      runs.push(reference(c));
+      const dropped = await run(context, c, reference(c));
       assert.equal(released.unhandled, 0, "no rejection is left unhandled");
       assert.ok(released.cleaned, "the host holds no run or ticket of the Players once they went");
-      const last = released.shows.at(-1) ?? "";
-      assert.ok(last.includes("[successor]"), `the replacement shows last: ${last}`);
-      completes();
-      return;
-    }
-    // A Continue of the same lineage waits for the section that holds a queued draw, so no run without letting it go
-    // continues: the draw's own effects are what this case checks.
-    if (c.handle === "drawQueued" && c.transition === "sameLineage") {
-      assert.equal(released.unhandled, 0, "no rejection is left unhandled");
-      assert.ok(released.cleaned, "the host holds no run or ticket of the Players once they went");
-      assert.equal(released.result, "null", "the retired draw gives nothing");
-      assert.deepEqual(
-        released.posts.filter((post) => post === "resolveDraw:chosen"),
-        [],
-        "the retired draw's body sends nothing",
-      );
-      assert.deepEqual(released.revisions, [], "nor writes a revision");
-      completes();
-      return;
-    }
-    const dropped = await run(context, c, reference(c));
-    assert.equal(released.unhandled, 0, "no rejection is left unhandled");
-    assert.ok(released.cleaned, "the host holds no run or ticket of the Players once they went");
-    const outcome = expected(c);
-    // Two errors wait for one late Start: one stop, the current one, acts on its session, with the first error.
-    if (c.handle === "lateStartStop" && c.transition === "errorStop") {
-      const diagnostic = (seen: Seen) =>
-        seen.posts.filter((post) => post.startsWith("halt@") || post.startsWith("commitIncident@"));
-      assert.deepEqual(
-        diagnostic(released),
-        [c.settlement === "success" ? "halt@1" : "commitIncident@1"],
-        "one stop of the late Start",
-      );
-      assert.equal(released.errors.at(-1), "first TypeError", "the first error stays");
-    }
-    if (outcome === "lineage") {
-      // What the lineage keeps is its publication; its success stops, posts and revises nothing of its own.
-      const kept = ({ errors, revisions, posts }: Seen) => ({ errors, revisions, posts });
-      assert.deepEqual(kept(released), kept(dropped), "the lineage's success stops nothing");
-    } else if (outcome === "nothing") {
-      assert.deepEqual(effects(released), effects(dropped), "the completion changes nothing");
-      // The debug view's success stays its lineage's (Q1 B): its caller still gets the view.
-      if (
-        c.handle === "draw" ||
-        c.handle === "drawQueued" ||
-        c.handle === "export" ||
-        c.handle === "exportWaiting" ||
-        (c.handle === "debugView" && c.settlement === "rejection")
+      const outcome = expected(c);
+      // Two errors wait for one late Start: one stop, the current one, acts on its session, with the first error.
+      if (c.handle === "lateStartStop" && c.transition === "errorStop") {
+        const diagnostic = (seen: Seen) =>
+          seen.posts.filter(
+            (post) => post.startsWith("halt@") || post.startsWith("commitIncident@"),
+          );
+        assert.deepEqual(
+          diagnostic(released),
+          [c.settlement === "success" ? "halt@1" : "commitIncident@1"],
+          "one stop of the late Start",
+        );
+        assert.equal(released.errors.at(-1), "first TypeError", "the first error stays");
+      }
+      if (outcome === "lineage") {
+        // What the lineage keeps is its publication; its success stops, posts and revises nothing of its own.
+        const kept = ({ errors, revisions, posts }: Seen) => ({ errors, revisions, posts });
+        assert.deepEqual(kept(released), kept(dropped), "the lineage's success stops nothing");
+      } else if (outcome === "nothing") {
+        assert.deepEqual(effects(released), effects(dropped), "the completion changes nothing");
+        // The debug view's success stays its lineage's (Q1 B): its caller still gets the view.
+        if (
+          c.handle === "draw" ||
+          c.handle === "drawQueued" ||
+          c.handle === "export" ||
+          c.handle === "exportWaiting" ||
+          (c.handle === "debugView" && c.settlement === "rejection")
+        )
+          assert.equal(released.result, "null", "a retired activation's operation gives nothing");
+      } else if (c.handle === "debugMode" && c.settlement === "success")
+        // Its publication shows as the host's reply applies, which this case does not hold (`debugModePublish` does).
+        assert.equal(released.debug, true, "Debug mode shows");
+      else if ((c.handle === "draw" || c.handle === "drawQueued") && c.settlement === "success") {
+        // The resolved draw's session goes on from its draw (at scene time 0), not from where the browser's time went
+        // while it waited: the clock's rebase. A second later it observes a second.
+        assert.equal(released.result, "value", "the draw gives its outcome");
+        assert.equal(released.clock, "1000", "the scene clock goes on from the draw");
+      } else if (
+        RESULTS.includes(c.handle) &&
+        (c.settlement === "success" || c.handle === "export" || c.handle === "exportWaiting")
       )
-        assert.equal(released.result, "null", "a retired activation's operation gives nothing");
-    } else if (c.handle === "debugMode" && c.settlement === "success")
-      // Its publication shows as the host's reply applies, which this case does not hold (`debugModePublish` does).
-      assert.equal(released.debug, true, "Debug mode shows");
-    else if ((c.handle === "draw" || c.handle === "drawQueued") && c.settlement === "success") {
-      // The resolved draw's session goes on from its draw (at scene time 0), not from where the browser's time went
-      // while it waited: the clock's rebase. A second later it observes a second.
-      assert.equal(released.result, "value", "the draw gives its outcome");
-      assert.equal(released.clock, "1000", "the scene clock goes on from the draw");
-    } else if (
-      RESULTS.includes(c.handle) &&
-      (c.settlement === "success" || c.handle === "export" || c.handle === "exportWaiting")
-    )
-      // Its effect is what its caller takes: its result, or the export's failure (the others' failure is the stop's);
-      // an export waiting for a failure capture gives its candidate whether the capture succeeded or failed.
-      assert.equal(
-        released.result,
-        c.settlement === "success" || c.handle === "exportWaiting" ? "value" : "rejected TypeError",
-        "the operation gives its result",
-      );
-    else if (STOPS.includes(c.handle) && c.transition === "none")
-      // The stop's commit and its failure capture are what an export waits for: it gives its candidate only after them.
-      assert.deepEqual(
-        [released.result, dropped.result === "value"],
-        ["value", false],
-        "only the stop's own work lets the export through",
-      );
-    else
-      // Its own effect shows, is reported, posted or released: a promise that only settled is none.
-      assert.notDeepEqual(
-        { ...effects(released), teardown: released.teardown },
-        { ...effects(dropped), teardown: dropped.teardown },
-        "the completion has its own effect",
-      );
-    completes();
+        // Its effect is what its caller takes: its result, or the export's failure (the others' failure is the stop's);
+        // an export waiting for a failure capture gives its candidate whether the capture succeeded or failed.
+        assert.equal(
+          released.result,
+          c.settlement === "success" || c.handle === "exportWaiting"
+            ? "value"
+            : "rejected TypeError",
+          "the operation gives its result",
+        );
+      else if (STOPS.includes(c.handle) && c.transition === "none")
+        // The stop's commit and its failure capture are what an export waits for: it gives its candidate only after
+        // them.
+        assert.deepEqual(
+          [released.result, dropped.result === "value"],
+          ["value", false],
+          "only the stop's own work lets the export through",
+        );
+      else
+        // Its own effect shows, is reported, posted or released: a promise that only settled is none.
+        assert.notDeepEqual(
+          { ...effects(released), teardown: released.teardown },
+          { ...effects(dropped), teardown: dropped.teardown },
+          "the completion has its own effect",
+        );
+      completed.push(coordinates);
+    } finally {
+      context.after(() => assertOwnErrors(c, runs, reported));
+    }
   });
 }
 
