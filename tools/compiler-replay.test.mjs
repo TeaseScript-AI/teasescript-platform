@@ -66,7 +66,10 @@ test("submit queues the set and every area in 16 shards, the fixture by its fold
   assert.doesNotMatch(copies.at(-1), /--memory|SX_TREE_base/u);
 });
 
-/** A stand-in `sx-job` in `bin` that logs each call's arguments, a batch's lines after them, and prints an id a job. */
+/**
+ * A stand-in `sx-job` in `bin` that logs each call's arguments, a batch's lines and each `--in` file's text (read before
+ * it answers, as `sx-job` snapshots them: a missing one fails the call), and prints an id a job.
+ */
 function standInQueue(bin, id = "11111111111111") {
   const log = join(bin, "calls.jsonl");
   writeFileSync(
@@ -74,7 +77,9 @@ function standInQueue(bin, id = "11111111111111") {
     `#!/bin/sh
 node -e 'const fs = require("fs"); const [log, ...args] = process.argv.slice(1);
 const lines = args[0] === "submit-batch" ? fs.readFileSync(args[1], "utf8").trim().split("\\n") : [];
-fs.appendFileSync(log, JSON.stringify({ args, lines }) + "\\n");
+const inputs = Object.fromEntries(args.flatMap((arg, at) => args[at - 1] === "--in"
+  ? [[arg.slice(0, arg.indexOf("=")), fs.readFileSync(arg.slice(arg.indexOf("=") + 1), "utf8")]] : []));
+fs.appendFileSync(log, JSON.stringify({ args, lines, inputs }) + "\\n");
 for (const _ of args[0] === "submit-batch" ? lines : [0]) console.log("${id}");' "${log}" "$@"
 `,
   );
@@ -1235,6 +1240,10 @@ test("submit, rerun-stalls and aside each remove the temporary folder they made,
       assert.match(run.stdout + run.stderr, out, what);
       assert.deepEqual(left(), [], what);
     }
+    // (the queue read each step's file before the step removed it: the stall's index and aside's rows, as written)
+    const read = Object.assign({}, ...calls().map(({ inputs }) => inputs));
+    assert.equal(JSON.parse(read["index.json"]).entries.length, 1);
+    assert.equal(read["rows.jsonl"], "\n");
     // (each step handed the queue a file in its own folder under the TMPDIR it was given)
     const given = calls().map(({ args }) =>
       args[0] === "submit-batch" ? args[1] : args.find((arg) => /^(index|rows)\.json/u.test(arg)),
