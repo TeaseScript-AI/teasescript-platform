@@ -32,6 +32,7 @@ import {
 } from "../contract-descriptors.js";
 import { typedDefault as defaultKinds } from "../contract.js";
 import { leftOutCompletion } from "../consumers.js";
+import { type Definition } from "../definitions.js";
 import { type FlowNode } from "../flow-graph.js";
 import { type ItemTag, REASON, type Item } from "../items.js";
 import { propertyName, propertyStep } from "../program.js";
@@ -323,11 +324,20 @@ export class Contracts {
     answered: readonly [string[], PlaceAnswer][],
     kindsAt: ReadonlyMap<string, { path: string[]; kinds: Set<string> | null }>,
   ): void {
-    for (const [level, answer] of answered) {
+    // (every definition of every landing level, each once: a store at a shallower level covers the deeper ones)
+    const definitions = new Map<number, Definition>();
+    for (const [, answer] of answered)
+      for (const definition of answer.definitions.list) definitions.set(definition.uid, definition);
+    // (and every definition of a level above the landing: a store into an enclosing object or list)
+    for (let depth = 0; depth < landing.path.length; depth += 1)
+      for (const definition of this.answers.place(landing.id, landing.path.slice(0, depth))
+        .definitions.list)
+        definitions.set(definition.uid, definition);
+    for (const [level] of answered) {
       const kinds = kindsAt.get(level.join("\u0000"))?.kinds ?? null;
       if (kinds === null) continue;
       const at = [...landing.path, ...level];
-      for (const definition of answer.definitions.list) {
+      for (const definition of definitions.values()) {
         if (definition.path.length > at.length || definition.path.some((step, i) => at[i] !== step))
           continue;
         const value = this.index.findExpressionAt(definition.site);
