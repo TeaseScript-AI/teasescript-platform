@@ -551,15 +551,28 @@ test(
     // main and runtime-v2 grow apart from one base; `other` is another lane's branch off main
     const cases = [
       // [the branch's base, what its merge commit merges, the reason it fails, or null when it passes]
-      ["main", "main", "which the base already holds"],
-      ["main", "other", "which neither origin/main nor origin/runtime-v2 holds"],
+      ["main", "main", "which the base already holds: rebase onto main instead"],
+      [
+        "main",
+        "other",
+        "which neither origin/main nor origin/runtime-v2 holds: rebase onto main instead",
+      ],
       ["main", "runtime-v2", null],
       ["runtime-v2", "main", null],
-      ["runtime-v2", "runtime-v2", "which the base already holds"],
+      ["runtime-v2", "runtime-v2", "which the base already holds: rebase onto runtime-v2 instead"],
       ["main", null, null],
+      // a ref the clone lacks: unproven, so it fails, with the advice to fetch, and a parent the other ref holds passes
+      [
+        "main",
+        "runtime-v2",
+        "which git cannot place (origin/runtime-v2: fatal: Not a valid object name origin/runtime-v2): fetch main, " +
+          "origin/main, origin/runtime-v2 and run again",
+        "origin/runtime-v2",
+      ],
+      ["runtime-v2", "main", null, "origin/runtime-v2"],
     ];
     for (const merged of [false, true])
-      for (const [base, merges, failure] of cases) {
+      for (const [base, merges, failure, missing] of cases) {
         const { directory } = repository({ passing: true });
         const git = (...args) => {
           const result = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
@@ -588,6 +601,7 @@ test(
           commit("runtime-v2", "runtime-v2-later.md");
           git("update-ref", "refs/remotes/origin/main", "main");
           git("update-ref", "refs/remotes/origin/runtime-v2", "runtime-v2");
+          if (missing !== undefined) git("update-ref", "-d", `refs/remotes/${missing}`);
           git("switch", "-q", "lane");
           if (merges !== null) git("merge", "-q", "--no-edit", merges);
           const result = spawnSync(
@@ -616,14 +630,8 @@ test(
           if (failure !== null) {
             const mergeCommit = git("rev-parse", "--short=9", "lane");
             const parent = git("rev-parse", "--short=9", "lane^2");
-            assert.match(
-              result.stdout,
-              new RegExp(
-                `--- merge commits ---\\n${mergeCommit} Merge branch '${merges}' into lane: merges ${parent}, ${failure}: rebase onto ${base} instead\\n`,
-                "u",
-              ),
-              at,
-            );
+            const expected = `--- merge commits ---\n${mergeCommit} Merge branch '${merges}' into lane: merges ${parent}, ${failure}\n`;
+            assert.ok(result.stdout.includes(expected), `${at}: ${result.stdout}`);
           }
         } finally {
           rmSync(directory, { recursive: true, force: true });
