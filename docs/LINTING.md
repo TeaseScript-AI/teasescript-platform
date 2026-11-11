@@ -63,8 +63,8 @@ patterns. `tools/oxlint/check-waiting-overrides.mjs`, in `npm run lint`, checks 
 a finding that oxlint reports without that entry and not with it, and refuses a path that is not a linted file. A
 finding is oxlint's whole diagnostic, so one whose message or place changes when the entry goes keeps the entry too. A
 severity oxlint's schema does not have is refused, in the root `rules` or an entry's. An entry is added only for a
-finding that waits, so that with the check each list shrinks. Interrupted, the check stops by the signal; the next run
-removes the probe configuration an interrupted run left.
+finding that waits, so that with the check each list shrinks. A SIGINT, SIGTERM or SIGHUP removes the check's probe
+configuration and stops oxlint and the check by that signal; the next run removes the probe a SIGKILL left.
 
 ## Comment forecasts
 

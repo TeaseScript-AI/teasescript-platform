@@ -2739,8 +2739,9 @@ when the script runs ([§13](#type-tests-and-narrowing)). The message names the 
 that uses `n`, inside which `n` is an `integer`, and a fallback ([below](#fallback-with-otherwise)):
 
 ```text
+let n: integer? = load("count", default: null)
 say n + 1
-// 'n' may be null here. Check 'n' first, as in 'if n != null { say n + 1 }', or give a fallback, as in '(n otherwise 0)'.
+// 'n' must be checked for null before it is used here: 'load' on line 1 can give null. Check 'n' first, as in 'if n != null { say n + 1 }', or give a fallback, as in '(n otherwise 0)'.
 ```
 
 Where that code is not proved to compile in the statement's place, the message names the check in words, as in

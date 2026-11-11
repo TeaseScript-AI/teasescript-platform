@@ -134,26 +134,34 @@ test("the shadow comparison keeps a crashed route's partial record, retries a re
   );
   const out = join(folder, "shadow.jsonl");
   const decisions = join(folder, "decisions.jsonl");
-  const shadow = (nodeOptions?: string) => {
+  const shadow = (nodeOptions?: string, to = out, decided = decisions) => {
     const env = { ...process.env };
     delete env.NODE_OPTIONS;
     if (nodeOptions !== undefined) env.NODE_OPTIONS = nodeOptions;
     return spawnSync(
       process.execPath,
-      [tool, folder, "area", "--memory", "16", "--out", out, "--decisions", decisions],
+      [tool, folder, "area", "--memory", "16", "--out", to, "--decisions", decided],
       { encoding: "utf8", env },
     );
   };
-  // (NODE_OPTIONS, where the queue sets a heap flag that would override every worker's --memory, is refused)
-  const refused = shadow("--max_old_space_size=256");
-  assert.equal(refused.status, 2, refused.stderr);
-  assert.match(refused.stderr, /without Node options and NODE_OPTIONS/);
   const ran = shadow();
   assert.equal(ran.status, 1, ran.stderr);
-  const records = readFileSync(out, "utf8")
-    .trim()
-    .split("\n")
-    .map((line) => JSON.parse(line));
+  const recordsOf = (file: string) =>
+    readFileSync(file, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line));
+  const records = recordsOf(out);
+  // (a caller's NODE_OPTIONS reaches no route, as the queue's heap flag would: a large heap and the semi-space flag,
+  // which alone moved a route's limit while routes inherited it (#2329), give the same records, each heap failure at
+  // --memory's limit)
+  const optioned = shadow(
+    "--max-old-space-size=4096 --max-semi-space-size=64",
+    join(folder, "optioned.jsonl"),
+    join(folder, "optioned-decisions.jsonl"),
+  );
+  assert.equal(optioned.status, 1, optioned.stderr);
+  assert.deepEqual(recordsOf(join(folder, "optioned.jsonl")), records);
   assert.deepEqual(
     records.map((r) => r.name),
     [

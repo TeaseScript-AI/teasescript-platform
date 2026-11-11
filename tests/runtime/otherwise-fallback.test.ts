@@ -88,7 +88,7 @@ exit`,
       [
         "error",
         "TSV043",
-        `'shown' may be null. Check it first: if shown != null { ... }, or give a fallback: shown otherwise ""`,
+        `'shown' must be checked for null before it is used here. Check it first: if shown != null { ... }, or give a fallback: shown otherwise ""`,
         "shown",
       ],
     ],
@@ -486,7 +486,7 @@ exit`;
     [
       [
         "TSV043",
-        "'count' may be null. Check it first: if count != null { ... }, or give a fallback: count otherwise 0",
+        "'count' must be checked for null before it is used here: its type is 'integer?' (line 4). Check it first: if count != null { ... }, or give a fallback: count otherwise 0",
       ],
     ],
   );
@@ -901,8 +901,9 @@ exit`,
 test("a null check also names a fallback of the value's type, but not for a value that is changed", () => {
   const messages = (source: string) =>
     compileSource(`${HIDE}${source}\nexit`).diagnostics.map((diagnostic) => diagnostic.message);
-  const check = (name: string, fallback?: string) =>
-    `'${name}' may be null. Check it first: if ${name} != null { ... }${fallback === undefined ? "" : `, or give a fallback: ${name} otherwise ${fallback}`}`;
+  // (the cause names the type written on the declaration's line, the fourth below `HIDE`)
+  const check = (name: string, fallback?: string, type?: string) =>
+    `'${name}' must be checked for null before it is used here${type === undefined ? "" : `: its type is '${type}' (line ${name === "i" ? 6 : 4})`}. Check it first: if ${name} != null { ... }${fallback === undefined ? "" : `, or give a fallback: ${name} otherwise ${fallback}`}`;
   for (const [declared, use, fallback] of [
     ["integer", "say n + 1", "0"],
     ["number", "say n * 2", "0"],
@@ -915,12 +916,12 @@ test("a null check also names a fallback of the value's type, but not for a valu
   ] as const)
     assert.deepEqual(
       messages(`let n: ${declared}? = hide(null)\n${use}`),
-      [check("n", fallback)],
+      [check("n", fallback, `${declared}?`)],
       use,
     );
   // A value that is not a variable, and a store into a narrower place.
   assert.deepEqual(messages('say "a/b".lastIndexOf("/") + 1'), [
-    "This value may be null. Keep it in a variable and check it first, as in: if value != null { ... }, or give a fallback: value otherwise 0",
+    "This value must be checked for null before it is used here. Keep it in a variable and check it first, as in: if value != null { ... }, or give a fallback: value otherwise 0",
   ]);
   assert.deepEqual(messages("let n: integer? = hide(null)\nlet m: integer = n"), [
     "'m' is declared as integer, so it cannot start as a whole number (integer) or null. Check it first: if n != null { ... }, or give a fallback: n otherwise 0",
@@ -941,13 +942,17 @@ test("a null check also names a fallback of the value's type, but not for a valu
     "let n: integer[][]? = hide([[1]])\nn[0][0] = 3",
     'let n = null\nlet x = true\nif x {\n    n = playAudio async "a.mp3"\n}\nn.stop()',
   ])
-    assert.deepEqual(messages(source), [check(source.includes("p.name") ? "p" : "n")], source);
+    assert.deepEqual(
+      messages(source),
+      [check(source.includes("p.name") ? "p" : "n", undefined, /: (.+?) =/.exec(source)?.[1])],
+      source,
+    );
   // A read still gets a fallback, also the index of an element that is set.
   assert.deepEqual(
     messages(
       "let n: object? = hide({ toys: [1] })\nsay n.toys\nlet i: integer? = hide(0)\nlet toys = [1]\ntoys[i] = 2",
     ),
-    [check("n", "..."), check("i", "0")],
+    [check("n", "...", "object?"), check("i", "0", "integer?")],
   );
 });
 

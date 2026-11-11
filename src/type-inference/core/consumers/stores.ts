@@ -19,14 +19,15 @@ import {
   keptSteps,
 } from "../budget.js";
 import type { Consumers } from "../consumers.js";
-import { writtenOf } from "../contract.js";
+import { typeTags, writtenOf } from "../contract.js";
 import { stepIndex, stepsArray, stepsRest, type Steps } from "../contract/key-ids.js";
 import { labelText } from "../contract/labels.js";
 import { keyPlace, type Definition } from "../definitions.js";
 import { withoutEmpty } from "../exact-path.js";
 import { REASON, type Item, type ItemTag, type Writer } from "../items.js";
-import { propertyStep } from "../program.js";
+import { propertyStep, siteKey } from "../program.js";
 import { offendingKinds, type DiagnosticRule } from "../result.js";
+import { type BindingRead, readsBindings } from "./bindings.js";
 import { error } from "./diagnostics.js";
 import { kindsOf, quietKinds } from "./names.js";
 import { copiesOnly, deferred, storeReach } from "./reach.js";
@@ -144,6 +145,28 @@ function writtenGroups(
 }
 
 /**
+ * The variable or parameter with its own written type a read at a site reads (`readsBindings`): by the
+ * read's place (`placeBySite`) and the binding it reads (`occurrenceOf`), map reads alone; `null` for any other site. A
+ * store's sentence asks it only where it names a copy's source (#2289), so nothing runs for a rule no sentence words.
+ */
+function declaredRead(walk: Consumers): BindingRead {
+  const { program } = walk.pass;
+  return (read) => {
+    const occurrence = program.placeBySite.get(siteKey(read));
+    const binding = occurrence === undefined ? undefined : program.occurrenceOf.get(occurrence);
+    if (binding === undefined) return null;
+    const { kind, site } = program.place(binding);
+    const written = writtenOf(kind);
+    const declared =
+      kind.kind === "parameter" ||
+      (kind.kind === "binding" && (kind.declared === "let" || kind.declared === "global"));
+    return written === null || site === null || !declared
+      ? null
+      : { name: kind.name, site, type: typeTags(written) };
+  };
+}
+
+/**
  * C1, C7 against a place's admitted type (A1–A9): every candidate store admission names is checked against the
  * decided type, the store's value at its node by §3. A definite contribution that does not fit, where no kind of the
  * value fits, is an error at the innermost offending expression and the store is rejected (A6); a store of a
@@ -163,6 +186,7 @@ export function admittedStores(
 ): void {
   const { program, definitions } = walk.pass;
   const admission = walk.admission;
+  const binding = declaredRead(walk);
   for (const group of completed !== null
     ? [completed]
     : walk.order<DecidedAt>(writtenOnly ? writtenGroups(walk) : admission.groups())) {
@@ -193,16 +217,21 @@ export function admittedStores(
       written || !admission.admitted(root, path()).includes("null")
         ? nullableTags
         : [...tags, "null"];
-    const rule = (brought: SourceSite | null = null): DiagnosticRule => ({
-      rule: "store",
-      into: placeText(walk, root, path()),
-      type: named(),
-      written,
-      decider: decider?.site ?? null,
-      brought,
-      root: storeRoot(walk, root),
-      steps: storeSteps(walk, root, path(), written ? writtenOf(program.place(root).kind) : null),
-    });
+    const rule = (brought: SourceSite | null = null): DiagnosticRule => {
+      const made: DiagnosticRule = {
+        rule: "store",
+        into: placeText(walk, root, path()),
+        type: named(),
+        written,
+        decider: decider?.site ?? null,
+        brought,
+        root: storeRoot(walk, root),
+        steps: storeSteps(walk, root, path(), written ? writtenOf(program.place(root).kind) : null),
+      };
+      // (a copy decides it: the sentence's reader of the declared variable it copies, beside the rule, #2289)
+      if (written && !decision.own) readsBindings(made, binding);
+      return made;
+    };
     // C9: a place published with its contract's kinds owes the check of external data another store
     // brought, at each candidate carrying it, against those kinds; data a store brings inline has its boundary there,
     // an opaque value C5's obligation at its access (A7)

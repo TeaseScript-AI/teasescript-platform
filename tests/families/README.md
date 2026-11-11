@@ -14,6 +14,7 @@ Which tool answers which question:
 | Where does the core's route differ from the current checker on one tree (the shadow gate)? | `shadow.mjs`, `shadow-classify.mjs` ([Shadow](#shadow)) |
 | Does a stop let a value through that the natural plan rejects? | `stop-runs.mjs` ([Stop runs](#stop-runs)) |
 | What do the checker, the core and the core's route each answer for a list of cases, plans and runs included? | `differential.mjs` ([Differential records](#differential-records)) |
+| Are two trees' records of a list of cases equal but for some fields, such as a changed message's `message`? | `differential.mjs join --ignore` ([Differential records](#differential-records)) |
 | A compiler pull request's whole replay of base against head | `tools/compiler-replay.mjs` |
 | Does a change outside the type core keep the current checker's output? | `tools/compiler-differential.mjs` |
 
@@ -333,17 +334,23 @@ sx-job submit --commit base=<base> --commit head=<head> --items seeds.txt --targ
 ## Plans
 
 `plans.mjs` (#1526 phase A's kit, landed from #1678's copy) compiles each source of a set through the core backend on
-two built trees in one worker, in the four modes, and compares the plan, the diagnostics, the trace of every unit the
-compile charges and the questions it asks its answers, exactly; `--demands 16,64` also at those demand allowances,
-`--stops` the held family's settled stops and questions phase. A set is `corpus` (the cases file `CASES_JSON` names),
-`fixture`, `held`, or an area by its name or folder. A run (one compile of a source in a mode on one tree, or one
+two built trees in one worker, in the four modes, each the base's `HELD_MODES` entry with the head's of the same `name`
+(#2342; trees whose modes are not the same names once each are refused, exit 2), and compares the plan, the
+diagnostics, the trace of every unit the compile charges and the questions it asks its answers, exactly; `--demands
+16,64` also at those demand allowances, `--stops` the held family's settled stops and questions phase. A set is
+`corpus` (the cases file `CASES_JSON` names), `fixture`, `held`, or an area by its name or folder. A run (one compile
+of a source in a mode on one tree, or one
 analysis of the held family's stop search, or that search's work between them) stalls by the runner's rule above: its
 units past `--units` (4) times its program's allowance, the allowance of the source's natural compile for a run at a
 test allowance; a run past the safety net, `--timeout` (1,800 s), makes its source `uncharged`, never a stall. One JSON
 line per source (its set, name and `key`) goes to `--out`, whose sources, by name and key, a rerun with it counts as
 recorded without running them again, and a summary to stdout; `plans.mjs summary <records>...` classifies the records
-(identical, work only, questions, publication, stops) and lists each difference, stall and uncharged source. A builder runs the head tree's copy instead
-of copying a kit, and extends it here where a comparison needs more:
+(identical, work only, questions, publication, stops) and lists each difference, stall and uncharged source. A record
+and a stall's run name their mode by that `name`; a record from before #2342 holds a number, the mode's index in
+`HELD_MODES` at the commit that wrote it (`forward`, `reversed`, `forward, unshared`, `reversed, unshared` from
+3804b7d3f, where the table began, to this day; the oracle's `MODES` orders them otherwise), printed as that number and
+never translated. A builder runs the head tree's copy instead of copying a kit, and extends it here where a comparison
+needs more:
 
 ```sh
 sx-job submit --commit base=<base> --commit head=<head> --shards 16 --mem 3G --timeout 1h --campaign <T> \
@@ -448,17 +455,21 @@ give the same bytes. It judges nothing: a reader compares the records, and two t
 It has no unit limit and no process of its own per run, so it is for case lists; areas and the corpus at scale stay
 with `plans.mjs` and `shadow.mjs`.
 
-A case is one JSON line: `{name, source | files, globals?, runs?}` (`globals` `["hostValue"]` by default), or
-`{name, set, unit, key?, runs?}` for a unit of a set as `stop-runs.mjs` names one (`unitResolver`, `units.mjs`).
-`runs` is a list of the host globals' values, each run on every plan (`runGlobals`). A name twice, an unknown key, a
-malformed line or a set's unit missing or ambiguous refuses the whole file (exit 2) before any record is written.
+A case is one JSON line: `{name, source | files, globals?, runs?, storage?}` (`globals` `["hostValue"]` by default),
+or `{name, set, unit, key?, runs?, storage?}` for a unit of a set as `stop-runs.mjs` names one (`unitResolver`,
+`units.mjs`). `runs` is a list of the host globals' values, each run on every plan (`runGlobals`); `storage`, an object
+of stored values by key, is the script storage each run starts with, so a `load` reads it (#2338). A name twice, an
+unknown key, a malformed line, a set's unit missing or ambiguous, `storage` without `runs`, or storage that cannot be
+copied or that the tree's runtime rejects (`validateScriptStorageEntries`) refuses the whole file (exit 2) before any
+plan runs or record is written. A run's host values are checked by the runtime as each run starts: a value it rejects
+is that run's `threw`, and the run exits 1.
 
 A record is `{name, case, checker, core, candidate}`:
 - `checker`, and each mode of `candidate` that is not refused: `diagnostics` (severity, code, path, one-based line and
   column, offsets, message), `plan` (`null`, or its `hash`, the first 32 hex digits of the sha256 of `jsonText(plan)`, as
   `plans.mjs` hashes a plan, and `checks`, `planCheckList` in `tests/helpers/plan-checks.ts`: each check's field, path,
   line, offsets and, where it names them, type, place and part), and `runs` where the case names some and there is a
-  plan (`{globals, status, failure, said}`);
+  plan (`{globals, storage?, status, failure, said}`, `storage` where the case names it);
 - a refused mode of `candidate` is `{mode, outside}` with the refusal's text and no diagnostics;
 - `core` is `{unparsed: true}` where the files do not parse or resolve, else each mode's `outcome`, `diagnostics` (class,
   kind, code, path, line, offsets, the site's text, `coreMessage`) and `checks` (`coreRecord`'s run-time checks: kind,
@@ -474,6 +485,13 @@ writes them in the cases' order: the record, or `{name, base, head}`. It reads e
 line and copies the line as bytes, so a record longer than V8's longest string still joins; a line cut short, or an
 output that is one of its inputs by any path or link, is refused (exit 2), and the output appears only once whole.
 Writing a record that long ends the run with an error instead, and `join` then finds its case missing.
+
+`join … --ignore <field>...` (repeatable; base and head both given) writes the same output and also compares each case's
+base and head as JSON values with every field of those names removed at any depth (`--ignore message` masks the
+checker's, the core's and the route's messages; `messageKind` is another field). Its summary line adds `ignore`,
+`differ` (a count), `differing` (the names of the cases that still differ) and `unread` (cases whose differing records
+do not parse, such as a record longer than V8's longest string); it exits 1 when either list is not empty. Records equal
+as bytes are equal without being parsed.
 
 A batch of an item pool is itself a cases file, so the queue sizes the jobs; the plan's check list comes from the
 tool's own build, so the tool's tree may be newer than the tree it reads:
@@ -492,10 +510,10 @@ node tests/families/differential.mjs join --cases cases.jsonl --base <base jobs'
 compiles each source of a set (`corpus`, `fixture` or an area) through both public routes of one built tree, the legacy
 backend and the core (`decisionRecords`), in the four modes, and writes one JSON line per source to `--out` and the
 core's decision records to `--decisions`. Each route runs in its own process with `--memory` MB of old generation
-(2,048, the families runner's, so both compare a source under the same cap; it refuses Node options and `NODE_OPTIONS`,
-whose heap flags would override that: the queue sets one, so the command clears it), under the unit limit below (the
-legacy route charges no ledger) and the safety net. A run that fails (heap, units, safety net, the process's end, a V8
-abort at its heap limit included: #1738) leaves the source's other runs and is recorded as `{ outcome: "failed",
+(2,048, the families runner's, so both compare a source under the same cap; a route's process starts without the
+caller's `NODE_OPTIONS`, such as the queue's heap flag, and with no other Node option of the caller's, #2329), under
+the unit limit below (the legacy route charges no ledger) and the safety net. A run that fails (heap, units, safety
+net, the process's end, a V8 abort at its heap limit included: #1738) leaves the source's other runs and is recorded as `{ outcome: "failed",
 failure, phase, runsBeforeFailure, heapMiB }` (`heapMiB`: the worker's heap limit as V8 measured it) in its row and in
 the record's `failed` list, with `incomplete: true` and the first failure as `reason`; the next run starts in a fresh
 worker. A reused worker's heap failure or safety net is retried once in a fresh one, whose result is the run's
@@ -506,8 +524,8 @@ the natural allowance on current main, so no natural run reaches a receiving com
 record is never agreement.
 
 ```sh
-sx-job submit --commit <sha> --shards 16 --mem 6G --timeout 2h --campaign <T> -- bash -c 'env -u NODE_OPTIONS \
-  node "$SX_TREE/tests/families/shadow.mjs" "$SX_TREE" <set> --shard {i}/{n} --demands 16 --out "$SX_OUT/shadow.jsonl" \
+sx-job submit --commit <sha> --shards 16 --mem 6G --timeout 2h --campaign <T> -- bash -c \
+  'node "$SX_TREE/tests/families/shadow.mjs" "$SX_TREE" <set> --shard {i}/{n} --demands 16 --out "$SX_OUT/shadow.jsonl" \
   --decisions "$SX_OUT/decisions.jsonl" > "$SX_OUT/shadow.log"'
 ```
 
@@ -536,7 +554,7 @@ green` only with no `open` row, and `--gate` (S11's final run, with `--expect`) 
 records it reproduces its aggregate (`~/work/evidence/1728/`):
 
 ```sh
-env -u NODE_OPTIONS node "$SX_TREE/tests/families/shadow.mjs" "$SX_TREE" <set> --manifest > expect.jsonl
+node "$SX_TREE/tests/families/shadow.mjs" "$SX_TREE" <set> --manifest > expect.jsonl
 node tests/families/shadow-classify.mjs <shards' shadow.jsonl>... --expect expect.jsonl --out <folder> [--gate]
 ```
 

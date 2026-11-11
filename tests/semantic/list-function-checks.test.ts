@@ -227,12 +227,12 @@ test("possibly null lists and values of list functions need a check first", () =
     [
       [
         "TSV043",
-        "'samples' may be null. Check it first: if samples != null { ... }, or give a fallback: samples otherwise ...",
+        "'samples' must be checked for null before it is used here: its type is 'integer[]?' (line 1). Check it first: if samples != null { ... }, or give a fallback: samples otherwise ...",
         "samples",
       ],
       [
         "TSV043",
-        "'share' may be null. Check it first: if share != null { ... }, or give a fallback: share otherwise 0",
+        "'share' must be checked for null before it is used here: its type is 'number?' (line 1). Check it first: if share != null { ... }, or give a fallback: share otherwise 0",
         "share",
       ],
     ],
@@ -339,7 +339,7 @@ test("take and takeLast return a new list of the first or last elements", () => 
   assert.deepEqual(diagnostics("function f(m: integer?) {\n    say [1, 2].takeLast(m)\n}\nexit"), [
     [
       "TSV043",
-      "'m' may be null. Check it first: if m != null { ... }, or give a fallback: m otherwise 0",
+      "'m' must be checked for null before it is used here. Check it first: if m != null { ... }, or give a fallback: m otherwise 0",
       "m",
     ],
   ]);
@@ -378,14 +378,14 @@ test("indexOf, lastIndexOf, and count find a value by ==, and a missing value ha
     ["true true true true true", "0 2 1 null 2", "null 0 0 1", "walk", "not queued", "1"],
   );
   const check = (name: string) =>
-    `'${name}' may be null. Check it first: if ${name} != null { ... }, or give a fallback: ${name} otherwise 0`;
+    `'${name}' must be checked for null before it is used here. Check it first: if ${name} != null { ... }, or give a fallback: ${name} otherwise 0`;
   const cases: [string, [string, string, string][]][] = [
     [
       "let xs = [1, 2]\nsay xs[xs.indexOf(2)]\nexit",
       [
         [
           "TSV043",
-          "This value may be null. Keep it in a variable and check it first, as in: if value != null { ... }, or give a fallback: value otherwise 0",
+          "This value must be checked for null before it is used here. Keep it in a variable and check it first, as in: if value != null { ... }, or give a fallback: value otherwise 0",
           "xs.indexOf(2)",
         ],
       ],
@@ -512,7 +512,7 @@ test("get gives the element at an index, or its default for an index the list do
       [
         [
           "TSV043",
-          "'at' may be null. Check it first: if at != null { ... }, or give a fallback: at otherwise 0",
+          "'at' must be checked for null before it is used here. Check it first: if at != null { ... }, or give a fallback: at otherwise 0",
           "at",
         ],
       ],
@@ -702,7 +702,7 @@ test("get with a null default gives the element type or null for lists of values
       [
         [
           "TSV043",
-          "'person' may be null. Check it first: if person != null { ... }, or give a fallback: person otherwise ...",
+          "'person' must be checked for null before it is used here. Check it first: if person != null { ... }, or give a fallback: person otherwise ...",
           "person",
         ],
       ],

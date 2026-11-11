@@ -647,7 +647,9 @@ test("askForm with cancel: may return null, which the script checks before readi
     compileSource(
       'let a = askForm fields: { on: false }, cancel: "Back"\nlet b: boolean = a.on\nexit',
     ).diagnostics.map((diagnostic) => diagnostic.message),
-    ["'a' may be null. Check it first: if a != null { ... }, or give a fallback: a otherwise ..."],
+    [
+      "'a' must be checked for null before it is used here. Check it first: if a != null { ... }, or give a fallback: a otherwise ...",
+    ],
   );
 });
 

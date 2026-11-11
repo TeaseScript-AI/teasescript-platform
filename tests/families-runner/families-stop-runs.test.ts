@@ -8,10 +8,27 @@ import test from "node:test";
 
 const tool = resolve("tests/families/stop-runs.mjs");
 
-/** A built tree's modules as the stop runs load them: a stop oracle that reports the source it ran, and its modes. */
+/** Held modes' names in an order that is neither `HELD_MODES`' nor the oracle's `MODES`' (#2342). */
+const NAMES = ["reversed", "forward, unshared", "reversed, unshared", "forward"];
+
+/**
+ * A built tree's modules as the stop runs load them: a stop oracle that reports the source it ran and the held mode it
+ * ran in, and its modes.
+ */
 const MODULES: Record<string, string> = {
-  "tests/helpers/type-core-stop-oracle.js": `export const stopRuns = (files) => ({ kind: "closed", ran: files[0].source });\n`,
-  "tests/helpers/type-core-held-host.js": `export const HELD_MODES = [0, 1, 2, 3].map(() => ({ run: (f) => f() }));\n`,
+  "tests/helpers/type-core-stop-oracle.js": `export const stopRuns = (files, globals, mode) =>
+  ({ kind: "closed", ran: files[0].source, mode: mode(() => globalThis.heldMode) });\n`,
+  "tests/helpers/type-core-held-host.js": `export const HELD_MODES = ${JSON.stringify(NAMES)}.map((name) => ({
+  name,
+  run: (f) => {
+    globalThis.heldMode = name;
+    try {
+      return f();
+    } finally {
+      globalThis.heldMode = undefined;
+    }
+  },
+}));\n`,
   "tests/helpers/type-core-oracles.js": `export const MODES = [{ reversed: false, unshared: false }];
 export const inMode = (mode, make) => make();
 `,
@@ -116,4 +133,25 @@ test("the stop runs run the unit an item names by name and key, and never pick b
     item("copy"),
   ]);
   assert.equal(resolved.ran.status, 0, resolved.ran.stderr);
+  // (a record's mode by its name runs the held mode of that name; a number, a record's from before #2342, the mode at
+  // that index; an unknown name is the item's exception, never another mode)
+  const moded = run("moded", [
+    { ...item("unique"), mode: "forward, unshared" },
+    { ...item("unique"), mode: "forward" },
+    { ...item("unique"), mode: 2 },
+    { ...item("unique"), mode: "sideways" },
+  ]);
+  assert.equal(moded.ran.status, 1, moded.ran.stderr);
+  assert.deepEqual(
+    moded.rows.map(({ mode, exception }) => ({
+      mode,
+      exception: typeof exception === "string" ? exception.split("\n")[0] : exception,
+    })),
+    [
+      { mode: "forward, unshared", exception: undefined },
+      { mode: "forward", exception: undefined },
+      { mode: "reversed, unshared", exception: undefined },
+      { mode: undefined, exception: 'Error: no held mode "sideways"' },
+    ],
+  );
 });

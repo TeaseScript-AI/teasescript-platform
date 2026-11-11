@@ -624,7 +624,7 @@ export function verdict(r) {
         `${d.area} ${d.generator} ${d.source} ${d.mode}: part ${d.part} of ${d.parts.join("/")}`,
       );
   for (const d of r.set.differences)
-    if (!(d.what === "diagnostics only" && agreed.has(`${d.name} ${MODES[d.mode]}`)))
+    if (!(d.what === "diagnostics only" && agreed.has(`${d.name} ${labelOf(d.mode)}`)))
       reasons.push(`set ${d.name} mode ${d.mode}: ${d.what}`);
   for (const a of r.aside)
     if (!a.planEqual || !a.asideEqual)
@@ -817,8 +817,16 @@ function rerunShard({ positional: [prefix, givenBase, givenHead, id], options })
   return 0;
 }
 
-/** The set's modes (`plans.mjs`'s index, `HELD_MODES`' order: shared first, forward then reversed), as the runner names them. */
+/** The set's modes as the runner names them, in `HELD_MODES`' order (shared first, forward then reversed). */
 const MODES = ["src-on", "rev-on", "src-off", "rev-off"];
+/** The runner's name of a set record's mode: its `HELD_MODES` name, or a number (before #2342) by that order. */
+const LABEL_OF = {
+  forward: "src-on",
+  reversed: "rev-on",
+  "forward, unshared": "src-off",
+  "reversed, unshared": "rev-off",
+};
+const labelOf = (mode) => (typeof mode === "number" ? MODES[mode] : LABEL_OF[mode]);
 const MODE_OF = {
   "src-on": { reversed: false, unshared: false },
   "src-off": { reversed: false, unshared: true },

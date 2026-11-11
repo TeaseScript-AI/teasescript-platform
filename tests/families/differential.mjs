@@ -1,18 +1,23 @@
 // node tests/families/differential.mjs <tree> <cases.jsonl> --out <records.jsonl>
 // node tests/families/differential.mjs join --cases <cases.jsonl> --base <records>... [--head <records>...] --out <file>
+//   [--ignore <field>...]...
 // The differential record (#2298): each case of a cases file compiled on one built tree by the current checker
 // (`compileProject`), analysed by the type core (`analyseCore`, its result as the compiler reads it, `checkedResult`)
 // and compiled through the core's candidate route (`publishedRoute`), the core and the route in the four modes
 // (`HELD_MODES`); one JSON line per case to `--out`, in the cases file's order, the same bytes for the same tree and
 // cases. It judges nothing; its record and its cases are in tests/families/README.md, "Differential records".
-//   A case is a JSON line: `{name, source | files, globals?, runs?}` or `{name, set, unit, key?, runs?}` (a unit of a
-//   set as `stop-runs.mjs` names one, `unitResolver`); `runs` a list of host globals' values, each run on every plan.
+//   A case is a JSON line: `{name, source | files, globals?, runs?, storage?}` or `{name, set, unit, key?, runs?,
+//   storage?}` (a unit of a set as `stop-runs.mjs` names one, `unitResolver`); `runs` a list of host globals' values,
+//   each run on every plan; `storage` the script storage each run starts with, by key (#2338).
 //   The compiler's and the core's modules come from <tree>; the plan's check list (`planCheckList`) from this file's
 //   own build, so a record's form does not depend on the tree's age.
 // `join` checks the records of one or two trees against the whole cases file (each case recorded once on each side, no
-// other record) and writes them in the cases' order: a side's record, or `{name, base, head}`.
+// other record) and writes them in the cases' order: a side's record, or `{name, base, head}`. With `--ignore` (#2316)
+// it also compares each case's base and head as JSON values with those fields removed at any depth, and names the
+// cases that still differ and those whose records it cannot read as JSON.
 // Exit 0: every case recorded and nothing threw; 1: a record holds `threw`, or `join` found a case missing, repeated
-// or unknown (it then writes nothing); 2: a refused usage, cases file or tree, before any record is written.
+// or unknown (it then writes nothing), or with `--ignore` a case differs or is unread; 2: a refused usage, cases file
+// or tree, before any record is written.
 import { createHash } from "node:crypto";
 import {
   appendFileSync,
@@ -38,7 +43,17 @@ const refuse = (why) => {
 /** The start of a record's line: the tool writes each record with its name first. */
 const NAME_FIELD = Buffer.from('{"name":"');
 
-const CASE_KEYS = new Set(["name", "source", "files", "globals", "runs", "set", "unit", "key"]);
+const CASE_KEYS = new Set([
+  "name",
+  "source",
+  "files",
+  "globals",
+  "runs",
+  "storage",
+  "set",
+  "unit",
+  "key",
+]);
 const isObject = (value) => typeof value === "object" && value !== null && !Array.isArray(value);
 const isTexts = (value) => Array.isArray(value) && value.every((each) => typeof each === "string");
 
@@ -93,6 +108,9 @@ function readCases(file) {
       refuse(`${where}: globals are a list of names`);
     if (c.runs !== undefined && !(Array.isArray(c.runs) && c.runs.every(isObject)))
       refuse(`${where}: runs are a list of objects of the globals' values`);
+    if (c.storage !== undefined && !isObject(c.storage))
+      refuse(`${where}: storage is an object of the stored values by key`);
+    if (c.storage !== undefined && c.runs === undefined) refuse(`${where}: storage is for runs`);
     cases.push({ ...c, where });
   }
   return cases;
@@ -107,6 +125,15 @@ const values = (name) => {
   return args.slice(at + 1, end < 0 ? args.length : end);
 };
 const option = (name) => values(name)[0];
+/** The values after every `name`; an occurrence with none refuses the usage. */
+const allValues = (name) =>
+  args.flatMap((arg, at) => {
+    if (arg !== name) return [];
+    const end = args.findIndex((each, i) => i > at && each.startsWith("--"));
+    const given = args.slice(at + 1, end < 0 ? args.length : end);
+    if (given.length === 0) refuse(`${name} names no field`);
+    return given;
+  });
 
 if (args[0] === "join") join();
 else await record();
@@ -147,6 +174,9 @@ async function loadTree(root) {
     "jsonText",
   ]);
   const { runGlobals } = await load("tests/helpers/type-core-route.js", ["runGlobals"]);
+  const { validateScriptStorageEntries } = await load("src/runtime/host-data/script-storage.js", [
+    "validateScriptStorageEntries",
+  ]);
   const { planCheckList } = await own("tests/helpers/plan-checks.js");
   return {
     compileProject,
@@ -160,8 +190,30 @@ async function loadTree(root) {
     publishedRoute,
     jsonText,
     runGlobals,
+    validateScriptStorageEntries,
     planCheckList,
   };
+}
+
+/** A case's `storage` as script storage entries, a copy of its own for each run, or `undefined` where it has none. */
+function entriesOf(storage) {
+  return (
+    storage &&
+    Object.entries(storage).map(([key, value]) => ({ key, value: structuredClone(value) }))
+  );
+}
+
+/** Refuses a case whose storage cannot be copied as each run copies it, or that the runtime's `validate` rejects. */
+function checkStorage(cases, validate) {
+  for (const c of cases.filter((each) => each.storage !== undefined)) {
+    let failure;
+    try {
+      failure = validate(entriesOf(c.storage), "storage");
+    } catch (error) {
+      failure = `storage cannot be copied: ${error.message}`;
+    }
+    if (failure !== null) refuse(`${c.where}: ${failure}`);
+  }
 }
 
 /** Each case's files and globals, a set's from its unit; a set unreadable, or its unit missing or ambiguous, refuses the file. */
@@ -204,10 +256,12 @@ async function record() {
     publishedRoute,
     jsonText,
     runGlobals,
+    validateScriptStorageEntries,
     planCheckList,
   } = await loadTree(root);
-  // (the cases resolved before anything runs)
+  // (every fault of the input found before any plan runs and before the output is opened)
   await resolveCases(cases, root);
+  checkStorage(cases, validateScriptStorageEntries);
 
   let threw = 0;
   const thrown = (error) => {
@@ -227,10 +281,12 @@ async function record() {
   });
   const runs = (plan, c) =>
     c.runs?.map((globals) => {
+      const given = c.storage === undefined ? {} : { storage: c.storage };
+      const storage = entriesOf(c.storage);
       try {
-        return { globals, ...runGlobals(plan, globals) };
+        return { globals, ...given, ...runGlobals(plan, globals, storage) };
       } catch (error) {
-        return { globals, threw: thrown(error) };
+        return { globals, ...given, threw: thrown(error) };
       }
     });
   /** A compile's diagnostics, its plan's hash and checks, and where the case names them, its runs. */
@@ -272,6 +328,7 @@ async function record() {
         files,
         globals,
         ...(c.runs === undefined ? {} : { runs: c.runs }),
+        ...(c.storage === undefined ? {} : { storage: c.storage }),
       },
     };
     try {
@@ -358,10 +415,12 @@ function join() {
     ["base", values("--base")],
     ["head", values("--head")],
   ].filter(([side]) => args.includes(`--${side}`));
+  const ignored = new Set(allValues("--ignore"));
   if (casesFile === undefined || out === undefined || values("--base").length === 0)
     refuse(
-      "usage: differential.mjs join --cases <cases.jsonl> --base <records>... [--head <records>...] --out <file>",
+      "usage: differential.mjs join --cases <cases.jsonl> --base <records>... [--head <records>...] --out <file> [--ignore <field>...]",
     );
+  if (ignored.size > 0 && sides.length !== 2) refuse("--ignore compares a base with a head");
   // (an output that is an input, by any path or link, would be emptied before it is read)
   if (existsSync(out)) {
     const { dev, ino } = statSync(out);
@@ -418,16 +477,45 @@ function join() {
       done += got;
     }
     writeSync(output, bytes);
+    return bytes;
+  };
+  const differing = [];
+  const unread = [];
+  /** Whether `a` and `b` are equal JSON values once every field in `ignored` is removed, at any depth. */
+  const same = (a, b) => {
+    if (a === b) return true;
+    if (Array.isArray(a))
+      return Array.isArray(b) && a.length === b.length && a.every((each, i) => same(each, b[i]));
+    if (!isObject(a) || !isObject(b)) return false;
+    const kept = (value) => Object.keys(value).filter((key) => !ignored.has(key));
+    const keys = kept(a);
+    return (
+      keys.length === kept(b).length &&
+      keys.every((key) => Object.hasOwn(b, key) && same(a[key], b[key]))
+    );
+  };
+  // (equal bytes need no parse, so a record longer than V8's longest string is compared when both sides hold it alike)
+  const compare = (name, base, head) => {
+    if (base.equals(head)) return;
+    let parsed;
+    try {
+      parsed = [base, head].map((bytes) => JSON.parse(bytes.toString("utf8")));
+    } catch {
+      unread.push(name);
+      return;
+    }
+    if (!same(...parsed)) differing.push(name);
   };
   try {
     for (const c of cases) {
       if (read.length === 1) copy(read[0].get(c.name));
       else {
         write(`{"name":${JSON.stringify(c.name)},"base":`);
-        copy(read[0].get(c.name));
+        const base = copy(read[0].get(c.name));
         write(`,"head":`);
-        copy(read[1].get(c.name));
+        const head = copy(read[1].get(c.name));
         write("}");
+        if (ignored.size > 0) compare(c.name, base, head);
       }
       write("\n");
     }
@@ -439,5 +527,9 @@ function join() {
   }
   for (const fd of [output, ...inputs.values()]) closeSync(fd);
   renameSync(partial, out);
-  process.stdout.write(`${JSON.stringify({ cases: cases.length, sides: read.length })}\n`);
+  const summary = { cases: cases.length, sides: read.length };
+  if (ignored.size > 0)
+    Object.assign(summary, { ignore: [...ignored], differ: differing.length, differing, unread });
+  process.stdout.write(`${JSON.stringify(summary)}\n`);
+  if (differing.length > 0 || unread.length > 0) process.exitCode = 1;
 }

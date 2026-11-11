@@ -23,12 +23,7 @@ import {
 import { VALUE_KINDS } from "../../../value-kinds.js";
 import { propertyName } from "../program.js";
 import type { ItemTag } from "../items.js";
-import type {
-  DiagnosticRule,
-  RequiredCheck,
-  SiteExpectation,
-  WrittenTypeError,
-} from "../result.js";
+import type { DiagnosticRule, SiteExpectation, WrittenTypeError } from "../result.js";
 import type { MessageSource } from "./site.js";
 import {
   argumentFixOf,
@@ -67,7 +62,15 @@ import {
   unlike,
   UNPROVED,
 } from "./code-forms.js";
-import { declaration, elementOf, storeFix, storeSubject, textOf, typeAt } from "./stores.js";
+import {
+  copySentence,
+  declaration,
+  elementOf,
+  storeFix,
+  storeSubject,
+  textOf,
+  typeAt,
+} from "./stores.js";
 
 // An error's first sentence and its rules' fixes, and a written type's error.
 
@@ -822,21 +825,6 @@ function listJoinFix(
   );
 }
 
-/**
- * The route rule's error's first sentence (AD-1, #1073), from N10's payload: the read, the offending kind,
- * and the writer's line; its fix is the warning's it stands in for (`coreMessage`).
- */
-export function requiredSentence(
-  kinds: readonly ItemTag[],
-  required: RequiredCheck,
-  source: MessageSource,
-): string {
-  const line = source.line(required.writer);
-  return kinds.includes("null")
-    ? `'${required.subject}' can be null here because of '${source.text(required.writer)}' on line ${line}.`
-    : `'${required.subject}' can be ${described(kinds)} here because of line ${line}.`;
-}
-
 export function errorSentence(
   rule: DiagnosticRule,
   text: string,
@@ -855,7 +843,10 @@ export function errorSentence(
           `${source.line(rule.brought)} brings ${described(kinds)} into that property. Use a separate property for a ` +
           "value of another type."
         );
-      return `${storeSubject(rule, source)}, so it cannot ${elementOf(rule) === null ? "take" : "contain"} ${described(kinds)}.${storeFix(rule, kinds, text, site, source, diagnosed)}`;
+      return (
+        copySentence(rule, kinds, source, diagnosed) ??
+        `${storeSubject(rule, source)}, so it cannot ${elementOf(rule) === null ? "take" : "contain"} ${described(kinds)}.${storeFix(rule, kinds, text, site, source, diagnosed)}`
+      );
     case "fallback": {
       // ADR 0021 rule 7.3: a written union of the place the value lands in directly holds both
       const both = typeText([...rule.type, ...kinds]);
