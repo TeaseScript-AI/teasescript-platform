@@ -323,7 +323,7 @@ test("a candidate whose activation retires while it is built hands nothing over,
 });
 
 /*
- * Session split S2's resource owners (HEAD 0 §5), on the record owner itself: what an activation's export holds goes
+ * Session split S2's resource owners (its HEAD 0), on the record owner itself: what an activation's export holds goes
  * when the activation retires, without waiting for its work to come back. The first activation retires the initial
  * record as any later one retires its predecessor.
  */

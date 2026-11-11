@@ -97,7 +97,7 @@ const RULES = [
     name: "worker Player",
     when: (cell, phase) =>
       phase === "r0" && cell.backend === "worker" && FULL_PLAYER.has(cell.scenario),
-    reason: "open until L5i.1, L5i.7 and the activation candidate (HEAD 0 §6)",
+    reason: "open until L5i.1, L5i.7 and the activation candidate (session split S2's HEAD 0)",
   },
 ];
 

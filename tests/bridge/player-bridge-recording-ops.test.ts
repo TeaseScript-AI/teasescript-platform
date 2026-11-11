@@ -518,7 +518,7 @@ test("an in-process introduction of a retired run makes nothing", async () => {
 });
 
 /*
- * Recording provenance over the host's begin routes (§21.4 family 2): a Start that records, and the `beginRecording` op
+ * Recording provenance over the host's begin routes (L5h's HEAD 0, family 2): a Start that records, and the `beginRecording` op
  * (Continue's) on a session started without the recorder × when the capture comes × the transport. The recorder's end
  * kinds are its own family (`player-debug-recorder.test.ts`); the routes a test cannot reach through these ops (L5i.6's
  * history restores, `introduceNow`, raw restores) converge on the same begin, which `player-recording-routes.test.ts`

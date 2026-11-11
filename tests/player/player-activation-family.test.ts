@@ -22,7 +22,7 @@ import { hostIntroduced, loadHostFacade } from "../helpers/player/host-sessions.
 import { reportsInto } from "../helpers/player/rewind-host.js";
 
 /*
- * Session split S2's runtime family (HEAD 0 §7): an activation's completions act only while it lives. Each case is a
+ * Session split S2's runtime family (its HEAD 0): an activation's completions act only while it lives. Each case is a
  * full tuple of the axes below, on the Player's composable and its in-process engine: an operation the activation (or
  * the page, for it) issued, whose reply is held; an ownership transition while it is held; where the reply is let go
  * relative to that transition and its successor; how it settles; and the successor that follows.
@@ -1114,7 +1114,7 @@ test("the activation family completed every feasible full tuple, and nothing els
 });
 
 /*
- * The reaction ledger (HEAD 0 §4): each entry's settlement and effects, in order, against peers queued before and after
+ * The reaction ledger (session split S2's HEAD 0): each entry's settlement and effects, in order, against peers queued before and after
  * it (a microtask and a host reply). S2 changes no entry's reactions but the declared differences: the loss's stop
  * commits in the loss listener's own turn (it did a reaction after the lost signal's rejection), and Q1 B's same-lineage
  * reporters, whose plain order here is unchanged. Since #2262 a request of no session posts when it is made, behind no
@@ -1366,7 +1366,7 @@ test("activation ledger: each entry settles and acts in the order it did, but fo
   assert.deepEqual(ledgers, LEDGER);
 });
 
-// Debug mode's request clears only its own marker (HEAD 0 §2, cleanup): a reply to an earlier request leaves a later
+// Debug mode's request clears only its own marker (session split S2's HEAD 0, cleanup): a reply to an earlier request leaves a later
 // one's, so a third change still goes to the host, which a cleared marker would take for done.
 test("a Debug mode reply clears only its own request's marker, so a later change is still sent", async (context) => {
   browser(context);

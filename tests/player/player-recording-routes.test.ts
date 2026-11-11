@@ -47,7 +47,7 @@ function callers(targets: readonly { readonly file: string; readonly path: strin
   ].sort();
 }
 
-/** Each place that begins a recording, by the begin route it serves (§21.2 "Recording provenance"). */
+/** Each place that begins a recording, by the begin route it serves (L5h's HEAD 0, "Recording provenance"). */
 const BEGINS: Readonly<Record<string, string>> = {
   "player/debug/debug-recorder.ts DebugRecorder > begin <- player/runtime/runtime-adapter.ts PlayerRuntimeEngine > beginRecording":
     "the one convergence: it records the engine and the begin's epoch",
@@ -199,7 +199,7 @@ test("the page's diagnostic senders each check their activation's admission, and
 const HELD = "player/engine-bridge/ops/session.ts";
 
 /**
- * Each route that supplies the export observation its facts (§21.4 family 1), by the observation it supplies: every
+ * Each route that supplies the export observation its facts (L5h's HEAD 0, family 1), by the observation it supplies: every
  * publication passes `publish`, every Player error stop the host's halt, and every session binds its run as it is made
  * or handed over. An unclassified or stale route fails.
  */

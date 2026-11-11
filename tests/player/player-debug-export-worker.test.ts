@@ -27,7 +27,7 @@ import {
 import { inProcessBridge } from "../helpers/in-process-bridge.js";
 
 /*
- * #1966's witness (L5h.3b, §21.4 family 6): a debug export of a recorded session in a Worker, from source through the
+ * #1966's witness (L5h.3b; L5h's HEAD 0, family 6): a debug export of a recorded session in a Worker, from source through the
  * production capture, preparation and release ops, with replay and its prerequisites chosen. It has recorded calls and
  * a complete replay with its checkpoint, it crosses the real file format, it replays offline, and its file is the same
  * byte for byte as the in-process one's.

@@ -24,7 +24,7 @@ import { recordClient, replayTape, type TapeEntry } from "../gate/tape.js";
 import { asMalformed, untypedBridge } from "../helpers/bridge/untyped.js";
 
 /*
- * The K/F tape driver's claims (the L5 gate's tape plan §3, design round 1): the structural one, and bounded runtime
+ * The K/F tape driver's claims (the L5 gate's tape plan, design round 1): the structural one, and bounded runtime
  * witnesses whose axes come from the engine's transitions and guards, not from the candidate table. Each state is built
  * from its axis value alone and named by it; it asserts the guard values the session shows at its point (before the
  * attempt after its `at`-th accepted input), then the accepted inputs and the tape's outcome, written from the axis

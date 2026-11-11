@@ -1,4 +1,4 @@
-// Records the L5 gate's K/F tapes in Node and judges each (the gate's tape plan §4): for every package, a tape on a fresh
+// Records the L5 gate's K/F tapes in Node and judges each (the gate's tape plan): for every package, a tape on a fresh
 // in-process host (`tests/gate/driver.ts`), the adapter oracle's judgment (`tests/gate/oracle.ts`), and a replay in a
 // fresh Node Worker (`tests/gate/tape.ts`). Writes each tape, one report line per package and the mechanism census.
 // Run in a built tree (`dist/tests/gate/`):

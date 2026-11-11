@@ -140,7 +140,7 @@ test("an export while a rewind gate is pending takes the shown publication's mar
 });
 
 /*
- * L5h.3b's export observation over the Player's activations (§21.4 family 1): a Player error's incident is the run's.
+ * L5h.3b's export observation over the Player's activations (L5h's HEAD 0, family 1): a Player error's incident is the run's.
  * A rewind keeps it, as it keeps the run; the next Start begins a run without one; a retired dialog gets no candidate.
  */
 test("a debug export's incident is the run's: kept through Back and Return, gone with the next Start", async (context) => {

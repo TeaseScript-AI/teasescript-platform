@@ -1,4 +1,4 @@
-// The K/F tapes' mechanism census and the browser and Pixel cover sets (the gate's tape plan §4–§5), from the report
+// The K/F tapes' mechanism census and the browser and Pixel cover sets (the gate's tape plan), from the report
 // lines `record.mjs` wrote. Per mechanism (`tests/gate/inventory.ts`: an action kind shown, an event kind, a
 // settlement, an accepted op), how many complete prefixes and how many incomplete tapes met it; the mechanisms no tape
 // met (with the policy's reason where the table cannot meet it) and those met only in incomplete tapes, listed apart;
