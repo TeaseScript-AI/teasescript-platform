@@ -27,7 +27,8 @@ contracts and current implementation surfaces belong in the topic documents link
 The accepted production boundary places the complete player, engine, Platform Standard Library, package libraries,
 Standard UI, and custom UI inside a sandboxed cross-origin iframe, preferably on a separate player origin. Main-site
 cookies remain host-only and unavailable to the player. The parent, player, server, and future integrations exchange
-only selected validated typed plain data.
+only selected validated typed plain data. Inside the player boundary the engine runs in a dedicated module Worker that
+owns every plan and session; the page holds published views and host resources ([Runtime](docs/RUNTIME.md)).
 
 Package code may use HTML, CSS, canvas, DOM APIs, and optional Shadow DOM only inside that player boundary. It cannot
 access the parent DOM, account cookies, forum state, or internal site data and has no unrestricted external network
