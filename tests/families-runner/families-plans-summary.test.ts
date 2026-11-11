@@ -438,6 +438,15 @@ test("the plans summary says which tree added, removed or moved each stop, by it
     ],
     ["unrecorded", {}],
     ["reordered", { base: stopsOf([publication, walk]), head: stopsOf([walk, publication]) }],
+    // (R19, R21: a phase's allowances in another order are no move; any allowance a tree gives is printed as it is)
+    ["within a phase", { base: stopsOf([walk]), head: stopsOf([walk]).reverse() }],
+    [
+      "edges",
+      {
+        base: [0, null, 0.5].map((allowance) => ({ allowance, phase: "walk" })),
+        head: [0, -1].map((allowance) => ({ allowance, phase: "walk" })),
+      },
+    ],
   ];
   const modes = entries.map(([mode, lists]) => ({
     mode,
@@ -471,7 +480,7 @@ test("the plans summary says which tree added, removed or moved each stop, by it
     ["stopSet", "stopsAdded", "stopsRemoved", "stopsMoved", "stopsUnavailable"].map(
       (key) => counts[key],
     ),
-    [5, 1, 1, 1, 3],
+    [7, 1, 1, 2, 4],
   );
   const apart = (mode: string, count: number) =>
     `held c mode "${mode}": STOP SET apart (main ${count} stops)`;
@@ -486,6 +495,10 @@ test("the plans summary says which tree added, removed or moved each stop, by it
     'held c mode "unrecorded": which stops moved is unavailable (no stop lists recorded, a record from before #2340)',
     apart("reordered", 8),
     'held c mode "reordered": which stops moved is unavailable (the lists differ, no phase does)',
+    apart("within a phase", 3),
+    'held c mode "within a phase": which stops moved is unavailable (the lists differ, no phase does)',
+    apart("edges", 3),
+    'held c mode "edges": stop phase "walk" moved: base 0, 0.5, null (3), head -1..0 (2)',
     'held c mode "failing": stop set unavailable (the base\'s unstopped compile failed: Error: no)',
   ]);
 });

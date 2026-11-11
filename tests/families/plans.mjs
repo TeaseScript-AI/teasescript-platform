@@ -290,7 +290,8 @@ function demandRow(d, natural) {
 /**
  * What differs between two trees' settled stops (`stops.base`, `stops.head`, #2340, each proved by `stopListFault`), a
  * stop known by its phase: a phase on the head alone is `added`, on the base alone `removed`, on both at other
- * allowances `moved`; each with both trees' allowances in that phase. Known limit: a stop that changes phase over an
+ * allowances `moved`; each with both trees' allowances in that phase, ascending (a null last), so that allowances in
+ * another order are no move (#2340's round 1, the order being the tree's, R21). Known limit: a stop that changes phase over an
  * overlapping allowance range reads as one removed and one added. `null` where the record holds no lists (one from
  * before #2340), never equal.
  */
@@ -302,6 +303,8 @@ function stopMoves({ base, head }) {
       if (!phases.has(stop.phase)) phases.set(stop.phase, []);
       phases.get(stop.phase).push(stop.allowance);
     }
+    for (const allowances of phases.values())
+      allowances.sort((x, y) => (x === null) - (y === null) || x - y);
     return phases;
   };
   const [b, h] = [byPhase(base), byPhase(head)];
