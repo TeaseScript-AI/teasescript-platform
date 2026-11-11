@@ -519,25 +519,22 @@ test("the plans summary names what differs in a demand row, gives it one class, 
           base: compile("P", "d", { trace: "1/4/0", units: 4 }),
           head: compile("P", "d", { trace: "1/3/0", units: 3 }),
         },
-        { demand: 4, base: compile("P", "d", { questions: undefined }), head: compile("P", "d") },
       ],
     },
   ];
   const file = join(folder, "records.jsonl");
-  writeFileSync(file, `${JSON.stringify({ set: "s", name: "n", runs: 7, differing: 6, modes })}\n`);
+  writeFileSync(file, `${JSON.stringify({ set: "s", name: "n", runs: 6, differing: 5, modes })}\n`);
   const ran = spawnSync(process.execPath, [tool, "summary", file], { encoding: "utf8" });
   assert.equal(ran.status, 0, ran.stderr);
   const [countsLine, ...lines] = ran.stdout.trim().split("\n");
   const counts = JSON.parse(countsLine!);
   assert.deepEqual(
-    ["demand", "demandPublication", "demandQuestions", "demandWork", "demandUnavailable"].map(
-      (key) => counts[key],
-    ),
-    [5, 2, 1, 1, 1],
+    ["demand", "demandPublication", "demandQuestions", "demandWork"].map((key) => counts[key]),
+    [4, 2, 1, 1],
   );
   assert.deepEqual(
-    ["Base", "Head", "Both", "Neither", "Unavailable"].map((who) => counts[`demandStops${who}`]),
-    [1, 0, 1, 2, 1],
+    ["Base", "Head", "Both", "Neither"].map((who) => counts[`demandStops${who}`]),
+    [1, 0, 1, 2],
   );
   const own = "(against its own unstopped compile, base:";
   const checks = "checks 1/1 → 1/1 (unstopped/at the allowance)";
@@ -550,7 +547,129 @@ test("the plans summary names what differs in a demand row, gives it one class, 
       `${own} questions, head: questions); ${checks}, units 5 → 5`,
     `s n mode "forward, unshared": at demand allowance 8 apart (work): work; stops neither ` +
       `${own} work, head: work); ${checks}, units 4 → 3`,
-    `s n mode "forward, unshared": at demand allowance 4 apart (unavailable): unrecorded; stops unavailable ` +
-      `${own} unrecorded, head: none); ${checks}, units 5 → 5`,
   ]);
+});
+
+test("the plans summary refuses, naming file, line and fault, any line that is not a record the runner writes (#2341, R13)", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  const compile = (more: Record<string, unknown> = {}) => ({
+    plan: "p",
+    diagnostics: "d",
+    checks: 0,
+    error: null,
+    trace: "1/5/a",
+    questions: "1/b",
+    units: 5,
+    ...more,
+  });
+  const valid = () => ({
+    set: "s",
+    name: "n",
+    key: "c".repeat(64),
+    runs: 2,
+    differing: 1,
+    modes: [
+      {
+        mode: "reversed",
+        base: compile(),
+        head: compile(),
+        same: true,
+        demands: [{ demand: 16, base: compile(), head: compile({ trace: "1/4/a", units: 4 }) }],
+      },
+    ],
+  });
+  // (each row one fault, which only its own clause refuses; the valid record first, which must pass)
+  const rows: [string, (r: ReturnType<typeof valid>) => object | string, RegExp][] = [
+    ["a valid record", (r) => r, /^$/],
+    ["not JSON", () => "{not json", /no JSON/],
+    ["a key that is no hash", (r) => ({ ...r, key: "k" }), /no sha256/],
+    ["an unknown field", (r) => ({ ...r, extra: 1 }), /no source record/],
+    ["runs as text", (r) => ({ ...r, runs: "2" }), /runs or differing/],
+    ["no modes", (r) => ({ ...r, modes: [] }), /no modes/],
+    ["a mode twice", (r) => ({ ...r, modes: [r.modes[0], r.modes[0]] }), /a mode twice/],
+    [
+      "a mode index past 3",
+      (r) => ({ ...r, modes: [{ ...r.modes[0], mode: 4 }] }),
+      /neither by a name/,
+    ],
+    [
+      "questions false",
+      (r) => ({ ...r, modes: [{ ...r.modes[0], base: compile({ questions: false }) }] }),
+      /questions not n\/hash/,
+    ],
+    [
+      "trace null",
+      (r) => ({ ...r, modes: [{ ...r.modes[0], head: compile({ trace: null }) }] }),
+      /trace not n\/units\/hash/,
+    ],
+    [
+      "a part missing",
+      (r) => ({ ...r, modes: [{ ...r.modes[0], head: { ...compile(), questions: undefined } }] }),
+      /exactly its seven parts/,
+    ],
+    [
+      "a plan neither text nor null",
+      (r) => ({ ...r, modes: [{ ...r.modes[0], base: compile({ plan: 1 }) }] }),
+      /neither text nor null/,
+    ],
+    [
+      "checks below zero",
+      (r) => ({ ...r, modes: [{ ...r.modes[0], base: compile({ checks: -1 }) }] }),
+      /checks or units/,
+    ],
+    [
+      "same against the parts",
+      (r) => ({ ...r, modes: [{ ...r.modes[0], same: false }] }),
+      /same that is not/,
+    ],
+    [
+      "a demand side null",
+      (r) => ({
+        ...r,
+        modes: [{ ...r.modes[0], demands: [{ demand: 16, base: null, head: compile() }] }],
+      }),
+      /exactly its seven parts/,
+    ],
+    [
+      "a demand kept though equal",
+      (r) => ({
+        ...r,
+        modes: [{ ...r.modes[0], demands: [{ demand: 16, base: compile(), head: compile() }] }],
+      }),
+      /do not differ/,
+    ],
+    [
+      "a demand of zero",
+      (r) => ({
+        ...r,
+        modes: [{ ...r.modes[0], demands: [{ ...r.modes[0]!.demands[0]!, demand: 0 }] }],
+      }),
+      /demand not one/,
+    ],
+    ["a stall with runs", (r) => ({ ...r, stalled: "units", run: null }), /also holds runs/],
+    [
+      "a stall's run of no tree",
+      () => ({
+        set: "s",
+        name: "n",
+        stalled: "units",
+        run: { tree: "both", mode: "forward", at: "natural" },
+      }),
+      /run not one the runner names/,
+    ],
+  ];
+  for (const [at, [label, change, fault]] of rows.entries()) {
+    const changed = change(valid());
+    const file = join(folder, `row-${at}.jsonl`);
+    writeFileSync(file, `${typeof changed === "string" ? changed : JSON.stringify(changed)}\n`);
+    const ran = spawnSync(process.execPath, [tool, "summary", file], { encoding: "utf8" });
+    if (at === 0) assert.equal(ran.status, 0, `${label}: ${ran.stderr}`);
+    else {
+      assert.equal(ran.status, 2, `${label}: ${ran.stdout}`);
+      assert.match(ran.stderr, new RegExp(`row-${at}\\.jsonl:1: `), label);
+      assert.match(ran.stderr, fault, label);
+      assert.equal(ran.stdout, "", label);
+    }
+  }
 });
