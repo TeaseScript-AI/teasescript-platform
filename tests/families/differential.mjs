@@ -252,7 +252,7 @@ async function record() {
     end: d.span.end.offset,
     message: d.message,
   });
-  // (each run starts from its own copy of the case's storage, which a run's save changes)
+  // (each run starts from its own copy of the case's storage)
   const runs = (plan, c) =>
     c.runs?.map((globals) => {
       const given = c.storage === undefined ? {} : { storage: c.storage };

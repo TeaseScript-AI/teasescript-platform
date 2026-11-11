@@ -659,15 +659,15 @@ test("the differential record of the repository's own build: four modes, a plan'
 test("a case's storage is what each run's load reads, on the checker and the core's route, and is recorded (#2338)", (t) => {
   const folder = mkdtempSync(join(tmpdir(), "families-differential-storage-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
-  // (a typed load: its reader takes the stored value, refuses one of another type, and without one gives the default)
-  const source =
-    'let key = "k"\nlet n: integer = load(key, default: 3)\nsay n\nsave n + 1 as key\nexit\n';
+  // (a load whose value a repeat count reads: it takes the stored value, fails on one of another type, and without one
+  // runs on its default)
+  const source = 'let v = load("k", default: 0)\nsay v\nrepeat v {}\nexit\n';
   const runs = [{ hostValue: 0 }, { hostValue: 1 }];
   const cases = join(folder, "cases.jsonl");
   writeFileSync(
     cases,
     [
-      { name: "stored", source, runs, storage: { k: 7 } },
+      { name: "stored", source, runs, storage: { k: 2 } },
       { name: "wrong", source, runs, storage: { k: "seven" } },
       { name: "none", source, runs },
     ]
@@ -689,11 +689,11 @@ test("a case's storage is what each run's load reads, on the checker and the cor
         r.failure !== null,
       ]),
     );
-  // (every run of a case starts from the same storage, whatever an earlier run saved)
+  // (each run of a case, two of them, on the checker and in each of the route's four modes)
   const expected = {
-    stored: [{ k: 7 }, "halted", ["7"], false],
-    wrong: [{ k: "seven" }, "failed", [], true],
-    none: [undefined, "halted", ["3"], false],
+    stored: [{ k: 2 }, "halted", ["2"], false],
+    wrong: [{ k: "seven" }, "failed", ["seven"], true],
+    none: [undefined, "halted", ["0"], false],
   };
   assert.deepEqual(
     Object.fromEntries(rows.map((row) => [row.name, outcomes(row)])),
@@ -703,6 +703,6 @@ test("a case's storage is what each run's load reads, on the checker and the cor
   );
   assert.deepEqual(
     rows.map((row) => row.case.storage),
-    [{ k: 7 }, { k: "seven" }, undefined],
+    [{ k: 2 }, { k: "seven" }, undefined],
   );
 });
