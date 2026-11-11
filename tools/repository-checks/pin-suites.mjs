@@ -8,10 +8,10 @@ import { suiteTestFiles } from "../test-shards.mjs";
 //
 //   node tools/repository-checks/pin-suites.mjs [--base <ref>] [--run]
 //
-// Each file that holds such pins says so in its first line, a mark (`readMarks`): `// pins: <what> | line /<regex>/`
-// in a suite, or `// pins for <suite>, ...: <what> | line /<regex>/` in a file holding pins those suites run (`in`).
-// Each suite pins a whole-analysis count (a work total, a table of totals or of `main`'s recorded work as bounds, a
-// count of listed copy or construction sites) or a digest of what an analysis publishes, so any change under
+// Each `.ts` file that holds such pins says so in its first line, a mark (`readMarks`): `// pins: <what> | line
+// /<regex>/` in a suite, or `// pins for <suite>, ...: <what> | line /<regex>/` in a file holding pins those suites run
+// (`in`). Each suite pins a whole-analysis count (a work total, a table of totals or of `main`'s recorded work as
+// bounds, a count of listed copy or construction sites) or a digest of what an analysis publishes, so any change under
 // `src/type-inference/core/` can move it, and the suite itself is listed when it or a file holding its pins changes: a
 // suite whose pins are in two files is named by a mark in each, and is listed once.
 // The changes are those since the merge-base of HEAD and `--base` (default `origin/main`), committed or not, untracked
@@ -45,7 +45,7 @@ import { suiteTestFiles } from "../test-shards.mjs";
 const CORE = "src/type-inference/core/";
 
 /**
- * A mark, the first line of a file under `tests/` that holds pins: `// pins: <what> | line /<regex>/<flags>` in a
+ * A mark, the first line of a `.ts` file under `tests/` that holds pins: `// pins: <what> | line /<regex>/<flags>` in a
  * suite, or `// pins for <suite>, <suite>: <what> | line /<regex>/<flags>` in a file holding pins those suites run.
  */
 const MARK = /^\/\/ pins(?: for ([^:]+))?: (.+?) \| line \/(.+)\/([a-z]*)$/u;
@@ -53,21 +53,22 @@ const MARK = /^\/\/ pins(?: for ([^:]+))?: (.+?) \| line \/(.+)\/([a-z]*)$/u;
 const MARK_START = /^\s*\/\/\s*pins\b/u;
 
 /**
- * The pinning suites the marks under `root`'s `tests/` declare, one record per suite and marked file: its `file`, what
- * it pins (`pins`), a line its pins hold (`pin`) and, when the mark is in another file, that file (`in`); in path order.
- * `faults` names each mark that does not parse, names no test file as its suite, finds no line of its file but itself,
- * or is not a file's first line.
+ * The pinning suites the marks of the `.ts` files under `root`'s `tests/` declare, one record per suite and marked file:
+ * its `file`, what it pins (`pins`), a line its pins hold (`pin`) and, when the mark is in another file, that file
+ * (`in`); in path order.
+ * `faults` names each mark that does not parse, has a `g` or `y` flag, names no test file as its suite, finds no line of
+ * its file but itself, or is not a file's first line.
  */
 export function readMarks(root) {
   const tests = new Set(testFiles(root));
   const suites = [];
   const faults = [];
   const files = readdirSync(join(root, "tests"), { recursive: true })
-    .filter((name) => /\.(?:ts|mts|cts|js|mjs|cjs)$/u.test(name))
+    .filter((name) => name.endsWith(".ts"))
     .map((name) => `tests/${name.split(sep).join("/")}`)
     .sort();
   for (const file of files) {
-    const lines = readFileSync(join(root, file), "utf8").split("\n");
+    const lines = readFileSync(join(root, file), "utf8").split(/\r?\n/u);
     for (const [at, line] of lines.entries())
       if (at > 0 && MARK_START.test(line))
         faults.push(`${file}:${at + 1}: a mark is a file's first line`);
@@ -75,6 +76,11 @@ export function readMarks(root) {
     const found = MARK.exec(lines[0]);
     if (found === null) {
       faults.push(`${file}:1: no mark: use // pins[ for <suite>, ...]: <what> | line /<regex>/`);
+      continue;
+    }
+    // (a `g` or `y` regex keeps where it last matched, so one test would change the next)
+    if (/[gy]/u.test(found[4])) {
+      faults.push(`${file}:1: the mark's line takes no g or y flag`);
       continue;
     }
     let pin;

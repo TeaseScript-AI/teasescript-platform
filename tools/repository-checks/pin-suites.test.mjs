@@ -254,6 +254,11 @@ test("a mark is read from a file's first line only, whole, naming test files, an
     "tests/d.test.ts": "// pins: a bad line | line /(/u\n(\n",
     "tests/e.test.ts": "// pins: only itself | line /only itself/u\nconst E = 1;\n",
     "tests/helpers/f.ts": "// pins for tests/none.test.ts: nothing | line /^y/u\ny\n",
+    // (a file with CRLF line ends reads as one with LF, its mark and its pin line alike)
+    "tests/crlf.test.ts": "// pins: a crlf total | line /^const A=1;$/u\r\nconst A=1;\r\n",
+    "tests/g.test.ts": "// pins: a stateful line | line /x/gu\nx\n",
+    // (only `.ts` files hold marks: a generator's source text is not read)
+    "tests/families/area/gen.mjs": "export const s = `\n// pins: in a source | line /x/u\nx`;\n",
   };
   for (const [file, text] of Object.entries(files)) {
     mkdirSync(join(root, file, ".."), { recursive: true });
@@ -276,12 +281,14 @@ test("a mark is read from a file's first line only, whole, naming test files, an
         pin: "/^\\s*measured: \\d/u",
         in: "tests/helpers/h.ts",
       },
+      { file: "tests/crlf.test.ts", pins: "a crlf total", pin: "/^const A=1;$/u", in: undefined },
     ],
   );
   assert.deepEqual(faults, [
     "tests/c.test.ts:1: no mark: use // pins[ for <suite>, ...]: <what> | line /<regex>/",
     "tests/d.test.ts:1: the mark's line is no regex: Invalid regular expression: /(/u: Unterminated group",
     "tests/e.test.ts:1: no line of the file but the mark's own is a line /only itself/u finds",
+    "tests/g.test.ts:1: the mark's line takes no g or y flag",
     "tests/helpers/f.ts:1: tests/none.test.ts is no test file",
     "tests/helpers/late.ts:2: a mark is a file's first line",
   ]);
