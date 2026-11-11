@@ -293,6 +293,11 @@ test("a revision number names an entry of the accepted record, each end of a ran
     ),
     [],
   );
+  // a short end stands right after its number: a dash and digits later on the line are none
+  assert.deepEqual(
+    unresolvedRevisionsIn("tests/d.ts", "r4.38 and pages 1–9989\n", recordEntries(["### r4-38\n"])),
+    [],
+  );
   // a range's short second end is a number of its own; a spaced dash, a longer token or a full end is none
   assert.deepEqual(
     missing(
