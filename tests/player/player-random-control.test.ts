@@ -507,7 +507,7 @@ test("every session op is classified, and only adoptCatchUp reads a session past
 
 // The caller inventory of Continue's boundary (Sol plan P5, code r1 C3): the calls that introduce or restore a session
 // in the session composable's files, `useDebugRewind.ts` and `rewindOwner.ts`, by these callee spellings (`startedSession`,
-// `introduceNow`, `prepareRestore`, `host.start`, `showRewound`, `host.show`), each classified. Only a Start carries its Player's
+// `introduceNow`, `prepareRestore`, `requireBridge().start`, `showRewound`, `host.show`), each classified. Only a Start carries its Player's
 // random ownership (`startRandom()`); a restore takes it at its adoption. A new such call in those files fails until it
 // is classified. A new module, or an indirection under another name, needs adding here.
 const SESSION_INTRODUCTIONS: Readonly<Record<string, readonly (readonly [string, string])[]>> = {
@@ -517,11 +517,9 @@ const SESSION_INTRODUCTIONS: Readonly<Record<string, readonly (readonly [string,
       "begin: (origin) => startedSession(create, { debugMode: debugModeOn() }, origin)",
       "start: Start",
     ],
-    ["introduceNow(requireBridge(), () => given, marks ?? NO_MARKS)", "restore: a raw restore"],
-    ["return introduceNow(", "by kind: `startedSession`'s factory, with `random`"],
     [
-      "return host.start(create.plan, startOptions, true, random, origin.begin)",
-      "by kind: `startedSession`'s held plan",
+      "return requireBridge().start(create.plan, startOptions, true, startRandom(), origin.begin)",
+      "by kind: `startedSession`'s held plan, with `random`",
     ],
   ],
   "player/vue/src/session/persistence/useKeptSession.ts": [
@@ -618,7 +616,7 @@ test("every random-op sender in the composable is classified as adopting or not"
 
 test("every session introduction in the composable and rewind is classified as a Start or a restore", () => {
   const callee =
-    /\b(startedSession|introduceNow|prepareRestore|host\.start|showRewound|host\.show)\(/u;
+    /\b(startedSession|introduceNow|prepareRestore|requireBridge\(\)\.start|showRewound|host\.show)\(/u;
   const definition = /function (startedSession|prepareRestore|showRewound)\(/u;
   for (const [file, classified] of Object.entries(SESSION_INTRODUCTIONS)) {
     const calls = readFileSync(new URL(`../../../${file}`, import.meta.url), "utf8")
@@ -640,7 +638,10 @@ test("every session introduction in the composable and rewind is classified as a
   const composable = composableText();
   assert.deepEqual(
     composable.match(/.*startRandom\(\).*/gu)?.map((line) => line.trim()),
-    ["startRandom: () => startRandom(),", "const random = startRandom();"],
+    [
+      "startRandom: () => startRandom(),",
+      "return requireBridge().start(create.plan, startOptions, true, startRandom(), origin.begin);",
+    ],
   );
 });
 

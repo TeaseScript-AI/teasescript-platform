@@ -430,8 +430,9 @@ for (const delay of [0, 50, 250] as const)
         player.queued.maximum <= 2,
         "no periodic backlog beyond startup/media service section",
       );
-      // The host's session as shown now, read over the bridge as its checkpoint, and the host's recording: both read in one
-      // turn after the session's earlier requests, so the client posts them together, and both reply on mock time.
+      // The host's session as shown now, read over the bridge as its checkpoint, and the host's recording: both queued in
+      // one turn behind the session's earlier requests, one after the other, so no session work comes between them; both
+      // reply on mock time.
       const onMockTime = async <T>(reading: Promise<T>, what: string): Promise<T> => {
         let replied = false;
         void reading.then(

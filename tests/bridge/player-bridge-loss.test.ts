@@ -40,9 +40,11 @@ import {
  * When the engine's Worker is lost, every request still waiting for its reply ends its caller quietly: the loss is the
  * Player error stop, which `bridgeLost` reports once, and no caller reports it again or leaves its rejection unhandled
  * (L5g). The cases come from the Player's consumers of bridge requests: those whose handling L5g changed must fail with
- * that handling reverted; the ones that were already safe are controls. A loss is injected as the client meets a real
- * one, so the composable runs on its own in-process engine (the topology the L5 series keeps it on): the client
- * rejects everything pending and posts nothing more (`terminate`), and its loss listeners run in the same tick.
+ * that handling reverted; the ones that were already safe are controls. The service rows run on a section host, where
+ * a loss is injected as the client meets a real one: the client rejects everything pending and posts nothing more
+ * (`terminate`), and its loss listeners run in the same tick. The composable's rows run on both topologies
+ * (`worker-topology.ts`): in-process with that injected loss, and on a Node Worker whose thread is ended, where the loss
+ * arrives with its exit.
  */
 
 /** The changed consumers, each with a request in flight at the loss. */
@@ -324,6 +326,14 @@ const RERUN = rerunRegistry({
   "hosted script's preparation in flight": TOPOLOGIES,
   // Only a Worker thread can exit before it is ready; the in-process host is ready at once.
   "Worker lost before ready": ["worker"],
+  // The same schedules without a loss, each its own case, so a control never stands in for its loss row.
+  "control: input-section observation in flight": TOPOLOGIES,
+  "control: input-section op in flight": TOPOLOGIES,
+  "control: media load report in flight": TOPOLOGIES,
+  "control: call view in flight": TOPOLOGIES,
+  "control: keep's capture in flight": TOPOLOGIES,
+  "control: Continue's restore in flight": TOPOLOGIES,
+  "control: hosted script's preparation in flight": TOPOLOGIES,
 });
 
 /** The browser surface the composable uses, with fake audio elements a test makes load. */
@@ -446,7 +456,7 @@ for (const [consumer, id, run] of [
     },
   );
   RERUN.rows(
-    id,
+    `control: ${id}`,
     `control: ${consumer} on the same schedule without a loss succeeds`,
     async (context, topology) => {
       const { transport, player, hostErrors } = await mount(context, topology, 50);
@@ -837,7 +847,7 @@ test("control: a Stage photo preload whose metadata the Worker's loss ends prelo
 // The no-loss controls: each row above on the same schedule, its reply held and let go without a loss, completes.
 
 RERUN.rows(
-  "media load report in flight",
+  "control: media load report in flight",
   "control: a media load report held and let go without a loss lets the script go on",
   async (context, topology) => {
     const { transport, player, elements, hostErrors } = await mount(
@@ -863,7 +873,7 @@ RERUN.rows(
 );
 
 RERUN.rows(
-  "call view in flight",
+  "control: call view in flight",
   "control: a call view request held and let go without a loss shows the call view",
   async (context, topology) => {
     const { transport, player, hostErrors } = await mount(context, topology, 50);
@@ -877,7 +887,7 @@ RERUN.rows(
 );
 
 RERUN.rows(
-  "keep's capture in flight",
+  "control: keep's capture in flight",
   "control: a keep's capture held and let go without a loss keeps the new point",
   async (context, topology) => {
     const kept = memoryKeptSessionStore();
@@ -907,7 +917,7 @@ RERUN.rows(
 );
 
 RERUN.rows(
-  "Continue's restore in flight",
+  "control: Continue's restore in flight",
   "control: Continue's restore held and let go without a loss offers Continue",
   async (context, topology) => {
     const kept = memoryKeptSessionStore();
@@ -937,7 +947,7 @@ RERUN.rows(
 );
 
 RERUN.rows(
-  "hosted script's preparation in flight",
+  "control: hosted script's preparation in flight",
   "control: the hosted script's preparation held and let go without a loss offers Start",
   async (context, topology) => {
     browser(context);
@@ -963,6 +973,24 @@ RERUN.rows(
     assert.equal(hostErrors(), 0);
   },
 );
+
+test("each connection's post log and reply gate see its own requests alone, with two connections live", async (context) => {
+  for (const topology of TOPOLOGIES) {
+    const held = await topologyBridge(context, topology, { delayMs: 5 });
+    const other = await topologyBridge(context, topology, { delayMs: 5 });
+    const before = held.posts.length;
+    held.hold("prepare");
+    const reply = other.bridge.client.request("prepare", {
+      source: { kind: "source", script: "exit" },
+    });
+    const late = new Promise((resolve) => setTimeout(() => resolve("held"), 2_000));
+    const settled = await Promise.race([reply.then((answer) => answer.result.kind), late]);
+    assert.equal(settled, "prepared", "the other connection's reply is not held");
+    assert.deepEqual(held.posts.slice(before), [], "the held connection logged nothing");
+    assert.ok(other.posts.some((post) => post.op === "prepare"));
+    held.release();
+  }
+});
 
 test("the rows' Worker loss is the thread's real exit, and each topology is the one asked for", async (context) => {
   for (const topology of TOPOLOGIES) {

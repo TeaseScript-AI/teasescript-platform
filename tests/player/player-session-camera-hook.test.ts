@@ -2,10 +2,7 @@ import assert from "node:assert/strict";
 import { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
 
-import {
-  playerRuntimeSnapshot,
-  type PlayerRuntimeSession,
-} from "../../player/runtime/runtime-adapter.js";
+import { playerRuntimeSnapshot } from "../../player/runtime/runtime-adapter.js";
 import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
 import {
   pendingPlayerRuntimeStorageWrite,
@@ -35,7 +32,7 @@ import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 // Load the real Vue composable through the existing build tool: its browser-source imports use Vite resolution.
 interface CameraHost {
   readonly bridge: Promise<PlayerBridge>;
-  readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
+  readonly session: Readonly<Ref<PlayerSession | null>>;
   readonly canClearScriptStorage: Readonly<Ref<boolean>>;
   readonly viewfinder: Readonly<Ref<FakeTrack | null>>;
   readonly viewfinderPlacement: Readonly<Ref<"window" | "stage" | null>>;
@@ -213,8 +210,7 @@ RERUN.rows(
     assert.ok(camera);
     assert.equal(host.viewfinderPlacement.value, "stage");
     assert.equal(host.viewfinder.value, camera);
-    // EVIDENCE: fixture: the composable shows the host's sessions (`PlayerSession`); this file declares the adapter's type.
-    const showing = host.session.value as PlayerSession | null;
+    const showing = host.session.value;
     assert.ok(showing);
     // The state to restore later, read from the host over the bridge.
     const saved = JSON.stringify(await checkpointSnapshot(await host.bridge, showing));

@@ -72,11 +72,15 @@ function heldOf(backend: Backend, session: PlayerSession): HeldSession {
 /**
  * Starts the in-process backend, ready at once: the Player's ops served on a port pair in this realm. With `delayMs`,
  * replies arrive after that delay instead of on a microtask (the delayed smoke). `historySpill` and `historyBudget` set
- * Debug's rewind histories' spill store and admission bound (`playerOpsContext`).
+ * Debug's rewind histories' spill store and admission bound (`playerOpsContext`). `wrapPort` wraps the client's end of
+ * the port pair, for a test that observes or holds what crosses this connection alone.
  */
 export function createInProcessBackend(
   build: BuildIdentity,
-  options: { readonly delayMs?: number } & NonNullable<Parameters<typeof playerOpsContext>[0]> = {},
+  options: {
+    readonly delayMs?: number;
+    readonly wrapPort?: (port: ClientPort) => ClientPort;
+  } & NonNullable<Parameters<typeof playerOpsContext>[0]> = {},
 ): PlayerBridge {
   let toHost: ((data: unknown) => void) | null = null;
   let toClient: ((data: unknown) => void) | null = null;
@@ -118,7 +122,7 @@ export function createInProcessBackend(
       closeConnection(context, sessions);
     },
   };
-  const { client } = openBridge(clientPort, build);
+  const { client } = openBridge(options.wrapPort?.(clientPort) ?? clientPort, build);
   const context = playerOpsContext(options);
   const sessions = startBridgeHost(hostPort, playerBridgeOps(context), build, context.delivery);
   const bridge = new PlayerBridge(client);

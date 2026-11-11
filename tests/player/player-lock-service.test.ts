@@ -1125,7 +1125,7 @@ const LOCK_RERUN = rerunRegistry<string>({
   ),
   "real composable lock": TOPOLOGIES,
   "lock before the preload's reply": TOPOLOGIES,
-  "preload's reply at the lock step": TOPOLOGIES,
+  "preload's reply before the lock is answered": TOPOLOGIES,
 });
 
 for (const script of SCRIPT_NAMES)
@@ -1284,8 +1284,8 @@ LOCK_RERUN.rows(
 );
 
 LOCK_RERUN.rows(
-  "preload's reply at the lock step",
-  "the preload's reply let go as the session shows, while its lock step loads the lock code, changes nothing",
+  "preload's reply before the lock is answered",
+  "the preload's reply let go as the session shows, before the lock's dialog is answered, changes nothing",
   async (context, topology) => {
     const { transport, player, start, answer } = await lockingPlayer(context, topology);
     const metadata = heldMetadata(context, transport.bridge);

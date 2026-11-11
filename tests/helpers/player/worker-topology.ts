@@ -58,15 +58,6 @@ export interface TopologyBridge {
   readonly exited: Promise<number> | null;
 }
 
-/** A reply gate: the op held, its request's id, and whether its reply arrived while held. */
-interface Gate {
-  target: string | null;
-  readonly ids: Set<number>;
-  holding: boolean;
-  heldTarget: boolean;
-  from: number;
-}
-
 const BUILD: BuildIdentity = { commit: null, dirty: null, mode: null, appVersion: null };
 const WORKERS = {
   // The engine's Worker entry, as the Player runs it.
@@ -153,7 +144,10 @@ const postOf = (request: {
   at: performance.now(),
 });
 
-/** A bridge of `topology`, ended after the test. In-process, its replies arrive after `delayMs` (needed to hold). */
+/**
+ * A bridge of `topology`, ended after the test. In-process, its replies arrive after `delayMs`, or on a microtask. Its
+ * post log and reply gate are this connection's alone, on either topology.
+ */
 export async function topologyBridge(
   context: TestContext,
   topology: Topology,
@@ -163,7 +157,7 @@ export async function topologyBridge(
   }: { readonly delayMs?: number; readonly entry?: keyof typeof WORKERS } = {},
 ): Promise<TopologyBridge> {
   assert.ok(client && bridgeModule && facade, "call loadTopology first");
-  const made = topology === "worker" ? await onWorker(WORKERS[entry]) : inProcess(context, delayMs);
+  const made = topology === "worker" ? await onWorker(WORKERS[entry]) : inProcess(delayMs);
   context.after(() => made.bridge.client.terminate());
   return {
     ...made,
@@ -173,133 +167,48 @@ export async function topologyBridge(
   };
 }
 
-function inProcess(
-  context: TestContext,
-  delayMs: number | undefined,
-): Omit<TopologyBridge, "topology" | "assertTopology"> {
-  const bridge = facade!.createInProcessBackend(BUILD, delayMs === undefined ? {} : { delayMs });
-  const lose = inProcessLoss(bridge, client!.BridgeLostError);
+/**
+ * `port` with this connection's post log and reply gate: each request it posts is logged; once the gate's target op is
+ * posted, every reply from then on waits at the port, the target's among them, until `release`.
+ */
+function gatedPort(port: Client.ClientPort) {
   const posts: Posted[] = [];
-  const gate: Gate = {
-    target: null,
-    ids: new Set<number>(),
-    holding: false,
-    heldTarget: false,
-    from: 0,
-  };
-  // The port pair passes every message through `structuredClone`: requests from the client, replies from the host.
-  const clone = globalThis.structuredClone;
-  context.mock.method(
-    globalThis,
-    "structuredClone",
-    (value: unknown, options?: StructuredSerializeOptions) => {
-      const message = decoded(value);
-      if (message?.kind === "request") {
-        posts.push(postOf(message));
-        if (gate.target !== null && message.op === gate.target && gate.ids.size === 0) {
-          gate.ids.add(message.id);
-          holdDeliveries();
-        }
-      } else if (message?.kind === "reply" && gate.holding && gate.ids.has(message.id))
-        gate.heldTarget = true;
-      return clone(value, options);
-    },
-  );
-  const timeout = globalThis.setTimeout;
-  const deliveries: (() => void)[] = [];
-  let restore = () => {};
-  /** Holds the host's delayed deliveries from now on: the target's reply, and every later one. */
-  const holdDeliveries = () => {
-    gate.holding = true;
-    const held = (callback: () => void, ms?: number) => {
-      if (ms !== delayMs) return timeout(callback, ms);
-      deliveries.push(callback);
-      return timeout(() => {}, 0);
-    };
-    // EVIDENCE: invariant: `held` keeps `setTimeout`'s call shape for the callbacks the host and the page schedule.
-    const mocked = context.mock.method(globalThis, "setTimeout", held as typeof setTimeout);
-    restore = () => mocked.mock.restore();
-  };
-  return {
-    bridge,
-    posts,
-    exited: null,
-    lose: async () => lose(),
-    hold: (op) => {
-      assert.ok(delayMs !== undefined && delayMs > 0, "an in-process hold needs delayed replies");
-      Object.assign(gate, { target: op, heldTarget: false, from: posts.length });
-      gate.ids.clear();
-    },
-    held: () =>
-      until(
-        () => gate.heldTarget,
-        `the reply to ${gate.target} held; posted since: ${posts
-          .slice(gate.from)
-          .map((post) => post.op)
-          .join(", ")}`,
-      ),
-    release: () => {
-      Object.assign(gate, { holding: false, target: null });
-      restore();
-      for (const deliver of deliveries.splice(0)) timeout(deliver, 0);
-    },
-  };
-}
-
-async function onWorker(entry: URL): Promise<Omit<TopologyBridge, "topology" | "assertTopology">> {
-  const worker = new Worker(entry, { workerData: { build: BUILD } });
-  const exited = new Promise<number>((resolve) => worker.once("exit", resolve));
-  const posts: Posted[] = [];
-  const gate: Gate = {
-    target: null,
-    ids: new Set<number>(),
-    holding: false,
-    heldTarget: false,
-    from: 0,
-  };
+  const gate: {
+    target: string | null;
+    id: number | null;
+    holding: boolean;
+    heldTarget: boolean;
+    from: number;
+  } = { target: null, id: null, holding: false, heldTarget: false, from: 0 };
   const buffered: unknown[] = [];
   let deliver: (data: unknown) => void = () => {};
-  const port: Client.ClientPort = {
+  const gated: Client.ClientPort = {
+    ...port,
     post: (message) => {
       const request = decoded(message);
       if (request?.kind === "request") {
         posts.push(postOf(request));
-        if (gate.target !== null && request.op === gate.target && gate.ids.size === 0) {
-          gate.ids.add(request.id);
+        if (gate.target !== null && request.op === gate.target && gate.id === null) {
+          gate.id = request.id;
           gate.holding = true;
         }
       }
-      worker.postMessage(message);
+      port.post(message);
     },
     listen: (listener) => {
       deliver = listener;
-      worker.on("message", (data: unknown) => {
+      port.listen((data) => {
         if (!gate.holding) return listener(data);
-        if (gate.ids.has(decoded(data)?.id ?? -1)) gate.heldTarget = true;
+        if (decoded(data)?.id === gate.id) gate.heldTarget = true;
         buffered.push(data);
       });
     },
-    onFailure: (listener) => {
-      worker.on("error", listener);
-      worker.on("messageerror", listener);
-      worker.on("exit", (code) => listener(new Error(`The worker exited with code ${code}.`)));
-    },
-    terminate: () => void worker.terminate(),
   };
-  const bridge = new bridgeModule!.PlayerBridge(await client!.connectBridge(port, BUILD));
   return {
-    bridge,
+    port: gated,
     posts,
-    exited,
-    lose: () =>
-      new Promise<void>((resolve) => {
-        bridge.client.onLoss(() => resolve());
-        void worker.terminate();
-      }),
-    hold: (op) => {
-      Object.assign(gate, { target: op, heldTarget: false, from: posts.length });
-      gate.ids.clear();
-    },
+    hold: (op: string) =>
+      void Object.assign(gate, { target: op, id: null, heldTarget: false, from: posts.length }),
     held: () =>
       until(
         () => gate.heldTarget,
@@ -315,9 +224,54 @@ async function onWorker(entry: URL): Promise<Omit<TopologyBridge, "topology" | "
   };
 }
 
+function inProcess(
+  delayMs: number | undefined,
+): Omit<TopologyBridge, "topology" | "assertTopology"> {
+  const wrapped: { gated?: ReturnType<typeof gatedPort> } = {};
+  const bridge = facade!.createInProcessBackend(BUILD, {
+    ...(delayMs === undefined ? {} : { delayMs }),
+    wrapPort: (port) => (wrapped.gated = gatedPort(port)).port,
+  });
+  const gated = wrapped.gated;
+  assert.ok(gated !== undefined, "the backend took the gated port");
+  const { posts, hold, held, release } = gated;
+  const lose = inProcessLoss(bridge, client!.BridgeLostError);
+  return { bridge, posts, exited: null, lose: async () => lose(), hold, held, release };
+}
+
+async function onWorker(entry: URL): Promise<Omit<TopologyBridge, "topology" | "assertTopology">> {
+  const worker = new Worker(entry, { workerData: { build: BUILD } });
+  const exited = new Promise<number>((resolve) => worker.once("exit", resolve));
+  const { port, posts, hold, held, release } = gatedPort({
+    post: (message) => worker.postMessage(message),
+    listen: (listener) => void worker.on("message", (data: unknown) => listener(data)),
+    onFailure: (listener) => {
+      worker.on("error", listener);
+      worker.on("messageerror", listener);
+      worker.on("exit", (code) => listener(new Error(`The worker exited with code ${code}.`)));
+    },
+    terminate: () => void worker.terminate(),
+  });
+  const bridge = new bridgeModule!.PlayerBridge(await client!.connectBridge(port, BUILD));
+  return {
+    bridge,
+    posts,
+    exited,
+    lose: () =>
+      new Promise<void>((resolve) => {
+        bridge.client.onLoss(() => resolve());
+        void worker.terminate();
+      }),
+    hold,
+    held,
+    release,
+  };
+}
+
 /**
- * A file's rerun registry: each case's id with the topologies it runs on. `rows` makes one test per registered topology;
- * a row is complete once its body and its cleanup ran, and the file's end checks that every registered row completed.
+ * A file's rerun registry: each case's id with the topologies it runs on. `rows` registers a case once and makes one test
+ * per listed topology; a row is complete once its body and its cleanup ran, and the file's end checks that every listed
+ * row completed.
  * It closes the registered cases only: a test written outside the registry is not covered.
  */
 export function rerunRegistry<Id extends string>(cases: Readonly<Record<Id, readonly Topology[]>>) {
@@ -325,6 +279,7 @@ export function rerunRegistry<Id extends string>(cases: Readonly<Record<Id, read
     ([id, topologies]) => topologies.map((topology) => ({ case: id, topology })),
   );
   const completed: Coordinates[] = [];
+  const registered = new Set<Id>();
   after(() =>
     assert.deepEqual(coverageGaps(feasible, completed, { tuples: true }), [], "registered rows"),
   );
@@ -334,6 +289,9 @@ export function rerunRegistry<Id extends string>(cases: Readonly<Record<Id, read
       name: string,
       body: (context: TestContext, topology: Topology) => Promise<void>,
     ): void {
+      // One registration per case: a second would complete the first's coordinates in its place.
+      assert.ok(!registered.has(id), `the case ${id} is registered twice`);
+      registered.add(id);
       for (const topology of cases[id])
         test(`${name} (${topology})`, async (context) => {
           await body(context, topology);
