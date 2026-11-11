@@ -1031,11 +1031,12 @@ RERUN.rows(
     await until(() => refusals.length > 0, "the catch-up's refusal");
     assert.deepEqual(refusals, ["basis"]);
     await until(() => buttonLabel(host) === "After", "the answer's next button");
-    // Refused, the catch-up stepped nothing; the clock observed the late second in one go instead.
+    // Refused, the catch-up adopted nothing (a step already queued finds no copy); the clock observed the late second in
+    // one go instead.
     const ops = transport.posts.slice(heldAt).map((post) => post.op);
     const begun = ops.indexOf("beginCatchUp");
     assert.ok(begun >= 0, ops.join(", "));
-    assert.equal(ops.indexOf("stepCatchUp", begun), -1, ops.join(", "));
+    assert.equal(ops.indexOf("adoptCatchUp", begun), -1, ops.join(", "));
     assert.ok(ops.indexOf("observeTime", begun) > begun, ops.join(", "));
     await until(
       () => host.session.value!.state.observedSessionTimeMs >= 1_000,
