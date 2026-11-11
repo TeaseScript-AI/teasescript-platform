@@ -203,7 +203,7 @@ test(
     // the filter's own temporary folders, apart from everyone else's
     const temporary = resolve(directory, "tmp");
     mkdirSync(temporary);
-    const environment = { ...process.env, TMPDIR: temporary };
+    const environment: NodeJS.ProcessEnv = { ...process.env, TMPDIR: temporary };
     delete environment.NODE_TEST_CONTEXT;
     const started = resolve(directory, "started");
     const fixture = resolve(directory, "running.test.mjs");
