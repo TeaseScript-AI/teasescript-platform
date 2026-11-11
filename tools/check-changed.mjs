@@ -21,7 +21,8 @@ import { isSuiteTestPath, isTypeCoreTestFile } from "./test-shards.mjs";
 //
 // The base is `--base`, else the open pull request's base (`gh pr view`, as `origin/<base>`), else `origin/main`; the
 // changes are those since its merge-base with HEAD, committed or not, untracked files included. Always: `git diff
-// --check`, the format check of the changed files, oxlint, knip, the doc links and the imports, each as CI runs it.
+// --check`, the format check of the changed files, oxlint, knip, the doc links and the imports, each as CI runs it, and
+// `merge commits`: no merge commit since the merge-base but one of main and runtime-v2 into each other (`strayMerges`).
 // Then each project a changed path belongs to (`projectsFor`): its type check and tests. A root configuration file
 // belongs to the checks that read it, and needs no project when only those that always run do. A changed path no
 // project claims, other than documentation, runs every project's checks. It never builds the TypeScript or runs the
@@ -134,6 +135,40 @@ export function unknownToCostly(paths) {
       isTypeCoreTestFile(path) &&
       costlyTestSeconds[path.slice("tests/".length).replace(/\.ts$/u, ".js")] === undefined,
   );
+}
+
+/** The long-lived branches the workflow merges into each other, on merge branches such as `rt2/merge-main-…`. */
+const MERGED_INTO_EACH_OTHER = ["origin/main", "origin/runtime-v2"];
+
+/**
+ * The merge commits in `from..head` that are not a merge of one long-lived branch into another (#2106), each as
+ * `<commit> <subject>: <why>`, run with `git` in the working folder. A merge passes only when each parent after its first
+ * is on `origin/main` or `origin/runtime-v2` and not on `base`, the commit the run compares with: so merging main into a
+ * branch of runtime-v2 passes, and merging a branch's own base into it, or another branch, does not. A lane branch
+ * rebases instead.
+ */
+export function strayMerges(from, head, base) {
+  const holds = (ref, commit) =>
+    spawnSync("git", ["merge-base", "--is-ancestor", commit, ref]).status === 0;
+  const stray = [];
+  for (const line of git("rev-list", "--merges", "--parents", `${from}..${head}`).split("\n")) {
+    if (line === "") continue;
+    const [commit, , ...merged] = line.split(" ");
+    const why = merged
+      .map((parent) =>
+        holds(base, parent)
+          ? `merges ${parent.slice(0, 9)}, which the base already holds`
+          : MERGED_INTO_EACH_OTHER.some((ref) => holds(ref, parent))
+            ? null
+            : `merges ${parent.slice(0, 9)}, which neither ${MERGED_INTO_EACH_OTHER.join(" nor ")} holds`,
+      )
+      .filter((reason) => reason !== null);
+    if (why.length > 0)
+      stray.push(
+        `${commit.slice(0, 9)} ${git("log", "-1", "--format=%s", commit)}: ${why.join("; ")}`,
+      );
+  }
+  return stray;
 }
 
 /** The extensions `npm run format:check` covers. */
@@ -333,6 +368,8 @@ async function check(cleanups) {
   if (!existsSync("node_modules")) {
     process.stdout.write(`check-changed: ${linkMainNodeModules(process.env, process.cwd())}\n`);
   }
+  // (before `--merged` enters its worktree, whose HEAD is the base's commit)
+  const head = git("rev-parse", "HEAD");
   let mergeBase;
   if (merged) mergeBase = enterMerge(ref, cleanups);
   else
@@ -372,8 +409,15 @@ async function check(cleanups) {
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
   const formatted = changed.filter((path) => FORMATTED.test(path));
   const [formatter, ...formatterArgs] = prettier();
+  const stray = strayMerges(mergeBase, head, merged ? mergeBase : ref);
   const checks = [
     run("diff --check", "git", ["diff", "--check", mergeBase]),
+    {
+      name: "merge commits",
+      passed: stray.length === 0,
+      seconds: 0,
+      output: stray.map((line) => `${line}: rebase onto ${ref} instead\n`).join(""),
+    },
     ...(formatted.length > 0
       ? [run("format", formatter, [...formatterArgs, "--check", ...formatted])]
       : []),

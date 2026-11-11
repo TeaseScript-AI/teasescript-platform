@@ -543,3 +543,91 @@ test("it links the node_modules main's checkout has, replaces only a stale link,
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test(
+  "a merge commit fails `merge commits` unless it merges main or runtime-v2 into the other, plain and merged, and the other checks still run (#2106)",
+  { timeout: 120_000 },
+  () => {
+    // main and runtime-v2 grow apart from one base; `other` is another lane's branch off main
+    const cases = [
+      // [the branch's base, what its merge commit merges, the reason it fails, or null when it passes]
+      ["main", "main", "which the base already holds"],
+      ["main", "other", "which neither origin/main nor origin/runtime-v2 holds"],
+      ["main", "runtime-v2", null],
+      ["runtime-v2", "main", null],
+      ["runtime-v2", "runtime-v2", "which the base already holds"],
+      ["main", null, null],
+    ];
+    for (const merged of [false, true])
+      for (const [base, merges, failure] of cases) {
+        const { directory } = repository({ passing: true });
+        const git = (...args) => {
+          const result = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+            cwd: directory,
+            encoding: "utf8",
+          });
+          assert.equal(result.status, 0, result.stderr);
+          return result.stdout.trim();
+        };
+        const commit = (branch, file) => {
+          git("switch", "-q", branch);
+          writeFileSync(join(directory, file), `${branch}\n`);
+          git("add", file);
+          git("commit", "-q", "-m", `${branch} grows`);
+        };
+        try {
+          git("branch", "runtime-v2", "main");
+          git("branch", "other", "main");
+          commit("runtime-v2", "runtime-v2.md");
+          commit("other", "other.md");
+          commit("main", "main.md");
+          git("switch", "-q", "-c", "lane", base);
+          commit("lane", "lane.md");
+          // (both grow after the lane branched, so merging either is a merge commit)
+          commit("main", "main-later.md");
+          commit("runtime-v2", "runtime-v2-later.md");
+          git("update-ref", "refs/remotes/origin/main", "main");
+          git("update-ref", "refs/remotes/origin/runtime-v2", "runtime-v2");
+          git("switch", "-q", "lane");
+          if (merges !== null) git("merge", "-q", "--no-edit", merges);
+          const result = spawnSync(
+            process.execPath,
+            [tool, ...(merged ? ["--merged"] : []), "--base", base],
+            { cwd: directory, encoding: "utf8", env: environment },
+          );
+          const at = `${merged ? "merged" : "plain"}: a branch of ${base} merging ${merges}`;
+          assert.equal(
+            result.status,
+            failure === null ? 0 : 1,
+            `${at}: ${result.stdout}${result.stderr}`,
+          );
+          assert.deepEqual(
+            result.stdout
+              .match(/^(?:PASS|FAIL) {2}\S.*$/gmu)
+              .map((line) => line.split(/ {2,}/u)[1]),
+            ["diff --check", "merge commits", "oxlint", "knip", "doc links", "imports"],
+            at,
+          );
+          assert.match(
+            result.stdout,
+            new RegExp(`^${failure === null ? "PASS" : "FAIL"} {2}merge commits `, "mu"),
+            at,
+          );
+          if (failure !== null) {
+            const mergeCommit = git("rev-parse", "--short=9", "lane");
+            const parent = git("rev-parse", "--short=9", "lane^2");
+            assert.match(
+              result.stdout,
+              new RegExp(
+                `--- merge commits ---\\n${mergeCommit} Merge branch '${merges}' into lane: merges ${parent}, ${failure}: rebase onto ${base} instead\\n`,
+                "u",
+              ),
+              at,
+            );
+          }
+        } finally {
+          rmSync(directory, { recursive: true, force: true });
+        }
+      }
+  },
+);
