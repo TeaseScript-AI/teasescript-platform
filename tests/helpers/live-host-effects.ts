@@ -132,6 +132,8 @@ const MEDIA_ELEMENT = {
  */
 const PLAYER_SESSION_OPTIONS = {
   bridge: "transport",
+  // No fresh connection: a loss is the error stop, as the replays record it.
+  nextConnection: "absent",
   resolveAsset: "pure",
   scriptStorage: "recorded",
   capabilities: "absent",
