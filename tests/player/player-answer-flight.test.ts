@@ -190,6 +190,7 @@ async function page(context: TestContext, topology: Topology, { recoverable = fa
         await until(
           () => host.session.value !== null && presentedAction(host.session.value) !== undefined,
           "presented",
+          "host",
         );
         return;
       }
@@ -203,6 +204,7 @@ async function page(context: TestContext, topology: Topology, { recoverable = fa
       await until(
         () => host.session.value !== null && presentedAction(host.session.value) !== undefined,
         "presented",
+        "host",
       );
     },
   };
@@ -1045,7 +1047,7 @@ for (const topology of TOPOLOGIES)
         );
         // The stop after the loss offers its recovery (#2382): Continue from the point kept at the question.
         if (exit === "loss") {
-          await until(() => at.host.recovery.value !== null, "the recovery offer");
+          await until(() => at.host.recovery.value !== null, "the recovery offer", "host");
           assert.deepEqual(at.host.recovery.value, { offer: "continue", where: "line" });
         }
       });
