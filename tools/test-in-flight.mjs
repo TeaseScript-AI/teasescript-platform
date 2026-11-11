@@ -11,15 +11,19 @@ import { relative, resolve } from "node:path";
 export const AFTER_MS = 5 * 60_000;
 
 /**
- * The longest a test, and each of its hooks apart, may wait: past it Node fails the test as `test timed out`, its `✖`
- * line printed then, and its file's other tests still run. It cannot end synchronous work, which holds its timer back.
- * Both runners of the suite give it (`run-test-files.mjs`, and `test-output-filter.mjs` for named files, where a later
- * `--test-timeout` replaces it), so an asynchronous hang is a named failure before a job's limit (#2454). What the test
- * left running can still keep its file's process, and the run, alive until that limit. A test's own `timeout` option
- * replaces it for the test, not for its hooks, which take one of their own.
- * 5 minutes is a measurement, to redo as the suite's costliest tests change (2026-11-11): the longest test took 125 s and
- * 159 s in two full runs on queue workers (jobs 11111622335a16, 11111647209084), the costliest file 177 s in CI (median,
- * `costly-test-files.mjs`), and CI's test jobs take 5 to 7 of their 15 minutes.
+ * The longest a test, and each of its hooks apart, may wait: past it Node fails the test as `test timed out`, and its
+ * file's other tests still run. Its `✖` line is printed once every earlier file of the run has reported, so a run that
+ * an earlier file holds open can reach its job's limit before the line appears; this module's line on standard error
+ * names that stall. It cannot end synchronous work, which holds its timer back. Both runners of the suite give it
+ * (`run-test-files.mjs`, and `test-output-filter.mjs` for named files, where a later `--test-timeout` replaces it), so
+ * an asynchronous hang fails by name (#2454). What the test left running can still keep its file's process, and the
+ * run, alive until the job's limit. A test's own `timeout` option replaces it for the test, not for its hooks, which
+ * take one of their own.
+ * 5 minutes is a measurement, to redo as the suite's costliest tests change (2026-11-11). The longest test,
+ * `type-core-lost-check-matrix`'s matrix test, took 79.5 to 176.8 s over seven full runs on queue workers (desktop,
+ * laptop, and runtime-v2's merge job, 169.7 s): the limit is 1.7× the slowest seen. The costliest file took 177 s in CI
+ * (median, `costly-test-files.mjs`). CI's test jobs took 5.2 to 8.6 of their 15 minutes in main's last three green runs,
+ * so a hang that begins in a job's first 10 minutes fails before the job's limit.
  */
 export const TEST_LIMIT_MS = 5 * 60_000;
 const LOOK_MS = 60_000;
