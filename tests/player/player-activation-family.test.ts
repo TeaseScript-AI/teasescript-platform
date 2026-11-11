@@ -1120,6 +1120,8 @@ const ENTRIES = [
 type Entry = (typeof ENTRIES)[number];
 
 async function ledgerOf(context: TestContext, entry: Entry): Promise<string[]> {
+  const reported: unknown[] = [];
+  reportsInto(context, reported);
   const elements = browser(context);
   context.mock.method(performance, "now", () => 1_000);
   const bridge = facade.createInProcessBackend(BUILD);
@@ -1211,6 +1213,20 @@ async function ledgerOf(context: TestContext, entry: Entry): Promise<string[]> {
       break;
     }
   }
+  // Registered after the entry's own hooks, so that it also sees what the Player's stop reports.
+  context.after(() =>
+    assert.deepEqual(
+      reported.map((error) =>
+        error instanceof Error ? `${error.name}: ${error.message}` : String(error),
+      ),
+      entry === "errorStop"
+        ? ["TypeError: The Player failed."]
+        : entry === "loss"
+          ? ["BridgeLostError: The engine Worker failed: injected."]
+          : [],
+      "the entry's own host errors",
+    ),
+  );
   peer("after");
   await settle();
   return log;
