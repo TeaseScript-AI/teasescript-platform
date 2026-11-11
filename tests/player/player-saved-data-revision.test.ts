@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test, { type TestContext } from "node:test";
+import test, { before, type TestContext } from "node:test";
 import { watch, type Ref } from "vue";
 import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
@@ -30,6 +30,7 @@ import {
   start,
 } from "../helpers/player/rewind-host.js";
 import { readForImport } from "../helpers/player/transfer-read.js";
+import { hostIntroduced, loadHostFacade } from "../helpers/player/host-sessions.js";
 
 /*
  * The saved data's revision (`savedDataRevision`, `player/vue/src/session/persistence/useSavedValues.ts`) through the
@@ -43,6 +44,8 @@ import { readForImport } from "../helpers/player/transfer-read.js";
  * commit, whose fresh read takes in values another tab may have changed (`applyScriptStorage`); an owned adoption's
  * answer saves once more as the session runs on.
  */
+
+before(loadHostFacade);
 
 const MEMBERS = {
   "adoption replace": ["owned", "Continue", "loss", "host error", "failed"],
@@ -164,7 +167,10 @@ async function adoption(context: TestContext, outcome: Outcome): Promise<RowReco
   if (outcome === "Continue") {
     // A kept session at an ask, which writes nothing as it continues.
     host.prepareRestore(
-      createPlayerRuntimeSession('let x = askChoice "X", "Y"\nexit', host.scriptStorageOptions()),
+      hostIntroduced(
+        await host.bridge,
+        createPlayerRuntimeSession('let x = askChoice "X", "Y"\nexit', host.scriptStorageOptions()),
+      ),
     );
     host.activate();
   } else if (outcome === "loss") made.lose!();
@@ -194,7 +200,10 @@ async function scriptWrite(context: TestContext, outcome: Outcome): Promise<RowR
   const from = revisioned.savedDataRevision.value;
   if (outcome === "Continue") {
     host.prepareRestore(
-      createPlayerRuntimeSession('let x = askChoice "X", "Y"\nexit', host.scriptStorageOptions()),
+      hostIntroduced(
+        await host.bridge,
+        createPlayerRuntimeSession('let x = askChoice "X", "Y"\nexit', host.scriptStorageOptions()),
+      ),
     );
     host.activate();
     await settle(context);
