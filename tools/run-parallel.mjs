@@ -10,6 +10,10 @@ import { join } from "node:path";
 // not run (`summaryLine`):
 //
 //   node tools/run-parallel.mjs <npm script>...
+//   node tools/run-parallel.mjs --list <file>
+//
+// `--list` runs the npm scripts a text file lists, one per line, so that two branches adding a step at different places
+// merge by themselves, the end included (`listedSteps`; `check:pretest`'s, in `tools/check-pretest-steps.txt`).
 //
 // Exit status: the first failed step's, or 130 or 143 for a signal that came first, else 0. `runSteps` does the same for another tool, and
 // leaves the last line to it.
@@ -141,8 +145,34 @@ export async function runSteps(names, { serial = false } = {}) {
   return { steps: names.map((name) => ({ name, status: status.get(name) })), exitCode };
 }
 
+/**
+ * The npm scripts `text` lists, one per line, a line beginning `#` and an empty one aside: at least one, each a script of
+ * `pkg`. Throws naming what is wrong, and `file`, where the text is from.
+ */
+export function listedSteps(pkg, text, file) {
+  const names = text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "" && !line.startsWith("#"));
+  if (names.length === 0) throw new Error(`${file} lists no npm script`);
+  const unknown = names.filter((name) => !Object.hasOwn(pkg.scripts ?? {}, name));
+  if (unknown.length > 0)
+    throw new Error(`${file} lists what is not an npm script: ${unknown.join(", ")}`);
+  return names;
+}
+
 if (import.meta.main) {
-  const names = process.argv.slice(2);
+  const args = process.argv.slice(2);
+  if (args[0] === "--list" && args.length !== 2)
+    throw new Error("usage: node tools/run-parallel.mjs --list <file>");
+  const names =
+    args[0] === "--list"
+      ? listedSteps(
+          JSON.parse(readFileSync("package.json", "utf8")),
+          readFileSync(args[1], "utf8"),
+          args[1],
+        )
+      : args;
   if (names.length === 0) throw new Error("Pass npm script names to run.");
   // (runSteps's handlers stop the steps; these keep a signal from killing the process until it exits, so one that comes
   // while the last line waits for a slow reader changes neither the line nor the status)
