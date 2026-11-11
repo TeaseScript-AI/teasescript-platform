@@ -193,7 +193,8 @@ export async function topologyBridge(
 /**
  * The connections of one Player on `topology`: the first, and each fresh one its `nextConnection` (`next`) opens after a
  * loss, all of `topology` and ended after the test. `calls()` counts `next`'s calls; `failNext()` makes the next call
- * reject, as a connection that cannot open.
+ * reject, as a connection that cannot open; `armNext(step)` runs `step` on the next fresh connection, and waits for it,
+ * before `next` gives it.
  */
 export async function topologyConnections(
   context: TestContext,
@@ -203,6 +204,7 @@ export async function topologyConnections(
   const made: TopologyBridge[] = [await topologyBridge(context, topology, options)];
   let calls = 0;
   let failing = false;
+  let armed: ((fresh: TopologyBridge) => void | Promise<void>) | null = null;
   return {
     /** Each connection made, the first included, in order. */
     get made(): readonly TopologyBridge[] {
@@ -213,6 +215,7 @@ export async function topologyConnections(
     current: () => made.at(-1)!,
     calls: () => calls,
     failNext: () => void (failing = true),
+    armNext: (step: (fresh: TopologyBridge) => void | Promise<void>) => void (armed = step),
     async next(): Promise<PlayerBridge> {
       calls += 1;
       if (failing) {
@@ -221,6 +224,9 @@ export async function topologyConnections(
       }
       const fresh = await topologyBridge(context, topology, options);
       made.push(fresh);
+      const step = armed;
+      armed = null;
+      await step?.(fresh);
       return fresh.bridge;
     },
   };
