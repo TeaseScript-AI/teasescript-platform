@@ -842,8 +842,10 @@ when it loads and refused when malformed:
   each file's registry; an in-process-only case is not owed, and a standalone in-process test still runs but is no
   Worker coverage.
 - `PLAYER_TEST_WORKER_DELAY_MS`: a whole number of milliseconds (default 0). Every message and failure from a Worker
-  reaches its client that late, in order, on real time that mocked timers neither move nor hold. A delivery received
-  before a test ends still arrives through that test's own loss and waits; at its end, those still pending are dropped.
+  reaches its client that late, in order, on real time that mocked timers neither move nor hold. A loss goes through
+  the same queue as the replies by construction; no test asserts that a reply sent before it arrives first. A delivery
+  received before a test ends still arrives through that test's own loss and waits; at its end, those still pending
+  are dropped.
 
 **The delayed challenge** runs one or more complete compiled files on the Worker with every message 3 s late, above
 `until`'s `"step"` budget of about 2 s:

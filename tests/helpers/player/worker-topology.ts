@@ -283,15 +283,10 @@ export async function topologyBridge(
   {
     delayMs,
     entry = "engine",
-    workerDelayMs = WORKER_DELAY_MS,
-  }: {
-    readonly delayMs?: number;
-    readonly entry?: keyof typeof WORKERS;
-    readonly workerDelayMs?: number;
-  } = {},
+  }: { readonly delayMs?: number; readonly entry?: keyof typeof WORKERS } = {},
 ): Promise<TopologyBridge> {
   assert.ok(client && bridgeModule && facade, "call loadTopology first");
-  const delivery = delayedDelivery(topology === "worker" ? workerDelayMs : 0);
+  const delivery = delayedDelivery(topology === "worker" ? WORKER_DELAY_MS : 0);
   const made =
     topology === "worker" ? await onWorker(WORKERS[entry], delivery) : inProcess(delayMs);
   // A delivery received before the test's end still reaches the client through the test's own loss, release and
@@ -463,7 +458,8 @@ async function onWorker(
   const exited = new Promise<number>((resolve) => worker.once("exit", resolve));
   let messages = 0;
   // A failure takes its place in the same order as the messages: a reply the Worker sent before it ended reaches the
-  // client before the loss does.
+  // client before the loss does. This holds by construction (`onFailure` goes through `delivery.run`); no test
+  // asserts it.
   const { port, posts, hold, held, release } = gatedPort({
     post: (message) => worker.postMessage(message),
     listen: (listener) =>

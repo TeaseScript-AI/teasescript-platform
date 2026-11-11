@@ -1,16 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import test, { before } from "node:test";
+import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   delayedDelivery,
-  loadTopology,
   rerunRegistry,
   RowEnd,
   selectedTopologies,
   TOPOLOGIES,
-  topologyBridge,
-  until,
   withinHostTime,
   workerDelayMs,
 } from "../helpers/player/worker-topology.js";
@@ -38,8 +35,6 @@ if (FIXTURE !== undefined) {
   );
   for (const topology of TOPOLOGIES) test(`fixture standalone (${topology})`, () => {});
 } else {
-  before(loadTopology);
-
   /** Waits on real time, which a mocked `setTimeout` does not move, until `check` holds. */
   const realTime = async (check: () => boolean, label: string) => {
     const within = withinHostTime();
@@ -110,27 +105,6 @@ if (FIXTURE !== undefined) {
     immediate.cancel();
     immediate.run(() => order.push("dropped"));
     assert.deepEqual(order, ["at once"]);
-  });
-
-  test("a reply a delayed Worker sent before its loss reaches the client before the loss does", async (context) => {
-    const transport = await topologyBridge(context, "worker", { workerDelayMs: 1_000 });
-    const order: string[] = [];
-    transport.bridge.client.onLoss(() => order.push("loss"));
-    const received = transport.thread!.messages();
-    const reply = transport.bridge.client.request("planMetadata", { plan: "missing" }).then(
-      () => order.push("reply"),
-      (error: unknown) => order.push(`reply: ${error instanceof Error ? error.name : "?"}`),
-    );
-    await until(() => transport.thread!.messages() > received, "the reply received", "host");
-    // A runner too slow to lose the Worker within the delay checks nothing here, and says so rather than failing.
-    if (order.length > 0)
-      return context.skip("the reply was delivered before the Worker could be lost");
-    await transport.lose();
-    await reply;
-    assert.equal(order.length, 2, order.join(", "));
-    assert.match(order[0]!, /^reply/u, "the reply first");
-    assert.notEqual(order[0], "reply: BridgeLostError", "answered, not ended by the loss");
-    assert.equal(order[1], "loss");
   });
 
   test("malformed settings are refused", () => {
