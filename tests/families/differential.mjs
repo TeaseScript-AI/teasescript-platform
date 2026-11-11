@@ -33,7 +33,7 @@ import {
   renameSync,
   statSync,
   unlinkSync,
-  writeSync,
+  writeFileSync,
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -59,15 +59,17 @@ function claimOutput(out, inputs) {
 /**
  * The partial a run writes beside `out` and renames onto it once whole, named by its pid and created by this run, open
  * for writing: a path that exists already is refused untouched, so a run never writes over or moves a file it did not
- * create.
+ * create. `write` writes all it is given or throws, so a write the file system cuts short is never published.
  */
 function startPartial(out) {
   const partial = `${out}.partial-${process.pid}`;
+  let fd;
   try {
-    return { partial, fd: openSync(partial, "wx") };
+    fd = openSync(partial, "wx");
   } catch (error) {
     return refuse(`cannot create ${partial}: ${error.message}`);
   }
+  return { partial, fd, write: (data) => writeFileSync(fd, data) };
 }
 
 /** The start of a record's line: the tool writes each record with its name first. */
@@ -345,7 +347,7 @@ async function record() {
     return { agree: bare.every((each) => each === bare[0]), modes: list };
   };
 
-  const { partial, fd } = startPartial(out);
+  const { partial, fd, write } = startPartial(out);
   for (const c of cases) {
     const { files, globals } = c;
     const row = {
@@ -410,7 +412,7 @@ async function record() {
       if (route.plan === "outside") return { outside: JSON.parse(route.text).outside };
       return compiled(route.plan, JSON.parse(route.text).diagnostics, c);
     });
-    writeSync(fd, `${JSON.stringify(row)}\n`);
+    write(`${JSON.stringify(row)}\n`);
   }
   closeSync(fd);
   renameSync(partial, out);
@@ -488,9 +490,8 @@ function join() {
     process.exit(1);
   }
   // (written beside the output and renamed onto it once whole, so that a failed copy leaves no output)
-  const { partial, fd: output } = startPartial(out);
+  const { partial, fd: output, write } = startPartial(out);
   const inputs = new Map();
-  const write = (text) => writeSync(output, text);
   const copy = ({ file, start, end }) => {
     if (!inputs.has(file)) inputs.set(file, openSync(file, "r"));
     const bytes = Buffer.alloc(end - start);
@@ -499,7 +500,7 @@ function join() {
       if (got === 0) throw new Error(`${file} ended inside the record at ${start}`);
       done += got;
     }
-    writeSync(output, bytes);
+    write(bytes);
     return bytes;
   };
   const differing = [];

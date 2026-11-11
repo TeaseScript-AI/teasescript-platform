@@ -13,6 +13,7 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
   writeSync,
@@ -581,7 +582,7 @@ test("a run owns its output from its claim: no exit leaves an earlier output, an
   assert.equal(whole.status, 0, whole.stderr);
   assert.equal(lines<Row>(readFileSync(out, "utf8")).length, 1);
   assert.deepEqual(partials(), before);
-  // (two runs on one --out: the first owns it from its start, blocks reading its cases, and is refused after the second
+  // (two runs on one --out: the first claims it, then blocks reading its cases, and is refused after the second
   // published; the second's output stays, as the first removes nothing on its way out)
   const fifo = join(folder, "cases.fifo");
   assert.equal(spawnSync("mkfifo", [fifo]).status, 0);
@@ -640,6 +641,24 @@ test("a run owns its output from its claim: no exit leaves an earlier output, an
       readFileSync(input, "utf8"),
       mode,
     );
+  }
+  // (a write the file system cuts short is never published: under a file-size limit of half one record, each mode fails
+  // and leaves no --out; Node ignores the limit's signal, so the write itself comes back short)
+  const single = casesOf("single", ["MODAL"]);
+  assert.equal(record(single).status, 0);
+  const records = join(folder, "records.jsonl");
+  cpSync(out, records);
+  const limit = `--fsize=${Math.floor(statSync(records).size / 2)}`;
+  for (const [mode, args] of [
+    ["record", [tree, single]],
+    ["join", ["join", "--cases", single, "--base", records]],
+  ] as const) {
+    writeFileSync(out, stale);
+    const ran = spawnSync("prlimit", [limit, process.execPath, tool, ...args, "--out", out], {
+      encoding: "utf8",
+    });
+    assert.notEqual(ran.status, 0, `${mode}: ${ran.stderr}`);
+    assert.equal(existsSync(out), false, mode);
   }
 });
 
