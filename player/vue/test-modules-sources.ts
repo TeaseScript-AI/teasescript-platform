@@ -1,3 +1,26 @@
+// The stamp of the Player test bundle's sources, `dist/player-test-modules/sources.json`, and the plugin that writes it.
+// `tests/helpers/player-modules.ts` refuses a bundle whose stamp differs from the checkout's walk, so a compiled test
+// cannot run against Player or engine code older than its own.
+//
+// The stamp covers locations, not the bundle's module graph: every file under `src/` and `player/` (no folder named
+// `node_modules` is entered) and every file directly in the repository root except the checkout's own bookkeeping
+// (`ROOT_BOOKKEEPING`). Each is recorded by its path from the root with `/`: a file by the SHA-256 of its content; a
+// symlink to a file by its target's identity (its path from the root, or its absolute path outside it) and that content;
+// a symlink to a folder, a broken symlink, or an unreadable entry by what it is, which fails the build. The set of paths
+// is part of the stamp, so an added, removed or renamed file is a change.
+//
+// The build also fails, so that no input of another kind passes unstamped, on: a bundled module outside the area that
+// is neither under `node_modules` nor a bundler module (`\0`); a configuration file or a file it imports outside the
+// area; a bundled module with a query or of a type other than `.ts`, `.mts`, `.cts`, `.js`, `.mjs`, `.cjs` or `.json`;
+// a `tsconfig*.json` in the area, or a file it reaches by local `extends` or `references`, that cannot be read, has a
+// malformed edge, or reaches outside the area.
+//
+// What the stamp attests is the area's file set, contents and link identities, for the canonical build
+// (`npm run build:player-test-modules`). It does not attest another invocation (another mode or inline options), files
+// that configuration or plugin code reads outside the area by other routes, environment variables, the installed
+// `node_modules`, or Node's version, and it assumes the inputs do not change while the configuration loads and the
+// bundle builds.
+
 import { createHash } from "node:crypto";
 import {
   existsSync,
@@ -11,31 +34,6 @@ import {
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { Plugin, ResolvedConfig } from "vite";
-
-/**
- * The stamp of the Player test bundle's sources, `dist/player-test-modules/sources.json`, and the plugin that writes it.
- * `tests/helpers/player-modules.ts` refuses a bundle whose stamp differs from the checkout's walk, so a compiled test
- * cannot run against Player or engine code older than its own.
- *
- * The stamp covers locations, not the bundle's module graph: every file under `src/` and `player/` (no folder named
- * `node_modules` is entered) and every file directly in the repository root except the checkout's own bookkeeping
- * (`ROOT_BOOKKEEPING`). Each is recorded by its path from the root with `/`: a file by the SHA-256 of its content; a
- * symlink to a file by its target's identity (its path from the root, or its absolute path outside it) and that content;
- * a symlink to a folder, a broken symlink, or an unreadable entry by what it is, which fails the build. The set of paths
- * is part of the stamp, so an added, removed or renamed file is a change.
- *
- * The build also fails, so that no input of another kind passes unstamped, on: a bundled module outside the area that
- * is neither under `node_modules` nor a bundler module (`\0`); a configuration file or a file it imports outside the
- * area; a bundled module with a query or of a type other than `.ts`, `.mts`, `.cts`, `.js`, `.mjs`, `.cjs` or `.json`;
- * a `tsconfig*.json` in the area, or a file it reaches by local `extends` or `references`, that cannot be read, has a
- * malformed edge, or reaches outside the area.
- *
- * What the stamp attests is the area's file set, contents and link identities, for the canonical build
- * (`npm run build:player-test-modules`). It does not attest another invocation (another mode or inline options), files
- * that configuration or plugin code reads outside the area by other routes, environment variables, the installed
- * `node_modules`, or Node's version, and it assumes the inputs do not change while the configuration loads and the
- * bundle builds.
- */
 
 /** The checkout's own bookkeeping in the root, which no build reads: a worktree's `.git`, a queue tree's markers. */
 const ROOT_BOOKKEEPING = new Set([".git", ".sha", ".complete"]);
