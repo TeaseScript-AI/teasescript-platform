@@ -383,6 +383,7 @@ const RERUN = rerunRegistry({
   "the host's prepare and activate while a candidate opens": TOPOLOGIES,
   "the host's prepare and activate while a candidate prepares": TOPOLOGIES,
   "unmounted after a recovery": TOPOLOGIES,
+  "an earlier click's exit beside a later click's connection": TOPOLOGIES,
 });
 
 RERUN.rows(
@@ -1731,6 +1732,61 @@ RERUN.rows(
     assert.equal(given.connections.ends(given.connections.first), 0, "a given bridge is not ended");
     assert.equal(await answering(given.connections.first)(), true, "and still answers");
     assert.deepEqual(rejections, [], "nothing rejected unhandled");
+    return end();
+  },
+);
+
+RERUN.rows(
+  "an earlier click's exit beside a later click's connection",
+  "a recovery that ends after the host's own prepare and activate began another leaves the later fresh connection alone",
+  async (context, topology, end) => {
+    const store = memoryKeptSessionStore();
+    // Once armed, the next read of the kept session waits until `gate.open`: the earlier click's restore.
+    const gate: { armed: boolean; open?: () => void } = { armed: false };
+    const held: KeptSessionStore = {
+      ...store,
+      session: (scope) => {
+        const found = store.session(scope);
+        if (!gate.armed) return found;
+        gate.armed = false;
+        return new Promise((resolve) => {
+          gate.open = () => void found.then(resolve);
+        });
+      },
+    };
+    const { connections, player, kept, start } = await page(context, topology, { kept: held });
+    await player.activate();
+    await keptAtTheQuestion(player, kept);
+    await connections.first.lose();
+    await until(() => player.recovery.value !== null, "the offer");
+    gate.armed = true;
+    const earlierOpened = nextOpened(connections, () => {});
+    const earlier = player.activate();
+    const old = await earlierOpened;
+    await until(() => gate.open !== undefined, "the earlier click's restore reads the store");
+    // The trusted host's own calls begin another recovery while the Player is still lost.
+    player.prepare(start);
+    const laterOpened = nextOpened(connections, (fresh) => fresh.hold("prepare"));
+    const later = player.activate();
+    const current = await laterOpened;
+    await current.held();
+    gate.open!();
+    await earlier;
+    assert.equal(
+      connections.ends(old),
+      1,
+      "the later click ended the earlier one's connection, once",
+    );
+    assert.equal(
+      connections.ends(current),
+      0,
+      "the earlier click's exit leaves the later one's alone",
+    );
+    current.release();
+    await later;
+    await until(() => player.session.value?.state.foregroundAction != null, "the later session");
+    assert.equal(await player.bridge, current.bridge);
+    assert.equal(connections.ends(current), 0);
     return end();
   },
 );
