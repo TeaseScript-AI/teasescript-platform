@@ -18,8 +18,10 @@ import { existsSync, readFileSync } from "node:fs";
 // may be a commit not fetched yet: the message says to fetch it; this tool never fetches. A token that is no commit
 // but a tree, such as a stored baseline's `src` tree hash, is reported as a tree, resolved, without the remote check:
 // proving a tree reachable from a remote ref is costly.
-// Unfilled placeholders (`PLACEHOLDERS`) outside fenced code blocks are reported too. Every run that completes ends
-// with one line counting the tokens by result and the placeholders, so no output means it did not run.
+// Unfilled placeholders (`PLACEHOLDERS`) outside fenced code blocks are reported too, and so is a closing clause that
+// names several issues after one keyword, in code too, which as closing syntax closes only the first
+// (`closingClausesOf`). Every run that completes ends with one line counting the tokens by result, the placeholders
+// and those clauses, so no output means it did not run.
 //
 // Tokens that need not be commits are checked, and skipped when no repository resolves them, so no rule hides a SHA:
 // - only digits: a CI run, comment or issue id;
@@ -36,9 +38,9 @@ import { existsSync, readFileSync } from "node:fs";
 // - shorter than 40 and inside a URL or a path, except after `/commit/`, `/commits/`, `/tree/` or `/blob/`: a file's
 //   or a job's name. A full 40-character SHA in a path, such as an evidence folder, must resolve.
 //
-// Exit status: 0 when every token that must be a commit resolved on a remote and no placeholder is left, 1 otherwise,
-// 2 when it
-// cannot run (bad arguments, an unreadable file, or a `--repo` that is no git repository).
+// Exit status: 0 when every token that must be a commit resolved on a remote and no placeholder or several-issue
+// closing clause is left, 1 otherwise, 2 when it cannot run (bad arguments, an unreadable file, or a `--repo` that is
+// no git repository).
 
 /** The unfilled placeholders a report can carry, case-insensitive. */
 export const PLACEHOLDERS = [
@@ -121,6 +123,36 @@ export function placeholdersOf(text) {
   return [
     ...new Set(PLACEHOLDERS.flatMap((pattern) => [...prose.matchAll(pattern)].map((m) => m[0]))),
   ];
+}
+
+/**
+ * The closing clauses of `text` that name several issues after one keyword, such as `Closes #1970, #1965`, each with
+ * its first reference: used as GitHub's closing syntax, it closes only that one, as GitHub closes only an issue its own
+ * keyword names. The separators are matched without overlapping white space, so the work stays linear. Every closing
+ * keyword followed by more than one issue reference is found, wherever it stands in the text, code included; a quoted
+ * example must be written so that it is not such a clause. A keyword is `close`, `closes`, `closed`, `fix`, `fixes`,
+ * `fixed`, `resolve`, `resolves` or `resolved` in any case, with an optional `:`; a reference is `#N`, `owner/repo#N`
+ * or `https://github.com/owner/repo/issues/N`, its number not running on into a word character; references are joined
+ * by `,`, `and`, `, and` or `&`. A form GitHub closes on that these patterns do not match, such as a reference inside
+ * emphasis or a link, is the way left to fail open. The text cannot tell an issue from a pull request, nor what the
+ * author means to close: a second reference to a companion pull request or into the first issue's comments fails
+ * too, and the refusal names the ways out.
+ */
+export function closingClausesOf(text) {
+  // (a reference ends where its number ends: digits that run on into a word character, as a colour's, are none)
+  const number = String.raw`\d+(?![\p{L}\p{M}\p{N}\p{Pc}])`;
+  const issue = String.raw`(?:https?:\/\/github\.com\/[\w.-]+\/[\w.-]+\/issues\/${number}|(?:[\w.-]+\/[\w.-]+)?#${number})`;
+  const clause = new RegExp(
+    String.raw`\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?):?\s+(${issue})(?:\s*(?:,\s*(?:and\b|&)|,|\band\b|&)\s*${issue})+`,
+    "giu",
+  );
+  // (each clause's line, counted on from the one before, so the text is read once)
+  let line = 1;
+  let at = 0;
+  return [...text.matchAll(clause)].map((m) => {
+    for (; at < m.index; at += 1) if (text[at] === "\n") line += 1;
+    return { clause: m[0], closes: m[1], line };
+  });
 }
 
 /**
@@ -346,11 +378,20 @@ function main() {
     failed = true;
     process.stdout.write(`placeholder ${placeholder}  unfilled\n`);
   }
+  const clauses = closingClausesOf(text);
+  for (const { clause, closes, line } of clauses) {
+    failed = true;
+    process.stdout.write(
+      `closing     line ${line}: "${clause}" names several issues after one keyword; as closing syntax it closes only ${closes}. ` +
+        `Give each issue meant to close its own keyword (Closes #1, Closes #2); otherwise end the clause after the first ` +
+        `reference (a new sentence for the rest), or split a quoted example so that no keyword stands before the list\n`,
+    );
+  }
   const tokens = Object.values(counts).reduce((sum, n) => sum + n, 0);
   process.stdout.write(
     `check-shas: ${tokens} tokens: ${counts.resolved} resolved, ${counts.trees} trees, ${counts.ambiguous} ambiguous, ` +
       `${counts.unresolved} unresolved, ${counts.local} local only, ${counts.skipped} skipped (ids, words, paths, sha256s); ` +
-      `${placeholders.length} placeholders\n`,
+      `${placeholders.length} placeholders, ${clauses.length} multi-issue closing clauses\n`,
   );
   process.exitCode = failed ? 1 : 0;
 }

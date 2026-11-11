@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { excuse } from "./check-shas.mjs";
+import { closingClausesOf, excuse } from "./check-shas.mjs";
 
 const tool = fileURLToPath(new URL("./check-shas.mjs", import.meta.url));
 
@@ -226,6 +226,139 @@ test("an unfilled placeholder fails", { timeout: 30_000 }, () => {
 });
 
 test(
+  "a closing clause that names several issues after one keyword fails",
+  { timeout: 30_000 },
+  () => {
+    const { directory } = repository();
+    try {
+      const { status, out } = check("Closes #1970, #1965, #1956 (by the ruled reading)\n", [
+        directory,
+      ]);
+      assert.equal(status, 1, out);
+      assert.match(
+        out,
+        /closing +line 1: "Closes #1970, #1965, #1956" names several issues after one keyword; as closing syntax it closes only #1970\. Give each issue meant to close its own keyword \(Closes #1, Closes #2\); otherwise end the clause after the first reference \(a new sentence for the rest\), or split a quoted example so that no keyword stands before the list$/mu,
+      );
+      // (the final's colour: digits that run on into a word character are no reference)
+      const colour = check("Fixes #2147" + ", #123abc now normalizes identically.\n", [directory]);
+      assert.equal(colour.status, 0, colour.out);
+      assert.match(
+        out.trim().split("\n").at(-1),
+        /0 placeholders, 1 multi-issue closing clauses$/u,
+      );
+      // (a comma and a conjunction together, across a line break)
+      const listed = check("text\nCloses #12,\nand #13\n", [directory]);
+      assert.equal(listed.status, 1, listed.out);
+      assert.match(listed.out, /line 2: "Closes #12,\nand #13" .* closes only #12\. /u);
+      // (a cost witness: a comma and 60,000 spaces before no reference, which an overlapping separator walked quadratically)
+      const spaces = check(`Closes #12,${" ".repeat(60_000)}x`, [directory]);
+      assert.equal(spaces.status, 0, spaces.out);
+      for (const [text, closes] of [
+        ["fixes: #1 and #2", ["#1"]],
+        ["Closes #12, and #13", ["#12"]],
+        ["closes: https://github.com/o/r/issues/1, #2", ["https://github.com/o/r/issues/1"]],
+        ["Closes #1, https://github.com/o/r/issues/2", ["#1"]],
+        // (code is read like any text: a quoted clause fails, whatever code or delimiters surround it)
+        ["``a`b`` Closes #12, #13 `tail`", ["#12"]],
+        ["    ```\n\nCloses #12, #13\n\n    ```\n", ["#12"]],
+        ["``Closes #1, #2``", ["#1"]],
+        ["~~~\nCloses #1, #2\n~~~\n", ["#1"]],
+        ["\\` Closes #12, #13 `tail`", ["#12"]],
+        ["literal `\n# Heading\nCloses #12, #13 `tail`", ["#12"]],
+        ["literal `\r\n\r\nCloses #12, #13\r\n\r\n`tail`", ["#12"]],
+        ["```bad`info\n\nCloses #12, #13\n\n```\n", ["#12"]],
+        // (a cost witness: a 60,000-backtick line, which the earlier code stripping walked superlinearly)
+        [`${"`".repeat(60_000)}\nCloses #12, #13\n`, ["#12"]],
+        ["Closes #1 `x` #2", []],
+        ["Resolved o/r#3 & #4", ["o/r#3"]],
+        ["closed #5,#6", ["#5"]],
+        ["Closes #1, closes #2", []],
+        ["Closes #1\nRefs #2, #3", []],
+        ["Closes #1. #2 follows", []],
+        ["the comment `Closes #1, #2` closed only #1", ["#1"]],
+        ["```\nCloses #1, #2\n```\n", ["#1"]],
+        // (each keyword and reference form, so that a pattern missing one fails its row)
+        ["close #1, #2", ["#1"]],
+        ["Fixed #1, #2", ["#1"]],
+        ["FIX #1, #2", ["#1"]],
+        ["resolve #1, #2", ["#1"]],
+        ["resolves #1 & #2", ["#1"]],
+        ["Closes o/r#1, #2", ["o/r#1"]],
+        ["encloses #1, #2", []],
+      ])
+        assert.deepEqual(
+          closingClausesOf(text).map((found) => found.closes),
+          closes,
+          JSON.stringify(text),
+        );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  },
+);
+
+test("closingClausesOf, over generated clauses: a reference ends where its number ends", () => {
+  const keywords = [
+    "close",
+    "closes",
+    "closed",
+    "fix",
+    "fixes",
+    "fixed",
+    "resolve",
+    "resolves",
+    "resolved",
+  ];
+  const spellings = [
+    (k) => k,
+    (k) => k[0].toUpperCase() + k.slice(1),
+    (k) => `${k.toUpperCase()}:`,
+  ];
+  const forms = [(n) => `#${n}`, (n) => `o/r#${n}`, (n) => `https://github.com/o/r/issues/${n}`];
+  const separators = [", ", " and ", ", and ", " & "];
+  // What stands directly after a reference's digits, and whether the reference still ends there: a word character
+  // (a letter of any script, a connector, a combining mark, a digit of any script) runs the number on, so there is no
+  // reference.
+  // (`null` is the end of the text after the second reference, and nothing but the separator after the first)
+  const after = [
+    [null, true],
+    [" ", true],
+    [".", true],
+    [")", true],
+    ["-", true],
+    ["\n", true],
+    ["abc", false],
+    ["é", false],
+    ["_x", false],
+    ["\u203f", false],
+    ["\u0301", false],
+    ["١", false],
+  ];
+  let cases = 0;
+  for (const keyword of keywords)
+    for (const spell of spellings)
+      for (const form of forms)
+        for (const separator of separators)
+          for (const [first, firstEnds] of after)
+            for (const [second, secondEnds] of after) {
+              // (a first reference stays in a list only when the separator follows it, so after it stands nothing
+              // or a word character; any other character ends the clause before the list)
+              if (firstEnds && first !== null) continue;
+              const text =
+                `${spell(keyword)} ${form(12)}${first ?? ""}${separator}${form(13)}` +
+                (second === null ? "" : `${second} rest`);
+              const expected = firstEnds && secondEnds ? [form(12)] : [];
+              assert.deepEqual(
+                closingClausesOf(text).map((found) => found.closes),
+                expected,
+                JSON.stringify(text),
+              );
+              cases += 1;
+            }
+  assert.equal(cases, 9 * 3 * 3 * 4 * 7 * 12);
+});
+
+test(
   "each --repo is asked, and a token resolves in the one that has it",
   { timeout: 30_000 },
   () => {
@@ -255,11 +388,11 @@ test(
       for (const [text, line] of [
         [
           "",
-          "0 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 0 placeholders",
+          "0 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 0 placeholders, 0 multi-issue closing clauses",
         ],
         [
           `at ${shas[0].slice(0, 9)}, <sha>`,
-          "1 tokens: 1 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 1 placeholders",
+          "1 tokens: 1 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 1 placeholders, 0 multi-issue closing clauses",
         ],
       ]) {
         const { out } = check(text, [directory]);
