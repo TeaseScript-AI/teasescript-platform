@@ -17,11 +17,12 @@ import { readFileSync } from "node:fs";
 // - Git prunes on the remote only refs that no ref of this clone maps onto, so the local archive refs keep a mirror or
 //   pruning push from deleting the archives.
 //
-// Limit: git lists the refs a mirror push prunes to no hook (a `--prune` push lists them, and the hook refuses an
-// archive's). A mirror push therefore deletes, unarchived, the branches and tags this clone lacks, and any archive this
-// clone has no local ref for (made from another clone, or by hand without the local ref); such a push to this
-// repository's origin also publishes `refs/t3/`, and is not an agent's to run. The server-side archive is the owner's
-// option if that limit is ever met. Git gives the hook no sign of `--dry-run`, so a dry run archives too.
+// Limit: an archive can be deleted by a mirror or pruning push that maps no ref of this clone onto it: one this clone
+// has no local ref for, or any archive when a push refspec or `mirror` is configured for the remote. Git lists such a
+// deletion to no hook. The agents' clone configures neither, and holds every archive as a local ref. A mirror push
+// also deletes, unarchived, the branches and tags this clone lacks, and publishes `refs/t3/`: to this repository's
+// origin it is not an agent's to run. The server-side archive is the owner's option if that limit is ever met. Git
+// gives the hook no sign of `--dry-run`, so a dry run archives too.
 
 const ZERO = /^0+$/u;
 const ARCHIVE = "refs/archive/";
