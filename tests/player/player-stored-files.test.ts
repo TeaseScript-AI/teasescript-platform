@@ -24,6 +24,7 @@ import {
   TOPOLOGIES,
   topologyBridge,
   type Topology,
+  inProcessBackend,
 } from "../helpers/player/worker-topology.js";
 
 /*
@@ -242,7 +243,7 @@ async function playInPlayer(
     usePlayerSession({
       scriptStorage: storage,
       capturedMedia: { repository },
-      ...(transport === null ? {} : { bridge: Promise.resolve(transport.bridge) }),
+      bridge: transport === null ? inProcessBackend() : Promise.resolve(transport.bridge),
     }),
   );
   assert.ok(host);

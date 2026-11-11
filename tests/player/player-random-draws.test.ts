@@ -41,6 +41,7 @@ import { NO_MARKS } from "../../player/debug/debug-history-marks.js";
 import { loadHostFacade, onHost, hostIntroduced } from "../helpers/player/host-sessions.js";
 import { clockTicket } from "../helpers/clock-ticket.js";
 import { untypedClient } from "../helpers/bridge/untyped.js";
+import { inProcessBackend } from "../helpers/player/worker-topology.js";
 
 // The button press on a session the composable's host holds (`OnHost`).
 const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
@@ -124,6 +125,7 @@ interface Presentation {
     | { readonly kind: "order"; readonly items: readonly string[] };
 }
 let usePlayerSession: (options: {
+  readonly bridge: Promise<PlayerBridge>;
   scriptStorage: ScriptStorageProvider;
   keptSessions: ReturnType<typeof memoryKeptSessionStore>;
   debugRooms: ReturnType<typeof memoryKeptRoomStore>;
@@ -259,6 +261,7 @@ async function mount(context: TestContext, plan: InstructionPlan) {
   const scope = effectScope();
   const mounted = scope.run(() => {
     const host = usePlayerSession({
+      bridge: inProcessBackend(),
       scriptStorage: savedData(),
       keptSessions: memoryKeptSessionStore(),
       debugRooms: memoryKeptRoomStore(),
@@ -635,6 +638,7 @@ test("a site's history lasts through Choose outcomes off and on, and goes when t
   const hostScope = effectScope();
   const host = hostScope.run(() =>
     usePlayerSession({
+      bridge: inProcessBackend(),
       scriptStorage: savedData(),
       keptSessions: memoryKeptSessionStore(),
       debugRooms: memoryKeptRoomStore(),

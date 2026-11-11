@@ -10,6 +10,7 @@ import { loadHostFacade, onHostAll, hostIntroduced } from "../helpers/player/hos
 import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
+import { inProcessBackend } from "../helpers/player/worker-topology.js";
 
 /*
  * The Player speaks messages changed in place from a status region (PLAYER-UI.md "Message presentation and provenance"):
@@ -25,7 +26,7 @@ interface MessageHost {
   activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
 }
-let usePlayerSession: (options: Record<string, never>) => MessageHost;
+let usePlayerSession: (options: { readonly bridge: Promise<PlayerBridge> }) => MessageHost;
 let useMessageUpdateAnnouncements: (host: MessageHost) => Readonly<Ref<string>>;
 let adapter: {
   createPlayerRuntimeSession: typeof CompileProject.createPlayerRuntimeSession;
@@ -101,7 +102,7 @@ function createHost(context: TestContext) {
   context.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const scope = effectScope();
   const created = scope.run(() => {
-    const host = usePlayerSession({});
+    const host = usePlayerSession({ bridge: inProcessBackend() });
     return { host, spoken: useMessageUpdateAnnouncements(host) };
   });
   assert.ok(created);

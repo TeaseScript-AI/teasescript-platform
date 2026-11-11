@@ -30,6 +30,7 @@ import type { SessionRead } from "./transfer-read.js";
 import type { SessionTransfer } from "../../../player/persistence/session-transfer.js";
 import { loadPlayerModule } from "../player-modules.js";
 import { loadHostFacade } from "./host-sessions.js";
+import { inProcessBackend } from "./worker-topology.js";
 
 // What Start leaves out of its own frame (#1707): the plan's JSON for a new session's first save is written in a task
 // before Start, and the zone the browser names is captured early. Start and Continue still record the zone and clock
@@ -118,9 +119,6 @@ before(async () => {
   assert.equal(typeof facade.heldPlan, "function");
   // EVIDENCE: validation: the bundle facade's `heldPlan`, checked as a function above.
   heldPlan = facade.heldPlan as typeof heldPlan;
-  assert.equal(typeof facade.createInProcessBackend, "function");
-  // EVIDENCE: validation: the bundle's backend factory, checked as a function above.
-  createInProcessBackend = facade.createInProcessBackend as typeof createInProcessBackend;
   const module: Record<string, unknown> = await loadPlayerModule(
     "player/vue/src/session/usePlayerSession.ts",
   );
@@ -248,10 +246,6 @@ export async function writesOn(host: KeepHost, plan: InstructionPlan): Promise<n
 /** Each page's host token of a test plan: preparing a plan again on a page reuses it, as the plan is the same. */
 const tokens = new WeakMap<KeepHost, Map<InstructionPlan, string>>();
 let heldPlan: (bridge: PlayerBridge, token: string) => object;
-let createInProcessBackend: (
-  build: { commit: null; dirty: null; mode: null; appVersion: null },
-  options: { readonly delayMs?: number },
-) => PlayerBridge;
 
 /** The token under which `host`'s bridge holds `plan`, prepared there from the plan's text the first time. */
 export async function held(host: KeepHost, plan: InstructionPlan): Promise<string> {
@@ -297,16 +291,7 @@ export async function mount(
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
-      ...(delayMs === undefined
-        ? {}
-        : {
-            bridge: Promise.resolve(
-              createInProcessBackend(
-                { commit: null, dirty: null, mode: null, appVersion: null },
-                { delayMs },
-              ),
-            ),
-          }),
+      bridge: inProcessBackend(delayMs === undefined ? {} : { delayMs }),
       scriptStorage: at.provider,
       // A browser whose saved values keep no captured media gives the page no media store.
       ...("route" in at.state && at.state.route === "plain"

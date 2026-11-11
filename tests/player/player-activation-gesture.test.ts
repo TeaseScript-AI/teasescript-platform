@@ -14,6 +14,7 @@ import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkp
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
 import { hostIntroduced, loadHostFacade } from "../helpers/player/host-sessions.js";
+import { inProcessBackend } from "../helpers/player/worker-topology.js";
 
 /*
  * What the browser allows only within the player's click runs within it, also when the session shows only once the
@@ -178,7 +179,7 @@ test("a Start with the camera asks for it within the click, before any reply", a
 test("a Continue a new Start replaced cannot take over the recording, even from behind an async prepare", async (context) => {
   stubBrowser(context);
   const scope = effectScope();
-  const host = scope.run(() => usePlayerSession({}))!;
+  const host = scope.run(() => usePlayerSession({ bridge: inProcessBackend() }))!;
   context.after(() => scope.stop());
   const bridge = await host.bridge;
   host.prepareRestore(

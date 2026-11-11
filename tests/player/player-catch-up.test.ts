@@ -22,6 +22,7 @@ import { loadPlayerModule } from "../helpers/player-modules.js";
 import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
 import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
+import { inProcessBackend } from "../helpers/player/worker-topology.js";
 
 // The adapter's functions, also on the sessions the composables' host holds (`helpers/player/host-sessions.ts`).
 const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
@@ -112,7 +113,7 @@ interface SessionHost {
   resolveRandomDraw(drawId: number, outcome: "natural"): Promise<{ readonly kind: string } | null>;
   debugRecording(): Promise<DebugRecording | null>;
 }
-let usePlayerSession: () => SessionHost;
+let usePlayerSession: (options: { readonly bridge: Promise<PlayerBridge> }) => SessionHost;
 
 before(async () => {
   await loadHostFacade();
@@ -159,7 +160,7 @@ async function mount(
   let nowMs = 0;
   context.mock.method(performance, "now", () => (nowMs += 1));
   const scope = effectScope();
-  const host = scope.run(() => usePlayerSession())!;
+  const host = scope.run(() => usePlayerSession({ bridge: inProcessBackend() }))!;
   context.after(() => scope.stop());
   if (randomControl !== undefined) host.setRandomControl(randomControl);
   // Recorded as every Player session is, so the debug export's replay can be checked.

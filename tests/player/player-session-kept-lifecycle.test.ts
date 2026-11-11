@@ -31,6 +31,7 @@ import { loadPlayerModule } from "../helpers/player-modules.js";
 import { answerWith, type Intent } from "../helpers/player/player-input.js";
 import { loadHostFacade } from "../helpers/player/host-sessions.js";
 import { readForImport, type SessionRead } from "../helpers/player/transfer-read.js";
+import { inProcessBackend } from "../helpers/player/worker-topology.js";
 
 // The kept session's lifecycle around its preparation and the saved-data import (#1862, #1863): a preparation that
 // something later replaced shows nothing and puts back no photo, and an import replaces a script's values only once
@@ -79,6 +80,7 @@ interface Host {
   importSession(review: SessionImportReview): Promise<void>;
 }
 let usePlayerSession: (options: {
+  readonly bridge: Promise<PlayerBridge>;
   scriptStorage: ScriptStorageProvider;
   capturedMedia: { repository: FakeMediaRepository };
   keptSessions: KeptSessionStore;
@@ -233,6 +235,7 @@ function page(context: TestContext, at: Browser, options: { scope?: string; room
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
+      bridge: inProcessBackend(),
       scriptStorage: at.provider(options.scope ?? SHOWN),
       capturedMedia: { repository: at.repository },
       keptSessions: at.kept,
