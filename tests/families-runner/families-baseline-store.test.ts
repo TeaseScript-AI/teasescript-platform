@@ -680,7 +680,21 @@ test("the check and the baselines take one set of areas: each folder of tests/fa
   }
 });
 
-test("a stops run's decision stops are classified where both trees ran, never stored, and against a store unavailable, naming the base (#2355)", () => {
+test("a stops run's decision stops are classified where both trees ran, never stored, and against a store unavailable, naming the base, each read by compiler-replay's verdict (#2355)", async () => {
+  // (the replay's reader of an area's records, which the runner's records below must pass, every form)
+  const replay = (await import(
+    pathToFileURL(resolve(process.cwd(), "tools/compiler-replay.mjs")).href
+  )) as {
+    areaRecordForm: (record: Record<string, unknown>) => string;
+    apartText: (record: Record<string, unknown>) => string;
+  };
+  const readBack = (kept: Record<string, unknown>[]) =>
+    Object.fromEntries(
+      kept.map((record) => [
+        record.source,
+        `${replay.areaRecordForm(record)}: ${replay.apartText(record)}`,
+      ]),
+    );
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
     // (each source's stops on each tree: a place that stops at another pass, one the head alone stops, one the base
@@ -700,6 +714,14 @@ test("a stops run's decision stops are classified where both trees ran, never st
             [1, "q", "y", 3],
           ],
       fields: [[1, "r", "x", 1]],
+      // (a place that stops in passes 1 and 2 on the base and in pass 2 alone on the head: the pass-1 stop removed, the
+      // identical pass-2 stops paired first, never one moved and one removed)
+      restarted: head
+        ? [[2, "p", "z", 1]]
+        : [
+            [1, "p", "z", 1],
+            [2, "p", "z", 1],
+          ],
     });
     const library = (head: boolean) => `
 export function stopSet(files) {
@@ -708,7 +730,7 @@ export function stopSet(files) {
     exhausted: null, record: ${head} && source === "fields" ? "other" : "same" };
 }
 `;
-    const names = ["moved", "added", "removed", "fields"];
+    const names = ["moved", "added", "removed", "fields", "restarted"];
     const tree = (name: string, sha: string, head: boolean) => {
       const folder = join(directory, name);
       mkdirSync(join(folder, "dist", "tests", "helpers"), { recursive: true });
@@ -765,6 +787,19 @@ export function stopSet(files) {
         moved: [],
       },
       fields: { listsEqual: true },
+      restarted: {
+        added: [],
+        removed: [{ label: "p", path: "z", base: [1, 1], head: null }],
+        moved: [],
+      },
+    });
+    const apart = "difference: stops natural apart;";
+    assert.deepEqual(readBack(beside.kept), {
+      moved: `${apart} stops added 0; removed 0; moved 1: r:x (base pass 1 ordinal 2, head pass 2 ordinal 2)`,
+      added: `${apart} stops added 1: q:y (base none, head pass 1 ordinal 3); removed 0; moved 0`,
+      removed: `${apart} stops added 0; removed 1: q:y (base pass 1 ordinal 3, head none); moved 0`,
+      fields: `${apart} its stop lists equal, the stop set's other fields apart`,
+      restarted: `${apart} stops added 0; removed 1: p:z (base pass 1 ordinal 1, head none); moved 0`,
     });
 
     // stored: no stops in any stored run (the writer checks each line as every reader does, and the head's run below
@@ -796,6 +831,15 @@ export function stopSet(files) {
     assert.deepEqual(
       stopsBy(against.kept),
       Object.fromEntries(names.map((name) => [name, unavailable])),
+    );
+    assert.deepEqual(
+      readBack(against.kept),
+      Object.fromEntries(
+        names.map((name) => [
+          name,
+          `${apart} which stops: unavailable (${unavailable.unavailable})`,
+        ]),
+      ),
     );
   } finally {
     rmSync(directory, { recursive: true, force: true });
