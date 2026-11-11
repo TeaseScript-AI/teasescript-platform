@@ -47,7 +47,8 @@ declares. `npm run check:readme-paths` checks that every backticked path in the 
 `player/vue/src/README.md`) names a tracked file or folder; `tools/repository-checks/readme-paths.mjs` says which
 spans it reads and which it skips. `npm run lint:design` and `npm run test:lint:design` check the [Player design
 contracts](LINTING.md#player-design-lint) and their positive/negative fixtures; both are included in `npm run check`.
-Independent pre-test gates and UI checks/builds run concurrently through `tools/run-parallel.mjs`.
+Independent pre-test gates and UI checks/builds run concurrently through `tools/run-parallel.mjs`; the pre-test gates
+are the npm scripts `tools/check-pretest-steps.txt` lists, one per line.
 `npm run check` (`tools/run-check.mjs`) runs the build and the compiled tests also when a pre-test check failed, and
 its last line names what ran, failed and did not run. TypeScript compilation precedes UI work; compiled tests run only
 after all builds pass, as many files at once as
@@ -57,8 +58,9 @@ figure but never raise it above a cap the runner can see (`tools/test-files-at-o
 its own, as one whose process ends before its tests report, fails the full suite and is named. Each command's output is printed together, including warnings. A failed command stops no
 other in its group, and its leftover process group is terminated. On SIGINT and SIGTERM, `run-parallel` stops its own
 command groups, escalating after a grace period, and starts no other; `run-check` forwards the signal and waits for its
-part, without a deadline. A command `run-parallel` stops this way is labelled `ABORTED`, not `FAIL`. `npm run test:verification` checks scheduling, diagnostics and
-process cleanup (POSIX cleanup assertions run on CI; Windows uses `taskkill /t /f`). A tool test that builds a git
+part, without a deadline. A command `run-parallel` stops this way is labelled `ABORTED`, not `FAIL`. `npm run test:verification` runs every
+`tools/**/*.test.mjs` outside `tools/oxlint/`, whose tests `test:lint` runs, by glob: a new tool test needs no entry.
+It checks scheduling, diagnostics and process cleanup (POSIX cleanup assertions run on CI; Windows uses `taskkill /t /f`). A tool test that builds a git
 repository takes its git environment from `tools/fixture-git.mjs`, so that no host git configuration, ignore or
 attributes file, `GIT_*` variable or message language reaches the fixture; the helper's comment names what it keeps.
 
@@ -87,8 +89,8 @@ copies, only when `--player-profile profile.json` gives a JSON object of them, s
 The suite is every `tests/*.test.ts` and every `tests/<folder>/*.test.ts` one folder down, except in `fixtures/` and
 `helpers/`, which hold no tests (a closed list, `suiteTestFiles` in `tools/test-shards.mjs`); a file is named by its path
 under `tests/`, one at the top by its name alone.
-`npm run test -- dist/tests/<file>.test.js` runs one compiled test through the same compact filter, which fails before running anything when a passed path matches no file, and ends with each named file's test counts (`ℹ <file>: N passed`, and `; the file failed outside any test` when it threw while loading or its process ended non-zero); a named file that ran no test (a suite alone is none) fails the run, unless the tests were selected (a name or skip pattern, or `--test-only`, as an argument or in `NODE_OPTIONS`), where its line says the selection matched no test in it; the per-file counts, and this check, need Node's default process isolation, and a watch run is not checked per cycle; use `npm run test:full-output -- dist/tests/<file>.test.js` only for diagnosis.
-`node tools/check-changed.mjs` runs before a push the checks CI fails on for what changed since the base (`git diff --check`, `merge commits`, format, oxlint, knip, the doc links, the imports, and the changed projects' type checks and tool tests; its header lists them and its exit codes); CI still runs the tests. `--merged` runs them on HEAD merged into the base's current commit, as CI tests after a squash. In a checkout the queue has already merged with its base (`--merged-with`), run `--merged-checkout <pushed head's full SHA> --base <base's full SHA>` instead, so that `merge commits` judges the head's merge commits and not the queue's own merge.
+`npm run test -- dist/tests/<file>.test.js` runs one compiled test through the same compact filter, which fails before running anything when a passed path matches no file, and ends with each named file's test counts (`ℹ <file>: N passed`, and `; the file failed outside any test` when it threw while loading or its process ended non-zero); a named file that ran no test (a suite alone is none) fails the run, unless the tests were selected (a name or skip pattern, or `--test-only`, as an argument or in `NODE_OPTIONS`), where its line says the selection matched no test in it; the per-file counts, and this check, need Node's default process isolation, and a watch run is not checked per cycle; use `npm run test:full-output -- dist/tests/<file>.test.js` only for diagnosis. A compiled-only run (`node tools/test-output-filter.mjs dist/tests/<file>.test.js` after `npm run build:typescript`) fails every Player test that loads a module when `dist/player-test-modules` was built before a file of the checkout changed, a test file included; `npm run build:player-test-modules` rebuilds it.
+`node tools/check-changed.mjs` runs before a push the checks CI fails on for what changed since the base (`git diff --check`, `merge commits`, format, oxlint, knip, the doc links, the imports, and the changed projects' type checks and tool tests; its header lists them and its exit codes); CI still runs the tests. `--merged` runs them on HEAD merged into the base's current commit, as CI tests after a squash. In a checkout the queue has already merged with its base (`--merged-with`), run `--merged-checkout "$SX_MERGED_HEAD" --base "$SX_MERGED_BASE"` instead (the queue sets both), so that `merge commits` judges the head's merge commits and not the queue's own merge.
 `node tools/check-shas.mjs [--repo <path>]... [<file>]` checks that the commit SHAs a report or pull-request body names exist and are on a remote (a remote-tracking ref, or an archived or pull-request head on `origin`; a tree hash only exists), and finds its unfilled placeholders and its closing clauses that name several issues after one keyword; it names and counts, without failing, the paths it reads into the scratch area `/tmp/agent-work/`, a count that claims no completeness (its header lists the rules and what it does not read); it never fetches. `--append` writes its last line into the checked file as that file's last line, replacing its earlier one, so the report sent is that file.
 `tools/archive-replaced-heads.mjs` is a `pre-push` hook: before a push deletes or rewrites a ref on the remote, it pushes the old value to `refs/archive/<sha>` there and keeps the same ref in this clone, and refuses the push when it cannot or when the push would delete or rewrite an archive (its header lists the rules and the limit).
 CI's "Structure signals (advisory)" step, after `check:pretest` in the job that runs it, prints
@@ -393,11 +395,13 @@ as scrolling that must feel the same over the conversation, beside it, and over 
 not pin animations, timings, exact colours, or layout; the scoped visual check below covers those by eye. The existing
 Chromium DevTools smoke route has no browser-automation package dependency; it plays the repository demo end to end (see
 [Local browser smoke](#local-browser-smoke-and-future-host-e2e-gate)). For the development preview, run
-`npm run test:player:preview -- <preview-url>` against a running `npm run dev:player` server of this checkout (it
-refuses one that serves another; starting and stopping that server is still by hand, #2391); it requires
-`playwright-cli` on `PATH` and an available Chromium browser. Both run outside `npm run check` and are not a final
-cross-browser or production-host E2E suite. Preview groups use fresh browser contexts. On failure the runner reports a
-retained scratch directory with a screenshot and Playwright trace for the failing group; delete it after diagnosis.
+`npm run test:player:preview`: it starts this checkout's preview on a port Vite chooses and ends it with the run,
+however the run ends. `npm run test:player:preview -- <preview-url>` runs against a running `npm run dev:player`
+server of this checkout instead, and refuses one that serves another. Both require `playwright-cli` on `PATH` and an
+available Chromium browser. Both run outside `npm run check` and are not a final
+cross-browser or production-host E2E suite. Preview groups use fresh browser contexts. When a group fails, or a
+started preview does not start or ends early, the runner reports a retained scratch directory: a screenshot and
+Playwright trace of the failing group, and the started preview's log; delete it after diagnosis.
 `npm test` separately checks that the default Player build does not statically load development preview content, and
 `tests/player/player-demo.test.ts` plays the repository demo to its exit through the runtime adapter and media device.
 
