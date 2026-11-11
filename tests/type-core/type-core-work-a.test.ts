@@ -1303,7 +1303,7 @@ function publishedRecord(answers: Answers, files: readonly SourceFile[]): string
 }
 
 /**
- * S6-CARRIERS §4.1's member-answer oracle (the orchestrator's condition (a)), as a generated family: at every decided
+ * S6-CARRIERS's member-answer oracle (the orchestrator's condition (a)), as a generated family: at every decided
  * path, each alias member's own answer equals its class representative's, each with its own guard applied, its items
  * compared whole (tags, certainty, reasons, context words, writers, leaves, marks). It runs over every work family at
  * small sizes, Astra's two M1 witnesses (a conditional store below the copied path before and between the copies) and
@@ -1365,7 +1365,7 @@ test("every alias member answers as its class does at every decided path, in bot
 });
 
 /**
- * S6-CARRIERS §4.1's chains: a member read through a chain of copies keeps its own links' writers, which the oracle
+ * S6-CARRIERS's chains: a member read through a chain of copies keeps its own links' writers, which the oracle
  * sets aside, so this guards what they are for: every published record, its diagnostics' F28 writers included, is the
  * same with every chain resolved and with none (`withoutChains`), over every work family at small sizes in both orders
  * and over the fixture's records. The resolved side is the oracle's analysis of the same program where it ran.

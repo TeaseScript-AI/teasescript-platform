@@ -1562,7 +1562,7 @@ test("a stop in a settled walk keeps the error of a member read of a null defaul
 });
 
 /**
- * After a stop a read is answered from admission's retained state through the copy forest (S3 §5 revision 14), walked
+ * After a stop a read is answered from admission's retained state through the copy forest (S3 revision 14), walked
  * finitely: round a cycle of copies whose member copies another's part (`b = a.next`, `a = b`) a path grows no step,
  * so a read below it finishes at every settled phase's ends instead of overflowing the native stack (Codex r9's B2).
  */
@@ -1976,7 +1976,7 @@ test("a stop before a store below an own selection takes its target settles noth
 });
 
 /**
- * S3 §5 with #1275 (Codex r10's B1 on #1310): a store at a key whose decision stopped is an obligation the stop stands
+ * S3 with #1275 (Codex r10's B1 on #1310): a store at a key whose decision stopped is an obligation the stop stands
  * for (`Consumers.#stoppedStores`), whichever pass stopped it: a pass that both stops a decision and gives new store
  * targets starts again with the key stopped, and the store keeps a mark there, through demand-only completion and a
  * settled program stop alike. Each own selection's invalid store beside a property's and a variable's, in both
@@ -1987,7 +1987,7 @@ test("a stop before a store below an own selection takes its target settles noth
  * decision's demand at several fractions, an add, a k = 64 joined list, work stops across the restarted pass) runs
  * outside CI.
  */
-test("a store at a stopped decision's key keeps an obligation, whichever pass stopped it (S3 §5, #1275)", () => {
+test("a store at a stopped decision's key keeps an obligation, whichever pass stopped it (S3, #1275)", () => {
   const options = { globals: ["hostValue", "hostOther"] };
   const sources = [
     ...["first", "last", "random"].map((own) => `let box = {${own}: {n: 1}}\nbox.${own}.n = "bad"`),
@@ -3116,7 +3116,7 @@ test("after a stop a selection of a typed call with a named list default owes it
 
 /**
  * After a settled stop a read's answer takes the type admission gives its place as `place` does, a path admission decides
- * lazily among them (S3 §5): at every settled walk stop, `src.first`'s `at` and `valueAt` hold the kinds
+ * lazily among them (S3): at every settled walk stop, `src.first`'s `at` and `valueAt` hold the kinds
  * `place(src, ["element"])` admits, never `budget` (the matrix's 116).
  */
 test("after a settled stop a read answers its place's lazily decided type, as place does", () => {
@@ -3492,7 +3492,7 @@ test("#1216's redundant check stands at its counted stops", () => {
 });
 
 /**
- * #1432, #1415 (S3 §5; S8's mark-ownership rule): after a settled program stop, a read the finishing walk
+ * #1432, #1415 (S3; S8's mark-ownership rule): after a settled program stop, a read the finishing walk
  * answers by a domain holds the host data its key's stores hold, as the unstopped read does, so its consumer owes its
  * check (a mark carrying the unstopped obligation) and the store's boundary forms: through a dictionary's values
  * list (#1452), and where an unrestricted written type stands, whose store owes no other boundary (#1450). The anchors
@@ -5035,7 +5035,7 @@ test("a read past the bounded walk keeps every check: #1453's 257 copies, copies
 });
 
 /**
- * The per-demand fallback (S3 §5, ADR 0021 rule 1.10): `y` copies a number through a chain of copies, so its
+ * The per-demand fallback (S3, ADR 0021 rule 1.10): `y` copies a number through a chain of copies, so its
  * read's exact path is a long demand, and a later store makes its key's contract a whole number or a number; `count`'s
  * read is short. With a demand allowance below the chain's (three quarters of the longest read's work, measured), the
  * read of `y` stops with its key's contract and the reason `budget`, so its check runs when the script runs, while
@@ -5060,7 +5060,7 @@ function demandAllowance(source: string): number {
   return Math.floor(0.75 * Math.max(...bounded.map((read) => read.units)));
 }
 
-test("a demand past its allowance moves its read's check to the runtime, an independent proof staying an error (S3 §5)", () => {
+test("a demand past its allowance moves its read's check to the runtime, an independent proof staying an error (S3)", () => {
   const source = chain(1, true);
   const read = source.indexOf("y30 {}");
   const count = source.indexOf("count {}");
@@ -5083,7 +5083,7 @@ test("a demand past its allowance moves its read's check to the runtime, an inde
   assert.match(failed.failure ?? "", new RegExp(`^TSR043@${runnable.indexOf("y30 {}")}:`, "u"));
 });
 
-test("a stopped demand's proof is not reused by a later demand of its key, in either order (S3 §5)", () => {
+test("a stopped demand's proof is not reused by a later demand of its key, in either order (S3)", () => {
   // two reads of `y30`: the one asked first stops; the other, an independent demand, keeps its allowance and proves
   const source = chain(2, false);
   const request = coreRequest([{ path: "main.tease", source }], OPTIONS.globals);
@@ -5109,12 +5109,12 @@ test("a stopped demand's proof is not reused by a later demand of its key, in ei
 });
 
 /**
- * S3 §5's allowance by where a read sits (Astra r1 B3 on #1165): a top-level read reads globals every file stores, so in
+ * S3's allowance by where a read sits (Astra r1 B3 on #1165): a top-level read reads globals every file stores, so in
  * any file it takes 256 × the program's nodes, not its file's; a function's read takes its function's. `g136` copies a
  * number through 136 globals of a second file, and main's read of it stays the error it is: with its file's 11 nodes it
  * stopped with a moved check instead.
  */
-test("a top-level read takes the program's allowance in every file, a function's read its function's (S3 §5)", () => {
+test("a top-level read takes the program's allowance in every file, a function's read its function's (S3)", () => {
   const files = [
     { path: "main.tease", source: 'repeat g136 {}\ng136 = 2\ncheck()\nsay "DONE"\nexit\n' },
     {
@@ -5224,7 +5224,7 @@ test("a settled stop decides a typed parse's nested default by its syntax, its c
   }
 });
 
-test("an admission decision past its allowance stops: its key undecided, its reads checked when the script runs (S3 §5)", () => {
+test("an admission decision past its allowance stops: its key undecided, its reads checked when the script runs (S3)", () => {
   // `b`'s decision scans its 41 stores, while each read is short, `count`'s decision too
   const source = (count: boolean): string =>
     [
@@ -5299,7 +5299,7 @@ test("an admission decision past its allowance stops: its key undecided, its rea
  * excuse, no boundary among it. The generated family (shapes, readers, caps and allowances around the stop) runs outside
  * CI.
  */
-test("a stopped decision stays undecided at every reader, also after a settled program stop (S3 §5)", () => {
+test("a stopped decision stays undecided at every reader, also after a settled program stop (S3)", () => {
   const source =
     [
       "let tally = 1",

@@ -374,7 +374,7 @@ test("a default in a cycle is chosen on its completed kinds, in either order and
 });
 
 /**
- * S3 §1 (Astra's R2-B1 on #1028): a method without a category answers per receiver alternative, and a
+ * S3 (Astra's R2-B1 on #1028): a method without a category answers per receiver alternative, and a
  * receiver without items yet is a provisional bottom, no answer: the method's result stays the bottom, which the solver
  * completes, so no `external` reason enters a component from it. A chain round its own component (a self-update, a
  * record's field updated from itself, a loop, two functions) gives the same record in every order combination

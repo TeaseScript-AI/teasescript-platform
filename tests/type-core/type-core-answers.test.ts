@@ -373,7 +373,7 @@ test("a `get` on a receiver that may be a reference is the runtime's, no default
 });
 
 /**
- * S3 §1 (review: Astra's D2, round 2's D1): a decided place's admitted answer names the site of the contribution that
+ * S3 (review: Astra's D2, round 2's D1): a decided place's admitted answer names the site of the contribution that
  * decided it (A2's earliest definite one, a literal's earliest element, A4's copy), also where A3 settled the path
  * without a scan, for the deciding line S8's sentences name; a written place has none. Both orders.
  */

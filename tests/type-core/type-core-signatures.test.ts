@@ -37,7 +37,7 @@ import {
 } from "../../src/type-inference/core/result.js";
 
 /*
- * C13 (S3 §1) for S9b's first consumers: a `for` loop's iterable, a built-in method's arguments, the elements
+ * C13 (S3) for S9b's first consumers: a `for` loop's iterable, a built-in method's arguments, the elements
  * `join` and `sort` read, what `toJson` writes (Astra's G1) and what a choice's buttons return (TSV029):
  * each consumer's operand, written in every form a value reaches it by, of a kind that fits, of one that does not, of
  * both possible, or unknown, gives the ordered predicate's verdict at its own site, in both orders, and a stop never

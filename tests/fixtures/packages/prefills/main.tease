@@ -1,0 +1,14 @@
+let first = askText "First?"
+let name = askText "Name?", prefill: "Ada", hint: "First name"
+timer async hidden 4 s { let inBlock = askText "In the block?" }
+let typed = askText "Typed before the block?"
+timer async hidden 4 s { let inBlock = askText "In the block again?" }
+let resumed = askText "Resumed?", prefill: "Back"
+let count = askInteger "How many?", prefill: 3
+let when = askTime "When?", prefill: toTime("20:00")
+let pick = askChoice "Red", "Blue", prefill: "Blue"
+let afterButton = askText "After a button?", prefill: "Kept"
+let refused = askInteger "A number first?"
+let afterRefusal = askText "After a refusal?", prefill: "Still"
+say "Done.", instant
+exit

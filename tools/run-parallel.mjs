@@ -7,7 +7,8 @@ import { join } from "node:path";
 // other, so one run shows every failure (#2106). Each step's output prints together when it ends, after `[name] PASS`,
 // `FAIL` or `ABORTED` and its seconds; a failed step's leftover descendants (its process group) are stopped. SIGINT and
 // SIGTERM stop every running step, labelled `ABORTED`, and start no other. The last line says what ran, failed and did
-// not run (`summaryLine`):
+// not run (`summaryLine`). A script named twice is refused before any step runs, since each step is reported by its
+// name:
 //
 //   node tools/run-parallel.mjs <npm script>...
 //   node tools/run-parallel.mjs --list <file>
@@ -68,6 +69,9 @@ export function summaryLine(steps) {
  * `ABORTED`, or `NOT RUN` for a step a signal kept from starting) and the exit status.
  */
 export async function runSteps(names, { serial = false } = {}) {
+  const repeated = new Set(names.filter((name, index) => names.indexOf(name) !== index));
+  if (repeated.size > 0)
+    throw new Error(`a step is named more than once: ${[...repeated].join(", ")}`);
   const scratch = mkdtempSync(join(tmpdir(), "verification-"));
   const children = new Set();
   const status = new Map(names.map((name) => [name, "NOT RUN"]));

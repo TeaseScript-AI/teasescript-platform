@@ -104,7 +104,7 @@ test("every carrier role's placements owe the rule function's complete C1, C9 an
 });
 
 /**
- * The role matrix's compositions (S6-CARRIERS §6), as exact records in both orders: seven of round 4's eight choice
+ * The role matrix's compositions (S6-CARRIERS), as exact records in both orders: seven of round 4's eight choice
  * regressions (inline data a published choice selects owes the store's boundary at the host value, beside C13's warning
  * where it is a button's value, an unselected property none), a carrier of a carrier and a carrier inside a literal inside a carrier (inline and named), inline and
  * named data in one selected collection (the named data's C1 at the selecting expression, the inline data's boundary

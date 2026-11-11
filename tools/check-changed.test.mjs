@@ -46,7 +46,8 @@ import {
 
 isolateGit();
 
-// A representative changed path for each project, and the projects it alone needs.
+// A representative changed path for each project, and the projects it alone claims; every path but documentation also
+// needs `oxlint-rules`, whose `test:lint` runs for every such change (#2431).
 const REPRESENTATIVES = {
   typescript: ["src/compiler.ts", ["typescript"]],
   "player-vue": ["player/vue/src/shell/PlayerApp.vue", ["player-vue"]],
@@ -66,16 +67,22 @@ const REPRESENTATIVES = {
   formatting: [".prettierrc.json", ["formatting"]],
   "Prettier ignore file": [".prettierignore", ["formatting"]],
   "design-lint": ["eslint.design.config.mjs", ["design-lint"]],
+  // (which test:lint reads: turning a rule off there fails its rule tests, Sol's final on #2434)
   "oxlint config": [".oxlintrc.json", []],
+  // (which test:lint runs its rule tests through, #2402)
+  "test:lint's output filter": ["tools/test-output-filter.mjs", ["tools"]],
   unknown: [".github/workflows/ci.yml", Object.keys(PROJECTS)],
   "package manifest": ["package.json", Object.keys(PROJECTS)],
 };
 
-test("each changed path needs its project's checks, documentation and oxlint's configuration none, and an unknown path every project's", () => {
+test("each changed path needs its project's checks and, but for documentation, test:lint's; an unknown path every project's", () => {
   // Every project has a representative, so a new project cannot go unchecked here.
   for (const name of Object.keys(PROJECTS))
     assert.ok(name in REPRESENTATIVES, `${name} has a representative`);
-  const kinds = Object.entries(REPRESENTATIVES);
+  const kinds = Object.entries(REPRESENTATIVES).map(([kind, [path, claimed]]) => [
+    kind,
+    [path, kind === "documentation" ? claimed : [...new Set([...claimed, "oxlint-rules"])]],
+  ]);
   for (const [kind, [path, expected]] of kinds)
     assert.deepEqual([...projectsFor([path])].sort(), [...expected].sort(), kind);
   // Each pair of kinds needs the union of what each needs alone.
@@ -88,11 +95,16 @@ test("each changed path needs its project's checks, documentation and oxlint's c
       );
   assert.deepEqual([...projectsFor([])], []);
   // `player/` outside `player/vue/` belongs to the TypeScript project, and `player/vue/` only to the Player's.
-  assert.deepEqual([...projectsFor(["player/runtime/runtime-adapter.ts"])], ["typescript"]);
+  assert.deepEqual(
+    [...projectsFor(["player/runtime/runtime-adapter.ts"])],
+    ["typescript", "oxlint-rules"],
+  );
   assert.deepEqual(
     [...projectsFor(["player/vue/src/session/usePlayerSession.ts"])],
-    ["player-vue"],
+    ["player-vue", "oxlint-rules"],
   );
+  // documentation alone needs nothing, and beside a path that needs test:lint changes nothing
+  assert.deepEqual([...projectsFor(["docs/TESTING.md", "README.md"])], []);
   // A check that several projects name runs once: `lint:design` is the Player's and the design lint's.
   const everyCheck = checksOf(projectsFor([".github/workflows/ci.yml"]));
   assert.deepEqual(everyCheck, [
@@ -154,7 +166,14 @@ function repository({
   };
   run("init", "-q", "-b", "main");
   write("a.mjs", "export const a = 1;\n");
-  write("package.json", JSON.stringify({ devDependencies: { prettier: "0.0.0" } }));
+  // (a stand-in test:lint, which every change but documentation runs, that passes with the other stand-ins)
+  write(
+    "package.json",
+    JSON.stringify({
+      devDependencies: { prettier: "0.0.0" },
+      ...(passing ? { scripts: { "test:lint": "node -e 0" } } : {}),
+    }),
+  );
   write("package-lock.json", JSON.stringify({ lockfileVersion: 3, packages: { "": {}, ...lock } }));
   write(".gitignore", "node_modules/\n");
   // (the checks the merge runs: oxlint waits when asked, so a signal meets a running check)
@@ -364,6 +383,87 @@ test("a change to the type core prints the pin-suite mapper's list, plain and me
         rmSync(directory, { recursive: true, force: true });
       }
     }
+});
+
+test("a deleted path and both sides of a move select their projects as a changed one does, plain and merged; documentation still none (#2431)", () => {
+  // (each change alone, on a commit holding every path it deletes or moves)
+  const kept = [
+    "tools/test-file-counts.mjs",
+    "src/a.ts",
+    "player/vue/b.ts",
+    "docs/c.md",
+    "docs/é.md",
+    'docs/a"quote.md',
+  ];
+  const changes = {
+    "a deleted tool": [["rm", "-q", "tools/test-file-counts.mjs"], "oxlint-rules, tools"],
+    "a deleted source": [["rm", "-q", "src/a.ts"], "typescript, oxlint-rules"],
+    "a move out of the Player": [
+      ["mv", "player/vue/b.ts", "src/b.ts"],
+      "typescript, player-vue, oxlint-rules",
+    ],
+    "deleted documentation": [["rm", "-q", "docs/c.md"], "none"],
+    // (named as they are: Git's other output quotes them, `"docs/\303\251.md"`, which is no documentation path)
+    "deleted documentation with a non-ASCII name": [["rm", "-q", "docs/é.md"], "none"],
+    "deleted documentation with a quote in its name": [["rm", "-q", 'docs/a"quote.md'], "none"],
+  };
+  for (const merged of [false, true])
+    for (const [name, [change, projects]] of Object.entries(changes)) {
+      const { directory } = repository({ passing: true });
+      const git = (...args) => runSync("git", args, { cwd: directory, encoding: "utf8" });
+      try {
+        for (const path of kept) {
+          mkdirSync(dirname(join(directory, path)), { recursive: true });
+          writeFileSync(join(directory, path), "export {};\n");
+        }
+        git("add", ".");
+        git("commit", "-q", "-m", "the paths the change deletes or moves");
+        git("branch", "-q", "base");
+        git(...change);
+        git("commit", "-q", "-m", name);
+        const result = runSync(
+          process.execPath,
+          [tool, ...(merged ? ["--merged"] : []), "--base", "base"],
+          { cwd: directory, encoding: "utf8", env: environment },
+        );
+        assert.match(
+          result.stdout,
+          new RegExp(
+            `^check-changed: ${change[0] === "mv" ? 2 : 1} changed files since base \\([0-9a-f]{9}\\); projects: ${projects}$`,
+            "mu",
+          ),
+          `${merged ? "merged" : "plain"}, ${name}: ${result.stdout}${result.stderr}`,
+        );
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+});
+
+test("an untracked path is read as it is named: a quoted or non-ASCII name selects as its path does (#2431)", () => {
+  const cases = { 'docs/a"quote é.md': "none", 'tools/a"quote é.mjs': "oxlint-rules, tools" };
+  for (const [path, projects] of Object.entries(cases)) {
+    const { directory } = repository({ passing: true });
+    try {
+      mkdirSync(dirname(join(directory, path)), { recursive: true });
+      writeFileSync(join(directory, path), "export {};\n");
+      const result = runSync(process.execPath, [tool, "--base", "HEAD"], {
+        cwd: directory,
+        encoding: "utf8",
+        env: environment,
+      });
+      assert.match(
+        result.stdout,
+        new RegExp(
+          `^check-changed: 1 changed files since HEAD \\([0-9a-f]{9}\\); projects: ${projects}$`,
+          "mu",
+        ),
+        `${path}: ${result.stdout}${result.stderr}`,
+      );
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  }
 });
 
 test("the pin-suite mapper's verdict alone decides a run whose other checks pass, its output printed", () => {
@@ -910,9 +1010,9 @@ test("its last line names what ran, what failed, and what it did not run: the ch
       assert.equal(result.status, fails ? 1 : 0, result.stdout + result.stderr);
       assert.equal(
         result.stdout.trimEnd().split("\n").at(-1),
-        "check-changed: ran: diff --check, merge commits, format, oxlint, knip, doc links, imports, readme paths, pin suites, tsc; " +
+        "check-changed: ran: diff --check, merge commits, format, oxlint, knip, doc links, imports, readme paths, pin suites, tsc, test:lint; " +
           `failed: ${fails ? "pin suites" : "none"}; ` +
-          "not run: test:families, typecheck:player, lint:design, test:lint, test:verification, format:check, " +
+          "not run: test:families, typecheck:player, lint:design, test:verification, format:check, " +
           "test:lint:design, the compiled test suite (CI runs it)",
       );
     } finally {
@@ -943,8 +1043,8 @@ test(
       signalsBefore: false,
     });
     const last =
-      "check-changed: ran: diff --check, merge commits, format, oxlint, knip, doc links, imports, readme paths, pin suites, tsc; " +
-      "failed: pin suites; not run: test:families, typecheck:player, lint:design, test:lint, test:verification, " +
+      "check-changed: ran: diff --check, merge commits, format, oxlint, knip, doc links, imports, readme paths, pin suites, tsc, test:lint; " +
+      "failed: pin suites; not run: test:families, typecheck:player, lint:design, test:verification, " +
       "format:check, test:lint:design, the compiled test suite (CI runs it)";
     const at = result.stdout + result.stderr;
     assert.deepEqual([result.code, result.signal], [1, null], at);

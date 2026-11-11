@@ -288,7 +288,7 @@ export const INHERITED_FIELD_FAMILIES: readonly WorkFamily[] = [
   {
     name: "A4-inherited-chain-read-fields",
     measures:
-      "Sol's design review B3: a chain of k whole copies of a root of k written-typed fields, its last copy's every field read into one list",
+      "Sol's B3 (design review): a chain of k whole copies of a root of k written-typed fields, its last copy's every field read into one list",
     program: (k) =>
       main(
         lines(

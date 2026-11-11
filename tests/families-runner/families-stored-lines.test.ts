@@ -374,7 +374,7 @@ export function publicationHashes(files) {
 }
 `;
 
-test("a store writes and reads a publication run by the runner's own limit, its grant from the cells its oracle reported included, and still refuses a run over it (#1837, the final review's R1)", async () => {
+test("a store writes and reads a publication run by the runner's own limit, its grant from the cells its oracle reported included, and still refuses a run over it (#1837)", async () => {
   const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
   try {
     const tree = join(directory, "tree");

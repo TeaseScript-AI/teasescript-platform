@@ -679,3 +679,185 @@ test("the check and the baselines take one set of areas: each folder of tests/fa
     rmSync(directory, { recursive: true, force: true });
   }
 });
+
+// (each source's stops on each tree: a place that stops at another pass, one the head alone stops, one the base
+// alone stops, and stops alike where the stop set differs in another field; names in no order of the property; and a
+// tree whose run holds no stop list, `undefined` here: an oracle without them, or the head's unparsed run)
+const stopsOf = (head: boolean) => ({
+  moved: [[head ? 2 : 1, "r", "x", 2]],
+  added: head
+    ? [
+        [1, "r", "x", 1],
+        [1, "q", "y", 3],
+      ]
+    : [[1, "r", "x", 1]],
+  removed: head
+    ? [[1, "r", "x", 1]]
+    : [
+        [1, "r", "x", 1],
+        [1, "q", "y", 3],
+      ],
+  fields: [[1, "r", "x", 1]],
+  // (a place that stops in passes 1 and 2 on the base and in pass 2 alone on the head: the pass-1 stop removed, the
+  // identical pass-2 stops paired first, never one moved and one removed)
+  restarted: head
+    ? [[2, "p", "z", 1]]
+    : [
+        [1, "p", "z", 1],
+        [2, "p", "z", 1],
+      ],
+  "head without": head ? undefined : [[1, "r", "x", 1]],
+  "base without": head ? [[1, "r", "x", 1]] : undefined,
+  "head unparsed": head ? undefined : [[1, "r", "x", 1]],
+});
+const stopsLibrary = (head: boolean) => `
+export function stopSet(files) {
+  const source = files[0].source;
+  if (${head} && source === "head unparsed") return null;
+  const stops = ${JSON.stringify(stopsOf(head))}[source];
+  return { ...(stops === undefined ? {} : { stops }), passes: 1, restarts: 0, outcome: "complete",
+exhausted: null, record: ${head} && source === "fields" ? "other" : "same" };
+}
+`;
+
+test("a stops run's decision stops are classified where both trees ran, never stored, and against a store unavailable, naming the base, each read by compiler-replay's verdict (#2355)", async () => {
+  // (the replay's reader of an area's records, which the runner's records below must pass, every form)
+  const { areaRecordForm, apartText } = await import(
+    pathToFileURL(resolve(process.cwd(), "tools/compiler-replay/collect.mjs")).href
+  );
+  const readBack = (kept: Record<string, unknown>[]): Record<string, string> =>
+    Object.fromEntries(
+      kept.map((record) => [record.source, `${areaRecordForm(record)}: ${apartText(record)}`]),
+    );
+  const directory = mkdtempSync(join(tmpdir(), "families-runner-"));
+  try {
+    const names = [
+      "moved",
+      "head without",
+      "added",
+      "base without",
+      "removed",
+      "fields",
+      "head unparsed",
+      "restarted",
+    ];
+    const tree = (name: string, sha: string, head: boolean) => {
+      const folder = join(directory, name);
+      mkdirSync(join(folder, "dist", "tests", "helpers"), { recursive: true });
+      writeFileSync(join(folder, "package.json"), '{ "type": "module" }\n');
+      writeFileSync(join(folder, "package-lock.json"), "{}\n");
+      writeFileSync(
+        join(folder, "dist", "tests", "helpers", "type-core-oracles.js"),
+        storable(head) + stopsLibrary(head),
+      );
+      writeFileSync(join(folder, ".sha"), `${sha.repeat(40)}\n`);
+      writeSrc(folder, head ? "head\n" : "");
+      return folder;
+    };
+    const [base, head] = [tree("base", "1", false), tree("head", "2", true)];
+    const area = join(directory, "area");
+    mkdirSync(area);
+    writeFileSync(
+      join(area, "stopping.mjs"),
+      `export const cases = ${JSON.stringify(names.map((name) => [name, name]))};\nexport const checks = ["stops"];\n`,
+    );
+    const out = join(directory, "out.jsonl");
+    const run = (...args: string[]) => {
+      rmSync(out, { force: true });
+      const result = spawnSync(process.execPath, [runner, area, ...args, "--out", out], {
+        encoding: "utf8",
+      });
+      const kept = readFileSync(out, "utf8")
+        .trim()
+        .split("\n")
+        .map((line): Record<string, unknown> => JSON.parse(line))
+        .filter(({ mode, check }) => mode === "src-on" && check === "stops natural");
+      return { status: result.status, stderr: result.stderr, kept };
+    };
+    const stopsBy = (kept: Record<string, unknown>[]) =>
+      Object.fromEntries(kept.map(({ source, stops }) => [source, stops]));
+
+    // (why the stops are unavailable, as run.mjs says it, for each side that holds no list)
+    const baseNone =
+      "the base's run holds no stop list (a stored run never does): a run of the differing sources on two trees whose oracles list stops gives it";
+    const headNone = "the head's run holds no stop list";
+    // both trees run: each stop by its place, on the tree that has it; a side without a list named, never equal
+    const beside = run(base, head);
+    assert.equal(beside.status, 1, beside.stderr);
+    assert.deepEqual(stopsBy(beside.kept), {
+      moved: {
+        added: [],
+        removed: [],
+        moved: [{ label: "r", path: "x", base: [1, 2], head: [2, 2] }],
+      },
+      added: {
+        added: [{ label: "q", path: "y", base: null, head: [1, 3] }],
+        removed: [],
+        moved: [],
+      },
+      removed: {
+        added: [],
+        removed: [{ label: "q", path: "y", base: [1, 3], head: null }],
+        moved: [],
+      },
+      fields: { listsEqual: true },
+      restarted: {
+        added: [],
+        removed: [{ label: "p", path: "z", base: [1, 1], head: null }],
+        moved: [],
+      },
+      "head without": { unavailable: headNone },
+      "base without": { unavailable: baseNone },
+      "head unparsed": { unavailable: headNone },
+    });
+    const apart = "difference: stops natural apart;";
+    assert.deepEqual(readBack(beside.kept), {
+      moved: `${apart} stops added 0; removed 0; moved 1: r:x (base pass 1 ordinal 2, head pass 2 ordinal 2)`,
+      added: `${apart} stops added 1: q:y (base none, head pass 1 ordinal 3); removed 0; moved 0`,
+      removed: `${apart} stops added 0; removed 1: q:y (base pass 1 ordinal 3, head none); moved 0`,
+      fields: `${apart} its stop lists equal, the stop set's other fields apart`,
+      restarted: `${apart} stops added 0; removed 1: p:z (base pass 1 ordinal 1, head none); moved 0`,
+      "head without": `${apart} which stops: unavailable (${headNone})`,
+      "base without": `${apart} which stops: unavailable (${baseNone})`,
+      "head unparsed": `${apart} which stops: unavailable (${headNone})`,
+    });
+
+    // stored: no stops in any stored run (the writer checks each line as every reader does, and the head's run below
+    // reads it through `storedRuns`)
+    const root = join(directory, "baselines");
+    const stored = spawnSync(
+      process.execPath,
+      [runner, area, base, "--store", root, "--shard", "0/1"],
+      { encoding: "utf8" },
+    );
+    assert.equal(stored.status, 0, stored.stderr);
+    const [src] = readdirSync(root);
+    const lines = readFileSync(join(root, src!, "area", "0of1.runs.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line): { runs?: Record<string, { value: Record<string, unknown> }> } =>
+        JSON.parse(line),
+      );
+    const values = lines.flatMap(({ runs }) => Object.values(runs ?? {}).map(({ value }) => value));
+    assert.equal(values.length, names.length * 4 * 3);
+    assert.ok(values.every((value) => !Object.hasOwn(value, "stops")));
+    // the head against the store: a difference whose stops say the base holds no list, and the head too where it holds
+    // none, never equal
+    const against = run(head, "--baseline", join(root, src!, "area"));
+    assert.equal(against.status, 1, against.stderr);
+    const why = (name: string) =>
+      name.startsWith("head ") ? `${baseNone}; ${headNone}` : baseNone;
+    assert.deepEqual(
+      stopsBy(against.kept),
+      Object.fromEntries(names.map((name) => [name, { unavailable: why(name) }])),
+    );
+    assert.deepEqual(
+      readBack(against.kept),
+      Object.fromEntries(
+        names.map((name) => [name, `${apart} which stops: unavailable (${why(name)})`]),
+      ),
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
