@@ -140,7 +140,6 @@ const OUTSIDE: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   "session/activation/useActivationRun.ts": { "useActivationRun.retire": READ },
   "session/useEngineConnection.ts": {
     useEngineConnection: SETUP,
-    inProcess: SETUP,
     take: SETUP,
     prepareIn: "compiles the script in the host (`prepare`): it reaches no store",
     "useEngineConnection.replace":
