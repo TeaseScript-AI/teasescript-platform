@@ -83,27 +83,31 @@ const PARSED = /\.(ts|tsx|mts|cts|js|mjs|cjs)$/;
 
 const USAGE = `usage: node tools/structure-report.mjs [ROOT…] [--top N] [--json FILE] [--compare FILE]
        node tools/structure-report.mjs [ROOT…] --diff BASE [--moved] [--json FILE] [--summary FILE]`;
-const args = process.argv.slice(2);
-const given = [...args];
-// the first option given without its value, which `main` refuses
+const given = process.argv.slice(2);
+// Each option's value is the argument right after it on the command line as given, read in order, so that each option
+// is checked against its own next argument; of an option given twice, the first counts. An option whose next argument
+// is missing or is another option (`--…`) has no value, which `main` refuses for the first such option.
+const VALUED = ["--top", "--json", "--compare", "--diff", "--summary"];
+const values = {};
 let valueless;
-const option = (name) => {
-  const i = args.indexOf(name);
-  if (i < 0) return undefined;
-  const value = args[i + 1];
-  if (value === undefined || value.startsWith("--")) {
-    valueless ??= name;
-    args.splice(i, 1);
-    return undefined;
+const args = [];
+for (let i = 0; i < given.length; i++) {
+  if (!VALUED.includes(given[i])) {
+    args.push(given[i]);
+    continue;
   }
-  args.splice(i, 2);
-  return value;
-};
-const top = Number(option("--top") ?? 10);
-const jsonOut = option("--json");
-const compareWith = option("--compare");
-const diffBase = option("--diff");
-const summaryOut = option("--summary");
+  const value = given[i + 1];
+  if (value === undefined || value.startsWith("--")) valueless ??= given[i];
+  else {
+    values[given[i]] ??= value;
+    i++;
+  }
+}
+const top = Number(values["--top"] ?? 10);
+const jsonOut = values["--json"];
+const compareWith = values["--compare"];
+const diffBase = values["--diff"];
+const summaryOut = values["--summary"];
 const movedAt = args.indexOf("--moved");
 const discountMoved = movedAt !== -1;
 if (discountMoved) args.splice(movedAt, 1);

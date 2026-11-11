@@ -763,6 +763,11 @@ test("an option given without its value stops the report with the usage, writing
       // the next argument another option: neither is taken as the other's value
       ["--json", ["--json", "--diff", "HEAD"]],
       ["--diff", ["--diff", "--moved"]],
+      // whatever order the options are read in, each is checked against its own next argument
+      ["--diff", ["--diff", "--top", "1", "HEAD"]],
+      ["--json", ["--json", "--top", "1", "report.json"]],
+      ["--summary", ["--summary", "--diff", "HEAD", "summary.md"]],
+      ["--compare", ["--compare", "--top", "1", "snapshot.json"]],
     ]) {
       const result = spawnSync(process.execPath, [tool, ...args], { cwd: root, encoding: "utf8" });
       assert.equal(result.status, 2, args.join(" "));
