@@ -69,13 +69,15 @@ const runs = JSON.parse(readFileSync(${JSON.stringify(join(root, "gh.json"))}, "
 const args = process.argv.slice(2);
 const where = /^repos\\/\\{owner\\}\\/\\{repo\\}\\/actions\\/runs\\/(\\d+)(\\/jobs)?$/.exec(args[1] ?? "");
 const start = Date.parse("2026-11-01T00:00:00Z");
-const steps = (run, n) => [
+// (a run's \`conclusion\` defaults to success; \`failed\` is a test job that failed, \`unstarted\` one that never started)
+const steps = (run, n) => n === run.unstarted ? [] : [
   ...(n === run.jobs.length - 1
     ? [{ name: "Check source before the tests", conclusion: "success",
          started_at: new Date(start).toISOString(),
          completed_at: new Date(start + run.pretest * 1000).toISOString() }]
     : []),
-  { name: "Build and run tests (shard " + (n + 1) + ")", conclusion: "success" },
+  { name: "Build and run tests, shard " + (n + 1) + " of " + run.jobs.length,
+    conclusion: n === run.failed ? "failure" : "success" },
 ];
 if (args.join(" ") === "run download " + args[2] + " --pattern test-file-seconds-* --dir " + args[6] && runs[args[2]])
   runs[args[2]].jobs.forEach((seconds, n) => {
@@ -84,7 +86,7 @@ if (args.join(" ") === "run download " + args[2] + " --pattern test-file-seconds
     writeFileSync(folder + "/test-file-seconds.json", JSON.stringify({ filesAtOnce: 3, seconds }));
   });
 else if (args[0] === "api" && where && runs[where[1]] && args.length === 2 && !where[2])
-  process.stdout.write(JSON.stringify({ head_sha: where[1].repeat(40).slice(0, 40), conclusion: "success" }));
+  process.stdout.write(JSON.stringify({ head_sha: where[1].repeat(40).slice(0, 40), conclusion: runs[where[1]].conclusion ?? "success" }));
 else if (args[0] === "api" && where && runs[where[1]] && where[2]) {
   const jobs = runs[where[1]].jobs.map((_, n) => ({ steps: steps(runs[where[1]], n) }));
   const query = args.slice(2).join(" ");
@@ -174,7 +176,7 @@ test(
 );
 
 test(
-  "--from-ci takes each file's median over the runs, folders' files included, and refuses a file no run measured",
+  "--from-ci takes each file's median over the runs, folders' files included, counts a run by its test jobs, and refuses a file no run measured",
   { timeout: 60_000 },
   () => {
     const root = checkout();
@@ -219,6 +221,26 @@ test(
       assert.equal(refused.status, 1, refused.out);
       assert.match(refused.out, /no CI run measured type-core-dir\/plain\.test\.js/u);
       assert.equal(refused.module, before);
+
+      // A run counts by its test jobs, whatever its own conclusion, and is refused when one failed or never started.
+      const counted = runs(null);
+      counted[12].conclusion = "cancelled";
+      writeFileSync(join(root, "gh.json"), JSON.stringify(counted));
+      const cancelled = measure(root, ["--from-ci", "11", "12", "13"]);
+      assert.equal(cancelled.status, 0, cancelled.out);
+      assert.match(cancelled.out, /run 12 ended cancelled, but its 2 test jobs passed: counted/u);
+      assert.deepEqual(costly(cancelled.module), costly(module));
+      for (const [field, value] of [
+        ["failed", 1],
+        ["unstarted", 0],
+      ]) {
+        const broken = runs(null);
+        Object.assign(broken[13], { conclusion: "failure", [field]: value });
+        writeFileSync(join(root, "gh.json"), JSON.stringify(broken));
+        const one = measure(root, ["--from-ci", "11", "12", "13"]);
+        assert.equal(one.status, 1, `${field}: ${one.out}`);
+        assert.match(one.out, /run 13's test jobs did not all pass \(run failure\)/u, field);
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
