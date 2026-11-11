@@ -37,6 +37,21 @@ import {
   type Topology,
 } from "../helpers/player/worker-topology.js";
 
+/** Ends the capture `reportsInto` began, at the check of what it captured, so that a later host error prints again. */
+function endCapture() {
+  // `reportsInto` replaced `console.error` by a mock of the test's context, which carries its `mock`.
+  const error: unknown = console.error;
+  const capture = typeof error === "function" && "mock" in error ? error.mock : undefined;
+  assert.ok(
+    typeof capture === "object" &&
+      capture !== null &&
+      "restore" in capture &&
+      typeof capture.restore === "function",
+    "the capture reportsInto began",
+  );
+  capture.restore();
+}
+
 /*
  * When the engine's Worker is lost, every request still waiting for its reply ends its caller quietly: the loss is the
  * Player error stop, which `bridgeLost` reports once, and no caller reports it again or leaves its rejection unhandled
@@ -632,6 +647,7 @@ RERUN.rows(
     assert.deepEqual(unhandled, []);
     assert.deepEqual(await kept.session("loss"), before, "the session kept before stays");
     assert.equal(player.hostError.value, "BridgeLostError");
+    endCapture();
     assert.deepEqual(
       reported.map((error) => (error instanceof Error ? error.name : String(error))),
       ["BridgeLostError"],
@@ -675,6 +691,7 @@ RERUN.rows(
     });
     assert.deepEqual(unhandled, []);
     assert.notEqual(player.activation.value, "continue");
+    endCapture();
     assert.deepEqual(
       reported.map((error) => (error instanceof Error ? error.name : String(error))),
       ["BridgeLostError"],

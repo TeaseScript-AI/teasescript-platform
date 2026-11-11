@@ -39,6 +39,21 @@ import {
 } from "../helpers/player/rewind-host.js";
 import { sourceStart } from "../helpers/prepared-plan.js";
 
+/** Ends the capture `reportsInto` began, at the check of what it captured, so that a later host error prints again. */
+function endCapture() {
+  // `reportsInto` replaced `console.error` by a mock of the test's context, which carries its `mock`.
+  const error: unknown = console.error;
+  const capture = typeof error === "function" && "mock" in error ? error.mock : undefined;
+  assert.ok(
+    typeof capture === "object" &&
+      capture !== null &&
+      "restore" in capture &&
+      typeof capture.restore === "function",
+    "the capture reportsInto began",
+  );
+  capture.restore();
+}
+
 /*
  * L5i.6's handoff, by the lifecycle grammar (`tests/helpers/player/rewind-lifecycle.ts`): each schedule holds one step or
  * adoption at one boundary, inserts one lifecycle event there, lets the operation go, and compares the quiescent page
@@ -482,6 +497,7 @@ async function handoffRow(
       ...(gated && each.outcome === "fails" ? ["The restart gate failed."] : []),
       ...(each.event === "loss" ? ["The engine Worker failed: injected."] : []),
     ];
+    endCapture();
     const messages = reported.map((error) =>
       error instanceof Error ? error.message : String(error),
     );

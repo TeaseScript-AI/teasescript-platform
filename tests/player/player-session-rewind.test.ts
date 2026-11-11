@@ -39,6 +39,21 @@ import {
 } from "../helpers/player/rewind-host.js";
 import { sourceStart } from "../helpers/prepared-plan.js";
 
+/** Ends the capture `reportsInto` began, at the check of what it captured, so that a later host error prints again. */
+function endCapture() {
+  // `reportsInto` replaced `console.error` by a mock of the test's context, which carries its `mock`.
+  const error: unknown = console.error;
+  const capture = typeof error === "function" && "mock" in error ? error.mock : undefined;
+  assert.ok(
+    typeof capture === "object" &&
+      capture !== null &&
+      "restore" in capture &&
+      typeof capture.restore === "function",
+    "the capture reportsInto began",
+  );
+  capture.restore();
+}
+
 // `hostIntroduced` registers adapter sessions through the facade of the bundle the composable runs in.
 before(loadHostFacade);
 
@@ -251,6 +266,7 @@ test("Debug off during a pending adoption, then a loss: the adoption's late outc
       held.release();
       await chosen.catch(() => {});
       await settle(subtest);
+      endCapture();
       assert.deepEqual(
         reported.map((error) => (error instanceof Error ? error.message : String(error))),
         ["The engine Worker failed: injected."],
@@ -317,6 +333,7 @@ for (const end of ["Debug off", "unmount"] as const)
     reportsInto(context, reported);
     made.lose!();
     await settle(context);
+    endCapture();
     assert.deepEqual(
       reported.map((error) => (error instanceof Error ? error.message : String(error))),
       ["The engine Worker failed: injected."],
@@ -849,6 +866,7 @@ for (const each of exitCases())
     const done = await step.catch(() => false);
     await settle(context);
     // The host errors the Player reports: the case's own Player error or loss, and nothing else.
+    endCapture();
     assert.deepEqual(
       reported.map((error) => (error instanceof Error ? error.message : String(error))),
       each.lifecycle === "stopped"
