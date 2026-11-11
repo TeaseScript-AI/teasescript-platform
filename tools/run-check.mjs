@@ -36,15 +36,13 @@ async function main() {
   const scripts = JSON.parse(readFileSync("package.json", "utf8")).scripts;
   let signalled = 0;
   let running = null;
-  // (installed until the last line is out: a later signal is passed on too, but the status stays the first's)
-  const handlers = Object.entries(SIGNALS).map(([signal, code]) => {
-    const handler = () => {
+  // (installed until the process exits, the last line's write included: a later signal is passed on to a running part
+  // too, but the status stays the first's)
+  for (const [signal, code] of Object.entries(SIGNALS))
+    process.on(signal, () => {
       if (signalled === 0) signalled = code;
       running?.kill(signal);
-    };
-    process.on(signal, handler);
-    return [signal, handler];
-  });
+    });
   const env = { ...process.env, BUILD_SOURCEMAPS: "0" };
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
   /** A part's run: `PASS`, `FAIL`, or `ABORTED` when a signal stopped it, and its exit status (1 for a spawn error). */
@@ -92,7 +90,6 @@ async function main() {
       status: "NOT RUN",
     });
   if (signalled !== 0) fail(signalled);
-  for (const [signal, handler] of handlers) process.removeListener(signal, handler);
   console.log(`\n${summaryLine(steps)}`);
   process.exitCode = exitCode;
 }

@@ -1,6 +1,18 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  readFileSync,
+  readSync,
+  rmSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -187,6 +199,120 @@ test(
         alive = false;
       }
       assert.equal(alive, false, `${at}: the descendant outlived the run`);
+    }
+  },
+);
+
+/**
+ * Runs `node <args>` in `cwd` in its own process group, its stdout on a FIFO this test reads only when told. Once the
+ * fixture's `pid` is written, the FIFO is filled, so that the runner's next write waits, and its group gets SIGTERM. The
+ * runner then gets SIGTERM every 20 ms until it starts writing its last line, and three times more, before the FIFO is
+ * read again. Returns its exit and its output without the filling.
+ */
+async function slowReader(t, cwd, args) {
+  const fifo = join(cwd, "stdout.fifo");
+  assert.equal(spawnSync("mkfifo", [fifo]).status, 0);
+  // (marks the start of the last line, `\nran: …`, which both runners write in one piece)
+  writeFileSync(
+    join(cwd, "mark-last-line.mjs"),
+    "import { writeFileSync } from 'node:fs'; const write = process.stdout.write.bind(process.stdout); " +
+      "process.stdout.write = (chunk, ...rest) => { " +
+      "if (String(chunk).startsWith('\\nran: ')) writeFileSync('last-line', ''); return write(chunk, ...rest); };",
+  );
+  const reader = openSync(fifo, constants.O_RDONLY | constants.O_NONBLOCK);
+  const filler = openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK);
+  const writer = openSync(fifo, constants.O_WRONLY);
+  const child = spawn(process.execPath, ["--import", "./mark-last-line.mjs", ...args], {
+    cwd,
+    env: environment,
+    detached: true,
+    stdio: ["ignore", writer, "pipe"],
+  });
+  closeSync(writer);
+  const signal = (pid, name) => {
+    try {
+      process.kill(pid, name);
+    } catch (error) {
+      if (error.code !== "ESRCH") throw error;
+    }
+  };
+  t.after(() => signal(-child.pid, "SIGKILL"));
+  let stderr = "";
+  child.stderr.on("data", (chunk) => (stderr += chunk));
+  const ended = () => child.exitCode !== null || child.signalCode !== null;
+  const closed = new Promise((resolve) =>
+    child.on("close", (code, name) => resolve({ code, signal: name })),
+  );
+  // (no deadline, so a loaded host only makes it slower (#2379))
+  const pause = () => new Promise((wait) => setTimeout(wait, 20));
+  const chunks = [];
+  const buffer = Buffer.alloc(1 << 16);
+  /** Reads what the FIFO holds; true at its end. */
+  const drain = () => {
+    for (;;) {
+      try {
+        const length = readSync(reader, buffer);
+        if (length === 0) return true;
+        chunks.push(Buffer.from(buffer.subarray(0, length)));
+      } catch (error) {
+        if (error.code === "EAGAIN") return false;
+        throw error;
+      }
+    }
+  };
+  while (!existsSync(join(cwd, "pid")) || readFileSync(join(cwd, "pid"), "utf8") === "") {
+    drain();
+    if (ended()) assert.fail(`the runner ended first: ${stderr}`);
+    await pause();
+  }
+  drain();
+  // (a nested run-parallel's last line has passed through run-check by now)
+  rmSync(join(cwd, "last-line"), { force: true });
+  const before = Buffer.concat(chunks).length;
+  let filled = 0;
+  for (const size of [4096, 1])
+    for (;;) {
+      try {
+        filled += writeSync(filler, Buffer.alloc(size, "f"));
+      } catch (error) {
+        if (error.code === "EAGAIN") break;
+        throw error;
+      }
+    }
+  closeSync(filler);
+  signal(-child.pid, "SIGTERM");
+  for (let more = 3; !ended() && more > 0; await pause()) {
+    if (existsSync(join(cwd, "last-line"))) more -= 1;
+    signal(child.pid, "SIGTERM");
+  }
+  while (!drain()) await pause();
+  closeSync(reader);
+  const output = Buffer.concat(chunks);
+  assert.equal(output.subarray(before, before + filled).toString(), "f".repeat(filled));
+  const stdout = Buffer.concat([
+    output.subarray(0, before),
+    output.subarray(before + filled),
+  ]).toString();
+  return { ...(await closed), stdout, stderr };
+}
+
+test(
+  "a signal while the last line waits for a slow reader changes neither the status nor the last line (#2106)",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    for (const [args, waits, last] of [
+      [[tool], "suite", "ran: lint, format, build; failed: none; not run: test suite"],
+      [
+        ["tools/run-parallel.mjs", "build:player"],
+        "build",
+        "ran: none; failed: none; not run: build:player",
+      ],
+    ]) {
+      const result = await slowReader(t, fixture(t, {}, waits), args);
+      const at = `${args.join(" ")}: ${result.stdout}${result.stderr}`;
+      assert.deepEqual([result.code, result.signal], [143, null], at);
+      assert.ok(result.stdout.endsWith(`\n${last}\n`), at);
+      assert.equal(result.stdout.split(last).length, 2, at);
     }
   },
 );
