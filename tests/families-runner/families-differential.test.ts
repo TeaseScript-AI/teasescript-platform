@@ -322,12 +322,11 @@ function joinOf(
   folder: string,
   sides: Record<string, string[]>,
   out = join(folder, "joined.jsonl"),
+  extra: string[] = [],
+  names = ["a", "b", "c"],
 ) {
   const cases = join(folder, "cases.jsonl");
-  writeFileSync(
-    cases,
-    ["a", "b", "c"].map((name) => `${JSON.stringify({ name, source: "" })}\n`).join(""),
-  );
+  writeFileSync(cases, names.map((name) => `${JSON.stringify({ name, source: "" })}\n`).join(""));
   const files = Object.entries(sides).flatMap(([side, rows]) => {
     const file = join(folder, `${side}.jsonl`);
     if (!existsSync(file)) writeFileSync(file, rows.map((row) => `${row}\n`).join(""));
@@ -335,7 +334,7 @@ function joinOf(
   });
   const ran = spawnSync(
     process.execPath,
-    [tool, "join", "--cases", cases, ...files, "--out", out],
+    [tool, "join", "--cases", cases, ...files, "--out", out, ...extra],
     { encoding: "utf8" },
   );
   return { ran, text: existsSync(out) ? readFileSync(out, "utf8") : null };
@@ -385,6 +384,135 @@ test("join refuses an output that is one of its inputs, by path or link, and lea
     readdirSync(folder).filter((file) => file.includes(".partial-")),
     [],
   );
+});
+
+test("join --ignore names the cases whose base and head differ with those fields removed at any depth (#2316)", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "families-differential-ignore-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  const record = (name: string, message: string, code = "TSV001", messageKind = "plain") =>
+    JSON.stringify({
+      name,
+      message,
+      core: { modes: [{ diagnostics: [{ code, message, messageKind }] }] },
+    });
+  // a: only `message` differs, at the top and nested, its keys in another order; b: only `messageKind`, a field whose
+  // name holds the ignored one; c: a nested `code` beside a differing `message`
+  const base = [record("a", "old"), record("b", "same"), record("c", "old")];
+  const head = [
+    JSON.stringify({
+      core: {
+        modes: [{ diagnostics: [{ messageKind: "plain", message: "new", code: "TSV001" }] }],
+      },
+      message: "new",
+      name: "a",
+    }),
+    record("b", "same", "TSV001", "framed"),
+    record("c", "new", "TSV002"),
+  ];
+  const plain = joinOf(folder, { base, head }, join(folder, "plain.jsonl"));
+  assert.equal(plain.ran.status, 0, plain.ran.stderr);
+  assert.deepEqual(JSON.parse(plain.ran.stdout), { cases: 3, sides: 2 });
+  const once = joinOf(folder, { base, head }, join(folder, "once.jsonl"), ["--ignore", "message"]);
+  assert.equal(once.ran.status, 1, once.ran.stderr);
+  assert.deepEqual(JSON.parse(once.ran.stdout), {
+    cases: 3,
+    sides: 2,
+    ignore: ["message"],
+    differ: 2,
+    differing: ["b", "c"],
+    unread: [],
+  });
+  // (the joined records are written as without --ignore)
+  assert.equal(once.text, plain.text);
+  const twice = joinOf(folder, { base, head }, join(folder, "twice.jsonl"), [
+    "--ignore",
+    "message",
+    "--ignore",
+    "messageKind",
+  ]);
+  assert.equal(twice.ran.status, 1, twice.ran.stderr);
+  assert.deepEqual(JSON.parse(twice.ran.stdout), {
+    cases: 3,
+    sides: 2,
+    ignore: ["message", "messageKind"],
+    differ: 1,
+    differing: ["c"],
+    unread: [],
+  });
+  const all = joinOf(folder, { base, head }, join(folder, "all.jsonl"), [
+    "--ignore",
+    "message",
+    "messageKind",
+    "code",
+  ]);
+  assert.equal(all.ran.status, 0, all.ran.stderr);
+  assert.deepEqual(JSON.parse(all.ran.stdout), {
+    cases: 3,
+    sides: 2,
+    ignore: ["message", "messageKind", "code"],
+    differ: 0,
+    differing: [],
+    unread: [],
+  });
+});
+
+test("join --ignore reports a case one tree lacks, a record it cannot read, and an empty join (#2316)", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "families-differential-ignore-edges-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  const ignore = ["--ignore", "message"];
+  const rows = ["a", "b", "c"].map((name) => JSON.stringify({ name, message: name }));
+  // (a case in one tree only is reported, never skipped, and nothing is written)
+  mkdirSync(join(folder, "one"));
+  const one = joinOf(
+    join(folder, "one"),
+    { base: rows, head: rows.slice(0, 2) },
+    undefined,
+    ignore,
+  );
+  assert.equal(one.ran.status, 1, one.ran.stderr);
+  assert.equal(one.ran.stderr, 'head: "c" missing\n');
+  assert.equal(one.text, null);
+  // (a record whose line names its case but is no JSON is named, never taken as equal)
+  mkdirSync(join(folder, "unread"));
+  const broken = joinOf(
+    join(folder, "unread"),
+    { base: rows, head: [rows[0]!, '{"name":"b",nope}', rows[2]!] },
+    undefined,
+    ignore,
+  );
+  assert.equal(broken.ran.status, 1, broken.ran.stderr);
+  assert.deepEqual(JSON.parse(broken.ran.stdout), {
+    cases: 3,
+    sides: 2,
+    ignore: ["message"],
+    differ: 0,
+    differing: [],
+    unread: ["b"],
+  });
+  // (an empty join compares nothing and says so by its count)
+  mkdirSync(join(folder, "empty"));
+  const empty = joinOf(join(folder, "empty"), { base: [], head: [] }, undefined, ignore, []);
+  assert.equal(empty.ran.status, 0, empty.ran.stderr);
+  assert.deepEqual(JSON.parse(empty.ran.stdout), {
+    cases: 0,
+    sides: 2,
+    ignore: ["message"],
+    differ: 0,
+    differing: [],
+    unread: [],
+  });
+  assert.equal(empty.text, "");
+  // (--ignore needs a field and a head)
+  mkdirSync(join(folder, "refused"));
+  const refusals: [Record<string, string[]>, string[]][] = [
+    [{ base: rows, head: rows }, ["--ignore"]],
+    [{ base: rows }, ignore],
+  ];
+  for (const [sides, extra] of refusals) {
+    const ran = joinOf(join(folder, "refused"), sides, undefined, extra);
+    assert.equal(ran.ran.status, 2, ran.ran.stderr);
+    assert.equal(ran.text, null);
+  }
 });
 
 test("the plan's check list lists each check planChecks counts, with its site and type (#2298)", () => {
