@@ -30,7 +30,7 @@ const [{ costlyTestSeconds }, { isSuiteTestPath, isTypeCoreTestFile }] = sibling
 // Runs, before a push, the checks CI fails on for what changed since a base, in parallel, and prints one line per check
 // with its verdict and seconds, and the full output of a check that failed:
 //
-//   node tools/check-changed.mjs [--merged] [--base <ref>]
+//   node tools/check-changed.mjs [--merged | --merged-checkout <commit>] [--base <ref>]
 //
 // The base is `--base`, else the open pull request's base (`gh pr view`, as `origin/<base>`), else `origin/main`; the
 // changes are those since its merge-base with HEAD, committed or not, untracked files included. Always: `git diff
@@ -52,6 +52,12 @@ const [{ costlyTestSeconds }, { isSuiteTestPath, isTypeCoreTestFile }] = sibling
 // changes are not in HEAD, so not in the merge; a conflict is exit 2, naming the files. The worktree is removed at the
 // end, also on SIGINT, SIGTERM and SIGHUP; only killing this process outright (`kill -9`) leaves it, for `git worktree
 // prune` and the temporary folder's cleanup.
+//
+// `--merged-checkout <commit>` checks a checkout that already is that merge, made by a runner such as the queue's
+// `--merged-with`: HEAD is the commit merged with the base's (`git merge --no-ff`: its first parent the commit, its
+// second the base's), or the commit itself when it already holds the base. Anything else is exit 2. `merge commits`
+// then reads the commit's side only, so the runner's merge is not judged. Only the commit named tells that merge from a
+// builder's merge of the base into the branch, which has the same shape and fails.
 //
 // Without `node_modules`, which it never installs, it links main's: that of the checkout `TEASESCRIPT_MAIN` names
 // (unset or empty, `/opt/teasescript-agents/teasescript-main/current`), as `linkMainNodeModules` says. It runs no
@@ -229,21 +235,70 @@ function cannotRun(message) {
   throw new CannotRun(message);
 }
 
-const USAGE = "usage: node tools/check-changed.mjs [--merged] [--base <ref>]";
+const USAGE =
+  "usage: node tools/check-changed.mjs [--merged | --merged-checkout <commit>] [--base <ref>]";
 
-/** `--merged`, and the base: `--base`, else the open pull request's base, else `origin/main`. */
+/**
+ * `--merged`, `--merged-checkout`'s commit (or null), and the base: `--base`, else the open pull request's base, else
+ * `origin/main`.
+ */
 function options(argv) {
-  const merged = argv.includes("--merged");
-  const rest = argv.filter((argument) => argument !== "--merged");
-  if (rest.length > 0 && !(rest.length === 2 && rest[0] === "--base")) cannotRun(USAGE);
-  if (rest.length === 2) return { merged, ref: rest[1] };
+  let merged = false;
+  const values = new Map();
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === "--merged" && !merged) merged = true;
+    else if (
+      (argument === "--base" || argument === "--merged-checkout") &&
+      !values.has(argument) &&
+      index + 1 < argv.length
+    )
+      values.set(argument, argv[(index += 1)]);
+    else cannotRun(USAGE);
+  }
+  const mergedCheckout = values.get("--merged-checkout") ?? null;
+  if (merged && mergedCheckout !== null) cannotRun(USAGE);
+  if (values.has("--base")) return { merged, mergedCheckout, ref: values.get("--base") };
   const pr = spawnSync("gh", ["pr", "view", "--json", "baseRefName", "-q", ".baseRefName"], {
     encoding: "utf8",
   });
   return {
     merged,
+    mergedCheckout,
     ref: pr.status === 0 && pr.stdout.trim() !== "" ? `origin/${pr.stdout.trim()}` : "origin/main",
   };
+}
+
+/**
+ * `--merged-checkout`: the commit `name` names, once HEAD is proven to be it, or its merge with `ref`'s commit, the
+ * commit first.
+ */
+function mergedCheckoutCommit(name, ref) {
+  // (a commit's full SHA, and how the message names it: a full SHA as its first 9 characters)
+  const commit = (of) => {
+    let sha;
+    try {
+      sha = git("rev-parse", "--verify", "--quiet", `${of}^{commit}`);
+    } catch {
+      cannotRun(`no commit ${of}: fetch it`);
+    }
+    return [sha, of === sha ? sha.slice(0, 9) : `${of} (${sha.slice(0, 9)})`];
+  };
+  const [branch, branchName] = commit(name);
+  const [base, baseName] = commit(ref);
+  const [head, ...parents] = git("rev-list", "--parents", "-n", "1", "HEAD").split(" ");
+  if (head === branch) return branch;
+  if (parents.length === 2 && parents[0] === branch && parents[1] === base) {
+    process.stdout.write(
+      `check-changed: HEAD (${head.slice(0, 9)}) merges ${baseName} into ${branchName}; only ` +
+        `${branchName}'s merge commits are judged\n`,
+    );
+    return branch;
+  }
+  return cannotRun(
+    `--merged-checkout ${branchName}: HEAD (${head.slice(0, 9)}) is neither that commit nor its merge with ` +
+      `${baseName}, whose first parent is that commit and second the base's`,
+  );
 }
 
 /** The prefix of every temporary worktree `--merged` makes. */
@@ -535,12 +590,13 @@ function enterMerge(ref, cleanups) {
 }
 
 async function check(cleanups) {
-  const { merged, ref } = options(process.argv.slice(2));
+  const { merged, mergedCheckout, ref } = options(process.argv.slice(2));
   if (!existsSync("node_modules")) {
     process.stdout.write(`check-changed: ${linkMainNodeModules(process.env, process.cwd())}\n`);
   }
-  // (before `--merged` enters its worktree, whose HEAD is the base's commit)
-  const head = git("rev-parse", "HEAD");
+  // (the branch's commit: read before `--merged` enters its worktree, whose HEAD is the base's commit)
+  const head =
+    mergedCheckout === null ? git("rev-parse", "HEAD") : mergedCheckoutCommit(mergedCheckout, ref);
   let mergeBase;
   if (merged) mergeBase = enterMerge(ref, cleanups);
   else

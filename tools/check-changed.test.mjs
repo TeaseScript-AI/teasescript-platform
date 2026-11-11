@@ -887,7 +887,7 @@ test(
 );
 
 test(
-  "a merge commit fails `merge commits` unless it merges main or runtime-v2 into the other, plain and merged, and the other checks still run (#2106)",
+  "a merge commit fails `merge commits` unless it merges main or runtime-v2 into the other, plain, merged and in a merged checkout, and the other checks still run (#2106)",
   { timeout: 120_000 },
   () => {
     // main and runtime-v2 grow apart from one base; `other` is another lane's branch off main
@@ -930,8 +930,12 @@ test(
         "shallow",
       ],
     ];
-    for (const merged of [false, true])
+    // ("merged checkout": HEAD is the lane merged with its base as the queue's `--merged-with` merges it, `git merge
+    // --no-ff` in a checkout of the lane, checked as the READY command does)
+    for (const mode of ["plain", "merged", "merged checkout"])
       for (const [base, merges, failure, tweak] of cases) {
+        // (the shallow clone's own case: the queue merges in a full clone)
+        if (mode === "merged checkout" && tweak === "shallow") continue;
         const { directory } = repository({ passing: true });
         // (the shallow case clones the branches, so its base is the clone's origin/main)
         const branch = base.replace(/^origin\//u, "");
@@ -977,13 +981,26 @@ test(
             git("clone", "-q", "--depth=3", "--no-single-branch", `file://${directory}`, cwd);
             cpSync(join(directory, "node_modules"), join(cwd, "node_modules"), { recursive: true });
           }
-          const result = spawnSync(
-            process.execPath,
-            [tool, ...(merged ? ["--merged"] : []), "--base", base],
-            { cwd, encoding: "utf8", env: environment },
+          const lane = git("rev-parse", "lane");
+          if (mode === "merged checkout") {
+            git("switch", "-q", "--detach", "lane");
+            git("merge", "-q", "--no-ff", "--no-edit", base);
+          }
+          const check = (...args) =>
+            spawnSync(process.execPath, [tool, ...args], {
+              cwd,
+              encoding: "utf8",
+              env: environment,
+            });
+          const result = check(
+            ...{ plain: [], merged: ["--merged"], "merged checkout": ["--merged-checkout", lane] }[
+              mode
+            ],
+            "--base",
+            base,
           );
           if (tweak === "shallow") rmSync(cwd, { recursive: true, force: true });
-          const at = `${merged ? "merged" : "plain"}: a branch of ${base} merging ${merges}`;
+          const at = `${mode}: a branch of ${base} merging ${merges}`;
           assert.equal(
             result.status,
             failure === null ? 0 : 1,
@@ -1006,6 +1023,32 @@ test(
             const parent = git("rev-parse", "--short=9", "lane^2");
             const expected = `--- merge commits ---\n${mergeCommit} Merge branch '${merges}' into lane: merges ${parent}, ${failure}\n`;
             assert.ok(result.stdout.includes(expected), `${at}: ${result.stdout}`);
+          }
+          if (mode === "merged checkout" && merges === null) {
+            // the branch is behind its base, so the queue made a merge commit: by shape alone, as `--base HEAD^2`
+            // reads it, that is the base merged into the branch, and fails
+            const runner = git("rev-parse", "--short=9", "HEAD");
+            const parent = git("rev-parse", "--short=9", "HEAD^2");
+            const byShape = check("--base", "HEAD^2");
+            assert.equal(byShape.status, 1, `${at}: ${byShape.stdout}`);
+            assert.ok(
+              byShape.stdout.includes(
+                `${runner} Merge branch '${base}' into HEAD: merges ${parent}, which the base already holds: ` +
+                  "rebase onto HEAD^2 instead\n",
+              ),
+              `${at}: ${byShape.stdout}`,
+            );
+            // a commit that is not the merge's first parent, or both forms at once, cannot run
+            const wrong = check("--merged-checkout", `${lane}~1`, "--base", base);
+            assert.equal(wrong.status, 2, `${at}: ${wrong.stdout}${wrong.stderr}`);
+            assert.match(
+              wrong.stderr,
+              new RegExp(
+                `--merged-checkout ${lane}~1 \\(\\w{9}\\): HEAD \\(${runner}\\) is neither `,
+                "u",
+              ),
+            );
+            assert.equal(check("--merged", "--merged-checkout", lane).status, 2);
           }
         } finally {
           rmSync(directory, { recursive: true, force: true });
