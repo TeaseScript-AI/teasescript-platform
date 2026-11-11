@@ -3,8 +3,9 @@
 // cannot run against Player or engine code older than its own.
 //
 // The stamp covers locations, not the bundle's module graph: every file under `src/` and `player/` (no folder named
-// `node_modules` is entered) and every file directly in the repository root except the checkout's own bookkeeping
-// (`ROOT_BOOKKEEPING`). Each is recorded by its path from the root with `/`: a file by the SHA-256 of its content; a
+// `node_modules` is entered) and every root entry except the checkout's own bookkeeping (`ROOT_BOOKKEEPING`). A root
+// entry is a regular file, or a link to one, directly in the repository root; a folder, or a link to a folder (such as
+// the `node_modules` that `check-changed` links into a worktree), is not. Each is recorded by its path from the root with `/`: a file by the SHA-256 of its content; a
 // symlink to a file by its target's identity (its path from the root, or its absolute path outside it) and that content;
 // a symlink to a folder, a broken symlink, or an unreadable entry by what it is, which fails the build. The set of paths
 // is part of the stamp, so an added, removed or renamed file is a change.
@@ -15,11 +16,11 @@
 // a `tsconfig*.json` in the area, or a file it reaches by local `extends` or `references`, that cannot be read, has a
 // malformed edge, or reaches outside the area.
 //
-// What the stamp attests is the area's file set, contents and link identities, for the canonical build
-// (`npm run build:player-test-modules`). It does not attest another invocation (another mode or inline options), files
-// that configuration or plugin code reads outside the area by other routes, environment variables, the installed
-// `node_modules`, or Node's version, and it assumes the inputs do not change while the configuration loads and the
-// bundle builds.
+// The check attests the stamped file set, contents and link identities under the canonical build invocation
+// (`npm run build:player-test-modules`). Not attested: another CLI or API mode or inline options; files that
+// configuration or plugin code reads outside the area; environment variables, `node_modules`, Node's version; a change
+// during configuration loading or the build. The walk runs at `buildStart`, after Vite has loaded the configuration and
+// read the `.env` files, so the inputs must be stable from configuration loading through the build.
 
 import { createHash } from "node:crypto";
 import {
@@ -35,8 +36,15 @@ import {
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { Plugin, ResolvedConfig } from "vite";
 
-/** The checkout's own bookkeeping in the root, which no build reads: a worktree's `.git`, a queue tree's markers. */
-const ROOT_BOOKKEEPING = new Set([".git", ".sha", ".complete"]);
+/**
+ * The checkout's own bookkeeping in the root, not stamped: the machinery that makes a checkout writes it after the
+ * build, and no build reads it. Each with its reason.
+ */
+const ROOT_BOOKKEEPING = new Map([
+  [".git", "the checkout's pointer to its repository, which differs between any two checkouts"],
+  [".sha", "the queue's tree marker: the commit the tree was made from"],
+  [".complete", "the queue's tree marker: the tree is complete"],
+]);
 /** The folders, under the root, that the stamp walks. */
 const AREA_FOLDERS = ["src", "player"];
 /** The module forms the build admits: a plain file the bundler reads as it is. */
