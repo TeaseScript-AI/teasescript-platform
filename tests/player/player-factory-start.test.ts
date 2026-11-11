@@ -82,8 +82,9 @@ after(() => {
 });
 
 const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
+// Its first message reads Debug mode; its draw pauses under an owned control that sets no site.
 const SCRIPT =
-  'let mood = "calm"\nsay "${mood} now", instant\nlet roll = randomInteger(1..=6)\nexit';
+  'let mood = "calm"\nsay "${mood} now, Debug mode ${debugMode}", instant\nlet roll = randomInteger(1..=6)\nexit';
 
 /** A Player on a new in-process host, and the factory Start it prepared, which keeps what it received. */
 async function factoryPlayer(context: TestContext) {
@@ -141,6 +142,11 @@ test("a factory Start receives whether Debug mode is on (held until PR B)", asyn
   prepare();
   await player.activate();
   assert.equal(received.recording?.debugMode, true);
+  assert.deepEqual(
+    player.session.value?.transcriptEntries.map((entry) => entry.text),
+    ["calm now, Debug mode true"],
+    "the script read Debug mode as on",
+  );
 });
 
 test("a factory Start receives the Player's random control while it owns it (held until PR B)", async (context) => {
@@ -152,6 +158,10 @@ test("a factory Start receives the Player's random control while it owns it (hel
   const control = facade.heldRandom(bridge).control;
   assert.ok(control, "the connection holds the Player's control");
   assert.equal(received.recording?.randomControl, control, "the factory got that control");
+  assert.ok(
+    player.session.value?.state.randomDraw,
+    "the session pauses at its draw, as the control asks",
+  );
 });
 
 test("a factory Start reads the click's clock, not a later one, while it runs (held until PR B)", async (context) => {
