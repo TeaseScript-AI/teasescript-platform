@@ -100,7 +100,7 @@ for (let load = 0; load < ${loads}; load++) {
 }
 
 test("a Player test bundle is refused once a file it was built from or by changes", (t) => {
-  const { path, write, build, minutesOf90 } = checkout(t);
+  const { path, build, minutesOf90 } = checkout(t);
   assert.equal(build().status, 0);
   assert.equal(minutesOf90(), "2");
 
