@@ -11,10 +11,16 @@ import { shortcutOutcome } from "./playerKeys";
  * Once the answer settles, it plays the commands against what the answer left, as if they came after it.
  *
  * It restates no rule of the Player: what a held key does is `shortcutOutcome`'s; whether the composer takes input, what
- * a submit does, what skip and activate do, which text a question keeps and when a notice is cleared, are the host's
- * functions, which the live path uses too. It reconstructs two things the browser would have done to the text: the
- * text typed in the flight after the text `main`'s field would hold, and a held key that the interaction does not
- * take, typed as its character.
+ * a submit does, what skip and activate do and which text a question keeps are the host's functions, which the live
+ * path uses too; a notice is cleared, as the text's watch clears it, by a change of the text, and an answer's own
+ * `complete` sets or clears its notice. It reconstructs two things the browser would have done to the text: the text
+ * typed in the flight after the text `main`'s field would hold, and a held key that the interaction does not take,
+ * typed as its character.
+ *
+ * Of what the flight holds, three things become the field's text at a settlement, and nothing else it holds is ever
+ * written to the field: the text of an answer that was refused (`aside`), the text the settlement wrote (`settled`,
+ * such as a prefill), and a key held in the empty field, typed as its character. None of them is in the field during
+ * the flight, so an edit made within the flight does not reach them (#2463, residual 1).
  */
 
 type Source = "input" | "button";
@@ -188,27 +194,30 @@ export function useAnswerFlight(host: AnswerFlightHost) {
     // The text the field holds on `main` once the answer settled: what the settlement wrote, else, if the answer was
     // refused, its own text.
     let prefix = current.settled ?? (settlement === "refused" ? current.aside : "");
-    // A refusal's notice stands until the player changes the field or gives a command.
-    if (settlement === "refused" && (current.current.changed || current.queue.length > 0))
-      host.clearFeedback();
+    // A change of the text clears a notice, as the text's watch does when the change comes after the answer.
+    if (current.current.changed) host.clearFeedback();
     for (let command = current.queue.shift(); command; command = current.queue.shift()) {
       if (command.kind === "submit") {
-        if (host.disabled()) continue;
-        const text = prefix + command.text;
-        if (start(current, text, command.after, () => host.submit(command.source, text))) return;
-        prefix = text;
-        continue;
+        if (!host.disabled()) {
+          const text = prefix + command.text;
+          if (start(current, text, command.after, () => host.submit(command.source, text))) return;
+          prefix = text;
+        }
+      } else {
+        const outcome = shortcutOutcome(command.key, {
+          empty: prefix === "",
+          fresh: command.fresh,
+          ...host.shortcuts(),
+        });
+        if (outcome === "type") {
+          prefix += command.key;
+          host.clearFeedback();
+        } else if (outcome !== "consume") {
+          const run = outcome === "skip" ? host.skip : host.activate;
+          if (start(current, prefix, command.after, run)) return;
+        }
       }
-      const outcome = shortcutOutcome(command.key, {
-        empty: prefix === "",
-        fresh: command.fresh,
-        ...host.shortcuts(),
-      });
-      if (outcome === "type") prefix += command.key;
-      else if (outcome !== "consume") {
-        const run = outcome === "skip" ? host.skip : host.activate;
-        if (start(current, prefix, command.after, run)) return;
-      }
+      if (command.after.changed) host.clearFeedback();
     }
     const typed = host.text();
     if (prefix !== "") write(current, prefix + typed);
