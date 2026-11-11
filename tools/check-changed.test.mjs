@@ -653,9 +653,10 @@ test(
           assert.equal(
             result.stderr,
             `check-changed: node_modules (${realpathSync(join(directory, "node_modules"))}) does not install ` +
-              `package-lock.json: ${what}. When the lockfile is main's, wait for teasescript-main's refresh (a link ` +
-              "to a slot, not `current`, never gets it: remove the link, and check-changed links `current`); " +
-              "otherwise run the checks in the queue\n",
+              `package-lock.json: ${what}. Main's lockfile: wait for teasescript-main's refresh (a link to a slot, ` +
+              "not `current`, never gets it: remove the link, and check-changed links `current`). A branch behind " +
+              "main's lockfile: rebase, or check with --merged. A lockfile the branch changes: run the checks in " +
+              "the queue\n",
             at,
           );
         } finally {
