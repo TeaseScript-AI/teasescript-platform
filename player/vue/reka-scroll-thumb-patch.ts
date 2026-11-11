@@ -10,15 +10,20 @@ import type { Plugin } from "vite";
  *    unmounted, so a page with a scroll area, such as the transcript, never went frame-idle. The loop now stops once the
  *    position has not changed for {@link SETTLED_FRAMES} frames, and the next scroll starts it again.
  *
- * The build fails when either patched line is not found exactly once, so an upgrade cannot drop the patch silently.
+ * The build fails when either patched line is not found exactly once, or when it bundles reka-ui without the patched file,
+ * so an upgrade cannot drop the patch silently. A build that bundles no reka-ui file, as the development server's
+ * dependency scan, is not refused.
  * Remove this plugin once reka-ui moves the thumb outside the scroll event and stops the loop when scrolling settles.
  */
 export function rekaScrollThumbPatch(): Plugin {
   let patched = false;
+  let bundlesRekaUi = false;
   return {
     name: "reka-scroll-thumb-patch",
     transform(code, id) {
-      if (!id.replaceAll("\\", "/").endsWith("/reka-ui/dist/ScrollArea/ScrollAreaThumb.js")) return;
+      const path = id.replaceAll("\\", "/");
+      if (path.includes("/reka-ui/dist/")) bundlesRekaUi = true;
+      if (!path.endsWith("/reka-ui/dist/ScrollArea/ScrollAreaThumb.js")) return;
       let result = code;
       for (const [line, replacement] of PATCHES) {
         const found = result.match(line);
@@ -32,7 +37,7 @@ export function rekaScrollThumbPatch(): Plugin {
       return { code: `${result}\n${SETTLING_SCROLL_LISTENER}`, map: null };
     },
     buildEnd(error) {
-      if (error === undefined && !patched)
+      if (error === undefined && bundlesRekaUi && !patched)
         this.error("reka-ui's ScrollAreaThumb was not patched; review reka-scroll-thumb-patch.ts.");
     },
   };
