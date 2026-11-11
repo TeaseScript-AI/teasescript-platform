@@ -128,12 +128,18 @@ const PROJECTED =
 // proof's read of a memoised answer is a read all the same.
 const CONSTRUCTED =
   "let a: number[] = [0]\nlet b = fromJson(hostValue, default: [0])\nb = a\nlet c = b.first\nsay c\nexit\n";
+// The same projection 33 levels down a written type: a candidate is a sub-term at any depth.
+const DEEP =
+  `let a: number${"[]".repeat(33)} = ${"[".repeat(33)}0${"]".repeat(33)}\n` +
+  `let b = fromJson(hostValue, default: 0)\nb = a${".first".repeat(33)}\nsay b\nexit\n`;
 
-test("receiving.mjs finds a source projection's fixed point and a read the constructor memoised", () => {
+test("receiving.mjs finds a source projection's fixed point, at any depth, and a read the constructor memoised", () => {
   const { status, lines } = run([
     ["projected", PROJECTED],
     ["projected-control", `let witness: number = 0\n${PROJECTED}`],
     ["constructed", CONSTRUCTED],
+    ["deep", DEEP],
+    ["deep-control", `let witness: number = 0\n${DEEP}`],
   ]);
   assert.equal(status, 0);
   assert.deepEqual(
@@ -144,10 +150,14 @@ test("receiving.mjs finds a source projection's fixed point and a read the const
       ["projected", "L"],
       ["projected-control", "L"],
       ["constructed", "L"],
+      ["deep", "L"],
+      ["deep-control", "L"],
     ],
   );
-  for (const each of alternates(lines, "projected")) assert.ok(each.includes(":none->number"));
-  assert.deepEqual(alternates(lines, "projected-control"), alternates(lines, "projected"));
+  for (const name of ["projected", "deep"]) {
+    for (const each of alternates(lines, name)) assert.ok(each.includes(":none->number"));
+    assert.deepEqual(alternates(lines, `${name}-control`), alternates(lines, name));
+  }
   for (const each of alternates(lines, "constructed"))
     assert.ok(each.includes(':none->{"kind":"list","element":number}'));
 });

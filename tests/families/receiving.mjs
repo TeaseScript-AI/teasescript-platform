@@ -149,14 +149,22 @@ function nest(term, rest) {
 }
 
 /** Where a value lands: whether in a written place, and its unwritten terminal places (a literal's cell is passed
- * through to the literal's own landing, never a level itself). */
-function destinations(contract, value, at = [], depth = 0, out = { written: false, places: [] }) {
-  if (depth > 32) return out;
+ * through to the literal's own landing, never a level itself). A value is followed once per path, at any depth. */
+function destinations(
+  contract,
+  value,
+  at = [],
+  seen = new Map(),
+  out = { written: false, places: [] },
+) {
+  const paths = seen.get(value) ?? new Set();
+  if (paths.has(at.join("."))) return out;
+  seen.set(value, paths.add(at.join(".")));
   const { program, definitions } = contract.pass;
   for (const d of definitions.byValue.get(value) ?? []) {
     const owner = program.cellOwner.get(d.place);
     if (owner?.kind === "cell") {
-      destinations(contract, owner.owner, ["element", ...at], depth + 1, out);
+      destinations(contract, owner.owner, ["element", ...at], seen, out);
       continue;
     }
     if (d.kind !== "whole") continue;
@@ -164,7 +172,7 @@ function destinations(contract, value, at = [], depth = 0, out = { written: fals
     else out.places.push({ place: d.place, path: [...d.path, ...at] });
   }
   const operation = definitions.fallbackOf.get(value);
-  if (operation !== undefined) destinations(contract, operation, at, depth + 1, out);
+  if (operation !== undefined) destinations(contract, operation, at, seen, out);
   return out;
 }
 
@@ -212,24 +220,28 @@ function query(request, call, assignment, label) {
 }
 
 /** The candidates: every sub-term of every written type of the program (itself, an element, a property, a union's
- * member, a union's element), each also with `null`, in a fixed order. */
+ * member, a union's element), each also with `null`, at any depth, in a fixed order (depth first, as written). */
 function candidates(program) {
   const out = new Map();
-  const walk = (term, depth) => {
-    if (term === null || term.kind === "ref" || depth > 32 || out.has(show(term))) return;
+  const todo = [...program.places]
+    .map((place) => (place?.kind === undefined ? null : writtenOf(place.kind)))
+    .reverse();
+  while (todo.length > 0) {
+    const term = todo.pop();
+    if (term === null || term.kind === "ref" || out.has(show(term))) continue;
     out.set(show(term), term);
     const optional = optionalOf(term, true);
     if (optional !== null && !out.has(show(optional))) out.set(show(optional), optional);
-    if (term.kind === "list" || term.kind === "set" || term.kind === "dict")
-      walk(term.element, depth + 1);
-    else if (term.kind === "object") for (const p of term.properties ?? []) walk(p.type, depth + 1);
-    else if (term.kind === "union") {
-      for (const member of term.members) walk(member, depth + 1);
-      walk(termAt(term, ["element"]), depth + 1);
-    }
-  };
-  for (const place of program.places)
-    walk(place?.kind === undefined ? null : writtenOf(place.kind), 0);
+    const parts =
+      term.kind === "list" || term.kind === "set" || term.kind === "dict"
+        ? [term.element]
+        : term.kind === "object"
+          ? (term.properties ?? []).map((p) => p.type)
+          : term.kind === "union"
+            ? [...term.members, termAt(term, ["element"])]
+            : [];
+    todo.push(...parts.reverse());
+  }
   return [...out.values()];
 }
 
