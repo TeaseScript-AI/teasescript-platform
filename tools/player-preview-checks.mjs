@@ -100,7 +100,9 @@ for (const [signal, number] of [
   ["SIGINT", 2],
   ["SIGTERM", 15],
 ])
-  process.once(signal, () => {
+  // Kept for the whole shutdown: a stopped Playwright CLI command can signal its process group, this process included.
+  process.on(signal, () => {
+    if (shutdown !== null) return;
     console.error(`player-preview-checks: stopped by ${signal}`);
     void shutDown(new Error(`stopped by ${signal}`)).finally(() => process.exit(128 + number));
   });
