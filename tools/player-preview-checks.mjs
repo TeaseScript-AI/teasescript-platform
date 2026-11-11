@@ -1,24 +1,85 @@
-// Requires Playwright CLI and a running Player development preview (`npm run dev:player`).
-// npm run test:player:preview -- http://localhost:5173/player/
-import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+// Runs the Player preview checks in Chromium through Playwright CLI (`playwright-cli` on `PATH`):
+//
+//   npm run test:player:preview            starts this checkout's development preview and stops it after the checks
+//   npm run test:player:preview -- <url>   uses a running preview of this checkout (`npm run dev:player`)
+//
+// Without a URL it starts the Player's Vite development server in this process, on a free port of 127.0.0.1 that it
+// binds strictly, with a dependency cache of its own in its scratch folder (not the shared `node_modules/.vite`), and
+// closes it when the checks end or fail; ended by a signal, the process ends with it. Either way, before any check, the
+// server must answer `<url>__checkout` (`player/vue/vite.config.ts`) with this checkout's real path, else the run stops:
+// a preview of another checkout, or a server that does not say which checkout it serves, is refused. What it cannot
+// check: whether a running preview's server has reloaded the checkout's current files (Vite serves edited files, but
+// not an edited configuration until it restarts).
+import { spawn } from "node:child_process";
+import { mkdtempSync, realpathSync, writeFileSync, rmSync } from "node:fs";
+import { createServer as createNetServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const url = process.argv[2];
-if (!url) throw new Error("Pass the Player development preview URL.");
+const checkout = realpathSync(fileURLToPath(new URL("..", import.meta.url)));
 const scratch = mkdtempSync(join(tmpdir(), "player-preview-"));
 const session = `player-preview-${process.pid}`;
-function cli(...args) {
-  const result = spawnSync("playwright-cli", [`-s=${session}`, ...args], {
+async function cli(...args) {
+  const child = spawn("playwright-cli", [`-s=${session}`, ...args], {
     cwd: scratch,
-    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
   });
-  if (result.error) throw result.error;
-  if (result.status !== 0 || result.stdout.includes("### Error")) {
-    throw new Error(result.stderr + result.stdout);
+  let stdout = "";
+  let stderr = "";
+  child.stdout.setEncoding("utf8").on("data", (text) => (stdout += text));
+  child.stderr.setEncoding("utf8").on("data", (text) => (stderr += text));
+  const status = await new Promise((resolve, reject) => {
+    child.once("error", reject);
+    child.once("close", resolve);
+  });
+  if (status !== 0 || stdout.includes("### Error")) throw new Error(stderr + stdout);
+  return stdout;
+}
+
+/** A port of 127.0.0.1 that was free a moment ago; the server binds it strictly, so a port taken since fails. */
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const probe = createNetServer().once("error", reject);
+    probe.listen(0, "127.0.0.1", () => {
+      const { port } = probe.address();
+      probe.close(() => resolve(port));
+    });
+  });
+}
+
+/** Starts this checkout's development preview; resolves to its URL and its server. */
+async function startPreview() {
+  const { createServer } = await import("vite");
+  const server = await createServer({
+    configFile: join(checkout, "player/vue/vite.config.ts"),
+    cacheDir: join(scratch, "vite"),
+    logLevel: "warn",
+    clearScreen: false,
+    server: { host: "127.0.0.1", port: await freePort(), strictPort: true },
+  });
+  try {
+    await server.listen();
+  } catch (error) {
+    await server.close();
+    throw error;
   }
-  return result.stdout;
+  return { url: server.resolvedUrls.local[0], server };
+}
+
+/** Refuses a server that does not say it serves this checkout. */
+async function checkServedCheckout(url) {
+  const endpoint = new URL("__checkout", url.endsWith("/") ? url : `${url}/`);
+  const answer = await fetch(endpoint).catch((error) => error);
+  const served = answer instanceof Response && answer.ok ? await answer.text() : null;
+  if (served !== checkout)
+    throw new Error(
+      `${url} is no development preview of this checkout (${checkout}): ${
+        served === null
+          ? `${endpoint} ${answer instanceof Response ? `answered ${answer.status}` : `failed: ${answer.message}`}`
+          : `it serves ${served}`
+      }. Run the checks without a URL to start this checkout's preview.`,
+    );
 }
 
 // The tools menu opens tools into the sidebar, which keeps them while it is hidden and shown again; on a narrow screen
@@ -695,7 +756,12 @@ async function runGroup(browserPage, run, url, artifacts) {
 }
 
 let passed = false;
+let preview = null;
 try {
+  const url = process.argv[2] ?? (preview = await startPreview()).url;
+  if (preview !== null)
+    console.log(`player-preview-checks: started this checkout's preview at ${url}`);
+  await checkServedCheckout(url);
   const config = join(scratch, "browser.json");
   writeFileSync(
     config,
@@ -711,10 +777,10 @@ try {
       },
     }),
   );
-  cli("open", url, "--config", config);
+  await cli("open", url, "--config", config);
   for (const group of groups) {
     console.log(`player-preview-checks: RUN ${group.name}`);
-    const output = cli(
+    const output = await cli(
       "run-code",
       `async page => (${runGroup.toString()})(page, ${group.toString()}, ${JSON.stringify(url)}, ${JSON.stringify(join(scratch, group.name))})`,
     );
@@ -725,8 +791,12 @@ try {
   passed = true;
 } finally {
   try {
-    cli("close");
+    await cli("close");
+  } catch (error) {
+    if (passed) throw error;
   } finally {
+    await preview?.server.close();
+    rmSync(join(scratch, "vite"), { recursive: true, force: true });
     if (passed) rmSync(scratch, { recursive: true, force: true });
     else console.error(`player-preview-checks: failure artifacts retained at ${scratch}`);
   }
