@@ -368,7 +368,8 @@ as scrolling that must feel the same over the conversation, beside it, and over 
 not pin animations, timings, exact colours, or layout; the scoped visual check below covers those by eye. The existing
 Chromium DevTools smoke route has no browser-automation package dependency; it plays the repository demo end to end (see
 [Local browser smoke](#local-browser-smoke-and-future-host-e2e-gate)). For the development preview, run
-`npm run test:player:preview -- <preview-url>` against a running `npm run dev:player` server; it requires
+`npm run test:player:preview -- <preview-url>` against a running `npm run dev:player` server of this checkout (it
+refuses one that serves another; starting and stopping that server is still by hand, #2391); it requires
 `playwright-cli` on `PATH` and an available Chromium browser. Both run outside `npm run check` and are not a final
 cross-browser or production-host E2E suite. Preview groups use fresh browser contexts. On failure the runner reports a
 retained scratch directory with a screenshot and Playwright trace for the failing group; delete it after diagnosis.

@@ -1,9 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { fileURLToPath, URL } from "node:url";
 import tailwindcss from "@tailwindcss/vite";
 import vue from "@vitejs/plugin-vue";
-import { defineConfig } from "vite";
+import { defineConfig, type Plugin } from "vite";
 import ts from "typescript-vue";
 import { registerTS } from "vue/compiler-sfc";
 import { rekaScrollThumbPatch } from "./reka-scroll-thumb-patch.ts";
@@ -38,6 +38,22 @@ function buildIdentity(mode: string) {
   };
 }
 
+/**
+ * The development server answers `<base>__checkout` with the real path of the repository it serves, so that
+ * `tools/player-preview-checks.mjs` can refuse a preview of another checkout.
+ */
+const servedCheckout: Plugin = {
+  name: "served-checkout",
+  apply: "serve",
+  configureServer(server) {
+    const checkout = realpathSync(fileURLToPath(new URL("../..", import.meta.url)));
+    server.middlewares.use(`${server.config.base}__checkout`, (_request, response) => {
+      response.setHeader("Content-Type", "text/plain; charset=utf-8");
+      response.end(checkout);
+    });
+  },
+};
+
 // Imported shadcn prop types need the classic TypeScript compiler API.
 registerTS(() => ts);
 
@@ -45,7 +61,7 @@ export default defineConfig(({ mode }) => ({
   base: "/player/",
   define: { __PLAYER_BUILD__: JSON.stringify(buildIdentity(mode)) },
   root: fileURLToPath(new URL(".", import.meta.url)),
-  plugins: [tailwindcss(), vue(), { ...rekaScrollThumbPatch(), apply: "build" }],
+  plugins: [tailwindcss(), vue(), { ...rekaScrollThumbPatch(), apply: "build" }, servedCheckout],
   // The development server pre-bundles reka-ui, so the patch applies there.
   optimizeDeps: { rolldownOptions: { plugins: [rekaScrollThumbPatch()] } },
   publicDir: false,
