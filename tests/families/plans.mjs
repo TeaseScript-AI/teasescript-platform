@@ -34,18 +34,22 @@
 // identical; work only (the plan, the diagnostics, the error and the questions equal, the charge trace not); a question
 // sequence apart; a publication difference; at a demand allowance apart, each row in the same one class and named by
 // every part apart, with which tree's output the allowance stops against that tree's own unstopped compile (#2341); for
-// the held family, a stop set or a stopped compile apart, each by its parts, and the analysis's units apart; and lists
-// each with the stalled and uncharged sources. Before any output it checks every line's keys, types and value formats
-// against those the runner writes (`recordFault`), a gate against malformed, foreign and truncated lines, not a proof
-// of the invariants between one record's fields: a line it refuses ends the summary, exit 2, naming its file, line and
-// fault. A record from
-// before #2342 names its mode by a number, its index in `HELD_MODES` at the commit that wrote it: printed as that number,
-// never translated, with one line that says so.
+// the held family, a stop set apart phase by phase (#2340: from both trees' stop lists, which a record keeps where the
+// sets differ, a phase on the head alone is added, on the base alone removed, on both at other allowances, compared
+// ascending, moved; a stop that changes phase over an overlapping range reads as one removed and one added, and a
+// record without the lists, or whose lists differ in no phase, is unavailable, never equal), a stopped compile apart by
+// its parts, and the analysis's units apart; and lists each with the stalled and uncharged sources. Before any output
+// it checks every line's keys, types and value formats against those the runner writes (`recordFault`), a gate against
+// malformed, foreign and truncated lines, not a proof of the invariants between one record's fields: a line it refuses
+// ends the summary, exit 2, naming its file, line and fault. A record from before #2342 names its mode by a number, its
+// index in `HELD_MODES` at the commit that wrote it: printed as that number, never translated, with one line that says
+// so.
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { isMainThread, parentPort, Worker, workerData } from "node:worker_threads";
+import { summarize } from "./plans-summary.mjs";
 import { unitsOf } from "./units.mjs";
 
 /** The exit of a worker whose run passed the unit limit, after it posted the run (`over`). */
@@ -58,340 +62,6 @@ const setOf = (set, headRoot) => {
   if (["corpus", "fixture", "held"].includes(set) || set.includes("/")) return set;
   return path.join(headRoot, "tests", "families", set);
 };
-
-/** A compile's parts as a record holds them, each by the name the summary prints, in that order. */
-const PARTS = [
-  ["plan", "plan"],
-  ["diagnostics", "diagnostics"],
-  ["error", "error"],
-  ["questions", "questions"],
-  ["trace", "work"],
-];
-/** The parts that make a publication: what a compile emits, as against what it asks and charges. */
-const OUTPUT = new Set(["plan", "diagnostics", "error"]);
-
-/** The parts in which two compiles of a record (each proved by `recordFault`) differ, by their printed names. */
-function partsApart(b, h) {
-  return PARTS.filter(([field]) => b[field] !== h[field]).map(([, name]) => name);
-}
-
-/**
- * A difference's one class, by precedence: `publication` where the output differs (whatever else does), else
- * `questions`, else `work`.
- */
-function classOf(parts) {
-  if (parts.some((part) => OUTPUT.has(part))) return "publication";
-  return parts.includes("questions") ? "questions" : "work";
-}
-
-const whole = (value) => Number.isInteger(value) && value >= 0;
-const text = (value) => typeof value === "string";
-const textOrNull = (value) => value === null || text(value);
-/** Whether `value` is an object with every key of `required` and no key outside `required` and `optional`. */
-const shaped = (value, required, optional = []) =>
-  value !== null &&
-  typeof value === "object" &&
-  !Array.isArray(value) &&
-  required.every((key) => Object.hasOwn(value, key)) &&
-  Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
-/**
- * An allowance as a pair records it (R19): every runner on main writes what `--demands`' `map(Number)`, the tree's
- * `heldStops` or the questions phase's sums give, unchecked, so any number, and `null` for one JSON cannot hold (NaN,
- * an infinity).
- */
-const allowanceOf = (n) => n === null || typeof n === "number";
-/** A run's place at an allowance (`demand 16`, `allowance 0`), the allowance in JavaScript's own text of that number. */
-const atAllowance = (at) => {
-  const [, number] = /^(?:demand|allowance) (.+)$/.exec(at) ?? [];
-  return number !== undefined && String(Number(number)) === number;
-};
-/** A mode as a record names it: a `HeldMode` name, or before #2342 its index, 0 to 3. */
-const modeName = (mode) =>
-  (text(mode) && mode !== "") || (Number.isInteger(mode) && mode >= 0 && mode < 4);
-
-// (the forms every runner on main writes: a digest is sha256's first 32 hex digits; a count is a whole number's text; a
-// trace or questions hash is two 32-bit words, each in hex without leading zeros, side by side)
-const DIGEST = /^[0-9a-f]{32}$/;
-const COUNT = "(?:0|[1-9]\\d*)";
-const WORDS = "(?:0|[1-9a-f][0-9a-f]{0,7})(?:0|[1-9a-f][0-9a-f]{0,7})";
-const TRACE = new RegExp(`^${COUNT}/(${COUNT})/${WORDS}$`);
-const QUESTIONS = new RegExp(`^${COUNT}/${WORDS}$`);
-
-/** Why `c` is no compile `compile` writes, else undefined. */
-function compileFault(c) {
-  if (!shaped(c, ["plan", "diagnostics", "checks", "error", "trace", "questions", "units"]))
-    return "a compile without exactly its seven parts";
-  if (![c.plan, c.diagnostics].every((part) => part === null || (text(part) && DIGEST.test(part))))
-    return "a compile's plan or diagnostics neither a digest nor null";
-  if (!textOrNull(c.error)) return "a compile's error neither text nor null";
-  const trace = text(c.trace) ? TRACE.exec(c.trace) : null;
-  if (trace === null) return "a compile's trace not n/units/hash";
-  if (!text(c.questions) || !QUESTIONS.test(c.questions)) return "a compile's questions not n/hash";
-  if (!whole(c.checks) || !whole(c.units)) return "a compile's checks or units no whole number";
-  if (c.units !== Number(trace[1])) return "a compile's units not its trace's";
-  return undefined;
-}
-
-/** Why `pair` (`{base, head}` and the `fields` it also holds) is no pair the runner writes, else undefined. */
-function pairFault(pair, fields, differing) {
-  if (!shaped(pair, ["base", "head", ...Object.keys(fields)]))
-    return `a compared pair without exactly ${["base", "head", ...Object.keys(fields)].join(", ")}`;
-  for (const [field, proved] of Object.entries(fields))
-    if (!proved(pair[field])) return `a compared pair's ${field} not one the runner writes`;
-  const fault = compileFault(pair.base) ?? compileFault(pair.head);
-  if (fault !== undefined) return fault;
-  // (the runner keeps a demand, stop or questions-phase pair only where its compiles differ)
-  if (differing && partsApart(pair.base, pair.head).length === 0)
-    return "a pair kept as differing whose compiles do not differ";
-  return undefined;
-}
-
-const listOf = (value, fault) =>
-  Array.isArray(value) ? value.map(fault).find((each) => each !== undefined) : "no list";
-
-/**
- * Why a records line is not one `plans.mjs` writes (#2341, under the lead's rulings R13 and R21), else undefined: the
- * closed set of its keys, types and value formats, a source's (its runs, or a stall or a safety net reached) with its
- * modes, compiles and pairs. It does not prove the invariants between one record's fields.
- */
-function recordFault(r) {
-  if (
-    !shaped(
-      r,
-      ["set", "name"],
-      ["key", "runs", "differing", "modes", "stalled", "uncharged", "run", "work", "allowance"],
-    )
-  )
-    return "no source record";
-  if (!text(r.set) || !text(r.name)) return "a set or name that is no text";
-  if (r.key !== undefined && !(text(r.key) && /^[0-9a-f]{64}$/.test(r.key)))
-    return "a key that is no sha256";
-  if (r.uncharged !== undefined && !(text(r.uncharged) && /^safety net .+ s$/.test(r.uncharged)))
-    return "a safety net reached that the runner does not word so";
-  const ends = ["stalled", "uncharged"].filter((key) => r[key] !== undefined);
-  if (ends.length > 0) {
-    if (ends.length > 1 || !text(r[ends[0]])) return "a stall that is not one text";
-    if (["runs", "differing", "modes"].some((key) => r[key] !== undefined))
-      return "a stall that also holds runs";
-    const run = r.run;
-    if (
-      run !== null &&
-      !(
-        shaped(run, ["tree", "mode", "at"], ["analysis"]) &&
-        ["base", "head"].includes(run.tree) &&
-        modeName(run.mode) &&
-        text(run.at) &&
-        // (a compile's run, or the stop search's, which alone counts its analyses)
-        (["stop search", "stop search, between"].includes(run.at)
-          ? whole(run.analysis)
-          : run.analysis === undefined &&
-            (run.at === "natural" || run.at === "analysis" || atAllowance(run.at)))
-      )
-    )
-      return "a stall's run not one the runner names";
-    if (["work", "allowance"].some((key) => r[key] !== undefined && !whole(r[key])))
-      return "a stall's work or allowance no whole number";
-    return undefined;
-  }
-  if (["run", "work", "allowance"].some((key) => r[key] !== undefined))
-    return "a run's stall fields without a stall";
-  if (!whole(r.runs) || !whole(r.differing)) return "runs or differing no whole number";
-  if (!Array.isArray(r.modes) || r.modes.length === 0) return "no modes";
-  if (new Set(r.modes.map((m) => m?.mode)).size !== r.modes.length) return "a mode twice";
-  for (const m of r.modes) {
-    if (!shaped(m, ["mode", "base", "head", "same"], ["demands", "stops", "questions"]))
-      return "a mode not one the runner writes";
-    if (!modeName(m.mode)) return "a mode named neither by a name nor by an index 0 to 3";
-    const fault =
-      pairFault({ base: m.base, head: m.head }, {}, false) ??
-      (m.demands === undefined
-        ? undefined
-        : listOf(m.demands, (d) => pairFault(d, { demand: allowanceOf }, true))) ??
-      stopsFault(m.stops) ??
-      questionsFault(m.questions);
-    if (fault !== undefined) return fault;
-    if (typeof m.same !== "boolean" || m.same !== (partsApart(m.base, m.head).length === 0))
-      return "same that is not whether the compiles' parts are equal";
-  }
-  return undefined;
-}
-
-/** Why a mode's `stops` is not one the runner writes, else undefined. */
-function stopsFault(stops) {
-  if (stops === undefined) return undefined;
-  if (!shaped(stops, ["count", "sameSet", "differ"])) return "stops not one the runner writes";
-  if (!whole(stops.count) || typeof stops.sameSet !== "boolean")
-    return "stops' count or sameSet malformed";
-  return listOf(stops.differ, (d) => pairFault(d, { allowance: allowanceOf, phase: text }, true));
-}
-
-/** Why a mode's `questions` (the questions phase) is not one the runner writes, else undefined. */
-function questionsFault(q) {
-  if (q === undefined) return undefined;
-  if (!shaped(q, ["analysis", "analysisHead", "compile", "sampled", "differ"]))
-    return "questions phase not one the runner writes";
-  if (
-    ![q.analysis, q.analysisHead].every((n) => n === null || whole(n)) ||
-    !whole(q.compile) ||
-    !whole(q.sampled)
-  )
-    return "questions phase's units malformed";
-  return listOf(q.differ, (d) => pairFault(d, { allowance: allowanceOf }, true));
-}
-
-/**
- * A demand row as #2341 reads it: its parts apart, its class, and for each tree the parts in which its compile at the
- * allowance differs from that tree's own unstopped compile in the mode (`natural`), so that which tree the allowance
- * stops, by its output, is a fact of the record: `base`, `head`, `both` or `neither`.
- */
-function demandRow(d, natural) {
-  const parts = partsApart(d.base, d.head);
-  const own = { base: partsApart(natural.base, d.base), head: partsApart(natural.head, d.head) };
-  const stops = (side) => own[side].some((part) => OUTPUT.has(part));
-  const stopped =
-    stops("base") && stops("head")
-      ? "both"
-      : stops("base")
-        ? "base"
-        : stops("head")
-          ? "head"
-          : "neither";
-  return { parts, kind: classOf(parts), own, stopped };
-}
-
-/** The records' classification (`summary`): one line per set, then each difference, stall and safety net reached. */
-function summarize(files, limit) {
-  const sets = new Map();
-  const listed = [];
-  let numbered = false;
-  const bump = (set, key) => {
-    if (!sets.has(set))
-      sets.set(set, {
-        sources: 0,
-        modes: 0,
-        identical: 0,
-        workOnly: 0,
-        workLower: 0,
-        workHigher: 0,
-        questions: 0,
-        publication: 0,
-        demand: 0,
-        demandPublication: 0,
-        demandQuestions: 0,
-        demandWork: 0,
-        demandStopsBase: 0,
-        demandStopsHead: 0,
-        demandStopsBoth: 0,
-        demandStopsNeither: 0,
-        stopSet: 0,
-        stoppedCompile: 0,
-        analysisApart: 0,
-        stalled: 0,
-        uncharged: 0,
-      });
-    sets.get(set)[key] += 1;
-  };
-  // (every line proved before any is read: one that is not a record `plans.mjs` writes refuses the input, R13)
-  const rows = [];
-  for (const file of files)
-    for (const [at, line] of readFileSync(file, "utf8").split("\n").entries()) {
-      if (line === "") continue;
-      let record;
-      let fault;
-      try {
-        record = JSON.parse(line);
-        fault = recordFault(record);
-      } catch (error) {
-        fault = `no JSON (${error.message})`;
-      }
-      if (fault !== undefined) {
-        process.stderr.write(`plans.mjs summary: ${file}:${at + 1}: ${fault}\n`);
-        process.exit(2);
-      }
-      rows.push(record);
-    }
-  for (const r of rows) {
-    bump(r.set, "sources");
-    if (r.stalled !== undefined || r.uncharged !== undefined) {
-      const kind = r.stalled !== undefined ? "stalled" : "uncharged";
-      bump(r.set, kind);
-      if (typeof r.run?.mode === "number") numbered = true;
-      listed.push(`${r.set} ${r.name}: ${kind} (${r[kind]}, ${JSON.stringify(r.run ?? null)})`);
-      continue;
-    }
-    for (const m of r.modes) {
-      bump(r.set, "modes");
-      const { base: b, head: h } = m;
-      // (a name, or a number from before #2342, printed as recorded and said once below)
-      if (typeof m.mode === "number") numbered = true;
-      const at = `${r.set} ${r.name} mode ${typeof m.mode === "number" ? m.mode : JSON.stringify(m.mode)}`;
-      const kind = m.same ? "identical" : classOf(partsApart(b, h));
-      if (kind === "identical") bump(r.set, "identical");
-      else if (kind === "questions") {
-        bump(r.set, "questions");
-        listed.push(
-          `${at}: questions ${b.questions} → ${h.questions}, units ${b.units} → ${h.units}`,
-        );
-      } else if (kind === "work") {
-        bump(r.set, "workOnly");
-        bump(r.set, h.units < b.units ? "workLower" : "workHigher");
-        listed.push(`${at}: work ${b.units} → ${h.units}`);
-      } else {
-        bump(r.set, "publication");
-        const sign = (x, y) => (x === y ? "=" : "≠");
-        listed.push(
-          `${at}: PUBLICATION plan ${sign(b.plan, h.plan)} diagnostics ${sign(b.diagnostics, h.diagnostics)} ` +
-            `error ${b.error} → ${h.error}, units ${b.units} → ${h.units}`,
-        );
-      }
-      const list = (parts) => parts.join(", ") || "none";
-      for (const d of m.demands ?? []) {
-        bump(r.set, "demand");
-        const row = demandRow(d, m);
-        bump(r.set, `demand${row.kind[0].toUpperCase()}${row.kind.slice(1)}`);
-        bump(r.set, `demandStops${row.stopped[0].toUpperCase()}${row.stopped.slice(1)}`);
-        const error = row.parts?.includes("error")
-          ? `, error ${d.base.error} → ${d.head.error}`
-          : "";
-        listed.push(
-          `${at}: at demand allowance ${d.demand} apart (${row.kind}): ${list(row.parts)}${error}; ` +
-            `stops ${row.stopped} (against its own unstopped compile, base: ${list(row.own.base)}, head: ` +
-            `${list(row.own.head)}); checks ${b.checks}/${d.base.checks} → ${h.checks}/${d.head.checks} ` +
-            `(unstopped/at the allowance), units ${d.base.units} → ${d.head.units}`,
-        );
-      }
-      if (m.stops !== undefined) {
-        if (!m.stops.sameSet) {
-          bump(r.set, "stopSet");
-          listed.push(`${at}: STOP SET apart (main ${m.stops.count} stops)`);
-        }
-        for (const d of m.stops.differ) {
-          bump(r.set, "stoppedCompile");
-          listed.push(
-            `${at}: stopped compile at ${d.allowance} (${d.phase}) apart: ${list(partsApart(d.base, d.head))}`,
-          );
-        }
-      }
-      if (m.questions !== undefined && m.questions.analysis !== m.questions.analysisHead) {
-        bump(r.set, "analysisApart");
-        listed.push(`${at}: analysis units ${m.questions.analysis} → ${m.questions.analysisHead}`);
-      }
-      for (const d of m.questions?.differ ?? []) {
-        bump(r.set, "stoppedCompile");
-        listed.push(
-          `${at}: questions-phase compile at ${d.allowance} apart: ${list(partsApart(d.base, d.head))}`,
-        );
-      }
-    }
-  }
-  for (const [set, counts] of sets) console.log(JSON.stringify({ set, ...counts }));
-  if (numbered)
-    console.log(
-      "mode <number>: a record from before #2342, the mode's index in HELD_MODES at the commit that wrote it",
-    );
-  for (const line of listed.slice(0, limit)) console.log(line);
-  if (listed.length > limit) console.log(`… ${listed.length - limit} more`);
-}
 
 if (isMainThread && process.argv[2] === "summary") {
   const rest = process.argv.slice(3);
@@ -873,6 +543,11 @@ if (isMainThread && process.argv[2] === "summary") {
         }
       }
       const c = heldCases?.get(unit.name);
+      // (a held case whose base compile fails has no stop search: said so, never left out, #2340)
+      if (stops && c?.slice && b.error !== null)
+        entry.stops = {
+          unavailable: `the base's unstopped compile failed: ${b.error}`.slice(0, 300),
+        };
       if (stops && c?.slice && b.error === null) {
         const list = searched(base, c, mode);
         const headList = searched(head, c, headMode);
@@ -881,6 +556,8 @@ if (isMainThread && process.argv[2] === "summary") {
           sameSet: JSON.stringify(list) === JSON.stringify(headList),
           differ: [],
         };
+        // (both trees' stops where they differ, for the summary to say which phase each tree added, removed or moved)
+        if (!entry.stops.sameSet) Object.assign(entry.stops, { base: list, head: headList });
         if (!entry.stops.sameSet) record.differing += 1;
         for (const { allowance, phase } of list) {
           const [sb, sh] = [
