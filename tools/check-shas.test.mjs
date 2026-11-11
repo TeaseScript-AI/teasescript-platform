@@ -729,6 +729,15 @@ test(
           changed,
           /cannot write .*: it changed while it was checked, and is left so: run again$/mu,
         ]),
+        // Two files whose inodes differ only beyond a JavaScript number's precision (as OverlayFS gives), the name's and
+        // the descriptor's, stubbed: refused as another file.
+        [
+          "a replaced file whose identity differs beyond a number's precision",
+          "const stat = fs.statSync; const fstat = fs.fstatSync; const high = 2n ** 63n; const as = (found, ino) => { if (found) found.ino = typeof found.ino === 'bigint' ? ino : Number(ino); return found; }; fs.statSync = (path, options) => path === process.argv.at(-1) ? as(stat(path, options), high + 1n) : stat(path, options); fs.fstatSync = (d, options) => as(fstat(d, options), high + 2n);",
+          2,
+          before,
+          /cannot write .*: it changed while it was checked, and is left so: run again$/mu,
+        ],
       ]) {
         writeFileSync(report, before);
         const preload = `import fs from "node:fs"; import { syncBuiltinESMExports } from "node:module"; ${patch} syncBuiltinESMExports();`;

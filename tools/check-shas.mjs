@@ -126,8 +126,9 @@ function appendLine(file, descriptor, bytes, kept, line) {
     // (another writer's change since the first read is left as it is, not cut: one written into this file, or a new
     // file renamed onto its name, which leaves the descriptor on the old one)
     const now = readAll(descriptor);
-    const named = statSync(file, { throwIfNoEntry: false });
-    const held = fstatSync(descriptor);
+    // (as BigInts: two inodes can differ beyond a JavaScript number's precision, as OverlayFS's high bits do)
+    const named = statSync(file, { throwIfNoEntry: false, bigint: true });
+    const held = fstatSync(descriptor, { bigint: true });
     changed = !now.equals(bytes) || named?.dev !== held.dev || named?.ino !== held.ino;
     if (!changed) {
       ftruncateSync(descriptor, end);
