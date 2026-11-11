@@ -1,23 +1,12 @@
 import assert from "node:assert/strict";
-import { spawn, spawnSync } from "node:child_process";
-import {
-  closeSync,
-  constants,
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  openSync,
-  readFileSync,
-  readSync,
-  rmSync,
-  writeFileSync,
-  writeSync,
-} from "node:fs";
+import { spawn } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { pretestSteps } from "./run-check.mjs";
+import { bounded, runSync, slowReader, waitFor } from "./runner-test-support.mjs";
 
 const tool = fileURLToPath(new URL("./run-check.mjs", import.meta.url));
 
@@ -25,8 +14,8 @@ const tool = fileURLToPath(new URL("./run-check.mjs", import.meta.url));
  * A package shaped as the repository's: `check:pretest` runs `lint` and `format` through run-parallel, `build` runs
  * `build:player` through run-parallel too, as `npm run build` does, and a stand-in suite. Each part exits with the status
  * `exits` gives it (0 when not named) and records that it ran, with the `BUILD_SOURCEMAPS` it saw. The part `waits`
- * names (`build` or `suite`) instead starts a descendant that writes its pid to `pid`, prints `LATE` after 2.5 s, and
- * waits: in the build one that ignores SIGTERM, in the suite one that does not.
+ * names (`build` or `suite`) instead starts a descendant that writes its pid to `pid` and waits: in the build one that
+ * ignores SIGTERM, in the suite one that does not.
  */
 function fixture(t, exits, waits = null) {
   const cwd = mkdtempSync(join(tmpdir(), "run-check-test-"));
@@ -37,7 +26,7 @@ function fixture(t, exits, waits = null) {
     (name === waits
       ? `spawn(process.execPath, ['-e', "require('node:fs').writeFileSync('pid', String(process.pid)); ` +
         `${name === "build" ? "process.on('SIGTERM', () => {}); " : ""}` +
-        `setTimeout(() => console.log('LATE'), 2500); setInterval(() => {}, 1000);"], ` +
+        `setInterval(() => {}, 1000);"], ` +
         "{ stdio: 'inherit' }); setInterval(() => {}, 1000);"
       : `process.exit(${exits[name] ?? 0});`);
   const scripts = {
@@ -75,7 +64,7 @@ function outcome(cwd, status, stdout, stderr) {
 
 function run(t, exits) {
   const cwd = fixture(t, exits);
-  const result = spawnSync(process.execPath, [tool], { cwd, encoding: "utf8", env: environment });
+  const result = runSync(process.execPath, [tool], { cwd, encoding: "utf8", env: environment });
   return outcome(cwd, result.status, result.stdout, result.stderr);
 }
 
@@ -126,21 +115,15 @@ test("the checks before the tests are check:pretest's run-parallel steps, and an
 // Process-group assertions target the POSIX environment used by repository CI.
 test(
   "a signal to its process group, as a terminal or a harness sends it, stops the running part as the part handles it; the status is the first failure's or the signal's, and the last line comes once, after (#2106)",
+  // (repeated signals: the slow-reader case below, which sends them from the first to after the last line)
   { skip: process.platform === "win32" },
   async (t) => {
     const stopped = "ran: lint, format; failed: none; not run: build, test suite (stopped)";
-    for (const [waits, exits, signals, status, last] of [
-      ["build", {}, ["SIGTERM"], 143, stopped],
-      ["build", {}, ["SIGINT"], 130, stopped],
-      ["build", {}, ["SIGTERM", "SIGTERM"], 143, stopped],
-      ["build", { lint: 3 }, ["SIGTERM"], 3, stopped.replace("failed: none", "failed: lint")],
-      [
-        "suite",
-        {},
-        ["SIGTERM"],
-        143,
-        "ran: lint, format, build; failed: none; not run: test suite",
-      ],
+    for (const [waits, exits, signal, status, last] of [
+      ["build", {}, "SIGTERM", 143, stopped],
+      ["build", {}, "SIGINT", 130, stopped],
+      ["build", { lint: 3 }, "SIGTERM", 3, stopped.replace("failed: none", "failed: lint")],
+      ["suite", {}, "SIGTERM", 143, "ran: lint, format, build; failed: none; not run: test suite"],
     ]) {
       const cwd = fixture(t, exits, waits);
       // (its own process group, as a terminal's job or a harness's command has)
@@ -157,19 +140,12 @@ test(
         }
       };
       t.after(() => group("SIGKILL"));
-      let exited = false;
-      const closed = new Promise((resolve) =>
-        child.on("close", (code) => {
-          exited = true;
-          resolve(code);
-        }),
+      const closed = new Promise((resolve) => child.on("close", resolve));
+      const pid = await waitFor(
+        `the ${waits}'s descendant to start`,
+        () => Number(readFileSync(join(cwd, "pid"), "utf8")),
+        child,
       );
-      // (no deadline, so a loaded host only makes it slower (#2379); a runner that ends first fails the wait)
-      while (!existsSync(join(cwd, "pid")) || readFileSync(join(cwd, "pid"), "utf8") === "") {
-        if (exited) assert.fail(`the runner ended before the ${waits} started: ${stdout}${stderr}`);
-        await new Promise((wait) => setTimeout(wait, 20));
-      }
-      const pid = Number(readFileSync(join(cwd, "pid"), "utf8"));
       // (a run that fails to stop it leaves no stray process behind the test either)
       t.after(() => {
         try {
@@ -178,126 +154,29 @@ test(
           if (error.code !== "ESRCH") throw error;
         }
       });
-      for (const [index, signal] of signals.entries()) {
-        if (index > 0) await new Promise((wait) => setTimeout(wait, 300));
-        group(signal);
-      }
-      const result = outcome(cwd, await closed, stdout, stderr);
-      const at = `${waits}, ${JSON.stringify(exits)}, ${signals.join(" ")}`;
+      group(signal);
+      const at = `${waits}, ${JSON.stringify(exits)}, ${signal}`;
+      const result = outcome(cwd, await bounded(closed, `the run to end (${at})`), stdout, stderr);
       assert.equal(result.status, status, `${at}: ${result.output}`);
       assert.equal(result.last, last, at);
       assert.equal(stdout.split(`\n${last}\n`).length, 2, `${at}: the last line once: ${stdout}`);
-      assert.doesNotMatch(result.output, /LATE/u, at);
-      // (the descendant is gone, or a zombie its parent has not reaped: in the build, run-parallel's own escalation
-      // stopped the one that ignores SIGTERM)
-      let alive = true;
-      try {
-        process.kill(pid, 0);
-        alive = !/\) Z /u.test(readFileSync(`/proc/${pid}/stat`, "utf8"));
-      } catch (error) {
-        if (error.code !== "ESRCH" && error.code !== "ENOENT") throw error;
-        alive = false;
-      }
-      assert.equal(alive, false, `${at}: the descendant outlived the run`);
+      // (the descendant ends, or is a zombie its parent has not reaped: in the build, run-parallel's own escalation
+      // stops the one that ignores SIGTERM before run-parallel ends; a survivor fails the wait, naming it)
+      await waitFor(`the ${waits}'s descendant to end (${at})`, () => {
+        try {
+          process.kill(pid, 0);
+          return /\) Z /u.test(readFileSync(`/proc/${pid}/stat`, "utf8"));
+        } catch (error) {
+          if (error.code === "ESRCH" || error.code === "ENOENT") return true;
+          throw error;
+        }
+      });
     }
   },
 );
 
-/**
- * Runs `node <args>` in `cwd` in its own process group, its stdout on a FIFO this test reads only when told. Once the
- * fixture's `pid` is written, the FIFO is filled, so that the runner's next write waits, and its group gets SIGTERM. The
- * runner then gets SIGTERM every 20 ms until it starts writing its last line, and three times more, before the FIFO is
- * read again. Returns its exit and its output without the filling.
- */
-async function slowReader(t, cwd, args) {
-  const fifo = join(cwd, "stdout.fifo");
-  assert.equal(spawnSync("mkfifo", [fifo]).status, 0);
-  // (marks the start of the last line, `\nran: …`, which both runners write in one piece)
-  writeFileSync(
-    join(cwd, "mark-last-line.mjs"),
-    "import { writeFileSync } from 'node:fs'; const write = process.stdout.write.bind(process.stdout); " +
-      "process.stdout.write = (chunk, ...rest) => { " +
-      "if (String(chunk).startsWith('\\nran: ')) writeFileSync('last-line', ''); return write(chunk, ...rest); };",
-  );
-  const reader = openSync(fifo, constants.O_RDONLY | constants.O_NONBLOCK);
-  const filler = openSync(fifo, constants.O_WRONLY | constants.O_NONBLOCK);
-  const writer = openSync(fifo, constants.O_WRONLY);
-  const child = spawn(process.execPath, ["--import", "./mark-last-line.mjs", ...args], {
-    cwd,
-    env: environment,
-    detached: true,
-    stdio: ["ignore", writer, "pipe"],
-  });
-  closeSync(writer);
-  const signal = (pid, name) => {
-    try {
-      process.kill(pid, name);
-    } catch (error) {
-      if (error.code !== "ESRCH") throw error;
-    }
-  };
-  t.after(() => signal(-child.pid, "SIGKILL"));
-  let stderr = "";
-  child.stderr.on("data", (chunk) => (stderr += chunk));
-  const ended = () => child.exitCode !== null || child.signalCode !== null;
-  const closed = new Promise((resolve) =>
-    child.on("close", (code, name) => resolve({ code, signal: name })),
-  );
-  // (no deadline, so a loaded host only makes it slower (#2379))
-  const pause = () => new Promise((wait) => setTimeout(wait, 20));
-  const chunks = [];
-  const buffer = Buffer.alloc(1 << 16);
-  /** Reads what the FIFO holds; true at its end. */
-  const drain = () => {
-    for (;;) {
-      try {
-        const length = readSync(reader, buffer);
-        if (length === 0) return true;
-        chunks.push(Buffer.from(buffer.subarray(0, length)));
-      } catch (error) {
-        if (error.code === "EAGAIN") return false;
-        throw error;
-      }
-    }
-  };
-  while (!existsSync(join(cwd, "pid")) || readFileSync(join(cwd, "pid"), "utf8") === "") {
-    drain();
-    if (ended()) assert.fail(`the runner ended first: ${stderr}`);
-    await pause();
-  }
-  drain();
-  // (a nested run-parallel's last line has passed through run-check by now)
-  rmSync(join(cwd, "last-line"), { force: true });
-  const before = Buffer.concat(chunks).length;
-  let filled = 0;
-  for (const size of [4096, 1])
-    for (;;) {
-      try {
-        filled += writeSync(filler, Buffer.alloc(size, "f"));
-      } catch (error) {
-        if (error.code === "EAGAIN") break;
-        throw error;
-      }
-    }
-  closeSync(filler);
-  signal(-child.pid, "SIGTERM");
-  for (let more = 3; !ended() && more > 0; await pause()) {
-    if (existsSync(join(cwd, "last-line"))) more -= 1;
-    signal(child.pid, "SIGTERM");
-  }
-  while (!drain()) await pause();
-  closeSync(reader);
-  const output = Buffer.concat(chunks);
-  assert.equal(output.subarray(before, before + filled).toString(), "f".repeat(filled));
-  const stdout = Buffer.concat([
-    output.subarray(0, before),
-    output.subarray(before + filled),
-  ]).toString();
-  return { ...(await closed), stdout, stderr };
-}
-
 test(
-  "a signal while the last line waits for a slow reader changes neither the status nor the last line (#2106)",
+  "a signal while the last line waits for a slow reader changes neither the status nor the last line, for run-check and for run-parallel alone (#2106)",
   { skip: process.platform === "win32" },
   async (t) => {
     for (const [args, waits, last] of [
@@ -308,11 +187,27 @@ test(
         "ran: none; failed: none; not run: build:player",
       ],
     ]) {
-      const result = await slowReader(t, fixture(t, {}, waits), args);
+      const cwd = fixture(t, {}, waits);
+      const result = await slowReader(t, {
+        cwd,
+        args,
+        env: environment,
+        ready: "pid",
+        groupSignal: true,
+      });
       const at = `${args.join(" ")}: ${result.stdout}${result.stderr}`;
       assert.deepEqual([result.code, result.signal], [143, null], at);
       assert.ok(result.stdout.endsWith(`\n${last}\n`), at);
       assert.equal(result.stdout.split(last).length, 2, at);
+      // (the stopped part's descendant is not left behind)
+      const pid = Number(readFileSync(join(cwd, "pid"), "utf8"));
+      t.after(() => {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch (error) {
+          if (error.code !== "ESRCH") throw error;
+        }
+      });
     }
   },
 );

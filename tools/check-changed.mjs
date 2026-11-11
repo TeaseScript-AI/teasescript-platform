@@ -574,57 +574,70 @@ async function check(cleanups) {
   const selected = checksOf(projects);
   progress.notNeeded = checksOf(Object.keys(PROJECTS)).filter((check) => !selected.includes(check));
   const results = await Promise.all(checks);
+  // (a signal has ended the run: its verdicts are not printed)
+  if (ended) return null;
   for (const { name, passed, seconds } of results)
     process.stdout.write(
       `${passed ? "PASS" : "FAIL"}  ${name.padEnd(18)} ${seconds.toFixed(1)}s\n`,
     );
   for (const { name, passed, output, shown } of results)
     if (!passed || shown) process.stdout.write(`\n--- ${name} ---\n${output}`);
-  process.stdout.write(`\n${lastLine()}\n`);
-  process.exitCode = results.every(({ passed }) => passed) ? 0 : 1;
   // (a link through main's `current` follows its refresh, which can switch it to another install while the checks run)
   const after = lockfileMismatch();
   if (after !== null) {
     process.stderr.write(
       `check-changed: node_modules changed while the checks ran, so their verdicts do not count: ${after}\n`,
     );
-    process.exitCode = 2;
+    return 2;
   }
+  return results.every(({ passed }) => passed) ? 0 : 1;
 }
+
+/** Whether the run's end is decided (`main`'s `end`): from then on nothing changes its status or its last line. */
+let ended = false;
 
 async function main() {
   const cleanups = [];
-  let cleaned = false;
   const cleanup = () => {
-    if (cleaned) return;
-    cleaned = true;
     stop();
     for (const step of cleanups) step();
   };
-  // (installed for the whole run: the first signal stops the checks, cleans up and writes the last line, once; a later
-  // one, during that cleanup, changes nothing)
-  let stopping = false;
+  /**
+   * The run's one end, whichever path comes first: a normal end, one that cannot run, or a signal. It stops the checks,
+   * cleans up, then writes the last line, once; a later call, as a signal during that, or while the last line waits for
+   * a slow reader, changes nothing. A cleanup that refuses (exit 2) outranks a verdict, not a signal. The last line
+   * follows a blank one, unless the run could not start its checks.
+   */
+  const end = (code, { exit = false, blank = true } = {}) => {
+    if (ended) return;
+    ended = true;
+    cleanup();
+    const status = process.exitCode === 2 && code < 2 ? 2 : code;
+    process.exitCode = status;
+    process.stdout.write(`${blank ? "\n" : ""}${lastLine()}\n`, () => {
+      if (exit) process.exit(status);
+    });
+  };
+  // (installed until the process exits)
   for (const [signal, code] of [
     ["SIGINT", 130],
     ["SIGTERM", 143],
     ["SIGHUP", 129],
   ])
-    process.on(signal, () => {
-      if (stopping) return;
-      stopping = true;
-      cleanup();
-      process.stdout.write(`\n${lastLine()}\n`, () => process.exit(code));
-    });
+    process.on(signal, () => end(code, { exit: true }));
+  let code;
   try {
-    await check(cleanups);
+    code = await check(cleanups);
   } catch (error) {
-    if (!(error instanceof CannotRun)) throw error;
-    process.stderr.write(`check-changed: ${error.message}\n`);
-    process.stdout.write(`${lastLine()}\n`);
-    process.exitCode = 2;
-  } finally {
-    cleanup();
+    if (!(error instanceof CannotRun)) {
+      cleanup();
+      throw error;
+    }
+    if (!ended) process.stderr.write(`check-changed: ${error.message}\n`);
+    end(2, { blank: false });
+    return;
   }
+  if (code !== null) end(code);
 }
 
 if (import.meta.main) await main();

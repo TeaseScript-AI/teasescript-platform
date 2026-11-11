@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, test } from "node:test";
 import { summaryLine } from "./run-parallel.mjs";
+import { awaitFile, bounded, waitFor } from "./runner-test-support.mjs";
 
 const runner = fileURLToPath(new URL("./run-parallel.mjs", import.meta.url));
 
@@ -40,45 +41,15 @@ function start(t, cwd, names, serial = false) {
   child.stderr.on("data", (chunk) => {
     output += chunk;
   });
-  const done = new Promise((resolve, reject) => {
-    child.on("error", reject);
-    child.on("close", (code) => resolve({ code, output, stdout }));
-  });
+  const done = bounded(
+    new Promise((resolve, reject) => {
+      child.on("error", reject);
+      child.on("close", (code) => resolve({ code, output, stdout }));
+    }),
+    `run-parallel ${names.join(" ")} to end`,
+  );
   return { child, done, output: () => output };
 }
-
-/**
- * How long a wait may last: only a hang reaches it, never a loaded host (#2379), and it then fails naming what it
- * waited for. The fixtures' own waits share it.
- */
-const BOUND_SECONDS = 300;
-
-/**
- * Waits until `read` returns a value, and returns it: it ends on the event itself, or fails naming `what` once
- * `runner`, when given, has exited without it, or after `BOUND_SECONDS`.
- */
-async function waitFor(what, read, runner = null) {
-  const until = performance.now() + BOUND_SECONDS * 1000;
-  for (;;) {
-    try {
-      const value = read();
-      if (value) return value;
-    } catch (error) {
-      if (error.code !== "ENOENT") throw error;
-    }
-    if (runner !== null && (runner.exitCode !== null || runner.signalCode !== null))
-      throw new Error(`The runner exited before ${what}`);
-    if (performance.now() > until) throw new Error(`Waited ${BOUND_SECONDS} s for ${what}`);
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-}
-
-/** Fixture source that waits until `file` exists, or exits 1 after `BOUND_SECONDS`, saying it waited for `what`. */
-const awaitFile = (file, what) =>
-  `{ const until = performance.now() + ${BOUND_SECONDS * 1000}; ` +
-  `while (!existsSync('${file}')) { if (performance.now() > until) { ` +
-  `console.error('waited ${BOUND_SECONDS} s for ${what}'); process.exit(1); } ` +
-  `await new Promise(r => setTimeout(r, 10)); } }`;
 
 const record = `import { appendFileSync, existsSync, writeFileSync } from 'node:fs';`;
 
@@ -142,6 +113,9 @@ test("a step npm cannot start fails with exit 1 and is named", async (t) => {
     env: { ...process.env, PATH: cwd },
     stdio: ["ignore", "pipe", "pipe"],
   });
+  t.after(() => {
+    if (child.exitCode === null) child.kill("SIGKILL");
+  });
   let output = "";
   let stdout = "";
   child.stdout.on("data", (chunk) => {
@@ -149,7 +123,10 @@ test("a step npm cannot start fails with exit 1 and is named", async (t) => {
     stdout += chunk;
   });
   child.stderr.on("data", (chunk) => (output += chunk));
-  const code = await new Promise((resolve) => child.on("close", resolve));
+  const code = await bounded(
+    new Promise((resolve) => child.on("close", resolve)),
+    "run-parallel without npm to end",
+  );
   assert.equal(code, 1, output);
   assert.match(output, /\[first\] FAIL/u);
   assert.match(output, /first: spawn npm ENOENT/u);
