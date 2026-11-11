@@ -1,9 +1,9 @@
 import type { PlaceId, TypeTerm } from "../../graph.js";
 import type { CorePass } from "../answers.js";
-import { joinParts, joinSteps, keepText } from "../budget.js";
+import { joinParts, joinSteps, keepText, keptSteps } from "../budget.js";
 import type { Contract } from "../contract.js";
 import { heldAsIs, type FlowSink } from "./contributions.js";
-import { keyOf } from "../definitions.js";
+import { keyOf, type Definition } from "../definitions.js";
 import { belowSelected, withoutEmpty } from "../exact-path.js";
 import { marked } from "../indexes/guards.js";
 import { EMPTY, makeItem, mergeItems, REASON, spelledBy, STOPPED, type Item } from "../items.js";
@@ -50,8 +50,6 @@ import { projected } from "./positions.js";
 import { defaultOf, termAt, typeKinds, writtenOf } from "./terms.js";
 
 // The kinds a value can have, by its kind and at a path, mirroring the value side's dispatch.
-
-const NESTING = 256;
 
 /** The kinds at a path of a value: a literal's field, a copied record's field. */
 export function contractOfValueAt(
@@ -709,48 +707,82 @@ export function* onlyNull(contract: Contract, fallback: PlaceId): Work<readonly 
 
 /**
  * V30 §18: the written type a value lands in directly at a path, also as an element of literals or through a
- * fallback or default (A1, C10, F18); a lookup cut by the nesting limit is an unknown destination, never memoised.
+ * fallback or default (A1, C10, F18); `null` where it lands in none. The lookup walks up the value's syntactic
+ * ancestors (the literal whose cell holds it, the operation it is a fallback or default of), so it never meets itself;
+ * it walks them on its own stack, so no nesting depth cuts it (#2406), and keeps each finished answer
+ * (`Contract.lands`), never one under way: a stop inside it leaves nothing behind.
  */
 export function landsIn(
   contract: Contract,
   value: PlaceId,
   path: readonly string[],
-  depth = 0,
 ): TypeTerm | null {
-  if (depth >= NESTING) return CUT;
   const { program, definitions } = contract.pass;
-  const memoKey = joinParts(value, path);
-  if (contract.lands.has(memoKey)) return contract.lands.get(memoKey)!;
-  keepText(contract.work, memoKey.length);
-  contract.lands.set(memoKey, null);
-  const keep = (found: TypeTerm | null): TypeTerm | null => {
-    if (found === CUT) contract.lands.delete(memoKey);
-    else contract.lands.set(memoKey, found);
-    return found;
+  // (each path met is some element steps, then the asked path's other steps, `rest`: a climb from a cell to its
+  // literal adds an element step in front, a climb to an operation none; a lookup is keyed by their count, so its key
+  // does not grow with the depth it is met at, #2406)
+  let leading = 0;
+  while (path[leading] === "element") leading += 1;
+  const rest = path.slice(leading);
+  /** A lookup under way: its stores still to try, then the operation it is a fallback or default of. */
+  interface Lookup {
+    readonly key: string;
+    readonly value: PlaceId;
+    readonly elements: number;
+    readonly stores: readonly Definition[];
+    next: number;
+    upward: boolean;
+  }
+  const lookups: Lookup[] = [];
+  const open = new Set<string>();
+  // (a lookup's answer where it is known; `undefined` where it is entered, to run before the one that asked)
+  const enter = (at: PlaceId, elements: number): TypeTerm | null | undefined => {
+    const key = joinParts(at, elements, rest);
+    if (contract.lands.has(key)) return contract.lands.get(key)!;
+    if (open.has(key)) throw new Error(`A landing's lookup met itself at '${key}'.`);
+    keepText(contract.work, key.length);
+    open.add(key);
+    const stores = definitions.byValue.get(at) ?? [];
+    lookups.push({ key, value: at, elements, stores, next: 0, upward: false });
+    return undefined;
   };
-  try {
-    for (const d of definitions.byValue.get(value) ?? []) {
+  let answer = enter(value, leading);
+  while (lookups.length > 0) {
+    const lookup = lookups[lookups.length - 1]!;
+    // (the answer of the lookup this one entered last, if any: a written type there is this one's too)
+    let found = answer ?? null;
+    answer = undefined;
+    while (found === null && lookup.next < lookup.stores.length) {
+      const d = lookup.stores[lookup.next]!;
+      lookup.next += 1;
       program.work.charge("checks");
       const written = d.kind === "whole" ? writtenOf(program.place(d.place).kind) : null;
-      const term = written === null ? null : termAt(written, joinSteps(d.path, path));
-      if (term !== null) return keep(term);
+      if (written !== null) {
+        const elements = Array<string>(lookup.elements).fill("element");
+        found = termAt(written, keptSteps(contract.work, d.path, elements, rest));
+      }
       const owner = program.cellOwner.get(d.place);
-      if (owner?.kind === "cell") {
-        const found = contract.landsIn(owner.owner, joinSteps(["element"], path), depth + 1);
-        if (found !== null) return keep(found);
+      if (found === null && owner?.kind === "cell") {
+        found = enter(owner.owner, lookup.elements + 1) ?? null;
+        if (lookups[lookups.length - 1] !== lookup) break;
       }
     }
-    const operation = definitions.fallbackOf.get(value);
-    return keep(operation === undefined ? null : contract.landsIn(operation, path, depth + 1));
-  } catch (error) {
-    // (a stop inside the lookup leaves no provisional answer behind for the finishing path to read)
-    contract.lands.delete(memoKey);
-    throw error;
+    if (lookups[lookups.length - 1] !== lookup) continue;
+    if (found === null && !lookup.upward) {
+      lookup.upward = true;
+      const operation = definitions.fallbackOf.get(lookup.value);
+      if (operation !== undefined) {
+        found = enter(operation, lookup.elements) ?? null;
+        if (lookups[lookups.length - 1] !== lookup) continue;
+      }
+    }
+    lookups.pop();
+    open.delete(lookup.key);
+    contract.lands.set(lookup.key, found);
+    answer = found;
   }
+  return answer ?? null;
 }
-
-/** The lookup cut by the nesting limit: an unknown destination (V30 §18). */
-const CUT: TypeTerm = { kind: "dynamic", why: "unknown member" };
 
 /** #1668: whether `withOwnSelection` keeps the elements: not where every owner is an object (only its own selection). */
 function keepsElements(owners: readonly Item[]): boolean {

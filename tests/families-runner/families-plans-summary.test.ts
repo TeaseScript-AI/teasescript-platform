@@ -127,7 +127,7 @@ test("the plans summary names what differs in a demand row, gives it one class, 
   ]);
 });
 
-test("the plans summary refuses, naming file, line and fault, any line that is not a record the runner writes (#2341, R13)", (t) => {
+test("the plans summary refuses, naming file, line and fault, any line that is not a record the runner writes (#2341)", (t) => {
   const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
   const compile = (more: Record<string, unknown> = {}) => ({

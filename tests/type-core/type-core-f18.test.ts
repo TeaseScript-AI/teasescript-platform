@@ -262,6 +262,111 @@ test("a computed key's load is external data in every layer, whatever its defaul
     });
 });
 
+/** A typed call behind `n` nested `otherwise null`, in #2406's forms; the reader and what it keeps of each value. */
+const FALLBACK_CHAINS: readonly {
+  readonly form: string;
+  readonly source: (chain: string) => string;
+  readonly call: string;
+  readonly reader: string;
+  readonly codes: readonly string[];
+  readonly runs: readonly (readonly [Given, string])[];
+}[] = (() => {
+  const json = (value: string): Given => ({ globals: { hostValue: value } });
+  const stored = (value: SerializableRuntimeValue): Given => ({
+    globals: { hostValue: "" },
+    storage: value,
+  });
+  const integer: readonly (readonly [Given, string])[] = [
+    [json('"wrong"'), "0"],
+    [json("null"), "0"],
+    [json("1.5"), "0"],
+    [json("2"), "2"],
+  ];
+  const fromJson = "fromJson(hostValue, default: 0)";
+  return [
+    {
+      form: "a later copy",
+      source: (chain) => `let a: number = 0\nlet b = ${chain}\nsay b\nb = a\nexit\n`,
+      call: fromJson,
+      reader: "integer",
+      codes: ["TSV062"],
+      runs: integer,
+    },
+    {
+      form: "no copy",
+      source: (chain) => `let b = ${chain}\nsay b\nexit\n`,
+      call: fromJson,
+      reader: "integer",
+      codes: ["TSV062"],
+      runs: integer,
+    },
+    {
+      form: "a written landing",
+      source: (chain) => `let s: number? = ${chain}\nsay s\nexit\n`,
+      call: fromJson,
+      reader: "null|number",
+      codes: [],
+      runs: [
+        [json('"wrong"'), "0"],
+        [json("null"), "null"],
+        [json("1.5"), "1.5"],
+        [json("2"), "2"],
+      ],
+    },
+    {
+      form: "a load",
+      source: (chain) => `let a: number = 0\nlet b = ${chain}\nsay b\nb = a\nexit\n`,
+      call: 'load("k", default: 0)',
+      reader: "integer",
+      codes: ["TSV062"],
+      runs: [
+        [stored("wrong"), "0"],
+        [stored(1.5), "0"],
+        [stored(2), "2"],
+      ],
+    },
+  ];
+})();
+
+test("a typed call keeps its reader behind any number of nested fallbacks: the landing's lookup has no nesting cut (#2406)", () => {
+  // (main cut the lookup at 256 ancestors and read the cut as a written destination, losing the call's reader)
+  for (const mode of MODES)
+    for (const { form, source: sourceOf, call, reader, codes, runs } of FALLBACK_CHAINS)
+      for (const n of [255, 256, 1_024]) {
+        const where = `${form}, ${n} fallbacks (mode ${JSON.stringify(mode)})`;
+        const source = sourceOf(call + " otherwise null".repeat(n));
+        const files = [{ path: "main.tease", source }];
+        const compiled = inMode(mode, () =>
+          compileProjectWithBackend(files, { globals: GLOBALS }, CORE_BACKEND),
+        );
+        assert.ok(compiled.plan !== null, where);
+        assert.deepEqual(
+          compiled.diagnostics.map((d) => d.code),
+          codes,
+          where,
+        );
+        const start = source.indexOf(call);
+        const site = `${start}:${start + call.length}`;
+        const planned = plannedContent(compiled.plan, source)
+          .filter((entry) => /^(expected|load) /u.test(entry) && entry.split(" ")[1] === site)
+          .map((entry) => entry.split(" ")[2]);
+        assert.deepEqual(planned, [reader], where);
+        for (const [given, said] of runs) {
+          const ran = runGlobals(
+            compiled.plan,
+            given.globals,
+            given.storage === undefined ? [] : [{ key: "k", value: given.storage }],
+          );
+          assert.equal(ran.status, "halted", `${where}: ${ran.failure}`);
+          assert.deepEqual(
+            ran.said.map((entry) => entry.text),
+            [said],
+            `${where}: ${JSON.stringify(given)}`,
+          );
+        }
+      }
+});
+
 test("the call-site snapshot costs work linear in the typed defaults, nested or side by side, at three doublings, in both orders (F18)", () => {
   // (each typed call's default reads `d` at its call: its nodes mapped once, its read answered once, whatever nesting)
   const nested = (k: number): string => {

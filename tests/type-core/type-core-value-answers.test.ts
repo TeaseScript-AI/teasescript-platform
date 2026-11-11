@@ -30,7 +30,7 @@ function nodeAt(answers: Answers, start: number, length: number): FlowNode {
   return node;
 }
 
-test("a value's answer at a path below it gives its kinds there and the properties it is known to have (S3 §1, S7)", () => {
+test("a value's answer at a path below it gives its kinds there and the properties it is known to have (S3, S7)", () => {
   const call = 'fromJson(hostValue, default: {stats: {n: 0, m: 1.5}, tag: "a"}, files: false)';
   const source = `let p = ${call}\nsay p.tag\nexit\n`;
   for (const answers of bothOrders(source)) {
@@ -47,7 +47,7 @@ test("a value's answer at a path below it gives its kinds there and the properti
   }
 });
 
-test("a place's known properties at a path are those its literals and its property stores give it (S3 §1, S7)", () => {
+test("a place's known properties at a path are those its literals and its property stores give it (S3, S7)", () => {
   const source = "let d = {s: {x: 1}}\nd.t = 2\nd.s.y = 3\nsay d.t\nexit\n";
   for (const answers of bothOrders(source)) {
     // the read of `d` that `say` shows a property of

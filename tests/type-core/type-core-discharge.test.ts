@@ -163,7 +163,7 @@ function rowOf(check: Obligation, program: unknown): Row | null {
 /** Programs beside the set for the rows its records do not reach: the set's lazy file and lock defaults are all `null`. */
 const BESIDE = ['let file = fileFromBase64("!", default: hostValue)\nexit'];
 
-test("every check the core emits has a row of the discharge map, which names its runtime check (S3 §4)", () => {
+test("every check the core emits has a row of the discharge map, which names its runtime check (S3)", () => {
   const witnessed = new Map<Row, number>();
   const unplaced: string[] = [];
   const records = [

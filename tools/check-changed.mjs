@@ -39,15 +39,16 @@ const [{ costlyTestSeconds }, { summaryLine }, { isSuiteTestPath, isTypeCoreTest
 //
 // The base is `--base`, else the open pull request's base (`gh pr view`, as `origin/<base>`), else the long-lived branch
 // HEAD's own line leaves, `origin/main` or `origin/runtime-v2`, which it prints, or exit 2 when it cannot prove which
-// (`branchedFrom`); the changes are those since its merge-base with HEAD, committed or not, untracked files
-// included. Always: `git diff --check`, the format check of the changed files, oxlint, knip, the doc links and the
-// imports, each as CI runs it, and `merge commits`: since the merge-base, no merge commit but one whose later parents
-// are on origin/main or origin/runtime-v2 and not on the base (`strayMerges`).
+// (`branchedFrom`); the changes are those since its merge-base with HEAD, committed or not, untracked files, deleted
+// ones and both sides of a move included. Always: `git diff --check`, the format check of the changed files, oxlint,
+// knip, the doc links and the imports, each as CI runs it, and `merge commits`: since the merge-base, no merge commit
+// but one whose later parents are on origin/main or origin/runtime-v2 and not on the base (`strayMerges`).
 // Then each project a changed path belongs to (`projectsFor`): its type check and tests. A root configuration file
 // belongs to the checks that read it, and needs no project when only those that always run do. A changed path no
-// project claims, other than documentation, runs every project's checks. It never builds the TypeScript or runs the
-// compiled test suite, which CI does: a change that shows only there, such as the root tsconfig's emit settings, passes
-// here. When a changed file is under `src/type-inference/core/`, it also prints the suites that pin the core's work or
+// project claims, other than documentation, runs every project's checks. Every change but documentation (a path ending
+// in `.md` or under `docs/`, `isDocumentation`) runs `test:lint` (`everyChange`). It never builds the TypeScript or runs
+// the compiled test suite, which CI does: a change that shows only there, such as the root tsconfig's emit settings,
+// passes here. When a changed file is under `src/type-inference/core/`, it also prints the suites that pin the core's work or
 // its published answers, as `tools/repository-checks/pin-suites.mjs` lists them: the focused list such a change runs
 // before review (`docs/TESTING.md`, "Pinned work"), which it does not run itself. When a changed type-core test file has
 // no entry in `tools/costly-test-files.mjs`, it prints one line saying so: the file runs in full, as every file does,
@@ -95,9 +96,14 @@ export const PROJECTS = {
     claims: (path) => path.startsWith("player/vue/"),
     checks: ["typecheck:player", "lint:design"],
   },
+  // `test:lint`'s rule tests read far more than a claim can name: `.oxlintrc.json`, the tools that run and count them
+  // (one by a computed path), and the repository's own sources and test helpers, which they lint as fixtures; a trace
+  // found 859 tracked files (#2431). So it runs for every change that is not documentation only, as oxlint does, which
+  // takes longer and runs beside it. Its claim stays, so that a path under it is not an unknown kind (every project).
   // (`tools/oxlint/tsconfig.json`, which `test:lint` compiles the rules with, extends the root one)
   "oxlint-rules": {
     claims: (path) => path.startsWith("tools/oxlint/") || path === "tsconfig.json",
+    everyChange: true,
     checks: ["test:lint"],
   },
   tools: {
@@ -122,25 +128,28 @@ export const PROJECTS = {
   },
 };
 
-/** Root configuration files that only the checks run for every change read: oxlint's. */
+/** Root configuration files that only the checks run for every change read: oxlint's, which `test:lint` reads too. */
 const READ_BY_ALWAYS_RUN_CHECKS = new Set([".oxlintrc.json"]);
 
 /** A documentation path selects no project's checks; its Markdown links are checked on every run (`doc links`). */
 const isDocumentation = (path) => path.endsWith(".md") || path.startsWith("docs/");
 
 /**
- * The projects whose checks `paths` need. A path no project claims, documentation and the configuration only the checks
- * run for every change read aside, needs every project: an unknown kind of path is checked by everything, never by
- * nothing.
+ * The projects whose checks `paths` need. A project with `everyChange` is needed by every path but documentation. A path
+ * no project claims, documentation and the configuration only the checks run for every change read aside, needs every
+ * project: an unknown kind of path is checked by everything, never by nothing.
  */
 export function projectsFor(paths) {
   const projects = new Set();
   for (const path of paths) {
-    if (isDocumentation(path) || READ_BY_ALWAYS_RUN_CHECKS.has(path)) continue;
+    if (isDocumentation(path)) continue;
+    for (const name of Object.keys(PROJECTS)) if (PROJECTS[name].everyChange) projects.add(name);
+    if (READ_BY_ALWAYS_RUN_CHECKS.has(path)) continue;
     const claiming = Object.keys(PROJECTS).filter((name) => PROJECTS[name].claims(path));
     for (const name of claiming.length > 0 ? claiming : Object.keys(PROJECTS)) projects.add(name);
   }
-  return projects;
+  // (in `PROJECTS`' order, whatever path came first)
+  return new Set(Object.keys(PROJECTS).filter((name) => projects.has(name)));
 }
 
 /** The checks `projects` run, each once although several projects name it, in the order the projects name them. */
@@ -258,6 +267,15 @@ export function strayMerges(from, head, base, baseName, queueHint = false) {
 const FORMATTED = /\.(?:ts|tsx|cts|mts|js|jsx|cjs|mjs|vue)$/u;
 
 const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim();
+
+/**
+ * The path names a Git command lists with `-z`, each as it is named: elsewhere Git quotes a name with a quote or, by
+ * default, a non-ASCII character. (A name that is not UTF-8 reads with U+FFFD for its bad bytes.)
+ */
+const namesFrom = (...args) =>
+  execFileSync("git", args, { encoding: "utf8" })
+    .split("\0")
+    .filter((name) => name !== "");
 
 /** A reason the checks cannot run: exit 2. */
 export class CannotRun extends Error {}
@@ -680,13 +698,9 @@ function enterMerge(ref, cleanups) {
     { encoding: "utf8" },
   );
   if (merge.status !== 0) {
-    const conflicts = spawnSync(
-      "git",
-      ["-C", directory, "diff", "--name-only", "--diff-filter=U"],
-      { encoding: "utf8" },
-    ).stdout.trim();
+    const conflicts = namesFrom("-C", directory, "diff", "-z", "--name-only", "--diff-filter=U");
     cannotRun(
-      `HEAD does not merge into ${ref} (${baseCommit.slice(0, 9)}): ${conflicts.split("\n").join(", ") || merge.stderr.trim()}`,
+      `HEAD does not merge into ${ref} (${baseCommit.slice(0, 9)}): ${conflicts.join(", ") || merge.stderr.trim()}`,
     );
   }
   symlinkSync(realpathSync(join(repository, "node_modules")), join(directory, "node_modules"));
@@ -716,25 +730,26 @@ async function check(cleanups) {
   const mismatch = lockfileMismatch();
   if (mismatch !== null) cannotRun(mismatch);
 
-  const changed = [
-    ...git("diff", "--name-only", "--diff-filter=d", mergeBase).split("\n"),
-    // (the merge's worktree has no untracked file but the linked `node_modules`)
-    ...(merged ? [] : git("ls-files", "--others", "--exclude-standard").split("\n")),
-  ].filter((path) => path !== "" && existsSync(path));
-  const projects = projectsFor(changed);
+  // Every path the change touches selects checks: a deleted one, whose project's checks or test:lint can then fail
+  // (#2431), and both sides of a move, which only `--no-renames` lists, each as it is named (`namesFrom`). The checks
+  // that read the files get those that exist (`changed`).
+  const touched = [
+    ...new Set([
+      ...namesFrom("diff", "-z", "--name-only", "--no-renames", mergeBase),
+      // (the merge's worktree has no untracked file but the linked `node_modules`)
+      ...(merged ? [] : namesFrom("ls-files", "-z", "--others", "--exclude-standard")),
+    ]),
+  ];
+  const changed = touched.filter((path) => existsSync(path));
+  const projects = projectsFor(touched);
   process.stdout.write(
-    `check-changed: ${changed.length} changed files since ${ref} (${mergeBase.slice(0, 9)}); ` +
+    `check-changed: ${touched.length} changed files since ${ref} (${mergeBase.slice(0, 9)}); ` +
       `projects: ${[...projects].join(", ") || "none"}\n`,
   );
   const unknown = unknownToCostly(changed);
   if (unknown.length > 0) process.stdout.write(`${unknown.join(", ")}: ${UNKNOWN_TO_COSTLY}\n`);
 
-  // (a deleted core file counts too, which `changed`, holding the files that exist, leaves out, and a file moved out of
-  // the core, whose old path only `--no-renames` lists)
-  const coreChanged = [
-    ...git("diff", "--name-only", "--no-renames", mergeBase).split("\n"),
-    ...changed,
-  ].some((path) => path.startsWith(CORE));
+  const coreChanged = touched.some((path) => path.startsWith(CORE));
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
   const formatted = changed.filter((path) => FORMATTED.test(path));
   const [formatter, ...formatterArgs] = prettier();

@@ -109,6 +109,20 @@ test("--list runs the npm scripts a file lists, in its order, and refuses a list
   assert.doesNotMatch(bare.stdout, /ran:/u);
 });
 
+test("a step named twice, given or listed, is refused before any step runs (#2455)", async (t) => {
+  const cwd = fixture(t, { a: "", b: "" });
+  writeFileSync(join(cwd, "steps.txt"), "a\nb\na\n");
+  for (const args of [
+    ["a", "b", "a"],
+    ["--list", "steps.txt"],
+  ]) {
+    const refused = await start(t, cwd, args).done;
+    assert.equal(refused.code, 1, refused.output);
+    assert.match(refused.stderr, /a step is named more than once: a\n/u);
+    assert.doesNotMatch(refused.stdout, /\[a\]|ran:/u);
+  }
+});
+
 test("a step npm cannot start fails with exit 1 and is named", async (t) => {
   const cwd = fixture(t, { first: "" });
   // (no npm on PATH: the spawn itself fails)
