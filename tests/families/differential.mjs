@@ -17,10 +17,15 @@
 // cases that still differ and those whose records it cannot read as JSON.
 // Exit 0: every case recorded and nothing threw; 1: a record holds `threw`, or `join` found a case missing, repeated
 // or unknown (it then writes nothing), or with `--ignore` a case differs or is unread; 2: a refused usage, cases file
-// or tree, before any record is written.
+// or tree, before any record is written. A run claims its `--out` once its arguments are read (#2383): it removes what
+// stands there then (an output that is one of its inputs, by any path or link, is refused instead), writes beside it a
+// partial it creates, named by its pid, and renames that onto `--out` once whole; after its claim it removes nothing it
+// did not create. So a run that ends without publishing leaves no earlier result at `--out`, except where the run
+// cannot reach or remove it, and then the claim refuses (exit 2) and says so. Two runs on one `--out` at a time are not
+// supported: the later claim removes the earlier output, and the loss is a missing file, never another run's records
+// under this run's name.
 import { createHash } from "node:crypto";
 import {
-  appendFileSync,
   closeSync,
   existsSync,
   openSync,
@@ -30,7 +35,6 @@ import {
   statSync,
   unlinkSync,
   writeFileSync,
-  writeSync,
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -40,6 +44,51 @@ const refuse = (why) => {
   process.stderr.write(`differential.mjs: ${why}\n`);
   process.exit(2);
 };
+/**
+ * Claims `out` for this run: refuses it where it is one of `inputs` by any path or link, or is no file, and else removes
+ * what stands there. Every call the claim makes on `out` passes through one rule (`reach`): nothing there (`ENOENT`,
+ * `ENOTDIR`) proceeds, a call that succeeds proceeds, and any other outcome refuses, since what stands there then stays.
+ */
+function claimOutput(out, inputs) {
+  if (out === undefined) return;
+  const reach = (call) => {
+    try {
+      return call();
+    } catch (error) {
+      if (error.code === "ENOENT" || error.code === "ENOTDIR") return undefined;
+      return refuse(
+        `cannot claim the output ${out}: ${error.message}; any file standing there is not this run's output`,
+      );
+    }
+  };
+  const found = reach(() => statSync(out));
+  if (found === undefined) return;
+  for (const file of inputs)
+    if (file !== undefined && existsSync(file)) {
+      const input = statSync(file);
+      if (input.dev === found.dev && input.ino === found.ino)
+        refuse(`the output ${out} is the input ${file}`);
+    }
+  if (!found.isFile()) refuse(`the output ${out} is no file`);
+  reach(() => unlinkSync(out));
+}
+
+/**
+ * The partial a run writes beside `out` and renames onto it once whole, named by its pid and created by this run, open
+ * for writing: a path that exists already is refused untouched, so a run never writes over or moves a file it did not
+ * create. `write` writes all it is given or throws, so a write the file system cuts short is never published.
+ */
+function startPartial(out) {
+  const partial = `${out}.partial-${process.pid}`;
+  let fd;
+  try {
+    fd = openSync(partial, "wx");
+  } catch (error) {
+    return refuse(`cannot create ${partial}: ${error.message}`);
+  }
+  return { partial, fd, write: (data) => writeFileSync(fd, data) };
+}
+
 /** The start of a record's line: the tool writes each record with its name first. */
 const NAME_FIELD = Buffer.from('{"name":"');
 
@@ -241,6 +290,7 @@ async function resolveCases(cases, root) {
 async function record() {
   const [root, casesFile] = args;
   const out = option("--out");
+  claimOutput(out, [casesFile]);
   if (root === undefined || casesFile === undefined || out === undefined || root.startsWith("--"))
     refuse("usage: differential.mjs <tree> <cases.jsonl> --out <records.jsonl>");
   const cases = readCases(casesFile);
@@ -314,11 +364,7 @@ async function record() {
     return { agree: bare.every((each) => each === bare[0]), modes: list };
   };
 
-  try {
-    writeFileSync(out, "");
-  } catch (error) {
-    refuse(`cannot write ${out}: ${error.message}`);
-  }
+  const { partial, fd, write } = startPartial(out);
   for (const c of cases) {
     const { files, globals } = c;
     const row = {
@@ -383,8 +429,10 @@ async function record() {
       if (route.plan === "outside") return { outside: JSON.parse(route.text).outside };
       return compiled(route.plan, JSON.parse(route.text).diagnostics, c);
     });
-    appendFileSync(out, `${JSON.stringify(row)}\n`);
+    write(`${JSON.stringify(row)}\n`);
   }
+  closeSync(fd);
+  renameSync(partial, out);
   process.stdout.write(`${JSON.stringify({ cases: cases.length, threw })}\n`);
   process.exitCode = threw === 0 ? 0 : 1;
 }
@@ -415,19 +463,14 @@ function join() {
     ["base", values("--base")],
     ["head", values("--head")],
   ].filter(([side]) => args.includes(`--${side}`));
+  // (an output that is an input, by any path or link, would be emptied before it is read)
+  claimOutput(out, [casesFile, ...sides.flatMap(([, files]) => files)]);
   const ignored = new Set(allValues("--ignore"));
   if (casesFile === undefined || out === undefined || values("--base").length === 0)
     refuse(
       "usage: differential.mjs join --cases <cases.jsonl> --base <records>... [--head <records>...] --out <file> [--ignore <field>...]",
     );
   if (ignored.size > 0 && sides.length !== 2) refuse("--ignore compares a base with a head");
-  // (an output that is an input, by any path or link, would be emptied before it is read)
-  if (existsSync(out)) {
-    const { dev, ino } = statSync(out);
-    for (const file of [casesFile, ...sides.flatMap(([, files]) => files)])
-      if (existsSync(file) && statSync(file).dev === dev && statSync(file).ino === ino)
-        refuse(`the output ${out} is the input ${file}`);
-  }
   const cases = readCases(casesFile);
   const wanted = new Set(cases.map((c) => c.name));
   const problems = [];
@@ -464,10 +507,8 @@ function join() {
     process.exit(1);
   }
   // (written beside the output and renamed onto it once whole, so that a failed copy leaves no output)
-  const partial = `${out}.partial-${process.pid}`;
+  const { partial, fd: output, write } = startPartial(out);
   const inputs = new Map();
-  const output = openSync(partial, "w");
-  const write = (text) => writeSync(output, text);
   const copy = ({ file, start, end }) => {
     if (!inputs.has(file)) inputs.set(file, openSync(file, "r"));
     const bytes = Buffer.alloc(end - start);
@@ -476,7 +517,7 @@ function join() {
       if (got === 0) throw new Error(`${file} ended inside the record at ${start}`);
       done += got;
     }
-    writeSync(output, bytes);
+    write(bytes);
     return bytes;
   };
   const differing = [];
