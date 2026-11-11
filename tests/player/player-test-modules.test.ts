@@ -19,6 +19,7 @@ import { dirname, join, relative, resolve } from "node:path";
 import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import ts from "typescript-vue";
+import { transformWithOxc } from "vite";
 import {
   extendedFiles,
   tsconfigClosure,
@@ -256,6 +257,30 @@ test("a Player test bundle is not built from an input the stamp does not cover",
     return () =>
       write("compiler-options.json", JSON.stringify({ compilerOptions: { strict: true } }));
   });
+  // round 4's witness: an `extends` that does not name its file, where TypeScript reads `tools.json` and Vite's compiler
+  // `tools/tsconfig.json`
+  write("tools.json", JSON.stringify({ compilerOptions: { useDefineForClassFields: true } }));
+  write(
+    "tools/tsconfig.json",
+    JSON.stringify({ compilerOptions: { useDefineForClassFields: false } }),
+  );
+  refused(/tsconfig\.json extends "\.\/tools", which names no regular \.json file/u, () => {
+    write("tsconfig.json", JSON.stringify({ extends: "./tools" }));
+    return () => write("tsconfig.json", JSON.stringify({ extends: "./compiler-options.json" }));
+  });
+  // no root tsconfig.json, so the compiler would read one above the checkout
+  refused(/the root has no tsconfig\.json/u, () => {
+    unlinkSync(path("tsconfig.json"));
+    return () => write("tsconfig.json", JSON.stringify({ extends: "./compiler-options.json" }));
+  });
+  write("player/public/note.txt", "a note\n");
+  refused(/the build has a public folder/u, () => {
+    write(
+      "player/vue/vite.test-modules.config.ts",
+      config().replace("publicDir: false,", 'publicDir: "player/public",'),
+    );
+    return () => write("player/vue/vite.test-modules.config.ts", config());
+  });
   // a project reference is a local path, also without "./" (TypeScript does not inherit references through `extends`)
   write("tools/tsconfig.json", "{}\n");
   for (const reference of ["tools", "tools/options.json"])
@@ -282,6 +307,44 @@ test("a Player test bundle is not built from an input the stamp does not cover",
     JSON.stringify({ compilerOptions: { strict: true, target: "ES2025" } }),
   );
   assert.equal(build().status, 0);
+});
+
+test("a local extends chain is followed by the names it writes, at every step", async (t) => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "player-test-modules-chain-")));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "player/b"), { recursive: true });
+  writeFileSync(join(root, "tsconfig.json"), JSON.stringify({ extends: ["./player/a.json"] }));
+  writeFileSync(join(root, "player/a.json"), JSON.stringify({ extends: "./b.json" }));
+  writeFileSync(join(root, "player/b.json"), "{}\n");
+  writeFileSync(join(root, "player/b/tsconfig.json"), "{}\n");
+  await tsconfigClosure(root, join(root, "tsconfig.json"));
+  writeFileSync(join(root, "player/a.json"), JSON.stringify({ extends: "./b" }));
+  await assert.rejects(tsconfigClosure(root, join(root, "tsconfig.json")), {
+    message: /player\/a\.json extends "\.\/b", which names no regular \.json file/u,
+  });
+});
+
+test("a file a package's tsconfig extends must be the package's: the area's are followed only by the names they write", async (t) => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "player-test-modules-package-")));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "node_modules/x"), { recursive: true });
+  mkdirSync(join(root, "player"));
+  writeFileSync(join(root, "player/base.json"), "{}\n");
+  writeFileSync(join(root, "tsconfig.json"), JSON.stringify({ extends: "x/tsconfig.json" }));
+  writeFileSync(
+    join(root, "node_modules/x/tsconfig.json"),
+    JSON.stringify({ extends: "./own.json" }),
+  );
+  writeFileSync(join(root, "node_modules/x/own.json"), "{}\n");
+  await tsconfigClosure(root, join(root, "tsconfig.json"));
+  writeFileSync(
+    join(root, "node_modules/x/own.json"),
+    JSON.stringify({ extends: "../../player/base.json" }),
+  );
+  await assert.rejects(tsconfigClosure(root, join(root, "tsconfig.json")), {
+    message:
+      /extends .*\/player\/base\.json, which is neither named by an extends in the area nor/u,
+  });
 });
 
 test("the stamp's root entries are its files and links to files, apart from the checkout's bookkeeping", (t) => {
@@ -349,9 +412,11 @@ for (const name of ["node_modules", "other"])
           assert.match(stamp.get(path) ?? "", /^folder link /u, "a folder link fails the build");
       });
 
-// The compiler edges, generated: an edge kind, its spelling and the files beside it. The expected result is
-// TypeScript's own: its resolved target must exist and lie in the area (`src/`, `player/`, a root file), or, for an
-// `extends`, in a package under `node_modules`.
+// The compiler edges, generated: an edge kind, its spelling and the files beside it, each file with a compiler option
+// of its own. A `references` target is TypeScript's own; it must exist and lie in the area (`src/`, `player/`, a root
+// file). A local `extends` (starting with `.` or `/`) must name a regular `.json` file in the area; a package's must be
+// under `node_modules`, as TypeScript resolves it. Where a local `extends` passes, Vite's compiler (`transformWithOxc`)
+// is a second oracle: it must read the named file.
 const EDGE_LAYOUTS: Record<string, readonly string[]> = {
   "nothing there": [],
   "a root x.json": ["x.json"],
@@ -368,23 +433,31 @@ const inTheArea = (root: string, file: string) => {
   if (parts[0] === ".." || parts.slice(0, -1).includes("node_modules")) return false;
   return parts.length === 1 || parts[0] === "src" || parts[0] === "player";
 };
+const regularFile = (file: string) => existsSync(file) && statSync(file).isFile();
 for (const kind of ["extends", "references"] as const)
   for (const edge of [
     "./x",
     "x",
     "./x.json",
+    "./x/",
+    "./x/tsconfig.json",
     "./player/x",
     "player/x",
     "./player/x.json",
     "./tools/x",
+    "${configDir}/x.json",
   ])
     for (const [layout, files] of Object.entries(EDGE_LAYOUTS))
       test(`${kind} "${edge}" with ${layout}`, async (t) => {
         const root = realpathSync(mkdtempSync(join(tmpdir(), "player-test-modules-edge-")));
         t.after(() => rmSync(root, { recursive: true, force: true }));
-        for (const file of files) {
-          mkdirSync(dirname(join(root, file)), { recursive: true });
-          writeFileSync(join(root, file), "{}\n");
+        const marks = new Map(files.map((file, n) => [join(root, file), `mark${n}`]));
+        for (const [file, mark] of marks) {
+          mkdirSync(dirname(file), { recursive: true });
+          writeFileSync(
+            file,
+            JSON.stringify({ compilerOptions: { jsx: "react", jsxFactory: mark } }),
+          );
         }
         const start = join(root, "tsconfig.json");
         writeFileSync(
@@ -405,18 +478,33 @@ for (const kind of ["extends", "references"] as const)
           (diagnostic) =>
             diagnostic.category === ts.DiagnosticCategory.Error && diagnostic.start !== undefined,
         );
+        const local = /^[./]/u.test(edge);
+        const named = resolve(root, edge);
         const passes =
-          !reported &&
-          target !== undefined &&
-          existsSync(target) &&
-          statSync(target).isFile() &&
-          (inTheArea(root, target) ||
-            (kind === "extends" &&
-              relative(root, target).replaceAll("\\", "/").startsWith("node_modules/")));
+          kind === "extends" && local
+            ? edge.endsWith(".json") && regularFile(named) && inTheArea(root, named)
+            : !reported &&
+              target !== undefined &&
+              regularFile(target) &&
+              (kind === "extends"
+                ? relative(root, target).replaceAll("\\", "/").startsWith("node_modules/")
+                : inTheArea(root, target));
         const outcome = await tsconfigClosure(root, start).then(
           () => "passes",
           (error: unknown) => (error instanceof Error ? error.message : String(error)),
         );
         if (passes) assert.equal(outcome, "passes", `TypeScript resolves it to ${target}`);
         else assert.notEqual(outcome, "passes", `TypeScript resolves it to ${target ?? "nothing"}`);
+        if (passes && kind === "extends" && local) {
+          mkdirSync(join(root, "player"), { recursive: true });
+          const { code } = await transformWithOxc(
+            "export const a = <b />;",
+            join(root, "player/probe.tsx"),
+          );
+          assert.match(
+            code,
+            new RegExp(`\\b${marks.get(named)}\\("b"`, "u"),
+            "Vite's compiler reads the named file",
+          );
+        }
       });
