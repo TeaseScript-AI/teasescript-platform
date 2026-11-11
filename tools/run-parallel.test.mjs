@@ -44,77 +44,73 @@ function start(t, cwd, names, serial = false) {
   return { child, done };
 }
 
-async function waitFor(read) {
-  const deadline = Date.now() + 8000;
-  while (Date.now() < deadline) {
+/**
+ * Waits until `read` returns a value, and returns it. It has no deadline, so a loaded host only makes it slower
+ * (#2379): it ends on the event itself, or fails once `runner`, when given, has exited without it.
+ */
+async function waitFor(read, runner = null) {
+  for (;;) {
     try {
       const value = read();
       if (value) return value;
     } catch (error) {
       if (error.code !== "ENOENT") throw error;
     }
+    if (runner !== null && (runner.exitCode !== null || runner.signalCode !== null))
+      throw new Error("The runner exited before the fixture reached the requested state");
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  throw new Error("Fixture did not reach the requested state");
 }
 
 const record = `import { appendFileSync, existsSync, writeFileSync } from 'node:fs';`;
 
-test(
-  "parallel commands run once and overlap; serial route runs once in order",
-  { timeout: 15000 },
-  async (t) => {
-    const cwd = fixture(t, {
-      first: `${record} appendFileSync('events', 'first-start\\n'); writeFileSync('first-ready', '');
+test("parallel commands run once and overlap; serial route runs once in order", async (t) => {
+  const cwd = fixture(t, {
+    first: `${record} appendFileSync('events', 'first-start\\n'); writeFileSync('first-ready', '');
       if (process.env.VERIFY_SERIAL !== '1') {
         while (!existsSync('second-ready')) await new Promise(r => setTimeout(r, 10));
       }
       appendFileSync('events', 'first-end\\n');`,
-      second: `${record} appendFileSync('events', 'second-start\\n'); writeFileSync('second-ready', '');
+    second: `${record} appendFileSync('events', 'second-start\\n'); writeFileSync('second-ready', '');
       console.error('visible warning'); appendFileSync('events', 'second-end\\n');`,
-    });
-    for (const serial of [false, true]) {
-      const result = await start(t, cwd, ["first", "second"], serial).done;
-      assert.equal(result.code, 0, result.output);
-      assert.match(result.output, /visible warning/);
-      const events = readFileSync(join(cwd, "events"), "utf8").trim().split("\n");
-      assert.equal(events.length, 4);
-      for (const event of ["first-start", "first-end", "second-start", "second-end"]) {
-        assert.equal(events.filter((value) => value === event).length, 1);
-      }
-      if (serial)
-        assert.deepEqual(events, ["first-start", "first-end", "second-start", "second-end"]);
-      else assert.ok(events.indexOf("second-start") < events.indexOf("first-end"));
-      for (const file of ["events", "first-ready", "second-ready"]) rmSync(join(cwd, file));
+  });
+  for (const serial of [false, true]) {
+    const result = await start(t, cwd, ["first", "second"], serial).done;
+    assert.equal(result.code, 0, result.output);
+    assert.match(result.output, /visible warning/);
+    const events = readFileSync(join(cwd, "events"), "utf8").trim().split("\n");
+    assert.equal(events.length, 4);
+    for (const event of ["first-start", "first-end", "second-start", "second-end"]) {
+      assert.equal(events.filter((value) => value === event).length, 1);
     }
-  },
-);
+    if (serial)
+      assert.deepEqual(events, ["first-start", "first-end", "second-start", "second-end"]);
+    else assert.ok(events.indexOf("second-start") < events.indexOf("first-end"));
+    for (const file of ["events", "first-ready", "second-ready"]) rmSync(join(cwd, file));
+  }
+});
 
-test(
-  "a failed step stops no other, serial or parallel; the last line names what ran, failed and did not run (#2106)",
-  { timeout: 15000 },
-  async (t) => {
-    const cwd = fixture(t, {
-      failure: "console.error('distinct failure diagnostic'); process.exit(7);",
-      later: `${record} await new Promise(r => setTimeout(r, 300)); appendFileSync('events', 'later-end\\n');`,
-    });
-    for (const serial of [false, true]) {
-      const result = await start(t, cwd, ["failure", "later"], serial).done;
-      assert.equal(result.code, 7, result.output);
-      assert.match(result.output, /distinct failure diagnostic/);
-      assert.match(result.output, /\[failure\] FAIL/);
-      assert.match(result.output, /\[later\] PASS/);
-      assert.equal(readFileSync(join(cwd, "events"), "utf8"), "later-end\n");
-      assert.equal(
-        result.output.trimEnd().split("\n").at(-1),
-        "ran: failure, later; failed: failure; not run: none",
-      );
-      rmSync(join(cwd, "events"));
-    }
-  },
-);
+test("a failed step stops no other, serial or parallel; the last line names what ran, failed and did not run (#2106)", async (t) => {
+  const cwd = fixture(t, {
+    failure: "console.error('distinct failure diagnostic'); process.exit(7);",
+    later: `${record} await new Promise(r => setTimeout(r, 300)); appendFileSync('events', 'later-end\\n');`,
+  });
+  for (const serial of [false, true]) {
+    const result = await start(t, cwd, ["failure", "later"], serial).done;
+    assert.equal(result.code, 7, result.output);
+    assert.match(result.output, /distinct failure diagnostic/);
+    assert.match(result.output, /\[failure\] FAIL/);
+    assert.match(result.output, /\[later\] PASS/);
+    assert.equal(readFileSync(join(cwd, "events"), "utf8"), "later-end\n");
+    assert.equal(
+      result.output.trimEnd().split("\n").at(-1),
+      "ran: failure, later; failed: failure; not run: none",
+    );
+    rmSync(join(cwd, "events"));
+  }
+});
 
-test("a step npm cannot start fails with exit 1 and is named", { timeout: 10000 }, async (t) => {
+test("a step npm cannot start fails with exit 1 and is named", async (t) => {
   const cwd = fixture(t, { first: "" });
   // (no npm on PATH: the spawn itself fails)
   const child = spawn(process.execPath, [runner, "first"], {
@@ -150,7 +146,7 @@ describe("process cleanup", { concurrency: true }, () => {
   for (const reason of ["parent-failure", "SIGINT", "SIGTERM"]) {
     test(
       `${reason} stops npm descendants, including a child that ignores termination`,
-      { skip: process.platform === "win32", timeout: 15000, concurrency: true },
+      { skip: process.platform === "win32", concurrency: true },
       async (t) => {
         const cwd = fixture(t, {
           waiting: `import { existsSync } from 'node:fs'; import { spawn } from 'node:child_process';
@@ -158,7 +154,7 @@ describe("process cleanup", { concurrency: true }, () => {
         ${reason === "parent-failure" ? "while (!existsSync('pid')) await new Promise(r => setTimeout(r, 10)); process.exit(9);" : "setInterval(() => {}, 1000);"}`,
         });
         const { child, done } = start(t, cwd, ["waiting"]);
-        const pid = await waitFor(() => Number(readFileSync(join(cwd, "pid"), "utf8")));
+        const pid = await waitFor(() => Number(readFileSync(join(cwd, "pid"), "utf8")), child);
         t.after(() => {
           try {
             process.kill(pid, "SIGKILL");

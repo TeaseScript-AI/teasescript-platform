@@ -107,7 +107,7 @@ test("the checks before the tests are check:pretest's run-parallel steps, and an
 // Process-group assertions target the POSIX environment used by repository CI.
 test(
   "a signal during the build or the suite stops its whole process group, keeps the first failure's or the signal's status, and the last line comes after (#2106)",
-  { skip: process.platform === "win32", timeout: 60_000 },
+  { skip: process.platform === "win32" },
   async (t) => {
     for (const [waits, exits, status, last] of [
       ["build", {}, 143, "ran: lint, format; failed: none; not run: build, test suite (stopped)"],
@@ -125,9 +125,19 @@ test(
       let stderr = "";
       child.stdout.on("data", (chunk) => (stdout += chunk));
       child.stderr.on("data", (chunk) => (stderr += chunk));
-      const closed = new Promise((resolve) => child.on("close", resolve));
-      while (!existsSync(join(cwd, "pid")) || readFileSync(join(cwd, "pid"), "utf8") === "")
+      t.after(() => child.exitCode === null && child.signalCode === null && child.kill("SIGKILL"));
+      let exited = false;
+      const closed = new Promise((resolve) =>
+        child.on("close", (code) => {
+          exited = true;
+          resolve(code);
+        }),
+      );
+      // (no deadline, so a loaded host only makes it slower (#2379); a runner that ends first fails the wait)
+      while (!existsSync(join(cwd, "pid")) || readFileSync(join(cwd, "pid"), "utf8") === "") {
+        if (exited) assert.fail(`the runner ended before the ${waits} started: ${stdout}${stderr}`);
         await new Promise((wait) => setTimeout(wait, 20));
+      }
       const pid = Number(readFileSync(join(cwd, "pid"), "utf8"));
       // (a run that fails to stop it leaves no stray process behind the test either)
       t.after(() => {
