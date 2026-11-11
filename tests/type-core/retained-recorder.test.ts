@@ -700,6 +700,30 @@ test("a marked ring analysed whole (`analyseCore`), in the four held modes, has 
       'say "${p2.q.q.g}"',
       "exit",
     ],
+    // (#2005's floor rings: the listing memo's fills, then a prefix's property index read again)
+    [
+      "let p0={a:0,b:0}",
+      "let p1={a:0,b:0}",
+      "let p2={a:0,b:0}",
+      "p2.q=p0",
+      "if p0.q.a is integer { p1=p0 }",
+      "if p0.q.q.q.b is integer { p1=p0 }",
+      "p2=p1",
+      "p2=p2.q",
+      'say "${p2.b} ${p2.q.a} ${p2.q.q.b}"',
+      "exit",
+    ],
+    [
+      "let p0={q:{a:0,b:0}}",
+      "let p1={a:0,b:0}",
+      "let p2={a:0,b:0}",
+      "p2.q=p0",
+      "p1=p0",
+      "p2=p1",
+      "p2=p2.q",
+      'say "${p2.b} ${p2.q.a} ${p2.q.q.b}"',
+      "exit",
+    ],
   ];
   const found: string[] = [];
   for (const lines of sources) {

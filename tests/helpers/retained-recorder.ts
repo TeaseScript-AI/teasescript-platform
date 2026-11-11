@@ -154,6 +154,18 @@ export interface RecorderReport {
   readonly entries: number;
   /** Classes compared by identity, with the times they were met. */
   readonly identities: ReadonlyMap<string, number>;
+  /**
+   * What the run switches saw change, by owner field (`Owner.field`, `Owner's fields`) and by collection's name: the
+   * changes a collection's own write recorded and those an `amend` recorded; a name compared and never changed has
+   * both zero.
+   */
+  readonly exercised: ReadonlyMap<string, Exercised>;
+}
+
+/** The recorded changes of one owner field or collection (`RecorderReport.exercised`). */
+export interface Exercised {
+  written: number;
+  amended: number;
 }
 
 /** A 53-bit hash of a string (cyrb53), as a short text. */
@@ -209,6 +221,7 @@ export class Recorder implements RetainedRecorder {
   readonly #seen = new Set<string>();
   readonly #outsideWrites = new Map<string, number>();
   readonly #identities = new Map<string, number>();
+  readonly #exercised = new Map<string, Exercised>();
   #checkpoints = 0;
   #entries = 0;
   /** Whether the next checkpoint only takes fingerprints (the first, and the one after a callback is installed). */
@@ -227,6 +240,7 @@ export class Recorder implements RetainedRecorder {
       checkpoints: this.#checkpoints,
       entries: this.#entries,
       identities: this.#identities,
+      exercised: this.#exercised,
     };
   }
 
@@ -459,11 +473,21 @@ export class Recorder implements RetainedRecorder {
       covered: () => boolean,
       label: string,
       value: unknown,
+      tally: string,
     ): void => {
       after.set(entry, hash);
+      let seen = this.#exercised.get(tally);
+      if (seen === undefined) this.#exercised.set(tally, (seen = { written: 0, amended: 0 }));
       const before = this.#before.get(entry);
       if (this.#fresh || before === undefined || before === hash) return;
-      if (marks.written.has(entry) || covered()) return;
+      if (marks.written.has(entry)) {
+        seen.written += 1;
+        return;
+      }
+      if (covered()) {
+        seen.amended += 1;
+        return;
+      }
       const where = this.#locate ? ` (changed at ${this.#where(value, memo, "")})` : "";
       const text = `unrecorded change: ${label}${where}`;
       if (!this.#seen.has(text)) {
@@ -481,6 +505,7 @@ export class Recorder implements RetainedRecorder {
         () => false,
         `${collection.name}'s membership`,
         null,
+        collection.name,
       );
       // (a map's value at each key, a set's member itself: each its own entry, by value)
       for (const [key, value, keyed] of listed) {
@@ -492,6 +517,7 @@ export class Recorder implements RetainedRecorder {
           () => node.amended,
           `${collection.name} at ${this.#atom(key)}`,
           held,
+          collection.name,
         );
       }
     }
@@ -506,6 +532,7 @@ export class Recorder implements RetainedRecorder {
         () => ownerAmended,
         `${record.name}'s fields`,
         null,
+        `${record.name}'s fields`,
       );
       for (const [field, value] of fields) {
         const node = this.#value(value, memo, marks.amended, []);
@@ -515,6 +542,7 @@ export class Recorder implements RetainedRecorder {
           () => ownerAmended || node.amended,
           `${record.name}.${field}`,
           value,
+          `${record.name}.${field}`,
         );
       }
     }
