@@ -67,6 +67,7 @@ export function compileProjectWithBackend(files) {
   if (source === "settling" && settling) (settling = false), wait(1800);
   if (source === "slow") wait(700);
   if (source === "hang") wait(6000);
+  if (source === "failing" && import.meta.url.includes("/base/")) throw new Error("fails");
   ledger().charge("frames", source === "over" ? 5000 : source === "hang" ? 1 : 300);
   return { plan: { instructions: [], mode: globalThis.heldMode }, diagnostics: [] };
 }
@@ -504,4 +505,129 @@ test("the plans summary names what differs in a demand row, gives it one class, 
     `s n mode "forward, unshared": at demand allowance 4 apart (unavailable): unrecorded; stops unavailable ` +
       `${own} unrecorded, head: none); ${checks}, units 5 → 5`,
   ]);
+});
+
+test("the plans summary says which tree added, removed or moved each stop, by its phase, and an unrecorded list is unavailable (#2340)", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  const side = {
+    plan: "p",
+    diagnostics: "d",
+    checks: 0,
+    error: null,
+    trace: "t",
+    questions: "q",
+    units: 1,
+  };
+  /** A stop list as `heldStops` gives it: each phase's allowances ascending, the phases from the highest down. */
+  const stopsOf = (phases: [string, number, number][]) =>
+    phases.flatMap(([phase, low, high]) =>
+      Array.from({ length: high - low + 1 }, (_, i) => ({ allowance: low + i, phase })),
+    );
+  // (phase names in neither alphabetical nor allowance order; a phase the base alone has, one the head alone has, one
+  // shifted by 43, as #2064's analysis units moved, and the base's and the head's lists each missing once)
+  const walk: [string, number, number] = ["walk", 5, 7];
+  const publication: [string, number, number] = ["publication", 1121, 1125];
+  const extraction: [string, number, number] = ["extraction", 300, 301];
+  const entries: [string, Record<string, unknown>][] = [
+    ["removed", { base: stopsOf([publication, walk]), head: stopsOf([publication]) }],
+    ["added", { base: stopsOf([publication]), head: stopsOf([publication, extraction]) }],
+    [
+      "moved",
+      { base: stopsOf([publication, walk]), head: stopsOf([["publication", 1164, 1168], walk]) },
+    ],
+    ["unrecorded", {}],
+    ["head unrecorded", { base: stopsOf([publication]) }],
+    ["reordered", { base: stopsOf([publication, walk]), head: stopsOf([walk, publication]) }],
+  ];
+  const modes = entries.map(([mode, lists]) => ({
+    mode,
+    base: side,
+    head: side,
+    same: true,
+    stops: { count: 1, sameSet: false, differ: [], ...lists },
+  }));
+  const failing = {
+    mode: "failing",
+    base: side,
+    head: side,
+    same: true,
+    stops: { unavailable: "the base's unstopped compile failed: Error: no" },
+  };
+  const file = join(folder, "records.jsonl");
+  const record = { set: "held", name: "c", runs: 7, differing: 6, modes: [...modes, failing] };
+  writeFileSync(file, `${JSON.stringify(record)}\n`);
+  const ran = spawnSync(process.execPath, [tool, "summary", file, "--list", "100"], {
+    encoding: "utf8",
+  });
+  assert.equal(ran.status, 0, ran.stderr);
+  const [countsLine, ...lines] = ran.stdout.trim().split("\n");
+  const counts = JSON.parse(countsLine!);
+  assert.deepEqual(
+    ["stopSet", "stopsAdded", "stopsRemoved", "stopsMoved", "stopsUnavailable"].map(
+      (key) => counts[key],
+    ),
+    [6, 1, 1, 1, 4],
+  );
+  const apart = (mode: string) => `held c mode "${mode}": STOP SET apart (main 1 stops)`;
+  assert.deepEqual(lines, [
+    apart("removed"),
+    'held c mode "removed": stop phase "walk" removed: base 5..7 (3), head none (0)',
+    apart("added"),
+    'held c mode "added": stop phase "extraction" added: base none (0), head 300..301 (2)',
+    apart("moved"),
+    'held c mode "moved": stop phase "publication" moved: base 1121..1125 (5), head 1164..1168 (5)',
+    apart("unrecorded"),
+    'held c mode "unrecorded": which stops moved is unavailable (no stop lists recorded)',
+    apart("head unrecorded"),
+    'held c mode "head unrecorded": which stops moved is unavailable (no stop lists recorded)',
+    apart("reordered"),
+    'held c mode "reordered": which stops moved is unavailable (the lists differ, no phase does)',
+    'held c mode "failing": stop set unavailable (the base\'s unstopped compile failed: Error: no)',
+  ]);
+});
+
+test("the plans comparison keeps both trees' stops where they differ, and says a held case's stop search did not run (#2340)", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  built(folder, [["fine", "fine"]]);
+  // (one held case whose stops move by tree, and one whose base compile fails)
+  for (const tree of ["base", "head"])
+    writeFileSync(
+      join(folder, tree, "dist", "tests/helpers/type-core-held-host.js"),
+      `export const HELD_MODES = ${JSON.stringify(ORDERS.base)}.map((name) => ({ name, run: (f) => f() }));
+export const heldFamily = () => ["moving", "failing"].map((name) => ({ name, source: name, slice: true }));
+export const heldStops = () => [{ allowance: ${tree === "head" ? 12 : 10}, phase: "walk" }];
+`,
+    );
+  const out = join(folder, "held.jsonl");
+  const ran = spawnSync(
+    process.execPath,
+    [tool, join(folder, "base"), join(folder, "head"), "held", "--stops", "--out", out],
+    { encoding: "utf8" },
+  );
+  assert.equal(ran.status, 1, ran.stderr);
+  const records = readFileSync(out, "utf8")
+    .trim()
+    .split("\n")
+    .map((line): Record<string, unknown> => JSON.parse(line));
+  const stopsOf = (name: string) => {
+    const { modes } = records.find((record) => record.name === name)!;
+    assert.ok(Array.isArray(modes));
+    return modes.map((entry: Record<string, unknown>) => entry.stops);
+  };
+  assert.deepEqual(
+    stopsOf("moving"),
+    ORDERS.base.map(() => ({
+      count: 1,
+      sameSet: false,
+      differ: [],
+      base: [{ allowance: 10, phase: "walk" }],
+      head: [{ allowance: 12, phase: "walk" }],
+    })),
+  );
+  assert.deepEqual(
+    stopsOf("failing"),
+    ORDERS.base.map(() => ({ unavailable: "the base's unstopped compile failed: Error: fails" })),
+  );
 });
