@@ -152,3 +152,44 @@ test(
     }
   },
 );
+
+test(
+  "branches that share a replaced head archive it once; a push that would delete an archive is refused",
+  { timeout: 60_000 },
+  () => {
+    const { root, git, remote, commit } = setup();
+    const archived = () =>
+      remote("for-each-ref", "--format=%(refname) %(objectname)", "refs/archive").stdout.trim();
+    try {
+      const first = commit("first");
+      const shared = commit("shared");
+      git("push", "-q", "origin", "main:main", "main:side");
+      git("reset", "-q", "--hard", first);
+      const rewritten = commit("rewritten");
+      const both = git("push", "-q", "--force", "origin", "main:main", "main:side");
+      assert.equal(both.status, 0, both.stderr);
+      assert.equal(archived(), `refs/archive/${shared} ${shared}`);
+      assert.equal(remote("rev-parse", "side").stdout.trim(), rewritten);
+
+      // A mirror push from a clone without the archive would delete it unlisted, and move `main` back: refused, nothing moves.
+      git("reset", "-q", "--hard", first);
+      const mirror = git("push", "-q", "--mirror", "origin");
+      assert.notEqual(mirror.status, 0);
+      assert.match(
+        mirror.stderr,
+        /a pruning push \(--mirror or --prune\) can delete archive refs unseen/u,
+      );
+      // An explicit deletion of an archive is listed to the hook, and refused.
+      const explicit = git("push", "-q", "origin", `:refs/archive/${shared}`);
+      assert.notEqual(explicit.status, 0);
+      assert.match(
+        explicit.stderr,
+        new RegExp(`refs/archive/${shared} would be deleted or moved, and archives are kept`, "u"),
+      );
+      assert.equal(archived(), `refs/archive/${shared} ${shared}`);
+      assert.equal(remote("rev-parse", "main").stdout.trim(), rewritten);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
