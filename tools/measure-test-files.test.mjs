@@ -228,7 +228,7 @@ test(
       writeFileSync(join(root, "gh.json"), JSON.stringify(counted));
       const cancelled = measure(root, ["--from-ci", "11", "12", "13"]);
       assert.equal(cancelled.status, 0, cancelled.out);
-      assert.match(cancelled.out, /run 12 ended cancelled, but its 2 test jobs passed: counted/u);
+      assert.match(cancelled.out, /run 12 ended cancelled, but its 2 test steps passed: counted/u);
       assert.deepEqual(costly(cancelled.module), costly(module));
       for (const [field, value] of [
         ["failed", 1],
@@ -239,7 +239,7 @@ test(
         writeFileSync(join(root, "gh.json"), JSON.stringify(broken));
         const one = measure(root, ["--from-ci", "11", "12", "13"]);
         assert.equal(one.status, 1, `${field}: ${one.out}`);
-        assert.match(one.out, /run 13's test jobs did not all pass \(run failure\)/u, field);
+        assert.match(one.out, /run 13's test steps did not all pass \(run failure\)/u, field);
       }
     } finally {
       rmSync(root, { recursive: true, force: true });
