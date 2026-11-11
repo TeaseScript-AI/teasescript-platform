@@ -15,6 +15,7 @@ Which tool answers which question:
 | Does a stop let a value through that the natural plan rejects? | `stop-runs.mjs` ([Stop runs](#stop-runs)) |
 | What do the checker, the core and the core's route each answer for a list of cases, plans and runs included? | `differential.mjs` ([Differential records](#differential-records)) |
 | Are two trees' records of a list of cases equal but for some fields, such as a changed message's `message`? | `differential.mjs join --ignore` ([Differential records](#differential-records)) |
+| Which receiving-context class (A, R, R+, L, I; #1072) has each typed call of a list of cases, with its fixed points? | `receiving.mjs` (its header) |
 | A compiler pull request's whole replay of base against head | `tools/compiler-replay.mjs` |
 | Does a change outside the type core keep the current checker's output? | `tools/compiler-differential.mjs` |
 
