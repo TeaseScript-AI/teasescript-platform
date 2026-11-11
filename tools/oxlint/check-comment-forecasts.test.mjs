@@ -109,6 +109,9 @@ test("the counted citations are counted in comments only", () => {
     ),
     { "bare r4.N": 2, "other TABLE": 2 },
   );
+  // the revision rule's token: after `_` it is one, after `.` or a letter none
+  assert.deepEqual(citationCounts("a.ts", "// _r4.1\n"), { "bare r4.N": 1 });
+  assert.deepEqual(citationCounts("a.ts", "// x.r4.2, xr4.3\n"), {});
 });
 
 test("a TABLE revision or section, wrapped or not, is no counted form: the text check finds it", () => {
@@ -272,6 +275,17 @@ test("a revision number names an entry of the accepted record, each end of a ran
     [1, "9997"],
   ]);
   assert.deepEqual(missing("tests/a.json", '{"closes": "r4.9996 until #1"}\r\n'), [[1, "9996"]]);
+  // a range's short second end is a number of its own; a spaced dash, a longer token or a full end is none
+  assert.deepEqual(
+    missing(
+      "tests/b.ts",
+      "r4.38–72, r4.38-9995, r4.9994–38\nr4.38 – 9993, r4.38–9992a, r4.38-9991.5, r4.38–9990٢, r4.38-r4.72\n",
+    ),
+    [
+      [1, "9995"],
+      [1, "9994"],
+    ],
+  );
   // other spellings and longer tokens are no revision numbers; an anchor is the doc-links check's
   // a number is its digits as written, leading zeros included, so 038 names no entry 38
   assert.deepEqual(
@@ -415,7 +429,7 @@ test("a record page's anchors are exactly those the doc-links check resolves, he
       { cwd: root, encoding: "utf8" },
     );
     const unresolved = new Set(
-      [...links.stderr.matchAll(/page\.md#([\w-]+)/gu)].map(([, anchor]) => anchor),
+      [...links.stderr.matchAll(/Cannot find heading for `#([\w-]+)`/gu)].map(([, anchor]) => anchor),
     );
     assert.ok(unresolved.size > 0, links.stderr);
     assert.deepEqual(
@@ -448,7 +462,12 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
     write("tools/oxlint/comment-citations.json", "{}\n");
     // entries on every record page Git lists: the README, a nested page and another Markdown extension too
     const record = "docs/specifications/type-inference-accepted-record";
-    write(`${record}/README.md`, "# Record\n\n## Labels\n\n### r4-40\n");
+    write(
+      `${record}/README.md`,
+      "# Record\n\n## Labels\n\n| label | meaning |\n| --- | --- |\n| `C9` | a rule |\n\n### r4-40\n",
+    );
+    // a core comment's label with its glossary row: no finding, so the glossary is the README Git lists
+    write("src/type-inference/core/labelled.ts", "// C9 holds here\nexport const x = 1;\n");
     // (a struck-through heading, GitHub's mark, and one with inline HTML, read as the doc-links check reads them)
     write(
       `${record}/sharing.md`,
@@ -551,6 +570,10 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
           ({ fileName, line, message }) => `${fileName}:${line} ${/#([\w-]+)/u.exec(message)[1]}`,
         ),
       ["src/pointers.ts:3 r4-9", "src/pointers.ts:4 twice-2", "src/pointers.ts:4 r4-41"],
+    );
+    assert.deepEqual(
+      entryFindings.filter(({ message }) => message.includes("glossary")),
+      [],
     );
     writeFileSync(
       Buffer.concat([Buffer.from(`${root}/name-`), Buffer.from([0xff]), Buffer.from(".md")]),
@@ -716,7 +739,8 @@ test("a comment's pointer at the accepted record names an anchor of the page it 
         "sharing.md",
         "# Sharing\n\n### r4-15\n\n### section-2-f12\n\n```\n### r4-9\n```\n\n### Twice\n\n### Twice\n",
       ],
-      ["oracles.md", "# Oracles\n\n### r4-16\n"],
+      // (each page slugs on its own: a heading repeated on another page takes no `-1` there)
+      ["oracles.md", "# Oracles\n\n### r4-16\n\n### Twice\n"],
       ["nested/entry.md", "# Nested\n\n### r4-41\n"],
       ["other.markdown", "# Other\n\n### r4-42: The rule (a), `x`!\n"],
     ]),
@@ -734,6 +758,7 @@ test("a comment's pointer at the accepted record names an anchor of the page it 
         `// fenced (${record}/sharing.md#r4-9), repeated (${record}/sharing.md#twice, ${record}/sharing.md#twice-1)`,
         `// a third (${record}/sharing.md#twice-2), nested (${record}/nested/entry.md#r4-41, ${record}/entry.md#r4-41)`,
         `// another extension (${record}/other.markdown#r4-42-the-rule-a-x, ${record}/other.md#r4-42-the-rule-a-x)`,
+        `// missing anchors (${record}/nested/entry.md#r4-9999, ${record}/other.markdown#r4-42) and (${record}/oracles.md#twice)`,
         "",
       ].join("\n"),
       anchors,
@@ -746,6 +771,8 @@ test("a comment's pointer at the accepted record names an anchor of the page it 
       { line: 7, page: "sharing.md", anchor: "twice-2" },
       { line: 7, page: "entry.md", anchor: "r4-41" },
       { line: 8, page: "other.md", anchor: "r4-42-the-rule-a-x" },
+      { line: 9, page: "nested/entry.md", anchor: "r4-9999" },
+      { line: 9, page: "other.markdown", anchor: "r4-42" },
     ],
   );
 });

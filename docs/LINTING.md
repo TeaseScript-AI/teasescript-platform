@@ -76,7 +76,7 @@ holds the whole word `r4` or a section mark later on, or whose next line holds o
 between does not count, markup or words, so such a line is refused in prose too: state the fact, or keep the revision
 two lines away. A citation over three or more lines, in another letter case or inside a longer word is outside the check
 and left to review. A revision number `r4.N` (a whole token) names the accepted record's entry `r4-N`, and so does a
-range's short second end (`66` in `r4.63–66` or `r4.63-66`; a spaced dash makes no range): outside the record's own
+range's short second end (`45` in `r4.44–45` or `r4.44-45`; a spaced dash makes no range): outside the record's own
 pages and the check's test, one with no such heading is refused, in every file Git lists; the check proves the entry
 exists, not that it carries the sentence's claim, and other spellings (`R4.1`, an anchor `#r4-N`) are not its. A
 comment's pointer at the record (`…/type-inference-accepted-record/<page>.md#<anchor>`, a nested page or `.markdown`

@@ -255,8 +255,8 @@ export function recordEntries(pages) {
 }
 
 /**
- * A range's short second end right after a revision number, `–66` or `-66` in `r4.63–66`: a dash, then digits that no
- * letter, digit or `.` and digit follows. A spaced dash or `to` makes no range.
+ * A range's short second end right after a revision number (the `–66` after a number 63): a dash, then digits that
+ * no letter, digit or `.` and digit follows. A spaced dash or `to` makes no range.
  */
 const SHORT_END = /^[–-](\d+)(?![\p{L}\p{N}]|\.\p{N})/u;
 
