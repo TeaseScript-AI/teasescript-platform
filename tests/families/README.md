@@ -11,6 +11,7 @@ Which tool answers which question:
 | --- | --- |
 | Does an area's analysis (its publication, its stops) differ between two trees? | `run.mjs`, `stalls.mjs` ([Running an area](#running-an-area)) |
 | Does a set's plan, diagnostics, charge trace or questions on the core's route differ between two trees? | `plans.mjs` ([Plans](#plans)) |
+| What differs in a differing demand row, and which tree's output does the allowance stop? | `plans.mjs summary` ([Plans](#plans)) |
 | Where does the core's route differ from the current checker on one tree (the shadow gate)? | `shadow.mjs`, `shadow-classify.mjs` ([Shadow](#shadow)) |
 | Does a stop let a value through that the natural plan rejects? | `stop-runs.mjs` ([Stop runs](#stop-runs)) |
 | What do the checker, the core and the core's route each answer for a list of cases, plans and runs included? | `differential.mjs` ([Differential records](#differential-records)) |
@@ -342,15 +343,21 @@ diagnostics, the trace of every unit the compile charges and the questions it as
 of a source in a mode on one tree, or one
 analysis of the held family's stop search, or that search's work between them) stalls by the runner's rule above: its
 units past `--units` (4) times its program's allowance, the allowance of the source's natural compile for a run at a
-test allowance; a run past the safety net, `--timeout` (1,800 s), makes its source `uncharged`, never a stall. One JSON
-line per source (its set, name and `key`) goes to `--out`, whose sources, by name and key, a rerun with it counts as
-recorded without running them again, and a summary to stdout; `plans.mjs summary <records>...` classifies the records
-(identical, work only, questions, publication, stops) and lists each difference, stall and uncharged source. A record
-and a stall's run name their mode by that `name`; a record from before #2342 holds a number, the mode's index in
-`HELD_MODES` at the commit that wrote it (`forward`, `reversed`, `forward, unshared`, `reversed, unshared` from
-3804b7d3f, where the table began, to this day; the oracle's `MODES` orders them otherwise), printed as that number and
-never translated. A builder runs the head tree's copy instead of copying a kit, and extends it here where a comparison
-needs more:
+test allowance; a run past the safety net, `--timeout` (1,800 s), makes its source `uncharged`, never a stall. A worker,
+fresh or after a stall, gets no source before it has loaded and checked both trees, also within `--timeout`; otherwise
+the run ends with exit 2, and the next source gets no record. One JSON line per source (its set, name and `key`) goes to
+`--out`, whose sources, by name and key, a rerun with it counts as recorded without running them again, and a summary to
+stdout; `plans.mjs summary <records>...` classifies the records (identical, work only, questions, publication, stops)
+and lists each difference, stall and uncharged source. A differing demand row takes the same one class (publication
+where the plan, the diagnostics or the error differ, else questions, else work), lists every part apart, and says which
+tree's output the allowance stops against that tree's own unstopped compile in the mode (base, head, both or neither),
+each counted. `summary` first checks every line's keys, types and value formats against those the runner writes: a gate
+against malformed, foreign and truncated lines, which refuses the input (exit 2), not a proof of the invariants between
+one record's fields. A record and a stall's run name their mode by that `name`; a record from before #2342 holds a
+number, the mode's index in `HELD_MODES` at the commit that wrote it (`forward`, `reversed`, `forward, unshared`,
+`reversed, unshared` from 3804b7d3f, where the table began, to this day; the oracle's `MODES` orders them otherwise),
+printed as that number and never translated. A builder runs the head tree's copy instead of copying a kit, and extends
+it here where a comparison needs more:
 
 ```sh
 sx-job submit --commit base=<base> --commit head=<head> --shards 16 --mem 3G --timeout 1h --campaign <T> \
