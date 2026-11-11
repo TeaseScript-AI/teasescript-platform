@@ -179,6 +179,15 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
           "declared 'integer' on line 1. To add other numbers to it, write 'let scores: number[] = [lives]'.",
       ],
     ],
+    // (a later store's copy: its declaration's `null` start value would not fit 'let scores: number[] = null', so
+    // the sentence that names the line stays, Codex r1 on #2317)
+    [
+      "let lives: integer = 3\nlet scores = null\nscores = [lives]\nscores.add(2.5)\nexit\n",
+      [
+        "E TSV041 '2.5': 'scores' holds whole numbers (integer[]) since line 3, so it cannot contain a number. " +
+          ROUND,
+      ],
+    ],
     [
       "let n: integer = hostValue\nexit\n",
       [
