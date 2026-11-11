@@ -453,6 +453,49 @@ test("a value deeper than the call stack is walked whole: a change at its bottom
   assert.deepEqual(marked, []);
 });
 
+test("compared at every third switch, a change in a switch not compared is still named unless amended", () => {
+  for (const marked of [false, true]) {
+    const recorder = new Recorder({ every: 3 });
+    withRetainedRecorder(recorder, () => {
+      const map = Retained.map<string, { value: number }>("T.every");
+      const payload = { value: 1 };
+      const steps: (() => void)[] = [
+        () => map.set("p", payload),
+        () => {},
+        () => {
+          payload.value = 2;
+          if (marked) amend(payload);
+        },
+        () => {},
+        () => {},
+      ];
+      new Solver(itemScope()).run(
+        (function* (): Work<readonly Item[]> {
+          for (const [index, step] of steps.entries())
+            yield {
+              key: `every${index}`,
+              kind: "value",
+              file: 0,
+              offset: index,
+              *make(): Work<readonly Item[]> {
+                step();
+                return [];
+              },
+            };
+          return [];
+        })(),
+      );
+    });
+    const report = recorder.report();
+    assert.ok(report.checkpoints < report.switches, `${report.checkpoints} of ${report.switches}`);
+    assert.deepEqual(
+      report.violations,
+      marked ? [] : ['unrecorded change: T.every at "p"'],
+      `marked: ${marked}`,
+    );
+  }
+});
+
 test("a demand's factory runs as its own run: its caller's amend does not cover the change it makes", () => {
   // (an eager factory, `make` an ordinary function, and a generator one change the payload alike)
   for (const eager of [true, false]) {

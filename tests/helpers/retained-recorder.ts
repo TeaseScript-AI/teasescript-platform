@@ -125,6 +125,8 @@ const TYPED = new Set<unknown>(
 interface Marks {
   readonly written: Set<string>;
   readonly amended: WeakSet<WeakKey>;
+  /** The objects of `amended` in order, so a window's runs' marks can be joined (`every`). */
+  readonly list: WeakKey[];
 }
 
 interface Registered {
@@ -150,7 +152,10 @@ export interface RecorderReport {
   readonly violations: readonly string[];
   /** Writes outside any solver run, by owner name and site, with their counts. */
   readonly outside: ReadonlyMap<string, number>;
+  /** The comparisons made (`every`), the last one `report`'s. */
   readonly checkpoints: number;
+  /** The run switches heard. */
+  readonly switches: number;
   /** The entries compared at the last checkpoint. */
   readonly entries: number;
   /** Classes compared by identity, with the times they were met. */
@@ -216,6 +221,13 @@ function siteOf(stack: string | undefined): string {
 /** A recorder's options: `locate` names, with each unrecorded change, the path within the entry where it stands. */
 export interface RecorderOptions {
   readonly locate?: boolean;
+  /**
+   * Compares at every `every`-th run switch and at the last (`report`), the marks of every run in the switches between
+   * counting for the next comparison: an unmarked change is still found, but not which switch made it, and a change
+   * undone within the window, or marked in it by another run, is not. 1, every switch, unless given (the sweep's cost
+   * bound, #1072 1b R12).
+   */
+  readonly every?: number;
   /** Walks the instances of the identity classes marked `census` by value, so a change in one is named. */
   readonly census?: boolean;
 }
@@ -223,6 +235,11 @@ export interface RecorderOptions {
 export class Recorder implements RetainedRecorder {
   readonly #locate: boolean;
   readonly #census: boolean;
+  readonly #every: number;
+  /** The runs whose intervals ended at the switches since the last comparison (`every`). */
+  readonly #window = new Set<WeakKey>();
+  #since = 0;
+  #switches = 0;
   /** Each object's fingerprint at the last checkpoint, kept only where `locate` asks for it. */
   #lastMemo = new Map<WeakKey, Fingerprint>();
   readonly #ids = new WeakMap<WeakKey, number>();
@@ -251,6 +268,7 @@ export class Recorder implements RetainedRecorder {
   public constructor(options: RecorderOptions = {}) {
     this.#locate = options.locate === true;
     this.#census = options.census === true;
+    this.#every = options.every ?? 1;
   }
 
   public report(): RecorderReport {
@@ -259,6 +277,7 @@ export class Recorder implements RetainedRecorder {
       violations: this.#violations,
       outside: this.#outsideWrites,
       checkpoints: this.#checkpoints,
+      switches: this.#switches,
       entries: this.#entries,
       identities: this.#identities,
       exercised: this.#exercised,
@@ -274,8 +293,27 @@ export class Recorder implements RetainedRecorder {
   #marksOf(run: WeakKey): Marks {
     let marks = this.#marks.get(run);
     if (marks === undefined)
-      this.#marks.set(run, (marks = { written: new Set(), amended: new WeakSet() }));
+      this.#marks.set(run, (marks = { written: new Set(), amended: new WeakSet(), list: [] }));
     return marks;
+  }
+
+  /** `target` marked in the current run. */
+  #mark<T extends object>(target: T): void {
+    const marks = this.#marksOf(this.#run);
+    if (marks.amended.has(target)) return;
+    marks.amended.add(target);
+    marks.list.push(target);
+  }
+
+  /** The marks of several runs as one (`every`). */
+  #joined(runs: readonly WeakKey[]): Marks {
+    const joined: Marks = { written: new Set(), amended: new WeakSet(), list: [] };
+    for (const run of runs) {
+      const marks = this.#marksOf(run);
+      for (const entry of marks.written) joined.written.add(entry);
+      for (const target of marks.list) joined.amended.add(target);
+    }
+    return joined;
   }
 
   #outsideWrite(name: string): void {
@@ -463,18 +501,21 @@ export class Recorder implements RetainedRecorder {
       },
     });
     this.#registered.set(owner, `O${id}`);
-    this.#marksOf(this.#run).amended.add(owner);
+    this.#mark(owner);
   }
 
   public amend<T extends object>(target: T): void {
-    this.#marksOf(this.#run).amended.add(target);
+    this.#mark(target);
     this.#outsideWrite(this.#registered.get(target) ?? className(target));
   }
 
   public run<T extends object>(run: T | null): void {
     const next = run ?? { outside: true };
     if (run === this.#run || (run === null && this.#outside)) return;
-    this.checkpoint();
+    this.#switches += 1;
+    this.#since += 1;
+    if (this.#since >= this.#every) this.checkpoint();
+    else this.#window.add(this.#run);
     this.#run = next;
     this.#outside = run === null;
   }
@@ -485,7 +526,12 @@ export class Recorder implements RetainedRecorder {
    */
   public checkpoint(): void {
     this.#checkpoints += 1;
-    const marks = this.#marksOf(this.#run);
+    // (the marks of the run that just ended, and of each run whose interval ended at a switch not compared)
+    this.#window.add(this.#run);
+    const marks =
+      this.#window.size === 1 ? this.#marksOf(this.#run) : this.#joined([...this.#window]);
+    this.#window.clear();
+    this.#since = 0;
     const memo = new Map<WeakKey, Fingerprint>();
     const after = new Map<string, string>();
     const changed = (
