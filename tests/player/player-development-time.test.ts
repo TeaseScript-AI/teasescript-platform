@@ -37,7 +37,7 @@ import { loadPlayerModule } from "../helpers/player-modules.js";
 import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
 import { preparedPlan, sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
-import { inProcessBackend } from "../helpers/player/worker-topology.js";
+import { inProcessBackend, withinHostTime } from "../helpers/player/worker-topology.js";
 
 // The adapter's functions, also on the sessions the composables' host holds (`helpers/player/host-sessions.ts`).
 const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
@@ -658,9 +658,9 @@ test("a countdown shows while Debug runs, not before Continue, and counts from t
   Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
   document.dispatchEvent(new Event("visibilitychange"));
   // The keep is the host's work: bounded in real time, not in turns.
-  const keptBy = process.hrtime.bigint() + 30_000_000_000n;
+  const within = withinHostTime();
   while ((await rooms.session(scriptStorage.scope)) === null) {
-    assert.ok(process.hrtime.bigint() < keptBy, "the hidden page kept the debug room's session");
+    assert.ok(within(), "the hidden page kept the debug room's session");
     await tasks();
   }
   close();

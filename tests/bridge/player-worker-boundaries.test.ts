@@ -1037,12 +1037,13 @@ RERUN.rows(
     assert.equal(queued.indexOf("beginCatchUp"), -1, queued.join(", "));
     transport.release();
     assert.equal((await answering).kind, "answered");
-    await until(() => refusals.length > 0, "the catch-up's refusal");
+    await until(() => refusals.length > 0, "the catch-up's refusal", "host");
     assert.deepEqual(refusals, ["basis"]);
     await until(() => buttonLabel(host) === "After", "the answer's next button");
     await until(
       () => host.session.value!.state.observedSessionTimeMs >= 1_000,
       "the fresh observation",
+      "host",
     );
     // Refused, the catch-up adopted nothing (a step already queued finds no copy); the clock observed the late second in
     // one go instead. Read once that observation is in, so a later adoption is in the log.
