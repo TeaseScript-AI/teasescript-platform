@@ -45,8 +45,8 @@ const ORDERS = {
  * own (`ORDERS`), and a compile's plan holds the name of the mode it ran in, so modes paired by position differ. For
  * every record form (R20): `exits` ends its worker; `over at demand <n>` charges 5,000 at that demand, `overstop` at its
  * stop's allowance of 10; an `apart…` source's plan on the head names its demand and allowance, so every pair differs;
- * the analysis throws for `throws`, charges 5,000 for `overanalysis` and nothing for `apart-zero-questions`; and
- * `apart-zero-stop`'s one stop is at an allowance of 0.
+ * the stop search throws for `throws`; the analysis charges 5,000 for `overanalysis` and nothing for
+ * `apart-zero-questions`; and `apart-zero-stop`'s one stop is at an allowance of 0.
  */
 const MODULES: Record<string, string> = {
   "src/type-inference/core/budget.js": `let test = null;
@@ -99,7 +99,6 @@ export const compileSourceWithBackend = (source) => compileProjectWithBackend([{
   "src/type-inference/core/answers.js": `import { ledger } from "./budget.js";
 class Answers {}
 export function analyseCore(request) {
-  if (request.source === "throws") throw new Error("analysis failed");
   if (request.source !== undefined && request.source !== "apart-zero-questions")
     ledger().charge("frames", request.source === "overanalysis" ? 5000 : 300);
   return new Answers();
@@ -126,6 +125,7 @@ let settling = import.meta.url.includes("/base/");
 export function heldStops(c, mode) {
   if (c.name === "settling" && settling) (settling = false), wait(1800);
   if (c.name === "lost") wait(6000);
+  if (c.name === "throws") throw new Error("search failed");
   mode.run(() => new WorkLedger(10).charge("frames", c.name === "searched" ? 5000 : 300));
   return [{ allowance: c.name === "apart-zero-stop" ? 0 : 10, phase: "admission" }];
 }
@@ -514,7 +514,7 @@ test("every record form the runner writes, at its allowance edges, passes the su
       .flatMap((r) => (r.run === undefined ? [] : [`${r.stalled ?? r.uncharged} at ${r.run.at}`]))
       .sort(),
     [
-      "Error: analysis failed at analysis",
+      "Error: search failed at stop search, between",
       "safety net 1 s at natural",
       "safety net 1 s at stop search, between",
       "units at allowance 10",
