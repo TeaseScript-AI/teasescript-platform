@@ -174,9 +174,10 @@ const MERGED_INTO_EACH_OTHER = ["origin/main", "origin/runtime-v2"];
  * branch of runtime-v2, or runtime-v2 into a branch of main, passes, and merging a branch's own base into it, or any
  * other branch, does not; a lane branch rebases instead. Which line the first parent is on is not checked. A lookup git
  * cannot answer (a missing ref or commit), or answers "no" in a shallow clone, fails as unproven, with the advice to
- * fetch or deepen the clone.
+ * fetch or deepen the clone. With `queueHint`, `head` as a merge of exactly the base's commit is named first as what the
+ * queue's merged checkout makes, with the `--merged-checkout` command; it still fails, as it may be a builder's own.
  */
-export function strayMerges(from, head, base, baseName) {
+export function strayMerges(from, head, base, baseName, queueHint = false) {
   // (a shallow clone lacks history, so there git's "not an ancestor" proves nothing)
   const shallow = git("rev-parse", "--is-shallow-repository") === "true";
   // (true or false, or why git cannot answer)
@@ -192,10 +193,26 @@ export function strayMerges(from, head, base, baseName) {
   const stray = [];
   for (const line of git("rev-list", "--merges", "--parents", `${from}..${head}`).split("\n")) {
     if (line === "") continue;
-    const [commit, , ...merged] = line.split(" ");
+    const [commit, first, ...merged] = line.split(" ");
     const why = [];
     for (const parent of merged) {
       const short = parent.slice(0, 9);
+      if (
+        queueHint &&
+        commit === head &&
+        merged.length === 1 &&
+        parent ===
+          spawnSync("git", ["rev-parse", "--verify", "--quiet", `${base}^{commit}`], {
+            encoding: "utf8",
+          }).stdout.trim()
+      ) {
+        why.push(
+          `merges ${short}, the base's commit itself, as the queue's merged checkout does: if this is one, run it as ` +
+            `--merged-checkout ${first} --base ${baseName}; if you merged the base into your branch yourself, rebase ` +
+            `onto ${baseName} instead`,
+        );
+        continue;
+      }
       const onBase = holds(base, parent, baseName);
       if (onBase === true) {
         why.push(`merges ${short}, which the base already holds: rebase onto ${baseName} instead`);
@@ -632,7 +649,14 @@ async function check(cleanups) {
   const formatted = changed.filter((path) => FORMATTED.test(path));
   const [formatter, ...formatterArgs] = prettier();
   const scan = performance.now();
-  const stray = strayMerges(mergeBase, head, merged ? mergeBase : ref, ref);
+  // (under --merged-checkout, the head's own merge of the base is the builder's: no queue hint)
+  const stray = strayMerges(
+    mergeBase,
+    head,
+    merged ? mergeBase : ref,
+    ref,
+    mergedCheckout === null,
+  );
   const scanSeconds = (performance.now() - scan) / 1000;
   const checks = [
     run("diff --check", "git", ["diff", "--check", mergeBase]),
