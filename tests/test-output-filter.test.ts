@@ -748,6 +748,12 @@ test("a test past the time limit fails by name and its file's later tests still 
      require("node:test")("hangs", () => new Promise((resolve) => setTimeout(resolve, 5_000)));
      require("node:test")("after it", () => {});`,
   );
+  // (a hook has a limit of its own: the test it delays fails)
+  writeFileSync(
+    resolve(directory, "hook.test.js"),
+    `require("node:test").beforeEach(() => new Promise((resolve) => setTimeout(resolve, 5_000)));
+     require("node:test")("behind a slow hook", () => {});`,
+  );
   const run = (args: string[]) =>
     spawnSync(process.execPath, [filterPath, "--full-output", ...args], {
       cwd: directory,
@@ -764,12 +770,13 @@ test("a test past the time limit fails by name and its file's later tests still 
     assert.equal(named.status, 0, named.stderr);
     assert.ok(named.stdout.includes(given), named.stdout);
     // (a shorter limit given to the filter replaces its own; the file's process ends when the timer the test left does)
-    const hangs = run(["--test-timeout=300", "hangs.test.js"]);
+    const hangs = run(["--test-timeout=300", "hangs.test.js", "hook.test.js"]);
     assert.equal(hangs.status, 1, `${hangs.error ?? ""}${hangs.stderr}`);
     assert.match(hangs.stdout, /^✔ passes \(/mu);
     assert.match(hangs.stdout, /^✖ hangs \(/mu);
     assert.match(hangs.stdout, /^✔ after it \(/mu);
-    assert.match(hangs.stdout, /'test timed out after 300ms'/u);
+    assert.match(hangs.stdout, /^✖ behind a slow hook \(/mu);
+    assert.equal(hangs.stdout.split("'test timed out after 300ms'").length, 3, hangs.stdout);
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }

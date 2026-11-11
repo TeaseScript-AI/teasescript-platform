@@ -88,7 +88,7 @@ if (unmatched.length > 0) {
 
 // Node's command line sorts the files it runs, so the full suite goes through a runner that keeps the costly files
 // first: started late, one of them would run alone at the end.
-// A test fails past `TEST_LIMIT_MS` (`test-in-flight.mjs`), also for named files, where a `--test-timeout` given to the
+// A test or hook that waits past `TEST_LIMIT_MS` fails (`test-in-flight.mjs`), also for named files, where a `--test-timeout` given to the
 // filter replaces the limit. Beside the spec reporter, `test-in-flight.mjs` names on
 // standard error a stall that limit does not end.
 // Compact output of named files ends with one line per file and its tests' counts, the passing tests it leaves out among
