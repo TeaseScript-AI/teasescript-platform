@@ -155,13 +155,11 @@ const CLOCK_HEAD =
   "export const minutes = (seconds: number): number => Math.floor(seconds / 60);\n";
 const BUNDLES_CONFIG = `import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vite";
-import { testModulesSources } from "./test-modules-sources.ts";
 
 export default defineConfig({
   root: fileURLToPath(new URL("../..", import.meta.url)),
   logLevel: "warn",
   publicDir: false,
-  plugins: [testModulesSources()],
   build: {
     ssr: true,
     outDir: "dist/player-test-modules",
@@ -212,18 +210,26 @@ function repository(head) {
     "player/clock.ts": CLOCK_BASE,
     "player/vue/vite.test-modules.config.ts": BUNDLES_CONFIG,
     ...Object.fromEntries(
-      [
-        "tests/helpers/regression-case.ts",
-        "tests/helpers/player-modules.ts",
-        "player/vue/test-modules-sources.ts",
-      ].map((path) => [path, readFileSync(join(repositoryRoot, path), "utf8")]),
+      ["tests/helpers/regression-case.ts", "tests/helpers/player-modules.ts"].map((path) => [
+        path,
+        readFileSync(join(repositoryRoot, path), "utf8"),
+      ]),
     ),
   });
   symlinkSync(join(repositoryRoot, "node_modules"), join(root, "node_modules"));
   git("add", "-A");
   git("commit", "-q", "-m", "Keep a session store (#3)");
   const base = git("rev-parse", "HEAD");
-  write(root, { "src/bridge.ts": BRIDGE_HEAD, "player/clock.ts": CLOCK_HEAD, ...head });
+  // The head adds the plugin that stamps the bundles' sources, which its loader requires; the base has none.
+  write(root, {
+    "src/bridge.ts": BRIDGE_HEAD,
+    "player/clock.ts": CLOCK_HEAD,
+    "player/vue/test-modules-sources.ts": readFileSync(
+      join(repositoryRoot, "player/vue/test-modules-sources.ts"),
+      "utf8",
+    ),
+    ...head,
+  });
   git("add", "-A");
   git("commit", "-q", "-m", "Refuse a session of another bridge");
   spawnSync(

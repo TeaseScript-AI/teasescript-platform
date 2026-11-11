@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const bundle = new URL("../../player-test-modules/", import.meta.url);
@@ -7,8 +7,9 @@ const root = new URL("../../../", import.meta.url);
 let checked: Error | null | undefined;
 
 /**
- * The files whose content differs from the bundle's `sources.json` (`player/vue/test-modules-sources.ts`), a missing
- * file included, or an error naming why the bundle cannot be checked.
+ * An error naming the files that differ from the bundle's `sources.json` (`player/vue/test-modules-sources.ts`): a
+ * changed or missing file, or one that exists where the stamp records none; or naming why the bundle cannot be checked;
+ * `null` when the checkout matches.
  */
 function staleBundle(): Error | null {
   let sources: unknown;
@@ -23,12 +24,10 @@ function staleBundle(): Error | null {
   if (typeof sources !== "object" || sources === null || Array.isArray(sources))
     return new Error(`${fileURLToPath(bundle)}sources.json is not an object of hashes.`);
   const changed = Object.entries(sources).filter(([path, hash]) => {
+    const file = new URL(path, root);
+    if (hash === null) return existsSync(file);
     try {
-      return (
-        createHash("sha256")
-          .update(readFileSync(new URL(path, root)))
-          .digest("hex") !== hash
-      );
+      return createHash("sha256").update(readFileSync(file)).digest("hex") !== hash;
     } catch {
       return true;
     }
@@ -48,7 +47,7 @@ function staleBundle(): Error | null {
  * one is after a Player or engine edit that only `npm run build:typescript` followed.
  */
 export async function loadPlayerModule(source: string): Promise<Record<string, unknown>> {
-  checked ??= staleBundle();
+  if (checked === undefined) checked = staleBundle();
   if (checked !== null) throw checked;
   const module: Record<string, unknown> = await import(
     new URL(source.replace(/\.ts$/u, ".js"), bundle).href
