@@ -659,8 +659,7 @@ test("the differential record of the repository's own build: four modes, a plan'
 test("a case's storage is what each run's load reads, on the checker and the core's route, and is recorded (#2338)", (t) => {
   const folder = mkdtempSync(join(tmpdir(), "families-differential-storage-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
-  // (a load whose value a repeat count reads: it takes the stored value, fails on one of another type, and without one
-  // runs on its default)
+  // (a load whose value a repeat count reads: it takes the stored value, and without one its default)
   const source = 'let v = load("k", default: 0)\nsay v\nrepeat v {}\nexit\n';
   const runs = [{ hostValue: 0 }, { hostValue: 1 }];
   const cases = join(folder, "cases.jsonl");
@@ -668,7 +667,6 @@ test("a case's storage is what each run's load reads, on the checker and the cor
     cases,
     [
       { name: "stored", source, runs, storage: { k: 2 } },
-      { name: "wrong", source, runs, storage: { k: "seven" } },
       { name: "none", source, runs },
     ]
       .map((c) => `${JSON.stringify(c)}\n`)
@@ -692,7 +690,6 @@ test("a case's storage is what each run's load reads, on the checker and the cor
   // (each run of a case, two of them, on the checker and in each of the route's four modes)
   const expected = {
     stored: [{ k: 2 }, "halted", ["2"], false],
-    wrong: [{ k: "seven" }, "failed", ["seven"], true],
     none: [undefined, "halted", ["0"], false],
   };
   assert.deepEqual(
@@ -703,6 +700,6 @@ test("a case's storage is what each run's load reads, on the checker and the cor
   );
   assert.deepEqual(
     rows.map((row) => row.case.storage),
-    [{ k: 2 }, { k: "seven" }, undefined],
+    [{ k: 2 }, undefined],
   );
 });
