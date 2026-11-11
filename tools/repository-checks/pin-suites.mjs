@@ -23,23 +23,24 @@ import { suiteTestFiles } from "../test-shards.mjs";
 // when one fails. Exit 2 on another option, when the changes cannot be read (no merge-base), or on a mark `readMarks`
 // faults.
 //
-// The marks are the authority; each mark's regex must find a line of its file other than the mark. Their test
+// The marks are the authority; each mark's regex must find a line of its file other than the mark, and every line it
+// finds must hold a number or hex digest literal, so that a mark whose values are deleted finds nothing. Their test
 // (`pin-suites.test.mjs`) finds four pin forms by their text (`PIN_FORMS`): an `assert.equal` of `.total` to a literal
 // of four or more digits, a table of four or more such literals, a `[count, "reason"]` record, and, in the type core's
 // tests only (`FORM_SCOPES`), a property set to a hex digest of 16 or more digits: a digest pin written in another test
 // file is not found. A pin written another way (`strictEqual`, `deepEqual` of a short tuple or an object, a total under
-// four digits, a helper's table, a nested table such as work-a's) is not found; that test is a net for a suite with no
-// mark, and `NOT_PINS` declares the test files it finds that pin no work. Under `tests/helpers/type-core/families/` it
-// also requires every recorded bound to be a line a mark of that file finds, and claims a position, not a meaning: in
-// the code of that folder, neither `main` nor `measured` occurs outside the admitted positions. Comments, JSDoc and
-// marks included, are not code and are not read there: they cannot record or change a bound. The code is every node
-// `forEachChild` reaches from a file's source; every identifier, private name, string and template without
-// substitutions spelled so is classified by its role. Admitted are `main: <object literal>` and `measured: <numeric
-// literal>` (the two records), a property signature, and the identifier `main` as a declared, imported or exported
-// binding or as a callee (the program builder). Any other occurrence fails, naming its file, line and role, and so does
-// every object spread and every computed name that is not a literal. Not claimed: a bound recorded under a third
-// property name, a bound outside that folder, and a bound changed at run time by code that names neither property (a
-// key built at run time, a write through an alias).
+// four digits, a helper's table, a nested table such as work-a's) is not found; that test is a net over every `.ts`
+// file under `tests/`, helpers included, for a file holding pins with no mark, and `NOT_PINS` declares the files it
+// finds that pin no work. Under `tests/helpers/type-core/families/` it also requires every recorded bound to be a line
+// a mark of that file finds, and claims a position, not a meaning: in the code of that folder, neither `main` nor
+// `measured` occurs outside the admitted positions. Comments, JSDoc and marks included, are not code and are not read
+// there: they cannot record or change a bound. The code is every node `forEachChild` reaches from a file's source;
+// every identifier, private name, string and template without substitutions spelled so is classified by its role.
+// Admitted are `main: <object literal>` and `measured: <numeric literal>` (the two records), a property signature, and
+// the identifier `main` as a declared, imported or exported binding or as a callee (the program builder). Any other
+// occurrence fails, naming its file, line and role, and so does every object spread and every computed name that is not
+// a literal. Not claimed: a bound recorded under a third property name, a bound outside that folder, and a bound
+// changed at run time by code that names neither property (a key built at run time, a write through an alias).
 
 /** The core, whose every file can move a pin. */
 const CORE = "src/type-inference/core/";
@@ -49,6 +50,8 @@ const CORE = "src/type-inference/core/";
  * suite, or `// pins for <suite>, <suite>: <what> | line /<regex>/<flags>` in a file holding pins those suites run.
  */
 const MARK = /^\/\/ pins(?: for ([^:]+))?: (.+?) \| line \/(.+)\/([a-z]*)$/u;
+/** A literal value on a line: a number that is no part of a name, or a hex digest. */
+const VALUE = /(?<![\w$])\d|"[0-9a-f]{16,}"/u;
 /** A line that begins a mark, wherever it stands. */
 const MARK_START = /^\s*\/\/\s*pins\b/u;
 
@@ -57,7 +60,8 @@ const MARK_START = /^\s*\/\/\s*pins\b/u;
  * its `file`, what it pins (`pins`), a line its pins hold (`pin`) and, when the mark is in another file, that file
  * (`in`); in path order.
  * `faults` names each mark that does not parse, has a `g` or `y` flag, names no test file as its suite, finds no line of
- * its file but itself, or is not a file's first line.
+ * its file but itself or a line holding no number or hex digest, or is not a file's first line. `files` are the `.ts`
+ * files read.
  */
 export function readMarks(root) {
   const tests = new Set(testFiles(root));
@@ -90,8 +94,15 @@ export function readMarks(root) {
       faults.push(`${file}:1: the mark's line is no regex: ${error.message}`);
       continue;
     }
-    if (!lines.slice(1).some((line) => pin.test(line))) {
-      faults.push(`${file}:1: no line of the file but the mark's own is a line ${pin} finds`);
+    // (a pin's line holds its value, so that a mark whose values are gone finds nothing: a declaration line would stay)
+    const matched = lines.slice(1).flatMap((line, at) => (pin.test(line) ? [at + 2] : []));
+    const bare = matched.find((at) => !VALUE.test(lines[at - 1]));
+    if (matched.length === 0 || bare !== undefined) {
+      faults.push(
+        matched.length === 0
+          ? `${file}:1: no line of the file but the mark's own is a line ${pin} finds`
+          : `${file}:1: ${pin} finds line ${bare}, which holds no number or digest`,
+      );
       continue;
     }
     const named = found[1]?.split(",").map((suite) => suite.trim());
@@ -108,7 +119,7 @@ export function readMarks(root) {
   }
   const key = (suite) => `${suite.file}\n${suite.in ?? ""}`;
   suites.sort((a, b) => (key(a) < key(b) ? -1 : 1));
-  return { suites, faults };
+  return { suites, faults, files };
 }
 
 /** The files the pin forms find that pin no work, each with what its numbers are. */
@@ -122,6 +133,7 @@ export const NOT_PINS = [
   { file: "tests/runtime/message-markup.test.ts", is: "character codes" },
   { file: "tests/runtime/runtime-random.test.ts", is: "a generator's expected states" },
   { file: "tests/type-core/type-core-message-parity.test.ts", is: "random seeds" },
+  { file: "tests/helpers/type-core/type-core-enclosing.ts", is: "sample values of a host global" },
 ];
 
 /** The four pin forms the marks' test finds by their text. */

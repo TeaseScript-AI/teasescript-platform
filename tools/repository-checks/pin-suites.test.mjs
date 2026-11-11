@@ -76,7 +76,7 @@ const ADMITTED = [
 ];
 
 /**
- * The bounds a family module's `text` records, by line, and every occurrence of `main` or `measured` outside the
+ * The bounds a family module's `text` records, each by its record's first and last line, and every occurrence of `main` or `measured` outside the
  * `ADMITTED` positions (`escapes`, each with its name and syntactic role). Every identifier, private name, string and
  * template without substitutions spelled so in the code (each node `forEachChild` reaches; comments are not read) is
  * classified; every object spread and every computed name that is not a literal is an escape.
@@ -113,7 +113,11 @@ function recordedBoundsOf(text) {
       const name = nameOf(node);
       const admitted = ADMITTED.find((entry) => entry.test(node, node.parent, name));
       if (admitted === undefined) escape(node, `${name}: ${roleOf(node, node.parent)}`);
-      else if (admitted.records) recorded.push(lineOf(node));
+      else if (admitted.records)
+        recorded.push([
+          lineOf(node),
+          source.getLineAndCharacterOfPosition(node.parent.getEnd()).line + 1,
+        ]);
     }
     ts.forEachChild(node, visit);
   };
@@ -185,15 +189,16 @@ test("a core change lists every pinning suite; another change lists none, a suit
 });
 
 /**
- * The net's findings under `root`: each test file a pin form finds that no mark names and `notPins` does not declare,
+ * The net's findings under `root`: each `.ts` file of `readMarks`'s that a pin form finds, no mark names or holds and
+ * `notPins` does not declare,
  * and each `notPins` file that is marked or holds no pin form.
  */
-function netOf(root, suites, notPins) {
-  const marked = new Set(suites.map((suite) => suite.file));
+function netOf(root, { suites, files }, notPins) {
+  const marked = new Set(suites.flatMap((suite) => [suite.file, suite.in ?? suite.file]));
   const declared = new Set(notPins.map((entry) => entry.file));
   const formsOf = (file) => pinFormsOf(readFileSync(join(root, file), "utf8"), file);
   return [
-    ...testFiles(root)
+    ...files
       .filter((file) => !marked.has(file) && !declared.has(file) && formsOf(file).length > 0)
       .map(
         (file) =>
@@ -208,7 +213,7 @@ function netOf(root, suites, notPins) {
 
 test("the marks are kept true: each reads, and each test file a pin form finds is marked or declared no pin", () => {
   assert.deepEqual(MARKS.faults, []);
-  assert.deepEqual(netOf(ROOT, MARKED, NOT_PINS), []);
+  assert.deepEqual(netOf(ROOT, MARKS, NOT_PINS), []);
 });
 
 test("the net names an unmarked pin, a marked file declared no pin, and a declaration with no pin form", (t) => {
@@ -218,17 +223,32 @@ test("the net names an unmarked pin, a marked file declared no pin, and a declar
     "tests/type-core/digest.test.ts": '  upToOrder: "8ec84600facd682a",\n',
     "tests/marked.test.ts": "// pins: a total | line /total/u\n  assert.equal(r.total, 1234);\n",
     "tests/plain.test.ts": "const n = 12;\n",
+    // (a helper's digest under a mark wrapped in a block comment, and under none: each is a pin with no mark)
+    "tests/helpers/type-core/type-core-wrapped.ts":
+      '/* // pins for tests/marked.test.ts: a digest | line /^\\s*natural: "[0-9a-f]{16}",/u */\n  natural: "8ec84600facd682a",\n',
+    "tests/helpers/type-core/type-core-unmarked.ts": '  natural: "8ec84600facd682a",\n',
   };
   for (const [file, text] of Object.entries(files)) {
     mkdirSync(join(root, file, ".."), { recursive: true });
     writeFileSync(join(root, file), text);
   }
-  const { suites } = readMarks(root);
-  assert.deepEqual(netOf(root, suites, []), [
-    "tests/type-core/digest.test.ts holds a pin form (digest) but carries no mark and is not in NOT_PINS (tools/repository-checks/pin-suites.mjs)",
-  ]);
+  const marks = readMarks(root);
+  assert.deepEqual(marks.faults, []);
   assert.deepEqual(
-    netOf(root, suites, [
+    netOf(root, marks, []),
+    [
+      "tests/helpers/type-core/type-core-unmarked.ts",
+      "tests/helpers/type-core/type-core-wrapped.ts",
+      "tests/type-core/digest.test.ts",
+    ].map(
+      (file) =>
+        `${file} holds a pin form (digest) but carries no mark and is not in NOT_PINS (tools/repository-checks/pin-suites.mjs)`,
+    ),
+  );
+  assert.deepEqual(
+    netOf(root, marks, [
+      { file: "tests/helpers/type-core/type-core-unmarked.ts" },
+      { file: "tests/helpers/type-core/type-core-wrapped.ts" },
       { file: "tests/type-core/digest.test.ts" },
       { file: "tests/marked.test.ts" },
       { file: "tests/plain.test.ts" },
@@ -253,7 +273,10 @@ test("a mark is read from a file's first line only, whole, naming test files, an
     "tests/c.test.ts": "// pins a total, no line\nconst C = 1;\n",
     "tests/d.test.ts": "// pins: a bad line | line /(/u\n(\n",
     "tests/e.test.ts": "// pins: only itself | line /only itself/u\nconst E = 1;\n",
-    "tests/helpers/f.ts": "// pins for tests/none.test.ts: nothing | line /^y/u\ny\n",
+    "tests/helpers/f.ts": "// pins for tests/none.test.ts: nothing | line /^y/u\ny = 1\n",
+    // (a regex that also finds a declaration, which outlives the values below it)
+    "tests/decl.test.ts":
+      "// pins: a table | line /^const T\\b|^\\s+\\d+,$/u\nconst T = [\n  1,\n];\n",
     // (a file with CRLF line ends reads as one with LF, its mark and its pin line alike)
     "tests/crlf.test.ts": "// pins: a crlf total | line /^const A=1;$/u\r\nconst A=1;\r\n",
     "tests/g.test.ts": "// pins: a stateful line | line /x/gu\nx\n",
@@ -287,6 +310,7 @@ test("a mark is read from a file's first line only, whole, naming test files, an
   assert.deepEqual(faults, [
     "tests/c.test.ts:1: no mark: use // pins[ for <suite>, ...]: <what> | line /<regex>/",
     "tests/d.test.ts:1: the mark's line is no regex: Invalid regular expression: /(/u: Unterminated group",
+    "tests/decl.test.ts:1: /^const T\\b|^\\s+\\d+,$/u finds line 2, which holds no number or digest",
     "tests/e.test.ts:1: no line of the file but the mark's own is a line /only itself/u finds",
     "tests/g.test.ts:1: the mark's line takes no g or y flag",
     "tests/helpers/f.ts:1: tests/none.test.ts is no test file",
@@ -307,9 +331,11 @@ test("every bound a family records is a line some declaration's pin finds in tha
     const { recorded, escapes } = recordedBoundsOf(text);
     for (const { line, form } of escapes)
       failures.push(`${file}:${line}: ${form}, not a position a family may name it at`);
-    for (const line of recorded) {
+    // (a mark finds a record where it finds one of its lines: a record's values may sit below its name)
+    for (const [line, end] of recorded) {
       const declarations = MARKED.filter(
-        (suite) => suite.in === file && suite.pin.test(lines[line - 1]),
+        (suite) =>
+          suite.in === file && lines.slice(line - 1, end).some((each) => suite.pin.test(each)),
       );
       if (declarations.length === 0)
         failures.push(
@@ -367,7 +393,13 @@ test("main and measured occur in a family only at an admitted position; any othe
     "const x = main;",
   ].join("\n");
   assert.deepEqual(recordedBoundsOf(text), {
-    recorded: [1, 4, 5, 6, 19],
+    recorded: [
+      [1, 3],
+      [4, 4],
+      [5, 5],
+      [6, 6],
+      [19, 19],
+    ],
     escapes: [
       // (#2252's Sol r2: a literal key passed as a string, a write through `as`, an object rest forwarded)
       { line: 13, form: "main: a string in CallExpression" },

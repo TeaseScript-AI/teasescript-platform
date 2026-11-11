@@ -1,4 +1,4 @@
-// pins: listed construction sites | line /^const (?:LISTED|STORED)\b/u
+// pins: listed construction sites | line /^\s+\d+,$/u
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
 import test from "node:test";

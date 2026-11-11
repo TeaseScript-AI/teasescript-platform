@@ -1,4 +1,4 @@
-// pins for tests/type-core/type-core-declared-escapes.test.ts: main's stop states and plan and runs digests at the declared difference's window edges, and main's publication and runs at the first-asker windows | line /^export const MAIN: /u
+// pins for tests/type-core/type-core-declared-escapes.test.ts: main's stop states and plan and runs digests at the declared difference's window edges, and main's publication and runs at the first-asker windows | line /^\s*natural: "[0-9a-f]{16}",/u
 // `MAIN` is main's side: recorded at 8c8d25853 by lane 2b's recorder (`probe33.mjs` in #2116's evidence), per source and
 // mode, the natural plan's and answers' digests and, at each edge, main's stop state, its plan's digest or `refused`,
 // its stopped decisions (a digest outside a window, the list inside a settled one) and, in a settled window, its

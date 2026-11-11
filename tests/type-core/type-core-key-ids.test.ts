@@ -1,4 +1,4 @@
-// pins: listed copy sites | line /^const COPIES_LISTED\b/u
+// pins: listed copy sites | line /^ {4}\d+,$|^ {2}[\w$]+: \[\d+, "/u
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
