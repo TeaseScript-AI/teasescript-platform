@@ -773,6 +773,7 @@ RERUN.rows(
       ],
       "the save runs again",
     );
+    assert.equal(r.begin[0], "restoreKept", "the begin's posts are compared from the restore");
     assert.deepEqual(r, b);
     return end();
   },
