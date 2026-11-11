@@ -321,7 +321,11 @@ function answering(connection: TopologyBridge): () => Promise<boolean> {
 
 /** Waits until the session shows its question, and the store keeps it there. */
 async function keptAtTheQuestion(player: RecoveryHost, kept: KeptSessionStore) {
-  await until(() => player.session.value?.state.foregroundAction != null, "the question shows");
+  await until(
+    () => player.session.value?.state.foregroundAction != null,
+    "the question shows",
+    "step",
+  );
   // The keep follows the host's capture of the session, which a Worker gives in its own time.
   for (const within = withinHostTime(); ;) {
     const stored = await kept.session(SCOPE);
@@ -403,14 +407,18 @@ RERUN.rows(
     await connections.first.held();
     await connections.first.lose();
     connections.first.release();
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     assert.deepEqual(player.recovery.value, { offer: "start", where: "line" });
     assert.equal(player.hostError.value, null, "no error stop");
     assert.equal(player.connectionLosses.value, 1);
     await turns(10);
     assert.equal(connections.calls(), 0, "nothing reconnects without a click");
     await player.activate();
-    await until(() => player.session.value?.state.foregroundAction != null, "the new question");
+    await until(
+      () => player.session.value?.state.foregroundAction != null,
+      "the new question",
+      "step",
+    );
     assert.equal(connections.calls(), 1);
     await onTheFreshConnection(player, connections);
     assert.equal(player.recovery.value, null);
@@ -429,14 +437,18 @@ RERUN.rows(
     const stored = await keptAtTheQuestion(player, kept);
     const transcript = player.session.value!.transcriptEntries.length;
     await connections.first.lose();
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     assert.deepEqual(player.recovery.value, { offer: "continue", where: "line" });
     // The stopped session stays shown under the line.
     assert.ok(player.session.value !== null);
     const recovering = player.activate();
     assert.equal(player.recovery.value, null, "the offer goes while its click is under way");
     await recovering;
-    await until(() => player.session.value?.state.foregroundAction != null, "the question again");
+    await until(
+      () => player.session.value?.state.foregroundAction != null,
+      "the question again",
+      "step",
+    );
     assert.equal(connections.calls(), 1);
     await onTheFreshConnection(player, connections);
     // The fresh host is asked for the plan's JSON, which its kept session's next save stores.
@@ -463,12 +475,12 @@ RERUN.rows(
     await connections.first.lose();
     connections.first.release();
     await starting;
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     assert.deepEqual(player.recovery.value, { offer: "start", where: "page" });
     assert.equal(player.session.value, null);
     assert.equal(player.activation.value, null);
     await player.activate();
-    await until(() => player.session.value?.state.foregroundAction != null, "the question");
+    await until(() => player.session.value?.state.foregroundAction != null, "the question", "step");
     assert.equal(connections.calls(), 1);
     await onTheFreshConnection(player, connections);
     return end();
@@ -487,7 +499,7 @@ RERUN.rows(
     assert.equal(player.recovery.value, null);
     assert.equal(player.hostError.value, null);
     await player.activate();
-    await until(() => player.session.value?.state.foregroundAction != null, "the question");
+    await until(() => player.session.value?.state.foregroundAction != null, "the question", "step");
     assert.equal(connections.calls(), 1);
     await onTheFreshConnection(player, connections);
     return end();
@@ -502,16 +514,20 @@ RERUN.rows(
     await player.activate();
     await keptAtTheQuestion(player, kept);
     await connections.first.lose();
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     connections.failNext();
     await player.activate();
-    await until(() => player.recovery.value !== null, "the offer again");
+    await until(() => player.recovery.value !== null, "the offer again", "step");
     assert.deepEqual(player.recovery.value, { offer: "continue", where: "page" });
     assert.equal(player.hostError.value, null, "no error stop");
     await turns(10);
     assert.equal(connections.calls(), 1, "no attempt without a click");
     await player.activate();
-    await until(() => player.session.value?.state.foregroundAction != null, "the question again");
+    await until(
+      () => player.session.value?.state.foregroundAction != null,
+      "the question again",
+      "step",
+    );
     assert.equal(connections.calls(), 2);
     await onTheFreshConnection(player, connections);
     return end();
@@ -526,17 +542,17 @@ RERUN.rows(
     await player.activate();
     await keptAtTheQuestion(player, kept);
     await connections.first.lose();
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     assert.equal(player.recovery.value?.offer, "continue");
     await kept.discard(SCOPE);
     await player.activate();
-    await until(() => player.activation.value !== null, "the start page");
+    await until(() => player.activation.value !== null, "the start page", "step");
     assert.equal(player.activation.value, "start");
     assert.equal(player.session.value, null, "nothing begins");
     assert.equal(player.recovery.value, null);
     assert.equal(connections.calls(), 1);
     await player.activate();
-    await until(() => player.session.value?.state.foregroundAction != null, "the question");
+    await until(() => player.session.value?.state.foregroundAction != null, "the question", "step");
     await onTheFreshConnection(player, connections);
     return end();
   },
@@ -552,7 +568,7 @@ RERUN.rows(
     await player.activate();
     await keptAtTheQuestion(player, kept);
     await connections.first.lose();
-    await until(() => player.hostError.value !== null, "the error stop");
+    await until(() => player.hostError.value !== null, "the error stop", "step");
     assert.equal(player.hostError.value, "BridgeLostError");
     assert.equal(player.recovery.value, null);
     assert.equal(hostErrors(), 1);
@@ -568,7 +584,7 @@ RERUN.rows(
       script: 'say "Bye", instant\nexit',
     });
     await player.activate();
-    await until(() => player.session.value?.state.status === "halted", "the end");
+    await until(() => player.session.value?.state.status === "halted", "the end", "step");
     await connections.first.lose();
     await turns(5);
     assert.equal(player.recovery.value, null, "the end shows as it is");
@@ -576,11 +592,15 @@ RERUN.rows(
     assert.equal(player.hostError.value, null);
     // The end dialog closes: the start page offers Start.
     await player.toStartPage();
-    await until(() => player.activation.value !== null, "the start page");
+    await until(() => player.activation.value !== null, "the start page", "step");
     assert.equal(player.activation.value, "start");
     assert.equal(connections.calls(), 0);
     await player.activate();
-    await until(() => player.session.value?.state.status === "halted", "the new session's end");
+    await until(
+      () => player.session.value?.state.status === "halted",
+      "the new session's end",
+      "step",
+    );
     assert.equal(connections.calls(), 1);
     await onTheFreshConnection(player, connections);
     return end();
@@ -595,7 +615,7 @@ RERUN.rows(
     await player.activate();
     await keptAtTheQuestion(player, kept);
     await connections.first.lose();
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     const opened = nextOpened(connections, (fresh) => fresh.hold("prepare"));
     const recovering = player.activate();
     const fresh = await opened;
@@ -603,13 +623,17 @@ RERUN.rows(
     await fresh.lose();
     fresh.release();
     await recovering;
-    await until(() => player.recovery.value !== null, "the offer again");
+    await until(() => player.recovery.value !== null, "the offer again", "step");
     assert.deepEqual(player.recovery.value, { offer: "continue", where: "page" });
     assert.equal(player.hostError.value, null, "no error stop");
     await turns(10);
     assert.equal(connections.calls(), 1, "no attempt without a click");
     await player.activate();
-    await until(() => player.session.value?.state.foregroundAction != null, "the question again");
+    await until(
+      () => player.session.value?.state.foregroundAction != null,
+      "the question again",
+      "step",
+    );
     assert.equal(connections.calls(), 2);
     assert.equal(connections.ends(fresh), 1, "the lost fresh connection is ended once");
     await onTheFreshConnection(player, connections);
@@ -625,7 +649,7 @@ RERUN.rows(
     await player.activate();
     await keptAtTheQuestion(player, kept);
     await connections.first.lose();
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     connections.armNext(() => scope.stop());
     await player.activate();
     await turns(10);
@@ -658,13 +682,17 @@ for (const [id, name, offWhileLost] of [
     const first = connections.first.posts.map((post) => post.op);
     assert.ok(first.includes("debugTracing") && first.includes("randomControl"), first.join());
     await connections.first.lose();
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     if (offWhileLost) {
       player.setDebugTracing(false);
       player.setRandomControl(null);
     }
     await player.activate();
-    await until(() => player.session.value?.state.foregroundAction != null, "the question again");
+    await until(
+      () => player.session.value?.state.foregroundAction != null,
+      "the question again",
+      "step",
+    );
     await onTheFreshConnection(player, connections);
     // Only the settings are compared: the fresh connection also prepares, restores and continues the session.
     const posts = connections.current().posts;
@@ -696,9 +724,13 @@ RERUN.rows(
     const { transfer } = await player.exportSession();
     const review = await player.reviewSessionImport(await readForImport(player, transfer));
     await connections.first.lose();
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     await player.activate();
-    await until(() => player.session.value?.state.foregroundAction != null, "the question again");
+    await until(
+      () => player.session.value?.state.foregroundAction != null,
+      "the question again",
+      "step",
+    );
     await onTheFreshConnection(player, connections);
     const stored = await kept.session(SCOPE);
     await assert.rejects(player.importSession(review), /lost with the engine's connection/u);
@@ -738,7 +770,7 @@ RERUN.rows(
     assert.equal(await store.session(SCOPE), null);
     holding = false;
     gate.held!();
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     assert.deepEqual(player.recovery.value, { offer: "continue", where: "line" });
     return end();
   },
@@ -752,9 +784,13 @@ RERUN.rows(
     await player.activate();
     await keptAtTheQuestion(player, kept);
     await connections.first.lose();
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     await player.activate();
-    await until(() => player.session.value?.state.foregroundAction != null, "the question again");
+    await until(
+      () => player.session.value?.state.foregroundAction != null,
+      "the question again",
+      "step",
+    );
     await connections.first.lose();
     await turns(5);
     assert.equal(player.recovery.value, null);
@@ -795,7 +831,7 @@ async function witnessToLoss(context: TestContext, topology: Topology) {
   await answerFirst(run.player);
   await run.connections.first.held();
   // The page writes the save in its own task, while the next keep's capture is held.
-  await until(() => storage.writes.length > 0, "the save written");
+  await until(() => storage.writes.length > 0, "the save written", "step");
   assert.deepEqual(storage.writes, [["picked", "go"]], "the save was written before the loss");
   await run.connections.first.lose();
   run.connections.first.release();
@@ -808,7 +844,11 @@ async function witnessAfter(
   connection: TopologyBridge,
   storage: ReturnType<typeof memoryStorage>,
 ) {
-  await until(() => player.session.value?.state.foregroundAction != null, "the kept question");
+  await until(
+    () => player.session.value?.state.foregroundAction != null,
+    "the kept question",
+    "step",
+  );
   const transcriptAtContinue = player.session.value!.transcriptEntries.length;
   // The kept state as the restore gave it, as `captureKeep` exports it.
   const restoredState = JSON.stringify(
@@ -820,6 +860,7 @@ async function witnessAfter(
       (player.session.value?.transcriptEntries.length ?? 0) > transcriptAtContinue &&
       player.session.value?.state.foregroundAction != null,
     "the next question",
+    "step",
   );
   const posts = connection.posts;
   const from = posts.findIndex((post) => post.op === "restoreKept");
@@ -890,7 +931,7 @@ RERUN.rows(
     fixedClocks(context);
     // R: the recovery in the page.
     const recovered = await witnessToLoss(context, topology);
-    await until(() => recovered.player.recovery.value !== null, "the offer");
+    await until(() => recovered.player.recovery.value !== null, "the offer", "step");
     assert.equal(recovered.player.recovery.value?.offer, "continue");
     await recovered.player.activate();
     const r = await witnessAfter(
@@ -949,9 +990,13 @@ RERUN.rows(
     await player.activate();
     await keptAtTheQuestion(player, kept);
     await connections.first.lose();
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     await player.activate();
-    await until(() => player.session.value?.state.foregroundAction != null, "the kept question");
+    await until(
+      () => player.session.value?.state.foregroundAction != null,
+      "the kept question",
+      "step",
+    );
     await turns(5);
     const stored = await store.session(SCOPE);
     assert.ok(stored !== null);
@@ -960,7 +1005,7 @@ RERUN.rows(
     await until(() => refusal.refused > 0, "the next keep refused", "host");
     assert.deepEqual(await store.session(SCOPE), stored, "the kept point stays");
     await connections.current().lose();
-    await until(() => player.recovery.value !== null, "the offer again");
+    await until(() => player.recovery.value !== null, "the offer again", "step");
     assert.deepEqual(player.recovery.value, { offer: "continue", where: "line" });
     return end();
   },
@@ -1033,11 +1078,12 @@ RERUN.rows(
     });
     const oldReview = await player.reviewSessionImport(oldRead);
     await connections.first.lose();
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     await player.activate();
     await until(
       () => player.session.value?.state.foregroundAction != null,
       "the recovered question",
+      "step",
     );
     const freshRead = await readForImport(player, {
       ...transfer,
@@ -1062,7 +1108,7 @@ for (const op of ["restoreKept", "beginRecording", "continue"] as const)
       await player.activate();
       await keptAtTheQuestion(player, kept);
       await connections.first.lose();
-      await until(() => player.recovery.value !== null, "the first offer");
+      await until(() => player.recovery.value !== null, "the first offer", "step");
       const opened = nextOpened(connections, (fresh) => fresh.hold(op));
       const recovering = player.activate();
       const fresh = await opened;
@@ -1070,12 +1116,16 @@ for (const op of ["restoreKept", "beginRecording", "continue"] as const)
       await fresh.lose();
       fresh.release();
       await recovering;
-      await until(() => player.recovery.value !== null, "the second offer");
+      await until(() => player.recovery.value !== null, "the second offer", "step");
       assert.deepEqual(player.recovery.value, { offer: "continue", where: "page" });
       assert.equal(player.hostError.value, null);
       assert.equal(connections.calls(), 1);
       await player.activate();
-      await until(() => player.session.value?.state.foregroundAction != null, "the question again");
+      await until(
+        () => player.session.value?.state.foregroundAction != null,
+        "the question again",
+        "step",
+      );
       assert.equal(connections.calls(), 2);
       assert.equal(connections.ends(fresh), 1, "the lost fresh connection is ended once");
       await onTheFreshConnection(player, connections);
@@ -1131,7 +1181,7 @@ for (const [id, phase] of [
       await player.activate();
       await keptAtTheQuestion(player, kept);
       await connections.first.lose();
-      await until(() => player.recovery.value !== null, "the first offer");
+      await until(() => player.recovery.value !== null, "the first offer", "step");
       assert.deepEqual(
         tracks.map((track) => track.readyState),
         ["ended"],
@@ -1148,13 +1198,17 @@ for (const [id, phase] of [
         fresh.release();
       }
       await recovering;
-      await until(() => player.recovery.value !== null, "the second offer");
+      await until(() => player.recovery.value !== null, "the second offer", "step");
       assert.deepEqual(
         tracks.map((track) => track.readyState),
         ["ended", "ended"],
       );
       await player.activate();
-      await until(() => player.session.value?.state.foregroundAction != null, "the question again");
+      await until(
+        () => player.session.value?.state.foregroundAction != null,
+        "the question again",
+        "step",
+      );
       assert.deepEqual(
         tracks.map((track) => track.readyState),
         ["ended", "ended", "live"],
@@ -1175,6 +1229,7 @@ RERUN.rows(
     await until(
       () => (rewind.view.value?.timeline.points.length ?? 0) > 0,
       "the first history point",
+      "step",
     );
     const point = rewind.view.value!.timeline.points[0]!.id;
     await answerFirst(player);
@@ -1186,7 +1241,7 @@ RERUN.rows(
     assert.equal(await rewind.back(point), true);
     assert.equal(player.rewind.inspecting.value, true);
     await connections.first.lose();
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     assert.deepEqual(player.recovery.value, { offer: "continue", where: "line" });
     const opened = nextOpened(connections, (fresh) => fresh.hold("prepare"));
     const recovering = player.activate();
@@ -1200,6 +1255,7 @@ RERUN.rows(
     await until(
       () => player.session.value?.state.foregroundAction != null,
       "the recovered question",
+      "step",
     );
     assert.equal(rewind.view.value, null, "the recovered session cleared the old view");
     assert.equal(player.rewind.inspecting.value, false);
@@ -1220,7 +1276,7 @@ RERUN.rows(
       };
     });
     await player.activate();
-    await until(() => player.recovery.value !== null, "the offer again");
+    await until(() => player.recovery.value !== null, "the offer again", "step");
     assert.deepEqual(player.recovery.value, { offer: "start", where: "page" });
     assert.equal(player.hostError.value, null);
     assert.equal(player.session.value, null);
@@ -1229,7 +1285,7 @@ RERUN.rows(
     assert.equal(connections.ends(refusing), 1, "the refusing connection is ended");
     assert.equal(await answering(refusing)(), false);
     await player.activate();
-    await until(() => player.session.value?.state.foregroundAction != null, "the question");
+    await until(() => player.session.value?.state.foregroundAction != null, "the question", "step");
     assert.equal(connections.calls(), 2);
     assert.equal(connections.ends(refusing), 1, "once");
     return end();
@@ -1259,7 +1315,11 @@ RERUN.rows(
     assert.equal(player.recovery.value, null);
     assert.equal(player.hostError.value, null);
     await player.activate();
-    await until(() => player.session.value?.state.foregroundAction != null, "the kept question");
+    await until(
+      () => player.session.value?.state.foregroundAction != null,
+      "the kept question",
+      "step",
+    );
     assert.equal(connections.calls(), 1);
     await onTheFreshConnection(player, connections);
     return end();
@@ -1277,10 +1337,14 @@ RERUN.rows(
     await connections.first.lose();
     connections.first.release();
     await continuing;
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     assert.deepEqual(player.recovery.value, { offer: "continue", where: "page" });
     await player.activate();
-    await until(() => player.session.value?.state.foregroundAction != null, "the kept question");
+    await until(
+      () => player.session.value?.state.foregroundAction != null,
+      "the kept question",
+      "step",
+    );
     await onTheFreshConnection(player, connections);
     return end();
   },
@@ -1305,7 +1369,7 @@ RERUN.rows(
     assert.equal(await kept.session(SCOPE), null);
     await connections.first.lose();
     connections.first.release();
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     assert.deepEqual(player.recovery.value, { offer: "start", where: "line" });
     return end();
   },
@@ -1338,7 +1402,7 @@ for (const [id, read] of [
     await keptAtTheQuestion(player, kept);
     reading.broken = true;
     await connections.first.lose();
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     assert.deepEqual(player.recovery.value, { offer: "start", where: "line" });
     return end();
   });
@@ -1356,11 +1420,11 @@ RERUN.rows(
     await fresh.lose();
     fresh.release();
     await recovering;
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     assert.deepEqual(player.recovery.value, { offer: "start", where: "page" });
     assert.equal(player.hostError.value, null);
     await player.activate();
-    await until(() => player.session.value?.state.foregroundAction != null, "the question");
+    await until(() => player.session.value?.state.foregroundAction != null, "the question", "step");
     assert.equal(connections.calls(), 2);
     assert.equal(connections.ends(fresh), 1, "the lost fresh connection is ended once");
     return end();
@@ -1375,7 +1439,7 @@ RERUN.rows(
     await player.activate();
     await keptAtTheQuestion(player, kept);
     await connections.first.lose();
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     connections.armNext((fresh) => {
       const client = fresh.bridge.client;
       // EVIDENCE: fixture: the client's own request, called with the arguments the Player passes it.
@@ -1390,12 +1454,16 @@ RERUN.rows(
           : original(op, ...rest)) as typeof client.request;
     });
     await player.activate();
-    await until(() => player.recovery.value !== null, "the offer again");
+    await until(() => player.recovery.value !== null, "the offer again", "step");
     assert.deepEqual(player.recovery.value, { offer: "continue", where: "page" });
     assert.equal(player.hostError.value, null);
     assert.equal(connections.calls(), 1);
     await player.activate();
-    await until(() => player.session.value?.state.foregroundAction != null, "the kept question");
+    await until(
+      () => player.session.value?.state.foregroundAction != null,
+      "the kept question",
+      "step",
+    );
     assert.equal(connections.calls(), 2);
     return end();
   },
@@ -1413,6 +1481,7 @@ RERUN.rows(
     await until(
       () => (rewind.view.value?.timeline.points.length ?? 0) > 0,
       "the first history point",
+      "step",
     );
     const point = rewind.view.value!.timeline.points[0]!.id;
     await answerFirst(player);
@@ -1423,10 +1492,10 @@ RERUN.rows(
     );
     assert.equal(await rewind.back(point), true);
     await connections.first.lose();
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     connections.failNext();
     await player.activate();
-    await until(() => player.recovery.value !== null, "the offer again");
+    await until(() => player.recovery.value !== null, "the offer again", "step");
     // The family's state after the failed click: no session shown, still inspecting, no click, nothing prepared.
     assert.equal(player.session.value, null);
     assert.equal(player.rewind.inspecting.value, true);
@@ -1436,6 +1505,7 @@ RERUN.rows(
     await until(
       () => player.session.value?.state.foregroundAction != null,
       "the recovered question",
+      "step",
     );
     assert.equal(player.rewind.inspecting.value, false);
     assert.equal(rewind.view.value, null);
@@ -1495,7 +1565,7 @@ for (const [id, kind] of [
     await keptAtTheQuestion(player, kept);
     swap.on = true;
     await connections.first.lose();
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     assert.deepEqual(player.recovery.value, { offer: "start", where: "line" });
     return end();
   });
@@ -1517,11 +1587,11 @@ for (const [id, kind] of [
       await player.activate();
       await keptAtTheQuestion(player, kept);
       await connections.first.lose();
-      await until(() => player.recovery.value !== null, "the offer");
+      await until(() => player.recovery.value !== null, "the offer", "step");
       assert.equal(player.recovery.value?.offer, "continue");
       swap.on = true;
       await player.activate();
-      await until(() => player.activation.value !== null, "the start page");
+      await until(() => player.activation.value !== null, "the start page", "step");
       assert.equal(player.activation.value, "start");
       assert.equal(player.session.value, null, "nothing begins");
       return end();
@@ -1542,17 +1612,17 @@ RERUN.rows(
     };
     const { connections, player } = await page(context, topology, { kept });
     await player.activate();
-    await until(() => player.session.value?.state.foregroundAction != null, "the question");
+    await until(() => player.session.value?.state.foregroundAction != null, "the question", "step");
     for (const within = withinHostTime(); (await store.session(SCOPE)) === null;) {
       assert.ok(within(), "the session was not kept");
       await turns(1);
     }
     await connections.first.lose();
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     assert.equal(player.recovery.value?.offer, "start");
     hidden.on = false;
     await player.activate();
-    await until(() => player.session.value?.state.foregroundAction != null, "the question");
+    await until(() => player.session.value?.state.foregroundAction != null, "the question", "step");
     assert.equal(player.session.value!.liveEventSequence, 0, "a session started anew");
     return end();
   },
@@ -1596,7 +1666,7 @@ RERUN.rows(
     await player.activate();
     await keptAtTheQuestion(player, kept);
     await connections.first.lose();
-    await until(() => player.recovery.value !== null, "the first offer");
+    await until(() => player.recovery.value !== null, "the first offer", "step");
     const probe: { answers?: () => Promise<boolean> } = {};
     connections.armNext((fresh) => {
       probe.answers = answering(fresh);
@@ -1609,7 +1679,7 @@ RERUN.rows(
           : request(...args)) as typeof client.request;
     });
     await player.activate();
-    await until(() => player.recovery.value !== null, "the second offer");
+    await until(() => player.recovery.value !== null, "the second offer", "step");
     assert.deepEqual(player.recovery.value, { offer: "continue", where: "page" });
     assert.equal(player.hostError.value, null);
     const rejecting = connections.current();
@@ -1621,7 +1691,11 @@ RERUN.rows(
       "the click's camera is released",
     );
     await player.activate();
-    await until(() => player.session.value?.state.foregroundAction != null, "the question again");
+    await until(
+      () => player.session.value?.state.foregroundAction != null,
+      "the question again",
+      "step",
+    );
     assert.equal(connections.calls(), 2);
     assert.equal(connections.ends(rejecting), 1, "the next click does not end it again");
     await onTheFreshConnection(player, connections);
@@ -1637,7 +1711,7 @@ RERUN.rows(
     await player.activate();
     await keptAtTheQuestion(player, kept);
     await connections.first.lose();
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     const opened = nextOpened(connections, (fresh) => fresh.hold("prepare"));
     const recovering = player.activate();
     const fresh = await opened;
@@ -1668,7 +1742,7 @@ for (const [id, admitted] of [
       await player.activate();
       await keptAtTheQuestion(player, kept);
       await connections.first.lose();
-      await until(() => player.recovery.value !== null, "the offer");
+      await until(() => player.recovery.value !== null, "the offer", "step");
       const gate: { open?: () => void } = {};
       // Not admitted: its factory waits at `gate` once the connection opened.
       const opened = nextOpened(connections, (fresh) =>
@@ -1682,7 +1756,11 @@ for (const [id, admitted] of [
       // The trusted host's own calls, while the click's fresh connection opens or prepares.
       player.prepare(start);
       await player.activate();
-      await until(() => player.session.value?.state.foregroundAction != null, "the host's session");
+      await until(
+        () => player.session.value?.state.foregroundAction != null,
+        "the host's session",
+        "step",
+      );
       if (admitted) candidate.release();
       else gate.open!();
       await superseded;
@@ -1714,9 +1792,13 @@ RERUN.rows(
     await player.activate();
     await keptAtTheQuestion(player, kept);
     await connections.first.lose();
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     await player.activate();
-    await until(() => player.session.value?.state.foregroundAction != null, "the question again");
+    await until(
+      () => player.session.value?.state.foregroundAction != null,
+      "the question again",
+      "step",
+    );
     const fresh = connections.current();
     const answers = answering(fresh);
     const before = fresh.posts.length;
@@ -1766,7 +1848,7 @@ RERUN.rows(
     await player.activate();
     await keptAtTheQuestion(player, kept);
     await connections.first.lose();
-    await until(() => player.recovery.value !== null, "the offer");
+    await until(() => player.recovery.value !== null, "the offer", "step");
     gate.armed = true;
     const earlierOpened = nextOpened(connections, () => {});
     const earlier = player.activate();
@@ -1796,7 +1878,11 @@ RERUN.rows(
     );
     current.release();
     await later;
-    await until(() => player.session.value?.state.foregroundAction != null, "the later session");
+    await until(
+      () => player.session.value?.state.foregroundAction != null,
+      "the later session",
+      "step",
+    );
     assert.equal(await player.bridge, current.bridge);
     assert.equal(connections.ends(current), 0);
     return end();

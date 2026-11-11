@@ -281,7 +281,7 @@ RERUN.rows(
     for (let index = 0; index < 5; index += 1) await turn();
     transport.release();
     await Promise.all([answering, replacing]);
-    await until(() => said(host).includes("replacement"), "the replacement shows");
+    await until(() => said(host).includes("replacement"), "the replacement shows", "step");
     for (let index = 0; index < 10; index += 1) await turn();
     assert.deepEqual(said(host), ["replacement"], "nothing of the old session shows");
     // An input op is posted only while its session owns the UI (`inputSection`).
@@ -301,7 +301,7 @@ RERUN.rows(
     const first = await mount(context, transport);
     first.host.setDebugTracing(true);
     await start(first.host, 'say "first", instant\nshowButton "End"\nexit');
-    await until(() => first.host.traceId.value !== null, "the first Player's trace");
+    await until(() => first.host.traceId.value !== null, "the first Player's trace", "step");
     first.stop();
     for (let index = 0; index < 5; index += 1) await turn();
     const from = transport.posts.length;
@@ -376,7 +376,11 @@ RERUN.rows(
     first.stop();
     // A Continue on the next page: the same browser work, within its click.
     const second = await page(context, topology, at);
-    await until(() => second.host.activation.value === "continue", "the next page offers Continue");
+    await until(
+      () => second.host.activation.value === "continue",
+      "the next page offers Continue",
+      "step",
+    );
     calls.length = 0;
     const continuing = second.host.activate();
     assert.deepEqual(within(), ["play", "wakeLock"], "the Continue's audio unlock and wake lock");
@@ -458,6 +462,7 @@ RERUN.rows(
     await until(
       () => playerRuntimePacingGate(host.session.value!) != null,
       "the paced message holds the session",
+      "step",
     );
     const skipped = await input.runInput(
       host.inputSection,
@@ -467,8 +472,8 @@ RERUN.rows(
     );
     assert.equal(skipped.kind, "answered", "the pacing skip");
     await host.pressPermanentButton(1);
-    await until(() => said(host).includes("tick"), "the permanent button's block ran");
-    await until(() => said(host).includes("end"), "the script reached its end");
+    await until(() => said(host).includes("tick"), "the permanent button's block ran", "step");
+    await until(() => said(host).includes("end"), "the script reached its end", "step");
     for (const text of ["hi Ann", "picked B", "first Cy"])
       assert.ok(said(host).includes(text), said(host).join(" | "));
     assert.equal(
@@ -570,9 +575,9 @@ async function keptWith(
 async function importAndContinue(host: Host, transfer: SessionTransfer) {
   const review = await host.reviewSessionImport(await readForImport(host, transfer));
   await host.importSession(review);
-  await until(() => host.activation.value === "continue", "the import offers Continue");
+  await until(() => host.activation.value === "continue", "the import offers Continue", "step");
   await host.activate();
-  await until(() => said(host).length > 0, "the import shows its session");
+  await until(() => said(host).length > 0, "the import shows its session", "step");
 }
 
 /** Plays `KEPT` on `host` to its second question and lets its keep commit. */
@@ -581,8 +586,8 @@ async function playToSecondQuestion(host: Host) {
   await host.activate();
   await until(() => asks(host), "the first question is asked", "host");
   assert.equal((await answer(host, input.intents.composer("one", "enter"))).kind, "answered");
-  await until(() => said(host).includes("Got one."), "the first answer shows");
-  await until(() => asks(host), "the second question is asked");
+  await until(() => said(host).includes("Got one."), "the first answer shows", "step");
+  await until(() => asks(host), "the second question is asked", "step");
 }
 
 RERUN.rows(
@@ -599,7 +604,11 @@ RERUN.rows(
     first.stop();
     const rooms = memoryKeptRoomStore();
     const second = await page(context, topology, at, KEPT, { rooms });
-    await until(() => second.host.activation.value === "continue", "the next page offers Continue");
+    await until(
+      () => second.host.activation.value === "continue",
+      "the next page offers Continue",
+      "step",
+    );
     await second.host.activate();
     assert.deepEqual(said(second.host), shown, "the transcript up to the kept point");
     assert.equal(at.entries.get("visits"), 1);
@@ -623,6 +632,7 @@ RERUN.rows(
     await until(
       () => said(second.host).includes("Then two."),
       "the copy runs on in the debug room",
+      "step",
     );
     // Its keep commits in the debug room; only then does the normal room's session show it stayed.
     await keptWith(at, "Then two.", rooms);
@@ -654,6 +664,7 @@ RERUN.rows(
     await until(
       () => second.host.activation.value === "continue",
       "the other topology offers Continue",
+      "step",
     );
     await second.host.activate();
     assert.deepEqual(said(second.host), shown, "Continue on the other topology");
@@ -696,7 +707,7 @@ RERUN.rows(
     const { host } = await mount(context, transport);
     host.setDebugTracing(true);
     await start(host, TRACED);
-    await until(() => host.traceId.value !== null, "the Start's trace");
+    await until(() => host.traceId.value !== null, "the Start's trace", "step");
     const first = host.traceId.value;
     const view = await host.debugView(VARIABLES);
     assert.equal(view?.traceId, first);
@@ -804,7 +815,7 @@ RERUN.rows(
     await host.activate();
     const input = await runtimeInput();
     assert.equal((await answer(host, input.intents.composer("begin", "enter"))).kind, "answered");
-    await until(() => random.draw.value !== null, "the session pauses at its first draw");
+    await until(() => random.draw.value !== null, "the session pauses at its first draw", "step");
     assert.deepEqual(rolls(host), [], "nothing after the draw runs while it waits");
     const first = random.draw.value!;
     // The first draw's own read of what its site took has its reply before the next request does.
@@ -816,6 +827,7 @@ RERUN.rows(
     await until(
       () => random.draw.value !== null && random.draw.value.drawId !== first.drawId,
       "the second draw",
+      "step",
     );
     assert.deepEqual(rolls(host), ["Roll: 6"], "the chosen outcome, once");
     await transport.held();
@@ -838,9 +850,9 @@ RERUN.rows(
     assert.equal(await rewind.resume(), true, "Resume");
     assert.equal((await answer(host, input.intents.composer("again", "enter"))).kind, "answered");
     for (const value of [5, 4, 3]) {
-      await until(() => random.draw.value !== null, `the draw for ${value}`);
+      await until(() => random.draw.value !== null, `the draw for ${value}`, "step");
       assert.equal(await random.resolve({ kind: "number", value }), true);
-      await until(() => rolls(host).includes(`Roll: ${value}`), `Roll: ${value}`);
+      await until(() => rolls(host).includes(`Roll: ${value}`), `Roll: ${value}`, "step");
     }
     assert.deepEqual(rolls(host), ["Roll: 5", "Roll: 4", "Roll: 3"]);
     assert.equal(host.hostError.value, null);
@@ -876,7 +888,7 @@ RERUN.rows(
     await host.activate();
     await choose(host, "A1");
     await choose(host, "B1");
-    await until(() => said(host).includes("second B1"), "two answers");
+    await until(() => said(host).includes("second B1"), "two answers", "step");
     const tip = said(host);
     const first = rewind.state.value.points[0];
     assert.ok(first, "the first interaction is a point");
@@ -891,7 +903,7 @@ RERUN.rows(
     assert.equal(await rewind.back(first.id), true, "Back again");
     assert.equal(await rewind.resume(), true, "Resume");
     await choose(host, "A2");
-    await until(() => said(host).includes("first A2"), "the resumed session goes on");
+    await until(() => said(host).includes("first A2"), "the resumed session goes on", "step");
     assert.ok(!said(host).includes("second B1"), said(host).join(" | "));
     assert.equal(host.hostError.value, null);
     return end();
@@ -933,7 +945,11 @@ RERUN.rows(
       (await answer(second.host, input.intents.composer("two", "enter"))).kind,
       "answered",
     );
-    await until(() => elsewhere.entries.get("second") === "two", "the imported session's save");
+    await until(
+      () => elsewhere.entries.get("second") === "two",
+      "the imported session's save",
+      "step",
+    );
     assert.equal(writes.at(-1), "second", writes.join(", "));
     assert.equal(elsewhere.entries.get("visits"), 1, "the export's saved values came with it");
     return end();
@@ -970,7 +986,11 @@ RERUN.rows(
     );
     const input = await runtimeInput();
     assert.equal((await answer(host, input.intents.choice(null, "button"))).kind, "answered");
-    await until(() => said(host).some((text) => text.endsWith(" rounds")), "the button's answer");
+    await until(
+      () => said(host).some((text) => text.endsWith(" rounds")),
+      "the button's answer",
+      "step",
+    );
     const observed = host.session.value!.state.observedSessionTimeMs;
     assert.ok(observed >= 1_000);
     assert.deepEqual(said(host), ["Done", `${Math.floor(observed / 10)} rounds`]);
@@ -1039,7 +1059,7 @@ RERUN.rows(
     assert.equal((await answering).kind, "answered");
     await until(() => refusals.length > 0, "the catch-up's refusal", "host");
     assert.deepEqual(refusals, ["basis"]);
-    await until(() => buttonLabel(host) === "After", "the answer's next button");
+    await until(() => buttonLabel(host) === "After", "the answer's next button", "step");
     await until(
       () => host.session.value!.state.observedSessionTimeMs >= 1_000,
       "the fresh observation",
@@ -1069,7 +1089,7 @@ RERUN.rows(
       host,
       'say "Counting", instant\nlet zero = dynamic(0)\nlet result = 1 / zero\nexit\nfunction dynamic(value) {\n    return value\n}',
     );
-    await until(() => host.session.value?.state.status === "failed", "the script error");
+    await until(() => host.session.value?.state.status === "failed", "the script error", "step");
     const candidate = await host.debugExportCandidate(() => ({}), new AbortController().signal);
     assert.equal(candidate.recording?.complete, true);
     assert.ok((candidate.recording?.operations.length ?? 0) > 0, "the recording up to the error");

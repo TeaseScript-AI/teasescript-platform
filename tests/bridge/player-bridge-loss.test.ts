@@ -426,8 +426,16 @@ async function mount(
   player.prepare(await sourceStart(player.bridge, script, () => ({ wallClockMs: 0 })));
   await player.activate();
   if (script === AT_A_CHOICE)
-    await until(() => player.session.value?.state.foregroundAction != null, "the choice shows");
-  await until(() => elements.some((element) => element.src.endsWith("bell.mp3")), "the audio");
+    await until(
+      () => player.session.value?.state.foregroundAction != null,
+      "the choice shows",
+      "step",
+    );
+  await until(
+    () => elements.some((element) => element.src.endsWith("bell.mp3")),
+    "the audio",
+    "step",
+  );
   return { transport, player, elements, hostErrors };
 }
 
@@ -906,6 +914,7 @@ RERUN.rows(
       () =>
         player.session.value?.transcriptEntries.some((entry) => entry.text === "after") ?? false,
       "the script goes on",
+      "step",
     );
     assert.equal(player.hostError.value, null);
     assert.equal(hostErrors(), 0);
@@ -922,7 +931,7 @@ RERUN.rows(
     player.demandCallView();
     await transport.held();
     transport.release();
-    await until(() => player.session.value?.callView != null, "the call view shows");
+    await until(() => player.session.value?.callView != null, "the call view shows", "step");
     assert.equal(hostErrors(), 0);
     return end();
   },
@@ -1012,7 +1021,7 @@ RERUN.rows(
     });
     await transport.held();
     transport.release();
-    await until(() => player.activation.value === "start", "Start is offered");
+    await until(() => player.activation.value === "start", "Start is offered", "step");
     assert.equal(prepared.failure.value, null);
     assert.equal(hostErrors(), 0);
     return end();

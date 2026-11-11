@@ -205,7 +205,7 @@ export function withinHostTime(): () => boolean {
 export async function until(
   check: () => boolean,
   label: string,
-  on: "step" | "host" = "step",
+  on: "step" | "host",
 ): Promise<void> {
   const within = withinHostTime();
   const waiting = (turn: number) => (on === "host" ? within() : turn < 1_000);
