@@ -9,8 +9,8 @@ import { closeSync, existsSync, ftruncateSync, openSync, readFileSync, writeSync
 // own already there (which is left out of the check), so that the report sent is that file and its line is never
 // copied by hand. Only a whole last line in the tool's own form is its own; a quoted or partial one is text. The file is
 // written in place, through a link: cut after its text, then the line written there. A failure to open or cut leaves it
-// as it was; one while writing leaves its text and maybe part of the line, which the message says to remove; both
-// exit 2.
+// as it was; one while writing or closing leaves its text and maybe part of the line, which the message says to
+// remove; both exit 2.
 //
 // A SHA-shaped token is 7 to 40 lowercase hex characters, bounded by no letter, digit or `_`. Each is resolved with
 // `git rev-parse --verify --quiet <token>^{commit}` in each `--repo` (default: the current repository) and reported as
@@ -66,33 +66,41 @@ function withoutOwnLine(text) {
 /**
  * Writes `line` as `file`'s last line, in place: the file is cut where `kept`, its text before trailing white space and
  * an own last line, ends, and the blank line and `line` are written there. A failure to open or cut leaves the file as
- * it was; a failure while writing leaves its text, maybe with part of the line. Either exits 2, saying which.
+ * it was; a later failure, closing included, leaves its text, maybe with all or part of the line. Either exits 2,
+ * naming the first failure and what it left.
  */
 function appendLine(file, bytes, kept, line) {
   const end = Buffer.byteLength(kept);
   // (the text was read as UTF-8: cut only where its bytes are the same, so no character is split)
   if (!bytes.subarray(0, end).equals(Buffer.from(kept)))
     cannotRun(`cannot write ${file}: it is not UTF-8 text; it is as it was`);
+  const tail = Buffer.from(`\n\n${line}\n`);
   let descriptor;
+  let cut = false;
+  let failure;
   try {
     descriptor = openSync(file, "r+");
     ftruncateSync(descriptor, end);
-  } catch (error) {
-    if (descriptor !== undefined) closeSync(descriptor);
-    cannotRun(`cannot write ${file} (${error.code ?? error.message}); it is as it was`);
-  }
-  const tail = Buffer.from(`\n\n${line}\n`);
-  try {
+    cut = true;
     for (let written = 0; written < tail.length;)
       written += writeSync(descriptor, tail, written, tail.length - written, end + written);
   } catch (error) {
-    cannotRun(
-      `cannot write ${file}'s last line (${error.code ?? error.message}); its text is as it was, and part of the ` +
-        "line may stand after it: remove that by hand",
-    );
-  } finally {
-    closeSync(descriptor);
+    failure = error;
   }
+  // (closed once, even when it fails: a descriptor whose close reported an error is not closed again)
+  if (descriptor !== undefined)
+    try {
+      closeSync(descriptor);
+    } catch (error) {
+      failure ??= error;
+    }
+  if (failure === undefined) return;
+  const cause = failure.code ?? failure.message;
+  if (!cut) cannotRun(`cannot write ${file} (${cause}); it is as it was`);
+  cannotRun(
+    `cannot write ${file}'s last line (${cause}); its text is as it was, and all or part of the line may stand ` +
+      "after it: remove a partial line by hand",
+  );
 }
 
 /** The unfilled placeholders a report can carry, case-insensitive. */
