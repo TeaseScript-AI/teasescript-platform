@@ -15,7 +15,13 @@ import { typePlan } from "../../../type-plans.js";
 import { lazyDefaultArgument } from "../../../lazy-defaults.js";
 import { type ValueKind, VALUE_KIND_NAMES } from "../../../value-kinds.js";
 import type { PlaceId, TypeTerm } from "../../graph.js";
-import { type Answers, type ValueAnswer, type AdmittedType, closedType } from "../answers.js";
+import {
+  type Answers,
+  type ValueAnswer,
+  type AdmittedType,
+  type PlaceAnswer,
+  closedType,
+} from "../answers.js";
 import { joinSteps } from "../budget.js";
 import {
   ContractDescriptors,
@@ -276,9 +282,12 @@ export class Contracts {
     if (expected === null) return expected;
     const kindsAt = levelKinds(expected);
     let incoherent: string | null = null;
+    const answered: [string[], PlaceAnswer][] = [];
     for (const level of levelsOf(expected)) {
       if (landing === null) break;
-      const { admitted, contract } = this.answers.place(landing.id, [...landing.path, ...level]);
+      const answer = this.answers.place(landing.id, [...landing.path, ...level]);
+      answered.push([level, answer]);
+      const { admitted, contract } = answer;
       if (admitted.by === "decided" && admitted.inherited)
         throw new OutsideContract(call, "a typed parse or load into a copy of a written type");
       const kinds = kindsAt.get(level.join("\u0000"))?.kinds ?? null;
@@ -299,7 +308,56 @@ export class Contracts {
     if (!this.coherence) return expected;
     if (incoherent !== null) throw new OutsideContract(call, incoherent);
     if (fallback !== null) this.#defaultCoherent(call, fallback, kindsAt);
+    if (landing !== null) this.#othersCoherent(call, landing, answered, kindsAt);
     return expected;
+  }
+
+  /**
+   * PROBE (#2307 HEAD 0) v4: the destination's other stores at each landing level (its definitions there): each place
+   * their stored value reads at that level is a written binding whose type there is the reader's; any other read
+   * declines (an unwritten source's domain is not proved here).
+   */
+  #othersCoherent(
+    call: CallExpression | LoadExpression,
+    landing: Landing,
+    answered: readonly [string[], PlaceAnswer][],
+    kindsAt: ReadonlyMap<string, { path: string[]; kinds: Set<string> | null }>,
+  ): void {
+    for (const [level, answer] of answered) {
+      const kinds = kindsAt.get(level.join("\u0000"))?.kinds ?? null;
+      if (kinds === null) continue;
+      const at = [...landing.path, ...level];
+      for (const definition of answer.definitions.list) {
+        if (definition.path.length > at.length || definition.path.some((step, i) => at[i] !== step))
+          continue;
+        const value = this.index.findExpressionAt(definition.site);
+        if (value === undefined) throw new OutsideContract(call, "PROBE other unsure-site");
+        let own = false;
+        for (
+          let node: Expression | undefined = call;
+          node !== undefined;
+          node = this.index.parentOf(node)
+        )
+          if (node === value) own = true;
+        if (own) continue;
+        for (const read of atLevel(value, at.slice(definition.path.length))) {
+          if (read.kind === "other") continue;
+          if (read.kind === "unsure") throw new OutsideContract(call, "PROBE other unsure");
+          const place = this.answers.at(nodeOf(this.answers, this.index, read.read))?.place ?? null;
+          const annotation =
+            place === null ? null : (this.lets.get(place.id)?.typeAnnotation ?? null);
+          if (place === null || annotation === null)
+            throw new OutsideContract(call, "PROBE other unannotated");
+          const plan = typePlan(typeFromAnnotation(annotation));
+          const written =
+            plan === null
+              ? undefined
+              : levelKinds(plan).get(joinSteps(place.path, read.rest).join("\u0000"));
+          if (written !== undefined && written.kinds !== null && !sameKinds(written.kinds, kinds))
+            throw new OutsideContract(call, "PROBE other written-differs");
+        }
+      }
+    }
   }
 
   /** PROBE (#2307 HEAD 0): whether the coherence check runs (`checkedResult` turns it off). */
