@@ -242,13 +242,13 @@ test("whatever stands between TABLE and r4 or § on its line, markup or words, t
 });
 
 test("a revision number names an entry of the accepted record, each end of a range too, outside the record's pages", () => {
-  const entries = recordEntries(
-    new Map([
-      ["sharing", "# Sharing\n\n### r4-38\n\n### section-2-f12\n"],
-      ["oracles", "# Oracles\n\n### r4-165\n\nnot a heading: ### r4-7\n"],
-    ]),
-  );
-  assert.deepEqual([...entries].sort(), ["165", "38"]);
+  // an entry is a level-3 heading as Markdown reads it: trailing spaces count as nothing, a fenced line is no heading
+  const entries = recordEntries([
+    "# Sharing\n\n### r4-38\n\n### section-2-f12\n",
+    "# Oracles\n\n### r4-165  \n\n### r4-72\t\n\nnot a heading: ### r4-7\n\n```\n### r4-8\n```\n\n~~~\n### r4-9\n~~~\n",
+    "#### r4-10\n\n### r4-11-other\n\n### R4-12\n",
+  ]);
+  assert.deepEqual([...entries].sort(), ["165", "38", "72"]);
   const missing = (fileName, text) =>
     unresolvedRevisionsIn(fileName, text, entries).map(({ line, number }) => [line, number]);
   // a document, a link's text, a string, data and a range
@@ -268,7 +268,14 @@ test("a revision number names an entry of the accepted record, each end of a ran
   ]);
   assert.deepEqual(missing("tests/a.json", '{"closes": "r4.9996 until #1"}\r\n'), [[1, "9996"]]);
   // other spellings and longer tokens are no revision numbers; an anchor is the doc-links check's
-  assert.deepEqual(missing("docs/b.md", "R4.1, xr4.1, r4-9999, x.r4.2, r4.1a\n"), [[1, "1"]]);
+  // a number is its digits as written, leading zeros included, so 038 names no entry 38
+  assert.deepEqual(
+    missing("docs/b.md", "R4.1, xr4.1, ér4.9999, r4.9999٢, r4-9999, x.r4.2, r4.1a, r4.038\n"),
+    [
+      [1, "1"],
+      [1, "038"],
+    ],
+  );
   // the record's own pages and this test are outside the rule
   assert.deepEqual(
     missing("docs/specifications/type-inference-accepted-record/admission.md", "built as r4.167\n"),
@@ -293,15 +300,14 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
       write(`tools/oxlint/${file}`, readFileSync(new URL(file, import.meta.url)));
     write("tools/oxlint/comment-forecasts-allowed.json", "[]\n");
     write("tools/oxlint/comment-citations.json", "{}\n");
-    write(
-      "docs/specifications/type-inference-accepted-record/README.md",
-      "# Record\n\n## Labels\n",
-    );
-    write(
-      "docs/specifications/type-inference-accepted-record/sharing.md",
-      "# S\n\n### r4-38\n\nas r4.167\n",
-    );
-    write("docs/rev.md", "Kept r4.38.\n\nGone r4.9999.\n");
+    // entries on every record page Git lists: the README, a nested page and another Markdown extension too
+    const record = "docs/specifications/type-inference-accepted-record";
+    write(`${record}/README.md`, "# Record\n\n## Labels\n\n### r4-40\n");
+    write(`${record}/sharing.md`, "# S\n\n### r4-38\n\nas r4.167\n");
+    write(`${record}/nested/entry.md`, "# N\n\n### r4-41\n");
+    write(`${record}/other.markdown`, "# O\n\n### r4-42\n");
+    write("docs/rev.md", "Kept r4.38, r4.40, r4.41 and r4.42.\n\nGone r4.9999.\n");
+    write("data/rev.json", '{"why": "r4.9995"}\n');
     write("src/rev.ts", 'const reason = "r4.9998 and r4.38";\n');
     symlinkSync(join(repositoryRoot, "node_modules"), join(root, "node_modules"));
     write("docs/a.md", "# A\n\nAs ruled (TABLE r4.1).\n");
@@ -327,20 +333,16 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
       ...expected.filter((found) => found !== "src/a.ts:1"),
       "docs/rev.md:3",
       "src/rev.ts:1",
+      "data/rev.json:1",
+      // (a binary file is read for revision numbers, not for the record's name)
+      "data.bin:1",
     ].sort();
     const at = (findings, kind) =>
       findings
         .filter(({ message }) => message.includes(kind))
         .map(({ fileName, line }) => `${fileName}:${line}`)
         .sort();
-    const record = "docs/specifications/type-inference-accepted-record";
-    const pages = new Map(
-      ["README", "sharing"].map((name) => [
-        name,
-        readFileSync(join(root, record, `${name}.md`), "utf8"),
-      ]),
-    );
-    const listed = listedTextFindings(root, pages);
+    const listed = listedTextFindings(root);
     assert.deepEqual(at(listed, "cites a record that is not in the repository"), expected);
     assert.deepEqual(at(listed, "names no entry of the accepted record"), revisions);
     const entry = await import(
@@ -353,7 +355,7 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
       Buffer.concat([Buffer.from(`${root}/name-`), Buffer.from([0xff]), Buffer.from(".md")]),
       "TABLE r4.9\n",
     );
-    assert.throws(() => listedTextFindings(root, pages), /whose name is not UTF-8/u);
+    assert.throws(() => listedTextFindings(root), /whose name is not UTF-8/u);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

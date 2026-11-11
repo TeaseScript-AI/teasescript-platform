@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { remark } from "remark";
 import { checkedFiles, fileComments } from "./comments.mjs";
 
 // A comment says what the code does now and never forecasts later work (IMPLEMENTATION-AND-REVIEW.md "Code that does
@@ -229,11 +230,25 @@ export function unresolvedPointers(fileName, text, pages) {
 /** A revision number written in text: `r4.` and its digits as a whole token, naming the accepted record's entry `r4-N`. */
 const REVISION_NUMBER = /(?<![\p{L}\p{N}.])r4\.(\d+)(?!\p{N})/gu;
 
-/** The accepted record's entries by number: each page's `### r4-N` heading; `pages` maps a page's name to its text. */
+/** Whether `file` is one of the accepted record's pages: a Markdown file anywhere in its folder. */
+const isRecordPage = (file) => file.startsWith(`${RECORD}/`) && /\.(?:md|markdown)$/u.test(file);
+
+/** A Markdown node's text: its value, or its children's text joined. */
+const textOf = (node) => node.value ?? (node.children ?? []).map(textOf).join("");
+
+/**
+ * The accepted record's entries by number: each level-3 heading whose text is `r4-N`, as remark (the doc-links check's
+ * Markdown parser) reads the pages, so a heading's trailing spaces count as nothing and a line in a code block is none;
+ * `pages` holds the pages' texts.
+ */
 export function recordEntries(pages) {
   const numbers = new Set();
-  for (const page of pages.values())
-    for (const [, number] of page.matchAll(/^### r4-(\d+)$/gmu)) numbers.add(number);
+  const visit = (node) => {
+    const entry = node.type === "heading" && node.depth === 3 && /^r4-(\d+)$/u.exec(textOf(node));
+    if (entry) numbers.add(entry[1]);
+    for (const child of node.children ?? []) visit(child);
+  };
+  for (const page of pages) visit(remark().parse(page));
   return numbers;
 }
 
@@ -275,20 +290,19 @@ export function tableCitationsIn(fileName, text) {
 
 /**
  * Each citation of the old design record and each revision number with no entry (`unresolvedRevisionsIn`, against
- * `pages`, the accepted record's pages by name) in the files Git lists in `root` (tracked, and untracked but not
- * ignored) that are regular files, as `doc-links.mjs` reads them, as diagnostics; a file with a NUL byte is binary and is not
- * read as text. A name is decoded whole, a leading byte order mark kept; a failed `git` throws, and so does a listed
- * name that is not UTF-8, which could not be read unchanged.
+ * the entries of every record page Git lists) in the files Git lists in `root` (tracked, and untracked but not ignored)
+ * that are regular files, as `doc-links.mjs` reads them, as diagnostics. A file with a NUL byte is binary: the revision
+ * rule reads it too, the record's name is not looked for in it. A name is decoded whole, a leading byte order mark kept;
+ * a failed `git` throws, and so does a listed name that is not UTF-8, which could not be read unchanged.
  */
-export function listedTextFindings(root, pages) {
-  const entries = recordEntries(pages);
+export function listedTextFindings(root) {
   const listing = execFileSync(
     "git",
     ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--deduplicate"],
     { cwd: root, maxBuffer: 1 << 28 },
   );
   const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
-  const findings = [];
+  const files = [];
   for (let start = 0, end; (end = listing.indexOf(0, start)) !== -1; start = end + 1) {
     const bytes = listing.subarray(start, end);
     let file;
@@ -299,8 +313,20 @@ export function listedTextFindings(root, pages) {
         `git lists a file whose name is not UTF-8 (${JSON.stringify(bytes.toString("latin1"))}): rename it, so the citation checks can read it`,
       );
     }
-    if (!lstatSync(resolve(root, file), { throwIfNoEntry: false })?.isFile()) continue;
-    const text = readFileSync(resolve(root, file), "utf8");
+    if (lstatSync(resolve(root, file), { throwIfNoEntry: false })?.isFile()) files.push(file);
+  }
+  const read = (file) => readFileSync(resolve(root, file), "utf8");
+  const entries = recordEntries(files.filter(isRecordPage).map(read));
+  const findings = [];
+  for (const file of files) {
+    const text = read(file);
+    for (const { line, number } of unresolvedRevisionsIn(file, text, entries))
+      findings.push({
+        fileName: file,
+        line,
+        column: 1,
+        message: `revision ${number} names no entry of the accepted record (${RECORD}, headings r4-N): state the fact, or point at an entry, an issue or a merged pull request`,
+      });
     if (text.includes("\0")) continue;
     for (const { line, text: citation } of tableCitationsIn(file, text))
       findings.push({
@@ -308,13 +334,6 @@ export function listedTextFindings(root, pages) {
         line,
         column: 1,
         message: `"${citation.length > 60 ? `${citation.slice(0, 60)}…` : citation}": a line that names the old design record and then a revision or a section of it cites a record that is not in the repository; state the fact, or point at the accepted record, an issue or a merged pull request, and in prose about the old record keep any revision or section off its line and the next`,
-      });
-    for (const { line, number } of unresolvedRevisionsIn(file, text, entries))
-      findings.push({
-        fileName: file,
-        line,
-        column: 1,
-        message: `revision ${number} names no entry of the accepted record (${RECORD}, headings r4-N): state the fact, or point at an entry, an issue or a merged pull request`,
       });
   }
   return findings;
@@ -372,7 +391,7 @@ export function checkCommentForecasts(root) {
     if (Object.keys(counts).length > 0) counted[file] = counts;
   }
   diagnostics.push(...glossaryFindings(carried, glossary));
-  diagnostics.push(...listedTextFindings(root, pages));
+  diagnostics.push(...listedTextFindings(root));
   for (const [index, item] of allowed.entries())
     if (!used.has(index))
       diagnostics.push({
