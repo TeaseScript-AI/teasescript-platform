@@ -1,5 +1,5 @@
 // What a program's analysis answers, as the oracles publish it, under the questions' bound (units, heap room and the
-// work reported), and the lists of its answers with orders set aside.
+// work reported), and the lists the tests read off its answers and items.
 import { getHeapStatistics } from "node:v8";
 import type { AdmittedType, Answers, CorePass } from "../../src/type-inference/core/answers.js";
 import { BudgetExhausted } from "../../src/type-inference/core/budget.js";
