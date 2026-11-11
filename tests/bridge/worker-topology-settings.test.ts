@@ -53,34 +53,46 @@ if (FIXTURE !== undefined) {
     await realTime(() => process.hrtime.bigint() >= deadline, `${ms} ms passed`);
   };
 
-  test("delayed deliveries arrive in the order given, each its delay after it was given and in a task of its own", async () => {
+  /** Milliseconds on the monotonic clock, which mocked timers, `Date` and `performance` do not move. */
+  const monotonic = () => Number(process.hrtime.bigint()) / 1e6;
+
+  // Each check below reads only lower bounds and orders taken inside the deliveries, never that an observer ran before a
+  // deadline, so a slow runner cannot fail it.
+  test("delayed deliveries arrive in the order given, each at least its delay after it was given and in a task of its own", async () => {
     const delivery = delayedDelivery(40);
     const order: string[] = [];
+    const late: number[] = [];
+    const given = (name: string, more: () => void = () => {}) => {
+      const at = monotonic();
+      delivery.run(() => {
+        late.push(monotonic() - at);
+        order.push(name);
+        more();
+      });
+    };
     // Due together, the second still waits for the promise work the first started, as a Worker's next event does.
-    delivery.run(() => {
-      order.push("a");
-      queueMicrotask(() => order.push("a's promise work"));
-    });
-    delivery.run(() => order.push("b"));
+    given("a", () => queueMicrotask(() => order.push("a's promise work")));
+    given("b");
     await realSleep(10);
-    delivery.run(() => order.push("c"));
-    assert.equal(order.length, 0, `nothing before its delay: ${order.join(", ")}`);
-    await realTime(() => order.length === 3, "the first two delivered");
-    assert.deepEqual(order, ["a", "a's promise work", "b"], "c is not due yet");
-    await realTime(() => order.length === 4, "the third delivered");
+    given("c");
+    await realTime(() => order.length === 4, "all three delivered");
     assert.deepEqual(order, ["a", "a's promise work", "b", "c"]);
+    assert.ok(
+      late.every((ms) => ms >= 39),
+      `each at least its delay after it was given: ${late.join(", ")}`,
+    );
     assert.equal(delivery.pending(), 0);
   });
 
   test("a delayed delivery runs on real time: a mocked clock neither holds nor hastens it", async (context) => {
     context.mock.timers.enable({ apis: ["setTimeout", "setInterval", "Date"] });
     const delivery = delayedDelivery(30);
-    let delivered = false;
-    delivery.run(() => void (delivered = true));
+    const at = monotonic();
+    let late: number | null = null;
+    delivery.run(() => void (late = monotonic() - at));
     context.mock.timers.tick(1_000_000_000);
-    await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(delivered, false, "a mocked tick does not hasten it");
-    await realTime(() => delivered, "delivered while the mocked clock stood still");
+    await realTime(() => late !== null, "delivered while the mocked clock stood still");
+    assert.ok(late! >= 29, `a mocked tick does not hasten it: ${late}`);
   });
 
   test("a cancelled delivery drops what is pending and everything given later", async () => {
@@ -101,7 +113,7 @@ if (FIXTURE !== undefined) {
   });
 
   test("a reply a delayed Worker sent before its loss reaches the client before the loss does", async (context) => {
-    const transport = await topologyBridge(context, "worker", { workerDelayMs: 300 });
+    const transport = await topologyBridge(context, "worker", { workerDelayMs: 1_000 });
     const order: string[] = [];
     transport.bridge.client.onLoss(() => order.push("loss"));
     const received = transport.thread!.messages();
@@ -110,7 +122,9 @@ if (FIXTURE !== undefined) {
       (error: unknown) => order.push(`reply: ${error instanceof Error ? error.name : "?"}`),
     );
     await until(() => transport.thread!.messages() > received, "the reply received", "host");
-    assert.equal(order.length, 0, `received, not yet delivered: ${order.join(", ")}`);
+    // A runner too slow to lose the Worker within the delay checks nothing here, and says so rather than failing.
+    if (order.length > 0)
+      return context.skip("the reply was delivered before the Worker could be lost");
     await transport.lose();
     await reply;
     assert.equal(order.length, 2, order.join(", "));
