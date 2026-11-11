@@ -323,6 +323,19 @@ export class Contracts {
 
   /** PROBE (#2307 HEAD 0): whether the coherence check runs (`checkedResult` turns it off). */
   public coherence = true;
+  /** PROBE v7: each place key's definitions, read once; each unwritten binding's verdict at a level and kinds, once. */
+  readonly #definitionsOf = new Map<string, readonly Definition[]>();
+  readonly #bindingVerdicts = new Map<string, string | null>();
+
+  #definitions(id: PlaceId, path: readonly string[], answer?: PlaceAnswer): readonly Definition[] {
+    const key = `${id}\u0001${path.join("\u0000")}`;
+    let found = this.#definitionsOf.get(key);
+    if (found === undefined) {
+      found = (answer ?? this.answers.place(id, path)).definitions.list;
+      this.#definitionsOf.set(key, found);
+    }
+    return found;
+  }
 
   /**
    * PROBE v6: whether a read at `rest` below it is a written binding whose type there is `kinds`; an unwritten one's own
@@ -340,8 +353,12 @@ export class Contracts {
     const annotation = this.lets.get(place.id)?.typeAnnotation ?? null;
     if (annotation === null) {
       if (!follow) return "unannotated";
+      const key = `${place.id}\u0001${steps.join("\u0000")}\u0001${[...kinds].sort().join("|")}`;
+      if (this.#bindingVerdicts.has(key)) return this.#bindingVerdicts.get(key)!;
       const one = new Map([[steps.join("\u0000"), { path: [...steps], kinds: new Set(kinds) }]]);
-      return this.#sourcesAgree(place.id, [], one, null);
+      const verdict = this.#sourcesAgree(place.id, [], one, null);
+      this.#bindingVerdicts.set(key, verdict);
+      return verdict;
     }
     const plan = typePlan(typeFromAnnotation(annotation));
     const level = plan === null ? undefined : levelKinds(plan).get(steps.join("\u0000"));
@@ -364,12 +381,14 @@ export class Contracts {
   ): string | null {
     const definitions = new Map<number, Definition>();
     for (const { path } of kindsAt.values())
-      for (const definition of (
-        answered.get(path.join("\u0000")) ?? this.answers.place(id, joinSteps(base, path))
-      ).definitions.list)
+      for (const definition of this.#definitions(
+        id,
+        joinSteps(base, path),
+        answered.get(path.join("\u0000")),
+      ))
         definitions.set(definition.uid, definition);
     for (let depth = 0; depth < base.length; depth += 1)
-      for (const definition of this.answers.place(id, base.slice(0, depth)).definitions.list)
+      for (const definition of this.#definitions(id, base.slice(0, depth)))
         definitions.set(definition.uid, definition);
     for (const { path, kinds } of kindsAt.values()) {
       if (kinds === null) continue;
