@@ -1,4 +1,4 @@
-// The scenarios of L5h.3b's export equivalence family (§21.4 family 5), as plain JavaScript over an `api` of the
+// The scenarios of L5h.3b's export equivalence family (L5h's HEAD 0, family 5), as plain JavaScript over an `api` of the
 // Player's modules, so that the same scenarios run on the base's assembler (`generate.mjs`, which writes the fixture) and
 // on the head's (`tests/player/player-debug-export-equivalence.test.ts`). Each scenario makes a session, its recording and the
 // photo reads, and names its choices; the side's adapter turns them into its candidate.

@@ -8,7 +8,7 @@ import { recordClient, type TapeEntry } from "./tape.js";
 import { untypedBridge, untypedClient } from "../helpers/bridge/untyped.js";
 
 /*
- * The K/F tape driver (the L5 gate's tape plan §2): prepares a project, starts it as a hosted Player starts, then
+ * The K/F tape driver (the L5 gate's tape plan): prepares a project, starts it as a hosted Player starts, then
  * sweeps the session-wide candidates (`candidates.ts`) one request at a time, recording every request and reply on the
  * client. A decline moves to the next candidate not yet tried in this decision, read from the latest publication; an
  * acceptance starts a fresh decision. The tape ends halted, failed, cut, unsupported, refused or stalled.

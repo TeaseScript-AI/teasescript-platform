@@ -11,7 +11,7 @@ import { stopArguments, type Origin, type useActivationRun } from "../useActivat
 type Runs = Pick<ReturnType<typeof useActivationRun>, "admits">;
 
 /*
- * The session an activation's work acts on, as that work may hold it (session split S2, HEAD 0 §2): bound to the
+ * The session an activation's work acts on, as that work may hold it (session split S2's HEAD 0): bound to the
  * activation's origin and to the session's connection, with only the operations the work uses. Each operation admits
  * its origin immediately before it acts, and refuses a retired one (`RetiredActivation`); the work never holds the
  * session, its bridge or its client. A target is made only synchronously, from a session in hand.

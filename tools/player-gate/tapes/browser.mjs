@@ -1,4 +1,4 @@
-// Replays the K/F tapes' pinned cover set in one browser, through both bridge backends (the gate's tape plan §4): each
+// Replays the K/F tapes' pinned cover set in one browser, through both bridge backends (the gate's tape plan): each
 // tape the census pins for the cohort (`census.mjs`, `cohorts.browser` or `cohorts.pixel`, by package and tape hash) is
 // served to the bridge page's replay mode (`bridge/replay.mjs`), one fresh page per tape and backend, and every reply is
 // compared with the one recorded in Node. Writes one JSON line per tape and backend.

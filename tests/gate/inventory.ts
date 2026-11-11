@@ -150,7 +150,7 @@ export const MECHANISMS: readonly string[] = [
 ];
 
 /**
- * What this policy cannot meet, with its reason (the tape plan §5 and orchestrator 2's disposition): the census names
+ * What this policy cannot meet, with its reason (the tape plan and orchestrator 2's disposition): the census names
  * these beside its computed gaps, and they stay named coverage residuals, never claims that a state is unreachable. The
  * gate fixtures and their hosts (`fixtures/`, `hosts.ts`) meet the rest.
  */

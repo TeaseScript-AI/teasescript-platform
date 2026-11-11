@@ -5,7 +5,7 @@ import test from "node:test";
 import { pathToFileURL } from "node:url";
 
 /*
- * The checks of activation work (session split S2, HEAD 0 §6; `tools/activation-work-checks.mjs`): what they admit,
+ * The checks of activation work (session split S2's HEAD 0; `tools/activation-work-checks.mjs`): what they admit,
  * what they find, and that they refuse each named form. They share the session-work census's program
  * (`tests/player/player-session-work-census.test.ts` registers them on its census). They enforce wiring forms only: a trusted
  * adapter's behaviour and when a callback runs are the runtime family's and review's, not theirs.

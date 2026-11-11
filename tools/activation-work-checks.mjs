@@ -1,4 +1,4 @@
-// The checks of activation work (session split S2, HEAD 0 §6), over the program the session-work census builds
+// The checks of activation work (session split S2's HEAD 0), over the program the session-work census builds
 // (`createSessionWorkCensus(…).program()`). They read every module in `player/vue/src/session/activation/work/` and
 // enforce its documented wiring forms, with a closed default: a form they do not know fails.
 //

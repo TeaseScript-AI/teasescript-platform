@@ -3,7 +3,7 @@ import { candidatesFor, type Candidate } from "./candidates.js";
 /*
  * The gate fixtures' hosts (`tests/gate/fixtures/`): a fixture whose first line is `// gate-host: <name>` is driven with
  * that host instead of the table's own answers to host work, for a mechanism the table's answers never reach (orchestrator
- * 2's disposition of the tape plan §5). Each host changes or adds what a real host or player may send; the table and
+ * 2's disposition of the tape plan). Each host changes or adds what a real host or player may send; the table and
  * its rows stay as they are, and the engine still decides every request.
  */
 

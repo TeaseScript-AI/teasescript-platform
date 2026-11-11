@@ -613,7 +613,7 @@ test(
 );
 
 /*
- * Nested-set admission against the frozen boundary (#1904, plan-r4 §8 R-setdepth): the pinned root validates sets with
+ * Nested-set admission against the frozen boundary (#1904, plan-r4's R-setdepth): the pinned root validates sets with
  * the per-member key the candidate replaced by bottom-up prints, so equal admissions on both are the same admission.
  * Each case declares its outcome first, so two roots that reject alike never pass for an accepted value. Frozen depths
  * stay at 1,024 levels or less: deeper, the pinned root's validator itself grows with the square of the depth.
