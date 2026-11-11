@@ -304,6 +304,11 @@ test(
         few.out,
         /2 of CI's newest passed runs are for an open pull request into other, not 3/u,
       );
+      // (with how to find runs to give instead)
+      assert.match(
+        few.stderr,
+        /find runs with `gh run list --workflow ci\.yml .*`, then give them: --from-ci RUN/u,
+      );
       assert.equal(few.module, chosen.module);
 
       // Refused, the module unchanged: --base-branch with runs or without a branch, before any gh request; and a

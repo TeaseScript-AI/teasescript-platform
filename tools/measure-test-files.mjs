@@ -15,9 +15,10 @@ import { isTypeCoreTestFile, shardFiles, suiteName, suiteTestFiles } from "./tes
 // API gives the pre-test step's seconds, and each file counts its median over the runs, at least three since CI's
 // runners vary. A run counts its last attempt (re-running a run removes its earlier attempts' artifacts), when every
 // test step ("Build and run tests, shard i of N") and its pre-test step passed, whatever the run's own conclusion.
-// `--from-ci --base-branch BRANCH` takes the newest three CI runs that passed for a pull request into BRANCH, among the
-// newest hundred that passed, and names them; GitHub names a run's pull requests only while they are open, so a run
-// of a merged pull request is passed over. The module records the runs taken.
+// `--from-ci --base-branch BRANCH` takes the first three matches among CI's latest hundred passed pull-request runs into
+// BRANCH, and names them. They may be of one pull request or one head and may predate BRANCH's tip; the current checkout
+// supplies the file set. GitHub names a run's pull requests only while they are open, so a run of a merged pull request
+// is passed over. The module records the runs taken.
 //
 // Without it, the build, the full suite in `npm test`'s order and concurrency, and then `check:pretest` (after the
 // suite, with the new seconds written: `test:verification` checks that every listed file exists, costliest first) run
@@ -79,6 +80,10 @@ const median = (values) => {
   return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 };
 
+// (how to give the runs instead, which each refusal of `--base-branch` adds)
+const giveRuns =
+  "find runs with `gh run list --workflow ci.yml --event pull_request --limit 100 --json databaseId,headSha,conclusion`, then give them: --from-ci RUN ...";
+
 /** The ids of the newest three CI runs that passed for a pull request into `branch`, named on standard error. */
 function runsInto(branch) {
   // (each run's id and its pull requests' bases only: a hundred whole runs pass the output buffer's 1 MiB)
@@ -95,6 +100,7 @@ function runsInto(branch) {
   } catch (error) {
     fail([
       `cannot read CI's passed pull-request runs (${error.message.split("\n")[0]}): give the runs`,
+      giveRuns,
     ]);
   }
   // (the shape the projection makes; anything else is refused, not read)
@@ -106,6 +112,7 @@ function runsInto(branch) {
   if (!Array.isArray(passed) || !passed.every(run))
     fail([
       "CI's passed pull-request runs did not read as a list of ids and base branches: give the runs",
+      giveRuns,
     ]);
   const ids = passed
     .filter((found) => found.bases.includes(branch))
@@ -114,6 +121,7 @@ function runsInto(branch) {
   if (ids.length < 3)
     fail([
       `${ids.length} of CI's newest passed runs are for an open pull request into ${branch}, not 3: give the runs`,
+      giveRuns,
     ]);
   process.stderr.write(
     `measure-test-files: runs ${ids.join(", ")}, the newest passed for a pull request into ${branch}\n`,
