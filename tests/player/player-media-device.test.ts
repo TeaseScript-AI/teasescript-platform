@@ -135,12 +135,15 @@ test("a retry plays every refused element, each with the source it was refused w
     ].join("\n"),
   );
   player.start();
+  // Each playAudio runs once the one before it has loaded; the first two are refused, the third plays.
+  for (const refuse of [true, true, false]) {
+    const element = player.elements.at(-1)!;
+    element.refuse = refuse;
+    element.metadata(10);
+    await settle();
+  }
   const [bell, chime, music] = player.elements;
   assert.ok(bell !== undefined && chime !== undefined && music !== undefined);
-  bell.refuse = true;
-  chime.refuse = true;
-  for (const element of [bell, chime, music]) element.metadata(10);
-  await settle();
   assert.equal(player.blocked, true);
   const refusedWith = [bell, chime].map((element) => element.playedSources.at(-1));
   const plays = [bell, chime, music].map((element) => element.plays);
