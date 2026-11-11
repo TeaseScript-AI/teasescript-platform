@@ -62,14 +62,26 @@ test("a JavaScript file no root reaches fails the inventory", (context) => {
   assert.throws(() => inventoryOf(app, "worker"), /no root reaches assets\/stray-h\.js/u);
 });
 
+test("an import of a file the build does not hold fails the inventory", (context) => {
+  const app = buildOf(context, {
+    ...PLAYER,
+    "assets/plan-f.js": 'import "./gone.js";\nexport const plan = 1;',
+  });
+  assert.throws(
+    () => inventoryOf(app, "worker"),
+    /plan-f\.js: imports \.\/gone\.js, which the build/u,
+  );
+});
+
 test("an import() of a form the inventory does not read fails it", (context) => {
   // A variable; a template with a substitution, whose file the page also reaches (so no unreached file would show the
-  // lost Worker edge); and a variable after a space or a comment.
+  // lost Worker edge); and a variable after a space or a comment of either kind.
   for (const call of [
     "import(name)",
     "import(`./${name}.js`)",
     "import (name)",
     "import/* chunk */(name)",
+    "import // chunk\n(name)",
   ]) {
     const app = buildOf(context, {
       ...PLAYER,
@@ -78,8 +90,20 @@ test("an import() of a form the inventory does not read fails it", (context) => 
     });
     assert.throws(
       () => inventoryOf(app, "worker"),
-      /engine-host-e\.js: 1 import\(\) of a form/u,
+      /engine-host-e\.js: an import\(\) of a form/u,
       call,
     );
   }
+});
+
+test("text that only looks like an import, in a string or a comment, is none", (context) => {
+  const app = buildOf(context, {
+    ...PLAYER,
+    "assets/plan-f.js":
+      'export const plan = 1;\n// import(name) and import "./gone.js"\nPromise.resolve(`import (name)`).then(postMessage);\nconst text = "import(\'./gone.js\')";',
+  });
+  const inventory = inventoryOf(app, "worker");
+  assert.deepEqual(inventory.files.find((file) => file.file === "assets/plan-f.js").classes, [
+    "Worker",
+  ]);
 });
