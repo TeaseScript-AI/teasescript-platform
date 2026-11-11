@@ -30,25 +30,35 @@ function start(t, cwd, names, serial = false) {
   t.after(() => {
     if (child.exitCode === null) child.kill("SIGTERM");
   });
+  // (both streams in arrival order, and stdout alone, whose order is the runner's: the last line is read there)
   let output = "";
+  let stdout = "";
   child.stdout.on("data", (chunk) => {
     output += chunk;
+    stdout += chunk;
   });
   child.stderr.on("data", (chunk) => {
     output += chunk;
   });
   const done = new Promise((resolve, reject) => {
     child.on("error", reject);
-    child.on("close", (code) => resolve({ code, output }));
+    child.on("close", (code) => resolve({ code, output, stdout }));
   });
-  return { child, done };
+  return { child, done, output: () => output };
 }
 
 /**
- * Waits until `read` returns a value, and returns it. It has no deadline, so a loaded host only makes it slower
- * (#2379): it ends on the event itself, or fails once `runner`, when given, has exited without it.
+ * How long a wait may last: only a hang reaches it, never a loaded host (#2379), and it then fails naming what it
+ * waited for. The fixtures' own waits share it.
  */
-async function waitFor(read, runner = null) {
+const BOUND_SECONDS = 300;
+
+/**
+ * Waits until `read` returns a value, and returns it: it ends on the event itself, or fails naming `what` once
+ * `runner`, when given, has exited without it, or after `BOUND_SECONDS`.
+ */
+async function waitFor(what, read, runner = null) {
+  const until = performance.now() + BOUND_SECONDS * 1000;
   for (;;) {
     try {
       const value = read();
@@ -57,19 +67,25 @@ async function waitFor(read, runner = null) {
       if (error.code !== "ENOENT") throw error;
     }
     if (runner !== null && (runner.exitCode !== null || runner.signalCode !== null))
-      throw new Error("The runner exited before the fixture reached the requested state");
+      throw new Error(`The runner exited before ${what}`);
+    if (performance.now() > until) throw new Error(`Waited ${BOUND_SECONDS} s for ${what}`);
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 }
+
+/** Fixture source that waits until `file` exists, or exits 1 after `BOUND_SECONDS`, saying it waited for `what`. */
+const awaitFile = (file, what) =>
+  `{ const until = performance.now() + ${BOUND_SECONDS * 1000}; ` +
+  `while (!existsSync('${file}')) { if (performance.now() > until) { ` +
+  `console.error('waited ${BOUND_SECONDS} s for ${what}'); process.exit(1); } ` +
+  `await new Promise(r => setTimeout(r, 10)); } }`;
 
 const record = `import { appendFileSync, existsSync, writeFileSync } from 'node:fs';`;
 
 test("parallel commands run once and overlap; serial route runs once in order", async (t) => {
   const cwd = fixture(t, {
     first: `${record} appendFileSync('events', 'first-start\\n'); writeFileSync('first-ready', '');
-      if (process.env.VERIFY_SERIAL !== '1') {
-        while (!existsSync('second-ready')) await new Promise(r => setTimeout(r, 10));
-      }
+      if (process.env.VERIFY_SERIAL !== '1') ${awaitFile("second-ready", "second to start beside it")}
       appendFileSync('events', 'first-end\\n');`,
     second: `${record} appendFileSync('events', 'second-start\\n'); writeFileSync('second-ready', '');
       console.error('visible warning'); appendFileSync('events', 'second-end\\n');`,
@@ -91,22 +107,30 @@ test("parallel commands run once and overlap; serial route runs once in order", 
 });
 
 test("a failed step stops no other, serial or parallel; the last line names what ran, failed and did not run (#2106)", async (t) => {
+  // (`later` ends only after run-parallel has reported the failure, when the abort it no longer does would come)
   const cwd = fixture(t, {
     failure: "console.error('distinct failure diagnostic'); process.exit(7);",
-    later: `${record} await new Promise(r => setTimeout(r, 300)); appendFileSync('events', 'later-end\\n');`,
+    later: `${record} ${awaitFile("release", "the failure to be reported")} appendFileSync('events', 'later-end\\n');`,
   });
   for (const serial of [false, true]) {
-    const result = await start(t, cwd, ["failure", "later"], serial).done;
+    const run = start(t, cwd, ["failure", "later"], serial);
+    await waitFor(
+      "run-parallel to report the failed step",
+      () => run.output().includes("[failure] FAIL"),
+      run.child,
+    );
+    writeFileSync(join(cwd, "release"), "");
+    const result = await run.done;
     assert.equal(result.code, 7, result.output);
     assert.match(result.output, /distinct failure diagnostic/);
     assert.match(result.output, /\[failure\] FAIL/);
     assert.match(result.output, /\[later\] PASS/);
     assert.equal(readFileSync(join(cwd, "events"), "utf8"), "later-end\n");
     assert.equal(
-      result.output.trimEnd().split("\n").at(-1),
+      result.stdout.trimEnd().split("\n").at(-1),
       "ran: failure, later; failed: failure; not run: none",
     );
-    rmSync(join(cwd, "events"));
+    for (const file of ["events", "release"]) rmSync(join(cwd, file));
   }
 });
 
@@ -119,13 +143,17 @@ test("a step npm cannot start fails with exit 1 and is named", async (t) => {
     stdio: ["ignore", "pipe", "pipe"],
   });
   let output = "";
-  child.stdout.on("data", (chunk) => (output += chunk));
+  let stdout = "";
+  child.stdout.on("data", (chunk) => {
+    output += chunk;
+    stdout += chunk;
+  });
   child.stderr.on("data", (chunk) => (output += chunk));
   const code = await new Promise((resolve) => child.on("close", resolve));
   assert.equal(code, 1, output);
   assert.match(output, /\[first\] FAIL/u);
   assert.match(output, /first: spawn npm ENOENT/u);
-  assert.equal(output.trimEnd().split("\n").at(-1), "ran: first; failed: first; not run: none");
+  assert.equal(stdout.trimEnd().split("\n").at(-1), "ran: first; failed: first; not run: none");
 });
 
 test("summaryLine names each step that ended under ran, a failed one also under failed, and every other under not run", () => {
@@ -151,10 +179,14 @@ describe("process cleanup", { concurrency: true }, () => {
         const cwd = fixture(t, {
           waiting: `import { existsSync } from 'node:fs'; import { spawn } from 'node:child_process';
         spawn(process.execPath, ['-e', "require('node:fs').writeFileSync('pid', String(process.pid)); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);"], {stdio:'inherit'});
-        ${reason === "parent-failure" ? "while (!existsSync('pid')) await new Promise(r => setTimeout(r, 10)); process.exit(9);" : "setInterval(() => {}, 1000);"}`,
+        ${reason === "parent-failure" ? `${awaitFile("pid", "its descendant to start")} process.exit(9);` : "setInterval(() => {}, 1000);"}`,
         });
         const { child, done } = start(t, cwd, ["waiting"]);
-        const pid = await waitFor(() => Number(readFileSync(join(cwd, "pid"), "utf8")), child);
+        const pid = await waitFor(
+          "the descendant that ignores SIGTERM to start",
+          () => Number(readFileSync(join(cwd, "pid"), "utf8")),
+          child,
+        );
         t.after(() => {
           try {
             process.kill(pid, "SIGKILL");
@@ -177,23 +209,26 @@ describe("process cleanup", { concurrency: true }, () => {
           result.output,
         );
         assert.equal(
-          result.output.trimEnd().split("\n").at(-1),
+          result.stdout.trimEnd().split("\n").at(-1),
           reason === "parent-failure"
             ? "ran: waiting; failed: waiting; not run: none"
             : "ran: none; failed: none; not run: waiting",
         );
-        await waitFor(() => {
-          try {
-            process.kill(pid, 0);
-            return (
-              process.platform === "linux" &&
-              /\) Z /.test(readFileSync(`/proc/${pid}/stat`, "utf8"))
-            );
-          } catch (error) {
-            if (error.code === "ESRCH") return true;
-            throw error;
-          }
-        });
+        await waitFor(
+          "the descendant that ignores SIGTERM to end, after run-parallel's SIGKILL",
+          () => {
+            try {
+              process.kill(pid, 0);
+              return (
+                process.platform === "linux" &&
+                /\) Z /.test(readFileSync(`/proc/${pid}/stat`, "utf8"))
+              );
+            } catch (error) {
+              if (error.code === "ESRCH") return true;
+              throw error;
+            }
+          },
+        );
       },
     );
   }
