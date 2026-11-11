@@ -142,8 +142,10 @@ export function extendedFiles(options: Record<string, unknown>): string[] {
 
 /**
  * Checks the files a `tsconfig*.json` reaches by `extends` and `references`, recursively, as TypeScript itself resolves
- * them (`getParsedCommandLineOfConfigFile`, `resolveProjectReferencePath`); throws on a diagnostic of the file, or on a
- * target that cannot be read or lies outside the area. An `extends` target may be a package's, under `node_modules`.
+ * them (`getParsedCommandLineOfConfigFile`, `resolveProjectReferencePath`); throws on a file TypeScript cannot read, a
+ * diagnostic TypeScript places on an `extends` or `references` property, or a target that cannot be read or lies outside
+ * the area. An `extends` target may be a package's, under `node_modules`. Other diagnostics, such as a compiler option
+ * this TypeScript does not know, are the compiler's to judge, not the stamp's.
  */
 export async function tsconfigClosure(
   root: string,
@@ -159,10 +161,29 @@ export async function tsconfigClosure(
     onUnRecoverableConfigFileDiagnostic: (diagnostic) =>
       diagnostics.push(ts.flattenDiagnosticMessageText(diagnostic.messageText, " ")),
   });
-  // "No inputs were found" (18003) concerns the files the configuration compiles, not the configuration.
-  for (const diagnostic of parsed?.errors ?? [])
-    if (diagnostic.category === ts.DiagnosticCategory.Error && diagnostic.code !== 18003)
+  // Where in its file each `extends` or `references` property lies, as TypeScript parses the file.
+  const edges = (file: string): (readonly [number, number])[] => {
+    const statement = ts.readJsonConfigFile(file, ts.sys.readFile).statements[0];
+    if (statement === undefined || !ts.isObjectLiteralExpression(statement.expression)) return [];
+    return statement.expression.properties.flatMap((property) =>
+      ts.isPropertyAssignment(property) &&
+      ts.isStringLiteral(property.name) &&
+      (property.name.text === "extends" || property.name.text === "references")
+        ? [[property.pos, property.end] as const]
+        : [],
+    );
+  };
+  for (const diagnostic of parsed?.errors ?? []) {
+    const { file, start: at } = diagnostic;
+    if (
+      diagnostic.category !== ts.DiagnosticCategory.Error ||
+      file === undefined ||
+      at === undefined
+    )
+      continue;
+    if (edges(file.fileName).some(([from, to]) => at >= from && at < to))
       diagnostics.push(ts.flattenDiagnosticMessageText(diagnostic.messageText, " "));
+  }
   if (parsed === undefined || diagnostics.length > 0)
     throw new Error(`${start} cannot be read as a tsconfig: ${diagnostics.join("; ")}`);
   const readable = (target: string) => existsSync(target) && statSync(target).isFile();
