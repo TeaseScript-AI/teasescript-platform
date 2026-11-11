@@ -373,9 +373,9 @@ Chromium DevTools smoke route has no browser-automation package dependency; it p
 however the run ends. `npm run test:player:preview -- <preview-url>` runs against a running `npm run dev:player`
 server of this checkout instead, and refuses one that serves another. Both require `playwright-cli` on `PATH` and an
 available Chromium browser. Both run outside `npm run check` and are not a final
-cross-browser or production-host E2E suite. Preview groups use fresh browser contexts. On failure the runner reports a
-retained scratch directory with a screenshot and Playwright trace for the failing group, and a started preview's log;
-delete it after diagnosis.
+cross-browser or production-host E2E suite. Preview groups use fresh browser contexts. When a group fails, or a
+started preview does not start or ends early, the runner reports a retained scratch directory: a screenshot and
+Playwright trace of the failing group, and the started preview's log; delete it after diagnosis.
 `npm test` separately checks that the default Player build does not statically load development preview content, and
 `tests/player/player-demo.test.ts` plays the repository demo to its exit through the runtime adapter and media device.
 
