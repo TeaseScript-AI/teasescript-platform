@@ -201,6 +201,9 @@ test("collect: a route-only difference stands until aside agrees; an earlier par
     source: "s",
     mode: "rev-on",
     check: "publication",
+    // (both trees' hashes, as run.mjs writes a difference)
+    base: "a",
+    head: "b",
     part: 3,
     parts: [4, 4],
   };
@@ -481,7 +484,17 @@ test("collect: a failed shard's rerun stands in its place, and the failed job's 
       ? {
           area: {
             record: killed,
-            differences: [{ generator: "g", source: "s", mode: "src-on", part: 1, parts: [2, 2] }],
+            differences: [
+              {
+                generator: "g",
+                source: "s",
+                mode: "src-on",
+                base: "a",
+                head: "b",
+                part: 1,
+                parts: [2, 2],
+              },
+            ],
             work: [{ work: { area: "rings", roots: [] } }],
           },
         }
@@ -981,5 +994,86 @@ test("submit orders the batch by the shards the recorded costs fill, not by an a
     assert.deepEqual(names.slice(0, 4), ["copies-0of2", "joins-0of2", "joins-1of2", "copies-1of2"]);
   } finally {
     rmSync(home, { recursive: true, force: true });
+  }
+});
+
+/** A stand-in tree's oracle library: each source of `published.mjs` and `stopping.mjs` in one form `run.mjs` writes. */
+const formsLibrary = (head) => `import { createHash } from "node:crypto";
+export const MODES = [false, true].flatMap((reversed) =>
+  [false, true].map((unshared) => ({ reversed, unshared })),
+);
+const hashed = (text) => createHash("sha256").update(text).digest("hex");
+export function publicationHashes(files) {
+  const source = files[0].source;
+  if (source === "throws") throw new TypeError("a stand-in exception");
+  const answered = ${head} && source !== "left" ? '[1,"z"]' : '[1,"x"]';
+  const unanswered = { left: ${head ? 1 : 2}, "left apart": 2 }[source] ?? 0;
+  return { parts: ['"A"', '"R"', answered, '"T"'].map(hashed), unanswered };
+}
+export const stopSet = () => ({ stops: [[1, "r", "x", ${head ? 2 : 1}]], passes: 1, restarts: 0,
+  outcome: "complete", exhausted: null, record: "same" });
+`;
+
+test("collect reads every area record form the real run.mjs writes, and a record of no known form differs, never equal (#2447)", () => {
+  const directory = mkdtempSync(join(tmpdir(), "compiler-replay-forms-"));
+  const root = results("p", () => ({}));
+  try {
+    const trees = [false, true].map((head) => {
+      const tree = join(directory, head ? "head" : "base");
+      write(join(tree, "package.json"), [{ type: "module" }]);
+      mkdirSync(join(tree, "dist", "tests", "helpers"), { recursive: true });
+      writeFileSync(
+        join(tree, "dist", "tests", "helpers", "type-core-oracles.js"),
+        formsLibrary(head),
+      );
+      return tree;
+    });
+    const area = join(directory, "rings");
+    mkdirSync(area);
+    // (a publication difference, an exception, a run left unanswered whose answered parts agree, one whose answered
+    // parts differ, and a stops run's difference, which has no parts)
+    writeFileSync(
+      join(area, "published.mjs"),
+      `export const cases = ${JSON.stringify(["throws", "left apart", "differs", "left"].map((s) => [s, s]))};\n`,
+    );
+    writeFileSync(
+      join(area, "stopping.mjs"),
+      'export const cases = [["stops", "stops"]];\nexport const checks = ["stops"];\n',
+    );
+    // (shard 0 as the area job writes it: the runner's differences and its summary line)
+    const out = join(root, "p-areas", jobId("a", 0), "out");
+    const run = spawnSync(
+      process.execPath,
+      [join(ROOT, "tests/families/run.mjs"), area, ...trees, "--allowances", "natural"].concat([
+        "--out",
+        join(out, "rings.differences.jsonl"),
+      ]),
+      { encoding: "utf8" },
+    );
+    assert.equal(run.status, 1, run.stderr);
+    writeFileSync(join(out, "rings.log"), run.stdout);
+    const modes = ["src-on", "src-off", "rev-on", "rev-off"];
+    const apart = (generator, source, text) =>
+      modes.map((mode) => `rings ${generator} ${source} ${mode}: ${text}`);
+    const expected = [
+      "rings: 4 exceptions",
+      "rings: 4 unanswered",
+      ...apart("published.mjs", "left apart", "part 2 of 4/4"),
+      ...apart("published.mjs", "differs", "part 2 of 4/4"),
+      ...apart("stopping.mjs", "stops", "stops natural apart"),
+    ];
+    const r = report("p", root, ["rings"]);
+    assert.deepEqual(r.unread, []);
+    assert.deepEqual(verdict(r), { status: 1, reasons: expected });
+    // a record of no form the runner writes: unread, named, never dropped
+    const odd = { generator: "g", source: "s", mode: "src-on", check: "publication", base: 1 };
+    writeFileSync(join(out, "rings.differences.jsonl"), `${JSON.stringify(odd)}\n`, { flag: "a" });
+    assert.deepEqual(verdict(report("p", root, ["rings"])).reasons, [
+      ...expected,
+      `rings (rings-0of16): a record of no form run.mjs writes: ${JSON.stringify(odd)}`,
+    ]);
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
   }
 });
