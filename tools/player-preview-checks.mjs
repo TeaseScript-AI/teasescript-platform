@@ -1,12 +1,35 @@
-// Requires Playwright CLI and a running Player development preview (`npm run dev:player`).
+// Requires Playwright CLI and a running Player development preview of this checkout (`npm run dev:player`).
 // npm run test:player:preview -- http://localhost:5173/player/
+// Before any check, the preview must answer `<url>__checkout` (`player/vue/vite.config.ts`) with this checkout's real
+// path, as `text/plain`; a preview of another checkout, or one that does not say which checkout it serves, is refused.
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const url = process.argv[2];
 if (!url) throw new Error("Pass the Player development preview URL.");
+const checkout = realpathSync(fileURLToPath(new URL("..", import.meta.url)));
+const endpoint = new URL("__checkout", url.endsWith("/") ? url : `${url}/`);
+const answer = await fetch(endpoint).catch((error) => error);
+// An older preview answers the path with its page, as it does any path it does not know.
+const served =
+  answer instanceof Response &&
+  answer.ok &&
+  answer.headers.get("content-type")?.startsWith("text/plain")
+    ? await answer.text()
+    : null;
+if (served !== checkout)
+  throw new Error(
+    `${url} is no development preview of this checkout (${checkout}): ${
+      served !== null
+        ? `it serves ${served}`
+        : answer instanceof Response
+          ? `${endpoint} answered ${answer.status} ${answer.headers.get("content-type") ?? "without a type"}, not a checkout`
+          : `${endpoint} failed: ${answer.message}`
+    }. Start this checkout's preview (\`npm run dev:player\`) and pass its URL.`,
+  );
 const scratch = mkdtempSync(join(tmpdir(), "player-preview-"));
 const session = `player-preview-${process.pid}`;
 function cli(...args) {
