@@ -989,7 +989,7 @@ RERUN.rows(
 
 RERUN.rows(
   "W10b catch-up behind an answer",
-  "W10b: a late catch-up queued behind a button answer is refused for the revision it was sampled from; the clock observes afresh, the answer stands, and nothing is reported",
+  "a late catch-up queued behind a button answer is refused for the revision it was sampled from; the clock observes afresh, the answer stands, and nothing is reported",
   async (context, topology, end) => {
     stubBrowser(context);
     let nowMs = 0;
