@@ -442,7 +442,7 @@ export function heldBack(record: FixtureRecord): string | null {
   // Its right-hand datetime has no subtraction row: §3.4 sites that operand, not the whole pair. Keep the set
   // unchanged until its maintainer corrects this start as well as its end.
   if (record.name === "cp9-cells/F16/invalid-datetime-difference")
-    return "operator site awaiting set correction (TABLE §3.4, r4.62)";
+    return "operator site awaiting set correction";
   // S9b's F18 shapes: a copy of a written type as `fromJson`'s and `load`'s receiving context, which
   // the core takes with its A4 receiving design (#1072's A2); `files: true` is outside the slice's syntax, and the text
   // operand's warning there is C13's, not F18's

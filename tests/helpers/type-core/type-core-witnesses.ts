@@ -141,7 +141,7 @@ export const CARRIER_WITNESSES: readonly (readonly [string, string, string])[] =
       "outcome compile-error\nD written-target error 57:60 -",
     ],
     [
-      "a named key read before and after a call storing to it, in one literal (TABLE r4.68 (1))",
+      "a named key read before and after a call storing to it, in one literal",
       "global root = 1\nfunction bump {\n  root = 2.0\n  return 0\n}\nlet box = [root, bump(), root]\nrepeat box[2] {}\n",
       `outcome warning-runtime-check
       D integer-use warning 96:102 call

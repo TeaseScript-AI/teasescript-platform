@@ -1046,7 +1046,7 @@ test("a copy of an unannotated parameter whose default copies a written binding 
  * where its row is not executable) are byte-identical with the sharing on and off; its record is the same in both
  * orders, each of its lists in source order of its sites.
  */
-test("each source of the written-domain, V30 type, inferred-copy and default-chain matrices is output-neutral with the sharing on and off, in both orders, and its record is the same in both (TABLE r4.72, r4.86)", (t) => {
+test("each source of the written-domain, V30 type, inferred-copy and default-chain matrices is output-neutral with the sharing on and off, in both orders, and its record is the same in both", (t) => {
   const differing: string[] = [];
   const reordered: string[] = [];
   const unsited: string[] = [];
@@ -1157,7 +1157,7 @@ test("a copy keeps its source's written type past a later copy back, and agrees 
  * of the root, in both orders, with the sharing on and off. A `fromJson` call is outside the candidate route: its
  * decision is the host value's.
  */
-test("a copy's inherited written field is decided at the copy's own store in every layer (TABLE r4.80)", () => {
+test("a copy's inherited written field is decided at the copy's own store in every layer", () => {
   const span = (source: string, text: string, from = 0): string => {
     const start = source.indexOf(text, from);
     assert.ok(start >= 0, `${JSON.stringify(text)} in ${JSON.stringify(source)}`);

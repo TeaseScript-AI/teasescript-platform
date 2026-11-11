@@ -2058,7 +2058,7 @@ test("a store below an object's own first, last or random checks the property it
  * its diagnostics, and its plan runs to the says and the failure its leaves give, in both orders. (Records, dicts and
  * sets are outside the slice until it is complete, S9b; the core's deep reads of them are `deep-literal-scale.test.ts`'s.)
  */
-test("deep and broad list literals compile and run as their leaves give, in both orders (TABLE r4.58)", () => {
+test("deep and broad list literals compile and run as their leaves give, in both orders", () => {
   const nested = (depth: number, leaf: string): string =>
     `${"[".repeat(depth)}${leaf}${"]".repeat(depth)}`;
   const reads = (name: string, depth: number): string => `${name}${"[0]".repeat(depth)}`;
@@ -2533,7 +2533,7 @@ test("every carrier kind leaves an obligation for the external data it gives a p
  * three stores owes its C1 against the whole written type, the host data its boundary; the plan checks every store; the
  * fitting host value says AFTER and each bad one fails at the third store's value, nothing said.
  */
-test("a copy of a written binding keeps its type beside a copy of the same source, in both orders (A4, TABLE r4.72)", () => {
+test("a copy of a written binding keeps its type beside a copy of the same source, in both orders (A4)", () => {
   for (const nested of [false, true])
     for (const [first, second] of [
       ["a", "b"],
