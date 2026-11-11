@@ -458,7 +458,12 @@ test("every record form the runner writes, at its allowance edges, passes the su
   // waits shortened to 2.5 s against a 1 s safety net)
   const edges = ["0", "-1", "0.5", "NaN", "Infinity"];
   const family = [
-    ...["stopped", "searched", "overstop", "overanalysis", "throws", "lost"],
+    "stopped",
+    "searched",
+    "overstop",
+    "overanalysis",
+    "throws",
+    "lost",
     ...edges.flatMap((edge) => [`apart-stop ${edge}`, `overstop ${edge}`]),
   ];
   for (const tree of ["base", "head"]) {
