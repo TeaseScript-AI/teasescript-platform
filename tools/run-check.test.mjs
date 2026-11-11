@@ -108,26 +108,33 @@ test("a run that passes, and one whose suite fails, name every part in the last 
 
 test("the checks before the tests are check:pretest's run-parallel steps, named or listed, and another form is refused", () => {
   const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
-  // the repository's: listed in package.json, one per line, so that steps added at different places merge (R-34)
-  assert.equal(pkg.scripts["check:pretest"], "node tools/run-parallel.mjs --list checkPretest");
-  assert.deepEqual(pretestSteps(pkg), pkg.checkPretest);
-  assert.ok(pretestSteps(pkg).includes("test:verification"));
+  // the repository's: listed in a text file, one per line, so that steps added at different places merge (#2440)
+  assert.equal(
+    pkg.scripts["check:pretest"],
+    "node tools/run-parallel.mjs --list tools/check-pretest-steps.txt",
+  );
+  const read = (file) => readFileSync(new URL(`../${file}`, import.meta.url), "utf8");
+  assert.ok(pretestSteps(pkg, read).includes("test:verification"));
   assert.deepEqual(
     pretestSteps({ scripts: { "check:pretest": "node tools/run-parallel.mjs a b:c" } }),
     ["a", "b:c"],
   );
-  const scripts = { "check:pretest": "node tools/run-parallel.mjs --list steps", a: "", "b:c": "" };
-  assert.deepEqual(pretestSteps({ scripts, steps: ["b:c", "a"] }), ["b:c", "a"]);
-  for (const [steps, message] of [
-    [undefined, "package.json's steps is not a list of npm script names"],
-    [[], "package.json's steps is not a list of npm script names"],
-    [["a", "d", 1], "package.json's steps lists what is not an npm script: d, 1"],
+  const scripts = {
+    "check:pretest": "node tools/run-parallel.mjs --list steps.txt",
+    a: "",
+    "b:c": "",
+  };
+  const listed = (text) => pretestSteps({ scripts }, () => text);
+  assert.deepEqual(listed("# what runs\nb:c\n\n  a  \n"), ["b:c", "a"]);
+  for (const [text, message] of [
+    ["# nothing\n\n", "steps.txt lists no npm script"],
+    ["a\nd\nb:c\n", "steps.txt lists what is not an npm script: d"],
   ])
-    assert.throws(() => pretestSteps({ scripts, steps }), { message });
+    assert.throws(() => listed(text), { message });
   for (const script of [undefined, "npm run a && node tools/run-parallel.mjs b", "npm run a"])
     assert.throws(() => pretestSteps({ scripts: { "check:pretest": script } }), {
       message:
-        "check:pretest is not one `node tools/run-parallel.mjs <npm script>...` or `--list <key>` call",
+        "check:pretest is not one `node tools/run-parallel.mjs <npm script>...` or `--list <file>` call",
     });
 });
 

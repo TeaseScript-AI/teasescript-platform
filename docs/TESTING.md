@@ -46,7 +46,7 @@ sources, the packages each area may import with their reasons, the generated-com
 declares. `npm run lint:design` and `npm run test:lint:design` check the [Player design
 contracts](LINTING.md#player-design-lint) and their positive/negative fixtures; both are included in `npm run check`.
 Independent pre-test gates and UI checks/builds run concurrently through `tools/run-parallel.mjs`; the pre-test gates
-are the npm scripts `package.json`'s `checkPretest` lists, one per line.
+are the npm scripts `tools/check-pretest-steps.txt` lists, one per line.
 `npm run check` (`tools/run-check.mjs`) runs the build and the compiled tests also when a pre-test check failed, and
 its last line names what ran, failed and did not run. TypeScript compilation precedes UI work; compiled tests run only
 after all builds pass, as many files at once as

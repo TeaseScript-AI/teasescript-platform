@@ -6,19 +6,6 @@
   "engines": {
     "node": "26.13.0"
   },
-  "checkPretest": [
-    "format:check",
-    "lint",
-    "lint:design",
-    "test:lint:design",
-    "test:lint",
-    "knip",
-    "check:doc-links",
-    "check:imports",
-    "test:build:typescript",
-    "test:verification",
-    "test:families"
-  ],
   "scripts": {
     "build": "npm run build:typescript && node tools/run-parallel.mjs typecheck:player build:player build:player-test-modules",
     "build:tree": "npm run build:typescript && node tools/run-parallel.mjs build:player build:player-test-modules",
@@ -32,7 +19,7 @@
     "test:compiled": "node ./tools/test-output-filter.mjs",
     "test": "npm run build && node ./tools/test-output-filter.mjs",
     "check": "node tools/run-check.mjs",
-    "check:pretest": "node tools/run-parallel.mjs --list checkPretest",
+    "check:pretest": "node tools/run-parallel.mjs --list tools/check-pretest-steps.txt",
     "check:doc-links": "node tools/repository-checks/doc-links.mjs",
     "check:imports": "node tools/repository-checks/imports.mjs",
     "knip": "knip",

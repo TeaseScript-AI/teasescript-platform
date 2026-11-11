@@ -22,16 +22,16 @@ import { listedSteps, runSteps, summaryLine } from "./run-parallel.mjs";
 
 /**
  * The steps of `pkg`'s `check:pretest`, which must be one `tools/run-parallel.mjs` call: of the scripts it names, or of
- * those the `package.json` list it names with `--list` holds (`listedSteps`).
+ * those the file it names with `--list` holds (`listedSteps`), read by `read`.
  */
-export function pretestSteps(pkg) {
+export function pretestSteps(pkg, read = (file) => readFileSync(file, "utf8")) {
   const script = pkg.scripts?.["check:pretest"] ?? "";
-  const listed = /^node tools\/run-parallel\.mjs --list ([\w-]+)$/u.exec(script);
-  if (listed !== null) return listedSteps(pkg, listed[1]);
+  const listed = /^node tools\/run-parallel\.mjs --list (\S+)$/u.exec(script);
+  if (listed !== null) return listedSteps(pkg, read(listed[1]), listed[1]);
   const words = /^node tools\/run-parallel\.mjs((?: [\w:.-]+)+)$/u.exec(script);
   if (words === null)
     throw new Error(
-      "check:pretest is not one `node tools/run-parallel.mjs <npm script>...` or `--list <key>` call",
+      "check:pretest is not one `node tools/run-parallel.mjs <npm script>...` or `--list <file>` call",
     );
   return words[1].trim().split(" ");
 }
