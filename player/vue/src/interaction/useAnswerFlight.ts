@@ -22,9 +22,9 @@ import { shortcutOutcome } from "./playerKeys";
  * another control's field, drafts or runtime input; a suspended plain question keeps its own draft, and a password
  * field keeps no unsent draft.
  *
- * Its domain: it holds only while the departing field is the plain text field, and a settle that shows anything else
- * than the plain text field ends the flight and drops what was typed in it. A password field is read-only during its
- * own answer's flight. Only between two fields of the same element does the browser enter a paste, an IME's text or a
+ * Its domain: it holds only while the departing field is the plain text field. A completed answer that advances to
+ * anything else than the plain text field ends the flight and drops what was typed in it (a question a block suspends
+ * keeps it, above). A password field is read-only during its own answer's flight. Only between two fields of the same element does the browser enter a paste, an IME's text or a
  * phone's capitalisation alike (#2463, residual 6). Within the domain, the Composer decides nothing by the field:
  * - Enter queues a submit, which the host's `submit` runs; Space in the empty field is held, and `shortcutOutcome`
  *   decides it against the settled interaction; any other key is the browser's, in the field;
@@ -144,6 +144,12 @@ export function useAnswerFlight(host: AnswerFlightHost) {
     return current.aside + entered.join("") + host.text();
   }
 
+  /** Keeps `text`, which the field now shows, for the presented question, as its normal path does for typed text. */
+  function keepPresented(text: string) {
+    const here = host.origin();
+    if (here?.keeps) host.keep(here.action, text);
+  }
+
   /** Whether the flight's question is still pending under another interaction: a block suspended it. */
   function suspended(current: Flight) {
     const origin = current.origin;
@@ -247,6 +253,7 @@ export function useAnswerFlight(host: AnswerFlightHost) {
     if (suspended(current)) {
       const kept = unsent(current);
       write(current, current.settled ?? "");
+      keepPresented(current.settled ?? "");
       if (current.origin!.keeps) host.keep(current.origin!.action, kept);
       release();
       return;
@@ -255,6 +262,7 @@ export function useAnswerFlight(host: AnswerFlightHost) {
     // disabled composer: the flight ends, and what was typed or given meanwhile goes.
     if (!host.holds()) {
       write(current, prefix);
+      keepPresented(prefix);
       release();
       return;
     }
@@ -285,8 +293,7 @@ export function useAnswerFlight(host: AnswerFlightHost) {
     }
     const text = prefix + host.text();
     if (prefix !== "") write(current, text);
-    const here = host.origin();
-    if (here?.keeps) host.keep(here.action, text);
+    keepPresented(text);
     release();
   }
 

@@ -30,8 +30,10 @@ import {
 } from "../helpers/player/worker-topology.js";
 
 /*
- * The composer while an answer is in flight (#2430): what is typed and given during the flight ends as if it came after
- * the answer settled, as on a Player whose answers settle at once. Each row runs the real session composable and the
+ * The composer while an answer is in flight (#2430). In the ordinary family, within the flight's domain, what is typed
+ * and given during the flight ends as if it came after the answer settled, as on a Player whose answers settle at
+ * once; outside it, and where a block suspends the question, the end table of #2463's design round 2 decides where it
+ * goes. Each row runs the real session composable and the
  * real flight owner (`useAnswerFlight`) on both bridge topologies, through a model of how `RuntimeInteraction.vue` and
  * `Composer.vue` call them, twice: once with the keys pressed while the answer's reply is held, and once, as the
  * reference, with no flight and every key pressed after the answer settled. The browser kit's `keys` scenario witnesses
@@ -524,7 +526,7 @@ const NEXT = {
   preselected: 'let b = askChoice "Red", "Blue", prefill: "Blue"\nshowButton "Done"',
   pacing: 'say "Wait."\nlet b = askText "Next?"\nshowButton "Done"',
   password: 'let b = askPassword "Next?"\nshowButton "Done"',
-  picker: 'let b = askDate "Next?"\nshowButton "Done"',
+  picker: 'let b = askDate "Next?", prefill: toDate("2026-10-04")\nshowButton "Done"',
   ended: 'say "Bye.", instant',
 } as const;
 const QUEUES = {
@@ -661,6 +663,8 @@ async function observe(at: Page, ui: ReturnType<typeof composer>, from: number) 
     status: at.host.session.value?.state.status,
     // What the question shows if it returns after a block interrupted it: the text kept for it, else its prefill.
     kept: id === undefined ? null : (ui.kept.get(id) ?? prefillOf(at.host.session.value)),
+    // The text kept for the presented question itself, without the prefill's fallback.
+    record: id === undefined ? null : (ui.kept.get(id) ?? null),
     // How often the password is in a text the composer keeps, and in what a debug export reads.
     password: [...ui.kept.values()].filter((text) => text.includes("hunter2")).length,
     exported: occurrences(
@@ -720,82 +724,107 @@ async function inFlight(at: Page, row: Coordinates, keys: readonly string[], pha
   return seen;
 }
 
-for (const topology of TOPOLOGIES)
-  test(`what is typed while an answer is in flight ends as if typed after it settled (${topology})`, async (context) => {
-    const at = await page(context, topology);
-    const ran: Coordinates[] = [];
-    assert.deepEqual(
-      coverageGaps(product(DOMAINS).filter(feasible), family(), { tuples: true }),
-      [],
-    );
-    for (const row of family()) {
-      // EVIDENCE: invariant: `family` takes each row's queue and history from the keys of `QUEUES` and `HISTORY`.
-      const keys = [
-        ...QUEUES[row.queue as keyof typeof QUEUES],
-        ...HISTORY[row.history as keyof typeof HISTORY],
-      ];
-      // Outside the domain, nothing typed or given in the flight takes effect: the row ends as the answer alone does.
-      const expected = await reference(at, row, inDomain(row) ? keys : []);
-      // A preparation that refuses posts nothing to hold, nor does an answer no longer available past its observation;
-      // a queue that holds an answer also runs with the first answer's own reply held.
-      const phases =
-        row.settle === "unprepared"
-          ? ["prepare"]
-          : row.settle === "unavailable" || !row.queue!.includes("submit")
-            ? ["observeInput"]
-            : ["observeInput", "submitComposer"];
-      for (const phase of phases) {
-        const actual = await inFlight(at, row, keys, phase);
-        const where = `${JSON.stringify(row)} holding ${phase}`;
-        // An edit within the flight does not reach text the settlement puts in the field (#2463, residual 1): only the
-        // answers posted and where the session went are compared.
-        if (row.history === "edit") {
-          assert.deepEqual([actual.posts, actual.status], [expected.posts, expected.status], where);
-        } else assert.deepEqual(actual, expected, where);
-      }
-      // Outcomes written down from the Player's keyboard contract and `main`'s measured rows, not computed by the
-      // predicate under test. Outside the domain, a completed answer leaves the next field empty, with no notice.
-      if (!inDomain(row) && row.settle === "completed")
-        assert.deepEqual([expected.field, expected.notice], ["", ""], JSON.stringify(row));
-      if (inDomain(row) && row.queue === "held-space" && row.history !== "edit") {
-        const last = row.history === "stays" ? "y" : "";
-        if (row.settle === "completed" && row.presents === "unselected")
-          assert.equal(expected.field, last, "Space types nothing");
-        if (row.settle === "completed" && row.presents === "preselected")
-          assert.equal(
-            expected.posts.at(-1)?.[0],
-            "selectChoice",
-            "Space activates the preselected button",
-          );
-        if (row.settle === "completed" && row.presents === "pacing")
-          assert.ok(
-            expected.posts.some(([op]) => op === "skipPacing"),
-            "Space skips the pause",
-          );
-        if (row.settle === "completed" && row.presents === "text")
-          assert.equal(expected.field, ` ${last}`, "Space types a space");
-        // Enter on the empty composer refused, then Space on the unselected choices: the notice stays (#2463, round 1).
-        if (row.settle === "refused" && row.aside === "empty") {
-          assert.equal(expected.field, last);
-          assert.equal(expected.notice, row.history === "none" ? "invalidPayload" : "");
-        }
-        if (row.settle === "refused" && row.aside === "typed")
-          assert.equal(
-            expected.field,
-            `Not an option ${last}`,
-            "Space types after the refused text",
-          );
-      }
-      ran.push(row);
-    }
-    assert.deepEqual(coverageGaps(family(), ran, { tuples: true }), []);
-  });
+/** The phases a row's flight is held in: a preparation that refuses posts nothing to hold, nor does an answer no longer
+ * available past its observation; a queue that holds an answer also runs with the first answer's own reply held. */
+const phasesOf = (row: Coordinates) =>
+  row.settle === "unprepared"
+    ? ["prepare"]
+    : row.settle === "unavailable" || !row.queue!.includes("submit")
+      ? ["observeInput"]
+      : ["observeInput", "submitComposer"];
+/** The family in chunks of at most ten runs each (a reference and each held phase), so that every test stays within
+ * the limit per test under the Worker's delayed challenge (docs/TESTING.md, "Worker-topology settings"). */
+const CHUNKS = family().reduce<Coordinates[][]>((chunks, row) => {
+  const last = chunks.at(-1);
+  const runs = (rows: Coordinates[]) =>
+    rows.reduce((sum, each) => sum + 1 + phasesOf(each).length, 0);
+  if (last && runs(last) + 1 + phasesOf(row).length <= 10) last.push(row);
+  else chunks.push([row]);
+  return chunks;
+}, []);
 
-// Text typed in the flight of an answer whose settle shows a password field was typed in clear, and may be what the
-// player meant as the password: once the flight ends it is in no text the composer holds or keeps, nor in what a debug
-// export reads (the session's state, recording and transcript).
+test("the family's rows are those its axes and feasibility give, each in one chunk", () => {
+  assert.deepEqual(coverageGaps(product(DOMAINS).filter(feasible), family(), { tuples: true }), []);
+  assert.deepEqual(coverageGaps(family(), CHUNKS.flat(), { tuples: true }), []);
+  assert.equal(CHUNKS.flat().length, family().length);
+});
+
 for (const topology of TOPOLOGIES)
-  test(`text typed in a flight that settles into a password field is kept nowhere (${topology})`, async (context) => {
+  for (const [index, rows] of CHUNKS.entries())
+    test(`what is typed while an answer is in flight ends by the family's rule, chunk ${index + 1} of ${CHUNKS.length} (${topology})`, async (context) => {
+      const at = await page(context, topology);
+      for (const row of rows) {
+        // EVIDENCE: invariant: `family` takes each row's queue and history from the keys of `QUEUES` and `HISTORY`.
+        const keys = [
+          ...QUEUES[row.queue as keyof typeof QUEUES],
+          ...HISTORY[row.history as keyof typeof HISTORY],
+        ];
+        // Outside the domain, nothing typed or given in the flight takes effect: the row ends as the answer alone does.
+        const expected = await reference(at, row, inDomain(row) ? keys : []);
+        for (const phase of phasesOf(row)) {
+          const actual = await inFlight(at, row, keys, phase);
+          const where = `${JSON.stringify(row)} holding ${phase}`;
+          // An edit within the flight does not reach text the settlement puts in the field (#2463, residual 1): only the
+          // answers posted and where the session went are compared.
+          if (row.history === "edit") {
+            assert.deepEqual(
+              [actual.posts, actual.status],
+              [expected.posts, expected.status],
+              where,
+            );
+          }
+          // The raw record is compared outside the domain (the destination's own text, kept as its normal path keeps
+          // it); within it, what the question shows on its return (`kept`), as an unchanged field keeps no record.
+          else if (inDomain(row))
+            assert.deepEqual({ ...actual, record: null }, { ...expected, record: null }, where);
+          else assert.deepEqual(actual, expected, where);
+        }
+        // Outcomes written down from the Player's keyboard contract and `main`'s measured rows, not computed by the
+        // predicate under test. Outside the domain, a completed answer leaves the next field empty, with no notice.
+        if (!inDomain(row) && row.settle === "completed")
+          assert.deepEqual(
+            [expected.field, expected.notice],
+            [row.presents === "picker" ? "2026-10-04" : "", ""],
+            JSON.stringify(row),
+          );
+        if (inDomain(row) && row.queue === "held-space" && row.history !== "edit") {
+          const last = row.history === "stays" ? "y" : "";
+          if (row.settle === "completed" && row.presents === "unselected")
+            assert.equal(expected.field, last, "Space types nothing");
+          if (row.settle === "completed" && row.presents === "preselected")
+            assert.equal(
+              expected.posts.at(-1)?.[0],
+              "selectChoice",
+              "Space activates the preselected button",
+            );
+          if (row.settle === "completed" && row.presents === "pacing")
+            assert.ok(
+              expected.posts.some(([op]) => op === "skipPacing"),
+              "Space skips the pause",
+            );
+          if (row.settle === "completed" && row.presents === "text")
+            assert.equal(expected.field, ` ${last}`, "Space types a space");
+          // Enter on the empty composer refused, then Space on the unselected choices: the notice stays (#2463, round 1).
+          if (row.settle === "refused" && row.aside === "empty") {
+            assert.equal(expected.field, last);
+            assert.equal(expected.notice, row.history === "none" ? "invalidPayload" : "");
+          }
+          if (row.settle === "refused" && row.aside === "typed")
+            assert.equal(
+              expected.field,
+              `Not an option ${last}`,
+              "Space types after the refused text",
+            );
+        }
+      }
+    });
+
+// Text typed in the flight of a completed answer whose next question is a password was typed in clear: the completed
+// question advances to another control, so once the flight ends the text is in no text the composer holds or keeps,
+// nor in what a debug export reads (the session's state, recording and transcript). A question a block suspends keeps
+// it instead (the suspension rows below).
+for (const topology of TOPOLOGIES)
+  test(`text typed in the flight of a completed answer whose next question is a password is kept nowhere (${topology})`, async (context) => {
     const at = await page(context, topology);
     const clear = "plain4secret";
     await at.start(`${FIRST.text.script}\n${NEXT.password}\nexit`);
@@ -863,9 +892,9 @@ const unsentOf = (sent: string, typed: string) =>
 const markers = (text: string) => ["MID", "TAIL"].filter((marker) => text.includes(marker));
 
 for (const topology of TOPOLOGIES)
-  test(`a block that suspends the answer's question keeps the unsent text with it (${topology})`, async (context) => {
-    const at = await page(context, topology);
-    for (const [name, block] of Object.entries(BLOCKS))
+  for (const [name, block] of Object.entries(BLOCKS))
+    test(`a ${name} block that suspends the answer's question keeps the unsent text with it (${topology})`, async (context) => {
+      const at = await page(context, topology);
       for (const sent of ["", "SENT"])
         for (const [typed, keys] of Object.entries(TYPED)) {
           const where = JSON.stringify({ block: name, sent, typed });
@@ -917,7 +946,7 @@ for (const topology of TOPOLOGIES)
           assert.equal(ui.field.value, unsentOf(sent, typed), `${where}: with its unsent text`);
           ui.unmount();
         }
-  });
+    });
 
 // An answer the drain sends has its own question: a block that suspends that one keeps the drain's text with it.
 for (const topology of TOPOLOGIES)

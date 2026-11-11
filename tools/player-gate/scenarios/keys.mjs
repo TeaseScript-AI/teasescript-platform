@@ -253,6 +253,18 @@ function cases(engine) {
   ];
 }
 
+const OVERTAKEN = "This interaction is no longer available.";
+/** Whether an answer is in flight while the composer stays writable: Send disabled, the field neither read-only nor
+ * disabled. */
+const inFlight = () => {
+  const field = document.querySelector("[data-composer-input]");
+  return (
+    document.querySelector("[data-runtime-interaction] button[type=submit]")?.disabled === true &&
+    field?.readOnly === false &&
+    field.disabled === false
+  );
+};
+
 /** Answers the block a timer opened, once its field shows its own empty text; the first question then returns. */
 async function answerBlock(page) {
   const input = page.locator("[data-composer-input]");
@@ -366,7 +378,18 @@ async function runCase(opened, origin, item) {
     };
     if (aim > 0) await page.waitForTimeout(Math.max(0, aim - Date.now()));
     await page.keyboard.press("Enter");
+    // A block case's answer is in flight at Enter (Send disabled, the field writable), and the block overtakes it: the
+    // answer meets its question no longer presented, whose notice the Player shows. A missed window fails the case.
+    if (item.block && !(await page.evaluate(inFlight)))
+      throw new Error("The answer was not in flight after Enter");
     await item.keys(page, at);
+    if (item.block)
+      await page
+        .getByText(OVERTAKEN, { exact: true })
+        .waitFor({ timeout: 5_000 })
+        .catch(() => {
+          throw new Error("The block did not overtake the answer in flight");
+        });
     let after = await settled(page, () => opens);
     if (item.block) {
       await answerBlock(page);
