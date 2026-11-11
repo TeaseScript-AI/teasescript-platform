@@ -20,6 +20,7 @@ import {
   unknownItem,
   WIDE,
   withOwnSelection,
+  writtenDefault,
   type ChoicePart,
 } from "./contract.js";
 import { joinParts, joinSteps, keepText } from "./budget.js";
@@ -1465,9 +1466,23 @@ export class Values {
       kind: "value",
       file: site?.file ?? -1,
       offset: site?.start ?? -1,
-      make: () => this.valueItems(fallback, at, rest),
+      make: () => this.#defaultRun(fallback, at, rest),
       decision: typedDefault(rest, true),
     };
+  }
+
+  /**
+   * `defaultKinds`' run: the default's written type where its syntax gives one (`writtenDefault`), as the contract's
+   * `defaultKinds` reads it, else its value at `at`.
+   */
+  *#defaultRun(
+    fallback: PlaceId,
+    at: FlowNode | null,
+    rest: readonly string[],
+  ): Work<readonly Item[]> {
+    return (
+      writtenDefault(this.pass, fallback, rest) ?? (yield* this.valueItems(fallback, at, rest))
+    );
   }
 
   /** F19: whether a default's value at `at` holds only `null` (or nothing) (`ONLY_NULL`). */
