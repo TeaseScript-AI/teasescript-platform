@@ -1,11 +1,33 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  cpSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
+import { withConsumerOrder } from "../../src/type-inference/core/consumers.js";
+import { sharing } from "../../src/type-inference/core/sharing.js";
+import { withSolverSeam } from "../../src/type-inference/core/solver.js";
+import { HELD_MODES } from "../helpers/type-core-held-host.js";
+import { inMode, MODES } from "../helpers/type-core-oracles.js";
 
 const tool = resolve("tests/families/plans.mjs");
+
+/**
+ * Each tree's order of its modes' names (#2342): neither `HELD_MODES`' order, the oracle's `MODES`', nor alphabetical,
+ * and no name at the same position in both, so that pairing by position fails every mode.
+ */
+const ORDERS = {
+  base: ["reversed, unshared", "forward", "reversed", "forward, unshared"],
+  head: ["forward, unshared", "reversed", "reversed, unshared", "forward"],
+};
 
 /**
  * A built tree's modules as the plans comparison loads them: a ledger whose allowance is 1,000 or a test's, and a compile
@@ -15,7 +37,8 @@ const tool = resolve("tests/families/plans.mjs");
  * within 4 times its natural one) and 5,000 for `searched` (past 4 times its natural one), each at its one settled stop
  * 300; `settling` waits 1.8 s in the head's first compile and as the base's next search starts (each within a 3 s
  * net, together past it), `lost` 6 s as its search starts. (#1850: margins of over a second either way, which a loaded
- * worker keeps, where a 0.5 s net left 200 ms.)
+ * worker keeps, where a 0.5 s net left 200 ms.) Each tree's four modes are named as `HELD_MODES`' are, in an order of its
+ * own (`ORDERS`), and a compile's plan holds the name of the mode it ran in, so modes paired by position differ.
  */
 const MODULES: Record<string, string> = {
   "src/type-inference/core/budget.js": `let test = null;
@@ -45,7 +68,7 @@ export function compileProjectWithBackend(files) {
   if (source === "slow") wait(700);
   if (source === "hang") wait(6000);
   ledger().charge("frames", source === "over" ? 5000 : source === "hang" ? 1 : 300);
-  return { plan: { instructions: [] }, diagnostics: [] };
+  return { plan: { instructions: [], mode: globalThis.heldMode }, diagnostics: [] };
 }
 export const compileSourceWithBackend = (source) => compileProjectWithBackend([{ source }]);
 `,
@@ -60,7 +83,18 @@ export function analyseCore(request) {
   "tests/helpers/type-core-analysis.js": `export const coreRequest = (files) => ({ source: files[0].source });\n`,
   "tests/helpers/type-core-held-host.js": `import { WorkLedger } from "../../src/type-inference/core/budget.js";
 const wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-export const HELD_MODES = [0, 1, 2, 3].map(() => ({ run: (f) => f() }));
+const names = import.meta.url.includes("/head/") ? ${JSON.stringify(ORDERS.head)} : ${JSON.stringify(ORDERS.base)};
+export const HELD_MODES = names.map((name) => ({
+  name,
+  run: (f) => {
+    globalThis.heldMode = name;
+    try {
+      return f();
+    } finally {
+      globalThis.heldMode = undefined;
+    }
+  },
+}));
 export const heldFamily = () =>
   ["stopped", "searched", "settling", "lost"].map((name) => ({ name, source: name, slice: true }));
 let settling = import.meta.url.includes("/base/");
@@ -125,7 +159,7 @@ test("the plans comparison stalls a run past its unit limit, not a slow one, and
   assert.deepEqual(outcome("over"), {
     stalled: "units",
     uncharged: undefined,
-    run: { tree: "base", mode: 0, at: "natural" },
+    run: { tree: "base", mode: "reversed, unshared", at: "natural" },
     work: 5000,
     allowance: 1000,
     differing: undefined,
@@ -133,10 +167,17 @@ test("the plans comparison stalls a run past its unit limit, not a slow one, and
   // (slow, within its limit and each run within the safety net: compared, and equal; a run past the net with no units:
   // uncharged, no stall)
   for (const name of ["fine", "slow"]) assert.equal(outcome(name).differing, 0, name);
+  // (each mode by its name, in the base's order, compared with the head's mode of that name: equal, #2342)
+  const { modes } = area.records.find((record) => record.name === "cases.mjs/fine")!;
+  assert.ok(Array.isArray(modes));
+  assert.deepEqual(
+    modes.map((entry: Record<string, unknown>) => ({ mode: entry.mode, same: entry.same })),
+    ORDERS.base.map((mode) => ({ mode, same: true })),
+  );
   assert.deepEqual(outcome("hang"), {
     stalled: undefined,
     uncharged: "safety net 3 s",
-    run: { tree: "base", mode: 0, at: "natural" },
+    run: { tree: "base", mode: "reversed, unshared", at: "natural" },
     work: undefined,
     allowance: undefined,
     differing: undefined,
@@ -171,7 +212,7 @@ test("the plans comparison stalls a run past its unit limit, not a slow one, and
       {
         name: "searched",
         stalled: "units",
-        run: { tree: "base", mode: 0, at: "stop search", analysis: 1 },
+        run: { tree: "base", mode: "reversed, unshared", at: "stop search", analysis: 1 },
         work: 5000,
         allowance: 1000,
       },
@@ -179,7 +220,7 @@ test("the plans comparison stalls a run past its unit limit, not a slow one, and
       {
         name: "lost",
         uncharged: "safety net 3 s",
-        run: { tree: "base", mode: 0, at: "stop search, between", analysis: 0 },
+        run: { tree: "base", mode: "reversed, unshared", at: "stop search, between", analysis: 0 },
       },
     ].map((record) => ({
       stalled: undefined,
@@ -239,4 +280,132 @@ test("the plans comparison resumes a source by its name and key, so a recorded o
   const keyless = plans();
   assert.equal(keyless.resumed, 0);
   assert.deepEqual(keyless.records.slice(1), [first, second]);
+});
+
+/** Two stand-in trees under `folder`, each with `MODULES` and the area `area` of `cases`. */
+function built(folder: string, cases: string[][]): void {
+  for (const tree of ["base", "head"]) {
+    for (const [file, text] of Object.entries(MODULES)) {
+      mkdirSync(join(folder, tree, "dist", file, ".."), { recursive: true });
+      writeFileSync(join(folder, tree, "dist", file), text);
+    }
+    writeFileSync(join(folder, tree, "package.json"), '{ "type": "module" }\n');
+    mkdirSync(join(folder, tree, "tests", "families", "area"), { recursive: true });
+    cpSync(resolve("tests/families/sources.mjs"), join(folder, tree, "tests/families/sources.mjs"));
+    writeFileSync(
+      join(folder, tree, "tests/families/area/cases.mjs"),
+      `export const cases = ${JSON.stringify(cases)};\n`,
+    );
+  }
+}
+
+test("the plans comparison refuses trees whose modes are not the same names once each, before any record (#2342)", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  built(folder, [["fine", "fine"]]);
+  const held = join(folder, "head", "dist", "tests/helpers/type-core-held-host.js");
+  const original = readFileSync(held, "utf8");
+  for (const names of [
+    ["forward", "reversed", "forward, unshared", "sideways"],
+    ["forward", "reversed", "forward, unshared"],
+    ["forward", "reversed", "forward, unshared", "forward"],
+    ["forward", "reversed", "forward, unshared", null],
+  ]) {
+    writeFileSync(
+      held,
+      `${original}\nHELD_MODES.splice(0, 4, ...${JSON.stringify(names)}.map((name) => ({ name, run: (f) => f() })));\n`,
+    );
+    const out = join(folder, `${names.length}-${String(names[3])}.jsonl`);
+    const ran = spawnSync(
+      process.execPath,
+      [tool, join(folder, "base"), join(folder, "head"), "area", "--out", out],
+      { encoding: "utf8" },
+    );
+    assert.equal(ran.status, 2, `${JSON.stringify(names)}: ${ran.stderr}`);
+    assert.match(ran.stderr, /held modes are not the same names once each/);
+    assert.equal(existsSync(out), false, JSON.stringify(names));
+  }
+});
+
+test("the plans summary prints a recorded mode as recorded and says once what a number is (#2342)", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  const side = (units: number) => ({
+    plan: "p",
+    diagnostics: "d",
+    checks: 0,
+    error: null,
+    trace: `1/${units}/0`,
+    questions: "1/0",
+    units,
+  });
+  const mode = (name: unknown) => ({ mode: name, base: side(3), head: side(2), same: false });
+  const file = join(folder, "records.jsonl");
+  writeFileSync(
+    file,
+    [
+      { set: "s", name: "old", runs: 2, differing: 2, modes: [mode(2), mode(1)] },
+      { set: "s", name: "new", runs: 1, differing: 1, modes: [mode("forward, unshared")] },
+    ]
+      .map((record) => `${JSON.stringify(record)}\n`)
+      .join(""),
+  );
+  const ran = spawnSync(process.execPath, [tool, "summary", file], { encoding: "utf8" });
+  assert.equal(ran.status, 0, ran.stderr);
+  const lines = ran.stdout.trim().split("\n").slice(1);
+  assert.deepEqual(lines, [
+    "mode <number>: a record from before #2342, the mode's index in HELD_MODES at the commit that wrote it",
+    "s old mode 2: work 3 → 2",
+    "s old mode 1: work 3 → 2",
+    's new mode "forward, unshared": work 3 → 2',
+  ]);
+});
+
+test("each held mode's name says the settings its run sets, and the oracle's mode of those settings is found by them, not by position (#2342)", () => {
+  /** Whether `enter` throws for an order already active: a seam the mode set. */
+  const active = (enter: () => void) => {
+    try {
+      enter();
+      return false;
+    } catch {
+      return true;
+    }
+  };
+  /** The settings a run is in, as observed inside it. */
+  const observed = () => {
+    const consumers = active(() =>
+      withConsumerOrder(
+        (list) => [...list],
+        () => 0,
+      ),
+    );
+    const solver = active(() => withSolverSeam({}, () => 0));
+    assert.equal(consumers, solver, "the consumers' and the solver's orders reversed together");
+    return { reversed: consumers, unshared: !sharing() };
+  };
+  const named = (name: string) => ({
+    reversed: name.startsWith("reversed"),
+    unshared: name.endsWith(", unshared"),
+  });
+  assert.deepEqual(HELD_MODES.map((mode) => mode.name).sort(), [
+    "forward",
+    "forward, unshared",
+    "reversed",
+    "reversed, unshared",
+  ]);
+  const positions: [number, number][] = [];
+  for (const [at, mode] of HELD_MODES.entries()) {
+    const settings = mode.run(observed);
+    assert.deepEqual(settings, named(mode.name), mode.name);
+    const oracle = MODES.findIndex(
+      (each) => each.reversed === settings.reversed && each.unshared === settings.unshared,
+    );
+    assert.deepEqual(inMode(MODES[oracle]!, observed), settings, mode.name);
+    positions.push([at, oracle]);
+  }
+  // (the two tables order the modes differently: a ledger that reads one's position by the other misattributes)
+  assert.ok(
+    positions.some(([held, oracle]) => held !== oracle),
+    JSON.stringify(positions),
+  );
 });

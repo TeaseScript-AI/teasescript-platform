@@ -2,7 +2,8 @@
 //   [--limit n] [--units 4] [--timeout 1800] [--memory 2048] [--only names.json]
 // node tests/families/plans.mjs summary <records>... [--list 40]
 // The plans comparison (#1526 phase A's kit, landed from #1678's copy): the plan each source compiles to through the core
-// backend, in the four modes (`HELD_MODES`), on two built trees in one worker, compared as the exact serialized JSON
+// backend, in the four modes (`HELD_MODES`, each tree's own, the base's paired with the head's of the same `name`, which
+// names the mode in a record and a run, #2342), on two built trees in one worker, compared as the exact serialized JSON
 // (sha256 of `JSON.stringify(plan)`, none where the compile has no plan, and of the diagnostics) together with the trace of every work unit the compile
 // charges (each `WorkLedger.charge` call's counter and units folded into a 64-bit hash, with their count and sum) and the
 // sequence of questions the compile asks its answers (each call of an `Answers` method, with its place, path or node, in
@@ -23,11 +24,14 @@
 // charges, and its source is recorded as `uncharged` with that run, never as a stall. Either way a fresh worker takes
 // the next source. A stalled or uncharged source is never agreement. Resumes: a source already in `--out` is not run
 // again, its record counted as it stands. Prints one JSON summary line; exit 0 when every compared run is equal and
-// nothing stalled or reached the safety net, else 1.
+// nothing stalled or reached the safety net, else 1;
+// 2 on a usage error, or where the trees' modes are not the same names once each (no record is written).
 // `summary` classifies the records per set, source and mode (`modes`, each with its demand, stop and questions runs):
 // identical; work only (the plan, the diagnostics, the error and the questions equal, the charge trace not); a question
 // sequence apart; a publication difference; at a demand allowance apart; for the held family, a stop set or a stopped
-// compile apart, and the analysis's units apart; and lists each with the stalled and uncharged sources.
+// compile apart, and the analysis's units apart; and lists each with the stalled and uncharged sources. A record from
+// before #2342 names its mode by a number, its index in `HELD_MODES` at the commit that wrote it: printed as that number,
+// never translated, with one line that says so.
 import { createHash } from "node:crypto";
 import { appendFileSync, existsSync, readFileSync, realpathSync } from "node:fs";
 import path from "node:path";
@@ -50,6 +54,7 @@ const setOf = (set, headRoot) => {
 function summarize(files, limit) {
   const sets = new Map();
   const listed = [];
+  let numbered = false;
   const bump = (set, key) => {
     if (!sets.has(set))
       sets.set(set, {
@@ -81,13 +86,16 @@ function summarize(files, limit) {
     if (r.stalled !== undefined || r.uncharged !== undefined) {
       const kind = r.stalled !== undefined ? "stalled" : "uncharged";
       bump(r.set, kind);
+      if (typeof r.run?.mode === "number") numbered = true;
       listed.push(`${r.set} ${r.name}: ${kind} (${r[kind]}, ${JSON.stringify(r.run ?? null)})`);
       continue;
     }
     for (const m of r.modes) {
       bump(r.set, "modes");
       const { base: b, head: h } = m;
-      const at = `${r.set} ${r.name} mode ${m.mode}`;
+      // (a name, or a number from before #2342, printed as recorded and said once below)
+      if (typeof m.mode === "number") numbered = true;
+      const at = `${r.set} ${r.name} mode ${typeof m.mode === "number" ? m.mode : JSON.stringify(m.mode)}`;
       if (m.same) bump(r.set, "identical");
       else if (b.plan === h.plan && b.diagnostics === h.diagnostics && b.error === h.error) {
         if (b.questions !== h.questions) {
@@ -133,6 +141,10 @@ function summarize(files, limit) {
     }
   }
   for (const [set, counts] of sets) console.log(JSON.stringify({ set, ...counts }));
+  if (numbered)
+    console.log(
+      "mode <number>: a record from before #2342, the mode's index in HELD_MODES at the commit that wrote it",
+    );
   for (const line of listed.slice(0, limit)) console.log(line);
   if (listed.length > limit) console.log(`… ${listed.length - limit} more`);
 }
@@ -249,6 +261,7 @@ if (isMainThread && process.argv[2] === "summary") {
           running = message.running;
           arm();
         } else if (message.over !== undefined) over = message.over;
+        else if (message.refused !== undefined) refused(message.refused);
         else finish(message);
       };
       const onError = (error) =>
@@ -306,8 +319,8 @@ if (isMainThread && process.argv[2] === "summary") {
    * and its own work before, between and after them another (`stop search, between`), each metered at the natural
    * floor and posted as it starts, so neither counts to the run before it.
    */
-  const searched = (tree, c, mode) => {
-    const held = tree.held.HELD_MODES[mode];
+  const searched = (tree, c, held) => {
+    const mode = held.name;
     let analysis = 0;
     const between = () =>
       start({ tree: tree.name, mode, at: "stop search, between", analysis }, tree.natural);
@@ -425,8 +438,8 @@ if (isMainThread && process.argv[2] === "summary") {
   const multiple = units ?? Infinity;
 
   /**
-   * One compile in a mode, unstopped (`allowance` undefined), at a demand allowance (`{ demand }`) or at a test allowance
-   * (a number): its plan's and diagnostics' hashes and its charge trace.
+   * One compile in a mode (a `HeldMode` of the tree), unstopped (`allowance` undefined), at a demand allowance
+   * (`{ demand }`) or at a test allowance (a number): its plan's and diagnostics' hashes and its charge trace.
    */
   function compile(tree, unit, mode, allowance) {
     const at =
@@ -435,7 +448,10 @@ if (isMainThread && process.argv[2] === "summary") {
         : typeof allowance === "object"
           ? `demand ${allowance.demand}`
           : `allowance ${allowance}`;
-    start({ tree: tree.name, mode, at }, typeof allowance === "number" ? tree.natural : 0);
+    start(
+      { tree: tree.name, mode: mode.name, at },
+      typeof allowance === "number" ? tree.natural : 0,
+    );
     tree.trace = { n: 0, units: 0, a: 2166136261, b: 3266489917 };
     tree.questions = { n: 0, a: 2166136261, b: 3266489917 };
     const options = { globals: unit.globals };
@@ -450,7 +466,7 @@ if (isMainThread && process.argv[2] === "summary") {
     let result = null;
     let error = null;
     try {
-      result = tree.held.HELD_MODES[mode].run(() =>
+      result = mode.run(() =>
         allowance === undefined
           ? make()
           : typeof allowance === "object"
@@ -491,10 +507,10 @@ if (isMainThread && process.argv[2] === "summary") {
   function analysisUnits(tree, unit, mode) {
     const request = tree.analysis.coreRequest(unit.files, unit.globals);
     if (request === null) return null;
-    start({ tree: tree.name, mode, at: "analysis" });
+    start({ tree: tree.name, mode: mode.name, at: "analysis" });
     tree.trace = { n: 0, units: 0, a: 0, b: 0 };
     try {
-      tree.held.HELD_MODES[mode].run(() => tree.answers.analyseCore(request));
+      mode.run(() => tree.answers.analyseCore(request));
     } catch {
       tree.trace = null;
       return null;
@@ -508,6 +524,27 @@ if (isMainThread && process.argv[2] === "summary") {
 
   const base = await load(baseRoot, "base");
   const head = await load(headRoot, "head");
+  // (each of the base's modes with the head's of its name, the identity a record names, #2342: never by position)
+  const names = (tree) => tree.held.HELD_MODES.map((mode) => mode?.name);
+  const [baseNames, headNames] = [names(base), names(head)];
+  const unnamed = (list) =>
+    list.some((name) => typeof name !== "string" || name === "") ||
+    new Set(list).size !== list.length;
+  if (
+    unnamed(baseNames) ||
+    unnamed(headNames) ||
+    baseNames.length !== headNames.length ||
+    baseNames.some((name) => !headNames.includes(name))
+  ) {
+    parentPort.postMessage({
+      refused: `the trees' held modes are not the same names once each: base ${JSON.stringify(baseNames)}, head ${JSON.stringify(headNames)}`,
+    });
+    await new Promise(() => {});
+  }
+  const modes = base.held.HELD_MODES.map((mode) => [
+    mode,
+    head.held.HELD_MODES.find((other) => other.name === mode.name),
+  ]);
   const sources = await unitsOf(set, baseRoot, headRoot);
   const heldCases = sources.some((unit) => unit.held)
     ? new Map(base.held.heldFamily().map((c) => [c.name, c]))
@@ -522,16 +559,16 @@ if (isMainThread && process.argv[2] === "summary") {
       differing: 0,
       modes: [],
     };
-    for (let mode = 0; mode < 4; mode += 1) {
+    for (const [mode, headMode] of modes) {
       const b = compile(base, unit, mode);
-      const h = compile(head, unit, mode);
+      const h = compile(head, unit, headMode);
       record.runs += 1;
-      const entry = { mode, base: b, head: h, same: same(b, h) };
+      const entry = { mode: mode.name, base: b, head: h, same: same(b, h) };
       if (!entry.same) record.differing += 1;
       for (const demand of demands) {
         const [db, dh] = [
           compile(base, unit, mode, { demand }),
-          compile(head, unit, mode, { demand }),
+          compile(head, unit, headMode, { demand }),
         ];
         record.runs += 1;
         if (!same(db, dh)) {
@@ -542,7 +579,7 @@ if (isMainThread && process.argv[2] === "summary") {
       const c = heldCases?.get(unit.name);
       if (stops && c?.slice && b.error === null) {
         const list = searched(base, c, mode);
-        const headList = searched(head, c, mode);
+        const headList = searched(head, c, headMode);
         entry.stops = {
           count: list.length,
           sameSet: JSON.stringify(list) === JSON.stringify(headList),
@@ -552,7 +589,7 @@ if (isMainThread && process.argv[2] === "summary") {
         for (const { allowance, phase } of list) {
           const [sb, sh] = [
             compile(base, unit, mode, allowance),
-            compile(head, unit, mode, allowance),
+            compile(head, unit, headMode, allowance),
           ];
           record.runs += 1;
           if (!same(sb, sh)) {
@@ -561,7 +598,7 @@ if (isMainThread && process.argv[2] === "summary") {
           }
         }
         const analysed = analysisUnits(base, unit, mode);
-        const analysedHead = analysisUnits(head, unit, mode);
+        const analysedHead = analysisUnits(head, unit, headMode);
         const questions = {
           analysis: analysed,
           analysisHead: analysedHead,
@@ -588,7 +625,7 @@ if (isMainThread && process.argv[2] === "summary") {
           for (const allowance of allowances) {
             const [qb, qh] = [
               compile(base, unit, mode, allowance),
-              compile(head, unit, mode, allowance),
+              compile(head, unit, headMode, allowance),
             ];
             record.runs += 1;
             questions.sampled += 1;
