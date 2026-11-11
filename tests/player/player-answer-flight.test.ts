@@ -48,7 +48,9 @@ interface Flight {
   hold(key: string, fresh: boolean): void;
   noteChange(): boolean;
   settle(settlement: "completed" | "refused"): void;
+  end(): void;
   release(): void;
+  owns(): boolean;
   fail(): void;
 }
 let useAnswerFlight: (host: {
@@ -62,7 +64,9 @@ let useAnswerFlight: (host: {
   submit(source: Source, text: string): void;
   skip(): void;
   activate(): void;
-  keepTyped(text: string): void;
+  origin(): { readonly action: number; readonly keeps: boolean } | undefined;
+  pending(action: number): boolean;
+  keep(action: number, text: string): void;
   clearFeedback(): void;
 }) => Flight;
 let shortcutOutcome: (
@@ -277,9 +281,14 @@ function composer(
     if (interceptor) interceptor(text);
     else field.value = text;
   };
+  // As `RuntimeInteraction.vue`'s `keepsTyped`: a question that is no form and no password keeps its typed text.
+  const keepsTyped = () => {
+    const shown = session();
+    return !(shown && playerRuntimeForm(shown)) && foreground()?.kind !== "ask-password";
+  };
   const keepTyped = (text: string) => {
     const id = actionId.value;
-    if (id !== undefined && foreground()?.kind !== "ask-password") kept.set(id, text);
+    if (id !== undefined && keepsTyped()) kept.set(id, text);
   };
   const actionId = computed(() => {
     const shown = session();
@@ -336,7 +345,15 @@ function composer(
         ran.push(performance.now());
         void activate();
       },
-      keepTyped,
+      origin: () => {
+        const action = actionId.value;
+        return action === undefined ? undefined : { action, keeps: keepsTyped() };
+      },
+      pending: (action) => {
+        const shown = session();
+        return !!shown && playerRuntimeInteractionActionIds(shown.state).includes(action);
+      },
+      keep: (action, text) => void kept.set(action, text),
       clearFeedback: () => void (notice.value = ""),
     });
     // Only the questions that can still be answered keep their text, as `RuntimeInteraction.vue`'s watch prunes it.
@@ -354,7 +371,7 @@ function composer(
     });
     watch(field, (text) => {
       if (owned.noteChange()) notice.value = "";
-      keepTyped(text);
+      if (!owned.owns()) keepTyped(text);
     });
     return owned;
   })!;
@@ -814,6 +831,118 @@ for (const topology of TOPOLOGIES)
     ui.unmount();
   });
 
+// The end table of design round 2 (#2463), where a timer's block suspends the question whose answer is in flight: the
+// answer, sent after the block's due time, reaches it suspended. Each block is answered, and the question returns.
+const BLOCKS = {
+  text: { script: 'let b = askText "B?"', answer: () => input.intents.composer("B", "enter") },
+  password: {
+    script: 'let b = askPassword "B?"',
+    answer: () => input.intents.composer("pw", "enter"),
+  },
+  date: {
+    script: 'let b = askDate "B?"',
+    answer: () => input.intents.composer("2024-01-02", "enter"),
+  },
+  popup: { script: 'showPopup "B"', answer: () => input.intents.popupClose("button") },
+  form: {
+    script: 'let b = askForm("B", fields: { name: "Ada" }, submit: "Continue")',
+    answer: () => input.intents.formSubmit(undefined, "button"),
+  },
+} as const;
+// What is typed in the flight: the native tail, an Enter's segment before it, or a held Space (a command, not text).
+const TYPED = {
+  tail: ["T", "A", "I", "L"],
+  segment: ["M", "I", "D", "Enter", "T", "A", "I", "L"],
+  space: [" ", "T", "A", "I", "L"],
+} as const;
+/** The end table's rule, written apart from the composable: what stays with the suspended question. */
+const unsentOf = (sent: string, typed: string) =>
+  sent + (typed === "segment" ? "MID" : "") + "TAIL";
+const markers = (text: string) => ["MID", "TAIL"].filter((marker) => text.includes(marker));
+
+for (const topology of TOPOLOGIES)
+  test(`a block that suspends the answer's question keeps the unsent text with it (${topology})`, async (context) => {
+    const at = await page(context, topology);
+    for (const [name, block] of Object.entries(BLOCKS))
+      for (const sent of ["", "SENT"])
+        for (const [typed, keys] of Object.entries(TYPED)) {
+          const where = JSON.stringify({ block: name, sent, typed });
+          await at.start(`timer async hidden 60 s { ${block.script} }\nlet a = askText "A?"\nexit`);
+          const ui = composer(at.host, { flight: true });
+          const from = at.transport.posts.length;
+          const original = ui.actionId.value!;
+          ui.field.value = sent;
+          await nextTick();
+          const before = JSON.stringify([...ui.kept]);
+          at.transport.hold("observeInput");
+          at.elapse(61_000);
+          const answering = ui.press("Enter");
+          await at.transport.held();
+          await ui.type(keys);
+          assert.equal(
+            JSON.stringify([...ui.kept]),
+            before,
+            `${where}: no record changes in the flight`,
+          );
+          at.transport.release();
+          await answering;
+          await ui.idle();
+          const shown = ui.actionId.value;
+          assert.notEqual(shown, original, `${where}: the block is presented`);
+          assert.equal(ui.field.value, "", `${where}: the block's field shows its own text`);
+          assert.equal(ui.kept.get(original), unsentOf(sent, typed), where);
+          for (const [action, text] of ui.kept)
+            if (action !== original)
+              assert.deepEqual(markers(text), [], `${where}: in no other record`);
+          const posts = at.transport.posts.slice(from).filter((post) => post.op !== "observeInput");
+          assert.deepEqual(
+            markers(JSON.stringify(posts)),
+            [],
+            `${where}: no command acts on the block`,
+          );
+          const exported = await at.host.debugExportCandidate(
+            () => ({}),
+            new AbortController().signal,
+          );
+          assert.ok(exported !== null, where);
+          const serialized = JSON.stringify(exported, (_key, value: unknown) =>
+            typeof value === "bigint" ? String(value) : value,
+          );
+          assert.deepEqual(markers(serialized), [], `${where}: in no export`);
+          await ui.complete(block.answer());
+          await ui.idle();
+          assert.equal(ui.actionId.value, original, `${where}: the question returns`);
+          assert.equal(ui.field.value, unsentOf(sent, typed), `${where}: with its unsent text`);
+          ui.unmount();
+        }
+  });
+
+// An answer the drain sends has its own question: a block that suspends that one keeps the drain's text with it.
+for (const topology of TOPOLOGIES)
+  test(`a drained answer that a block overtakes keeps its text with its own question (${topology})`, async (context) => {
+    const at = await page(context, topology);
+    await at.start(
+      `let a = askText "A?"\ntimer async hidden 60 s { ${BLOCKS.password.script} }\nlet c = askText "C?"\nexit`,
+    );
+    const ui = composer(at.host, { flight: true });
+    ui.field.value = FIRST.text.aside;
+    at.transport.hold("observeInput");
+    const answering = ui.press("Enter");
+    await at.transport.held();
+    await ui.type(["M", "I", "D", "Enter", "T", "A", "I", "L"]);
+    at.elapse(61_000);
+    at.transport.release();
+    await answering;
+    await ui.idle();
+    const next = [...ui.kept.keys()].find((action) => ui.kept.get(action) === "MIDTAIL");
+    assert.ok(next !== undefined, "the drained answer's question keeps its text");
+    await ui.complete(BLOCKS.password.answer());
+    await ui.idle();
+    assert.equal(ui.actionId.value, next);
+    assert.equal(ui.field.value, "MIDTAIL");
+    ui.unmount();
+  });
+
 // A queued answer whose question the first answer ended: the composer takes no input there, so it is dropped, and the
 // flight ends with what the answer wrote. On `main` the same Enter reaches the control that took the focus (residual 6
 // of #2430), which this model has no focus to show; the kit's `keys` scenario measures it.
@@ -889,13 +1018,21 @@ for (const topology of TOPOLOGIES)
         at.transport.release();
         if (exit === "throw") {
           await assert.rejects(Promise.resolve(answering), /injected/u);
-          // The field holds the answer's text again, before what was typed meanwhile.
-          assert.equal(ui.field.value, `${FIRST.text.aside}y`);
+          // The question holds what was left unsent: the answer's text, each later Enter's text, and the text typed
+          // last (design round 2's end table, the throw row).
+          assert.equal(ui.field.value, `${FIRST.text.aside}xy`);
+          assert.equal(ui.kept.get(ui.actionId.value!), `${FIRST.text.aside}xy`);
         } else await answering;
         await ui.idle();
         assert.equal(ui.flight.holding.value, false);
         assert.equal(ui.isIntercepted(), false);
         assert.equal(ui.flightWrites.length, writes, "no write of the flight after it ended");
+        // What the flight left unsent goes nowhere when its owner ends: no question keeps the Enter's text.
+        if (exit !== "throw")
+          assert.deepEqual(
+            [...ui.kept.values()].filter((text) => text.includes("x")),
+            [],
+          );
         const answered = at.transport.posts
           .slice(from)
           .filter((post) => post.op === "submitComposer")
