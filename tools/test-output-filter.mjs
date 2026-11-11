@@ -98,7 +98,7 @@ const countsFolder =
   fullSuite || fullOutput ? null : mkdtempSync(join(tmpdir(), "test-file-counts-"));
 const countsFile = countsFolder === null ? null : join(countsFolder, "counts.json");
 /**
- * `NODE_OPTIONS`' options as Node splits them (`ParseNodeOptionsEnvVar` in its `src/node_options.cc`): at a space outside
+ * `NODE_OPTIONS`' options as Node splits them (ParseNodeOptionsEnvVar in its src/node_options.cc): at a space outside
  * double quotes, the quotes dropped, a backslash inside them taking the next character as it is.
  */
 function nodeOptions(text) {
