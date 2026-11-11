@@ -497,6 +497,9 @@ test("a section list right after a document's name is admitted, in every form th
         `${name}${separator}`,
       );
   }
+  // a range, then the list goes on
+  for (const name of SECTION_NAMES)
+    assert.deepEqual(sectionsIn(`(${name} §1–2, §5)`), [], `${name} range`);
   // at the start of a line and of the text, and after a character that is no letter or digit
   assert.deepEqual(sectionsIn("V30 §1\n(ADR 0021 §6.2)\n`S3 §5`, _V30 §2"), []);
 });
