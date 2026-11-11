@@ -945,6 +945,33 @@ for (const topology of TOPOLOGIES)
     ui.unmount();
   });
 
+// An owner's change while the reply of a refused answer is held: the question stays, and no record keeps the flight's
+// text for it (design round 2's end table: reset and replacement discard).
+for (const topology of TOPOLOGIES)
+  for (const exit of ["reset", "replacement"] as const)
+    test(`a question that outlives its flight's owner keeps none of its text (${exit}, ${topology})`, async (context) => {
+      const at = await page(context, topology);
+      await at.start(`${FIRST.unselected.script}\nexit`);
+      const ui = composer(at.host, { flight: true });
+      const original = ui.actionId.value;
+      ui.field.value = FIRST.unselected.aside;
+      at.transport.hold("observeInput");
+      const answering = ui.press("Enter");
+      await at.transport.held();
+      await ui.type(["x", "Enter", "y"]);
+      if (exit === "reset") ui.reset();
+      else ui.replace();
+      at.transport.release();
+      await answering;
+      await ui.idle();
+      assert.equal(ui.actionId.value, original, "the question stays");
+      assert.deepEqual(
+        [...ui.kept.values()].filter((text) => text.includes("x")),
+        [],
+      );
+      ui.unmount();
+    });
+
 // A queued answer whose question the first answer ended: the composer takes no input there, so it is dropped, and the
 // flight ends with what the answer wrote. On `main` the same Enter reaches the control that took the focus (residual 6
 // of #2430), which this model has no focus to show; the kit's `keys` scenario measures it.
