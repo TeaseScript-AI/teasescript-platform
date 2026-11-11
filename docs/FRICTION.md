@@ -65,8 +65,7 @@ deferring costs, not by date:
     it is small.
   - A fix in files no open lane owns, or in tooling, is the coordinator's light-route pull request between packages,
     as a move is. A friction fix never waits behind a lane's queue.
-- **Otherwise:** a single, cheap instance that no lane is near is free like any other, unless triage closed it as
-  not planned. A scope cut's residual is left
+- **Otherwise:** a single, cheap instance that no lane is near is free like any other. A scope cut's residual is left
   to an issue only when it cannot bite ([Design rounds](DEVELOPMENT-WORKFLOW.md#design-rounds)).
 
 The `spare capacity` label changes none of this: a friction issue is built, waits or is free the same with or without
