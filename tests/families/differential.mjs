@@ -221,6 +221,19 @@ function entriesOf(storage) {
   );
 }
 
+/** Refuses a case whose storage cannot be copied as each run copies it, or that the runtime's `validate` rejects. */
+function checkStorage(cases, validate) {
+  for (const c of cases.filter((each) => each.storage !== undefined)) {
+    let failure;
+    try {
+      failure = validate(entriesOf(c.storage), "storage");
+    } catch (error) {
+      failure = `storage cannot be copied: ${error.message}`;
+    }
+    if (failure !== null) refuse(`${c.where}: ${failure}`);
+  }
+}
+
 /** Each case's files and globals, a set's from its unit; a set unreadable, or its unit missing or ambiguous, refuses the file. */
 async function resolveCases(cases, root) {
   const unitOf = unitResolver(root);
@@ -264,18 +277,9 @@ async function record() {
     validateScriptStorageEntries,
     planCheckList,
   } = await loadTree(root);
-  // (every fault of the input found before any plan runs and before the output is opened: the cases resolved, and
-  // each case's storage copied once, as each run copies it, and checked as the runtime checks it)
+  // (every fault of the input found before any plan runs and before the output is opened)
   await resolveCases(cases, root);
-  for (const c of cases.filter((each) => each.storage !== undefined)) {
-    let failure;
-    try {
-      failure = validateScriptStorageEntries(entriesOf(c.storage), "storage");
-    } catch (error) {
-      failure = `storage cannot be copied: ${error.message}`;
-    }
-    if (failure !== null) refuse(`${c.where}: ${failure}`);
-  }
+  checkStorage(cases, validateScriptStorageEntries);
 
   let threw = 0;
   const thrown = (error) => {
