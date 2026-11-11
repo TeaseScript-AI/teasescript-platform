@@ -7,7 +7,8 @@
 // checkout with `dist/`, or `dist/` itself), in the four modes (source and reversed order, the sharing on and off), and
 // compares what the sources publish (`publication`, part by part: a difference names the first part that differs,
 // #1503) and, for a generator whose `checks` include "stops", which decisions stop and when (`stopSet`) at each demand
-// allowance. Each tree's own oracle library (`dist/tests/helpers/type-core-oracles.js`) analyses its sources, in a
+// allowance, a difference naming the stops each tree added, removed or moved (`stopsApart`, #2355, never stored).
+// Each tree's own oracle library (`dist/tests/helpers/type-core-oracles.js`) analyses its sources, in a
 // child process: a run (a source's mode and check on one tree) whose charged units pass `--units` times its program's
 // allowance (`units`, the same on every machine, #1647; a publication run's, also its oracle's units per cell for each
 // cell its own questions returned, #1837), or a source that takes more than `--memory` MB of heap or ends
@@ -212,7 +213,8 @@ const reportedBy = (oracle, check) => (check === "publication" ? questionsOf(ora
 /**
  * A run's result by its hash (a publication's by its parts'), with a publication's part hashes (`parts`, each cut to 16
  * digits, which still place a difference and keep a stored run small) and unanswered nodes, and whether the files did
- * not parse.
+ * not parse; a stops run's decision stops too (`stops`, the oracle's `[pass, label, path, ordinal]`, #2355), which a
+ * comparison classifies and a stored run never holds (`storable`).
  */
 const digest = (value) => ({
   hash: hash(textOf(value?.parts ?? value)),
@@ -220,7 +222,80 @@ const digest = (value) => ({
   unanswered: value?.unanswered ?? 0,
   ...(value?.unansweredBy === undefined ? {} : { unansweredBy: value.unansweredBy }),
   unparsed: value === null,
+  ...(Array.isArray(value?.stops) ? { stops: value.stops } : {}),
 });
+
+/**
+ * A run's result as a store keeps it: without a stops run's `stops` (#2355, the lead's ruling R12): a reader from before
+ * #2355 refuses a stored run that holds them, and a `--needs-baseline` run reads through its own head's reader.
+ */
+const storable = (result) => {
+  if (result?.value?.stops === undefined) return result;
+  const { stops: _, ...value } = result.value;
+  return { ...result, value };
+};
+
+/** Whether `stops` is the oracle's decision stops (`stopSet`'s `stops`): `[pass, label, path, ordinal]` each. */
+const decisionStops = (stops) =>
+  Array.isArray(stops) &&
+  stops.every(
+    (stop) =>
+      Array.isArray(stop) &&
+      stop.length === 4 &&
+      Number.isInteger(stop[0]) &&
+      typeof stop[1] === "string" &&
+      typeof stop[2] === "string" &&
+      Number.isInteger(stop[3]),
+  );
+
+/**
+ * Which decision stops two stops runs differ in (#2355), a stop known by its place (label and path): a place stopping on
+ * the head alone is `added`, on the base alone `removed`, on both at another pass or ordinal `moved`, each with both
+ * trees' `[pass, ordinal]`; `listsEqual` where the lists agree and the difference is in the stop set's other fields.
+ * Known limit: a place that stops a different number of times on each tree pairs its stops in order, so its extra ones
+ * read as added or removed. Where a side holds no list (a stored run never does), `unavailable`, naming that side, never
+ * equal.
+ */
+function stopsApart(was, is) {
+  if (was?.stops === undefined && is?.stops === undefined) return {};
+  for (const [side, value] of [
+    ["base", was],
+    ["head", is],
+  ])
+    if (!decisionStops(value?.stops))
+      return {
+        stops: {
+          unavailable:
+            value?.stops === undefined
+              ? `the ${side}'s run holds no stop list (a stored run never does): a run of the differing sources on two trees gives it`
+              : `the ${side}'s stop list is not the oracle's [pass, label, path, ordinal]`,
+        },
+      };
+  const byPlace = (stops) => {
+    const places = new Map();
+    for (const [pass, label, path, ordinal] of stops) {
+      const place = JSON.stringify([label, path]);
+      if (!places.has(place)) places.set(place, []);
+      places.get(place).push([pass, ordinal]);
+    }
+    return places;
+  };
+  const [b, h] = [byPlace(was.stops), byPlace(is.stops)];
+  const apart = { added: [], removed: [], moved: [] };
+  for (const place of new Set([...b.keys(), ...h.keys()])) {
+    const [label, path] = JSON.parse(place);
+    const [before, after] = [b.get(place) ?? [], h.get(place) ?? []];
+    for (let at = 0; at < Math.max(before.length, after.length); at += 1) {
+      const [base, head] = [before[at] ?? null, after[at] ?? null];
+      if (base === null) apart.added.push({ label, path, base, head });
+      else if (head === null) apart.removed.push({ label, path, base, head });
+      else if (base[0] !== head[0] || base[1] !== head[1])
+        apart.moved.push({ label, path, base, head });
+    }
+  }
+  const none = Object.values(apart).every((list) => list.length === 0);
+  return { stops: none ? { listsEqual: true } : apart };
+}
 
 /** Why a tree's result left nodes unanswered, or `null` where it left none; a stored run before #1837 says `unknown`. */
 const reasonOf = (value) =>
@@ -296,6 +371,7 @@ function judged(was, is) {
       base: was.value.hash.slice(0, 16),
       head: is.value.hash.slice(0, 16),
       ...firstPart(was.value.parts, is.value.parts),
+      ...stopsApart(was.value, is.value),
     },
   };
 }
@@ -1137,7 +1213,7 @@ if (process.argv[2] === "--child") {
           questions: [questions] = [],
         } = reply.spent[at];
         results[id] = {
-          ...result,
+          ...storable(result),
           work: charged,
           allowance,
           ...(questions === null || questions === undefined ? {} : { questions }),

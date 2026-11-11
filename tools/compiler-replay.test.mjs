@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  apartText,
   areasOf,
   batchOf,
   declarations,
@@ -968,5 +969,63 @@ test("submit orders the batch by the shards the recorded costs fill, not by an a
     assert.deepEqual(names.slice(0, 4), ["copies-0of2", "joins-0of2", "joins-1of2", "copies-1of2"]);
   } finally {
     rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("collect: a stops difference names its stops as run.mjs classified them, and an exception or an unanswered run is no difference (#2355)", () => {
+  const stops = {
+    generator: "g",
+    source: "s",
+    mode: "src-on",
+    check: "stops 16",
+    base: "a",
+    head: "b",
+  };
+  assert.equal(
+    apartText({ ...stops, stops: { added: [{}, {}], removed: [], moved: [{}] } }),
+    "stops 16 apart; stops added 2, removed 0, moved 1",
+  );
+  assert.equal(
+    apartText({ ...stops, stops: { listsEqual: true } }),
+    "stops 16 apart; its stop lists equal, the stop set's other fields apart",
+  );
+  assert.equal(
+    apartText({ ...stops, stops: { unavailable: "the base's run holds no stop list" } }),
+    "stops 16 apart; which stops: unavailable (the base's run holds no stop list)",
+  );
+  assert.equal(apartText({ ...stops, part: 1, parts: [2, 2] }), "part 1 of 2/2");
+  // (an exception and a run left unanswered, as run.mjs records them, beside a stops difference: the report reads the
+  // difference alone and its verdict names it, where it read all three and failed on the first without parts)
+  const thrown = {
+    generator: "g",
+    source: "t",
+    mode: "src-on",
+    check: "stops 16",
+    thrown: { base: "E" },
+  };
+  const unanswered = {
+    generator: "g",
+    source: "u",
+    mode: "src-on",
+    check: "publication",
+    unanswered: { base: 1, head: 1 },
+    by: {},
+    prefix: "equal",
+  };
+  const classified = { ...stops, stops: { added: [], removed: [{}], moved: [] } };
+  const root = results("p", (i) =>
+    i === 0 ? { area: { differences: [thrown, unanswered, classified] } } : {},
+  );
+  try {
+    const r = report("p", root, ["rings"]);
+    assert.deepEqual(
+      r.differences.map((d) => d.source),
+      ["s"],
+    );
+    assert.deepEqual(verdict(r).reasons, [
+      "rings g s src-on: stops 16 apart; stops added 0, removed 1, moved 0",
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
   }
 });

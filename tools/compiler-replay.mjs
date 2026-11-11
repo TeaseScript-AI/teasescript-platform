@@ -524,8 +524,15 @@ export function report(prefix, results, expected = areasOf(ROOT).map((a) => a.na
     for (const key of Object.keys(row)) if (key !== "shards") row[key] += summary[key] ?? 0;
     if (existsSync(path.join(out, `${area}.work.jsonl`)))
       work.push(path.join(out, `${area}.work.jsonl`));
+    // (a difference only: an exception, or a run left unanswered with no difference in what both answered, is the
+    // area's count and no difference, #2355)
     for (const d of lines(path.join(out, `${area}.differences.jsonl`)))
-      if (d.mode !== undefined) differences.push({ area, ...d, routeOnly: routeOnly(d) });
+      if (
+        d.mode !== undefined &&
+        d.thrown === undefined &&
+        !(d.unanswered !== undefined && d.head === undefined)
+      )
+        differences.push({ area, ...d, routeOnly: routeOnly(d) });
   }
   const set = { shards: 0, sources: 0, runs: 0, stalled: 0, uncharged: 0, differences: [] };
   for (const { name, read } of setShards) {
@@ -601,6 +608,21 @@ export function report(prefix, results, expected = areasOf(ROOT).map((a) => a.na
   };
 }
 
+/**
+ * Where an area difference lies: a publication's first differing part, or a stops run's stops (#2355: the counts of
+ * those `run.mjs` classified as added, removed or moved, each listed in its differences record, or why it could not).
+ */
+export function apartText(d) {
+  if (Array.isArray(d.parts)) return `part ${d.part} of ${d.parts.join("/")}`;
+  const stops = d.stops;
+  if (stops === undefined) return `${d.check ?? "run"} apart`;
+  if (stops.unavailable !== undefined)
+    return `${d.check} apart; which stops: unavailable (${stops.unavailable})`;
+  if (stops.listsEqual)
+    return `${d.check} apart; its stop lists equal, the stop set's other fields apart`;
+  return `${d.check} apart; stops added ${stops.added.length}, removed ${stops.removed.length}, moved ${stops.moved.length}`;
+}
+
 /** The verdict of a report: 0, 1 or 3, with each reason it is not 0. */
 export function verdict(r) {
   if (r.notRun.length > 0) return { status: 3, reasons: r.notRun.map((job) => `not run: ${job}`) };
@@ -620,9 +642,7 @@ export function verdict(r) {
   );
   for (const d of r.differences)
     if (!(d.routeOnly && agreed.has(`${d.source} ${d.mode}`)))
-      reasons.push(
-        `${d.area} ${d.generator} ${d.source} ${d.mode}: part ${d.part} of ${d.parts.join("/")}`,
-      );
+      reasons.push(`${d.area} ${d.generator} ${d.source} ${d.mode}: ${apartText(d)}`);
   for (const d of r.set.differences)
     if (!(d.what === "diagnostics only" && agreed.has(`${d.name} ${MODES[d.mode]}`)))
       reasons.push(`set ${d.name} mode ${d.mode}: ${d.what}`);
