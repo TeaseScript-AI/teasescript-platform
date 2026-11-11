@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { runSteps, summaryLine } from "./run-parallel.mjs";
+import { runSteps, stopTree, summaryLine } from "./run-parallel.mjs";
 
 // `npm run check`, in three parts (#2106):
 //
@@ -10,7 +10,7 @@ import { runSteps, summaryLine } from "./run-parallel.mjs";
 //    failed build it does not run: it would test stale or missing code. No check before the tests writes what it runs.
 //
 // The last line names what ran, failed and did not run (`summaryLine`), the suite with why when it did not run. SIGINT
-// and SIGTERM stop the running part and start no other. Exit status: the first failed part's, or 130 or 143 for a
+// and SIGTERM stop the running part's whole process group and start no other part; the last line follows its end. Exit status: the first failed part's, or 130 or 143 for a
 // signal that came first, else 0. `VERIFY_SERIAL=1` runs the checks before the tests one after another.
 
 /** The steps of `check:pretest`, which must be one `tools/run-parallel.mjs` call. */
@@ -29,31 +29,41 @@ async function main() {
   const scripts = JSON.parse(readFileSync("package.json", "utf8")).scripts;
   let signalled = 0;
   let running = null;
+  // (the running part's process group being stopped, with its escalation)
+  let stopping = Promise.resolve();
   const handlers = Object.entries(SIGNALS).map(([signal, code]) => {
     const handler = () => {
-      if (signalled === 0) signalled = code;
-      running?.kill(signal);
+      if (signalled !== 0) return;
+      signalled = code;
+      if (running !== null) stopping = stopTree(running);
     };
     process.on(signal, handler);
     return [signal, handler];
   });
   const env = { ...process.env, BUILD_SOURCEMAPS: "0" };
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-  /** A part's run: `PASS`, `FAIL`, or `ABORTED` when a signal stopped it, and its exit status. */
+  /**
+   * A part's run in its own process group, which a signal stops whole: `PASS`, `FAIL`, or `ABORTED` when a signal
+   * stopped it, and its exit status (1 for a spawn error).
+   */
   const part = (command, args) =>
     new Promise((resolve) => {
+      let failed = false;
       running = spawn(command, args, {
         stdio: "inherit",
         env,
+        detached: process.platform !== "win32",
         shell: process.platform === "win32" && command === npm,
       });
-      running.on("error", (error) => console.error(`${args.join(" ")}: ${error.message}`));
+      running.on("error", (error) => {
+        failed = true;
+        console.error(`${args.join(" ")}: ${error.message}`);
+      });
       running.on("close", (code) => {
         running = null;
-        resolve({
-          status: code === 0 ? "PASS" : signalled !== 0 ? "ABORTED" : "FAIL",
-          code: code ?? 1,
-        });
+        if (code === 0 && !failed) resolve({ status: "PASS", code: 0 });
+        else if (signalled !== 0) resolve({ status: "ABORTED", code: signalled });
+        else resolve({ status: "FAIL", code: !failed && code > 0 ? code : 1 });
       });
     });
 
@@ -78,6 +88,8 @@ async function main() {
       status: "NOT RUN",
     });
   if (signalled !== 0) fail(signalled);
+  // (a stopped part's descendants end, or are killed, before the last line)
+  await stopping;
   for (const [signal, handler] of handlers) process.removeListener(signal, handler);
   console.log(`\n${summaryLine(steps)}`);
   process.exitCode = exitCode;

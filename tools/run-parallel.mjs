@@ -34,7 +34,7 @@ function signalTree(child, signal) {
 }
 
 /** Stops `child`'s process group, escalating to SIGKILL after a grace period; resolves when that is done. */
-function stopTree(child) {
+export function stopTree(child) {
   if (!signalTree(child, "SIGTERM")) return Promise.resolve();
   return new Promise((resolve) =>
     setTimeout(() => {
@@ -113,7 +113,8 @@ export async function runSteps(names, { serial = false } = {}) {
         process.stdout.write(readFileSync(path));
         if (result === "FAIL") {
           console.error(`${name}: ${failure ?? (signal ? `signal ${signal}` : `exit ${code}`)}`);
-          if (exitCode === 0) exitCode = code || 1;
+          // (a spawn error closes with a negative system code, which reads as 1)
+          if (exitCode === 0) exitCode = failure === null && code > 0 ? code : 1;
           stopping.push(stopTree(child));
         }
         resolve();

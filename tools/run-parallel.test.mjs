@@ -114,6 +114,24 @@ test(
   },
 );
 
+test("a step npm cannot start fails with exit 1 and is named", { timeout: 10000 }, async (t) => {
+  const cwd = fixture(t, { first: "" });
+  // (no npm on PATH: the spawn itself fails)
+  const child = spawn(process.execPath, [runner, "first"], {
+    cwd,
+    env: { ...process.env, PATH: cwd },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  let output = "";
+  child.stdout.on("data", (chunk) => (output += chunk));
+  child.stderr.on("data", (chunk) => (output += chunk));
+  const code = await new Promise((resolve) => child.on("close", resolve));
+  assert.equal(code, 1, output);
+  assert.match(output, /\[first\] FAIL/u);
+  assert.match(output, /first: spawn npm ENOENT/u);
+  assert.equal(output.trimEnd().split("\n").at(-1), "ran: first; failed: first; not run: none");
+});
+
 test("summaryLine names each step that ended under ran, a failed one also under failed, and every other under not run", () => {
   assert.equal(summaryLine([]), "ran: none; failed: none; not run: none");
   assert.equal(

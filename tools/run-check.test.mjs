@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,15 +11,21 @@ const tool = fileURLToPath(new URL("./run-check.mjs", import.meta.url));
 
 /**
  * A package whose `check:pretest` runs `lint` and `format`, with a `build` and a stand-in suite: each exits with the
- * status `exits` gives it (0 when not named) and records that it ran, with the `BUILD_SOURCEMAPS` it saw.
+ * status `exits` gives it (0 when not named) and records that it ran, with the `BUILD_SOURCEMAPS` it saw. The part
+ * `waits` names (`build` or `suite`) instead starts a descendant that ignores SIGTERM, writes its pid to `pid`, and
+ * prints `LATE` after 2.5 s, then waits.
  */
-function run(t, exits) {
+function fixture(t, exits, waits = null) {
   const cwd = mkdtempSync(join(tmpdir(), "run-check-test-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   const part = (name) =>
-    "import { appendFileSync } from 'node:fs'; " +
+    "import { appendFileSync } from 'node:fs'; import { spawn } from 'node:child_process'; " +
     `appendFileSync('ran', '${name} ' + process.env.BUILD_SOURCEMAPS + '\\n'); ` +
-    `process.exit(${exits[name] ?? 0});`;
+    (name === waits
+      ? `spawn(process.execPath, ['-e', "require('node:fs').writeFileSync('pid', String(process.pid)); ` +
+        `process.on('SIGTERM', () => {}); setTimeout(() => console.log('LATE'), 2500); setInterval(() => {}, 1000);"], ` +
+        "{ stdio: 'inherit' }); setInterval(() => {}, 1000);"
+      : `process.exit(${exits[name] ?? 0});`);
   const scripts = {
     "check:pretest": "node tools/run-parallel.mjs lint format",
     build: "node build.mjs",
@@ -32,18 +38,26 @@ function run(t, exits) {
   mkdirSync(join(cwd, "tools"));
   writeFileSync(join(cwd, "tools", "test-output-filter.mjs"), part("suite"));
   writeFileSync(join(cwd, "package.json"), JSON.stringify({ scripts }));
-  const result = spawnSync(process.execPath, [tool], {
-    cwd,
-    encoding: "utf8",
-    env: { ...process.env, VERIFY_SERIAL: "1", BUILD_SOURCEMAPS: "" },
-  });
+  return cwd;
+}
+
+const environment = { ...process.env, VERIFY_SERIAL: "1", BUILD_SOURCEMAPS: "" };
+
+/** `npm run check`'s run in `cwd`: its status, the parts that ran, its last line and its output. */
+function outcome(cwd, status, stdout, stderr) {
   const ran = existsSync(join(cwd, "ran")) ? readFileSync(join(cwd, "ran"), "utf8") : "";
   return {
-    status: result.status,
+    status,
     ran: ran.trim().split("\n"),
-    last: result.stdout.trimEnd().split("\n").at(-1),
-    output: result.stdout + result.stderr,
+    last: stdout.trimEnd().split("\n").at(-1),
+    output: stdout + stderr,
   };
+}
+
+function run(t, exits) {
+  const cwd = fixture(t, exits);
+  const result = spawnSync(process.execPath, [tool], { cwd, encoding: "utf8", env: environment });
+  return outcome(cwd, result.status, result.stdout, result.stderr);
 }
 
 test("a failed check before the tests stops no other part: the build and the suite still run (#2106)", (t) => {
@@ -89,3 +103,57 @@ test("the checks before the tests are check:pretest's run-parallel steps, and an
       message: "check:pretest is not one `node tools/run-parallel.mjs <npm script>...` call",
     });
 });
+
+// Process-group assertions target the POSIX environment used by repository CI.
+test(
+  "a signal during the build or the suite stops its whole process group, keeps the first failure's or the signal's status, and the last line comes after (#2106)",
+  { skip: process.platform === "win32", timeout: 60_000 },
+  async (t) => {
+    for (const [waits, exits, status, last] of [
+      ["build", {}, 143, "ran: lint, format; failed: none; not run: build, test suite (stopped)"],
+      ["suite", {}, 143, "ran: lint, format, build; failed: none; not run: test suite"],
+      [
+        "build",
+        { lint: 3 },
+        3,
+        "ran: lint, format; failed: lint; not run: build, test suite (stopped)",
+      ],
+    ]) {
+      const cwd = fixture(t, exits, waits);
+      const child = spawn(process.execPath, [tool], { cwd, env: environment });
+      let stdout = "";
+      let stderr = "";
+      child.stdout.on("data", (chunk) => (stdout += chunk));
+      child.stderr.on("data", (chunk) => (stderr += chunk));
+      const closed = new Promise((resolve) => child.on("close", resolve));
+      while (!existsSync(join(cwd, "pid")) || readFileSync(join(cwd, "pid"), "utf8") === "")
+        await new Promise((wait) => setTimeout(wait, 20));
+      const pid = Number(readFileSync(join(cwd, "pid"), "utf8"));
+      // (a run that fails to stop it leaves no stray process behind the test either)
+      t.after(() => {
+        try {
+          process.kill(pid, "SIGKILL");
+        } catch (error) {
+          if (error.code !== "ESRCH") throw error;
+        }
+      });
+      child.kill("SIGTERM");
+      const result = outcome(cwd, await closed, stdout, stderr);
+      const at = `${waits}, ${JSON.stringify(exits)}`;
+      assert.equal(result.status, status, `${at}: ${result.output}`);
+      assert.equal(result.last, last, at);
+      assert.doesNotMatch(result.output, /LATE/u, at);
+      // (the descendant that ignored SIGTERM is gone, or a zombie its parent has not reaped)
+      let alive = true;
+      try {
+        process.kill(pid, 0);
+        alive = !/\) Z /u.test(readFileSync(`/proc/${pid}/stat`, "utf8"));
+      } catch (error) {
+        if (error.code !== "ESRCH" && error.code !== "ENOENT") throw error;
+        alive = false;
+      }
+      if (alive) process.kill(pid, "SIGKILL");
+      assert.equal(alive, false, `${at}: the descendant outlived the run`);
+    }
+  },
+);

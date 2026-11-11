@@ -262,24 +262,50 @@ function prettier() {
   return [process.execPath, "node_modules/prettier/bin/prettier.cjs"];
 }
 
+/**
+ * The checks this run started, in order, the verdicts of those that ended, and, once every check has started, the
+ * project checks no changed path needs: what the last line names (`lastLine`).
+ */
+const progress = { started: [], ended: new Map(), notNeeded: null };
+
 /** A check's run: its verdict, seconds and output; `shown` prints the output also when it passes. */
 function run(name, command, args, shown = false) {
   const start = performance.now();
+  progress.started.push(name);
   return new Promise((resolve) => {
     const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], detached: true });
     running.add(child);
     let output = "";
     child.stdout.on("data", (chunk) => (output += chunk));
     child.stderr.on("data", (chunk) => (output += chunk));
-    child.on("error", (error) =>
-      resolve({ name, passed: false, seconds: 0, output: error.message, shown }),
-    );
+    child.on("error", (error) => {
+      progress.ended.set(name, false);
+      resolve({ name, passed: false, seconds: 0, output: error.message, shown });
+    });
     child.on("close", (code) => {
       running.delete(child);
+      progress.ended.set(name, code === 0);
       const seconds = (performance.now() - start) / 1000;
       resolve({ name, passed: code === 0, seconds, output, shown });
     });
   });
+}
+
+/**
+ * The last line (#2106), so that no run, also one that cannot run or is stopped, can be read as one that ran more: what
+ * ran, failed, and did not run, a check a signal stopped, a project check no changed path needs and the compiled suite
+ * included.
+ */
+function lastLine() {
+  if (progress.notNeeded === null)
+    return `check-changed: ${summaryLine([{ name: "every check", status: "NOT RUN" }])}`;
+  const verdict = (name) =>
+    progress.ended.has(name) ? (progress.ended.get(name) ? "PASS" : "FAIL") : "ABORTED";
+  return `check-changed: ${summaryLine([
+    ...progress.started.map((name) => ({ name, status: verdict(name) })),
+    ...progress.notNeeded.map((name) => ({ name, status: "NOT RUN" })),
+    { name: NEVER_RUN, status: "NOT RUN" },
+  ])}`;
 }
 
 /**
@@ -403,6 +429,8 @@ async function check(cleanups) {
         ? run("tsc", "node_modules/.bin/tsc", ["--noEmit", "-p", "tsconfig.json"])
         : run(check, npm, ["run", "--silent", check]),
     );
+  const selected = checksOf(projects);
+  progress.notNeeded = checksOf(Object.keys(PROJECTS)).filter((check) => !selected.includes(check));
   const results = await Promise.all(checks);
   for (const { name, passed, seconds } of results)
     process.stdout.write(
@@ -410,17 +438,7 @@ async function check(cleanups) {
     );
   for (const { name, passed, output, shown } of results)
     if (!passed || shown) process.stdout.write(`\n--- ${name} ---\n${output}`);
-  // (the last line, so that a passing run cannot be read as one that ran more: #2106)
-  const selected = checksOf(projects);
-  process.stdout.write(
-    `\ncheck-changed: ${summaryLine([
-      ...results.map(({ name, passed }) => ({ name, status: passed ? "PASS" : "FAIL" })),
-      ...checksOf(Object.keys(PROJECTS))
-        .filter((check) => !selected.includes(check))
-        .map((name) => ({ name, status: "NOT RUN" })),
-      { name: NEVER_RUN, status: "NOT RUN" },
-    ])}\n`,
-  );
+  process.stdout.write(`\n${lastLine()}\n`);
   process.exitCode = results.every(({ passed }) => passed) ? 0 : 1;
 }
 
@@ -440,16 +458,14 @@ async function main() {
   ])
     process.once(signal, () => {
       cleanup();
-      process.exit(code);
+      process.stdout.write(`\n${lastLine()}\n`, () => process.exit(code));
     });
   try {
     await check(cleanups);
   } catch (error) {
     if (!(error instanceof CannotRun)) throw error;
     process.stderr.write(`check-changed: ${error.message}\n`);
-    process.stdout.write(
-      `check-changed: ${summaryLine([{ name: "every check", status: "NOT RUN" }])}\n`,
-    );
+    process.stdout.write(`${lastLine()}\n`);
     process.exitCode = 2;
   } finally {
     cleanup();

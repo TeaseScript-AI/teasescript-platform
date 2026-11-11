@@ -269,6 +269,14 @@ test(
         Promise.resolve(child.kill("SIGTERM")),
       ]);
       assert.equal(code, 143);
+      // (its last line still says what ran: oxlint, which waits, was stopped, so it did not run: #2106)
+      const last = output.trimEnd().split("\n").at(-1);
+      assert.match(
+        last,
+        /^check-changed: ran: [^;]*; failed: [^;]*; not run: (?:[^;]+, )?oxlint, (?:[^;]+, )?the compiled test suite \(CI runs it\)$/u,
+        output,
+      );
+      assert.doesNotMatch(last.split("; not run:")[0], /oxlint/u);
       assert.equal(worktrees(), 1);
     } finally {
       rmSync(directory, { recursive: true, force: true });
