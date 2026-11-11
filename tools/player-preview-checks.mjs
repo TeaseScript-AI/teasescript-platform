@@ -200,21 +200,22 @@ async function mediaPlaybackChecks(page) {
   const check = (value, message) => {
     if (!value) throw new Error(message);
   };
-  // Observe the Player's audio elements. Every play() is refused, as a browser that grants no audio would, until the
-  // player clicks "Enable audio": refusing only the first would refuse the silent play that primes an element at Start.
+  // Observe the Player's audio elements. As in a browser that grants no audio, every play() is refused until one is
+  // called from the player's click on "Enable audio" itself (`window.event` is that click only while it is dispatched),
+  // so silent priming cannot use up the refusal and only a deliberate retry can start playback. Later calls are
+  // admitted, as after a user activation.
   await page.addInitScript(() => {
     window.__played = [];
     const play = HTMLMediaElement.prototype.play;
     let refusing = true;
-    document.addEventListener(
-      "click",
-      (event) => {
-        if (event.target.closest("button")?.textContent.trim() === "Enable audio") refusing = false;
-      },
-      true,
-    );
+    const retrying = () =>
+      window.event?.type === "click" &&
+      window.event.target instanceof Element &&
+      window.event.target.closest("button")?.textContent.trim() === "Enable audio";
     HTMLMediaElement.prototype.play = function () {
-      if (refusing) return Promise.reject(new DOMException("Refused", "NotAllowedError"));
+      if (refusing && !retrying())
+        return Promise.reject(new DOMException("Refused", "NotAllowedError"));
+      refusing = false;
       window.__played.push(this);
       return play.call(this);
     };
@@ -231,12 +232,13 @@ async function mediaPlaybackChecks(page) {
   // The authored Stage image comes from the runtime and the host's asset resolution.
   await page.locator(".stage-media").waitFor();
   const firstImage = await page.locator(".stage-media").getAttribute("src");
-  // Refused audio offers a deliberate retry and reports no progress until it plays.
+  // Refused audio offers a deliberate retry. That the runtime records no progress meanwhile is
+  // `tests/player/player-media-device.test.ts`'s to prove; here no play() is admitted before the retry.
   const retry = page.getByRole("button", { name: "Enable audio", exact: true });
   await retry.waitFor();
   check(
     await page.evaluate(() => window.__played.length === 0),
-    "Refused audio was reported as playing",
+    "A play() was admitted before the retry",
   );
   // The toast may expire, so the panel keeps the retry; it is the only way to continue, so it has no dismissal.
   await page.locator("[data-notification-bell]").click();
