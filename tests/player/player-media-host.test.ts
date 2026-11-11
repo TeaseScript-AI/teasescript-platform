@@ -18,6 +18,7 @@ import {
   TOPOLOGIES,
   topologyBridge,
   type Topology,
+  withinHostTime,
 } from "../helpers/player/worker-topology.js";
 
 /*
@@ -168,15 +169,18 @@ for (const delayMs of [0, 50, 250] as const)
     async (context, topology, end) => {
       const { player, elements, start, reports } = await mount(context, topology, delayMs);
       await start('playAudio async "bell.mp3"\nsay "after", instant\nshowButton "Done"\nexit');
-      for (let turn = 0; !elements.some((element) => element.src.endsWith("bell.mp3")); turn++) {
-        assert.ok(turn < 200, "the medium did not start");
+      for (
+        const within = withinHostTime();
+        !elements.some((element) => element.src.endsWith("bell.mp3"));
+      ) {
+        assert.ok(within(), "the medium did not start");
         await later();
       }
       elements
         .find((element) => element.src.endsWith("bell.mp3"))!
         .dispatchEvent(new Event("loadedmetadata"));
-      for (let turn = 0; !transcript(player).includes("after"); turn++) {
-        assert.ok(turn < 400, "the script did not go on");
+      for (const within = withinHostTime(); !transcript(player).includes("after");) {
+        assert.ok(within(), "the script did not go on");
         await later();
       }
       await later(delayMs + 20);
@@ -191,8 +195,11 @@ RERUN.rows(
   async (context, topology, end) => {
     const { player, elements, start, reports } = await mount(context, topology, 50);
     await start('playAudio async "old.mp3"\nshowButton "Old"\nexit');
-    for (let turn = 0; !elements.some((element) => element.src.endsWith("old.mp3")); turn++) {
-      assert.ok(turn < 200, "the old medium did not start");
+    for (
+      const within = withinHostTime();
+      !elements.some((element) => element.src.endsWith("old.mp3"));
+    ) {
+      assert.ok(within(), "the old medium did not start");
       await later();
     }
     const old = elements.find((element) => element.src.endsWith("old.mp3"))!;
@@ -200,15 +207,18 @@ RERUN.rows(
     await start('playAudio async "new.mp3"\nsay "new after", instant\nshowButton "New"\nexit');
     const replacing = player.session.value!.id;
     old.dispatchEvent(new Event("loadedmetadata"));
-    for (let turn = 0; !elements.some((element) => element.src.endsWith("new.mp3")); turn++) {
-      assert.ok(turn < 200, "the new medium did not start");
+    for (
+      const within = withinHostTime();
+      !elements.some((element) => element.src.endsWith("new.mp3"));
+    ) {
+      assert.ok(within(), "the new medium did not start");
       await later();
     }
     elements
       .find((element) => element.src.endsWith("new.mp3"))!
       .dispatchEvent(new Event("loadedmetadata"));
-    for (let turn = 0; !transcript(player).includes("new after"); turn++) {
-      assert.ok(turn < 400, "the new session did not go on");
+    for (const within = withinHostTime(); !transcript(player).includes("new after");) {
+      assert.ok(within(), "the new session did not go on");
       await later();
     }
     await later(80);
@@ -391,10 +401,21 @@ for (const delay of [0, 50, 250] as const)
           await drainTasks();
         }
       };
-      for (let n = 0; !started && !startError && n < 2000; n++) await advance(1);
+      // How long a wait on the host may step the mocked clock. In-process, its replies come on mock time, within `steps`.
+      // A Worker's take real time, which no count of steps bounds and `until` cannot wait on here (the test mocks its
+      // timers), so they get as long as a wait on the host may take.
+      const waiting = (steps: number) => {
+        const within = withinHostTime();
+        let step = 0;
+        return () => (topology === "worker" ? within() : step++ < steps);
+      };
+      for (const more = waiting(2000); !started && !startError && more();) await advance(1);
       if (startError) throw startError;
       assert.equal(started, true, "start reply releases on mock time");
-      for (let n = 0; !player.elements.some((a) => a.src.endsWith("clock.mp3")) && n < 1000; n++)
+      for (
+        const more = waiting(1000);
+        !player.elements.some((a) => a.src.endsWith("clock.mp3")) && more();
+      )
         await advance(1);
       const audio = player.elements.find((a) => a.src.endsWith("clock.mp3"));
       assert.ok(audio, "audio created");
@@ -441,7 +462,7 @@ for (const delay of [0, 50, 250] as const)
           () => void (replied = true),
           () => void (replied = true),
         );
-        for (let n = 0; !replied && n < 1000; n++) await advance(1);
+        for (const more = waiting(1000); !replied && more();) await advance(1);
         assert.equal(replied, true, `${what} replies on mock time`);
         return reading;
       };

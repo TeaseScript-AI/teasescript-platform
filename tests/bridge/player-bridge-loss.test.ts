@@ -35,6 +35,7 @@ import {
   topologyBridge,
   until,
   type Topology,
+  withinHostTime,
 } from "../helpers/player/worker-topology.js";
 
 /** Ends the capture `reportsInto` began, at the check of what it captured, so that a later host error prints again. */
@@ -628,8 +629,8 @@ RERUN.rows(
     await player.prepareScript(token, { plan: token, options: () => ({ wallClockMs: 0 }) });
     await player.activate();
     // The session is kept at the button it presents.
-    for (let turn = 0; (await kept.session("loss")) === null; turn++) {
-      assert.ok(turn < 100, "the session was not kept");
+    for (const within = withinHostTime(); (await kept.session("loss")) === null;) {
+      assert.ok(within(), "the session was not kept");
       await turns(1);
     }
     const before = await kept.session("loss");
@@ -941,8 +942,8 @@ RERUN.rows(
     );
     await player.prepareScript(token, { plan: token, options: () => ({ wallClockMs: 0 }) });
     await player.activate();
-    for (let turn = 0; (await kept.session("loss")) === null; turn++) {
-      assert.ok(turn < 100, "the session was not kept");
+    for (const within = withinHostTime(); (await kept.session("loss")) === null;) {
+      assert.ok(within(), "the session was not kept");
       await turns(1);
     }
     const before = await kept.session("loss");

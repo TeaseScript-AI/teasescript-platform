@@ -1177,6 +1177,7 @@ for (const script of SCRIPT_NAMES)
         await until(
           () => replies() === expected && otherReplies() === (other === null ? 0 : 1),
           "the preload's replies",
+          "host",
         );
         await settled();
         assert.deepEqual(loaders.calls, reply === "current" ? PRELOADED[script] : []);

@@ -34,6 +34,7 @@ import {
   type TopologyBridge,
   type TopologyConnections,
   checkpointSnapshot,
+  withinHostTime,
 } from "../helpers/player/worker-topology.js";
 
 /*
@@ -321,10 +322,11 @@ function answering(connection: TopologyBridge): () => Promise<boolean> {
 /** Waits until the session shows its question, and the store keeps it there. */
 async function keptAtTheQuestion(player: RecoveryHost, kept: KeptSessionStore) {
   await until(() => player.session.value?.state.foregroundAction != null, "the question shows");
-  for (let turn = 0; ; turn++) {
+  // The keep follows the host's capture of the session, which a Worker gives in its own time.
+  for (const within = withinHostTime(); ;) {
     const stored = await kept.session(SCOPE);
     if (stored !== null && stored.events.length > 0) return stored;
-    assert.ok(turn < 200, "the session was not kept");
+    assert.ok(within(), "the session was not kept");
     await turns(1);
   }
 }
@@ -729,7 +731,7 @@ RERUN.rows(
     });
     holding = true;
     await player.activate();
-    await until(() => gate.held !== null, "the publish held");
+    await until(() => gate.held !== null, "the publish held", "host");
     await connections.first.lose();
     await turns(10);
     assert.equal(player.recovery.value, null, "the offer waits for the publish");
@@ -823,19 +825,23 @@ async function witnessAfter(
   const from = posts.findIndex((post) => post.op === "restoreKept");
   // The save after the kept point completes once its store write settled, and the session shows that and is kept again;
   // the next question waits for none of it.
-  await until(() => {
-    const begun = posts.slice(from).map((post) => post.op);
-    const completed = begun.indexOf("completeStorageWrite");
-    return (
-      completed >= 0 &&
-      begun.indexOf("captureKeep", completed) > completed &&
-      (player.session.value?.events.some(
-        (event) =>
-          event.kind === "actionCompleted" && event.settlement.actionKind === "storageWrite",
-      ) ??
-        false)
-    );
-  }, "the save completed, shown and kept");
+  await until(
+    () => {
+      const begun = posts.slice(from).map((post) => post.op);
+      const completed = begun.indexOf("completeStorageWrite");
+      return (
+        completed >= 0 &&
+        begun.indexOf("captureKeep", completed) > completed &&
+        (player.session.value?.events.some(
+          (event) =>
+            event.kind === "actionCompleted" && event.settlement.actionKind === "storageWrite",
+        ) ??
+          false)
+      );
+    },
+    "the save completed, shown and kept",
+    "host",
+  );
   const shown = player.session.value!;
   // Ids that are this connection's own (sessions, plans) are named by their first appearance. Times are compared as
   // they are: the page's clocks are fixed for the witness (`fixedClocks`).
@@ -951,7 +957,7 @@ RERUN.rows(
     assert.ok(stored !== null);
     refusal.on = true;
     await answerFirst(player);
-    await until(() => refusal.refused > 0, "the next keep refused");
+    await until(() => refusal.refused > 0, "the next keep refused", "host");
     assert.deepEqual(await store.session(SCOPE), stored, "the kept point stays");
     await connections.current().lose();
     await until(() => player.recovery.value !== null, "the offer again");
@@ -1001,7 +1007,7 @@ RERUN.rows(
     // The review's last step, its read of the saved values, waits while the connection is lost.
     gate.holdLoad = true;
     const reviewing = player.reviewSessionImport(read);
-    await until(() => gate.release !== null, "the review reading the saved values");
+    await until(() => gate.release !== null, "the review reading the saved values", "host");
     await connections.first.lose();
     const keptBefore = await kept.session(SCOPE);
     gate.release!();
@@ -1175,6 +1181,7 @@ RERUN.rows(
     await until(
       () => (rewind.view.value?.timeline.points.length ?? 0) > 1,
       "the next history point",
+      "host",
     );
     assert.equal(await rewind.back(point), true);
     assert.equal(player.rewind.inspecting.value, true);
@@ -1412,6 +1419,7 @@ RERUN.rows(
     await until(
       () => (rewind.view.value?.timeline.points.length ?? 0) > 1,
       "the next history point",
+      "host",
     );
     assert.equal(await rewind.back(point), true);
     await connections.first.lose();
@@ -1449,7 +1457,7 @@ async function storedRecord(context: TestContext, topology: Topology, kind: "end
     };
   }
   await answerFirst(earlier.player);
-  for (let turn = 0; ; turn++) {
+  for (const within = withinHostTime(); ;) {
     const ended = await kept.session(SCOPE);
     if (
       ended !== null &&
@@ -1457,7 +1465,7 @@ async function storedRecord(context: TestContext, topology: Topology, kind: "end
       earlier.player.session.value?.state.status === "halted"
     )
       return ended;
-    assert.ok(turn < 200, "the ended session was not kept");
+    assert.ok(within(), "the ended session was not kept");
     await turns(1);
   }
 }
@@ -1535,8 +1543,8 @@ RERUN.rows(
     const { connections, player } = await page(context, topology, { kept });
     await player.activate();
     await until(() => player.session.value?.state.foregroundAction != null, "the question");
-    for (let turn = 0; (await store.session(SCOPE)) === null; turn++) {
-      assert.ok(turn < 200, "the session was not kept");
+    for (const within = withinHostTime(); (await store.session(SCOPE)) === null;) {
+      assert.ok(within(), "the session was not kept");
       await turns(1);
     }
     await connections.first.lose();
@@ -1763,7 +1771,11 @@ RERUN.rows(
     const earlierOpened = nextOpened(connections, () => {});
     const earlier = player.activate();
     const old = await earlierOpened;
-    await until(() => gate.open !== undefined, "the earlier click's restore reads the store");
+    await until(
+      () => gate.open !== undefined,
+      "the earlier click's restore reads the store",
+      "host",
+    );
     // The trusted host's own calls begin another recovery while the Player is still lost.
     player.prepare(start);
     const laterOpened = nextOpened(connections, (fresh) => fresh.hold("prepare"));

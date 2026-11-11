@@ -36,6 +36,7 @@ import {
   type Posted,
   type Topology,
   type TopologyBridge,
+  withinHostTime,
 } from "../helpers/player/worker-topology.js";
 
 /*
@@ -354,7 +355,7 @@ RERUN.rows(
     assert.equal(first.host.session.value, null, "the host has not replied yet");
     first.transport.release();
     await starting;
-    await until(() => asks(first.host), "the first question is asked");
+    await until(() => asks(first.host), "the first question is asked", "host");
     // The options as the host holds them: its checkpoint of the started session.
     const sampled = first.sampled();
     assert.ok(sampled?.temporalContext, "the click sampled a temporal context");
@@ -548,13 +549,16 @@ async function page(
   return { ...opened, transport, sampled: () => sampled };
 }
 
-/** Waits until `at`'s normal room, or `store`, keeps a session whose events hold `text`. */
+/**
+ * Waits until `at`'s normal room, or `store`, keeps a session whose events hold `text`: a keep that follows the host's
+ * reply, for as long as a wait on the host may take.
+ */
 async function keptWith(
   at: ReturnType<typeof keptBrowser>,
   text: string,
   store: Pick<KeptSessionStore, "session"> = at.kept,
 ) {
-  for (let round = 0; round < 500; round += 1) {
+  for (const within = withinHostTime(); within();) {
     const stored = await store.session(at.provider.scope);
     if (stored !== null && JSON.stringify(stored.events).includes(text)) return;
     await new Promise((resolve) => setTimeout(resolve, 2));
@@ -575,7 +579,7 @@ async function importAndContinue(host: Host, transfer: SessionTransfer) {
 async function playToSecondQuestion(host: Host) {
   const input = await runtimeInput();
   await host.activate();
-  await until(() => asks(host), "the first question is asked");
+  await until(() => asks(host), "the first question is asked", "host");
   assert.equal((await answer(host, input.intents.composer("one", "enter"))).kind, "answered");
   await until(() => said(host).includes("Got one."), "the first answer shows");
   await until(() => asks(host), "the second question is asked");
@@ -607,7 +611,7 @@ RERUN.rows(
     assert.equal(edited.scriptStorage.find((entry) => entry.key === "visits")?.value, 5);
     // Debug on carries the session into the debug room, where it goes on; the normal room keeps it where it was.
     second.host.setDebugMode(true);
-    await until(() => second.host.rooms.current.value === "debug", "the debug room");
+    await until(() => second.host.rooms.current.value === "debug", "the debug room", "host");
     assert.deepEqual(said(second.host), shown, "the debug room's copy of the session");
     const copied = await checkpointSnapshot(second.transport.bridge, second.host.session.value!);
     assert.equal(copied.debugMode, true);
@@ -713,7 +717,11 @@ RERUN.rows(
     const named: (number | null)[] = [];
     context.after(watch(host.traceId, (id) => void named.push(id), { flush: "sync" }));
     transport.release();
-    await until(() => host.traceId.value !== null && host.traceId.value !== first, "a new trace");
+    await until(
+      () => host.traceId.value !== null && host.traceId.value !== first,
+      "a new trace",
+      "host",
+    );
     assert.deepEqual(named, [host.traceId.value], "only the newest intent's reply named a trace");
     const again = await host.debugView(VARIABLES);
     assert.equal(again?.traceId, host.traceId.value, "the view is of the newest trace");
@@ -958,6 +966,7 @@ RERUN.rows(
     await until(
       () => host.session.value!.state.observedSessionTimeMs >= 1_000,
       "the catch-up ends",
+      "host",
     );
     const input = await runtimeInput();
     assert.equal((await answer(host, input.intents.choice(null, "button"))).kind, "answered");
@@ -1028,12 +1037,13 @@ RERUN.rows(
     assert.equal(queued.indexOf("beginCatchUp"), -1, queued.join(", "));
     transport.release();
     assert.equal((await answering).kind, "answered");
-    await until(() => refusals.length > 0, "the catch-up's refusal");
+    await until(() => refusals.length > 0, "the catch-up's refusal", "host");
     assert.deepEqual(refusals, ["basis"]);
     await until(() => buttonLabel(host) === "After", "the answer's next button");
     await until(
       () => host.session.value!.state.observedSessionTimeMs >= 1_000,
       "the fresh observation",
+      "host",
     );
     // Refused, the catch-up adopted nothing (a step already queued finds no copy); the clock observed the late second in
     // one go instead. Read once that observation is in, so a later adoption is in the log.
