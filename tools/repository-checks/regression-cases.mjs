@@ -13,7 +13,7 @@ import { SourceMap } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { run } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { ts } from "ts-morph";
 
@@ -39,9 +39,10 @@ import { ts } from "ts-morph";
 //    number is reported.
 // 5. A detached worktree of the base gets the head's `tests/` in place of its own and the head's `node_modules`. It is
 //    compiled with `tsc` (which emits despite type errors, as a test naming what the fix adds has one at the base), and
-//    its Player test bundles, which `tests/helpers/player-modules.ts` loads, are built with `vite build --config
-//    player/vue/vite.test-modules.config.ts`. Its compiled files run in base mode, the selected ids alone (`only`); the
-//    helper records when each starts and how it ends, and a case its runner cancelled as not finished.
+//    its Player test bundles, which `tests/helpers/player-modules.ts` loads, are built from
+//    `player/vue/vite.test-modules.config.ts` with the head's stamping plugin (`player/vue/test-modules-sources.ts`),
+//    also at a base from before it. Its compiled files run in base mode, the selected ids alone (`only`); the helper
+//    records when each starts and how it ends, and a case its runner cancelled as not finished.
 // 6. `verdict` judges each selected case: a witness when it threw an error whose message's first line (cut at the first
 //    CR LF, LF, CR, U+2028 or U+2029) `atBase` matches whole. Anything else is not: it passed, failed for another
 //    reason, did not finish (it started and did not end, or was cancelled), or did not run (it did not start: its file
@@ -333,13 +334,19 @@ async function main(argv) {
       throw new CannotRun(
         `compiling the base failed (${build.signal ?? `exit ${build.status}`}):\n${build.stderr}`,
       );
+    // The base's own configuration with the head's stamping plugin in place of any of its own, so the head's loader
+    // finds a stamp of what was built also at a base from before the plugin.
     const bundles = spawnSync(
       process.execPath,
       [
-        join(root, "node_modules/vite/bin/vite.js"),
-        "build",
-        "--config",
-        "player/vue/vite.test-modules.config.ts",
+        "--input-type=module",
+        "--eval",
+        `const { build, loadConfigFromFile } = await import("vite");
+const { testModulesSources } = await import(${JSON.stringify(pathToFileURL(join(root, "player/vue/test-modules-sources.ts")).href)});
+const loaded = await loadConfigFromFile({ command: "build", mode: "production" }, "player/vue/vite.test-modules.config.ts");
+if (loaded === null) throw new Error("player/vue/vite.test-modules.config.ts has no configuration");
+const plugins = [loaded.config.plugins ?? []].flat(Infinity).filter((plugin) => plugin && plugin.name !== "test-modules-sources");
+await build({ ...loaded.config, configFile: false, plugins: [...plugins, testModulesSources()] });`,
       ],
       { cwd: worktree, encoding: "utf8" },
     );
