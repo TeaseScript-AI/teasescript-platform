@@ -16,7 +16,9 @@ import {
   type Recovery,
   type ShownStatus,
 } from "../../player/vue/src/session/activation/recoveryKind.js";
+import type { SessionTransfer } from "../../player/persistence/session-transfer.js";
 import { coverageGaps, product, type Coordinates } from "../helpers/family-coverage.js";
+import { readForImport, type SessionRead } from "../helpers/player/transfer-read.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import {
   loadTopology,
@@ -137,6 +139,16 @@ interface RecoveryHost {
   toStartPage(): Promise<void>;
   setDebugTracing(on: boolean): void;
   setRandomControl(control: { readonly sites: readonly [] } | null): void;
+  exportSession(): Promise<{ readonly transfer: SessionTransfer }>;
+  readTransfer(input: {
+    readonly bytes: Uint8Array<ArrayBuffer>;
+  }): Promise<{ readonly kind: string }>;
+  reviewSessionImport(transfer: SessionRead): Promise<ImportReview>;
+  importSession(review: ImportReview): Promise<void>;
+}
+/** The composable's review of a session to import, which only `importSession` reads. */
+interface ImportReview {
+  readonly transfer: SessionRead;
 }
 let usePlayerSession: (options: {
   readonly bridge: Promise<PlayerBridge>;
@@ -275,6 +287,10 @@ const RERUN = rerunRegistry({
   "unmounted during the replacement": TOPOLOGIES,
   "the trace and random control go again": TOPOLOGIES,
   "the trace and random control turned off while lost": TOPOLOGIES,
+  "a session import read before the loss": TOPOLOGIES,
+  "a keep's publish under way at the loss": TOPOLOGIES,
+  // Only the in-process host can report the loss of a client already ended; a Worker's ended client reports none.
+  "a late loss of the replaced connection": ["in-process"],
 });
 
 RERUN.rows(
@@ -322,10 +338,14 @@ RERUN.rows(
     assert.deepEqual(player.recovery.value, { offer: "continue", where: "line" });
     // The stopped session stays shown under the line.
     assert.ok(player.session.value !== null);
-    await player.activate();
+    const recovering = player.activate();
+    assert.equal(player.recovery.value, null, "the offer goes while its click is under way");
+    await recovering;
     await until(() => player.session.value?.state.foregroundAction != null, "the question again");
     assert.equal(connections.calls(), 1);
     await onTheFreshConnection(player, connections);
+    // The fresh host is asked for the plan's JSON, which its kept session's next save stores.
+    assert.ok(connections.current().posts.some((post) => post.op === "preparePlanText"));
     assert.equal(player.session.value!.transcriptEntries.length, transcript);
     assert.equal(player.recovery.value, null);
     assert.deepEqual(
@@ -559,3 +579,81 @@ for (const [id, name, offWhileLost] of [
     assert.deepEqual(settings, offWhileLost ? [] : ["debugTracing", "randomControl"]);
     return end();
   });
+
+RERUN.rows(
+  "a session import read before the loss",
+  "a session import read by the lost connection imports nothing on the fresh one",
+  async (context, topology, end) => {
+    const { connections, player, kept } = await page(context, topology);
+    await player.activate();
+    await keptAtTheQuestion(player, kept);
+    const { transfer } = await player.exportSession();
+    const review = await player.reviewSessionImport(await readForImport(player, transfer));
+    await connections.first.lose();
+    await until(() => player.recovery.value !== null, "the offer");
+    await player.activate();
+    await until(() => player.session.value?.state.foregroundAction != null, "the question again");
+    await onTheFreshConnection(player, connections);
+    const stored = await kept.session(SCOPE);
+    await assert.rejects(player.importSession(review), /lost with the engine's connection/u);
+    assert.deepEqual(await kept.session(SCOPE), stored, "the kept session stays");
+    return end();
+  },
+);
+
+RERUN.rows(
+  "a keep's publish under way at the loss",
+  "a keep's publish under way at the loss is waited for: the offer reads the point it stored",
+  async (context, topology, end) => {
+    // The store holds each publish after `holding` until `release`.
+    const store = memoryKeptSessionStore();
+    let holding = false;
+    const gate: { held: (() => void) | null } = { held: null };
+    const kept: KeptSessionStore = {
+      session: (scope) => store.session(scope),
+      media: store.media,
+      discard: (scope) => store.discard(scope),
+      publish: async (scope, update) => {
+        if (holding) await new Promise<void>((resolve) => (gate.held = resolve));
+        return store.publish(scope, update);
+      },
+    };
+    // Nothing is kept before the question; its keep's publish is held.
+    const { connections, player } = await page(context, topology, {
+      kept,
+      script: 'let pick = askChoice "Go"\nsay "after", instant\nexit',
+    });
+    holding = true;
+    await player.activate();
+    await until(() => gate.held !== null, "the publish held");
+    await connections.first.lose();
+    await turns(10);
+    assert.equal(player.recovery.value, null, "the offer waits for the publish");
+    assert.equal(await store.session(SCOPE), null);
+    holding = false;
+    gate.held!();
+    await until(() => player.recovery.value !== null, "the offer");
+    assert.deepEqual(player.recovery.value, { offer: "continue", where: "line" });
+    return end();
+  },
+);
+
+RERUN.rows(
+  "a late loss of the replaced connection",
+  "a loss the replaced connection reports late stops nothing on the fresh one",
+  async (context, topology, end) => {
+    const { connections, player, kept } = await page(context, topology);
+    await player.activate();
+    await keptAtTheQuestion(player, kept);
+    await connections.first.lose();
+    await until(() => player.recovery.value !== null, "the offer");
+    await player.activate();
+    await until(() => player.session.value?.state.foregroundAction != null, "the question again");
+    await connections.first.lose();
+    await turns(5);
+    assert.equal(player.recovery.value, null);
+    assert.equal(player.hostError.value, null);
+    assert.equal(player.connectionLosses.value, 1);
+    return end();
+  },
+);
