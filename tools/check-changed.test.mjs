@@ -21,10 +21,12 @@ import { basename, dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  CannotRun,
   PROJECTS,
   UNKNOWN_TO_COSTLY,
   checksOf,
   MAIN_CHECKOUT,
+  branchedFrom,
   linkMainNodeModules,
   notInstalled,
   projectsFor,
@@ -1190,6 +1192,137 @@ test("`merge commits` runs in every run, plain, merged and in a merged checkout,
       "merged checkout, main into a lane of runtime-v2",
       ["--merged-checkout", rt2, "--base", "runtime-v2"],
       0,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test("without --base or a pull request, the base is the long-lived line HEAD's own line leaves, named, or exit 2 when unproven (#2409)", () => {
+  const graph = mergeGraph();
+  const { directory, git } = graph;
+  const base = (ref, at, back) => ({
+    ref,
+    line:
+      `check-changed: no --base and no pull request: base ${ref}, whose own line HEAD's leaves at ` +
+      `${git("rev-parse", "--short=9", at)}, ${back} commits back`,
+  });
+  const fails = (at, message, cwd = directory) =>
+    assert.throws(
+      () => inside(cwd, branchedFrom),
+      (error) => error instanceof CannotRun && error.message === message,
+      at,
+    );
+  try {
+    graph.lane("runtime-v2", null);
+    assert.deepEqual(
+      inside(directory, branchedFrom),
+      base("origin/runtime-v2", "runtime-v2~1", 1),
+      "runtime-v2",
+    );
+    graph.lane("main", null);
+    assert.deepEqual(inside(directory, branchedFrom), base("origin/main", "main~1", 1), "main");
+    // off the commit both lines hold, from before they split: main
+    graph.lane("main~1", null);
+    assert.deepEqual(
+      inside(directory, branchedFrom),
+      base("origin/main", "main~2", 1),
+      "before the split",
+    );
+    // a lane of main merging runtime-v2, and one of runtime-v2 merging main: each its own line's, though the other's
+    // tip is nearer by commits (Sol r1)
+    graph.lane("main", "runtime-v2");
+    assert.deepEqual(
+      inside(directory, branchedFrom),
+      base("origin/main", "main~1", 2),
+      "main merging runtime-v2",
+    );
+    git("switch", "-q", "runtime-v2");
+    git("merge", "-q", "--no-edit", "main~1");
+    git("update-ref", "refs/remotes/origin/runtime-v2", "runtime-v2");
+    for (const step of [1, 2, 3, 4, 5]) graph.commit("main", `main-${step}.md`);
+    git("update-ref", "refs/remotes/origin/main", "main");
+    git("switch", "-q", "-C", "lane", "runtime-v2");
+    graph.commit("lane", "lane.md");
+    git("merge", "-q", "--no-edit", "main");
+    assert.deepEqual(
+      inside(directory, branchedFrom),
+      base("origin/runtime-v2", "runtime-v2", 2),
+      "runtime-v2, holding an older main, merging a newer main",
+    );
+    // a lane of the branch that merges main for runtime-v2, which lands with a merge commit, as #2408: its head is in
+    // runtime-v2's history, but not on its own line, which HEAD's line meets at runtime-v2's tip before the landing
+    // (Sol r2)
+    git("switch", "-q", "-C", "merge-main", "runtime-v2");
+    git("merge", "-q", "--no-edit", "main");
+    const before = git("rev-parse", "runtime-v2");
+    git("switch", "-q", "runtime-v2");
+    git("merge", "-q", "--no-ff", "--no-edit", "merge-main");
+    git("update-ref", "refs/remotes/origin/runtime-v2", "runtime-v2");
+    git("switch", "-q", "-C", "lane", "merge-main");
+    graph.commit("lane", "lane.md");
+    assert.deepEqual(
+      inside(directory, branchedFrom),
+      base("origin/runtime-v2", before, 2),
+      "a lane of runtime-v2's merge branch",
+    );
+    // unproven: a missing ref, a shallow clone, and a HEAD whose line meets neither
+    git("update-ref", "-d", "refs/remotes/origin/runtime-v2");
+    fails(
+      "no origin/runtime-v2",
+      "no --base and no pull request, and no origin/runtime-v2 to tell the base by: fetch origin/main and " +
+        "origin/runtime-v2, or name the base with --base",
+    );
+    git("update-ref", "refs/remotes/origin/runtime-v2", "runtime-v2");
+    const shallow = `${directory}-shallow`;
+    git("clone", "-q", "--depth=2", "--no-single-branch", `file://${directory}`, shallow);
+    try {
+      fails(
+        "shallow",
+        "no --base and no pull request, and the clone is shallow: deepen it (git fetch --unshallow), or name the " +
+          "base with --base",
+        shallow,
+      );
+    } finally {
+      rmSync(shallow, { recursive: true, force: true });
+    }
+    git("switch", "-q", "--orphan", "unrelated");
+    writeFileSync(join(directory, "unrelated.md"), "unrelated\n");
+    git("add", "unrelated.md");
+    git("commit", "-q", "-m", "unrelated");
+    fails(
+      "unrelated",
+      "no --base and no pull request, and HEAD's line meets neither origin/main nor origin/runtime-v2's: name the " +
+        "base with --base",
+    );
+    // --merged-checkout needs --base: the queue's merge of a lane of runtime-v2 with main, its second parent main
+    const lane = graph.lane("runtime-v2", null);
+    git("switch", "-q", "--detach", "lane");
+    git("merge", "-q", "--no-ff", "--no-edit", "origin/main");
+    assert.equal(git("rev-parse", "HEAD^2"), git("rev-parse", "origin/main"));
+    const merged = runSync(process.execPath, [tool, "--merged-checkout", lane], {
+      cwd: directory,
+      encoding: "utf8",
+      env: environment,
+    });
+    assert.equal(merged.status, 2, `${merged.stdout}${merged.stderr}`);
+    assert.match(merged.stderr, /usage: .* --merged-checkout <commit> --base <ref>/u);
+    // the run itself: a lane of runtime-v2 checked against runtime-v2, its one commit the change
+    graph.lane("runtime-v2", null);
+    const result = runSync(process.execPath, [tool], {
+      cwd: directory,
+      encoding: "utf8",
+      env: environment,
+    });
+    assert.equal(result.status, 0, `${result.stdout}${result.stderr}`);
+    assert.ok(
+      result.stdout.startsWith(`${base("origin/runtime-v2", "runtime-v2~1", 1).line}\n`),
+      result.stdout,
+    );
+    assert.match(
+      result.stdout,
+      /^check-changed: 1 changed files since origin\/runtime-v2 /mu,
+      result.stdout,
     );
   } finally {
     rmSync(directory, { recursive: true, force: true });
