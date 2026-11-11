@@ -480,7 +480,7 @@ export const LIFECYCLE = {
  */
 export const UNHELD_AWAITS = {
   storageRoute: "a promise the page resolves once at mount, before any operation of these cases",
-  bridgeReady: "the connection, ready before any operation of these cases",
+  currentConnection: "the connection, ready before any operation of these cases",
   pendingKeep: "an import waits for a keep under way; the keep's own suspensions are held instead",
 } as const;
 

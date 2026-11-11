@@ -5,7 +5,7 @@
 // - `instrumented`: every importer of `engine-bridge/client.js` gets `instrumented-client.mjs`, whose `openBridge` and
 //   `connectBridge` wrap the port they are given and log each request's post and each reply's arrival, so both
 //   backends have the same seam;
-// - `delayed`: `session/usePlayerSession.ts` gets `delayed-in-process.mjs`, whose `createInProcessBackend` delivers replies
+// - `delayed`: `session/useEngineConnection.ts` gets `delayed-in-process.mjs`, whose `createInProcessBackend` delivers replies
 //   after GATE_DELAY_MS (the in-process backend's own `delayMs`); every other importer of `client.js` gets
 //   `delayed-client.mjs`, which delivers what a Worker port receives after the same delay, in order. The in-process
 //   backend's own `openBridge` call is left alone, so no reply is delayed twice; with GATE_LOG=1 it gets
@@ -34,7 +34,7 @@ const IN_PROCESS = fileURLToPath(
 );
 
 /** The Player module that creates the in-process backend, whose import the `delayed` variant swaps. */
-const SESSION = "/player/vue/src/session/usePlayerSession.ts";
+const SESSION = "/player/vue/src/session/useEngineConnection.ts";
 
 function gateSwap() {
   const swapped = new Set();

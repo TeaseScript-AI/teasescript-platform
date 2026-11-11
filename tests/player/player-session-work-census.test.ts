@@ -510,7 +510,7 @@ const ENTRIES: Readonly<Record<string, readonly [Policy, readonly string[]]>> = 
     ["creation", ["BridgeClient.request", "BridgeClient.signal"]],
   "player/vue/src/session/activation/useSessionActivation.ts useSessionActivation > startFrom > then:callback#2.2":
     ["lifecycle", ["BridgeClient.request", "BridgeClient.signal"]],
-  "player/vue/src/session/usePlayerSession.ts usePlayerSession > then:callback": [
+  "player/vue/src/session/useEngineConnection.ts useEngineConnection > then:callback": [
     "lifecycle",
     ["BridgeClient.request", "BridgeClient.signal"],
   ],
@@ -584,7 +584,11 @@ const ESCAPES: Readonly<Record<string, Policy>> = {
     "bridge plumbing",
   "player/encryption/lock-service.ts LockService > #present > wake {wake}": "own observation",
   "player/vue/src/session/useCallView.ts useCallView {followCallView}": "lifecycle",
-  "player/vue/src/session/usePlayerSession.ts usePlayerSession > then:callback {bridgeLost}":
+  // The script's preparation, sent once the bridge's source promise yielded it, when it had not yet: what the page's
+  // preparers send, which both wait for the readiness first.
+  "player/vue/src/session/useEngineConnection.ts useEngineConnection > prepareScriptSource {send}":
+    "creation",
+  "player/vue/src/session/useEngineConnection.ts useEngineConnection > then:callback {lost}":
     "lifecycle",
   // The export lease's release, which the activation's retirement (`own`) and the dialog's cancellation run, and which
   // the handoff takes back from the cancellation.
@@ -606,6 +610,12 @@ const ESCAPES: Readonly<Record<string, Policy>> = {
 
 /** The escapes the census follows: an object literal's property, or a destructured binding, that holds a forwarder. */
 const FOLLOWED: readonly string[] = [
+  // The engine connection's owner: the composable's hooks it calls, and the script's preparation it gives the pages.
+  "player/vue/src/session/useEngineConnection.ts useEngineConnection {lost}",
+  "player/vue/src/session/useEngineConnection.ts useEngineConnection {ready}",
+  "player/vue/src/session/usePlayerSession.ts usePlayerSession > lost {lost}",
+  "player/vue/src/session/usePlayerSession.ts usePlayerSession > prepareScriptSource {prepareScriptSource}",
+  "player/vue/src/session/usePlayerSession.ts usePlayerSession {prepareScriptSource}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > discardSessionReview {discardSessionReview}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > readTransfer {readTransfer}",
   "player/vue/src/session/usePlayerSession.ts usePlayerSession > reviewSessionImport {reviewSessionImport}",

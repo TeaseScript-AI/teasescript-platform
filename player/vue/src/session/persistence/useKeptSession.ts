@@ -61,7 +61,8 @@ interface KeptSessionHost {
   readonly options: PlayerSessionOptions;
   /** The engine's host now, or `null` before it is ready. */
   readonly bridgeNow: () => PlayerBridge | null;
-  readonly bridgeReady: Promise<PlayerBridge>;
+  /** The current connection once it is ready. */
+  readonly currentConnection: () => Promise<PlayerBridge>;
   readonly isDisposed: () => boolean;
   readonly session: Readonly<Ref<PlayerSession | null>>;
   readonly capturedMedia: CapturedMediaStore;
@@ -89,7 +90,7 @@ interface KeptSessionHost {
 export function useKeptSession({
   options,
   bridgeNow,
-  bridgeReady,
+  currentConnection,
   isDisposed,
   session,
   capturedMedia,
@@ -376,7 +377,7 @@ export function useKeptSession({
     // The host holds the plan, under the token `prepare` gave it.
     // Owned from the call: a later preparation, or a transition that replaces it, while the host gets ready retires it.
     const owner = nextPreparation();
-    await bridgeReady;
+    await currentConnection();
     if (isDisposed() || owner !== preparation) return;
     // A plan this one replaces needs no JSON any more; this one's is written now, in a task of its own, for the kept
     // session's comparison and a first save to read.
@@ -455,7 +456,7 @@ export function useKeptSession({
     );
     let restored: PlayerSession | "otherPlan" | "ended";
     try {
-      const host = await bridgeReady;
+      const host = await currentConnection();
       ctx.check();
       restored = await ctx.admit(() =>
         host.restoreKept(plan, found.planJson, found.snapshotJson, found.events, found.marks),
