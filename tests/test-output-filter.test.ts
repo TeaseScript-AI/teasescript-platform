@@ -195,57 +195,76 @@ test("compact output ends with each named file's counts, 0 passed for a file tha
   assert.doesNotMatch(full.stdout, /^ℹ \S*\.test\.mjs: /mu);
 });
 
-test(
-  "Ctrl+C stops a run of named files and leaves no counts behind",
-  { skip: process.platform === "win32" },
-  async () => {
-    const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
-    // the filter's own temporary folders, apart from everyone else's
-    const temporary = resolve(directory, "tmp");
-    mkdirSync(temporary);
-    const environment: NodeJS.ProcessEnv = { ...process.env, TMPDIR: temporary };
-    delete environment.NODE_TEST_CONTEXT;
-    const started = resolve(directory, "started");
-    const fixture = resolve(directory, "running.test.mjs");
-    writeFileSync(
-      fixture,
-      `import { writeFileSync } from "node:fs";
-       import test from "node:test";
-       test("running", () => {
-         writeFileSync(${JSON.stringify(started)}, "");
-         return new Promise(() => setInterval(() => {}, 1000));
-       });`,
-    );
-    // In a process group of its own, which receives the signal as a terminal's group does.
-    const filter = spawn(process.execPath, [filterPath, fixture], {
-      cwd: directory,
-      env: environment,
-      detached: true,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let output = "";
-    filter.stdout.setEncoding("utf8").on("data", (chunk: string) => (output += chunk));
-    filter.stderr.setEncoding("utf8").on("data", (chunk: string) => (output += chunk));
-    const closed = once(filter, "close");
-    const group = filter.pid;
-    assert.ok(group !== undefined);
-    try {
-      for (let wait = 0; wait < 500 && !existsSync(started); wait++) await delay(10);
-      assert.ok(existsSync(started), output);
-      assert.equal(
-        readdirSync(temporary).filter((name) => name.startsWith("test-file-counts-")).length,
-        1,
+// Ctrl+C reaches the filter's whole process group; a signal can also end the runner alone, which the filter then raises
+// on itself. Either way the filter ends by that signal, prints no counts and leaves no folder of them.
+for (const [target, signal] of [
+  ["its process group", "SIGINT"],
+  ["its runner alone", "SIGHUP"],
+] as const)
+  test(
+    `${signal} to ${target} stops a run of named files by that signal and leaves no counts behind`,
+    // (the runner's process id is read from Linux's /proc)
+    {
+      skip:
+        process.platform !== "linux" && target === "its runner alone"
+          ? "Linux only"
+          : process.platform === "win32",
+    },
+    async () => {
+      const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
+      // the filter's own temporary folders, apart from everyone else's
+      const temporary = resolve(directory, "tmp");
+      mkdirSync(temporary);
+      const environment: NodeJS.ProcessEnv = { ...process.env, TMPDIR: temporary };
+      delete environment.NODE_TEST_CONTEXT;
+      const started = resolve(directory, "started");
+      const fixture = resolve(directory, "running.test.mjs");
+      writeFileSync(
+        fixture,
+        `import { writeFileSync } from "node:fs";
+         import test from "node:test";
+         test("running", () => {
+           writeFileSync(${JSON.stringify(started)}, "");
+           return new Promise(() => setInterval(() => {}, 1000));
+         });`,
       );
-      process.kill(-group, "SIGINT");
-      assert.deepEqual(await closed, [null, "SIGINT"]);
-      assert.doesNotMatch(output, /ℹ \S*running\.test\.mjs: /u);
-      assert.deepEqual(readdirSync(temporary), []);
-    } finally {
-      if (filter.exitCode === null && filter.signalCode === null) process.kill(-group, "SIGKILL");
-      rmSync(directory, { recursive: true, force: true });
-    }
-  },
-);
+      // In a process group of its own, which receives the signal as a terminal's group does.
+      const filter = spawn(process.execPath, [filterPath, fixture], {
+        cwd: directory,
+        env: environment,
+        detached: true,
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let output = "";
+      filter.stdout.setEncoding("utf8").on("data", (chunk: string) => (output += chunk));
+      filter.stderr.setEncoding("utf8").on("data", (chunk: string) => (output += chunk));
+      const closed = once(filter, "close");
+      const group = filter.pid;
+      assert.ok(group !== undefined);
+      try {
+        for (let wait = 0; wait < 500 && !existsSync(started); wait++) await delay(10);
+        assert.ok(existsSync(started), output);
+        assert.equal(
+          readdirSync(temporary).filter((name) => name.startsWith("test-file-counts-")).length,
+          1,
+        );
+        if (target === "its process group") process.kill(-group, signal);
+        else {
+          const runner = Number(
+            readFileSync(`/proc/${group}/task/${group}/children`, "utf8").trim().split(" ")[0],
+          );
+          assert.ok(runner > 0, "the filter's runner");
+          process.kill(runner, signal);
+        }
+        assert.deepEqual(await closed, [null, signal]);
+        assert.doesNotMatch(output, /ℹ \S*running\.test\.mjs: /u);
+        assert.deepEqual(readdirSync(temporary), []);
+      } finally {
+        if (filter.exitCode === null && filter.signalCode === null) process.kill(-group, "SIGKILL");
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
 
 test("filter refuses a path that matches no test file before Node runs any", () => {
   const fixtures = {
