@@ -1,3 +1,4 @@
+// pins: a literal default's total, decision and default work | line /^\s*\{ total: \d/u
 import assert from "node:assert/strict";
 import test from "node:test";
 

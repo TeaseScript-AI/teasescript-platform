@@ -1,3 +1,4 @@
+// pins for tests/type-core/type-core-work-b.test.ts: main's 64 → 128 growth step of W34's two known products, as gates | line /^\s*measured: \d/u
 import { type WorkFamily, rows, lines, fields, main, type KnownProduct } from "./builders.js";
 
 /** A W34 chain: a k-field record replaced by one of nulls under the flag, k whole copies, the last read at k fields. */

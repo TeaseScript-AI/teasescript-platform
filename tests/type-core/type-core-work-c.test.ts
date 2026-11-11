@@ -1,3 +1,4 @@
+// pins: main's work per shape, as bounds | line /^\s*(?:setup: \[|\[\d{4,}(?:, \d{4,}){3}\])/u
 // The coarse core's work as a sampled regression oracle (`tests/helpers/type-core/type-core-work.ts`), one of three files that
 // CI runs side by side.
 import assert from "node:assert/strict";

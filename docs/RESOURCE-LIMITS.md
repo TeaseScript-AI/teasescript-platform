@@ -320,7 +320,7 @@ These are not limits of their own: each shape below is a measured superlinear gr
 accepted as a gated known limit (the Owner's acceptance is dated in each row; the lead's design record outside the
 repository holds the rulings cited as supporting references), and each reaches
 `compiler.core-work-allowance` at the stated size, where the analysis stops as that row says. The gate is a regression
-check on the 64 → 128 doubling step in the `tests/type-core-work-*.test.ts` files (`KnownProduct.measured`, never a bound at larger
+check on the 64 → 128 doubling step in the `tests/type-core/type-core-work-*.test.ts` files (`KnownProduct.measured`, never a bound at larger
 sizes); a change to the mechanism re-measures and proposes the gate with its counts, never retunes it. A real script
 that reaches one of these opens an issue; until then the row is the record.
 
