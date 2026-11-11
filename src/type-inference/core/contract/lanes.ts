@@ -7,6 +7,7 @@ import { marksNothing } from "./marks.js";
 import type { WrapperHop } from "./model.js";
 import { writtenOf } from "./terms.js";
 import { wrapperFacts } from "./wrapper-facts.js";
+import { Retained, retainedModule } from "../retained/retained.js";
 
 // G3 stage 1 (docs/specifications/type-inference-accepted-record/solver-and-work.md#r4-196): a binding's wrapper shape,
 // the frozen structural part of `wrapperHop`, and the lane the keys of each `(binding, first step)` family take from
@@ -74,7 +75,7 @@ export function withKeyRecords<T>(
 ): { readonly result: T; readonly records: readonly KeyRecord[] } {
   if (recording !== null) throw new Error("Key records are already being recorded.");
   const records: KeyRecord[] = [];
-  recording = { records, passes: new WeakMap(), sites, next: 0 };
+  recording = { records, passes: Retained.weakMap("lanes.recording.passes"), sites, next: 0 };
   try {
     return { result: run(), records };
   } finally {
@@ -328,7 +329,8 @@ export function keyLane(contract: Contract, place: PlaceId, firstStep: string | 
   const lane: KeyLane = shape === null || textKeys ? "text" : "cursor";
   contract.keep(1);
   byStep ??= contract.lanes.get(binding);
-  if (byStep === undefined) contract.lanes.set(binding, (byStep = new Map()));
+  if (byStep === undefined)
+    contract.lanes.set(binding, (byStep = Retained.map("Contract.lanes[]")));
   byStep.set(firstStep, lane);
   if (recording !== null) noteLane(contract, binding, firstStep, lane, false, building);
   return lane;
@@ -349,11 +351,14 @@ export function selectLanes(contract: Contract): void {
   }
 }
 
-const READ_FAMILIES = new WeakMap<CoreProgram, readonly (readonly [PlaceId, string])[]>();
+const READ_FAMILIES = retainedModule(
+  "lanes.READ_FAMILIES",
+  Retained.weakMap<CoreProgram, readonly (readonly [PlaceId, string])[]>,
+);
 
 /** A program's read families, each once in its first read's order: an index of its syntax, made once per program. */
 function readFamilies(program: CoreProgram): readonly (readonly [PlaceId, string])[] {
-  const known = READ_FAMILIES.get(program);
+  const known = READ_FAMILIES().get(program);
   if (known !== undefined) return known;
   const seen = new Map<PlaceId, Set<string>>();
   const families: (readonly [PlaceId, string])[] = [];
@@ -368,7 +373,7 @@ function readFamilies(program: CoreProgram): readonly (readonly [PlaceId, string
     steps.add(step);
     families.push([binding, step]);
   }
-  READ_FAMILIES.set(program, families);
+  READ_FAMILIES().set(program, families);
   return families;
 }
 

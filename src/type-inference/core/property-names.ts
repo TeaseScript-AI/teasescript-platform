@@ -26,6 +26,7 @@ import { keptPath, recordPath, type Key } from "./definitions.js";
 import { dictList } from "./method-categories.js";
 import { propertyName } from "./program.js";
 import type { Work } from "./solver.js";
+import { Retained, retainedModule } from "./retained/retained.js";
 
 /** A task of a property name search (`propertyNames`): a value at a path, a key, or a literal at a path. */
 export type PropertyNamesTask =
@@ -296,10 +297,19 @@ interface Take {
   readonly classified: Map<Key, { readonly source: Source; readonly pumps: boolean | null }>;
 }
 
-const listingMemos = new WeakMap<Contract, ListingMemo>();
+const listingMemos = retainedModule(
+  "property-names.listingMemos",
+  Retained.weakMap<Contract, ListingMemo>,
+);
 
 const NO_SOURCES: Listing = {
-  run: { sources: [], names: new Set(), ids: new Set(), classified: new Set(), owner: null },
+  run: {
+    sources: [],
+    names: Retained.set("property-names.NO_SOURCES.names"),
+    ids: Retained.set("property-names.NO_SOURCES.ids"),
+    classified: Retained.set("property-names.NO_SOURCES.classified"),
+    owner: null,
+  },
   length: 0,
 };
 
@@ -307,7 +317,7 @@ const NO_SOURCES: Listing = {
 function listingMemo(pass: CorePass): ListingMemo {
   const { contract } = pass;
   const work = pass.program.work;
-  const known = listingMemos.get(contract);
+  const known = listingMemos().get(contract);
   if (
     known !== undefined &&
     known.stops === contract.stoppedCount &&
@@ -322,7 +332,7 @@ function listingMemo(pass: CorePass): ListingMemo {
     tops: known?.tops ?? new Map(),
     contributions: new Map(),
   };
-  listingMemos.set(contract, memo);
+  listingMemos().set(contract, memo);
   return memo;
 }
 

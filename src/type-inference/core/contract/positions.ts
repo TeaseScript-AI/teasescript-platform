@@ -22,12 +22,14 @@ import { heldReference, holdsBelow, positionStep, propertyOnly } from "./kinds.j
 import { pathAt, stepsOf } from "./literal-index.js";
 import { marksNothing } from "./marks.js";
 import type { ChainRoot, LoneRead, Owner } from "./model.js";
+import { amend } from "../retained/retained.js";
 
 // G3 3a's positioned frontier on the contract side: a read's position one step below its parent's, past wrappers.
 
 /** A position's or an occurrence answer's demand, made since the last stop, which the next stop forgets (`stop`). */
 export function remember(contract: Contract, demand: string): void {
   contract.occurrences.push(demand);
+  amend(contract);
 }
 
 /**

@@ -22,6 +22,7 @@ import {
   type MarkResidual,
 } from "./marks.js";
 import type { Holder, IndexNode, LiteralIndex, PrefixEntry } from "./model.js";
+import { amend, Retained, retainedModule } from "../retained/retained.js";
 
 /*
  * #1655: a read below a push, one step at a time. A prefix's key entry below its own root (`p1 = p1.q`, a copy cycle
@@ -127,15 +128,15 @@ export function withoutPushedReads<T>(callback: () => T, depth: number | null = 
 class Frontier {
   readonly nodes: FNode[];
   readonly ids: Map<string, number>;
-  readonly goals = new Map<number, Map<string, Goal>>();
+  readonly goals = Retained.map<number, Map<string, Goal>>("Frontier.goals");
   /** Interned node sets: their members and, per step, the set one step below (final goals only). */
-  readonly sets = new Map<string, number>();
+  readonly sets = Retained.map<string, number>("Frontier.sets");
   readonly members: (readonly number[])[] = [];
-  readonly below = new Map<number, Map<string, number>>();
+  readonly below = Retained.map<number, Map<string, number>>("Frontier.below");
   /** Per state (a node, twice it plus one where reached marked), the leaves at it (`Term`'s closure), once final. */
-  readonly leaves = new Map<number, readonly number[]>();
+  readonly leaves = Retained.map<number, readonly number[]>("Frontier.leaves");
   /** Per pushed slot, its reach, or `null` where its closure declined. */
-  readonly reads = new Map<string, Reach | null>();
+  readonly reads = Retained.map<string, Reach | null>("Frontier.reads");
   /** The host reads' leaves (`hostLeaf`). */
   readonly hosts: Set<number>;
   /** The stops and held places `heldStopped` last answered for, and its answer. */
@@ -147,9 +148,9 @@ class Frontier {
   /** Per place, whether a copy cycle through a projection holds it. */
   readonly cyclic: Map<PlaceId, boolean>;
   /** Per goal (`node|step`) whose rules declined, the reason: a later build reaching it declines at once. */
-  readonly poisoned = new Map<number, Map<string, string>>();
+  readonly poisoned = Retained.map<number, Map<string, string>>("Frontier.poisoned");
   /** Per decline reason, the pushed reads it declined (`pushedFacts`). */
-  readonly declines = new Map<string, number>();
+  readonly declines = Retained.map<string, number>("Frontier.declines");
   /** The goals of the build running, final when it ends, dropped when it declines. */
   pending: Goal[] = [];
   /** The goals whose rules are not read yet, and each node a goal gained with a reader to pass it to. */
@@ -163,9 +164,9 @@ class Frontier {
    * their union.
    */
   readonly pendingSets: (readonly number[])[] = [];
-  readonly pendingIds = new Map<string, number>();
-  readonly advances = new Map<number, Map<string, Decision>>();
-  readonly unions = new Map<string, number>();
+  readonly pendingIds = Retained.map<string, number>("Frontier.pendingIds");
+  readonly advances = Retained.map<number, Map<string, Decision>>("Frontier.advances");
+  readonly unions = Retained.map<string, number>("Frontier.unions");
   /**
    * #2005: whether its builds carry receiver scopes (`compose`): from a build's first pending mark, or first mark
    * accepted past a root a record does not witness, on (`Activate`), for the rest of the pass.
@@ -177,7 +178,7 @@ class Frontier {
   product: Product | null = null;
   /** #2005: the term goals a floor reads (`termsAt`), and the marked leaves' unmarked bases (`markedLeaf`). */
   terms: Terms | null = null;
-  readonly markBases = new Map<number, number>();
+  readonly markBases = Retained.map<number, number>("Frontier.markBases");
   /** #2005: the node whose goal's rules run (`immediateSafe`). */
   ruleNode: number | undefined = undefined;
 
@@ -187,20 +188,21 @@ class Frontier {
     nodes: Frontier | null = null,
   ) {
     this.nodes = nodes?.nodes ?? [];
-    this.ids = nodes?.ids ?? new Map();
-    this.hosts = nodes?.hosts ?? new Set();
-    this.roots = nodes?.roots ?? new Map();
-    this.places = nodes?.places ?? new Set();
-    this.cyclic = nodes?.cyclic ?? new Map();
+    this.ids = nodes?.ids ?? Retained.map("Frontier.ids");
+    this.hosts = nodes?.hosts ?? Retained.set("Frontier.hosts");
+    this.roots = nodes?.roots ?? Retained.map("Frontier.roots");
+    this.places = nodes?.places ?? Retained.set("Frontier.places");
+    this.cyclic = nodes?.cyclic ?? Retained.map("Frontier.cyclic");
     this.shapeOnly = nodes !== null;
+    Retained.owner(this, "Frontier");
   }
 }
 
-const FRONTIERS = new WeakMap<Contract, Frontier>();
+const FRONTIERS = retainedModule("frontier.FRONTIERS", Retained.weakMap<Contract, Frontier>);
 
 function frontierOf(contract: Contract): Frontier {
-  let frontier = FRONTIERS.get(contract);
-  if (frontier === undefined) FRONTIERS.set(contract, (frontier = new Frontier(contract)));
+  let frontier = FRONTIERS().get(contract);
+  if (frontier === undefined) FRONTIERS().set(contract, (frontier = new Frontier(contract)));
   return frontier;
 }
 
@@ -457,7 +459,8 @@ function advance(frontier: Frontier, set: number, s: string): Decision {
     states[0]! >= 0
       ? decided(frontier, markStep(frontier.contract, states, s))
       : advanceAtoms(frontier, states, s);
-  if (bySteps === undefined) frontier.advances.set(set, (bySteps = new Map()));
+  if (bySteps === undefined)
+    frontier.advances.set(set, (bySteps = Retained.map("Frontier.advances[]")));
   bySteps.set(s, decision);
   return decision;
 }
@@ -665,7 +668,7 @@ function hostLeaf(frontier: Frontier, value: PlaceId): number {
  */
 function goalOf(frontier: Frontier, node: number, stepName: string): Goal {
   let bySteps = frontier.goals.get(node);
-  if (bySteps === undefined) frontier.goals.set(node, (bySteps = new Map()));
+  if (bySteps === undefined) frontier.goals.set(node, (bySteps = Retained.map("Frontier.goals[]")));
   let goal = bySteps.get(stepName);
   if (goal === undefined) {
     const poisoned = frontier.poisoned.get(node)?.get(stepName);
@@ -719,7 +722,7 @@ function gain(frontier: Frontier, goal: Goal, found: number): void {
   let node = found;
   const at = frontier.nodes[found]!;
   if (at.kind === "hold") {
-    goal.holds ??= new Map();
+    goal.holds ??= Retained.held(goal, Retained.map("Frontier.goal.holds"));
     const known = goal.holds.get(at.inner);
     const set = known === undefined ? at.set : unionPending(frontier, known, at.set);
     if (set === known) return;
@@ -958,7 +961,7 @@ function star(frontier: Frontier, set: number, stepName: string): number {
     else for (const node of frontier.members[set]!) below(frontier, node, [stepName], 0, then);
   });
   const id = intern(frontier, nodes);
-  if (bySteps === undefined) frontier.below.set(set, (bySteps = new Map()));
+  if (bySteps === undefined) frontier.below.set(set, (bySteps = Retained.map("Frontier.below[]")));
   bySteps.set(stepName, id);
   return id;
 }
@@ -1252,7 +1255,7 @@ export function pushedFacts(contract: Contract): {
   readonly shapes: number;
   readonly floors: number;
 } {
-  const frontier = FRONTIERS.get(contract);
+  const frontier = FRONTIERS().get(contract);
   const product = frontier?.product ?? null;
   let goals = 0;
   let edges = 0;
@@ -1289,7 +1292,7 @@ export function pushedInvariant(contract: Contract): {
   readonly held: number;
   readonly bases: number;
 } {
-  const frontier = FRONTIERS.get(contract);
+  const frontier = FRONTIERS().get(contract);
   const violations: string[] = [];
   if (frontier === undefined) return { violations, largest: 0, held: 0, bases: 0 };
   const nameOf = (each: number): string => String(each);
@@ -1555,17 +1558,17 @@ interface Terms {
 }
 
 function productOf(frontier: Frontier): Product {
-  return (frontier.product ??= {
+  return (frontier.product ??= Retained.held(frontier, {
     shapes: new Frontier(frontier.contract, frontier),
     atoms: [],
-    atomIds: new Map(),
-    steps: new Map(),
-    structured: new Map(),
-    pure: new Map(),
-    safe: new WeakMap(),
-    accepts: new Map(),
+    atomIds: Retained.map("Frontier.product.atomIds"),
+    steps: Retained.map("Frontier.product.steps"),
+    structured: Retained.map("Frontier.product.structured"),
+    pure: Retained.map("Frontier.product.pure"),
+    safe: Retained.weakMap("Frontier.product.safe"),
+    accepts: Retained.map("Frontier.product.accepts"),
     floors: 0,
-  });
+  }));
 }
 
 function atomOf(product: Product, id: number): Atom {
@@ -1642,7 +1645,8 @@ function advanceAtoms(frontier: Frontier, states: readonly number[], s: string):
         marked: residual.marked,
         states: residual.states.map((state) => atomId(frontier, state, scopes)),
       };
-      if (bySteps === undefined) product.steps.set(id, (bySteps = new Map()));
+      if (bySteps === undefined)
+        product.steps.set(id, (bySteps = Retained.map("Frontier.product.steps[]")));
       keep(frontier.contract.work, 1 + known.states.length);
       bySteps.set(s, known);
     }
@@ -1909,7 +1913,8 @@ function literalSafe(frontier: Frontier, state: number, at: IndexNode): boolean 
   for (const [node, id] of settled) {
     keep(frontier.contract.work, 1);
     let bySafe = product.safe.get(node);
-    if (bySafe === undefined) product.safe.set(node, (bySafe = new Map()));
+    if (bySafe === undefined)
+      product.safe.set(node, (bySafe = Retained.map("Frontier.product.safe[]")));
     bySafe.set(id, safe);
   }
   return safe;
@@ -1996,7 +2001,10 @@ function immediateSafe(frontier: Frontier): boolean {
 
 /** #2005: a node's terms (`TermGoal`), each passed to `then` as found. */
 function termsAt(frontier: Frontier, node: number, then: (node: number) => void): void {
-  if (frontier.terms === null) frontier.terms = { goals: new Map(), fresh: [], pending: [] };
+  if (frontier.terms === null) {
+    frontier.terms = { goals: Retained.map("Frontier.terms.goals"), fresh: [], pending: [] };
+    amend(frontier);
+  }
   const terms = frontier.terms;
   let goal = terms.goals.get(node);
   if (goal === undefined) {

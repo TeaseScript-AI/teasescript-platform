@@ -42,6 +42,7 @@ import type { Alias, Candidate, Decided, DecidedAt, Decision, Inputs } from "./m
 import { permittedAt } from "./permitted.js";
 import { inputsAt, inputsOf, scanAt } from "./scan.js";
 import { compareKeys, stopsOf, writtenSource } from "./walk.js";
+import { amend } from "../retained/retained.js";
 
 // The decision of one place at one path (§5), and its comparison under the member-answer oracle.
 
@@ -339,6 +340,7 @@ function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): De
   );
   work.charge("checks", ordered.length + sortCost(ordered.length));
   contract.facts.decidedPaths += 1;
+  amend(contract.facts);
   return {
     root,
     path,
