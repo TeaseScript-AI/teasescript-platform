@@ -1018,23 +1018,32 @@ test(
             new RegExp(`^${failure === null ? "PASS" : "FAIL"} {2}merge commits `, "mu"),
             at,
           );
+          // The queue's merged checkout, named first when HEAD merges exactly the base's commit, as the lane's merge of
+          // its own base does here, outside `--merged-checkout`; still a failure, as it may be the builder's own
+          const queueHint = (first, baseName) =>
+            `the base's commit itself, as the queue's merged checkout does: if this is one, run it as ` +
+            `--merged-checkout ${first} --base ${baseName}; if you merged the base into your branch yourself, rebase ` +
+            `onto ${baseName} instead`;
           if (failure !== null) {
             const mergeCommit = git("rev-parse", "--short=9", "lane");
             const parent = git("rev-parse", "--short=9", "lane^2");
-            const expected = `--- merge commits ---\n${mergeCommit} Merge branch '${merges}' into lane: merges ${parent}, ${failure}\n`;
+            const why =
+              mode !== "merged checkout" && merges === base
+                ? queueHint(git("rev-parse", "lane^1"), base)
+                : failure;
+            const expected = `--- merge commits ---\n${mergeCommit} Merge branch '${merges}' into lane: merges ${parent}, ${why}\n`;
             assert.ok(result.stdout.includes(expected), `${at}: ${result.stdout}`);
           }
           if (mode === "merged checkout" && merges === null) {
             // the branch is behind its base, so the queue made a merge commit: by shape alone, as `--base HEAD^2`
-            // reads it, that is the base merged into the branch, and fails
+            // reads it, that is the base merged into the branch, and fails, naming the queue's case first
             const runner = git("rev-parse", "--short=9", "HEAD");
             const parent = git("rev-parse", "--short=9", "HEAD^2");
             const byShape = check("--base", "HEAD^2");
             assert.equal(byShape.status, 1, `${at}: ${byShape.stdout}`);
             assert.ok(
               byShape.stdout.includes(
-                `${runner} Merge branch '${base}' into HEAD: merges ${parent}, which the base already holds: ` +
-                  "rebase onto HEAD^2 instead\n",
+                `${runner} Merge branch '${base}' into HEAD: merges ${parent}, ${queueHint(lane, "HEAD^2")}\n`,
               ),
               `${at}: ${byShape.stdout}`,
             );
