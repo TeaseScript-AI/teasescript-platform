@@ -73,6 +73,8 @@ export const publishedRoute = (files) => {
   return { plan, text: JSON.stringify({ plan, diagnostics: [${diagnostic('"TSV0" + globalThis.MODE', "warning")}] }) };
 };
 `,
+  "src/runtime/host-data/script-storage.js":
+    "export const validateScriptStorageEntries = () => null;\n",
   "tests/helpers/type-core-route.js": `export const runGlobals = (plan, globals) =>
   globals.hostValue === 2.5
     ? { status: "failed", failure: "TSR058@0:5", said: [] }
@@ -387,6 +389,11 @@ test("join refuses an output that is one of its inputs, by path or link, and lea
   const ran = joinOf(folder, { base: rows }, join(folder, "out.jsonl"));
   assert.equal(ran.ran.status, 0, ran.ran.stderr);
   assert.equal(ran.text, before);
+  // (a later join that writes nothing, a case missing, removes that earlier output rather than leave it as its own)
+  const failed = joinOf(folder, { base: rows, head: rows.slice(0, 2) }, join(folder, "out.jsonl"));
+  assert.equal(failed.ran.status, 1, failed.ran.stderr);
+  assert.match(failed.ran.stderr, /removed .*out\.jsonl, an earlier run's output/);
+  assert.equal(failed.text, null);
   assert.deepEqual(
     readdirSync(folder).filter((file) => file.includes(".partial-")),
     [],
@@ -707,5 +714,35 @@ test("a case's storage is what each run's load reads, on the checker and the cor
     assert.equal(refused.status, 2, refused.stderr);
     assert.match(refused.stderr, why);
     assert.equal(existsSync(refusedOut), false);
+  }
+  // (a seed that cannot be copied, or that the runtime rejects, is found before any plan runs: after a valid case, the
+  // file is refused and no record written; an earlier run's output on that path is removed, never left standing)
+  type Nested = number | { kind: "list"; items: Nested[] };
+  let deep: Nested = 1;
+  for (let depth = 0; depth < 2000; depth += 1) deep = { kind: "list", items: [deep] };
+  for (const [storage, why] of [
+    [{ unused: deep }, /bad\.jsonl:2: storage cannot be copied: /],
+    [{ k: { not: "a runtime value" } }, /bad\.jsonl:2: storage\b/],
+  ] as const) {
+    const bad = join(folder, "bad.jsonl");
+    writeFileSync(
+      bad,
+      [
+        { name: "fine", source, runs },
+        { name: "seeded", source, runs, storage },
+      ]
+        .map((c) => `${JSON.stringify(c)}\n`)
+        .join(""),
+    );
+    const earlier = readFileSync(out, "utf8");
+    const again = join(folder, "again.jsonl");
+    writeFileSync(again, earlier);
+    const refused = spawnSync(process.execPath, [tool, resolve("."), bad, "--out", again], {
+      encoding: "utf8",
+    });
+    assert.equal(refused.status, 2, refused.stderr);
+    assert.match(refused.stderr, why);
+    assert.match(refused.stderr, /removed .*again\.jsonl, an earlier run's output/);
+    assert.equal(existsSync(again), false);
   }
 });

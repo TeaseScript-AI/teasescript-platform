@@ -17,7 +17,8 @@
 // cases that still differ and those whose records it cannot read as JSON.
 // Exit 0: every case recorded and nothing threw; 1: a record holds `threw`, or `join` found a case missing, repeated
 // or unknown (it then writes nothing), or with `--ignore` a case differs or is unread; 2: a refused usage, cases file
-// or tree, before any record is written.
+// or tree, before any record is written. A run that writes nothing removes an earlier run's `--out` and says so, unless
+// that file is one of its inputs, so that no earlier result stands as its own (#2338).
 import { createHash } from "node:crypto";
 import {
   appendFileSync,
@@ -38,8 +39,25 @@ import { distOf, unitResolver } from "./units.mjs";
 
 const refuse = (why) => {
   process.stderr.write(`differential.mjs: ${why}\n`);
+  dropOutput();
   process.exit(2);
 };
+
+/** Removes the `--out` an earlier run left, for a run that writes none, unless it is one of this run's inputs. */
+function dropOutput() {
+  const out = option("--out");
+  if (out === undefined || !existsSync(out) || !statSync(out).isFile()) return;
+  const { dev, ino } = statSync(out);
+  const inputs =
+    args[0] === "join" ? [option("--cases"), ...values("--base"), ...values("--head")] : [args[1]];
+  for (const file of inputs)
+    if (file !== undefined && existsSync(file)) {
+      const input = statSync(file);
+      if (input.dev === dev && input.ino === ino) return;
+    }
+  unlinkSync(out);
+  process.stderr.write(`differential.mjs: removed ${out}, an earlier run's output\n`);
+}
 /** The start of a record's line: the tool writes each record with its name first. */
 const NAME_FIELD = Buffer.from('{"name":"');
 
@@ -174,6 +192,9 @@ async function loadTree(root) {
     "jsonText",
   ]);
   const { runGlobals } = await load("tests/helpers/type-core-route.js", ["runGlobals"]);
+  const { validateScriptStorageEntries } = await load("src/runtime/host-data/script-storage.js", [
+    "validateScriptStorageEntries",
+  ]);
   const { planCheckList } = await own("tests/helpers/plan-checks.js");
   return {
     compileProject,
@@ -187,6 +208,7 @@ async function loadTree(root) {
     publishedRoute,
     jsonText,
     runGlobals,
+    validateScriptStorageEntries,
     planCheckList,
   };
 }
@@ -239,10 +261,21 @@ async function record() {
     publishedRoute,
     jsonText,
     runGlobals,
+    validateScriptStorageEntries,
     planCheckList,
   } = await loadTree(root);
-  // (the cases resolved before anything runs)
+  // (every fault of the input found before any plan runs and before the output is opened: the cases resolved, and
+  // each case's storage copied once, as each run copies it, and checked as the runtime checks it)
   await resolveCases(cases, root);
+  for (const c of cases.filter((each) => each.storage !== undefined)) {
+    let failure;
+    try {
+      failure = validateScriptStorageEntries(entriesOf(c.storage), "storage");
+    } catch (error) {
+      failure = `storage cannot be copied: ${error.message}`;
+    }
+    if (failure !== null) refuse(`${c.where}: ${failure}`);
+  }
 
   let threw = 0;
   const thrown = (error) => {
@@ -442,6 +475,7 @@ function join() {
   });
   if (problems.length > 0) {
     process.stderr.write(`${problems.join("\n")}\n`);
+    dropOutput();
     process.exit(1);
   }
   // (written beside the output and renamed onto it once whole, so that a failed copy leaves no output)
@@ -504,6 +538,7 @@ function join() {
     for (const fd of [output, ...inputs.values()]) closeSync(fd);
     unlinkSync(partial);
     process.stderr.write(`differential.mjs: ${error.message}\n`);
+    dropOutput();
     process.exit(1);
   }
   for (const fd of [output, ...inputs.values()]) closeSync(fd);
