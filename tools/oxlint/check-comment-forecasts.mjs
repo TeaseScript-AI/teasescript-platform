@@ -155,17 +155,22 @@ const PRINTED_PROPERTIES = new Set(["measures", "authority"]);
  * (the first argument of a call to `test`, `it`, `describe` or `suite`, or to a property of those names, before
  * `.skip`, `.only` or `.todo` or not) and of a `measures` or `authority` property's value. A part is a string, a
  * template's text (not its `${}` expressions), either side of a `+`, inside parentheses, or what an arrow function's
- * expression body gives; any other expression is not read.
+ * expression body gives; any other expression is not read. A property is an object's or a class's, named by an
+ * identifier, a string, or a string in brackets (`["measures"]`). Names and parts are read with their escapes
+ * resolved; a part with an escape reports its first line.
  */
 export function printedTexts(fileName, text) {
-  if (!/\b(?:test|it|describe|suite|measures|authority)\b/u.test(text)) return [];
+  // A file with none of the names, and no backslash that could spell one, has none of these positions.
+  if (!/\\|\b(?:test|it|describe|suite|measures|authority)\b/u.test(text)) return [];
   const parts = [];
   for (const { source, text: script, lineOffset } of scriptsOf(fileName, text)) {
     const part = (node, from, to) => {
       const start = node.getStart(source) + from;
       parts.push({
         line: source.getLineAndCharacterOfPosition(start).line + 1 + lineOffset,
-        text: script.slice(start, node.end - to),
+        text: script.slice(start, node.end - to).includes("\\")
+          ? node.text.replace(/\r\n?|[\n\u2028\u2029]/gu, " ")
+          : node.text,
       });
     };
     const read = (node) => {
@@ -194,13 +199,21 @@ export function printedTexts(fileName, text) {
           named(callee.expression))
       );
     };
+    const propertyName = (name) =>
+      ts.isComputedPropertyName(name)
+        ? ts.isStringLiteralLike(name.expression)
+          ? name.expression.text
+          : undefined
+        : ts.isIdentifier(name) || ts.isStringLiteral(name)
+          ? name.text
+          : undefined;
     const visit = (node) => {
       if (ts.isCallExpression(node) && node.arguments.length > 0 && isTestCallee(node.expression))
         read(node.arguments[0]);
       if (
-        ts.isPropertyAssignment(node) &&
-        (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name)) &&
-        PRINTED_PROPERTIES.has(node.name.text)
+        (ts.isPropertyAssignment(node) || ts.isPropertyDeclaration(node)) &&
+        node.initializer &&
+        PRINTED_PROPERTIES.has(propertyName(node.name))
       )
         read(node.initializer);
       ts.forEachChild(node, visit);

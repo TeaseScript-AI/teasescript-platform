@@ -491,18 +491,20 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
     const record = "docs/specifications/type-inference-accepted-record";
     write(
       `${record}/README.md`,
-      "# Record\n\n## Labels\n\n| label | meaning |\n| --- | --- |\n| `C9` | a rule |\n| `W5` | a family |\n\n### r4-40\n",
+      "# Record\n\n## Labels\n\n| label | meaning |\n| --- | --- |\n| `C9` | a rule |\n| `W5` | a family |\n| `W6` | a family |\n\n### r4-40\n",
     );
     // a core comment's label with its glossary row: no finding, so the glossary is the README Git lists
     write("src/type-inference/core/labelled.ts", "// C9 holds here\nexport const x = 1;\n");
-    // printed test text: a title's label without a row refused; a row only a `measures` string carries kept; an
-    // expected message not read
+    // printed test text: a title's label without a row refused, its callee escaped too; a row only a `measures`
+    // string carries kept, a bracketed name's too; an expected message not read
     write(
       "tests/printed.test.ts",
       [
         'test("W99 grows", () => {});',
         'export const family = { measures: "W5: one preset" };',
         'assert.equal(found, "TSV041 error L19");',
+        'te\\u0073t("W98 grows", () => {});',
+        'export const group = { ["authority"]: "W6" };',
         "",
       ].join("\n"),
     );
@@ -615,6 +617,7 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
         .map(({ fileName, line, message }) => `${fileName}:${line} ${message.split(",")[0]}`),
       [
         "tests/printed.test.ts:1 a test's title or a measures or authority string carries the label W99",
+        "tests/printed.test.ts:4 a test's title or a measures or authority string carries the label W98",
       ],
     );
     writeFileSync(
@@ -841,19 +844,36 @@ test("printed text is a test's title and a measures or authority value, in every
     "export const families = [",
     '  { measures: "A9", authority: `A10 ${y}`, "measures": (k) => `A11 ${k}` },',
     "];",
+    // a bracketed name, a class's property, escapes in a callee, a name and a part
+    'const c = { ["measures"]: "A12", [`authority`]: "A13" };',
+    'class G { measures = "A14"; static authority = "A15"; }',
+    'te\\u0073t("A16", f); const e = { "measu\\u0072es": "\\x4117" };',
     // not printed: another argument, another property, a block body, a variable, an expected value, a comment
     'test(title, "B1");',
     'const r = { rule: "B2", reason: "B3", name: "B4", measures: (k) => { return "B5"; } };',
     'assert.equal(x, "B6"); // B7',
+    'const n = { measure: "B9", authority: "ordinary", [name]: "B10" };',
     "check(`B8`);",
     "",
   ].join("\n");
   assert.deepEqual(
     printedLabelsIn("tests/a.test.ts", source).map(({ line, label }) => `${line} ${label}`),
-    ["1 A1", "2 A2", "2 A3", "3 A4", "3 A5", "4 A6", "5 A7", "6 A8", "8 A9", "8 A10", "8 A11"],
+    [
+      ...["1 A1", "2 A2", "2 A3", "3 A4", "3 A5", "4 A6", "5 A7", "6 A8", "8 A9", "8 A10", "8 A11"],
+      ...["10 A12", "10 A13", "11 A14", "11 A15", "12 A16", "12 A17"],
+    ],
   );
-  // a file with none of the callee or property names is not parsed
+  // a file with none of the callee or property names, and no backslash, is not parsed; one with a backslash is
   assert.deepEqual(printedTexts("tests/b.ts", 'const s = "A1";\n'), []);
+  assert.deepEqual(
+    printedLabelsIn("tests/b.ts", 'const s = { "measur\\u0065s": "A1" };\n').map(({ label }) => label),
+    ["A1"],
+  );
+  // a part with an escape reports its first line
+  assert.deepEqual(printedLabelsIn("tests/b.ts", 'test(`A1\\n\nA2`, f);\n'), [
+    { line: 1, label: "A1" },
+    { line: 1, label: "A2" },
+  ]);
   // a file with a property alone, and none with a callee alone, is read
   assert.deepEqual(
     ["measures", "authority"].map((name) =>
