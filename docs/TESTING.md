@@ -318,7 +318,7 @@ tests (`npm test -- --shard=i/3`), `check-3` also the checks before them (`npm r
 file and every other of 10 s or more is listed, costliest first, with its median seconds over three CI runs or more in
 `tools/costly-test-files.mjs`, beside the seconds of `check:pretest`: each test job keeps its files' seconds as an
 artifact for 7 days, and `node tools/measure-test-files.mjs --write --from-ci RUN ...` regenerates the module from them
-(its header names the runs; seconds measured on a worker do not predict CI's). A new type-core test file runs in full
+(`--from-ci --base-branch BRANCH` takes the newest three passed runs of open pull requests into BRANCH; its header names the runs; seconds measured on a worker do not predict CI's). A new type-core test file runs in full
 before it has an entry, at the other files' seconds; `check-changed` and the shard test name it, and the coordinator
 lands its entry from the merge's CI runs in a light pull request. The full suite starts the listed files
 first, and `tools/test-shards.mjs` shares the files out so that the jobs end together, `check-3`'s after its checks

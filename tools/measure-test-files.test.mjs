@@ -90,8 +90,8 @@ function fill(root) {
   }
   // `npm run build` and `npm run check:pretest` pass at once: the files are compiled already.
   write("bin/npm", "#!/bin/sh\nexit 0\n", 0o755);
-  // `gh` answers the three requests the tool makes from `gh.json` (each run's pre-test step seconds and test jobs' file
-  // seconds), in the real shapes, and fails any other.
+  // `gh` answers the four requests the tool makes from `gh.json` (CI's newest passed runs as `list`, each run's pre-test
+  // step seconds and test jobs' file seconds), in the real shapes, and fails any other.
   write(
     "bin/gh",
     `#!${process.execPath}
@@ -116,6 +116,8 @@ if (args.join(" ") === "run download " + args[2] + " --pattern test-file-seconds
     mkdirSync(folder, { recursive: true });
     writeFileSync(folder + "/test-file-seconds.json", JSON.stringify({ filesAtOnce: 3, seconds }));
   });
+else if (args.join(" ") === "api repos/{owner}/{repo}/actions/workflows/ci.yml/runs?event=pull_request&status=success&per_page=100 -q [.workflow_runs[] | {id, bases: [.pull_requests[].base.ref]}]" && runs.list)
+  process.stdout.write(JSON.stringify(runs.list.map((run) => ({ id: run.id, bases: run.pull_requests.map((pull) => pull.base.ref) }))));
 else if (args[0] === "api" && where && runs[where[1]] && args.length === 2 && !where[2])
   process.stdout.write(JSON.stringify({ head_sha: where[1].repeat(40).slice(0, 40), conclusion: runs[where[1]].conclusion ?? "success" }));
 else if (args[0] === "api" && where && runs[where[1]] && where[2]) {
@@ -200,7 +202,7 @@ test(
 );
 
 test(
-  "--from-ci takes each file's median over the runs, folders' files included, counts a run by its test jobs, and refuses a file no run measured",
+  "--from-ci takes each file's median over the runs, folders' files included, counts a run by its test jobs, selects runs by a pull request's base, and refuses a file no run measured",
   { timeout: 60_000 },
   () => {
     const root = checkout();
@@ -266,6 +268,36 @@ test(
         assert.equal(one.status, 1, `${field}: ${one.out}`);
         assert.match(one.out, /run 13's test steps did not all pass \(run failure\)/u, field);
       }
+
+      // --base-branch takes the newest three runs that passed for an open pull request into the branch, and the
+      // module records them; fewer than three are refused.
+      const into = (ref) => [{ base: { ref } }];
+      writeFileSync(
+        join(root, "gh.json"),
+        JSON.stringify({
+          ...runs(null),
+          list: [
+            { id: 14, pull_requests: into("other") },
+            { id: 13, pull_requests: into("main") },
+            { id: 15, pull_requests: [] },
+            { id: 12, pull_requests: into("main") },
+            { id: 11, pull_requests: into("main") },
+            { id: 10, pull_requests: into("main") },
+          ],
+        }),
+      );
+      const chosen = measure(root, ["--from-ci", "--base-branch", "main"]);
+      assert.equal(chosen.status, 0, chosen.out);
+      assert.match(chosen.out, /runs 13, 12, 11, the newest passed for a pull request into main/u);
+      assert.match(chosen.module, /--write --from-ci 13 12 11/u);
+      assert.deepEqual(costly(chosen.module), costly(module));
+      const few = measure(root, ["--from-ci", "--base-branch", "other"]);
+      assert.equal(few.status, 1, few.out);
+      assert.match(
+        few.out,
+        /1 of CI's newest passed runs are for an open pull request into other, not 3/u,
+      );
+      assert.equal(few.module, chosen.module);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

@@ -15,6 +15,9 @@ import { isTypeCoreTestFile, shardFiles, suiteName, suiteTestFiles } from "./tes
 // API gives the pre-test step's seconds, and each file counts its median over the runs, at least three since CI's
 // runners vary. A run counts its last attempt (re-running a run removes its earlier attempts' artifacts), when every
 // test step ("Build and run tests, shard i of N") and its pre-test step passed, whatever the run's own conclusion.
+// `--from-ci --base-branch BRANCH` takes the newest three CI runs that passed for a pull request into BRANCH, among the
+// newest hundred that passed, and names them; GitHub names a run's pull requests only while they are open, so a run
+// of a merged pull request is passed over. The module records the runs taken.
 //
 // Without it, the build, the full suite in `npm test`'s order and concurrency, and then `check:pretest` (after the
 // suite, with the new seconds written: `test:verification` checks that every listed file exists, costliest first) run
@@ -22,7 +25,7 @@ import { isTypeCoreTestFile, shardFiles, suiteName, suiteTestFiles } from "./tes
 // nothing else loads, with a Node compile cache as in CI, a fresh one unless `NODE_COMPILE_CACHE` names one. Such
 // seconds do not predict CI's (#1719). A failed step or test leaves the module as it was.
 const usage =
-  "Usage: node tools/measure-test-files.mjs [--write] [--raw FILE] [--from-ci RUN ...]\n";
+  "Usage: node tools/measure-test-files.mjs [--write] [--raw FILE] [--from-ci RUN ... | --from-ci --base-branch BRANCH]\n";
 const argv = process.argv.slice(2);
 const write = argv[0] === "--write";
 if (write) argv.shift();
@@ -32,9 +35,11 @@ if (argv[0] === "--raw" && argv.length >= 2)
     .splice(0, 2)
     .slice(1)
     .map((p) => resolve(p));
-const fromCi = argv[0] === "--from-ci" ? argv.slice(1) : null;
+const base = argv[0] === "--from-ci" && argv[1] === "--base-branch" ? argv[2] : null;
+const fromCi = argv[0] === "--from-ci" && base === null ? argv.slice(1) : null;
 if (
-  (fromCi === null && argv.length > 0) ||
+  (base !== null && argv.length !== 3) ||
+  (base === null && fromCi === null && argv.length > 0) ||
   (fromCi !== null && new Set(fromCi).size !== fromCi.length) ||
   (fromCi !== null && fromCi.length < 3)
 ) {
@@ -68,6 +73,31 @@ const median = (values) => {
   const middle = Math.floor(sorted.length / 2);
   return sorted.length % 2 === 1 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
 };
+
+/** The ids of the newest three CI runs that passed for a pull request into `branch`, named on standard error. */
+function runsInto(branch) {
+  // (each run's id and its pull requests' bases only: a hundred whole runs pass the output buffer's 1 MiB)
+  const passed = JSON.parse(
+    gh(
+      "api",
+      "repos/{owner}/{repo}/actions/workflows/ci.yml/runs?event=pull_request&status=success&per_page=100",
+      "-q",
+      "[.workflow_runs[] | {id, bases: [.pull_requests[].base.ref]}]",
+    ),
+  );
+  const ids = passed
+    .filter((found) => found.bases.includes(branch))
+    .slice(0, 3)
+    .map((found) => String(found.id));
+  if (ids.length < 3)
+    fail([
+      `${ids.length} of CI's newest passed runs are for an open pull request into ${branch}, not 3: give the runs`,
+    ]);
+  process.stderr.write(
+    `measure-test-files: runs ${ids.join(", ")}, the newest passed for a pull request into ${branch}\n`,
+  );
+  return ids;
+}
 
 /** CI's runs: each run's files' seconds (every test job's artifact), its pre-test step's seconds and its commit. */
 function ciRuns(ids) {
@@ -115,8 +145,8 @@ function ciRuns(ids) {
 }
 
 let measured;
-if (fromCi !== null) {
-  const runs = ciRuns(fromCi);
+if (fromCi !== null || base !== null) {
+  const runs = ciRuns(fromCi ?? runsInto(base));
   // (the suite as the checkout has it: a file no run measured is refused, one the checkout lost is left out)
   const suite = suiteTestFiles(join(import.meta.dirname, "../tests"), ".test.ts").map((file) =>
     file.replace(/\.ts$/, ".js"),
