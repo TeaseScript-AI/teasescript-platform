@@ -79,6 +79,9 @@ function freePort() {
 async function startPreview() {
   const { createServer } = await import("vite");
   acquiring();
+  const port = await freePort();
+  // From this check to the call of createServer, nothing awaits.
+  acquiring();
   // Vite registers its own SIGTERM and stdin-end handlers, which close the server and exit at once. While it creates the
   // server, those registrations (and any a plugin makes) are dropped: this run's shutdown handles both.
   const { on, once } = process;
@@ -98,7 +101,7 @@ async function startPreview() {
       cacheDir: join(scratch, "vite"),
       logLevel: "warn",
       clearScreen: false,
-      server: { host: "127.0.0.1", port: await freePort(), strictPort: true },
+      server: { host: "127.0.0.1", port, strictPort: true },
     });
   } finally {
     Object.assign(process, { on, once });
