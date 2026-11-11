@@ -6,6 +6,7 @@
 // Before any check, the preview must answer `<url>__checkout` (`player/vue/vite.config.ts`) with this checkout's real
 // path, as `text/plain`; a preview of another checkout, or one that does not say which checkout it serves, is refused.
 import { spawn, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import {
   closeSync,
   mkdtempSync,
@@ -20,7 +21,9 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const checkout = realpathSync(fileURLToPath(new URL("..", import.meta.url)));
-const session = `player-preview-${process.pid}`;
+// Playwright CLI keeps its sessions by name for the whole user, across checkouts and jobs, so a name from the process id
+// alone could meet a session another run left behind under a reused id; this run's session is its own.
+const session = `player-preview-${process.pid}-${randomBytes(6).toString("hex")}`;
 /** The run's scratch folder: browser configuration, failure artifacts, and a started preview's cache and log. */
 let scratch = "";
 
