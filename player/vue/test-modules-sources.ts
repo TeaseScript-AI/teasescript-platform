@@ -12,11 +12,14 @@
 // set of paths is part of the stamp, so an added, removed or renamed file is a change.
 //
 // The build also fails, so that no input of another kind passes unstamped, on: a bundled module outside the area that
-// is neither under `node_modules` nor a bundler module (`\0`); an `envDir` outside the area; a configuration file or a
-// file it imports outside the area; a bundled module with a query or of a type other than `.ts`, `.mts`, `.cts`, `.js`,
-// `.mjs`, `.cjs` or `.json`; a `tsconfig*.json` in the area, or a file it reaches by `extends` or `references` as
-// TypeScript resolves them, that TypeScript reports a diagnostic on, cannot be read, or lies outside the area (an
-// `extends` target may be a package's).
+// is neither under `node_modules` nor a bundler module (`\0`); an `envDir` outside the area; a public folder; a
+// configuration file or a file it imports outside the area; a bundled module with a query or of a type other than `.ts`,
+// `.mts`, `.cts`, `.js`, `.mjs`, `.cjs` or `.json`; a root without a `tsconfig.json`, as the compiler then reads the
+// nearest one above the checkout; a `tsconfig*.json` in the area, or a file it reaches by `extends` or `references`,
+// that TypeScript reports a diagnostic on, cannot be read, or lies outside the area. A local `extends` (one starting with
+// `.` or `/`) must name its file: a path ending in `.json` that is a regular file, as TypeScript and Vite's compiler
+// then read that file, where they choose differently for a name without it. A package's `extends` lies under
+// `node_modules`, as TypeScript resolves it; a `references` target is TypeScript's.
 //
 // The check attests the stamped file set, contents and link identities under the canonical build invocation
 // (`npm run build:player-test-modules`). Not attested: another CLI or API mode or inline options; files that
@@ -141,11 +144,12 @@ export function extendedFiles(options: Record<string, unknown>): string[] {
 }
 
 /**
- * Checks the files a `tsconfig*.json` reaches by `extends` and `references`, recursively, as TypeScript itself resolves
- * them (`getParsedCommandLineOfConfigFile`, `resolveProjectReferencePath`); throws on a file TypeScript cannot read, a
- * diagnostic TypeScript places on an `extends` or `references` property, or a target that cannot be read or lies outside
- * the area. An `extends` target may be a package's, under `node_modules`. Other diagnostics, such as a compiler option
- * this TypeScript does not know, are the compiler's to judge, not the stamp's.
+ * Checks the files a `tsconfig*.json` reaches by `extends` and `references`, recursively; throws on a file TypeScript
+ * cannot read, a diagnostic TypeScript places on an `extends` or `references` property, a local `extends` that does not
+ * name a regular `.json` file, or a target that cannot be read or lies outside the area. A local `extends` is followed
+ * by its name; every other file TypeScript extends (`getParsedCommandLineOfConfigFile`) must be a package's, under
+ * `node_modules`; references are TypeScript's (`resolveProjectReferencePath`). Other diagnostics, such as a compiler
+ * option this TypeScript does not know, are the compiler's to judge, not the stamp's.
  */
 export async function tsconfigClosure(
   root: string,
@@ -188,9 +192,34 @@ export async function tsconfigClosure(
     throw new Error(`${start} cannot be read as a tsconfig: ${diagnostics.join("; ")}`);
   const readable = (target: string) => existsSync(target) && statSync(target).isFile();
   const inside = (target: string) => inArea(root, realpathSync(target)) && inArea(root, target);
+  // The local files of the `extends` chain, each by the name its `extends` writes.
+  const named = new Set<string>();
+  const follow = (file: string) => {
+    const written: unknown = ts.readConfigFile(file, ts.sys.readFile).config?.extends;
+    for (const value of [written].flat()) {
+      // Not a string: TypeScript's diagnostic on the property. Not local: a package's, judged below.
+      if (typeof value !== "string" || !(/^[./\\]/u.test(value) || isAbsolute(value))) continue;
+      const target = slashes(resolve(dirname(file), value));
+      if (!value.endsWith(".json") || !readable(target))
+        throw new Error(
+          `${file} extends "${value}", which names no regular .json file: write the name of the file it extends, ending in .json`,
+        );
+      if (!inside(target)) throw new Error(`${file} extends ${target}, outside the stamped area`);
+      if (!named.has(target)) {
+        named.add(target);
+        follow(target);
+      }
+    }
+  };
+  follow(start);
   for (const target of extendedFiles(parsed.options))
-    if (!readable(target) || !(inside(target) || dependency(realpathSync(target))))
-      throw new Error(`${start} extends ${target}, outside the stamped area or unreadable`);
+    if (
+      !named.has(slashes(target)) &&
+      !(readable(target) && dependency(target) && dependency(realpathSync(target)))
+    )
+      throw new Error(
+        `${start} extends ${target}, which is neither named by an extends in the area nor a readable file of a package under node_modules`,
+      );
   for (const reference of parsed.projectReferences ?? []) {
     const target = ts.resolveProjectReferencePath(reference);
     if (!readable(target) || !inside(target))
@@ -220,6 +249,14 @@ export function testModulesSources(): Plugin {
           this.error(
             `test-modules-sources: the configuration reads ${file}, outside the stamped area`,
           );
+      // Vite's compiler reads the nearest `tsconfig.json` above a module: the root's, or one above the checkout.
+      if (!stamp.has("tsconfig.json"))
+        this.error(
+          "test-modules-sources: the root has no tsconfig.json, so the compiler would read one above the checkout",
+        );
+      // Vite resolves `publicDir: false` to "".
+      if (config.publicDir !== "")
+        this.error(`test-modules-sources: the build has a public folder (${config.publicDir})`);
       // Vite reads the `.env` files of `envDir` (`false` reads none); they are stamped as files of that folder.
       if (config.envDir !== false && !inArea(root, join(config.envDir, ".env")))
         this.error(
