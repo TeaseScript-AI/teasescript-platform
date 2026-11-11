@@ -93,7 +93,11 @@ if (unmatched.length > 0) {
 // them. A file that ran no test (a suite alone is none) fails the run, unless the tests may be selected (a name or
 // skip pattern, or `--test-only`, in any spelling Node takes, as an argument or anywhere in `NODE_OPTIONS`): then its
 // line says the selection matched no test in it. A selection's spelling given as another option's value, or joined by
-// a stray `"` or `\` in `NODE_OPTIONS`, reads as a selection too. There `test-file-counts.mjs` counts, and names a test in flight in that reporter's place.
+// a stray `"` or `\` in `NODE_OPTIONS`, reads as a selection too. A selection the filter does not read (from
+// `--config-file`, from an `--env-file` given after the filter, or `--experimental-test-tag-filter`) fails the run; one
+// in the environment must be in the filter's own. The per-file counts, and with them this check, need Node's default
+// process isolation (under `--test-isolation=none` a passing test counts as none), and a watch run is not checked per
+// cycle. There `test-file-counts.mjs` counts, and names a test in flight in that reporter's place.
 const countsFolder =
   fullSuite || fullOutput ? null : mkdtempSync(join(tmpdir(), "test-file-counts-"));
 const countsFile = countsFolder === null ? null : join(countsFolder, "counts.json");
