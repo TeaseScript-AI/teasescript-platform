@@ -106,8 +106,11 @@ test("the counted citations are counted in comments only", () => {
 
 test("a TABLE revision or section, wrapped or not, is no counted form: the text check finds it", () => {
   assert.deepEqual(
-    citationCounts("a.ts", `/* TABLE r4.1, r4.2 and F19 (r4.3), TABLE B1, TABLE\n * § 3 */\n`),
-    { "bare r4.N": 3, "other TABLE": 1 },
+    citationCounts(
+      "a.ts",
+      `/* TABLE B1 here\n * and more\n * TABLE r4.1, TABLE B1, TABLE\n * § 3 */\n`,
+    ),
+    { "bare r4.N": 1, "other TABLE": 1 },
   );
 });
 
@@ -146,11 +149,24 @@ test("a line naming TABLE and then r4 or § is found in any file's text, wrapped
       [2, "TABLE B1, see TABLE"],
     ],
   );
-  // other ids, a longer revision number or word, a revision before the name, words after a wrapped name, a blank line
+  // the second final's escapes: markup around a name at a line's end, an entity before the revision on the next
+  assert.deepEqual(
+    found(
+      "docs/e.md",
+      "<strong>TABLE</strong>\n<strong>r4.5</strong>\nSee TABLE\n&nbsp;r4.5 and TABLE (see\nr4.1)\n",
+    ),
+    [
+      [1, "TABLE</strong>"],
+      [3, "TABLE"],
+      [4, "TABLE (see"],
+    ],
+  );
+  // outside the rule: other ids, a longer revision number or word, another letter case, a revision before the name,
+  // a revision two lines on
   assert.deepEqual(
     found(
       "docs/b.md",
-      "TABLE B1, TABLE F18 and TABLE r40 or xr4.1\nTABLEr4.1 and TABLE² r4.1\nr4.1 before TABLE\nTABLE (see\nr4.1)\nTABLE\n\nr4.1\n",
+      "TABLE B1, TABLE F18 and TABLE r40 or xr4.1\n\nTABLEr4.1, TABLES r4.1, TABLE² r4.1\n\ntable r4.1, Table §2, TABLE R4.1\n\nr4.1 before TABLE\n\nTABLE (see\nthe row\nr4.1)\n",
     ),
     [],
   );
