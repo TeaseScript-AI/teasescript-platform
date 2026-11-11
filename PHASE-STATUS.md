@@ -66,7 +66,8 @@ accept syntax, architecture, or implementation details.
   in two steps under the question: a photo taken in a viewfinder the player opens, or an image file chosen or dropped
   onto the composer, becomes a preview on the Stage, and "Use image" answers with it, stored like a photo. Recording APIs and the advanced package media API remain
   deferred.
-- **Player:** the POC Player is the Vue implementation under `player/vue/src/` (#418), served on `/player/`. It uses
+- **Player:** the POC Player is the Vue implementation under `player/vue/src/` (#418), served on `/player/`. Its engine
+  runs in a module Worker (#1144). It uses
   Vue/Vite, Tailwind CSS 4, repository-owned shadcn-vue/Reka primitives, and TanStack Vue Virtual as the transcript
   owner. A framework-independent adapter connects it to the implemented transcript, foreground-interaction, pacing,
   time-observation, runtime timer, checkpoint, and restore slice, including typed message markup with controlled links;
