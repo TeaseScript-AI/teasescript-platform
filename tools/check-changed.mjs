@@ -10,7 +10,7 @@ import {
   symlinkSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { costlyTestSeconds } from "./costly-test-files.mjs";
 import { isSuiteTestPath, isTypeCoreTestFile } from "./test-shards.mjs";
 
@@ -39,10 +39,11 @@ import { isSuiteTestPath, isTypeCoreTestFile } from "./test-shards.mjs";
 // prune` and the temporary folder's cleanup.
 //
 // Without `node_modules`, which it never installs, it links main's: that of the checkout `TEASESCRIPT_MAIN` names
-// (unset or empty, `/opt/teasescript-agents/teasescript-main/current`), as `linkMainNodeModules` says.
+// (unset or empty, `/opt/teasescript-agents/teasescript-main/current`), as `linkMainNodeModules` says. It runs no
+// check with a `node_modules` that does not install the checked tree's `package-lock.json` (`notInstalled`).
 //
 // Exit status: 0 when every check passed, 1 when one failed, 2 when the checks cannot run (no base, a merge conflict,
-// a leftover it may not remove, or no `node_modules` it can link).
+// a leftover it may not remove, no `node_modules` it can link, or one that does not install the lockfile).
 
 /** The projects a changed path can belong to, each with the npm scripts or commands that check it. */
 export const PROJECTS = {
@@ -173,9 +174,10 @@ export const MAIN_CHECKOUT = "/opt/teasescript-agents/teasescript-main/current";
 
 /**
  * Links main's `node_modules` into `cwd` and says what it linked: the `node_modules` folder of the checkout
- * `TEASESCRIPT_MAIN` names in `env` (relative to `cwd`; unset or empty, `fallback`), as the system opens it. A link
- * already there whose target is gone (`ENOENT`, `ENOTDIR`) it replaces. Anything else there, or no such folder, it
- * refuses with why and the two fixes, and leaves as it is.
+ * `TEASESCRIPT_MAIN` names in `env` (relative to `cwd`; unset or empty, `fallback`). The link holds that path as named,
+ * which the system opens through any link in it at each use, so a link to the default follows `current` from slot to
+ * slot as teasescript-main's refresh switches it. A link already there whose target is gone (`ENOENT`, `ENOTDIR`) it
+ * replaces. Anything else there, or no such folder, it refuses with why and the two fixes, and leaves as it is.
  */
 export function linkMainNodeModules(env, cwd, fallback = MAIN_CHECKOUT) {
   const main = env.TEASESCRIPT_MAIN || fallback;
@@ -198,9 +200,9 @@ export function linkMainNodeModules(env, cwd, fallback = MAIN_CHECKOUT) {
     if (!gone)
       refuse("node_modules is there but is no link whose target is gone, so it is left as it is");
   }
-  let source;
+  // (concatenated, not joined: `join` would drop a `..` after a link that the system follows first)
+  const source = `${isAbsolute(main) ? "" : `${cwd}/`}${main}/node_modules`;
   try {
-    source = realpathSync.native(`${isAbsolute(main) ? "" : `${cwd}/`}${main}/node_modules`);
     if (!statSync(source).isDirectory()) throw Object.assign(new Error(), { code: "not a folder" });
   } catch (error) {
     refuse(`${main} has no node_modules folder (${error.code})`);
@@ -208,6 +210,57 @@ export function linkMainNodeModules(env, cwd, fallback = MAIN_CHECKOUT) {
   if (there !== null) rmSync(target);
   symlinkSync(source, target);
   return `${there === null ? "linked" : "replaced a stale link with"} node_modules from ${source}`;
+}
+
+/**
+ * The packages the lockfile `lock` names that the install `installed` (its `node_modules/.package-lock.json`, which
+ * npm writes at each install) does not hold as the lockfile names them, each as `<path> <version> (<what is there>)`:
+ * an entry missing, unless `optional` (a package for another platform), or with another version, `resolved` or
+ * `integrity`. A lockfile without `packages` (npm's lockfile versions 2 and 3 have it) cannot be compared: it throws.
+ */
+export function notInstalled(lock, installed) {
+  if (typeof lock.packages !== "object" || lock.packages === null)
+    throw new Error("package-lock.json has no `packages` to compare node_modules with");
+  const differences = [];
+  for (const [path, wanted] of Object.entries(lock.packages)) {
+    if (path === "") continue;
+    const there = installed.packages?.[path];
+    if (there === undefined) {
+      if (!wanted.optional) differences.push(`${path} ${wanted.version} (not installed)`);
+    } else if (["version", "resolved", "integrity"].some((key) => there[key] !== wanted[key]))
+      differences.push(`${path} ${wanted.version} (installed: ${there.version})`);
+  }
+  return differences;
+}
+
+/**
+ * Refuses a `node_modules` in the working folder that does not install its `package-lock.json` (#2087), naming the
+ * first differences. A folder without a lockfile has nothing to compare.
+ */
+function requireInstalledLockfile() {
+  if (!existsSync("package-lock.json")) return;
+  const refuse = (what) =>
+    cannotRun(
+      `node_modules (${realpathSync("node_modules")}) does not install package-lock.json: ${what}. ` +
+        "When the lockfile is main's, wait for teasescript-main's refresh (a link to a slot, not `current`, never " +
+        "gets it: remove the link, and check-changed links `current`); otherwise run the checks in the queue",
+    );
+  if (!existsSync("node_modules/.package-lock.json"))
+    refuse("it has no .package-lock.json, which npm writes at each install");
+  let differences;
+  try {
+    differences = notInstalled(
+      JSON.parse(readFileSync("package-lock.json", "utf8")),
+      JSON.parse(readFileSync("node_modules/.package-lock.json", "utf8")),
+    );
+  } catch (error) {
+    cannotRun(error.message);
+  }
+  if (differences.length > 0)
+    refuse(
+      differences.slice(0, 5).join(", ") +
+        (differences.length > 5 ? `, and ${differences.length - 5} more` : ""),
+    );
 }
 
 /**
@@ -341,14 +394,7 @@ async function check(cleanups) {
     } catch {
       cannotRun(`no merge-base of HEAD and ${ref}: fetch it, or name one with --base`);
     }
-  const linkedLock = join(dirname(realpathSync("node_modules")), "package-lock.json");
-  if (
-    existsSync(linkedLock) &&
-    readFileSync(linkedLock, "utf8") !== readFileSync("package-lock.json", "utf8")
-  )
-    process.stderr.write(
-      `check-changed: warning: node_modules was installed from ${linkedLock}, another lockfile\n`,
-    );
+  requireInstalledLockfile();
 
   const changed = [
     ...git("diff", "--name-only", "--diff-filter=d", mergeBase).split("\n"),
