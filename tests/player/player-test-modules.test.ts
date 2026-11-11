@@ -495,7 +495,10 @@ for (const name of ["node_modules", "dist", "other", "with\\backslash"])
           writeFileSync(join(root, path, "inner.ts"), "inner");
         } else symlinkSync(join(root, "targets/folder"), join(root, path), "junction");
         const stamp = walkSources(root);
-        const leftOut = placement === "the root" && name !== "other" && kind.startsWith("folder");
+        const leftOut =
+          placement === "the root" &&
+          (name === "node_modules" || name === "dist") &&
+          kind.startsWith("folder");
         const expected = leftOut ? [] : kind === "folder" ? [`${path}/inner.ts`] : [path];
         assert.deepEqual(
           [...stamp.keys()].filter((key) => key === path || key.startsWith(`${path}/`)),
