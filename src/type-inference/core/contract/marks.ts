@@ -98,8 +98,8 @@ export function marksNothing(contract: Contract, holder: Holder | null): boolean
 
 export function newHolder(contract: Contract, id: string): Holder {
   contract.keepText(id.length);
-  contract.facts.markNodes += 1;
   amend(contract.facts);
+  contract.facts.markNodes += 1;
   const holder: Holder = {
     id,
     reads: [],
@@ -125,13 +125,13 @@ function refer(
   if (holder.refSeen.has(key)) return;
   contract.keepText(key.length);
   holder.refSeen.add(key);
-  contract.facts.markNodes += 1;
   amend(contract.facts);
+  contract.facts.markNodes += 1;
   const list = holder.refsAt.get(where);
   if (list === undefined) holder.refsAt.set(where, [{ to, shift }]);
   else {
-    list.push({ to, shift });
     amend(list);
+    list.push({ to, shift });
   }
 }
 
@@ -284,8 +284,8 @@ function readsAt(contract: Contract, reads: Holder["reads"], rest: readonly stri
   const byBase = readGroups(contract, reads);
   const visit = (group: ReadGroup, tested: Key): boolean => {
     program.work.charge("eventSteps");
-    contract.facts.markVisits += 1;
     amend(contract.facts);
+    contract.facts.markVisits += 1;
     return groupHit(contract, group, tested);
   };
   for (let length = 1; length <= rest.length; length += 1) {
@@ -327,8 +327,8 @@ function readsAt(contract: Contract, reads: Holder["reads"], rest: readonly stri
  */
 export function collectMarks(contract: Contract): void {
   if (contract.collected) return;
-  contract.collected = true;
   amend(contract);
+  contract.collected = true;
   // (a key's lane asked meanwhile would read the marks unfinished: `keyLane`)
   contract.building += 1;
   try {
@@ -358,10 +358,10 @@ function collectAll(contract: Contract): void {
     const holder = contract.identityOf(d.value).holder;
     if (holder === null || holder.readSeen.has(d.value)) continue;
     holder.readSeen.add(d.value);
-    contract.facts.markNodes += 1;
     amend(contract.facts);
-    holder.reads.push({ value: d.value, path: [] });
+    contract.facts.markNodes += 1;
     amend(holder.reads);
+    holder.reads.push({ value: d.value, path: [] });
   }
   for (const value of program.hasOf.keys()) {
     program.work.charge("invSteps");
@@ -415,8 +415,8 @@ export function depthOf(contract: Contract, holder: Holder): number {
     depth: number;
   }[] = [];
   const open = (each: Holder): void => {
-    each.depth = Infinity;
     amend(each);
+    each.depth = Infinity;
     let depth = guards.testedLength();
     for (const at of each.guarded) depth = Math.max(depth, contract.pathDepths[at]!);
     stack.push({
@@ -532,8 +532,8 @@ export function marksAt(contract: Contract, holder: Holder | null, asked: Rest):
     if (frame.index < frame.references.length) {
       const reference = frame.references[frame.index++]!;
       work.charge("eventSteps");
-      contract.facts.markVisits += 1;
       amend(contract.facts);
+      contract.facts.markVisits += 1;
       if (!frame.hit)
         answer = ask(reference.to, joinSteps(reference.shift, frame.rest.slice(frame.length)));
       continue;
@@ -781,9 +781,9 @@ function compiled(contract: Contract, automaton: MarkAutomaton, holder: Holder):
 /** A holder's own automaton, the holders it refers to compiled. */
 function compile(contract: Contract, automaton: MarkAutomaton, holder: Holder): number {
   const { program, guards } = contract.pass;
-  const root = newState(contract, automaton);
   // (a compile fills the automaton in place: its states, their steps, accepting flags and ε-moves, its prefix visits)
   amend(automaton);
+  const root = newState(contract, automaton);
   // its guarded literal paths
   for (const at of holder.guarded) {
     program.work.charge("eventSteps");
@@ -940,8 +940,8 @@ function markFirsts(contract: Contract, holder: Holder): ReadonlySet<string> | n
     if (!opened.has(top)) {
       opened.add(top);
       // (a cycle back to it may depend on any step)
-      top.firsts = null;
       amend(top);
+      top.firsts = null;
       for (const reference of top.refsAt.get(0) ?? [])
         if (reference.shift.length === 0 && reference.to.firsts === undefined)
           stack.push(reference.to);

@@ -117,10 +117,20 @@ export function pathSteps(contract: Contract, id: number): string[] {
 /** The id of the path one `step` below the path `parent`, made (and charged, its step and slot) when first asked. */
 export function pathAt(contract: Contract, parent: number, step: string): number {
   let steps = contract.pathChildren[parent];
-  if (steps === undefined)
+  if (steps === undefined) {
+    amend(contract.pathChildren);
     contract.pathChildren[parent] = steps = Retained.map("Contract.pathChildren[]");
+  }
   const known = steps.get(step);
   if (known !== undefined) return known;
+  // (the arena's arrays, each grown by the path below)
+  amend(contract.pathParents);
+  amend(contract.pathDepths);
+  amend(contract.pathLastSteps);
+  amend(contract.pathFirstSteps);
+  amend(contract.pathMembers);
+  amend(contract.pathProperties);
+  amend(contract.pathPositions);
   contract.keepText(step.length);
   contract.keep(1);
   const id = contract.pathParents.length;
@@ -132,7 +142,6 @@ export function pathAt(contract: Contract, parent: number, step: string): number
   contract.pathMembers.push(memberStep([step], 0) === 0 ? id : contract.pathMembers[parent]!);
   contract.pathProperties.push(contract.pathProperties[parent]! && propertyOnly(step));
   contract.pathPositions.push(contract.pathPositions[parent]! && positionStep(step));
-  amend(contract);
   steps.set(step, id);
   return id;
 }
@@ -295,6 +304,7 @@ export function heldBelow(contract: Contract, node: IndexNode): NodeBelow {
     const own = top.node;
     const sum = (count: (below: NodeBelow) => number): number =>
       top.children.reduce((total, child) => total + count(child.below!), 0);
+    amend(top.node);
     top.node.below = {
       holds: ownsAny(own) || top.children.some((child) => child.below!.holds),
       reference: own.reference || top.children.some((child) => child.below!.reference),
@@ -310,7 +320,6 @@ export function heldBelow(contract: Contract, node: IndexNode): NodeBelow {
         own.empty ||
         top.children.some((child) => child.below!.beside),
     };
-    amend(top.node);
   }
   return node.below!;
 }
@@ -446,8 +455,8 @@ export function* indexWork(contract: Contract, literal: PlaceId): IdentityWork {
           if (node.seen.has(key)) continue;
           contract.keep(1);
           node.seen.add(key);
-          contract.facts.literalEntries += 1;
           amend(contract.facts);
+          contract.facts.literalEntries += 1;
           node.firstOther ??= rank;
           put(node.others, { g, value });
           continue;
@@ -468,8 +477,8 @@ export function* indexWork(contract: Contract, literal: PlaceId): IdentityWork {
         );
         const read = node.readIds.get(id);
         if (read === undefined) {
-          contract.facts.literalEntries += 1;
           amend(contract.facts);
+          contract.facts.literalEntries += 1;
           contract.keep(2);
           const entry: ReadEntry = {
             g,
@@ -512,8 +521,8 @@ export function* indexWork(contract: Contract, literal: PlaceId): IdentityWork {
       if (term.kind === "object") {
         if (node.objects === null) {
           contract.keep(4);
-          node.objects = { list: [], count: Retained.map("LiteralNode.objects.count") };
           amend(node);
+          node.objects = { list: [], count: Retained.map("LiteralNode.objects.count") };
         }
         // its property names, and the property its button value reads, decided once per record (V30 §19)
         const names = new Set<string>();
@@ -522,8 +531,8 @@ export function* indexWork(contract: Contract, literal: PlaceId): IdentityWork {
         // (its names and their entry, its counts, its properties copied, a task per property)
         contract.keep(2 + 4 * (term.properties?.length ?? 0));
         for (const property of term.properties ?? []) {
-          contract.facts.selectionVisits += 1;
           amend(contract.facts);
+          contract.facts.selectionVisits += 1;
           names.add(contract.kept(propertyStep(property.name)));
           if (property.name === "value") value ??= property;
           else if (property.name === "text") text ??= property;
@@ -756,6 +765,7 @@ export function propertyLack(
   }
   contract.keep(3);
   const lack = { writer, at };
+  amend(index.lacking);
   index.lacking.set(path, lack);
   return lack;
 }
@@ -781,6 +791,7 @@ export function lackingAt(
         break;
       }
     }
+  amend(index.lacking);
   index.lacking.set(key, token);
   return token;
 }

@@ -28,8 +28,8 @@ import { amend } from "../retained/retained.js";
 
 /** A position's or an occurrence answer's demand, made since the last stop, which the next stop forgets (`stop`). */
 export function remember(contract: Contract, demand: string): void {
+  amend(contract.occurrences);
   contract.occurrences.push(demand);
-  amend(contract);
 }
 
 /**

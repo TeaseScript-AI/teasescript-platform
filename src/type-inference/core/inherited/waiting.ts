@@ -104,8 +104,8 @@ export function join(admission: Admission, reader: string, first: Key, second: K
   const { contract } = admission.pass;
   const [a, b] = [canonicalKey(contract, first), canonicalKey(contract, second)];
   link(admission, a, b);
-  admission.pass.receivingDomain.joins.push({ reader, a, b });
   amend(admission.pass.receivingDomain);
+  admission.pass.receivingDomain.joins.push({ reader, a, b });
 }
 
 /**
@@ -115,6 +115,7 @@ export function join(admission: Admission, reader: string, first: Key, second: K
  */
 export function settleCycles(admission: Admission): void {
   const { receivingDomain, solver } = admission.pass;
+  amend(receivingDomain);
   receivingDomain.joins = receivingDomain.joins.filter(
     ({ reader }) => solver.answer(reader) !== undefined,
   );
@@ -122,7 +123,6 @@ export function settleCycles(admission: Admission): void {
   admission.cycleSizes.clear();
   for (const { a, b } of receivingDomain.joins) link(admission, a, b);
   receivingDomain.joinsSettled = solver.forgets;
-  amend(receivingDomain);
 }
 
 /** `settleCycles` where the solver forgot answers since `cycles` was last made, between two runs. */

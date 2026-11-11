@@ -572,9 +572,14 @@ export class Contract {
   }
 
   #stopAt(place: PlaceId, path: readonly string[] | number): void {
+    // (its count of stops and the occurrences below change in place)
+    amend(this);
     const paths = this.#stopped.get(place);
     if (paths === undefined) this.#stopped.set(place, [path]);
-    else paths.push(path);
+    else {
+      amend(paths);
+      paths.push(path);
+    }
     this.#stoppedCount += 1;
     this.#belowStop.delete(place);
     // (an asked key at or below the stop: a text's by its steps; a cursor's, of a cursor stop, by climbing to its depth,
@@ -600,7 +605,6 @@ export class Contract {
     );
     this.pass.solver.forget(this.occurrences);
     this.occurrences.length = 0;
-    amend(this);
   }
 
   /** The running demand asked whether `key` stopped: kept for `stop`, each new ask counted apart from the allowance. */
@@ -637,8 +641,8 @@ export class Contract {
     if (!this.#deciding || this.targetsDecide || everyRecordKept()) return;
     const open = Retained.map<PlaceId, number>("Contract.#open");
     for (const { root } of groups) open.set(root, (open.get(root) ?? 0) + 1);
-    this.#open = open;
     amend(this);
+    this.#open = open;
     for (const place of [...this.#askers.keys()]) if (!open.has(place)) this.#askers.delete(place);
     if (open.size === 0) this.#close();
   }
@@ -671,8 +675,8 @@ export class Contract {
   /** Nothing a stop forgets by is kept from now on: each asker, each demand's readers, the occurrences (#1599). */
   #close(): void {
     if (!this.#deciding) return;
-    this.#deciding = false;
     amend(this);
+    this.#deciding = false;
     this.#askers.clear();
     this.occurrences.length = 0;
     this.pass.solver.closeForgetting();
@@ -1329,9 +1333,9 @@ export class Contract {
       const shape = this.joined(parts, ";");
       const name = this.#nodeShapes.get(shape) ?? `n${this.#nodeShapes.size}`;
       this.#nodeShapes.set(shape, name);
+      amend(node);
       node.shapes ??= {};
       node.shapes[kind] = { name, plain, marked };
-      amend(node);
       const parent = stack.at(-1);
       if (parent !== undefined) parent.at += 1;
     }

@@ -177,8 +177,8 @@ function layerOf(
     under,
     front,
   };
-  contract.layersById.push(layer);
   amend(contract.layersById);
+  contract.layersById.push(layer);
   return layer;
 }
 
@@ -225,8 +225,8 @@ function ownPaths(contract: Contract, sub: Key): ReadonlySet<string> {
     const subs = contract.subsByPath.get(path);
     if (subs === undefined) contract.subsByPath.set(path, new Set([sub]));
     else {
-      subs.add(sub);
       amend(subs);
+      subs.add(sub);
     }
   }
   contract.subPaths.set(sub, paths);
@@ -351,13 +351,12 @@ function madePathId(path: ReadPath): number | undefined {
 export function atPath(contract: Contract, layer: SubLayer, path: number): LayerPath {
   let at = layer.paths.get(path);
   if (at === undefined) {
+    amend(layer.paths);
     layer.paths.set(path, (at = {}));
     contract.keep(1);
-    contract.facts.supportEdges += 1;
     amend(contract.facts);
+    contract.facts.supportEdges += 1;
   }
-  // (its one way in: the caller fills the layer's answers there in place, `support` and `demand`)
-  amend(layer);
   return at;
 }
 
@@ -403,7 +402,9 @@ function layerSupport(
     }
     for (const child of childrenAt(contract, layer, ref, path))
       root = union(contract, root, child.paths.get(path)!.support ?? null);
-    atPath(contract, layer, path).support = root;
+    const at = atPath(contract, layer, path);
+    amend(at);
+    at.support = root;
   }
   return top.paths.get(path)!.support ?? null;
 }
@@ -745,8 +746,8 @@ export function relevantSubs(
       contract.pass.program.work.charge("invSteps", defs.size);
       for (const d of defs) own.add(d);
     }
-  contract.facts.listedSources += found.size;
   amend(contract.facts);
+  contract.facts.listedSources += found.size;
   return [...found]
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
     .map(([key, defs]) => ({ key, defs }));

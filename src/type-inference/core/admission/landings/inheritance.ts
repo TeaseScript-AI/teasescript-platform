@@ -29,7 +29,7 @@ import type {
   WholeCycle,
 } from "../model.js";
 import { levelsOf } from "../permitted.js";
-import { Retained } from "../../retained/retained.js";
+import { amend, Retained } from "../../retained/retained.js";
 
 // A4 through copies' landings: where copies land in each place, the copy forest places answer through, cycles of copies.
 
@@ -825,6 +825,8 @@ function keepListing(admission: Admission, listing: Listing): void {
     admission.listings.set(listing.frame.place, (node = { listing: null, next: new Map() }));
     madeNode();
   }
+  // (the place's trie, grown and its node's listing set in place below)
+  amend(node);
   for (const step of listing.frame.below) {
     happened("publish");
     debit(work, "publish");

@@ -236,8 +236,8 @@ function firstDifference(contract: Contract, a: string, b: string): number {
 /** A node made: its id, counted with what it keeps (a branch its two children). */
 function made(contract: Contract, edges: number): number {
   contract.keep(1 + edges);
-  contract.facts.supportEdges += edges;
   amend(contract.facts);
+  contract.facts.supportEdges += edges;
   return contract.facts.supportNodes++;
 }
 
@@ -372,8 +372,8 @@ export function union(
       contract.supportUnions.set(low.id, (byHigh = Retained.map("Contract.supportUnions[]")));
     byHigh.set(high.id, node);
     contract.keep(1);
-    contract.facts.supportEdges += 1;
     amend(contract.facts);
+    contract.facts.supportEdges += 1;
     results.push(node);
   };
   for (let task = tasks.pop(); task !== undefined; task = tasks.pop()) {

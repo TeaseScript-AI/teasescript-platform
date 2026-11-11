@@ -196,6 +196,8 @@ function indexed(pass: CorePass, state: PlusIndex): Indexed {
     if (!key.endsWith("|")) below.add(keyPlace(key));
   }
   contract.keep(below.size);
+  // (the state made at an earlier ask, its index filled here)
+  amend(state);
   state.indexed = {
     below,
     shapes: Retained.map("PlusIndex.shapes"),
@@ -204,8 +206,6 @@ function indexed(pass: CorePass, state: PlusIndex): Indexed {
     bindingsHolding: Retained.map("PlusIndex.bindingsHolding"),
     runs: Retained.map("PlusIndex.runs"),
   };
-  // (the state made at an earlier ask, its index filled here)
-  amend(state);
   return state.indexed;
 }
 
@@ -332,6 +332,7 @@ function holdersOf(pass: CorePass, ix: Indexed, run: Run, step: string): Readonl
   }
   contract.keep(2 + found.length);
   const holding = new Set(found);
+  amend(run.holding);
   run.holding.set(step, holding);
   return holding;
 }
@@ -399,6 +400,7 @@ function bindingProof(pass: CorePass, ix: Indexed, binding: PlaceId): Proof | nu
       for (const name of shape.names) {
         let list = ix.bindingsHolding.get(name);
         if (list === undefined) ix.bindingsHolding.set(name, (list = []));
+        amend(list);
         list.push(proof);
       }
     }

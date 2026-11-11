@@ -437,8 +437,8 @@ export function* selectedObject(
   below: boolean,
 ): Work<readonly Item[]> {
   contract.pass.program.work.charge("invSteps");
-  contract.facts.selectionVisits += 1;
   amend(contract.facts);
+  contract.facts.selectionVisits += 1;
   const { selected } = object;
   if (object.term.properties === null ? !byValue : (selected?.name === "value") !== byValue)
     return [];

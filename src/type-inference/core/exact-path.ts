@@ -773,6 +773,7 @@ export class ExactPath {
         }
       }
     }
+    amend(this);
     this.#copies = {
       links,
       at,
@@ -791,7 +792,6 @@ export class ExactPath {
       anchorsBuilt: Retained.map("ExactPath.copies.anchorsBuilt"),
       marksBuilt: Retained.map("ExactPath.copies.marksBuilt"),
     };
-    amend(this);
     return this.#copies;
   }
 
@@ -1009,6 +1009,7 @@ export class ExactPath {
       }
       this.#exitBudget.set(key, (budget = { exits, asked: 0 }));
     }
+    amend(budget);
     budget.asked += callables.size;
     if (budget.asked <= budget.exits) return undefined;
     this.#exitBudget.delete(key);
@@ -1083,8 +1084,8 @@ export class ExactPath {
         if (list === undefined) byCallable.set(at, [link]);
         else list.push(link);
       }
-      this.#bySource = bySource;
       amend(this);
+      this.#bySource = bySource;
     }
     const links = this.#bySource.get(source)?.get(callable);
     if (links === undefined) return null;
@@ -1094,6 +1095,7 @@ export class ExactPath {
     );
     let byCallable = this.#sourceSpans.get(source);
     if (byCallable === undefined) this.#sourceSpans.set(source, (byCallable = new Map()));
+    amend(byCallable);
     byCallable.set(callable, nested);
     return nested;
   }

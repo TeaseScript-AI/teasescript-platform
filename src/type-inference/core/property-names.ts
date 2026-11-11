@@ -488,8 +488,8 @@ function remember(
   listing: Listing,
 ): Listing {
   const at = byRest(memo, of, rest, true)!;
-  at.listing = listing;
   amend(at);
+  at.listing = listing;
   return listing;
 }
 
@@ -542,9 +542,9 @@ function classify(
   const pumps = take.pumps(contribution.place, contribution.path, rest.length);
   take.classified.set(sub, { source, pumps });
   if (contribution.steps === null && !pumps) {
+    amend(contribution);
     contribution.steps = followersOf(pass, contribution.place, contribution.path);
     contribution.followed = true;
-    amend(contribution);
   }
   const { names, steps } = contribution;
   const adds = (step: Planned | Made): boolean => {
@@ -952,7 +952,10 @@ export function propertyNames(
     // (or the parts of its step a listing's classification made, each taken once in place of its own: `Contribution`)
     const prepaid = "key" in task ? (listings()?.contributions.get(id) ?? null) : null;
     const walked = prepaid?.walked === true;
-    if (walked) prepaid!.walked = false;
+    if (walked) {
+      amend(prepaid!);
+      prepaid!.walked = false;
+    }
     const walk = "key" in task && !walked ? keptKeyWalk(contract, task.key) : null;
     const taken: readonly string[] = walked
       ? prepaid!.path
@@ -1081,11 +1084,13 @@ export function propertyNames(
     // (its names, and where it follows its listings and tasks: a part a listing's classification made is taken once in
     // place of its own)
     if (prepaid?.named === true) {
+      amend(prepaid);
       prepaid.named = false;
       for (const found of prepaid.names) names.add(found);
     } else keyNames(pass, task.key, (found) => names.add(found));
     if (!follows) continue;
     if (prepaid?.followed === true && prepaid.steps !== null) {
+      amend(prepaid);
       prepaid.followed = false;
       for (const step of prepaid.steps)
         if ("id" in step)

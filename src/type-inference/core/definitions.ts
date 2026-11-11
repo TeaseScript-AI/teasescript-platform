@@ -133,8 +133,8 @@ export class KeyTrie {
   /** The trie, built on its first question. */
   #rooted(): Map<PlaceId, TrieNode> {
     if (this.#roots !== null) return this.#roots;
-    this.#roots = this.work.shared(() => this.#build());
     amend(this);
+    this.#roots = this.work.shared(() => this.#build());
     return this.#roots;
   }
 

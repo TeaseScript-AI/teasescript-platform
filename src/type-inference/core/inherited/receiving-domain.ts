@@ -37,6 +37,7 @@ export class ReceivingDomain {
    */
   public reset(): void {
     const { cycles, cycleSizes, inheritedOwn, joins, joinsSettled } = this;
+    amend(this);
     Object.assign(this, new ReceivingDomain(), {
       cycles,
       cycleSizes,
@@ -44,7 +45,6 @@ export class ReceivingDomain {
       joins,
       joinsSettled,
     });
-    amend(this);
   }
 
   /**

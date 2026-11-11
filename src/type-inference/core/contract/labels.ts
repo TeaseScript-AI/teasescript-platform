@@ -79,8 +79,8 @@ function shown(contract: Contract, label: Label): string {
   }
   const parts = partsOf(label);
   convert(contract, parts.length, 0, 1);
-  label.text = keptText(contract.work, parts);
   amend(label);
+  label.text = keptText(contract.work, parts);
   return label.text;
 }
 

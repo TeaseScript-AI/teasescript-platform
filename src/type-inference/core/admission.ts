@@ -240,8 +240,8 @@ export class Admission {
     return this.pass.receivingDomain.reach;
   }
   set reach(value: number) {
-    this.pass.receivingDomain.reach = value;
     amend(this.pass.receivingDomain);
+    this.pass.receivingDomain.reach = value;
   }
   get termLevels(): ReceivingDomain["termLevels"] {
     return this.pass.receivingDomain.termLevels;
@@ -385,8 +385,8 @@ export class Admission {
     return this.pass.receivingDomain.inherits;
   }
   set inherits(value: Inheritance | null) {
-    this.pass.receivingDomain.inherits = value;
     amend(this.pass.receivingDomain);
+    this.pass.receivingDomain.inherits = value;
   }
   get landedPaths(): ReceivingDomain["landedPaths"] {
     return this.pass.receivingDomain.landedPaths;
@@ -403,8 +403,8 @@ export class Admission {
     return this.pass.receivingDomain.forest;
   }
   set forest(value: CopyForest | null) {
-    this.pass.receivingDomain.forest = value;
     amend(this.pass.receivingDomain);
+    this.pass.receivingDomain.forest = value;
   }
   /** Per class, its eligible member per tested key asked while the groups are made (`eligibleAt`). */
   readonly eligibleWhileGrouping = new Map<Definition, Map<string, Definition | null>>();
@@ -419,8 +419,8 @@ export class Admission {
     return this.pass.receivingDomain.cycleMembers;
   }
   set cycleMembers(value: Map<number, PlaceId[]> | null) {
-    this.pass.receivingDomain.cycleMembers = value;
     amend(this.pass.receivingDomain);
+    this.pass.receivingDomain.cycleMembers = value;
   }
   get seedIndex(): ReceivingDomain["seedIndex"] {
     return this.pass.receivingDomain.seedIndex;
@@ -519,8 +519,12 @@ export class Admission {
             this.a4Keys.add(keptKey(this.work, d.place, at));
             this.a4Places.set(d.place, null);
           }
-          if (term !== null) this.a4Copies.push({ place: d.place, path: at, term });
-          else
+          // (each array marked at its push: the domain's `reset` shares them with the fresh domain it was made from)
+          if (term !== null) {
+            amend(this.a4Copies);
+            this.a4Copies.push({ place: d.place, path: at, term });
+          } else {
+            amend(this.a4Inherits);
             this.a4Inherits.push({
               place: d.place,
               path: at,
@@ -529,14 +533,12 @@ export class Admission {
               store: d,
               cellsLive,
             });
+          }
         }
       }
     for (const { path, term } of this.a4Copies)
       this.reach = Math.max(this.reach, path.length + levelsOf(this, term).length - 1);
     for (const { path } of this.a4Inherits) this.reach += path.length;
-    // (the arrays themselves: the domain's `reset` shares them with the fresh domain it was made from)
-    amend(this.a4Copies);
-    amend(this.a4Inherits);
   }
 
   /**

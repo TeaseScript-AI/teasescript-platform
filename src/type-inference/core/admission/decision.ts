@@ -302,8 +302,8 @@ function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): De
       work.charge("checks");
       const items = admission.run(contract.entryAt(entry, rest));
       if (holders !== null && holdsNothing(items)) {
-        holders.wasted += 1;
         amend(holders);
+        holders.wasted += 1;
       }
       if (offends(items)) takeAll(entry.ds);
     }
@@ -342,8 +342,8 @@ function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): De
     (a, b) => admission.sourceOrder(a.d) - admission.sourceOrder(b.d),
   );
   work.charge("checks", ordered.length + sortCost(ordered.length));
-  contract.facts.decidedPaths += 1;
   amend(contract.facts);
+  contract.facts.decidedPaths += 1;
   return {
     root,
     path,

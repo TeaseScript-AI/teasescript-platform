@@ -206,8 +206,8 @@ export function* propertyItems(
   let index = contract.propertyIndexes.get(stores);
   if (index === undefined || !("holders" in index)) {
     // (its first property read: the levels answer it at their own cost, nothing kept for it)
-    levels.reads += 1;
     amend(levels);
+    levels.reads += 1;
     if (levels.reads === 1) return null;
     const groups = sharing() ? groupsAt(contract, asked, levels.base, stepsRest([])) : null;
     const sources = groups ?? stores.list;
@@ -234,6 +234,8 @@ export function* propertyItems(
       contract.keep(2);
       contract.propertyIndexes.set(stores, (index = { names, holding: null, saved: 0 }));
     }
+    // (the index, made at an earlier read or just now, its holding and savings filled in place below)
+    amend(index);
     const cost = index.names + sources.length;
     if (index.holding === null) {
       if (levels.reads * (sources.length - 1) < cost) return null;
@@ -251,8 +253,6 @@ export function* propertyItems(
       index.holding = holding;
     }
     index.saved += sources.length - (index.holding.get(rest.at(0)!) ?? 0);
-    // (the index made at an earlier read, its holding and savings filled here)
-    amend(index);
     if (index.saved < cost) return null;
     // (#1323: with the sharing on every group, F11's earliest lacking named among them as among entries off)
     const shared = groups === null ? null : { groups };
@@ -325,7 +325,10 @@ function holderGroups(
       ? holders.map((source) => source.group!)
       : holderGroups(contract, index, holders, restTo(contract, path, path.length - 1), asked),
   );
-  if (kept) index.folds.set(memoKey, groups);
+  if (kept) {
+    amend(index.folds);
+    index.folds.set(memoKey, groups);
+  }
   return groups;
 }
 

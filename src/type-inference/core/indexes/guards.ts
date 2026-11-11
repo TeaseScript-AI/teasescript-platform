@@ -281,8 +281,8 @@ export class GuardIndex {
   #nestId(nest: Nest): number {
     let id = this.#nestIds.get(nest);
     if (id === undefined) {
-      this.#nestIds.set(nest, (id = ++this.#nestCount));
       amend(this);
+      this.#nestIds.set(nest, (id = ++this.#nestCount));
     }
     return id;
   }
@@ -724,8 +724,8 @@ export class GuardIndex {
       }
       merged.set(place, sorted);
     }
-    this.#byPlace = merged;
     amend(this);
+    this.#byPlace = merged;
     return merged;
   }
 
@@ -793,8 +793,8 @@ export class GuardIndex {
         keys.add(keptKey(this.program.work, keyPlace(tested), path.slice(0, length)));
       }
     }
-    this.#testedRelative = relative;
     amend(this);
+    this.#testedRelative = relative;
     return relative;
   }
 }

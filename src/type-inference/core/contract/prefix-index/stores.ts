@@ -128,10 +128,10 @@ function ringOf(contract: Contract, place: PlaceId): CopyRing | null {
       }
       if (stops.size > 0) {
         ring = { ports: members.reverse(), stops };
+        amend(contract.facts);
         contract.facts.ringComponents += 1;
         contract.facts.ringPorts += members.length;
         contract.facts.ringStops += stops.size;
-        amend(contract.facts);
       }
     }
     for (const member of members) contract.rings.set(member, ring);
@@ -199,8 +199,8 @@ export function* prefixWork(contract: Contract, prefix: CanonicalKey): IdentityW
     const index = f.seen.get(id);
     if (index === undefined) {
       f.seen.set(id, f.out.length);
-      contract.facts.prefixEntries += 1;
       amend(contract.facts);
+      contract.facts.prefixEntries += 1;
       // its marks: its identity's holder; a stored value at a path is that value's holder lifted there
       const holder =
         e.key !== undefined
@@ -250,8 +250,8 @@ export function* prefixWork(contract: Contract, prefix: CanonicalKey): IdentityW
     let defs = f.also.get(layer);
     if (defs === undefined) {
       f.also.set(layer, (defs = new Set()));
-      contract.facts.prefixEntries += 1;
       amend(contract.facts);
+      contract.facts.prefixEntries += 1;
     }
     defs.add(f.d);
   };

@@ -1446,6 +1446,9 @@ function builtSlot(
   const work = contract.pass.program.work;
   // (a slot's build grows the frontier in place, in the run that asks it: its nodes, sets, pending sets and goals)
   amend(frontier);
+  // (and its product's shapes, a frontier of their own, where a build before made them; a build that makes them marks
+  // them as it does)
+  if (frontier.product !== null) amend(frontier.product.shapes);
   const reach = work.shared((): Reach | null => {
     try {
       if (!cyclic(frontier, place)) return null;
@@ -1465,8 +1468,6 @@ function builtSlot(
     }
   });
   frontier.reads.set(slot, reach);
-  // (and its product's shapes, a frontier of their own, where the build has made or grown them)
-  if (frontier.product !== null) amend(frontier.product.shapes);
   return reach === null ? null : slot;
 }
 
@@ -2006,8 +2007,8 @@ function immediateSafe(frontier: Frontier): boolean {
 /** #2005: a node's terms (`TermGoal`), each passed to `then` as found. */
 function termsAt(frontier: Frontier, node: number, then: (node: number) => void): void {
   if (frontier.terms === null) {
-    frontier.terms = { goals: Retained.map("Frontier.terms.goals"), fresh: [], pending: [] };
     amend(frontier);
+    frontier.terms = { goals: Retained.map("Frontier.terms.goals"), fresh: [], pending: [] };
   }
   const terms = frontier.terms;
   let goal = terms.goals.get(node);

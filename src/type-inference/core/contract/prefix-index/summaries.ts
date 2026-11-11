@@ -70,8 +70,9 @@ function layerDemand(contract: Contract, layer: SubLayer, path: number): ProofDe
   const name = joinParts("protoLayer", kind, key, `.${path}`);
   contract.keepText(name.length);
   contract.keep(1);
-  contract.facts.layerDemands += 1;
   amend(contract.facts);
+  contract.facts.layerDemands += 1;
+  amend(at);
   at.demand = {
     key: name,
     kind: "contract",

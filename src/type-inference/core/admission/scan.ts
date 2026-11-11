@@ -217,8 +217,8 @@ export function* scanAt(
     // (#2065: a store holding nothing at the path, which the prefix's index, once made, does not read)
     const holders = scans[best]!.holders;
     if (holders !== null && first === null && holdsNothing(items)) {
-      holders.wasted += 1;
       amend(holders);
+      holders.wasted += 1;
     }
     const definite =
       first === null && items.some((item) => item.tag === "unknown") ? [] : deciding(items);

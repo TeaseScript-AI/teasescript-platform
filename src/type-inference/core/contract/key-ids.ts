@@ -278,8 +278,8 @@ function prefixesOf(contract: Contract, path: number): readonly number[] {
   }
   prefixes.reverse();
   keptArray(contract.work, prefixes);
-  facts.prefixes = prefixes;
   amend(facts);
+  facts.prefixes = prefixes;
   return prefixes;
 }
 
@@ -698,8 +698,8 @@ function textOf(contract: Contract, path: number): string {
   // (a path's text made here alone: no text builder takes a record's steps, `PathSteps`)
   const text = pathText(ownSteps(stepsOfId(contract, keyIdAt(0, path))));
   contract.keepText(text.length);
-  facts.text = text;
   amend(facts);
+  facts.text = text;
   return text;
 }
 
@@ -801,8 +801,8 @@ export function stepsOfId(contract: Contract, id: KeyId, from = 0): PathSteps {
     steps = kept(contract, path, from, made);
   }
   if (from === 0) {
-    facts.steps = steps;
     amend(facts);
+    facts.steps = steps;
   } else
     (facts.suffixes ??= Retained.held(facts, Retained.map("PathFacts.suffixes"))).set(from, steps);
   return steps;
@@ -880,8 +880,8 @@ export class PathSteps {
   /** The id of the path it spells, found once (`spanId`, `prefixId`, `joinedId`). */
   get path(): number {
     if (this.#id === undefined) {
-      this.#id = this.#find();
       amend(this);
+      this.#id = this.#find();
     }
     return this.#id;
   }
@@ -901,11 +901,11 @@ export class PathSteps {
     if (this.#text !== undefined) return this.#text;
     const path = this.path;
     const entry = this.#entry;
-    this.#text = entry?.text ?? textOf(this.#contract, path);
     amend(this);
+    this.#text = entry?.text ?? textOf(this.#contract, path);
     if (entry !== undefined) {
-      entry.text = this.#text;
       amend(entry);
+      entry.text = this.#text;
     }
     return this.#text;
   }
