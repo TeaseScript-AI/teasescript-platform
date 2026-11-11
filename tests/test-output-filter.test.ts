@@ -27,7 +27,15 @@ function runFixtures(
   argumentsIn?: (directory: string) => string[],
 ) {
   const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
-  const environment = { ...process.env };
+  // the filter's own temporary folders, apart from everyone else's
+  const temporary = resolve(directory, "tmp");
+  mkdirSync(temporary);
+  const environment: NodeJS.ProcessEnv = {
+    ...process.env,
+    TMPDIR: temporary,
+    TEMP: temporary,
+    TMP: temporary,
+  };
   delete environment.NODE_TEST_CONTEXT;
 
   const fixturePaths = Object.entries(fixtures).map(([name, source]) => {
@@ -37,7 +45,7 @@ function runFixtures(
   });
 
   try {
-    return spawnSync(
+    const result = spawnSync(
       process.execPath,
       [
         filterPath,
@@ -46,6 +54,7 @@ function runFixtures(
       ],
       { encoding: "utf8", env: environment },
     );
+    return { ...result, leftover: readdirSync(temporary) };
   } finally {
     rmSync(directory, { recursive: true, force: true });
   }
@@ -181,6 +190,8 @@ test("compact output ends with each named file's counts, 0 passed for a file tha
   assert.match(compact.stdout, counted);
   assert.match(compact.stdout, silent);
   assert.match(compact.stdout, suites);
+  // a run with a failing test removes the counts' folder
+  assert.deepEqual(compact.leftover, []);
   // after Node's own output: the summary and the failures
   assert.match(compact.stdout, /failing test[\s\S]*\nℹ \S*counted\.test\.mjs: /u);
   // a name pattern that matches no test runs none
@@ -190,86 +201,12 @@ test("compact output ends with each named file's counts, 0 passed for a file tha
   ]);
   assert.equal(unmatched.status, 0, unmatched.stderr);
   assert.match(unmatched.stdout, /^ℹ \S*counted\.test\.mjs: 0 passed$/mu);
+  // and so does one that passes
+  assert.deepEqual(unmatched.leftover, []);
   // full output names every test, and adds no counts
   const full = runFixtures(fixtures, true);
   assert.doesNotMatch(full.stdout, /^ℹ \S*\.test\.mjs: /mu);
 });
-
-// Ctrl+C reaches the filter's whole process group; a signal can also end the runner alone, which the filter then raises
-// on itself. Either way the filter ends by that signal, prints no counts and leaves no folder of them.
-for (const [target, signal] of [
-  ["its process group", "SIGINT"],
-  ["its runner alone", "SIGHUP"],
-] as const)
-  test(
-    `${signal} to ${target} stops a run of named files by that signal and leaves no counts behind`,
-    // (the runner's process id is read from Linux's /proc)
-    {
-      skip:
-        process.platform !== "linux" && target === "its runner alone"
-          ? "Linux only"
-          : process.platform === "win32",
-    },
-    async () => {
-      const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
-      // the filter's own temporary folders, apart from everyone else's
-      const temporary = resolve(directory, "tmp");
-      mkdirSync(temporary);
-      const environment: NodeJS.ProcessEnv = { ...process.env, TMPDIR: temporary };
-      delete environment.NODE_TEST_CONTEXT;
-      const started = resolve(directory, "started");
-      const fixture = resolve(directory, "running.test.mjs");
-      writeFileSync(
-        fixture,
-        `import { writeFileSync } from "node:fs";
-         import test from "node:test";
-         test("running", () => {
-           writeFileSync(${JSON.stringify(started)}, "");
-           return new Promise(() => setInterval(() => {}, 1000));
-         });`,
-      );
-      // In a process group of its own, which receives the signal as a terminal's group does.
-      const filter = spawn(process.execPath, [filterPath, fixture], {
-        cwd: directory,
-        env: environment,
-        detached: true,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      let output = "";
-      filter.stdout.setEncoding("utf8").on("data", (chunk: string) => (output += chunk));
-      filter.stderr.setEncoding("utf8").on("data", (chunk: string) => (output += chunk));
-      const closed = once(filter, "close");
-      const group = filter.pid;
-      assert.ok(group !== undefined);
-      try {
-        for (let wait = 0; wait < 500 && !existsSync(started); wait++) await delay(10);
-        assert.ok(existsSync(started), output);
-        assert.equal(
-          readdirSync(temporary).filter((name) => name.startsWith("test-file-counts-")).length,
-          1,
-        );
-        if (target === "its process group") process.kill(-group, signal);
-        else {
-          const runner = Number(
-            readFileSync(`/proc/${group}/task/${group}/children`, "utf8").trim().split(" ")[0],
-          );
-          assert.ok(runner > 0, "the filter's runner");
-          process.kill(runner, signal);
-        }
-        assert.deepEqual(await closed, [null, signal]);
-        assert.doesNotMatch(output, /ℹ \S*running\.test\.mjs: /u);
-        assert.deepEqual(readdirSync(temporary), []);
-      } finally {
-        // The fixture's test process outlives a signal to the runner alone: the group goes whatever ended.
-        try {
-          process.kill(-group, "SIGKILL");
-        } catch {
-          // The whole group has ended.
-        }
-        rmSync(directory, { recursive: true, force: true });
-      }
-    },
-  );
 
 test("filter refuses a path that matches no test file before Node runs any", () => {
   const fixtures = {

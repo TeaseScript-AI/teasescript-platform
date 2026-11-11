@@ -94,22 +94,11 @@ if (unmatched.length > 0) {
 const countsFolder =
   fullSuite || fullOutput ? null : mkdtempSync(join(tmpdir(), "test-file-counts-"));
 const countsFile = countsFolder === null ? null : join(countsFolder, "counts.json");
-/** Removes the counts' folder, at the run's end or the filter's: also when a signal ends the filter first. */
+// The folder is removed when the run ends or the filter exits. The filter installs no signal handler, so a signal that
+// ends it leaves the folder in the system's temporary directory, where no run reads it: one counts file, empty until
+// the run ends, then under a hundred bytes per named file.
 const removeCounts = () => countsFolder && rmSync(countsFolder, { recursive: true, force: true });
-// Each signal's removal, until the run's own end takes it away, so that a signal the filter raises then ends it.
-const removals = new Map();
-if (countsFolder !== null) {
-  process.once("exit", removeCounts);
-  // (`once`: the signal raised again after the removal ends the filter as it would have)
-  for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"]) {
-    const removal = () => {
-      removeCounts();
-      process.kill(process.pid, signal);
-    };
-    removals.set(signal, removal);
-    process.once(signal, removal);
-  }
-}
+if (countsFolder !== null) process.once("exit", removeCounts);
 const nodeArguments = fullSuite
   ? [join(import.meta.dirname, "run-test-files.mjs"), ...testFiles]
   : [
@@ -203,7 +192,6 @@ child.on("close", (code, signal) => {
   if (countsFolder !== null) {
     if (!refused && signal === null) process.stdout.write(fileCountLines());
     removeCounts();
-    for (const [name, removal] of removals) process.off(name, removal);
   }
   if (refused) return;
   if (signal !== null) {
