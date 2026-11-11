@@ -619,11 +619,83 @@ test("notInstalled names each lockfile package the install lacks or holds otherw
     });
 });
 
-/** What a refusal of a node_modules that does not install the lockfile says to do. */
+test("notInstalled excuses an absent optional package only when its os, cpu or libc exclude the host, or nothing recorded needs it (Sol final r3 on #2322)", () => {
+  const host = { os: "linux", cpu: "x64", libc: "glibc" };
+  const tool = (extra) => ({
+    version: "1.0.0",
+    resolved: "t",
+    integrity: "i",
+    optionalDependencies: {
+      "@x/binding-linux-x64-gnu": "1",
+      "@x/binding-darwin-arm64": "1",
+      "@x/binding-linux-x64-musl": "1",
+      "@x/binding-not-windows": "1",
+      "@x/wasm": "1",
+    },
+    ...extra,
+  });
+  const binding = (os, cpu, libc) => ({
+    version: "1.0.0",
+    resolved: "b",
+    integrity: "i",
+    optional: true,
+    os,
+    cpu,
+    ...(libc === undefined ? {} : { libc }),
+  });
+  const lock = {
+    packages: {
+      "": { devDependencies: { x: "1" } },
+      "node_modules/x": tool(),
+      "node_modules/@x/binding-linux-x64-gnu": binding(["linux"], ["x64"], ["glibc"]),
+      "node_modules/@x/binding-linux-x64-musl": binding(["linux"], ["x64"], ["musl"]),
+      "node_modules/@x/binding-darwin-arm64": binding(["darwin"], ["arm64"]),
+      "node_modules/@x/binding-not-windows": binding(["!win32"], ["x64"]),
+      // (the WebAssembly binding, excluded by its cpu, and a helper only it needs, with no platform field)
+      "node_modules/@x/wasm": { ...binding(undefined, ["wasm32"]), dependencies: { helper: "1" } },
+      "node_modules/helper": { version: "1.0.0", resolved: "h", integrity: "i", optional: true },
+    },
+  };
+  const record = (...paths) => ({
+    packages: Object.fromEntries(paths.map((path) => [path, lock.packages[path]])),
+  });
+  // a correct install on this host: its binding recorded; another platform's, the musl one and the wasm side absent
+  assert.deepEqual(
+    notInstalled(lock, record("node_modules/x", "node_modules/@x/binding-linux-x64-gnu"), host),
+    ["node_modules/@x/binding-not-windows 1.0.0 (not installed)"],
+  );
+  const complete = record(
+    "node_modules/x",
+    "node_modules/@x/binding-linux-x64-gnu",
+    "node_modules/@x/binding-not-windows",
+  );
+  assert.deepEqual(notInstalled(lock, complete, host), []);
+  // this host's binding absent, which its tool needs: missing, like any other package
+  assert.deepEqual(
+    notInstalled(lock, record("node_modules/x", "node_modules/@x/binding-not-windows"), host),
+    ["node_modules/@x/binding-linux-x64-gnu 1.0.0 (not installed)"],
+  );
+  // a helper with no platform field: absent is fine while only an excluded package needs it, missing once a recorded
+  // one does
+  const needed = structuredClone(lock);
+  needed.packages["node_modules/x"].dependencies = { helper: "1" };
+  assert.deepEqual(notInstalled(needed, complete, host), [
+    "node_modules/helper 1.0.0 (not installed)",
+  ]);
+  // the same lockfile on a musl host or a Mac: their own binding is the needed one
+  assert.deepEqual(notInstalled(lock, complete, { os: "linux", cpu: "x64", libc: "musl" }), [
+    "node_modules/@x/binding-linux-x64-musl 1.0.0 (not installed)",
+  ]);
+  assert.deepEqual(notInstalled(lock, complete, { os: "darwin", cpu: "arm64", libc: null }), [
+    "node_modules/@x/binding-darwin-arm64 1.0.0 (not installed)",
+  ]);
+});
+
+/** What a refusal of a node_modules whose record does not hold the lockfile says to do. */
 const REMEDIES =
   "Main's lockfile: wait for teasescript-main's refresh, and remove a node_modules link pinned to a slot instead of " +
   "`current` (check-changed then links `current`). A branch behind main's lockfile: rebase, or check with --merged. " +
-  "A lockfile the branch changes: run the checks in the queue";
+  "A lockfile the branch changes: run the checks in the queue. Your own node_modules: run `npm ci`";
 
 test(
   "with a node_modules that does not install the lockfile it runs no check, plain or merged, says what differs, and exits 2 (#2087)",
@@ -659,8 +731,8 @@ test(
           assert.doesNotMatch(result.stdout, /PASS|FAIL/u, at);
           assert.equal(
             result.stderr,
-            `check-changed: node_modules (${realpathSync(join(directory, "node_modules"))}) does not install ` +
-              `package-lock.json: ${what}. ${REMEDIES}\n`,
+            `check-changed: npm's record of node_modules (${realpathSync(join(directory, "node_modules"))}) does ` +
+              `not hold package-lock.json: ${what}. ${REMEDIES}\n`,
             at,
           );
         } finally {
@@ -715,9 +787,55 @@ test(
         assert.equal(
           result.stderr,
           "check-changed: node_modules changed while the checks ran, so their verdicts do not count: " +
-            `node_modules (${join(installs, "b")}) does not install package-lock.json: ` +
+            `npm's record of node_modules (${join(installs, "b")}) does not hold package-lock.json: ` +
             `node_modules/remark 15.0.1 (not installed). ${REMEDIES}\n`,
         );
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+  },
+);
+
+test(
+  "with this host's platform binding absent from the install record it runs no check and exits 2; another platform's absent passes (Sol final r3 on #2322)",
+  { timeout: 60_000 },
+  () => {
+    const entry = (extra) => ({ version: "1.0.0", resolved: "r", integrity: "i", ...extra });
+    const binding = (os, cpu) => entry({ optional: true, os: [os], cpu: [cpu] });
+    const lock = {
+      "node_modules/x": entry({
+        optionalDependencies: { "@x/binding-here": "1", "@x/binding-elsewhere": "1" },
+      }),
+      "node_modules/@x/binding-here": binding(process.platform, process.arch),
+      "node_modules/@x/binding-elsewhere": binding(
+        process.platform === "aix" ? "sunos" : "aix",
+        "ppc64",
+      ),
+    };
+    for (const [installed, status] of [
+      [["node_modules/x", "node_modules/@x/binding-here"], 0],
+      [["node_modules/x"], 2],
+    ]) {
+      const { directory } = repository({
+        passing: true,
+        lock,
+        installed: Object.fromEntries(installed.map((path) => [path, lock[path]])),
+      });
+      try {
+        const result = spawnSync(process.execPath, [tool, "--base", "main"], {
+          cwd: directory,
+          encoding: "utf8",
+          env: environment,
+        });
+        assert.equal(result.status, status, result.stdout + result.stderr);
+        if (status === 2) {
+          assert.doesNotMatch(result.stdout, /PASS|FAIL/u);
+          assert.match(
+            result.stderr,
+            /does not hold package-lock\.json: node_modules\/@x\/binding-here 1\.0\.0 \(not installed\)\. /u,
+          );
+        }
       } finally {
         rmSync(directory, { recursive: true, force: true });
       }
