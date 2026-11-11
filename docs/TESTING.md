@@ -833,6 +833,43 @@ replays the census's pinned cohort, each tape checked against its pinned hash, o
 differs in one engine is a measured value. Since #2147 an authored colour whose numbers have at most 20 significant
 digits normalizes to the same text in every engine, which converts it with engine-independent arithmetic.
 
+## Worker-topology settings
+
+`tests/helpers/player/worker-topology.ts` runs a row on the in-process host and on a Node Worker. Two settings, read
+when it loads and refused when malformed:
+
+- `PLAYER_TEST_TOPOLOGY`: `both` (the default) or `worker`. With `worker`, only the Worker's rows run and are owed by
+  each file's registry; an in-process-only case is not owed, and a standalone in-process test still runs but is no
+  Worker coverage.
+- `PLAYER_TEST_WORKER_DELAY_MS`: a whole number of milliseconds (default 0). Every message and failure from a Worker
+  reaches its client that late, in order, on real time that mocked timers neither move nor hold. A loss goes through
+  the same queue as the replies by construction; no test asserts that a reply sent before it arrives first. A delivery
+  received before a test ends still arrives through that test's own loss and waits; at its end, those still pending
+  are dropped.
+
+**The delayed challenge** runs one or more complete compiled files on the Worker with every message 3 s late, above
+`until`'s `"step"` budget of about 2 s:
+
+```sh
+npm run build:typescript && npm run build:player-test-modules
+PLAYER_TEST_TOPOLOGY=worker PLAYER_TEST_WORKER_DELAY_MS=3000 node tools/test-output-filter.mjs dist/tests/<file>.test.js
+```
+
+Select by these settings, not by test title: a title filter skips Worker tests whose title names no topology, and the
+registries then fail for rows they still owe. The runner's exit status is the result. The normal limit per test and
+per hook is not raised for the challenge.
+
+A change to a Worker row's synchronization premises (what it waits for before an assertion, a held reply, a scene
+clock) or to `worker-topology.ts` runs the challenge on each affected complete file in the queue. Its handoff gives the
+result, the selection and the delay, and the cost per file.
+
+The challenge fails a positive wait bounded in turns while a host reply is still under way, and a premise that real
+time stays short. It cannot fail an absence check made before the absent effect could arrive: a delay makes such a
+check easier to pass. That needs the producer's own completion as the check's witness, which only reading the row
+shows. `until`'s `on` argument is chosen by the wait's dependency (its doc comment); a wrong `"step"` shows as
+`never: <label>` under the challenge. A failing row stops at its first failure, so the waits after it are not
+challenged until it is repaired.
+
 ## Implemented Phase 1 deterministic property harness
 
 The repository keeps one small deterministic campaign around the current public

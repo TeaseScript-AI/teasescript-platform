@@ -150,13 +150,13 @@ async function plainStart(player: DriverPlayer): Promise<void> {
     })),
   );
   await player.activate();
-  await until(atChoice(player), "the first choice");
+  await until(atChoice(player), "the first choice", "step");
 }
 
 /** A hosted script's Start offered (`prepareHostedScript`): Continue instead when the browser keeps its session. */
 async function offered(player: DriverPlayer, activation: "start" | "continue"): Promise<void> {
   const prepared = prepareHostedScript(player, { load: async () => ({ project: SCRIPT }) });
-  await until(() => player.activation.value === activation, `${activation} offered`);
+  await until(() => player.activation.value === activation, `${activation} offered`, "step");
   assert.equal(prepared.failure.value, null);
 }
 
@@ -166,7 +166,7 @@ async function hostedStart(context: TestContext, debug: boolean): Promise<PostEn
   const { player, transport } = await page(context, browser(), debug);
   await offered(player, "start");
   await player.activate();
-  await until(atChoice(player), "the first choice");
+  await until(atChoice(player), "the first choice", "step");
   await quiet(transport);
   assert.equal(player.hostError.value, null);
   return posts(transport);
@@ -179,13 +179,14 @@ async function keptAfterInput(context: TestContext) {
   const { player, transport, close } = await page(context, at, false);
   await offered(player, "start");
   await player.activate();
-  await until(atChoice(player), "the first choice");
+  await until(atChoice(player), "the first choice", "step");
   await answerFirst(player);
-  await until(atChoice(player), "the second choice");
+  await until(atChoice(player), "the second choice", "step");
   hide();
   await until(
     () => at.published.some((kept) => kept.snapshotJson.includes('"Red"')),
     "the session kept after its input",
+    "step",
   ).catch((error: unknown) => {
     const kept = at.published.map((update) => update.snapshotJson.length);
     const sent = transport.posts.map((post) => post.op).join(", ");
@@ -210,7 +211,7 @@ async function continueKept(context: TestContext): Promise<PostEntry[]> {
   const { player, transport } = await page(context, at, false);
   await offered(player, "continue");
   await player.activate();
-  await until(atChoice(player), "the kept choice");
+  await until(atChoice(player), "the kept choice", "step");
   await quiet(transport);
   assert.equal(player.hostError.value, null);
   return posts(transport);
@@ -221,12 +222,12 @@ async function rewindBackReturn(context: TestContext): Promise<PostEntry[]> {
   stubBrowser(context);
   const { player, transport, rewind } = await page(context, browser(), true);
   await plainStart(player);
-  await until(() => rewind().state.value.points.length === 1, "the first point");
+  await until(() => rewind().state.value.points.length === 1, "the first point", "step");
   await answerFirst(player);
-  await until(() => rewind().state.value.points.length === 2, "the second point");
+  await until(() => rewind().state.value.points.length === 2, "the second point", "step");
   assert.equal(await rewind().back(rewind().state.value.points[0]!.id), true, "Back");
   assert.equal(await rewind().returnToSession(), true, "Return");
-  await until(() => rewind().state.value.inspection === null, "the inspection's end");
+  await until(() => rewind().state.value.inspection === null, "the inspection's end", "step");
   await quiet(transport);
   assert.equal(player.hostError.value, null);
   return posts(transport);
