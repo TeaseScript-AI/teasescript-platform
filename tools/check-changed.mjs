@@ -11,8 +11,21 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, isAbsolute, join, resolve } from "node:path";
-import { costlyTestSeconds } from "./costly-test-files.mjs";
-import { isSuiteTestPath, isTypeCoreTestFile } from "./test-shards.mjs";
+
+// Its sibling modules load only after this guard: run as a lone copy outside its checkout, it says so in one line and
+// exits 2 instead of failing on an import (#2366).
+let siblings;
+try {
+  siblings = await Promise.all([import("./costly-test-files.mjs"), import("./test-shards.mjs")]);
+} catch (error) {
+  if (error?.code !== "ERR_MODULE_NOT_FOUND") throw error;
+  process.stderr.write(
+    `check-changed: run it from its checkout, whose tools/ holds the modules it imports (${error.message}); on a ` +
+      "branch that predates it, run main's from your worktree: node /opt/teasescript-agents/teasescript-main/current/tools/check-changed.mjs\n",
+  );
+  process.exit(2);
+}
+const [{ costlyTestSeconds }, { isSuiteTestPath, isTypeCoreTestFile }] = siblings;
 
 // Runs, before a push, the checks CI fails on for what changed since a base, in parallel, and prints one line per check
 // with its verdict and seconds, and the full output of a check that failed:

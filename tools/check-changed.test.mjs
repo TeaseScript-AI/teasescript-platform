@@ -543,3 +543,22 @@ test("it links the node_modules main's checkout has, replaces only a stale link,
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("run as a lone copy outside its checkout, it says it needs its checkout in one line and exits 2 (#2366)", () => {
+  const folder = mkdtempSync(join(tmpdir(), "check-changed-alone-"));
+  try {
+    const copy = join(folder, "check-changed.mjs");
+    writeFileSync(copy, readFileSync(new URL("./check-changed.mjs", import.meta.url)));
+    const result = spawnSync(process.execPath, [copy], { cwd: folder, encoding: "utf8" });
+    assert.equal(result.status, 2, result.stderr);
+    assert.equal(result.stdout, "");
+    assert.equal(
+      result.stderr,
+      "check-changed: run it from its checkout, whose tools/ holds the modules it imports (Cannot find module " +
+        `'${join(folder, "costly-test-files.mjs")}' imported from ${copy}); on a branch that predates it, run main's ` +
+        "from your worktree: node /opt/teasescript-agents/teasescript-main/current/tools/check-changed.mjs\n",
+    );
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
+});
