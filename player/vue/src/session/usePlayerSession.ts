@@ -825,6 +825,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     options,
     bridgeNow,
     currentConnection,
+    losses: () => connectionLosses.value,
     session,
     room,
     scriptStorage,
