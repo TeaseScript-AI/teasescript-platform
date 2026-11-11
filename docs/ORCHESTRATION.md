@@ -134,13 +134,14 @@ Triage each [friction](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#report-what
 the package it arrived in, or at once when it blocks a lane or keeps wasting compute:
 
 - **fixed:** the line is its record;
-- **filed:** an issue, as [`FRICTION.md`](FRICTION.md) describes;
+- **filed:** an issue, as [`FRICTION.md`](FRICTION.md) describes, with its `Schedule:` line;
 - **a rule:** proposed like any other rule.
 
 Your own wrong turns are lines too. Keep the triage with your state. At each structure check, add the friction
 counts: lines per class since the last check, with their dispositions, and open issues per class with the age of the
-oldest, against the last check's counts. An issue open longer than two packages is triaged again: promoted, or closed
-with its reason. [`FRICTION.md`](FRICTION.md#priority) ranks the issues.
+oldest, against the last check's counts. No issue waits to be promoted: [`FRICTION.md`](FRICTION.md#priority) says
+when an issue is being built, waiting or free, and that a coordinator starts no other builder while one of its issues is
+free.
 
 Count the tax as well as the reports. Beside the structure report, count across the repository the lint disables,
 `@ts-expect-error` and `@ts-ignore` directives, and skipped tests, and compare them with the last check. The number

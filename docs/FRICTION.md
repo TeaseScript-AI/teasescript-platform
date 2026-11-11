@@ -38,7 +38,20 @@ its record.
 
 ## Priority
 
-A filed line is ranked by what deferring it costs, not by its date:
+An open friction issue is either being built, or waits on an open issue or pull request named in its `Schedule:` line,
+or is free; a coordinator starts no other builder while one of its issues is free; the coordinators' launch check
+refuses it. The line is the newest one in the issue or its comments that begins `Schedule:`, and names the track's
+coordinator:
+
+- `Schedule: taken, <coordinator>, lane <name>`: it is being built. An open pull request that closes the issue counts
+  the same without a line.
+- `Schedule: after #N, <coordinator>`: it waits while a named issue or pull request is open, without a time limit, and
+  is free the moment all of them are closed. The reason stands beside the line.
+- `Schedule: free, <coordinator>`: nothing holds it, and that coordinator's next builder takes it. An issue without a
+  line is free for every coordinator.
+
+Reviews, running work and messages to running builders are never refused. Among free issues, the order is by what
+deferring costs, not by date:
 
 - **At once:** it blocks a lane or keeps wasting compute. Its owner fixes it now.
 - **Next package:** it recurs, or a lane will soon change its code.
@@ -46,8 +59,8 @@ A filed line is ranked by what deferring it costs, not by its date:
     it is small.
   - A fix in files no open lane owns, or in tooling, is the coordinator's light-route pull request between packages,
     as a move is. A friction fix never waits behind a lane's queue.
-- **Backlog:** a single, cheap instance that no lane is near. It stays filed until the friction check promotes it. A
-  scope cut's residual is backlog only when it cannot bite ([Design rounds](DEVELOPMENT-WORKFLOW.md#design-rounds)).
+- **Otherwise:** a single, cheap instance that no lane is near is free like any other. A scope cut's residual is left
+  to an issue only when it cannot bite ([Design rounds](DEVELOPMENT-WORKFLOW.md#design-rounds)).
 
 A friction issue is not `spare capacity` unless its triage shows that deferring it costs nothing more. A fix in the
 repository never enters another lane's open pull request. A backward-compatible fix in the agent environment may land at
