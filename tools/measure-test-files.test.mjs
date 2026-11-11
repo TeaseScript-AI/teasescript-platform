@@ -317,12 +317,16 @@ test(
         ["--from-ci", "--base-branch", ""],
         ["--from-ci", "--base-branch", "--raw"],
         ["--base-branch", "main"],
+        ["--from-ci", "11", "12", "13", "--base-branch=main"],
+        ["--from-ci", "--base-branch=main", "11", "12", "13"],
+        ["--from-ci", "11", "12", "13", "--raw", "x"],
+        ["--from-ci", "11", "12", "0x0d"],
       ]) {
         const refused = measure(root, args);
         assert.equal(refused.status, 1, `${args.join(" ")}: ${refused.out}`);
         assert.match(
           refused.stderr,
-          /^Usage: .*\n\(--from-ci takes three distinct runs or more, or --base-branch/u,
+          /^Usage: .*\n\(--from-ci takes three distinct run ids or more, or --base-branch/u,
         );
         assert.equal(refused.module, chosen.module, args.join(" "));
       }

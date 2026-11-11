@@ -41,11 +41,13 @@ if (
   // (`--base-branch` only as `--from-ci --base-branch BRANCH`: never with runs, nor without a branch)
   (argv.includes("--base-branch") && (argv.length !== 3 || !base || base.startsWith("-"))) ||
   (base === null && fromCi === null && argv.length > 0) ||
+  // (a run is its id, digits only: an option among the runs, in any spelling, is refused here, not asked of gh)
+  (fromCi !== null && !fromCi.every((id) => /^[1-9]\d*$/u.test(id))) ||
   (fromCi !== null && new Set(fromCi).size !== fromCi.length) ||
   (fromCi !== null && fromCi.length < 3)
 ) {
   process.stderr.write(
-    `${usage}(--from-ci takes three distinct runs or more, or --base-branch and a branch, not both)\n`,
+    `${usage}(--from-ci takes three distinct run ids or more, or --base-branch and a branch, not both)\n`,
   );
   process.exit(1);
 }
