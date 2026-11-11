@@ -1,10 +1,18 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { test } from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
   CITATION_FIXTURES,
@@ -161,7 +169,25 @@ test("a TABLE revision or section is found in any file's text, wrapped or not, w
   );
 });
 
-test("the TABLE citation check reads every file Git lists, by its exact path, and refuses a name it cannot read", () => {
+test("every ASCII character that is no letter or digit may stand between TABLE and r4 or §, once or twice", () => {
+  const between = [];
+  for (let code = 0; code < 128; code++) {
+    const character = String.fromCharCode(code);
+    if (!/[\p{L}\p{N}]/u.test(character)) between.push(character, character + character);
+  }
+  assert.equal(between.length, 2 * (128 - 62));
+  for (const text of between)
+    for (const cited of ["r4.1", "§3"])
+      assert.equal(
+        tableCitationsIn("docs/a.md", `See TABLE${text}${cited}.\n`).length,
+        1,
+        JSON.stringify(`TABLE${text}${cited}`),
+      );
+  // emphasis around the whole citation
+  assert.equal(tableCitationsIn("docs/a.md", "_TABLE r4.1_ and __TABLE §2__\n").length, 2);
+});
+
+test("the TABLE citation check reads every file Git lists, by its exact path, and refuses a name it cannot read", async () => {
   const root = mkdtempSync(join(tmpdir(), "table-citations-"));
   try {
     const git = (...args) => execFileSync("git", args, { cwd: root, stdio: "pipe" });
@@ -170,22 +196,47 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
       writeFileSync(join(root, file), text);
     };
     git("init", "-q");
-    write(".gitignore", "ignored/\n");
+    write(".gitignore", "ignored/\nnode_modules\n");
+    // the lint runner's entry, `checkCommentForecasts`, run on this repository: its module and the files it reads
+    for (const file of ["check-comment-forecasts.mjs", "comments.mjs", "files.mjs"])
+      write(`tools/oxlint/${file}`, readFileSync(new URL(file, import.meta.url)));
+    write("tools/oxlint/comment-forecasts-allowed.json", "[]\n");
+    write("tools/oxlint/comment-citations.json", "{}\n");
+    write(
+      "docs/specifications/type-inference-accepted-record/README.md",
+      "# Record\n\n## Labels\n",
+    );
+    symlinkSync(join(repositoryRoot, "node_modules"), join(root, "node_modules"));
     write("docs/a.md", "# A\n\nAs ruled (TABLE r4.1).\n");
     write("src/a.ts", 'const reason = "a site (TABLE §2)";\n');
     write(CITATION_FIXTURES, 'const fixture = "TABLE r4.3";\n');
     write(`other/${CITATION_FIXTURES}`, 'const fixture = "TABLE r4.4";\n');
     write("gone.md", "TABLE r4.5\n");
     write("data.bin", "x\0TABLE r4.6\n");
+    write("\uFEFFmarked.md", "TABLE r4.10\n");
     git("add", "-A");
     rmSync(join(root, "gone.md"));
     write("untracked.txt", "TABLE r4.7\n");
     write("ignored/a.md", "TABLE r4.8\n");
+    const expected = [
+      "\uFEFFmarked.md:1",
+      "docs/a.md:3",
+      `other/${CITATION_FIXTURES}:1`,
+      "src/a.ts:1",
+      "untracked.txt:1",
+    ].sort();
+    const at = (findings) => findings.map(({ fileName, line }) => `${fileName}:${line}`).sort();
+    assert.deepEqual(at(tableCitationFindings(root)), expected);
+    const entry = await import(
+      pathToFileURL(join(root, "tools/oxlint/check-comment-forecasts.mjs")).href
+    );
     assert.deepEqual(
-      tableCitationFindings(root)
-        .map(({ fileName, line }) => `${fileName}:${line}`)
-        .sort(),
-      ["docs/a.md:3", `other/${CITATION_FIXTURES}:1`, "src/a.ts:1", "untracked.txt:1"],
+      at(
+        entry
+          .checkCommentForecasts(root)
+          .filter(({ message }) => message.includes("cites the old design record")),
+      ),
+      expected,
     );
     writeFileSync(
       Buffer.concat([Buffer.from(`${root}/name-`), Buffer.from([0xff]), Buffer.from(".md")]),

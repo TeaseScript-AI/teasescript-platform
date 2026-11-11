@@ -35,13 +35,21 @@ export const FORECASTS = [
 
 /**
  * What may stand between the old design record's name and a revision or section it cites: any run of characters that
- * are no letter or digit (white space, line breaks, a comment's or quote's marks, a Markdown table's cell border), HTML
- * tags and comments, and character entities (`&nbsp;`), so a citation wrapped over lines or markup is one.
+ * are no letter or digit by their Unicode class (white space, line breaks, punctuation, a comment's or quote's marks,
+ * emphasis, a Markdown table's cell border), HTML tags and comments on one line, and character entities (`&nbsp;`), so
+ * a citation wrapped over lines or markup is one. A `<` or `&` is one character unless it opens a tag or an entity, so
+ * each text has one reading.
  */
-const BETWEEN = String.raw`(?:[^\p{L}\p{N}_<&]|<[^<>\n]*>|&#?[\p{L}\p{N}]+;|[<&])*?`;
+const BETWEEN = String.raw`(?:[^\p{L}\p{N}<&]|<[^<>\n]*>|<(?![^<>\n]*>)|&#?[\p{L}\p{N}]+;|&(?!#?[\p{L}\p{N}]+;))*?`;
+
+/** A word's edge: no letter or digit on that side. */
+const EDGE = String.raw`[\p{L}\p{N}]`;
 
 /** A citation of the old design record's revisions or sections. Written so this file's own text has none. */
-const TABLE_CITATION = new RegExp(String.raw`\bTABLE\b${BETWEEN}(?:r4\b|§)`, "gu");
+const TABLE_CITATION = new RegExp(
+  String.raw`(?<!${EDGE})TABLE(?!${EDGE})${BETWEEN}(?:r4(?!${EDGE})|§)`,
+  "gu",
+);
 
 /** The one file whose text holds such citations on purpose: this check's own test, whose fixtures must be ones. */
 export const CITATION_FIXTURES = "tools/oxlint/check-comment-forecasts.test.mjs";
@@ -49,7 +57,10 @@ export const CITATION_FIXTURES = "tools/oxlint/check-comment-forecasts.test.mjs"
 /** The citations whose count per file in comments may only shrink, each by its pattern over a comment's text. */
 const COUNTED_CITATIONS = {
   "bare r4.N": /(?<!TABLE )\br4\.\d+/gu,
-  "other TABLE": new RegExp(String.raw`\bTABLE\b(?!${BETWEEN}(?:r4\b|§))`, "gu"),
+  "other TABLE": new RegExp(
+    String.raw`(?<!${EDGE})TABLE(?!${EDGE})(?!${BETWEEN}(?:r4(?!${EDGE})|§))`,
+    "gu",
+  ),
 };
 
 /** The accepted record's folder of pages, which a comment may point at by a page and a heading's anchor. */
@@ -208,7 +219,8 @@ export function tableCitationsIn(fileName, text) {
 /**
  * Each citation of the old design record in the files Git lists in `root` (tracked, and untracked but not ignored)
  * that are regular files, as `doc-links.mjs` reads them, as diagnostics; a file with a NUL byte is binary and is not
- * read as text. A failed `git` throws, and so does a listed name that is not UTF-8, which could not be read unchanged.
+ * read as text. A name is decoded whole, a leading byte order mark kept; a failed `git` throws, and so does a listed
+ * name that is not UTF-8, which could not be read unchanged.
  */
 export function tableCitationFindings(root) {
   const listing = execFileSync(
@@ -216,7 +228,7 @@ export function tableCitationFindings(root) {
     ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--deduplicate"],
     { cwd: root, maxBuffer: 1 << 28 },
   );
-  const utf8 = new TextDecoder("utf-8", { fatal: true });
+  const utf8 = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
   const findings = [];
   for (let start = 0, end; (end = listing.indexOf(0, start)) !== -1; start = end + 1) {
     const bytes = listing.subarray(start, end);
