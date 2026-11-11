@@ -9,9 +9,8 @@ import {
   statSync,
   symlinkSync,
 } from "node:fs";
-import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 
 // Its sibling modules load only after this guard: run as a lone copy outside its checkout, it says so in one line and
 // exits 2 instead of failing on an import (#2366).
@@ -46,10 +45,10 @@ const [{ costlyTestSeconds }, { summaryLine }, { isSuiteTestPath, isTypeCoreTest
 // are on origin/main or origin/runtime-v2 and not on the base (`strayMerges`).
 // Then each project a changed path belongs to (`projectsFor`): its type check and tests. A root configuration file
 // belongs to the checks that read it, and needs no project when only those that always run do. A changed path no
-// project claims, other than documentation, runs every project's checks. A project may also take what its runner
-// loads, read from the sources (`loads`, `loadedBy`), and runs when that cannot be read. It never builds the TypeScript or runs the
-// compiled test suite, which CI does: a change that shows only there, such as the root tsconfig's emit settings, passes
-// here. When a changed file is under `src/type-inference/core/`, it also prints the suites that pin the core's work or
+// project claims, other than documentation, runs every project's checks. Every change but documentation (a path ending
+// in `.md` or under `docs/`, `isDocumentation`) runs `test:lint` (`everyChange`). It never builds the TypeScript or runs
+// the compiled test suite, which CI does: a change that shows only there, such as the root tsconfig's emit settings,
+// passes here. When a changed file is under `src/type-inference/core/`, it also prints the suites that pin the core's work or
 // its published answers, as `tools/repository-checks/pin-suites.mjs` lists them: the focused list such a change runs
 // before review (`docs/TESTING.md`, "Pinned work"), which it does not run itself. When a changed type-core test file has
 // no entry in `tools/costly-test-files.mjs`, it prints one line saying so: the file runs in full, as every file does,
@@ -97,11 +96,14 @@ export const PROJECTS = {
     claims: (path) => path.startsWith("player/vue/"),
     checks: ["typecheck:player", "lint:design"],
   },
-  // (`tools/oxlint/tsconfig.json`, which `test:lint` compiles the rules with, extends the root one; and what its runner
-  // loads, as `tools/test-output-filter.mjs`, which runs the rule tests, #2402)
+  // `test:lint`'s rule tests read far more than a claim can name: `.oxlintrc.json`, the tools that run and count them
+  // (one by a computed path), and the repository's own sources and test helpers, which they lint as fixtures; a trace
+  // found 859 tracked files (#2431). So it runs for every change that is not documentation only, as oxlint does, which
+  // takes longer and runs beside it. Its claim stays, so that a path under it is not an unknown kind (every project).
+  // (`tools/oxlint/tsconfig.json`, which `test:lint` compiles the rules with, extends the root one)
   "oxlint-rules": {
     claims: (path) => path.startsWith("tools/oxlint/") || path === "tsconfig.json",
-    loads: ["tools/oxlint/test.mjs"],
+    everyChange: true,
     checks: ["test:lint"],
   },
   tools: {
@@ -126,121 +128,28 @@ export const PROJECTS = {
   },
 };
 
-/** Root configuration files that only the checks run for every change read: oxlint's. */
+/** Root configuration files that only the checks run for every change read: oxlint's, which `test:lint` reads too. */
 const READ_BY_ALWAYS_RUN_CHECKS = new Set([".oxlintrc.json"]);
 
 /** A documentation path selects no project's checks; its Markdown links are checked on every run (`doc links`). */
 const isDocumentation = (path) => path.endsWith(".md") || path.startsWith("docs/");
 
-/** The source files `loadedBy` reads for the paths they name: `.js`, `.mjs`, `.cjs`, `.ts`, `.mts`, `.cts`. */
-const READ_FOR_NAMES = /\.(?:[cm]?js|[cm]?ts)$/u;
-
-/** What a path lookup answers when nothing is there to name (a literal of any text can be looked up). */
-const NOTHING_THERE = new Set(["ENOENT", "ENOTDIR", "ENAMETOOLONG"]);
-
 /**
- * The repository files `entries` (paths from `root`) load or name, the entries included, read from their sources and
- * followed through each file named whose suffix `READ_FOR_NAMES` lists. A file names a path by a string literal (quoted,
- * or a template without a substitution) that, from the file's folder when it begins with `.` and from the root
- * otherwise, names an existing file inside the root: so an import, `export … from`, a literal `import()` or `require()`,
- * and a script path a runner spawns, as `tools/oxlint/test.mjs` spawns `tools/test-output-filter.mjs`. A `.js` path
- * that does not exist, whose `.ts` does, names the `.ts`. Nothing else is followed: a path built by computing (a template
- * with a substitution, a concatenation, a folder listed at run time, as `tools/oxlint/test.mjs` finds its rule tests),
- * whose result is not resolved, though each literal piece of it is read as a literal of its own; a folder; a package;
- * or the paths in a named file of another suffix (`.tsx`, JSON), which is named but not read. Throws when TypeScript
- * cannot be loaded, a file it follows cannot be read, or a lookup fails other than by finding nothing there (a folder it
- * may not search, a symbolic link loop).
+ * The projects whose checks `paths` need. A project with `everyChange` is needed by every path but documentation. A path
+ * no project claims, documentation and the configuration only the checks run for every change read aside, needs every
+ * project: an unknown kind of path is checked by everything, never by nothing.
  */
-export function loadedBy(entries, root = ".") {
-  const ts = createRequire(join(resolve(root), "package.json"))("typescript");
-  const found = new Set();
-  const pending = [];
-  const add = (path) => {
-    if (found.has(path)) return;
-    found.add(path);
-    if (READ_FOR_NAMES.test(path)) pending.push(path);
-  };
-  const named = (literal, from) => {
-    if (literal === "" || literal.includes("\0")) return null;
-    const absolute = resolve(
-      root,
-      literal.startsWith(".") ? join(dirname(from), literal) : literal,
-    );
-    const path = relative(resolve(root), normalize(absolute)).split(sep).join("/");
-    if (path === "" || path === ".." || path.startsWith("../") || isAbsolute(path)) return null;
-    const isFile = (candidate) => {
-      try {
-        return statSync(join(root, candidate)).isFile();
-      } catch (error) {
-        if (NOTHING_THERE.has(error.code)) return false;
-        throw error;
-      }
-    };
-    if (isFile(path)) return path;
-    const typed = path.replace(/\.js$/u, ".ts");
-    return typed !== path && isFile(typed) ? typed : null;
-  };
-  for (const entry of entries) add(entry);
-  while (pending.length > 0) {
-    const file = pending.shift();
-    const source = ts.createSourceFile(
-      file,
-      readFileSync(join(root, file), "utf8"),
-      ts.ScriptTarget.Latest,
-    );
-    const visit = (node) => {
-      if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) {
-        const path = named(node.text, file);
-        if (path !== null) add(path);
-      }
-      ts.forEachChild(node, visit);
-    };
-    visit(source);
-  }
-  return found;
-}
-
-/** Per root and project with `loads`, the paths they load (`loadedBy`), or why they could not be read; read once. */
-const loaded = new Map();
-
-/** Projects whose `loads` could not be read from `root`, each with the reason: their checks run (`projectsFor`). */
-export function unreadableLoads(root = ".") {
-  return Object.keys(PROJECTS).flatMap((name) => {
-    const error = loaded.get(`${resolve(root)}\0${name}`)?.error;
-    return error === undefined ? [] : [{ name, error }];
-  });
-}
-
-/** Whether `path` is one that project `name`'s `loads` load from `root`, or they cannot be read. */
-function loads(name, path, root) {
-  if (PROJECTS[name].loads === undefined) return false;
-  const key = `${resolve(root)}\0${name}`;
-  if (!loaded.has(key))
-    try {
-      loaded.set(key, { paths: loadedBy(PROJECTS[name].loads, root) });
-    } catch (error) {
-      loaded.set(key, { error: error.message.split("\n")[0] });
-    }
-  const read = loaded.get(key);
-  return read.error !== undefined || read.paths.has(path);
-}
-
-/**
- * The projects whose checks `paths` need. A path no project claims, documentation and the configuration only the checks
- * run for every change read aside, needs every project: an unknown kind of path is checked by everything, never by
- * nothing. A project with `loads` also takes each path those entry files load (`loadedBy`), and every path when they
- * cannot be read; this only adds to its claim, and never counts as a claim for the rule before.
- */
-export function projectsFor(paths, root = ".") {
+export function projectsFor(paths) {
   const projects = new Set();
   for (const path of paths) {
-    if (isDocumentation(path) || READ_BY_ALWAYS_RUN_CHECKS.has(path)) continue;
+    if (isDocumentation(path)) continue;
+    for (const name of Object.keys(PROJECTS)) if (PROJECTS[name].everyChange) projects.add(name);
+    if (READ_BY_ALWAYS_RUN_CHECKS.has(path)) continue;
     const claiming = Object.keys(PROJECTS).filter((name) => PROJECTS[name].claims(path));
     for (const name of claiming.length > 0 ? claiming : Object.keys(PROJECTS)) projects.add(name);
-    for (const name of Object.keys(PROJECTS))
-      if (!projects.has(name) && loads(name, path, root)) projects.add(name);
   }
-  return projects;
+  // (in `PROJECTS`' order, whatever path came first)
+  return new Set(Object.keys(PROJECTS).filter((name) => projects.has(name)));
 }
 
 /** The checks `projects` run, each once although several projects name it, in the order the projects name them. */
@@ -826,10 +735,6 @@ async function check(cleanups) {
     `check-changed: ${changed.length} changed files since ${ref} (${mergeBase.slice(0, 9)}); ` +
       `projects: ${[...projects].join(", ") || "none"}\n`,
   );
-  for (const { name, error } of unreadableLoads())
-    process.stdout.write(
-      `check-changed: what ${name} loads cannot be read, so its checks run: ${error}\n`,
-    );
   const unknown = unknownToCostly(changed);
   if (unknown.length > 0) process.stdout.write(`${unknown.join(", ")}: ${UNKNOWN_TO_COSTLY}\n`);
 

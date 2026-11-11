@@ -28,13 +28,11 @@ import {
   MAIN_CHECKOUT,
   branchedFrom,
   linkMainNodeModules,
-  loadedBy,
   notInstalled,
   projectsFor,
   removeTemporaryWorktree,
   strayMerges,
   unknownToCostly,
-  unreadableLoads,
 } from "./check-changed.mjs";
 import { isolateGit } from "./fixture-git.mjs";
 import {
@@ -48,15 +46,13 @@ import {
 
 isolateGit();
 
-// A representative changed path for each project, and the projects it alone needs.
+// A representative changed path for each project, and the projects it alone claims; every path but documentation also
+// needs `oxlint-rules`, whose `test:lint` runs for every such change (#2431).
 const REPRESENTATIVES = {
   typescript: ["src/compiler.ts", ["typescript"]],
   "player-vue": ["player/vue/src/PlayerApp.vue", ["player-vue"]],
   "oxlint-rules": ["tools/oxlint/run.mjs", ["oxlint-rules"]],
-  tools: ["tools/check-shas.mjs", ["tools"]],
-  // a tool `test:lint`'s runner loads, which it runs the rule tests through (#2402), and one that tool imports
-  "loaded by test:lint's runner": ["tools/test-output-filter.mjs", ["tools", "oxlint-rules"]],
-  "imported by what test:lint's runner loads": ["tools/test-shards.mjs", ["tools", "oxlint-rules"]],
+  tools: ["tools/test-shards.mjs", ["tools"]],
   "repository checks": ["tools/repository-checks/regression-cases.mjs", ["tools"]],
   families: [
     "tests/families/copies/copy-admission/named-and-nested-composite-admission.mjs",
@@ -71,16 +67,22 @@ const REPRESENTATIVES = {
   formatting: [".prettierrc.json", ["formatting"]],
   "Prettier ignore file": [".prettierignore", ["formatting"]],
   "design-lint": ["eslint.design.config.mjs", ["design-lint"]],
+  // (which test:lint reads: turning a rule off there fails its rule tests, Sol's final on #2434)
   "oxlint config": [".oxlintrc.json", []],
+  // (which test:lint runs its rule tests through, #2402)
+  "test:lint's output filter": ["tools/test-output-filter.mjs", ["tools"]],
   unknown: [".github/workflows/ci.yml", Object.keys(PROJECTS)],
   "package manifest": ["package.json", Object.keys(PROJECTS)],
 };
 
-test("each changed path needs its project's checks, documentation and oxlint's configuration none, and an unknown path every project's", () => {
+test("each changed path needs its project's checks and, but for documentation, test:lint's; an unknown path every project's", () => {
   // Every project has a representative, so a new project cannot go unchecked here.
   for (const name of Object.keys(PROJECTS))
     assert.ok(name in REPRESENTATIVES, `${name} has a representative`);
-  const kinds = Object.entries(REPRESENTATIVES);
+  const kinds = Object.entries(REPRESENTATIVES).map(([kind, [path, claimed]]) => [
+    kind,
+    [path, kind === "documentation" ? claimed : [...new Set([...claimed, "oxlint-rules"])]],
+  ]);
   for (const [kind, [path, expected]] of kinds)
     assert.deepEqual([...projectsFor([path])].sort(), [...expected].sort(), kind);
   // Each pair of kinds needs the union of what each needs alone.
@@ -93,154 +95,19 @@ test("each changed path needs its project's checks, documentation and oxlint's c
       );
   assert.deepEqual([...projectsFor([])], []);
   // `player/` outside `player/vue/` belongs to the TypeScript project, and `player/vue/` only to the Player's.
-  assert.deepEqual([...projectsFor(["player/runtime-adapter.ts"])], ["typescript"]);
-  assert.deepEqual([...projectsFor(["player/vue/src/usePlayerSession.ts"])], ["player-vue"]);
+  assert.deepEqual([...projectsFor(["player/runtime-adapter.ts"])], ["typescript", "oxlint-rules"]);
+  assert.deepEqual(
+    [...projectsFor(["player/vue/src/usePlayerSession.ts"])],
+    ["player-vue", "oxlint-rules"],
+  );
+  // documentation alone needs nothing, and beside a path that needs test:lint changes nothing
+  assert.deepEqual([...projectsFor(["docs/TESTING.md", "README.md"])], []);
   // A check that several projects name runs once: `lint:design` is the Player's and the design lint's.
   const everyCheck = checksOf(projectsFor([".github/workflows/ci.yml"]));
   assert.deepEqual(everyCheck, [
     ...new Set(Object.values(PROJECTS).flatMap(({ checks }) => checks)),
   ]);
   assert.equal(everyCheck.filter((check) => check === "lint:design").length, 1);
-});
-
-test("loadedBy follows the string literals that name a file, and nothing else; projectsFor runs a project whose loads cannot be read (#2402)", () => {
-  const root = mkdtempSync(join(tmpdir(), "check-changed-loads-"));
-  try {
-    const files = {
-      // each form it reads
-      "entry.mjs":
-        'import "./imported.mjs";\nexport { x } from "./re-exported.mjs";\nawait import("./dynamic.mjs");\n' +
-        'const require = () => {};\nrequire("./required.cjs");\nspawn("node", ["tools/spawned.mjs"]);\n' +
-        'new URL("./url.mjs", import.meta.url);\nimport "./typed.js";\nconst t = `./template.mjs`;\n' +
-        // and what it does not follow: a computed path, a concatenation, a folder, a package, a missing file
-        'const name = "computed";\nimport(`./${name}.mjs`);\nimport("./concat" + "enated.mjs");\n' +
-        'scan("folder");\nimport "typescript";\nimport "./missing.mjs";\n' +
-        // a .js that exists is itself; a file another suffix (.tsx) is named, not read
-        'import "./both.js";\nimport "./view.tsx";\n',
-      "imported.mjs": 'import "./transitive.mjs";\n',
-      "re-exported.mjs": "export const x = 1;\n",
-      "dynamic.mjs": "",
-      "required.cjs": "",
-      // (and, from a folder below, a root file whose name begins with two dots, which is inside the root: Sol r1)
-      "tools/spawned.mjs": 'readFileSync("config.json");\nimport "../..helper.mjs";\n',
-      "..helper.mjs": "",
-      "both.js": "",
-      "both.ts": "",
-      "view.tsx": 'import "./inside-tsx.mjs";\n',
-      "inside-tsx.mjs": "",
-      "url.mjs": "",
-      "typed.ts": "export {};\n",
-      "template.mjs": "",
-      "transitive.mjs": "",
-      "computed.mjs": "",
-      "concatenated.mjs": "",
-      "folder/inside.mjs": "",
-      // a file of another kind is named, not read
-      "config.json": '{ "next": "unread.mjs" }\n',
-      "unread.mjs": "",
-      // test:lint's runner, in this root, naming a file no project claims
-      "tools/oxlint/test.mjs": 'spawn("node", ["lib/helper.mjs"]);\n',
-      "lib/helper.mjs": "",
-    };
-    for (const [path, text] of Object.entries(files)) {
-      mkdirSync(dirname(join(root, path)), { recursive: true });
-      writeFileSync(join(root, path), text);
-    }
-    symlinkSync(join(process.cwd(), "node_modules"), join(root, "node_modules"));
-    assert.deepEqual([...loadedBy(["entry.mjs"], root)].sort(), [
-      "..helper.mjs",
-      "both.js",
-      "config.json",
-      "dynamic.mjs",
-      "entry.mjs",
-      "imported.mjs",
-      "re-exported.mjs",
-      "required.cjs",
-      "template.mjs",
-      "tools/spawned.mjs",
-      "transitive.mjs",
-      "typed.ts",
-      "url.mjs",
-      "view.tsx",
-    ]);
-    // what a project's loads name only adds that project: a path no project claims still needs every project
-    assert.deepEqual(
-      [...projectsFor(["lib/helper.mjs"], root)].sort(),
-      Object.keys(PROJECTS).sort(),
-    );
-    assert.deepEqual([...projectsFor(["tools/check-shas.mjs"], root)], ["tools"]);
-    // the repository's own: test:lint's runner loads the output filter, which runs the rule tests
-    assert.ok(loadedBy(PROJECTS["oxlint-rules"].loads).has("tools/test-output-filter.mjs"));
-    // a file it follows that cannot be read fails the reading, and so does a root without TypeScript
-    assert.throws(() => loadedBy(["absent.mjs"], root), /ENOENT/u);
-    const bare = mkdtempSync(join(tmpdir(), "check-changed-loads-bare-"));
-    try {
-      writeFileSync(join(bare, "entry.mjs"), "");
-      assert.throws(() => loadedBy(["entry.mjs"], bare), /typescript/u);
-      // projectsFor then runs the project's checks for any path no other rule gives it, and says why
-      assert.deepEqual([...projectsFor(["tools/check-shas.mjs"], bare)].sort(), [
-        "oxlint-rules",
-        "tools",
-      ]);
-      assert.deepEqual(
-        unreadableLoads(bare).map(({ name }) => name),
-        ["oxlint-rules"],
-      );
-      assert.deepEqual(unreadableLoads(root), []);
-      // read per root, also when each is the working folder ("."): one root's reading is not another's (Sol r2)
-      assert.deepEqual([...inside(root, () => projectsFor(["tools/check-shas.mjs"]))], ["tools"]);
-      assert.deepEqual([...inside(bare, () => projectsFor(["tools/check-shas.mjs"]))].sort(), [
-        "oxlint-rules",
-        "tools",
-      ]);
-      // a runner that is not there, with TypeScript there, fails the reading too: its loads are stale (Sol r2)
-      const stale = mkdtempSync(join(tmpdir(), "check-changed-loads-stale-"));
-      try {
-        symlinkSync(join(process.cwd(), "node_modules"), join(stale, "node_modules"));
-        assert.deepEqual([...projectsFor(["tools/check-shas.mjs"], stale)].sort(), [
-          "oxlint-rules",
-          "tools",
-        ]);
-        assert.match(unreadableLoads(stale)[0]?.error ?? "", /ENOENT.*tools\/oxlint\/test\.mjs/u);
-      } finally {
-        rmSync(stale, { recursive: true, force: true });
-      }
-    } finally {
-      rmSync(bare, { recursive: true, force: true });
-    }
-    // a lookup that fails other than by finding nothing fails the reading too: a symbolic link loop, and a folder it may
-    // not search (Sol r1)
-    for (const [kind, error] of [
-      ["loop", /ELOOP/u],
-      ["closed", /EACCES/u],
-    ]) {
-      if (kind === "closed" && process.getuid?.() === 0) continue;
-      const lookup = mkdtempSync(join(tmpdir(), `check-changed-loads-${kind}-`));
-      try {
-        mkdirSync(join(lookup, "tools/oxlint"), { recursive: true });
-        symlinkSync(join(process.cwd(), "node_modules"), join(lookup, "node_modules"));
-        writeFileSync(join(lookup, "tools/oxlint/test.mjs"), 'import "../../found/it.mjs";\n');
-        if (kind === "loop") symlinkSync("found", join(lookup, "found"));
-        else {
-          mkdirSync(join(lookup, "found"));
-          writeFileSync(join(lookup, "found/it.mjs"), "");
-          chmodSync(join(lookup, "found"), 0o000);
-        }
-        assert.throws(() => loadedBy(["tools/oxlint/test.mjs"], lookup), error, kind);
-        assert.deepEqual(
-          [...projectsFor(["tools/check-shas.mjs"], lookup)].sort(),
-          ["oxlint-rules", "tools"],
-          kind,
-        );
-        assert.match(unreadableLoads(lookup)[0]?.error ?? "", error, kind);
-      } finally {
-        if (kind === "closed") chmodSync(join(lookup, "found"), 0o755);
-        rmSync(lookup, { recursive: true, force: true });
-      }
-    }
-  } finally {
-    rmSync(root, { recursive: true, force: true });
-  }
 });
 
 test("without node_modules it can link, it runs no check, says why and the two fixes, and exits 2", () => {
@@ -296,7 +163,14 @@ function repository({
   };
   run("init", "-q", "-b", "main");
   write("a.mjs", "export const a = 1;\n");
-  write("package.json", JSON.stringify({ devDependencies: { prettier: "0.0.0" } }));
+  // (a stand-in test:lint, which every change but documentation runs, that passes with the other stand-ins)
+  write(
+    "package.json",
+    JSON.stringify({
+      devDependencies: { prettier: "0.0.0" },
+      ...(passing ? { scripts: { "test:lint": "node -e 0" } } : {}),
+    }),
+  );
   write("package-lock.json", JSON.stringify({ lockfileVersion: 3, packages: { "": {}, ...lock } }));
   write(".gitignore", "node_modules/\n");
   // (the checks the merge runs: oxlint waits when asked, so a signal meets a running check)
@@ -304,8 +178,6 @@ function repository({
     "tools/oxlint/run.mjs",
     slowOxlint ? `${awaitFile("release-oxlint", "the test to release oxlint")}\n` : "\n",
   );
-  // (test:lint's runner, which loads nothing here: `loads` then adds no project)
-  write("tools/oxlint/test.mjs", "\n");
   // (a stand-in for the pin-suite mapper that says how it was asked)
   write(
     "tools/repository-checks/pin-suites.mjs",
@@ -341,8 +213,6 @@ function repository({
     JSON.stringify({ lockfileVersion: 3, packages: installed }),
   );
   write("node_modules/prettier/package.json", JSON.stringify({ version: "0.0.0" }));
-  // (the TypeScript that reads what a project's runner loads, as main's install has it)
-  symlinkSync(realpathSync("node_modules/typescript"), join(directory, "node_modules/typescript"));
   write("node_modules/prettier/bin/prettier.cjs", "\n");
   if (passing) {
     write("node_modules/knip/bin/knip.js", "\n");
@@ -1055,9 +925,9 @@ test("its last line names what ran, what failed, and what it did not run: the ch
       assert.equal(result.status, fails ? 1 : 0, result.stdout + result.stderr);
       assert.equal(
         result.stdout.trimEnd().split("\n").at(-1),
-        "check-changed: ran: diff --check, merge commits, format, oxlint, knip, doc links, imports, pin suites, tsc; " +
+        "check-changed: ran: diff --check, merge commits, format, oxlint, knip, doc links, imports, pin suites, tsc, test:lint; " +
           `failed: ${fails ? "pin suites" : "none"}; ` +
-          "not run: test:families, typecheck:player, lint:design, test:lint, test:verification, format:check, " +
+          "not run: test:families, typecheck:player, lint:design, test:verification, format:check, " +
           "test:lint:design, the compiled test suite (CI runs it)",
       );
     } finally {
@@ -1088,8 +958,8 @@ test(
       signalsBefore: false,
     });
     const last =
-      "check-changed: ran: diff --check, merge commits, format, oxlint, knip, doc links, imports, pin suites, tsc; " +
-      "failed: pin suites; not run: test:families, typecheck:player, lint:design, test:lint, test:verification, " +
+      "check-changed: ran: diff --check, merge commits, format, oxlint, knip, doc links, imports, pin suites, tsc, test:lint; " +
+      "failed: pin suites; not run: test:families, typecheck:player, lint:design, test:verification, " +
       "format:check, test:lint:design, the compiled test suite (CI runs it)";
     const at = result.stdout + result.stderr;
     assert.deepEqual([result.code, result.signal], [1, null], at);
