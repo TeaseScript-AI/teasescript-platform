@@ -78,12 +78,15 @@ export function withTestDemandAllowance(demand, run) {
   "src/compiler.js": `import { ledger } from "./type-inference/core/budget.js";
 const wait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 let settling = import.meta.url.includes("/head/");
+let thrown = false;
 export function compileProjectWithBackend(files) {
   const source = files[0].source;
   if (source === "settling" && settling) (settling = false), wait(1800);
   if (source === "slow") wait(700);
   if (source === "hang") wait(6000);
   if (source === "exits") process.exit(3);
+  // (a throw that waits for the compile and its record: the worker's event loop runs it only after both, #2426)
+  if (source === "async-after" && !thrown) (thrown = true), setTimeout(() => { throw new Error("async after record"); });
   const over =
     source === "over" ||
     source === \`over at demand \${globalThis.demand}\` ||
@@ -410,6 +413,113 @@ test("the plans comparison hands no source to a worker before it has loaded and 
       );
     }
   }
+});
+
+/**
+ * A `node --import` module for the runner's process (#2426, R29): the first worker's messages during its first source
+ * are held until that worker's real error, delivered after it in their order, and then its exit follows. That is an
+ * order Node allows (an error ahead of the messages the worker posted before it), selected so that the test is
+ * deterministic; it does not prove every interleaving.
+ */
+const ERROR_FIRST = `import { createRequire, syncBuiltinESMExports } from "node:module";
+const threads = createRequire(import.meta.url)("node:worker_threads");
+const Native = threads.Worker;
+let made = 0;
+threads.Worker = class extends Native {
+  first = ++made === 1;
+  sourced = false;
+  failed = false;
+  held = [];
+  wrapped = new Map();
+  postMessage(...args) {
+    this.sourced = true;
+    return super.postMessage(...args);
+  }
+  on(event, listener) {
+    if (!this.first || (event !== "message" && event !== "error")) return super.on(event, listener);
+    const wrapped = (...args) => {
+      if (event === "message" && this.sourced && !this.failed) return void this.held.push([listener, args]);
+      listener(...args);
+      if (event === "error" && this.sourced) {
+        this.failed = true;
+        for (const [held, values] of this.held.splice(0)) if (this.wrapped.has(held)) held(...values);
+      }
+    };
+    this.wrapped.set(listener, wrapped);
+    return super.on(event, wrapped);
+  }
+  off(event, listener) {
+    const wrapped = this.wrapped.get(listener);
+    this.wrapped.delete(listener);
+    return super.off(event, wrapped ?? listener);
+  }
+};
+syncBuiltinESMExports();
+`;
+
+test("a worker's error delivered before the messages it posted first ends its source in one stall naming the run that threw, and the next source runs on a fresh worker (#2426)", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  built(folder, [
+    ["async-after", "async-after"],
+    ["fine-next", "fine-next"],
+  ]);
+  for (const tree of ["base", "head"]) {
+    const held = join(folder, tree, "dist", "tests/helpers/type-core-held-host.js");
+    writeFileSync(
+      held,
+      readFileSync(held, "utf8").replace(
+        '["stopped", "searched", "settling", "lost"]',
+        '["throws", "stopped"]',
+      ),
+    );
+  }
+  const adapter = join(folder, "error-first.mjs");
+  writeFileSync(adapter, ERROR_FIRST);
+  const plans = (set: string, ...more: string[]) => {
+    const out = join(folder, `${set}.jsonl`);
+    const ran = spawnSync(
+      process.execPath,
+      [
+        "--import",
+        adapter,
+        tool,
+        join(folder, "base"),
+        join(folder, "head"),
+        set,
+        "--out",
+        out,
+        ...more,
+      ],
+      { encoding: "utf8" },
+    );
+    assert.equal(ran.status, 1, ran.stderr);
+    return readFileSync(out, "utf8")
+      .trim()
+      .split("\n")
+      .map((line): Record<string, unknown> => JSON.parse(line));
+  };
+  // (error, its runs, exit: the stall names the run that threw, never none or an earlier one)
+  const [threw, stopped] = plans("held", "--stops");
+  assert.deepEqual(threw, {
+    set: "held",
+    name: "throws",
+    key: threw!.key,
+    stalled: "Error: search failed",
+    run: { tree: "base", mode: ORDERS.base[0], at: "stop search, between", analysis: 0 },
+  });
+  assert.equal(stopped!.name, "stopped");
+  assert.equal(stopped!.differing, 0);
+  // (error, its runs and its record, exit: the record does not end the source, and the next source runs on a fresh
+  // worker, not the one that failed)
+  const [failed, next] = plans("area");
+  assert.equal(failed!.stalled, "Error: async after record");
+  assert.equal(failed!.modes, undefined);
+  // (the throw runs once the compiles of every mode and the record are done: the last run is the head's last one)
+  assert.deepEqual(failed!.run, { tree: "head", mode: ORDERS.base.at(-1), at: "natural" });
+  assert.equal(next!.name, "cases.mjs/fine-next");
+  assert.equal(next!.differing, 0);
+  assert.equal(next!.stalled, undefined);
 });
 
 test("the plans comparison ends with exit 2 and writes no record where a worker posts a stray message during a source (#2342, R17)", (t) => {
