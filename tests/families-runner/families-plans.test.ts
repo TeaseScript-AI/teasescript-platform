@@ -1,6 +1,5 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { createHash } from "node:crypto";
 import {
   cpSync,
   existsSync,
@@ -18,9 +17,6 @@ import { sharing } from "../../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../../src/type-inference/core/solver.js";
 import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import { inMode, MODES } from "../helpers/type-core-oracles.js";
-
-/** A plan or diagnostics digest as the runner writes one (sha256's first 32 hex digits), here of `label`. */
-const digest = (label: string) => createHash("sha256").update(label).digest("hex").slice(0, 32);
 
 const tool = resolve("tests/families/plans.mjs");
 
@@ -46,8 +42,9 @@ const ORDERS = {
  * every record form (R20): `exits` ends its worker; `over at demand <n>` charges 5,000 at that demand, and `overstop`
  * at its stop's allowance; an `apart…` source's plan on the head names its demand and allowance, so every pair differs;
  * the stop search throws for `throws`; the analysis charges 5,000 for `overanalysis` and nothing for
- * `apart-zero-questions`; and the one stop of `apart-stop <n>` and `overstop <n>` is at the allowance `<n>`, of any
- * other at 10.
+ * `apart-zero-questions`; the one stop of `apart-stop <n>` and `overstop <n>` is at the allowance `<n>`, of any
+ * other at 10; and `lists`, `empty-base`, `empty-head` and `duplicates` have a stop list of each tree's own: at edge
+ * allowances out of order, empty on one tree, and one allowance twice (#2340).
  */
 const MODULES: Record<string, string> = {
   "src/type-inference/core/budget.js": `let test = null;
@@ -84,6 +81,7 @@ export function compileProjectWithBackend(files) {
   if (source === "settling" && settling) (settling = false), wait(1800);
   if (source === "slow") wait(700);
   if (source === "hang") wait(6000);
+  if (source === "failing" && import.meta.url.includes("/base/")) throw new Error("fails");
   if (source === "exits") process.exit(3);
   // (a throw that waits for the compile and its record: the worker's event loop runs it only after both, #2426)
   if (source === "async-after" && !thrown) (thrown = true), setTimeout(() => { throw new Error("async after record"); });
@@ -131,6 +129,27 @@ export function heldStops(c, mode) {
   if (c.name === "lost") wait(6000);
   if (c.name === "throws") throw new Error("search failed");
   mode.run(() => new WorkLedger(10).charge("frames", c.name === "searched" ? 5000 : 300));
+  const walk = (...allowances) => allowances.map((allowance) => ({ allowance, phase: "walk" }));
+  const lists = {
+    lists: [
+      [
+        { allowance: 0, phase: "walk" },
+        { allowance: -1, phase: "walk" },
+        { allowance: 0.5, phase: "read" },
+        { allowance: NaN, phase: "walk" },
+        { allowance: Infinity, phase: "removed" },
+      ],
+      [
+        { allowance: Infinity, phase: "walk" },
+        { allowance: 2, phase: "read" },
+        { allowance: 10, phase: "added" },
+      ],
+    ],
+    "empty-base": [[], walk(5)],
+    "empty-head": [walk(5), []],
+    duplicates: [walk(1, 1), walk(1)],
+  }[c.name];
+  if (lists !== undefined) return lists[import.meta.url.includes("/head/") ? 1 : 0];
   const [, at] = /^(?:apart-stop|overstop) (.+)$/.exec(c.name) ?? [];
   return [{ allowance: at === undefined ? 10 : Number(at), phase: "admission" }];
 }
@@ -574,6 +593,11 @@ test("every record form the runner writes, at its allowance edges, passes the su
     "overanalysis",
     "throws",
     "lost",
+    "lists",
+    "empty-base",
+    "empty-head",
+    "duplicates",
+    "failing",
     ...edges.flatMap((edge) => [`apart-stop ${edge}`, `overstop ${edge}`]),
   ];
   for (const tree of ["base", "head"]) {
@@ -620,7 +644,12 @@ test("every record form the runner writes, at its allowance edges, passes the su
     run?: { at: string };
     modes?: {
       demands?: { demand: unknown }[];
-      stops?: { differ: { allowance: unknown }[] };
+      stops?: {
+        differ?: { allowance: unknown }[];
+        base?: { allowance: unknown }[];
+        head?: { allowance: unknown }[];
+        unavailable?: string;
+      };
       questions?: { differ: { allowance: unknown }[] };
     }[];
   };
@@ -666,45 +695,37 @@ test("every record form the runner writes, at its allowance edges, passes the su
     "null",
   ]);
   assert.ok(modes.some((m) => m.questions?.differ.some((d) => d.allowance === 0)));
+  // (#2340: both trees' stop lists where the sets differ, at the edges, and a stop search that did not run)
+  assert.deepEqual(
+    values(
+      modes.flatMap((m) =>
+        [...(m.stops?.base ?? []), ...(m.stops?.head ?? [])].map((stop) => stop.allowance),
+      ),
+    ),
+    ["-1", "0", "0.5", "1", "10", "2", "5", "null"],
+  );
+  assert.ok(modes.some((m) => m.stops?.unavailable !== undefined));
   assert.ok(records.some((r) => r.name === "cases.mjs/fine" && r.differing === 0));
   // (and the summary reads every line)
-  const summary = spawnSync(process.execPath, [tool, "summary", ...files], { encoding: "utf8" });
+  const summary = spawnSync(process.execPath, [tool, "summary", ...files, "--list", "100000"], {
+    encoding: "utf8",
+  });
   assert.equal(summary.stderr, "");
   assert.equal(summary.status, 0);
-});
-
-test("the plans summary prints a recorded mode as recorded and says once what a number is (#2342)", (t) => {
-  const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
-  t.after(() => rmSync(folder, { recursive: true, force: true }));
-  const side = (units: number) => ({
-    plan: digest("p"),
-    diagnostics: digest("d"),
-    checks: 0,
-    error: null,
-    trace: `1/${units}/00`,
-    questions: "1/00",
-    units,
-  });
-  const mode = (name: unknown) => ({ mode: name, base: side(3), head: side(2), same: false });
-  const file = join(folder, "records.jsonl");
-  writeFileSync(
-    file,
-    [
-      { set: "s", name: "old", runs: 2, differing: 2, modes: [mode(2), mode(1)] },
-      { set: "s", name: "new", runs: 1, differing: 1, modes: [mode("forward, unshared")] },
-    ]
-      .map((record) => `${JSON.stringify(record)}\n`)
-      .join(""),
-  );
-  const ran = spawnSync(process.execPath, [tool, "summary", file], { encoding: "utf8" });
-  assert.equal(ran.status, 0, ran.stderr);
-  const lines = ran.stdout.trim().split("\n").slice(1);
-  assert.deepEqual(lines, [
-    "mode <number>: a record from before #2342, the mode's index in HELD_MODES at the commit that wrote it",
-    "s old mode 2: work 3 → 2",
-    "s old mode 1: work 3 → 2",
-    's new mode "forward, unshared": work 3 → 2',
-  ]);
+  // (an empty list on either tree, and an allowance twice, each read in every mode: #2340's round 2)
+  for (const [name, line] of [
+    ["empty-base", 'stop phase "walk" added: base none (0), head 5 (1)'],
+    ["empty-head", 'stop phase "walk" removed: base 5 (1), head none (0)'],
+    ["duplicates", 'stop phase "walk" moved: base 1, 1 (2), head 1 (1)'],
+  ])
+    assert.equal(
+      summary.stdout
+        .split("\n")
+        .filter((each) => each.startsWith(`held ${name} mode `) && each.endsWith(`: ${line}`))
+        .length,
+      4,
+      name,
+    );
 });
 
 test("each held mode's name says the settings its run sets, and the oracle's mode of those settings is found by them, not by position (#2342)", () => {
@@ -756,280 +777,47 @@ test("each held mode's name says the settings its run sets, and the oracle's mod
   );
 });
 
-test("the plans summary names what differs in a demand row, gives it one class, and which tree's output the allowance stops (#2341)", (t) => {
+test("the plans comparison keeps both trees' stops where they differ, and says a held case's stop search did not run (#2340)", (t) => {
   const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
-  const compile = (plan: string, diagnostics: string, more: Record<string, unknown> = {}) => ({
-    plan: digest(plan),
-    diagnostics: digest(diagnostics),
-    checks: 1,
-    error: null,
-    trace: "1/5/00",
-    questions: "1/00",
-    units: 5,
-    ...more,
-  });
-  // (in "reversed" the trees' unstopped compiles differ, so that a row read against the other tree's names the other
-  // tree; in "forward, unshared" they agree, so that a row can differ in its questions or work alone)
-  const apart = { base: compile("A", "d"), head: compile("B", "e") };
-  const alike = { base: compile("P", "d"), head: compile("P", "d") };
-  const modes = [
-    {
-      mode: "reversed",
-      ...apart,
-      same: false,
-      demands: [
-        // (the base's output at the allowance is the head's unstopped plan, not its own: the base's stop alone)
-        {
-          demand: 64,
-          base: compile("B", "d", { questions: "2/00", trace: "1/4/00", units: 4 }),
-          head: compile("B", "e", { questions: "3/00", trace: "1/6/00", units: 6 }),
-        },
-        {
-          demand: 16,
-          base: compile("X", "d", { trace: "1/4/00", units: 4 }),
-          head: compile("Y", "e", { trace: "1/3/00", units: 3 }),
-        },
-      ],
-    },
-    {
-      mode: "forward, unshared",
-      ...alike,
-      same: true,
-      demands: [
-        {
-          demand: 32,
-          base: compile("P", "d", { questions: "2/00" }),
-          head: compile("P", "d", { questions: "3/00" }),
-        },
-        {
-          demand: 8,
-          base: compile("P", "d", { trace: "1/4/00", units: 4 }),
-          head: compile("P", "d", { trace: "1/3/00", units: 3 }),
-        },
-      ],
-    },
-  ];
-  const file = join(folder, "records.jsonl");
-  writeFileSync(file, `${JSON.stringify({ set: "s", name: "n", runs: 6, differing: 5, modes })}\n`);
-  const ran = spawnSync(process.execPath, [tool, "summary", file], { encoding: "utf8" });
-  assert.equal(ran.status, 0, ran.stderr);
-  const [countsLine, ...lines] = ran.stdout.trim().split("\n");
-  const counts = JSON.parse(countsLine!);
+  built(folder, [["fine", "fine"]]);
+  // (one held case whose stops move by tree, and one whose base compile fails)
+  for (const tree of ["base", "head"])
+    writeFileSync(
+      join(folder, tree, "dist", "tests/helpers/type-core-held-host.js"),
+      `export const HELD_MODES = ${JSON.stringify(ORDERS.base)}.map((name) => ({ name, run: (f) => f() }));
+export const heldFamily = () => ["moving", "failing"].map((name) => ({ name, source: name, slice: true }));
+export const heldStops = () => [{ allowance: ${tree === "head" ? 12 : 10}, phase: "walk" }];
+`,
+    );
+  const out = join(folder, "held.jsonl");
+  const ran = spawnSync(
+    process.execPath,
+    [tool, join(folder, "base"), join(folder, "head"), "held", "--stops", "--out", out],
+    { encoding: "utf8" },
+  );
+  assert.equal(ran.status, 1, ran.stderr);
+  const records = readFileSync(out, "utf8")
+    .trim()
+    .split("\n")
+    .map((line): Record<string, unknown> => JSON.parse(line));
+  const stopsOf = (name: string) => {
+    const { modes } = records.find((record) => record.name === name)!;
+    assert.ok(Array.isArray(modes));
+    return modes.map((entry: Record<string, unknown>) => entry.stops);
+  };
   assert.deepEqual(
-    ["demand", "demandPublication", "demandQuestions", "demandWork"].map((key) => counts[key]),
-    [4, 2, 1, 1],
+    stopsOf("moving"),
+    ORDERS.base.map(() => ({
+      count: 1,
+      sameSet: false,
+      differ: [],
+      base: [{ allowance: 10, phase: "walk" }],
+      head: [{ allowance: 12, phase: "walk" }],
+    })),
   );
   assert.deepEqual(
-    ["Base", "Head", "Both", "Neither"].map((who) => counts[`demandStops${who}`]),
-    [1, 0, 1, 2],
+    stopsOf("failing"),
+    ORDERS.base.map(() => ({ unavailable: "the base's unstopped compile failed: Error: fails" })),
   );
-  const own = "(against its own unstopped compile, base:";
-  const checks = "checks 1/1 → 1/1 (unstopped/at the allowance)";
-  assert.deepEqual(lines.slice(1), [
-    `s n mode "reversed": at demand allowance 64 apart (publication): diagnostics, questions, work; stops base ` +
-      `${own} plan, questions, work, head: questions, work); ${checks}, units 4 → 6`,
-    `s n mode "reversed": at demand allowance 16 apart (publication): plan, diagnostics, work; stops both ` +
-      `${own} plan, work, head: plan, work); ${checks}, units 4 → 3`,
-    `s n mode "forward, unshared": at demand allowance 32 apart (questions): questions; stops neither ` +
-      `${own} questions, head: questions); ${checks}, units 5 → 5`,
-    `s n mode "forward, unshared": at demand allowance 8 apart (work): work; stops neither ` +
-      `${own} work, head: work); ${checks}, units 4 → 3`,
-  ]);
-});
-
-test("the plans summary refuses, naming file, line and fault, any line that is not a record the runner writes (#2341, R13)", (t) => {
-  const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
-  t.after(() => rmSync(folder, { recursive: true, force: true }));
-  const compile = (more: Record<string, unknown> = {}) => ({
-    plan: digest("p"),
-    diagnostics: digest("d"),
-    checks: 0,
-    error: null,
-    trace: "1/5/811c9dc5c2b2ae3d",
-    questions: "1/a0",
-    units: 5,
-    ...more,
-  });
-  const valid = () => ({
-    set: "s",
-    name: "n",
-    key: "c".repeat(64),
-    runs: 2,
-    differing: 1,
-    modes: [
-      {
-        mode: "reversed",
-        base: compile(),
-        head: compile(),
-        same: true,
-        demands: [{ demand: 16, base: compile(), head: compile({ trace: "1/4/a0", units: 4 }) }],
-      },
-    ],
-  });
-  // (each row one fault, which only its own clause refuses; the valid record first, which must pass)
-  // (a row whose fault is null passes)
-  const rows: (readonly [
-    string,
-    (r: ReturnType<typeof valid>) => object | string,
-    RegExp | null,
-  ])[] = [
-    ["a valid record", (r) => r, null],
-    ["not JSON", () => "{not json", /no JSON/],
-    ["a key that is no hash", (r) => ({ ...r, key: "k" }), /no sha256/],
-    ["an unknown field", (r) => ({ ...r, extra: 1 }), /no source record/],
-    ["runs as text", (r) => ({ ...r, runs: "2" }), /runs or differing/],
-    ["no modes", (r) => ({ ...r, modes: [] }), /no modes/],
-    ["a mode twice", (r) => ({ ...r, modes: [r.modes[0], r.modes[0]] }), /a mode twice/],
-    [
-      "a mode index past 3",
-      (r) => ({ ...r, modes: [{ ...r.modes[0], mode: 4 }] }),
-      /neither by a name/,
-    ],
-    [
-      "questions false",
-      (r) => ({ ...r, modes: [{ ...r.modes[0], base: compile({ questions: false }) }] }),
-      /questions not n\/hash/,
-    ],
-    [
-      "trace null",
-      (r) => ({ ...r, modes: [{ ...r.modes[0], head: compile({ trace: null }) }] }),
-      /trace not n\/units\/hash/,
-    ],
-    [
-      "a part missing",
-      (r) => ({ ...r, modes: [{ ...r.modes[0], head: { ...compile(), questions: undefined } }] }),
-      /exactly its seven parts/,
-    ],
-    [
-      "a plan neither a digest nor null",
-      (r) => ({ ...r, modes: [{ ...r.modes[0], base: compile({ plan: 1 }) }] }),
-      /neither a digest nor null/,
-    ],
-    // (each value format the runner writes, one malformed value a row: round 2's B1)
-    ...(
-      [
-        ["a plan of no digest", { plan: "not-a-hash" }, /neither a digest nor null/],
-        ["diagnostics of 33 digits", { diagnostics: "b".repeat(33) }, /neither a digest nor null/],
-        ["a digest in capitals", { plan: "A".repeat(32) }, /neither a digest nor null/],
-        ["an error that is no text", { error: 1 }, /error neither text nor null/],
-        ["a trace hash of one word", { trace: "1/5/a" }, /trace not/],
-        ["a trace hash of 17 digits", { trace: `1/5/${"a".repeat(17)}` }, /trace not/],
-        ["a trace word with a leading zero", { trace: "1/5/00a" }, /trace not/],
-        ["a trace count with a leading zero", { trace: "01/5/a0" }, /trace not/],
-        ["a questions hash of one word", { questions: "1/a" }, /questions not/],
-        ["a questions hash of 17 digits", { questions: `1/${"a".repeat(17)}` }, /questions not/],
-        ["units apart from the trace's", { units: 6 }, /units not its trace's/],
-      ] as const
-    ).map(
-      ([label, part, fault]) =>
-        [
-          label,
-          (r: ReturnType<typeof valid>) => ({
-            ...r,
-            modes: [
-              { ...r.modes[0], demands: [{ demand: 16, base: compile(), head: compile(part) }] },
-            ],
-          }),
-          fault,
-        ] as const,
-    ),
-    [
-      "checks below zero",
-      (r) => ({ ...r, modes: [{ ...r.modes[0], base: compile({ checks: -1 }) }] }),
-      /checks or units/,
-    ],
-    [
-      "same against the parts",
-      (r) => ({ ...r, modes: [{ ...r.modes[0], same: false }] }),
-      /same that is not/,
-    ],
-    [
-      "a demand side null",
-      (r) => ({
-        ...r,
-        modes: [{ ...r.modes[0], demands: [{ demand: 16, base: null, head: compile() }] }],
-      }),
-      /exactly its seven parts/,
-    ],
-    [
-      "a demand kept though equal",
-      (r) => ({
-        ...r,
-        modes: [{ ...r.modes[0], demands: [{ demand: 16, base: compile(), head: compile() }] }],
-      }),
-      /do not differ/,
-    ],
-    [
-      "a demand as text",
-      (r) => ({
-        ...r,
-        modes: [{ ...r.modes[0], demands: [{ ...r.modes[0]!.demands[0]!, demand: "16" }] }],
-      }),
-      /demand not one/,
-    ],
-    ["a stall with runs", (r) => ({ ...r, stalled: "units", run: null }), /also holds runs/],
-    [
-      "a stall's run of no tree",
-      () => ({
-        set: "s",
-        name: "n",
-        stalled: "units",
-        run: { tree: "both", mode: "forward", at: "natural" },
-      }),
-      /run not one the runner names/,
-    ],
-    ...(
-      [
-        // (the runs a stall names, as every runner on main words them: null fault, the record passes)
-        [{ at: "natural" }, null],
-        [{ at: "demand 16" }, null],
-        [{ at: "allowance 1027" }, null],
-        [{ at: "analysis" }, null],
-        [{ at: "stop search", analysis: 0 }, null],
-        [{ at: "stop search, between", analysis: 3 }, null],
-        [{ at: "somewhere" }, /run not one the runner names/],
-        [{ at: "demand 016" }, /run not one the runner names/],
-        [{ at: "natural", analysis: 1 }, /run not one the runner names/],
-        [{ at: "stop search" }, /run not one the runner names/],
-      ] as const
-    ).map(
-      ([run, fault]) =>
-        [
-          `a stall at ${JSON.stringify(run)}`,
-          () => ({
-            set: "s",
-            name: "n",
-            stalled: "units",
-            run: { tree: "head", mode: "forward", ...run },
-            work: 9,
-            allowance: 2,
-          }),
-          fault,
-        ] as const,
-    ),
-    [
-      "a safety net reached",
-      () => ({ set: "s", name: "n", uncharged: "safety net 1800 s", run: null }),
-      null,
-    ],
-    [
-      "a safety net worded otherwise",
-      () => ({ set: "s", name: "n", uncharged: "timeout", run: null }),
-      /does not word so/,
-    ],
-  ];
-  for (const [at, [label, change, fault]] of rows.entries()) {
-    const changed = change(valid());
-    const file = join(folder, `row-${at}.jsonl`);
-    writeFileSync(file, `${typeof changed === "string" ? changed : JSON.stringify(changed)}\n`);
-    const ran = spawnSync(process.execPath, [tool, "summary", file], { encoding: "utf8" });
-    if (fault === null) assert.equal(ran.status, 0, `${label}: ${ran.stderr}`);
-    else {
-      assert.equal(ran.status, 2, `${label}: ${ran.stdout}`);
-      assert.match(ran.stderr, new RegExp(`row-${at}\\.jsonl:1: `), label);
-      assert.match(ran.stderr, fault, label);
-      assert.equal(ran.stdout, "", label);
-    }
-  }
 });

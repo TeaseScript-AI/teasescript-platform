@@ -91,6 +91,24 @@ test("a failed step stops no other, serial or parallel; the last line names what
   }
 });
 
+test("--list runs the npm scripts a file lists, in its order, and refuses a list of what is not a script or no file (#2440)", async (t) => {
+  const cwd = fixture(t, { a: "", b: "" });
+  writeFileSync(join(cwd, "steps.txt"), "# the steps\nb\na\n");
+  writeFileSync(join(cwd, "bad.txt"), "a\nc\n");
+  const listed = await start(t, cwd, ["--list", "steps.txt"], true).done;
+  assert.equal(listed.code, 0, listed.output);
+  assert.equal(listed.stdout.trim().split("\n").at(-1), "ran: b, a; failed: none; not run: none");
+  assert.match(listed.stdout, /\[b\] PASS[\s\S]*\[a\] PASS/u);
+  const refused = await start(t, cwd, ["--list", "bad.txt"]).done;
+  assert.equal(refused.code, 1, refused.output);
+  assert.match(refused.stderr, /bad\.txt lists what is not an npm script: c/u);
+  // without its file, `--list` is no npm script to run, but a usage error (Sol r1)
+  const bare = await start(t, cwd, ["--list"]).done;
+  assert.equal(bare.code, 1, bare.output);
+  assert.match(bare.stderr, /usage: node tools\/run-parallel\.mjs --list <file>/u);
+  assert.doesNotMatch(bare.stdout, /ran:/u);
+});
+
 test("a step npm cannot start fails with exit 1 and is named", async (t) => {
   const cwd = fixture(t, { first: "" });
   // (no npm on PATH: the spawn itself fails)

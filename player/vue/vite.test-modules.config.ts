@@ -1,5 +1,6 @@
 import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vite";
+import { testModulesSources } from "./test-modules-sources.ts";
 
 /**
  * The Player browser-source modules that compiled Node tests load through `tests/helpers/player-modules.ts`. Knip cannot
@@ -45,11 +46,12 @@ const modules = [
 // One server-side bundle for all test processes, built with the other UI builds, instead of every test file
 // transforming the Player and the engine sources again. Shared modules become shared chunks, so the entries keep one
 // module graph; dependencies such as `vue` stay external, so tests and composables share one Vue instance. MCU is
-// bundled: its extensionless internal imports do not load in Node.
+// bundled: its extensionless internal imports do not load in Node. `sources.json` stamps the bundle with its sources.
 export default defineConfig({
   root: fileURLToPath(new URL("../..", import.meta.url)),
   logLevel: "warn",
   publicDir: false,
+  plugins: [testModulesSources()],
   ssr: { noExternal: ["@material/material-color-utilities"] },
   build: {
     ssr: true,

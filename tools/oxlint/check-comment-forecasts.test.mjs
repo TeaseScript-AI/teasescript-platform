@@ -15,6 +15,7 @@ import {
   glossaryRows,
   labelsIn,
   listedTextFindings,
+  recordAnchors,
   recordEntries,
   tableCitationsIn,
   unnamedSectionsIn,
@@ -108,6 +109,9 @@ test("the counted citations are counted in comments only", () => {
     ),
     { "bare r4.N": 2, "other TABLE": 2 },
   );
+  // the revision rule's token: after `_` it is one, after `.` or a letter none
+  assert.deepEqual(citationCounts("a.ts", "// _r4.1\n"), { "bare r4.N": 1 });
+  assert.deepEqual(citationCounts("a.ts", "// x.r4.2, xr4.3\n"), {});
 });
 
 test("a TABLE revision or section, wrapped or not, is no counted form: the text check finds it", () => {
@@ -271,6 +275,40 @@ test("a revision number names an entry of the accepted record, each end of a ran
     [1, "9997"],
   ]);
   assert.deepEqual(missing("tests/a.json", '{"closes": "r4.9996 until #1"}\r\n'), [[1, "9996"]]);
+  // a short end is read whole, however long: its digits and the edge after them are its own
+  const long = "r4.38–1234567890123456\n";
+  assert.deepEqual(
+    unresolvedRevisionsIn(
+      "tests/c.ts",
+      long,
+      recordEntries(["### r4-38\n\n### r4-123456789012345\n"]),
+    ).map(({ number }) => number),
+    ["1234567890123456"],
+  );
+  assert.deepEqual(
+    unresolvedRevisionsIn(
+      "tests/c.ts",
+      long,
+      recordEntries(["### r4-38\n\n### r4-1234567890123456\n"]),
+    ),
+    [],
+  );
+  // a short end stands right after its number: a dash and digits later on the line are none
+  assert.deepEqual(
+    unresolvedRevisionsIn("tests/d.ts", "r4.38 and pages 1–9989\n", recordEntries(["### r4-38\n"])),
+    [],
+  );
+  // a range's short second end is a number of its own; a spaced dash, a longer token or a full end is none
+  assert.deepEqual(
+    missing(
+      "tests/b.ts",
+      "r4.38–72, r4.38-9995, r4.9994–38\nr4.38 – 9993, r4.38–9992a, r4.38-9991.5, r4.38–9990٢, r4.38-r4.72\n",
+    ),
+    [
+      [1, "9995"],
+      [1, "9994"],
+    ],
+  );
   // other spellings and longer tokens are no revision numbers; an anchor is the doc-links check's
   // a number is its digits as written, leading zeros included, so 038 names no entry 38
   assert.deepEqual(
@@ -354,6 +392,80 @@ test("a heading the doc-links check resolves is an entry exactly when its level 
   }
 });
 
+test("a record page's anchors are exactly those the doc-links check resolves, heading form by heading form", () => {
+  // #2405's heading forms, a heading in a code block, a repeated heading and a heading with punctuation, on one page
+  const headings = [
+    "### r4-9901",
+    "### ~~r4-9902~~",
+    "### *r4-9903*",
+    "### **r4-9904**",
+    "### `r4-9905`",
+    "### r4\\-9906",
+    "### r4&#45;9907",
+    "### [r4-9908](#r4-9908)",
+    "### [r4-9909][e9909]\n\n[e9909]: #r4-9909",
+    "### r4-9910 ###",
+    "### <em>r4-9911</em>",
+    "### r4<!-- c -->-9912",
+    "### <span>r4-9913</span>",
+    "### r4-9914![alt](i.png)",
+    "r4-9915\n---",
+    "### <r4-9916:>",
+    "### <r4-9917>",
+    "<h3>r4-9918</h3>",
+    "```\n### r4-9919\n```",
+    "### Twice",
+    "### Twice",
+    "### R4-9920: The Rule (a), `x` & y!",
+  ];
+  const root = mkdtempSync(join(tmpdir(), "record-anchors-"));
+  try {
+    const record = "docs/specifications/type-inference-accepted-record";
+    const write = (file, text) => {
+      mkdirSync(dirname(join(root, file)), { recursive: true });
+      writeFileSync(join(root, file), text);
+    };
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    write(".gitignore", "node_modules\n");
+    symlinkSync(join(repositoryRoot, "node_modules"), join(root, "node_modules"));
+    const page = `# Page\n\n${headings.join("\n\n")}\n`;
+    write(`${record}/page.md`, page);
+    const anchors = recordAnchors(new Map([["page.md", page]])).get("page.md");
+    // every anchor the rule reads, and the anchors a reader might expect that it does not
+    const candidates = [
+      ...new Set([
+        ...anchors,
+        ...Array.from({ length: 20 }, (_, index) => `r4-${9901 + index}`),
+        "twice-2",
+        "r4-9920-the-rule-a-x--y",
+        "r4-9920-the-rule-a-x-y",
+      ]),
+    ];
+    write(
+      "docs/refs.md",
+      candidates.map((anchor) => `[${anchor}](${record.slice(5)}/page.md#${anchor})`).join("\n\n") +
+        "\n",
+    );
+    const links = spawnSync(
+      process.execPath,
+      [fileURLToPath(new URL("../repository-checks/doc-links.mjs", import.meta.url))],
+      { cwd: root, encoding: "utf8" },
+    );
+    const unresolved = new Set(
+      [...links.stderr.matchAll(/Cannot find heading for `#([\w-]+)`/gu)].map(
+        ([, anchor]) => anchor,
+      ),
+    );
+    assert.ok(unresolved.size > 0, links.stderr);
+    assert.deepEqual(
+      candidates.map((anchor) => [anchor, anchors.has(anchor)]),
+      candidates.map((anchor) => [anchor, !unresolved.has(anchor)]),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("the TABLE citation check reads every file Git lists, by its exact path, and refuses a name it cannot read", async () => {
   const root = mkdtempSync(join(tmpdir(), "table-citations-"));
   try {
@@ -375,11 +487,16 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
     write("tools/oxlint/comment-citations.json", "{}\n");
     // entries on every record page Git lists: the README, a nested page and another Markdown extension too
     const record = "docs/specifications/type-inference-accepted-record";
-    write(`${record}/README.md`, "# Record\n\n## Labels\n\n### r4-40\n");
+    write(
+      `${record}/README.md`,
+      "# Record\n\n## Labels\n\n| label | meaning |\n| --- | --- |\n| `C9` | a rule |\n\n### r4-40\n",
+    );
+    // a core comment's label with its glossary row: no finding, so the glossary is the README Git lists
+    write("src/type-inference/core/labelled.ts", "// C9 holds here\nexport const x = 1;\n");
     // (a struck-through heading, GitHub's mark, and one with inline HTML, read as the doc-links check reads them)
     write(
       `${record}/sharing.md`,
-      "# S\n\n### r4-38\n\n### ~~r4-9997~~\n\n### <em>r4-9996</em>\n\nas r4.167\n",
+      "# S\n\n### r4-38\n\n### ~~r4-9997~~\n\n### <em>r4-9996</em>\n\nas r4.167\n\n```\n### r4-9\n```\n\n### Twice\n\n### Twice\n",
     );
     // files in the record's folder that are no pages are under the rule
     write(`${record}/notes.json`, '{"why": "r4.9994"}\n');
@@ -394,6 +511,19 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
         `[^n]: [page](${record.slice(5)}/sharing.md)\n`,
     );
     write("data/rev.json", '{"why": "r4.9995"}\n');
+    // a range's short second end names an entry too
+    write("tests/ranges.ts", 'const s = "r4.38–40 and r4.38-9992";\n');
+    // comments' pointers: at a fenced heading, a third repeat and a missing page refused; nested and `.markdown` found
+    write(
+      "src/pointers.ts",
+      [
+        `// (${record}/sharing.md#r4-38, ${record}/sharing.md#twice-1)`,
+        `// (${record}/nested/entry.md#r4-41, ${record}/other.markdown#r4-42)`,
+        `// (${record}/sharing.md#r4-9)`,
+        `// (${record}/sharing.md#twice-2, ${record}/entry.md#r4-41)`,
+        "",
+      ].join("\n"),
+    );
     // section numbers: refused in a test and in data, not in the exempt paths or a binary file, and admitted after V30
     write("tests/sections.ts", '// V30 §13\nconst title = "a rule (§3.2)";\n');
     write("data/sections.json", '{"why": "§4"}\n');
@@ -432,6 +562,7 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
       `${record}/nested/notes.txt:1`,
       // (a binary file is read for revision numbers, not for the record's name)
       "data.bin:1",
+      "tests/ranges.ts:1",
     ].sort();
     const at = (findings, kind) =>
       findings
@@ -457,6 +588,18 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
     assert.deepEqual(at(entryFindings, "cites a record that is not in the repository"), expected);
     assert.deepEqual(at(entryFindings, "names no entry of the accepted record"), revisions);
     assert.deepEqual(at(entryFindings, "a section number without"), sections);
+    assert.deepEqual(
+      entryFindings
+        .filter(({ message }) => message.startsWith("a comment points at"))
+        .map(
+          ({ fileName, line, message }) => `${fileName}:${line} ${/#([\w-]+)/u.exec(message)[1]}`,
+        ),
+      ["src/pointers.ts:3 r4-9", "src/pointers.ts:4 twice-2", "src/pointers.ts:4 r4-41"],
+    );
+    assert.deepEqual(
+      entryFindings.filter(({ message }) => message.includes("glossary")),
+      [],
+    );
     writeFileSync(
       Buffer.concat([Buffer.from(`${root}/name-`), Buffer.from([0xff]), Buffer.from(".md")]),
       "TABLE r4.9\n",
@@ -613,11 +756,20 @@ test("the section rule's exemptions are exact paths and two folders", () => {
     assert.equal(unnamedSectionsIn(file, "§1\n").length, 1, file);
 });
 
-test("a comment's pointer at the accepted record names a heading of the page it names", () => {
-  const pages = new Map([
-    ["sharing", "# Sharing\n\n### r4-15\n\n### section-2-f12\n"],
-    ["oracles", "# Oracles\n\n### r4-16\n"],
-  ]);
+test("a comment's pointer at the accepted record names an anchor of the page it names, nested pages included", () => {
+  const anchors = recordAnchors(
+    new Map([
+      // (a heading in a code block is none; a repeated heading's second anchor takes `-1`)
+      [
+        "sharing.md",
+        "# Sharing\n\n### r4-15\n\n### section-2-f12\n\n```\n### r4-9\n```\n\n### Twice\n\n### Twice\n",
+      ],
+      // (each page slugs on its own: a heading repeated on another page takes no `-1` there)
+      ["oracles.md", "# Oracles\n\n### r4-16\n\n### Twice\n"],
+      ["nested/entry.md", "# Nested\n\n### r4-41\n"],
+      ["other.markdown", "# Other\n\n### r4-42: The rule (a), `x`!\n"],
+    ]),
+  );
   const record = "docs/specifications/type-inference-accepted-record";
   assert.deepEqual(
     unresolvedPointers(
@@ -628,14 +780,24 @@ test("a comment's pointer at the accepted record names a heading of the page it 
         `// the old single page (${record}.md#r4-15)`,
         `// no such page (${record}/stops.md#r4-15)`,
         `const s = "${record}/sharing.md#r4-17";`,
+        `// fenced (${record}/sharing.md#r4-9), repeated (${record}/sharing.md#twice, ${record}/sharing.md#twice-1)`,
+        `// a third (${record}/sharing.md#twice-2), nested (${record}/nested/entry.md#r4-41, ${record}/entry.md#r4-41)`,
+        `// another extension (${record}/other.markdown#r4-42-the-rule-a-x, ${record}/other.md#r4-42-the-rule-a-x)`,
+        `// missing anchors (${record}/nested/entry.md#r4-9999, ${record}/other.markdown#r4-42) and (${record}/oracles.md#twice)`,
         "",
       ].join("\n"),
-      pages,
+      anchors,
     ),
     [
-      { line: 2, page: "sharing", anchor: "r4-16" },
+      { line: 2, page: "sharing.md", anchor: "r4-16" },
       { line: 3, page: undefined, anchor: "r4-15" },
-      { line: 4, page: "stops", anchor: "r4-15" },
+      { line: 4, page: "stops.md", anchor: "r4-15" },
+      { line: 6, page: "sharing.md", anchor: "r4-9" },
+      { line: 7, page: "sharing.md", anchor: "twice-2" },
+      { line: 7, page: "entry.md", anchor: "r4-41" },
+      { line: 8, page: "other.md", anchor: "r4-42-the-rule-a-x" },
+      { line: 9, page: "nested/entry.md", anchor: "r4-9999" },
+      { line: 9, page: "other.markdown", anchor: "r4-42" },
     ],
   );
 });
