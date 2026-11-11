@@ -708,12 +708,23 @@ test(
         ],
         // Another writer between the read and the cut, growing or shortening the file: it is left as that writer left
         // it, neither cut nor padded.
+        // (writing into the file, or renaming a new file onto its name, as an editor's save does)
         ...[
-          ["grows", `${before}Another writer added this paragraph.\n`],
-          ["shortens", "Short"],
-        ].map(([how, changed]) => [
+          ["grows", `${before}Another writer added this paragraph.\n`, "fs.writeFileSync(f, c)"],
+          ["shortens", "Short", "fs.writeFileSync(f, c)"],
+          [
+            "changes, keeping its length,",
+            before.replace("READY", "DRAFT"),
+            "fs.writeFileSync(f, c)",
+          ],
+          [
+            "replaces",
+            before.replace("READY", "DRAFT"),
+            'fs.writeFileSync(f + ".new", c); fs.renameSync(f + ".new", f)',
+          ],
+        ].map(([how, changed, write]) => [
           `another writer ${how} the file`,
-          `const real = fs.readSync; let starts = 0; fs.readSync = (d, b, o, l, p) => { if (p === 0 && ++starts === 2) fs.writeFileSync(process.argv.at(-1), ${JSON.stringify(changed)}); return real(d, b, o, l, p); };`,
+          `const real = fs.readSync; let starts = 0; fs.readSync = (d, b, o, l, p) => { if (p === 0 && ++starts === 2) { const f = process.argv.at(-1); const c = ${JSON.stringify(changed)}; ${write}; } return real(d, b, o, l, p); };`,
           2,
           changed,
           /cannot write .*: it changed while it was checked, and is left so: run again$/mu,

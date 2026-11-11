@@ -7,6 +7,7 @@ import {
   openSync,
   readFileSync,
   readSync,
+  statSync,
   writeSync,
 } from "node:fs";
 
@@ -18,11 +19,11 @@ import {
 // own already there (which is left out of the check), so that the report sent is that file and its line is never
 // copied by hand. Only a whole last line in the tool's own form is its own; a quoted or partial one is text. The file is
 // held through one descriptor from before its read until after its write, and written in place, through a link: read
-// again and cut after its text only if it is still as it was read, then the line written there. A file that cannot be
-// opened for reading and writing or is no regular file, one another writer changed meanwhile, and a failure to read or
-// cut leave it as it was (or as the other writer left it); one while writing or closing leaves its text and maybe part
-// of the line, which the message says to remove; all exit 2. Limit: a writer that changes the file in the instant
-// between that second read and the cut is not seen.
+// again and cut after its text only if its name still names it and it is still as it was read, then the line written
+// there. A file that cannot be opened for reading and writing or is no regular file, one another writer changed or
+// replaced meanwhile, and a failure to read or cut leave it as it was (or as the other writer left it); one while
+// writing or closing leaves its text and maybe part of the line, which the message says to remove; all exit 2. Limit: a
+// writer that changes or replaces the file in the instant between that second read and the cut is not seen.
 //
 // A SHA-shaped token is 7 to 40 lowercase hex characters, bounded by no letter, digit or `_`. Each is resolved with
 // `git rev-parse --verify --quiet <token>^{commit}` in each `--repo` (default: the current repository) and reported as
@@ -105,7 +106,7 @@ function openForAppend(file) {
 
 /**
  * Writes `line` as `file`'s last line, in place, through `descriptor`, which read `bytes`: the file is read again, and
- * only if it is still `bytes` cut where `kept`, its text before trailing white space and an own last line, ends, and
+ * only if `file` still names it and it is still `bytes` cut where `kept`, its text before trailing white space and an own last line, ends, and
  * the blank line and `line` are written there. A file another writer changed meanwhile is left as that writer left it;
  * a failure to read or cut leaves it as it was; a later failure, closing included, leaves its text, maybe with all or
  * part of the line. Each exits 2, naming the first failure and what it left.
@@ -120,8 +121,12 @@ function appendLine(file, descriptor, bytes, kept, line) {
   let cut = false;
   let failure;
   try {
-    // (another writer's change since the first read is left as it is, not cut)
-    changed = !readAll(descriptor).equals(bytes);
+    // (another writer's change since the first read is left as it is, not cut: one written into this file, or a new
+    // file renamed onto its name, which leaves the descriptor on the old one)
+    const now = readAll(descriptor);
+    const named = statSync(file, { throwIfNoEntry: false });
+    const held = fstatSync(descriptor);
+    changed = !now.equals(bytes) || named?.dev !== held.dev || named?.ino !== held.ino;
     if (!changed) {
       ftruncateSync(descriptor, end);
       cut = true;
