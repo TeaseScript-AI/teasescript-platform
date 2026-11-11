@@ -41,17 +41,16 @@ const [{ costlyTestSeconds }, { summaryLine }, { isSuiteTestPath, isTypeCoreTest
 // HEAD's own line leaves, `origin/main` or `origin/runtime-v2`, which it prints, or exit 2 when it cannot prove which
 // (`branchedFrom`); the changes are those since its merge-base with HEAD, committed or not, untracked files, deleted
 // ones and both sides of a move included. Always: `git diff --check`, the format check of the changed files, oxlint,
-// knip, the doc links, the imports, `test:verification` and `typecheck:player`, each as CI runs it, and
-// `merge commits`: since the merge-base, no merge commit but one whose later parents are on origin/main or
-// origin/runtime-v2 and not on the base (`strayMerges`). The tool tests and the Player's type check read far more than
-// a claim can name (#2472): `typecheck:player` type-checks the `src/`, `player/` and `playground/` files the Player
-// imports, 314 tracked files outside `player/vue/` on main cfbf2b415; `test:verification` read 471 besides the tools
-// and checks it tests, among them every `.ts` file under `tests/` (`pin-suites`) and the documents the reading route
-// lists (`reading-route-size`).
+// knip, the doc links, the imports and `test:verification`, each as CI runs it, and `merge commits`: since the
+// merge-base, no merge commit but one whose later parents are on origin/main or origin/runtime-v2 and not on the base
+// (`strayMerges`). `test:verification` reads more than a claim can name, documentation included (#2472): on main
+// cfbf2b415 it read 471 tracked files besides the tools and checks it tests, among them every `.ts` file under
+// `tests/` (`pin-suites`) and the documents the reading route lists (`reading-route-size`).
 // Then each project a changed path belongs to (`projectsFor`): its type check and tests. A root configuration file
 // belongs to the checks that read it, and needs no project when only those that always run do. A changed path no
 // project claims, other than documentation, runs every project's checks. Every change but documentation (a path ending
-// in `.md` or under `docs/`, `isDocumentation`) runs `test:lint` (`everyChange`). The checks run side by side: with
+// in `.md` or under `docs/`, `isDocumentation`) runs `test:lint` and `typecheck:player` (`everyChange`), which read
+// more than a claim can name but no documentation. The checks run side by side: with
 // `test:lint` a run peaked at about 5.5 GiB summed over its processes (#2431), and a queue job asks `--mem 8G` for it.
 // It never builds the TypeScript or runs the compiled test suite, which CI does: a change that shows only there, such
 // as the root tsconfig's emit settings, passes here. When a changed file is under `src/type-inference/core/`, it also prints the suites that pin the core's work or
@@ -99,6 +98,14 @@ export const PROJECTS = {
   },
   families: { claims: (path) => path.startsWith("tests/families/"), checks: ["test:families"] },
   "player-vue": { claims: (path) => path.startsWith("player/vue/"), checks: ["lint:design"] },
+  // vue-tsc type-checks the Player against every file it imports: on main cfbf2b415, 314 tracked files outside
+  // `player/vue/`, from `src/`, `player/` and `playground/`, a set that moves with the Player's imports, and no
+  // documentation (#2472). So it runs for every change but documentation, as `test:lint` does.
+  "player-types": {
+    claims: (path) => path.startsWith("player/vue/"),
+    everyChange: true,
+    checks: ["typecheck:player"],
+  },
   // `test:lint`'s rule tests read far more than a claim can name: `.oxlintrc.json`, the tools that run and count them
   // (one by a computed path), and the repository's own sources and test helpers, which they lint as fixtures; a trace
   // found 859 tracked files (#2431). So it runs for every change that is not documentation only, as oxlint does, which
@@ -783,7 +790,6 @@ async function check(cleanups) {
     run("doc links", process.execPath, ["tools/repository-checks/doc-links.mjs"]),
     run("imports", process.execPath, ["tools/repository-checks/imports.mjs"]),
     run("test:verification", npm, ["run", "--silent", "test:verification"]),
-    run("typecheck:player", npm, ["run", "--silent", "typecheck:player"]),
     ...(coreChanged
       ? [
           run(

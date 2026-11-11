@@ -47,10 +47,12 @@ import {
 isolateGit();
 
 // A representative changed path for each project, and the projects it alone claims; every path but documentation also
-// needs `oxlint-rules`, whose `test:lint` runs for every such change (#2431).
+// needs `oxlint-rules` and `player-types`, whose `test:lint` and `typecheck:player` run for every such change (#2431,
+// #2472).
 const REPRESENTATIVES = {
   typescript: ["src/compiler.ts", ["typescript"]],
-  "player-vue": ["player/vue/src/shell/PlayerApp.vue", ["player-vue"]],
+  "player-vue": ["player/vue/src/shell/PlayerApp.vue", ["player-vue", "player-types"]],
+  "player-types": ["player/vue/src/session/usePlayerSession.ts", ["player-vue", "player-types"]],
   "oxlint-rules": ["tools/oxlint/run.mjs", ["oxlint-rules"]],
   // (the tools, the repository checks and knip's configuration, which only the checks run for every change read, #2472)
   tools: ["tools/test-shards.mjs", []],
@@ -63,7 +65,7 @@ const REPRESENTATIVES = {
   documentation: ["docs/TESTING.md", []],
   // root configuration files, each needing the projects whose checks read it
   "root tsconfig": ["tsconfig.json", ["typescript", "oxlint-rules", "design-lint"]],
-  "Player tsconfig": ["player/vue/tsconfig.json", ["player-vue", "design-lint"]],
+  "Player tsconfig": ["player/vue/tsconfig.json", ["player-vue", "player-types", "design-lint"]],
   "knip config": ["knip.json", []],
   formatting: [".prettierrc.json", ["formatting"]],
   "Prettier ignore file": [".prettierignore", ["formatting"]],
@@ -82,7 +84,12 @@ test("each changed path needs its project's checks and, but for documentation, t
     assert.ok(name in REPRESENTATIVES, `${name} has a representative`);
   const kinds = Object.entries(REPRESENTATIVES).map(([kind, [path, claimed]]) => [
     kind,
-    [path, kind === "documentation" ? claimed : [...new Set([...claimed, "oxlint-rules"])]],
+    [
+      path,
+      kind === "documentation"
+        ? claimed
+        : [...new Set([...claimed, "oxlint-rules", "player-types"])],
+    ],
   ]);
   for (const [kind, [path, expected]] of kinds)
     assert.deepEqual([...projectsFor([path])].sort(), [...expected].sort(), kind);
@@ -98,11 +105,11 @@ test("each changed path needs its project's checks and, but for documentation, t
   // `player/` outside `player/vue/` belongs to the TypeScript project, and `player/vue/` only to the Player's.
   assert.deepEqual(
     [...projectsFor(["player/runtime/runtime-adapter.ts"])],
-    ["typescript", "oxlint-rules"],
+    ["typescript", "player-types", "oxlint-rules"],
   );
   assert.deepEqual(
     [...projectsFor(["player/vue/src/session/usePlayerSession.ts"])],
-    ["player-vue", "oxlint-rules"],
+    ["player-vue", "player-types", "oxlint-rules"],
   );
   // documentation alone needs nothing, and beside a path that needs test:lint changes nothing
   assert.deepEqual([...projectsFor(["docs/TESTING.md", "README.md"])], []);
@@ -167,8 +174,8 @@ function repository({
   };
   run("init", "-q", "-b", "main");
   write("a.mjs", "export const a = 1;\n");
-  // (stand-ins that pass with the others: test:lint, which every change but documentation runs, and
-  // test:verification and typecheck:player, which every change runs)
+  // (stand-ins that pass with the others: test:lint and typecheck:player, which every change but documentation runs,
+  // and test:verification, which every change runs)
   write(
     "package.json",
     JSON.stringify({
@@ -405,11 +412,11 @@ test("a deleted path and both sides of a move select their projects as a changed
     'docs/a"quote.md',
   ];
   const changes = {
-    "a deleted tool": [["rm", "-q", "tools/test-file-counts.mjs"], "oxlint-rules"],
-    "a deleted source": [["rm", "-q", "src/a.ts"], "typescript, oxlint-rules"],
+    "a deleted tool": [["rm", "-q", "tools/test-file-counts.mjs"], "player-types, oxlint-rules"],
+    "a deleted source": [["rm", "-q", "src/a.ts"], "typescript, player-types, oxlint-rules"],
     "a move out of the Player": [
       ["mv", "player/vue/b.ts", "src/b.ts"],
-      "typescript, player-vue, oxlint-rules",
+      "typescript, player-vue, player-types, oxlint-rules",
     ],
     "deleted documentation": [["rm", "-q", "docs/c.md"], "none"],
     // (named as they are: Git's other output quotes them, `"docs/\303\251.md"`, which is no documentation path)
@@ -450,7 +457,10 @@ test("a deleted path and both sides of a move select their projects as a changed
 });
 
 test("an untracked path is read as it is named: a quoted or non-ASCII name selects as its path does (#2431)", () => {
-  const cases = { 'docs/a"quote é.md': "none", 'tools/a"quote é.mjs': "oxlint-rules" };
+  const cases = {
+    'docs/a"quote é.md': "none",
+    'tools/a"quote é.mjs': "player-types, oxlint-rules",
+  };
   for (const [path, projects] of Object.entries(cases)) {
     const { directory } = repository({ passing: true });
     try {
@@ -1020,7 +1030,7 @@ test("its last line names what ran, what failed, and what it did not run: the ch
       assert.equal(
         result.stdout.trimEnd().split("\n").at(-1),
         "check-changed: ran: diff --check, merge commits, format, oxlint, knip, doc links, imports, test:verification, " +
-          "typecheck:player, pin suites, tsc, test:lint; " +
+          "pin suites, tsc, typecheck:player, test:lint; " +
           `failed: ${fails ? "pin suites" : "none"}; ` +
           "not run: test:families, lint:design, format:check, " +
           "test:lint:design, the compiled test suite (CI runs it)",
@@ -1054,7 +1064,7 @@ test(
     });
     const last =
       "check-changed: ran: diff --check, merge commits, format, oxlint, knip, doc links, imports, test:verification, " +
-      "typecheck:player, pin suites, tsc, test:lint; " +
+      "pin suites, tsc, typecheck:player, test:lint; " +
       "failed: pin suites; not run: test:families, lint:design, " +
       "format:check, test:lint:design, the compiled test suite (CI runs it)";
     const at = result.stdout + result.stderr;
@@ -1216,7 +1226,7 @@ test("`merge commits` runs in every run, plain, merged and in a merged checkout,
     assert.equal(result.status, status, `${at}: ${result.stdout}${result.stderr}`);
     assert.deepEqual(
       result.stdout.match(/^(?:PASS|FAIL) {2}\S.*$/gmu).map((line) => line.split(/ {2,}/u)[1]),
-      // (each change is documentation only: the tool tests and the Player's type check run for every change, #2472)
+      // (each change is documentation only, which the tool tests read too, #2472)
       [
         "diff --check",
         "merge commits",
@@ -1225,7 +1235,6 @@ test("`merge commits` runs in every run, plain, merged and in a merged checkout,
         "doc links",
         "imports",
         "test:verification",
-        "typecheck:player",
       ],
       at,
     );
