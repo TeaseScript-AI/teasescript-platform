@@ -458,6 +458,11 @@ copied or that the tree's runtime rejects (`validateScriptStorageEntries`) refus
 plan runs or record is written. A run's host values are checked by the runtime as each run starts: a value it rejects
 is that run's `threw`, and the run exits 1.
 
+A run owns its `--out` from its start (#2383). It removes an earlier `--out` at once; an output that is one of its
+inputs, by any path or link, is refused instead. It writes its records to a partial named by its pid and renames that
+onto `--out` once whole. No exit removes an output, so a run that ends without writing leaves no earlier result as its
+own, and never touches a concurrent run's output. A run that dies midway leaves only its partial.
+
 A record is `{name, case, checker, core, candidate}`:
 - `checker`, and each mode of `candidate` that is not refused: `diagnostics` (severity, code, path, one-based line and
   column, offsets, message), `plan` (`null`, or its `hash`, the first 32 hex digits of the sha256 of `jsonText(plan)`, as
