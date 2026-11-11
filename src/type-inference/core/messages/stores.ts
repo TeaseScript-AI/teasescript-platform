@@ -5,7 +5,8 @@ import { UNIT_OPERANDS } from "../../../duration.js";
 import { ROUND_COUNT_FIX } from "../../../loop-rules.js";
 import { isTemporalKind } from "../../../temporal-builtins.js";
 import type { ItemTag } from "../items.js";
-import type { DiagnosticRule, SiteExpectation, StoreRoot } from "../result.js";
+import type { DeclaredBinding, DiagnosticRule, SiteExpectation, StoreRoot } from "../result.js";
+import { bindingsOf } from "../consumers/bindings.js";
 import type { MessageSource } from "./site.js";
 import {
   capitalized,
@@ -107,32 +108,152 @@ export function declaration(
   const written = typeAt(type, diagnosed);
   if (root === null || root.kind === "result" || written === null) return null;
   const parameter = root.kind === "parameter";
-  // (its text up to the name, the type, and its text from the `=` on, which no written type holds: a global's
-  // `default:` stays with it)
-  const text = root.site === null ? "" : source.text(root.site);
-  const start = text.indexOf("=");
-  const declared = `${parameter ? "" : `${root.kind} `}${root.name}: ${written}`;
-  const code =
-    root.site === null
-      ? null
-      : codeAt(
-          {
-            code: start === -1 ? declared : `${declared} ${text.slice(start)}`,
-            takes: [],
-            diagnosed,
-            // (it restates the author's own declaration, its start value as written, and adds no read)
-            reads: "none",
-            holds: [root.site],
-            rulesOut: null,
-            gives: [],
-            elements: [],
-            writes: false,
-          },
-          parameter ? "parameter" : "statement",
-        );
+  const code = declarationCode(root, written, source, diagnosed);
   return code === null
     ? `declare ${parameter ? `the parameter '${root.name}'` : named} with the type '${written}'`
     : `declare ${parameter ? "the parameter" : subject} as '${code}'`;
+}
+
+/** `declaration`'s code: the root's declaration as the source writes it, with the written type `written`, or `null`. */
+function declarationCode(
+  root: StoreRoot,
+  written: string,
+  source: MessageSource,
+  diagnosed: Diagnosed,
+): string | null {
+  if (root.site === null) return null;
+  const parameter = root.kind === "parameter";
+  // (its text up to the name, the type, and its text from the `=` on, which no written type holds: a global's
+  // `default:` stays with it)
+  const text = source.text(root.site);
+  const start = text.indexOf("=");
+  const declared = `${parameter ? "" : `${root.kind} `}${root.name}: ${written}`;
+  return codeAt(
+    {
+      code: start === -1 ? declared : `${declared} ${text.slice(start)}`,
+      takes: [],
+      diagnosed,
+      // (it restates the author's own declaration, its start value as written, and adds no read)
+      reads: "none",
+      holds: [root.site],
+      rulesOut: null,
+      gives: [],
+      elements: [],
+      writes: false,
+    },
+    parameter ? "parameter" : "statement",
+  );
+}
+
+/**
+ * The owner's sentences (#2289) for a store of numbers into a place that holds whole numbers because a copy of a
+ * variable declared `integer` decided it (A4): a variable declared as a copy of that variable's value, or a list or
+ * set declared with elements that are copies of it, with the fix that declares the place with `number`; `null` for any
+ * other store, whose sentence stays `storeSubject`'s. Offered only where the place's declaration is a `let` or a
+ * `global` that stores the copy alone (#2317's closed set of declaration forms): its text after its first `=`, one
+ * trailing `;` aside, is the deciding value, so the fix is the declaration as written with one type written in.
+ */
+export function copySentence(
+  rule: StoreRule,
+  kinds: readonly ItemTag[],
+  source: MessageSource,
+  diagnosed: Diagnosed,
+): string | null {
+  const { root, decider } = rule;
+  const binding = bindingsOf(rule);
+  const integer = (type: readonly ItemTag[]): boolean => {
+    const values = type.filter((kind) => kind !== "null");
+    return values.length === 1 && values[0] === "integer";
+  };
+  if (
+    binding === undefined ||
+    !rule.written ||
+    root === null ||
+    (root.kind !== "let" && root.kind !== "global") ||
+    root.site === null ||
+    decider === null ||
+    decider.file !== root.site.file ||
+    decider.start < root.site.start ||
+    decider.end > root.site.end ||
+    !integer(rule.type) ||
+    kinds.length === 0 ||
+    kinds.some((kind) => kind !== "number")
+  )
+    return null;
+  // (the declaration stores the copy alone: a `default:`, or any text beside the value, keeps today's sentence)
+  const declaration = source.text(root.site);
+  const start = declaration.indexOf("=");
+  const value = source.text(decider);
+  if (
+    start === -1 ||
+    declaration
+      .slice(start + 1)
+      .trim()
+      .replace(/;$/, "")
+      .trimEnd() !== value
+  )
+    return null;
+  const numbers = typeText(rule.type.map((kind) => (kind === "integer" ? "number" : kind)));
+  if (numbers === null) return null;
+  const from = (copied: DeclaredBinding | null): string | null => {
+    const declared = copied === null || !integer(copied.type) ? null : typeText(copied.type);
+    return declared === null
+      ? null
+      : `'${copied!.name}', declared '${declared}' on line ${source.line(copied!.site)}.`;
+  };
+  // (one row per form a copy reaches the place by; a form without one does not compile)
+  const form: "value" | "elements" = rule.steps.length === 0 ? "value" : "elements";
+  switch (form) {
+    case "value": {
+      // (the variable itself is the copy: its value a read of the declared variable)
+      const of = from(binding(decider));
+      const code = typeAt(numbers, diagnosed);
+      const fix = code === null ? null : declarationCode(root, code, source, diagnosed);
+      return of === null || fix === null
+        ? null
+        : `${capitalized(rule.into)} holds ${described(rule.type)} because it is a copy of ${of} ` +
+            `To store other numbers in it, write '${fix}'.`;
+    }
+    case "elements": {
+      // (the list's or set's own elements are the copies: a list or set literal whose every element reads one
+      // declared variable, by its one name; no dict, no property or collection above them)
+      const collection = elementOf(rule);
+      if (collection === null || !collection.root || collection.kind === "dict") return null;
+      const parsed = parsedExpression(value);
+      const literal = parsed?.expression;
+      if (
+        literal === undefined ||
+        (literal.kind !== "listLiteral" && literal.kind !== "setLiteral") ||
+        literal.elements.length === 0
+      )
+        return null;
+      const [first] = literal.elements;
+      const name = first!.kind === "identifier" ? first!.name : null;
+      if (
+        literal.elements.some((element) => element.kind !== "identifier" || element.name !== name)
+      )
+        return null;
+      const at = (offset: number): number => decider.start + offset - parsed!.at;
+      const of = from(
+        binding({
+          file: decider.file,
+          start: at(first!.span.start.offset),
+          end: at(first!.span.end.offset),
+        }),
+      );
+      const held = typeText(rule.type);
+      const code = typeAt(collectionText(collection.kind, numbers), diagnosed);
+      const fix = code === null ? null : declarationCode(root, code, source, diagnosed);
+      return of === null || held === null || fix === null
+        ? null
+        : `'${collection.name}' holds ${plural(rule.type)} (${collectionText(collection.kind, held)}) because ` +
+            `its elements are copies of ${of} To add other numbers to it, write '${fix}'.`;
+    }
+    default: {
+      const unknown: never = form;
+      return unknown;
+    }
+  }
 }
 
 /**

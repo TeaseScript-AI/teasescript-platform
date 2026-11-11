@@ -164,6 +164,46 @@ test("each consumer's first sentence and fix, as an error and as a warning, with
           "declare it as 'let n: integer? = 1'.",
       ],
     ],
+    // (#2289: a copy of a declared variable holds its type, and declares nothing itself; the owner's sentences)
+    [
+      "let lives: integer = 3\nlet copy = lives\ncopy = 2.5\nexit\n",
+      [
+        "E TSV041 '2.5': 'copy' holds a whole number (integer) because it is a copy of 'lives', declared " +
+          "'integer' on line 1. To store other numbers in it, write 'let copy: number = lives'.",
+      ],
+    ],
+    [
+      "let lives: integer = 3\nlet scores = [lives]\nscores.add(2.5)\nexit\n",
+      [
+        "E TSV041 '2.5': 'scores' holds whole numbers (integer[]) because its elements are copies of 'lives', " +
+          "declared 'integer' on line 1. To add other numbers to it, write 'let scores: number[] = [lives]'.",
+      ],
+    ],
+    // (a later store's copy: its declaration's `null` start value would not fit 'let scores: number[] = null', so
+    // the sentence that names the line stays, Codex r1 on #2317)
+    [
+      "let lives: integer = 3\nlet scores = null\nscores = [lives]\nscores.add(2.5)\nexit\n",
+      [
+        "E TSV041 '2.5': 'scores' holds whole numbers (integer[]) since line 3, so it cannot contain a number. " +
+          ROUND,
+      ],
+    ],
+    // (a global's `default:` is a second stored value: its `null` would not fit the fix's type, the final review's B1
+    // on #2317, for a list and a set alike)
+    [
+      "let lives: integer = 3\nglobal scores = [lives], default: null\nscores.add(2.5)\nexit\n",
+      [
+        "E TSV041 '2.5': 'scores' holds whole numbers (integer[]) since line 2, so it cannot contain a number. " +
+          ROUND,
+      ],
+    ],
+    [
+      "let lives: integer = 3\nglobal seen = set[lives], default: null\nseen.add(2.5)\nexit\n",
+      [
+        "E TSV041 '2.5': 'seen' holds whole numbers (integer set) since line 2, so it cannot contain a number. " +
+          ROUND,
+      ],
+    ],
     [
       "let n: integer = hostValue\nexit\n",
       [
