@@ -1133,7 +1133,7 @@ for (const script of SCRIPT_NAMES)
     LOCK_RERUN.rows(
       preloadCase(script, reply),
       `the lock preload of a script with ${script}, its reply ${reply === "current" ? "taken while its pair is serviced" : `arriving with ${reply}`}, loads ${reply === "current" ? `what the script needs (${PRELOADED[script].join(", ") || "nothing"})` : "nothing"}`,
-      async (context, topology) => {
+      async (context, topology, end) => {
         const transport = await topologyBridge(context, topology, { delayMs: 20 });
         transport.assertTopology();
         const replies = metadataReplies(context, transport.bridge);
@@ -1180,6 +1180,7 @@ for (const script of SCRIPT_NAMES)
         );
         await settled();
         assert.deepEqual(loaders.calls, reply === "current" ? PRELOADED[script] : []);
+        return end();
       },
     );
 
@@ -1254,18 +1255,19 @@ async function lockingPlayer(context: TestContext, topology: Topology) {
 LOCK_RERUN.rows(
   "real composable lock",
   "a script's lock asked through the composable's dialog locks with the password the player gave",
-  async (context, topology) => {
+  async (context, topology, end) => {
     const { player, start, answer } = await lockingPlayer(context, topology);
     await start();
     await answer();
     assert.equal(player.hostError.value, null);
+    return end();
   },
 );
 
 LOCK_RERUN.rows(
   "lock before the preload's reply",
   "a lock asked and answered while the preload's reply is held completes, and the late reply only preloads",
-  async (context, topology) => {
+  async (context, topology, end) => {
     const { transport, player, loaders, start, answer } = await lockingPlayer(context, topology);
     const metadata = heldMetadata(context, transport.bridge);
     await start();
@@ -1280,13 +1282,14 @@ LOCK_RERUN.rows(
     assert.equal(player.lock.dialog.value, null, "no dialog again");
     assert.equal(player.session.value?.state.status, "halted");
     assert.equal(player.hostError.value, null);
+    return end();
   },
 );
 
 LOCK_RERUN.rows(
   "preload's reply before the lock is answered",
   "the preload's reply let go as the session shows, before the lock's dialog is answered, changes nothing",
-  async (context, topology) => {
+  async (context, topology, end) => {
     const { transport, player, start, answer } = await lockingPlayer(context, topology);
     const metadata = heldMetadata(context, transport.bridge);
     await start();
@@ -1295,5 +1298,6 @@ LOCK_RERUN.rows(
     await answer();
     await waitFor(() => metadata.delivered() === 1, "the preload's reply");
     assert.equal(player.hostError.value, null);
+    return end();
   },
 );

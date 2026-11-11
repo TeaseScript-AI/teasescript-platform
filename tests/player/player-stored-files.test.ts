@@ -285,7 +285,7 @@ const RERUN = rerunRegistry({
 RERUN.rows(
   "stores and reads files",
   "a Player stores and reads files, shows only images, and knows saved files in its next session",
-  async (context, topology) => {
+  async (context, topology, end) => {
     stubBrowser(context);
     const repository = new FakeMediaRepository();
     const { entries, provider } = memoryStorage("files");
@@ -363,13 +363,14 @@ RERUN.rows(
       hash: "900fbe934249ad120004bd24adf66aad8817d89586273c0cc50e187bddebb601",
       json: JSON.stringify({ picture: `data:image/png;base64,${PNG}` }),
     });
+    return end();
   },
 );
 
 RERUN.rows(
   "storage full",
   "when the browser's storage is full a save of a file keeps the previous value, and the file stays usable",
-  async (context, topology) => {
+  async (context, topology, end) => {
     stubBrowser(context);
     class FullRepository extends FakeMediaRepository {
       override async add(): Promise<void> {
@@ -402,6 +403,7 @@ RERUN.rows(
     assert.ok(typeof picture === "string");
     assert.notEqual(played.host.resolveAsset(picture), null);
     assert.equal(repository.size, 0);
+    return end();
   },
 );
 
@@ -455,7 +457,7 @@ test("saved text that only has the shape of a reference stays text in a later se
 RERUN.rows(
   "replies late",
   "a Player stores, reads and hashes files once each when the engine's replies come 50 ms late",
-  async (context, topology) => {
+  async (context, topology, end) => {
     stubBrowser(context);
     // A completed answer shows at once; were it to wait for a later observation, the next service would make it again.
     const digest = context.mock.method(crypto.subtle, "digest");
@@ -477,5 +479,6 @@ RERUN.rows(
     assert.equal(data, PNG);
     assert.equal(hash, createHash("sha256").update(Buffer.from(PNG, "base64")).digest("hex"));
     assert.equal(digest.mock.callCount(), 1);
+    return end();
   },
 );

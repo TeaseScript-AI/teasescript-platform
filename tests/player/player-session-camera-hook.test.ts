@@ -138,7 +138,7 @@ const RERUN = rerunRegistry({
 RERUN.rows(
   "clearing while a restored session waits",
   "saved data cannot be cleared while a restored session waits for the camera",
-  async (context, topology) => {
+  async (context, topology, end) => {
     const { grant } = stubBrowser(context);
     const entries = new Map<string, SerializableRuntimeValue>([["first", 0]]);
     const provider: ScriptStorageProvider = {
@@ -190,13 +190,14 @@ RERUN.rows(
     }
     assert.deepEqual([...entries], [["first", 1]]);
     assert.equal(host.canClearScriptStorage.value, true);
+    return end();
   },
 );
 
 RERUN.rows(
   "camera view",
   "the script's camera view previews the session camera where it places it, also after a restore",
-  async (context, topology) => {
+  async (context, topology, end) => {
     const { grant, tracks } = stubBrowser(context);
     grant();
     const transport = await topologyBridge(context, topology, { entry: "restore" });
@@ -238,13 +239,14 @@ RERUN.rows(
     await host.activate();
     assert.equal(host.viewfinderPlacement.value, "stage");
     assert.equal(host.viewfinder.value, tracks[3]);
+    return end();
   },
 );
 
 RERUN.rows(
   "Start that throws",
   "a Start that throws after the camera opened releases the camera",
-  async (context, topology) => {
+  async (context, topology, end) => {
     const { grant, tracks } = stubBrowser(context);
     context.mock.method(console, "error", () => {});
     grant();
@@ -263,5 +265,6 @@ RERUN.rows(
     assert.equal(host.hostError.value, "TypeError");
     assert.equal(tracks.length, 1);
     assert.equal(tracks[0]?.readyState, "ended");
+    return end();
   },
 );

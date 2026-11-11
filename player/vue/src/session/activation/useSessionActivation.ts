@@ -491,7 +491,7 @@ export function useSessionActivation({
     // The activation's run begins before anything of it can fail, retiring the one before it.
     const origin = activationRun.begin(bridgeNow()!);
     let begun: PlayerSession | SessionTarget | Promise<PlayerSession | SessionTarget>;
-    // `begin` records the click's capture: it reads it before its first await, a Start in its factory or options.
+    // `begin` records the click's capture: it reads it before its first await, a Start in its options.
     clicked = sample;
     try {
       begun = pending.begin(origin);

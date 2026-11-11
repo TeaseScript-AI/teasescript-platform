@@ -165,7 +165,7 @@ for (const delayMs of [0, 50, 250] as const)
   RERUN.rows(
     `load report, ${delayMs} ms`,
     `a medium's load report goes over the bridge once and the script goes on (${delayMs} ms late)`,
-    async (context, topology) => {
+    async (context, topology, end) => {
       const { player, elements, start, reports } = await mount(context, topology, delayMs);
       await start('playAudio async "bell.mp3"\nsay "after", instant\nshowButton "Done"\nexit');
       for (let turn = 0; !elements.some((element) => element.src.endsWith("bell.mp3")); turn++) {
@@ -181,13 +181,14 @@ for (const delayMs of [0, 50, 250] as const)
       }
       await later(delayMs + 20);
       assert.equal(reports().length, 1, "one report, delivered once");
+      return end();
     },
   );
 
 RERUN.rows(
   "replaced session's report",
   "a replaced session's load report never reaches the session that replaced it",
-  async (context, topology) => {
+  async (context, topology, end) => {
     const { player, elements, start, reports } = await mount(context, topology, 50);
     await start('playAudio async "old.mp3"\nshowButton "Old"\nexit');
     for (let turn = 0; !elements.some((element) => element.src.endsWith("old.mp3")); turn++) {
@@ -216,6 +217,7 @@ RERUN.rows(
       [replacing],
       "only the new session's own report",
     );
+    return end();
   },
 );
 
@@ -363,7 +365,7 @@ for (const delay of [0, 50, 250] as const)
   RERUN.rows(
     `scene time, ${delay} ms`,
     `with media sampling and late replies, scene time follows the clock and the session advances: ${delay} ms`,
-    async (context, topology) => {
+    async (context, topology, end) => {
       context.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
       let now = 0;
       context.mock.method(performance, "now", () => now);
@@ -492,5 +494,6 @@ for (const delay of [0, 50, 250] as const)
         now - beganInput <= 3 * Math.max(1, delay),
         "input waits at most one periodic reply, its observation, and its answer",
       );
+      return end();
     },
   );

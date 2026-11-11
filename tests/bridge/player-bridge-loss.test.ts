@@ -432,7 +432,7 @@ for (const [consumer, id, run] of [
   RERUN.rows(
     id,
     `${consumer} in flight when the Worker is lost ends quietly, and the loss is the error stop once`,
-    async (context, topology) => {
+    async (context, topology, end) => {
       covered.add(consumer);
       const { transport, player, hostErrors } = await mount(context, topology, 50);
       let result: Awaited<ReturnType<typeof run>> | "pending" = "pending";
@@ -453,12 +453,13 @@ for (const [consumer, id, run] of [
       );
       assert.equal(player.hostError.value, "BridgeLostError");
       assert.equal(hostErrors(), 1);
+      return end();
     },
   );
   RERUN.rows(
     `control: ${id}`,
     `control: ${consumer} on the same schedule without a loss succeeds`,
-    async (context, topology) => {
+    async (context, topology, end) => {
       const { transport, player, hostErrors } = await mount(context, topology, 50);
       transport.hold("observeInput");
       const pending = run(player);
@@ -468,6 +469,7 @@ for (const [consumer, id, run] of [
       assert.ok(result !== null && typeof result !== "symbol", String(result));
       assert.equal(player.hostError.value, null);
       assert.equal(hostErrors(), 0);
+      return end();
     },
   );
 }
@@ -488,7 +490,7 @@ for (const [consumer, id, run] of [
   RERUN.rows(
     id,
     `control: ${consumer} at the loss never posts, as the stop ends it first`,
-    async (context, topology) => {
+    async (context, topology, end) => {
       covered.add(consumer);
       const { transport, player, hostErrors } = await mount(context, topology, 0);
       // Another section of the session holds it, so this one waits in the client.
@@ -508,13 +510,14 @@ for (const [consumer, id, run] of [
       assert.deepEqual(unhandled, []);
       assert.deepEqual(transport.posts.slice(before), [], "nothing reached the port");
       assert.equal(hostErrors(), 1);
+      return end();
     },
   );
 
 RERUN.rows(
   "media load report in flight",
   "control: a media load report in flight when the Worker is lost ends quietly",
-  async (context, topology) => {
+  async (context, topology, end) => {
     covered.add("a media load report");
     const { transport, player, elements, hostErrors } = await mount(
       context,
@@ -534,13 +537,14 @@ RERUN.rows(
     assert.deepEqual(unhandled, []);
     assert.equal(player.hostError.value, "BridgeLostError");
     assert.equal(hostErrors(), 1);
+    return end();
   },
 );
 
 RERUN.rows(
   "call view in flight",
   "a call view request in flight when the Worker is lost ends quietly, and the loss is the error stop once",
-  async (context, topology) => {
+  async (context, topology, end) => {
     covered.add("a call view request");
     const { transport, player, hostErrors } = await mount(context, topology, 50);
     const unhandled = await unhandledDuring(async () => {
@@ -554,6 +558,7 @@ RERUN.rows(
     assert.deepEqual(unhandled, []);
     assert.equal(player.hostError.value, "BridgeLostError");
     assert.equal(hostErrors(), 1);
+    return end();
   },
 );
 
@@ -594,7 +599,7 @@ async function keepingPage(
 RERUN.rows(
   "keep's capture in flight",
   "a keep's capture in flight when the Worker is lost keeps the session kept before, and ends quietly",
-  async (context, topology) => {
+  async (context, topology, end) => {
     covered.add("a keep's capture");
     const kept = memoryKeptSessionStore();
     // A button that times out, then a question: the session is kept at each, the second without input.
@@ -624,13 +629,14 @@ RERUN.rows(
     assert.deepEqual(unhandled, []);
     assert.deepEqual(await kept.session("loss"), before, "the session kept before stays");
     assert.equal(player.hostError.value, "BridgeLostError");
+    return end();
   },
 );
 
 RERUN.rows(
   "Continue's restore in flight",
   "Continue's restore in flight when the Worker is lost ends quietly, and offers no Continue",
-  async (context, topology) => {
+  async (context, topology, end) => {
     covered.add("Continue's restore");
     const kept = memoryKeptSessionStore();
     {
@@ -660,13 +666,14 @@ RERUN.rows(
     });
     assert.deepEqual(unhandled, []);
     assert.notEqual(player.activation.value, "continue");
+    return end();
   },
 );
 
 RERUN.rows(
   "hosted script's preparation in flight",
   "the hosted script's preparation in flight when the Worker is lost ends quietly, and shows no failure",
-  async (context, topology) => {
+  async (context, topology, end) => {
     browser(context);
     const hostErrors = hostErrorLog(context);
     const transport = await topologyBridge(context, topology, { delayMs: 50 });
@@ -696,13 +703,14 @@ RERUN.rows(
     assert.equal(failure, null, "a lost preparation is no failure to show");
     assert.equal(player.hostError.value, "BridgeLostError");
     assert.equal(hostErrors(), 1);
+    return end();
   },
 );
 
 RERUN.rows(
   "Worker lost before ready",
   "a Worker lost before it is ready leaves no rejection unhandled",
-  async (context) => {
+  async (context, _topology, end) => {
     browser(context);
     // A thread that exits before it sends `ready`.
     const worker = new Worker("process.exit(3)", { eval: true });
@@ -732,6 +740,7 @@ RERUN.rows(
     });
     scope.stop();
     assert.deepEqual(unhandled, []);
+    return end();
   },
 );
 
@@ -849,7 +858,7 @@ test("control: a Stage photo preload whose metadata the Worker's loss ends prelo
 RERUN.rows(
   "control: media load report in flight",
   "control: a media load report held and let go without a loss lets the script go on",
-  async (context, topology) => {
+  async (context, topology, end) => {
     const { transport, player, elements, hostErrors } = await mount(
       context,
       topology,
@@ -869,13 +878,14 @@ RERUN.rows(
     );
     assert.equal(player.hostError.value, null);
     assert.equal(hostErrors(), 0);
+    return end();
   },
 );
 
 RERUN.rows(
   "control: call view in flight",
   "control: a call view request held and let go without a loss shows the call view",
-  async (context, topology) => {
+  async (context, topology, end) => {
     const { transport, player, hostErrors } = await mount(context, topology, 50);
     transport.hold("viewCalls");
     player.demandCallView();
@@ -883,13 +893,14 @@ RERUN.rows(
     transport.release();
     await until(() => player.session.value?.callView != null, "the call view shows");
     assert.equal(hostErrors(), 0);
+    return end();
   },
 );
 
 RERUN.rows(
   "control: keep's capture in flight",
   "control: a keep's capture held and let go without a loss keeps the new point",
-  async (context, topology) => {
+  async (context, topology, end) => {
     const kept = memoryKeptSessionStore();
     const { transport, player, token } = await keepingPage(
       context,
@@ -913,13 +924,14 @@ RERUN.rows(
       await turns(1);
     }
     assert.equal(player.hostError.value, null);
+    return end();
   },
 );
 
 RERUN.rows(
   "control: Continue's restore in flight",
   "control: Continue's restore held and let go without a loss offers Continue",
-  async (context, topology) => {
+  async (context, topology, end) => {
     const kept = memoryKeptSessionStore();
     {
       const first = await keepingPage(context, kept, "in-process", 0);
@@ -943,13 +955,14 @@ RERUN.rows(
     transport.release();
     await preparing;
     assert.equal(player.activation.value, "continue");
+    return end();
   },
 );
 
 RERUN.rows(
   "control: hosted script's preparation in flight",
   "control: the hosted script's preparation held and let go without a loss offers Start",
-  async (context, topology) => {
+  async (context, topology, end) => {
     browser(context);
     const hostErrors = hostErrorLog(context);
     const transport = await topologyBridge(context, topology, { delayMs: 50 });
@@ -971,6 +984,7 @@ RERUN.rows(
     await until(() => player.activation.value === "start", "Start is offered");
     assert.equal(prepared.failure.value, null);
     assert.equal(hostErrors(), 0);
+    return end();
   },
 );
 
@@ -985,12 +999,36 @@ test("each connection's post log and reply gate see its own requests alone, with
     const reply = other.bridge.client.request("prepare", {
       source: { kind: "source", script: "exit" },
     });
-    const late = new Promise((resolve) => setTimeout(() => resolve("held"), 2_000));
+    let fallback: ReturnType<typeof setTimeout> | undefined;
+    const late = new Promise((resolve) => (fallback = setTimeout(() => resolve("held"), 2_000)));
     const settled = await Promise.race([reply.then((answer) => answer.result.kind), late]);
+    clearTimeout(fallback);
     assert.equal(settled, "prepared", "the other connection's reply is not held");
     assert.deepEqual(held.posts.slice(before), [], "the held connection logged nothing");
     assert.ok(other.posts.some((post) => post.op === "prepare"));
   }
+});
+
+test("the in-process host's replies wait the configured delay: not the same turn, not 49 ms, at 50 ms", async (context) => {
+  const transport = await topologyBridge(context, "in-process", { delayMs: 50 });
+  // A first round trip on real time: the connection is ready before mock time starts.
+  await transport.bridge.client.request("planMetadata", { plan: "missing" });
+  context.mock.timers.enable({ apis: ["setTimeout"] });
+  let settled = false;
+  const reply = transport.bridge.client
+    .request("planMetadata", { plan: "missing" })
+    .then(() => void (settled = true));
+  const turns = async () => {
+    for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
+  };
+  await turns();
+  assert.equal(settled, false, "the reply does not arrive in the turn of its request");
+  context.mock.timers.tick(49);
+  await turns();
+  assert.equal(settled, false, "49 ms is not the configured 50 ms");
+  context.mock.timers.tick(1);
+  await reply;
+  assert.equal(settled, true);
 });
 
 test("the rows' Worker loss is the thread's real exit, and each topology is the one asked for", async (context) => {

@@ -268,11 +268,26 @@ async function onWorker(entry: URL): Promise<Omit<TopologyBridge, "topology" | "
   };
 }
 
+/** A row's acknowledgement that its body reached its end: `rows` gives each row its own, through `end()`. */
+export class RowEnd {
+  readonly #row: string;
+  constructor(row: string) {
+    this.#row = row;
+  }
+  toString(): string {
+    return this.#row;
+  }
+}
+
 /**
  * A file's rerun registry: each case's id with the topologies it runs on. `rows` registers a case once and makes one test
- * per listed topology; a row is complete once its body and its cleanup ran, and the file's end checks that every listed
- * row completed.
- * It closes the registered cases only: a test written outside the registry is not covered.
+ * per listed topology. A row is complete once its body returned the acknowledgement its `end()` gives that row, and its
+ * cleanup ran after; the file's end checks that every listed row completed. A body that returns otherwise, early or at
+ * its start, fails its row, and TypeScript refuses a bare `return` in it.
+ *
+ * It closes the registered cases only: a test written outside the registry is not covered. It cannot tell that every
+ * assertion of a body ran: a body that acknowledges early (`return end()` before its last assertions), or that skips
+ * assertions in a branch without returning, completes its row. Only a reading of the body shows those.
  */
 export function rerunRegistry<Id extends string>(cases: Readonly<Record<Id, readonly Topology[]>>) {
   const feasible: Coordinates[] = Object.entries<readonly Topology[]>(cases).flatMap(
@@ -287,15 +302,16 @@ export function rerunRegistry<Id extends string>(cases: Readonly<Record<Id, read
     rows(
       id: Id,
       name: string,
-      body: (context: TestContext, topology: Topology) => Promise<void>,
+      body: (context: TestContext, topology: Topology, end: () => RowEnd) => Promise<RowEnd>,
     ): void {
       // One registration per case: a second would complete the first's coordinates in its place.
       assert.ok(!registered.has(id), `the case ${id} is registered twice`);
       registered.add(id);
       for (const topology of cases[id])
         test(`${name} (${topology})`, async (context) => {
-          await body(context, topology);
-          // Registered last, so it runs after the row's own cleanup.
+          const token = new RowEnd(`${id} (${topology})`);
+          const returned = await body(context, topology, () => token);
+          assert.equal(returned, token, "the row's body returned its own end()");
           context.after(() => void completed.push({ case: id, topology }));
         });
     },
