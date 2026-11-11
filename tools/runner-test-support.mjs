@@ -1,9 +1,11 @@
 // Waits, process runs and a slow reader for the tests of the check runners (run-parallel, run-check, check-changed). No
 // wait depends on how long a loaded host takes (#2379): each ends on its event, or fails naming what it waited for when
 // the process it watches has ended without it, or after `BOUND_SECONDS`, which only a hang reaches. A bound that expires
-// SIGKILLs what it waited for: a runner keeps handling SIGTERM to the end, so SIGTERM need not end it. Every process
-// these tests start goes through `runSync` (a short fixture command), `spawnTool` or `runTool` (a runner, in its own
-// process group) or `slowReader`.
+// SIGKILLs what it waited for: a runner keeps handling SIGTERM to the end, so SIGTERM need not end it. A runner the
+// tests start through `spawnTool`, `runTool` or `slowReader` runs in its own process group, which the test's end
+// SIGKILLs; `runSync` SIGKILLs only its command. The groups a runner detaches (run-parallel's steps, check-changed's
+// checks) are not the test's: every process a fixture starts there ends by itself within `BOUND_SECONDS`
+// (`idleBounded`, `awaitFile`), and one whose pid a fixture records is SIGKILLed at the test's end (`killRecorded`).
 
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
@@ -13,6 +15,7 @@ import {
   existsSync,
   openSync,
   readFileSync,
+  readlinkSync,
   readSync,
   writeFileSync,
   writeSync,
@@ -115,6 +118,32 @@ export function spawnTool(t, command, args, { cwd, env, stdio = ["ignore", "pipe
 export async function runTool(t, command, args, options) {
   const { code, signal, stdout, stderr } = await spawnTool(t, command, args, options).done;
   return { status: code, signal, stdout, stderr };
+}
+
+/** Fixture source for a process that idles, as a stuck leaf or a long check, and ends by itself after `BOUND_SECONDS`. */
+export const idleBounded = `setTimeout(() => process.exit(0), ${BOUND_SECONDS * 1000});`;
+
+/**
+ * Registers, before the test waits for anything, the SIGKILL at its end of the process whose pid the fixture in `cwd`
+ * writes to `file`, if it has, and if that pid, where `/proc` tells, still works in `cwd`: a reused pid is not killed.
+ */
+export function killRecorded(t, cwd, file) {
+  t.after(() => {
+    let pid = 0;
+    try {
+      pid = Number(readFileSync(join(cwd, file), "utf8"));
+      if (existsSync("/proc/self/cwd") && readlinkSync(`/proc/${pid}/cwd`) !== cwd) return;
+    } catch (error) {
+      if (error.code === "ENOENT") return;
+      throw error;
+    }
+    if (pid > 0)
+      try {
+        process.kill(pid, "SIGKILL");
+      } catch (error) {
+        if (error.code !== "ESRCH") throw error;
+      }
+  });
 }
 
 /** Fixture source that waits until `file` exists, or exits 1 after `BOUND_SECONDS`, naming `what`. */

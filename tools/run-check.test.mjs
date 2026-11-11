@@ -6,7 +6,14 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { pretestSteps } from "./run-check.mjs";
-import { bounded, runTool, slowReader, waitFor } from "./runner-test-support.mjs";
+import {
+  bounded,
+  idleBounded,
+  killRecorded,
+  runTool,
+  slowReader,
+  waitFor,
+} from "./runner-test-support.mjs";
 
 const tool = fileURLToPath(new URL("./run-check.mjs", import.meta.url));
 
@@ -26,8 +33,8 @@ function fixture(t, exits, waits = null) {
     (name === waits
       ? `spawn(process.execPath, ['-e', "require('node:fs').writeFileSync('pid', String(process.pid)); ` +
         `${name === "build" ? "process.on('SIGTERM', () => {}); " : ""}` +
-        `setInterval(() => {}, 1000);"], ` +
-        "{ stdio: 'inherit' }); setInterval(() => {}, 1000);"
+        `${idleBounded}"], ` +
+        `{ stdio: 'inherit' }); ${idleBounded}`
       : `process.exit(${exits[name] ?? 0});`);
   const scripts = {
     "check:pretest": "node tools/run-parallel.mjs lint format",
@@ -140,20 +147,13 @@ test(
         }
       };
       t.after(() => group("SIGKILL"));
+      killRecorded(t, cwd, "pid");
       const closed = new Promise((resolve) => child.on("close", resolve));
       const pid = await waitFor(
         `the ${waits}'s descendant to start`,
         () => Number(readFileSync(join(cwd, "pid"), "utf8")),
         child,
       );
-      // (a run that fails to stop it leaves no stray process behind the test either)
-      t.after(() => {
-        try {
-          process.kill(pid, "SIGKILL");
-        } catch (error) {
-          if (error.code !== "ESRCH") throw error;
-        }
-      });
       group(signal);
       const at = `${waits}, ${JSON.stringify(exits)}, ${signal}`;
       const result = outcome(cwd, await bounded(closed, `the run to end (${at})`), stdout, stderr);
@@ -188,6 +188,7 @@ test(
       ],
     ]) {
       const cwd = fixture(t, {}, waits);
+      killRecorded(t, cwd, "pid");
       const result = await slowReader(t, {
         cwd,
         args,
@@ -199,15 +200,6 @@ test(
       assert.deepEqual([result.code, result.signal], [143, null], at);
       assert.ok(result.stdout.endsWith(`\n${last}\n`), at);
       assert.equal(result.stdout.split(last).length, 2, at);
-      // (the stopped part's descendant is not left behind)
-      const pid = Number(readFileSync(join(cwd, "pid"), "utf8"));
-      t.after(() => {
-        try {
-          process.kill(pid, "SIGKILL");
-        } catch (error) {
-          if (error.code !== "ESRCH") throw error;
-        }
-      });
     }
   },
 );

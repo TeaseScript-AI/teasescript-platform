@@ -959,7 +959,7 @@ test(
 function mergeGraph() {
   const { directory } = repository({ passing: true });
   const git = (...args) => {
-    const result = spawnSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
+    const result = runSync("git", ["-c", "user.name=t", "-c", "user.email=t@t", ...args], {
       cwd: directory,
       encoding: "utf8",
     });
@@ -1088,122 +1088,114 @@ test("strayMerges fails a merge commit unless it merges main or runtime-v2 into 
   }
 });
 
-test(
-  "`merge commits` runs in every run, plain, merged and in a merged checkout, judging the head's merge commits and not the queue's own merge, and the other checks still run (#2106)",
-  { timeout: 120_000 },
-  () => {
-    const graph = mergeGraph();
-    const { directory, git } = graph;
-    const check = (...args) =>
-      spawnSync(process.execPath, [tool, ...args], {
-        cwd: directory,
-        encoding: "utf8",
-        env: environment,
-      });
-    /** `check(...args)`'s run, asserted: its status, every check in it, and `merge commits`' lines (none when it passes). */
-    const verdict = (at, args, status, lines = []) => {
-      const result = check(...args);
-      assert.equal(result.status, status, `${at}: ${result.stdout}${result.stderr}`);
-      assert.deepEqual(
-        result.stdout.match(/^(?:PASS|FAIL) {2}\S.*$/gmu).map((line) => line.split(/ {2,}/u)[1]),
-        ["diff --check", "merge commits", "oxlint", "knip", "doc links", "imports"],
-        at,
-      );
-      if (lines.length > 0)
-        assert.ok(
-          result.stdout.includes(
-            `--- merge commits ---\n${lines.map((line) => `${line}\n`).join("")}`,
-          ),
-          `${at}: ${result.stdout}`,
-        );
-      else assert.match(result.stdout, /^PASS {2}merge commits /mu, at);
-    };
-    // The queue's merged checkout, named first when HEAD merges exactly the base's commit outside `--merged-checkout`;
-    // still a failure, as it may be the builder's own merge of its base
-    const queueHint = (first, baseName) =>
-      `the base's commit itself, as the queue's merged checkout does: if this is one, run it as ` +
-      `--merged-checkout ${first} --base ${baseName}; if you merged the base into your branch yourself, rebase ` +
-      `onto ${baseName} instead`;
-    const mergeLine = (commit, merges, why) =>
-      `${git("rev-parse", "--short=9", commit)} Merge branch '${merges}' into lane: merges ` +
-      `${git("rev-parse", "--short=9", `${commit}^2`)}, ${why}`;
-    try {
-      // plain and --merged: the lane's merge of its own base's tip fails, with the queue's case named first; a merge of
-      // the other long-lived line passes
-      for (const mode of [[], ["--merged"]]) {
-        const own = graph.lane("main", "main");
-        verdict(`${mode} own base`, [...mode, "--base", "main"], 1, [
-          mergeLine("lane", "main", queueHint(git("rev-parse", `${own}^1`), "main")),
-        ]);
-        graph.lane("main", "runtime-v2");
-        verdict(`${mode} runtime-v2 into a lane of main`, [...mode, "--base", "main"], 0);
-      }
-      // --merged-checkout, HEAD as the queue makes it. Behind its base, the queue made a merge commit: not judged
-      const behind = graph.lane("main", null);
-      graph.queueMerge("main");
-      verdict(
-        "merged checkout behind its base",
-        ["--merged-checkout", behind, "--base", "main"],
-        0,
-      );
-      // by shape alone, as `--base HEAD^2` reads it, that merge is the base merged into the branch: it fails, naming
-      // the queue's case first
-      const runner = git("rev-parse", "--short=9", "HEAD");
-      const byShape = check("--base", "HEAD^2");
-      assert.equal(byShape.status, 1, byShape.stdout);
+test("`merge commits` runs in every run, plain, merged and in a merged checkout, judging the head's merge commits and not the queue's own merge, and the other checks still run (#2106)", () => {
+  const graph = mergeGraph();
+  const { directory, git } = graph;
+  const check = (...args) =>
+    runSync(process.execPath, [tool, ...args], {
+      cwd: directory,
+      encoding: "utf8",
+      env: environment,
+    });
+  /** `check(...args)`'s run, asserted: its status, every check in it, and `merge commits`' lines (none when it passes). */
+  const verdict = (at, args, status, lines = []) => {
+    const result = check(...args);
+    assert.equal(result.status, status, `${at}: ${result.stdout}${result.stderr}`);
+    assert.deepEqual(
+      result.stdout.match(/^(?:PASS|FAIL) {2}\S.*$/gmu).map((line) => line.split(/ {2,}/u)[1]),
+      ["diff --check", "merge commits", "oxlint", "knip", "doc links", "imports"],
+      at,
+    );
+    if (lines.length > 0)
       assert.ok(
-        byShape.stdout.includes(
-          `${runner} Merge branch 'main' into HEAD: merges ${git("rev-parse", "--short=9", "HEAD^2")}, ` +
-            `${queueHint(behind, "HEAD^2")}\n`,
+        result.stdout.includes(
+          `--- merge commits ---\n${lines.map((line) => `${line}\n`).join("")}`,
         ),
-        byShape.stdout,
+        `${at}: ${result.stdout}`,
       );
-      // a commit that is not the merge's first parent, or both forms at once, cannot run
-      const wrong = check("--merged-checkout", `${behind}~1`, "--base", "main");
-      assert.equal(wrong.status, 2, `${wrong.stdout}${wrong.stderr}`);
-      assert.match(
-        wrong.stderr,
-        new RegExp(
-          `--merged-checkout ${behind}~1 \\(\\w{9}\\): HEAD \\(${runner}\\) is neither `,
-          "u",
-        ),
-      );
-      assert.equal(check("--merged", "--merged-checkout", behind).status, 2);
-      // a stray merge on the branch's side is still judged, and so is the lane's own merge of its base, when the queue
-      // merges nothing, without the queue's case
-      const stray = graph.lane("main", "other");
-      graph.queueMerge("main");
-      verdict(
-        "merged checkout, another lane merged",
-        ["--merged-checkout", stray, "--base", "main"],
-        1,
-        [
-          mergeLine(
-            stray,
-            "other",
-            "which neither origin/main nor origin/runtime-v2 holds: rebase onto main instead, or, if it has landed on " +
-              "one of them since your last fetch, fetch main, origin/main, origin/runtime-v2 and run again",
-          ),
-        ],
-      );
+    else assert.match(result.stdout, /^PASS {2}merge commits /mu, at);
+  };
+  // The queue's merged checkout, named first when HEAD merges exactly the base's commit outside `--merged-checkout`;
+  // still a failure, as it may be the builder's own merge of its base
+  const queueHint = (first, baseName) =>
+    `the base's commit itself, as the queue's merged checkout does: if this is one, run it as ` +
+    `--merged-checkout ${first} --base ${baseName}; if you merged the base into your branch yourself, rebase ` +
+    `onto ${baseName} instead`;
+  const mergeLine = (commit, merges, why) =>
+    `${git("rev-parse", "--short=9", commit)} Merge branch '${merges}' into lane: merges ` +
+    `${git("rev-parse", "--short=9", `${commit}^2`)}, ${why}`;
+  try {
+    // plain and --merged: the lane's merge of its own base's tip fails, with the queue's case named first; a merge of
+    // the other long-lived line passes
+    for (const mode of [[], ["--merged"]]) {
       const own = graph.lane("main", "main");
-      graph.queueMerge("main");
-      verdict(
-        "merged checkout, its own base merged",
-        ["--merged-checkout", own, "--base", "main"],
-        1,
-        [mergeLine(own, "main", "which the base already holds: rebase onto main instead")],
-      );
-      // main merged into a lane of runtime-v2, checked as the queue merges it with runtime-v2
-      const rt2 = graph.lane("runtime-v2", "main");
-      graph.queueMerge("runtime-v2");
-      verdict(
-        "merged checkout, main into a lane of runtime-v2",
-        ["--merged-checkout", rt2, "--base", "runtime-v2"],
-        0,
-      );
-    } finally {
-      rmSync(directory, { recursive: true, force: true });
+      verdict(`${mode} own base`, [...mode, "--base", "main"], 1, [
+        mergeLine("lane", "main", queueHint(git("rev-parse", `${own}^1`), "main")),
+      ]);
+      graph.lane("main", "runtime-v2");
+      verdict(`${mode} runtime-v2 into a lane of main`, [...mode, "--base", "main"], 0);
     }
-  },
-);
+    // --merged-checkout, HEAD as the queue makes it. Behind its base, the queue made a merge commit: not judged
+    const behind = graph.lane("main", null);
+    graph.queueMerge("main");
+    verdict("merged checkout behind its base", ["--merged-checkout", behind, "--base", "main"], 0);
+    // by shape alone, as `--base HEAD^2` reads it, that merge is the base merged into the branch: it fails, naming
+    // the queue's case first
+    const runner = git("rev-parse", "--short=9", "HEAD");
+    const byShape = check("--base", "HEAD^2");
+    assert.equal(byShape.status, 1, byShape.stdout);
+    assert.ok(
+      byShape.stdout.includes(
+        `${runner} Merge branch 'main' into HEAD: merges ${git("rev-parse", "--short=9", "HEAD^2")}, ` +
+          `${queueHint(behind, "HEAD^2")}\n`,
+      ),
+      byShape.stdout,
+    );
+    // a commit that is not the merge's first parent, or both forms at once, cannot run
+    const wrong = check("--merged-checkout", `${behind}~1`, "--base", "main");
+    assert.equal(wrong.status, 2, `${wrong.stdout}${wrong.stderr}`);
+    assert.match(
+      wrong.stderr,
+      new RegExp(
+        `--merged-checkout ${behind}~1 \\(\\w{9}\\): HEAD \\(${runner}\\) is neither `,
+        "u",
+      ),
+    );
+    assert.equal(check("--merged", "--merged-checkout", behind).status, 2);
+    // a stray merge on the branch's side is still judged, and so is the lane's own merge of its base, when the queue
+    // merges nothing, without the queue's case
+    const stray = graph.lane("main", "other");
+    graph.queueMerge("main");
+    verdict(
+      "merged checkout, another lane merged",
+      ["--merged-checkout", stray, "--base", "main"],
+      1,
+      [
+        mergeLine(
+          stray,
+          "other",
+          "which neither origin/main nor origin/runtime-v2 holds: rebase onto main instead, or, if it has landed on " +
+            "one of them since your last fetch, fetch main, origin/main, origin/runtime-v2 and run again",
+        ),
+      ],
+    );
+    const own = graph.lane("main", "main");
+    graph.queueMerge("main");
+    verdict(
+      "merged checkout, its own base merged",
+      ["--merged-checkout", own, "--base", "main"],
+      1,
+      [mergeLine(own, "main", "which the base already holds: rebase onto main instead")],
+    );
+    // main merged into a lane of runtime-v2, checked as the queue merges it with runtime-v2
+    const rt2 = graph.lane("runtime-v2", "main");
+    graph.queueMerge("runtime-v2");
+    verdict(
+      "merged checkout, main into a lane of runtime-v2",
+      ["--merged-checkout", rt2, "--base", "runtime-v2"],
+      0,
+    );
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+});

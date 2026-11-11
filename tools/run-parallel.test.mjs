@@ -5,7 +5,13 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, test } from "node:test";
 import { summaryLine } from "./run-parallel.mjs";
-import { awaitFile, spawnTool, waitFor } from "./runner-test-support.mjs";
+import {
+  awaitFile,
+  idleBounded,
+  killRecorded,
+  spawnTool,
+  waitFor,
+} from "./runner-test-support.mjs";
 
 const runner = fileURLToPath(new URL("./run-parallel.mjs", import.meta.url));
 
@@ -118,22 +124,16 @@ describe("process cleanup", { concurrency: true }, () => {
       async (t) => {
         const cwd = fixture(t, {
           waiting: `import { existsSync } from 'node:fs'; import { spawn } from 'node:child_process';
-        spawn(process.execPath, ['-e', "require('node:fs').writeFileSync('pid', String(process.pid)); process.on('SIGTERM', () => {}); setInterval(() => {}, 1000);"], {stdio:'inherit'});
-        ${reason === "parent-failure" ? `${awaitFile("pid", "its descendant to start")} process.exit(9);` : "setInterval(() => {}, 1000);"}`,
+        spawn(process.execPath, ['-e', "require('node:fs').writeFileSync('pid', String(process.pid)); process.on('SIGTERM', () => {}); ${idleBounded}"], {stdio:'inherit'});
+        ${reason === "parent-failure" ? `${awaitFile("pid", "its descendant to start")} process.exit(9);` : idleBounded}`,
         });
+        killRecorded(t, cwd, "pid");
         const { child, done } = start(t, cwd, ["waiting"]);
         const pid = await waitFor(
           "the descendant that ignores SIGTERM to start",
           () => Number(readFileSync(join(cwd, "pid"), "utf8")),
           child,
         );
-        t.after(() => {
-          try {
-            process.kill(pid, "SIGKILL");
-          } catch (error) {
-            if (error.code !== "ESRCH") throw error;
-          }
-        });
         if (reason === "SIGINT" || reason === "SIGTERM") child.kill(reason);
         const result = await done;
         assert.equal(
