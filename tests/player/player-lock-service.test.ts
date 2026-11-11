@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import test, { before } from "node:test";
+import test, { before, type TestContext } from "node:test";
+import { effectScope, shallowRef, type Ref } from "vue";
 
 import { CapturedMediaStore } from "../../player/media/captured-media.js";
 import { rebuildRecordedSession } from "../../player/debug/debug-export.js";
@@ -36,6 +37,16 @@ import {
 } from "../helpers/player/age-keyholder.js";
 import { hatch, inProcessBridge, introduced } from "../helpers/in-process-bridge.js";
 import { serviceSection } from "../helpers/service-section.js";
+import { loadPlayerModule } from "../helpers/player-modules.js";
+import { preparedSource, type PlanStart } from "../helpers/prepared-plan.js";
+import {
+  loadTopology,
+  rerunRegistry,
+  TOPOLOGIES,
+  topologyBridge,
+  until,
+  type Topology,
+} from "../helpers/player/worker-topology.js";
 
 // The engine's host the Player's sessions live in, as in production until the L5 series activates the Worker.
 let bridge: PlayerBridge;
@@ -981,3 +992,308 @@ test("a session held while its unlock dialog is prepared presents it once publis
   assert.equal(player.wakes.length, 1);
   player.stop();
 });
+
+/*
+ * The lock preload (L5i.7, F2): while a script that locks or opens is serviced, the Player loads the lock code its
+ * `planMetadata` reply asks for; a reply that arrives for a pair no longer serviced, after the page ended, or not at all
+ * loads nothing. The loaders are the injected `lockServices`, counted per call.
+ */
+
+/** What the session services read of the Player's session composable (`usePlayerSessionServices.ts`). */
+interface ServicesHost {
+  readonly camera: { answer(): null };
+  readonly capturedMedia: CapturedMediaStore;
+  readonly reportDiagnostic: (diagnostic: PlayerDiagnostic) => void;
+  readonly servicedSession: Readonly<Ref<PlayerSession | null>>;
+  readonly generation: Readonly<Ref<number>>;
+  readonly serviceSection: () => Promise<null>;
+  readonly options: { readonly lockServices?: LockServices };
+}
+let usePlayerSessionServices: (host: ServicesHost) => object;
+/** The real composable, as far as a lock's dialog and the shown session go. */
+interface LockingPlayer {
+  readonly session: Readonly<Ref<PlayerSession | null>>;
+  readonly hostError: Readonly<Ref<string | null>>;
+  readonly bridge: Promise<PlayerBridge>;
+  prepare(create: PlanStart): void;
+  activate(): Promise<void>;
+  readonly lock: {
+    readonly dialog: Readonly<Ref<{ readonly dialog: LockDialog; readonly busy: boolean } | null>>;
+    submit(input: LockDialogInput): void;
+  };
+}
+let usePlayerSession: (options: {
+  readonly bridge: Promise<PlayerBridge>;
+  readonly debugHistorySpill: () => Promise<null>;
+  readonly lockServices?: LockServices;
+}) => LockingPlayer;
+before(async () => {
+  await loadTopology();
+  const services = await loadPlayerModule("player/vue/src/session/usePlayerSessionServices.ts");
+  const session = await loadPlayerModule("player/vue/src/session/usePlayerSession.ts");
+  assert.equal(typeof services.usePlayerSessionServices, "function");
+  assert.equal(typeof session.usePlayerSession, "function");
+  // EVIDENCE: validation: checked as a function above; Vite loaded the real source module, and these are its host APIs.
+  usePlayerSessionServices = services.usePlayerSessionServices as typeof usePlayerSessionServices;
+  // EVIDENCE: validation: checked as a function above, from the same bundle.
+  usePlayerSession = session.usePlayerSession as typeof usePlayerSession;
+});
+
+/** The page globals the composable reads, for the test. */
+function pageSurface(context: TestContext): void {
+  const globals = {
+    document: Object.assign(new EventTarget(), { visibilityState: "visible" }),
+    window: new EventTarget(),
+    Audio: class {
+      src = "";
+      play = async () => {};
+      pause() {}
+      load() {}
+      removeAttribute() {}
+    },
+  };
+  for (const [name, value] of Object.entries(globals)) {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, name);
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+    context.after(() => {
+      if (previous) Object.defineProperty(globalThis, name, previous);
+      else Reflect.deleteProperty(globalThis, name);
+    });
+  }
+}
+
+/** The real loaders, counted per call. */
+function countedLoaders(): { readonly services: LockServices; readonly calls: string[] } {
+  const calls: string[] = [];
+  return {
+    calls,
+    services: {
+      tlock: () => (calls.push("tlock"), loadTlock()),
+      age: () => (calls.push("age"), loadAge()),
+      fetch: relays(() => false),
+      nowMs: () => NOW_MS,
+    },
+  };
+}
+
+/** Counts the `planMetadata` replies `bridge`'s client delivers, rejections included. */
+function metadataReplies(context: TestContext, bridge: PlayerBridge): () => number {
+  let replies = 0;
+  const request = bridge.client.request.bind(bridge.client);
+  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+    const reply = request(...args);
+    return args[0] === "planMetadata" ? reply.finally(() => (replies += 1)) : reply;
+  });
+  return () => replies;
+}
+
+/** A session of `script` started on `bridge`, at its first interaction. */
+async function startedAt(bridge: PlayerBridge, script: string): Promise<PlayerSession> {
+  return bridge.start(await preparedSource(bridge, script), { wallClockMs: NOW_MS }, false);
+}
+
+const SCRIPT_NAMES = ["no lock", "locks", "locks and encrypts"] as const;
+/** Each script pauses at a choice before its lock step, so no service runs one. */
+const PRELOAD_SCRIPTS: Record<(typeof SCRIPT_NAMES)[number], string> = {
+  "no lock": 'let pick = askChoice "Go"\nexit',
+  locks: 'let pick = askChoice "Go"\nsay decryptText("x", password: "p", default: "closed")\nexit',
+  "locks and encrypts":
+    'let pick = askChoice "Go"\nlet locked = encryptText("x", password: "p", publicKey: false, timeLock: false)\nexit',
+};
+/** What the preload of each script loads once its reply is taken. */
+const PRELOADED: Record<(typeof SCRIPT_NAMES)[number], readonly string[]> = {
+  "no lock": [],
+  locks: ["tlock"],
+  "locks and encrypts": ["tlock", "age"],
+};
+const PRELOAD_REPLIES = [
+  "current",
+  "another plan shown",
+  "another connection shown",
+  "unmounted",
+  "lost",
+] as const;
+const preloadCase = (
+  script: (typeof SCRIPT_NAMES)[number],
+  reply: (typeof PRELOAD_REPLIES)[number],
+): string => `preload: ${script}, ${reply}`;
+const LOCK_RERUN = rerunRegistry<string>({
+  ...Object.fromEntries(
+    SCRIPT_NAMES.flatMap((script) =>
+      PRELOAD_REPLIES.map((reply) => [preloadCase(script, reply), TOPOLOGIES]),
+    ),
+  ),
+  "real composable lock": TOPOLOGIES,
+  "lock before the preload's reply": TOPOLOGIES,
+  "preload's reply at the lock step": TOPOLOGIES,
+});
+
+for (const script of SCRIPT_NAMES)
+  for (const reply of PRELOAD_REPLIES)
+    LOCK_RERUN.rows(
+      preloadCase(script, reply),
+      `the lock preload of a script with ${script}, its reply ${reply === "current" ? "taken while its pair is serviced" : `arriving with ${reply}`}, loads ${reply === "current" ? `what the script needs (${PRELOADED[script].join(", ") || "nothing"})` : "nothing"}`,
+      async (context, topology) => {
+        const transport = await topologyBridge(context, topology, { delayMs: 20 });
+        transport.assertTopology();
+        const replies = metadataReplies(context, transport.bridge);
+        const serviced = await startedAt(transport.bridge, PRELOAD_SCRIPTS[script]);
+        // The next plan of the same connection, and the first of another, whose token equals the serviced one's.
+        const otherPlan =
+          reply === "another plan shown"
+            ? await startedAt(transport.bridge, PRELOAD_SCRIPTS["no lock"])
+            : null;
+        const other =
+          reply === "another connection shown" ? await topologyBridge(context, topology) : null;
+        const otherConnection =
+          other === null ? null : await startedAt(other.bridge, PRELOAD_SCRIPTS["no lock"]);
+        if (otherConnection !== null) assert.equal(otherConnection.planToken, serviced.planToken);
+        const otherReplies = other === null ? () => 0 : metadataReplies(context, other.bridge);
+        const loaders = countedLoaders();
+        const servicedSession = shallowRef<PlayerSession | null>(null);
+        const scope = effectScope();
+        scope.run(() =>
+          usePlayerSessionServices({
+            camera: { answer: () => null },
+            capturedMedia: new CapturedMediaStore(null, urls, "locks"),
+            reportDiagnostic: (diagnostic) => assert.fail(diagnostic.message),
+            servicedSession,
+            generation: shallowRef(1),
+            serviceSection: async () => null,
+            options: { lockServices: loaders.services },
+          }),
+        );
+        context.after(() => scope.stop());
+        transport.hold("planMetadata");
+        servicedSession.value = serviced;
+        await transport.held();
+        if (reply === "another plan shown") servicedSession.value = otherPlan;
+        if (reply === "another connection shown") servicedSession.value = otherConnection;
+        if (reply === "unmounted") scope.stop();
+        if (reply === "lost") await transport.lose();
+        transport.release();
+        // Each `planMetadata` reply delivered, the preload's own callback runs next.
+        const expected = reply === "another plan shown" ? 2 : 1;
+        await until(
+          () => replies() === expected && otherReplies() === (other === null ? 0 : 1),
+          "the preload's replies",
+        );
+        await settled();
+        assert.deepEqual(loaders.calls, reply === "current" ? PRELOADED[script] : []);
+      },
+    );
+
+/** Waits, in short real-time turns, until `check` holds: a lock's key derivation takes longer than a reply. */
+async function waitFor(check: () => boolean, label: string): Promise<void> {
+  const deadline = Date.now() + 20_000;
+  while (!check()) {
+    assert.ok(Date.now() < deadline, `never: ${label}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+/** Holds the outcome of `bridge`'s `planMetadata` requests from the caller until `release`; each is posted when made. */
+function heldMetadata(context: TestContext, bridge: PlayerBridge) {
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let delivered = 0;
+  const request = bridge.client.request.bind(bridge.client);
+  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+    const reply = request(...args);
+    return args[0] === "planMetadata"
+      ? gate.then(() => reply).finally(() => (delivered += 1))
+      : reply;
+  });
+  return { release, delivered: () => delivered };
+}
+
+/** The lock dialog asks for a password; the script then opens its lock with it. */
+const ASKS_A_PASSWORD = [
+  'let locked = encryptText("chosen", password: true, publicKey: false, timeLock: false)',
+  'say decryptText(locked, password: "words", default: "closed"), instant',
+  "exit",
+].join("\n");
+
+/** The real composable on `topology`, started on `ASKS_A_PASSWORD`, its lock asked through its own dialog. */
+async function lockingPlayer(context: TestContext, topology: Topology) {
+  pageSurface(context);
+  const transport = await topologyBridge(context, topology);
+  transport.assertTopology();
+  const loaders = countedLoaders();
+  const scope = effectScope();
+  const player = scope.run(() =>
+    usePlayerSession({
+      bridge: Promise.resolve(transport.bridge),
+      debugHistorySpill: async () => null,
+      lockServices: loaders.services,
+    }),
+  )!;
+  context.after(() => scope.stop());
+  const start = async () => {
+    player.prepare({
+      plan: await preparedSource(player.bridge, ASKS_A_PASSWORD),
+      options: () => ({ wallClockMs: NOW_MS }),
+    });
+    await player.activate();
+  };
+  /** Answers the dialog with a password and waits for the script to say what it opened. */
+  const answer = async () => {
+    await waitFor(() => player.lock.dialog.value?.busy === false, "the lock dialog");
+    const dialog = player.lock.dialog.value!.dialog;
+    assert.deepEqual(dialog.kind === "lock" && dialog.choices, ["password"]);
+    player.lock.submit({ password: "words", timeLockMs: null });
+    await waitFor(() => player.session.value?.state.status === "halted", "the script's end");
+    assert.deepEqual(
+      player.session.value?.transcriptEntries.map((entry) => entry.text),
+      ["chosen"],
+    );
+  };
+  return { transport, player, loaders, start, answer };
+}
+
+LOCK_RERUN.rows(
+  "real composable lock",
+  "a script's lock asked through the composable's dialog locks with the password the player gave",
+  async (context, topology) => {
+    const { player, start, answer } = await lockingPlayer(context, topology);
+    await start();
+    await answer();
+    assert.equal(player.hostError.value, null);
+  },
+);
+
+LOCK_RERUN.rows(
+  "lock before the preload's reply",
+  "a lock asked and answered while the preload's reply is held completes, and the late reply only preloads",
+  async (context, topology) => {
+    const { transport, player, loaders, start, answer } = await lockingPlayer(context, topology);
+    const metadata = heldMetadata(context, transport.bridge);
+    await start();
+    await answer();
+    assert.equal(metadata.delivered(), 0, "the preload's reply is still held");
+    const before = loaders.calls.length;
+    metadata.release();
+    await waitFor(() => metadata.delivered() === 1, "the preload's reply");
+    await settled();
+    // The injected loaders are plain functions, so the preload calls them again; the modules are evaluated once.
+    assert.deepEqual(loaders.calls.slice(before), ["tlock", "age"]);
+    assert.equal(player.lock.dialog.value, null, "no dialog again");
+    assert.equal(player.session.value?.state.status, "halted");
+    assert.equal(player.hostError.value, null);
+  },
+);
+
+LOCK_RERUN.rows(
+  "preload's reply at the lock step",
+  "the preload's reply let go as the session shows, while its lock step loads the lock code, changes nothing",
+  async (context, topology) => {
+    const { transport, player, start, answer } = await lockingPlayer(context, topology);
+    const metadata = heldMetadata(context, transport.bridge);
+    await start();
+    assert.ok(player.session.value !== null, "the session shows");
+    metadata.release();
+    await answer();
+    await waitFor(() => metadata.delivered() === 1, "the preload's reply");
+    assert.equal(player.hostError.value, null);
+  },
+);

@@ -58,6 +58,15 @@ export interface TopologyBridge {
   readonly exited: Promise<number> | null;
 }
 
+/** A reply gate: the op held, its request's id, and whether its reply arrived while held. */
+interface Gate {
+  target: string | null;
+  readonly ids: Set<number>;
+  holding: boolean;
+  heldTarget: boolean;
+  from: number;
+}
+
 const BUILD: BuildIdentity = { commit: null, dirty: null, mode: null, appVersion: null };
 const WORKERS = {
   // The engine's Worker entry, as the Player runs it.
@@ -171,8 +180,8 @@ function inProcess(
   const bridge = facade!.createInProcessBackend(BUILD, delayMs === undefined ? {} : { delayMs });
   const lose = inProcessLoss(bridge, client!.BridgeLostError);
   const posts: Posted[] = [];
-  const gate = {
-    target: null as string | null,
+  const gate: Gate = {
+    target: null,
     ids: new Set<number>(),
     holding: false,
     heldTarget: false,
@@ -241,8 +250,8 @@ async function onWorker(entry: URL): Promise<Omit<TopologyBridge, "topology" | "
   const worker = new Worker(entry, { workerData: { build: BUILD } });
   const exited = new Promise<number>((resolve) => worker.once("exit", resolve));
   const posts: Posted[] = [];
-  const gate = {
-    target: null as string | null,
+  const gate: Gate = {
+    target: null,
     ids: new Set<number>(),
     holding: false,
     heldTarget: false,
