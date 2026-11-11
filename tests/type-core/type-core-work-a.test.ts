@@ -238,7 +238,7 @@ test("a decided object's property search grows with the program in a stack of co
  * reversed with the solver's worklist; its total and each counter under the standard gate. The series to k = 1,024 is
  * the step's evidence, outside CI.
  */
-test("every stage 3b family's index and queries grow with the program in either order (§13.3)", () => {
+test("every stage 3b family's index and queries grow with the program in either order", () => {
   const measure = ({ name, request }: Sized, reversed: boolean): Measured => {
     const pass = narrowingPassIn(request, reversed);
     askEveryRead(pass, reversed);
@@ -1309,7 +1309,7 @@ function publishedRecord(answers: Answers, files: readonly SourceFile[]): string
  * small sizes, Astra's two M1 witnesses (a conditional store below the copied path before and between the copies) and
  * every alias form beside the events its class answers through, in both orders, and over the fixture's records.
  */
-test("every alias member answers as its class does at every decided path, in both orders (§4.1, condition (a))", (t) => {
+test("every alias member answers as its class does at every decided path, in both orders (condition (a))", (t) => {
   const differences: string[] = [];
   let compared = 0;
   const report = (difference: string | null): void => {
@@ -1370,7 +1370,7 @@ test("every alias member answers as its class does at every decided path, in bot
  * same with every chain resolved and with none (`withoutChains`), over every work family at small sizes in both orders
  * and over the fixture's records. The resolved side is the oracle's analysis of the same program where it ran.
  */
-test("resolving chains of copies changes no published record or writer, in both orders (§4.1)", () => {
+test("resolving chains of copies changes no published record or writer, in both orders", () => {
   const differing: string[] = [];
   const compare = (
     name: string,

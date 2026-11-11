@@ -23,7 +23,7 @@ import {
 } from "../helpers/type-core/adapter-parity.js";
 
 /**
- * The parity helper itself (work note §6.1): a case declares the legacy's fact and errors and the adapter's answer;
+ * The parity helper itself (work note): a case declares the legacy's fact and errors and the adapter's answer;
  * the helper refuses a fact it cannot compare and a declaration the legacy contradicts.
  */
 test("a fact with an open slot, a held unknown or an open shape is not closed and must be declared", () => {

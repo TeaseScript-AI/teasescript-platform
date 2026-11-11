@@ -15,7 +15,7 @@ import { closedView, dynamicView } from "./adapter-parity.js";
 
 /**
  * An operand of each registry kind and of the compound shapes the adapters' rules read, as `let a` declares it in a
- * source and as its view holds it (O4 stage 2b, work note §6.3): the catalog the direct tests enumerate a contract's
+ * source and as its view holds it (O4 stage 2b, work note): the catalog the direct tests enumerate a contract's
  * arguments over.
  */
 export interface Operand {

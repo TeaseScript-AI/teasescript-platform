@@ -25,7 +25,7 @@ import {
 } from "../helpers/type-core/adapter-parity.js";
 
 /**
- * Parity of the members of handles with the legacy checker (work note §5.4, §6.3): every property and method of
+ * Parity of the members of handles with the legacy checker (work note): every property and method of
  * `HANDLE_MEMBERS` on a receiver of each kind of handle, with and without arguments, the handles a source makes, and
  * handles among other kinds of a receiver, which `members.ts` composes.
  */

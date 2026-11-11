@@ -33,8 +33,8 @@ import {
 import { OPERANDS } from "../helpers/type-core/adapter-operands.js";
 
 /**
- * Parity of the numeric functions and of the value form of `min` and `max` with the legacy checker (work note §5.3,
- * §5.3.1, §6.3): each function with each argument over an operand of every kind of the registry and the compound
+ * Parity of the numeric functions and of the value form of `min` and `max` with the legacy checker (work note):
+ * each function with each argument over an operand of every kind of the registry and the compound
  * shapes, the shapes of a call, known values, the named argument, the domains the checker sees, the bounded results
  * of an input the compiler cannot know, and `min` of every pair of the kinds it orders and of the others.
  */

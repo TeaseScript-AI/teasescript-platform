@@ -81,8 +81,8 @@ import {
 
 /*
  * The sharing differential: S6's sharing of answers between equivalent values (alias classes and chains
- * of copies, S6-CARRIERS §4.1; levels by structure, §4.6; a walk's stops of one snapshot, the decider's and the named
- * data's, §3.1; a literal's entries for the reads of one key) and S6c's (a choice's options, a run of adds, a
+ * of copies, S6-CARRIERS §4.1; levels by structure; a walk's stops of one snapshot, the decider's and the named
+ * data's; a literal's entries for the reads of one key) and S6c's (a choice's options, a run of adds, a
  * literal's computed values and a prefix's entries by their class, `Contract.classOf`) is an optimization,
  * so it is output-neutral: for every program below, in both orders, the published diagnostics, the owed checks, every
  * binding's admitted type at its root and its element (the decider's site with it) and the candidate route's lowered

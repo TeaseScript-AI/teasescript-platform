@@ -44,7 +44,7 @@ import {
 
 /*
  * The written-domain matrices (`type-core-written.ts`; the lead's rulings on the merged S6's B1 and B2: A4, F17b,
- * §4's fit rule, ADR 0021 1.3, V30 §13), each source in both orders and with the sharing on and off, in three layers:
+ * the design's fit rule, ADR 0021 1.3, V30 §13), each source in both orders and with the sharing on and off, in three layers:
  * the decision (the place's admitted kinds at each level, and the program's C9 boundaries, each at its host read with its
  * target's level and `against`, none at a level that admits every kind), the plan (each store that brings a host value
  * checked against the whole written type) and
@@ -807,7 +807,7 @@ function routeTakes(source: string): boolean {
  * V30 §13's union examples (`:1406–1416`) as V30 writes them, and each union with its members in the other order:
  * `a`–`e` valid, `f`–`p` one compile error at the written type naming the union, `h`'s form (`T | U[]`, so `n`'s, `o`'s
  * and `p`'s union too) with V30's suggestion. Each line is the written type, its offending union and the suggestion.
- * `p` is written `function p: …`: V30's `function p(): …` breaks §11's "Parentheses are omitted when there are no
+ * `p` is written `function p: …`: V30's `function p(): …` breaks V30 §11's "Parentheses are omitted when there are no
  * parameters" (TSP026), so its type is never checked.
  */
 const V30_UNION_EXAMPLES: readonly (readonly [string, string?, string?, (string | null)?])[] = [
@@ -914,7 +914,7 @@ const V30_UNION_EXAMPLES: readonly (readonly [string, string?, string?, (string 
 ];
 
 /**
- * One type written twice is one type, not another type beside it (§13; ADR 0021 3.2, `T?` is `T | null`), also when
+ * One type written twice is one type, not another type beside it (ADR 0021 3.2, `T?` is `T | null`), also when
  * spelled two ways; two list types are two types (Sol's r1 B1).
  */
 const SAME_TYPE_UNIONS: readonly (readonly [string, string?, string?, (string | null)?])[] = [

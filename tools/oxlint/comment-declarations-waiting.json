@@ -356,7 +356,7 @@
   {
     "file": "tests/type-core/type-core-candidate.test.ts",
     "kind": "docblock",
-    "text": "The reached fixture, derived from its records (S6-CARRIERS revision 5, §5.2; the lead's answer 3). Every",
+    "text": "The reached fixture, derived from its records (S6-CARRIERS revision 5; the lead's answer 3). Every",
     "waits": "#1937"
   },
   {

@@ -3,7 +3,7 @@ import test from "node:test";
 import { compileValidPlan } from "../helpers/compile-valid-plan.js";
 
 /**
- * The depth the base accepts for a condition (O4 stage 2c, work note §6): 16,000 parentheses, conjunctions,
+ * The depth the base accepts for a condition (O4 stage 2c, work note): 16,000 parentheses, conjunctions,
  * disjunctions and negations around a grouped condition each compile to a plan with no diagnostics at `4807b7570`;
  * the recognizer and its consumers must accept the same. The parser and the checker read these iteratively; a
  * recursive reading would exhaust the call stack long before this depth and surface as a diagnostic.

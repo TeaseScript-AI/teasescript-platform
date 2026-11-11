@@ -12,7 +12,7 @@ import {
 import { request } from "../helpers/type-core/type-inference-graph.js";
 
 /**
- * The condition-shape table (O4 stage 2c, work note §4): generated from the templates and the legacy oracle on the
+ * The condition-shape table (O4 stage 2c, work note): generated from the templates and the legacy oracle on the
  * current build and compared with the table checked in, which was written at the base build before the visitor
  * changed, so that the visitor is asserted against the legacy's observations. Set `CONDITION_SHAPES_WRITE=1` to write
  * the table anew, only from a build without the production change (a base checkout with these two test files).

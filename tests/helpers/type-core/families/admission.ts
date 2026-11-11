@@ -2,7 +2,7 @@ import { type WorkFamily, rows, lines, fields, cells, main } from "./builders.js
 import { INHERITED_FIELD_FAMILIES } from "./inherited.js";
 
 /**
- * Admission (§10.3's admission combinations; the port plan's §3.3, M4 S6): the decided type over an empty, a
+ * Admission (the admission combinations; M4 S6): the decided type over an empty, a
  * populated and a later mutated snapshot, several destinations of one source with different decided types, a rejected
  * destination beside its intact source, external ingresses merged with an opaque source, A5's candidates under k whole
  * presets of a record, A2's scan past external stores, the width of a record's written copies, a literal's records and a
@@ -158,7 +158,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   {
     name: "A4-self-copies",
     measures:
-      "A4 through copies, §8 width: a place copied into k fields of itself, a cycle of copies (Sol's round 3 B3 on #1049)",
+      "A4 through copies, width: a place copied into k fields of itself, a cycle of copies (Sol's round 3 B3 on #1049)",
     program: (k) =>
       main(
         lines(
@@ -172,7 +172,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   {
     name: "A4-wide-copies",
     measures:
-      "A4, §8 width: one record of k fields, each a copy of one written binding, every field read",
+      "A4, width: one record of k fields, each a copy of one written binding, every field read",
     program: (k) =>
       main(
         lines(
@@ -185,7 +185,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   },
   {
     name: "A8-wide-elements",
-    measures: "A8, §8 width: a literal of two k-field records, each field's type one, a field read",
+    measures: "A8, width: a literal of two k-field records, each field's type one, a field read",
     program: (k) =>
       main(
         lines(
@@ -197,7 +197,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   },
   {
     name: "A6-wide-misfits",
-    measures: "A6, §8 width: a k-field record replaced by one whose every field misfits",
+    measures: "A6, width: a k-field record replaced by one whose every field misfits",
     program: (k) =>
       main(
         lines(
@@ -260,7 +260,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   {
     name: "A2-published-wide-copies",
     measures:
-      "§8, A2, C9: k whole copies of one record of k fields published beside named host data, every field read (Codex r17 B2)",
+      "A2, C9: k whole copies of one record of k fields published beside named host data, every field read (Codex r17 B2)",
     program: (k) =>
       main(
         lines(
@@ -286,7 +286,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
     ] as const
   ).map(([name, copied, nulls, event]): WorkFamily => ({
     name,
-    measures: `§4.1, A2: k + 1 whole copies of \`${copied}\`, a k-field record of named host data, every field read${event === "none" ? "" : event === "store" ? ", a store below it between the copies" : `, a conditional store below it ${event} the copies`}`,
+    measures: `A2: k + 1 whole copies of \`${copied}\`, a k-field record of named host data, every field read${event === "none" ? "" : event === "store" ? ", a store below it between the copies" : `, a conditional store below it ${event} the copies`}`,
     program: (k) => {
       const half = k >> 1;
       const copies = (count: number): string => rows(count, () => `box = ${copied}`);
@@ -311,7 +311,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   {
     name: "A2-published-wide-copies-conditional",
     measures:
-      "§4.1, A2, C9: A2-published-wide-copies with a conditional store into the record before the copies (M1)",
+      "A2, C9: A2-published-wide-copies with a conditional store into the record before the copies (M1)",
     program: (k) =>
       main(
         lines(
@@ -327,7 +327,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   },
   ...(["one region", "k regions"] as const).map((variant): WorkFamily => ({
     name: `A2-guarded-quiet-copies-${variant.replace(" ", "-")}`,
-    measures: `§4.3, A2: k copies of a k-field record of named host data guarded in ${variant}${variant === "k regions" ? ", one unguarded" : ""}, every field read`,
+    measures: `A2: k copies of a k-field record of named host data guarded in ${variant}${variant === "k regions" ? ", one unguarded" : ""}, every field read`,
     program: (k) =>
       main(
         lines(
@@ -468,7 +468,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
     ] as const
   ).map(([variant, wrapper, at, payload]): WorkFamily => ({
     name: `C9-fresh-wrappers-${variant}`,
-    measures: `§4.6, C9: k stores of \`${wrapper}\`, every field of the record read`,
+    measures: `C9: k stores of \`${wrapper}\`, every field of the record read`,
     program: (k) =>
       main(
         lines(
@@ -485,7 +485,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   {
     name: "C9-fresh-wrappers-distinct",
     measures:
-      "§4.6, C9: k wrappers of k distinct records, the last stored k times more, one field read (Codex r20 B3)",
+      "C9: k wrappers of k distinct records, the last stored k times more, one field read (Codex r20 B3)",
     program: (k) =>
       main(
         lines(
@@ -499,10 +499,10 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
       ),
   },
   // S6-CARRIERS §3.4 with Codex r20 B5: k merged host stores met by k consumers, each provenance node resolved once (the
-  // nested own defaults of §3.2 are a gated known limit)
+  // nested own defaults of guarded reads are a gated known limit)
   ...(["reads", "typed"] as const).map((variant): WorkFamily => ({
     name: `C9-merged-leaves-${variant}`,
-    measures: `§3.4: k conditional host stores of one place, k ${variant === "reads" ? "reads" : "typed copies"} of it (Codex r20 B5)`,
+    measures: `k conditional host stores of one place, k ${variant === "reads" ? "reads" : "typed copies"} of it (Codex r20 B5)`,
     program: (k) =>
       main(
         lines(
@@ -524,7 +524,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
     ] as const
   ).map(([variant, value, at, holder]): WorkFamily => ({
     name: `A2-alias-${variant}-copies`,
-    measures: `§4.1, C1: k stores of \`${value}\` over a k-field record of named host data, every field read`,
+    measures: `C1: k stores of \`${value}\` over a k-field record of named host data, every field read`,
     program: (k) =>
       main(
         lines(
@@ -543,7 +543,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   {
     name: "A2-alias-chain-heads",
     measures:
-      "§4.1, C1: k links of a chain of copies of a k-field record of named host data, each stored, every field read",
+      "C1: k links of a chain of copies of a k-field record of named host data, each stored, every field read",
     program: (k) =>
       main(
         lines(
@@ -562,7 +562,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
   {
     name: "A2-alias-guarded-snapshot-copies",
     measures:
-      "§4.1, §3.2: k copies of one snapshot read under k field tests of its source, every field read (Codex r22 F4)",
+      "k copies of one snapshot read under k field tests of its source, every field read (Codex r22 F4)",
     program: (k) =>
       main(
         lines(
@@ -578,7 +578,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
         ),
       ),
   },
-  // §3.2 with S6-CARRIERS §4.6 (Codex r21 B1): k stores of a computed child over a k-field record, each under a test of
+  // guard marks with S6-CARRIERS §4.6 (Codex r21 B1): k stores of a computed child over a k-field record, each under a test of
   // a different field, one field read; each operand read's marks below it come from the guard regions holding it, never
   // from each tested field in turn
   ...(
@@ -588,7 +588,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
     ] as const
   ).map(([variant, value, at]): WorkFamily => ({
     name: `A2-guarded-computed-children-${variant}`,
-    measures: `§3.2, §4.6: k stores of \`${value}\`, each under a test of another field, one field read (Codex r21 B1)`,
+    measures: `k stores of \`${value}\`, each under a test of another field, one field read (Codex r21 B1)`,
     program: (k) =>
       main(
         lines(
@@ -613,7 +613,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
     ] as const
   ).map(([variant, value]): WorkFamily => ({
     name: `A2-wide-ingresses-${variant}`,
-    measures: `§3.1: \`let out = ${value}\`, W k reads of \`hostValue\`, decided at k fields, each read (Codex r23 F1)`,
+    measures: `\`let out = ${value}\`, W k reads of \`hostValue\`, decided at k fields, each read (Codex r23 F1)`,
     program: (k) => {
       const wide = Array.from({ length: k }, () => "hostValue").join(", ");
       return main(
@@ -640,7 +640,7 @@ export const ADMISSION_FAMILIES: readonly WorkFamily[] = [
     ] as const
   ).map(([variant, value]): WorkFamily => ({
     name: `A2-wide-ingress-${variant}`,
-    measures: `§3.1: \`let out = ${value(2)}\` at k, decided at k fields, each read (Codex r24 F1, F2)`,
+    measures: `\`let out = ${value(2)}\` at k, decided at k fields, each read (Codex r24 F1, F2)`,
     program: (k) =>
       main(
         lines(
@@ -896,11 +896,11 @@ export const JOIN_REACH_FAMILIES: readonly WorkFamily[] = (
   ),
 );
 
-/** §3.2, C10: k nested own defaults of one kind around one host value (Codex r20 B4). */
+/** C10: k nested own defaults of one kind around one host value (Codex r20 B4). */
 function nestedOwn(variant: string, wrap: (inner: string, i: number) => string): WorkFamily {
   return {
     name: `C9-nested-own-${variant}`,
-    measures: `§3.2, C10: k nested own ${variant} defaults around one host value (Codex r20 B4)`,
+    measures: `C10: k nested own ${variant} defaults around one host value (Codex r20 B4)`,
     program: (k) => {
       let value = "hostValue";
       for (let i = k - 1; i >= 0; i -= 1) value = wrap(value, i);

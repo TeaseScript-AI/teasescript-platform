@@ -17,6 +17,7 @@ import {
   listedTextFindings,
   recordEntries,
   tableCitationsIn,
+  unnamedSectionsIn,
   unresolvedPointers,
   unresolvedRevisionsIn,
 } from "./check-comment-forecasts.mjs";
@@ -393,6 +394,14 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
         `[^n]: [page](${record.slice(5)}/sharing.md)\n`,
     );
     write("data/rev.json", '{"why": "r4.9995"}\n');
+    // section numbers: refused in a test and in data, not in the exempt paths or a binary file, and admitted after V30
+    write("tests/sections.ts", '// V30 §13\nconst title = "a rule (§3.2)";\n');
+    write("data/sections.json", '{"why": "§4"}\n');
+    write("docs/sections.md", "See §5.\n");
+    write("src/sections.ts", "// §6\n");
+    write("tests/fixtures/type-core/cells.jsonl", '{"cells": ["§7"]}\n');
+    write("tools/oxlint/comment-declarations-waiting.json", '[{"text": "§8"}]\n');
+    write("sections.bin", "x\0§9\n");
     write("src/rev.ts", 'const reason = "r4.9998 and r4.38";\n');
     symlinkSync(join(repositoryRoot, "node_modules"), join(root, "node_modules"));
     write("docs/a.md", "# A\n\nAs ruled (TABLE r4.1).\n");
@@ -439,12 +448,15 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
     assert.equal(links.status, 0, links.stderr);
     assert.deepEqual(at(listed, "cites a record that is not in the repository"), expected);
     assert.deepEqual(at(listed, "names no entry of the accepted record"), revisions);
+    const sections = ["data/sections.json:1", "tests/sections.ts:2"];
+    assert.deepEqual(at(listed, "a section number without"), sections);
     const entry = await import(
       pathToFileURL(join(root, "tools/oxlint/check-comment-forecasts.mjs")).href
     );
     const entryFindings = entry.checkCommentForecasts(root);
     assert.deepEqual(at(entryFindings, "cites a record that is not in the repository"), expected);
     assert.deepEqual(at(entryFindings, "names no entry of the accepted record"), revisions);
+    assert.deepEqual(at(entryFindings, "a section number without"), sections);
     writeFileSync(
       Buffer.concat([Buffer.from(`${root}/name-`), Buffer.from([0xff]), Buffer.from(".md")]),
       "TABLE r4.9\n",
@@ -466,6 +478,139 @@ test("only this test's own text is exempt from the TABLE citation check, by its 
     tableCitationsIn("tools/oxlint/check-comment-forecasts.mjs", readFileSync(check, "utf8")),
     [],
   );
+});
+
+// The document names a section list may follow, and the list's separators after its first number.
+const SECTION_NAMES = ["V30", "ADR 0021", "PLAN", "S3", "S6-CARRIERS"];
+const SECTION_SEPARATORS = [", ", " and ", ", and ", " or "];
+const sectionsIn = (text) =>
+  unnamedSectionsIn("tests/a.ts", text).map(({ line, section }) => `${line} ${section}`);
+
+test("a section list right after a document's name is admitted, in every form the rule names", () => {
+  for (const name of SECTION_NAMES) {
+    for (const first of ["§1", "§§12–15", "§3.2", "§4.1.2", "§6b", "§2-3"])
+      assert.deepEqual(sectionsIn(`see ${name} ${first}.`), [], `${name} ${first}`);
+    for (const separator of SECTION_SEPARATORS)
+      assert.deepEqual(
+        sectionsIn(`(${name} §8${separator}§13${separator}§35)`),
+        [],
+        `${name}${separator}`,
+      );
+  }
+  // a whole number before sentence punctuation, a possessive or a dash that starts no number
+  for (const text of [
+    "ADR 0021 §6.2.",
+    "V30 §13's rule",
+    "V30 §13a, §2",
+    "V30 §1 – see",
+    "V30 §1.x",
+    "V30 §1.2.3x",
+    "V30 §1–2x.",
+    "V30 §1-2.5",
+  ])
+    assert.deepEqual(sectionsIn(text), [], text);
+  // a range, then the list goes on
+  for (const name of SECTION_NAMES)
+    assert.deepEqual(sectionsIn(`(${name} §1–2, §5)`), [], `${name} range`);
+  // at the start of a line and of the text, and after a character that is no letter or digit
+  assert.deepEqual(sectionsIn("V30 §1\n(ADR 0021 §6.2)\n`S3 §5`, _V30 §2"), []);
+});
+
+test("every other section number is found, with its line and as written", () => {
+  for (const text of [
+    "§1",
+    "a rule (§3.2)",
+    "§ 3",
+    "§§2",
+    "§\t4",
+    "v30 §1",
+    "Adr 0021 §1",
+    "ADR 21 §1",
+    "ADR 00211 §1",
+    "xV30 §1",
+    "S30 §1",
+    "S6 §1",
+    "S6-CARRIERS-X §1",
+    "2V30 §1",
+    "V30's §11",
+    "V30 (Explicit types) §13",
+    "V30 §13; §14",
+    "V30 §13, ADR §14",
+    "V30 §13 , §14",
+    "TABLE §3",
+    // a number is whole: no letter or digit after it, and no `.` or dash before a digit
+    "V30 §13a1",
+    "V30 §13ab",
+    "V30 §1.2.3xy",
+    "V30 §1–2a3",
+    "V30 §1–2–3",
+    "V30 §1-2.5-6",
+    // a list goes on by its separators and one mark only
+    "V30 §1,§2",
+    "V30 §1, §§2",
+  ])
+    assert.equal(sectionsIn(text).length, 1, text);
+  assert.deepEqual(sectionsIn("V30 §13ab, §2"), ["1 §13", "1 §2"]);
+  assert.deepEqual(sectionsIn(`§${" ".repeat(25)}1`), ["1 § 1"]);
+  // each ASCII character but the one space, once and twice, between a name and its section
+  for (const name of SECTION_NAMES)
+    for (let code = 0; code < 128; code += 1) {
+      const between = String.fromCharCode(code);
+      if (between === " ") continue;
+      for (const text of [
+        `${name}${between}§1`,
+        `${name}${between}${between}§1`,
+        `${name} ${between}§1`,
+      ])
+        assert.equal(sectionsIn(text).length, 1, JSON.stringify(text));
+    }
+  for (const name of SECTION_NAMES) {
+    assert.equal(sectionsIn(`${name}  §1`).length, 1, `${name}, two spaces`);
+    assert.equal(sectionsIn(`${name}\n§1`).length, 1, `${name}, a line break`);
+  }
+  assert.deepEqual(sectionsIn("a\nV30 §1, §2; §3 and §4\n\n(§5.1's rows, §§6)\n"), [
+    "2 §3",
+    "2 §4",
+    "4 §5.1",
+    "4 §§6",
+  ]);
+});
+
+test("a section mark before anything but a digit is no section number", () => {
+  assert.deepEqual(
+    sectionsIn('"§say bubble(color: toString(@))"\nif (character === "§") {}\n`§` §x §.1'),
+    [],
+  );
+});
+
+test("a line naming the old record with a section number gets one finding from each rule", () => {
+  assert.equal(tableCitationsIn("tests/a.ts", "TABLE §3\n").length, 1);
+  assert.equal(unnamedSectionsIn("tests/a.ts", "TABLE §3\n").length, 1);
+});
+
+test("the section rule's exemptions are exact paths and two folders", () => {
+  for (const file of [
+    "docs/a.md",
+    "docs/specifications/b.md",
+    "src/a.ts",
+    "src/type-inference/core/b.ts",
+    "tests/fixtures/type-core/cells.jsonl",
+    "tools/oxlint/comment-declarations-waiting.json",
+    CITATION_FIXTURES,
+  ])
+    assert.deepEqual(unnamedSectionsIn(file, "§1\n"), [], file);
+  for (const file of [
+    "docsx/a.md",
+    "tests/docs/a.md",
+    "srcs/a.ts",
+    "other/tests/fixtures/type-core/cells.jsonl",
+    "tests/fixtures/type-core/cells-deferred.jsonl",
+    "tests/fixtures/type-core/MANIFEST.md",
+    "tools/oxlint/comment-declarations-waiting.json.bak",
+    "tools/oxlint/comment-citations.json",
+    `other/${CITATION_FIXTURES}`,
+  ])
+    assert.equal(unnamedSectionsIn(file, "§1\n").length, 1, file);
 });
 
 test("a comment's pointer at the accepted record names a heading of the page it names", () => {

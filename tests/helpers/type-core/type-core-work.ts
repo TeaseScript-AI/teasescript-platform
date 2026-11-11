@@ -8,7 +8,7 @@ import { coreRequest } from "../type-core-analysis.js";
 import { type WorkFamily } from "./families/builders.js";
 
 /**
- * The work of the coarse core (checkpoint 9 and §10.1's W rows) as a sampled regression oracle: every
+ * The work of the coarse core (checkpoint 9 and its W rows) as a sampled regression oracle: every
  * family's charged work at k = 128 against k = 64, per doubling of the programs' syntax nodes, since a family's source
  * need not double exactly. Linear work doubles; a structure bounded by a product of two program dimensions about
  * quadruples. The `n log n` structures (a key's definitions sorted, its lifting table, its own events) give up

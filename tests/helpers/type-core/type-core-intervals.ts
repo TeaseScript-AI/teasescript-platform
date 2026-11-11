@@ -1,7 +1,7 @@
 import { phaseEnds } from "../type-core-held-host.js";
 
 /*
- * C-R2's epoch-aware stop enumeration (Astra's round 1 review of #1526 phase C, Sol's round 2 §4): the settled stop
+ * C-R2's epoch-aware stop enumeration (Astra's round 1 review of #1526 phase C, Sol's round 2): the settled stop
  * intervals of a case, by an independent census of every allowance below its total, against the bisection the held
  * host's stops are taken from (`phaseEnds`, `heldStops`), so no settled interval of an earlier epoch, or one the
  * bisection skips past an unsettled gap, goes unenumerated.
