@@ -88,8 +88,8 @@ if (unmatched.length > 0) {
 
 // Node's command line sorts the files it runs, so the full suite goes through a runner that keeps the costly files
 // first: started late, one of them would run alone at the end.
-// A test fails past `TEST_LIMIT_MS` (`test-in-flight.mjs`), and its file's process then ends, also for named files, where
-// a `--test-timeout` given to the filter replaces the limit. Beside the spec reporter, `test-in-flight.mjs` names on
+// A test fails past `TEST_LIMIT_MS` (`test-in-flight.mjs`), also for named files, where a `--test-timeout` given to the
+// filter replaces the limit. Beside the spec reporter, `test-in-flight.mjs` names on
 // standard error a stall that limit does not end.
 // Compact output of named files ends with one line per file and its tests' counts, the passing tests it leaves out among
 // them; a file that failed outside its tests (it threw while loading, or its process ended non-zero) says so beside
@@ -133,7 +133,6 @@ const nodeArguments = fullSuite
             `--test-reporter-destination=${countsFile}`,
           ]),
       `--test-timeout=${TEST_LIMIT_MS}`,
-      "--test-force-exit",
       ...testFiles,
     ];
 // (without `TEST_FULL_OUTPUT`: a test that runs this filter itself chooses its own output)
