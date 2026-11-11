@@ -15,8 +15,8 @@ import { suiteName } from "./test-shards.mjs";
 // `node:test` passes it as its file entry alone), is named and fails the run. A signal cancels the run as it cancels
 // `node --test`, which stops the files' processes instead of leaving them running. Where `TEST_FILE_SECONDS` names a
 // file, it receives each file's seconds from its process's start to its end, as CI's test jobs keep them for
-// `tools/measure-test-files.mjs`. A test fails past `TEST_LIMIT_MS`, and its file's process then ends; a stall that
-// limit does not end is named on standard error (`tools/test-in-flight.mjs`).
+// `tools/measure-test-files.mjs`. A test fails past `TEST_LIMIT_MS`; a stall that limit does not end is named on
+// standard error (`tools/test-in-flight.mjs`).
 const atOnce = filesAtOnce();
 // A test runner option is any of Node's `--test…` or `--experimental-test…` options, also negated with `--no-`; Node
 // reads `_` in an option's name as `-`, so `--test_name_pattern=x` is one too.
@@ -42,7 +42,6 @@ const tests = run({
   concurrency: atOnce,
   isolation: "process",
   timeout: TEST_LIMIT_MS,
-  forceExit: true,
   signal: controller.signal,
 });
 trackInFlight((type, listener) => tests.on(type, listener));
