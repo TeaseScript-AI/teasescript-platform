@@ -56,13 +56,13 @@ for (const diagnostic of [
   ...checkObligationInventory(repositoryRoot),
   ...checkQuestionSources(repositoryRoot),
   ...checkSiteKeys(repositoryRoot),
-  ...checkWaitingOverrides(
+  ...(await checkWaitingOverrides(
     repositoryRoot,
     ".oxlintrc.json",
     readFileSync(resolve(repositoryRoot, ".oxlintrc.json"), "utf8"),
     new Set(files),
     executable,
-  ),
+  )),
 ]) {
   console.error(
     `${diagnostic.fileName}:${diagnostic.line}:${diagnostic.column}: ${diagnostic.message}`,
