@@ -293,12 +293,13 @@ export function useSessionActivation({
   };
   /**
    * The recovery the page presents: its offer, over the stopped session (`line`) or on the start page (`page`); `null`
-   * when nothing is offered, as before the store was read, after an end, or on a start page that stays as it was.
+   * when nothing is offered, as before the store was read, while its click is under way, after an end, or on a start
+   * page that stays as it was.
    */
   const recoveryOffer = computed(() => {
     const recovery = recoveryShown.value;
     const kind = offer.value;
-    if (recovery === null || kind === null) return null;
+    if (recovery === null || kind === null || beginning.value) return null;
     if (recovery.kind === "kept") return { offer: kind, where: "line" as const };
     if (recovery.kind !== "ended" && recovery.shown) return { offer: kind, where: "page" as const };
     return null;
