@@ -146,9 +146,9 @@ function declarationCode(
 
 /**
  * The owner's sentences (#2289) for a store of numbers into a place that holds whole numbers because a copy of a
- * variable declared `integer` decided it (A4): a variable that is a copy of that variable's value, or a list or set
- * whose elements are copies of it, with the fix that declares the place with `number`; `null` for any other store,
- * whose sentence stays `storeSubject`'s.
+ * variable declared `integer` decided it (A4): a variable declared as a copy of that variable's value, or a list or
+ * set declared with elements that are copies of it, with the fix that declares the place with `number`; `null` for any
+ * other store, whose sentence stays `storeSubject`'s.
  */
 export function copySentence(
   rule: StoreRule,
@@ -156,16 +156,23 @@ export function copySentence(
   source: MessageSource,
   diagnosed: Diagnosed,
 ): string | null {
-  const { copied, root } = rule;
+  const { copied, root, decider } = rule;
   const integer = (type: readonly ItemTag[]): boolean => {
     const values = type.filter((kind) => kind !== "null");
     return values.length === 1 && values[0] === "integer";
   };
+  // (the copy is the root's own start value, so the fix restates the declaration as written with `number`: a later
+  // store's copy leaves the start value's type, a `null` among them, out of the fix, Codex r1 on #2317)
   if (
     copied === undefined ||
     !rule.written ||
     root === null ||
     (root.kind !== "let" && root.kind !== "global") ||
+    root.site === null ||
+    decider === null ||
+    decider.file !== root.site.file ||
+    decider.start < root.site.start ||
+    decider.end > root.site.end ||
     !integer(rule.type) ||
     !integer(copied.type) ||
     kinds.length === 0 ||
