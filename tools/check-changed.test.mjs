@@ -113,6 +113,7 @@ test(
       });
       assert.equal(result.status, 2, result.stderr);
       assert.doesNotMatch(result.stdout, /PASS|FAIL/u);
+      assert.equal(result.stdout, "check-changed: ran: none; failed: none; not run: every check\n");
       assert.equal(
         result.stderr,
         `check-changed: no node_modules, and ${main} has no node_modules folder (ENOENT): run \`npm ci\`, or set TEASESCRIPT_MAIN to a checkout of main that has node_modules\n`,
@@ -245,32 +246,59 @@ test("--merged names a conflict, exits 2 and leaves no worktree", { timeout: 30_
 });
 
 test(
-  "a signal during --merged stops the checks and removes the worktree",
-  { timeout: 30_000 },
+  "a signal during --merged stops the checks and removes the worktree; a second one during that cleanup changes nothing (#2106)",
   async () => {
-    const { directory, worktrees } = repository({ slowOxlint: true });
+    // (a git whose worktree removal takes a second, so the second signal lands during the cleanup)
+    const slowGit = mkdtempSync(join(tmpdir(), "check-changed-slow-git-"));
+    const git = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+    writeFileSync(
+      join(slowGit, "git"),
+      `#!/bin/sh\ncase "$*" in *"worktree remove"*) sleep 1;; esac\nexec ${git} "$@"\n`,
+    );
+    chmodSync(join(slowGit, "git"), 0o755);
     try {
-      const child = spawn(process.execPath, [tool, "--merged", "--base", "main"], {
-        cwd: directory,
-        env: environment,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      let output = "";
-      child.stdout.on("data", (chunk) => (output += chunk));
-      // (the worktree exists once the merge line is out)
-      let ended = false;
-      child.on("close", () => (ended = true));
-      while (!output.includes("the merge of HEAD") && !ended)
-        await new Promise((wait) => setTimeout(wait, 50));
-      assert.ok(!ended, "the tool reached its checks");
-      const [code] = await Promise.all([
-        new Promise((done) => child.on("close", (exit) => done(exit))),
-        Promise.resolve(child.kill("SIGTERM")),
-      ]);
-      assert.equal(code, 143);
-      assert.equal(worktrees(), 1);
+      for (const signals of [1, 2]) {
+        const { directory, worktrees } = repository({ slowOxlint: true });
+        try {
+          const child = spawn(process.execPath, [tool, "--merged", "--base", "main"], {
+            cwd: directory,
+            env: { ...environment, PATH: `${slowGit}:${environment.PATH}` },
+            stdio: ["ignore", "pipe", "pipe"],
+          });
+          let output = "";
+          child.stdout.on("data", (chunk) => (output += chunk));
+          // (the worktree exists once the merge line is out)
+          let ended = false;
+          const closed = new Promise((done) =>
+            child.on("close", (exit) => {
+              ended = true;
+              done(exit);
+            }),
+          );
+          while (!output.includes("the merge of HEAD") && !ended)
+            await new Promise((wait) => setTimeout(wait, 50));
+          assert.ok(!ended, "the tool reached its checks");
+          child.kill("SIGTERM");
+          if (signals === 2) {
+            await new Promise((wait) => setTimeout(wait, 300));
+            child.kill("SIGTERM");
+          }
+          assert.equal(await closed, 143);
+          // (its last line still says what ran: oxlint, which waits, was stopped, so it did not run: #2106)
+          const last = output.trimEnd().split("\n").at(-1);
+          assert.match(
+            last,
+            /^check-changed: ran: [^;]*; failed: [^;]*; not run: (?:[^;]+, )?oxlint, (?:[^;]+, )?the compiled test suite \(CI runs it\)$/u,
+            `${signals} signals: ${output}`,
+          );
+          assert.doesNotMatch(last.split("; not run:")[0], /oxlint/u);
+          assert.equal(worktrees(), 1);
+        } finally {
+          rmSync(directory, { recursive: true, force: true });
+        }
+      }
     } finally {
-      rmSync(directory, { recursive: true, force: true });
+      rmSync(slowGit, { recursive: true, force: true });
     }
   },
 );
@@ -562,3 +590,34 @@ test("run as a lone copy outside its checkout, it says it needs its checkout in 
     rmSync(folder, { recursive: true, force: true });
   }
 });
+
+test(
+  "its last line names what ran, what failed, and what it did not run: the checks no changed path needs and the compiled suite (#2106)",
+  { timeout: 30_000 },
+  () => {
+    for (const fails of [false, true]) {
+      const { directory } = repository({
+        core: "added",
+        passing: true,
+        mapper: fails ? "process.exitCode = 1;\n" : "",
+      });
+      try {
+        const result = spawnSync(process.execPath, [tool, "--base", "main"], {
+          cwd: directory,
+          encoding: "utf8",
+          env: environment,
+        });
+        assert.equal(result.status, fails ? 1 : 0, result.stdout + result.stderr);
+        assert.equal(
+          result.stdout.trimEnd().split("\n").at(-1),
+          "check-changed: ran: diff --check, format, oxlint, knip, doc links, imports, pin suites, tsc; " +
+            `failed: ${fails ? "pin suites" : "none"}; ` +
+            "not run: test:families, typecheck:player, lint:design, test:lint, test:verification, format:check, " +
+            "test:lint:design, the compiled test suite (CI runs it)",
+        );
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    }
+  },
+);
