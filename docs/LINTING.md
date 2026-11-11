@@ -78,8 +78,8 @@ two lines away. A citation over three or more lines, in another letter case or i
 and left to review. A revision number `r4.N` (a whole token) names the accepted record's entry `r4-N`: outside the
 record's own pages and the check's test, one with no such heading is refused, in every file Git lists; the check proves
 the entry exists, not that it carries the sentence's claim, and other spellings (`R4.1`, an anchor `#r4-N`) are not its.
-A section number (`§` or `§§`, then a digit) stands in a section list right after a repository document's name on its
-line (`V30 §13`, `ADR 0021 §6.2`, `V30 §5, §35`); `PLAN`, `S3` and `S6-CARRIERS` name the port plan's documents outside
+A section number (`§` or `§§`, then a digit) stands, as a whole number, in a section list right after a repository
+document's name on its line (`V30 §13`, `ADR 0021 §6.2`, `V30 §5, §35`); `PLAN`, `S3` and `S6-CARRIERS` name the port plan's documents outside
 the repository and are allowed as labels while #2423 decides them. Any other section number is refused in every file
 Git lists except `docs/`, whose documents number their own sections; `src/`, whose comments #2209 rewrites;
 `tests/fixtures/type-core/cells.jsonl`, whose section numbers are cell ids in recorded data whose bytes `MANIFEST.md`

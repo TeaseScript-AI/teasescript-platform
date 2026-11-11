@@ -497,6 +497,18 @@ test("a section list right after a document's name is admitted, in every form th
         `${name}${separator}`,
       );
   }
+  // a whole number before sentence punctuation, a possessive or a dash that starts no number
+  for (const text of [
+    "ADR 0021 §6.2.",
+    "V30 §13's rule",
+    "V30 §13a, §2",
+    "V30 §1 – see",
+    "V30 §1.x",
+    "V30 §1.2.3x",
+    "V30 §1–2x.",
+    "V30 §1-2.5",
+  ])
+    assert.deepEqual(sectionsIn(text), [], text);
   // a range, then the list goes on
   for (const name of SECTION_NAMES)
     assert.deepEqual(sectionsIn(`(${name} §1–2, §5)`), [], `${name} range`);
@@ -526,8 +538,20 @@ test("every other section number is found, with its line and as written", () => 
     "V30 §13, ADR §14",
     "V30 §13 , §14",
     "TABLE §3",
+    // a number is whole: no letter or digit after it, and no `.` or dash before a digit
+    "V30 §13a1",
+    "V30 §13ab",
+    "V30 §1.2.3xy",
+    "V30 §1–2a3",
+    "V30 §1–2–3",
+    "V30 §1-2.5-6",
+    // a list goes on by its separators and one mark only
+    "V30 §1,§2",
+    "V30 §1, §§2",
   ])
     assert.equal(sectionsIn(text).length, 1, text);
+  assert.deepEqual(sectionsIn("V30 §13ab, §2"), ["1 §13", "1 §2"]);
+  assert.deepEqual(sectionsIn(`§${" ".repeat(25)}1`), ["1 § 1"]);
   // each ASCII character but the one space, once and twice, between a name and its section
   for (const name of SECTION_NAMES)
     for (let code = 0; code < 128; code += 1) {

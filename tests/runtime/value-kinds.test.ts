@@ -29,7 +29,7 @@ import {
 type Fact = "shown" | "notation" | "json" | "choice" | "ordered" | "dictKey" | "saved" | "case";
 
 /**
- * Each kind's description, and what V30 lets a script do with a value of it: show it with `${...}` and `join()` (V30 §8),
+ * Each kind's description, and what V30 lets a script do with a value of it: show it with `${...}` and `join()` (V30 §8, §16),
  * where `say` shows a script reference and a regex in their notation, write it with `toJson` (V30 §13), give it to a button as its value (V30 §19), order it with `<` (V30 §5, §35), use it as a dict key
  * (V30 §40), save it (V30 §25), and write it as a `case` value (V30 §32).
  */

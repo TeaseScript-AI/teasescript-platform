@@ -288,12 +288,14 @@ const SECTION_NUMBER = /§§?[ \t]*[0-9]/gu;
 
 /**
  * The section lists a section number may stand in, a closed set: a document's name, one space, `§` or `§§` and a
- * number (dotted parts, a letter, a range), then any further `, §N`, ` and §N`, `, and §N` or ` or §N`, on one line.
+ * whole number (dotted parts, a letter, a range), then any further `, §N`, ` and §N`, `, and §N` or ` or §N`, on one
+ * line.
  * `V30` and `ADR NNNN` are repository documents. `PLAN`, `S3` and `S6-CARRIERS` name the port plan's documents
  * outside the repository; they are allowed as labels, which #2423 decides, not as citations.
  */
 const NAMED_SECTIONS = (() => {
-  const number = String.raw`\d+(?:\.\d+)*[a-z]?(?:[–-]\d+(?:\.\d+)*[a-z]?)?`;
+  // (a number ends where no letter or digit follows, and no `.`, `–` or `-` before a digit)
+  const number = String.raw`\d+(?:\.\d+)*[a-z]?(?:[–-]\d+(?:\.\d+)*[a-z]?)?(?![\p{L}\p{N}]|[.–-]\p{N})`;
   return new RegExp(
     String.raw`(?<![\p{L}\p{N}])(?:V30|ADR \d{4}|PLAN|S3|S6-CARRIERS) §§?${number}(?:(?:, | and |, and | or )§${number})*`,
     "gu",
@@ -337,7 +339,7 @@ export function unnamedSectionsIn(fileName, text) {
     counted = match.index;
     found.push({
       line,
-      section: /^§§?[ \t]*[\d.]*\d/u.exec(text.slice(match.index, match.index + 24))[0],
+      section: /§§?[ \t]*[\d.]*\d/uy.exec(text.slice(match.index))[0].replace(/[ \t]+/gu, " "),
     });
   }
   return found;
