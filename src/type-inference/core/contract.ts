@@ -198,6 +198,7 @@ export {
   writtenOf,
   writtenTypeSteps,
 } from "./contract/terms.js";
+import { amend, Retained } from "./retained/retained.js";
 export { presenceSteps } from "./contract/prefix-index/tries.js";
 export { withOwnSelection } from "./contract/value-kinds.js";
 
@@ -231,70 +232,82 @@ export class Contract {
     layerDemands: 0,
     listedSources: 0,
   };
-  readonly prefix = new Map<CanonicalKey, PrefixStores>();
+  readonly prefix = Retained.map<CanonicalKey, PrefixStores>("Contract.prefix");
   /** Per copy-only place its copies reach, the cycle of whole copies it is a port of, `null` for none (`ringOf`). */
-  readonly rings = new Map<PlaceId, CopyRing | null>();
+  readonly rings = Retained.map<PlaceId, CopyRing | null>("Contract.rings");
   /** The prefixes under discovery (`prefixWork`), each by its frame, so a query reaching one again reads it as it stands. */
-  readonly discovering = new Map<CanonicalKey, PrefixFrame>();
-  readonly subPaths = new Map<Key, ReadonlySet<string>>();
+  readonly discovering = Retained.map<CanonicalKey, PrefixFrame>("Contract.discovering");
+  readonly subPaths = Retained.map<Key, ReadonlySet<string>>("Contract.subPaths");
   /**
    * Per relative path of a source's own live keys, the sources holding it (`ownPaths`); per prefix or set of listing
    * layers and step, the listing layers found there (`stepLayers`).
    */
-  readonly subsByPath = new Map<string, Set<Key>>();
-  readonly stepLayers = new WeakMap<PrefixStores | SupportNode, Map<string, StepLayers>>();
+  readonly subsByPath = Retained.map<string, Set<Key>>("Contract.subsByPath");
+  readonly stepLayers = Retained.weakMap<PrefixStores | SupportNode, Map<string, StepLayers>>(
+    "Contract.stepLayers",
+  );
   /**
    * Per set of listing layers and made path id, the layers in it or below it holding a source at the path (`holdersIn`;
    * a read's path without an id yet is answered by the read's own, kept here once its id is made, `ReadPath.holders`).
    */
-  readonly holdersBelow = new WeakMap<SupportNode, Map<number, SupportNode | null>>();
+  readonly holdersBelow = Retained.weakMap<SupportNode, Map<number, SupportNode | null>>(
+    "Contract.holdersBelow",
+  );
   /** Per layer and step, the nearest listing layers below it there (`listingBelow`). */
-  readonly layersBelow = new WeakMap<SubLayer, Map<string, SupportNode | null>>();
+  readonly layersBelow = Retained.weakMap<SubLayer, Map<string, SupportNode | null>>(
+    "Contract.layersBelow",
+  );
   /**
    * Per prefix of several layers, its per-step map (`prefixFound`): the union of its layers' maps, each seen under its
    * position; the positions' leaves, the views by map node and set of positions, the unions by their two nodes.
    */
-  readonly prefixSteps = new WeakMap<PrefixStores, PrefixNode | null>();
-  readonly positionLeaves = new Map<number, SupportNode>();
-  readonly prefixViews = new Map<number, Map<number, PrefixNode>>();
-  readonly prefixUnions = new Map<number, Map<number, PrefixNode>>();
-  readonly aliasLayers = new WeakMap<PrefixStores, SubLayer | null>();
-  readonly projectedLayers = new Map<string, SubLayer | null>();
+  readonly prefixSteps = Retained.weakMap<PrefixStores, PrefixNode | null>("Contract.prefixSteps");
+  readonly positionLeaves = Retained.map<number, SupportNode>("Contract.positionLeaves");
+  readonly prefixViews = Retained.map<number, Map<number, PrefixNode>>("Contract.prefixViews");
+  readonly prefixUnions = Retained.map<number, Map<number, PrefixNode>>("Contract.prefixUnions");
+  readonly aliasLayers = Retained.weakMap<PrefixStores, SubLayer | null>("Contract.aliasLayers");
+  readonly projectedLayers = Retained.map<string, SubLayer | null>("Contract.projectedLayers");
   /**
    * #1466: the layers' answers' support nodes, each made once per pass (`prefix-index/tries.ts`): a source's leaf,
    * a summary's leaf by its source and content, a branch by its bit and children, and the union of each two nodes asked.
    */
-  readonly supportLeaves = new Map<Key, SupportNode>();
+  readonly supportLeaves = Retained.map<Key, SupportNode>("Contract.supportLeaves");
   /**
    * A step map's leaves by step key and set (`SubLayer.front`); the steps' numbers, their keys in step maps (`stepKey`);
    * the layers made, by their numbers (`SubLayer.id`).
    */
-  readonly mapLeaves = new Map<string, Map<number, SupportNode>>();
-  readonly stepNumbers = new Map<string, number>();
+  readonly mapLeaves = Retained.map<string, Map<number, SupportNode>>("Contract.mapLeaves");
+  readonly stepNumbers = Retained.map<string, number>("Contract.stepNumbers");
   readonly layersById: SubLayer[] = [];
-  readonly summaryLeaves = new Map<Key, Map<string, SupportNode>>();
-  readonly supportBranches = new Map<number, Map<number, Map<number, SupportNode>>>();
-  readonly supportUnions = new Map<number, Map<number, SupportNode>>();
-  readonly keys = new Map<CanonicalKey, Identity>();
-  readonly identities = new Map<PlaceId, Identity>();
-  readonly aliases = new Map<PlaceId, { readonly key: Key; readonly guarded: boolean }>();
-  readonly holders = new Map<string, Holder>();
-  readonly literals = new Map<PlaceId, LiteralIndex>();
+  readonly summaryLeaves = Retained.map<Key, Map<string, SupportNode>>("Contract.summaryLeaves");
+  readonly supportBranches = Retained.map<number, Map<number, Map<number, SupportNode>>>(
+    "Contract.supportBranches",
+  );
+  readonly supportUnions = Retained.map<number, Map<number, SupportNode>>("Contract.supportUnions");
+  readonly keys = Retained.map<CanonicalKey, Identity>("Contract.keys");
+  readonly identities = Retained.map<PlaceId, Identity>("Contract.identities");
+  readonly aliases = Retained.map<PlaceId, { readonly key: Key; readonly guarded: boolean }>(
+    "Contract.aliases",
+  );
+  readonly holders = Retained.map<string, Holder>("Contract.holders");
+  readonly literals = Retained.map<PlaceId, LiteralIndex>("Contract.literals");
   /** The literals whose index is being built, each its own cycle's stop (`own`). */
-  readonly indexing = new Set<PlaceId>();
+  readonly indexing = Retained.set<PlaceId>("Contract.indexing");
   /** Per literal, path, selected key, depth and side, the objects a selection reads (`selectionObjects`). */
-  readonly selections = new Map<string, readonly LiteralObject[]>();
+  readonly selections = Retained.map<string, readonly LiteralObject[]>("Contract.selections");
   /** Per literal, path, selected key, depth and side, its objects by their names (`selectionOf`). */
-  readonly selectionsOf = new Map<string, Selection>();
+  readonly selectionsOf = Retained.map<string, Selection>("Contract.selectionsOf");
   /** Per selected cell and per binding read there, the names it holds, or `null` (`heldNames`). */
-  readonly heldNamesOf = new Map<PlaceId, ReadonlySet<string> | null>();
-  readonly bindingNamesOf = new Map<PlaceId, ReadonlySet<string> | null>();
+  readonly heldNamesOf = Retained.map<PlaceId, ReadonlySet<string> | null>("Contract.heldNamesOf");
+  readonly bindingNamesOf = Retained.map<PlaceId, ReadonlySet<string> | null>(
+    "Contract.bindingNamesOf",
+  );
   /** Per cell, the class of what it stores on either side (`storedClass`), and per class's text, its name. */
   readonly storedClasses = [
-    new Map<PlaceId, StoredClass | null>(),
-    new Map<PlaceId, StoredClass | null>(),
+    Retained.map<PlaceId, StoredClass | null>("Contract.storedClasses[0]"),
+    Retained.map<PlaceId, StoredClass | null>("Contract.storedClasses[1]"),
   ];
-  readonly storedNames = new Map<string, string>();
+  readonly storedNames = Retained.map<string, string>("Contract.storedNames");
   /**
    * The paths of the literal indexes, each made once per pass as it is first asked: a path is its parent's
    * and one step, keeping that step alone, never its whole text; its id orders and names it in a literal's signature
@@ -317,134 +330,171 @@ export class Contract {
    * G3 stage 1: per path of the arena, what the cursors derive from it, each made once and kept (`PathFacts`,
    * `factsOf`); per text of a family whose lane is cursors, its cursor (`textCursor`).
    */
-  readonly pathFacts = new Map<number, PathFacts>();
-  readonly textCursors = new Map<Key, KeyId>();
+  readonly pathFacts = Retained.map<number, PathFacts>("Contract.pathFacts");
+  readonly textCursors = Retained.map<Key, KeyId>("Contract.textCursors");
   /** Per demand name holding a cursor, the logical name it orders as (`compareDemandNames`). */
-  readonly logicalNames = new Map<string, string>();
+  readonly logicalNames = Retained.map<string, string>("Contract.logicalNames");
   /** What the key cursors' conversions made, by place and path (`keyOfId`). */
-  readonly keyTexts = new Map<PlaceId, Map<number, Key>>();
+  readonly keyTexts = Retained.map<PlaceId, Map<number, Key>>("Contract.keyTexts");
   /** Per place, its own label's recipe, the root of its labels' recipes (`labels.ts`). */
-  readonly labelRoots = new Map<PlaceId, Label>();
-  readonly signatures = new Map<PlaceId, string>();
+  readonly labelRoots = Retained.map<PlaceId, Label>("Contract.labelRoots");
+  readonly signatures = Retained.map<PlaceId, string>("Contract.signatures");
   /** A carrier value's identity by its shape (`identityWork`), interned; a plain literal's (`signatureWork`). */
-  readonly carrierIds = new Map<string, string>();
-  readonly literalIds = new Map<string, string>();
+  readonly carrierIds = Retained.map<string, string>("Contract.carrierIds");
+  readonly literalIds = Retained.map<string, string>("Contract.literalIds");
   /** The shapes of literal indexes' nodes (`nodeShape`), interned. */
-  readonly #nodeShapes = new Map<string, string>();
+  readonly #nodeShapes = Retained.map<string, string>("Contract.#nodeShapes");
   /** Per read, its snapshot (`readSnapshot`). */
-  readonly snapshots = new Map<PlaceId, string>();
+  readonly snapshots = Retained.map<PlaceId, string>("Contract.snapshots");
   /** Per value, its read class on the contract side and on the value side (`readClass`). */
-  readonly readClasses = [new Map<PlaceId, ReadClass>(), new Map<PlaceId, ReadClass>()];
+  readonly readClasses = [
+    Retained.map<PlaceId, ReadClass>("Contract.readClasses[0]"),
+    Retained.map<PlaceId, ReadClass>("Contract.readClasses[1]"),
+  ];
   /** Per read of a stable binding, its class across bindings on the contract side and the value side (`boundClass`). */
-  readonly boundClasses = [new Map<PlaceId, KeptClass>(), new Map<PlaceId, KeptClass>()];
+  readonly boundClasses = [
+    Retained.map<PlaceId, KeptClass>("Contract.boundClasses[0]"),
+    Retained.map<PlaceId, KeptClass>("Contract.boundClasses[1]"),
+  ];
   /** Per read, the one definition of its stable binding on the contract side and the value side (`stableDefinition`). */
   readonly stableDefinitions = [
-    new Map<PlaceId, Definition | null>(),
-    new Map<PlaceId, Definition | null>(),
+    Retained.map<PlaceId, Definition | null>("Contract.stableDefinitions[0]"),
+    Retained.map<PlaceId, Definition | null>("Contract.stableDefinitions[1]"),
   ];
   /** Per value, its class on the contract side and on the value side (`classOf`); per class text, its short name. */
-  readonly valueClasses = [new Map<PlaceId, KeptClass>(), new Map<PlaceId, KeptClass>()];
-  readonly classIds = new Map<string, string>();
+  readonly valueClasses = [
+    Retained.map<PlaceId, KeptClass>("Contract.valueClasses[0]"),
+    Retained.map<PlaceId, KeptClass>("Contract.valueClasses[1]"),
+  ];
+  readonly classIds = Retained.map<string, string>("Contract.classIds");
   /** Per value, its roles' writers on the contract side and on the value side (`classWriters`), where asked. */
   readonly classWritersBySide = [
-    new Map<PlaceId, readonly (Writer | null)[] | null>(),
-    new Map<PlaceId, readonly (Writer | null)[] | null>(),
+    Retained.map<PlaceId, readonly (Writer | null)[] | null>("Contract.classWritersBySide[0]"),
+    Retained.map<PlaceId, readonly (Writer | null)[] | null>("Contract.classWritersBySide[1]"),
   ];
   /** Per literal's list of computed values at a path, its groups on the contract side and the value side (`othersAt`). */
   readonly otherGroups = [
-    new WeakMap<readonly ValueEntry[], readonly OtherGroup[]>(),
-    new WeakMap<readonly ValueEntry[], readonly OtherGroup[]>(),
+    Retained.weakMap<readonly ValueEntry[], readonly OtherGroup[]>("Contract.otherGroups[0]"),
+    Retained.weakMap<readonly ValueEntry[], readonly OtherGroup[]>("Contract.otherGroups[1]"),
   ];
   /** Per literal's list of reads at a path, its groups for the contract's gather and the value side's (`readGroupsAt`). */
   readonly readClassGroups = [
-    new WeakMap<readonly ReadEntry[], readonly ReadClassGroup[]>(),
-    new WeakMap<readonly ReadEntry[], readonly ReadClassGroup[]>(),
+    Retained.weakMap<readonly ReadEntry[], readonly ReadClassGroup[]>(
+      "Contract.readClassGroups[0]",
+    ),
+    Retained.weakMap<readonly ReadEntry[], readonly ReadClassGroup[]>(
+      "Contract.readClassGroups[1]",
+    ),
   ];
   /** Per literal path's computed values on either side (`othersAt`), its computed-key loads below their root. */
-  readonly loadsBelowOf = new WeakMap<readonly OtherGroup[], readonly Item[]>();
+  readonly loadsBelowOf = Retained.weakMap<readonly OtherGroup[], readonly Item[]>(
+    "Contract.loadsBelowOf",
+  );
   /** Per group of a mixed class (`othersAt`), the leaves its other members name by role (`othersLeaves`), or `null`. */
-  readonly othersLeavesOf = new WeakMap<ClassGroup<ValueEntry>, IngressNode | null>();
+  readonly othersLeavesOf = Retained.weakMap<ClassGroup<ValueEntry>, IngressNode | null>(
+    "Contract.othersLeavesOf",
+  );
   /**
    * Per value and side, the leaves it names by role in its class (`leafRoles`); per value its walk starts from, those and
    * the units the walk charged.
    */
   readonly leafRolesOf = [
-    new Map<PlaceId, readonly IngressNode[] | null>(),
-    new Map<PlaceId, readonly IngressNode[] | null>(),
+    Retained.map<PlaceId, readonly IngressNode[] | null>("Contract.leafRolesOf[0]"),
+    Retained.map<PlaceId, readonly IngressNode[] | null>("Contract.leafRolesOf[1]"),
   ];
   readonly leafRolesFrom = [
-    new Map<PlaceId, { readonly roles: readonly IngressNode[] | null; readonly units: number }>(),
-    new Map<PlaceId, { readonly roles: readonly IngressNode[] | null; readonly units: number }>(),
+    Retained.map<
+      PlaceId,
+      { readonly roles: readonly IngressNode[] | null; readonly units: number }
+    >("Contract.leafRolesFrom[0]"),
+    Retained.map<
+      PlaceId,
+      { readonly roles: readonly IngressNode[] | null; readonly units: number }
+    >("Contract.leafRolesFrom[1]"),
   ];
   /**
    * Per member's leaves by role (`leafRoles`), their union (`rolesNode`); per node, whether it holds them, and the units
    * the check charged.
    */
-  readonly rolesNodes = new WeakMap<readonly IngressNode[], IngressNode>();
-  readonly heldLeaves = new WeakMap<
+  readonly rolesNodes = Retained.weakMap<readonly IngressNode[], IngressNode>(
+    "Contract.rolesNodes",
+  );
+  readonly heldLeaves = Retained.weakMap<
     IngressNode,
     WeakMap<readonly IngressNode[], { readonly held: boolean; readonly units: number }>
-  >();
+  >("Contract.heldLeaves");
   /**
    * #1203: per literal path's computed values on either side that hold classes of computed-key loads (`othersAt`),
    * the classes a read below their root takes: in order, those of computed-key loads as one `null` where the first of
    * them stands, which answer there together (`loadsBelow`), so no read passes them one by one.
    */
-  readonly othersBelowOf = new WeakMap<readonly OtherGroup[], readonly (OtherGroup | null)[]>();
+  readonly othersBelowOf = Retained.weakMap<readonly OtherGroup[], readonly (OtherGroup | null)[]>(
+    "Contract.othersBelowOf",
+  );
   /** Per choice, the options its answer reads on the contract side and on the value side (`choiceOptions`). */
   readonly choiceOptionsBySide = [
-    new Map<PlaceId, readonly ChoiceGroup[]>(),
-    new Map<PlaceId, readonly ChoiceGroup[]>(),
+    Retained.map<PlaceId, readonly ChoiceGroup[]>("Contract.choiceOptionsBySide[0]"),
+    Retained.map<PlaceId, readonly ChoiceGroup[]>("Contract.choiceOptionsBySide[1]"),
   ];
   /** Per `+`, its place in its run of terms on the contract side and on the value side (`plusRepeatOf`). */
   readonly plusRuns = [
-    new Map<PlaceId, { readonly third: PlaceId | null; readonly at: number }>(),
-    new Map<PlaceId, { readonly third: PlaceId | null; readonly at: number }>(),
+    Retained.map<PlaceId, { readonly third: PlaceId | null; readonly at: number }>(
+      "Contract.plusRuns[0]",
+    ),
+    Retained.map<PlaceId, { readonly third: PlaceId | null; readonly at: number }>(
+      "Contract.plusRuns[1]",
+    ),
   ];
   /** #1384: the pass's index of its `+` runs' terms by the properties they hold (`plusRun`), once one is asked. */
   plusIndex: PlusIndex | null = null;
   /** Each value's structure identity (`structureOf`), and its interned shapes. */
-  readonly structures = new Map<PlaceId, string>();
-  readonly #structureIds = new Map<string, string>();
+  readonly structures = Retained.map<PlaceId, string>("Contract.structures");
+  readonly #structureIds = Retained.map<string, string>("Contract.#structureIds");
   /** The structures that hold a carrier whose operand read is marked below it (`guardsBelow`): no level's members. */
-  readonly markedStructures = new Set<string>();
+  readonly markedStructures = Retained.set<string>("Contract.markedStructures");
   /** A literal's sub-structure below each path, and what stands at each path itself (`levelsOf`). */
-  readonly literalLevels = new Map<
+  readonly literalLevels = Retained.map<
     PlaceId,
     { readonly below: ReadonlyMap<number, string>; readonly at: ReadonlyMap<number, string> }
-  >();
+  >("Contract.literalLevels");
   /** A prefix's literal entries grouped at each path below it (`groupsAt`), per prefix and path. */
-  readonly levelGroups = new Map<string, readonly LevelGroup[]>();
-  readonly levelBases = new Map<CanonicalKey, PrefixLevels>();
+  readonly levelGroups = Retained.map<string, readonly LevelGroup[]>("Contract.levelGroups");
+  readonly levelBases = Retained.map<CanonicalKey, PrefixLevels>("Contract.levelBases");
   /** A prefix's entries that answer by themselves, in groups of one class (`entryGroups`). */
-  readonly entryGroupsOf = new WeakMap<PrefixLevels, readonly EntryGroup[]>();
+  readonly entryGroupsOf = Retained.weakMap<PrefixLevels, readonly EntryGroup[]>(
+    "Contract.entryGroupsOf",
+  );
   /** #1456: per prefix's stores whose entries are closed objects, its property index or its reads until it pays. */
-  readonly propertyIndexes = new WeakMap<PrefixStores, PropertyIndex | PropertyReads>();
-  readonly groups = new WeakMap<
+  readonly propertyIndexes = Retained.weakMap<PrefixStores, PropertyIndex | PropertyReads>(
+    "Contract.propertyIndexes",
+  );
+  readonly groups = Retained.weakMap<
     readonly unknown[],
     Map<Key, { readonly byCallable: Map<Callable | null, ReadGroup>; readonly list: ReadGroup[] }>
-  >();
-  readonly lands = new Map<string, TypeTerm | null>();
+  >("Contract.groups");
+  readonly lands = Retained.map<string, TypeTerm | null>("Contract.lands");
   placeKeys: Map<PlaceId, Key[]> | null = null;
   storedChoiceKeys: StoredChoiceKeys | null = null;
   subFirst: Map<PlaceId, Set<string>> | null = null;
   collected = false;
 
   /** The value-side literal reads that passed an element step over a copy, by literal, path and node (F12). */
-  readonly overCopy = new Set<string>();
+  readonly overCopy = Retained.set<string>("Contract.overCopy");
 
   /**
    * The paths whose admission decision stopped at its demand allowance, by place (`stop`): a text key's steps, a cursor's
    * path id (G3 stage 1); and per place the cursors' paths found at or below one, climbed once between stops.
    */
-  readonly #stopped = new Map<PlaceId, (readonly string[] | number)[]>();
-  readonly #belowStop = new Map<PlaceId, Map<number, boolean>>();
+  readonly #stopped = Retained.map<PlaceId, (readonly string[] | number)[]>("Contract.#stopped");
+  readonly #belowStop = Retained.map<PlaceId, Map<number, boolean>>("Contract.#belowStop");
   #stoppedCount = 0;
   /**
    * The demands whose runs asked whether a key stopped, by place, with the keys they asked (`#asked`, `stop`): one key
    * as itself, several as a set; kept only for a place a decision can still stop (`#open`, #1599).
    */
-  readonly #askers = new Map<PlaceId, Map<string, CanonicalKey | Set<CanonicalKey>>>();
+  readonly #askers = Retained.map<PlaceId, Map<string, CanonicalKey | Set<CanonicalKey>>>(
+    "Contract.#askers",
+  );
   /**
    * #1599: per place, how many of the decisions that can stop it have not ended (admission's groups by their root,
    * `openDecisions`, `decided`); a place absent from it no decision stops, so nothing asked of it is kept. `null` while
@@ -462,27 +512,35 @@ export class Contract {
    */
   readonly occurrences: string[] = [];
   /** Per holder, whether it marks no path whatever the path (`marksNothing`), and its finding while its component is open. */
-  readonly quiet = new Map<Holder, boolean>();
-  readonly pendingQuiet = new Map<Holder, boolean>();
+  readonly quiet = Retained.map<Holder, boolean>("Contract.quiet");
+  readonly pendingQuiet = Retained.map<Holder, boolean>("Contract.pendingQuiet");
   /**
    * Per binding and step, its wrapper's step or `null` (`wrapperShape`), and those being found; per literal and step its
    * read (`literalHop`).
    */
-  readonly hops = new Map<string, WrapperHop | null>();
-  readonly shaping = new Set<string>();
+  readonly hops = Retained.map<string, WrapperHop | null>("Contract.hops");
+  readonly shaping = Retained.set<string>("Contract.shaping");
   /** Per binding and first step, the lane its keys take this pass (`keyLane`). */
-  readonly lanes = new Map<PlaceId, Map<string, KeyLane>>();
+  readonly lanes = Retained.map<PlaceId, Map<string, KeyLane>>("Contract.lanes");
   /** Per binding, the steps the program's facts leave a wrapper possible at, `null` at none (`wrapperFacts`). */
-  readonly wrapperSteps = new Map<PlaceId, ReadonlySet<string> | null>();
+  readonly wrapperSteps = Retained.map<PlaceId, ReadonlySet<string> | null>(
+    "Contract.wrapperSteps",
+  );
   /** How many computations of the identity layer and collections of marks are running (`settle`, `collectMarks`). */
   building = 0;
   /** Per projection, the key it copies, or `null` (`copiedKey`). */
-  readonly copiedKeys = new Map<PlaceId, CanonicalKey | null>();
+  readonly copiedKeys = Retained.map<PlaceId, CanonicalKey | null>("Contract.copiedKeys");
   /** Per value, its chain of property reads of a read, or `null` (`chainOf`). */
-  readonly chains = new Map<PlaceId, ChainRoot | null>();
-  readonly literalHops = new Map<string, LoneRead | null>();
+  readonly chains = Retained.map<PlaceId, ChainRoot | null>("Contract.chains");
+  readonly literalHops = Retained.map<string, LoneRead | null>("Contract.literalHops");
 
-  public constructor(readonly pass: CorePass) {}
+  public constructor(readonly pass: CorePass) {
+    Retained.owner(this, "Contract", (contract) => ({
+      open: contract.#open,
+      stoppedCount: contract.#stoppedCount,
+      deciding: contract.#deciding,
+    }));
+  }
 
   /**
    * S3 §5: an admission decision that stopped at its demand allowance leaves its key's contract `unknown` with
@@ -542,6 +600,7 @@ export class Contract {
     );
     this.pass.solver.forget(this.occurrences);
     this.occurrences.length = 0;
+    amend(this);
   }
 
   /** The running demand asked whether `key` stopped: kept for `stop`, each new ask counted apart from the allowance. */
@@ -552,13 +611,14 @@ export class Contract {
       return;
     this.pass.solver.mayForget(demand);
     let byDemand = this.#askers.get(place);
-    if (byDemand === undefined) this.#askers.set(place, (byDemand = new Map()));
+    if (byDemand === undefined)
+      this.#askers.set(place, (byDemand = Retained.map("Contract.#askers[]")));
     const keys = byDemand.get(demand);
     const asked = key();
     if (keys === asked || (typeof keys === "object" && keys.has(asked))) return;
     if (keys === undefined) byDemand.set(demand, asked);
     else if (typeof keys === "object") keys.add(asked);
-    else byDemand.set(demand, new Set([keys, asked]));
+    else byDemand.set(demand, Retained.set("Contract.#askers[][]", [keys, asked]));
     countApart(this.work, "stopAsks");
   }
 
@@ -575,9 +635,10 @@ export class Contract {
    */
   public openDecisions(groups: readonly { readonly root: PlaceId }[]): void {
     if (!this.#deciding || this.targetsDecide || everyRecordKept()) return;
-    const open = new Map<PlaceId, number>();
+    const open = Retained.map<PlaceId, number>("Contract.#open");
     for (const { root } of groups) open.set(root, (open.get(root) ?? 0) + 1);
     this.#open = open;
+    amend(this);
     for (const place of [...this.#askers.keys()]) if (!open.has(place)) this.#askers.delete(place);
     if (open.size === 0) this.#close();
   }
@@ -611,6 +672,7 @@ export class Contract {
   #close(): void {
     if (!this.#deciding) return;
     this.#deciding = false;
+    amend(this);
     this.#askers.clear();
     this.occurrences.length = 0;
     this.pass.solver.closeForgetting();
@@ -1269,6 +1331,7 @@ export class Contract {
       this.#nodeShapes.set(shape, name);
       node.shapes ??= {};
       node.shapes[kind] = { name, plain, marked };
+      amend(node);
       const parent = stack.at(-1);
       if (parent !== undefined) parent.at += 1;
     }
