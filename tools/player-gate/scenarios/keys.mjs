@@ -2,10 +2,11 @@
 // answer's replies are delayed, end as on `main`, whose answers settle before the next key. Each case answers the
 // opening development scenario (`/player/?dev`) or the `answer-flight` fixture package, presses its keys, and records
 // what the page shows once every answer settled. `expect` is `main`'s measured outcome of the same keys, whose answers
-// settle at once (#2430; since 54806a4d6, #2465, `main` keeps a prefill the answer presents, as this branch does),
-// except where a password field departs or settles, outside the flight's domain: there it is the domain's outcome,
-// nothing typed or given in the flight taken (#2463, residual 6). A case with a `residual` is a
-// difference #2430 accepts, recorded beside it and never asserted.
+// settle at once (#2430; since 54806a4d6, #2465, `main` keeps a prefill the answer presents, as this branch does), or a
+// declared rule's: where a password field departs or settles, outside the flight's domain, nothing typed or given in
+// the flight is taken (#2463, residual 6); where a timer's block suspends the question, what was left unsent returns
+// with it (#2463, design round 2's end table). A case with a `residual` is a difference #2430 accepts, recorded beside
+// it and never asserted.
 import { cdpSession } from "../lib/engines.mjs";
 import { countedError } from "../lib/probe.mjs";
 
@@ -127,7 +128,7 @@ const REFUSED_CASES = {
   "send-click": [shown(NOT, REFUSED, 1), R(4)],
 };
 
-/** Every case: its page, the answer it starts with, its keys, `main`'s outcome, and its residual or `""`. */
+/** Every case: its page, the answer it starts with, its keys, its expected outcome, and its residual or `""`. */
 function cases(engine) {
   const dev = (outcome, table, answer) =>
     Object.entries(table)
@@ -229,7 +230,47 @@ function cases(engine) {
       before: ["Form", { type: "Stay" }],
       answer: "name",
     },
+    // A timer's block suspends the first question while its answer is in flight: Enter goes between the block's start
+    // and its publication. The block's field shows its own text; answered, it gives the first question back with what
+    // was left unsent (design round 2's end table): the answer's text, each later Enter's, and the text typed last.
+    ...[
+      ["password block", "Password block", "", type("TAIL"), shown("TAIL", "", 3)],
+      ["plain block", "Plain block", "", type("TAIL"), shown("TAIL", "", 4)],
+      ["lock block", "Lock block", "", type("TAIL"), shown("TAIL", "", 3)],
+      [
+        "overtaken block",
+        "Password block",
+        "SENT",
+        seq(type("MID"), press("Enter"), type("TAIL")),
+        shown("SENTMIDTAIL", "", 3),
+      ],
+    ].map(([name, block, answer, keys, expect]) => ({
+      ...fixture(name, block, keys, expect),
+      before: [],
+      block,
+      answer,
+    })),
   ];
+}
+
+/** Answers the block a timer opened, once its field shows its own empty text; the first question then returns. */
+async function answerBlock(page) {
+  const input = page.locator("[data-composer-input]");
+  const repeat = page.locator("[data-composer-repeat]");
+  const shown = await page.evaluate(() =>
+    [...document.querySelectorAll(".transcript-entry")].some((entry) =>
+      /Block\?|Choose a code/u.test(entry.textContent ?? ""),
+    ),
+  );
+  if (!shown) throw new Error("The block was not presented: the answer did not meet it in flight");
+  if ((await input.inputValue()) !== "")
+    throw new Error("The block's field holds text it was not given");
+  await input.fill("pw");
+  await input.press("Enter");
+  if ((await repeat.count()) > 0) {
+    await repeat.fill("pw");
+    await repeat.press("Enter");
+  }
 }
 
 /** What the page shows: the composer's text, its notice, the transcript's entries, an open dialog, new pages. */
@@ -274,6 +315,19 @@ async function runCase(opened, origin, item) {
     await page.goto(`${origin}${item.url}`);
     await page.locator("[data-session-start]").click();
     const input = page.locator("[data-composer-input]");
+    // A block case aims Enter at the middle of the window between the timer's block (3 s after the click) and its
+    // publication, which arrives after the build's reply delay, measured here as the first question's.
+    let aim = 0;
+    if (item.block) {
+      const clicked = Date.now();
+      await page.getByRole("button", { name: item.block, exact: true }).click();
+      await page.waitForFunction(() =>
+        [...document.querySelectorAll(".transcript-entry")].some((entry) =>
+          entry.textContent?.includes("First?"),
+        ),
+      );
+      aim = clicked + 3_000 + (Date.now() - clicked) / 2;
+    }
     // Each step before: a button clicked by its name, or a text typed and sent.
     for (const step of item.before) {
       if (typeof step === "string")
@@ -310,9 +364,14 @@ async function runCase(opened, origin, item) {
         ? await center(page.locator("[data-runtime-interaction] button[type=submit]"))
         : null,
     };
+    if (aim > 0) await page.waitForTimeout(Math.max(0, aim - Date.now()));
     await page.keyboard.press("Enter");
     await item.keys(page, at);
-    const after = await settled(page, () => opens);
+    let after = await settled(page, () => opens);
+    if (item.block) {
+      await answerBlock(page);
+      after = await settled(page, () => opens);
+    }
     return {
       name: item.name,
       residual: item.residual,
@@ -335,7 +394,7 @@ async function runCase(opened, origin, item) {
   }
 }
 
-/** Whether a case ran without an error and ends as on `main`; a residual one's outcome is recorded only. */
+/** Whether a case ran without an error and ends as expected; a residual one's outcome is recorded only. */
 export const keysCasePassed = (item) =>
   item.error === "" &&
   item.errors.length === 0 &&

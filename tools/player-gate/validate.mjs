@@ -298,7 +298,7 @@ const agrees = (what, recorded, derived, problems) => {
     problems.push(`the recorded ${what} (${recorded}) is not its records' (${derived})`);
 };
 
-/** The keys' pass, from its records: every case that is no residual ends as on `main`, with no error. */
+/** The keys' pass, from its records: every case that is no residual ends as expected, with no error. */
 const keysPassed = (result) => result.cases.length > 0 && result.cases.every(keysCasePassed);
 
 /** The demo's pass, from its records: at least four turns and fewer than its cap, no error, no failure. */

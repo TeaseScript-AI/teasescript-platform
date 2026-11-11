@@ -58,7 +58,8 @@ Pass or fail is derived from primary records, never from a cached flag:
 
 - the smoke's pass comes from its exit status;
 - the demo's pass comes from its errors and turns;
-- the keys' pass comes from each case's outcome against `main`'s and its errors;
+- the keys' pass comes from each case's outcome against its expected one (`main`'s, or a declared rule's) and its
+  errors;
 - a keep trial's outcome comes from its lifecycle and transactions;
 - a byte request's phase comes from its start against the cold page's mark, not its cached phase flag;
 - a cached flag that disagrees with its records is a problem.
@@ -78,9 +79,14 @@ Pass or fail is derived from primary records, never from a cached flag:
   - `bridge`;
   - the hidden-page keep: `keepHandler` on the desktop, `keepCompletion` and `keepDurable` on the Pixel;
   - `demo`;
-  - `keys`: keys pressed right after Enter on a `delayed` build, while the answer is in flight, against `main`'s
-    outcome of the same keys (#2430), on `/player/?dev` and the `answer-flight` fixture package; a case #2430 accepts
-    as a residual is recorded, not asserted.
+  - `keys`: keys pressed right after Enter on a `delayed` build, while the answer is in flight (#2430), on
+    `/player/?dev` and the `answer-flight` fixture package. Each case expects `main`'s outcome of the same keys, or a
+    declared rule's where #2463 states one (a password field outside the flight's domain; a timer's block that
+    suspends the question). A case #2430 accepts as a residual is recorded, not asserted: the residual cases in
+    `scenarios/keys.mjs`, marked `residual N`. Run it on the `delayed` variant
+    (`GATE_VARIANT=delayed GATE_DELAY_MS=250 OUT=DIR npx vite build --config tools/player-gate/variants/vite.config.mjs`,
+    then `node tools/player-gate/drive.mjs --engine ENGINE --scenario keys --build "main=CHECKOUT:DIR"
+    --packages tests/fixtures/packages --samples 1 --out FILE`).
 - **`validate.mjs`** derives every field again from a row's validated records, scenario by scenario and part by part,
   and checks each value against its unit's domain.
 - **`report.mjs`** prints the cost report: `node tools/player-gate/report.mjs --phase r0|r1 --artifacts FILE

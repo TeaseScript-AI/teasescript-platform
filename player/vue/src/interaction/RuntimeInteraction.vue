@@ -182,7 +182,7 @@ function loadFormEditor(current: PlayerFormPresentation | null): boolean {
     return false;
   }
   composerOwner = { actionId: current.actionId, fieldId: current.editor.fieldId };
-  flight.release();
+  flight.end();
   writeField(
     "input",
     typedTexts()?.get(typedKey(current.actionId, current.editor.fieldId)) ?? current.editor.text,
@@ -386,7 +386,13 @@ const flight = useAnswerFlight({
   submit: (source, typed) => submit(source, typed),
   skip: () => skipPacing(true),
   activate: activatePreselected,
-  keepTyped,
+  origin: () => {
+    const action = actionId.value;
+    return action === undefined ? undefined : { action, keeps: keepsTyped() };
+  },
+  pending: (action) =>
+    !!props.session && playerRuntimeInteractionActionIds(props.session.state).includes(action),
+  keep: (action, typed) => typedTexts()?.set(typedKey(action, ""), typed),
   clearFeedback,
 });
 watch(
@@ -426,7 +432,8 @@ watch(
   () => text("input"),
   (typed) => {
     clearTimeout(draftTimer);
-    keepTyped(typed);
+    // While an answer's flight owns the composer, its text is provisional: the flight's end keeps it where it belongs.
+    if (!flight.owns()) keepTyped(typed);
     if (!ownsPresentedEditor() || !props.session) return;
     const target = composerOwner!;
     const { planToken: plan } = props.session;
@@ -445,14 +452,16 @@ watch(
   },
 );
 onUnmounted(() => clearTimeout(draftTimer));
-/** Keeps a text typed for the presented question, for its return after a block interrupted it. */
+/**
+ * Whether the presented question keeps the text typed for it, for its return after a block interrupted it: a question
+ * that is no form. A password typed but not sent is never kept: a question that resumes after a block asks for it again.
+ */
+function keepsTyped() {
+  return form.value === null && foreground.value?.kind !== "ask-password";
+}
+/** Keeps a text typed for the presented question. */
 function keepTyped(typed: string) {
-  // A password typed but not sent is never kept: a question that resumes after a block asks for it again.
-  if (
-    actionId.value !== undefined &&
-    form.value === null &&
-    foreground.value?.kind !== "ask-password"
-  )
+  if (actionId.value !== undefined && keepsTyped())
     typedTexts()?.set(typedKey(actionId.value, ""), typed);
 }
 /** The composer's text, which the edited form field takes before any other edit of its form. */
@@ -871,7 +880,7 @@ watch(
   async (key) => {
     writeField("repeat", "");
     // A question or form that came back meanwhile already holds the composer; its text stays.
-    if (key !== undefined) flight.release();
+    if (key !== undefined) flight.end();
     if (key !== undefined || actionId.value === undefined) {
       writeField("input", "");
       clearFeedback();

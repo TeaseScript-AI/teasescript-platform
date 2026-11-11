@@ -2,8 +2,15 @@
 title: "Answer flight"
 ---
 // The composer while an answer is in flight (#2430): each case answers a first question, then presents what the
-// browser kit's `keys` scenario types into.
-let which = askChoice "Prefill", "Password", "Popup", "Export", "Link", "Form", "Code"
+// browser kit's `keys` scenario types into. A block case starts a timer whose block suspends the first question 3 s on.
+let which = askChoice "Prefill", "Password", "Popup", "Export", "Link", "Form", "Code", "Password block", "Plain block", "Lock block"
+if which == "Password block" {
+    timer async hidden 3 s { let block = askPassword "Block?" }
+} else if which == "Plain block" {
+    timer async hidden 3 s { let block = askText "Block?" }
+} else if which == "Lock block" {
+    timer async hidden 3 s { let note = encryptText("A note", password: askPassword("Choose a code"), publicKey: false, timeLock: false) }
+}
 let first = askText "First?"
 if which == "Prefill" {
     let next = askText "Next?", prefill: "Ada"
@@ -17,7 +24,7 @@ if which == "Prefill" {
     openUrl("https://example.com", alwaysButton: true)
 } else if which == "Code" {
     let note = encryptText("A note", password: askPassword("Choose a code"), publicKey: false, timeLock: false)
-} else {
+} else if which == "Form" {
     let form = askForm("The form", fields: { name: "Ada" }, submit: "Continue")
 }
 showButton "Done"
