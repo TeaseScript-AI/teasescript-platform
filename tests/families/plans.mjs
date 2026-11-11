@@ -25,7 +25,8 @@
 // the next source. A stalled or uncharged source is never agreement. Resumes: a source already in `--out` is not run
 // again, its record counted as it stands. Prints one JSON summary line; exit 0 when every compared run is equal and
 // nothing stalled or reached the safety net, else 1;
-// 2 on a usage error, or where the trees' modes are not the same names once each (no record is written).
+// 2 on a usage error, where the trees' modes are not the same names once each, or where a worker does not load and
+// check both trees within the safety net: no source is handed to a worker before that, so none is recorded.
 // `summary` classifies the records per set, source and mode (`modes`, each with its demand, stop and questions runs):
 // identical; work only (the plan, the diagnostics, the error and the questions equal, the charge trace not); a question
 // sequence apart; a publication difference; at a demand allowance apart; for the held family, a stop set or a stopped
@@ -229,11 +230,37 @@ if (isMainThread && process.argv[2] === "summary") {
     if (out !== undefined) appendFileSync(out, `${JSON.stringify(record)}\n`);
   };
   let worker = null;
-  const fresh = () =>
-    new Worker(fileURLToPath(import.meta.url), {
+  /**
+   * A worker that has loaded both trees and checked their modes (its `ready`), before any source is handed to it: a
+   * refusal, or a worker that ends, fails or is not ready within the safety net first, ends the run with exit 2 and
+   * never becomes a source's record (#2342, the final review's B1).
+   */
+  const fresh = async () => {
+    const started = new Worker(fileURLToPath(import.meta.url), {
       workerData: { baseRoot, headRoot, set, stops, demands, units },
       resourceLimits: { maxOldGenerationSizeMb: memory },
     });
+    const ready = await new Promise((resolve) => {
+      const timer = setTimeout(
+        () => end(`not ready within the safety net, ${seconds} s`),
+        seconds * 1000,
+      );
+      const onMessage = (message) =>
+        end(message.ready === true ? null : (message.refused ?? "an unexpected first message"));
+      const onError = (error) =>
+        end(`${error?.code ?? error?.name}: ${error?.message}`.slice(0, 300));
+      const onExit = (code) => end(`its worker ended (exit ${code})`);
+      function end(failure) {
+        clearTimeout(timer);
+        started.off("message", onMessage).off("error", onError).off("exit", onExit);
+        resolve(failure);
+      }
+      started.on("message", onMessage).on("error", onError).on("exit", onExit);
+    });
+    if (ready === null) return started;
+    await started.terminate().catch(() => {});
+    return refused(`the trees could not be compared: ${ready}`);
+  };
   for (const index of indices) {
     const source = sources[index];
     if (done.has(placed(source))) {
@@ -241,7 +268,7 @@ if (isMainThread && process.argv[2] === "summary") {
       count(done.get(placed(source)));
       continue;
     }
-    worker ??= fresh();
+    worker ??= await fresh();
     const current = worker;
     const record = await new Promise((resolve) => {
       // (the run going on, as the worker starts each; the run past the unit limit, as it ends)
@@ -261,7 +288,6 @@ if (isMainThread && process.argv[2] === "summary") {
           running = message.running;
           arm();
         } else if (message.over !== undefined) over = message.over;
-        else if (message.refused !== undefined) refused(message.refused);
         else finish(message);
       };
       const onError = (error) =>
@@ -555,6 +581,8 @@ if (isMainThread && process.argv[2] === "summary") {
   const heldCases = sources.some((unit) => unit.held)
     ? new Map(base.held.heldFamily().map((c) => [c.name, c]))
     : null;
+  // (loaded and checked: the runner hands this worker its first source only now)
+  if (!refused) parentPort.postMessage({ ready: true });
   parentPort.on("message", (index) => {
     if (refused) return;
     const unit = sources[index];

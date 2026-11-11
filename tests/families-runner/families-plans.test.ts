@@ -336,6 +336,55 @@ test("the plans comparison refuses trees whose modes are not the same names once
     }
 });
 
+test("the plans comparison hands no source to a worker before it has loaded and checked both trees' modes, so a slow or wrong start writes no record (#2342, final review B1)", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  built(folder, [
+    ["first", "first"],
+    ["second", "second"],
+  ]);
+  const held = (tree: string) => join(folder, tree, "dist", "tests/helpers/type-core-held-host.js");
+  const original = readFileSync(held("base"), "utf8");
+  // (one source recorded by a run on good trees: the partly resumed start)
+  const resumed = join(folder, "resumed.jsonl");
+  const plans = (out: string, ...more: string[]) =>
+    spawnSync(
+      process.execPath,
+      [tool, join(folder, "base"), join(folder, "head"), "area", "--out", out, ...more],
+      { encoding: "utf8" },
+    );
+  assert.equal(plans(resumed, "--limit", "1").status, 0);
+  const before = readFileSync(resumed, "utf8");
+  assert.equal(before.trim().split("\n").length, 1);
+  // (a hole in one tree's table behind an import that outlasts the safety net, on each tree; and good trees with a safety
+  // net of 0 s, the review's second case)
+  const delayed =
+    "Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);\ndelete HELD_MODES[1];";
+  let at = 0;
+  for (const [tree, change, timeout] of [
+    ["head", delayed, "1"],
+    ["base", delayed, "1"],
+    ["base", "", "0"],
+  ] as const) {
+    for (const each of ["base", "head"]) writeFileSync(held(each), original);
+    writeFileSync(held(tree), `${original}\n${change}\n`);
+    for (const start of ["fresh", "resumed"]) {
+      at += 1;
+      const out = join(folder, `started-${at}.jsonl`);
+      if (start === "resumed") writeFileSync(out, before);
+      const ran = plans(out, "--timeout", timeout);
+      const named = `${tree} ${start} --timeout ${timeout}`;
+      assert.equal(ran.status, 2, `${named}: ${ran.stdout} ${ran.stderr}`);
+      assert.match(ran.stderr, /the trees could not be compared/, named);
+      assert.equal(
+        existsSync(out) ? readFileSync(out, "utf8") : null,
+        start === "resumed" ? before : null,
+        named,
+      );
+    }
+  }
+});
+
 test("the plans summary prints a recorded mode as recorded and says once what a number is (#2342)", (t) => {
   const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
