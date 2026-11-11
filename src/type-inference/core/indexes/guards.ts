@@ -121,6 +121,7 @@ export class GuardIndex {
       byPlace: index.#byPlace,
       testedLength: index.#testedLength,
       nestCount: index.#nestCount,
+      tested: index.#tested,
     }));
     const work = program.work;
     const flow = program.flow;

@@ -16,7 +16,12 @@ import { ts } from "ts-morph";
  * each through parentheses, `as`, `satisfies`, `!`, a conditional's branch, a `??` or `||`'s operand, and an array's
  * element or an object literal's property: such a literal is judged where it stands.
  * What the check does not see is the recorder's: a local filled after it is stored in retained state is walked there by
- * value. In a file scoped `module`, only the top level is checked: its other classes keep no retained state. The scope
+ * value.
+ * A private instance field (`#x`), which no walk of its owner can see, is closed at its declaration: in a file scoped
+ * `file`, each is either `readonly` and made by a `Retained.*` call, or named in the object its class's
+ * `Retained.owner(this, name, hidden)` returns, `hidden` an arrow written there or a static `#hidden` arrow of the class,
+ * whose object literal gives the field itself (`x: owner.#x`), or listed in `OUTSIDE_FIELDS`. Any other private field is refused, whatever its initializer.
+ * In a file scoped `module`, only the top level is checked: its other classes keep no retained state. The scope
  * is the recorder's domain (`tests/helpers/retained-recorder.ts`): the admission's files and narrowing's are not in it.
  */
 const SCOPE = [
@@ -45,6 +50,18 @@ const EXCLUDED = new Map([
   [
     "src/type-inference/core/contract/contributions.ts",
     "a run's flow (`FlowSink`) is the solver's record of the run, published with its answer",
+  ],
+]);
+
+/** The private fields the check leaves out, each with why the recorder's domain does not hold it. */
+const OUTSIDE_FIELDS = new Map([
+  [
+    "GuardIndex.#narrowing",
+    "narrowing's index (`NarrowingIndex`), outside the recorder's domain by name",
+  ],
+  [
+    "GuardIndex.#queries",
+    "narrowing's queries over that index, outside the recorder's domain by name",
   ],
 ]);
 
@@ -172,11 +189,8 @@ export function retainedStateDiagnostics(sources) {
       ) {
         const { child, parent } = holder(node);
         if (!admitted(child, parent)) {
-          const { line, character } = source.getLineAndCharacterOfPosition(node.getStart(source));
           diagnostics.push({
-            fileName: file,
-            line: line + 1,
-            column: character + 1,
+            ...at(source, file, node),
             message:
               `a ${node.expression.text} made where an owner can keep it: make it through \`Retained\` ` +
               "(src/type-inference/core/retained/retained.ts), so the retained-state recorder sees it (#1072)",
@@ -186,8 +200,121 @@ export function retainedStateDiagnostics(sources) {
       ts.forEachChild(node, visit);
     };
     visit(source);
+    if (level === "file")
+      for (const { node, message } of privateFields(source))
+        diagnostics.push({ ...at(source, file, node), message });
   }
   return diagnostics;
+}
+
+/** A diagnostic's place: `node`'s line and column in `source`. */
+function at(source, file, node) {
+  const { line, character } = source.getLineAndCharacterOfPosition(node.getStart(source));
+  return { fileName: file, line: line + 1, column: character + 1 };
+}
+
+/** Whether `node` is a call of one of `Retained`'s makers (`Retained.map(…)` and the like). */
+function retainedCall(node) {
+  return (
+    node !== undefined &&
+    ts.isCallExpression(node) &&
+    ts.isPropertyAccessExpression(node.expression) &&
+    ts.isIdentifier(node.expression.expression) &&
+    node.expression.expression.text === "Retained"
+  );
+}
+
+/**
+ * The private fields a `hidden` arrow exposes: the body an object literal, each property whose value is the parameter's
+ * private field itself (`(owner) => ({ x: owner.#x })`). A field read any other way (`owner.#x.size`) is not exposed.
+ */
+function exposedBy(arrow) {
+  const names = new Set();
+  const [parameter] = arrow.parameters;
+  let body = arrow.body;
+  while (ts.isParenthesizedExpression(body)) body = body.expression;
+  if (
+    parameter === undefined ||
+    !ts.isIdentifier(parameter.name) ||
+    !ts.isObjectLiteralExpression(body)
+  )
+    return names;
+  for (const property of body.properties) {
+    const value = ts.isPropertyAssignment(property) ? property.initializer : undefined;
+    if (
+      value !== undefined &&
+      ts.isPropertyAccessExpression(value) &&
+      ts.isPrivateIdentifier(value.name) &&
+      ts.isIdentifier(value.expression) &&
+      value.expression.text === parameter.name.text
+    )
+      names.add(value.name.text);
+  }
+  return names;
+}
+
+/** Each private instance field of a class in `source` that is neither a readonly `Retained` collection nor exposed. */
+function privateFields(source) {
+  const found = [];
+  const visit = (node) => {
+    if (ts.isClassLike(node)) {
+      const statics = new Map();
+      for (const member of node.members)
+        if (
+          ts.isPropertyDeclaration(member) &&
+          ts.isPrivateIdentifier(member.name) &&
+          member.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.StaticKeyword)
+        )
+          statics.set(member.name.text, member.initializer);
+      const exposed = new Set();
+      const owners = (inner) => {
+        if (
+          ts.isCallExpression(inner) &&
+          ts.isPropertyAccessExpression(inner.expression) &&
+          ts.isIdentifier(inner.expression.expression) &&
+          inner.expression.expression.text === "Retained" &&
+          inner.expression.name.text === "owner" &&
+          inner.arguments.length === 3
+        ) {
+          const hidden = inner.arguments[2];
+          const arrow = ts.isArrowFunction(hidden)
+            ? hidden
+            : ts.isPropertyAccessExpression(hidden) && ts.isPrivateIdentifier(hidden.name)
+              ? statics.get(hidden.name.text)
+              : undefined;
+          if (arrow !== undefined && ts.isArrowFunction(arrow))
+            for (const name of exposedBy(arrow)) exposed.add(name);
+        }
+        ts.forEachChild(inner, owners);
+      };
+      for (const member of node.members)
+        if (ts.isConstructorDeclaration(member) && member.body !== undefined) owners(member.body);
+      for (const member of node.members) {
+        if (!ts.isPropertyDeclaration(member) || !ts.isPrivateIdentifier(member.name)) continue;
+        const modifiers = member.modifiers ?? [];
+        if (modifiers.some((modifier) => modifier.kind === ts.SyntaxKind.StaticKeyword)) continue;
+        const readonly = modifiers.some(
+          (modifier) => modifier.kind === ts.SyntaxKind.ReadonlyKeyword,
+        );
+        if (
+          (readonly && retainedCall(member.initializer)) ||
+          exposed.has(member.name.text) ||
+          OUTSIDE_FIELDS.has(`${node.name?.text}.${member.name.text}`)
+        )
+          continue;
+        found.push({
+          node: member,
+          message:
+            `a private field \`${member.name.text}\` of ${node.name?.text ?? "a class"} that the retained-state recorder ` +
+            "cannot see: make it `readonly` through `Retained`, or expose it in its class's `Retained.owner` hidden " +
+            "function (#1072)",
+        });
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(source);
+  return found;
 }
 
 /**
