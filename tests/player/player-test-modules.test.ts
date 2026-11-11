@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
+import { walkSources } from "../../player/vue/test-modules-sources.js";
 
 // A compiled-only run after a Player or engine edit used the bundle of the code before it, and passed (#2141). The
 // fixture is a checkout with the real stamp plugin, the compiled loader and its compiled walk: a two-module Player, its
@@ -221,4 +222,24 @@ test("a Player test bundle is not built from an input the stamp does not cover",
     return () => unlinkSync(path("player/tools"));
   });
   assert.equal(build().status, 0);
+});
+
+test("the stamp's root entries are its files and links to files, apart from the checkout's bookkeeping", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "player-test-modules-root-"));
+  const elsewhere = mkdtempSync(join(tmpdir(), "player-test-modules-elsewhere-"));
+  t.after(() => {
+    rmSync(root, { recursive: true, force: true });
+    rmSync(elsewhere, { recursive: true, force: true });
+  });
+  for (const name of [".git", ".sha", ".complete", ".fourth", "README.md", "target.txt"])
+    writeFileSync(join(root, name), name);
+  mkdirSync(join(root, "docs"));
+  writeFileSync(join(root, "docs/guide.md"), "guide");
+  symlinkSync(elsewhere, join(root, "node_modules"), "junction");
+  symlinkSync(join(root, "docs"), join(root, "docs-link"), "junction");
+  symlinkSync("target.txt", join(root, "file-link.txt"));
+  assert.deepEqual(
+    [...walkSources(root).keys()],
+    [".fourth", "README.md", "file-link.txt", "target.txt"],
+  );
 });
