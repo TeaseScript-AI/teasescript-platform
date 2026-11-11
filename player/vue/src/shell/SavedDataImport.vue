@@ -86,10 +86,11 @@ onBeforeUnmount(() => {
   leaveSessionReview();
 });
 
+// A lost engine connection takes a session read or reviewed for an import with it: the dialog closes without importing.
 watch(
   () => props.losses,
   () => {
-    if (step.value.kind === "sessionReview") open.value = false;
+    if (step.value.kind === "reading" || step.value.kind === "sessionReview") open.value = false;
   },
 );
 watch(open, () => {
