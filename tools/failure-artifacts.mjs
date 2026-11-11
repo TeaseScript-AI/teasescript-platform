@@ -1,6 +1,6 @@
-// Where a browser tool keeps a run's artifacts, which it keeps only when the run fails. In a queue job (`$SX_OUT` set),
-// the folder is made in the job's results folder, which the queue copies back: the job's own `TMPDIR` is removed with
-// the job. Elsewhere it is made in the system's temporary folder.
+// Where a browser tool keeps a run's artifacts, which it keeps only when the run fails. When `SX_OUT` is set and not
+// empty, as it is in a queue job, the folder is made there: a job's results folder, which the queue copies back, while
+// the job's own `TMPDIR` is removed with the job. Otherwise it is made in the system's temporary folder.
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";

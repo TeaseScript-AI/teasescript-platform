@@ -381,10 +381,12 @@ available Chromium browser. Both run outside `npm run check` and are not a final
 cross-browser or production-host E2E suite. Preview groups use fresh browser contexts. A run that does not pass, as
 when a group fails, a started preview does not start or ends early, or the browser does not close, keeps its
 artifacts and names their folder: a screenshot and Playwright trace of a failing group, the Playwright CLI's output,
-and the started preview's log. In a queue job the folder is in the job's results (`$SX_OUT`, which the queue copies
-back); elsewhere it is in the system's temporary folder, to delete after diagnosis. A passing run keeps nothing. The
-preview's dependency cache is never among the kept artifacts: the run's cleanup removes it, which a signal that ends
-the run skips, as it skips the rest of the cleanup.
+and the started preview's log. When `SX_OUT` is set and not empty, as it is in a queue job, the folder is made there,
+so the job's results hold it (the queue copies `$SX_OUT` back); otherwise it is in the system's temporary folder, to
+delete after diagnosis. A passing run keeps nothing. A run ended before its cleanup, by a signal or by a job's time
+limit, leaves the folder as far as it was written and prints no folder line: a group's screenshot and trace are taken
+when the group fails, not when the run is ended. The preview's dependency cache is never among the kept artifacts: the
+run's cleanup removes it, and a run ended before its cleanup leaves it.
 `npm run test:player:firefox-camera` keeps its failure artifacts the same way (`tools/failure-artifacts.mjs`).
 `npm test` separately checks that the default Player build does not statically load development preview content, and
 `tests/player/player-demo.test.ts` plays the repository demo to its exit through the runtime adapter and media device.
