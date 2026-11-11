@@ -34,6 +34,7 @@ import type {
 import { othersAt, readGroupsAt } from "./others.js";
 import { keyBelowIn, restPart, restSteps, stepsText, type Rest, type Steps } from "./key-ids.js";
 import { selectedObject, selectionOf, selectionPieces } from "./selections.js";
+import { Retained } from "../retained/retained.js";
 
 // The value side's wide gathers (S10 part 2b): a gather site's contributions, its groups, its selections' runs.
 
@@ -362,7 +363,8 @@ function heldLeaves(
   const { scope, work } = contract.pass.program;
   if (node === undefined) return holdsLeaves(node, roles, scope);
   let known = contract.heldLeaves.get(node);
-  if (known === undefined) contract.heldLeaves.set(node, (known = new WeakMap()));
+  if (known === undefined)
+    contract.heldLeaves.set(node, (known = Retained.weakMap("Contract.heldLeaves[]")));
   const checked = known.get(roles);
   if (checked !== undefined) {
     work.repeat(checked.units);
