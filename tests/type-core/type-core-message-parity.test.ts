@@ -1010,7 +1010,7 @@ const INTENDED: readonly Intended[] = [
   },
   {
     rule:
-      "§13 N2 (#1073, S10 part 2b): the null check the current checker asks for is written and holds at a read in a " +
+      "N2 (#1073, S10 part 2b): the null check the current checker asks for is written and holds at a read in a " +
       "stored value, so the new checker asks for none; its warning there is the external value's own property, which " +
       "only the run decides",
     matches: ({ record }) => record === "cp9-cells/witness/astra-stored-length",

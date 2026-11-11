@@ -19,7 +19,7 @@ import { filesOf } from "../helpers/type-core/type-core-flow-oracle.js";
 import { FLOW_PROGRAMS, HOST_GLOBALS } from "../helpers/type-core/type-core-flow-programs.js";
 
 /*
- * The dominators of the coarse core's flow graph (the coarse-core table's §3.1): Lengauer and Tarjan's algorithm
+ * The dominators of the coarse core's flow graph: Lengauer and Tarjan's algorithm
  * against the iterative one on every graph of the corpus, and the shapes the exact path depends on, each expected by
  * the table's rule or by what a run does: literal loops (P7), labels and boundaries (X4), loops (X5), computed
  * transfers (L11), blocks, early leaves (F5a), and calls that cannot return (L10).

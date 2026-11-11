@@ -2,7 +2,7 @@ import { CARRIER_ROLES, type CarrierRole } from "../../../src/type-inference/cor
 import { BOTH, SCALAR, type RuleClass } from "./type-core-rule.js";
 
 /*
- * The role matrix's table and compositions (S6-CARRIERS revision 5, §6): per role of the carrier table
+ * The role matrix's table and compositions (S6-CARRIERS revision 5): per role of the carrier table
  * (`CARRIER_ROLES`) its four placements of the data, each a class of the rule function (`type-core-rule.ts`) or why it
  * has none, and the compositions as exact records. The role test compares them; the sharing differential runs them.
  */

@@ -6,7 +6,7 @@ import { caseInputs, type CaseInputs } from "./adapter-case-inputs.js";
 import { isClosedFact, legacyOperation, type LegacyOutcome } from "./adapter-parity.js";
 
 /*
- * The case tables of the branched routines of the legacy checker (O4 stage 2b, work note §6.6): `askChoice`,
+ * The case tables of the branched routines of the legacy checker (O4 stage 2b, work note): `askChoice`,
  * `askForm`, the list functions over values and selectors, `linearRegression` and `predict`. Each routine's table is
  * enumerated here from templates over the registry's kinds and the written forms of an operand, and every row is
  * pinned by the legacy oracle: its fact, the errors at the operation and elsewhere, and the operands' facts. The class
@@ -1070,7 +1070,7 @@ const PREDICTION_TEMPLATES: readonly Template[] = [
 ];
 
 // ---------------------------------------------------------------------------------------------------------------------
-// The asks with a fixed answer and the command expressions (§5.6): small input spaces, enumerated whole
+// The asks with a fixed answer and the command expressions: small input spaces, enumerated whole
 
 const PERSON_FIELD_NAMES: readonly string[] = [...PERSON_FIELDS].sort();
 
@@ -1294,7 +1294,7 @@ function splitErrors(
 }
 
 /**
- * The class of a row, from what the oracle says (work note §6.1 and §6.6): a closed fact is `fact`, or `recovery`
+ * The class of a row, from what the oracle says (work note): a closed fact is `fact`, or `recovery`
  * with an error; no fact is `unknown`, with the legacy's codes and messages pinned beside it, and the adapter's
  * answer must realize to unknown; a `stage5` variant is `legacy`, and a row with an undecided null slot is `open`:
  * neither asserts an adapter answer.

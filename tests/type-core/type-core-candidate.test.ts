@@ -246,7 +246,7 @@ const NATIVE_CODES: Readonly<Record<string, readonly (string | null)[]>> = {
 };
 
 /**
- * The reached fixture, derived from its records (S6-CARRIERS revision 5, §5.2; the lead's answer 3). Every
+ * The reached fixture, derived from its records (S6-CARRIERS revision 5; the lead's answer 3). Every
  * record of the positive list (the cells test's: all but those `heldBack` names) is tried on the candidate route in both
  * orders. A record the route accepts is checked in four layers, each derived from the record and its source alone:
  * - **records:** its C1 and C2 diagnostics at their whole sites, its obligations exactly (the cells test's comparison),
@@ -337,7 +337,7 @@ test("the route's diagnostics pair one to one with a record's, so one expected d
   assert.equal(unmatchedDiagnostics(twice, record.expected.diagnostics).length, 2);
 });
 
-test("every positive-list record the candidate route reaches plans and runs as its record derives, in both orders (§5.2)", (t) => {
+test("every positive-list record the candidate route reaches plans and runs as its record derives, in both orders", (t) => {
   const routed = new Set(Object.values(RECORD_CODES).flat());
   const accepted: string[] = [];
   const outside = new Map<string, number>();
@@ -553,7 +553,7 @@ test("every positive-list record the candidate route reaches plans and runs as i
       `discharges: ${listed(classes)}; outside the candidate slice (later port steps): ${listed(outside)}`,
   );
   assert.equal(accepted.length + counted, positive);
-  // the literal witnesses of the rules (§5.2): each class and each original outcome the note names
+  // the literal witnesses of the rules: each class and each original outcome the note names
   // each discharge by its kind and site: two at one site are classified each by its own check
   const verdicts: readonly (readonly [string, string, string])[] = [
     ["cp9-cells/r6-bugs/admission/use-before-overwrite", "integer-use@38:43", "preempted"],
@@ -1182,7 +1182,7 @@ test("external data a literal carries is warned and checked at its store before 
 
 test("C1 warns where some kind of the stored value fits and errs only where none does, in both orders", () => {
   // a list literal's element at an index: the items `integer` and `number`, both definite, one fitting; with a host value
-  // the external item beside a `number`, and C9's boundary check at the host value. The context words (§3.4): the
+  // the external item beside a `number`, and C9's boundary check at the host value. The context words: the
   // element read that gathers several elements gives `member`, the host value its reason's `unknown`
   for (const [source, warnings, contexts, boundary, passing, failing] of [
     [
@@ -1343,7 +1343,7 @@ test("C2's integer check warns with TSV011 at a count and TSV043 at a list index
   assert.deepEqual(sited(candidate("let xs = [10, 20]\nlet i = 1.5\nrepeat xs[i] {}\nexit\n")), [
     "error TSV043@40",
   ]);
-  // in parentheses the diagnostic stands at the content (§3.4), once, and names the index's rule
+  // in parentheses the diagnostic stands at the content, once, and names the index's rule
   assert.deepEqual(sited(candidate("let n = 2.5\nrepeat (n) {}\nexit\n")), ["error TSV011@20"]);
   const parenthesized = candidate(
     "let rows = [10, 20]\nlet at = 0.5\nrepeat rows[(at)] {}\nexit\n",
@@ -1816,10 +1816,10 @@ test("parentheses answer for their content: a parenthesised count and index read
 });
 
 /**
- * §5.2's evaluator against the engine where a value is parenthesised (Codex r20 H4): a count's, an index's and a checked
+ * The derived evaluator against the engine where a value is parenthesised (Codex r20 H4): a count's, an index's and a checked
  * store's failure is sited at the content, as the engine reports it, and the store's checked value span with it.
  */
-test("the derived evaluator sites a parenthesised value's failure at its content, as the engine does (§5.2, H4)", () => {
+test("the derived evaluator sites a parenthesised value's failure at its content, as the engine does (H4)", () => {
   for (const [source, hostValue, failure] of [
     ['repeat (hostValue) {\n  say "RUN"\n}\nexit\n', 2.5, "TSR043@8:17"],
     ["let xs = [1, 2]\nlet y = xs[(hostValue)]\nexit\n", 0.5, "TSR024@28:37"],
@@ -2268,7 +2268,7 @@ interface CarrierShape {
   readonly data: string;
   readonly scalar: string;
   readonly collection: string | { readonly none: string };
-  /** Where the data stands by the rule function's terms (§5.1's rows), per endpoint where they differ. */
+  /** Where the data stands by the rule function's terms, per endpoint where they differ. */
   readonly rule: Rule | ((endpoint: Endpoint) => Rule);
   readonly lists?: readonly [scalar: number, collection: number];
   readonly read?: string;
@@ -2408,7 +2408,7 @@ const CARRIER_SHAPES: Readonly<Record<CarrierKind, readonly CarrierShape[]>> = {
  * Invariant O over the carrier table (`carriers.ts`), without exception: each kind of `CARRIER_KINDS` has its
  * shapes, each named or inline, without and with a later store, in both orders. The place is admitted an integer where
  * the data stands (published or decided), and the shape's complete multiset of C1, C9 and C10 records is what the rule
- * function owes (`type-core-rule.ts`, §5.1): named data A7's `copy-type` warning and check beside its source's
+ * function owes (`type-core-rule.ts`): named data A7's `copy-type` warning and check beside its source's
  * own boundary, inline data C9's boundary or C1's check, a member's C1 at what is read of it,
  * data in the operation's own read the operation's boundary (C10), every site and multiplicity (Astra r5 D2).
  * Where the candidate route reaches a shape, its plan checks the declaration against the whole type, a

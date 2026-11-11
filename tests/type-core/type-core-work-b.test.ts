@@ -410,7 +410,7 @@ test("W34's two known products grow no faster than measured", () => {
  * S6-CARRIERS §4.4: a class's members are visited only where its side's quiet proof is not quiet, and each such visit
  * emits, so the visits are bounded by the output: per pass, at most the diagnostics, the checks and the decided paths.
  */
-test("every family's member visits are bounded by its output and its decided paths (§4.4)", () => {
+test("every family's member visits are bounded by its output and its decided paths", () => {
   const over: string[] = [];
   for (const family of [
     ...WORK_FAMILIES,
