@@ -64,7 +64,9 @@ function setup() {
   mkdirSync(join(clone, ".git/hooks"), { recursive: true });
   writeFileSync(
     hook,
-    `#!/bin/sh\necho run >> "${log}"\nPATH="${shim}:$PATH" exec "${process.execPath}" "${tool}" "$@"\n`,
+    // (each run, and each line git gives it, logged)
+    `#!/bin/sh\necho run >> "${log}"\ninput=$(cat)\n[ -n "$input" ] && printf '%s\\n' "$input" | sed 's/^/line /' >> "${log}"\n` +
+      `printf '%s\\n' "$input" | PATH="${shim}:$PATH" exec "${process.execPath}" "${tool}" "$@"\n`,
   );
   chmodSync(hook, 0o755);
   writeFileSync(log, "");
@@ -81,7 +83,16 @@ function setup() {
     remote: run(origin),
     race: (ref, value) => writeFileSync(race, `${ref} ${value}`),
     raced: () => !existsSync(race),
-    runs: () => readFileSync(log, "utf8").split("\n").filter(Boolean).length,
+    runs: () =>
+      readFileSync(log, "utf8")
+        .split("\n")
+        .filter((entry) => entry === "run").length,
+    /** The lines git has given the hook so far. */
+    lines: () =>
+      readFileSync(log, "utf8")
+        .split("\n")
+        .filter((entry) => entry.startsWith("line "))
+        .map((entry) => entry.slice(5)),
     /** A new commit in the clone, after `parent` if given. */
     commit: (message, parent) =>
       spawnSync("git", ["commit-tree", emptyTree, ...(parent ? ["-p", parent] : [])], {
@@ -264,39 +275,87 @@ test(
 );
 
 test(
-  "the pruning table: an archive this clone holds stays; one it lacks is the named limit",
-  { timeout: 120_000 },
+  "the pruning table: an archive this clone holds stays, unless a push refspec or mirror is configured; one it lacks is the named limit",
+  { timeout: 180_000 },
   () => {
-    // [push arguments, whether this clone holds the archive, what happens to it on origin; whether the push
-    // replaces main, so the hook writes another archive during that same push]
+    const heads = ["remote.origin.push", "+refs/heads/*:refs/heads/*"];
+    const tags = ["remote.origin.push", "refs/tags/*:refs/archive/*"];
+    const mirror = ["remote.origin.mirror", "true"];
+    // { push arguments, the remote's configuration, whether this clone holds the archive, what happens to it on origin,
+    // whether the push replaces main, so the hook writes another archive during that same push }
     const table = [
-      [["--mirror", "origin"], true, "kept", true],
-      [["--prune", "origin", "+refs/*:refs/*"], true, "kept", true],
-      [["--prune", "origin", "refs/archive/*:refs/archive/*"], true, "kept", false],
+      { args: ["--mirror", "origin"], held: true, outcome: "kept", replaces: true },
+      {
+        args: ["--prune", "origin", "+refs/*:refs/*"],
+        held: true,
+        outcome: "kept",
+        replaces: true,
+      },
+      { args: ["--prune", "origin", "refs/archive/*:refs/archive/*"], held: true, outcome: "kept" },
       // (git lists a `--prune` deletion to the hook, which refuses it)
-      [["--prune", "origin", "+refs/*:refs/*"], false, "refused", true],
-      [["--prune", "origin", "refs/archive/*:refs/archive/*"], false, "refused", false],
-      // (the limit: a mirror push lists its deletions to no hook)
-      [["--mirror", "origin"], false, "deleted", true],
+      { args: ["--prune", "origin", "+refs/*:refs/*"], outcome: "refused", replaces: true },
+      { args: ["--prune", "origin", "refs/archive/*:refs/archive/*"], outcome: "refused" },
+      {
+        args: ["--prune", "origin"],
+        config: [heads, tags],
+        held: true,
+        outcome: "refused",
+        replaces: true,
+      },
+      // (the limit: a mirror push deletes, listing it to no hook, an archive no ref of this clone maps onto: one it
+      // lacks, or any when a push refspec or mirror is configured for the remote)
+      { args: ["--mirror", "origin"], outcome: "deleted", replaces: true },
+      {
+        args: ["--mirror", "origin"],
+        config: [heads],
+        held: true,
+        outcome: "deleted",
+        replaces: true,
+      },
+      {
+        args: ["--mirror", "origin"],
+        config: [heads, tags],
+        held: true,
+        outcome: "deleted",
+        replaces: true,
+      },
+      { args: ["--mirror", "origin"], config: [tags], held: true, outcome: "deleted" },
+      {
+        args: ["origin"],
+        config: [mirror, heads, tags],
+        held: true,
+        outcome: "deleted",
+        replaces: true,
+      },
     ];
-    for (const [args, held, outcome, replacesMain] of table) {
+    for (const { args, config = [], held = false, outcome, replaces = false } of table) {
       const repo = setup();
-      const label = `${args.join(" ")}, ${held ? "held" : "not held"} here`;
+      const label = `${args.join(" ")}${config.map(([key, value]) => `, ${key}=${value}`).join("")}, ${held ? "held" : "not held"} here`;
       try {
         const head = repo.commit("head");
         const cited = repo.commit("cited");
         repo.git("push", "origin", `${head}:refs/heads/main`, `${cited}:refs/archive/${cited}`);
         if (held) repo.git("update-ref", `refs/archive/${cited}`, cited);
         repo.git("update-ref", "refs/heads/main", repo.commit("replacement"));
+        for (const [key, value] of config) repo.git("config", "--add", key, value);
+        const given = repo.lines().length;
         const result = repo.git("push", ...args);
         assert.equal(result.status === 0, outcome !== "refused", `${label}: ${result.stderr}`);
         const archives = repo.remote("for-each-ref", "--format=%(refname)", "refs/archive").stdout;
         assert.equal(archives.includes(cited), outcome !== "deleted", label);
         assert.equal(
           archives.includes(head),
-          replacesMain && outcome !== "refused",
+          replaces && outcome !== "refused",
           `${label}: main's archive`,
         );
+        // What git gave the hook about the archive: its deletion when refused, nothing when deleted.
+        const about = repo
+          .lines()
+          .slice(given)
+          .filter((line) => line.includes(`refs/archive/${cited}`));
+        if (outcome === "refused") assert.ok(about.length > 0, `${label}: the deletion listed`);
+        if (outcome === "deleted")
+          assert.deepEqual(about, [], `${label}: no line about the archive`);
       } finally {
         rmSync(repo.root, { recursive: true, force: true });
       }
