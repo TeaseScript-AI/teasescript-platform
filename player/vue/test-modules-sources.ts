@@ -1,69 +1,179 @@
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import {
+  existsSync,
+  lstatSync,
+  readdirSync,
+  readFileSync,
+  readlinkSync,
+  realpathSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import type { Plugin, ResolvedConfig } from "vite";
 
-/** The source forms the stamp covers: a plain file that the bundler reads as it is. */
+/**
+ * The stamp of the Player test bundle's sources, `dist/player-test-modules/sources.json`, and the plugin that writes it.
+ * `tests/helpers/player-modules.ts` refuses a bundle whose stamp differs from the checkout's walk, so a compiled test
+ * cannot run against Player or engine code older than its own.
+ *
+ * The stamp covers locations, not the bundle's module graph: every file under `src/` and `player/` (no folder named
+ * `node_modules` is entered) and every file directly in the repository root except the checkout's own bookkeeping
+ * (`ROOT_BOOKKEEPING`). Each is recorded by its path from the root with `/`: a file by the SHA-256 of its content; a
+ * symlink to a file by its target's identity (its path from the root, or its absolute path outside it) and that content;
+ * a symlink to a folder, a broken symlink, or an unreadable entry by what it is, which fails the build. The set of paths
+ * is part of the stamp, so an added, removed or renamed file is a change.
+ *
+ * The build also fails, so that no input of another kind passes unstamped, on: a bundled module outside the area that
+ * is neither under `node_modules` nor a bundler module (`\0`); a configuration file or a file it imports outside the
+ * area; a bundled module with a query or of a type other than `.ts`, `.mts`, `.cts`, `.js`, `.mjs`, `.cjs` or `.json`;
+ * a `tsconfig*.json` in the area, or a file it reaches by local `extends` or `references`, that cannot be read, has a
+ * malformed edge, or reaches outside the area.
+ *
+ * What the stamp attests is the area's file set, contents and link identities, for the canonical build
+ * (`npm run build:player-test-modules`). It does not attest another invocation (another mode or inline options), files
+ * that configuration or plugin code reads outside the area by other routes, environment variables, the installed
+ * `node_modules`, or Node's version, and it assumes the inputs do not change while the configuration loads and the
+ * bundle builds.
+ */
+
+/** The checkout's own bookkeeping in the root, which no build reads: a worktree's `.git`, a queue tree's markers. */
+const ROOT_BOOKKEEPING = new Set([".git", ".sha", ".complete"]);
+/** The folders, under the root, that the stamp walks. */
+const AREA_FOLDERS = ["src", "player"];
+/** The module forms the build admits: a plain file the bundler reads as it is. */
 const ADMITTED = /\.(?:[cm]?ts|[cm]?js|json)$/u;
+/** What a stamp entry is when it is not a file the build can read; the build refuses these. */
+const UNSTAMPABLE = /^(?:folder link|broken link|unreadable) /u;
+
+const sha256 = (file: string) => createHash("sha256").update(readFileSync(file)).digest("hex");
+const slashes = (path: string) => path.replaceAll("\\", "/");
+
+/** The stamp entry of one path: its content's hash, a link's target and hash, or what keeps it from being read. */
+function entry(root: string, path: string): string {
+  try {
+    if (!lstatSync(path).isSymbolicLink()) return sha256(path);
+    if (!existsSync(path))
+      return `broken link ${slashes(resolve(dirname(path), readlinkSync(path)))}`;
+    const identity = slashes(relative(root, realpathSync(path)));
+    if (statSync(path).isDirectory()) return `folder link ${identity}`;
+    return `link ${identity} ${sha256(path)}`;
+  } catch {
+    return `unreadable ${slashes(relative(root, path))}`;
+  }
+}
+
+/** The stamp of the area under `root`: path from the root to entry, in path order. */
+export function walkSources(checkout: string): Map<string, string> {
+  // Link targets are named from the root's real path, as whichever path reached the checkout.
+  const root = realpathSync(checkout);
+  const stamp = new Map<string, string>();
+  const add = (path: string) => stamp.set(slashes(relative(root, path)), entry(root, path));
+  const walk = (folder: string) => {
+    for (const item of readdirSync(folder, { withFileTypes: true })) {
+      const path = join(folder, item.name);
+      if (item.name === "node_modules") continue;
+      if (item.isDirectory()) walk(path);
+      else add(path);
+    }
+  };
+  // The root's folders, and its links to folders (a linked `node_modules`), are not its files.
+  for (const item of readdirSync(root, { withFileTypes: true })) {
+    const path = join(root, item.name);
+    if (item.isDirectory() || ROOT_BOOKKEEPING.has(item.name)) continue;
+    if (item.isSymbolicLink() && existsSync(path) && statSync(path).isDirectory()) continue;
+    add(path);
+  }
+  for (const folder of AREA_FOLDERS) if (existsSync(join(root, folder))) walk(join(root, folder));
+  return new Map([...stamp].sort(([a], [b]) => (a < b ? -1 : 1)));
+}
+
+/** Whether `file` (absolute) lies in the stamped area of `root`. */
+function inArea(root: string, file: string): boolean {
+  const path = relative(root, file);
+  const parts = slashes(path).split("/");
+  const first = parts[0] ?? "";
+  if (isAbsolute(path) || first === "" || first === ".." || parts.includes("node_modules"))
+    return false;
+  return parts.length === 1 ? !ROOT_BOOKKEEPING.has(first) : AREA_FOLDERS.includes(first);
+}
+
+const dependency = (file: string) => slashes(file).includes("/node_modules/");
 
 /**
- * Writes `sources.json` into the Player test bundle: by its path from the root with `/`, the SHA-256 of each file the
- * bundle was built from, or `null` for a file whose absence it depended on. `tests/helpers/player-modules.ts` refuses a
- * bundle whose stamp differs from the checkout, so a compiled test cannot run against Player or engine code older than
- * its own. The stamp holds:
- * - every bundled repository module, hashed as this plugin reads it, before the bundler does;
- * - for each, the `tsconfig.json` and `package.json` of its folder and of every folder above it up to the root, which
- *   decide how it is compiled and resolved;
- * - the build's configuration file and the files it imports, and the `.env` files Vite reads for the build's mode.
- *
- * Symlinks are kept as paths (`resolve.preserveSymlinks`), so a retargeted link changes the content its path hashes to.
- * The build fails on a bundled module of another form (a query such as `?raw`, another file type) and on a bundled
- * module not hashed, so nothing is left out silently. Dependencies under `node_modules`, and the bundler's own virtual
- * modules (`\0`), are not stamped.
+ * The local files a `tsconfig*.json` reaches by `extends` and `references`, recursively; throws on a file that cannot
+ * be read, a malformed edge, or a target outside the area. A package specifier names a dependency and ends the walk.
  */
+async function tsconfigClosure(root: string, start: string, seen: Set<string>): Promise<void> {
+  if (seen.has(start)) return;
+  seen.add(start);
+  const { default: ts } = await import("typescript-vue");
+  const parsed = ts.parseConfigFileTextToJson(start, readFileSync(start, "utf8"));
+  if (parsed.error !== undefined || typeof parsed.config !== "object" || parsed.config === null)
+    throw new Error(`${start} cannot be read as a tsconfig`);
+  const config: Record<string, unknown> = parsed.config;
+  const edges: string[] = [];
+  const extendsValue = config.extends;
+  if (typeof extendsValue === "string") edges.push(extendsValue);
+  else if (Array.isArray(extendsValue) && extendsValue.every((each) => typeof each === "string"))
+    edges.push(...extendsValue);
+  else if (extendsValue !== undefined) throw new Error(`${start} has a malformed "extends"`);
+  const references = config.references;
+  if (references !== undefined) {
+    if (!Array.isArray(references)) throw new Error(`${start} has malformed "references"`);
+    for (const reference of references) {
+      const path: unknown =
+        typeof reference === "object" && reference !== null && "path" in reference
+          ? reference.path
+          : undefined;
+      if (typeof path !== "string") throw new Error(`${start} has a malformed reference`);
+      edges.push(path);
+    }
+  }
+  for (const edge of edges) {
+    if (!(edge.startsWith(".") || isAbsolute(edge))) continue;
+    const base = resolve(dirname(start), edge);
+    const target = [base, `${base}.json`, join(base, "tsconfig.json")].find(
+      (candidate) => existsSync(candidate) && statSync(candidate).isFile(),
+    );
+    if (target === undefined) throw new Error(`${start} reaches ${edge}, which does not resolve`);
+    if (!inArea(root, realpathSync(target)) || !inArea(root, target))
+      throw new Error(`${start} reaches ${target}, outside the stamped area`);
+    await tsconfigClosure(root, target, seen);
+  }
+}
+
+/** The Vite plugin that checks the build's inputs against the area and writes `sources.json`. */
 export function testModulesSources(): Plugin {
   let config: ResolvedConfig;
-  const hashes = new Map<string, string | null>();
-  const key = (file: string) => relative(config.root, file).replaceAll("\\", "/");
-  const stamp = (file: string) => {
-    hashes.set(
-      key(file),
-      existsSync(file) ? createHash("sha256").update(readFileSync(file)).digest("hex") : null,
-    );
-  };
-  const stamped = (id: string) =>
-    !id.startsWith("\0") && !id.replaceAll("\\", "/").includes("/node_modules/");
+  let stamp = new Map<string, string>();
   return {
     name: "test-modules-sources",
-    enforce: "pre",
     config: () => ({ resolve: { preserveSymlinks: true } }),
     configResolved(resolved) {
       config = resolved;
     },
-    buildStart() {
-      hashes.clear();
-      // The configuration file is the first of these.
-      for (const file of config.configFileDependencies) stamp(file);
-      if (config.envDir !== false)
-        for (const name of [
-          ".env",
-          ".env.local",
-          `.env.${config.mode}`,
-          `.env.${config.mode}.local`,
-        ])
-          stamp(join(config.envDir, name));
-    },
-    load(id) {
-      if (!stamped(id)) return null;
-      if (id.includes("?") || !ADMITTED.test(id))
-        this.error(`test-modules-sources: ${id} is a form the stamp does not cover`);
-      stamp(id);
-      for (let folder = dirname(id); ; folder = dirname(folder)) {
-        stamp(join(folder, "tsconfig.json"));
-        stamp(join(folder, "package.json"));
-        if (key(folder) === "" || dirname(folder) === folder) break;
-      }
-      return null;
+    async buildStart() {
+      const { root } = config;
+      stamp = walkSources(root);
+      for (const [path, value] of stamp)
+        if (UNSTAMPABLE.test(value))
+          this.error(`test-modules-sources: ${path} cannot be stamped (${value})`);
+      for (const file of config.configFileDependencies)
+        if (!dependency(file) && !inArea(root, file))
+          this.error(
+            `test-modules-sources: the configuration reads ${file}, outside the stamped area`,
+          );
+      const seen = new Set<string>();
+      for (const path of stamp.keys())
+        if (/(?:^|\/)tsconfig[^/]*\.json$/u.test(path))
+          try {
+            await tsconfigClosure(root, join(root, path), seen);
+          } catch (error) {
+            this.error(
+              `test-modules-sources: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
     },
     // Written by hand, as Vite emits no assets from a server-side build, and last, after any other stamping plugin.
     writeBundle: {
@@ -74,13 +184,16 @@ export function testModulesSources(): Plugin {
           this.error("test-modules-sources: the build has no output folder");
         for (const output of Object.values(bundle))
           if (output.type === "chunk")
-            for (const id of output.moduleIds)
-              if (stamped(id) && !hashes.has(key(id)))
-                this.error(`test-modules-sources: ${id} was bundled without being hashed`);
-        const sorted = [...hashes].sort(([a], [b]) => (a < b ? -1 : 1));
+            for (const id of output.moduleIds) {
+              if (id.startsWith("\0") || dependency(id)) continue;
+              if (id.includes("?") || !ADMITTED.test(id))
+                this.error(`test-modules-sources: ${id} is a form the stamp does not cover`);
+              if (!inArea(config.root, id))
+                this.error(`test-modules-sources: ${id} is bundled from outside the stamped area`);
+            }
         writeFileSync(
           join(options.dir, "sources.json"),
-          `${JSON.stringify(Object.fromEntries(sorted), null, 1)}\n`,
+          `${JSON.stringify(Object.fromEntries(stamp), null, 1)}\n`,
         );
       },
     },
