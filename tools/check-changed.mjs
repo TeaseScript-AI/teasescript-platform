@@ -451,12 +451,17 @@ async function main() {
     stop();
     for (const step of cleanups) step();
   };
+  // (installed for the whole run: the first signal stops the checks, cleans up and writes the last line, once; a later
+  // one, during that cleanup, changes nothing)
+  let stopping = false;
   for (const [signal, code] of [
     ["SIGINT", 130],
     ["SIGTERM", 143],
     ["SIGHUP", 129],
   ])
-    process.once(signal, () => {
+    process.on(signal, () => {
+      if (stopping) return;
+      stopping = true;
       cleanup();
       process.stdout.write(`\n${lastLine()}\n`, () => process.exit(code));
     });

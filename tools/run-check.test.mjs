@@ -10,10 +10,11 @@ import { pretestSteps } from "./run-check.mjs";
 const tool = fileURLToPath(new URL("./run-check.mjs", import.meta.url));
 
 /**
- * A package whose `check:pretest` runs `lint` and `format`, with a `build` and a stand-in suite: each exits with the
- * status `exits` gives it (0 when not named) and records that it ran, with the `BUILD_SOURCEMAPS` it saw. The part
- * `waits` names (`build` or `suite`) instead starts a descendant that ignores SIGTERM, writes its pid to `pid`, and
- * prints `LATE` after 2.5 s, then waits.
+ * A package shaped as the repository's: `check:pretest` runs `lint` and `format` through run-parallel, `build` runs
+ * `build:player` through run-parallel too, as `npm run build` does, and a stand-in suite. Each part exits with the status
+ * `exits` gives it (0 when not named) and records that it ran, with the `BUILD_SOURCEMAPS` it saw. The part `waits`
+ * names (`build` or `suite`) instead starts a descendant that writes its pid to `pid`, prints `LATE` after 2.5 s, and
+ * waits: in the build one that ignores SIGTERM, in the suite one that does not.
  */
 function fixture(t, exits, waits = null) {
   const cwd = mkdtempSync(join(tmpdir(), "run-check-test-"));
@@ -23,12 +24,14 @@ function fixture(t, exits, waits = null) {
     `appendFileSync('ran', '${name} ' + process.env.BUILD_SOURCEMAPS + '\\n'); ` +
     (name === waits
       ? `spawn(process.execPath, ['-e', "require('node:fs').writeFileSync('pid', String(process.pid)); ` +
-        `process.on('SIGTERM', () => {}); setTimeout(() => console.log('LATE'), 2500); setInterval(() => {}, 1000);"], ` +
+        `${name === "build" ? "process.on('SIGTERM', () => {}); " : ""}` +
+        `setTimeout(() => console.log('LATE'), 2500); setInterval(() => {}, 1000);"], ` +
         "{ stdio: 'inherit' }); setInterval(() => {}, 1000);"
       : `process.exit(${exits[name] ?? 0});`);
   const scripts = {
     "check:pretest": "node tools/run-parallel.mjs lint format",
-    build: "node build.mjs",
+    build: "node tools/run-parallel.mjs build:player",
+    "build:player": "node build.mjs",
   };
   for (const name of ["lint", "format"]) {
     writeFileSync(join(cwd, `${name}.mjs`), part(name));
@@ -37,6 +40,10 @@ function fixture(t, exits, waits = null) {
   writeFileSync(join(cwd, "build.mjs"), part("build"));
   mkdirSync(join(cwd, "tools"));
   writeFileSync(join(cwd, "tools", "test-output-filter.mjs"), part("suite"));
+  writeFileSync(
+    join(cwd, "tools", "run-parallel.mjs"),
+    readFileSync(new URL("./run-parallel.mjs", import.meta.url)),
+  );
   writeFileSync(join(cwd, "package.json"), JSON.stringify({ scripts }));
   return cwd;
 }
@@ -106,26 +113,38 @@ test("the checks before the tests are check:pretest's run-parallel steps, and an
 
 // Process-group assertions target the POSIX environment used by repository CI.
 test(
-  "a signal during the build or the suite stops its whole process group, keeps the first failure's or the signal's status, and the last line comes after (#2106)",
+  "a signal to its process group, as a terminal or a harness sends it, stops the running part as the part handles it; the status is the first failure's or the signal's, and the last line comes once, after (#2106)",
   { skip: process.platform === "win32" },
   async (t) => {
-    for (const [waits, exits, status, last] of [
-      ["build", {}, 143, "ran: lint, format; failed: none; not run: build, test suite (stopped)"],
-      ["suite", {}, 143, "ran: lint, format, build; failed: none; not run: test suite"],
+    const stopped = "ran: lint, format; failed: none; not run: build, test suite (stopped)";
+    for (const [waits, exits, signals, status, last] of [
+      ["build", {}, ["SIGTERM"], 143, stopped],
+      ["build", {}, ["SIGINT"], 130, stopped],
+      ["build", {}, ["SIGTERM", "SIGTERM"], 143, stopped],
+      ["build", { lint: 3 }, ["SIGTERM"], 3, stopped.replace("failed: none", "failed: lint")],
       [
-        "build",
-        { lint: 3 },
-        3,
-        "ran: lint, format; failed: lint; not run: build, test suite (stopped)",
+        "suite",
+        {},
+        ["SIGTERM"],
+        143,
+        "ran: lint, format, build; failed: none; not run: test suite",
       ],
     ]) {
       const cwd = fixture(t, exits, waits);
-      const child = spawn(process.execPath, [tool], { cwd, env: environment });
+      // (its own process group, as a terminal's job or a harness's command has)
+      const child = spawn(process.execPath, [tool], { cwd, env: environment, detached: true });
       let stdout = "";
       let stderr = "";
       child.stdout.on("data", (chunk) => (stdout += chunk));
       child.stderr.on("data", (chunk) => (stderr += chunk));
-      t.after(() => child.exitCode === null && child.signalCode === null && child.kill("SIGKILL"));
+      const group = (signal) => {
+        try {
+          process.kill(-child.pid, signal);
+        } catch (error) {
+          if (error.code !== "ESRCH") throw error;
+        }
+      };
+      t.after(() => group("SIGKILL"));
       let exited = false;
       const closed = new Promise((resolve) =>
         child.on("close", (code) => {
@@ -147,13 +166,18 @@ test(
           if (error.code !== "ESRCH") throw error;
         }
       });
-      child.kill("SIGTERM");
+      for (const [index, signal] of signals.entries()) {
+        if (index > 0) await new Promise((wait) => setTimeout(wait, 300));
+        group(signal);
+      }
       const result = outcome(cwd, await closed, stdout, stderr);
-      const at = `${waits}, ${JSON.stringify(exits)}`;
+      const at = `${waits}, ${JSON.stringify(exits)}, ${signals.join(" ")}`;
       assert.equal(result.status, status, `${at}: ${result.output}`);
       assert.equal(result.last, last, at);
+      assert.equal(stdout.split(`\n${last}\n`).length, 2, `${at}: the last line once: ${stdout}`);
       assert.doesNotMatch(result.output, /LATE/u, at);
-      // (the descendant that ignored SIGTERM is gone, or a zombie its parent has not reaped)
+      // (the descendant is gone, or a zombie its parent has not reaped: in the build, run-parallel's own escalation
+      // stopped the one that ignores SIGTERM)
       let alive = true;
       try {
         process.kill(pid, 0);
@@ -162,7 +186,6 @@ test(
         if (error.code !== "ESRCH" && error.code !== "ENOENT") throw error;
         alive = false;
       }
-      if (alive) process.kill(pid, "SIGKILL");
       assert.equal(alive, false, `${at}: the descendant outlived the run`);
     }
   },

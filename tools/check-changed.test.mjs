@@ -246,40 +246,60 @@ test("--merged names a conflict, exits 2 and leaves no worktree", { timeout: 30_
 });
 
 test(
-  "a signal during --merged stops the checks and removes the worktree",
+  "a signal during --merged stops the checks and removes the worktree; a second one during that cleanup changes nothing (#2106)",
   { timeout: 30_000 },
   async () => {
-    const { directory, worktrees } = repository({ slowOxlint: true });
+    // (a git whose worktree removal takes a second, so the second signal lands during the cleanup)
+    const slowGit = mkdtempSync(join(tmpdir(), "check-changed-slow-git-"));
+    const git = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
+    writeFileSync(
+      join(slowGit, "git"),
+      `#!/bin/sh\ncase "$*" in *"worktree remove"*) sleep 1;; esac\nexec ${git} "$@"\n`,
+    );
+    chmodSync(join(slowGit, "git"), 0o755);
     try {
-      const child = spawn(process.execPath, [tool, "--merged", "--base", "main"], {
-        cwd: directory,
-        env: environment,
-        stdio: ["ignore", "pipe", "pipe"],
-      });
-      let output = "";
-      child.stdout.on("data", (chunk) => (output += chunk));
-      // (the worktree exists once the merge line is out)
-      let ended = false;
-      child.on("close", () => (ended = true));
-      while (!output.includes("the merge of HEAD") && !ended)
-        await new Promise((wait) => setTimeout(wait, 50));
-      assert.ok(!ended, "the tool reached its checks");
-      const [code] = await Promise.all([
-        new Promise((done) => child.on("close", (exit) => done(exit))),
-        Promise.resolve(child.kill("SIGTERM")),
-      ]);
-      assert.equal(code, 143);
-      // (its last line still says what ran: oxlint, which waits, was stopped, so it did not run: #2106)
-      const last = output.trimEnd().split("\n").at(-1);
-      assert.match(
-        last,
-        /^check-changed: ran: [^;]*; failed: [^;]*; not run: (?:[^;]+, )?oxlint, (?:[^;]+, )?the compiled test suite \(CI runs it\)$/u,
-        output,
-      );
-      assert.doesNotMatch(last.split("; not run:")[0], /oxlint/u);
-      assert.equal(worktrees(), 1);
+      for (const signals of [1, 2]) {
+        const { directory, worktrees } = repository({ slowOxlint: true });
+        try {
+          const child = spawn(process.execPath, [tool, "--merged", "--base", "main"], {
+            cwd: directory,
+            env: { ...environment, PATH: `${slowGit}:${environment.PATH}` },
+            stdio: ["ignore", "pipe", "pipe"],
+          });
+          let output = "";
+          child.stdout.on("data", (chunk) => (output += chunk));
+          // (the worktree exists once the merge line is out)
+          let ended = false;
+          const closed = new Promise((done) =>
+            child.on("close", (exit) => {
+              ended = true;
+              done(exit);
+            }),
+          );
+          while (!output.includes("the merge of HEAD") && !ended)
+            await new Promise((wait) => setTimeout(wait, 50));
+          assert.ok(!ended, "the tool reached its checks");
+          child.kill("SIGTERM");
+          if (signals === 2) {
+            await new Promise((wait) => setTimeout(wait, 300));
+            child.kill("SIGTERM");
+          }
+          assert.equal(await closed, 143);
+          // (its last line still says what ran: oxlint, which waits, was stopped, so it did not run: #2106)
+          const last = output.trimEnd().split("\n").at(-1);
+          assert.match(
+            last,
+            /^check-changed: ran: [^;]*; failed: [^;]*; not run: (?:[^;]+, )?oxlint, (?:[^;]+, )?the compiled test suite \(CI runs it\)$/u,
+            `${signals} signals: ${output}`,
+          );
+          assert.doesNotMatch(last.split("; not run:")[0], /oxlint/u);
+          assert.equal(worktrees(), 1);
+        } finally {
+          rmSync(directory, { recursive: true, force: true });
+        }
+      }
     } finally {
-      rmSync(directory, { recursive: true, force: true });
+      rmSync(slowGit, { recursive: true, force: true });
     }
   },
 );

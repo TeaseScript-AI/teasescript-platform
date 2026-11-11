@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { runSteps, stopTree, summaryLine } from "./run-parallel.mjs";
+import { runSteps, summaryLine } from "./run-parallel.mjs";
 
 // `npm run check`, in three parts (#2106):
 //
@@ -9,9 +9,16 @@ import { runSteps, stopTree, summaryLine } from "./run-parallel.mjs";
 // 3. when the build passed, the compiled suite (`tools/test-output-filter.mjs`). It runs what the build wrote, so after a
 //    failed build it does not run: it would test stale or missing code. No check before the tests writes what it runs.
 //
-// The last line names what ran, failed and did not run (`summaryLine`), the suite with why when it did not run. SIGINT
-// and SIGTERM stop the running part's whole process group and start no other part; the last line follows its end. Exit status: the first failed part's, or 130 or 143 for a
-// signal that came first, else 0. `VERIFY_SERIAL=1` runs the checks before the tests one after another.
+// The last line names what ran, failed and did not run (`summaryLine`), the suite with why when it did not run.
+//
+// SIGINT and SIGTERM: it passes the signal to the running part and starts no other. It kills nothing itself and has no
+// deadline of its own: the part stops as it handles the signal (run-parallel stops the process groups it made, and is
+// the only one to escalate to SIGKILL). A part's output is relayed, not inherited, so its end is the end of every
+// process still writing that output, a run-parallel finishing its escalation included; the last line follows that end,
+// once, whatever signals come later.
+// The parts run in its own process group, so a signal to that group (a terminal's Ctrl-C, a harness's stop) reaches
+// them as it reaches it. Exit status: the first failed part's, or 130 or 143 for a signal that came first, else 0.
+// `VERIFY_SERIAL=1` runs the checks before the tests one after another.
 
 /** The steps of `check:pretest`, which must be one `tools/run-parallel.mjs` call. */
 export function pretestSteps(scripts) {
@@ -29,32 +36,29 @@ async function main() {
   const scripts = JSON.parse(readFileSync("package.json", "utf8")).scripts;
   let signalled = 0;
   let running = null;
-  // (the running part's process group being stopped, with its escalation)
-  let stopping = Promise.resolve();
+  // (installed until the last line is out: a later signal is passed on too, but the status stays the first's)
   const handlers = Object.entries(SIGNALS).map(([signal, code]) => {
     const handler = () => {
-      if (signalled !== 0) return;
-      signalled = code;
-      if (running !== null) stopping = stopTree(running);
+      if (signalled === 0) signalled = code;
+      running?.kill(signal);
     };
     process.on(signal, handler);
     return [signal, handler];
   });
   const env = { ...process.env, BUILD_SOURCEMAPS: "0" };
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
-  /**
-   * A part's run in its own process group, which a signal stops whole: `PASS`, `FAIL`, or `ABORTED` when a signal
-   * stopped it, and its exit status (1 for a spawn error).
-   */
+  /** A part's run: `PASS`, `FAIL`, or `ABORTED` when a signal stopped it, and its exit status (1 for a spawn error). */
   const part = (command, args) =>
     new Promise((resolve) => {
       let failed = false;
+      // (its output relayed, so the part ends when every process writing it has: the last line then comes after it)
       running = spawn(command, args, {
-        stdio: "inherit",
+        stdio: ["inherit", "pipe", "pipe"],
         env,
-        detached: process.platform !== "win32",
         shell: process.platform === "win32" && command === npm,
       });
+      running.stdout.pipe(process.stdout, { end: false });
+      running.stderr.pipe(process.stderr, { end: false });
       running.on("error", (error) => {
         failed = true;
         console.error(`${args.join(" ")}: ${error.message}`);
@@ -88,8 +92,6 @@ async function main() {
       status: "NOT RUN",
     });
   if (signalled !== 0) fail(signalled);
-  // (a stopped part's descendants end, or are killed, before the last line)
-  await stopping;
   for (const [signal, handler] of handlers) process.removeListener(signal, handler);
   console.log(`\n${summaryLine(steps)}`);
   process.exitCode = exitCode;

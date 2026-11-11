@@ -34,7 +34,7 @@ function signalTree(child, signal) {
 }
 
 /** Stops `child`'s process group, escalating to SIGKILL after a grace period; resolves when that is done. */
-export function stopTree(child) {
+function stopTree(child) {
   if (!signalTree(child, "SIGTERM")) return Promise.resolve();
   return new Promise((resolve) =>
     setTimeout(() => {
