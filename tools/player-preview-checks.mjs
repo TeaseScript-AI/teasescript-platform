@@ -13,7 +13,8 @@
 // One shutdown ends every run, also one stopped by SIGINT or SIGTERM: it stops the Playwright CLI command that runs,
 // closes the browser session and the server it started, and removes the dependency cache; it removes the scratch folder
 // after a pass and names it, with a failing group's screenshot and trace, otherwise. A cleanup error never replaces the
-// run's own failure. Stopped by a signal, the run exits with 128 plus the signal's number.
+// run's own failure. Stopped by a signal, also one during that shutdown, the run keeps and names its scratch folder and
+// exits with 128 plus the signal's number.
 import { spawn } from "node:child_process";
 import { mkdtempSync, realpathSync, writeFileSync, rmSync } from "node:fs";
 import { createServer as createNetServer } from "node:net";
@@ -62,41 +63,61 @@ function freePort() {
 /** Starts this checkout's development preview and resolves to its URL; the shutdown closes it. */
 async function startPreview() {
   const { createServer } = await import("vite");
-  const vite = new Set(process.listeners("SIGTERM"));
-  server = await createServer({
-    configFile: join(checkout, "player/vue/vite.config.ts"),
-    cacheDir: join(scratch, "vite"),
-    logLevel: "warn",
-    clearScreen: false,
-    server: { host: "127.0.0.1", port: await freePort(), strictPort: true },
-  });
-  // Vite's own SIGTERM handler closes the server and exits at once; this run's shutdown does that, after the rest.
-  for (const listener of process.listeners("SIGTERM"))
-    if (!vite.has(listener)) process.off("SIGTERM", listener);
+  // Vite registers its own SIGTERM and stdin-end handlers, which close the server and exit at once. While it creates the
+  // server, those registrations (and any a plugin makes) are dropped: this run's shutdown handles both.
+  const { on, once } = process;
+  const stdinOn = process.stdin.on;
+  process.on = function (event, listener) {
+    return event === "SIGTERM" ? this : on.call(this, event, listener);
+  };
+  process.once = function (event, listener) {
+    return event === "SIGTERM" ? this : once.call(this, event, listener);
+  };
+  process.stdin.on = function (event, listener) {
+    return event === "end" ? this : stdinOn.call(this, event, listener);
+  };
+  try {
+    server = await createServer({
+      configFile: join(checkout, "player/vue/vite.config.ts"),
+      cacheDir: join(scratch, "vite"),
+      logLevel: "warn",
+      clearScreen: false,
+      server: { host: "127.0.0.1", port: await freePort(), strictPort: true },
+    });
+  } finally {
+    Object.assign(process, { on, once });
+    process.stdin.on = stdinOn;
+  }
   await server.listen();
   return server.resolvedUrls.local[0];
 }
 
+/** The signal that stopped the run, with its exit status, or `null`. */
+let stopped = null;
 let shutdown = null;
-/** Ends the run once, whatever ends it; resolves to the cleanup errors. */
+/**
+ * Ends the run once, whatever ends it; resolves to the cleanup errors. A run stopped by a signal, also during this
+ * shutdown, keeps and names its scratch folder as a failed one does.
+ */
 function shutDown(failure) {
   shutdown ??= (async () => {
     for (const child of running) child.kill("SIGTERM");
     const problems = [];
     await cli("close").catch((error) => problems.push(error));
     await server?.close().catch((error) => problems.push(error));
-    for (const folder of failure === null ? [scratch] : [join(scratch, "vite")])
+    const passed = failure === null && stopped === null;
+    for (const folder of passed ? [scratch] : [join(scratch, "vite")])
       try {
         rmSync(folder, { recursive: true, force: true });
       } catch (error) {
         problems.push(error);
       }
-    if (failure !== null)
-      console.error(`player-preview-checks: failure artifacts retained at ${scratch}`);
+    if (!passed) console.error(`player-preview-checks: failure artifacts retained at ${scratch}`);
     return problems;
   })();
   return shutdown;
 }
+
 /** Refuses a server that does not say it serves this checkout. */
 async function checkServedCheckout(url) {
   const endpoint = new URL("__checkout", url.endsWith("/") ? url : `${url}/`);
@@ -800,11 +821,13 @@ async function main() {
     ["SIGINT", 2],
     ["SIGTERM", 15],
   ])
-    // Kept for the whole shutdown: a stopped Playwright CLI command can signal its process group, this process included.
+    // The first signal stops the run, also during a shutdown that has begun; a later one, such as the one a stopped
+    // Playwright CLI command sends its process group, this process included, joins it.
     process.on(signal, () => {
-      if (shutdown !== null) return;
+      if (stopped !== null) return;
+      stopped = { signal, status: 128 + number };
       console.error(`player-preview-checks: stopped by ${signal}`);
-      void shutDown(new Error(`stopped by ${signal}`)).finally(() => process.exit(128 + number));
+      void shutDown(new Error(`stopped by ${signal}`)).finally(() => process.exit(stopped.status));
     });
   let failure = null;
   try {
@@ -842,6 +865,7 @@ async function main() {
     failure = error;
   }
   const problems = await shutDown(failure);
+  if (stopped !== null) process.exit(stopped.status);
   if (failure !== null) throw failure;
   if (problems.length > 0) throw problems[0];
 }
