@@ -1,6 +1,7 @@
 import { createInProcessBackend } from "../../../engine-bridge/in-process.js";
 import type { BridgeLostError, BridgeResult } from "../../../engine-bridge/client.js";
-import type { OpArgs, OpResult } from "../../../engine-bridge/op-catalogue.js";
+import type { OpResult } from "../../../engine-bridge/op-catalogue.js";
+import type { PlayerProject } from "../../../runtime/runtime-adapter.js";
 import type { PlayerBridge } from "../../../runtime/player-bridge.js";
 import { playerBuildIdentity } from "../../../build-identity.js";
 import type { PlayerSessionOptions } from "./usePlayerSession.js";
@@ -79,7 +80,7 @@ export function useEngineConnection({
      * It is sent at once when this Player holds the bridge, else as soon as it does.
      */
     prepareScriptSource(
-      script: OpArgs<"prepare">["source"]["script"],
+      script: string | PlayerProject,
     ): Promise<BridgeResult<OpResult<"prepare">>> {
       const send = (host: PlayerBridge) =>
         host.client.request("prepare", { source: { kind: "source", script } });
