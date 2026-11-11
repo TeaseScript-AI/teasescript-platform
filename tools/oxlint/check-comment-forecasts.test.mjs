@@ -307,8 +307,11 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
     // entries on every record page Git lists: the README, a nested page and another Markdown extension too
     const record = "docs/specifications/type-inference-accepted-record";
     write(`${record}/README.md`, "# Record\n\n## Labels\n\n### r4-40\n");
-    // (a struck-through heading, GitHub's mark, read by the parser the doc-links check reads with)
-    write(`${record}/sharing.md`, "# S\n\n### r4-38\n\n### ~~r4-9997~~\n\nas r4.167\n");
+    // (a struck-through heading, GitHub's mark, and one with inline HTML, read as the doc-links check reads them)
+    write(
+      `${record}/sharing.md`,
+      "# S\n\n### r4-38\n\n### ~~r4-9997~~\n\n### <em>r4-9996</em>\n\nas r4.167\n",
+    );
     // files in the record's folder that are no pages are under the rule
     write(`${record}/notes.json`, '{"why": "r4.9994"}\n');
     write(`${record}/nested/notes.txt`, "r4.9993\n");
@@ -316,7 +319,10 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
     write(`${record}/other.markdown`, "# O\n\n### r4-42\n");
     write(
       "docs/rev.md",
-      `Kept r4.38, r4.40, r4.41 and r4.42.\n\nGone r4.9999.\n\nStruck [r4.9997](${record.slice(5)}/sharing.md#r4-9997).\n`,
+      `Kept r4.38, r4.40, r4.41 and r4.42.\n\nGone r4.9999.\n\nStruck [r4.9997](${record.slice(5)}/sharing.md#r4-9997)` +
+        ` and marked [r4.9996](${record.slice(5)}/sharing.md#r4-9996)[^n].\n\n` +
+        // (a footnote, GitHub's: without its extension this line is a definition naming a missing file)
+        `[^n]: [page](${record.slice(5)}/sharing.md)\n`,
     );
     write("data/rev.json", '{"why": "r4.9995"}\n');
     write("src/rev.ts", 'const reason = "r4.9998 and r4.38";\n');

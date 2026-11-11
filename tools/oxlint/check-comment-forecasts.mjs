@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { lstatSync, readdirSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { markdownProcessor } from "../repository-checks/markdown.mjs";
+import { headingText, markdownProcessor } from "../repository-checks/markdown.mjs";
 import { checkedFiles, fileComments } from "./comments.mjs";
 
 // A comment says what the code does now and never forecasts later work (IMPLEMENTATION-AND-REVIEW.md "Code that does
@@ -234,19 +234,17 @@ const REVISION_NUMBER = /(?<![\p{L}\p{N}.])r4\.(\d+)(?!\p{N})/gu;
 /** Whether `file` is one of the accepted record's pages: a Markdown file anywhere in its folder. */
 const isRecordPage = (file) => file.startsWith(`${RECORD}/`) && /\.(?:md|markdown)$/u.test(file);
 
-/** A Markdown node's text: its value, or its children's text joined. */
-const textOf = (node) => node.value ?? (node.children ?? []).map(textOf).join("");
-
 /**
  * The accepted record's entries by number: each level-3 heading whose text is `r4-N`, as the repository's Markdown
- * reading (`markdownProcessor`, the doc-links check's own) parses the pages, so a heading's trailing spaces count as
- * nothing, a line in a code block is none, and GitHub's inline marks around the text are read through; `pages` holds
- * the pages' texts.
+ * reading (`markdownProcessor` and `headingText`, the doc-links check's own) parses the pages, so a heading's trailing
+ * spaces count as nothing, a line in a code block is none, and GitHub's inline marks and inline HTML around the text
+ * are read through; `pages` holds the pages' texts.
  */
 export function recordEntries(pages) {
   const numbers = new Set();
   const visit = (node) => {
-    const entry = node.type === "heading" && node.depth === 3 && /^r4-(\d+)$/u.exec(textOf(node));
+    const entry =
+      node.type === "heading" && node.depth === 3 && /^r4-(\d+)$/u.exec(headingText(node));
     if (entry) numbers.add(entry[1]);
     for (const child of node.children ?? []) visit(child);
   };
