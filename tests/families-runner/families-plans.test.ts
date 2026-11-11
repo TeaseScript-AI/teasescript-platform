@@ -418,3 +418,90 @@ test("each held mode's name says the settings its run sets, and the oracle's mod
     JSON.stringify(positions),
   );
 });
+
+test("the plans summary names what differs in a demand row, gives it one class, and which tree's output the allowance stops (#2341)", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  const compile = (plan: string, diagnostics: string, more: Record<string, unknown> = {}) => ({
+    plan,
+    diagnostics,
+    checks: 1,
+    error: null,
+    trace: "1/5/0",
+    questions: "1/0",
+    units: 5,
+    ...more,
+  });
+  // (in "reversed" the trees' unstopped compiles differ, so that a row read against the other tree's names the other
+  // tree; in "forward, unshared" they agree, so that a row can differ in its questions or work alone)
+  const apart = { base: compile("A", "d"), head: compile("B", "e") };
+  const alike = { base: compile("P", "d"), head: compile("P", "d") };
+  const modes = [
+    {
+      mode: "reversed",
+      ...apart,
+      same: false,
+      demands: [
+        // (the base's output at the allowance is the head's unstopped plan, not its own: the base's stop alone)
+        {
+          demand: 64,
+          base: compile("B", "d", { questions: "2/0", trace: "1/4/0", units: 4 }),
+          head: compile("B", "e", { questions: "3/0", trace: "1/6/0", units: 6 }),
+        },
+        {
+          demand: 16,
+          base: compile("X", "d", { trace: "1/4/0", units: 4 }),
+          head: compile("Y", "e", { trace: "1/3/0", units: 3 }),
+        },
+      ],
+    },
+    {
+      mode: "forward, unshared",
+      ...alike,
+      same: true,
+      demands: [
+        {
+          demand: 32,
+          base: compile("P", "d", { questions: "2/0" }),
+          head: compile("P", "d", { questions: "3/0" }),
+        },
+        {
+          demand: 8,
+          base: compile("P", "d", { trace: "1/4/0", units: 4 }),
+          head: compile("P", "d", { trace: "1/3/0", units: 3 }),
+        },
+        { demand: 4, base: compile("P", "d", { questions: undefined }), head: compile("P", "d") },
+      ],
+    },
+  ];
+  const file = join(folder, "records.jsonl");
+  writeFileSync(file, `${JSON.stringify({ set: "s", name: "n", runs: 7, differing: 6, modes })}\n`);
+  const ran = spawnSync(process.execPath, [tool, "summary", file], { encoding: "utf8" });
+  assert.equal(ran.status, 0, ran.stderr);
+  const [countsLine, ...lines] = ran.stdout.trim().split("\n");
+  const counts = JSON.parse(countsLine!);
+  assert.deepEqual(
+    ["demand", "demandPublication", "demandQuestions", "demandWork", "demandUnavailable"].map(
+      (key) => counts[key],
+    ),
+    [5, 2, 1, 1, 1],
+  );
+  assert.deepEqual(
+    ["Base", "Head", "Both", "Neither", "Unavailable"].map((who) => counts[`demandStops${who}`]),
+    [1, 0, 1, 2, 1],
+  );
+  const own = "(against its own unstopped compile, base:";
+  const checks = "checks 1/1 → 1/1 (unstopped/at the allowance)";
+  assert.deepEqual(lines.slice(1), [
+    `s n mode "reversed": at demand allowance 64 apart (publication): diagnostics, questions, work; stops base ` +
+      `${own} plan, questions, work, head: questions, work); ${checks}, units 4 → 6`,
+    `s n mode "reversed": at demand allowance 16 apart (publication): plan, diagnostics, work; stops both ` +
+      `${own} plan, work, head: plan, work); ${checks}, units 4 → 3`,
+    `s n mode "forward, unshared": at demand allowance 32 apart (questions): questions; stops neither ` +
+      `${own} questions, head: questions); ${checks}, units 5 → 5`,
+    `s n mode "forward, unshared": at demand allowance 8 apart (work): work; stops neither ` +
+      `${own} work, head: work); ${checks}, units 4 → 3`,
+    `s n mode "forward, unshared": at demand allowance 4 apart (unavailable): unrecorded; stops unavailable ` +
+      `${own} unrecorded, head: none); ${checks}, units 5 → 5`,
+  ]);
+});
