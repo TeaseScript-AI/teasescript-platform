@@ -16,7 +16,11 @@ import { isAbsolute, join, resolve } from "node:path";
 // exits 2 instead of failing on an import (#2366).
 let siblings;
 try {
-  siblings = await Promise.all([import("./costly-test-files.mjs"), import("./test-shards.mjs")]);
+  siblings = await Promise.all([
+    import("./costly-test-files.mjs"),
+    import("./run-parallel.mjs"),
+    import("./test-shards.mjs"),
+  ]);
 } catch (error) {
   if (error?.code !== "ERR_MODULE_NOT_FOUND") throw error;
   process.stderr.write(
@@ -25,16 +29,18 @@ try {
   );
   process.exit(2);
 }
-const [{ costlyTestSeconds }, { isSuiteTestPath, isTypeCoreTestFile }] = siblings;
+const [{ costlyTestSeconds }, { summaryLine }, { isSuiteTestPath, isTypeCoreTestFile }] = siblings;
 
 // Runs, before a push, the checks CI fails on for what changed since a base, in parallel, and prints one line per check
 // with its verdict and seconds, and the full output of a check that failed:
 //
-//   node tools/check-changed.mjs [--merged] [--base <ref>]
+//   node tools/check-changed.mjs [--merged | --merged-checkout <commit>] [--base <ref>]
 //
 // The base is `--base`, else the open pull request's base (`gh pr view`, as `origin/<base>`), else `origin/main`; the
 // changes are those since its merge-base with HEAD, committed or not, untracked files included. Always: `git diff
-// --check`, the format check of the changed files, oxlint, knip, the doc links and the imports, each as CI runs it.
+// --check`, the format check of the changed files, oxlint, knip, the doc links and the imports, each as CI runs it, and
+// `merge commits`: since the merge-base, no merge commit but one whose later parents are on origin/main or
+// origin/runtime-v2 and not on the base (`strayMerges`).
 // Then each project a changed path belongs to (`projectsFor`): its type check and tests. A root configuration file
 // belongs to the checks that read it, and needs no project when only those that always run do. A changed path no
 // project claims, other than documentation, runs every project's checks. It never builds the TypeScript or runs the
@@ -43,13 +49,20 @@ const [{ costlyTestSeconds }, { isSuiteTestPath, isTypeCoreTestFile }] = sibling
 // its published answers, as `tools/repository-checks/pin-suites.mjs` lists them: the focused list such a change runs
 // before review (`docs/TESTING.md`, "Pinned work"), which it does not run itself. When a changed type-core test file has
 // no entry in `tools/costly-test-files.mjs`, it prints one line saying so: the file runs in full, as every file does,
-// and the entry lands from CI at merge.
+// and the entry lands from CI at merge. Its last line, also when the checks cannot run, names what ran, failed and did
+// not run, the compiled suite and the checks no changed path needs included (`summaryLine`, #2106).
 //
 // `--merged` checks what CI tests after a squash instead: HEAD merged into the base's current commit, in a temporary
 // detached worktree (`git merge --no-commit --no-ff`) with this worktree's `node_modules` linked in. Uncommitted
 // changes are not in HEAD, so not in the merge; a conflict is exit 2, naming the files. The worktree is removed at the
 // end, also on SIGINT, SIGTERM and SIGHUP; only killing this process outright (`kill -9`) leaves it, for `git worktree
 // prune` and the temporary folder's cleanup.
+//
+// `--merged-checkout <commit>` checks a checkout that already is that merge, made by a runner such as the queue's
+// `--merged-with`: HEAD is the commit merged with the base's (`git merge --no-ff`: its first parent the commit, its
+// second the base's), or the commit itself when it already holds the base. Anything else is exit 2. `merge commits`
+// then reads the commit's side only, so the runner's merge is not judged. Only the commit named tells that merge from a
+// builder's merge of the base into the branch, which has the same shape and fails.
 //
 // Without `node_modules`, which it never installs, it links main's: that of the checkout `TEASESCRIPT_MAIN` names
 // (unset or empty, `/opt/teasescript-agents/teasescript-main/current`), as `linkMainNodeModules` says. It runs no
@@ -133,6 +146,9 @@ export function checksOf(projects) {
   return [...new Set([...projects].flatMap((project) => PROJECTS[project].checks))];
 }
 
+/** What it never runs, named in its last line. */
+export const NEVER_RUN = "the compiled test suite (CI runs it)";
+
 /** The core, a change to which prints the suites that pin its work. */
 const CORE = "src/type-inference/core/";
 
@@ -156,6 +172,82 @@ export function unknownToCostly(paths) {
   );
 }
 
+/** The long-lived branches the workflow merges into each other, on merge branches such as `rt2/merge-main-…`. */
+const MERGED_INTO_EACH_OTHER = ["origin/main", "origin/runtime-v2"];
+
+/**
+ * The merge commits in `from..head` that the workflow does not make (#2106), each as `<commit> <subject>: <why and what
+ * to do>`, run with `git` in the working folder. A merge passes only when each parent after its first is on `origin/main`
+ * or `origin/runtime-v2` and not on `base` (named `baseName`), the commit the run compares with: so merging main into a
+ * branch of runtime-v2, or runtime-v2 into a branch of main, passes, and merging a branch's own base into it, or any
+ * other branch, does not; a lane branch rebases instead. Which line the first parent is on is not checked. A lookup git
+ * cannot answer (a missing ref or commit), or answers "no" in a shallow clone, fails as unproven, with the advice to
+ * fetch or deepen the clone. With `queueHint`, `head` as a merge of exactly the base's commit is named first as what the
+ * queue's merged checkout makes, with the `--merged-checkout` command; it still fails, as it may be a builder's own.
+ */
+export function strayMerges(from, head, base, baseName, queueHint = false) {
+  // (a shallow clone lacks history, so there git's "not an ancestor" proves nothing)
+  const shallow = git("rev-parse", "--is-shallow-repository") === "true";
+  // (true or false, or why git cannot answer)
+  const holds = (ref, commit, name = ref) => {
+    const lookup = spawnSync("git", ["merge-base", "--is-ancestor", commit, ref], {
+      encoding: "utf8",
+    });
+    if (lookup.status === 0) return true;
+    if (lookup.status === 1) return shallow ? `${name}: the clone is shallow` : false;
+    return `${name}: ${lookup.stderr.trim().split("\n")[0] || `git exit ${lookup.status}`}`;
+  };
+  const refs = [baseName, ...MERGED_INTO_EACH_OTHER].join(", ");
+  const stray = [];
+  for (const line of git("rev-list", "--merges", "--parents", `${from}..${head}`).split("\n")) {
+    if (line === "") continue;
+    const [commit, first, ...merged] = line.split(" ");
+    const why = [];
+    for (const parent of merged) {
+      const short = parent.slice(0, 9);
+      if (
+        queueHint &&
+        commit === head &&
+        merged.length === 1 &&
+        parent ===
+          spawnSync("git", ["rev-parse", "--verify", "--quiet", `${base}^{commit}`], {
+            encoding: "utf8",
+          }).stdout.trim()
+      ) {
+        why.push(
+          `merges ${short}, the base's commit itself, as the queue's merged checkout does: if this is one, run it as ` +
+            `--merged-checkout ${first} --base ${baseName}; if you merged the base into your branch yourself, rebase ` +
+            `onto ${baseName} instead`,
+        );
+        continue;
+      }
+      const onBase = holds(base, parent, baseName);
+      if (onBase === true) {
+        why.push(`merges ${short}, which the base already holds: rebase onto ${baseName} instead`);
+        continue;
+      }
+      const onBranches = MERGED_INTO_EACH_OTHER.map((ref) => holds(ref, parent));
+      if (onBase === false && onBranches.includes(true)) continue;
+      const errors = [
+        ...new Set([onBase, ...onBranches].filter((answer) => typeof answer === "string")),
+      ];
+      why.push(
+        errors.length > 0
+          ? `merges ${short}, which git cannot place (${errors.join("; ")}): ` +
+              (shallow ? "deepen the clone (git fetch --unshallow)" : `fetch ${refs}`) +
+              " and run again"
+          : `merges ${short}, which neither ${MERGED_INTO_EACH_OTHER.join(" nor ")} holds: rebase onto ` +
+              `${baseName} instead, or, if it has landed on one of them since your last fetch, fetch ${refs} and run again`,
+      );
+    }
+    if (why.length > 0)
+      stray.push(
+        `${commit.slice(0, 9)} ${git("log", "-1", "--format=%s", commit)}: ${why.join("; ")}`,
+      );
+  }
+  return stray;
+}
+
 /** The extensions `npm run format:check` covers. */
 const FORMATTED = /\.(?:ts|tsx|cts|mts|js|jsx|cjs|mjs|vue)$/u;
 
@@ -168,21 +260,70 @@ function cannotRun(message) {
   throw new CannotRun(message);
 }
 
-const USAGE = "usage: node tools/check-changed.mjs [--merged] [--base <ref>]";
+const USAGE =
+  "usage: node tools/check-changed.mjs [--merged | --merged-checkout <commit>] [--base <ref>]";
 
-/** `--merged`, and the base: `--base`, else the open pull request's base, else `origin/main`. */
+/**
+ * `--merged`, `--merged-checkout`'s commit (or null), and the base: `--base`, else the open pull request's base, else
+ * `origin/main`.
+ */
 function options(argv) {
-  const merged = argv.includes("--merged");
-  const rest = argv.filter((argument) => argument !== "--merged");
-  if (rest.length > 0 && !(rest.length === 2 && rest[0] === "--base")) cannotRun(USAGE);
-  if (rest.length === 2) return { merged, ref: rest[1] };
+  let merged = false;
+  const values = new Map();
+  for (let index = 0; index < argv.length; index += 1) {
+    const argument = argv[index];
+    if (argument === "--merged" && !merged) merged = true;
+    else if (
+      (argument === "--base" || argument === "--merged-checkout") &&
+      !values.has(argument) &&
+      index + 1 < argv.length
+    )
+      values.set(argument, argv[(index += 1)]);
+    else cannotRun(USAGE);
+  }
+  const mergedCheckout = values.get("--merged-checkout") ?? null;
+  if (merged && mergedCheckout !== null) cannotRun(USAGE);
+  if (values.has("--base")) return { merged, mergedCheckout, ref: values.get("--base") };
   const pr = spawnSync("gh", ["pr", "view", "--json", "baseRefName", "-q", ".baseRefName"], {
     encoding: "utf8",
   });
   return {
     merged,
+    mergedCheckout,
     ref: pr.status === 0 && pr.stdout.trim() !== "" ? `origin/${pr.stdout.trim()}` : "origin/main",
   };
+}
+
+/**
+ * `--merged-checkout`: the commit `name` names, once HEAD is proven to be it, or its merge with `ref`'s commit, the
+ * commit first.
+ */
+function mergedCheckoutCommit(name, ref) {
+  // (a commit's full SHA, and how the message names it: a full SHA as its first 9 characters)
+  const commit = (of) => {
+    let sha;
+    try {
+      sha = git("rev-parse", "--verify", "--quiet", `${of}^{commit}`);
+    } catch {
+      cannotRun(`no commit ${of}: fetch it`);
+    }
+    return [sha, of === sha ? sha.slice(0, 9) : `${of} (${sha.slice(0, 9)})`];
+  };
+  const [branch, branchName] = commit(name);
+  const [base, baseName] = commit(ref);
+  const [head, ...parents] = git("rev-list", "--parents", "-n", "1", "HEAD").split(" ");
+  if (head === branch) return branch;
+  if (parents.length === 2 && parents[0] === branch && parents[1] === base) {
+    process.stdout.write(
+      `check-changed: HEAD (${head.slice(0, 9)}) merges ${baseName} into ${branchName}; only ` +
+        `${branchName}'s merge commits are judged\n`,
+    );
+    return branch;
+  }
+  return cannotRun(
+    `--merged-checkout ${branchName}: HEAD (${head.slice(0, 9)}) is neither that commit nor its merge with ` +
+      `${baseName}, whose first parent is that commit and second the base's`,
+  );
 }
 
 /** The prefix of every temporary worktree `--merged` makes. */
@@ -403,24 +544,57 @@ function prettier() {
   return [process.execPath, "node_modules/prettier/bin/prettier.cjs"];
 }
 
+/**
+ * The checks this run started, in order, the verdicts of those that ended, and, once every check has started, the
+ * project checks no changed path needs: what the last line names (`lastLine`).
+ */
+const progress = { started: [], ended: new Map(), notNeeded: null };
+
 /** A check's run: its verdict, seconds and output; `shown` prints the output also when it passes. */
 function run(name, command, args, shown = false) {
   const start = performance.now();
+  progress.started.push(name);
   return new Promise((resolve) => {
     const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"], detached: true });
     running.add(child);
     let output = "";
     child.stdout.on("data", (chunk) => (output += chunk));
     child.stderr.on("data", (chunk) => (output += chunk));
-    child.on("error", (error) =>
-      resolve({ name, passed: false, seconds: 0, output: error.message, shown }),
-    );
+    child.on("error", (error) => {
+      progress.ended.set(name, false);
+      resolve({ name, passed: false, seconds: 0, output: error.message, shown });
+    });
     child.on("close", (code) => {
       running.delete(child);
+      progress.ended.set(name, code === 0);
       const seconds = (performance.now() - start) / 1000;
       resolve({ name, passed: code === 0, seconds, output, shown });
     });
   });
+}
+
+/** A check that has already ended (the merge-commit scan, in this process): its result, which the last line counts. */
+function settled(name, passed, seconds, output) {
+  progress.started.push(name);
+  progress.ended.set(name, passed);
+  return { name, passed, seconds, output, shown: false };
+}
+
+/**
+ * The last line (#2106), so that no run, also one that cannot run or is stopped, can be read as one that ran more: what
+ * ran, failed, and did not run, a check a signal stopped, a project check no changed path needs and the compiled suite
+ * included.
+ */
+function lastLine() {
+  if (progress.notNeeded === null)
+    return `check-changed: ${summaryLine([{ name: "every check", status: "NOT RUN" }])}`;
+  const verdict = (name) =>
+    progress.ended.has(name) ? (progress.ended.get(name) ? "PASS" : "FAIL") : "ABORTED";
+  return `check-changed: ${summaryLine([
+    ...progress.started.map((name) => ({ name, status: verdict(name) })),
+    ...progress.notNeeded.map((name) => ({ name, status: "NOT RUN" })),
+    { name: NEVER_RUN, status: "NOT RUN" },
+  ])}`;
 }
 
 /**
@@ -475,10 +649,13 @@ function enterMerge(ref, cleanups) {
 }
 
 async function check(cleanups) {
-  const { merged, ref } = options(process.argv.slice(2));
+  const { merged, mergedCheckout, ref } = options(process.argv.slice(2));
   if (!existsSync("node_modules")) {
     process.stdout.write(`check-changed: ${linkMainNodeModules(process.env, process.cwd())}\n`);
   }
+  // (the branch's commit: read before `--merged` enters its worktree, whose HEAD is the base's commit)
+  const head =
+    mergedCheckout === null ? git("rev-parse", "HEAD") : mergedCheckoutCommit(mergedCheckout, ref);
   let mergeBase;
   if (merged) mergeBase = enterMerge(ref, cleanups);
   else
@@ -512,8 +689,24 @@ async function check(cleanups) {
   const npm = process.platform === "win32" ? "npm.cmd" : "npm";
   const formatted = changed.filter((path) => FORMATTED.test(path));
   const [formatter, ...formatterArgs] = prettier();
+  const scan = performance.now();
+  // (under --merged-checkout, the head's own merge of the base is the builder's: no queue hint)
+  const stray = strayMerges(
+    mergeBase,
+    head,
+    merged ? mergeBase : ref,
+    ref,
+    mergedCheckout === null,
+  );
+  const scanSeconds = (performance.now() - scan) / 1000;
   const checks = [
     run("diff --check", "git", ["diff", "--check", mergeBase]),
+    settled(
+      "merge commits",
+      stray.length === 0,
+      scanSeconds,
+      stray.map((line) => `${line}\n`).join(""),
+    ),
     ...(formatted.length > 0
       ? [run("format", formatter, [...formatterArgs, "--check", ...formatted])]
       : []),
@@ -539,51 +732,73 @@ async function check(cleanups) {
         ? run("tsc", "node_modules/.bin/tsc", ["--noEmit", "-p", "tsconfig.json"])
         : run(check, npm, ["run", "--silent", check]),
     );
+  const selected = checksOf(projects);
+  progress.notNeeded = checksOf(Object.keys(PROJECTS)).filter((check) => !selected.includes(check));
   const results = await Promise.all(checks);
+  // (a signal has ended the run: its verdicts are not printed)
+  if (ended) return null;
   for (const { name, passed, seconds } of results)
     process.stdout.write(
       `${passed ? "PASS" : "FAIL"}  ${name.padEnd(18)} ${seconds.toFixed(1)}s\n`,
     );
   for (const { name, passed, output, shown } of results)
     if (!passed || shown) process.stdout.write(`\n--- ${name} ---\n${output}`);
-  process.exitCode = results.every(({ passed }) => passed) ? 0 : 1;
   // (a link through main's `current` follows its refresh, which can switch it to another install while the checks run)
   const after = lockfileMismatch();
   if (after !== null) {
     process.stderr.write(
       `check-changed: node_modules changed while the checks ran, so their verdicts do not count: ${after}\n`,
     );
-    process.exitCode = 2;
+    return 2;
   }
+  return results.every(({ passed }) => passed) ? 0 : 1;
 }
+
+/** Whether the run's end is decided (`main`'s `end`): from then on nothing changes its status or its last line. */
+let ended = false;
 
 async function main() {
   const cleanups = [];
-  let cleaned = false;
   const cleanup = () => {
-    if (cleaned) return;
-    cleaned = true;
     stop();
     for (const step of cleanups) step();
   };
+  /**
+   * The run's one end, whichever path comes first: a normal end, one that cannot run, or a signal. It stops the checks,
+   * cleans up, then writes the last line, once; a later call, as a signal during that, or while the last line waits for
+   * a slow reader, changes nothing. A cleanup that refuses (exit 2) outranks a verdict, not a signal. The last line
+   * follows a blank one, unless the run could not start its checks.
+   */
+  const end = (code, { exit = false, blank = true } = {}) => {
+    if (ended) return;
+    ended = true;
+    cleanup();
+    const status = process.exitCode === 2 && code < 2 ? 2 : code;
+    process.exitCode = status;
+    process.stdout.write(`${blank ? "\n" : ""}${lastLine()}\n`, () => {
+      if (exit) process.exit(status);
+    });
+  };
+  // (installed until the process exits)
   for (const [signal, code] of [
     ["SIGINT", 130],
     ["SIGTERM", 143],
     ["SIGHUP", 129],
   ])
-    process.once(signal, () => {
-      cleanup();
-      process.exit(code);
-    });
+    process.on(signal, () => end(code, { exit: true }));
+  let code;
   try {
-    await check(cleanups);
+    code = await check(cleanups);
   } catch (error) {
-    if (!(error instanceof CannotRun)) throw error;
-    process.stderr.write(`check-changed: ${error.message}\n`);
-    process.exitCode = 2;
-  } finally {
-    cleanup();
+    if (!(error instanceof CannotRun)) {
+      cleanup();
+      throw error;
+    }
+    if (!ended) process.stderr.write(`check-changed: ${error.message}\n`);
+    end(2, { blank: false });
+    return;
   }
+  if (code !== null) end(code);
 }
 
 if (import.meta.main) await main();

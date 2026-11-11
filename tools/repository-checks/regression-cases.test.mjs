@@ -17,6 +17,9 @@ import { fileURLToPath } from "node:url";
 
 import { callSitesOf, verdict } from "./regression-cases.mjs";
 import { regressionCase } from "../../tests/helpers/regression-case.ts";
+import { isolateGit } from "../fixture-git.mjs";
+
+isolateGit();
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));
 const tool = fileURLToPath(new URL("./regression-cases.mjs", import.meta.url));
@@ -187,8 +190,6 @@ function repository(head) {
   const root = mkdtempSync(join(tmpdir(), "rc-fixture-"));
   const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
   git("init", "-q");
-  git("config", "user.email", "t@t");
-  git("config", "user.name", "t");
   write(root, {
     ".gitignore": "node_modules\ndist/\ntmp/\n",
     // ES modules, as the repository's: a missing named import fails the file at the base

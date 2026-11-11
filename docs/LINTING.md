@@ -73,8 +73,16 @@ configuration and stops oxlint and the check by that signal; the next run remove
 
 `tools/oxlint/check-comment-forecasts.mjs` refuses a comment that forecasts later work, in the forms
 [Code that does not mislead](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-that-does-not-mislead) lists (its
-`FORECASTS` table); a citation of a repository record passes. `TABLE r4` and `TABLE §` are no citations (TABLE is not in
-the repository): `comment-citations.json` holds each file's exact counts of them in comments, which may only fall.
+`FORECASTS` table); a citation of a repository record passes. The old design record (TABLE) is not in the repository,
+so it cites nothing: in every file Git lists except the check's own test, a line that names it as a whole word and
+holds the whole word `r4` or a section mark later on, or whose next line holds one anywhere, is refused. What stands
+between does not count, markup or words, so such a line is refused in prose too: state the fact, or keep the revision
+two lines away. A citation over three or more lines, in another letter case or inside a longer word is outside the check
+and left to review. A revision number `r4.N` (a whole token) names the accepted record's entry `r4-N`: outside the
+record's own pages and the check's test, one with no such heading is refused, in every file Git lists; the check proves
+the entry exists, not that it carries the sentence's claim, and other spellings (`R4.1`, an anchor `#r4-N`) are not its.
+`comment-citations.json` holds each file's exact counts in comments of its other forms (a bare `r4.N`, the record's name
+with another id), which may only fall.
 `comment-forecasts-allowed.json` lists the forecasts the check accepts, and each entry must still be found.
 
 ## Comment declarations

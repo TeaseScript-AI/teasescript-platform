@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { gitIsolated } from "./fixture-git.mjs";
 
 const tool = fileURLToPath(new URL("./archive-replaced-heads.mjs", import.meta.url));
 const realGit = spawnSync("sh", ["-c", "command -v git"], { encoding: "utf8" }).stdout.trim();
@@ -34,17 +35,7 @@ function setup() {
   ].map((name) => join(root, name));
   mkdirSync(shim);
   mkdirSync(templates);
-  const env = {
-    ...process.env,
-    HOME: root,
-    GIT_CONFIG_GLOBAL: "/dev/null",
-    GIT_CONFIG_NOSYSTEM: "1",
-    GIT_TEMPLATE_DIR: templates,
-    GIT_AUTHOR_NAME: "t",
-    GIT_AUTHOR_EMAIL: "t@t",
-    GIT_COMMITTER_NAME: "t",
-    GIT_COMMITTER_EMAIL: "t@t",
-  };
+  const env = { ...gitIsolated(process.env), HOME: root, GIT_TEMPLATE_DIR: templates };
   const run =
     (directory) =>
     (...args) =>

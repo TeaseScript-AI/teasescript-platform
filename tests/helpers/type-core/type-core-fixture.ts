@@ -442,14 +442,14 @@ export function heldBack(record: FixtureRecord): string | null {
   // Its right-hand datetime has no subtraction row: §3.4 sites that operand, not the whole pair. Keep the set
   // unchanged until its maintainer corrects this start as well as its end.
   if (record.name === "cp9-cells/F16/invalid-datetime-difference")
-    return "operator site awaiting set correction (TABLE §3.4, r4.62)";
+    return "operator site awaiting set correction";
   // S9b's F18 shapes: a copy of a written type as `fromJson`'s and `load`'s receiving context, which
   // the core takes with its A4 receiving design (#1072's A2); `files: true` is outside the slice's syntax, and the text
   // operand's warning there is C13's, not F18's
   if (record.name.startsWith("cp9-cells/s9b/f18-held/copy/scalar-json-host-value/"))
     return "fromJson with files: true outside the slice, and C13's text operand";
   if (record.name.startsWith("cp9-cells/s9b/f18-held/copy/"))
-    return "S9b's F18 copy of a written type as the receiving context (r4.77 (2))";
+    return "S9b's F18 copy of a written type as the receiving context";
   // Known text the conversion cannot convert is a compile error of its own (V30 §13, #1105), which the core's record
   // holds since the checks that owe the runtime nothing publish there (the lead's decision 3 on #1072): the record lacks
   // it until its maintainer adds it.

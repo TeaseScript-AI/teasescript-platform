@@ -62,7 +62,7 @@ test("a place's known properties at a path are those its literals and its proper
   }
 });
 
-test("a place's admitted domain says whether a copy of a written type decides it (A4 through copies, r4.75 (1); S7)", () => {
+test("a place's admitted domain says whether a copy of a written type decides it (A4 through copies; S7)", () => {
   const source =
     "let a: number = 0\nlet b = a\nlet out = [a]\nlet own = 1.5\nlet copy = own\nsay b\nexit\n";
   for (const answers of bothOrders(source)) {

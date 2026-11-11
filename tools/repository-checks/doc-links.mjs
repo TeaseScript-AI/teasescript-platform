@@ -4,10 +4,11 @@ import { lstatSync } from "node:fs";
 import { join } from "node:path";
 
 import { remark } from "remark";
-import remarkGfm from "remark-gfm";
 import remarkValidateLinks from "remark-validate-links";
 import { engine } from "unified-engine";
 import { VFile } from "vfile";
+
+import { MARKDOWN_PLUGINS } from "./markdown.mjs";
 
 // The Markdown links (docs/TESTING.md "Normal and diagnostic verification"): remark-validate-links reports every
 // relative link and heading anchor in the Markdown files that Git tracks or does not ignore that does not resolve.
@@ -16,8 +17,8 @@ import { VFile } from "vfile";
 //
 // It runs in `check:pretest` and in `tools/check-changed.mjs`, for every change.
 //
-// Only Git is launched: unified-engine runs in this process, with remark as the processor and remark-gfm and
-// remark-validate-links (`repository: false`, so absolute URLs, this repository's included, are not checked) as its
+// Only Git is launched: unified-engine runs in this process, with remark as the processor and the repository's Markdown
+// plugins (`markdown.mjs`: remark-gfm) and remark-validate-links (`repository: false`, so absolute URLs, this repository's included, are not checked) as its
 // only plugins. No configuration file and no ignore file is searched for (`detectConfig` and `detectIgnore` off), and
 // nothing is written. The files are Git's list (`git ls-files --cached --others --exclude-standard`) of `*.md` entries
 // that are regular files in the working tree, so a deleted file, a symlink and a submodule are not read. Each goes to
@@ -76,7 +77,7 @@ function validate(files) {
     engine(
       {
         processor: remark,
-        plugins: [remarkGfm, [remarkValidateLinks, { repository: false }]],
+        plugins: [...MARKDOWN_PLUGINS, [remarkValidateLinks, { repository: false }]],
         files: files.map((name) => new VFile({ path: join(root, name) })),
         cwd: root,
         detectConfig: false,

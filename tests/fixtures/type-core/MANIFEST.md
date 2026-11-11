@@ -17,7 +17,7 @@ condition, are rows of the cells test and keep the warning.
 
 No record changed. `heldBack` releases 11 of the 32 `cp9-cells/s9b/f18-held/…` records: `named/*` (10) and
 `computed-key/integer-default-control`. It still holds:
-- `copy/*` (18): a copy of a written type as the receiving context (r4.77 (2)), awaiting the A4 receiving design;
+- `copy/*` (18): a copy of a written type as the receiving context (PR #1051), awaiting the A4 receiving design;
 - `copy/scalar-json-host-value/*` (2): `files: true` is outside the slice, and their text operand's warning is C13's;
 - `computed-key/null-default`: N3's required check (S10).
 
@@ -38,7 +38,7 @@ The #1469 builder (Opus) edited one record of `cells.jsonl` by hand: `cp9-cells/
 store into an object or host data, loses its second member-read warning at `target.other` (context `unknown`) and that
 warning's null-check, since one access owes one warning and check for its unknown kind (§4). No other record changed.
 
-## Rule A2 where the copy meets the place (#1249, TABLE r4.131, r4.154)
+## Rule A2 where the copy meets the place (#1249)
 
 The #1249 builder (Opus) edited 10 records of `cells.jsonl` by hand, with no set revision yet: a property only copies
 of whole objects bring errs at the copy or store that brings the other type, read or not, without a `related` site.
@@ -73,13 +73,13 @@ with the set's tooling as r481 published it: `convert.py` `25a3b7152cd55fe8…`,
 - Against `81b3a0c4…`: 32 records added, 5 changed, none removed. Changed: the copied-field error of
   `cp9-cells/s4/s6/owner/bound/record-kind-read/literal` and `…/insert` and of `cp9-cells/r42/copy/first-read-after-conflict`,
   `…/first-store-after-conflict` and `…/access-before-later-copy` moves to the first direct read or store, with the
-  copy as the diagnostic's optional `related` site (TABLE r4.75 (4)). Added: the 32 `cp9-cells/s9b/f18-held/…`
-  records of S9b's F18 shapes (TABLE r4.81 (1), r4.77 (2)), held by that prefix until S9b.
+  copy as the diagnostic's optional `related` site (PR #1049). Added: the 32 `cp9-cells/s9b/f18-held/…`
+  records of S9b's F18 shapes (PR #1051), held by that prefix until S9b.
 - A diagnostic may carry `related: {file, offset, end}`, the whole copy that brought the rejected kind; the reader keeps
   it and the comparison compares it with the diagnostic (`tests/helpers/type-core-records.ts`). No other record has it.
 - Held at this revision (`heldBack`, `tests/helpers/type-core/type-core-fixture.ts`; their counts pinned in the cells test): the
   adapters' 9, stage 3b's 653, S9b's F18 shapes 32, and `cp9-cells/F16/invalid-datetime-difference`, whose operator
-  site §3.4 puts at its right operand (r4.62); 1,318 records compare whole.
+  site §3.4 puts at its right operand; 1,318 records compare whole.
 
 ## Refresh to the set's revision `81b3a0c4…` (M4 step S6b)
 
@@ -103,10 +103,11 @@ cp "$work/out/cells.jsonl" "$work/out/cells-deferred.jsonl" tests/fixtures/type-
   expression, obligation, check and N10 writer span. The converter rewrote 199 gate records (195 prefixed files and the
   four collection records) and the same 2 deferred records.
 - Against `1de35708…`, 68 records are added, 114 changed and none removed. Added: the 40 presence records
-  `cp9-cells/s4/presence/…`; the ten rule-function records `cp9-cells/s6/rule-function/…` (TABLE r4.63–r4.66), the
-  same bytes as S6's separate `cells-rule-function.jsonl` (`987bc86d…`), which this refresh removes; and TABLE r4.52's
-  18: AD-3's six `cp9-cells/s4/s6b/dead-code/…`, AD-2's five `cp9-cells/s4/s7/load-field-repair/…` and AD-1's seven.
-  Changed: AD-1's 92 re-derived expectations, r4.62's 21 member-read and operator site ends, and r4.60's corrected
+  `cp9-cells/s4/presence/…`; the ten rule-function records `cp9-cells/s6/rule-function/…`, the same bytes as S6's
+  separate `cells-rule-function.jsonl` (`987bc86d…`), which this refresh removes; and the 18 of the owner's
+  authority-deviation decisions (2026-10-25): AD-3's six `cp9-cells/s4/s6b/dead-code/…`, AD-2's five
+  `cp9-cells/s4/s7/load-field-repair/…` and AD-1's seven.
+  Changed: AD-1's 92 re-derived expectations, the 21 re-sited member-read and operator ends, and the corrected
   `cp9-cells/r8/get-dispatch/unknown`. AD-1's 55 metadata re-derivations leave their compact records as they were. In
   the deferred file AD-1 re-derives `cp9-cells/3b/review-late/json/constant`.
 - Every AD-1 record cites a cell of stage 3b (N1–N10), so that class holds it until S10; the tests name the held
@@ -115,14 +116,14 @@ cp "$work/out/cells.jsonl" "$work/out/cells-deferred.jsonl" tests/fixtures/type-
 ## Refresh (M4 step S6)
 
 Opus, 2026-10-25, builder for M4 step S6 (lead Fable). `cells.jsonl` is regenerated from the expectation set at
-`1de3570831c7bc4b…` (1,913 gate records, 9 deferred; TABLE r4.50) by the same tooling, unchanged: `convert.py`
+`1de3570831c7bc4b…` (1,913 gate records, 9 deferred; PR #1029) by the same tooling, unchanged: `convert.py`
 (`eef78c11…`) with `collection-rewrites.json` (`981e40ee…`), the host rewrite and the four collection rewrites below.
 197 records are rewritten (193 prefixed files and the four collection records); `cells-deferred.jsonl` is unchanged.
 Against the set's previous revision `60751a0f17a0f8cf…` (1,888 records) it adds the 25 records
 `cp9-cells/s4/s6/owner/…` (`ingress/`, `bound/` and `default/`: the owner's review of 2026-10-25); the other 1,888
 compact records are byte-identical. The 25 were compared with the core in both orders before the refresh: 25 of 25 the
-same. The set's revision `6f102107b71f3dde…` before it differs only in the 25 records' reason citations and pins (TABLE
-r4.50 states the owner's three readings); both convert to the same bytes.
+same. The set's revision `6f102107b71f3dde…` before it differs only in the 25 records' reason citations and pins (the
+owner's three readings in their review of PR #1029); both convert to the same bytes.
 
 `60751a0f…` against its previous revision `01eccb2f1a7da537…` (1,874 records; `716ac7091de2b95e…` before it differs in
 five reason texts only) added the 14 records `cp9-cells/s4/s6/returns/…` and `cp9-cells/s4/s6/defaults/…`. The exit
@@ -132,10 +133,11 @@ compiler build of `main` `6187eb145`, in both demand orders:
 - preservation equality (`verify.py`'s invariance check, every record's model output moved through the remapping
   against its output on the rewritten record): 1,888 of 1,888;
 - the fixture against the model's compacted records on the rewritten set: 1,850 the same, the 9 adapter records apart,
-  and 29 different, records round 19d predates: the 23 `cp9-cells/s4/followup/…` records of TABLE r4.47 and 6 of the
-  14 `cp9-cells/s4/s6/…` records of r4.48 (the research folder's later model, `d0d44513…`, differs in those 6 only);
+  and 29 different, records round 19d predates: the 23 `cp9-cells/s4/followup/…` records of #1026's follow-up (PRs
+  #1027, #1028) and 6 of the 14 `cp9-cells/s4/s6/…` records of S6's returns and defaults as stores (the research folder's later model, `d0d44513…`,
+  differs in those 6 only);
 - boundary checks and ingress stores one to one in 1,874 records, 4 more consumed in place, 3 more with a store owing
-  none, and 7 different, follow-up records (clock reads, r4.47 (5)).
+  none, and 7 different, follow-up records (clock reads, #1026's follow-up).
 
 The sections below are S0's record of the method; the file table names the refreshed fixture.
 
@@ -231,7 +233,7 @@ end runs them, so they are unverified by construction.
 ## The four collection records (confirmed by Sol)
 
 These are `cases.jsonl` lines 578, 579, 722 and 1137. Each rewrite replaces the host read in place with a `load` that
-has a typed collection default. Under TABLE F18, a load with a typed default has the default's kind, definite, and
+has a typed collection default. Under F18, a load with a typed default has the default's kind, definite, and
 "a loaded … collection's M is `open`": the runtime checks the shape, not emptiness. Its contents are external data,
 and the `load` call is a C9 ingress expression (reason `external-data`), so the boundary stays at the same start
 offset with the same target and `against`. V30 uses the same form (`load("pushups", default: [])`).

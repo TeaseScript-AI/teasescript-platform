@@ -762,7 +762,7 @@ interface MergedRecord {
   readonly compact: readonly string[];
 }
 
-test("a stop whose own entries merge into one publishes main's records, its answers' orders aside (TABLE r4.185)", () => {
+test("a stop whose own entries merge into one publishes main's records, its answers' orders aside", () => {
   const hash = (text: string): string =>
     createHash("sha256").update(text).digest("hex").slice(0, 16);
   for (const [name, source, expected] of MERGED_STOPS) {

@@ -67,9 +67,9 @@ export const FINISHING_READERS = new Map([
     "constructor",
     "admission's host read after a stop (`AdmissionHost.read`, the inventory check's `HOST_READS`)",
   ],
-  ["valueItems", "every consumer's one read, unstopped or finishing (TABLE r4.99)"],
+  ["valueItems", "every consumer's one read, unstopped or finishing"],
   ["finishingRead", "its own descent into a literal's children"],
-  ["typedRead", "a typed default's domain, read where its own answer is missing (TABLE r4.144)"],
+  ["typedRead", "a typed default's domain, read where its own answer is missing"],
 ]);
 
 export function checkQuestionSources(root) {
@@ -419,7 +419,7 @@ export function questionSourceDiagnostics(sources, readers) {
             file,
             sourceFile,
             node,
-            `${text} is named only in ${guarded.where} (TABLE r4.158, r4.165): every question's items come from CoreAnswers.#items.`,
+            `${text} is named only in ${guarded.where}: every question's items come from CoreAnswers.#items.`,
           );
       }
       node.forEachChild(visit);

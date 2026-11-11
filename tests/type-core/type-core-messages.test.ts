@@ -1258,7 +1258,7 @@ test("a word that came with its value from another line names that value's origi
   );
 });
 
-test("the developer warning for JSON that does not fit fromJson's expected type keeps the form (TSW020, TABLE r4.77 (5))", () => {
+test("the developer warning for JSON that does not fit fromJson's expected type keeps the form (TSW020)", () => {
   const integer = { kind: "integer" } as const;
   assert.equal(
     jsonKindMismatch("x", integer),
