@@ -429,7 +429,9 @@ test("a record page's anchors are exactly those the doc-links check resolves, he
       { cwd: root, encoding: "utf8" },
     );
     const unresolved = new Set(
-      [...links.stderr.matchAll(/Cannot find heading for `#([\w-]+)`/gu)].map(([, anchor]) => anchor),
+      [...links.stderr.matchAll(/Cannot find heading for `#([\w-]+)`/gu)].map(
+        ([, anchor]) => anchor,
+      ),
     );
     assert.ok(unresolved.size > 0, links.stderr);
     assert.deepEqual(
