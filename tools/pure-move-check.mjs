@@ -333,7 +333,9 @@ export function verdictsOf(
   for (const verdict of verdicts) {
     if (verdict[1] !== null) continue;
     const reason = declaredFor(verdict[0]);
-    if (reason !== null) (verdict.push(reason), (verdict[1] = "declared"));
+    if (reason === null) continue;
+    verdict[1] = "declared";
+    verdict.push(reason);
   }
   return { verdicts, moved };
 }
