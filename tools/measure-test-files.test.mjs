@@ -25,6 +25,36 @@ const TOOLS = [
 // starts like a type-core file's, and a fixture, which is no test.
 const SUITE = ["a", "sub/a", "sub/type-core-z", "type-core-dir/plain", "fixtures/f"];
 
+/**
+ * The environment of every git and tool process the test starts, in checkout `root`, built from the test's own
+ * environment: git reads no global or system configuration, template or inherited `GIT_*` setting, and `HOME` is the
+ * checkout's, so no host hook, signing, default branch or file-system monitor reaches the fixture. Also `npm` and
+ * `gh` faked first on the `PATH`, and the tool's temporary folders and compile cache inside the checkout, which the
+ * test removes.
+ */
+function boundary(root) {
+  const host = Object.entries(process.env).filter(
+    ([name]) =>
+      !name.startsWith("GIT_") && !["HOME", "XDG_CONFIG_HOME", "NODE_TEST_CONTEXT"].includes(name),
+  );
+  return {
+    ...Object.fromEntries(host),
+    HOME: join(root, "home"),
+    GIT_CONFIG_GLOBAL: "/dev/null",
+    GIT_CONFIG_NOSYSTEM: "1",
+    GIT_TEMPLATE_DIR: join(root, "home/templates"),
+    GIT_AUTHOR_NAME: "t",
+    GIT_AUTHOR_EMAIL: "t@t",
+    GIT_COMMITTER_NAME: "t",
+    GIT_COMMITTER_EMAIL: "t@t",
+    PATH: `${join(root, "bin")}:${process.env.PATH}`,
+    // (one file at once, whatever the machine)
+    SX_MEM_MIB: "4000",
+    TMPDIR: root,
+    NODE_COMPILE_CACHE: join(root, "cache"),
+  };
+}
+
 /** A checkout with the suite's sources and compiled files, the tools, and fakes of `npm` and `gh`; its path. */
 function checkout() {
   const root = mkdtempSync(join(tmpdir(), "measure-test-files-"));
@@ -97,23 +127,12 @@ else if (args[0] === "api" && where && runs[where[1]] && where[2]) {
 `,
     0o755,
   );
+  mkdirSync(join(root, "home/templates"), { recursive: true });
   for (const args of [
     ["init", "-q"],
-    [
-      "-c",
-      "user.name=t",
-      "-c",
-      "user.email=t@t",
-      "-c",
-      "commit.gpgSign=false",
-      "commit",
-      "-q",
-      "--allow-empty",
-      "-m",
-      "c",
-    ],
+    ["commit", "-q", "--allow-empty", "-m", "c"],
   ]) {
-    const git = spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+    const git = spawnSync("git", args, { cwd: root, env: boundary(root), encoding: "utf8" });
     assert.equal(git.status, 0, `git ${args.join(" ")}: ${git.stderr}`);
   }
 }
@@ -123,18 +142,8 @@ function measure(root, args) {
   const result = spawnSync(process.execPath, ["tools/measure-test-files.mjs", "--write", ...args], {
     cwd: root,
     encoding: "utf8",
-    // (without the runner's `NODE_TEST_CONTEXT`, as the tool's own `run()` would otherwise skip every file)
-    env: {
-      ...Object.fromEntries(
-        Object.entries(process.env).filter(([name]) => name !== "NODE_TEST_CONTEXT"),
-      ),
-      PATH: `${join(root, "bin")}:${process.env.PATH}`,
-      // (one file at once, whatever the machine)
-      SX_MEM_MIB: "4000",
-      // (the tool's temporary folders and compile cache inside the checkout, which the test removes)
-      TMPDIR: root,
-      NODE_COMPILE_CACHE: join(root, "cache"),
-    },
+    // (also without the runner's `NODE_TEST_CONTEXT`, as the tool's own `run()` would otherwise skip every file)
+    env: boundary(root),
   });
   return {
     status: result.status,
@@ -160,13 +169,27 @@ test(
       const { status, out, module } = measure(root, []);
       assert.equal(status, 0, out);
       assert.match(out, /measure-test-files: 4 files, /u);
-      // (the local runs take well under the listing's 10 s, so only the type-core file is listed)
-      // (by name only: a local run's seconds depend on the machine's load)
-      assert.deepEqual(
-        costly(module).map((line) => line.split(":")[0]),
-        [`"sub/type-core-z.test.js"`],
+      // (the type-core file is listed whatever its seconds; an ordinary file is listed only when a loaded machine takes
+      // 10 s or more on it, so the others' count follows the listing)
+      const listed = costly(module).map((line) => JSON.parse(line.split(":")[0]));
+      assert.ok(listed.includes("sub/type-core-z.test.js"), module);
+      for (const file of listed)
+        assert.ok(
+          [
+            "a.test.js",
+            "sub/a.test.js",
+            "type-core-dir/plain.test.js",
+            "sub/type-core-z.test.js",
+          ].includes(file),
+          file,
+        );
+      assert.match(
+        module,
+        new RegExp(
+          `every other test file in the same runs, their mean \\(${4 - listed.length} files\\)`,
+          "u",
+        ),
       );
-      assert.match(module, /every other test file in the same runs, their mean \(3 files\)/u);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
@@ -178,14 +201,15 @@ test(
   { timeout: 60_000 },
   () => {
     const root = checkout();
-    // Three runs of two test jobs each, the last job's pre-test step 100, 120 and 140 s.
+    // Three runs of two test jobs each, the last job's pre-test step 100, 120 and 140 s; the type-core file's 0.25 s
+    // is listed as 1, the least a listed file weighs.
     const runs = (missing) =>
       Object.fromEntries(
         [
           // (run 11 lacks `sub/a.test.js`, so its median is that of an even count, 30 and 14)
-          [11, 100, [null, 1, 2, 3]],
-          [12, 120, [30, 2, 2, 4]],
-          [13, 140, [14, 3, 2, 5]],
+          [11, 100, [null, 1, 0.25, 3]],
+          [12, 120, [30, 2, 0.25, 4]],
+          [13, 140, [14, 3, 0.25, 5]],
         ].map(([id, pretest, [subA, a, typeCore, plain]]) => [
           id,
           {
@@ -208,7 +232,7 @@ test(
       assert.equal(status, 0, out);
       assert.match(module, /--write --from-ci 11 12 13/u);
       // (listed: the file of 10 s or more and the type-core file; the others' mean is that of 2 and 4)
-      assert.deepEqual(costly(module), [`"sub/a.test.js": 22,`, `"sub/type-core-z.test.js": 2,`]);
+      assert.deepEqual(costly(module), [`"sub/a.test.js": 22,`, `"sub/type-core-z.test.js": 1,`]);
       assert.match(module, /their mean \(2 files\)\. \*\/\nexport const otherTestSeconds = 3\.0;/u);
       assert.match(module, /export const pretestSeconds = 120;/u);
       assert.match(module, /export const testFilesAtOnce = 3;/u);
@@ -221,6 +245,94 @@ test(
       assert.equal(refused.module, before);
     } finally {
       rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "no git setting of the host reaches the fixture: each hostile one alone, and all at once",
+  { timeout: 120_000 },
+  () => {
+    const hostile = mkdtempSync(join(tmpdir(), "measure-test-files-host-"));
+    const script = (path, code) => {
+      mkdirSync(dirname(path), { recursive: true });
+      writeFileSync(path, `#!/bin/sh\nexit ${code}\n`);
+      chmodSync(path, 0o755);
+    };
+    script(join(hostile, "hooks/pre-commit"), 37);
+    script(join(hostile, "templates/hooks/pre-commit"), 38);
+    script(join(hostile, "fsmonitor"), 39);
+    const members = [
+      ["a failing hook path", [["core.hooksPath", join(hostile, "hooks")]]],
+      [
+        "commit signing",
+        [
+          ["commit.gpgSign", "true"],
+          ["gpg.program", "false"],
+        ],
+      ],
+      ["a template folder with a hook", [["init.templateDir", join(hostile, "templates")]]],
+      ["another default branch", [["init.defaultBranch", "elsewhere"]]],
+      ["a file-system monitor", [["core.fsmonitor", join(hostile, "fsmonitor")]]],
+    ];
+    const saved = { ...process.env };
+    const restore = () => {
+      for (const name of Object.keys(process.env)) if (!(name in saved)) delete process.env[name];
+      Object.assign(process.env, saved);
+    };
+    try {
+      for (const [label, settings] of [
+        ...members,
+        ["all at once", members.flatMap(([, entries]) => entries)],
+      ]) {
+        // Every way a host gives git a setting: global, system and HOME's files, the environment's own entries, and
+        // a template folder.
+        const home = mkdtempSync(join(hostile, "home-"));
+        const file = join(home, ".gitconfig");
+        writeFileSync(
+          file,
+          settings
+            .map(([key, value]) => {
+              const [section, name] = key.split(".");
+              return `[${section}]\n\t${name} = ${value}\n`;
+            })
+            .join(""),
+        );
+        Object.assign(process.env, {
+          HOME: home,
+          GIT_CONFIG_GLOBAL: file,
+          GIT_CONFIG_SYSTEM: file,
+          GIT_TEMPLATE_DIR: join(hostile, "templates"),
+          GIT_CONFIG_COUNT: String(settings.length),
+          ...Object.fromEntries(
+            settings.flatMap(([key, value], n) => [
+              [`GIT_CONFIG_KEY_${n}`, key],
+              [`GIT_CONFIG_VALUE_${n}`, value],
+            ]),
+          ),
+        });
+        // (the host's git sees each setting)
+        for (const [key, value] of settings)
+          assert.equal(
+            spawnSync("git", ["config", "--get", key], { encoding: "utf8" }).stdout.trim(),
+            value,
+            `${label}: ${key}`,
+          );
+        const root = checkout();
+        try {
+          if (label === "all at once") {
+            const { status, out, module } = measure(root, []);
+            assert.equal(status, 0, out);
+            assert.match(module, /sub\/type-core-z\.test\.js/u);
+          }
+        } finally {
+          rmSync(root, { recursive: true, force: true });
+        }
+        restore();
+      }
+    } finally {
+      restore();
+      rmSync(hostile, { recursive: true, force: true });
     }
   },
 );
