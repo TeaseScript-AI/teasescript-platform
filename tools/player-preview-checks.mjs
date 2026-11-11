@@ -705,11 +705,9 @@ async function runGroup(browserPage, run, url, artifacts) {
       pagePrototype[name] = async function (...args) {
         const response = await navigate.apply(this, args);
         await this.waitForSelector("#player-shell", { state: "attached" });
-        // The Player runs no script before explicit Start; groups other than the activation checks start it here.
-        if (!this.keepActivation) {
-          const start = this.locator("[data-session-activation] button");
-          if (await start.count()) await start.click();
-        }
+        // The Player runs no script before explicit Start; groups other than the activation checks start it here, once
+        // Start or Continue appears, which can be after the shell.
+        if (!this.keepActivation) await this.locator("[data-session-start]").click();
         return response;
       };
     }

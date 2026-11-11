@@ -1,15 +1,29 @@
 import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, relative } from "node:path";
 import { test } from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import {
+  CITATION_FIXTURES,
   citationCounts,
   FORECASTS,
   forecastsIn,
   glossaryFindings,
   glossaryRows,
   labelsIn,
+  listedTextFindings,
+  recordEntries,
+  tableCitationsIn,
   unresolvedPointers,
+  unresolvedRevisionsIn,
 } from "./check-comment-forecasts.mjs";
+import { repositoryRoot } from "./files.mjs";
+import { isolateGit } from "../fixture-git.mjs";
+
+isolateGit();
 
 // A forecast of each form; the citations #1977 allows; and prose and counted references, which are no forecasts.
 const FORECAST_TEXTS = {
@@ -89,19 +103,368 @@ test("the counted citations are counted in comments only", () => {
   assert.deepEqual(
     citationCounts(
       "a.ts",
-      `// TABLE r4.1 and TABLE r4.2, TABLE § 3\nconst s = "TABLE r4.9";\n/* TABLE § 4 */\n`,
+      `// r4.1 and TABLE B2, TABLE F3\nconst s = "r4.9 TABLE q1";\n/* r4.4 */\n`,
     ),
-    { "TABLE r4": 2, "TABLE §": 2 },
+    { "bare r4.N": 2, "other TABLE": 2 },
   );
 });
 
-test("a bare revision and TABLE with another id are counted too, a TABLE revision once", () => {
+test("a TABLE revision or section, wrapped or not, is no counted form: the text check finds it", () => {
   assert.deepEqual(
     citationCounts(
       "a.ts",
-      `// TABLE r4.1, r4.2 and F19 (r4.3), TABLE B1\nconst s = "r4.9, TABLE q1";\n`,
+      `/* TABLE B1 here\n * and more\n * TABLE r4.1, TABLE B1, TABLE\n * § 3 */\n`,
     ),
-    { "TABLE r4": 1, "bare r4.N": 2, "other TABLE": 1 },
+    { "bare r4.N": 1, "other TABLE": 1 },
+  );
+  // a name whose citation is on the next line only
+  assert.deepEqual(citationCounts("a.ts", "/* TABLE B1\n * words before r4.5 */\n"), {
+    "bare r4.N": 1,
+  });
+});
+
+test("a line naming TABLE and then r4 or § is found in any file's text, wrapped or not, with its line", () => {
+  const found = (fileName, text) =>
+    tableCitationsIn(fileName, text).map(({ line, text: citation }) => [line, citation]);
+  // a document, wrapped in a paragraph and in a block quote
+  assert.deepEqual(
+    found(
+      "docs/a.md",
+      "# A\n\nAs ruled (TABLE r4.390).\nThe pins (TABLE\nr4.50 states)\n\n> TABLE\n> § 2\n",
+    ),
+    [
+      [3, "TABLE r4.390)."],
+      [4, "TABLE"],
+      [7, "TABLE"],
+    ],
+  );
+  // a string, code and a comment over two lines, and data
+  assert.deepEqual(
+    found(
+      "tests/a.test.ts",
+      'test("a site (TABLE §3.4, r4.62)", () => {});\n/*\n * TABLE\n * r4.1\n */\n',
+    ),
+    [
+      [1, 'TABLE §3.4, r4.62)", () => {});'],
+      [3, "TABLE"],
+    ],
+  );
+  assert.deepEqual(found("tests/a.json", '{"reason": "TABLE r4.2"}\r\n'), [[1, 'TABLE r4.2"}']]);
+  // one finding per line, from its first name; a wrapped one after another name on its line
+  assert.deepEqual(
+    found("docs/d.md", "TABLE B1 and TABLE r4.1, TABLE §2\nTABLE B1, see TABLE\n§ 3\n"),
+    [
+      [1, "TABLE B1 and TABLE r4.1, TABLE §2"],
+      [2, "TABLE B1, see TABLE"],
+    ],
+  );
+  // the second final's escapes: markup around a name at a line's end, an entity before the revision on the next
+  assert.deepEqual(
+    found(
+      "docs/e.md",
+      "<strong>TABLE</strong>\n<strong>r4.5</strong>\nSee TABLE\n&nbsp;r4.5 and TABLE (see\nr4.1)\n",
+    ),
+    [
+      [1, "TABLE</strong>"],
+      [3, "TABLE"],
+      [4, "TABLE (see"],
+    ],
+  );
+  // outside the rule: other ids, a longer revision number or word, another letter case, a revision before the name,
+  // a revision two lines on
+  assert.deepEqual(
+    found(
+      "docs/b.md",
+      "TABLE B1, TABLE F18 and TABLE r40 or xr4.1\n\nTABLEr4.1, TABLES r4.1, TABLE² r4.1\n\ntable r4.1, Table §2, TABLE R4.1\n\nr4.1 before TABLE\n\nTABLE (see\nthe row\nr4.1)\n",
+    ),
+    [],
+  );
+  // a letter or digit beyond ASCII on either edge
+  assert.deepEqual(found("docs/f.md", "éTABLE r4.5\n\nTABLE r4² and TABLE r4٣\n"), []);
+  // a citing last line without a line break
+  assert.deepEqual(found("docs/g.md", "TABLE r4.5"), [[1, "TABLE r4.5"]]);
+});
+
+test("every ASCII character that is no letter or digit may stand between TABLE and r4 or §, once or twice", () => {
+  const between = [];
+  for (let code = 0; code < 128; code++) {
+    const character = String.fromCharCode(code);
+    if (!/[\p{L}\p{N}]/u.test(character)) between.push(character, character + character);
+  }
+  assert.equal(between.length, 2 * (128 - 62));
+  for (const text of between)
+    for (const cited of ["r4.1", "§3"])
+      assert.equal(
+        tableCitationsIn("docs/a.md", `See TABLE${text}${cited}.\n`).length,
+        // (two line breaks leave a blank line between: no longer one line or a wrapped one)
+        text === "\n\n" ? 0 : 1,
+        JSON.stringify(`TABLE${text}${cited}`),
+      );
+  // emphasis around the whole citation
+  assert.equal(tableCitationsIn("docs/a.md", "_TABLE r4.1_ and\n__TABLE §2__\n").length, 2);
+});
+
+test("whatever stands between TABLE and r4 or § on its line, markup or words, the line is found", () => {
+  // review round 3's eight misses, by name
+  for (const text of [
+    "TABLE<!-- a < b -->r4.1",
+    "TABLE<!-- a < b -->§3",
+    "TABLE<!-- a > b -->r4.1",
+    "TABLE<!-- a > b -->§3",
+    'TABLE<span title="a>b">r4.1',
+    'TABLE<span title="a>b">§3',
+    'TABLE<span title="a<b">r4.1',
+    'TABLE<span title="a<b">§3',
+  ])
+    assert.equal(tableCitationsIn("docs/a.md", `${text}\n`).length, 1, text);
+  const fillers = [
+    "<br>",
+    "&nbsp;",
+    "<!-- revision -->",
+    "<!-- <b> -->",
+    '<span title="r4">',
+    '<a href="x.md">',
+    "](TABLE.md) ",
+    " _",
+    " **",
+    " | record | ",
+    " revision ",
+    " see the row ",
+    " é ٣ ",
+    " (B1, F18) and ",
+    " TABLE ",
+    " –​",
+  ];
+  for (const filler of fillers)
+    for (const cited of ["r4.1", "§3"])
+      assert.equal(
+        tableCitationsIn("docs/a.md", `TABLE${filler}${cited}\n`).length,
+        1,
+        JSON.stringify(`TABLE${filler}${cited}`),
+      );
+});
+
+test("a revision number names an entry of the accepted record, each end of a range too, outside the record's pages", () => {
+  // an entry is a level-3 heading as Markdown reads it: trailing spaces count as nothing, a fenced line is no heading
+  const entries = recordEntries([
+    "# Sharing\n\n### r4-38\n\n### section-2-f12\n",
+    "# Oracles\n\n### r4-165  \n\n### r4-72\t\n\nnot a heading: ### r4-7\n\n```\n### r4-8\n```\n\n~~~\n### r4-9\n~~~\n",
+    "#### r4-10\n\n### r4-11-other\n\n### R4-12\n",
+  ]);
+  assert.deepEqual([...entries].sort(), ["165", "38", "72"]);
+  const missing = (fileName, text) =>
+    unresolvedRevisionsIn(fileName, text, entries).map(({ line, number }) => [line, number]);
+  // a document, a link's text, a string, data and a range
+  assert.deepEqual(
+    missing(
+      "docs/a.md",
+      "# A\n\nAs [r4.38](x.md#r4-38) and r4.165 hold, r4.9999 names none.\n\nRange r4.38–r4.9998, r4.12–r4.165.\n",
+    ),
+    [
+      [3, "9999"],
+      [5, "9998"],
+      [5, "12"],
+    ],
+  );
+  assert.deepEqual(missing("tests/a.test.ts", 'test("a rule (C9 r4.9997)", () => {});\n'), [
+    [1, "9997"],
+  ]);
+  assert.deepEqual(missing("tests/a.json", '{"closes": "r4.9996 until #1"}\r\n'), [[1, "9996"]]);
+  // other spellings and longer tokens are no revision numbers; an anchor is the doc-links check's
+  // a number is its digits as written, leading zeros included, so 038 names no entry 38
+  assert.deepEqual(
+    missing("docs/b.md", "R4.1, xr4.1, ér4.9999, r4.9999٢, r4-9999, x.r4.2, r4.1a, r4.038\n"),
+    [
+      [1, "1"],
+      [1, "038"],
+    ],
+  );
+  // the record's own pages and this test are outside the rule
+  assert.deepEqual(
+    missing("docs/specifications/type-inference-accepted-record/admission.md", "built as r4.167\n"),
+    [],
+  );
+  assert.deepEqual(missing(CITATION_FIXTURES, "r4.9999\n"), []);
+  assert.deepEqual(missing("docs/specifications/other.md", "r4.9999\n"), [[1, "9999"]]);
+});
+
+test("a heading the doc-links check resolves is an entry exactly when its level and text are the rule's, form by form", () => {
+  // [form, heading with N for its number, doc-links resolves its anchor, the revision rule takes it as an entry]
+  const forms = [
+    ["plain", "### r4-N", true, true],
+    ["strikethrough", "### ~~r4-N~~", true, true],
+    ["emphasis", "### *r4-N*", true, true],
+    ["strong", "### **r4-N**", true, true],
+    ["inline code", "### `r4-N`", true, true],
+    ["escaped hyphen", "### r4\\-N", true, true],
+    ["character reference", "### r4&#45;N", true, true],
+    ["link", "### [r4-N](#r4-N)", true, true],
+    ["reference link", "### [r4-N][eN]\n\n[eN]: #r4-N", true, true],
+    ["trailing hashes", "### r4-N ###", true, true],
+    ["inline HTML", "### <em>r4-N</em>", true, true],
+    ["inline HTML comment", "### r4<!-- c -->-N", true, true],
+    ["inline HTML span", "### <span>r4-N</span>", true, true],
+    ["image beside the text", "### r4-N![alt](i.png)", true, true],
+    // (outside the rule: another level, other text; and no Markdown heading at all)
+    ["setext, level 2", "r4-N\n---", true, false],
+    ["scheme autolink, text `r4-N:`", "### <r4-N:>", true, false],
+    ["HTML in angle brackets", "### <r4-N>", false, false],
+    ["HTML heading", "<h3>r4-N</h3>", false, false],
+  ].map(([form, heading, links, entry], index) => {
+    const number = String(9901 + index);
+    return { form, heading: heading.replaceAll("N", number), number, links, entry };
+  });
+  const root = mkdtempSync(join(tmpdir(), "record-headings-"));
+  try {
+    const record = "docs/specifications/type-inference-accepted-record";
+    const write = (file, text) => {
+      mkdirSync(dirname(join(root, file)), { recursive: true });
+      writeFileSync(join(root, file), text);
+    };
+    execFileSync("git", ["init", "-q"], { cwd: root });
+    write(".gitignore", "node_modules\n");
+    symlinkSync(join(repositoryRoot, "node_modules"), join(root, "node_modules"));
+    write(`${record}/page.md`, `# Page\n\n${forms.map(({ heading }) => heading).join("\n\n")}\n`);
+    write(
+      "docs/refs.md",
+      forms
+        .map(({ number }) => `[r4.${number}](${record.slice(5)}/page.md#r4-${number})`)
+        .join("\n\n") + "\n",
+    );
+    const links = spawnSync(
+      process.execPath,
+      [fileURLToPath(new URL("../repository-checks/doc-links.mjs", import.meta.url))],
+      { cwd: root, encoding: "utf8" },
+    );
+    const unresolved = new Set(
+      [...links.stderr.matchAll(/#r4-(\d+)/gu)].map(([, number]) => number),
+    );
+    const refused = new Set(
+      listedTextFindings(root)
+        .filter(({ fileName }) => fileName === "docs/refs.md")
+        .map(({ message }) => /^revision (\d+)/u.exec(message)?.[1]),
+    );
+    assert.deepEqual(
+      forms.map(({ form, number }) => [form, !unresolved.has(number), !refused.has(number)]),
+      forms.map(({ form, links: resolves, entry }) => [form, resolves, entry]),
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("the TABLE citation check reads every file Git lists, by its exact path, and refuses a name it cannot read", async () => {
+  const root = mkdtempSync(join(tmpdir(), "table-citations-"));
+  try {
+    const git = (...args) => execFileSync("git", args, { cwd: root, stdio: "pipe" });
+    const write = (file, text) => {
+      mkdirSync(dirname(join(root, file)), { recursive: true });
+      writeFileSync(join(root, file), text);
+    };
+    git("init", "-q");
+    write(".gitignore", "ignored/\nnode_modules\n");
+    // the lint runner's entry, `checkCommentForecasts`, run on this repository: its module and the files it reads
+    for (const file of ["check-comment-forecasts.mjs", "comments.mjs", "files.mjs"])
+      write(`tools/oxlint/${file}`, readFileSync(new URL(file, import.meta.url)));
+    write(
+      "tools/repository-checks/markdown.mjs",
+      readFileSync(new URL("../repository-checks/markdown.mjs", import.meta.url)),
+    );
+    write("tools/oxlint/comment-forecasts-allowed.json", "[]\n");
+    write("tools/oxlint/comment-citations.json", "{}\n");
+    // entries on every record page Git lists: the README, a nested page and another Markdown extension too
+    const record = "docs/specifications/type-inference-accepted-record";
+    write(`${record}/README.md`, "# Record\n\n## Labels\n\n### r4-40\n");
+    // (a struck-through heading, GitHub's mark, and one with inline HTML, read as the doc-links check reads them)
+    write(
+      `${record}/sharing.md`,
+      "# S\n\n### r4-38\n\n### ~~r4-9997~~\n\n### <em>r4-9996</em>\n\nas r4.167\n",
+    );
+    // files in the record's folder that are no pages are under the rule
+    write(`${record}/notes.json`, '{"why": "r4.9994"}\n');
+    write(`${record}/nested/notes.txt`, "r4.9993\n");
+    write(`${record}/nested/entry.md`, "# N\n\n### r4-41\n");
+    write(`${record}/other.markdown`, "# O\n\n### r4-42\n");
+    write(
+      "docs/rev.md",
+      `Kept r4.38, r4.40, r4.41 and r4.42.\n\nGone r4.9999.\n\nStruck [r4.9997](${record.slice(5)}/sharing.md#r4-9997)` +
+        ` and marked [r4.9996](${record.slice(5)}/sharing.md#r4-9996)[^n].\n\n` +
+        // (a footnote, GitHub's: without its extension this line is a definition naming a missing file)
+        `[^n]: [page](${record.slice(5)}/sharing.md)\n`,
+    );
+    write("data/rev.json", '{"why": "r4.9995"}\n');
+    write("src/rev.ts", 'const reason = "r4.9998 and r4.38";\n');
+    symlinkSync(join(repositoryRoot, "node_modules"), join(root, "node_modules"));
+    write("docs/a.md", "# A\n\nAs ruled (TABLE r4.1).\n");
+    write("src/a.ts", 'const reason = "a site (TABLE §2)";\n');
+    write(CITATION_FIXTURES, 'const fixture = "TABLE r4.3";\n');
+    write(`other/${CITATION_FIXTURES}`, 'const fixture = "TABLE r4.4";\n');
+    write("gone.md", "TABLE r4.5\n");
+    write("data.bin", "x\0TABLE r4.6\n");
+    write("\uFEFFmarked.md", "TABLE r4.10\n");
+    git("add", "-A");
+    rmSync(join(root, "gone.md"));
+    write("untracked.txt", "TABLE r4.7\n");
+    write("ignored/a.md", "TABLE r4.8\n");
+    const expected = [
+      "\uFEFFmarked.md:1",
+      "docs/a.md:3",
+      `other/${CITATION_FIXTURES}:1`,
+      "src/a.ts:1",
+      "untracked.txt:1",
+    ].sort();
+    // each citation fixture's revision has no entry here, so it is a revision finding too (`src/a.ts` cites a section)
+    const revisions = [
+      ...expected.filter((found) => found !== "src/a.ts:1"),
+      "docs/rev.md:3",
+      "src/rev.ts:1",
+      "data/rev.json:1",
+      `${record}/notes.json:1`,
+      `${record}/nested/notes.txt:1`,
+      // (a binary file is read for revision numbers, not for the record's name)
+      "data.bin:1",
+    ].sort();
+    const at = (findings, kind) =>
+      findings
+        .filter(({ message }) => message.includes(kind))
+        .map(({ fileName, line }) => `${fileName}:${line}`)
+        .sort();
+    const listed = listedTextFindings(root);
+    // the doc-links check resolves the struck-through heading the revision rule takes as an entry
+    const links = spawnSync(
+      process.execPath,
+      [fileURLToPath(new URL("../repository-checks/doc-links.mjs", import.meta.url))],
+      { cwd: root, encoding: "utf8" },
+    );
+    assert.equal(links.status, 0, links.stderr);
+    assert.deepEqual(at(listed, "cites a record that is not in the repository"), expected);
+    assert.deepEqual(at(listed, "names no entry of the accepted record"), revisions);
+    const entry = await import(
+      pathToFileURL(join(root, "tools/oxlint/check-comment-forecasts.mjs")).href
+    );
+    const entryFindings = entry.checkCommentForecasts(root);
+    assert.deepEqual(at(entryFindings, "cites a record that is not in the repository"), expected);
+    assert.deepEqual(at(entryFindings, "names no entry of the accepted record"), revisions);
+    writeFileSync(
+      Buffer.concat([Buffer.from(`${root}/name-`), Buffer.from([0xff]), Buffer.from(".md")]),
+      "TABLE r4.9\n",
+    );
+    assert.throws(() => listedTextFindings(root), /whose name is not UTF-8/u);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("only this test's own text is exempt from the TABLE citation check, by its path", () => {
+  const path = fileURLToPath(import.meta.url);
+  assert.equal(relative(repositoryRoot, path), CITATION_FIXTURES);
+  const own = readFileSync(path, "utf8");
+  assert.deepEqual(tableCitationsIn(CITATION_FIXTURES, own), []);
+  assert.ok(tableCitationsIn("tools/oxlint/other.test.mjs", own).length > 0);
+  const check = new URL("./check-comment-forecasts.mjs", import.meta.url);
+  assert.deepEqual(
+    tableCitationsIn("tools/oxlint/check-comment-forecasts.mjs", readFileSync(check, "utf8")),
+    [],
   );
 });
 

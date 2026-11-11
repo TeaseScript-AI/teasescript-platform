@@ -359,7 +359,7 @@ export const NARROWING_FAMILIES: readonly WorkFamily[] = [
   {
     name: "W34-tested-copies",
     measures:
-      "§13.3 r4.36: a test on a field of the source before each whole copy, k copies read at k fields",
+      "§13.3: a test on a field of the source before each whole copy, k copies read at k fields",
     program: (k) =>
       main(
         lines(

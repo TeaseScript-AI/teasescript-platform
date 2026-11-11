@@ -408,7 +408,7 @@ function published(
   return { text: `${answers.text}\n${route.text}`, record: answers.record, sited: answers.sited };
 }
 
-test("the core's sharing of answers is output-neutral for every family, witness and record, in both orders, and its record is the same in both (TABLE r4.72, r4.86)", (t) => {
+test("the core's sharing of answers is output-neutral for every family, witness and record, in both orders, and its record is the same in both", (t) => {
   const all = programs();
   const differing: string[] = [];
   let runs = 0;

@@ -61,7 +61,7 @@ const writer = (kind: string, start: number, file = 0): Writer => ({
 const unknown = (reasons: number, at: number, fields: ItemFields = {}): Item =>
   makeItem("unknown", writer("assignment", at), { cert: "pos", reasons, ...fields });
 
-test("one unknown's word is its first reason's in the rank external, opaque, deferred, missing (TABLE §1)", () => {
+test("one unknown's word is its first reason's in the rank external, opaque, deferred, missing", () => {
   const { external, opaque, deferred, missing, budget } = REASON;
   for (const [reasons, word] of [
     [external, "unknown"],

@@ -6,6 +6,10 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { isolateGit } from "../fixture-git.mjs";
+
+isolateGit();
+
 // The check over the two Player READMEs, run in a Git checkout that holds them.
 
 const repositoryRoot = fileURLToPath(new URL("../../", import.meta.url));

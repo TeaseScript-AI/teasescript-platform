@@ -17,6 +17,9 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import { addedLinesOfPatch, SUMMARY_KINDS } from "./structure-report.mjs";
+import { isolateGit } from "./fixture-git.mjs";
+
+isolateGit();
 
 const tool = fileURLToPath(new URL("./structure-report.mjs", import.meta.url));
 
@@ -44,8 +47,6 @@ test(
       execFileSync(process.execPath, [tool, ...args], { cwd: root, encoding: "utf8" });
     try {
       git("init", "-q");
-      git("config", "user.email", "t@t");
-      git("config", "user.name", "t");
       const folder = (dir, count) =>
         Object.fromEntries(
           Array.from({ length: count }, (_, i) => [
@@ -145,8 +146,6 @@ test(
     const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
     try {
       git("init", "-q");
-      git("config", "user.email", "t@t");
-      git("config", "user.name", "t");
       // a configuration that changes what `git diff` prints: an external diff that prints nothing, a textconv driver
       // that doubles every line, no or other prefixes, relative paths and colour
       for (const [key, value] of [
@@ -254,8 +253,6 @@ function history(base, change, setUp = () => {}) {
   const root = mkdtempSync(join(tmpdir(), "structure-report-git-"));
   const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
   git("init", "-q");
-  git("config", "user.email", "t@t");
-  git("config", "user.name", "t");
   setUp(root, git);
   write(root, base);
   git("add", "-A");
@@ -723,8 +720,6 @@ test(
       execFileSync(process.execPath, [tool, ...args], { cwd: root, encoding: "utf8" });
     try {
       git("init", "-q");
-      git("config", "user.email", "t@t");
-      git("config", "user.name", "t");
       // holding a 3-line function at lines 3-5
       const big = longFunction("big", 400).replace(
         "  const v1 = 1;\n  const v2 = 2;\n  const v3 = 3;",
@@ -776,8 +771,6 @@ test("--moved reads a file name with spaces as Git names it", { timeout: 60_000 
     execFileSync(process.execPath, [tool, ...args], { cwd: root, encoding: "utf8" });
   try {
     git("init", "-q");
-    git("config", "user.email", "t@t");
-    git("config", "user.name", "t");
     const big = longFunction("big", 400);
     write(root, { "src/a.ts": `${big}\nexport const small = 1;\n` });
     git("add", "-A");
@@ -1007,8 +1000,6 @@ test(
       execFileSync(process.execPath, [tool, ...args], { cwd: root, encoding: "utf8" });
     try {
       git("init", "-q");
-      git("config", "user.email", "t@t");
-      git("config", "user.name", "t");
       const importer = (from, extra = "") =>
         `import { f } from "${from}";\n${lines(1001)}\n${extra}`;
       write(root, { "src/big.ts": importer("./a.js"), "src/a.ts": "export const f = 1;\n" });
@@ -1172,8 +1163,6 @@ test("--moved reads no gitlink as a file: a submodule replaced by a regular file
   const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
   try {
     git("init", "-q");
-    git("config", "user.email", "t@t");
-    git("config", "user.name", "t");
     write(root, { "src/a.ts": "export const kept = 1;\n" });
     git("add", "-A");
     git("update-index", "--add", "--cacheinfo", `160000,${"1".repeat(40)},src/sub.ts`);
@@ -1211,8 +1200,6 @@ test("without node_modules it links main's before it reports, and stops when the
       execFileSync("git", args, { cwd: join(checkout, "work"), encoding: "utf8" }).trim();
     mkdirSync(join(checkout, "work"));
     git("init", "-q");
-    git("config", "user.email", "t@t");
-    git("config", "user.name", "t");
     write(join(checkout, "work"), { "src/a.ts": "export const a = 1;\n" });
     git("add", "-A");
     git("commit", "-q", "-m", "base");

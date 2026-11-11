@@ -48,7 +48,7 @@ test("Monaco markers retain canonical diagnostic code, severity, and range", () 
   });
 });
 
-test("an error, a warning and an information take Monaco's three levels (TABLE r4.54)", () => {
+test("an error, a warning and an information take Monaco's three levels", () => {
   const range = createSourceSpan(createSourcePosition(0, 0, 0), createSourcePosition(0, 0, 0));
   const levels = toMonacoMarkers(
     [

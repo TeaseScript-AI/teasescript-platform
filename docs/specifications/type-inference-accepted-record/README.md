@@ -7,6 +7,8 @@ page and anchor; a comment that only restates a rule cites nothing.
 
 - **Anchors:** each entry's heading is its anchor, `r4-N` for a revision (the number it had in the accepted record it
   came from) and `section-…` for a rule of the design's tables. A heading never changes and a number is never reused.
+  `r4.N` in text outside these pages names the entry `r4-N`; the citation lint refuses one that names no entry, and
+  proves that the entry exists, not that it carries the sentence's claim.
 - **Authority:** an entry is canonical for its rule, overridden only within the exact scope of a later accepted ADR,
   V30 (`accepted-syntaxes-v30.md`), or a later entry here that names it.
 - **Adding an entry:** the pull request that relies on a new rule adds it on its topic's page, in number order, with

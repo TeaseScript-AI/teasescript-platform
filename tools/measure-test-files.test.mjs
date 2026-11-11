@@ -13,6 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import { gitIsolated } from "./fixture-git.mjs";
 
 // The tool and the helpers it imports, run in a checkout of their own, with `npm` and `gh` faked on the `PATH`.
 const TOOLS = [
@@ -28,26 +29,17 @@ const SUITE = ["a", "sub/a", "sub/type-core-z", "type-core-dir/plain", "fixtures
 
 /**
  * The environment of every git and tool process the test starts, in checkout `root`, built from the test's own
- * environment: git reads no global or system configuration, template or inherited `GIT_*` setting, and `HOME` is the
- * checkout's, so no host hook, signing, default branch or file-system monitor reaches the fixture. Also `npm` and
+ * environment: `gitIsolated`, and `HOME` the checkout's. Also `npm` and
  * `gh` faked first on the `PATH`, and the tool's temporary folders and compile cache inside the checkout, which the
  * test removes.
  */
 function boundary(root) {
   const host = Object.entries(process.env).filter(
-    ([name]) =>
-      !name.startsWith("GIT_") && !["HOME", "XDG_CONFIG_HOME", "NODE_TEST_CONTEXT"].includes(name),
+    ([name]) => !["HOME", "XDG_CONFIG_HOME", "NODE_TEST_CONTEXT"].includes(name),
   );
   return {
-    ...Object.fromEntries(host),
+    ...gitIsolated(Object.fromEntries(host)),
     HOME: join(root, "home"),
-    GIT_CONFIG_GLOBAL: "/dev/null",
-    GIT_CONFIG_NOSYSTEM: "1",
-    GIT_TEMPLATE_DIR: join(root, "home/templates"),
-    GIT_AUTHOR_NAME: "t",
-    GIT_AUTHOR_EMAIL: "t@t",
-    GIT_COMMITTER_NAME: "t",
-    GIT_COMMITTER_EMAIL: "t@t",
     PATH: `${join(root, "bin")}:${process.env.PATH}`,
     // (one file at once, whatever the machine)
     SX_MEM_MIB: "4000",
@@ -90,14 +82,15 @@ function fill(root) {
   }
   // `npm run build` and `npm run check:pretest` pass at once: the files are compiled already.
   write("bin/npm", "#!/bin/sh\nexit 0\n", 0o755);
-  // `gh` answers the three requests the tool makes from `gh.json` (each run's pre-test and oracle step seconds and test
-  // jobs' file seconds), in the real shapes, and fails any other.
+  // `gh` answers the four requests the tool makes from `gh.json` (CI's newest passed runs as `list`, each run's pre-test
+  // and oracle step seconds and test jobs' file seconds), in the real shapes, and fails any other.
   write(
     "bin/gh",
     `#!${process.execPath}
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 const runs = JSON.parse(readFileSync(${JSON.stringify(join(root, "gh.json"))}, "utf8"));
 const args = process.argv.slice(2);
+appendFileSync(${JSON.stringify(join(root, "gh.log"))}, args.join(" ") + "\\n");
 const where = /^repos\\/\\{owner\\}\\/\\{repo\\}\\/actions\\/runs\\/(\\d+)(\\/jobs)?$/.exec(args[1] ?? "");
 const start = Date.parse("2026-11-01T00:00:00Z");
 // (a run's \`conclusion\` defaults to success; \`failed\` is a test job that failed, \`unstarted\` one that never started)
@@ -121,6 +114,11 @@ if (args.join(" ") === "run download " + args[2] + " --pattern test-file-seconds
     mkdirSync(folder, { recursive: true });
     writeFileSync(folder + "/test-file-seconds.json", JSON.stringify({ filesAtOnce: 3, seconds }));
   });
+else if (args.join(" ") === "api repos/{owner}/{repo}/actions/workflows/ci.yml/runs?event=pull_request&status=success&per_page=100 -q [.workflow_runs[] | {id, bases: [.pull_requests[].base.ref]}]" && (runs.list || "listText" in runs || runs.listFails)) {
+  // (\`listText\` answers as given; \`listFails\` fails as gh does)
+  if (runs.listFails) { process.stderr.write("HTTP 502: Bad Gateway\\n"); process.exit(1); }
+  process.stdout.write(runs.listText ?? JSON.stringify(runs.list.map((run) => ({ id: run.id, bases: run.pull_requests.map((pull) => pull.base.ref) }))));
+}
 else if (args[0] === "api" && where && runs[where[1]] && args.length === 2 && !where[2])
   process.stdout.write(JSON.stringify({ head_sha: where[1].repeat(40).slice(0, 40), conclusion: runs[where[1]].conclusion ?? "success" }));
 else if (args[0] === "api" && where && runs[where[1]] && where[2]) {
@@ -135,7 +133,7 @@ else if (args[0] === "api" && where && runs[where[1]] && where[2]) {
 `,
     0o755,
   );
-  mkdirSync(join(root, "home/templates"), { recursive: true });
+  mkdirSync(join(root, "home"), { recursive: true });
   for (const args of [
     ["init", "-q"],
     ["commit", "-q", "--allow-empty", "-m", "c"],
@@ -145,7 +143,7 @@ else if (args[0] === "api" && where && runs[where[1]] && where[2]) {
   }
 }
 
-/** The tool run with `args` in `root`: its exit status, its output, and the module it wrote. */
+/** The tool run with `args` in `root`: its exit status, its output (also by stream), and the module it wrote. */
 function measure(root, args) {
   const result = spawnSync(process.execPath, ["tools/measure-test-files.mjs", "--write", ...args], {
     cwd: root,
@@ -156,6 +154,8 @@ function measure(root, args) {
   return {
     status: result.status,
     out: result.stdout + result.stderr,
+    stdout: result.stdout,
+    stderr: result.stderr,
     module: readFileSync(join(root, "tools/costly-test-files.mjs"), "utf8"),
   };
 }
@@ -205,7 +205,7 @@ test(
 );
 
 test(
-  "--from-ci takes each file's median over the runs, folders' files included, counts a run by its test jobs, and refuses a file no run measured",
+  "--from-ci takes each file's median over the runs, folders' files included, counts a run by its test jobs, selects runs by a pull request's base, and refuses a file no run measured",
   { timeout: 60_000 },
   () => {
     const root = checkout();
@@ -272,6 +272,107 @@ test(
         const one = measure(root, ["--from-ci", "11", "12", "13"]);
         assert.equal(one.status, 1, `${field}: ${one.out}`);
         assert.match(one.out, /run 13's test steps did not all pass \(run failure\)/u, field);
+      }
+
+      // --base-branch takes the newest three runs that passed for an open pull request into the branch, matched whole
+      // against any of a run's pull requests, names them on standard error, and the module records them; fewer than
+      // three are refused.
+      const into = (...refs) => refs.map((ref) => ({ base: { ref } }));
+      const list = [
+        { id: 16, pull_requests: into("mainline") },
+        { id: 14, pull_requests: into("other") },
+        { id: 13, pull_requests: into("other", "main") },
+        { id: 15, pull_requests: [] },
+        { id: 12, pull_requests: into("main") },
+        { id: 11, pull_requests: into("main") },
+        { id: 10, pull_requests: into("main") },
+      ];
+      writeFileSync(join(root, "gh.json"), JSON.stringify({ ...runs(null), list }));
+      const chosen = measure(root, ["--from-ci", "--base-branch", "main"]);
+      assert.equal(chosen.status, 0, chosen.out);
+      assert.match(
+        chosen.stderr,
+        /runs 13, 12, 11, the newest passed for a pull request into main/u,
+      );
+      assert.doesNotMatch(chosen.stdout, /the newest passed/u);
+      assert.match(chosen.module, /--write --from-ci 13 12 11/u);
+      assert.deepEqual(costly(chosen.module), costly(module));
+      const few = measure(root, ["--from-ci", "--base-branch", "other"]);
+      assert.equal(few.status, 1, few.out);
+      assert.match(
+        few.out,
+        /2 of CI's newest passed runs are for an open pull request into other, not 3/u,
+      );
+      // (with how to find runs to give instead)
+      assert.match(
+        few.stderr,
+        /find runs with `gh run list --workflow ci\.yml .*`, then give them: --from-ci RUN/u,
+      );
+      assert.equal(few.module, chosen.module);
+
+      // Refused, the module unchanged: --base-branch with runs or without a branch, before any gh request; and a
+      // run list that gh fails to give or that does not read as runs with their bases.
+      writeFileSync(join(root, "gh.log"), "");
+      for (const args of [
+        ["--from-ci", "11", "12", "13", "--base-branch", "main"],
+        ["--from-ci", "11", "--base-branch", "main"],
+        ["--from-ci", "--base-branch", "main", "11"],
+        ["--from-ci", "--base-branch"],
+        ["--from-ci", "--base-branch", ""],
+        ["--from-ci", "--base-branch", "--raw"],
+        ["--base-branch", "main"],
+        ["--from-ci", "11", "12", "13", "--base-branch=main"],
+        ["--from-ci", "--base-branch=main", "11", "12", "13"],
+        ["--from-ci", "11", "12", "13", "--raw", "x"],
+        ["--from-ci", "11", "12", "0x0d"],
+      ]) {
+        const refused = measure(root, args);
+        assert.equal(refused.status, 1, `${args.join(" ")}: ${refused.out}`);
+        assert.match(
+          refused.stderr,
+          /^Usage: .*\n\(--from-ci takes three distinct run ids or more, or --base-branch/u,
+        );
+        assert.equal(refused.module, chosen.module, args.join(" "));
+      }
+      assert.equal(readFileSync(join(root, "gh.log"), "utf8"), "", "no gh request");
+      for (const [label, answer, message] of [
+        [
+          "gh failing",
+          { listFails: true },
+          /cannot read CI's passed pull-request runs \(Command failed: gh api .*\): give the runs/u,
+        ],
+        [
+          "no output",
+          { listText: "" },
+          /cannot read CI's passed pull-request runs \(.*JSON.*\): give the runs/u,
+        ],
+        [
+          "not JSON",
+          { listText: "<html>" },
+          /cannot read CI's passed pull-request runs \(.*JSON.*\): give the runs/u,
+        ],
+        [
+          "an object",
+          { listText: "{}" },
+          /did not read as a list of ids and base branches: give the runs/u,
+        ],
+        ["a null run", { listText: "[null]" }, /did not read as a list/u],
+        [
+          "bases as text",
+          { listText: JSON.stringify([13, 12, 11].map((id) => ({ id, bases: "mainland" }))) },
+          /did not read as a list/u,
+        ],
+        [
+          "an id as text",
+          { listText: JSON.stringify(["13", "12", "11"].map((id) => ({ id, bases: ["main"] }))) },
+          /did not read as a list/u,
+        ],
+      ]) {
+        writeFileSync(join(root, "gh.json"), JSON.stringify({ ...runs(null), ...answer }));
+        const refused = measure(root, ["--from-ci", "--base-branch", "main"]);
+        assert.equal(refused.status, 1, `${label}: ${refused.out}`);
+        assert.match(refused.stderr, message, label);
+        assert.equal(refused.module, chosen.module, label);
       }
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -403,17 +504,22 @@ test(
             .filter((name) => name.startsWith("GIT_") || name === "XDG_CONFIG_HOME")
             .sort(),
           [
+            "GIT_ATTR_NOSYSTEM",
             "GIT_AUTHOR_EMAIL",
             "GIT_AUTHOR_NAME",
             "GIT_COMMITTER_EMAIL",
             "GIT_COMMITTER_NAME",
+            "GIT_CONFIG_COUNT",
             "GIT_CONFIG_GLOBAL",
+            "GIT_CONFIG_KEY_0",
+            "GIT_CONFIG_KEY_1",
             "GIT_CONFIG_NOSYSTEM",
-            "GIT_TEMPLATE_DIR",
+            "GIT_CONFIG_VALUE_0",
+            "GIT_CONFIG_VALUE_1",
           ],
         );
         assert.equal(given.GIT_CONFIG_GLOBAL, "/dev/null");
-        assert.equal(given.GIT_TEMPLATE_DIR, join(root, "home/templates"));
+        assert.equal(given.LANGUAGE, "C");
         assert.equal(given.HOME, join(root, "home"));
         const { status, out, module } = measure(root, []);
         assert.equal(status, 0, out);

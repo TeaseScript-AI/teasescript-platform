@@ -1055,7 +1055,7 @@ function atReversed(lines: readonly string[], marker: string, delta: number): st
   return withSolverSeam({ reverseWorklist: true }, () => at(pass(...lines), marker, delta));
 }
 
-test("N5's component: stores that read one another, through copies too, preserve together in either order (r4.33)", () => {
+test("N5's component: stores that read one another, through copies too, preserve together in either order", () => {
   const loop = (body: readonly string[]): readonly string[] => [
     FLAG,
     "let v = 1",
