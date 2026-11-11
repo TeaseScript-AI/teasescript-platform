@@ -418,7 +418,7 @@ test("an adoption of an inspected state behind a busy connection queue goes on a
   healthy(mounted);
 });
 
-test("Round 1 R1-01: Debug turned on, Back and Return behind a busy queue end on the trace Return began", async (context) => {
+test("Debug turned on, Back and Return behind a busy queue end on the trace Return began (#2262's review, round 1)", async (context) => {
   const mounted = await mount(context, false);
   const plan = mounted.player.session.value!.planToken;
   const queued = Promise.allSettled(

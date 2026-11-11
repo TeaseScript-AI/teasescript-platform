@@ -126,7 +126,7 @@ async function playTape(bridge: PlayerBridge, calls = false): Promise<unknown[]>
   return steps;
 }
 
-test("L5b's ops give the same replies, publications and events in-process and in a Worker", async () => {
+test("the driver and time ops (#1856) give the same replies, publications and events in-process and in a Worker", async () => {
   const inProcess = await inProcessBridge();
   const worker = new PlayerBridge(await connectBridge(nodeWorkerPort(PLAYER_WORKER, BUILD), BUILD));
   try {

@@ -210,7 +210,7 @@ interface TapeStep {
   readonly state?: PlayerSession["state"];
 }
 
-test("L5e's ops give the same replies, publications and events in-process and in a Worker", async () => {
+test("the capture, file store and lock ops (#1869) give the same replies, publications and events in-process and in a Worker", async () => {
   const inProcess = await inProcessBridge();
   const worker = new PlayerBridge(await connectBridge(nodeWorkerPort(PLAYER_WORKER, BUILD), BUILD));
   try {

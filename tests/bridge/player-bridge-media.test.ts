@@ -207,7 +207,7 @@ async function tape(
   return { steps, last: bridge.latest(session)! };
 }
 
-test("L5d's ops give the same replies, views, origins and events in-process and in a Worker", async () => {
+test("the media ops (#1913) give the same replies, views, origins and events in-process and in a Worker", async () => {
   const inProcess = await inProcessBridge();
   const worker = new PlayerBridge(
     await connectBridge(nodeWorkerPort(RESTORE_WORKER, BUILD), BUILD),

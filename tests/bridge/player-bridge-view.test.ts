@@ -313,7 +313,7 @@ const KINDS: readonly {
   },
 ];
 
-test("every kind of call, timer and countdown Debug names comes through publications as the readers before L5f gave it", async () => {
+test("every kind of call, timer and countdown Debug names comes through publications as the readers before the reply's views (#1918) gave it", async () => {
   await onBoth(async (bridge, backend) => {
     const seen = {
       calls: new Set<string>(),
