@@ -95,9 +95,10 @@ function fill(root) {
   write(
     "bin/gh",
     `#!${process.execPath}
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 const runs = JSON.parse(readFileSync(${JSON.stringify(join(root, "gh.json"))}, "utf8"));
 const args = process.argv.slice(2);
+appendFileSync(${JSON.stringify(join(root, "gh.log"))}, args.join(" ") + "\\n");
 const where = /^repos\\/\\{owner\\}\\/\\{repo\\}\\/actions\\/runs\\/(\\d+)(\\/jobs)?$/.exec(args[1] ?? "");
 const start = Date.parse("2026-11-01T00:00:00Z");
 // (a run's \`conclusion\` defaults to success; \`failed\` is a test job that failed, \`unstarted\` one that never started)
@@ -116,8 +117,11 @@ if (args.join(" ") === "run download " + args[2] + " --pattern test-file-seconds
     mkdirSync(folder, { recursive: true });
     writeFileSync(folder + "/test-file-seconds.json", JSON.stringify({ filesAtOnce: 3, seconds }));
   });
-else if (args.join(" ") === "api repos/{owner}/{repo}/actions/workflows/ci.yml/runs?event=pull_request&status=success&per_page=100 -q [.workflow_runs[] | {id, bases: [.pull_requests[].base.ref]}]" && runs.list)
-  process.stdout.write(JSON.stringify(runs.list.map((run) => ({ id: run.id, bases: run.pull_requests.map((pull) => pull.base.ref) }))));
+else if (args.join(" ") === "api repos/{owner}/{repo}/actions/workflows/ci.yml/runs?event=pull_request&status=success&per_page=100 -q [.workflow_runs[] | {id, bases: [.pull_requests[].base.ref]}]" && (runs.list || "listText" in runs || runs.listFails)) {
+  // (\`listText\` answers as given; \`listFails\` fails as gh does)
+  if (runs.listFails) { process.stderr.write("HTTP 502: Bad Gateway\\n"); process.exit(1); }
+  process.stdout.write(runs.listText ?? JSON.stringify(runs.list.map((run) => ({ id: run.id, bases: run.pull_requests.map((pull) => pull.base.ref) }))));
+}
 else if (args[0] === "api" && where && runs[where[1]] && args.length === 2 && !where[2])
   process.stdout.write(JSON.stringify({ head_sha: where[1].repeat(40).slice(0, 40), conclusion: runs[where[1]].conclusion ?? "success" }));
 else if (args[0] === "api" && where && runs[where[1]] && where[2]) {
@@ -142,7 +146,7 @@ else if (args[0] === "api" && where && runs[where[1]] && where[2]) {
   }
 }
 
-/** The tool run with `args` in `root`: its exit status, its output, and the module it wrote. */
+/** The tool run with `args` in `root`: its exit status, its output (also by stream), and the module it wrote. */
 function measure(root, args) {
   const result = spawnSync(process.execPath, ["tools/measure-test-files.mjs", "--write", ...args], {
     cwd: root,
@@ -153,6 +157,8 @@ function measure(root, args) {
   return {
     status: result.status,
     out: result.stdout + result.stderr,
+    stdout: result.stdout,
+    stderr: result.stderr,
     module: readFileSync(join(root, "tools/costly-test-files.mjs"), "utf8"),
   };
 }
@@ -269,35 +275,97 @@ test(
         assert.match(one.out, /run 13's test steps did not all pass \(run failure\)/u, field);
       }
 
-      // --base-branch takes the newest three runs that passed for an open pull request into the branch, and the
-      // module records them; fewer than three are refused.
-      const into = (ref) => [{ base: { ref } }];
-      writeFileSync(
-        join(root, "gh.json"),
-        JSON.stringify({
-          ...runs(null),
-          list: [
-            { id: 14, pull_requests: into("other") },
-            { id: 13, pull_requests: into("main") },
-            { id: 15, pull_requests: [] },
-            { id: 12, pull_requests: into("main") },
-            { id: 11, pull_requests: into("main") },
-            { id: 10, pull_requests: into("main") },
-          ],
-        }),
-      );
+      // --base-branch takes the newest three runs that passed for an open pull request into the branch, matched whole
+      // against any of a run's pull requests, names them on standard error, and the module records them; fewer than
+      // three are refused.
+      const into = (...refs) => refs.map((ref) => ({ base: { ref } }));
+      const list = [
+        { id: 16, pull_requests: into("mainline") },
+        { id: 14, pull_requests: into("other") },
+        { id: 13, pull_requests: into("other", "main") },
+        { id: 15, pull_requests: [] },
+        { id: 12, pull_requests: into("main") },
+        { id: 11, pull_requests: into("main") },
+        { id: 10, pull_requests: into("main") },
+      ];
+      writeFileSync(join(root, "gh.json"), JSON.stringify({ ...runs(null), list }));
       const chosen = measure(root, ["--from-ci", "--base-branch", "main"]);
       assert.equal(chosen.status, 0, chosen.out);
-      assert.match(chosen.out, /runs 13, 12, 11, the newest passed for a pull request into main/u);
+      assert.match(
+        chosen.stderr,
+        /runs 13, 12, 11, the newest passed for a pull request into main/u,
+      );
+      assert.doesNotMatch(chosen.stdout, /the newest passed/u);
       assert.match(chosen.module, /--write --from-ci 13 12 11/u);
       assert.deepEqual(costly(chosen.module), costly(module));
       const few = measure(root, ["--from-ci", "--base-branch", "other"]);
       assert.equal(few.status, 1, few.out);
       assert.match(
         few.out,
-        /1 of CI's newest passed runs are for an open pull request into other, not 3/u,
+        /2 of CI's newest passed runs are for an open pull request into other, not 3/u,
       );
       assert.equal(few.module, chosen.module);
+
+      // Refused, the module unchanged: --base-branch with runs or without a branch, before any gh request; and a
+      // run list that gh fails to give or that does not read as runs with their bases.
+      writeFileSync(join(root, "gh.log"), "");
+      for (const args of [
+        ["--from-ci", "11", "12", "13", "--base-branch", "main"],
+        ["--from-ci", "11", "--base-branch", "main"],
+        ["--from-ci", "--base-branch", "main", "11"],
+        ["--from-ci", "--base-branch"],
+        ["--from-ci", "--base-branch", ""],
+        ["--from-ci", "--base-branch", "--raw"],
+        ["--base-branch", "main"],
+      ]) {
+        const refused = measure(root, args);
+        assert.equal(refused.status, 1, `${args.join(" ")}: ${refused.out}`);
+        assert.match(
+          refused.stderr,
+          /^Usage: .*\n\(--from-ci takes three distinct runs or more, or --base-branch/u,
+        );
+        assert.equal(refused.module, chosen.module, args.join(" "));
+      }
+      assert.equal(readFileSync(join(root, "gh.log"), "utf8"), "", "no gh request");
+      for (const [label, answer, message] of [
+        [
+          "gh failing",
+          { listFails: true },
+          /cannot read CI's passed pull-request runs \(Command failed: gh api .*\): give the runs/u,
+        ],
+        [
+          "no output",
+          { listText: "" },
+          /cannot read CI's passed pull-request runs \(.*JSON.*\): give the runs/u,
+        ],
+        [
+          "not JSON",
+          { listText: "<html>" },
+          /cannot read CI's passed pull-request runs \(.*JSON.*\): give the runs/u,
+        ],
+        [
+          "an object",
+          { listText: "{}" },
+          /did not read as a list of ids and base branches: give the runs/u,
+        ],
+        ["a null run", { listText: "[null]" }, /did not read as a list/u],
+        [
+          "bases as text",
+          { listText: JSON.stringify([13, 12, 11].map((id) => ({ id, bases: "mainland" }))) },
+          /did not read as a list/u,
+        ],
+        [
+          "an id as text",
+          { listText: JSON.stringify(["13", "12", "11"].map((id) => ({ id, bases: ["main"] }))) },
+          /did not read as a list/u,
+        ],
+      ]) {
+        writeFileSync(join(root, "gh.json"), JSON.stringify({ ...runs(null), ...answer }));
+        const refused = measure(root, ["--from-ci", "--base-branch", "main"]);
+        assert.equal(refused.status, 1, `${label}: ${refused.out}`);
+        assert.match(refused.stderr, message, label);
+        assert.equal(refused.module, chosen.module, label);
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

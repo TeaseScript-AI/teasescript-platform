@@ -38,12 +38,15 @@ if (argv[0] === "--raw" && argv.length >= 2)
 const base = argv[0] === "--from-ci" && argv[1] === "--base-branch" ? argv[2] : null;
 const fromCi = argv[0] === "--from-ci" && base === null ? argv.slice(1) : null;
 if (
-  (base !== null && argv.length !== 3) ||
+  // (`--base-branch` only as `--from-ci --base-branch BRANCH`: never with runs, nor without a branch)
+  (argv.includes("--base-branch") && (argv.length !== 3 || !base || base.startsWith("-"))) ||
   (base === null && fromCi === null && argv.length > 0) ||
   (fromCi !== null && new Set(fromCi).size !== fromCi.length) ||
   (fromCi !== null && fromCi.length < 3)
 ) {
-  process.stderr.write(`${usage}(--from-ci takes three distinct runs or more)\n`);
+  process.stderr.write(
+    `${usage}(--from-ci takes three distinct runs or more, or --base-branch and a branch, not both)\n`,
+  );
   process.exit(1);
 }
 
@@ -77,14 +80,31 @@ const median = (values) => {
 /** The ids of the newest three CI runs that passed for a pull request into `branch`, named on standard error. */
 function runsInto(branch) {
   // (each run's id and its pull requests' bases only: a hundred whole runs pass the output buffer's 1 MiB)
-  const passed = JSON.parse(
-    gh(
-      "api",
-      "repos/{owner}/{repo}/actions/workflows/ci.yml/runs?event=pull_request&status=success&per_page=100",
-      "-q",
-      "[.workflow_runs[] | {id, bases: [.pull_requests[].base.ref]}]",
-    ),
-  );
+  let passed;
+  try {
+    passed = JSON.parse(
+      gh(
+        "api",
+        "repos/{owner}/{repo}/actions/workflows/ci.yml/runs?event=pull_request&status=success&per_page=100",
+        "-q",
+        "[.workflow_runs[] | {id, bases: [.pull_requests[].base.ref]}]",
+      ),
+    );
+  } catch (error) {
+    fail([
+      `cannot read CI's passed pull-request runs (${error.message.split("\n")[0]}): give the runs`,
+    ]);
+  }
+  // (the shape the projection makes; anything else is refused, not read)
+  const run = (found) =>
+    Number.isSafeInteger(found?.id) &&
+    found.id > 0 &&
+    Array.isArray(found.bases) &&
+    found.bases.every((name) => typeof name === "string");
+  if (!Array.isArray(passed) || !passed.every(run))
+    fail([
+      "CI's passed pull-request runs did not read as a list of ids and base branches: give the runs",
+    ]);
   const ids = passed
     .filter((found) => found.bases.includes(branch))
     .slice(0, 3)
