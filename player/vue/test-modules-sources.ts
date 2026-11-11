@@ -11,10 +11,11 @@
 // content; a symlink to a folder, a broken symlink, or an unreadable entry by what it is, which fails the build. The
 // set of paths is part of the stamp, so an added, removed or renamed file is a change.
 //
-// The build also fails, so that no input of another kind passes unstamped, on: a bundled module outside the area that
-// is neither under `node_modules` nor a bundler module (`\0`); an `envDir` outside the area; a public folder; a
-// configuration file or a file it imports outside the area; a bundled module with a query or of a type other than `.ts`,
-// `.mts`, `.cts`, `.js`, `.mjs`, `.cjs` or `.json`; a root without a `tsconfig.json`, as the compiler then reads the
+// The build also fails, so that no input of another kind passes unstamped, on: a module the bundler loaded (each one in
+// `getModuleIds()`, also one whose code it inlined or dropped) that lies outside the area and is neither under
+// `node_modules` nor a bundler module (`\0`), or that has a query or a type other than `.ts`, `.mts`, `.cts`, `.js`,
+// `.mjs`, `.cjs` or `.json`; a module left external by its path rather than by a package's or Node's name; an `envDir`
+// outside the area; a public folder; a configuration file or a file it imports outside the area; a root without a `tsconfig.json`, as the compiler then reads the
 // nearest one above the checkout; a `tsconfig*.json` in the area, or a file it reaches by `extends` or `references`,
 // that TypeScript reports a diagnostic on, cannot be read, or lies outside the area. A local `extends` (one starting with
 // `.` or `/`) must name its file: a path ending in `.json` that is a regular file, as TypeScript and Vite's compiler
@@ -232,14 +233,20 @@ export async function tsconfigClosure(
 export function testModulesSources(): Plugin {
   let config: ResolvedConfig;
   let stamp = new Map<string, string>();
+  // The modules the bundler parsed; any other module it reports was left external, to be loaded when a test runs.
+  const parsed = new Set<string>();
   return {
     name: "test-modules-sources",
     config: () => ({ resolve: { preserveSymlinks: true } }),
     configResolved(resolved) {
       config = resolved;
     },
+    moduleParsed(info) {
+      parsed.add(info.id);
+    },
     async buildStart() {
       const { root } = config;
+      parsed.clear();
       stamp = walkSources(root);
       for (const [path, value] of stamp)
         if (UNSTAMPABLE.test(value))
@@ -277,18 +284,26 @@ export function testModulesSources(): Plugin {
     writeBundle: {
       order: "post",
       sequential: true,
-      handler(options, bundle) {
+      handler(options) {
         if (options.dir === undefined)
           this.error("test-modules-sources: the build has no output folder");
-        for (const output of Object.values(bundle))
-          if (output.type === "chunk")
-            for (const id of output.moduleIds) {
-              if (id.startsWith("\0") || dependency(id)) continue;
-              if (id.includes("?") || !ADMITTED.test(id))
-                this.error(`test-modules-sources: ${id} is a form the stamp does not cover`);
-              if (!inArea(config.root, id))
-                this.error(`test-modules-sources: ${id} is bundled from outside the stamped area`);
-            }
+        // Every module the bundler loaded, not only those rendered into a chunk: a module whose code it inlined or
+        // dropped still decides the bundle.
+        for (const id of this.getModuleIds()) {
+          if (id.startsWith("\0") || dependency(id)) continue;
+          if (!parsed.has(id)) {
+            // Left external: a package or Node built-in by its name is loaded from `node_modules` or Node.
+            if (/^[./\\]/u.test(id) || isAbsolute(id))
+              this.error(
+                `test-modules-sources: ${id} is left external by its path, a file the tests read that the stamp does not cover`,
+              );
+            continue;
+          }
+          if (id.includes("?") || !ADMITTED.test(id))
+            this.error(`test-modules-sources: ${id} is a form the stamp does not cover`);
+          if (!inArea(config.root, id))
+            this.error(`test-modules-sources: ${id} is bundled from outside the stamped area`);
+        }
         writeFileSync(
           join(options.dir, "sources.json"),
           `${JSON.stringify(Object.fromEntries(stamp), null, 1)}\n`,
