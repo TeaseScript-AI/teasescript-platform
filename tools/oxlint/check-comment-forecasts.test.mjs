@@ -21,6 +21,9 @@ import {
   unresolvedRevisionsIn,
 } from "./check-comment-forecasts.mjs";
 import { repositoryRoot } from "./files.mjs";
+import { isolateGit } from "../fixture-git.mjs";
+
+isolateGit();
 
 // A forecast of each form; the citations #1977 allows; and prose and counted references, which are no forecasts.
 const FORECAST_TEXTS = {
