@@ -517,12 +517,21 @@ if (isMainThread && process.argv[2] === "summary") {
       // (the run going on, as the worker starts each; the run past the unit limit, as it ends)
       let running = null;
       let over = null;
-      // (the safety net a run: armed as the source is handed over and again as each run starts)
+      // (a worker's error, kept until its exit: Node can deliver the error before the messages the worker posted
+      // first, never the exit, so the stall is recorded at the exit and names the run that threw)
+      let failed = null;
+      // (the safety net a run: armed as the source is handed over and again as each run starts; it also bounds the
+      // wait for the exit after an error, and then records that error)
       let timer = null;
       const arm = () => {
         clearTimeout(timer);
         timer = setTimeout(
-          () => finish({ uncharged: `safety net ${seconds} s`, run: running }),
+          () =>
+            finish(
+              failed === null
+                ? { uncharged: `safety net ${seconds} s`, run: running }
+                : { stalled: failed, run: running },
+            ),
           seconds * 1000,
         );
       };
@@ -535,16 +544,16 @@ if (isMainThread && process.argv[2] === "summary") {
         else if (Array.isArray(message?.modes) && message.name === source.name) finish(message);
         else finish({ stray: JSON.stringify(message ?? null).slice(0, 300) });
       };
-      const onError = (error) =>
-        finish({
-          stalled: `${error?.code ?? error?.name}: ${error?.message}`.slice(0, 300),
-          run: running,
-        });
+      const onError = (error) => {
+        failed = `${error?.code ?? error?.name}: ${error?.message}`.slice(0, 300);
+      };
       const onExit = (code) =>
         finish(
-          code === OVER_EXIT
-            ? { stalled: "units", ...(over ?? { run: running }) }
-            : { stalled: `worker exit ${code}`, run: running },
+          failed !== null
+            ? { stalled: failed, run: running }
+            : code === OVER_EXIT
+              ? { stalled: "units", ...(over ?? { run: running }) }
+              : { stalled: `worker exit ${code}`, run: running },
         );
       function finish(value) {
         clearTimeout(timer);
