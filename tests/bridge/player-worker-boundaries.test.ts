@@ -537,10 +537,14 @@ async function page(
   return { ...opened, transport, sampled: () => sampled };
 }
 
-/** Waits until `at` keeps a session whose events hold `text`. */
-async function keptWith(at: ReturnType<typeof keptBrowser>, text: string) {
+/** Waits until `at`'s normal room, or `store`, keeps a session whose events hold `text`. */
+async function keptWith(
+  at: ReturnType<typeof keptBrowser>,
+  text: string,
+  store: Pick<KeptSessionStore, "session"> = at.kept,
+) {
   for (let round = 0; round < 500; round += 1) {
-    const stored = await at.kept.session(at.provider.scope);
+    const stored = await store.session(at.provider.scope);
     if (stored !== null && JSON.stringify(stored.events).includes(text)) return;
     await new Promise((resolve) => setTimeout(resolve, 2));
   }
@@ -578,7 +582,8 @@ RERUN.rows(
     await keptWith(at, "Got one.");
     const shown = said(first.host);
     first.stop();
-    const second = await page(context, topology, at, KEPT, { rooms: memoryKeptRoomStore() });
+    const rooms = memoryKeptRoomStore();
+    const second = await page(context, topology, at, KEPT, { rooms });
     await until(() => second.host.activation.value === "continue", "the next page offers Continue");
     await second.host.activate();
     assert.deepEqual(said(second.host), shown, "the transcript up to the kept point");
@@ -604,6 +609,8 @@ RERUN.rows(
       () => said(second.host).includes("Then two."),
       "the copy runs on in the debug room",
     );
+    // Its keep commits in the debug room; only then does the normal room's session show it stayed.
+    await keptWith(at, "Then two.", rooms);
     const normal = await at.kept.session(at.provider.scope);
     assert.ok(normal !== null && JSON.stringify(normal.events).includes("Got one."));
     assert.ok(
