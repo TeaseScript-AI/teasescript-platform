@@ -32,10 +32,7 @@
 // exactly and stops (exit 2): a file that is not can be moved, but not declared in. Declarations come from that file
 // alone, and no flag admits a line class. To write one, run the check without `--declare`: it lists each line that
 // needs one as `unadmitted: FILE:LINE (SIDE): TEXT`. Read each, and declare those you mean, each with the reason that
-// line changed; for a comment #2541 pointed at another file and rewrapped:
-//   { "file": "tests/helpers/type-core/type-core-message-ports.ts", "side": "added",
-//     "text": "  // `type-core-messages-parity.test.ts`), without a value to write (#1268)",
-//     "reason": "a comment that said 'below' of what now sits in another file, pointed at that file and rewrapped" }
+// line changed.
 //
 // And a pure move keeps every import's binding: over the change's files, the set of bindings before equals the set
 // after, a binding being one imported or re-exported name with its target, its local or exported name and whether it is
