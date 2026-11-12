@@ -77,9 +77,8 @@
 // number; 2 when --diff cannot read the change's names (a name that is not UTF-8) or its moved lines, --summary has no
 // --diff, or there is no node_modules it can link, or one whose record does not hold the lockfile.
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   CannotRun as LinkRefused,
   linkMainNodeModules,
@@ -886,10 +885,7 @@ async function main() {
 }
 
 // run as a command, not when a test imports `addedLinesOfPatch`
-if (
-  process.argv[1] !== undefined &&
-  realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
-) {
+if (import.meta.main) {
   try {
     await main();
   } catch (error) {

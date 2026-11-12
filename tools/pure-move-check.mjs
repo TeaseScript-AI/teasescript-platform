@@ -79,9 +79,8 @@
 // its file and line); 2 when Git's output or the declarations cannot be read, a file name Git quotes, or a binary change, whose
 // content the check cannot inspect, and for a refused argument or an empty change.
 import { execFileSync, spawnSync } from "node:child_process";
-import { readFileSync, realpathSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { ts } from "ts-morph";
 import { movedLinesOf, MovedLinesUnreadable } from "./moved-lines.mjs";
 
@@ -1086,8 +1085,4 @@ function main() {
 }
 
 // run as a command, not when a test imports it
-if (
-  process.argv[1] !== undefined &&
-  realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
-)
-  main();
+if (import.meta.main) main();

@@ -225,5 +225,4 @@ export function main(argv, print = console.log, compare = compareSides) {
   }
 }
 
-if (process.argv[1] && SELF === path.resolve(process.argv[1]))
-  process.exitCode = main(process.argv.slice(2));
+if (import.meta.main) process.exitCode = main(process.argv.slice(2));
