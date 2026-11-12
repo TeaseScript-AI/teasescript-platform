@@ -65,7 +65,11 @@ export class WrittenDefaults {
     }
     // (literals in a worklist, each entered once: a deeply nested default recurses nowhere)
     // (a step's cells gathered in place, so a step two of a literal's cells share is never copied)
-    type Gathered = { readonly terms: Set<TypeTerm>; readonly literals: Set<PlaceId>; found: boolean };
+    type Gathered = {
+      readonly terms: Set<TypeTerm>;
+      readonly literals: Set<PlaceId>;
+      found: boolean;
+    };
     for (let literal = pending.pop(); literal !== undefined; literal = pending.pop()) {
       const gathered = new Map<string, Gathered>();
       for (const has of program.hasOf.get(literal) ?? [])

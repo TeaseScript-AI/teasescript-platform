@@ -332,7 +332,11 @@ test("literals that share the literals below them: the walk pays each reference 
     ].join("\n");
     for (const reversed of [false, true]) {
       const { items, walked } = ruleAt(text, ["element", "element", "element"], reversed);
-      assert.deepEqual({ items, walked }, { items: ["number def"], walked: n * n + 4 * n + 1 }, `n = ${n}`);
+      assert.deepEqual(
+        { items, walked },
+        { items: ["number def"], walked: n * n + 4 * n + 1 },
+        `n = ${n}`,
+      );
     }
   }
 });
