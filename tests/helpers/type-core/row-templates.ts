@@ -1,4 +1,5 @@
 import type { SyntaxKind } from "../../../src/type-inference/core/slice-syntax.js";
+import type { ValueKind } from "../../../src/value-kinds.js";
 
 /*
  * The row guard's templates (#2500, `tests/type-core/type-core-row-guard.test.ts`): for each open row of the candidate
@@ -148,29 +149,78 @@ export const ROW_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly string[
   ),
 };
 
-/** A value of each kind class in place of an operand's host global: a whole number, text, a truth value, `null`. */
-const MISFIT_LITERALS: readonly string[] = ["2", '"text"', "true", "null"];
-
 /**
- * Each command operand's first template with each literal of `MISFIT_LITERALS` in place of the host global: the sources
- * on which today's compile-time operand checks may differ from the route's (`DECLARED_RULE_DIFFERENCES`).
+ * A written value of each kind (`VALUE_KINDS`) the slice admits: each command operand holds each in turn in place of its
+ * host global (`misfitSources`).
  */
-export function misfitSources(): { row: SyntaxKind; operand: string; source: string }[] {
-  return Object.entries(OPERAND_TEMPLATES).flatMap(([row, operands]) =>
-    Object.entries(operands!).flatMap(([operand, [template]]) =>
-      MISFIT_LITERALS.map((literal) => ({
-        // EVIDENCE: invariant: the templates' keys are AST kinds (`OPERAND_TEMPLATES`' type).
-        row: row as SyntaxKind,
-        operand,
-        source: template!.replace("hostValue", literal),
-      })),
-    ),
-  );
+const ADMITTED_VALUES = {
+  integer: "2",
+  number: "2.5",
+  string: '"text"',
+  boolean: "true",
+  null: "null",
+  regex: "/a/",
+  range: "1..=2",
+  list: "[1]",
+  object: "{v: 1}",
+} as const satisfies Partial<Record<ValueKind, string>>;
+
+type AdmittedKind = keyof typeof ADMITTED_VALUES;
+
+/** The kinds the slice admits a value of but `kinds`. */
+function but(...kinds: AdmittedKind[]): AdmittedKind[] {
+  // EVIDENCE: invariant: the record's keys are its kinds (its type).
+  return (Object.keys(ADMITTED_VALUES) as AdmittedKind[]).filter((kind) => !kinds.includes(kind));
 }
 
 /**
- * The positions of open rows whose host global the route refuses after the syntax gate, by name: the source with the
- * host global there, which must be refused with `text` in every mode, and the same position with a value the slice
+ * Each other kind (`VALUE_KINDS`), which the slice admits no value of: a source holding one, which the route refuses or
+ * publishes no plan for (the row guard requires it). A new kind does not type-check here until it is placed.
+ */
+export const REFUSED_KINDS: Readonly<Record<Exclude<ValueKind, AdmittedKind>, string>> = {
+  duration: "let m = 2 s",
+  calendarDuration: "let m = 2 calendar months",
+  angle: "let m = 90 deg",
+  date: 'let m = toDate("2026-10-04", default: null)',
+  time: 'let m = toTime("14:30", default: null)',
+  datetime: 'let m = toDateTime("2026-10-04T18:00", default: null)',
+  absoluteDateTime: 'let m = toAbsoluteDateTime("2026-10-04T12:30:00Z", default: null)',
+  script: 'let m = script("main.tease")',
+  set: "let m = set[1]",
+  dict: "let m = dict{ a: 1 }",
+  speaker: 'speaker guide { displayName: "Guide" }\nlet m = guide',
+  timer: "let m = timer async 1 s",
+  media: 'let m = playAudio async "a.mp3"',
+  camera: "let m = showCamera",
+  permanentButton: 'let m = showPermanentButton "Hint" {\n  say "a"\n}',
+  messageHandle: 'let m = say "a"',
+};
+
+/** A command operand's first template with `value` in place of the host global. */
+const misfitSource = (row: SyntaxKind, operand: string, value: string): string =>
+  OPERAND_TEMPLATES[row]![operand]![0]!.replace("hostValue", value);
+
+/**
+ * Each command operand's first template with a value of each kind the slice admits in place of the host global: the
+ * sources on which today's compile-time operand checks may differ from the route's (`DECLARED_RULE_DIFFERENCES`).
+ */
+export function misfitSources(): { row: SyntaxKind; operand: string; source: string }[] {
+  return Object.entries(OPERAND_TEMPLATES).flatMap(([key, operands]) => {
+    // EVIDENCE: invariant: the templates' keys are AST kinds (`OPERAND_TEMPLATES`' type).
+    const row = key as SyntaxKind;
+    return Object.keys(operands!).flatMap((operand) =>
+      Object.values(ADMITTED_VALUES).map((value) => ({
+        row,
+        operand,
+        source: misfitSource(row, operand, value),
+      })),
+    );
+  });
+}
+
+/**
+ * The positions of open rows whose host global, or misfit (`misfitSources`), the route refuses after the syntax gate, by
+ * name: that source, which must be refused with `text` in every mode, and the same position with a value the slice
  * admits, which must pass the guard's three rules. `gate` names the refusal's place; the record carries only `text`,
  * which only that gate writes. A refusal not listed fails the guard, and so does a listed one that no longer occurs.
  */
@@ -200,6 +250,15 @@ export const DECLARED_REFUSALS: readonly {
     gate: "outsideAnswers (src/type-inference/core/backend.ts)",
     text: "this operand",
   },
+  // (a `say`'s value of a kind it shows only by S9b's rules, the misfit sources')
+  ...(["regex", "range", "list", "object"] as const).map((kind) => ({
+    row: "sayStatement" as const,
+    position: `the value, ${kind}`,
+    refused: misfitSource("sayStatement", "value", ADMITTED_VALUES[kind]),
+    admitted: 'say "text"',
+    gate: "outsideAnswers (src/type-inference/core/backend.ts)",
+    text: "this say",
+  })),
 ];
 
 /**
@@ -249,11 +308,11 @@ export const DECLARED_RUN_DIFFERENCES: readonly {
 ];
 
 /**
- * The command operands where today's checker gives a compile error for a literal of a kind the operand does not take,
- * and the route publishes a plan whose instruction refuses that value when it runs (#2488's design rulings, R2: a
- * closed list, which the command operand table empties): the misfit's source (`misfitSources`), today's code, and the
- * route's failure, its code at the text `at`. The guard requires each in every mode, with nothing of the statement's
- * effect happening, and fails on a difference no entry names and on an entry that no longer occurs.
+ * The command operands where today's checker gives a compile error for a value of a kind the operand does not take, and
+ * the route publishes a plan whose instruction refuses that value when it runs (#2488's design rulings, R2: a closed
+ * list, which the command operand table empties): the misfit's source (`misfitSources`), today's code, and the route's
+ * failure, its code at the text `at`. The guard requires each in every mode, with nothing of the statement's effect
+ * happening, and fails on a difference no entry names and on an entry that no longer occurs.
  */
 export const DECLARED_RULE_DIFFERENCES: readonly {
   readonly row: SyntaxKind;
@@ -263,136 +322,38 @@ export const DECLARED_RULE_DIFFERENCES: readonly {
   readonly failure: { readonly code: string; readonly at: string };
 }[] = (
   [
-    // row, operand, source, today's code, the route's failure code, and the text it stands at
-    ["deleteStatement", "key", "delete 2", "TSV038", "TSR054", "2"],
-    ["deleteStatement", "key", "delete true", "TSV038", "TSR054", "true"],
-    ["deleteStatement", "key", "delete null", "TSV038", "TSR054", "null"],
-    [
-      "exportTextStatement",
-      "fileName",
-      'exportText("t", fileName: 2)',
-      "TSV043",
-      "TSR050",
-      'exportText("t", fileName: 2)',
-    ],
-    [
-      "exportTextStatement",
-      "fileName",
-      'exportText("t", fileName: true)',
-      "TSV043",
-      "TSR050",
-      'exportText("t", fileName: true)',
-    ],
-    [
-      "exportTextStatement",
-      "fileName",
-      'exportText("t", fileName: null)',
-      "TSV043",
-      "TSR050",
-      'exportText("t", fileName: null)',
-    ],
-    ["exportTextStatement", "text", "exportText(2)", "TSV043", "TSR050", "exportText(2)"],
-    ["exportTextStatement", "text", "exportText(true)", "TSV043", "TSR050", "exportText(true)"],
-    ["exportTextStatement", "text", "exportText(null)", "TSV043", "TSR050", "exportText(null)"],
-    [
-      "openUrlStatement",
-      "alwaysButton",
-      'openUrl("https://example.com", alwaysButton: 2)',
-      "TSV043",
-      "TSR050",
-      'openUrl("https://example.com", alwaysButton: 2)',
-    ],
-    [
-      "openUrlStatement",
-      "alwaysButton",
-      'openUrl("https://example.com", alwaysButton: "text")',
-      "TSV043",
-      "TSR050",
-      'openUrl("https://example.com", alwaysButton: "text")',
-    ],
-    [
-      "openUrlStatement",
-      "alwaysButton",
-      'openUrl("https://example.com", alwaysButton: null)',
-      "TSV043",
-      "TSR050",
-      'openUrl("https://example.com", alwaysButton: null)',
-    ],
-    ["openUrlStatement", "url", "openUrl(2)", "TSV043", "TSR050", "openUrl(2)"],
-    ["openUrlStatement", "url", 'openUrl("text")', "TSV043", "TSR050", 'openUrl("text")'],
-    ["openUrlStatement", "url", "openUrl(true)", "TSV043", "TSR050", "openUrl(true)"],
-    ["openUrlStatement", "url", "openUrl(null)", "TSV043", "TSR050", "openUrl(null)"],
-    ["sayStatement", "pacing", 'say "a", 2', "TSV043", "TSR050", 'say "a", 2'],
-    ["sayStatement", "pacing", 'say "a", "text"', "TSV043", "TSR050", 'say "a", "text"'],
-    ["sayStatement", "pacing", 'say "a", true', "TSV043", "TSR050", 'say "a", true'],
-    ["sayStatement", "pacing", 'say "a", null', "TSV043", "TSR050", 'say "a", null'],
-    [
-      "showButtonStatement",
-      "background",
-      'showButton "Go", background: 2',
-      "TSV029",
-      "TSR052",
-      'showButton "Go", background: 2',
-    ],
-    [
-      "showButtonStatement",
-      "background",
-      'showButton "Go", background: "text"',
-      "TSV029",
-      "TSR052",
-      'showButton "Go", background: "text"',
-    ],
-    [
-      "showButtonStatement",
-      "background",
-      'showButton "Go", background: true',
-      "TSV029",
-      "TSR052",
-      'showButton "Go", background: true',
-    ],
-    [
-      "showButtonStatement",
-      "timeout",
-      'showButton "Go", timeout: 2',
-      "TSV043",
-      "TSR050",
-      'showButton "Go", timeout: 2',
-    ],
-    [
-      "showButtonStatement",
-      "timeout",
-      'showButton "Go", timeout: "text"',
-      "TSV043",
-      "TSR050",
-      'showButton "Go", timeout: "text"',
-    ],
-    [
-      "showButtonStatement",
-      "timeout",
-      'showButton "Go", timeout: true',
-      "TSV043",
-      "TSR050",
-      'showButton "Go", timeout: true',
-    ],
-    [
-      "showButtonStatement",
-      "timeout",
-      'showButton "Go", timeout: null',
-      "TSV043",
-      "TSR050",
-      'showButton "Go", timeout: null',
-    ],
-    ["showImageStatement", "image", "showImage 2", "TSV036", "TSR050", "showImage 2"],
-    ["showImageStatement", "image", "showImage true", "TSV036", "TSR050", "showImage true"],
-    ["waitStatement", "duration", "wait 2", "TSV043", "TSR050", "2"],
-    ["waitStatement", "duration", 'wait "text"', "TSV043", "TSR050", '"text"'],
-    ["waitStatement", "duration", "wait true", "TSV043", "TSR050", "true"],
-    ["waitStatement", "duration", "wait null", "TSV043", "TSR050", "null"],
+    // row, operand, today's code, the route's failure code, whether it stands at the statement or the operand's value,
+    // and the kinds (`ADMITTED_VALUES`), each one entry
+    ["deleteStatement", "key", "TSV038", "TSR054", "value", but("string")],
+    ["exportTextStatement", "text", "TSV043", "TSR050", "statement", but("string")],
+    ["exportTextStatement", "title", "TSV040", "TSR021", "statement", ["list"]],
+    ["exportTextStatement", "title", "TSV042", "TSR021", "statement", ["range", "object"]],
+    ["exportTextStatement", "fileName", "TSV043", "TSR050", "statement", but("string")],
+    ["openUrlStatement", "url", "TSV043", "TSR050", "statement", but()],
+    ["openUrlStatement", "buttonText", "TSV040", "TSR021", "statement", ["list"]],
+    ["openUrlStatement", "buttonText", "TSV042", "TSR021", "statement", ["range", "object"]],
+    ["openUrlStatement", "alwaysButton", "TSV043", "TSR050", "statement", but("boolean")],
+    ["sayStatement", "pacing", "TSV043", "TSR050", "statement", but()],
+    ["showButtonStatement", "label", "TSV040", "TSR021", "statement", ["list"]],
+    ["showButtonStatement", "label", "TSV042", "TSR021", "statement", ["range", "object"]],
+    ["showButtonStatement", "background", "TSV029", "TSR052", "statement", but("null")],
+    ["showButtonStatement", "timeout", "TSV043", "TSR050", "statement", but()],
+    ["showImageStatement", "image", "TSV036", "TSR050", "statement", but("string", "null")],
+    ["showPopupStatement", "message", "TSV040", "TSR021", "statement", ["list"]],
+    ["showPopupStatement", "message", "TSV042", "TSR021", "statement", ["range", "object"]],
+    ["showPopupStatement", "buttonText", "TSV040", "TSR021", "statement", ["list"]],
+    ["showPopupStatement", "buttonText", "TSV042", "TSR021", "statement", ["range", "object"]],
+    ["waitStatement", "duration", "TSV043", "TSR050", "value", but()],
   ] as const
-).map(([row, operand, source, code, failure, at]) => ({
-  row,
-  operand,
-  source,
-  code,
-  failure: { code: failure, at },
-}));
+).flatMap(([row, operand, code, failure, at, kinds]) =>
+  kinds.map((kind) => {
+    const source = misfitSource(row, operand, ADMITTED_VALUES[kind]);
+    return {
+      row,
+      operand,
+      source,
+      code,
+      failure: { code: failure, at: at === "value" ? ADMITTED_VALUES[kind] : source },
+    };
+  }),
+);
