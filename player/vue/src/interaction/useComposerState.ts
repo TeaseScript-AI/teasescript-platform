@@ -114,13 +114,17 @@ export function composerDescriptor(shown: {
   // Nothing asked, a skippable pacing gate included: the chat takes typing (decision 6).
   else if (foreground === null || FIELD_OF[foreground.kind] === "chat") tenant = { kind: "chat" };
   else tenant = NONE;
-  const prefill = foreground && "prefill" in foreground ? (foreground.prefill ?? null) : null;
+  // An answered question offers nothing: while its answer is under way the chat stands in for it, and its prefill, of
+  // whatever kind, is not the chat's.
+  const answered = id !== null && consumed === id;
+  const prefill =
+    !answered && foreground && "prefill" in foreground ? (foreground.prefill ?? null) : null;
   return {
     session: session ? `${session.planToken}:${shown.reset}` : null,
     chat: shown.chat,
     tenant,
     actionId: id,
-    answered: id !== null && consumed === id,
+    answered,
     liveActions: session ? playerRuntimeInteractionActionIds(session.state) : [],
     prefill: tenant.kind === "chat" ? prefill : null,
     editorText: editor?.text ?? null,
