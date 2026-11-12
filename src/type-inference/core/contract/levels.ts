@@ -42,7 +42,7 @@ import type {
   PropertyReads,
   PropertySource,
 } from "./model.js";
-import { amend, Retained, retainedModule } from "../retained/retained.js";
+import { Retained, retainedModule } from "../retained/retained.js";
 
 // A prefix's levels (§4.6): its entries grouped at a path, and a literal's structure by path.
 
@@ -247,7 +247,6 @@ export function* propertyItems(
       );
     }
     // (the index, made at an earlier read or just now, its holding and savings filled in place below)
-    amend(index);
     const cost = index.names + sources.length;
     if (index.holding === null) {
       if (levels.reads * (sources.length - 1) < cost) return null;
