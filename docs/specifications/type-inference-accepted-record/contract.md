@@ -263,8 +263,10 @@ makes excluding a landed copy fail closed.
 **A `null` that reaches a use through an entry is the use's required check.**
 
 **Rule.** This bounds [r4-444](#r4-444): beside its forward route, AD-1 promotes a `null` item reaching a use through an
-entry, where the program default is not held. Entries: a loop's head (from its live predecessors in its body, none for
-a `for` over a one-element literal), a label (its live `goto`s and its fall-through), a file's start (from a literal
+entry, where the program default is not held. An entry reads a route as the forward rule does, a route of the program's
+flow (ADR 0021 rules 5.5 and 5.6): a value the compiler knows, such as a loop's count or list held in a variable,
+removes no route. Entries: a loop's head (from its live predecessors in its body, none for a `for` over a one-element
+literal), a label (its live `goto`s and its fall-through), a file's start (from a literal
 `goto "f"` or `goto script("f")`; a glob, a computed target or a jump from block code is none), and a block body's
 start, which carries a `null` item with no writer and names the registering statement. A segment is unchecked only when no
 statement on it holds the key's root name in a test position (`==`, `!=`, `is`, `is not`, `and`, `or`, `not` operands;
