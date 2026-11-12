@@ -93,10 +93,12 @@ export async function demoScenario(cdp, origin) {
           stage: rendered(document.querySelector('.stage-media')) ? document.querySelector('.stage-media').getAttribute('src') : null,
           audio: window.__played.map((element) => ({ time: element.currentTime, audible: !element.muted && element.volume > 0 })),
           texts: entries.map((element) => element.textContent),
-          // A control is actionable only while it is neither disabled nor read-only: the Player makes the composer
-          // read-only and the buttons disabled while an input is submitting (#2125).
+          // A control is actionable only while it is neither disabled nor read-only.
           buttons: [...document.querySelectorAll('[data-foreground-controls] button')].filter((button) => !button.disabled).map((button) => button.textContent.trim()),
           placeholder: input && !input.disabled && !input.readOnly ? input.placeholder : null,
+          // A skippable pacing gate shows: Space in the empty composer settles it. The composer is enabled also while
+          // nothing is asked, so being enabled says nothing about a gate.
+          pacing: !!document.querySelector('[data-composer-pacing]'),
         };
       })()`,
     );
@@ -110,7 +112,7 @@ export async function demoScenario(cdp, origin) {
       await physicalClick(cdp, "[data-foreground-controls] button:last-of-type");
     } else if (
       !inputOwnershipChecked &&
-      state.placeholder !== null &&
+      state.pacing &&
       state.texts.some((text) => text.includes("Some of her messages make you wait."))
     ) {
       // The first skippable message: its pacing is still pending while the composer is enabled.
@@ -118,7 +120,7 @@ export async function demoScenario(cdp, origin) {
       await pacingInputOwnershipCheck(cdp);
     } else if (
       !spaceSkipChecked &&
-      state.placeholder !== null &&
+      state.pacing &&
       state.texts.some((text) => text.includes("Twenty seconds less. Don't thank me yet."))
     ) {
       spaceSkipChecked = true;
@@ -141,8 +143,8 @@ export async function demoScenario(cdp, origin) {
       await focusSeen(cdp, `document.querySelector('[data-composer-input]')`);
       await cdp.call("Input.insertText", { text: "Mistress" });
       await physicalClick(cdp, ".composer-send");
-    } else if (state.placeholder !== null) {
-      // A skippable pacing gate: Space in the empty composer hurries the message along.
+    } else if (state.pacing) {
+      // A skippable pacing gate shows: Space in the empty composer hurries the message along.
       await focusSeen(cdp, `document.querySelector('[data-composer-input]')`);
       await pressSpace(cdp);
     }
