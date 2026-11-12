@@ -552,6 +552,12 @@ export function useComposerState(host: {
     touch();
   }
 
+  /** Cancels a form draft waiting to be stored, as at a stop: the draft stays in its slot, unsent. */
+  function cancelDraft() {
+    clearTimeout(draftTimer);
+    draftTimer = undefined;
+  }
+
   /** Registers the field's composition ending (`Composer.vue`); the returned function detaches it. */
   function attach(end: () => void): () => void {
     finish = end;
@@ -595,6 +601,7 @@ export function useComposerState(host: {
     lockEnter,
     restartLock,
     eraseSecrets,
+    cancelDraft,
     attach,
     dispose,
   };

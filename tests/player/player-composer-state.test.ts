@@ -54,6 +54,11 @@ interface SessionHost {
   readonly chat: Readonly<Ref<number>>;
   readonly terminal: Readonly<Ref<SessionTerminal>>;
   epoch(): number;
+  inputEpoch(): number;
+  onEpoch(work: () => void): () => void;
+  readonly diagnostics: Readonly<
+    Ref<readonly { readonly code: string; readonly message: string }[]>
+  >;
   readonly bridge: Promise<PlayerBridge>;
   readonly inputSection: InputSectionHost;
   readonly lock: {
@@ -101,6 +106,8 @@ type Modules = {
     readonly stoppedSession: () => PlayerSession | null;
     readonly chat: () => number;
     readonly epoch: () => number;
+    readonly inputEpoch: () => number;
+    readonly onEpoch: (work: () => void) => () => void;
     readonly terminal: () => SessionTerminal;
     readonly inputSection: () => InputSectionHost | undefined;
     readonly prepareInput: () => true;
@@ -113,6 +120,8 @@ type Modules = {
     readonly composer: ComposerState;
     readonly session: () => PlayerSession | null;
     readonly chat: () => number;
+    readonly epoch: () => number;
+    readonly inputEpoch: () => number;
     readonly terminal: () => SessionTerminal;
     readonly inputSection: () => InputSectionHost | undefined;
     readonly run: AnswerSubmission["run"];
@@ -228,6 +237,8 @@ async function page(context: TestContext, topology: Topology, script: string) {
       stoppedSession: () => (player.stopped.value ? player.session.value : null),
       chat: () => player.chat.value,
       epoch: player.epoch,
+      inputEpoch: player.inputEpoch,
+      onEpoch: player.onEpoch,
       terminal: () => player.terminal.value,
       inputSection: () => player.inputSection,
       prepareInput: () => true,
@@ -240,6 +251,8 @@ async function page(context: TestContext, topology: Topology, script: string) {
       composer,
       session: shown,
       chat: () => player.chat.value,
+      epoch: player.epoch,
+      inputEpoch: player.inputEpoch,
       terminal: () => player.terminal.value,
       inputSection: () => player.inputSection,
       run: (id, intent) => submission.run(id, intent),
