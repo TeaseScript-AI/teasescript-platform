@@ -733,7 +733,7 @@ test("a word that came with its value from another line names that value's origi
     "'use' is called from more than one place, so 'n' may hold another type in each call.",
   );
   // (the parameter is `pick`'s, and `use` has one call; `pick` copies before it returns, so the analysis does not read
-  // its call as the argument, as it reads an identity function's: r4.452)
+  // its call as the argument, as it reads an identity function's, #2493)
   count(
     "function pick(n) {\n  let m = n\n  return m\n}\nfunction use { let c = pick(1)\nrepeat c {} }\nlet b = pick(1.5)\nuse()\nexit\n",
     "c",
