@@ -19,7 +19,9 @@ export interface CompactSite {
 /** N10's payload of N3's error: its rule, the writer D′'s span, and the tests the read lacks, in their order. */
 export interface CompactRequiredCheck {
   readonly rule: string;
-  readonly writer: CompactSite;
+  /** `null` where the route starts at a block's body with no store of its own (`block` then names the block). */
+  readonly writer: CompactSite | null;
+  readonly block?: CompactSite;
   readonly missingTests: readonly string[];
 }
 
@@ -81,11 +83,23 @@ export function compactRecord(record: CoreRecord): CompactRecord {
         : {
             requiredCheck: {
               rule: diagnostic.requiredCheck.rule,
-              writer: {
-                file: diagnostic.requiredCheck.writer.file,
-                offset: diagnostic.requiredCheck.writer.offset,
-                end: diagnostic.requiredCheck.writer.end,
-              },
+              writer:
+                diagnostic.requiredCheck.writer === null
+                  ? null
+                  : {
+                      file: diagnostic.requiredCheck.writer.file,
+                      offset: diagnostic.requiredCheck.writer.offset,
+                      end: diagnostic.requiredCheck.writer.end,
+                    },
+              ...(diagnostic.requiredCheck.block === undefined
+                ? {}
+                : {
+                    block: {
+                      file: diagnostic.requiredCheck.block.file,
+                      offset: diagnostic.requiredCheck.block.offset,
+                      end: diagnostic.requiredCheck.block.end,
+                    },
+                  }),
               missingTests: [...diagnostic.requiredCheck.missingTests],
             },
           }),
@@ -184,7 +198,8 @@ function requiredCheck(value: unknown, where: string): CompactRequiredCheck | un
   assert.ok(missingTests.length > 0, `${where}.missingTests: at least one test`);
   return {
     rule: text(fields["rule"], `${where}.rule`),
-    writer: site(fields["writer"], `${where}.writer`),
+    writer: fields["writer"] === null ? null : site(fields["writer"], `${where}.writer`),
+    ...(fields["block"] === undefined ? {} : { block: site(fields["block"], `${where}.block`) }),
     missingTests,
   };
 }
@@ -273,7 +288,9 @@ export function recordDifferences(expected: CompactRecord, actual: CompactRecord
       ? []
       : [
           `${entry.kind} ${span(entry)} ${entry.requiredCheck.rule} writer ` +
-            `${at(entry.requiredCheck.writer)} ${JSON.stringify(entry.requiredCheck.missingTests)}`,
+            `${entry.requiredCheck.writer === null ? "none" : at(entry.requiredCheck.writer)}` +
+            `${entry.requiredCheck.block === undefined ? "" : ` block ${at(entry.requiredCheck.block)}`} ` +
+            JSON.stringify(entry.requiredCheck.missingTests),
         ];
   const wantedRequired = expected.diagnostics.flatMap(required);
   const gotRequired = actual.diagnostics.flatMap(required);
