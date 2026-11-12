@@ -11,8 +11,6 @@
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { installRetainedRecorder } from "../../src/type-inference/core/retained/retained.js";
-import { RetainedInstrument } from "./retained-instrument.js";
 import { FROZEN_IN_CI } from "./retained-subset.js";
 
 const file = process.argv[1] ?? "";
@@ -22,6 +20,11 @@ const all =
   process.env["RETAINED_FREEZE"] === "all" || survey !== undefined || measure !== undefined;
 const name = /[\\/]tests[\\/]type-core[\\/]([^\\/]+\.test)\.js$/u.exec(file)?.[1];
 if (name !== undefined && (all || FROZEN_IN_CI.has(name))) {
+  // (imported here, not above: the instrument loads much of the type core, which every other test process, and each
+  // process a test spawns, would load for nothing)
+  const { installRetainedRecorder } =
+    await import("../../src/type-inference/core/retained/retained.js");
+  const { RetainedInstrument } = await import("./retained-instrument.js");
   const instrument = new RetainedInstrument({
     note: survey !== undefined,
     measure: measure !== undefined,
@@ -61,7 +64,11 @@ if (name !== undefined && (all || FROZEN_IN_CI.has(name))) {
         const key = `${error.message.replace(/\d+/gu, "N").slice(0, 140)} @ ${sites}`;
         frozen.set(key, (frozen.get(key) ?? 0) + 1);
       }
-      return `${Error.prototype.toString.call(error)}\n${frames.map((frame) => `    at ${frame.getFunctionName() ?? "<anonymous>"} (${frame.getFileName() ?? "?"}:${frame.getLineNumber() ?? "?"})`).join("\n")}`;
+      // (each frame as V8 prints it, `Array.map` included, so a test that reads its own stack reads it as unsurveyed)
+      return `${Error.prototype.toString.call(error)}\n${frames
+        // oxlint-disable-next-line typescript/no-base-to-string -- EVIDENCE: invariant: V8's call site has its own `toString`, the frame of a printed stack; `NodeJS.CallSite` does not declare it.
+        .map((frame) => `    at ${frame.toString()}`)
+        .join("\n")}`;
     };
     process.on("exit", () => {
       mkdirSync(survey, { recursive: true });
