@@ -184,16 +184,16 @@ function identityNames(programs: readonly Program[]): (name: string, file: numbe
 
 /** An identity function: one parameter without a type or a default, no result type, a body of `return` of it. */
 function isIdentity(declaration: FunctionDeclaration): boolean {
-  const [parameter, ...more] = declaration.parameters;
-  const [statement, ...rest] = declaration.body.statements;
+  const parameter = declaration.parameters[0];
+  const statement = declaration.body.statements[0];
   return (
+    declaration.parameters.length === 1 &&
     parameter !== undefined &&
-    more.length === 0 &&
     parameter.typeAnnotation === null &&
     parameter.defaultValue === null &&
     declaration.returnTypeAnnotation === null &&
+    declaration.body.statements.length === 1 &&
     statement !== undefined &&
-    rest.length === 0 &&
     statement.kind === "returnStatement" &&
     statement.value?.kind === "identifier" &&
     statement.value.name === parameter.name.name
@@ -202,12 +202,12 @@ function isIdentity(declaration: FunctionDeclaration): boolean {
 
 /** Whether the view reads a call as its argument (see the module's comment). */
 function readsAsArgument(call: CallExpression, eligible: (name: string) => boolean): boolean {
-  const [argument, ...more] = call.arguments;
+  const argument = call.arguments[0];
   return (
     call.callee.kind === "identifier" &&
     eligible(call.callee.name) &&
+    call.arguments.length === 1 &&
     argument !== undefined &&
-    more.length === 0 &&
     argument.kind === "positionalArgument"
   );
 }
