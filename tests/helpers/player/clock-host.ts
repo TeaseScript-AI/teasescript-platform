@@ -1,5 +1,6 @@
 /*
- * The Player and its scene clock for the clock's tests (`player-clock-work.test.ts`, `player-clock-families.test.ts`):
+ * The Player and its scene clock for the clock's tests (`player-clock-work.test.ts`,
+ * `player-clock-observations.test.ts`, `player-clock-families.test.ts`):
  * a Player whose host requests are tracked and held (`mount`), and the clock alone over its session (`mountClock`).
  */
 
