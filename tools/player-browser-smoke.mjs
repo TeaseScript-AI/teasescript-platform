@@ -1970,12 +1970,16 @@ function noLoginField(element) {
   return `(${element} instanceof HTMLTextAreaElement || ${element}?.type === 'text') && ${element}.autocomplete === 'off' && getComputedStyle(${element}).webkitTextSecurity === 'disc'`;
 }
 
-/** Pastes `text` from the clipboard into the field `selector`, as Ctrl+V does. */
+/**
+ * Pastes `text` from the clipboard into the field `selector`, as Ctrl+V does. The text is copied from a field next to
+ * it, inside any open dialog, whose focus trap would keep a field elsewhere from being selected.
+ */
 async function pasteText(cdp, selector, text) {
-  await value(
+  const selected = await value(
     cdp,
-    `(() => { const source = document.createElement('textarea'); source.id = 'smoke-clipboard'; source.value = ${JSON.stringify(text)}; document.body.append(source); source.select(); return true; })()`,
+    `(() => { const source = document.createElement('textarea'); source.id = 'smoke-clipboard'; source.value = ${JSON.stringify(text)}; document.querySelector(${JSON.stringify(selector)}).parentElement.append(source); source.focus(); source.select(); return document.activeElement === source; })()`,
   );
+  assertEqual(selected, true, "The text to paste could not be selected");
   await key(cdp, "c", { modifiers: 2, commands: ["copy"] });
   await value(cdp, `(document.getElementById('smoke-clipboard').remove(), true)`);
   await physicalClick(cdp, selector);

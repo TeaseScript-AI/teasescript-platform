@@ -55,10 +55,8 @@ defineExpose({ focus });
         ref="input"
         v-model="model"
         rows="1"
-        :class="[
-          'min-h-11 min-w-0 resize-none overflow-hidden py-2.5 whitespace-pre aria-invalid:border-destructive',
-          shown ? undefined : '[-webkit-text-security:disc]',
-        ]"
+        variant="line"
+        :class="['min-w-0', shown ? undefined : '[-webkit-text-security:disc]']"
         v-bind="passwordAttributes"
         :readonly="props.busy"
         :aria-invalid="props.error ? 'true' : undefined"
