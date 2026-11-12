@@ -2,7 +2,7 @@
  * #1072 step 1b (R28): the type-core test files CI runs frozen (`retained-instrument-preload.ts`), chosen by measurement:
  * per file, what it exercises frozen (each kind `Retained` makes, by its name and site; each owner kind; each registered
  * function) and what freezing it costs in CI; then a greedy cover of everything the 86 files exercise, the cheapest
- * first per item it adds. The whole frozen survey (`RETAINED_FREEZE=all`, docs/TESTING.md) runs every file. Measured at
+ * first per item it adds, within no CI shard above 10 minutes. The whole frozen survey (`RETAINED_FREEZE=all`, docs/TESTING.md) runs every file. Measured at
  * #2417's head 10a2ad0f (notes `o4-lead/plans/1072-retained-head0.md`, Amendment 3, "The frozen subset").
  */
 
@@ -73,12 +73,11 @@ export const FROZEN_IN_CI: ReadonlyMap<string, string> = new Map<string, string>
     "type-core-signatures.test",
     "1 first: set Contract.bindingNamesOf.stored (contract/selections.ts)",
   ],
-  [
-    "type-core-work-a.test",
-    "3 first: map ExactPath.copies.exits[] (exact-path.ts), map ExactPath.copies.markSeveral[] (exact-path.ts) and 1 more",
-  ],
 ]);
 
-// What the subset does not exercise, by site; the whole survey covers the first, and no test makes the second:
+// What the subset does not exercise, by site; the whole survey covers all but the last, which no test makes:
+// - maps `ExactPath.copies.exits[]` and `.markSeveral[]`, and the sets `.markSeveral[][]` (`exact-path.ts`): only
+//   `type-core-work-a` and `-work-b` exercise all three, and the cheaper, `work-a`, would cost about 40 s of each CI
+//   shard, past the 10 minutes of a slow runner;
 // - function `test.subAt` (`tests/type-core/type-core-contract.test.ts`): a test's probe, exercised only by that file;
 // - set `SubSource.defs` (`contract/prefix-index/layers.ts`, `relevantSubs`): a source two found layers bring.
