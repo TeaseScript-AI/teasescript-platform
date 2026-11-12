@@ -272,6 +272,46 @@ test("a generator's shared build counts to the total, never to the asker, and en
 });
 
 /**
+ * #2289 (R67): a shared build of structure (`sharedStructure`) counts its own steps to the total and not to the asker,
+ * but what runs while it is suspended at a yield, the read it yielded, is the asker's: no demand runs inside it. A build
+ * abandoned at its yield leaves nothing open.
+ */
+test("a shared structure build counts its own steps to the total, and each read it yields to the asker (#2289 R67)", () => {
+  const work = new WorkLedger(1_000);
+  work.charge("checks", 7);
+  const steps = work.sharedStructure(
+    (function* (): Generator<string, string, string> {
+      work.charge("checks", 5);
+      const answer = yield "read";
+      work.charge("checks", 3);
+      return answer;
+    })(),
+  );
+  assert.deepEqual(steps.next(), { value: "read", done: false });
+  assert.equal(work.sharing, false);
+  // (the read the build yielded, run by its driver)
+  work.charge("checks", 2);
+  assert.deepEqual({ total: work.total, own: work.own }, { total: 14, own: 9 });
+  assert.deepEqual(steps.next("answered"), { value: "answered", done: true });
+  assert.deepEqual(
+    { total: work.total, own: work.own, sharing: work.sharing },
+    { total: 17, own: 9, sharing: false },
+  );
+  const abandoned = work.sharedStructure(
+    (function* () {
+      work.charge("checks", 4);
+      yield "read";
+    })(),
+  );
+  abandoned.next();
+  work.charge("checks", 1);
+  assert.deepEqual(
+    { total: work.total, own: work.own, sharing: work.sharing },
+    { total: 22, own: 10, sharing: false },
+  );
+});
+
+/**
  * S3: the pipeline handles depth 10,000; the consumers of statements nested past the core's 256 are
  * checked when the script runs, every other statement proved as ever (admission still decides every place from every
  * store), an `else if` one level more: a check inside them is moved, an error outside stands, and one warning names the
