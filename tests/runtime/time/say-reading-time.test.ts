@@ -10,7 +10,7 @@ import { run } from "../../../src/runtime/engine.js";
 import { completeAction } from "../../../src/runtime/operations/complete-action.js";
 import { observeTime } from "../../../src/runtime/operations/observe-time.js";
 import { assertRuntimeResumeEquivalent } from "../../helpers/runtime-equivalence.js";
-import { Story } from "../../helpers/story-session.js";
+import { Story } from "../../helpers/runtime/story-session.js";
 
 /*
  * A paced `say` lasts its reading time, and the next statement runs after it unless the player skips it (owner

@@ -40,7 +40,7 @@ import { serializeValidatedRuntimeJson } from "../../../src/runtime/snapshot/che
 import { withValidationTestStatistics } from "../../../src/validation-testing.js";
 import { compileValidPlan } from "../../helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
-import { AMSTERDAM } from "../../helpers/temporal-fixtures.js";
+import { AMSTERDAM } from "../../helpers/runtime/temporal-fixtures.js";
 
 /*
  * Engine-owned runtime sessions (docs/RUNTIME.md#runtime-sessions). The shared resume-equivalence helper compares

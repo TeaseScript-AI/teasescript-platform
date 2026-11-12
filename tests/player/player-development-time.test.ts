@@ -21,7 +21,7 @@ import {
 } from "../../player/runtime-adapter.js";
 import type { ScriptStorageProvider } from "../../player/script-storage.js";
 import type { MediaProgressReport } from "../../src/index.js";
-import { harness } from "../helpers/player/player-media.js";
+import { harness } from "../helpers/player/media/player-media.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 
 // Development time controls (#615) jump scene time through ordinary observations. A jump must give exactly the

@@ -25,7 +25,7 @@ import type {
   RuntimeScriptStorageEntrySnapshot,
   SerializableRuntimeValue,
 } from "../../src/index.js";
-import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
+import { FakeMediaRepository } from "../helpers/player/media/fake-media-repository.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 
 // The debug room (DEBUGGER.md "Debug room") through the real Vue session host: Debug on during a normal session goes on

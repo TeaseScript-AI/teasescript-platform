@@ -11,7 +11,7 @@ import {
 } from "../../player/runtime-adapter.js";
 import type { ScriptStorageProvider } from "../../player/script-storage.js";
 import type { SerializableRuntimeValue } from "../../src/index.js";
-import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
+import { FakeMediaRepository } from "../helpers/player/media/fake-media-repository.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 
 // Load the real Vue composable through the existing build tool: its browser-source imports use Vite resolution.

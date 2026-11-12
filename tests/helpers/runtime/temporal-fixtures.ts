@@ -1,4 +1,4 @@
-import { DEFAULT_PRESENTATION_SETTINGS, type TemporalContext } from "../../src/temporal.js";
+import { DEFAULT_PRESENTATION_SETTINGS, type TemporalContext } from "../../../src/temporal.js";
 
 export function utc(text: string): number {
   return Date.parse(`${text}Z`);

@@ -18,7 +18,7 @@ import {
   playerRuntimeSnapshot,
 } from "../../player/runtime-adapter.js";
 import { observeTime } from "../../src/index.js";
-import { harness } from "../helpers/player/player-media.js";
+import { harness } from "../helpers/player/media/player-media.js";
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 

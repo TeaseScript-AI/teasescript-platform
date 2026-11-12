@@ -14,7 +14,7 @@ import {
 import { untilReleased } from "../../player/browser-capture.js";
 import { RgbaImage } from "../../player/rgba-image.js";
 import { CapturedMediaNotStoredError, CapturedMediaStore } from "../../player/captured-media.js";
-import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
+import { FakeMediaRepository } from "../helpers/player/media/fake-media-repository.js";
 
 // A deterministic stand-in for MediaStreamTrack: `end()` simulates the browser ending it, for example on revocation.
 class FakeTrack implements CaptureTrack {

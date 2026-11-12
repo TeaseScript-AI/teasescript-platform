@@ -10,7 +10,7 @@ import {
   type PhotoColour,
   type Rgb,
 } from "../../player/theme/node-vibrant/swatches.js";
-import { referencePhotos } from "../helpers/player/photo-swatches-fixture.js";
+import { referencePhotos } from "../helpers/player/media/photo-swatches-fixture.js";
 
 const hex = (rgb: Rgb) => `#${rgb.map((value) => value.toString(16).padStart(2, "0")).join("")}`;
 const entry = (colour: PhotoColour) => [hex(colour.rgb), colour.population];

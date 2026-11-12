@@ -22,7 +22,7 @@ import {
   type RuntimeSnapshot,
   type SerializableRuntimeValue,
 } from "../../src/index.js";
-import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
+import { FakeMediaRepository } from "../helpers/player/media/fake-media-repository.js";
 import { runUntilExit } from "../helpers/run-until-exit.js";
 
 const urls = { create: (data: Blob) => `blob:${data.size}`, revoke: () => {} };

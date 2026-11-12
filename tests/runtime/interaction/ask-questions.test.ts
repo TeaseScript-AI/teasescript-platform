@@ -17,7 +17,7 @@ import { validateInstructionPlan } from "../../../src/plan/validation.js";
 import { withValidationTestStatistics } from "../../../src/validation-testing.js";
 import { compileValidPlan } from "../../helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
-import { AMSTERDAM } from "../../helpers/temporal-fixtures.js";
+import { AMSTERDAM } from "../../helpers/runtime/temporal-fixtures.js";
 import { createFreshRuntimeSnapshot } from "../../../src/runtime/snapshot/snapshot-construction.js";
 
 const SPEAKERS = 'speaker mistress {\n  displayName: "Mistress"\n}\nspeaker guide {}\n';

@@ -15,7 +15,7 @@ import type * as RuntimeAdapter from "../../player/runtime-adapter.js";
 import type { PlayerRuntimeSession } from "../../player/runtime-adapter.js";
 import type { ScriptStorageProvider } from "../../player/script-storage.js";
 import type { SerializableRuntimeValue } from "../../src/index.js";
-import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
+import { FakeMediaRepository } from "../helpers/player/media/fake-media-repository.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 
 // A Player error stops the session where it stands (PLAYER-UI "Session end and failure"). Input and the work that

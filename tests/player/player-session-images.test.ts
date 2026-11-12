@@ -24,7 +24,7 @@ import { debugExportFile, parseDebugExport, replayDebugExport } from "../../play
 import { memoryKeptSessionStore, type KeptSessionStore } from "../../player/kept-sessions.js";
 import type { ScriptStorageProvider } from "../../player/script-storage.js";
 import type { InstructionPlan, SerializableRuntimeValue } from "../../src/index.js";
-import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
+import { FakeMediaRepository } from "../helpers/player/media/fake-media-repository.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 
 interface ImageHost {

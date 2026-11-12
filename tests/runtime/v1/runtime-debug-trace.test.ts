@@ -48,7 +48,7 @@ import {
 } from "../../../player/runtime-adapter.js";
 import { TraceStore } from "../../../src/runtime/debug/debug-trace.js";
 import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
-import { playerStateOf } from "../../helpers/player-state.js";
+import { playerStateOf } from "../../helpers/player/player-state.js";
 
 /*
  * The opt-in debug trace (docs/RUNTIME.md#debug-trace) explains values with what execution actually computed. Every
