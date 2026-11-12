@@ -41,7 +41,7 @@ export function labelBelow(parent: Label, step: string): Label {
   recorded?.records.push({ kind: "recipe", made: found === undefined });
   if (found === undefined) {
     found = Retained.record<Label>("Label", { parent, step, text: null, below: null });
-    (parent.below ??= Retained.held(parent, Retained.map("Label.below"))).set(step, found);
+    (parent.below ??= Retained.map("Label.below")).set(step, found);
   }
   return found;
 }
