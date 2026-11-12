@@ -158,8 +158,16 @@ function declaredRead(walk: Consumers): BindingRead {
   const { program } = walk.pass;
   return (read) => {
     const occurrence = program.placeBySite.get(siteKey(read));
-    const binding = occurrence === undefined ? undefined : program.occurrenceOf.get(occurrence);
-    if (binding === undefined) return null;
+    if (occurrence === undefined) return null;
+    const binding = program.occurrenceOf.get(occurrence);
+    if (binding === undefined) {
+      // (#2378: a call of a function with a written result, a copy of that result; named by the function)
+      const call = program.callOutOf.has(occurrence) ? program.opOf.get(occurrence) : undefined;
+      if (call?.kind !== "call") return null;
+      const fn = program.functionOf(call.fn);
+      const result = writtenOf(program.place(fn.result).kind);
+      return result === null ? null : { name: fn.name, site: fn.site, type: typeTags(result) };
+    }
     const { kind, site } = program.place(binding);
     const written = writtenOf(kind);
     const declared =

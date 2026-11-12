@@ -1036,7 +1036,6 @@ const COPIES_LISTED: Readonly<Record<string, readonly [number, string]>> = {
     12,
     "a lifted holder's reference: the key's steps joined to its entry's, the holder's shift and its identity's name",
   ],
-  touchRead: [8, "a touch's path, an array its trie keeps (`Touches`)"],
   keyStructure: [8, "a root's rest below a prefix's store, kept in the structure's roots"],
   decide: [
     6,

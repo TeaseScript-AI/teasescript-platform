@@ -33,7 +33,7 @@ import type {
   View,
 } from "./model.js";
 import { permittedAt } from "./permitted.js";
-import { fieldsOf, sourceOfRead } from "./structure.js";
+import { dictStepsRead, fieldsOf, sourceOfRead } from "./structure.js";
 import { readNow, type Reads } from "../inherited/reads.js";
 
 // The store walk: a stored value's contributions by the path they stand at, the bindings it copies, their order.
@@ -189,6 +189,19 @@ export function copySources(
       });
       continue;
     }
+    // (#2378: a call of a function with a written result is a copy of that result, as a read of a written binding is)
+    const call = program.callOutOf.has(current) ? program.opOf.get(current) : undefined;
+    const result = call?.kind === "call" ? program.functionOf(call.fn).result : undefined;
+    if (result !== undefined && writtenOf(program.place(result).kind) !== null) {
+      out.push({
+        path: made(path),
+        binding: result,
+        strip: stripSteps(admission, strip),
+        cellsLive,
+        literal,
+      });
+      continue;
+    }
     const next: [PlaceId, Steps | null, CopyStrip, boolean, boolean][] = [];
     // (its cells' tasks share one rest of the strip, charged as kept)
     let rest: CopyStrip | null = null;
@@ -303,11 +316,11 @@ function stripSteps(admission: Admission, strip: CopyStrip): readonly string[] {
 }
 
 /**
- * A4, F12: the binding a value copies, directly or through its projections (`typed[0]`, `typed.first`), with the path
- * into it the copy stands at: the projections' steps, then `strip`; with its written type (`term`), or, for an
- * unwritten place that may inherit one (`inheriting`), that place (`from`: its type at each path the one its own
- * decision copies, `inheritedAt`); `null` for any other value, and for a projection the written type has no path for
- * (a dict's lists, a length).
+ * A4, F12: the binding a value copies, or the written result a call copies (#2378), directly or through its
+ * projections (`typed[0]`, `typed.first`, `f(0)[0]`), with the path into it the copy stands at: the projections' steps,
+ * then `strip`; with its written type (`term`), or, for an unwritten place that may inherit one (`inheriting`), that
+ * place (`from`: its type at each path the one its own decision copies, `inheritedAt`); `null` for any other value, and
+ * for a projection the written type has no path for (a dict's keys, its values list read whole, a length).
  */
 export function writtenSource(
   admission: Admission,
@@ -337,7 +350,8 @@ export function* writtenSourceRead(
     if (term !== null) return { term, from: null, strip };
     return admission.inheriting.has(binding) ? { term: null, from: binding, strip } : null;
   }
-  const key = program.projOf.has(value) ? contract.copiedKey(value) : null;
+  const key =
+    (program.projOf.has(value) ? contract.copiedKey(value) : null) ?? contract.resultKey(value);
   if (key === null) return null;
   const place = keyPlace(key);
   const term = writtenOf(program.place(place).kind);
@@ -345,12 +359,31 @@ export function* writtenSourceRead(
   // (a projection of a receiver that may be a reference is the runtime's member, no copy: F19a)
   for (let at = value; program.projOf.has(at); at = program.projOf.get(at)!.owner)
     if (yield* admission.keepsOwnRead(at)) return null;
-  const steps = keyStepsIn(contract, key);
-  if (someStep(steps, (step) => dictList(step) !== undefined)) return null;
+  const keySteps = keyStepsIn(contract, key);
+  let steps: readonly string[];
+  if (someStep(keySteps, (step) => dictList(step) !== undefined)) {
+    // (#2378: a dict's list read by its owner's contract, as `sourceOfRead` reads it: its values at the dict's
+    // elements; the values list itself has no written path of its own, its elements below it by its carrier, `expand`)
+    const read = yield* dictStepsRead(admission, key);
+    if (read === null || (read.values && strip.length === 0)) return null;
+    steps = read.path;
+  } else steps = stepsArray(keySteps);
   // (a copy's strip keeps an array: a cursor's steps copied out, `stepsArray`, for a source it keeps)
-  const path = keptSteps(admission.work, stepsArray(steps), strip);
+  const path = keptSteps(admission.work, steps, strip);
   if (term === null) return { term: null, from: place, strip: path };
   return permittedAt(term, path) === null ? null : { term, from: null, strip: path };
+}
+
+const ELEMENT: readonly string[] = ["element"];
+
+/** Whether a value is a dict's `values` list whose elements have a written source (`writtenSourceRead`). */
+function* dictValuesWritten(admission: Admission, value: PlaceId): Reads<boolean> {
+  const projection = admission.pass.program.projOf.get(value);
+  return (
+    projection !== undefined &&
+    dictList(projection.step) === "values" &&
+    (yield* writtenSourceRead(admission, value, ELEMENT)) !== null
+  );
 }
 
 /**
@@ -419,11 +452,19 @@ export function* expandRead(
   const literal = term === null && program.hasOf.has(value);
   let stop: Expansion["stop"] = null;
   const parts: Part[] = [];
+  // (#2378: a dict's values list read whole, its elements with a written source: below its path, its elements as its
+  // carrier reads them, the dict's values; at its path, its own value alone, the dict not being the list)
+  const valuesOwn =
+    !literal &&
+    !after &&
+    written === null &&
+    strip.length === 0 &&
+    (yield* dictValuesWritten(admission, value));
   const carried =
     literal ||
     after ||
     term !== null ||
-    (yield* program.work.outsideSteps(sourceOfRead(admission, value))) !== null
+    ((yield* program.work.outsideSteps(sourceOfRead(admission, value))) !== null && !valuesOwn)
       ? []
       : yield* admission.carriersOfRead(value, strip);
   if (literal && strip.length > 0) {
@@ -450,7 +491,7 @@ export function* expandRead(
           step: null,
           strip: rest,
           deep: true,
-          single: true,
+          single: !valuesOwn,
           position,
           after: false,
           role: projection ? null : role,
