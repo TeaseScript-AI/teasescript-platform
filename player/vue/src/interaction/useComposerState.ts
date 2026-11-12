@@ -35,6 +35,8 @@ export interface ComposerDescriptor {
   readonly prefill: string | null;
   /** For a form field: the text the form holds for it, which a new editor opens with. */
   readonly editorText: string | null;
+  /** The presented form's field whose editor is open, whichever slot the field shows (a lock's, say), or `null`. */
+  readonly editorField: string | null;
   /** For a date or time control: its prefill, which its slot starts with. */
   readonly temporalPrefill: string | null;
 }
@@ -43,6 +45,8 @@ export interface ComposerDescriptor {
 type PrefillState = "unshown" | "offered" | "taken";
 
 interface FormSlot {
+  readonly actionId: number;
+  readonly fieldId: string;
   /** Each opening of the field's editor is its own; an acknowledgment of another opening changes nothing. */
   readonly opening: number;
   draft: string;
@@ -128,6 +132,8 @@ export function useComposerState(host: {
   const revision = ref(0);
   /** The action whose answer was under way at the last selection, whose field the chat stands in for. */
   let answering: number | null = null;
+  /** The form field the field showed when its editor closed at the last selection, or `null`. */
+  let closedShown: { readonly actionId: number; readonly fieldId: string } | null = null;
   let finish: () => void = () => {};
   let draftTimer: ReturnType<typeof setTimeout> | undefined;
   let disposed = false;
@@ -164,8 +170,7 @@ export function useComposerState(host: {
     }
     const live = new Set(next.liveActions);
     // A Map's iteration visits each remaining key once while its entries are deleted.
-    for (const key of forms.keys())
-      if (!live.has(Number(key.slice(0, key.indexOf(":"))))) forms.delete(key);
+    for (const [key, slot] of forms) if (!live.has(slot.actionId)) forms.delete(key);
     for (const id of temporals.keys()) if (!live.has(id)) temporals.delete(id);
     for (const id of prefills.keys()) if (!live.has(id)) prefills.delete(id);
   }
@@ -208,15 +213,16 @@ export function useComposerState(host: {
       chat.value = "";
       offer = null;
     }
-    // A field closed while its form is still presented ends its opening; a suspended or answered one keeps it.
-    if (
-      previous.kind === "form" &&
-      !next.answered &&
-      (next.tenant.kind !== "form" || tenantKey(next.tenant) !== tenantKey(previous)) &&
-      next.actionId === previous.actionId &&
-      next.session === session
-    )
-      forms.delete(formKey(previous.actionId, previous.fieldId));
+    // A field whose editor closed while its form is still presented ends its opening, whichever slot the field showed
+    // meanwhile; a suspended or answered form keeps it.
+    closedShown = null;
+    if (!next.answered && next.actionId !== null && next.session === session)
+      for (const [key, slot] of forms)
+        if (slot.actionId === next.actionId && slot.fieldId !== next.editorField) {
+          forms.delete(key);
+          if (previous.kind === "form" && formKey(previous.actionId, previous.fieldId) === key)
+            closedShown = { actionId: slot.actionId, fieldId: slot.fieldId };
+        }
     if (previous.kind === "password" && tenantKey(previous) !== tenantKey(next.tenant))
       password = null;
     if (next.tenant.kind !== "lock" || lock?.key !== next.tenant.dialogKey) lock = null;
@@ -234,6 +240,8 @@ export function useComposerState(host: {
       const key = formKey(shown.actionId, shown.fieldId);
       if (!forms.has(key))
         forms.set(key, {
+          actionId: shown.actionId,
+          fieldId: shown.fieldId,
           opening: ++openings,
           draft: next.editorText ?? "",
           revision: 0,
@@ -461,6 +469,11 @@ export function useComposerState(host: {
       void revision.value;
       return tenant.value.kind === "lock" ? (lock?.phase ?? "first") : null;
     }),
+    /**
+     * The form field the last selection closed while the field showed it, so focus may return to its button; `null`
+     * when it closed under another slot, such as the lock's password.
+     */
+    closedField: () => closedShown,
     /** The chat's text, wherever the field is. */
     chatText: computed(() => chat.value),
     select,
