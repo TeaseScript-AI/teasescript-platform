@@ -82,7 +82,11 @@ export function decide(walk: Consumers, group: DecidedAt, lazily = false): Decis
   walk.deciding = before + allowance;
   let stopped = false;
   try {
-    return walk.admission.decide(group, lazily);
+    const decision = walk.admission.decide(group, lazily);
+    // (#2289 R26: a decision a literal's stopped element left undecided owes what a stopped one's stores owe)
+    if (decision === null && walk.admission.budgetUndecidedKey(group))
+      walk.stoppedStores(root, stepsArray(walk.admission.stepsAt(group)));
+    return decision;
   } catch (error) {
     if (!(error instanceof DemandExhausted)) throw error;
     stopped = true;
@@ -272,7 +276,9 @@ export function admittedStores(
     }
     // C1 per candidate; an equivalent copy (`Candidate.members`) only where its representative leaves an obligation
     const visit = (d: Definition, at: Steps): void => {
-      if (d === decider && at.length === 0) return;
+      // (#2289, R38: a strict literal cell's undeclared host element leaves through its decider's own store, which is
+      // checked)
+      if (d === decider && at.length === 0 && decision.deciderHost !== true) return;
       walk.reading = d.node;
       // §3.3: a candidate the admitted type accepts whatever its value
       if (at.length === 0) {

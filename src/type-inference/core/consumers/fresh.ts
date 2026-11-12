@@ -168,12 +168,12 @@ function inMarkedValue(walk: Consumers, site: SourceSite): boolean {
 
 /**
  * A literal whose element needs a decision admission did not make (`Admission.literalElements`, before admission
- * settled): each definition of the outermost literal holding it marked (`storeMark`: a store, an add, an argument
+ * settled, or after it where a stop left its cell undecided, #2289 R26): each definition of the outermost literal holding it marked (`storeMark`: a store, an add, an argument
  * whether one call or several reaches its parameter, a return), standing for its records within its value, the mixed
  * elements' among them; a literal no definition holds (a consumer's own, `say [count, "bad"]`, or a
  * receiver's) marked itself, standing for its records within it.
  */
-function markHolder(walk: Consumers, cell: PlaceId): void {
+export function markHolder(walk: Consumers, cell: PlaceId): void {
   const owner = walk.pass.program.cellOwner.get(cell)?.owner;
   if (owner !== undefined) markValue(walk, owner);
 }
@@ -183,7 +183,7 @@ function markHolder(walk: Consumers, cell: PlaceId): void {
  * (`Admission.joinElements`, #1272): each definition of the outermost literal holding it, or of the value itself,
  * marked; a value no definition holds marked itself.
  */
-function markValue(walk: Consumers, value: PlaceId): void {
+export function markValue(walk: Consumers, value: PlaceId): void {
   const { program, definitions } = walk.pass;
   if (walk.heldIn === null) {
     walk.heldIn = new Map();

@@ -59,7 +59,7 @@ import {
 import { withFacts } from "./consumers/diagnostics.js";
 import { enclosingStores, requiredStores } from "./consumers/enclosing.js";
 import { finishedItems, finishingRead, labelDomain } from "./consumers/finishing.js";
-import { freshStores, ingressMark } from "./consumers/fresh.js";
+import { freshStores, ingressMark, markHolder, markValue } from "./consumers/fresh.js";
 import { mixed, mixedChoices, mixedJoin } from "./consumers/mixed.js";
 import type {
   CheapDecision,
@@ -647,8 +647,19 @@ export class Consumers {
         this.#ingressSites.push(site);
       }
       this.rule = 3;
-      this.admission.literalElements(this.order, (site, found) => mixed(this, site, found));
-      this.admission.joinElements(this.order, (found) => mixedJoin(this, found));
+      // (a literal or join a stop left undecided (#2289 R26) is not compared: its holders' stores are marked)
+      this.admission.literalElements(
+        this.order,
+        (site, found) => mixed(this, site, found),
+        undefined,
+        (cell) => markHolder(this, cell),
+      );
+      this.admission.joinElements(
+        this.order,
+        (found) => mixedJoin(this, found),
+        undefined,
+        (value) => markValue(this, value),
+      );
       // (a pass whose admission gives the stores below a selection other targets starts the passes again, #1275; one in
       // which a decision stopped is not settled either: the next starts with its key stopped,
       // docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-180)
