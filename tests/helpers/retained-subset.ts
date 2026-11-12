@@ -70,6 +70,11 @@ export const FROZEN_IN_CI: ReadonlyMap<string, string> = new Map<string, string>
     "4 first: map site.PARAMETERS[] (messages/site.ts), map site.PROPERTIES[] (messages/site.ts) and 2 more",
   ],
   [
+    "type-core-written-default.test",
+    "7 first, measured at #2403's rebase: owner WrittenDefaults, maps WrittenDefaults.cells[] and .kinds.below " +
+      "(contract/written-default.ts), which only a typed default's literal or written type makes, and 3 more",
+  ],
+  [
     "type-core-signatures.test",
     "1 first: set Contract.bindingNamesOf.stored (contract/selections.ts)",
   ],
