@@ -57,6 +57,24 @@ const KEYS = {
   "send-click": click("send"),
 };
 const IME = new Set(["ime-committed", "ime-open"]);
+/**
+ * A step that fails unless the answer Enter sent is in flight as it shows at once: its predicted line, its question's
+ * controls gone, Send and the field usable.
+ */
+const answerShown = async (page) => {
+  const shown = await page.evaluate(() => {
+    const field = document.querySelector("[data-composer-input]");
+    const send = document.querySelector("[data-runtime-interaction] button[type=submit]");
+    return {
+      line: document.querySelector('.transcript-entry[data-message-id^="predicted-"]') !== null,
+      controls: document.querySelectorAll("[data-foreground-controls] button").length,
+      send: send ? !send.disabled : null,
+      field: field ? !field.readOnly && !field.disabled : null,
+    };
+  });
+  if (!shown.line || shown.controls !== 0 || shown.send !== true || shown.field !== true)
+    throw new Error(`The answer in flight did not show as sent: ${JSON.stringify(shown)}`);
+};
 /** A step that fails unless the composer's field shows `text`, read-only and not disabled: a form field's commit. */
 const committing = (text) => async (page) => {
   const field = await page.evaluate(() => {
@@ -176,7 +194,8 @@ function cases(engine) {
         url: "/player/?dev",
         before: [],
         answer,
-        keys: KEYS[name],
+        // A completed answer is in flight from Enter on; a refused one never left the composer.
+        keys: outcome === "completed" ? seq(answerShown, KEYS[name]) : KEYS[name],
         expect,
         residual: "",
       }));
@@ -239,6 +258,25 @@ function cases(engine) {
       answer,
       clipboard: "a\nb",
     })),
+    // An input method's composition under way when the answer presents a password field ends in the chat it was typed
+    // in: the password field starts empty, and once it is answered the chat shows the composed text.
+    ...(engine === "chromium"
+      ? [
+          {
+            ...fixture("password ime-open", "Password", KEYS["ime-open"], shown("に", "", 4)),
+            lastly: async (page) => {
+              const input = page.locator("[data-composer-input]");
+              await input.fill("pw");
+              await input.press("Enter");
+              await page.waitForFunction(
+                () => document.querySelector("[data-composer-input]")?.value === "に",
+                null,
+                { timeout: 5_000 },
+              );
+            },
+          },
+        ]
+      : []),
     // A second Enter in flight sends nothing: a lock's code field stays empty, and a popup, an export or a link's button
     // that the answer presents stays as it shows.
     fixture("code enter", "Code", press("Enter"), shown("", "", 4)),

@@ -82,7 +82,8 @@ Pass or fail is derived from primary records, never from a cached flag:
     `/player/?dev` and the `answer-flight` fixture package. Each case expects the outcome the composer's rules give
     (`scenarios/keys.mjs`): nothing typed in flight is lost, and Enter, Send and Space in an empty composer act on no
     other question while the answer is pending; a form's field commit or toggle in flight is no answer and goes in
-    order. It runs on the `delayed` variant at 250 ms (**The keys** below); a build whose answers settle at once is no
+    order. A completed case first checks the answer in flight as sent: its line, its controls gone, Send and the field
+    usable. It runs on the `delayed` variant at 250 ms (**The keys** below); a build whose answers settle at once is no
     oracle, since a key can land after the answer settled and then belongs to the next question. A block case moves
     the page's clock past its block's timer just before Enter, so the block always overtakes the answer, and fails by
     that name if it does not.
