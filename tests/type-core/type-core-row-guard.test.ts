@@ -9,12 +9,16 @@ import { compileProjectWithBackend } from "../../src/compiler.js";
 import { CONVERSIONS } from "../../src/conversions.js";
 import { run } from "../../src/runtime/engine.js";
 import type { RuntimeSnapshot } from "../../src/runtime/snapshot/state.js";
+import { analyseCore } from "../../src/type-inference/core/answers.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
+import { withTestAllowance } from "../../src/type-inference/core/budget.js";
 import { DISPOSITIONS, type SyntaxKind } from "../../src/type-inference/core/slice-syntax.js";
 import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
+import { coreRequest } from "../helpers/type-core-analysis.js";
 import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import {
   ADMITTED_KINDS,
+  CONTEXTS,
   DECLARED_REFUSALS,
   DECLARED_RULE_DIFFERENCES,
   DECLARED_RUN_DIFFERENCES,
@@ -78,8 +82,8 @@ interface GuardCase {
   readonly refusal?: string;
   /** A command operand's misfit, which today's checker may refuse at compile time (`DECLARED_RULE_DIFFERENCES`). */
   readonly misfit?: true;
-  /** A declared rule difference's twin after `exit` (`unreachable`). */
-  readonly unreachable?: true;
+  /** A declared rule difference's command in a context, or its fitting twin there (R12), judged by `judgeContexts`. */
+  readonly context?: true;
 }
 
 // EVIDENCE: invariant: the table's keys are exactly the AST kinds (its mapped type).
@@ -88,8 +92,6 @@ const OPEN = (Object.keys(DISPOSITIONS) as SyntaxKind[]).filter(
 );
 
 const script = (template: string): string => `${template}\nexit\n`;
-/** A command where it cannot run: a declared rule difference's twin (the lead's R9). */
-const unreachable = (command: string): string => `exit\n${command}\n`;
 
 /** Every case of the guard: each template, and each declared refusal's source and its admitted twin. */
 function guardCases(): GuardCase[] {
@@ -116,10 +118,20 @@ function guardCases(): GuardCase[] {
         source: script(source),
         misfit: true as const,
       })),
-    ...DECLARED_RULE_DIFFERENCES.map(({ row, operand, source }) => ({
-      name: `${row} ${operand}, unreachable: ${source}`,
-      source: unreachable(source),
-      unreachable: true as const,
+    // each declared rule difference in each context, and each fitting twin there once
+    ...[
+      ...new Map(
+        DECLARED_RULE_DIFFERENCES.flatMap((declared) =>
+          Object.values(CONTEXTS).flatMap((wrap): [string, string][] => [
+            [wrap(declared.source), declared.source],
+            [wrap(declared.fitting), declared.fitting],
+          ]),
+        ),
+      ),
+    ].map(([source, command]) => ({
+      name: `in context: ${command}: ${JSON.stringify(source)}`,
+      source,
+      context: true as const,
     })),
   ];
 }
@@ -161,7 +173,7 @@ const outcome = (run: Run | undefined): string =>
 function judge(guardCase: GuardCase, record: DifferentialRecord, seen: Set<string>): string[] {
   const failures: string[] = [];
   const { checker } = record;
-  if (guardCase.unreachable === true) return judgeUnreachable(guardCase, record);
+  if (guardCase.context === true) return [];
   if (guardCase.misfit === true && checker.threw === undefined && !checker.plan)
     return judgeRefusedToday(guardCase, record, seen);
   if (checker.threw !== undefined || !checker.plan)
@@ -258,40 +270,76 @@ function judgeRefusedToday(
   return failures;
 }
 
+/** Each diagnostic of an entry as `severity code start:end`. */
+const diagnosed = (
+  entry: Entry,
+  at: (offset: number) => number | null = (offset) => offset,
+): string[] =>
+  (entry.diagnostics ?? []).flatMap((diagnostic) => {
+    const [start, end] = [at(diagnostic.offset ?? -1), at(diagnostic.end ?? -1)];
+    return start === null || end === null
+      ? []
+      : [`${diagnostic.severity} ${diagnostic.code} ${start}:${end}`];
+  });
+
 /**
- * A declared rule difference after `exit` (R9): today its code and no plan; the route a plan whose only diagnostic is the
- * unreachable statement's warning at the command, and each run halting at `exit`, without a failure.
+ * Each declared rule difference in each context (R12): today its code and no plan; the route a plan, in every mode, that
+ * answers as its fitting twin's does (the route's, or today's where the twin's operand is outside the slice), apart from
+ * diagnostics inside the misfitting value, which are its producer's own: the same diagnostics, and each run ending as the
+ * twin's or, where it reaches the command, failing there with the entry's code. The one inherited difference: after an
+ * exiting `for`, today warns that the twin never runs (TSV065) and the route does not (R13).
  */
-function judgeUnreachable(guardCase: GuardCase, record: DifferentialRecord): string[] {
-  const declared = DECLARED_RULE_DIFFERENCES.find(
-    (difference) => unreachable(difference.source) === guardCase.source,
-  )!;
+function judgeContexts(
+  cases: readonly GuardCase[],
+  found: readonly DifferentialRecord[],
+): string[] {
+  const bySource = new Map(cases.map((guardCase, at) => [guardCase.source, found[at]!]));
   const failures: string[] = [];
-  const today = (record.checker.diagnostics ?? [])
-    .filter((diagnostic) => diagnostic.severity === "error")
-    .map((diagnostic) => diagnostic.code);
-  if (record.checker.plan || !today.includes(declared.code))
-    failures.push(
-      `${record.name}: today ${record.checker.plan ? "a plan" : "no plan"}, ${today.join(" ")}`,
-    );
-  const start = "exit\n".length;
-  const warning = `warning TSV065 ${start}:${start + declared.source.length}`;
-  for (const mode of record.candidate.modes) {
-    const found = (mode.diagnostics ?? []).map(
-      (diagnostic) =>
-        `${diagnostic.severity} ${diagnostic.code} ${diagnostic.offset}:${diagnostic.end}`,
-    );
-    const runs = (mode.runs ?? []).map(outcome);
-    if (
-      !mode.plan ||
-      JSON.stringify(found) !== JSON.stringify([warning]) ||
-      runs.length === 0 ||
-      runs.some((run) => run !== "halted null")
-    )
-      failures.push(
-        `${record.name} [${mode.mode}]: route ${mode.outside ?? mode.threw ?? (mode.plan ? "a plan" : "no plan")}, ${found.join(", ")}, runs ${runs.join(", ")}; declared ${warning}, every run halted`,
-      );
-  }
+  for (const declared of DECLARED_RULE_DIFFERENCES)
+    for (const [context, wrap] of Object.entries(CONTEXTS)) {
+      const source = wrap(declared.source);
+      const misfit = bySource.get(source)!;
+      const twin = bySource.get(wrap(declared.fitting))!;
+      const name = `${declared.source} ${context}`;
+      const today = (misfit.checker.diagnostics ?? [])
+        .filter((diagnostic) => diagnostic.severity === "error")
+        .map((diagnostic) => diagnostic.code);
+      if (misfit.checker.plan || !today.includes(declared.code))
+        failures.push(
+          `${name}: today ${misfit.checker.plan ? "a plan" : "no plan"}, ${today.join(" ")}`,
+        );
+      // the misfit's offsets as the twin's: the misfitting value replaced by the fitting one
+      const command = source.indexOf(declared.source);
+      const value =
+        command + OPERAND_TEMPLATES[declared.row]![declared.operand]![0]!.indexOf("hostValue");
+      const shift = declared.fitting.length - declared.source.length;
+      const asTwin = (offset: number): number | null =>
+        offset <= value ? offset : offset >= value + declared.value.length ? offset + shift : null;
+      const reached = `failed ${declared.failure.code}@${command + declared.source.indexOf(declared.failure.at)}:${command + declared.source.indexOf(declared.failure.at) + declared.failure.at.length}`;
+      misfit.candidate.modes.forEach((mode, at) => {
+        const twinMode = twin.candidate.modes[at];
+        const reference: Entry = twinMode?.plan ? twinMode : twin.checker;
+        const inherited = (diagnostic: string): boolean =>
+          reference === twin.checker &&
+          context === "after an exiting for" &&
+          diagnostic.startsWith("warning TSV065 ");
+        const expected = diagnosed(reference)
+          .filter((diagnostic) => !inherited(diagnostic))
+          .sort();
+        const answered = diagnosed(mode, asTwin).sort();
+        const runs = (mode.runs ?? []).map(outcome);
+        const twinRuns = (reference.runs ?? []).map(outcome);
+        if (
+          !mode.plan ||
+          JSON.stringify(answered) !== JSON.stringify(expected) ||
+          runs.length !== twinRuns.length ||
+          runs.some((run, index) => run !== reached && run !== twinRuns[index])
+        )
+          failures.push(
+            `${name} [${mode.mode}]: route ${mode.outside ?? mode.threw ?? (mode.plan ? "a plan" : "no plan")}, ${answered.join(", ")}, runs ${runs.join(", ")}; its twin ${expected.join(", ")}, runs ${twinRuns.join(", ")}`,
+          );
+      });
+    }
   return failures;
 }
 
@@ -329,7 +377,10 @@ test("each open row's templates publish on the route, with today's checks and to
     cases.map((guardCase) => guardCase.name),
   );
   const seen = new Set<string>();
-  const failures = cases.flatMap((guardCase, index) => judge(guardCase, found[index]!, seen));
+  const failures = [
+    ...cases.flatMap((guardCase, index) => judge(guardCase, found[index]!, seen)),
+    ...judgeContexts(cases, found),
+  ];
   // each declared rule difference, and each declared run difference, occurs in every mode
   for (const declared of DECLARED_RULE_DIFFERENCES)
     for (const mode of HELD_MODES.map((held) => held.name))
@@ -371,6 +422,29 @@ test("each value kind the slice admits no value of: the route refuses a source h
       }
       assert.equal(plan, null, `${kind}: ${source} [${mode.name}]`);
     }
+});
+
+test("a check that no store takes refuses its source, also where the analysis's budget stops it", () => {
+  const refused = DECLARED_REFUSALS.filter(
+    (declared) => declared.text === "a check that no store takes",
+  );
+  assert.equal(refused.length, 3);
+  for (const declared of refused) {
+    const files = [{ path: "main.tease", source: script(declared.refused) }];
+    const request = coreRequest(files);
+    assert.ok(request !== null, declared.refused);
+    const total = analyseCore(request).budget.total;
+    for (const allowance of [1, Math.floor(total / 4), Math.floor(total / 2), total - 1])
+      // a refusal, whatever its reason where the stop comes first; never a throw of another kind
+      assert.throws(
+        () =>
+          withTestAllowance(allowance, () =>
+            compileProjectWithBackend(files, { globals: ["hostValue"] }, CORE_BACKEND),
+          ),
+        CandidateOutsideSlice,
+        `${declared.refused} at ${allowance} of ${total}`,
+      );
+  }
 });
 
 /**
