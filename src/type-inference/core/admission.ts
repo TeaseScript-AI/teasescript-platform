@@ -527,26 +527,31 @@ export class Admission {
         !this.besideDefault(d)
       ) {
         // (one landing path and key per copied path, its copies' shared one, charged before it is made)
-        const landed = new Map<readonly string[], readonly string[]>();
+        const landed = new Map<
+          readonly string[],
+          { readonly at: readonly string[]; readonly key: Key }
+        >();
         for (const { path, binding, strip, cellsLive, literal } of copySources(this, d.value)) {
           const written = writtenOf(program.place(binding).kind);
           const term = written === null ? null : permittedAt(written, strip);
           if (term === null && (written !== null || !this.inheriting.has(binding))) continue;
-          let at = landed.get(path);
-          if (at === undefined) {
-            at = keptSteps(
+          let landing = landed.get(path);
+          if (landing === undefined) {
+            const at = keptSteps(
               this.work,
               d.path,
               d.kind === "add" && d.how !== "elements" ? ["element"] : [],
               path,
             );
-            landed.set(path, at);
-            this.a4Keys.add(keptKey(this.work, d.place, at));
+            landing = { at, key: keptKey(this.work, d.place, at) };
+            landed.set(path, landing);
+            this.a4Keys.add(landing.key);
             this.a4Places.set(d.place, null);
           }
+          const { at, key } = landing;
           if (term !== null) {
             this.a4Copies.push({ place: d.place, path: at, term });
-            if (literal) this.literalLandings.add(keptKey(this.work, d.place, at));
+            if (literal) this.literalLandings.add(key);
           } else
             this.a4Inherits.push({
               place: d.place,

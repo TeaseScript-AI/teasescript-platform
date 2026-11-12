@@ -7,7 +7,11 @@ import test from "node:test";
 import { compileProjectWithBackend } from "../../src/compiler.js";
 import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
 import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
-import { withTestDemandAllowance, type WorkCounter } from "../../src/type-inference/core/budget.js";
+import {
+  withTestAllowance,
+  withTestDemandAllowance,
+  type WorkCounter,
+} from "../../src/type-inference/core/budget.js";
 import { CoreProgram, propertyStep } from "../../src/type-inference/core/program.js";
 import { coreRequest, type SourceFile } from "../helpers/type-core-analysis.js";
 import { ADMISSION_FAMILIES } from "../helpers/type-core/families/admission.js";
@@ -26,7 +30,7 @@ import {
 import { type WorkFamily } from "../helpers/type-core/families/builders.js";
 import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import { narrowingPass } from "../helpers/type-core/type-core-narrowing.js";
-import { inMode, MODES } from "../helpers/type-core-oracles.js";
+import { inMode, type Mode, MODES } from "../helpers/type-core-oracles.js";
 import {
   DOUBLING,
   type Sized,
@@ -346,6 +350,52 @@ test("a deep literal's decision grows with its depth, never with its square (#14
     }
   }
   assert.deepEqual(steep, []);
+});
+
+/** The test allowance the landing key's test stops at, below the work of each of its programs. */
+const STOPPED_AT = 1000;
+
+/**
+ * #2289: a copy that lands through a literal's cell has its landing key made once per path, the key every copy to
+ * that path shares (`literalLandings`, as the A4 key is). So under a stop each copy of a typed leaf in a literal nested
+ * d deep adds the same work after the stop at every depth, and the family (4·d copies) grows in proportion; a key
+ * made for each copy would cost each its path's length, d² in all.
+ */
+test("a landing key through a literal's cell is made once per path, not once per copy (#2289)", () => {
+  const nest = (d: number, elements: readonly string[]): string =>
+    `let leaf: integer = 1\nlet value = ${"[".repeat(d)}${elements.join(", ")}${"]".repeat(d)}\nexit\n`;
+  const after = (source: string, mode: Mode): Answers["budget"] => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const { budget } = withTestAllowance(STOPPED_AT, () =>
+      inMode(mode, () => analyseCore(request)),
+    );
+    assert.equal(budget.exhausted, "work", "the analysis stops at the test allowance");
+    return budget;
+  };
+  for (const mode of MODES) {
+    const name = `${mode.reversed ? "reversed" : "source order"}${mode.unshared ? ", unshared" : ""}`;
+    const [small, large] = [128, 256].map((d) => ({
+      copies: 4 * d,
+      single: after(nest(d, ["leaf", "0"]), mode),
+      repeated: after(nest(d, Array<string>(4 * d).fill("leaf")), mode),
+    }));
+    // (the work after the stop each copy adds beyond a single copy's)
+    const perCopy = (at: typeof small): number =>
+      (at!.repeated.finishing - at!.single.finishing) / at!.copies;
+    assert.ok(
+      perCopy(large) <= 1.1 * perCopy(small),
+      `${name}: per copy ${perCopy(small)}, then ${perCopy(large)}`,
+    );
+    const scale =
+      (large!.repeated.counts.get("syntaxNodes") ?? 0) /
+      (small!.repeated.counts.get("syntaxNodes") ?? 1);
+    const doubling = (2 * (large!.repeated.finishing / small!.repeated.finishing)) / scale;
+    assert.ok(
+      doubling <= DOUBLING,
+      `${name}: the family's work after the stop per doubling, ${doubling}`,
+    );
+  }
 });
 
 /**
