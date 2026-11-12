@@ -75,15 +75,14 @@ export const FROZEN_IN_CI: ReadonlyMap<string, string> = new Map<string, string>
     "7 first, measured at #2403's rebase: owner WrittenDefaults, maps WrittenDefaults.cells[] and .kinds.below " +
       "(contract/written-default.ts), which only a typed default's literal or written type makes, and 3 more",
   ],
-  [
-    "type-core-signatures.test",
-    "1 first: set Contract.bindingNamesOf.stored (contract/selections.ts)",
-  ],
 ]);
 
 // What the subset does not exercise, by site; the whole survey covers all but the last, which no test makes:
 // - maps `ExactPath.copies.exits[]` and `.markSeveral[]`, and the sets `.markSeveral[][]` (`exact-path.ts`): only
 //   `type-core-work-a` and `-work-b` exercise all three, and the cheaper, `work-a`, would cost about 40 s of each CI
 //   shard, past the 10 minutes of a slow runner;
+// - set `Contract.bindingNamesOf.stored` (`contract/selections.ts`): only `type-core-signatures`, `-cells`, `-sharing` and
+//   `-work-a` exercise it; `signatures` cost 77 s frozen in CI against main's 25, and with it a CI shard took 10.1
+//   minutes at #2417's `25ece341`, so it left the subset;
 // - function `test.subAt` (`tests/type-core/type-core-contract.test.ts`): a test's probe, exercised only by that file;
 // - set `SubSource.defs` (`contract/prefix-index/layers.ts`, `relevantSubs`): a source two found layers bring.
