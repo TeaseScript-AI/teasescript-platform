@@ -259,3 +259,60 @@ test("the header is the parsed imports: a trailing comment ends one, code after 
   assert.equal(run(old.replaceAll("\n", "\r\n")).status, 2);
   assert.equal(run(`// header\u2028const hidden = 1;\n${old}`).status, 2);
 });
+
+test("a line break inside a token is its content: a blank line in a template or a comment is compared, and a token's lines stay together (#2534 final)", (t) => {
+  const run = (old, files) => repository(t, files, old).run();
+  const template = "const text = `alpha\n\nbeta`;\n";
+  // (unchanged, `export` added: passes; the blank line inside the literal is a line like any other)
+  assert.equal(run(template, { "src/big.ts": `export ${template}` }).status, 0);
+  // (a blank line dropped from, or added to, the literal: its value changes)
+  assert.equal(run(template, { "src/big.ts": "export const text = `alpha\nbeta`;\n" }).status, 1);
+  assert.equal(
+    run("const text = `alpha\nbeta`;\n", { "src/big.ts": "const text = `alpha\n\nbeta`;\n" })
+      .status,
+    1,
+  );
+  // (the same in a block comment)
+  const comment = "/* first\n\nsecond */\nconst value = 1;\n";
+  assert.equal(run(comment, { "src/big.ts": "/* first\nsecond */\nconst value = 1;\n" }).status, 1);
+  // (and in a comment after a statement on its line)
+  const trailing = "const value = 1; /* first\n\nsecond */\nconst other = 2;\n";
+  assert.equal(
+    run(trailing, { "src/big.ts": "const value = 1; /* first\nsecond */\nconst other = 2;\n" })
+      .status,
+    1,
+  );
+  // (a literal's middle line in another file: each file keeps OLD's order, but the literal is cut)
+  const three = "const text = `one\ntwo\nthree`;\n";
+  assert.equal(
+    run(three, { "src/big.ts": "const text = `one\nthree`;\n", "src/part.ts": "two\n" }).status,
+    1,
+  );
+  // (a line inside a literal that reads like a declaration takes no `export`)
+  const inner = "const text = `head\nconst inner = 1;\n`;\n";
+  assert.equal(
+    run(inner, { "src/big.ts": "const text = `head\nexport const inner = 1;\n`;\n" }).status,
+    1,
+  );
+});
+
+test("in a rewrap a comma is dropped only as a trailing comma, never an elision (#2534 final)", (t) => {
+  const old =
+    'const veryLongDescriptiveDeclarationName = { firstValue: [], secondValue: "123456789012345" };\n';
+  const wrapped = (array) =>
+    [
+      "export const veryLongDescriptiveDeclarationName = {",
+      `  firstValue: ${array},`,
+      '  secondValue: "123456789012345",',
+      "};",
+      "",
+    ].join("\n");
+  const run = (text) => repository(t, { "src/big.ts": text }, old).run().status;
+  assert.equal(run(wrapped("[]")), 0);
+  assert.equal(run(wrapped("[,]")), 1);
+});
+
+test("a file that does not parse cannot run (#2534 final)", (t) => {
+  const r = repository(t, { "src/big.ts": "const text = `open;\n" }, "const value = 1;\n");
+  assert.equal(r.run().status, 2);
+});
