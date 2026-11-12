@@ -731,7 +731,7 @@ attribution is best effort for synchronous adapters (#1923). The campaign CLI ex
 for identity, an unsupported route, or a pair censored at the step limit; 1 for a decided difference, a one-sided
 rejection included; 2 for a harness failure or an unknown verdict.
 
-`tests/runtime/runtime-differential.test.ts` runs this build against itself over the regressions in
+`tests/runtime/v1/runtime-differential.test.ts` runs this build against itself over the regressions in
 `tools/runtime-differential/regressions/` (with their independent expectations) and a seeded sample covering every
 generator tag. It also runs 10,000-level host values (a list, and lists, objects, dicts and sets nested in turn) and
 the sensitivity controls, each a `discrepancy` at its own path; `FUZZ_ACCEPTANCE=1` adds a 10,000-level chain of sets. `node tools/runtime-differential/run.mjs --seed S --count N [--route core] [--shrink]` runs larger campaigns
@@ -757,7 +757,7 @@ pinned oracle root of the runtime pipeline oracle (left) against this build (rig
 With `FUZZ_ACCEPTANCE=1` it also runs `tools/runtime-differential/acceptance.json`, every pair of which must be
 `equivalent`, a larger nested-set family and a deeper chain pair. Run both on-demand parts after a build with
 `FUZZ_ACCEPTANCE=1 npm run oracle:test` and `FUZZ_ACCEPTANCE=1 node tools/test-output-filter.mjs
-dist/tests/runtime/runtime-differential.test.js`. `run.mjs --oracle [--manifest FILE]` runs a campaign the same way, each line naming the oracle's commit and
+dist/tests/runtime/v1/runtime-differential.test.js`. `run.mjs --oracle [--manifest FILE]` runs a campaign the same way, each line naming the oracle's commit and
 the candidate's closure digest. A runner that never answers, or fails before it opens its pipes, is bounded only by the
 job's deadline. A behaviour changed after the pin shows as a difference, which only a new seal removes.
 

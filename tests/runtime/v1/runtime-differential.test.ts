@@ -6,7 +6,7 @@ import test from "node:test";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-import { SWEEP } from "../helpers/sweep.js";
+import { SWEEP } from "../../helpers/sweep.js";
 
 import {
   compileSource,
@@ -21,8 +21,8 @@ import {
   type RuntimeSession,
   type RuntimeSessionView,
   type SerializableRuntimeValue,
-} from "../../src/index.js";
-import { Attribution } from "../helpers/runtime/runtime-differential-side.js";
+} from "../../../src/index.js";
+import { Attribution } from "../../helpers/runtime/runtime-differential-side.js";
 import {
   differentialRun,
   differentialRunOn,
@@ -36,7 +36,7 @@ import {
   type Route,
   type SideRecord,
   type Stage,
-} from "../helpers/runtime-differential.js";
+} from "../../helpers/runtime-differential.js";
 import {
   canonicalDigest,
   canonicalText,
@@ -48,8 +48,8 @@ import {
   renderPath,
   wideSet,
   type StructurePath,
-} from "../helpers/runtime-state-comparison.js";
-import { withValidationTestStatistics } from "../../src/validation-testing.js";
+} from "../../helpers/runtime-state-comparison.js";
+import { withValidationTestStatistics } from "../../../src/validation-testing.js";
 
 /*
  * The differential harness run against this build itself (docs/TESTING.md "Differential harness"): every retained
@@ -57,7 +57,7 @@ import { withValidationTestStatistics } from "../../src/validation-testing.js";
  * for its own reason at its own path.
  */
 
-const checkout = fileURLToPath(new URL("../../..", import.meta.url));
+const checkout = fileURLToPath(new URL("../../../..", import.meta.url));
 const tools = path.join(checkout, "tools", "runtime-differential");
 
 interface GeneratedProgram {

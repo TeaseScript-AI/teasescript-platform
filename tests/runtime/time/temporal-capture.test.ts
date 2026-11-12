@@ -1,13 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { ZONE_RULES_END_MILLISECONDS, ZONE_RULES_START_MILLISECONDS } from "../../src/temporal.js";
+import {
+  ZONE_RULES_END_MILLISECONDS,
+  ZONE_RULES_START_MILLISECONDS,
+} from "../../../src/temporal.js";
 
 // Zone capture reads the host's own transition list where it has one, through the same daily scan as the formatter
 // (#1707): the rules a session records stay exactly what the portable scan captures, and every host without a usable
 // list falls back to that scan.
 
-type Capture = typeof import("../../src/temporal-capture.js");
+type Capture = typeof import("../../../src/temporal-capture.js");
 
 /** The part of the host's Temporal these tests use; ES2023's library has no Temporal types. */
 interface Zoned {
@@ -46,7 +49,7 @@ async function withHost<T>(
   temporal: GivenTemporal | undefined,
   run: (capture: Capture) => T,
 ): Promise<T> {
-  const url = new URL("../../src/temporal-capture.js", import.meta.url);
+  const url = new URL("../../../src/temporal-capture.js", import.meta.url);
   url.search = `?host=${(fresh += 1)}`;
   // EVIDENCE: invariant: the URL names the module this file imports statically for its type, with a query of its own.
   const capture = (await import(url.href)) as Capture;
