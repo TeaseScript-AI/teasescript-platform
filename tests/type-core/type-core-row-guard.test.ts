@@ -8,7 +8,7 @@ import test from "node:test";
 import { compileProjectWithBackend } from "../../src/compiler.js";
 import { run } from "../../src/runtime/engine.js";
 import type { RuntimeSnapshot } from "../../src/runtime/snapshot/state.js";
-import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { DISPOSITIONS, type SyntaxKind } from "../../src/type-inference/core/slice-syntax.js";
 import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
 import { HELD_MODES } from "../helpers/type-core-held-host.js";
@@ -18,6 +18,7 @@ import {
   DECLARED_RUN_DIFFERENCES,
   misfitSources,
   OPERAND_TEMPLATES,
+  REFUSED_KINDS,
   ROW_TEMPLATES,
 } from "../helpers/type-core/row-templates.js";
 
@@ -28,8 +29,8 @@ import {
  * tree), and judged per source and mode: (1) the route publishes a plan, never refusing or throwing, except a refusal
  * `DECLARED_REFUSALS` names, which must occur; (2) every check today's plan carries is in the route's, by path, offsets
  * and field; (3) each run, with the host global at every value of the derived domain, ends as today's does (status and
- * failure, with its site), except a difference `DECLARED_RUN_DIFFERENCES` names, which must occur. No row cites a check
- * its instruction makes whatever the plan says, so rule 2 has no exception.
+ * failure, with its site), except a difference `DECLARED_RUN_DIFFERENCES` names, which must occur. A `pass` row's runtime
+ * citations exempt no check of today's plan from rule 2.
  */
 
 /** The host values each plan runs with: a whole number, text, a truth value, a fraction, null (fitting and not). */
@@ -99,11 +100,14 @@ function guardCases(): GuardCase[] {
       },
       { name: `${declared.row} ${declared.position}, admitted`, source: script(declared.admitted) },
     ]),
-    ...misfitSources().map(({ row, operand, source }) => ({
-      name: `${row} ${operand}: ${source}`,
-      source: script(source),
-      misfit: true as const,
-    })),
+    // (a misfit a declared refusal names is judged as that refusal)
+    ...misfitSources()
+      .filter(({ source }) => !DECLARED_REFUSALS.some((declared) => declared.refused === source))
+      .map(({ row, operand, source }) => ({
+        name: `${row} ${operand}: ${source}`,
+        source: script(source),
+        misfit: true as const,
+      })),
   ];
 }
 
@@ -289,6 +293,26 @@ test("each open row's templates publish on the route, with today's checks and to
           `the declared run difference no longer occurs: ${declared.template} [${mode}]`,
         );
   assert.deepEqual(failures, []);
+});
+
+test("each value kind the slice admits no value of: the route refuses a source holding one, or publishes no plan", () => {
+  for (const [kind, source] of Object.entries(REFUSED_KINDS))
+    for (const mode of HELD_MODES) {
+      let plan;
+      try {
+        ({ plan } = mode.run(() =>
+          compileProjectWithBackend(
+            [{ path: "main.tease", source: script(source) }],
+            { globals: ["hostValue"] },
+            CORE_BACKEND,
+          ),
+        ));
+      } catch (error) {
+        if (!(error instanceof CandidateOutsideSlice)) throw error;
+        continue;
+      }
+      assert.equal(plan, null, `${kind}: ${source} [${mode.name}]`);
+    }
 });
 
 /**
