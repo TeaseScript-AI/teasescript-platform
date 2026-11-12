@@ -372,3 +372,40 @@ test("destructured names, overloads and a local export are read as declarations;
   assert.equal(refused.status, 2);
   assert.match(refused.err, /line 14: statements of two files on one line/u);
 });
+
+test("a property read on a call is no read, and a JavaScript file holding one is listed and written (#2564 item 14)", (t) => {
+  // (the checker threw on both reads when it resolved their property names in a JavaScript file without a library)
+  const old = [
+    'import test from "node:test";',
+    "",
+    "const c = 1;",
+    "const a = f({ b: 1 }).c;",
+    "",
+    'test("one", () => {',
+    "  [1].filter((x) => x).length;",
+    "  return a;",
+    "});",
+    "",
+    'test("two", () => {',
+    "  return c;",
+    "});",
+    "",
+  ].join("\n");
+  const r = repository(t, OLD, { "tools/probe.test.mjs": old });
+  const assign = {
+    old: "tools/probe.test.mjs",
+    setup: { path: "tools/probe-setup.mjs", header: "Shared." },
+    files: {
+      "tools/probe-one.test.mjs": { header: null, tests: [1] },
+      "tools/probe-two.test.mjs": { header: "Two.", tests: [2] },
+    },
+  };
+  const listed = r.run(assign, "--list");
+  assert.equal(listed.status, 0, listed.err);
+  // (`.c` is a property name: `a` reads no `c`)
+  assert.match(listed.out, /^4-4 a reads: $/mu);
+  const written = r.run(assign);
+  assert.equal(written.status, 0, written.err);
+  assert.match(r.read("tools/probe-one.test.mjs"), /^const a = f\(\{ b: 1 \}\)\.c;$/mu);
+  assert.match(r.read("tools/probe-two.test.mjs"), /^const c = 1;$/mu);
+});

@@ -127,13 +127,17 @@ function scan(file, text) {
       last: lineOf(node.end),
     });
   }
+  // (a member access's property name binds nothing at file level, and in a JavaScript file without a library the
+  // checker throws when it resolves one)
+  const propertyName = (node) =>
+    ts.isPropertyAccessExpression(node.parent) && node.parent.name === node;
   let tests = 0;
   for (const statement of statements) {
     if (statement.title !== undefined) statement.test = ++tests;
     statement.reads = new Set();
     statement.uses = new Set();
     const visit = (node) => {
-      if (ts.isIdentifier(node)) {
+      if (ts.isIdentifier(node) && !propertyName(node)) {
         let symbol = checker.getSymbolAtLocation(node);
         if (ts.isShorthandPropertyAssignment(node.parent) && node.parent.name === node)
           symbol = checker.getShorthandAssignmentValueSymbol(node.parent) ?? symbol;
