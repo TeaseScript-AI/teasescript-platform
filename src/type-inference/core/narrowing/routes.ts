@@ -245,6 +245,7 @@ export class NarrowingRoutes extends RouteEntries {
 
   /** The program default's feasibility, where the default holds (`#feasible`, set by the first `required`). */
   protected defaultHolds(): Feasibility | null {
+    this.#work.charge("eventSteps");
     return this.#feasible;
   }
 
@@ -260,7 +261,7 @@ export class NarrowingRoutes extends RouteEntries {
   ): Work<Definition | null> {
     this.#work.charge("exactQueries");
     // (under the program default, the jump stands at the entry it makes, R2.2)
-    if (!this.standsAt(into, point.node, point.chain)) return null;
+    if (this.#feasible !== null && !this.standsAt(into, point.node, point.chain)) return null;
     const found = yield* this.#examinedAt(key, "null", point.node, point.chain, point.at, [], into);
     return found !== null &&
       (yield* this.certifies(found, key)) &&
@@ -797,9 +798,9 @@ export class NarrowingRoutes extends RouteEntries {
    * declaration (`Feasibility.headed`). Anything else keeps the warning: that a run reaches it there is not proved.
    */
   #plain(node: FlowNode, chain: readonly Place[]): boolean {
+    this.#work.charge("eventSteps");
     return this.clear(this.#feasible!, this.#feasible!.hazards, node, chain, null);
   }
-
 
   /**
    * A `load` read where it is used, in a program the default holds (#1938): its literal default (`#ownLoad`) where the
