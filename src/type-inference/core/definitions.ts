@@ -14,6 +14,7 @@ import type { Callable, FlowLoop, FlowNode } from "./flow-graph.js";
 import { makeItem, writerKey, type ContextWord, type Item, type Writer } from "./items.js";
 import { conversionCategory, methodCategory } from "./method-categories.js";
 import { siteKey, type CoreProgram } from "./program.js";
+import { amend, Retained } from "./retained/retained.js";
 
 /*
  * The definitions of the coarse core (checkpoint 9, §3.1 X2–X6, §6 O, §8): every store, add, clear,
@@ -118,17 +119,30 @@ interface TrieNode {
  * question, the program's (`WorkLedger.shared`).
  */
 export class KeyTrie {
-  #roots: Map<PlaceId, TrieNode> | null = null;
+  /** Its trie, built on its first question (#1072 1b: a record, the one thing it fills later). */
+  readonly #built = Retained.record<{ roots: Map<PlaceId, TrieNode> | null }>("KeyTrie.built", {
+    roots: null,
+  });
 
   public constructor(
     readonly work: WorkLedger,
     readonly counter: WorkCounter,
     readonly keys: () => Iterable<Key>,
-  ) {}
+  ) {
+    Retained.owner(this, "KeyTrie");
+  }
+
+  /** The trie, built on its first question. */
+  #rooted(): Map<PlaceId, TrieNode> {
+    if (this.#built.roots !== null) return this.#built.roots;
+    amend(this);
+    this.#built.roots = this.work.shared(() => this.#build());
+    return this.#built.roots;
+  }
 
   /** The keys of the set at or above `key`, the nearest first; `self`: the key itself too. */
   public above(key: Key, self: boolean): Key[] {
-    const roots = (this.#roots ??= this.work.shared(() => this.#build()));
+    const roots = this.#rooted();
     let node = roots.get(keyPlace(key));
     const found: Key[] = [];
     if (node === undefined) return found;
@@ -156,7 +170,7 @@ export class KeyTrie {
     steps: { readonly length: number; at(index: number): string | undefined },
     self: boolean,
   ): { readonly key: Key; readonly depth: number }[] {
-    const roots = (this.#roots ??= this.work.shared(() => this.#build()));
+    const roots = this.#rooted();
     let node = roots.get(place);
     const found: { key: Key; depth: number }[] = [];
     if (node === undefined) return found;
@@ -177,18 +191,22 @@ export class KeyTrie {
   }
 
   #build(): Map<PlaceId, TrieNode> {
-    const roots = new Map<PlaceId, TrieNode>();
+    const roots = Retained.map<PlaceId, TrieNode>("KeyTrie.roots");
     for (const key of this.keys()) {
       this.work.charge("indexSteps");
       const place = keyPlace(key);
       let node: TrieNode | undefined = roots.get(place);
-      if (node === undefined) roots.set(place, (node = { children: new Map(), key: null }));
+      if (node === undefined)
+        roots.set(place, (node = { children: Retained.map("KeyTrie.children"), key: null }));
       for (const step of keyPath(key)) {
         this.work.charge("indexSteps");
         let child: TrieNode | undefined = node.children.get(step);
         if (child === undefined) {
           keep(this.work, 2);
-          node.children.set(step, (child = { children: new Map(), key: null }));
+          node.children.set(
+            step,
+            (child = { children: Retained.map("KeyTrie.children"), key: null }),
+          );
         }
         node = child;
       }
@@ -371,44 +389,42 @@ export type PositionRange = readonly [number, number];
  * the literal cells' stores, the owner sets and the global site list (definitions + sites).
  */
 export class DefinitionIndex {
-  readonly byKey = new Map<Key, Definition[]>();
+  readonly byKey = Retained.map<Key, Definition[]>("DefinitionIndex.byKey");
   /** The stores into a literal's own cells and properties, by the cell or property place. */
-  readonly cellDefs = new Map<PlaceId, Definition[]>();
-  /** #2289: whether some cell has two elements or more, so a literal's cell can decide a path (`literalRoute`). */
-  manyCells = false;
+  readonly cellDefs = Retained.map<PlaceId, Definition[]>("DefinitionIndex.cellDefs");
   /** The stores into each destination key (an add at its element), with the path below the key they reach. */
-  readonly candidates = new Map<
+  readonly candidates = Retained.map<
     Key,
     { readonly d: Definition; readonly at: readonly string[] }[]
-  >();
+  >("DefinitionIndex.candidates");
   /** The stores and adds into places; and the returns, arguments and parameter defaults (C9's transfers). */
   readonly storeDefs: Definition[] = [];
   readonly transferDefs: Definition[] = [];
   /** A dead call's arguments for written parameters, by the parameter's key: candidates, never definitions (F22). */
-  readonly deadArguments = new Map<Key, Definition[]>();
+  readonly deadArguments = Retained.map<Key, Definition[]>("DefinitionIndex.deadArguments");
   /** A binding's declaration: its initializer or its loop binding. */
-  readonly declOf = new Map<PlaceId, Definition>();
+  readonly declOf = Retained.map<PlaceId, Definition>("DefinitionIndex.declOf");
   /** F5a: a loop's exit definition per collection key. */
-  readonly loopAdds = new Map<Key, Definition[]>();
+  readonly loopAdds = Retained.map<Key, Definition[]>("DefinitionIndex.loopAdds");
   /** The definitions storing each value, literal cells included (A1, C10, F18). */
-  readonly byValue = new Map<PlaceId, Definition[]>();
+  readonly byValue = Retained.map<PlaceId, Definition[]>("DefinitionIndex.byValue");
   /** The operation a fallback operand or a default belongs to: it lands where the operation's result lands. */
-  readonly fallbackOf = new Map<PlaceId, PlaceId>();
+  readonly fallbackOf = Retained.map<PlaceId, PlaceId>("DefinitionIndex.fallbackOf");
   /** C9: the values external data enters by (a syntactic set: where each lands is admission's landing index). */
-  readonly ingress = new Set<PlaceId>();
+  readonly ingress = Retained.set<PlaceId>("DefinitionIndex.ingress");
   /** Each ingress by the key of its leaf (`ingressLeaf`): the value its own expression's writer names. */
-  readonly ingressAt = new Map<string, PlaceId>();
+  readonly ingressAt = Retained.map<string, PlaceId>("DefinitionIndex.ingressAt");
   /** The keys below each key that have definitions (X6's own events, X7's keys below). */
-  readonly #keysBelow = new Map<Key, Key[]>();
-  readonly #foreignAt = new Set<Key>();
-  readonly #foreignBelow = new Set<Key>();
+  readonly #keysBelow = Retained.map<Key, Key[]>("DefinitionIndex.#keysBelow");
+  readonly #foreignAt = Retained.set<Key>("DefinitionIndex.#foreignAt");
+  readonly #foreignBelow = Retained.set<Key>("DefinitionIndex.#foreignBelow");
   /** G3 3b: the keys with a definition or a loop's exit definition, and those another callable stores, as tries. */
   readonly stored: KeyTrie;
   readonly foreign: KeyTrie;
   /** The sites of each asked holder's own writers (`hasWriter`), gathered on its first question. */
-  readonly #writerSites = new Map<Key, ReadonlySet<string>>();
+  readonly #writerSites = Retained.map<Key, ReadonlySet<string>>("DefinitionIndex.#writerSites");
   /** Each parameter's default (`defaultOf`), kept as `#parameterDefaults` makes it. */
-  readonly #defaultOf = new Map<PlaceId, Definition>();
+  readonly #defaultOf = Retained.map<PlaceId, Definition>("DefinitionIndex.#defaultOf");
   /** The dominator positions of every live call site's call-in and call-out outside block code, sorted (X6). */
   readonly sitePositions: readonly number[];
   /**
@@ -416,19 +432,41 @@ export class DefinitionIndex {
    * the narrowings' owner rule (§13 N2: a callable holding an invalidation of a collection joins its owner set).
    */
   readonly ordinary: ReadonlySet<Callable>;
-  #serial = 0;
+  /**
+   * Its definitions' serial, counted as they are made, and whether some cell has two elements or more (`manyCells`)
+   * (#1072 1b: a record).
+   */
+  readonly #count = Retained.record("DefinitionIndex.count", { serial: 0, manyCells: false });
+
+  /** #2289: whether some cell has two elements or more, so a literal's cell can decide a path (`literalRoute`). */
+  public get manyCells(): boolean {
+    return this.#count.manyCells;
+  }
 
   public constructor(
     readonly program: CoreProgram,
     /** Stores whose receivers select an object's own `first`, `last` or `random`, by their place: their targets (#1275). */
-    readonly storeTargets: ReadonlyMap<PlaceId, ReturnType<CoreProgram["targetRoot"]>> = new Map(),
+    readonly storeTargets: ReadonlyMap<
+      PlaceId,
+      ReturnType<CoreProgram["targetRoot"]>
+    > = Retained.map("DefinitionIndex.storeTargets"),
   ) {
     const work = program.work;
-    this.stored = new KeyTrie(work, "rdWalk", () => [
-      ...this.byKey.keys(),
-      ...this.loopAdds.keys(),
-    ]);
-    this.foreign = new KeyTrie(work, "ownerSteps", () => this.#foreignAt);
+    this.stored = new KeyTrie(
+      work,
+      "rdWalk",
+      // (#1072 R26: captures `this`, an owner)
+      Retained.closure("DefinitionIndex.stored", () => [
+        ...this.byKey.keys(),
+        ...this.loopAdds.keys(),
+      ]),
+    );
+    this.foreign = new KeyTrie(
+      work,
+      "ownerSteps",
+      // (#1072 R26: captures `this`, an owner)
+      Retained.closure("DefinitionIndex.foreign", () => this.#foreignAt),
+    );
     const parameterDefaults = new Map<
       PlaceId,
       { readonly value: PlaceId; readonly site: SourceSite }
@@ -504,6 +542,7 @@ export class DefinitionIndex {
         append(this.#keysBelow, keptKey(this.program.work, place, path.slice(0, length)), key);
       }
     }
+    Retained.owner(this, "DefinitionIndex");
   }
 
   /**
@@ -512,7 +551,10 @@ export class DefinitionIndex {
    */
   #ordinaryCallables(): ReadonlySet<Callable> {
     const { flow, work } = this.program;
-    const ordinary = new Set(flow.callables.filter((callable) => !flow.blockCalled.has(callable)));
+    const ordinary = Retained.set(
+      "DefinitionIndex.ordinary",
+      flow.callables.filter((callable) => !flow.blockCalled.has(callable)),
+    );
     const queue = [...ordinary];
     const reach = (callable: Callable): void => {
       work.charge("ownerSteps");
@@ -538,10 +580,10 @@ export class DefinitionIndex {
   }
 
   #add(d: Omit<Definition, "uid">, cell = false): Definition {
-    const made: Definition = { uid: this.#serial++, ...d };
+    const made: Definition = { uid: this.#count.serial++, ...d };
     if (cell) {
       append(this.cellDefs, made.place, made);
-      this.manyCells ||= this.cellDefs.get(made.place)!.length > 1;
+      this.#count.manyCells ||= this.cellDefs.get(made.place)!.length > 1;
     } else {
       append(this.byKey, made.key, made);
       this.program.work.charge("defs");
@@ -674,7 +716,7 @@ export class DefinitionIndex {
         recv: null,
         prep: null,
       };
-      const d = dead === null ? this.#add(binding) : { uid: this.#serial++, ...binding };
+      const d = dead === null ? this.#add(binding) : { uid: this.#count.serial++, ...binding };
       this.#candidate(d, d.key);
       if (dead === null) this.transferDefs.push(d);
       else append(this.deadArguments, d.key, d);
@@ -843,7 +885,7 @@ export class DefinitionIndex {
           continue;
         append(this.loopAdds, d.key, {
           ...d,
-          uid: this.#serial++,
+          uid: this.#count.serial++,
           node: loop.exit,
           orig: d,
           loop: facts,
@@ -947,7 +989,7 @@ export class DefinitionIndex {
       if (mine === undefined) return false;
       work.charge("indexSteps", mine.length);
       keepText(work, holder.length);
-      const made = new Set<string>();
+      const made = Retained.set<string>("DefinitionIndex.#writerSites[]");
       for (const d of mine) {
         const own = this.writerOf(d);
         if (own !== null) made.add(siteKey(own));
@@ -1013,19 +1055,25 @@ export function joinedOperand(operand: PlaceId): number {
  * lists, X6's first event between two nodes, and R.
  */
 export class DefinitionLists {
-  readonly #sorted = new Map<Key, SortedDefinitions>();
-  readonly #below = new Map<Key, SortedDefinitions>();
-  readonly #events = new Map<Key, number[]>();
-  readonly #certain = new Map<Definition, boolean>();
-  readonly #singleSite = new Map<number, boolean>();
+  readonly #sorted = Retained.map<Key, SortedDefinitions>("DefinitionLists.#sorted");
+  readonly #below = Retained.map<Key, SortedDefinitions>("DefinitionLists.#below");
+  readonly #events = Retained.map<Key, number[]>("DefinitionLists.#events");
+  readonly #certain = Retained.map<Definition, boolean>("DefinitionLists.#certain");
+  readonly #singleSite = Retained.map<number, boolean>("DefinitionLists.#singleSite");
 
   public constructor(
     readonly index: DefinitionIndex,
     /** Whether a store takes part: not rejected by admission (A6). */
     readonly live: (d: Definition) => boolean,
     /** Whether a list `+`'s operand gives the join its elements: not rejected by admission (A6, `joinElements`). */
-    readonly joined: (operand: PlaceId) => boolean = () => true,
-  ) {}
+    // (#1072 R26: captures nothing)
+    readonly joined: (operand: PlaceId) => boolean = Retained.closure(
+      "DefinitionLists.joined",
+      () => true,
+    ),
+  ) {
+    Retained.owner(this, "DefinitionLists");
+  }
 
   get #program(): CoreProgram {
     return this.index.program;
