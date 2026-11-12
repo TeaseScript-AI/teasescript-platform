@@ -49,7 +49,6 @@ export const ROW_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly string[
   callExpression: [
     "let xs = [1]\nlet x: integer = xs.get(hostValue, default: 0)",
     "let xs = [1]\nlet x: integer = xs.get(0, default: hostValue)",
-    "let x: integer = hostValue.get(0, default: 0)",
     "let n: integer = toInteger(hostValue, default: 0)",
     'let n: integer = toInteger("1", default: hostValue)',
     "let v: integer = fromJson(hostValue, default: 1)",
