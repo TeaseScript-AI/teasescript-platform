@@ -226,6 +226,8 @@ test("a rewrap keeps each literal's text and the old order; `export` goes only o
   // (`export` before a statement inside a body)
   const body = "function f(): void {\n  run();\n}\n";
   assert.equal(run("function f(): void {\n  export run();\n}\n", body).status, 1);
+  // (and before a statement at the margin, which no module can export)
+  assert.equal(run("export run();\n", "run();\n").status, 1);
 });
 
 test("the header is the parsed imports: a trailing comment ends one, code after one is body, other line ends cannot run (#2534 r1)", (t) => {
@@ -237,6 +239,8 @@ test("the header is the parsed imports: a trailing comment ends one, code after 
   assert.match(same.out, /^old body lines: 1, taken: 1;/mu);
   assert.equal(run(old.replace("value + 1", "value + 999")).status, 1);
   assert.equal(run('import { value } from "./values.js"; const result = value + 1;\n').status, 1);
+  // (code after an import on its line, every old line kept: only the header rule fails it)
+  assert.equal(run(old.replace("// shared fixture", "const added = 2;")).status, 1);
   assert.equal(run(old.replaceAll("\n", "\r\n")).status, 2);
   assert.equal(run(`// header\u2028const hidden = 1;\n${old}`).status, 2);
 });
