@@ -52,6 +52,11 @@ type Activation = {
   readonly restored?: PlayerSession;
   /** Why Start shows instead of Continue: the kept session is of a format this Player no longer reads. */
   readonly outdated?: Problem;
+  /**
+   * Whether its session is the chat the Player showed before (`showSession`'s `sameChat`): only the Continue that
+   * recovers from a lost connection.
+   */
+  readonly sameChat?: true;
 };
 
 /** What the activation needs from the Player's session composable. */
@@ -81,8 +86,12 @@ interface SessionActivationHost {
   /** Whether a state Debug's rewind restored is shown for inspection. */
   readonly inspecting: () => boolean;
   readonly isDisposed: () => boolean;
-  /** Shows `next` as the Player's, for `origin`, the activation that began it. */
-  readonly showSession: (next: PlayerSession, origin: Origin) => void;
+  /** Shows `next` as the Player's, for `origin`, the activation that began it; `sameChat`: the chat shown before. */
+  readonly showSession: (
+    next: PlayerSession,
+    origin: Origin,
+    options: { readonly sameChat: boolean },
+  ) => void;
   // The owners made after this one, as the activation reaches them: forwarders and getters.
   readonly camera: { open(capability: boolean): Promise<boolean>; release(): void };
   readonly captures: { reset(): void };
@@ -605,7 +614,8 @@ export function useSessionActivation({
           prepareStart(create, found?.outdated);
           return;
         }
-        recipe = continueRecipe(found.session);
+        // The session the loss stopped goes on: its chat is the one shown before.
+        recipe = { ...continueRecipe(found.session), sameChat: true };
       } else recipe = startRecipe(create);
       endRecovery();
       // Until its session shows, a begin the fresh host refuses offers the same choice again (`startFrom`).
@@ -706,7 +716,7 @@ export function useSessionActivation({
   function started(pending: Activation, next: PlayerSession, origin: RunOrigin) {
     recoveryBegin = null;
     if (continuing?.id === next.id) continuing = null;
-    showSession(next, origin);
+    showSession(next, origin, { sameChat: pending.sameChat === true });
     // A new session replaces the one kept before.
     if (pending.kind === "start") {
       keptOwner().forgetKeptPoint();
