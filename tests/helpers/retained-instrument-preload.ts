@@ -1,22 +1,30 @@
 /*
- * #1072 step 1b (R21): `tools/test-output-filter.mjs` imports this into every test process. In a test file of
- * `tests/type-core/` it installs the retained-state instrument for the whole process, so those suites run frozen;
- * anywhere else, the production shard's files in `tests/type-core-production/` included, it does nothing.
+ * #1072 step 1b (R21, R28): `tools/test-output-filter.mjs` imports this into every test process. In a test file of
+ * `tests/type-core/` it installs the retained-state instrument for the whole process, so that suite runs frozen: in CI
+ * only the files of the frozen subset (`tests/helpers/retained-subset.ts`), with `RETAINED_FREEZE=all` every one (the
+ * whole survey, a queue job, docs/TESTING.md). Anywhere else, the production shard's files included, it does nothing.
  *
- * A survey (`RETAINED_SURVEY=<folder>`, never in CI): the instrument notes each refusal of a shape or an owner's field
+ * A survey (`RETAINED_SURVEY=<folder>`, never in CI) freezes every file: the instrument notes each refusal of a shape
  * and goes on, a write to frozen data is noted where its error's stack is first read, and each process writes what it
- * noted into the folder at its exit.
+ * noted into the folder at its exit. A measurement (`RETAINED_MEASURE=<folder>`) freezes every file too and writes what
+ * each made, owner and function by its site, for the subset's cover.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { installRetainedRecorder } from "../../src/type-inference/core/retained/retained.js";
 import { RetainedInstrument } from "./retained-instrument.js";
+import { FROZEN_IN_CI } from "./retained-subset.js";
 
 const file = process.argv[1] ?? "";
-if (/[\\/]tests[\\/]type-core[\\/][^\\/]+\.test\.js$/u.test(file)) {
-  const survey = process.env["RETAINED_SURVEY"];
+const survey = process.env["RETAINED_SURVEY"];
+const measure = process.env["RETAINED_MEASURE"];
+const all =
+  process.env["RETAINED_FREEZE"] === "all" || survey !== undefined || measure !== undefined;
+const name = /[\\/]tests[\\/]type-core[\\/]([^\\/]+\.test)\.js$/u.exec(file)?.[1];
+if (name !== undefined && (all || FROZEN_IN_CI.has(name))) {
   const instrument = new RetainedInstrument({
     note: survey !== undefined,
+    measure: measure !== undefined,
     trace:
       survey === undefined
         ? undefined
@@ -28,6 +36,14 @@ if (/[\\/]tests[\\/]type-core[\\/][^\\/]+\.test\.js$/u.test(file)) {
           },
   });
   installRetainedRecorder(instrument);
+  if (measure !== undefined)
+    process.on("exit", () => {
+      mkdirSync(measure, { recursive: true });
+      writeFileSync(
+        join(measure, `${name}-${process.pid}.json`),
+        `${JSON.stringify({ file: name, exercised: [...instrument.report().exercised].sort() }, null, 1)}\n`,
+      );
+    });
   if (survey !== undefined) {
     const frozen = new Map<string, number>();
     const seen = new WeakSet<object>();
