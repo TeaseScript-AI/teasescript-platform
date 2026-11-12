@@ -530,7 +530,8 @@ export class RetainedInstrument implements RetainedRecorder {
   public amend<T extends object>(target: T): void {
     const owner = this.#ownerOf.get(target);
     if (owner === undefined) {
-      const site = siteOf(new Error().stack);
+      // (a survey names each one's site; a frozen run only counts them, a stack each being dear)
+      const site = this.#note ? siteOf(new Error().stack) : "any";
       this.#valueMarks.set(site, (this.#valueMarks.get(site) ?? 0) + 1);
       return;
     }
