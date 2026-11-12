@@ -264,6 +264,39 @@ test("an owner is locked at the switch after it is made: a field written in a la
   }
 });
 
+/** An owner whose one field is an own accessor its `hidden` shows: a getter, with a setter when `settable`. */
+function accessorOwner(settable: boolean): { field: number } {
+  let value = 0;
+  const owner: { field: number } = settable
+    ? {
+        get field(): number {
+          return value;
+        },
+        set field(next: number) {
+          value = next;
+        },
+      }
+    : {
+        get field(): number {
+          return value;
+        },
+      };
+  Retained.owner(owner, "AccessorOwner", (shown) => ({ field: shown.field }));
+  return owner;
+}
+
+test("an owner's own accessor stands only as a getter its `hidden` shows, which nothing replaces later; a setter is refused", () => {
+  let owner: { field: number } | undefined;
+  const fixed = stepped(() => [
+    () => (owner = accessorOwner(false)),
+    () => Object.defineProperty(owner!, "field", { value: 1 }),
+  ]);
+  assert.deepEqual(fixed, { steps: ["ok", "frozen"], run: "ok" });
+  const settable = stepped(() => [() => (owner = accessorOwner(true)), () => (owner!.field = 1)]);
+  assert.equal(settable.steps[0], "ok");
+  assert.equal(settable.run, "refused");
+});
+
 test("a run's mark stands in each of its intervals: a write after the run resumes is open, another run's is not", () => {
   let wrote: Outcome = "ok";
   let other: Outcome = "ok";
