@@ -16,12 +16,13 @@ import { coreRequest } from "../helpers/type-core-analysis.js";
  * The core's `unreachable` (`coreCheckResult`, #2499) against today's checker's, statement by statement and file by
  * file, for the statements the flow graph builds no node of their own for (a speaker, a function, a `global` without
  * `default:`, `while`, `switch`): every kind in every position (reached, after `exit`, after a `while true` without
- * `break`, inside `if false` and `while false`, after a `return`) in every region (the first file, a second file a
- * `goto` enters, a function called from live code, never called, or called only from dead code, a timer block
- * registered in live and in dead code, and a timer block inside a function), where the language lets it stand
- * (`stands`, checked both ways). (A `global` with `default:` has a node, its assignment, and the check result has no
- * store site for a global, so it is not run.) The candidate route refuses these kinds (`slice-syntax.ts`), so the core
- * is run with that gate bypassed, as the reach measurement does: the analysis, then the check result and the facts.
+ * `break`, inside `if false`, `while false` and an `else if` reached and dead, after a `return`) in every region (the
+ * first file, a second file a `goto` enters, a function called from live code, never called, or called only from dead
+ * code, a timer block registered in live and in dead code, and a timer block inside a function), where the language
+ * lets it stand (`stands`, checked both ways). (A `global` with `default:` has a node, its assignment, and the check
+ * result has no store site for a global, so it is not run.) The candidate route refuses these kinds
+ * (`slice-syntax.ts`), so the core is run with that gate bypassed, as the reach measurement does: the analysis, then
+ * the check result and the facts.
  * What it does not claim: that the core and today's checker decide a branch dead alike in general. The core's dead edges
  * come from literal truth and its own answers, the checker's from its narrowing; these programs decide every branch by a
  * literal, so both agree on them, and the kinds above follow the rule every statement with a node follows.
@@ -49,6 +50,9 @@ const POSITIONS: Readonly<Record<string, (statement: string) => string>> = {
   "after while true": (s) => `while true {\n  say "x"\n}\n${s}`,
   "in if false": (s) => `if false {\n${indent(s)}\n}\nsay "end"`,
   "in while false": (s) => `while false {\n${indent(s)}\n}\nsay "end"`,
+  "in a reached else if": (s) =>
+    `if false {\n  say "a"\n} else if true {\n${indent(s)}\n}\nsay "end"`,
+  "in a dead else if": (s) => `if true {\n  say "a"\n} else if true {\n${indent(s)}\n}\nsay "end"`,
   "after return": (s) => `say "a"\nreturn\n${s}`,
 };
 
