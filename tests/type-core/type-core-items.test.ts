@@ -41,6 +41,15 @@ const reasonWord = (reasons: number): ContextWord =>
     ] as const
   ).find(([bit]) => (reasons & bit) !== 0)?.[1] ?? "unknown";
 
+/** The words `reasonWord` gives. */
+const REASON_WORDS: readonly ContextWord[] = [
+  "unknown",
+  "unmodelled",
+  "deferred-parameter",
+  "missing",
+  "budget",
+];
+
 const writerRank = (writer: Writer | null): number =>
   writer === null ? Infinity : writer.file * 1e9 + writer.start;
 const contextRank = (context: ContextWord | null): number =>
@@ -100,8 +109,8 @@ test("the item algebra keeps its laws over random items from a fixed seed", () =
       merged,
     });
 
-    // the unknown a merge gives speaks its reasons' word, the first of its parts' words where that is `later` or none
-    // (#2486: kept by the word order, an earlier word outlived the reasons that gave it)
+    // the unknown a merge gives speaks its reasons' word where its parts' first word is a reasons' word, else that first
+    // word (#2486: kept by the word order, an earlier reasons' word outlived the reasons that gave it)
     const unknownWord = (reasons: number): ContextWord | null => {
       const first = [...a, ...b]
         .filter((item) => item.tag === "unknown")
@@ -109,7 +118,7 @@ test("the item algebra keeps its laws over random items from a fixed seed", () =
           (word, item) => (contextRank(item.context) < contextRank(word) ? item.context : word),
           null,
         );
-      return first === null || first === "later" ? first : reasonWord(reasons);
+      return first !== null && REASON_WORDS.includes(first) ? reasonWord(reasons) : first;
     };
     // nothing lost: definite stays definite unless guarded, every reason and ingress store kept (no boundary check is
     // erased), the earliest writer, the first context word (an unknown's as above), the mark, and external data without
