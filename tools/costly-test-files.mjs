@@ -34,7 +34,6 @@ export const costlyTestSeconds = {
   "type-core/type-core-contract-capture.test.js": 28,
   "families-runner/families-plans.test.js": 25,
   "type-core/type-core-signatures.test.js": 24,
-  "type-core/type-core-discharge-runtime.test.js": 23,
   "test-output-filter.test.js": 23,
   "type-core/candidate/type-core-candidate-route.test.js": 22,
   "type-core/type-core-declared-escapes.test.js": 21,
