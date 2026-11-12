@@ -205,6 +205,84 @@ function rewraps(group, run) {
 const spelled = ({ file, from, to, oldFrom, oldTo }) => `${file}:${from}-${to}=${oldFrom}-${oldTo}`;
 
 /**
+ * Places the declared edits before any run, each one unit (`place`): its OLD lines in `taken`, its NEW lines in its
+ * file's `unit` map, so no run takes them on either side. Returns a message when an edit names no body lines of a NEW
+ * file (`unitsOf`) and of OLD (`oldLength` lines, its body from index `start`) or overlaps another.
+ */
+function declareEdits(edits, oldLength, start, unitsOf, taken, place) {
+  for (const edit of edits) {
+    const target = unitsOf.get(edit.file);
+    if (
+      target === undefined ||
+      edit.from > edit.to ||
+      edit.oldFrom > edit.oldTo ||
+      edit.from <= target.first ||
+      edit.to > target.shape.lines.length ||
+      edit.oldFrom <= start ||
+      edit.oldTo > oldLength
+    )
+      return `--edit ${spelled(edit)} names no body lines of a NEW file and of OLD`;
+    const id = place({
+      file: edit.file,
+      line: edit.from,
+      end: edit.to - 1,
+      first: edit.oldFrom - 1,
+      last: edit.oldTo - 1,
+    });
+    for (let o = edit.oldFrom - 1; o < edit.oldTo; o += 1) {
+      if (taken.has(o)) return `--edit ${spelled(edit)} overlaps another edit`;
+      taken.set(o, { file: edit.file, unit: id });
+    }
+    for (let k = edit.from - 1; k < edit.to; k += 1) {
+      if (target.unit.has(k)) return `--edit ${spelled(edit)} overlaps another edit`;
+      target.unit.set(k, id);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The failures of where the units lie (`places`, by number; `taken`, OLD's lines by unit; `unitsOf`, each NEW file's
+ * lines by unit): a token's lines apart, and a NEW file's units out of OLD's order.
+ */
+function placementFailures(oldShape, start, taken, unitsOf, places) {
+  const failures = [];
+  // A token's lines stay together: a line whose break lies inside a token goes with the line before it, in one unit
+  // (run, edit or admitted group) or in two units that follow each other in its NEW file and in OLD alike.
+  const together = (a, b) => {
+    if (a === undefined || b === undefined) return false;
+    const [before, after] = [places.get(a), places.get(b)];
+    return (
+      a === b ||
+      (before.file === after.file &&
+        before.end + 1 === after.line - 1 &&
+        before.last + 1 === after.first)
+    );
+  };
+  for (let o = start + 1; o < oldShape.lines.length; o += 1)
+    if (oldShape.inToken[o] && taken.has(o) && !together(taken.get(o - 1)?.unit, taken.get(o).unit))
+      failures.push(`old ${o + 1}: a token's line taken apart from the line before it`);
+  for (const [file, { shape, unit, first }] of unitsOf)
+    for (let k = first; k < shape.lines.length; k += 1)
+      if (
+        shape.inToken[k] &&
+        unit.has(k) &&
+        (k === first || !together(unit.get(k - 1), unit.get(k)))
+      )
+        failures.push(`${file}:${k + 1}: a token's line placed apart from the line before it`);
+  // The old order within each NEW file, over its runs, its edits and its rewrapped declarations alike.
+  for (const [file, entries] of Map.groupBy(places.values(), (entry) => entry.file)) {
+    entries.sort((a, b) => a.line - b.line);
+    for (let i = 1; i < entries.length; i += 1)
+      if (entries[i].first <= entries[i - 1].last)
+        failures.push(
+          `${file}:${entries[i].line}: out of the old file's order (old ${entries[i].first + 1} after ${entries[i - 1].last + 1})`,
+        );
+  }
+  return failures;
+}
+
+/**
  * Reconstructs OLD (`oldFile`: `{ file, text }`) from `files` (each `{ file, text }`), with `edits` (each `{ file,
  * from, to, oldFrom, oldTo }`: NEW file `file`'s lines `from` to `to` take OLD's lines `oldFrom` to `oldTo`, 1-based and
  * inclusive). Returns the counts, the added exports, the residue and the failures; or `{ refused }`, a message, when an
@@ -235,35 +313,8 @@ export function reconstruct(oldFile, files, edits = []) {
     const shape = structureOf(file, text);
     unitsOf.set(file, { shape, unit: new Map(), first: bodyStart(shape, true) });
   }
-  // The declared edits first, each one unit: no run takes their lines on either side.
-  for (const edit of edits) {
-    const target = unitsOf.get(edit.file);
-    if (
-      target === undefined ||
-      edit.from > edit.to ||
-      edit.oldFrom > edit.oldTo ||
-      edit.from <= target.first ||
-      edit.to > target.shape.lines.length ||
-      edit.oldFrom <= start ||
-      edit.oldTo > old.length
-    )
-      return { refused: `--edit ${spelled(edit)} names no body lines of a NEW file and of OLD` };
-    const id = place({
-      file: edit.file,
-      line: edit.from,
-      end: edit.to - 1,
-      first: edit.oldFrom - 1,
-      last: edit.oldTo - 1,
-    });
-    for (let o = edit.oldFrom - 1; o < edit.oldTo; o += 1) {
-      if (taken.has(o)) return { refused: `--edit ${spelled(edit)} overlaps another edit` };
-      taken.set(o, { file: edit.file, unit: id });
-    }
-    for (let k = edit.from - 1; k < edit.to; k += 1) {
-      if (target.unit.has(k)) return { refused: `--edit ${spelled(edit)} overlaps another edit` };
-      target.unit.set(k, id);
-    }
-  }
+  const refused = declareEdits(edits, old.length, start, unitsOf, taken, place);
+  if (refused !== undefined) return { refused };
   for (const { file } of files) {
     const { shape, unit } = unitsOf.get(file);
     const { lines } = shape;
@@ -370,38 +421,7 @@ export function reconstruct(oldFile, files, edits = []) {
     if (!used.has(index))
       for (const o of run) failures.push(`old ${o + 1}: not taken: ${old[o].slice(0, 100)}`);
   });
-  // A token's lines stay together: a line whose break lies inside a token goes with the line before it, in one unit
-  // (run, edit or admitted group) or in two units that follow each other in its NEW file and in OLD alike.
-  const together = (a, b) => {
-    if (a === undefined || b === undefined) return false;
-    const [before, after] = [places.get(a), places.get(b)];
-    return (
-      a === b ||
-      (before.file === after.file &&
-        before.end + 1 === after.line - 1 &&
-        before.last + 1 === after.first)
-    );
-  };
-  for (let o = start + 1; o < old.length; o += 1)
-    if (oldShape.inToken[o] && taken.has(o) && !together(taken.get(o - 1)?.unit, taken.get(o).unit))
-      failures.push(`old ${o + 1}: a token's line taken apart from the line before it`);
-  for (const [file, { shape, unit, first }] of unitsOf)
-    for (let k = first; k < shape.lines.length; k += 1)
-      if (
-        shape.inToken[k] &&
-        unit.has(k) &&
-        (k === first || !together(unit.get(k - 1), unit.get(k)))
-      )
-        failures.push(`${file}:${k + 1}: a token's line placed apart from the line before it`);
-  // The old order within each NEW file, over its runs, its edits and its rewrapped declarations alike.
-  for (const [file, entries] of Map.groupBy(places.values(), (entry) => entry.file)) {
-    entries.sort((a, b) => a.line - b.line);
-    for (let i = 1; i < entries.length; i += 1)
-      if (entries[i].first <= entries[i - 1].last)
-        failures.push(
-          `${file}:${entries[i].line}: out of the old file's order (old ${entries[i].first + 1} after ${entries[i - 1].last + 1})`,
-        );
-  }
+  failures.push(...placementFailures(oldShape, start, taken, unitsOf, places));
   return {
     counts: { old: wanted.length, taken: wanted.length - missing.length, runs },
     exported,
