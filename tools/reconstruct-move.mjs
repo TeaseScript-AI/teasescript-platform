@@ -4,7 +4,7 @@
 // short moved block, or a moved line break, as added and removed) and by the forms it names; this one rebuilds the old
 // file's body from the new files and reports every line that does not fit.
 //
-//   node tools/reconstruct-move.mjs BASE OLD NEW… [--edit NEW:LINE=OLDLINE]…
+//   node tools/reconstruct-move.mjs BASE OLD NEW… [--edit NEW:A-B=OLD:C-D]…
 //
 // BASE is a commit; OLD the moved file's path in it, read from Git; each NEW a file of the working tree, read as it is
 // (OLD may be one of them: a split that keeps the original file). Paths are relative to the current directory, which is
@@ -26,17 +26,17 @@
 //   - each OLD body line that is not a layout blank is taken once;
 //   - a run of lines is taken whole, longest first, never across a layout blank followed by a line at the left margin
 //     (one declaration's boundary);
-//   - a line whose line break lies inside a token goes with the line before it, in one run or admitted group, on both
-//     sides.
-// What is left over is the residue: OLD lines no run took, and NEW lines no OLD line matched. It is admitted only as
-// Prettier's rewrap of a declaration that gained `export `: each group of consecutive left-over NEW lines starts with
-// `export ` before such a declaration, breaks only after `(`, `,`, `=>` or `{`, or before `)` (where a break cannot end
-// a statement: none after `return`), and has the tokens of one run of consecutive left-over OLD lines, as TypeScript
-// scans them: comments and literals by their exact text, whitespace between tokens dropped, and a trailing comma (with
-// comments not counted, one before a closing bracket and after an element; never an elision, `tokensOf`) dropped. A
-// group holding a template literal or a `/` is no rewrap (a scan without context cannot tell a regular expression
-// from a division): such a move is declared with --edit. Last, within each NEW file its runs and admitted groups
-// follow OLD's order. Anything else fails.
+//   - a line whose line break lies inside a token goes with the line before it, on both sides: in one unit (a run, a
+//     declared edit or an admitted group), or in two units that follow each other in its NEW file and in OLD alike.
+// What is left over is the residue: OLD lines no run or edit took, and NEW lines no OLD line matched. It is admitted
+// only as Prettier's rewrap of a declaration that gained `export `: each group of consecutive left-over NEW lines
+// starts with `export ` before such a declaration, breaks only after `(`, `,`, `=>` or `{`, or before `)` (where a
+// break cannot end a statement: none after `return`), and has the tokens of one run of consecutive left-over OLD lines,
+// as TypeScript scans them: comments and literals by their exact text, whitespace between tokens dropped, and a
+// trailing comma (with comments not counted, one before a closing bracket and after an element; never an elision,
+// `tokensOf`) dropped. A group holding a template literal or a `/` is no rewrap (a scan without context cannot tell a
+// regular expression from a division): such a move is declared with --edit. Last, within each NEW file its runs,
+// declared edits and admitted groups follow OLD's order. Anything else fails.
 //
 // This check does not prove scope or brace ownership; compilation rejects malformed or ill-typed results, while
 // behavior requires separate tests or review.
@@ -45,22 +45,27 @@
 // end a line in JavaScript and could end a `//` header line early) cannot run, nor can a file TypeScript reports a
 // syntax error in (where tokens span lines is read from its parse).
 //
-// --edit NEW:LINE=OLDLINE declares one changed line: NEW's line LINE is read as OLD's line OLDLINE (both 1-based, NEW's
-// counted in the file), and both are printed, so a reviewer reads each edit. A declaration that names no such line
-// cannot run.
+// --edit NEW:A-B=OLD:C-D declares one changed passage: NEW's body lines A to B are one unit that takes OLD's body lines
+// C to D whole (1-based, counted in each file; the counts may differ). Nothing in it is compared or discarded: both
+// sides are printed whole, so a reviewer reads each edit. The unit counts in the order check and in keeping a token's
+// lines together as a run does: an edit may take part of a token's lines (one line of a doc comment) only where it
+// follows the unit before it, and the unit after it follows it, in NEW and in OLD alike. `OLD:` may be left out (given,
+// it is OLD's path as given), and `-B` or `-D` for a range of one line: `NEW:LINE=OLDLINE` is one line on each side. An
+// edit that names no body line of a NEW file or of OLD, an empty range, or one that overlaps another edit on either
+// side cannot run; a run never takes a declared line.
 //
 // Output: a summary line (`old body lines: N, taken: N; runs: N; export added: N; residue: N old, N new; edits: N`),
 // then each `export` added, each edit, the residue with its verdict, and each failure. Exit status: 0 when every line
 // is accounted for; 1 when one is not (a line not in OLD, out of order, an OLD line not taken, a residue that is no
 // rewrap, a token's lines apart); 2 when it cannot run (usage, an unreadable file or commit, a line separator other
-// than `\n`, a syntax error, a malformed or unmatched --edit).
+// than `\n`, a syntax error, a malformed, unmatched or overlapping --edit).
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { ts } from "ts-morph";
 
-const USAGE = "usage: node tools/reconstruct-move.mjs BASE OLD NEW… [--edit NEW:LINE=OLDLINE]…";
+const USAGE = "usage: node tools/reconstruct-move.mjs BASE OLD NEW… [--edit NEW:A-B=OLD:C-D]…";
 
 /** A file's lines, without the empty string after a final newline. */
 function linesOf(text) {
@@ -196,35 +201,72 @@ function rewraps(group, run) {
   return before !== null && after !== null && before.join("\0") === after.join("\0");
 }
 
+/** An edit as written: `NEW:A-B=OLD:C-D`. */
+const spelled = ({ file, from, to, oldFrom, oldTo }) => `${file}:${from}-${to}=${oldFrom}-${oldTo}`;
+
 /**
- * Reconstructs OLD (`oldFile`: `{ file, text }`) from `files` (each `{ file, text }`), with `edits` (a map from
- * `file:line` to the old line, 1-based, it is read as). Returns the counts, the added exports, the residue and the
- * failures.
+ * Reconstructs OLD (`oldFile`: `{ file, text }`) from `files` (each `{ file, text }`), with `edits` (each `{ file,
+ * from, to, oldFrom, oldTo }`: NEW file `file`'s lines `from` to `to` take OLD's lines `oldFrom` to `oldTo`, 1-based and
+ * inclusive). Returns the counts, the added exports, the residue and the failures; or `{ refused }`, a message, when an
+ * edit names no body lines or overlaps another.
  */
-export function reconstruct(oldFile, files, edits = new Map()) {
+export function reconstruct(oldFile, files, edits = []) {
   const oldShape = structureOf(oldFile.file, oldFile.text);
   const old = oldShape.lines;
   const start = bodyStart(oldShape, false);
-  /** Each OLD line taken: its NEW file, and the run or admitted group (`unit`) that took it. */
+  /** Each OLD line taken: its NEW file, and the run, edit or admitted group (`unit`) that took it. */
   const taken = new Map();
   const failures = [];
   const exported = [];
   const unmatched = [];
-  /** Per NEW file, each run's or residue group's place: its first new line, and its first and last old line. */
-  const placed = new Map();
   /** Per NEW file, the unit each body line belongs to. */
   const unitsOf = new Map();
   let runs = 0;
-  let units = 0;
+  /**
+   * Each unit (a run, a declared edit or an admitted group) by its number: its NEW file, its first new line (`line`,
+   * 1-based) and its last (`end`, 0-based), and its first and last old line (0-based).
+   */
+  const places = new Map();
+  const place = (entry) => {
+    places.set(places.size + 1, entry);
+    return places.size;
+  };
   for (const { file, text } of files) {
     const shape = structureOf(file, text);
-    const lines = shape.lines.map((line, index) => {
-      const edit = edits.get(`${file}:${index + 1}`);
-      return edit === undefined ? line : old[edit - 1];
+    unitsOf.set(file, { shape, unit: new Map(), first: bodyStart(shape, true) });
+  }
+  // The declared edits first, each one unit: no run takes their lines on either side.
+  for (const edit of edits) {
+    const target = unitsOf.get(edit.file);
+    if (
+      target === undefined ||
+      edit.from > edit.to ||
+      edit.oldFrom > edit.oldTo ||
+      edit.from <= target.first ||
+      edit.to > target.shape.lines.length ||
+      edit.oldFrom <= start ||
+      edit.oldTo > old.length
+    )
+      return { refused: `--edit ${spelled(edit)} names no body lines of a NEW file and of OLD` };
+    const id = place({
+      file: edit.file,
+      line: edit.from,
+      end: edit.to - 1,
+      first: edit.oldFrom - 1,
+      last: edit.oldTo - 1,
     });
-    placed.set(file, []);
-    const unit = new Map();
-    unitsOf.set(file, { shape, unit, first: bodyStart(shape, true) });
+    for (let o = edit.oldFrom - 1; o < edit.oldTo; o += 1) {
+      if (taken.has(o)) return { refused: `--edit ${spelled(edit)} overlaps another edit` };
+      taken.set(o, { file: edit.file, unit: id });
+    }
+    for (let k = edit.from - 1; k < edit.to; k += 1) {
+      if (target.unit.has(k)) return { refused: `--edit ${spelled(edit)} overlaps another edit` };
+      target.unit.set(k, id);
+    }
+  }
+  for (const { file } of files) {
+    const { shape, unit } = unitsOf.get(file);
+    const { lines } = shape;
     // (a layout blank only against a layout blank; `export ` only before a declaration line that starts outside tokens)
     const fits = (o, k) =>
       layoutBlank(oldShape, o) === layoutBlank(shape, k) &&
@@ -234,7 +276,7 @@ export function reconstruct(oldFile, files, edits = new Map()) {
           EXPORTABLE.test(old[o]) &&
           `export ${old[o]}` === lines[k]));
     for (let k = unitsOf.get(file).first; k < lines.length;) {
-      if (layoutBlank(shape, k)) {
+      if (layoutBlank(shape, k) || unit.has(k)) {
         k += 1;
         continue;
       }
@@ -247,6 +289,7 @@ export function reconstruct(oldFile, files, edits = new Map()) {
           k + n < lines.length &&
           o + n < old.length &&
           !taken.has(o + n) &&
+          !unit.has(k + n) &&
           fits(o + n, k + n) &&
           !(n > 0 && layoutBlank(shape, k + n - 1) && !/^(?:$|\s)/u.test(lines[k + n]))
         )
@@ -258,14 +301,19 @@ export function reconstruct(oldFile, files, edits = new Map()) {
         k += 1;
         continue;
       }
-      units += 1;
+      const id = place({
+        file,
+        line: k + 1,
+        end: k + length - 1,
+        first: best,
+        last: best + length - 1,
+      });
       for (let n = 0; n < length; n += 1) {
-        taken.set(best + n, { file, unit: units });
-        unit.set(k + n, units);
+        taken.set(best + n, { file, unit: id });
+        unit.set(k + n, id);
         if (old[best + n] !== lines[k + n])
           exported.push(`${file}:${k + n + 1} <- old ${best + n + 1}`);
       }
-      placed.get(file).push({ line: k + 1, first: best, last: best + length - 1 });
       runs += 1;
       k += length;
     }
@@ -308,31 +356,50 @@ export function reconstruct(oldFile, files, edits = new Map()) {
     }
     used.add(match);
     const run = oldRuns[match];
-    units += 1;
-    for (const o of run) taken.set(o, { file: group.file, unit: units });
-    for (const entry of group.lines) unitsOf.get(group.file).unit.set(entry.line - 1, units);
-    placed.get(group.file).push({ line: group.lines[0].line, first: run[0], last: run.at(-1) });
+    const id = place({
+      file: group.file,
+      line: group.lines[0].line,
+      end: group.lines.at(-1).line - 1,
+      first: run[0],
+      last: run.at(-1),
+    });
+    for (const o of run) taken.set(o, { file: group.file, unit: id });
+    for (const entry of group.lines) unitsOf.get(group.file).unit.set(entry.line - 1, id);
   }
   oldRuns.forEach((run, index) => {
     if (!used.has(index))
       for (const o of run) failures.push(`old ${o + 1}: not taken: ${old[o].slice(0, 100)}`);
   });
-  // A token's lines stay together: a line whose break lies inside a token goes with the line before it, in one run or
-  // admitted group, on both sides.
+  // A token's lines stay together: a line whose break lies inside a token goes with the line before it, in one unit
+  // (run, edit or admitted group) or in two units that follow each other in its NEW file and in OLD alike.
+  const together = (a, b) => {
+    if (a === undefined || b === undefined) return false;
+    const [before, after] = [places.get(a), places.get(b)];
+    return (
+      a === b ||
+      (before.file === after.file &&
+        before.end + 1 === after.line - 1 &&
+        before.last + 1 === after.first)
+    );
+  };
   for (let o = start + 1; o < old.length; o += 1)
-    if (oldShape.inToken[o] && taken.has(o) && taken.get(o).unit !== taken.get(o - 1)?.unit)
+    if (oldShape.inToken[o] && taken.has(o) && !together(taken.get(o - 1)?.unit, taken.get(o).unit))
       failures.push(`old ${o + 1}: a token's line taken apart from the line before it`);
   for (const [file, { shape, unit, first }] of unitsOf)
     for (let k = first; k < shape.lines.length; k += 1)
-      if (shape.inToken[k] && unit.has(k) && (k === first || unit.get(k) !== unit.get(k - 1)))
+      if (
+        shape.inToken[k] &&
+        unit.has(k) &&
+        (k === first || !together(unit.get(k - 1), unit.get(k)))
+      )
         failures.push(`${file}:${k + 1}: a token's line placed apart from the line before it`);
-  // The old order within each NEW file, over its runs and its rewrapped declarations alike.
-  for (const [file, places] of placed) {
-    places.sort((a, b) => a.line - b.line);
-    for (let i = 1; i < places.length; i += 1)
-      if (places[i].first <= places[i - 1].last)
+  // The old order within each NEW file, over its runs, its edits and its rewrapped declarations alike.
+  for (const [file, entries] of Map.groupBy(places.values(), (entry) => entry.file)) {
+    entries.sort((a, b) => a.line - b.line);
+    for (let i = 1; i < entries.length; i += 1)
+      if (entries[i].first <= entries[i - 1].last)
         failures.push(
-          `${file}:${places[i].line}: out of the old file's order (old ${places[i].first + 1} after ${places[i - 1].last + 1})`,
+          `${file}:${entries[i].line}: out of the old file's order (old ${entries[i].first + 1} after ${entries[i - 1].last + 1})`,
         );
   }
   return {
@@ -351,12 +418,20 @@ function cannotRun(message) {
 /** Runs the check with `argv` in `cwd`, printing with `print`; returns the exit status. */
 export function main(argv, cwd = process.cwd(), print = console.log) {
   const positional = [];
-  const edits = new Map();
+  const edits = [];
   for (let i = 0; i < argv.length; i += 1) {
     if (argv[i] === "--edit") {
-      const parsed = /^(.+):(\d+)=(\d+)$/u.exec(argv[i + 1] ?? "");
-      if (parsed === null) return cannotRun(`--edit takes NEW:LINE=OLDLINE\n${USAGE}`);
-      edits.set(`${parsed[1]}:${Number(parsed[2])}`, Number(parsed[3]));
+      const parsed = /^(.+):(\d+)(?:-(\d+))?=(?:(.+):)?(\d+)(?:-(\d+))?$/u.exec(argv[i + 1] ?? "");
+      if (parsed === null) return cannotRun(`--edit takes NEW:A-B=OLD:C-D\n${USAGE}`);
+      const [, file, from, to = from, oldName, oldFrom, oldTo = oldFrom] = parsed;
+      edits.push({
+        file,
+        oldName,
+        from: Number(from),
+        to: Number(to),
+        oldFrom: Number(oldFrom),
+        oldTo: Number(oldTo),
+      });
       i += 1;
     } else if (argv[i].startsWith("-")) return cannotRun(USAGE);
     else positional.push(argv[i]);
@@ -393,31 +468,26 @@ export function main(argv, cwd = process.cwd(), print = console.log) {
   // (the check reads where tokens span lines from the parse, so it reads only files that parse)
   for (const [name, text] of [[oldPath, oldText], ...files.map(({ file, text }) => [file, text])])
     if (!structureOf(name, text).parses) return cannotRun(`${name} does not parse`);
+  for (const edit of edits)
+    if (edit.oldName !== undefined && edit.oldName !== oldPath)
+      return cannotRun(`--edit ${spelled(edit)} names ${edit.oldName}, not OLD (${oldPath})`);
+  const result = reconstruct({ file: oldPath, text: oldText }, files, edits);
+  if (result.refused !== undefined) return cannotRun(result.refused);
+  const { counts, exported, residue, failures } = result;
   const old = linesOf(oldText);
-  for (const [place, oldLine] of edits) {
-    const [file, line] = [
-      place.slice(0, place.lastIndexOf(":")),
-      Number(place.slice(place.lastIndexOf(":") + 1)),
-    ];
-    const target = files.find((entry) => entry.file === file);
-    const lines = target === undefined ? [] : linesOf(target.text);
-    if (line < 1 || line > lines.length || oldLine < 1 || oldLine > old.length)
-      return cannotRun(`--edit ${place}=${oldLine} names no line of a NEW file and of OLD`);
-    print(`edit: ${place}: ${lines[line - 1]}`);
-    print(`  read as old ${oldLine}: ${old[oldLine - 1]}`);
-  }
-  const { counts, exported, residue, failures } = reconstruct(
-    { file: oldPath, text: oldText },
-    files,
-    edits,
-  );
   const residueOld = residue.reduce((sum, { run }) => sum + (run?.length ?? 0), 0);
   const residueNew = residue.reduce((sum, { group }) => sum + group.lines.length, 0);
   print(
     `old body lines: ${counts.old}, taken: ${counts.taken}; runs: ${counts.runs}; export added: ${exported.length}; ` +
-      `residue: ${residueOld} old, ${residueNew} new; edits: ${edits.size}`,
+      `residue: ${residueOld} old, ${residueNew} new; edits: ${edits.length}`,
   );
   for (const line of exported) print(`export added: ${line}`);
+  for (const edit of edits) {
+    const lines = linesOf(files.find(({ file }) => file === edit.file).text);
+    print(`edit: ${spelled(edit)}`);
+    for (let o = edit.oldFrom; o <= edit.oldTo; o += 1) print(`  old ${o}: ${old[o - 1]}`);
+    for (let k = edit.from; k <= edit.to; k += 1) print(`  new ${edit.file}:${k}: ${lines[k - 1]}`);
+  }
   for (const { group, run } of residue) {
     print(`residue ${run === null ? "not a rewrap" : "rewrapped"}:`);
     for (const o of run ?? []) print(`  old ${o + 1}: ${old[o]}`);

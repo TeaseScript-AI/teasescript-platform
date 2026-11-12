@@ -172,12 +172,14 @@ test("a residue is admitted only as a rewrap of a declaration that gained `expor
 test("--edit declares one changed line and prints both; an edit that names no line cannot run", (t) => {
   const files = { "src/big.ts": KEPT, "src/part.ts": replaced(PART, 6, "  return b; // edited") };
   const r = repository(t, files);
-  const declared = r.run("--edit", "src/part.ts:6=13");
-  assert.equal(declared.status, 0, declared.out);
-  assert.match(
-    declared.out,
-    /^edit: src\/part\.ts:6: {3}return b; \/\/ edited\n {2}read as old 13: {3}return b;$/mu,
-  );
+  for (const spelling of ["src/part.ts:6=13", "src/part.ts:6-6=src/big.ts:13-13"]) {
+    const declared = r.run("--edit", spelling);
+    assert.equal(declared.status, 0, declared.out);
+    assert.match(
+      declared.out,
+      /^edit: src\/part\.ts:6-6=13-13\n {2}old 13: {3}return b;\n {2}new src\/part\.ts:6: {3}return b; \/\/ edited$/mu,
+    );
+  }
   assert.equal(r.run().status, 1);
   assert.equal(r.run("--edit", "src/part.ts:99=13").status, 2);
   assert.equal(r.run("--edit", "src/other.ts:6=13").status, 2);
@@ -327,4 +329,73 @@ test("in a rewrap a comma is dropped only as a trailing comma, never an elision,
 test("a file that does not parse cannot run (#2534 final)", (t) => {
   const r = repository(t, { "src/big.ts": "const text = `open;\n" }, "const value = 1;\n");
   assert.equal(r.run().status, 2);
+});
+
+/** `OBJECT`'s first declaration with a template literal: a rewrap the token scan refuses. */
+const TEMPLATE = OBJECT.replace('"a b"', "`a b`");
+const TEMPLATE_SPLIT = `${wrapped("`a b`")}\n\nconst second = first.value;\n`;
+
+test("a range --edit declares a rewrap whose line count changes: one unit, both sides printed whole (#2547)", (t) => {
+  const r = repository(t, { "src/big.ts": TEMPLATE_SPLIT }, TEMPLATE);
+  assert.equal(r.run().status, 1);
+  const declared = r.run("--edit", "src/big.ts:1-5=src/big.ts:1-1");
+  assert.equal(declared.status, 0, declared.out);
+  assert.match(
+    declared.out,
+    /^old body lines: 2, taken: 2; runs: 1; export added: 0; residue: 0 old, 0 new; edits: 1$/mu,
+  );
+  assert.match(
+    declared.out,
+    /^edit: src\/big\.ts:1-5=1-1\n {2}old 1: const first = \{ value: `a b`, .*\n {2}new src\/big\.ts:1: export const first = \{\n(?: {2}new src\/big\.ts:[2-4]: .*\n){3} {2}new src\/big\.ts:5: \};$/mu,
+  );
+});
+
+test("a range --edit that overlaps another, names no body line or another OLD cannot run (#2547)", (t) => {
+  const r = repository(t, { "src/big.ts": TEMPLATE_SPLIT, "src/part.ts": PART }, TEMPLATE);
+  const status = (...edits) => r.run(...edits.flatMap((edit) => ["--edit", edit])).status;
+  assert.equal(status("src/big.ts:1-5=1", "src/big.ts:5=3"), 2);
+  assert.equal(status("src/big.ts:1-5=1", "src/big.ts:7=1"), 2);
+  assert.equal(status("src/big.ts:1-99=1"), 2);
+  assert.equal(status("src/big.ts:1-5=1-99"), 2);
+  assert.equal(status("src/big.ts:5-1=1"), 2);
+  assert.equal(status("src/big.ts:1-5=1-0"), 2);
+  assert.equal(status("src/big.ts:0-5=1"), 2);
+  // (a NEW file's header line, the `//` line above its imports)
+  assert.equal(status("src/part.ts:1-3=3"), 2);
+  assert.equal(status("src/big.ts:1-5=src/other.ts:1"), 2);
+});
+
+test("a declared edit is one unit: no run takes its lines, and it keeps OLD's order and a token's lines together (#2547)", (t) => {
+  // (new line 2 is declared part of the edit that takes old 3, so old 2 is left, though new line 2 equals it)
+  const same = "a();\nb();\nc();\n";
+  const declared = repository(t, { "src/big.ts": same }, same).run("--edit", "src/big.ts:2-3=3");
+  assert.equal(declared.status, 1, declared.out);
+  assert.match(declared.out, /^failure: old 2: not taken: b\(\);$/mu);
+  const after = repository(
+    t,
+    { "src/big.ts": `const second = first.value;\n\n${wrapped("`a b`")}\n` },
+    TEMPLATE,
+  ).run("--edit", "src/big.ts:3-7=1");
+  assert.equal(after.status, 1, after.out);
+  assert.match(after.out, /^failure: src\/big\.ts:3: out of the old file's order/mu);
+  // (a literal's middle line edited alone, between the lines that follow it on both sides: admitted, printed)
+  const r = repository(
+    t,
+    { "src/big.ts": "const text = `one\nTWO\nthree`;\n" },
+    "const text = `one\ntwo\nthree`;\n",
+  );
+  assert.equal(r.run().status, 1);
+  const middle = r.run("--edit", "src/big.ts:2=2");
+  assert.equal(middle.status, 0, middle.out);
+  assert.match(middle.out, /^old body lines: 3, taken: 3; runs: 2;/mu);
+  // (the literal's middle line in another file, its last line edited: every line taken, each file in OLD's order, but
+  // the literal is cut on both sides)
+  const cut = repository(
+    t,
+    { "src/big.ts": "const text = `one\nTHREE`;\n", "src/part.ts": "two;\n" },
+    "const text = `one\ntwo;\nthree`;\n",
+  ).run("--edit", "src/big.ts:2=3");
+  assert.equal(cut.status, 1, cut.out);
+  assert.match(cut.out, /^failure: old 3: a token's line taken apart/mu);
+  assert.match(cut.out, /^failure: src\/big\.ts:2: a token's line placed apart/mu);
 });
