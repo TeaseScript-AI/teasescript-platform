@@ -425,6 +425,9 @@ async function runCase(opened, origin, item) {
         : null,
     };
     if (aim > 0) await page.waitForTimeout(Math.max(0, aim - Date.now()));
+    const entries = () =>
+      page.evaluate(() => document.querySelectorAll(".transcript-entry").length);
+    const entriesAtEnter = item.block ? await entries() : 0;
     await page.keyboard.press("Enter");
     // A block case's answer is in flight at Enter (Send disabled, the field writable), and the block overtakes it: the
     // block shows before Send is enabled again, which the answer's settlement does. A missed window fails the case.
@@ -444,6 +447,10 @@ async function runCase(opened, origin, item) {
     }
     let after = await settled(page, () => opens);
     if (item.block) {
+      // The block's question is its one new entry: an entry for the answer means the answer was taken before the
+      // block's time, so the block followed it rather than overtaking it.
+      if ((await entries()) > entriesAtEnter + 1)
+        throw new Error("The answer was taken: the block did not overtake it in flight");
       await answerBlock(page, item.blockShows);
       after = await settled(page, () => opens);
     }
