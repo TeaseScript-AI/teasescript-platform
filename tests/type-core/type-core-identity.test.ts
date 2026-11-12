@@ -12,8 +12,8 @@ import {
 } from "../helpers/type-core-oracles.js";
 
 const main = (source: string): SourceFile[] => [{ path: "main.tease", source }];
-const PASS = "global function pass(value) {\n  return value\n}\n";
-const OWN_PASS = "function pass(value) {\n  return value\n}\n";
+const PASS = "global function pass(given) {\n  return given\n}\n";
+const OWN_PASS = "function pass(given) {\n  return given\n}\n";
 
 test("which calls the analysis reads as their argument", () => {
   // [form, files, calls read as their argument; null where the names fail before the analysis]
@@ -47,7 +47,7 @@ test("which calls the analysis reads as their argument", () => {
       ],
       1,
     ],
-    ["a named argument", main(`${PASS}let a = pass(value: 3)\nrepeat a {}\nexit`), 0],
+    ["a named argument", main(`${PASS}let a = pass(given: 3)\nrepeat a {}\nexit`), 0],
     ["a method of the helper's name", main(`${PASS}let xs = [1]\nlet a = xs.pass(3)\nexit`), 0],
     [
       "two files' own helpers of one name",
@@ -55,34 +55,34 @@ test("which calls the analysis reads as their argument", () => {
         { path: "main.tease", source: `${OWN_PASS}let a = pass(3)\nsay "\${a}"\nexit` },
         {
           path: "other.tease",
-          source: 'function pass(value) {\n  return [value]\n}\nlet b = pass(4)\nsay "${b}"\n',
+          source: 'function pass(given) {\n  return [given]\n}\nlet b = pass(4)\nsay "${b}"\n',
         },
       ],
       0,
     ],
     [
       "a typed parameter",
-      main('function pass(value: number) {\n  return value\n}\nsay "${pass(3)}"\nexit'),
+      main('function pass(given: number) {\n  return given\n}\nsay "${pass(3)}"\nexit'),
       0,
     ],
     [
       "a parameter's default",
-      main('function pass(value = 1) {\n  return value\n}\nsay "${pass(3)}"\nexit'),
+      main('function pass(given = 1) {\n  return given\n}\nsay "${pass(3)}"\nexit'),
       0,
     ],
     [
       "a result type",
-      main('function pass(value): number {\n  return value\n}\nsay "${pass(3)}"\nexit'),
+      main('function pass(given): number {\n  return given\n}\nsay "${pass(3)}"\nexit'),
       0,
     ],
     [
       "two parameters",
-      main('function pass(value, other) {\n  return value\n}\nsay "${pass(3, 4)}"\nexit'),
+      main('function pass(given, other) {\n  return given\n}\nsay "${pass(3, 4)}"\nexit'),
       0,
     ],
     [
       "a body that does more",
-      main('function pass(value) {\n  say "x"\n  return value\n}\nsay "${pass(3)}"\nexit'),
+      main('function pass(given) {\n  say "x"\n  return given\n}\nsay "${pass(3)}"\nexit'),
       0,
     ],
     // the front end refuses a name that shadows a function, and a call through a value
@@ -102,7 +102,7 @@ test("which calls the analysis reads as their argument", () => {
     [
       "a nested function",
       main(
-        `${PASS}function run {\n  function pass(value) {\n    return [value]\n  }\n  return pass(1)\n}\nsay "\${run}"\nexit`,
+        `${PASS}function run {\n  function pass(given) {\n    return [given]\n  }\n  return pass(1)\n}\nsay "\${run}"\nexit`,
       ),
       null,
     ],
