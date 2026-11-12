@@ -14,6 +14,7 @@ import { dictList } from "../method-categories.js";
 import { propertyName, siteKey, stepName } from "../program.js";
 import { elementStep } from "../result.js";
 import { unsettledItem } from "./kinds.js";
+import { Retained } from "../retained/retained.js";
 
 // The names obligations use: an operand's span, a key's label, a chain's derived or anonymous start, quiet kinds.
 
@@ -113,7 +114,8 @@ export function keyLabel(walk: Consumers, value: PlaceId): Label {
 /** A recipe named by a value's own text, or `the value` where it has none (`keyLabel`). */
 function ownLabel(walk: Consumers, site: SourceSite | null): Label {
   const text = site === null ? "the value" : walk.pass.program.textAt(site);
-  return { parent: null, step: "", text, below: null };
+  // (#1072 1b: a record, as the contract's recipes are, since a recipe below it is one: `labelBelow`)
+  return Retained.record<Label>("Label", { parent: null, step: "", text, below: null });
 }
 
 /** A label's text where a check or a diagnostic shows it: made there once per recipe and charged (`labelText`). */
