@@ -85,7 +85,9 @@ const witness = (
 /**
  * At demand 16 in four modes: a required check is Lost at a settled decision stop. Where a rejection or a retarget lost
  * the completion's results, the decline names the first stopped mark it lost, often the place's first literal, before the
- * host store (#2080 part 1).
+ * host store (#2080 part 1). The demand a witness declines at moves with the core's costs (#2289 moved two); what each
+ * shows holds at every demand: from 4 to 128 in four modes, each of them and the typed-copy cycle below declines, errs
+ * at compile time or publishes a plan that rejects the forbidden input, never one that lets it through (#2289's sweep).
  */
 const DECLINED: readonly Witness[] = [
   witness(
