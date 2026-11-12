@@ -329,10 +329,10 @@ export class RetainedInstrument implements RetainedRecorder {
   #sealedCount = 0;
   /**
    * Each typed array sealed (`TYPED_ENTRIES`), which no freeze holds: a copy of its bytes when its run ended, and where
-   * it was met; `changedTyped` compares them.
+   * it was met; `changedTyped` compares them. Held strongly to the process's exit, so a write is not lost with it.
    */
   readonly #typed: {
-    readonly view: WeakRef<ArrayBufferView>;
+    readonly view: ArrayBufferView;
     readonly bytes: Uint8Array;
     readonly path: string;
   }[] = [];
@@ -354,9 +354,7 @@ export class RetainedInstrument implements RetainedRecorder {
   public changedTyped(): string[] {
     const changed: string[] = [];
     for (const { view, bytes, path } of this.#typed) {
-      const now = view.deref();
-      if (now === undefined) continue;
-      const current = new Uint8Array(now.buffer, now.byteOffset, now.byteLength);
+      const current = new Uint8Array(view.buffer, view.byteOffset, view.byteLength);
       if (current.length !== bytes.length || current.some((byte, at) => byte !== bytes[at]))
         changed.push(path);
     }
@@ -775,9 +773,13 @@ export class RetainedInstrument implements RetainedRecorder {
         if (![...TYPED_ENTRIES.keys()].some((entry) => path.startsWith(entry)))
           this.#refuse(`a typed array at ${path}, under no entry of TYPED_ENTRIES`);
         else if (seal && !this.#typedSeen.has(value)) {
+          // (its elements alone: an own field beside them is refused, and none is added later)
+          if (Reflect.ownKeys(value).some((key) => typeof key === "symbol" || !/^\d+$/u.test(key)))
+            this.#refuse(`a typed array with own fields beside its elements at ${path}`);
+          Object.preventExtensions(value);
           this.#typedSeen.add(value);
           const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength).slice();
-          this.#typed.push({ view: new WeakRef(value), bytes, path });
+          this.#typed.push({ view: value, bytes, path });
         }
       } else if (!IDENTITY_CLASSES.has(constructorOf(value)))
         this.#refuse(
