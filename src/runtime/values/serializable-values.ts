@@ -1300,14 +1300,15 @@ function timeRecordProblem(value: Record<string, unknown>): string | null {
   if (value.kind === "angle") return isStoredAngleRecord(value) ? null : "a malformed angle";
   if (value.kind === "calendarDuration")
     return isStoredCalendarDurationRecord(value) ? null : "a malformed calendar duration";
-  const keys = typeof value.kind === "string" ? TEMPORAL_KEYS.get(value.kind) : undefined;
-  if (keys === undefined)
-    return typeof value.kind === "string" ? `a ${value.kind} value` : "a value without a kind";
+  const kind = value.kind;
+  if (typeof kind !== "string") return "a value without a kind";
+  const keys = TEMPORAL_KEYS.get(kind);
+  if (keys === undefined) return `a ${kind} value`;
   if (
     !hasOnlyKeys(value, keys) ||
     keys.some((key) => key !== "kind" && typeof value[key] !== "number")
   )
-    return `a malformed ${value.kind}`;
+    return `a malformed ${kind}`;
   // Every field other than kind was just checked to be a number.
   const field = (key: string): number => Number(value[key]);
   const date = { year: field("year"), month: field("month"), day: field("day") };
@@ -1318,14 +1319,14 @@ function timeRecordProblem(value: Record<string, unknown>): string | null {
     millisecond: field("millisecond"),
   };
   const valid =
-    value.kind === "date"
+    kind === "date"
       ? isValidDate(date)
-      : value.kind === "time"
+      : kind === "time"
         ? isValidTime(time)
-        : value.kind === "datetime"
+        : kind === "datetime"
           ? isValidDate(date) && isValidTime(time)
           : isValidEpochMilliseconds(field("epochMilliseconds"));
-  return valid ? null : `a malformed ${value.kind}`;
+  return valid ? null : `a malformed ${kind}`;
 }
 
 function serializableCaptureError(failure: ExternalDataFailure): SerializableValueError {

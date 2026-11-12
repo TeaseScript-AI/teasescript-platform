@@ -52,7 +52,9 @@ test("the stored baselines' tools show no plain write outside the gate in their 
   const { modules, sites, escapes, processes, loads } = await inventoryOf(process.cwd());
   assert.deepEqual(modules, [
     "tests/families/baselines.mjs",
+    "tests/families/run-child.mjs",
     "tests/families/run-contract.mjs",
+    "tests/families/run-results.mjs",
     "tests/families/run.mjs",
     "tests/families/sources.mjs",
     "tests/families/split.mjs",
@@ -125,7 +127,9 @@ test("the stored baselines' tools show no plain write outside the gate in their 
     for (const file of [
       "tools/corpus/baseline.sh",
       "tests/families/baselines.mjs",
+      "tests/families/run-child.mjs",
       "tests/families/run-contract.mjs",
+      "tests/families/run-results.mjs",
       "tests/families/run.mjs",
       "tests/families/sources.mjs",
       "tests/families/split.mjs",

@@ -22,6 +22,7 @@ import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
   CannotRun,
+  PLAYER_BROWSER_SMOKE,
   PROJECTS,
   UNKNOWN_TO_COSTLY,
   checksOf,
@@ -144,7 +145,7 @@ test("without node_modules it can link, it runs no check, says why and the two f
 /**
  * A repository with a base branch `main` and a branch `feature` off it, each changing `a.mjs` as `edit` says. `core`
  * also changes a file of the type core on `feature` ("added", or "deleted" or "renamed" out of the core, the file being
- * on `main` for those);
+ * on `main` for those), and `changed` adds that path on `feature`;
  * `mapper` is code the stand-in pin-suite mapper runs after its line. `passing` leaves `a.mjs` as it was and gives every
  * other check a stand-in that passes, so the mapper's verdict alone decides the run. `lock` is the lockfile's packages
  * and `installed` those the stand-in `node_modules` records as installed.
@@ -153,6 +154,7 @@ function repository({
   conflict = false,
   slowOxlint = false,
   core = false,
+  changed = null,
   mapper = "",
   passing = false,
   lock = {},
@@ -199,6 +201,7 @@ function repository({
   run("switch", "-q", "-c", "feature");
   if (!passing) write("a.mjs", "export const a = 2;\n");
   if (core === "added") write("src/type-inference/core/answers.ts", "export const answers = 1;\n");
+  if (changed !== null) write(changed, "export const changed = 1;\n");
   if (core === "deleted") rmSync(join(directory, "src/type-inference/core/answers.ts"));
   if (core === "renamed")
     run("mv", "src/type-inference/core/answers.ts", "src/type-inference/answers.ts");
@@ -1018,6 +1021,27 @@ test("its last line names what ran, what failed, and what it did not run: the ch
       rmSync(directory, { recursive: true, force: true });
     }
   }
+});
+
+test("a change under player/ or tests/fixtures/packages/ adds the browser smoke to what its last line did not run, and its verdict stays (#2484)", () => {
+  const lastLine = (changed) => {
+    const { directory } = repository({ passing: true, changed });
+    try {
+      const result = runSync(process.execPath, [tool, "--base", "main"], {
+        cwd: directory,
+        encoding: "utf8",
+        env: environment,
+      });
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      return result.stdout.trimEnd().split("\n").at(-1);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  };
+  const elsewhere = lastLine("src/compiler.ts");
+  assert.ok(!elsewhere.includes("browser smoke"), elsewhere);
+  for (const changed of ["player/runtime-adapter.ts", "tests/fixtures/packages/garden/helper.ts"])
+    assert.equal(lastLine(changed), `${elsewhere}, ${PLAYER_BROWSER_SMOKE}`, changed);
 });
 
 test(

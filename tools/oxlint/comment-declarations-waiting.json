@@ -394,11 +394,5 @@
     "kind": "reference",
     "text": "membersMissing",
     "waits": "#1937"
-  },
-  {
-    "file": "tests/type-core/type-core-stop.test.ts",
-    "kind": "docblock",
-    "text": "A source's typed loads and parses as its plan reads them (`load` and `expected` lines, `plannedContent`), or how the",
-    "waits": "#1937"
   }
 ]
