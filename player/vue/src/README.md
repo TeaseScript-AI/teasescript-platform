@@ -145,7 +145,8 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   password, lock password): only the player's edits, each under its field's token, and its own operations change them,
   and `select` alone changes the slot shown. `interaction/useAnswerSubmission.ts` checks each answer at once with
   `src/interaction-completion.ts`, sends it, including [pacing skips](../../../docs/ui/PLAYER-UI.md#composer-and-foreground-interactions),
-  and settles it by the runtime's outcome or the session's end. The composer uses shadcn Textarea/Button and VueUse autosizing;
+  and settles it by the runtime's outcome or the session's end; `interaction/useFormUpdates.ts` sends a form's updates,
+  which are no answers, in order, and counts those not yet answered. The composer uses shadcn Textarea/Button and VueUse autosizing;
   foreground controls use `components/PlayerActionButton.vue` in the transcript's trailing slot.
   `playerRuntimeForeground` maps authored backgrounds from live/restored actions; `player/theme/story-choice.ts`
   supplies theme/authored button material. See [ADR 0018](../../../docs/decisions/0018-first-standard-library-poc-contract.md)
