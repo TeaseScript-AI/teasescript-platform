@@ -623,14 +623,20 @@ export const keysCasePassed = (item) =>
     ));
 
 /**
- * The composer's area, as a list of lines: every element under it with its attributes and its state (disabled, read-only,
- * value, its own text). Identities a page draws anew (the field's token, generated ids) are left out.
+ * The composer's area, as lines in document order: every element under it with its attributes and its state (disabled,
+ * read-only, value, its own text). Identities a page draws anew (the field's token, generated ids and the attributes
+ * naming them) are left out. `pending`: an answer is on its way, read in the same task: its predicted line shows, or no
+ * question's control or dialog does.
  */
 const areaSnapshot = () => {
+  const pending =
+    document.querySelector('.transcript-entry[data-message-id^="predicted-"]') !== null ||
+    document.querySelector("[data-foreground-controls] button, [data-open-url], [role=dialog]") ===
+      null;
   const root = document.querySelector("[data-composer-shell]")?.closest(".composer-container");
-  if (!root) return ["no composer"];
+  if (!root) return { pending, lines: ["no composer"] };
   const skip = new Set(["data-composer-token", "id", "for", "aria-describedby", "aria-controls"]);
-  return [root, ...root.querySelectorAll("*")].map((element) => {
+  const lines = [root, ...root.querySelectorAll("*")].map((element) => {
     const attributes = [...element.attributes]
       .filter((attribute) => !skip.has(attribute.name))
       .map((attribute) => `${attribute.name}=${attribute.value}`)
@@ -645,6 +651,7 @@ const areaSnapshot = () => {
         : "";
     return `${element.tagName} ${attributes.join(" ")}${state}${own ? ` "${own}"` : ""}`;
   });
+  return { pending, lines };
 };
 
 // Each question kind of the `composer-area` fixture and how it is answered. In the answer's flight the composer's area is
@@ -670,6 +677,11 @@ const AREA_KINDS = {
       .locator("[data-composer-input]")
       .fill("20:00")
       .then(() => page.keyboard.press("Enter")),
+  "Date and time": (page) =>
+    page
+      .locator("[data-composer-input]")
+      .fill("2026-10-04T20:00")
+      .then(() => page.keyboard.press("Enter")),
   Choice: (page) => page.getByRole("button", { name: "Red", exact: true }).click(),
   Button: (page) => page.getByRole("button", { name: "Go", exact: true }).click(),
   Form: (page) => page.getByRole("button", { name: "Continue", exact: true }).click(),
@@ -677,6 +689,7 @@ const AREA_KINDS = {
   Export: (page) =>
     page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click(),
   Image: (page) => page.getByRole("button", { name: "Skip", exact: true }).click(),
+  Link: (page) => page.locator("[data-open-url]").click(),
   Password: (page) =>
     page
       .locator("[data-composer-input]")
@@ -688,12 +701,14 @@ const AREA_QUESTION = {
   Number: "[data-composer-input]",
   Date: "input[data-composer-input]",
   Time: "input[data-composer-input]",
+  "Date and time": "input[data-composer-input]",
   Choice: "[data-foreground-controls] button",
   Button: "[data-foreground-controls] button",
   Form: "[data-foreground-controls] button",
   Popup: "[role=dialog]",
   Export: "[role=dialog]",
   Image: "[data-foreground-controls] button",
+  Link: "[data-open-url]",
   Password: "[data-composer-password] [data-composer-input]",
 };
 
@@ -715,13 +730,16 @@ async function areaOf(opened, origin, kind) {
         ),
       );
       await page.waitForTimeout(SETTLE_MS);
-      return { snapshot: await page.evaluate(areaSnapshot), errors };
+      return { snapshot: (await page.evaluate(areaSnapshot)).lines, errors };
     }
     await page.locator(AREA_QUESTION[kind]).first().waitFor();
     await page.waitForTimeout(SETTLE_MS);
     await AREA_KINDS[kind](page);
-    // Read at once, inside the answer's flight of at least 250 ms.
-    return { snapshot: await page.evaluate(areaSnapshot), errors };
+    // Read at once, inside the answer's flight of at least 250 ms, which the reading itself confirms.
+    const reading = await page.evaluate(areaSnapshot);
+    if (!reading.pending)
+      throw new Error("The answer was no longer on its way when the area was read");
+    return { snapshot: reading.lines, errors };
   } finally {
     await close();
   }
@@ -762,14 +780,16 @@ async function areaCases(opened, origin) {
         if (!field?.includes("readOnly=true") || !field.includes('value=""'))
           result.error = `the password's field in its flight was not empty and read-only: ${field}`;
       } else {
-        const missing = idle.snapshot.filter((line) => !flight.snapshot.includes(line));
-        const extra = flight.snapshot.filter((line) => !idle.snapshot.includes(line));
-        if (missing.length + extra.length > 0)
-          result.error =
-            `the area differs from the idle chat's: ${JSON.stringify({ missing, extra })}`.slice(
-              0,
-              600,
-            );
+        // In order, line by line: order and repeats count.
+        const length = Math.max(idle.snapshot.length, flight.snapshot.length);
+        const at = Array.from({ length }, (_, line) => line).find(
+          (line) => idle.snapshot[line] !== flight.snapshot[line],
+        );
+        if (at !== undefined)
+          result.error = `the area differs from the idle chat's from line ${at}: ${JSON.stringify({
+            idle: idle.snapshot.slice(at, at + 2),
+            flight: flight.snapshot.slice(at, at + 2),
+          })}`.slice(0, 600);
       }
     } catch (error) {
       result.error = String(error?.message ?? error).slice(0, 300);
