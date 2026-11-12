@@ -16,6 +16,7 @@ import type { RuntimeInteractionActionSnapshot } from "../../../../src/runtime/a
 import {
   activePlayerRuntimeInteraction,
   answerRenderKey,
+  playerRuntimeUrlRequest,
   choiceOptionId,
   playerRuntimeInteractionActionIds,
   playerRuntimePacingGate,
@@ -79,7 +80,17 @@ export interface PendingAnswer {
    * player's answer had when it was given, under the answer's row key (`answerRenderKey`).
    */
   readonly entry: PlayerTranscriptEntryPresentation | null;
-  stage: AnswerStage;
+  /** Moves forward only, through `advance`. */
+  readonly stage: AnswerStage;
+}
+
+const STAGES: readonly AnswerStage[] = ["accepted", "fenced", "posted", "settled"];
+
+/** Moves `record` forward to `stage`, the one writer of a stage: never back, and nothing after `settled`. */
+function advance(record: PendingAnswer, stage: AnswerStage): boolean {
+  if (STAGES.indexOf(stage) <= STAGES.indexOf(record.stage)) return false;
+  (record as { stage: AnswerStage }).stage = stage;
+  return true;
 }
 
 /** Where the session stands for input: stopping until its final publication shows, stopped, or its connection lost. */
@@ -123,7 +134,11 @@ export function useAnswerSubmission(host: {
   let noticeTimer: ReturnType<typeof setTimeout> | undefined;
   let disposed = false;
   /** An `openUrl` request waiting for the pending answer to settle, and those already tried, by session lineage. */
-  let urlWaiting: number | null = null;
+  let urlWaiting: {
+    readonly chat: number;
+    readonly lineage: object;
+    readonly actionId: number;
+  } | null = null;
   const urlTried = new WeakMap<object, Set<number>>();
 
   function showNotice(message: string) {
@@ -146,8 +161,7 @@ export function useAnswerSubmission(host: {
    * `dropped` writes nothing. Every later settlement of the same record does nothing.
    */
   function settle(record: PendingAnswer, how: "released" | "undone" | "dropped", message = "") {
-    if (record.stage === "settled") return;
-    record.stage = "settled";
+    if (!advance(record, "settled")) return;
     if (pending.value === record) pending.value = null;
     if (how === "undone") {
       if (record.origin === "chat" && record.sent !== null)
@@ -155,45 +169,64 @@ export function useAnswerSubmission(host: {
       if (message) showNotice(message);
       host.undone?.(record);
     }
-    admitWaitingUrl();
+    if (how === "dropped") urlWaiting = null;
+    else admitWaitingUrl();
   }
 
   /**
-   * How the session's end settles `record` now, or `null` while it waits for the final publication; the one place that
-   * decides. A posted answer, with a line or without one (a password), is settled by the stopped session's final
-   * publication: still presenting its action, the host did not take it, and it is undone; no longer presenting it,
-   * it is released. `freezing` needs no timer of its own: it ends when the stop's halt settles, acknowledged or
-   * rejected (`PlayerBridge.halt`, `stopAt`), or sooner with a loss, a later activation or an unmount, so the answer
-   * waits exactly as long as the stop itself.
+   * How the session's end settles `record` as the terminal signal goes from `before` to `after`, or `null` while it
+   * waits; the one place that decides, a closed table by the record's stage, whose unnamed cells take the conservative
+   * case (undone, nothing published):
+   *
+   * | `before` → `after`             | accepted, fenced | posted                                                    |
+   * | ------------------------------ | ---------------- | --------------------------------------------------------- |
+   * | any, in another chat or gone   | dropped          | dropped                                                   |
+   * | `null` → `null`                | waits; undone once another session shows in the chat        |
+   * | any → `freezing`               | undone           | waits for the final publication                           |
+   * | any → `stopped`                | undone           | undone if the final publication still presents its action, else released |
+   * | any → `lost`                   | undone           | undone: the outcome is unknown, never sent again          |
+   * | `freezing` → `null`            | undone           | undone: a freeze retired without its final publication leaves the outcome unknown |
+   * | any other                      | undone           | undone                                                    |
+   *
+   * `freezing` needs no timer of its own: it ends when the stop's halt settles, acknowledged or rejected
+   * (`PlayerBridge.halt`, `stopAt`), or sooner with a loss, a later activation or an unmount.
    */
-  function terminalDisposition(record: PendingAnswer): "released" | "undone" | "dropped" | null {
+  function terminalDisposition(
+    record: PendingAnswer,
+    before: SessionTerminal,
+    after: SessionTerminal,
+  ): "released" | "undone" | "dropped" | null {
     if (disposed || record.chat !== host.chat()) return "dropped";
-    const terminal = host.terminal();
-    if (terminal === "lost") return "undone";
-    if (terminal === null) {
+    if (before === null && after === null) {
       const shown = host.session();
       // A session another shows in the same chat holds no answer posted to this one. Only the Continue after a lost
       // connection shows one, and the loss settled the answer before it; this keeps that order from mattering.
       return shown !== null && shown.lineage !== record.lineage ? "undone" : null;
     }
+    // A record that never reached the host is undone at any end.
     if (record.stage !== "posted") return "undone";
-    if (terminal === "freezing") return null;
-    // The final publication decides: an action it still presents was not answered.
-    const frozen = host.stoppedSession();
-    const live =
-      frozen !== null &&
-      frozen.lineage === record.lineage &&
-      playerRuntimeInteractionActionIds(frozen.state).includes(record.actionId);
-    return live ? "undone" : "released";
+    if (after === "freezing") return null;
+    if (after === "stopped") {
+      // The final publication decides: an action it still presents was not answered.
+      const frozen = host.stoppedSession();
+      const live =
+        frozen !== null &&
+        frozen.lineage === record.lineage &&
+        playerRuntimeInteractionActionIds(frozen.state).includes(record.actionId);
+      return live ? "undone" : "released";
+    }
+    // A lost connection, a freeze retired without its final publication, or any other change: the outcome is unknown,
+    // so the answer is undone and never sent again.
+    return "undone";
   }
 
   watch(
     () => [host.terminal(), host.chat()] as const,
-    ([terminal]) => {
+    ([terminal], [before]) => {
       if (terminal !== null) host.composer.eraseSecrets();
       const record = pending.value;
       if (record === null) return;
-      const how = terminalDisposition(record);
+      const how = terminalDisposition(record, before, terminal);
       if (how !== null) settle(record, how);
     },
   );
@@ -206,12 +239,13 @@ export function useAnswerSubmission(host: {
   ) {
     await nextFrame();
     if (record.stage === "settled") return;
-    const fenced = terminalDisposition(record);
+    const fenced = terminalDisposition(record, host.terminal(), host.terminal());
     if (fenced !== null) return settle(record, fenced);
-    record.stage = "fenced";
+    advance(record, "fenced");
     let result: InputResult;
     try {
-      result = await run(record.actionId, intent, () => (record.stage = "posted"));
+      // A record settled meanwhile, by the session's end or a later one's preparation, is never posted.
+      result = await run(record.actionId, intent, () => advance(record, "posted"));
     } catch (error) {
       settle(record, "undone");
       throw error;
@@ -219,13 +253,14 @@ export function useAnswerSubmission(host: {
     onOutcome?.(result);
     if (result.kind === "retired") {
       // Not run here, or run before a stop whose final publication decides; otherwise nothing took it.
-      const how = terminalDisposition(record);
+      const how = terminalDisposition(record, host.terminal(), host.terminal());
       if (how !== null) settle(record, how);
       else if (host.terminal() !== "freezing") settle(record, "undone");
       return;
     }
-    if (result.kind === "unavailable") return settle(record, "undone", NO_LONGER_AVAILABLE);
     if (result.kind === "unanswered") return settle(record, "undone", host.unansweredMessage());
+    // Only an answered result publishes; an unavailable action, or any other result, undoes the answer.
+    if (result.kind !== "answered") return settle(record, "undone", NO_LONGER_AVAILABLE);
     host.publish(result.session);
     const outcome = result.outcome;
     if (outcome.kind === "completed" || outcome.kind === "updated" || outcome.kind === "unchanged")
@@ -237,7 +272,7 @@ export function useAnswerSubmission(host: {
   async function run(
     actionId: number | undefined,
     intent: InputIntent,
-    onPost?: () => void,
+    admit?: () => boolean,
     target: "interaction" | "pacing" = "interaction",
   ): Promise<InputResult> {
     const ready = host.prepareInput();
@@ -248,7 +283,7 @@ export function useAnswerSubmission(host: {
       target === "pacing"
         ? playerRuntimePacingGate(current)?.actionId
         : activePlayerRuntimeInteraction(current.state)?.actionId;
-    return runInput(section, actionId, targetId, intent, onPost);
+    return runInput(section, actionId, targetId, intent, admit);
   }
 
   /** Accepts an answer to the presented action: it is pending, its controls are gone, its text has left. */
@@ -259,7 +294,8 @@ export function useAnswerSubmission(host: {
     sent: string | null = null,
   ): PendingAnswer | null {
     const session = host.session();
-    if (session === null || pending.value !== null || host.terminal() !== null) return null;
+    if (disposed || session === null || pending.value !== null || host.terminal() !== null)
+      return null;
     clearNotice();
     const record: PendingAnswer = {
       chat: host.chat(),
@@ -440,18 +476,24 @@ export function useAnswerSubmission(host: {
   }
 
   /**
-   * The `openUrl` button, or the request the Player opens at once (`auto`): that one waits while another answer is
-   * pending, and is tried once per request, counted when it is admitted as the pending answer.
+   * The `openUrl` button, or the request the Player opens at once (`auto`), only one its session's own run requested
+   * (`atOnce`): that one waits while another answer is pending, for the same chat, session and action, and is tried
+   * once per request, counted when it is admitted as the pending answer.
    */
   function openUrl(open: (session: PlayerSession) => boolean, auto: boolean): void {
     const session = host.session();
     const action = presentedAction(session);
-    if (session === null || action === null) return;
+    if (disposed || session === null || action === null) return;
     const tried = urlTried.get(session.lineage) ?? new Set<number>();
     if (auto) {
-      if (tried.has(action.actionId)) return;
+      if (
+        tried.has(action.actionId) ||
+        playerRuntimeUrlRequest(session)?.atOnce !== true ||
+        host.inputSection() === undefined
+      )
+        return;
       if (pending.value !== null) {
-        urlWaiting = action.actionId;
+        urlWaiting = { chat: host.chat(), lineage: session.lineage, actionId: action.actionId };
         return;
       }
     }
@@ -465,11 +507,20 @@ export function useAnswerSubmission(host: {
   function urlOpener(open: (session: PlayerSession) => boolean) {
     openAtOnce = open;
   }
+  /** Admits the automatic request that waited, if it is still the one its chat's session presents. */
   function admitWaitingUrl() {
     const waiting = urlWaiting;
     urlWaiting = null;
-    if (waiting === null || openAtOnce === null) return;
-    if (presentedAction(host.session())?.actionId !== waiting) return;
+    const session = host.session();
+    if (
+      waiting === null ||
+      openAtOnce === null ||
+      disposed ||
+      waiting.chat !== host.chat() ||
+      waiting.lineage !== session?.lineage ||
+      presentedAction(session)?.actionId !== waiting.actionId
+    )
+      return;
     openUrl(openAtOnce, true);
   }
 
@@ -555,6 +606,7 @@ export function useAnswerSubmission(host: {
 
   onScopeDispose(() => {
     disposed = true;
+    urlWaiting = null;
     clearNotice();
     const record = pending.value;
     if (record) settle(record, "dropped");

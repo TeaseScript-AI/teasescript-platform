@@ -40,7 +40,7 @@ export interface RuntimeInput {
     presented: number | undefined,
     target: (session: PlayerSessionView) => number | undefined,
     intent: Intent,
-    onPost?: () => void,
+    admit?: () => boolean,
   ): Promise<InputResult>;
   draftInput(
     section: unknown,
