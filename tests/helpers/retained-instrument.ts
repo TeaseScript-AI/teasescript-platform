@@ -601,9 +601,9 @@ export class RetainedInstrument implements RetainedRecorder {
   }
 
   /**
-   * An owner's first switch: its own fields, read by their descriptors, each a data field (an accessor is refused), and
-   * the private ones its `hidden` shows, read this once (the lint holds those `readonly`), admitted and sealed; then it is
-   * made non-extensible and locked.
+   * An owner's first switch: its own fields, read by their descriptors, each a data field (an accessor is refused, but
+   * for a getter without a setter that `hidden` shows), and the private ones its `hidden` shows, read this once (the
+   * lint holds those `readonly`), admitted and sealed; then it is made non-extensible and locked.
    */
   #settle(record: OwnerRecord): void {
     const { owner } = record;
@@ -616,9 +616,11 @@ export class RetainedInstrument implements RetainedRecorder {
       const descriptor = Object.getOwnPropertyDescriptor(owner, key)!;
       if ("value" in descriptor)
         this.#admit(descriptor.value, `${record.name}.${String(key)}`, true);
-      // (an own getter that `hidden` shows, read there: a value fixed once its owner is made, as `CorePass`'s)
-      else if (typeof key !== "string" || !Object.hasOwn(shown, key))
-        this.#refuse(`an accessor \`${String(key)}\` of the owner ${record.name}`);
+      // (an own getter without a setter that `hidden` shows, read there: a value fixed once its owner is made, as
+      // `CorePass`'s; made non-configurable, so nothing replaces it later)
+      else if (typeof key === "string" && Object.hasOwn(shown, key) && descriptor.set === undefined)
+        Object.defineProperty(owner, key, { configurable: false });
+      else this.#refuse(`an accessor \`${String(key)}\` of the owner ${record.name}`);
     }
     record.keys = keys;
     Object.preventExtensions(owner);
