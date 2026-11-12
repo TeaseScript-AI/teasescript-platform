@@ -205,6 +205,47 @@ test("a default's written type is certain: a number default is no repeat count (
   }
 });
 
+test("a load's default with a written type is read by that type, in the plan and at runtime (#1072 step 0)", () => {
+  const source = 'let fb: integer? = 5\nlet v = load("k", default: fb)\nsay v\nexit\n';
+  for (const mode of MODES) {
+    const where = JSON.stringify(mode);
+    const compiled = inMode(mode, () =>
+      compileProjectWithBackend(
+        [{ path: "main.tease", source }],
+        { globals: GLOBALS },
+        CORE_BACKEND,
+      ),
+    );
+    assert.ok(compiled.plan !== null, `${where}: ${compiled.diagnostics.map((d) => d.code)}`);
+    assert.deepEqual(
+      plannedContent(compiled.plan, source)
+        .filter((entry) => entry.startsWith("load "))
+        .map((entry) => entry.split(" ")[2]),
+      ["integer|null"],
+      where,
+    );
+    // (no stored value is null: an absent key has none, and gives the default)
+    for (const [stored, shown] of [
+      [undefined, "5"],
+      [2, "2"],
+      [1.5, "5"],
+      ["x", "5"],
+    ] as const) {
+      const ran = runGlobals(
+        compiled.plan,
+        { hostValue: "" },
+        stored === undefined ? [] : [{ key: "k", value: stored }],
+      );
+      assert.equal(ran.status, "halted", `${where}: ${String(stored)}: ${ran.failure}`);
+      assert.deepEqual(
+        ran.said.map((entry) => entry.text),
+        [shown],
+        `${where}: ${String(stored)}`,
+      );
+    }
+  }
+});
+
 /**
  * The rule's answer for the one typed call of `text` (`@`, its default `fb`) at `rest`, the units its index charges
  * where it is built and the units its walk charges.
