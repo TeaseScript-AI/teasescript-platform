@@ -43,8 +43,13 @@ test(
     const cwd = join(scratch, "empty");
     mkdirSync(cwd);
     // (from an empty folder outside any repository, with an option no tool knows: each refuses or fails at once,
-    // before any work)
-    const { GIT_DIR: _dir, GIT_WORK_TREE: _tree, ...env } = process.env;
+    // before any work; run-parallel passes the option to `npm run`, whose debug log goes to a cache in the scratch)
+    const env = Object.fromEntries(
+      Object.entries(process.env).filter(
+        ([name]) => !["GIT_DIR", "GIT_WORK_TREE", "NPM_CONFIG_CACHE"].includes(name.toUpperCase()),
+      ),
+    );
+    env.npm_config_cache = join(scratch, "npm-cache");
     const runs = await Promise.all(
       files.map(async (file) => {
         const name = relative(root, file);
