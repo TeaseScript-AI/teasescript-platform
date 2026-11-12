@@ -54,7 +54,9 @@ const [{ costlyTestSeconds }, { summaryLine }, { isSuiteTestPath, isTypeCoreTest
 // before review (`docs/TESTING.md`, "Pinned work"), which it does not run itself. When a changed type-core test file has
 // no entry in `tools/costly-test-files.mjs`, it prints one line saying so: the file runs in full, as every file does,
 // and the entry lands from CI at merge. Its last line, also when the checks cannot run, names what ran, failed and did
-// not run, the compiled suite and the checks no changed path needs included (`summaryLine`, #2106).
+// not run, the compiled suite and the checks no changed path needs included (`summaryLine`, #2106), and, when a changed
+// path is under `player/` or `tests/fixtures/packages/`, the Player's browser smoke that `docs/TESTING.md` requires for
+// it, which neither this nor CI runs (`PLAYER_BROWSER_SMOKE`, #2484).
 //
 // `--merged` checks what CI tests after a squash instead: HEAD merged into the base's current commit, in a temporary
 // detached worktree (`git merge --no-commit --no-ff`) with this worktree's `node_modules` linked in. Uncommitted
@@ -160,6 +162,14 @@ export function checksOf(projects) {
 
 /** What it never runs, named in its last line. */
 export const NEVER_RUN = "the compiled test suite (CI runs it)";
+
+/** What its last line also names as not run when a changed path is one `PLAYER_PATH` matches (#2484). */
+export const PLAYER_BROWSER_SMOKE =
+  "the Player's browser smoke (owed and run by nobody here or in CI: npm run test:player:browser " +
+  "through the queue on a worker with browsers: sx-job submit --host desktop)";
+
+/** The paths whose change `docs/TESTING.md` says needs the Player's browser smoke: the Player and its fixture packages. */
+const PLAYER_PATH = /^(?:player|tests\/fixtures\/packages)\//u;
 
 /** The core, a change to which prints the suites that pin its work. */
 const CORE = "src/type-inference/core/";
@@ -614,9 +624,10 @@ function prettier() {
 
 /**
  * The checks this run started, in order, the verdicts of those that ended, and, once every check has started, the
- * project checks no changed path needs: what the last line names (`lastLine`).
+ * project checks no changed path needs, and whether a changed path owes the browser smoke: what the last line names
+ * (`lastLine`).
  */
-const progress = { started: [], ended: new Map(), notNeeded: null };
+const progress = { started: [], ended: new Map(), notNeeded: null, smokeOwed: false };
 
 /** A check's run: its verdict, seconds and output; `shown` prints the output also when it passes. */
 function run(name, command, args, shown = false) {
@@ -654,14 +665,16 @@ function settled(name, passed, seconds, output) {
  * included.
  */
 function lastLine() {
+  const owed = progress.smokeOwed ? [{ name: PLAYER_BROWSER_SMOKE, status: "NOT RUN" }] : [];
   if (progress.notNeeded === null)
-    return `check-changed: ${summaryLine([{ name: "every check", status: "NOT RUN" }])}`;
+    return `check-changed: ${summaryLine([{ name: "every check", status: "NOT RUN" }, ...owed])}`;
   const verdict = (name) =>
     progress.ended.has(name) ? (progress.ended.get(name) ? "PASS" : "FAIL") : "ABORTED";
   return `check-changed: ${summaryLine([
     ...progress.started.map((name) => ({ name, status: verdict(name) })),
     ...progress.notNeeded.map((name) => ({ name, status: "NOT RUN" })),
     { name: NEVER_RUN, status: "NOT RUN" },
+    ...owed,
   ])}`;
 }
 
@@ -742,6 +755,7 @@ async function check(cleanups) {
     ]),
   ];
   const changed = touched.filter((path) => existsSync(path));
+  progress.smokeOwed = touched.some((path) => PLAYER_PATH.test(path));
   const projects = projectsFor(touched);
   process.stdout.write(
     `check-changed: ${touched.length} changed files since ${ref} (${mergeBase.slice(0, 9)}); ` +
