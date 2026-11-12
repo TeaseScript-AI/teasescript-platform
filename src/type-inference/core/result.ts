@@ -459,7 +459,15 @@ export interface NotChecked {
  */
 export interface RequiredCheck {
   readonly rule: "N3";
-  readonly writer: SourceSite;
+  /**
+   * The writer D′, or `null` where the unchecked route starts at a block's body, which inherits no check (ADR 0021 rule
+   * 5.5), with no store of its own before the use: then `block` names the statement registering that body.
+   */
+  readonly writer: SourceSite | null;
+  /** The writer's file's path where it is not the use's file (its line is named in that file), else `null`. */
+  readonly writerFile: string | null;
+  /** The statement registering the block whose body the route starts in, exactly where `writer` is `null`. */
+  readonly block: SourceSite | null;
   readonly missingTests: readonly string[];
   /** The read the tests name, in the source's text (not recorded). */
   readonly subject: string;
@@ -648,7 +656,9 @@ export interface RecordDiagnostic {
   /** N10's payload of the route rule's error (`RequiredCheck`). */
   readonly requiredCheck?: {
     readonly rule: string;
-    readonly writer: RecordSite;
+    /** `null` where the route starts at a block's body with no store of its own (`block` then names the block). */
+    readonly writer: RecordSite | null;
+    readonly block?: RecordSite;
     readonly missingTests: readonly string[];
   };
 }
@@ -725,7 +735,13 @@ export function coreRecord(result: CoreResult, paths: readonly string[]): CoreRe
               ? {
                   requiredCheck: {
                     rule: diagnostic.requiredCheck.rule,
-                    writer: site(diagnostic.requiredCheck.writer),
+                    writer:
+                      diagnostic.requiredCheck.writer === null
+                        ? null
+                        : site(diagnostic.requiredCheck.writer),
+                    ...(diagnostic.requiredCheck.block === null
+                      ? {}
+                      : { block: site(diagnostic.requiredCheck.block) }),
                     missingTests: [...diagnostic.requiredCheck.missingTests],
                   },
                 }

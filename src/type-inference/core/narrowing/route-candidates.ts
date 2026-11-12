@@ -133,7 +133,14 @@ export class RouteCandidates extends RouteTests {
     const work = program.work;
     const byBody = new Map<TreeBlock, Candidate[]>();
     for (const d of each(work, "indexSteps", definitions)) {
-      if (!lists.live(d) || !program.live(d.node) || program.inBlockCode(d.node)) continue;
+      // (a block's own stores are candidates of its body alone, which only a read there looks up: r4-451; a callable
+      // a block may run has none)
+      if (
+        !lists.live(d) ||
+        !program.live(d.node) ||
+        (program.inBlockCode(d.node) && program.flow.regions[d.node.region]?.kind !== "handler")
+      )
+        continue;
       const chain = this.chainOf(d.node);
       if (chain === null) continue;
       const last = chain.at(-1)!;
