@@ -168,32 +168,36 @@ test("an assignment the split cannot follow is refused, and nothing is written",
     ...ASSIGN,
     files: { [A]: { ...ASSIGN.files[A], ...a }, [B]: { ...ASSIGN.files[B], ...b } },
   });
+  // (each keyed by the refusal it must give, so that no later check stands in for it)
   const cases = {
-    "a test named twice": files({ tests: [1, 2] }, {}),
-    "a test named by no file": files({}, { tests: [] }),
-    "a test OLD does not have": files({ tests: [1, 3] }, {}),
-    "overlapping ranges": files({ lines: [[20, 22]] }, { lines: [[21, 21]] }),
-    "a range that cuts a statement": files({ lines: [[15, 16]] }, {}),
-    "a range in the imports": files({ lines: [[3, 3]] }, {}),
-    "a range from the header into the body": files({ lines: [[1, 6]] }, {}),
-    "a range past the file": files({ lines: [[40, 41]] }, {}),
-    "a declaration read from a file it is not in": files({}, { lines: [[19, 19]] }),
-    "a missing header": files({ header: undefined }, {}),
-    "a setup without a header": { ...ASSIGN, setup: { path: SETUP, header: null } },
-    "the setup as a file": {
+    "test 2 is named by": files({ tests: [1, 2] }, {}),
+    "test 2 is named by no file": files({}, { tests: [] }),
+    "OLD has no test 3": files({ tests: [1, 3] }, {}),
+    "overlaps another at line 21": files({ lines: [[20, 22]] }, { lines: [[21, 21]] }),
+    "a range cuts the statement's lines 15-17": files({ lines: [[15, 16]] }, {}),
+    "lies in OLD's imports": files({ lines: [[3, 3]] }, {}),
+    "the range 1-6 lies in OLD's imports or crosses": files({ lines: [[1, 6]] }, {}),
+    "the range 40-41 names no lines": files({ lines: [[40, 41]] }, {}),
+    "reads PAIR, placed in tests/split/b.test.ts": files({}, { lines: [[19, 19]] }),
+    "a.test.ts: no header sentence": files({ header: undefined }, {}),
+    "split-setup.ts: no header sentence": { ...ASSIGN, setup: { path: SETUP, header: null } },
+    "is the setup and a file": {
       ...ASSIGN,
       files: { ...ASSIGN.files, [SETUP]: { header: null, tests: [] } },
     },
-    "a target that exists at the base": {
+    "other.test.ts exists at HEAD and is not OLD": {
       ...ASSIGN,
       files: { [A]: ASSIGN.files[A], "tests/split/other.test.ts": ASSIGN.files[B] },
     },
-    "another OLD": { ...ASSIGN, old: "tests/split/missing.test.ts" },
+    "cannot read tests/split/missing.test.ts at HEAD": {
+      ...ASSIGN,
+      old: "tests/split/missing.test.ts",
+    },
   };
   for (const [name, assign] of Object.entries(cases)) {
     const result = r.run(assign);
     assert.equal(result.status, 2, `${name}: ${result.out}${result.err}`);
-    assert.match(result.err, /^split-write: /u, name);
+    assert.ok(result.err.startsWith("split-write: ") && result.err.includes(name), result.err);
     assert.equal(r.changed(), "", name);
   }
   assert.equal(r.run(ASSIGN, "--other").status, 2);
