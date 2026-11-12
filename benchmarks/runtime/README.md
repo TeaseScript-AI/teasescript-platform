@@ -24,7 +24,7 @@ npm run benchmark:runtime -- --count-only           # CI's cases; add --all for 
 npm run benchmark:runtime -- --count-only --update  # rewrite the baseline after an intended change
 ```
 
-CI runs the check as `tests/runtime/runtime-benchmark.test.ts`. A PR that changes a count or a result on purpose updates the
+CI runs the check as `tests/runtime/engine/runtime-benchmark.test.ts`. A PR that changes a count or a result on purpose updates the
 baseline with `--update` (with `--all`, so the on-demand rows follow too) and says in its text why each case moved; the
 diff shows one line per cut. A manifest text or a restored run that differs fails even under `--update`.
 
