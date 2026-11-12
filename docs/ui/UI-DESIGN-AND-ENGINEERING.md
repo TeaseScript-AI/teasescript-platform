@@ -35,6 +35,8 @@ task crosses categories or the relevant ownership is unclear.
   [Match interaction feedback to input capability](#match-interaction-feedback-to-input-capability).
 - **Broad visual direction or generic-design critique:**
   [Design quality and avoiding generic “AI slop”](#design-quality-and-avoiding-generic-ai-slop).
+- **Text a player reads, error text included:**
+  [Write for players who are not technical](#write-for-players-who-are-not-technical).
 
 ## Engineering guardrails
 
@@ -190,6 +192,13 @@ must prevent click-through when they intentionally intercept outside input.
 When a bug appears only on a real phone or another input class, treat that environment as evidence rather than forcing
 desktop emulation to reproduce it. Prefer the simplest input-specific rule that preserves the other input modes. Do not
 add cross-input JavaScript state to patch CSS capability feedback unless the interaction actually requires that state.
+
+### Write for players who are not technical
+
+Players are not technical: expect the average social-media user. Text a player sees uses the
+[glossary](../PRODUCT.md#terminology)'s player words (a Tease, not a package) and no browser or engine terms. An error
+says in plain words what happened and what the player can do; the cause, with the real error and its code, goes under a
+collapsed **Technical details**. Owner decision, 2026-11-11.
 
 ### Keep content independent from demo markup and decorative chrome
 

@@ -21,11 +21,16 @@
 //   4. a line of comments and whitespace alone, in a file the change adds, above its first import or export statement
 //      (a comment elsewhere is a declared line or a failure);
 // or as a declared line: an entry of the `--declare` file, a JSON array of `{ "file", "side": "added" | "removed",
-// "line", "reason" }` (the reason one clause; the file named as it is on that side), for a path-keyed entry (a test
-// table's key, an allowance, a comment citing a moved file's path) or a line no form admits (a signature the formatter
-// rewrapped after `export` was added). A declared line must be in the change and not marked moved (a line of a side
-// that is no regular file, below, counts as unmoved), and every declaration must match one; each is printed with its reason. Declarations come from that file alone, and no flag
-// admits a line class.
+// "text", "reason" }` (the line's text exactly as in that side's blob, without its LF but keeping a CR before it, so
+// that a rebase shifting the line leaves it declared; the reason one clause; the file named as it is on that side), for
+// a path-keyed entry (a test table's key, an allowance, a comment citing a moved file's path) or a line no form admits
+// (a signature the formatter rewrapped after `export` was added). A declared line must be in the change and not marked
+// moved (a line of a side that is no regular file, below, counts as unmoved), and every declaration must match one;
+// each is printed with its reason. A declaration is taken only by a line that needs one: the changed unmoved lines no
+// form admits, in diff order, then the refused imports' lines (below); one covers one line, so two lines of one text
+// need two, taken in the file's order. A blob a declaration names must be UTF-8, or the check cannot compare its text
+// exactly and stops (exit 2): a file that is not can be moved, but not declared in. Declarations come from that file
+// alone, and no flag admits a line class.
 //
 // And a pure move keeps every import's binding: over the change's files, the set of bindings before equals the set
 // after, a binding being one imported or re-exported name with its target, its local or exported name and whether it is
@@ -44,8 +49,8 @@
 // report names the family that would join the two. A relative specifier either side cannot
 // resolve, to no file or in a file whose configuration the tree does not establish (a config with an error, such as an
 // `extends` the tree does not hold, or a TypeScript file no config includes or none is above), is refused by name:
-// reported unless a declaration names its side and line, never passed; the move's compiler run is the witness for what
-// the check declines. A declared refusal, its line changed or not, is printed with the refusal reason it covers. One
+// reported unless a declaration names its side and its line's text, never passed; the move's compiler run is the
+// witness for what the check declines. A declared refusal, its line changed or not, is printed with the refusal reason it covers. One
 // known class is a config that `extends` an uncommitted package, which only an install supplies:
 // `player/vue/tsconfig.json` extends `@vue/tsconfig`, so every relative import in a file it owns is refused, and a move
 // there declares those lines.
@@ -57,9 +62,10 @@
 // holding `import(` or `@import`. A changed file of any other type, `.vue` and `.html` among them, is outside the rule:
 // the report lists it as `not compared (unparsed)`, and `vue-tsc` and the move's compiler run are its witness. A side
 // that is no regular file (a gitlink, mode 160000, or a symbolic link, 120000), whose content is no file's text, is
-// never read: it gives no bindings, the resolver sees no such file (a linked `tsconfig.json` or `package.json` is
-// none), each of its added or removed lines is unadmitted unless declared, whether Git marks it moved or it is
-// whitespace (a submodule's new commit is no move), and the report lists it as `not compared (not a regular file)`.
+// never parsed or resolved (a link's blob is read only to check a declaration of it is UTF-8): it gives no bindings,
+// the resolver sees no such file (a linked `tsconfig.json` or `package.json` is none), each of its added or removed
+// lines is unadmitted unless declared, whether Git marks it moved or it is whitespace (a submodule's new commit is no
+// move), and the report lists it as `not compared (not a regular file)`.
 //
 // The report always ends with the change's shape: the moved lines, the admitted lines by form, the declared lines, the
 // bindings differing and the refused specifiers.
@@ -89,6 +95,25 @@ const regular = (file, mode) => file !== null && (mode === "100644" || mode === 
 
 /** Why the check cannot be trusted: exit 2. */
 class CannotRun extends Error {}
+
+/**
+ * `text`'s line starts by Git's lines (an LF alone ends one; TypeScript also ends one at a CR or U+2028), and `lineOf`,
+ * the line of an offset, found among them by binary search: made once per blob.
+ */
+function gitLines(text) {
+  const starts = [0];
+  for (let at = text.indexOf("\n"); at !== -1; at = text.indexOf("\n", at + 1)) starts.push(at + 1);
+  const lineOf = (offset) => {
+    let [low, high] = [0, starts.length];
+    while (low < high) {
+      const middle = (low + high) >> 1;
+      if (starts[middle] <= offset) low = middle + 1;
+      else high = middle;
+    }
+    return low;
+  };
+  return { starts, lineOf };
+}
 
 /**
  * A blob's shape by Git's lines (a newline alone ends one), each line's whole content classified: its import and
@@ -124,17 +149,7 @@ function shapeOf(file, text) {
       if (range.pos >= from && range.end <= to) kind.fill(1, range.pos, range.end);
   };
   visit(source);
-  const starts = [0];
-  for (let at = text.indexOf("\n"); at !== -1; at = text.indexOf("\n", at + 1)) starts.push(at + 1);
-  const lineOf = (offset) => {
-    let [low, high] = [0, starts.length];
-    while (low < high) {
-      const middle = (low + high) >> 1;
-      if (starts[middle] <= offset) low = middle + 1;
-      else high = middle;
-    }
-    return low;
-  };
+  const { starts, lineOf } = gitLines(text);
   let first = null;
   for (const statement of source.statements) {
     const start = statement.getStart(source);
@@ -202,15 +217,19 @@ function declarationsOf(path) {
       typeof entry === "object" &&
       typeof entry.file === "string" &&
       (entry.side === "added" || entry.side === "removed") &&
-      Number.isInteger(entry.line) &&
-      entry.line > 0 &&
+      typeof entry.text === "string" &&
+      !entry.text.includes("\n") &&
       typeof entry.reason === "string" &&
       entry.reason.trim() !== "" &&
       !entry.reason.includes("\n") &&
-      Object.keys(entry).every((key) => ["file", "side", "line", "reason"].includes(key));
+      Object.keys(entry).every((key) => ["file", "side", "text", "reason"].includes(key));
+    if (entry !== null && typeof entry === "object" && Object.hasOwn(entry, "line"))
+      throw new CannotRun(
+        `pure-move-check: a declaration names its line by "text" now, not "line": replace "line" with that line's exact text, LF-delimited, in that side's blob (removed: the merge base; added: HEAD), keeping any CR: ${JSON.stringify(entry)}`,
+      );
     if (!ok)
       throw new CannotRun(
-        `pure-move-check: a declaration is not { file, side: "added" | "removed", line, reason }: ${JSON.stringify(entry)}`,
+        `pure-move-check: a declaration is not { file, side: "added" | "removed", text, reason }: ${JSON.stringify(entry)}`,
       );
   }
   return entries;
@@ -220,7 +239,8 @@ function declarationsOf(path) {
  * Each added or removed line of `files` (the changes `movedLinesOf` reads for `mergeBase`..`head`) that Git does not
  * mark moved, and each line of a side that is no regular file whether Git marks it moved or not, with the form that
  * admits it or `null` (only a declaration admits the latter): `[entry, form, reason]`, `entry` `{ side, file, row,
- * shape, added, irregular }`. `declaredFor(entry)` gives a declared line's reason, which comes before the forms. Also the moved lines'
+ * shape, added, irregular }`. `declaredFor(entry)` gives a declared line's reason, asked only of a line no form admits, in
+ * diff order. Also the moved lines'
  * counts. Shared with `structure-report.mjs --moved`, so the forms have one home.
  */
 export function verdictsOf(
@@ -288,9 +308,7 @@ export function verdictsOf(
   };
   const verdicts = [];
   for (const entry of rows) {
-    const reason = declaredFor(entry);
-    if (reason !== null) verdicts.push([entry, "declared", reason]);
-    else if (entry.irregular) verdicts.push([entry, null]);
+    if (entry.irregular) verdicts.push([entry, null]);
     else if (entry.shape?.importLines.has(entry.row.line)) verdicts.push([entry, "import"]);
     else if (entry.row.text.trim() === "") verdicts.push([entry, "whitespace"]);
     else if (
@@ -312,6 +330,14 @@ export function verdictsOf(
       pairedRemoved.set(key, paired - 1);
       verdict[1] = "export";
     }
+  }
+  // a declaration is taken only by a line no form admits, in diff order
+  for (const verdict of verdicts) {
+    if (verdict[1] !== null) continue;
+    const reason = declaredFor(verdict[0]);
+    if (reason === null) continue;
+    verdict[1] = "declared";
+    verdict.push(reason);
   }
   return { verdicts, moved };
 }
@@ -508,6 +534,7 @@ function bindingsOf(file, text, resolver) {
     },
     true,
   );
+  const { lineOf } = gitLines(text);
   const resolve = (node) => {
     const specifier = node.text;
     if (!specifier.startsWith(".")) return { type: "bare", path: specifier };
@@ -534,7 +561,7 @@ function bindingsOf(file, text, resolver) {
   const out = [];
   const compared = new Set();
   for (const statement of source.statements) {
-    const line = source.getLineAndCharacterOfPosition(statement.getStart(source)).line + 1;
+    const line = lineOf(statement.getStart(source));
     if (ts.isImportDeclaration(statement) && ts.isStringLiteral(statement.moduleSpecifier)) {
       compared.add(statement);
       const specifier = statement.moduleSpecifier.text;
@@ -604,7 +631,7 @@ function bindingsOf(file, text, resolver) {
       });
     }
   }
-  out.push(...otherReferencesOf(source, text, compared));
+  out.push(...otherReferencesOf(source, text, compared, lineOf));
   return out;
 }
 
@@ -613,11 +640,11 @@ function bindingsOf(file, text, resolver) {
  * is `refused`: an `import` keyword (not `import.meta`) or a `require` identifier outside the `compared` statements, a
  * triple-slash reference directive, or a comment (JSDoc included) holding `import(` or `@import`.
  */
-function otherReferencesOf(source, text, compared) {
+function otherReferencesOf(source, text, compared, lineOf) {
   const out = [];
   const lines = new Set();
   const refuse = (at, shown, what) => {
-    const line = source.getLineAndCharacterOfPosition(at).line + 1;
+    const line = lineOf(at);
     if (lines.has(line)) return;
     lines.add(line);
     const specifier = shown.split("\n")[0].slice(0, 60);
@@ -735,12 +762,14 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
     ]) {
       if (!regular(file, mode)) continue;
       const text = git("cat-file", "blob", `${ref}:${file}`);
+      const lines = text.split("\n");
       for (const binding of bindingsOf(file, text, resolvers[side])) {
         if (binding.target.type === "missing" || binding.target.type === "refused") {
           const refusal = {
             side: side === "before" ? "removed" : "added",
             file,
             line: binding.line,
+            text: lines[binding.line - 1],
             specifier: binding.specifier,
             reason: binding.target.reason,
           };
@@ -854,17 +883,39 @@ export function checkMove(
       .map(([file, mode]) => `${file} (${mode})`),
   );
   const declarations = declare === null ? [] : declarationsOf(declare);
-  const used = new Set();
+  // a declaration's text is compared exactly, and Git's diff and blobs, read as UTF-8, turn bytes that are not into
+  // U+FFFD, which a declaration could then match: each blob a declaration names must decode without loss
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  for (const key of new Set(declarations.map((d) => JSON.stringify([d.file, d.side])))) {
+    const [file, side] = JSON.parse(key);
+    const read = spawnSync(
+      "git",
+      ["cat-file", "blob", `${side === "removed" ? mergeBase : "HEAD"}:${file}`],
+      { cwd, maxBuffer: 256 * 1024 * 1024 },
+    );
+    // (a file not on that side has no blob and stays unmatched; a gitlink has none either, but Git's line for it,
+    // `Subproject commit …`, can be declared)
+    if (read.status !== 0) continue;
+    try {
+      decoder.decode(read.stdout);
+    } catch {
+      throw new CannotRun(
+        `pure-move-check: ${file} (${side}) is not UTF-8, so a declaration's text cannot be compared with its lines exactly`,
+      );
+    }
+  }
+  // each declaration binds to the one line it first matches, by the line's number on its side
+  const bound = new Map();
   const declaredFor = (entry) => {
     const index = declarations.findIndex(
       (d, at) =>
-        !used.has(at) &&
+        !bound.has(at) &&
         d.file === entry.file &&
         d.side === entry.side &&
-        d.line === entry.row.line,
+        d.text === entry.row.text,
     );
     if (index === -1) return null;
-    used.add(index);
+    bound.set(index, entry.row.line);
     return declarations[index].reason;
   };
   const { verdicts, moved } = verdictsOf(mergeBase, "HEAD", files, { cwd, declaredFor });
@@ -894,25 +945,29 @@ export function checkMove(
     renames === null ? null : renamesOf(renames),
     git,
   );
-  // a refusal is declared by a declaration of its side and line, used or not, even where the line is no changed one;
-  // each is printed with the refusal reason it covers
+  // a refusal is declared by the declaration bound to its line, a changed one or not, else by one of its side and its
+  // line's text bound to none, which it binds; each is printed with the refusal reason it covers
   const refused = [];
   const covered = [];
+  const ofSide = (d, refusal) => d.file === refusal.file && d.side === refusal.side;
   for (const refusal of bindings.refusals) {
-    const index = declarations.findIndex(
-      (d) => d.file === refusal.file && d.side === refusal.side && d.line === refusal.line,
+    let index = declarations.findIndex(
+      (d, at) => ofSide(d, refusal) && bound.get(at) === refusal.line,
     );
-    if (index === -1) refused.push(refusal);
-    else {
-      covered.push({ ...refusal, declared: declarations[index].reason });
-      if (!used.has(index)) {
-        used.add(index);
+    if (index === -1) {
+      index = declarations.findIndex(
+        (d, at) => ofSide(d, refusal) && !bound.has(at) && d.text === refusal.text,
+      );
+      if (index !== -1) {
+        bound.set(index, refusal.line);
         counts.declared += 1;
       }
     }
+    if (index === -1) refused.push(refusal);
+    else covered.push({ ...refusal, declared: declarations[index].reason });
   }
   counts.refused = refused.length;
-  const stale = declarations.filter((_, at) => !used.has(at));
+  const stale = declarations.filter((_, at) => !bound.has(at));
   return {
     mergeBase,
     unadmitted,
@@ -947,7 +1002,7 @@ export function reportOf(base, result) {
   for (const u of unadmitted) out.push(`  unadmitted: ${u.file}:${u.line} (${u.side}): ${u.text}`);
   for (const s of stale)
     out.push(
-      `  declaration matching no unmoved line: ${s.file}:${s.line} (${s.side}): ${s.reason}`,
+      `  declaration matching no line that needs one (a changed unmoved line no form admits, or a refused import's line): ${s.file} (${s.side}) ${JSON.stringify(s.text)}: ${s.reason}`,
     );
   for (const d of declared) out.push(`  declared: ${d.file}:${d.line} (${d.side}): ${d.reason}`);
   for (const c of covered)

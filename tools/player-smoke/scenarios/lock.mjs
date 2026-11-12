@@ -11,6 +11,7 @@ import {
   assertEqual,
   clickLabelled,
   delay,
+  key,
   navigate,
   physicalClick,
   reloadKept,
@@ -52,6 +53,31 @@ async function standInRelays(cdp) {
 }
 
 /**
+ * Whether `element` (an expression) is a password field that no browser takes for a login field: browsers offer, fill
+ * and save passwords in a `type="password"` field whatever its `autocomplete`, and a phone's Chrome shows its key bar on
+ * a masked `<input>`, so the Player's is a textarea, masked by style while hidden, with completion off.
+ */
+function noLoginField(element) {
+  return `${element} instanceof HTMLTextAreaElement && ${element}.autocomplete === 'off' && getComputedStyle(${element}).webkitTextSecurity === 'disc'`;
+}
+
+/**
+ * Pastes `text` from the clipboard into the field `selector`, as Ctrl+V does. The text is copied from a field next to
+ * it, inside any open dialog, whose focus trap would keep a field elsewhere from being selected.
+ */
+async function pasteText(cdp, selector, text) {
+  const selected = await value(
+    cdp,
+    `(() => { const source = document.createElement('textarea'); source.id = 'smoke-clipboard'; source.value = ${JSON.stringify(text)}; document.querySelector(${JSON.stringify(selector)}).parentElement.append(source); source.focus(); source.select(); return document.activeElement === source; })()`,
+  );
+  assertEqual(selected, true, "The text to paste could not be selected");
+  await key(cdp, "c", { modifiers: 2, commands: ["copy"] });
+  await value(cdp, `(document.getElementById('smoke-clipboard').remove(), true)`);
+  await physicalClick(cdp, selector);
+  await key(cdp, "v", { modifiers: 2, commands: ["paste"] });
+}
+
+/**
  * The `locks` package's dialogs (V30 §13, PLAYER-UI "Foreground interaction presentation"), coarsely: the lock dialog
  * shows the openers the player chooses and locks with a password, which opens it in the unlock dialog; a dialog for a
  * password alone shows no time lock; and a passed time lock opens without a dialog. No typed password is kept.
@@ -67,7 +93,13 @@ export async function lockScenario(cdp, origin) {
     const said = (text) =>
       `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.trim().endsWith(${JSON.stringify(text)}))`;
     const openers = `['time', 'password'].filter((name) => !!document.querySelector('[data-lock-' + name + ']')).join()`;
+    const field = (selector) => `document.querySelector('${selector} [data-password-input]')`;
     const lockWith = async (password, locked) => {
+      assertEqual(
+        await value(cdp, noLoginField(field("[data-lock-password]"))),
+        true,
+        "A login field",
+      );
       await typeInto(cdp, "[data-lock-password] [data-password-input]", password);
       await waitFor(
         cdp,
@@ -75,14 +107,30 @@ export async function lockScenario(cdp, origin) {
         2_000,
         "No repeat field",
       );
+      assertEqual(
+        await value(cdp, noLoginField(field("[data-lock-repeat]"))),
+        true,
+        "A login field",
+      );
       await typeInto(cdp, "[data-lock-repeat] [data-password-input]", password);
       await physicalClick(cdp, "[data-lock-submit]");
       await waitFor(cdp, said(locked), 15_000, `The lock dialog did not lock: ${locked}`);
     };
     const openWith = async (password, opened) => {
       await waitFor(cdp, dialog("unlock"), 8_000, "The unlock dialog did not open");
-      await typeInto(cdp, "[data-unlock-password] [data-password-input]", password);
-      await physicalClick(cdp, "[data-unlock-submit]");
+      assertEqual(
+        await value(cdp, noLoginField(field("[data-unlock-password]"))),
+        true,
+        "A login field",
+      );
+      // A password pasted with a line break opens without it, and Enter in the field submits the dialog.
+      await pasteText(cdp, "[data-unlock-password] [data-password-input]", `${password}\n`);
+      assertEqual(
+        await value(cdp, `${field("[data-unlock-password]")}.value`),
+        password,
+        "A pasted line break stayed in the password",
+      );
+      await pressEnter(cdp);
       await waitFor(cdp, said(opened), 15_000, `The password did not open it: ${opened}`);
     };
 
@@ -146,16 +194,27 @@ export async function passwordScenario(cdp, origin) {
       `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.trim().endsWith(${JSON.stringify(text)}))`;
     const field = `document.querySelector('[data-composer-input]')`;
     const fieldOpen = (question) =>
-      `${said(question)} && ${field}?.type === 'password' && !${field}.disabled`;
+      `${said(question)} && ${noLoginField(field)} && !${field}.disabled`;
     const repeat = `!!document.querySelector('[data-composer-repeat]')`;
 
+    // A password has one line: one pasted with a line break answers without it.
     await waitFor(cdp, fieldOpen("Your code?"), 8_000, "askPassword did not open a password field");
-    await typeInto(cdp, "[data-composer-input]", "corner");
+    await pasteText(cdp, "[data-composer-input]", "corner\n");
+    assertEqual(
+      await value(cdp, `${field}.value`),
+      "corner",
+      "A pasted line break stayed in the password",
+    );
     await pressEnter(cdp);
     await waitFor(cdp, said("Same: true"), 8_000, "askPassword did not give the typed text's hash");
 
     // In `password:` of an encrypt call the field asks twice, of a decrypt call once.
     await waitFor(cdp, fieldOpen("Choose a code") + ` && ${repeat}`, 8_000, "No repeat field");
+    assertEqual(
+      await value(cdp, noLoginField(`document.querySelector('[data-composer-repeat]')`)),
+      true,
+      "The repeat field is a login field",
+    );
     await typeInto(cdp, "[data-composer-input]", "field pass");
     await typeInto(cdp, "[data-composer-repeat]", "field pass");
     await pressEnter(cdp);
@@ -192,6 +251,66 @@ export async function passwordScenario(cdp, origin) {
 }
 
 /**
+ * A timer's question over a field in which an input method is composing (V30 §20): the password field and the text
+ * field never share the composition, so a password being composed never shows unmasked nor answers a text question, and
+ * text being composed never shows masked nor answers as a password.
+ */
+export async function passwordCompositionScenario(cdp, origin) {
+  await setViewport(cdp, 1280, 800);
+  await navigate(cdp, `${origin}/player/?package=password-composition`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  const said = (text) =>
+    `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.trim().endsWith(${JSON.stringify(text)}))`;
+  const input = `document.querySelector('[data-composer-input]')`;
+  const masked = `getComputedStyle(${input}).webkitTextSecurity !== 'none'`;
+  const compose = async (text) => {
+    await physicalClick(cdp, "[data-composer-input]");
+    await cdp.call("Input.imeSetComposition", {
+      text,
+      selectionStart: text.length,
+      selectionEnd: text.length,
+    });
+  };
+
+  await waitFor(cdp, `${said("Code?")} && ${noLoginField(input)} && !${input}.disabled`);
+  await compose("secret");
+  await waitFor(cdp, `${said("Interrupting text")} && !(${masked})`, 8_000, "No text question");
+  assertEqual(
+    await value(cdp, `${input}.value`),
+    "",
+    "The text field shows the password being composed",
+  );
+  await typeInto(cdp, "[data-composer-input]", "plain");
+  await pressEnter(cdp);
+  await waitFor(cdp, said("Text answer: plain"), 8_000, "The text answer was not the text typed");
+  await waitFor(cdp, `${noLoginField(input)} && ${input}.value === ''`);
+  await typeInto(cdp, "[data-composer-input]", "corner");
+  await pressEnter(cdp);
+
+  await waitFor(cdp, `${said("Ordinary text?")} && !(${masked}) && !${input}.disabled`);
+  await compose("words");
+  await waitFor(
+    cdp,
+    `${said("Interrupting password")} && ${noLoginField(input)}`,
+    8_000,
+    "No password question",
+  );
+  assertEqual(
+    await value(cdp, `${input}.value`),
+    "",
+    "The password field holds the text being composed",
+  );
+  await typeInto(cdp, "[data-composer-input]", "p");
+  await pressEnter(cdp);
+  await waitFor(cdp, said("Password given"), 8_000, "The password was not answered");
+  await waitFor(cdp, `!(${masked}) && !${input}.disabled`);
+  await typeInto(cdp, "[data-composer-input]", "done");
+  await pressEnter(cdp);
+  await waitFor(cdp, said("Answer: done"), 8_000, "The text answer was not the text typed");
+}
+
+/**
  * askPassword's fields and blocks, a focused input check: a block that returns at once leaves askPassword's field empty
  * again, and a lock's password field that a block asks over a form leaves the form's text being typed as it was.
  */
@@ -207,7 +326,7 @@ export async function passwordInterruptionScenario(cdp, origin) {
   const field = (id) => `document.querySelector('[data-form-field="${id}"]')`;
   await waitFor(
     cdp,
-    `${said("Code?")} && ${input}?.type === 'password' && !${input}.disabled`,
+    `${said("Code?")} && ${noLoginField(input)} && !${input}.disabled`,
     8_000,
     "askPassword did not open its field",
   );
@@ -216,24 +335,29 @@ export async function passwordInterruptionScenario(cdp, origin) {
   await waitFor(cdp, said("Pinged"), 8_000, "The block did not run");
   await waitFor(
     cdp,
-    `${input}?.type === 'password' && ${input}.value === ''`,
+    `${noLoginField(input)} && ${input}.value === ''`,
     8_000,
     "askPassword kept a password typed before a block that returned at once",
   );
   await typeInto(cdp, "[data-composer-input]", "corner");
   await pressEnter(cdp);
 
-  // A lock's password field over a form leaves the form's text being typed for when it returns.
+  // A lock's password field over a form leaves the form's text being typed for when it returns. The field is one: the
+  // form's text is never masked, and the password field starts empty.
+  const masked = `getComputedStyle(${input}).webkitTextSecurity !== 'none'`;
   await waitFor(cdp, `!!${field("name")}`, 8_000, "The form did not appear");
   await physicalClick(cdp, '[data-form-field="name"]');
-  await waitFor(cdp, `${input}.value === "Ada" && document.activeElement === ${input}`);
+  await waitFor(
+    cdp,
+    `${input}.value === "Ada" && document.activeElement === ${input} && !(${masked})`,
+  );
   await cdp.call("Input.insertText", { text: "Bea" });
   // Sooner than the form takes the text from the composer.
   await delay(100);
   await clickLabelled(cdp, "Lock it", "[data-permanent-button]");
   await waitFor(
     cdp,
-    `${said("Interrupting password")} && !!${repeat} && !${input}.disabled`,
+    `${said("Interrupting password")} && !!${repeat} && !${input}.disabled && ${noLoginField(input)}`,
     8_000,
     "The lock's password field did not open",
   );
@@ -243,7 +367,7 @@ export async function passwordInterruptionScenario(cdp, origin) {
   await pressEnter(cdp);
   await waitFor(
     cdp,
-    `!${repeat} && !!${field("name")} && ${input}.value === "Bea"`,
+    `!${repeat} && !!${field("name")} && ${input}.value === "Bea" && !(${masked})`,
     15_000,
     "The form's text being typed was lost after a lock's password field",
   );

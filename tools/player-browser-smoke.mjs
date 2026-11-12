@@ -45,6 +45,7 @@ import {
 import {
   lockKeptScenario,
   lockScenario,
+  passwordCompositionScenario,
   passwordInterruptionScenario,
   passwordScenario,
   publicKeyScenario,
@@ -136,6 +137,7 @@ async function main() {
         ["lock", () => lockScenario(cdp, origin)],
         ["password", () => passwordScenario(cdp, origin)],
         ["passwordInterruption", () => passwordInterruptionScenario(cdp, origin)],
+        ["passwordComposition", () => passwordCompositionScenario(cdp, origin)],
         ["lockKept", () => lockKeptScenario(cdp, origin)],
         ["publicKey", () => publicKeyScenario(cdp, origin, profile)],
         ["prefills", () => prefillsScenario(cdp, origin)],
