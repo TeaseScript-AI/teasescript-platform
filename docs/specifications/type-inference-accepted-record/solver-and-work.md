@@ -474,17 +474,29 @@ establish a usable shared proof.
 
 ### r4-349
 
-**A structure built only for sharing is charged as shared work.**
+**A structure built for every later reader is charged as shared work; no demand runs inside it.**
 
 **Rule.** A structure that only sharing builds, here the alias classes' eligibility index, is built inside
-`WorkLedger.shared`. Its work counts to the analysis's total and never to the decision that first asks for it.
+`WorkLedger.shared`. A literal's view, body and body's index (#2289), which every later reader of the literal's cells
+reads, are built inside `WorkLedger.sharedStructure`. Their own steps count to the analysis's total and never to the
+decision that first asks for them. No demand runs inside a structure's build: at each read it yields, the shared window
+closes, the read runs and is charged to the decision that asks, and the window reopens when the build resumes; the reads
+it makes without yielding run outside the window (`WorkLedger.outside`, `outsideSteps`), charged to the asker in the
+same way. A build abandoned at a yield leaves nothing open. The total's allowance bounds them all.
 
 **Reason.** With sharing on, the first decision that needed the class index paid for building it (14,456 units against
 3,840 at depth 32), stopped, and left every deeper path `budget`. The author saw one "would take too long" warning per
 copy where the unshared route gave one per element. Charging a shared build to the total keeps sharing from stopping a
-decision that the unshared run finishes.
+decision that the unshared run finishes. A literal's body charged to the first decision that compares its elements
+passed that decision's demand allowance where main's finished, and made the count depend on which decision asked first;
+a read run inside the window would be charged to no decision at all.
 
-**Source.** PR #1714, merged as `63254271e` (#1703), 2026-11-04.
+**Costs.** The comparisons themselves, each element's description and every read it makes, are the asking decision's,
+so three shapes reach their allowance at a smaller size than on main (decision B's known costs, recorded in
+`docs/RESOURCE-LIMITS.md`): the whole-copy ring list (k = 403 against 482), #1438's written union reversed (60 levels
+against 70), and #1765's written index chain reversed (a list written 12 levels deep against 41).
+
+**Source.** PR #1714, merged as `63254271e` (#1703), 2026-11-04; #2289 (2026-11-11), in its pull request.
 
 ### r4-358
 

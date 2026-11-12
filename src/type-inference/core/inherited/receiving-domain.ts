@@ -64,6 +64,7 @@ export class ReceivingDomain {
       readonly binding: PlaceId;
       readonly strip: readonly string[];
       readonly cellsLive: boolean;
+      readonly literal: boolean;
     }[]
   >();
   /** The copies of places that may inherit a written type (`inheriting`), where they land. */

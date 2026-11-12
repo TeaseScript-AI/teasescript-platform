@@ -2766,9 +2766,10 @@ test("admission decides from the start value, keeps written copies, rejects ever
       () => ["valid"],
     ],
     [
+      // (#2289 B1 rule 1: whole numbers beside a number are numbers, whatever is declared)
       "a written integer copied beside a fraction",
       "let n: integer = 1\nlet xs = [n, 2.5]\nexit",
-      (at) => ["compile-error", `written-target compile-error @${at("2.5")}`],
+      () => ["valid"],
     ],
     [
       "a written union copied beside a whole number",
@@ -2874,11 +2875,11 @@ test("admission decides from the start value, keeps written copies, rejects ever
       (at) => ["compile-error", `written-target compile-error @${at("s]")}`],
     ],
     [
+      // (`[whole, 2.5]` holds numbers, #2289 B1 rule 1; `ys` the declared integer its one deciding element has)
       "a copy of a written integer first, a null and external data before it",
       "let whole: integer = 1\nlet xs = [whole, 2.5]\nlet ys = [null, hostValue, whole]\nys = [3.5]\nexit",
       (at) => [
         "compile-error",
-        `written-target compile-error @${at("2.5")}`,
         `written-target compile-error @${at("3.5")}`,
         // (the null element keeps the element optional, ADR 0021 1.3; the external one owes its check and boundary)
         `written-target warning-runtime-check @${at("hostValue")}`,
@@ -2918,13 +2919,10 @@ test("admission decides from the start value, keeps written copies, rejects ever
     ],
     // (a possible misfit warns at the store's value, the literal; an error would sit at its innermost expression)
     [
+      // (a number beside the written integer makes the set's elements numbers, #2289 B1 rule 1: nothing to check)
       "a set whose first element copies a written integer, a later one possibly a fraction",
       "let typed: integer = 1\nlet xs = set[typed, [1, 2.5][1]]\nexit",
-      (at) => [
-        "warning-runtime-check",
-        `written-target warning-runtime-check @${at("set[")}`,
-        `copy-type xs.element [integer] @${at("set[")}`,
-      ],
+      () => ["valid"],
     ],
     [
       "a default whose written contract fits",
@@ -3984,7 +3982,8 @@ test("a split cycle's aliases, each stored into after the split, err at their li
  * `object?` (the property itself, or one below it), in either object; the objects as a list's elements, stores into one
  * place, the same through projections, and a ring of whole copies, in both orders, unread and read. A written binding's
  * copy brings its written type as a literal brings its kind: the second errs where it meets the place or the list, read
- * or not, and a union's copy only where it comes second (first, the place takes both kinds). An `object?` holds any
+ * or not, and a union's copy only where it comes second into a place (first, the place takes both kinds), never in a
+ * list, whose type is the union all its elements fit, in either order (#2289 B1). An `object?` holds any
  * object, its properties unchecked (A1): below it, nothing meets, and what a read of such a property gives is the read's
  * own record, not A2's.
  */
@@ -4087,7 +4086,8 @@ test("A2's value origins: a written binding's copy errs where it meets the place
           const source = `${setup}let a = ${objects.a}\nlet b = ${objects.b}\n${program(first, second)}\n`;
           const label = `${origin} in ${sideOf}, ${shape}, ${first} first`;
           const unread =
-            origin.endsWith("below it") || (origin === "a union binding" && first === sideOf);
+            origin.endsWith("below it") ||
+            (origin === "a union binding" && (first === sideOf || shape.startsWith("a list")));
           const expected = unread
             ? ["valid"]
             : ["compile-error", `compile-error written-target '${siteOf(second)}'`];
@@ -4795,6 +4795,33 @@ test("a value any carrier gives brings its elements' types, decided and checked 
   assert.deepEqual(differing, []);
 });
 
+test("a literal cell's elements are compared in the literal's order, however its index lists them (#2289)", () => {
+  // (`q` is listed where its own value stands, `{p: w}` where its property's written stop does: a merge of two lists
+  // that must be sorted; `{p: w}` and `{p: s}` are both listed by their written stops, one list in the literal's order.
+  // In both the earliest element decides: `xs`'s element is `{p: w}`, and `n` copies its written integer)
+  const sources = [
+    'let w: integer = 1\nlet q = {p: "s"}\nlet xs = [{p: w}, q]\nlet n = xs[0].p\nsay "${n}"\nexit\n',
+    'let w: integer = 1\nlet s: string = "s"\nlet xs = [{p: w}, {p: s}]\nlet n = xs[0].p\nsay "${n}"\nexit\n',
+  ];
+  for (const source of sources) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const { places } = new CoreProgram(request);
+    const binding = (name: string) =>
+      places.find((place) => place.kind.kind === "binding" && place.kind.name === name)!.id;
+    for (const mode of MODES)
+      inMode(mode, () => {
+        const at = `${JSON.stringify(mode)}: ${source}`;
+        const answers = analyseCore(request);
+        const element = answers.place(binding("xs"), ["element"]).admitted;
+        assert.ok(element.by === "decided", at);
+        assert.equal(element.decider?.start, source.indexOf("{p: w}"), at);
+        const n = answers.place(binding("n"), []).admitted;
+        assert.deepEqual(n.by === "decided" ? n.kinds : n.by, ["integer"], at);
+      });
+  }
+});
+
 test("a literal's elements are compared at each store with their own certainty, guarded or not, in both orders (round 12 B1)", () => {
   const carriers: readonly (readonly [string, (value: string) => string])[] = [
     ["direct", (value) => value],
@@ -5344,10 +5371,12 @@ test("named external data a carrier stores into a place published with a kind ow
     ["get's default", "let raw = hostValue\nlet out = [raw].get(0, default: 1)\nexit", "raw]"],
     ["get's receiver", "let raw = hostValue\nlet out = [1, raw].get(1, default: 1)\nexit", "raw]"],
     ["first", "let raw = hostValue\nlet out = [1, raw].first\nexit", "raw]"],
+    // (the literal is the written integer, strict, its host element deciding nothing: the data leaves through the
+    // store of the read that copies the cell's element, which owes the check, #2289)
     [
       "a written element beside",
       "let typed: integer = 1\nlet raw = hostValue\nlet out = [typed, raw][1]\nexit",
-      "raw]",
+      "[typed, raw][1]",
     ],
     ["a decided source", "let raw = hostValue\nlet xs = [1, raw]\nlet out = xs[1]\nexit", null],
     [

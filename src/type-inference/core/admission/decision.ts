@@ -134,12 +134,25 @@ export function forgetDecision(admission: Admission, key: CanonicalKey): void {
   admission.unrestricted.delete(key);
   admission.deciderSites.delete(key);
   admission.attempted.delete(key);
+  admission.budgetUndecided.delete(key);
 }
 
-/** Whether the decision of a decided path or of a key above it stopped (`stopDecision`). */
+/** #2289: whether a path's own decision met a literal's element a stop left undecided (`budgetUndecided`). */
+export function budgetUndecidedKey(admission: Admission, at: DecidedAt): boolean {
+  return (
+    admission.budgetUndecided.size > 0 && admission.budgetUndecided.has(atOf(admission, at).key)
+  );
+}
+
+/**
+ * Whether the decision of a decided path or of a key above it stopped (`stopDecision`), or the path's own decision met a
+ * literal's element a stop left undecided (#2289: `budgetUndecided`, the exact key; a key below it meets the same
+ * element in its own evaluation).
+ */
 export function decisionStoppedAt(admission: Admission, at: DecidedAt): boolean {
   // (a completion pass carries no stopped key, #1526 phase C: nothing is asked, no path made a cursor to ask it)
   if (admission.pass.closure && !admission.pass.contract.anyStopped) return false;
+  if (budgetUndecidedKey(admission, at)) return true;
   return at.key === undefined
     ? admission.pass.contract.stopped(at.root, at.path)
     : admission.pass.contract.keyStopped(at.key);
@@ -356,6 +369,7 @@ function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): De
     own: found.own,
     nullable,
     decider,
+    ...(found.deciderHost === true ? { deciderHost: true as const } : {}),
     candidates: ordered,
     published,
   };
@@ -441,6 +455,7 @@ function decision(admission: Admission, at: At, key: Key, inputs: Inputs): Decid
   let decider: Definition | null = null;
   let deciderSite: SourceSite | null = null;
   let published = false;
+  let deciderHost = false;
   let copied: TypeTerm | null = null;
   // an inferred root whose every store's contract is plain scalar kinds of one family accepts every store
   if (tags === null && depth === 0 && !admission.a4Keys.has(keyOf(root, []))) {
@@ -475,8 +490,17 @@ function decision(admission: Admission, at: At, key: Key, inputs: Inputs): Decid
   }
   if (tags === null) {
     const found = drive(admission, scanAt(admission, direct, prefixes, key));
+    // (#2289: a literal element a stop left undecided leaves the path undecided; C9's branch is not asked)
+    if (found?.stopped === true) {
+      admission.budgetUndecided.set(contract.canonicalKey(key), {
+        place: root,
+        path: stepsArray(path ?? keyStepsIn(contract, key)),
+      });
+      return { ...NOTHING, ...none, budget: true };
+    }
     if (found !== null) {
       ({ tags, nullable, byWritten, permitsNull, decider, site: deciderSite } = found);
+      deciderHost = found.host === true;
       copied = optionalOf(found.copied, found.nullable);
     } else {
       // C9: where no contribution decides, but the contract holds kinds beside external data, those
@@ -509,6 +533,7 @@ function decision(admission: Admission, at: At, key: Key, inputs: Inputs): Decid
     byWritten,
     permitsNull,
     decider,
+    ...(deciderHost ? { deciderHost: true as const } : {}),
     site: deciderSite,
     published,
     copied,
