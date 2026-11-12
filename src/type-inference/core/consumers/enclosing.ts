@@ -28,8 +28,11 @@ export function enclosingStores(walk: Consumers): void {
   const { program, definitions, contract } = walk.pass;
   if (!contract.anyStopped) return;
   const work = program.work;
-  // (shortest first, so each meets every stop above it among those placed before it)
-  const stops = [...contract.stoppedKeys()].sort((a, b) => a.path.length - b.path.length);
+  // (shortest first, so each meets every stop above it among those placed before it; with the keys a literal's stopped
+  // element left undecided, `budgetUndecided`, #2289 R3-10)
+  const stops = [...contract.stoppedKeys(), ...walk.admission.budgetUndecided.values()].sort(
+    (a, b) => a.path.length - b.path.length,
+  );
   work.charge("checks", stops.length + sortCost(stops.length));
   const placed = new Map<PlaceId, StopNode>();
   for (const { place, path } of stops) {
