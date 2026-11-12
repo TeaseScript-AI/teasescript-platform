@@ -4235,7 +4235,8 @@ debugging tool whose edits the next `load` reads like any stored value (see `RUN
 A `load` of a key written as one string literal without `${...}`, also in parentheses, reads the stored value as the
 declared type of the variable it starts or is assigned to, such as `integer | string` above, or else as the type that
 another load of the key declares, in any file, or else as its default's type
-([ADR 0021 §6](../decisions/0021-static-types.md)). A key is declared at most once: two loads that declare different
+([ADR 0021 §6](../decisions/0021-static-types.md)). A default that is a variable with a written type gives that written
+type, whatever value the variable holds at that line. A key is declared at most once: two loads that declare different
 types are a compile error. `default: null` makes the result the key's declared type made optional, such as `string?`;
 without a declared type for the key it is a compile error that names the fix. A default of a type the compiler cannot
 know, without a declared type, gives a value of unknown type ([§13](#13-explicit-types)). Loads without a declared type

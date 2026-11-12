@@ -241,11 +241,12 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
 2. A `load` of a key written as one string literal without `${...}`, also in parentheses, reads the stored value as the
    declared type of the variable it starts or is assigned to, as in `let level: integer | string = load("level",
    default: 1)`, or else as the type another load of the key declares, in any file, function, or handler, reachable or
-   not, or else as its default's type. A key is declared once: two loads that declare different types are an error that
-   names both. With `default: null`, the result is the key's declared type made optional; without a declared type for
-   the key, `default: null` is an error that names the fix. A default of a type the compiler cannot know, without a
-   declared type, gives a value of unknown type (rule 1.7), as does a key computed at runtime, such as `"toys.${id}"`,
-   `"toys." + id`, or a variable.
+   not, or else as its default's type. A default that is a variable with a written type gives that written type,
+   whatever value the variable holds at that line. A key is declared once: two loads that declare different types are an
+   error that names both. With `default: null`, the result is the key's declared type made optional; without a declared
+   type for the key, `default: null` is an error that names the fix. A default of a type the compiler cannot know,
+   without a declared type, gives a value of unknown type (rule 1.7), as does a key computed at runtime, such as
+   `"toys.${id}"`, `"toys." + id`, or a variable.
 3. Loads of a key without a declared type agree on its type: of two load types, one accepts every value of the other, as
    `number` does `integer`, or the later load in source order (rule 1.6) is an error that names the earlier one, and its
    file when that is another one. Saves never decide the type.
