@@ -215,8 +215,10 @@ is byte-identical where the build allows it. `node tools/pure-move-check.mjs <ba
 removes is moved, one of the forms that file names, or declared with a reason; `node tools/move-sweep.mjs <base>` finds
 the lines that still name a moved file by its old path; `structure-report.mjs --diff <base> --moved` reads its signals
 without the moved lines. `node tools/reconstruct-move.mjs BASE OLD NEW…` checks a split's whole-line reconstruction,
-with admitted differences and limits defined in its header. The coordinator schedules it between packages, so that no
-open pull request's hunks collide. A feature pull request never moves files another open pull request changes.
+with admitted differences and limits defined in its header; `node tools/moves/split-write.mjs ASSIGN` writes a split
+the builder has decided, from an assignment file kept with the move's evidence. The coordinator schedules it between
+packages, so that no open pull request's hunks collide. A feature pull request never moves files another open pull
+request changes.
 
 Report a structure concern as [friction](#report-what-cost-a-wrong-turn), class `structure`. Each pull request can be
 reasonable while the whole drifts, so the coordinator also checks the whole
