@@ -59,6 +59,8 @@ export interface PlayerImageInput {
 const props = defineProps<{
   session: PlayerSession | null;
   reset: number;
+  /** Changes when another chat shows (`PlayerSessionHost.chat`); the composer's text belongs to its chat. */
+  chat: number;
   entries: readonly PlayerTranscriptEntryPresentation[];
   speakers: Readonly<Record<string, PlayerSpeakerPresentation>>;
   revision?: number;
@@ -430,15 +432,14 @@ const flight = useAnswerFlight({
   skip: () => skipPacing(true),
   activate: activatePreselected,
   origin: () => actionId.value,
-  parked: () => parked !== null,
+  parked: () => parked,
   park: setAside,
   clearFeedback,
 });
-// The composer's text belongs to its session: a new or restarted one starts with it empty, before any field is placed.
+// The composer's text belongs to its chat: another chat starts with it empty, before any field is placed.
 watch(
-  [() => props.session?.planToken, () => props.reset],
-  (now, before) => {
-    if (now[0] === undefined || (now[0] === before[0] && now[1] === before[1])) return;
+  () => props.chat,
+  () => {
     parked = null;
     writeField("input", "");
   },

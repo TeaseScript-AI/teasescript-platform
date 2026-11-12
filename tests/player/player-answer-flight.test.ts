@@ -67,7 +67,7 @@ let useAnswerFlight: (host: {
   skip(): void;
   activate(): void;
   origin(): number | undefined;
-  parked(): boolean;
+  parked(): string | null;
   park(text: string): void;
   clearFeedback(): void;
 }) => Flight;
@@ -86,6 +86,9 @@ interface SessionHost {
   readonly stopped: Readonly<Ref<boolean>>;
   /** What the stop after a lost engine connection offers (#2382), `null` without one. */
   readonly recovery: Readonly<Ref<object | null>>;
+  /** Changes when another chat shows; and every show (`interactionReset`), the recovery's too. */
+  readonly chat: Readonly<Ref<number>>;
+  readonly interactionReset: Readonly<Ref<number>>;
   /** What a debug export reads: only serialized here, to count a text in it. */
   debugExportCandidate(details: () => object, wanted: AbortSignal): Promise<object | null>;
   readonly bridge: Promise<PlayerBridge>;
@@ -372,13 +375,14 @@ function composer(
         void activate();
       },
       origin: () => actionId.value,
-      parked: () => parked !== null,
+      parked: () => parked,
       park: setAside,
       clearFeedback: () => void (notice.value = ""),
     });
-    // A new or restarted session starts with an empty composer.
+    // Another chat starts with an empty composer, as `RuntimeInteraction.vue`'s watch of the host's `chat` does: the
+    // host's own, and a restart (`reset`), which the host's Start would show.
     watch(
-      reset,
+      [reset, host.chat],
       () => {
         parked = null;
         writeField("");
@@ -806,10 +810,17 @@ for (const topology of TOPOLOGIES)
       const expected = await reference(at, row, drains(row) ? keys : []);
       const unsent = unsentOf(keys);
       // A prefill that arrives while the field holds text is the Owner's open question (#2463). In the reference it
-      // arrives before the keys, in the flight at the settlement, after them, so what a held Enter sends, and so where
-      // a later one goes, follows from that answer: only the commands posted, in order, are compared there.
+      // arrives before the keys, in the flight at the settlement, after them. Unsettled there: the text before the one
+      // typed last, what a held Enter sends, and what follows from where it went (the action it answered, the notice).
+      // Compared: the commands posted, in order, where the session went, what is set aside or exported, and that the
+      // field ends with the text typed last.
       const pending = row.settle === "prefill" && unsent.typed !== "";
-      const commands = (seen: typeof expected) => seen.posts.map(([op]) => op);
+      const settledOf = (seen: typeof expected) => ({
+        commands: seen.posts.map(([op]) => op),
+        status: seen.status,
+        parked: seen.parked,
+        exported: seen.exported,
+      });
       if (!drains(row) && row.departs === "text") {
         const left = (row.settle === "completed" ? "" : scriptOf(row).aside) + unsent.text;
         if (row.presents === "picker") expected.parked = left;
@@ -824,8 +835,13 @@ for (const topology of TOPOLOGIES)
         // An edit within the flight does not reach text the settlement puts in the field (#2463, residual 1); a
         // password field drops the composer's text until the Owner decides (#2463): only the answers posted and where
         // the session went are compared there.
-        if (pending) assert.deepEqual(commands(actual), commands(expected), where);
-        else if (row.history === "edit" || (row.presents === "password" && row.departs === "text"))
+        if (pending) {
+          assert.deepEqual(settledOf(actual), settledOf(expected), where);
+          assert.ok(actual.field.endsWith(unsent.typed), `${where}: ends with the text typed last`);
+        } else if (
+          row.history === "edit" ||
+          (row.presents === "password" && row.departs === "text")
+        )
           assert.deepEqual([actual.posts, actual.status], [expected.posts, expected.status], where);
         else assert.deepEqual(actual, expected, where);
       }
@@ -1154,6 +1170,40 @@ for (const topology of TOPOLOGIES)
           assert.deepEqual(at.host.recovery.value, { offer: "continue", where: "line" });
         }
       });
+
+// The recovery after a lost connection (#2382): Continue goes on with the same chat, whose composer keeps its text; a
+// Start shows another chat, which starts empty.
+for (const topology of TOPOLOGIES)
+  test(`the composer keeps its text through the recovery's Continue, and a Start empties it (${topology})`, async (context) => {
+    const at = await page(context, topology, { recoverable: true });
+    await at.start(`${FIRST.text.script}\n${NEXT.text}\nexit`);
+    const ui = composer(at.host, { flight: true });
+    context.after(() => ui.unmount());
+    ui.field.value = "CHAT-DRAFT";
+    await nextTick();
+    const lost: unknown[] = [];
+    reportsInto(context, lost);
+    await at.transport.lose();
+    await until(() => at.host.recovery.value !== null, "the recovery offer", "host");
+    assert.deepEqual(at.host.recovery.value, { offer: "continue", where: "line" });
+    const reset = at.host.interactionReset.value;
+    await at.host.activate();
+    await until(
+      () =>
+        !at.host.stopped.value &&
+        at.host.session.value !== null &&
+        presentedAction(at.host.session.value) !== undefined,
+      "the recovered question",
+      "host",
+    );
+    await ui.idle();
+    assert.notEqual(at.host.interactionReset.value, reset, "the recovery shows its session anew");
+    assert.equal(ui.field.value, "CHAT-DRAFT", "the same chat keeps its text");
+    assert.equal(lost.length, 1);
+    await at.start(`${FIRST.text.script}\nexit`);
+    await ui.idle();
+    assert.equal(ui.field.value, "", "another chat starts empty");
+  });
 
 // The exits the input section decides: an answer it retires ends the flight at once, as one whose session is gone, and
 // leaves what was unsent in the composer; with no section, as before a session is prepared, the answer is not taken, and what was typed and given plays as after a

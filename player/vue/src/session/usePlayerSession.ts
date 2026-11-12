@@ -171,6 +171,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   // A new session remounts the transcript and resets interaction-local state.
   const generation = ref(0);
   const interactionReset = ref(0);
+  // Changes when another chat shows: a session the player did not have on screen before (`showSession`).
+  const chat = ref(0);
   // The engine's host and this Player's hold on it (`session/useEngineConnection.ts`). Once it is ready, the Player's
   // random control takes its claim, its loss is observed (`bridgeLost`), and the tracing setting is sent before any
   // Start that waits for it.
@@ -769,7 +771,10 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   function showSession(
     next: PlayerSession,
     origin: Origin,
-    { paused }: { readonly paused: boolean } = { paused: false },
+    {
+      paused = false,
+      sameChat = false,
+    }: { readonly paused?: boolean; readonly sameChat?: boolean } = {},
   ) {
     // A failed write concerns the run it happened in.
     notices.dismiss(playerNoticeKeys.storageWriteFailed);
@@ -780,6 +785,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     pendingLoadCount.value = 0;
     generation.value++;
     interactionReset.value++;
+    if (!sameChat) chat.value++;
     jumpedRevision.value = -1;
     // An inspected state takes Debug's random control only once input adopts it (`adoptRewound` below).
     if (!paused) adoptRandom(next, origin);
@@ -1021,6 +1027,11 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     prepareScriptSource,
     generation: computed(() => generation.value),
     interactionReset: computed(() => interactionReset.value),
+    /**
+     * Changes when another chat shows: every shown session but the one the recovery from a lost connection continues,
+     * which is the chat shown before. The composer's text belongs to its chat.
+     */
+    chat: computed(() => chat.value),
     /**
      * The transcript revision through which the transcript shows directly, like history, rather than entering as live
      * play: what development time jumps published (#615). -1 for none since the session started.

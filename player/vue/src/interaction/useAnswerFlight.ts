@@ -98,8 +98,8 @@ export interface AnswerFlightHost {
   activate(): void;
   /** The presented interaction's action, `undefined` without one. */
   origin(): number | undefined;
-  /** Whether another field takes the composer's place, so that its text is set aside meanwhile. */
-  parked(): boolean;
+  /** The composer's text set aside while another field takes its place, else `null`. */
+  parked(): string | null;
   /** Sets the composer's text aside as `text`, while another field takes its place. */
   park(text: string): void;
   clearFeedback(): void;
@@ -115,6 +115,9 @@ export function useAnswerFlight(host: AnswerFlightHost) {
   let starting: { readonly aside: string; readonly after: Segment } | null = null;
   // A write of the flight's own, until the flush that publishes it: it is no change of the player's.
   let ownWrite = false;
+  // The text an answer sent, after its flight ended before the answer's outcome was known (`end`): the composer's again
+  // if the answer is not taken.
+  let handedOff: string | null = null;
 
   function write(target: Flight | null, text: string) {
     ownWrite = true;
@@ -149,21 +152,40 @@ export function useAnswerFlight(host: AnswerFlightHost) {
     // A change of the text typed after the answer clears its notice, as the drain's does.
     if (current.current.changed || current.queue.some((command) => command.after.changed))
       host.clearFeedback();
-    if (host.parked()) {
+    if (host.parked() !== null) {
       host.park(text);
       write(current, settled ?? "");
     } else write(current, text === "" ? (settled ?? "") : text);
     release();
   }
 
+  /** Puts `text` before the composer's text, wherever that is: set aside, else in the field. */
+  function prefixComposer(text: string) {
+    const parked = host.parked();
+    if (parked !== null) host.park(text + parked);
+    else write(null, text + host.text());
+  }
+
+  /**
+   * The outcome of an answer whose flight `end` ended: a taken one's text is sent; else it is the composer's again,
+   * before what was typed after it.
+   */
+  function resolveHandOff(taken: boolean) {
+    const sent = handedOff;
+    handedOff = null;
+    if (sent !== null && !taken) prefixComposer(sent);
+  }
+
   /**
    * Ends the flight where another field takes the composer's place before its answer settled (a form editor, a lock),
-   * before that field's own text is written: what the flight left unsent is set aside.
+   * before that field's own text is written: what was typed and entered after the answer is set aside, and the answer's
+   * own text waits for the answer's outcome (`resolveHandOff`), which may open that field itself.
    */
   function end() {
     const current = flight;
     if (!current) return;
-    const text = unsent(current, current.taken);
+    const text = unsent(current, true);
+    handedOff = current.taken || current.aside === "" ? null : current.aside;
     release();
     host.park(text);
   }
@@ -171,10 +193,10 @@ export function useAnswerFlight(host: AnswerFlightHost) {
   /** Ends the flight without a settlement (the owner's change, a throw): what it left unsent stays the composer's. */
   function abandon() {
     const current = flight;
-    if (!current) return;
+    if (!current) return resolveHandOff(false);
     const text = unsent(current, current.taken);
     release();
-    if (host.parked()) host.park(text);
+    if (host.parked() !== null) host.park(text);
     else write(null, text);
   }
 
@@ -253,7 +275,7 @@ export function useAnswerFlight(host: AnswerFlightHost) {
    */
   function settle(settlement: FlightSettlement) {
     const current = flight;
-    if (!current) return;
+    if (!current) return resolveHandOff(settlement === "completed");
     holding.value = false;
     const taken = settlement === "completed" || current.taken;
     // The plain text field no longer holds, or a block overtook an answer that was not taken: commands given before
@@ -316,7 +338,10 @@ export function useAnswerFlight(host: AnswerFlightHost) {
     },
     { flush: "sync" },
   );
-  onScopeDispose(release);
+  onScopeDispose(() => {
+    handedOff = null;
+    release();
+  });
 
   return {
     /** Whether a flight holds the composer: its field stays writable, and Enter and held keys are queued. */
@@ -330,6 +355,7 @@ export function useAnswerFlight(host: AnswerFlightHost) {
     /** The answer in flight was taken: what it sent is no longer unsent. Call it before its result is published. */
     taken() {
       if (flight) flight.taken = true;
+      else resolveHandOff(true);
     },
     /** Ends the flight whose answer's session no longer owns the composer (retired): what it left stays. */
     abandon,

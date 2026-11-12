@@ -752,6 +752,7 @@ async function toggleFullscreen() {
         <RuntimeInteraction
           :session="player.stopped.value ? null : session"
           :reset="player.interactionReset.value"
+          :chat="player.chat.value"
           :transcript-key="transcript.key"
           :entries="transcript.entries"
           :speakers="transcript.speakers"

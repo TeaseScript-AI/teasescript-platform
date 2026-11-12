@@ -225,6 +225,18 @@ function cases(engine) {
       before: ["Form", { type: "Stay" }],
       answer: "name",
     },
+    // Back closes the editor: the composer's text comes back, without the answer that opened it, which was sent, and
+    // with what was typed in its flight before the editor showed. On `main`, that `x` goes into the editor, and Back
+    // drops it; the composer's text is the one rule here (Owner decision, 2026-11-11, #2463).
+    ...[
+      ["form back", KEYS.idle, ""],
+      ["form back typed", press("x"), "x"],
+    ].map(([name, keys, value]) => ({
+      ...fixture(name, "Form", keys, shown(value, "", 4)),
+      before: ["Form", { type: "Stay" }],
+      answer: "name",
+      lastly: (page) => page.getByRole("button", { name: "Back", exact: true }).click(),
+    })),
     // The same, where `main`'s
     // x replaces its text and Escape closes it.
     {
@@ -433,6 +445,11 @@ async function runCase(opened, origin, item) {
     let after = await settled(page, () => opens);
     if (item.block) {
       await answerBlock(page, item.blockShows);
+      after = await settled(page, () => opens);
+    }
+    // A step after the answers settled, such as closing a form field's editor.
+    if (item.lastly) {
+      await item.lastly(page);
       after = await settled(page, () => opens);
     }
     return {
