@@ -4,9 +4,9 @@ import {
   clickLabelled,
   delay,
   evaluate,
-  key,
   navigate,
   physicalClick,
+  pressEnter,
   setViewport,
   typeInto,
   value,
@@ -15,12 +15,20 @@ import {
 
 /**
  * The page's monotonic clock, shifted by `window.__timeShift`: the scenario moves it past a block's timer just before an
- * answer, so the block falls due inside that answer's own observation and no wake of the Player's runs it first.
+ * answer, so the block falls due inside that answer's own observation and no wake of the Player's runs it first. An
+ * event's time stamp reads the same clock, as in a browser: the composer takes a press as fresh only after the
+ * interaction appeared (`freshAfter`).
  */
 const SHIFTED_CLOCK = `(() => {
   const now = performance.now.bind(performance);
   window.__timeShift = 0;
   performance.now = () => now() + window.__timeShift;
+  const timeStamp = Object.getOwnPropertyDescriptor(Event.prototype, "timeStamp").get;
+  Object.defineProperty(Event.prototype, "timeStamp", {
+    get() {
+      return timeStamp.call(this) + window.__timeShift;
+    },
+  });
 })();`;
 
 /**
@@ -161,31 +169,68 @@ export async function instantAnswersScenario(cdp, origin) {
     );
     assertEqual(left.entered.includes(block.key), true, "The block's message did not enter");
     // Following stops where the new content starts: the block's message, taller than the view.
-    await waitFor(
-      cdp,
-      `(() => { const start = ${top(JSON.stringify(block.key))}; return start !== null && start >= -2 && start < 40 && !!document.querySelector('.return-to-latest'); })()`,
-      4_000,
-      "Following did not stop at the start of the block's message",
-    );
+    const stopped = `(() => { const start = ${top(JSON.stringify(block.key))}; return start !== null && start >= -2 && start < 40 && !!document.querySelector('.return-to-latest'); })()`;
+    try {
+      await waitFor(cdp, stopped, 4_000);
+    } catch {
+      const state = await value(
+        cdp,
+        `({ block: ${top(JSON.stringify(block.key))}, answer: ${top(JSON.stringify(leftAnswer.key))}, returnToLatest: !!document.querySelector('.return-to-latest') })`,
+      );
+      // How the rows changed, frame by frame: the frames whose row keys differ from the frame before.
+      const changes = left.frames.flatMap((frame, index) => {
+        const keys = frame.rows.map(
+          (row) => `${row.key}${row.id.startsWith("predicted-") ? "*" : ""}`,
+        );
+        const before = left.frames[index - 1]?.rows.map(
+          (row) => `${row.key}${row.id.startsWith("predicted-") ? "*" : ""}`,
+        );
+        return before?.join() === keys.join() ? [] : [`${index}: ${keys.slice(-4).join(" ")}`];
+      });
+      throw new Error(
+        `Following did not stop at the start of the block's message: ${JSON.stringify(state)}; rows by frame ${changes.join(" | ")}; entered ${left.entered.join(" ")}`,
+      );
+    }
 
     // 3. The same, scrolled up: the text being read stays where it is.
     await physicalClick(cdp, ".return-to-latest");
     await waitFor(cdp, button("Up"), 8_000, "The third choice did not show");
     await delay(800);
-    await evaluate(
+    // The reader scrolls up with the wheel, as a reader does.
+    const view = await value(
       cdp,
-      `const view = document.querySelector('.transcript-scroll'); view.scrollTop = Math.max(0, view.scrollTop - 300); return true;`,
+      `(() => { const r = document.querySelector('.transcript-scroll').getBoundingClientRect(); return { x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) }; })()`,
+    );
+    for (let step = 0; step < 5; step += 1) {
+      await cdp.call("Input.dispatchMouseEvent", {
+        type: "mouseWheel",
+        ...view,
+        deltaX: 0,
+        deltaY: -60,
+      });
+      await delay(60);
+    }
+    await waitFor(
+      cdp,
+      `!!document.querySelector('.return-to-latest')`,
+      4_000,
+      "The wheel did not scroll up",
     );
     await delay(500);
     const reading = await value(
       cdp,
-      `(() => { const view = document.querySelector('.transcript-scroll').getBoundingClientRect(); const row = [...document.querySelectorAll('.transcript-entry')].find((row) => { const top = row.getBoundingClientRect().top - view.top; return top > 40 && top < 300; }); return row?.dataset.rowKey ?? null; })()`,
+      `(() => { const view = document.querySelector('.transcript-scroll').getBoundingClientRect(); const row = [...document.querySelectorAll('.transcript-entry')].find((row) => { const { top, bottom } = row.getBoundingClientRect(); return top - view.top <= 100 && bottom - view.top > 100; }); return row?.dataset.rowKey ?? null; })()`,
     );
+    // The row at the reader's eye, a little below the top of the view, whose top may be above it.
     if (reading === null) throw new Error("No row was in view to read");
+    // Its buttons scroll with the conversation, out of view, and the driver would scroll to one it clicks; the reader
+    // answers in the composer, outside it.
+    await typeInto(cdp, "[data-composer-input]", "Up");
+    await delay(300);
     const readingTop = await value(cdp, top(JSON.stringify(reading)));
     await evaluate(cdp, RECORDER);
     await evaluate(cdp, `window.__timeShift = 1_300_000; return true;`);
-    await clickLabelled(cdp, "Up");
+    await pressEnter(cdp);
     const up = await frames(cdp);
     shownAtOnce(up, "Up", "An answer a block's message overtook while scrolled up");
     if (!up.frames.at(-1).rows.some((row) => row.text.includes("Line 1 of the second block")))
@@ -221,7 +266,7 @@ export async function instantAnswersScenario(cdp, origin) {
     );
     await evaluate(cdp, RECORDER);
     await evaluate(cdp, `window.__timeShift = 1_900_000; return true;`);
-    await key(cdp, "Enter");
+    await pressEnter(cdp);
     const refused = await frames(cdp);
     const shown = refused.frames.findIndex((frame) =>
       frame.rows.some((row) => row.id.startsWith("predicted-") && row.text.endsWith("hello there")),
