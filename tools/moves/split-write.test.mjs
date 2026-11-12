@@ -212,7 +212,7 @@ test("an assignment the split cannot follow is refused, and nothing is written",
       },
       {},
     ),
-    "lies in OLD's imports": files(
+    "the range 3-3 holds the import at line 3": files(
       {
         lines: [
           [1, 1],
@@ -221,7 +221,7 @@ test("an assignment the split cannot follow is refused, and nothing is written",
       },
       {},
     ),
-    "the range 1-6 lies in OLD's imports or crosses": files({ lines: [[1, 6]] }, {}),
+    "the range 1-6 crosses from OLD's leading // lines": files({ lines: [[1, 6]] }, {}),
     "the range 40-41 names no lines": files(
       {
         lines: [
@@ -241,6 +241,10 @@ test("an assignment the split cannot follow is refused, and nothing is written",
     "other.test.ts exists at HEAD and is not OLD": {
       ...ASSIGN,
       files: { [A]: ASSIGN.files[A], "tests/split/other.test.ts": ASSIGN.files[B] },
+    },
+    "../escaped.test.ts is not a path inside the repository": {
+      ...ASSIGN,
+      files: { ...ASSIGN.files, "../escaped.test.ts": { header: "Out.", tests: [] } },
     },
     "cannot read tests/split/missing.test.ts at HEAD": {
       ...ASSIGN,
@@ -279,4 +283,95 @@ test("a statement that is neither a test nor a declaration, or a declaration no 
   const unused = repository(t, `${OLD}\nconst UNUSED = 3;\n`).run(ASSIGN);
   assert.equal(unused.status, 2);
   assert.match(unused.err, /line 32: UNUSED: no test reaches it/u);
+});
+
+test("code between two imports is placed as any statement, and the later import is written in each file's imports (#2552 r1)", (t) => {
+  const old = [
+    'import test from "node:test";',
+    "",
+    "/** Read by both files. */",
+    "const EARLY = 1;",
+    'import assert from "node:assert/strict";',
+    "",
+    'test("one", () => {',
+    "  assert.equal(EARLY, 1);",
+    "});",
+    "",
+    'test("two", () => {',
+    "  assert.equal(EARLY + 1, 2);",
+    "});",
+    "",
+  ].join("\n");
+  const assign = {
+    old: OLD_PATH,
+    setup: { path: SETUP, header: "Shared." },
+    files: { [A]: { header: "One.", tests: [1] }, [B]: { header: "Two.", tests: [2] } },
+  };
+  const r = repository(t, old);
+  const result = r.run(assign);
+  assert.equal(result.status, 0, result.err);
+  assert.equal(
+    r.read(SETUP),
+    "// Shared.\n\n/** Read by both files. */\nexport const EARLY = 1;\n",
+  );
+  assert.match(
+    r.read(A),
+    /^\/\/ One\.\n\nimport test from "node:test";\nimport assert from "node:assert\/strict";\nimport \{ EARLY \} from "\.\.\/helpers\/split-setup\.js";\n\ntest\("one"/u,
+  );
+  // (the same declaration given to the setup by a range)
+  assert.equal(r.run({ ...assign, setup: { ...assign.setup, lines: [[3, 4]] } }).status, 0);
+  // (a comment above the later import goes nowhere unless a range places it)
+  const commented = repository(
+    t,
+    old.replace("const EARLY = 1;\n", "const EARLY = 1;\n// the assertions\n"),
+  );
+  const refused = commented.run(assign);
+  assert.equal(refused.status, 2);
+  assert.match(refused.err, /line 5: a comment above the import at line 6, in no range/u);
+});
+
+test("destructured names, overloads and a local export are read as declarations; two files on one line are refused (#2552 r1)", (t) => {
+  const old = [
+    'import test from "node:test";',
+    "",
+    "const { first, second } = { first: 1, second: 2 };",
+    "",
+    "function shape(value: number): number;",
+    "function shape(value: string): string;",
+    "function shape(value: number | string): number | string {",
+    "  return value;",
+    "}",
+    "",
+    "const local = 3;",
+    "export { local };",
+    "",
+    'test("one", () => shape(first));',
+    "",
+    'test("two", () => shape(String(second)));',
+    "",
+  ].join("\n");
+  const assign = {
+    old: OLD_PATH,
+    setup: { path: SETUP, header: "Shared.", lines: [[12, 12]] },
+    files: { [A]: { header: "One.", tests: [1] }, [B]: { header: "Two.", tests: [2] } },
+  };
+  const r = repository(t, old);
+  const result = r.run(assign);
+  assert.equal(result.status, 0, result.err);
+  assert.match(
+    r.read(A),
+    /^import \{ first, shape \} from "\.\.\/helpers\/split-setup\.js";$/mu,
+  );
+  assert.match(r.read(SETUP), /^export function shape\(value: string\): string;$/mu);
+  assert.match(r.read(SETUP), /^const local = 3;\nexport \{ local \};$/mu);
+  const oneLine = repository(
+    t,
+    old.replace(
+      'test("one", () => shape(first));\n\ntest(',
+      'test("one", () => shape(first)); test(',
+    ),
+  );
+  const refused = oneLine.run(assign);
+  assert.equal(refused.status, 2);
+  assert.match(refused.err, /line 14: statements of two files on one line/u);
 });
