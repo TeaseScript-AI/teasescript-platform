@@ -240,7 +240,7 @@ test("a choice's selected value is decided by its declared option, and nothing a
 test("a declared element that does not fit is named by its written type, at today's site (#2289 rule 3)", () => {
   // (`n` holds a whole number, but it is compared as the number it is declared: the sentence names that; the error
   // sits where main puts a misfit, the element, as `n` holds no kind that misfits)
-  const declared = "let a: integer = 1\nlet n: number = 1\n";
+  const declared = "let a: integer = 1\nlet n: number = 1\nlet u: integer | string = 1\n";
   const cases: readonly (readonly [string, string, string])[] = [
     [
       '[a, n, "s"]',
@@ -251,6 +251,12 @@ test("a declared element that does not fit is named by its written type, at toda
       '[{p: a}, {p: n}, {p: "s"}]',
       "{p: n}",
       "This list mixes objects whose property 'p' holds a whole number (integer) in one and a number in another. A list holds one type. Give 'p' one type in every element.",
+    ],
+    // (`u` holds a whole number, compared as its written union, which a number does not fit: the fix holds both)
+    [
+      "[2.5, u]",
+      "u",
+      "This list mixes a number and a whole number (integer) or text (string). A list holds one type. To allow both, declare it as 'let xs: (number | string)[] = [2.5, u]'.",
     ],
   ];
   for (const [literal, at, sentence] of cases) {
