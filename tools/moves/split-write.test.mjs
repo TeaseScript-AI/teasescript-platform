@@ -358,10 +358,7 @@ test("destructured names, overloads and a local export are read as declarations;
   const r = repository(t, old);
   const result = r.run(assign);
   assert.equal(result.status, 0, result.err);
-  assert.match(
-    r.read(A),
-    /^import \{ first, shape \} from "\.\.\/helpers\/split-setup\.js";$/mu,
-  );
+  assert.match(r.read(A), /^import \{ first, shape \} from "\.\.\/helpers\/split-setup\.js";$/mu);
   assert.match(r.read(SETUP), /^export function shape\(value: string\): string;$/mu);
   assert.match(r.read(SETUP), /^const local = 3;\nexport \{ local \};$/mu);
   const oneLine = repository(
