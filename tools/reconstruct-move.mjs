@@ -21,8 +21,8 @@
 // Then:
 //   - every line of a NEW body that is not a layout blank is a line of OLD's body, equal byte for byte, or, for a line
 //     outside tokens that declares at the left margin (`function`, `function*`, `async function`, `async function*`,
-//     `const`, `let`, `var`, `class`, `abstract class`, `interface`, `type`, `enum`, `declare`), that line with `export `
-//     put before it (a declaration a sibling now reads, listed);
+//     `const`, `let`, `var`, `class`, `abstract class`, `interface`, `type`, `enum`, `declare`), that line with
+//     `export ` put before it (a declaration a sibling now reads, listed);
 //   - each OLD body line that is not a layout blank is taken once;
 //   - a run of lines is taken whole, longest first, never across a layout blank followed by a line at the left margin
 //     (one declaration's boundary);
@@ -32,10 +32,11 @@
 // Prettier's rewrap of a declaration that gained `export `: each group of consecutive left-over NEW lines starts with
 // `export ` before such a declaration, breaks only after `(`, `,`, `=>` or `{`, or before `)` (where a break cannot end
 // a statement: none after `return`), and has the tokens of one run of consecutive left-over OLD lines, as TypeScript
-// scans them: comments and literals by their exact text, whitespace between tokens dropped, and a trailing comma (one
-// after an element, before a closing bracket; never an elision) dropped. A group holding a template literal or a `/` is
-// no rewrap (a scan without context cannot tell a regular expression from a division): such a move is declared with
-// --edit. Last, within each NEW file its runs and admitted groups follow OLD's order. Anything else fails.
+// scans them: comments and literals by their exact text, whitespace between tokens dropped, and a trailing comma (with
+// comments not counted, one before a closing bracket and after an element; never an elision, `tokensOf`) dropped. A
+// group holding a template literal or a `/` is no rewrap (a scan without context cannot tell a regular expression
+// from a division): such a move is declared with --edit. Last, within each NEW file its runs and admitted groups
+// follow OLD's order. Anything else fails.
 //
 // This check does not prove scope or brace ownership; compilation rejects malformed or ill-typed results, while
 // behavior requires separate tests or review.
@@ -135,9 +136,11 @@ const EXPORTABLE =
 
 /**
  * A text's tokens as TypeScript scans them, comments kept with their text, whitespace and line breaks between tokens
- * dropped, and a trailing comma dropped (one after an element, before a closing bracket: the one Prettier adds); `null`
- * for a text with a template literal or a `/` (a regular expression's text, or a division, which a scan without context
- * cannot tell apart).
+ * dropped, and a trailing comma dropped; `null` for a text with a template literal or a `/` (a regular expression's
+ * text, or a division, which a scan without context cannot tell apart). A comma is trailing when, comments not counted,
+ * the token after it closes a bracket and the token before it neither opens one nor is a comma: in a file that parses,
+ * that comma ends a list after its last element (an array's, an object's, a call's, a parameter list's, an import's, a
+ * type's), which it does not change; a comma after an opening bracket or another comma is an elision, an array's hole.
  */
 function tokensOf(text) {
   const scanner = ts.createScanner(
@@ -147,6 +150,7 @@ function tokensOf(text) {
     text,
   );
   const tokens = [];
+  const kinds = [];
   for (let kind = scanner.scan(); kind !== ts.SyntaxKind.EndOfFileToken; kind = scanner.scan()) {
     if (kind === ts.SyntaxKind.WhitespaceTrivia || kind === ts.SyntaxKind.NewLineTrivia) continue;
     if (
@@ -158,14 +162,23 @@ function tokensOf(text) {
     )
       return null;
     tokens.push(scanner.getTokenText());
+    kinds.push(kind);
   }
-  // (a trailing comma follows an element: after an opening bracket or another comma it is an elision, content)
+  // (a comma's neighbours, comments not counted: a comment is no element)
+  const comment = (i) =>
+    kinds[i] === ts.SyntaxKind.SingleLineCommentTrivia ||
+    kinds[i] === ts.SyntaxKind.MultiLineCommentTrivia;
+  const neighbour = (i, step) => {
+    let at = i + step;
+    while (comment(at)) at += step;
+    return tokens[at];
+  };
   return tokens.filter(
     (token, i) =>
       !(
         token === "," &&
-        [")", "]", "}"].includes(tokens[i + 1]) &&
-        !["(", "[", "{", ","].includes(tokens[i - 1])
+        [")", "]", "}"].includes(neighbour(i, 1)) &&
+        !["(", "[", "{", ","].includes(neighbour(i, -1))
       ),
   );
 }

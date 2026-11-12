@@ -301,9 +301,9 @@ test("a line break inside a token is its content: a blank line in a template or 
   );
 });
 
-test("in a rewrap a comma is dropped only as a trailing comma, never an elision (#2534 final)", (t) => {
-  const old =
-    'const veryLongDescriptiveDeclarationName = { firstValue: [], secondValue: "123456789012345" };\n';
+test("in a rewrap a comma is dropped only as a trailing comma, never an elision, comments not counted (#2534 final)", (t) => {
+  const old = (array) =>
+    `const veryLongDescriptiveDeclarationName = { firstValue: ${array}, secondValue: "123456789012345" };\n`;
   const wrapped = (array) =>
     [
       "export const veryLongDescriptiveDeclarationName = {",
@@ -312,9 +312,16 @@ test("in a rewrap a comma is dropped only as a trailing comma, never an elision 
       "};",
       "",
     ].join("\n");
-  const run = (text) => repository(t, { "src/big.ts": text }, old).run().status;
-  assert.equal(run(wrapped("[]")), 0);
-  assert.equal(run(wrapped("[,]")), 1);
+  const run = (before, after) =>
+    repository(t, { "src/big.ts": wrapped(after) }, old(before)).run().status;
+  assert.equal(run("[]", "[]"), 0);
+  // (an elision is content, bare or after a comment: a comment is no element)
+  assert.equal(run("[]", "[,]"), 1);
+  assert.equal(run("[/* placeholder */]", "[/* placeholder */,]"), 1);
+  assert.equal(run("[, /* hole */]", "[, /* hole */,]"), 1);
+  // (a trailing comma after an element is layout, with or without a comment before it)
+  assert.equal(run("[1]", "[1,]"), 0);
+  assert.equal(run("[1 /* one */]", "[1 /* one */,]"), 0);
 });
 
 test("a file that does not parse cannot run (#2534 final)", (t) => {
