@@ -138,32 +138,27 @@ const UI_CHECK: OperandCheck = { file: INTERACTION, function: "materializeIntera
  */
 export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
   // ------------------------------------------------------------------------------------------- statements
-  speakerDeclaration: REFUSED,
+  // (a speaker is set up at the start of the session, storing its values into its own places, so not `pass`; each value
+  // is judged by its own row, so a speaker's name in one is refused there, and the core judges its built-in fields'
+  // values after the analysis, `backend.ts`'s `outsideAnswers`)
+  speakerDeclaration: modelled((node) => node.properties.map((property) => property.value)),
   speakerSetterStatement: pass({}),
   sayStatement: {
     row: "modelled",
-    // (a `say` as a speaker names the speaker, which the slice does not hold; its presentation, text and pacing are
-    // walked in evaluation order, `sayOperands`)
+    // (a `say as` names its speaker by an identifier that is no expression, so it is not walked; its presentation, text
+    // and pacing are walked in evaluation order, `sayOperands`)
     visit: (node) =>
-      node.speaker !== null ||
-      (node.value.kind === "stringLiteral" &&
-        node.value.parts.some((part) => part.kind !== "stringText"))
+      node.value.kind === "stringLiteral" &&
+      node.value.parts.some((part) => part.kind !== "stringText")
         ? refuse(node.span, "this say")
         : walk([...sayOperands(node)]),
   },
-  showButtonStatement: {
-    row: "pass",
-    operands: {
-      label: SHOWN_TEXT,
-      background: UI_CHECK,
-      timeout: { file: INTERACTION, function: "buttonTimeoutMs" },
-    },
-    // (a button shown as a speaker names the speaker, which the slice does not hold)
-    visit: (node) =>
-      node.speaker !== null
-        ? refuse(node.span, "this show button statement")
-        : walk([...statementExpressions(node)]),
-  },
+  // (`showButton as` names its speaker as `say as` does, not walked)
+  showButtonStatement: pass({
+    label: SHOWN_TEXT,
+    background: UI_CHECK,
+    timeout: { file: INTERACTION, function: "buttonTimeoutMs" },
+  }),
   waitStatement: pass({
     duration: { file: "src/runtime/instructions/timers.ts", function: "timerDurationMs" },
   }),

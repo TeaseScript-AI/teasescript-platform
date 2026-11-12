@@ -212,20 +212,6 @@ const CONDITIONS: readonly Condition[] = [
   },
   {
     row: "sayStatement",
-    condition: "no speaker",
-    source: 'say as player "Hold."',
-    at: 'say as player "Hold."',
-    what: "this say",
-  },
-  {
-    row: "showButtonStatement",
-    condition: "no speaker",
-    source: 'showButton as player "Go"',
-    at: 'showButton as player "Go"',
-    what: "this show button statement",
-  },
-  {
-    row: "sayStatement",
     condition: "shown text without interpolation",
     source: 'say "Hi ${hostValue}"',
     at: 'say "Hi ${hostValue}"',
@@ -488,7 +474,9 @@ const CONDITIONS: readonly Condition[] = [
 
 /** The open rows that check nothing of their own: each walks its children. */
 const UNCONDITIONAL: readonly SyntaxKind[] = [
+  "speakerDeclaration",
   "speakerSetterStatement",
+  "showButtonStatement",
   "waitStatement",
   "showImageStatement",
   "hideImageStatement",
