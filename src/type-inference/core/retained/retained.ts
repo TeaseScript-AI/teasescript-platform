@@ -8,7 +8,8 @@
  * every kind is the native value it is given or makes, `owner` and `amend` return at once, and nothing is charged: what
  * runs and what it costs is unchanged. A test installs an instrument (`withRetainedRecorder`;
  * `tests/helpers/retained-instrument.ts`), which makes the kinds, refuses at its line any other write to retained
- * state, and hears the owners' marks and the solver's runs.
+ * state, and hears the owners' marks and the solver's runs. A typed array, which no freeze holds, is the exception: a
+ * write to its elements after its run is caught at the process's exit, which fails the file.
  */
 
 /**
