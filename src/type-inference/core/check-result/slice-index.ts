@@ -19,6 +19,7 @@ import {
   handlerBlocks,
   statementExpressions,
   expressionParts,
+  sayOperands,
 } from "../../../expression-children.js";
 import type { FactSite } from "../../backend.js";
 import type { SourceSite, PlaceId } from "../../graph.js";
@@ -97,6 +98,8 @@ export class SliceIndex {
   readonly #role = new Map<Expression, "count" | "index">();
   /** The iterables of the `for` loops. */
   readonly #iterables = new Set<Expression>();
+  /** The presentations of the `say` statements, whose option names are not written property names. */
+  readonly #presentations = new Set<Expression>();
 
   /** `onFile` hears of each file as the walk enters it (S3 §6 keeps the request's progress callback). */
   public constructor(programs: readonly Program[], onFile: (file: number) => void = () => {}) {
@@ -156,7 +159,9 @@ export class SliceIndex {
             for (let at = expression.properties.length - 1; at >= 0; at -= 1) {
               const property = expression.properties[at]!;
               this.#propertyOf.set(property.value, property.name.name);
-              this.#write(property.name.name, file, property.name.span);
+              // (a presentation's options are no properties of the script's values)
+              if (!this.#presentations.has(expression))
+                this.#write(property.name.name, file, property.name.span);
               pending.push({ expression: property.value, store, whole, parent: expression });
             }
             break;
@@ -265,10 +270,16 @@ export class SliceIndex {
         this.#role.set(statement.count, "count");
         pending.push({ expression: statement.count, store: null, whole: false });
         break;
-      case "sayStatement":
+      case "sayStatement": {
+        // every operand in evaluation order, with what it holds (B1 of #2488's design round): its presentation, its
+        // text, which `say` shows, and its pacing
         this.shown.push(statement.value);
-        pending.push({ expression: statement.value, store: null, whole: false });
+        if (statement.presentation !== null) this.#presentations.add(statement.presentation);
+        const operands = sayOperands(statement);
+        for (let at = operands.length - 1; at >= 0; at -= 1)
+          pending.push({ expression: operands[at]!, store: null, whole: false });
         break;
+      }
       case "forStatement":
         this.#iterables.add(statement.iterable);
         statements(statement.body.statements);
