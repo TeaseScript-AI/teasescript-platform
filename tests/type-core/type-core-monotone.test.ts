@@ -27,7 +27,7 @@ test("the oracle names a lost kind, a lost reason and an unknown's word moved la
     kinds(judgeRun("m", [unknown(5, "deferred-parameter")], [unknown(5, "unknown")], moves)),
     ["unknown's word later unknown"],
   );
-  // (what only grows: a kind, a reason, a word earlier in the order)
+  // (what only grows: a kind, a reason, a word earlier in the order or following a new reason)
   assert.deepEqual(
     judgeRun(
       "m",
@@ -37,7 +37,11 @@ test("the oracle names a lost kind, a lost reason and an unknown's word moved la
     ),
     [],
   );
-  assert.equal(moves.size, 0);
+  assert.deepEqual(
+    judgeRun("m", [unknown(4, "deferred-parameter")], [unknown(5, "unknown")], moves),
+    [],
+  );
+  assert.deepEqual(Object.fromEntries(moves), { "unknown word with its reasons": 2 });
 });
 
 test("the oracle counts the moves of the fields it does not judge", () => {

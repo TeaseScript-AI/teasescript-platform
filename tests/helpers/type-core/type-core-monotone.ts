@@ -6,7 +6,9 @@ import { withSolverSeam } from "../../../src/type-inference/core/solver.js";
 
 /**
  * What a run may not do to its member's previous answer: drop one of its kinds (`empty`, the emptiness mark, included),
- * drop a reason of a kind it keeps, or move an unknown's word later in the merge's order (`firstContext`).
+ * drop a reason of a kind it keeps, or move an unknown's word later in the merge's order (`firstContext`) while its
+ * reasons stay as they were. An unknown's word may follow its reasons as they grow (`reasonContext`), which happens at most
+ * once per reason; a word that moves later under the same reasons went round a component (#2486's Domme ring).
  */
 export type ViolationKind = "kind lost" | "reason lost" | "unknown's word later";
 
@@ -69,7 +71,9 @@ export function judgeRun(
     }
     if ((was.reasons & ~is.reasons) !== 0) violation("reason lost");
     if (was.tag === "unknown") {
-      if (later(was.context, is.context)) violation("unknown's word later");
+      if (was.reasons === is.reasons && later(was.context, is.context))
+        violation("unknown's word later");
+      else if (was.context !== is.context) count("unknown word with its reasons");
     } else if (was.context !== is.context)
       count(`known word ${later(was.context, is.context) ? "later" : "earlier"}`);
     if (was.cert !== is.cert) count(`cert ${was.cert}→${is.cert}`);
