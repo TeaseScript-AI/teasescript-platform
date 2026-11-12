@@ -707,6 +707,12 @@ export class RouteTests {
   }
 
   /** A statement's places from its callable's body down to it. */
+  protected placesOf(statement: TreeStatement): Place[] {
+    this.#work.charge("eventSteps");
+    return this.#up(statement);
+  }
+
+  /** A statement's places from its callable's body down to it. */
   #up(statement: TreeStatement): Place[] {
     this.#work.charge("eventSteps");
     const upward: Place[] = [];
