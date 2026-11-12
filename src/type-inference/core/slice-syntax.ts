@@ -11,6 +11,7 @@ import { dictMethod } from "../../dict-operations.js";
 import { listMethod } from "../../list-methods.js";
 import { isTextMethod, TEXT_METHODS } from "../../text-operations.js";
 import type { SourceSpan } from "../../source.js";
+import { sayOperands, statementExpressions } from "../../expression-children.js";
 import { SLICE_DEPTH } from "./contract-descriptors.js";
 import { methodCategory } from "./method-categories.js";
 import type { CoreFile } from "./program.js";
@@ -73,12 +74,30 @@ type Visit =
   | { readonly refuse: { readonly span: SourceSpan; readonly what: string } };
 
 /**
- * A row of the table: `refused`, a construct outside the slice, refused at its span as `this <kind in words>`; or
- * `modelled`, a construct of the slice, with the conditions under which it is, which its `visit` checks.
+ * Where the runtime checks one operand of a `pass` row whatever the plan carries: the function of `file` that fails on a
+ * value the operand does not take (`type-core-pass-rows.test.ts` reads that it raises a runtime fault; the row guard's
+ * misfit runs show each operand's code).
+ */
+export interface OperandCheck {
+  readonly file: string;
+  readonly function: string;
+}
+
+/**
+ * A row of the table: `refused`, a construct outside the slice, refused at its span as `this <kind in words>`;
+ * `modelled`, a construct of the slice, with the conditions under which it is, which its `visit` checks; or `pass`, a
+ * command the analysis needs nothing of beyond its operands (#2488's design, the `pass` rule): it stores into no place
+ * of the script, registers no handler and moves no control, so the flow graph builds only its operands and its
+ * fall-through, and each of its operands, by name, is checked by its instruction (`operands`).
  */
 type Disposition<K extends SyntaxKind> =
   | { readonly row: "refused" }
-  | { readonly row: "modelled"; readonly visit: (node: NodeOfKind<K>, walk: SyntaxWalk) => Visit };
+  | { readonly row: "modelled"; readonly visit: (node: NodeOfKind<K>, walk: SyntaxWalk) => Visit }
+  | {
+      readonly row: "pass";
+      readonly operands: Readonly<Record<string, OperandCheck>>;
+      readonly visit: (node: NodeOfKind<K>, walk: SyntaxWalk) => Visit;
+    };
 
 const REFUSED = { row: "refused" } as const;
 /** The children to walk, as one list: never spread into arguments, whose count is bounded below a source's width. */
@@ -91,6 +110,28 @@ const modelled = <K extends SyntaxKind>(
   children: (node: NodeOfKind<K>) => (Statement | Expression | Block | null)[] = () => [],
 ): Disposition<K> => ({ row: "modelled", visit: (node) => walk(children(node)) });
 
+/** A `pass` row whose children are its statement's own expressions (`statementExpressions`, in source order). */
+const pass = <K extends Statement["kind"]>(
+  operands: Readonly<Record<string, OperandCheck>>,
+): Disposition<K> => ({
+  row: "pass",
+  operands,
+  visit: (node) => {
+    // EVIDENCE: invariant: `K` is a statement kind, so the node of its row is a statement.
+    const statement = node as Statement;
+    return walk([...statementExpressions(statement)]);
+  },
+});
+
+const MEDIA = "src/runtime/instructions/media.ts";
+const INTERACTION = "src/runtime/instructions/interaction.ts";
+/** Shown text: `fieldText` takes a value that shows as text and refuses any other. */
+const SHOWN_TEXT: OperandCheck = {
+  file: "src/runtime/values/value-text.ts",
+  function: "fieldText",
+};
+const UI_CHECK: OperandCheck = { file: INTERACTION, function: "materializeInteractionUi" };
+
 /**
  * The route's syntax table: a row for every AST kind (a kind without one, or a row for no kind, fails the build), so a
  * new construct is refused by its row, never by a default, and opening one is a change of its row.
@@ -98,36 +139,49 @@ const modelled = <K extends SyntaxKind>(
 export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
   // ------------------------------------------------------------------------------------------- statements
   speakerDeclaration: REFUSED,
-  speakerSetterStatement: REFUSED,
+  speakerSetterStatement: pass({}),
   sayStatement: {
     row: "modelled",
+    // (a `say` as a speaker names the speaker, which the slice does not hold; its presentation, text and pacing are
+    // walked in evaluation order, `sayOperands`)
     visit: (node) =>
-      node.presentation !== null ||
       node.speaker !== null ||
-      node.skipPolicy !== null ||
-      node.pacing !== null ||
       (node.value.kind === "stringLiteral" &&
         node.value.parts.some((part) => part.kind !== "stringText"))
         ? refuse(node.span, "this say")
-        : node.value.kind === "stringLiteral"
-          ? walk([])
-          : walk([node.value]),
+        : walk([...sayOperands(node)]),
   },
-  showButtonStatement: REFUSED,
-  waitStatement: REFUSED,
+  showButtonStatement: {
+    row: "pass",
+    operands: {
+      label: SHOWN_TEXT,
+      background: UI_CHECK,
+      timeout: { file: INTERACTION, function: "buttonTimeoutMs" },
+    },
+    // (a button shown as a speaker names the speaker, which the slice does not hold)
+    visit: (node) =>
+      node.speaker !== null
+        ? refuse(node.span, "this show button statement")
+        : walk([...statementExpressions(node)]),
+  },
+  waitStatement: pass({
+    duration: { file: "src/runtime/instructions/timers.ts", function: "timerDurationMs" },
+  }),
   timerStatement: REFUSED,
-  showImageStatement: REFUSED,
-  hideImageStatement: REFUSED,
+  showImageStatement: pass({ image: { file: MEDIA, function: "showImage" } }),
+  hideImageStatement: pass({}),
   showCameraStatement: REFUSED,
   hideCameraStatement: REFUSED,
-  showPopupStatement: REFUSED,
-  openUrlStatement: REFUSED,
-  exportTextStatement: REFUSED,
+  showPopupStatement: pass({ message: SHOWN_TEXT, buttonText: SHOWN_TEXT }),
+  openUrlStatement: pass({ url: UI_CHECK, buttonText: SHOWN_TEXT, alwaysButton: UI_CHECK }),
+  exportTextStatement: pass({ text: UI_CHECK, title: SHOWN_TEXT, fileName: UI_CHECK }),
   showPermanentButtonStatement: REFUSED,
   playMediaStatement: REFUSED,
-  stopAudioStatement: REFUSED,
+  stopAudioStatement: pass({}),
   saveStatement: REFUSED,
-  deleteStatement: REFUSED,
+  deleteStatement: pass({
+    key: { file: "src/runtime/host-data/script-storage.ts", function: "storageKey" },
+  }),
   exitStatement: modelled(),
   endStatement: REFUSED,
   labelStatement: REFUSED,
