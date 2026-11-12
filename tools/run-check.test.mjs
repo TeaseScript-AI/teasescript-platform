@@ -11,6 +11,7 @@ import {
   idleBounded,
   killRecorded,
   runTool,
+  spawnTool,
   slowReader,
   waitFor,
 } from "./runner-test-support.mjs";
@@ -189,6 +190,60 @@ test(
           throw error;
         }
       });
+    }
+  },
+);
+
+test(
+  "a part that SIGTERM or SIGINT ended before run-check handled any signal counts as stopped, and no later part starts; one SIGKILL ended has failed (#2549)",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    // (no signal reaches run-check: the order a loaded CI host once showed, the part's close handled before
+    // run-check's own SIGTERM, taken to its end; npm ends by the signal it got once its script has)
+    const stopped = "ran: lint, format; failed: none; not run: build, test suite (stopped)";
+    const suite = "ran: lint, format, build; failed: none; not run: test suite";
+    for (const [waits, signal, status, last] of [
+      ["suite", "SIGTERM", 143, suite],
+      ["suite", "SIGINT", 130, suite],
+      ["build", "SIGTERM", 143, stopped],
+      [
+        "build",
+        "SIGKILL",
+        1,
+        "ran: lint, format, build; failed: build; not run: test suite (the build failed)",
+      ],
+    ]) {
+      const cwd = fixture(t, {}, waits);
+      const { child, done } = spawnTool(t, process.execPath, [tool], { cwd, env: environment });
+      const pid = await waitFor(
+        `the ${waits}'s descendant to start`,
+        () => Number(readFileSync(join(cwd, "pid"), "utf8")),
+        child,
+      );
+      // (the descendant and its ancestors up to the part run-check started, each of which holds or waits on the part's
+      // output; the build's descendant, which ignores SIGTERM, run-parallel stops. The part goes first, while nothing
+      // can have ended it; one below it may have ended already, as a shell whose command was signalled, or a step that
+      // run-parallel's own handler stopped)
+      const line = [pid];
+      for (let next = pid; ;) {
+        const stat = readFileSync(`/proc/${next}/stat`, "utf8");
+        next = Number(stat.slice(stat.lastIndexOf(") ") + 2).split(" ")[1]);
+        if (next === child.pid) break;
+        line.push(next);
+      }
+      const [part, ...below] = line.reverse();
+      process.kill(part, signal);
+      for (const each of below)
+        try {
+          process.kill(each, signal);
+        } catch (error) {
+          if (error.code !== "ESRCH") throw error;
+        }
+      const result = await done;
+      const at = `${waits}, ${signal}: ${result.output}`;
+      assert.deepEqual([result.code, result.signal], [status, null], at);
+      assert.equal(result.stdout.trimEnd().split("\n").at(-1), last, at);
+      assert.equal(result.stdout.split(`\n${last}\n`).length, 2, at);
     }
   },
 );

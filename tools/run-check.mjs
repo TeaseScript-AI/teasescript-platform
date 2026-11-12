@@ -11,13 +11,15 @@ import { listedSteps, runSteps, summaryLine } from "./run-parallel.mjs";
 //
 // The last line names what ran, failed and did not run (`summaryLine`), the suite with why when it did not run.
 //
-// SIGINT and SIGTERM: it passes the signal to the running part and starts no other. It kills nothing itself and has no
-// deadline of its own: the part stops as it handles the signal (run-parallel stops the process groups it made, and is
-// the only one to escalate to SIGKILL). A part's output is relayed, not inherited, so its end is the end of every
-// process still writing that output, a run-parallel finishing its escalation included; the last line follows that end,
-// once, whatever signals come later.
+// SIGINT and SIGTERM: it passes the signal to the running part and starts no other; a part either signal ended counts
+// as stopped by it even when that end is handled before the signal (#2549), and one another signal ended before any
+// stop as failed. It kills nothing itself and has no deadline of its own: the part stops as it handles the signal
+// (run-parallel stops the process groups it made, and is the only one to escalate to SIGKILL). A part's output is
+// relayed, not inherited, so its end is the end of every process still writing that output, a run-parallel finishing
+// its escalation included; the last line follows that end, once, whatever signals come later.
 // The parts run in its own process group, so a signal to that group (a terminal's Ctrl-C, a harness's stop) reaches
-// them as it reaches it. Exit status: the first failed part's, or 130 or 143 for a signal that came first, else 0.
+// them as it reaches it. Exit status: the first failed part's, or 130 or 143 for a signal that came first, else 0. A
+// signal that comes after the last line's write has finished can still end the process, by that signal, as it exits.
 // `VERIFY_SERIAL=1` runs the checks before the tests one after another.
 
 /**
@@ -67,8 +69,10 @@ async function main() {
         failed = true;
         console.error(`${args.join(" ")}: ${error.message}`);
       });
-      running.on("close", (code) => {
+      running.on("close", (code, signal) => {
         running = null;
+        // (a part SIGINT or SIGTERM ended was stopped by it, whether run-check's own handler has run yet or not)
+        if (signalled === 0 && Object.hasOwn(SIGNALS, signal)) signalled = SIGNALS[signal];
         if (code === 0 && !failed) resolve({ status: "PASS", code: 0 });
         else if (signalled !== 0) resolve({ status: "ABORTED", code: signalled });
         else resolve({ status: "FAIL", code: !failed && code > 0 ? code : 1 });
