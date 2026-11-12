@@ -12,6 +12,7 @@ import {
   OutsideContract,
   SLICE_DEPTH,
 } from "./check-result/slice-index.js";
+import { checkedOnSource, identityView, type IdentityView } from "./identity-view.js";
 import { REASON, type Item, type ItemTag } from "./items.js";
 import type { CoreAnalysisRequest, CoreFile } from "./program.js";
 import {
@@ -86,35 +87,44 @@ export const CORE_BACKEND: TypeAnalysisBackend = {
     const globals = new Set(request.options.globals ?? []);
     const before = outsideSyntax(core.files, globals);
     if (before !== null) throw outsideSlice(core, before);
-    // the walk of each file once, in project order (S3 §6), where the progress callback hears of it
-    const index = new SliceIndex(
-      core.files.map((file) => file.program),
-      request.onFile,
-    );
-    // (the route ends at the first refusal the analysis establishes, the capture's depth exit, at its request's site:
-    // never at unfinished work, a stop or a work count)
-    const leftSlice = (site: SourceSite): never => {
-      throw outsideSlice(core, {
-        file: site.file,
-        span: index.spanAt(site),
-        what: "a value whose structure the slice does not follow",
-      });
-    };
-    // (the questions after the analysis spend the same allowance: `asked`)
-    return asked(analyseCore({ ...core, leftSlice }), (answers) => outcomeOf(answers, index, core));
+    return coreOutcome(request);
   },
 };
 
+/**
+ * The core's outcome for a request, past the slice's syntax check (`CORE_BACKEND`'s route after it). Exported only for
+ * the tests that read a finished compile of a source the check refuses, as of a function (#2493).
+ */
+export function coreOutcome(request: TypeAnalysisRequest): TypeAnalysisOutcome {
+  const core = coreRequest(request);
+  // (the route ends at the first refusal the analysis establishes, the capture's depth exit, at its request's site:
+  // never at unfinished work, a stop or a work count)
+  const leftSlice = (site: SourceSite): never => {
+    throw outsideSlice(core, {
+      file: site.file,
+      span: index.spanAt(site),
+      what: "a value whose structure the slice does not follow",
+    });
+  };
+  // the analysis reads each identity call as its argument (`identity-view.ts`); its sites are the view's
+  const view = identityView({ ...core, leftSlice });
+  // the walk of each file once, in project order (S3 §6), where the progress callback hears of it
+  const index = new SliceIndex(
+    view.request.files.map((file) => file.program),
+    request.onFile,
+  );
+  // (the questions after the analysis spend the same allowance: `asked`)
+  return asked(analyseCore(view.request), (answers) => outcomeOf(answers, index, view));
+}
+
 /** The compiler's view of the core's answers to a program inside the slice, the facts computed here, before a caller. */
-function outcomeOf(
-  answers: Answers,
-  index: SliceIndex,
-  core: CoreAnalysisRequest,
-): TypeAnalysisOutcome {
+function outcomeOf(answers: Answers, index: SliceIndex, view: IdentityView): TypeAnalysisOutcome {
+  const core = view.request;
   try {
     const after = outsideAnswers(answers, index);
     if (after !== null) throw outsideSlice(core, after);
-    const checked = coreCheckResult(answers, index, core);
+    // (the facts are by site, which the view keeps: a call read as its argument keeps the call's span)
+    const checked = checkedOnSource(view, coreCheckResult(answers, index, core));
     const facts = coreFacts(answers, index, core);
     return { checked, facts: () => facts };
   } catch (error) {
