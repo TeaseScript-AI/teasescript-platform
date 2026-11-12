@@ -19,7 +19,6 @@ import {
   playerRuntimeUrlRequest,
   playerRuntimeForeground,
   playerRuntimePacingGate,
-  playerRuntimeInteractionActionIds,
   type PlayerSession,
 } from "../../../runtime/runtime-view.js";
 import Composer from "./Composer.vue";
@@ -33,7 +32,7 @@ import type {
 import { imagePickerAccept, type ImageFileFilters } from "../../../media/image-file.js";
 import { openUrlTab } from "../../../url-tab.js";
 import type { InputSectionHost } from "../session/runtime-input";
-import { useComposerState, type ComposerDescriptor, type ComposerTenant } from "./useComposerState";
+import { composerDescriptor, descriptorKey, useComposerState } from "./useComposerState";
 import { useAnswerSubmission, type SessionTerminal } from "./useAnswerSubmission";
 import { useFormUpdates } from "./useFormUpdates";
 import type { ImageCapture } from "../stage/useImageCapture";
@@ -304,54 +303,19 @@ watch(
   },
 );
 
-const temporalKinds = new Set(["ask-date", "ask-time", "ask-datetime"]);
 /** What the shown session presents to the composer, which decides the slot its field shows. */
-const descriptor = computed((): ComposerDescriptor => {
-  const session = props.session;
-  const id = actionId.value ?? null;
-  const shown = foreground.value;
-  const field = lockField.value;
-  const editor = formEditor.value;
-  let tenant: ComposerTenant;
-  if (field) tenant = { kind: "lock", dialogKey: field.key, repeat: field.repeat };
-  else if (id !== null && shown?.kind === "ask-password")
-    tenant = { kind: "password", actionId: id, resumes: passwordResumes.value };
-  // An answered form or date control gives the field back to the chat until the answer settles; a refusal shows
-  // them again with their text.
-  else if (id !== null && consumed.value === id) tenant = { kind: "chat" };
-  else if (id !== null && editor && form.value?.actionId === id)
-    tenant = { kind: "form", actionId: id, fieldId: editor.fieldId };
-  // A year-0000 prefill shows as editable ISO text (`isoText`): still the date's own slot, not the chat's.
-  else if (id !== null && shown && temporalKinds.has(shown.kind))
-    tenant = { kind: "temporal", actionId: id };
-  else tenant = { kind: "chat" };
-  const prefill = shown && "prefill" in shown ? (shown.prefill ?? null) : null;
-  return {
-    session: session ? `${session.planToken}:${props.reset}` : null,
+const descriptor = computed(() =>
+  composerDescriptor({
+    session: props.session,
+    reset: props.reset,
     chat: props.chat ?? 0,
-    tenant,
-    actionId: id,
-    answered: id !== null && consumed.value === id,
-    liveActions: session ? playerRuntimeInteractionActionIds(session.state) : [],
-    prefill: tenant.kind === "chat" ? prefill : null,
-    editorText: editor?.text ?? null,
-    editorField: id !== null && editor && form.value?.actionId === id ? editor.fieldId : null,
-    temporalPrefill: tenant.kind === "temporal" ? prefill : null,
-  };
-});
-const composerKey = computed(() => {
-  const next = descriptor.value;
-  return JSON.stringify([
-    next.session,
-    next.chat,
-    next.tenant,
-    next.actionId,
-    next.answered,
-    next.liveActions,
-    next.prefill,
-    next.editorField,
-  ]);
-});
+    foreground: foreground.value,
+    form: form.value,
+    lock: lockField.value,
+    consumed: consumed.value,
+  }),
+);
+const composerKey = computed(() => descriptorKey(descriptor.value));
 // Before the field renders the new slot, so an edit still under way reaches the slot it was typed in.
 watch(composerKey, () => composerState.select(descriptor.value), { immediate: true, flush: "pre" });
 /** The field takes no typing for now: a password just sent, a form field's commit, an image read, the lock at work. */
