@@ -243,6 +243,8 @@ export interface InstrumentReport {
   readonly owners: ReadonlyMap<string, number>;
   /** Owners opened by a mark after their lock, by name. */
   readonly opened: ReadonlyMap<string, number>;
+  /** What a measurement saw made (`measure`), each by its name and site. */
+  readonly exercised: ReadonlySet<string>;
 }
 
 /**
@@ -260,18 +262,27 @@ interface OwnerRecord {
 /** An instrument's options: `note` notes each refusal of a shape or an owner's field and goes on (a survey's mode). */
 export interface InstrumentOptions {
   readonly note?: boolean;
+  /**
+   * A measurement's mode (`measure`): each kind made, owner made and function registered is named with the site that made
+   * it, for the frozen subset's cover (`tests/helpers/retained-subset.ts`).
+   */
+  readonly measure?: boolean;
   /** A survey's trace: called every 2,000th switch with the report so far. */
   readonly trace?: ((report: InstrumentReport) => void) | undefined;
 }
 
 export class RetainedInstrument implements RetainedRecorder {
   readonly #note: boolean;
+  readonly #measure: boolean;
+  /** What a measurement saw made (`measure`): a kind, an owner or a function, by its name and the site that made it. */
+  readonly #exercised = new Set<string>();
   readonly #trace: ((report: InstrumentReport) => void) | null;
   /** The refusals noted (`note`), by their text with numbers made `N`, with their counts. */
   readonly #noted = new Map<string, number>();
 
   public constructor(options: InstrumentOptions = {}) {
     this.#note = options.note === true;
+    this.#measure = options.measure === true;
     this.#trace = options.trace ?? null;
   }
 
@@ -314,12 +325,14 @@ export class RetainedInstrument implements RetainedRecorder {
       noted: this.#noted,
       owners: this.#ownerCounts,
       opened: this.#openCounts,
+      exercised: this.#exercised,
     };
   }
 
   /** A function retained state may keep (`Retained.closure`): admitted as it is. */
-  public closure<T extends object>(_name: string, fn: T): void {
+  public closure<T extends object>(name: string, fn: T): void {
     this.#registered.add(fn);
+    this.#exercise(`function ${name}`);
   }
 
   /**
@@ -351,8 +364,13 @@ export class RetainedInstrument implements RetainedRecorder {
     }
   }
 
-  #count(kind: KindName): void {
+  #count(kind: KindName, name: string): void {
     this.#made.set(kind, (this.#made.get(kind) ?? 0) + 1);
+    this.#exercise(`${kind} ${name}`);
+  }
+
+  #exercise(what: string): void {
+    if (this.#measure) this.#exercised.add(`${what} @ ${siteOf(new Error().stack)}`);
   }
 
   #outsideWrite(name: string): void {
@@ -388,7 +406,7 @@ export class RetainedInstrument implements RetainedRecorder {
     // (R24 a: a new own property on a collection throws at its line)
     Object.preventExtensions(made);
     this.#registered.add(made);
-    this.#count(kind);
+    this.#count(kind, name);
     return made;
   }
 
@@ -451,7 +469,7 @@ export class RetainedInstrument implements RetainedRecorder {
       if (typeof descriptor.value === "object" || typeof descriptor.value === "function")
         this.#pending.push([made, key]);
     }
-    this.#count(kind);
+    this.#count(kind, name);
     // EVIDENCE: invariant: the proxy stands for its target, a copy of `given` of the same shape.
     return proxy as T;
   }
@@ -525,6 +543,7 @@ export class RetainedInstrument implements RetainedRecorder {
     this.#registered.add(owner);
     this.#newOwners.push(record);
     this.#ownerCounts.set(name, (this.#ownerCounts.get(name) ?? 0) + 1);
+    this.#exercise(`owner ${name}`);
   }
 
   public amend<T extends object>(target: T): void {

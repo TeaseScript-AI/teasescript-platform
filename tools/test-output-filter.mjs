@@ -138,8 +138,9 @@ const nodeArguments = fullSuite
     ];
 // (without `TEST_FULL_OUTPUT`: a test that runs this filter itself chooses its own output)
 const { TEST_FULL_OUTPUT: _, ...environment } = process.env;
-// (#1072 R21: every test process imports the retained-state instrument's preload, which installs it in a test file of
-// `tests/type-core/` alone: those suites run frozen, and `tests/type-core-production/` runs some of them again without it)
+// (#1072 R21, R28: every test process imports the retained-state instrument's preload, which installs it in the
+// `tests/type-core/` files of the frozen subset, or in every one with `RETAINED_FREEZE=all`; `tests/type-core-production/`
+// runs the subset's pinning suites again without it)
 const instrument = join(
   import.meta.dirname,
   "..",
