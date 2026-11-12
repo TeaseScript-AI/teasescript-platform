@@ -4,6 +4,21 @@ Opus, 2026-10-24, builder for M4 step S0 (brief `/tmp/agent-work/o4-3a-lead-fabl
 port plan's S0 (a) and (b) (`../checkpoint-9/port-plan/PLAN.md` revision 4, its S0 row and "Host globals"). S4
 commits the fixture with its test as `tests/fixtures/type-core/cells.jsonl`; nothing here is in the repository.
 
+## A guarded argument through an identity function (#2493)
+
+The #2493 builder (Opus) edited 11 records of `cells.jsonl` by hand (the lead's R34): each passes a value narrowed by a
+type test through a function that returns its parameter, and now expects the analysis's record, `valid` with no
+diagnostic and no check, in place of a run-time-check warning and its check. The analysis reads such a call as its
+argument in parentheses (accepted record r4.452), so the guarded mark travels as through parentheses
+([section-3-2-guarded](../../../docs/specifications/type-inference-accepted-record/contract.md#section-3-2-guarded)).
+V30 §17: "A returned value that depends on a parameter without a type follows each call". Each new record equals, in
+four modes, the record of the same source with the helper's calls written as text parentheses, which the set expects
+for a direct guarded read (`cp9-cells/r46/guard/branch-is/guarded`). The records:
+`cp9-cells/r46/guard/{result-identity,continuation-composed-transfers}/guarded`;
+`cp9-cells/r46/m3/astra-m3/{guard-result,guard-call/identity,guard-root-copy}`; `cp9-cells/r46/m3/guard-root-copy`;
+`cp9-cells/r46/m3/sol-m3/{guard-call-24,guard-runtime}`; and
+`cp9-cells/r46/m3/sol-m3b/{guard-return-12,guard-return-13,guard-result-member}`. No other record changed.
+
 ## A loop's write that a break follows (#2025)
 
 The S10 builder (Opus) corrected one record of `cells.jsonl` by hand: `cp9-cells/3b/loop/break/changed` expects
