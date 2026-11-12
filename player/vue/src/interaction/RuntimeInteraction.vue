@@ -312,7 +312,6 @@ const descriptor = computed((): ComposerDescriptor => {
   const shown = foreground.value;
   const field = lockField.value;
   const editor = formEditor.value;
-  const isoText = shown !== null && "isoText" in shown && shown.isoText === true;
   let tenant: ComposerTenant;
   if (field) tenant = { kind: "lock", dialogKey: field.key, repeat: field.repeat };
   else if (id !== null && shown?.kind === "ask-password")
@@ -322,7 +321,8 @@ const descriptor = computed((): ComposerDescriptor => {
   else if (id !== null && consumed.value === id) tenant = { kind: "chat" };
   else if (id !== null && editor && form.value?.actionId === id)
     tenant = { kind: "form", actionId: id, fieldId: editor.fieldId };
-  else if (id !== null && shown && temporalKinds.has(shown.kind) && !isoText)
+  // A year-0000 prefill shows as editable ISO text (`isoText`): still the date's own slot, not the chat's.
+  else if (id !== null && shown && temporalKinds.has(shown.kind))
     tenant = { kind: "temporal", actionId: id };
   else tenant = { kind: "chat" };
   const prefill = shown && "prefill" in shown ? (shown.prefill ?? null) : null;
