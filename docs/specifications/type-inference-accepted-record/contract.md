@@ -257,3 +257,31 @@ on `none-below` and `none-at`.
 makes excluding a landed copy fail closed.
 
 **Source.** The lead's design rulings 1–6, applied by merged PR #2064 for #1948 and #1585, 2026-11-08.
+
+### r4-451
+
+**A `null` that reaches a use through an entry is the use's required check.**
+
+**Rule.** This bounds [r4-444](#r4-444): beside its forward route, AD-1 promotes a `null` item reaching a use through an
+entry, where the program default is not held. An entry reads a route as the forward rule does, a route of the program's
+flow (ADR 0021 rules 5.5 and 5.6): a value the compiler knows, such as a loop's count or list held in a variable,
+removes no route. Entries: a loop's head (from its live predecessors in its body, none for a `for` over a one-element
+literal), a label (its live `goto`s and its fall-through), a file's start (from a literal
+`goto "f"` or `goto script("f")`; a glob, a computed target or a jump from block code is none), and a block body's
+start, which carries a `null` item with no writer and names the registering statement. A segment is unchecked only when no
+statement on it holds the key's root name in a test position (`==`, `!=`, `is`, `is not`, `and`, `or`, `not` operands;
+an `if` or `while` condition; a `switch` subject or case value), stores or binds it, or hands it to a call (its
+arguments or receiver; for a key owned outside the segment's activation, any call of an author function or a file's
+`call`). Passed compound statements count in every part, entered ones by their header. Per key, the jumps in its
+certified `null` stores' stretches (to the first later statement holding the name in that block or one around it; no
+other jump can be seeded) are tried as seeds in source order and propagated once per entry; the use takes its innermost
+nearest carrying entry, then its body's start. Many keys over many jumps cost their product (the gated known product
+in `docs/RESOURCE-LIMITS.md`); loops nested k deep cost jumps × depth, which the nesting limit bounds.
+Inside a block body the forward route admits the body's own definitions. Kept as warnings: written-union
+members, X7, block-reachable foreground uses, the program default, and copies whose source's `null` arrives through
+an entry.
+
+**Reason.** The text's error (V30 §13) for a value an earlier round, a label, a file transfer or a block body brings;
+closing a segment on any held name keeps every give-up a warning, never a false error.
+
+**Source.** The lead's HEAD 0 rulings R27 to R35 for #2497 pull request 1, 2026-11-12.

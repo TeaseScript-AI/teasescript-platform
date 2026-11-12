@@ -7,7 +7,11 @@ import test from "node:test";
 import { compileProjectWithBackend } from "../../src/compiler.js";
 import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
 import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
-import { withTestDemandAllowance, type WorkCounter } from "../../src/type-inference/core/budget.js";
+import {
+  withTestAllowance,
+  withTestDemandAllowance,
+  type WorkCounter,
+} from "../../src/type-inference/core/budget.js";
 import { CoreProgram, propertyStep } from "../../src/type-inference/core/program.js";
 import { coreRequest, type SourceFile } from "../helpers/type-core-analysis.js";
 import { ADMISSION_FAMILIES } from "../helpers/type-core/families/admission.js";
@@ -21,12 +25,15 @@ import { DECISION_HOLDER_FAMILIES } from "../helpers/type-core/families/copy-cha
 import { LAYER_FAMILIES } from "../helpers/type-core/families/property-names.js";
 import {
   NARROWING_FAMILIES,
+  ROUTE_ENTRY_COMPUTED_TRANSFERS,
+  ROUTE_ENTRY_FAMILIES,
+  ROUTE_ENTRY_PRODUCTS,
   ROUTE_FEASIBILITY_FAMILIES,
 } from "../helpers/type-core/families/narrowing.js";
 import { type WorkFamily } from "../helpers/type-core/families/builders.js";
 import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import { narrowingPass } from "../helpers/type-core/type-core-narrowing.js";
-import { inMode, MODES } from "../helpers/type-core-oracles.js";
+import { inMode, type Mode, MODES } from "../helpers/type-core-oracles.js";
 import {
   DOUBLING,
   type Sized,
@@ -289,13 +296,68 @@ test("the route rule's queries beside arms no run enters grow with the program i
   assert.deepEqual(steepCounters(ROUTE_FEASIBILITY_FAMILIES), []);
 });
 
+/** The depth to which #1438's written union, reversed, keeps its decision within its demand allowance (main: 70). */
+const REVERSED_UNION = 60;
+
+/**
+ * The route rule's entries (#2497, r4-451): labels, `goto`s and uses of one key, each doubled alone; loops in
+ * sequence; a root held under nested compound statements; files in a transfer cycle; block bodies reading one key; one
+ * global read in loops in many functions.
+ * (Loops nested k deep are no family here: the analysis before the entries already grows faster than this gate there,
+ * and the nesting limit bounds their depth, so the entries' jumps × depth has a constant ceiling.)
+ */
+test("the route rule's entry routes grow with the program in either order (#2497)", () => {
+  assert.deepEqual(steepCounters(ROUTE_ENTRY_FAMILIES), []);
+});
+
+/**
+ * A computed transfer enters no file (r4-451), so the jump index scans no file for it: the index's work grows with the
+ * program, though the flow's grows as files × transfers (`ROUTE_ENTRY_COMPUTED_TRANSFERS`).
+ */
+test("the jump index scans no file for a computed transfer (#2497)", () => {
+  const family = ROUTE_ENTRY_COMPUTED_TRANSFERS;
+  const [at64, at128] = [sized(family, 64), sized(family, 128)];
+  for (const reversed of [false, true]) {
+    const small = analysed(at64, reversed).budget.counts;
+    const large = analysed(at128, reversed).budget.counts;
+    const scale = (large.get("syntaxNodes") ?? 0) / (small.get("syntaxNodes") ?? 1);
+    const steps = (large.get("indexSteps") ?? 0) / (small.get("indexSteps") ?? 1);
+    const doubling = (2 * steps) / scale;
+    const name = `indexSteps${reversed ? " reversed" : ""}`;
+    assert.ok(doubling <= COUNTER_DOUBLING, `${name}: ${doubling.toFixed(3)}`);
+  }
+});
+
+/**
+ * The route rule's entries over many keys (`ROUTE_ENTRY_PRODUCTS`): a known product (docs/RESOURCE-LIMITS.md, "Accepted
+ * work products under the allowance"), a regression check on the 64 → 128 step only, at its measured doubling.
+ */
+test("the route rule's entries over many keys grow at most as measured (#2497)", () => {
+  const steep: string[] = [];
+  for (const family of ROUTE_ENTRY_PRODUCTS) {
+    const [at64, at128] = [sized(family, 64), sized(family, 128)];
+    for (const reversed of [false, true]) {
+      const small = analysed(at64, reversed).budget;
+      const large = analysed(at128, reversed).budget;
+      const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
+      const doubling = (2 * (large.total / small.total)) / scale;
+      if (doubling > family.measured)
+        steep.push(`${family.name}${reversed ? " reversed" : ""}: ${doubling.toFixed(3)}`);
+    }
+  }
+  assert.deepEqual(steep, []);
+});
+
 /**
  * #1438: a decider group's region holds each path below the group as a node one step below its parent's, never an
  * array or a text, so the decision of a literal nested k deep grows with k: the largest decision's units per doubling
  * of the source, for a literal of two kinds in either order and for one copying a written union in the source order
  * (2.01 and 2.06 here). Reversed, that one's decision costs depth × copies, G6 in #1319's design-round list (about 3.6,
- * as before G3 2c). A region that made each level's path and its text measured 4.42 and 4.45, and stopped both shapes'
- * decisions at their allowance at 300 levels.
+ * as before G3 2c), so it is pinned by where it stops instead: its decision stays within its demand allowance to
+ * `REVERSED_UNION` levels and stops one level deeper. Main stopped it at 71: #2289's B1 compares the literal's two
+ * elements on each decided path and charges that comparison to the decision, a known cost of decision B that
+ * reaches the allowance sooner; the allowance is unchanged. A region that made each level's path and its text
+ * measured 4.42 and 4.45, and stopped both shapes' decisions at their allowance at 300 levels.
  */
 test("a deep literal's decision grows with its depth, never with its square (#1438)", () => {
   const nest = (k: number, leaf: string): string => `${"[".repeat(k)}${leaf}${"]".repeat(k)}`;
@@ -307,6 +369,20 @@ test("a deep literal's decision grows with its depth, never with its square (#14
       [false],
     ],
   ];
+  const stops = (source: string, reversed: boolean): boolean => {
+    const request = coreRequest([{ path: "main.tease", source: `${source}\nexit` }]);
+    assert.ok(request !== null);
+    return analysed(
+      { name: "the written union reversed", request },
+      reversed,
+    ).budget.decisions.some((decision) => decision.stopped);
+  };
+  const union = shapes[1]![1];
+  assert.deepEqual(
+    [stops(union(REVERSED_UNION), true), stops(union(REVERSED_UNION + 1), true)],
+    [false, true],
+    "the written union reversed stops one level past its pinned depth",
+  );
   const largest = (budget: Answers["budget"]): number =>
     Math.max(...budget.decisions.map((decision) => decision.units));
   const steep: string[] = [];
@@ -326,6 +402,52 @@ test("a deep literal's decision grows with its depth, never with its square (#14
     }
   }
   assert.deepEqual(steep, []);
+});
+
+/** The test allowance the landing key's test stops at, below the work of each of its programs. */
+const STOPPED_AT = 1000;
+
+/**
+ * #2289: a copy that lands through a literal's cell has its landing key made once per path, the key every copy to
+ * that path shares (`literalLandings`, as the A4 key is). So under a stop each copy of a typed leaf in a literal nested
+ * d deep adds the same work after the stop at every depth, and the family (4·d copies) grows in proportion; a key
+ * made for each copy would cost each its path's length, d² in all.
+ */
+test("a landing key through a literal's cell is made once per path, not once per copy (#2289)", () => {
+  const nest = (d: number, elements: readonly string[]): string =>
+    `let leaf: integer = 1\nlet value = ${"[".repeat(d)}${elements.join(", ")}${"]".repeat(d)}\nexit\n`;
+  const after = (source: string, mode: Mode): Answers["budget"] => {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const { budget } = withTestAllowance(STOPPED_AT, () =>
+      inMode(mode, () => analyseCore(request)),
+    );
+    assert.equal(budget.exhausted, "work", "the analysis stops at the test allowance");
+    return budget;
+  };
+  for (const mode of MODES) {
+    const name = `${mode.reversed ? "reversed" : "source order"}${mode.unshared ? ", unshared" : ""}`;
+    const [small, large] = [128, 256].map((d) => ({
+      copies: 4 * d,
+      single: after(nest(d, ["leaf", "0"]), mode),
+      repeated: after(nest(d, Array<string>(4 * d).fill("leaf")), mode),
+    }));
+    // (the work after the stop each copy adds beyond a single copy's)
+    const perCopy = (at: typeof small): number =>
+      (at!.repeated.finishing - at!.single.finishing) / at!.copies;
+    assert.ok(
+      perCopy(large) <= 1.1 * perCopy(small),
+      `${name}: per copy ${perCopy(small)}, then ${perCopy(large)}`,
+    );
+    const scale =
+      (large!.repeated.counts.get("syntaxNodes") ?? 0) /
+      (small!.repeated.counts.get("syntaxNodes") ?? 1);
+    const doubling = (2 * (large!.repeated.finishing / small!.repeated.finishing)) / scale;
+    assert.ok(
+      doubling <= DOUBLING,
+      `${name}: the family's work after the stop per doubling, ${doubling}`,
+    );
+  }
 });
 
 /**
@@ -360,8 +482,8 @@ test("every admission family's work and each of its counters grow with the progr
  * directly and through a copy of the written binding: each literal's elements asked their earliest decider outside
  * every decision are answered from the groups' summaries, each level once (`writtenDecider`), not each level's walk of
  * the nest inside it again (`checks` 4.11 to 4.29 per doubling before). With the leaf an object of another type, each
- * level's list mixes the property's types and each rejection shows only in the next pass, k passes (A6's chain, gated
- * as its own known limit): each pass's work grows with the program (2.69 per doubling before at k = 32 → 64). The
+ * level's list mixes the property's types; before #2289 each rejection showed only in the next pass, k passes (A6's
+ * chain, gated as its own known limit), and each pass's work is gated (2.69 per doubling before at k = 32 → 64). The
  * series to k = 128 in the four modes and the siblings are the step's evidence, outside CI.
  */
 const WRITTEN_NESTS: readonly WorkFamily[] = (
@@ -396,7 +518,11 @@ test("a written decider in nested selections is answered once per level, each pa
       const doubling = (before: number, after: number): number =>
         (2 * (per(b, after) / Math.max(1, per(a, before)))) / scale;
       const name = `${family.name}${reversed ? " reversed" : ""}`;
-      if (doubling(a!.total, b!.total) > DOUBLING)
+      // (#2289: the option's bound is its growth as measured, 2.1508 at k = 16 → 32 in both orders: B1 fits the
+      // leaf's text to the written union, so it takes one pass where main takes 17 and 33 (2.1461 per pass), and each
+      // level's list is evaluated as one body, about 0.004 over the comparison evaluation alone)
+      const bound = passes ? 2.16 : DOUBLING;
+      if (doubling(a!.total, b!.total) > bound)
         steep.push(`${name}: ${doubling(a!.total, b!.total).toFixed(3)}`);
       const checks = doubling(a!.counts.get("checks") ?? 0, b!.counts.get("checks") ?? 0);
       if (checks > COUNTER_DOUBLING) steep.push(`${name} checks: ${checks.toFixed(3)}`);

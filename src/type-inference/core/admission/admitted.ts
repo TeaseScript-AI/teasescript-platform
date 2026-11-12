@@ -3,6 +3,7 @@ import type { Admission } from "../admission.js";
 import type { AdmittedType } from "../answers.js";
 import type { CheapDecision } from "../consumers/model.js";
 import { keepText, keptSteps, pathText } from "../budget.js";
+import { keptKey } from "../definitions.js";
 import { termAt, typeTags, writtenOf } from "../contract.js";
 import { type CanonicalKey, isKeyId, keptKeyAt, keyAt } from "../contract/key-ids.js";
 import { withoutEmpty } from "../exact-path.js";
@@ -67,7 +68,8 @@ function groupKeys(admission: Admission): ReadonlySet<CanonicalKey> {
 
 /**
  * C9 (A1–A7): a destination's admitted type: the written type (its null included), else the decided kinds (an
- * integer decider already widened by an admitted number, a copy of a written integer never: A4), else, where
+ * integer decider already widened by an admitted number, a copy of a written integer never: A4; a literal's the type
+ * all its elements fit, B1 of #2289, so `[lives, 2.5]` decides numbers), else, where
  * admission decided nothing, the contract's kinds, one family, an integer widened by an admitted number; with `null`
  * where a null contribution is admitted and the decision admits one (a copy of a written type without it does not),
  * and wherever a copy of a written type with it decided, whatever is stored (`permitsNull`), a written `null` alone
@@ -86,6 +88,10 @@ export function admitted(admission: Admission, place: PlaceId, path: readonly st
   lazily(admission, place, path);
   const key = keyAt(contract, place, path);
   pull(admission, place, path, key);
+  // (#2289 C-STOP-RECHECK: `lazily` or `pull` may have made the key's first decision, and a literal's stopped element
+  // left it undecided, before any fallback below)
+  // (no test reaches this guard; it stays so that a stop never loses a check, #2289)
+  if (admission.decisionStopped(place, path)) return [];
   // (an unrestricted written part, or a copy's, admits every kind at and below it: never what is stored)
   if (admission.unrestricted.has(key) || openBelow(admission, place, path)) return ["unknown"];
   const kinds = withoutEmpty(admission.run(contract.contractOf(key)));
@@ -151,8 +157,14 @@ function retainedSource(
     const written = writtenOf(program.place(at.place).kind);
     const term = written === null ? null : termAt(written, at.path);
     if (term !== null) return { tags: [...new Set(typeTags(term))], inherited: at.copied };
-    // (a decision that stopped, the path's own or a copy's source's, retains nothing: undecided, S3 §5)
-    if (admission.decisionStopped(at.place, at.path)) return null;
+    // (a decision that stopped, the path's own or a copy's source's, retains nothing: undecided, S3 §5; nor one a
+    // literal's stopped element left undecided, at the path or above it, #2289)
+    // (no test reaches this guard; it stays so that a stop never loses a check, #2289)
+    if (
+      admission.decisionStopped(at.place, at.path) ||
+      admission.budgetUndecidedAt(at.place, at.path, true)
+    )
+      return null;
     // (kept in `seen`)
     const key = keptKeyAt(admission.pass.contract, at.place, at.path);
     if (admission.unrestricted.has(key)) return { tags: ["unknown"], inherited: at.copied };
@@ -178,6 +190,10 @@ function retainedSource(
     seen.add(key);
     const { seeds, into, cycleOf } = inheritance(admission);
     const levels = seeds.get(at.place)?.get(pathText(at.path));
+    // (#2289: a seed a copy landed through a literal's cell is the literal's own type, not the copy's: its
+    // decision's answer, by the cell's query, where no program stop is; none after one, #2289)
+    if (levels !== undefined && literalBorne(admission, at.place, at.path))
+      return literalSeed(admission, at.place, at.path);
     if (levels !== undefined)
       return {
         tags: [...new Set([...levels].flatMap((level) => typeTags(level)))],
@@ -205,6 +221,50 @@ function retainedSource(
     }
   }
   return null;
+}
+
+/** Whether a path, or a path above it, is one A4's copies land at through a literal's cell (`literalLandings`). */
+function literalBorne(admission: Admission, place: PlaceId, path: readonly string[]): boolean {
+  // (no test reaches this guard; it stays so that a stop never loses a check, #2289)
+  if (admission.literalLandings.size === 0) return false;
+  for (let length = 0; length <= path.length; length += 1)
+    if (admission.literalLandings.has(keptKey(admission.work, place, path.slice(0, length))))
+      return true;
+  return false;
+}
+
+/**
+ * A literal-borne seed's level (`retainedSource`): the path's decision as its scan gives it, the literal's cell's
+ * answer among its contributions, as `deciderAt` asks it; `null` after a program stop (#2289) or where nothing
+ * decides.
+ */
+function literalSeed(
+  admission: Admission,
+  place: PlaceId,
+  path: readonly string[],
+): { readonly tags: ItemTag[]; readonly inherited: boolean } | null {
+  if (admission.pass.program.work.stopped !== null) return null;
+  const key = keyAt(admission.pass.contract, place, path);
+  const inputs = inputsAt(admission, isKeyId(key) ? { root: place, key } : { root: place, path });
+  const found =
+    inputs === null
+      ? null
+      : drive(admission, scanAt(admission, inputs.direct, inputs.prefixes, key));
+  if (found === null || found.stopped === true || found.tags.length === 0) return null;
+  // (a strict answer's complete type with its null; an inferred one's kinds, with null by admission's null rule, as a
+  // retained decision's)
+  if (found.copied !== null)
+    return { tags: [...new Set(typeTags(found.copied))], inherited: found.byWritten };
+  const kinds = admission.run(admission.pass.contract.contractOf(key));
+  const open =
+    path.length > 0 ||
+    kinds.every((item) => item.tag === "unknown" && (item.reasons & REASON.budget) !== 0);
+  const nullable =
+    found.permitsNull || (found.nullable && (open || kinds.some((item) => item.tag === "null")));
+  return {
+    tags: nullable ? [...new Set([...found.tags, "null" as const])] : [...found.tags],
+    inherited: found.byWritten,
+  };
 }
 
 /**

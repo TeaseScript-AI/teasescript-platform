@@ -909,14 +909,15 @@ and the composer may never grow larger than the conversation area available bene
 contain the complete measured input and Send control; a growing textarea may not paint beyond that row or beneath the
 visual-viewport/keyboard boundary.
 
-The following fullscreen keyboard-geometry and allocation behavior is intended but not yet fully implemented in the
-Player.
+The Player re-evaluates during and after keyboard/orientation transitions. The top page requests
+`interactive-widget=resizes-content`, so a supporting browser shrinks the layout viewport to the space above the software
+keyboard, in and out of fullscreen, and the Player sizes against the visual viewport within it. The Player's own page
+requests it; a page that frames the Player must request it too, because a frame's own setting has no effect and its
+visual viewport does not shrink for the keyboard. A browser without that setting keeps its own resizing. The Player adds
+no keyboard offset of its own: where a browser reports more height than the keyboard leaves, as Firefox for Android does
+in fullscreen, the composer's lower edge stays partly behind the keyboard.
 
-The Player re-evaluates during and after keyboard/orientation transitions. Normal browser presentation uses the visual
-viewport that the browser already resizes. Fullscreen uses feature-detected software-keyboard geometry when available,
-because fullscreen viewport resizing is not reliable. The outer fullscreen Player remains full-size while its internal
-content allocation reserves the reported keyboard height against the stable pre-keyboard viewport. The Player does not
-request layout-viewport resizing.
+The following keyboard allocation behavior is intended but not yet fully implemented in the Player.
 
 An open measured keyboard does not select a separate Player composition. The normal stage, transcript, foreground, and
 composer ownership remains intact. The stage may shrink below its preferred height so the complete measured composer,

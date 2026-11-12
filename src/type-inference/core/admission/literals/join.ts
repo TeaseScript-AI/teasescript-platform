@@ -58,7 +58,8 @@ const RESOLVED: ReadonlySet<string> = new Set([
  * its operands' structures once. `error` hears of each with the join, the path, the decided kinds there and the
  * operand's, the tree's value, whose declaration a fix may give the type (#1268), and the type it writes: `levels`, what
  * the tree's elements hold at each list level down to the path, its `null`s and numbers kept. `undecided`, before
- * admission settled (`Consumers.#freshStores`): a join an operand of which is read through a decision.
+ * admission settled (`Consumers.#freshStores`): a join an operand of which is read through a decision. `stopped`, after
+ * it settled: a join an operand of which a stop left undecided (#2289: a literal's element), not compared.
  */
 export function joinElements(
   admission: Admission,
@@ -74,6 +75,7 @@ export function joinElements(
     readonly shown?: MixedSteps;
   }) => void,
   undecided?: (value: PlaceId) => void,
+  stopped?: (value: PlaceId) => void,
 ): void {
   const { program, contract, definitions } = admission.pass;
   const family = (tag: ItemTag): ItemTag => (NUMERIC.has(tag) ? "number" : tag);
@@ -213,6 +215,7 @@ export function joinElements(
       },
     });
     if (operands.length < 2) return done(null);
+    let halted = false;
     // (before admission settled, a decision is read nowhere: a join with an operand that reads a place or holds a
     // source, a copy or a call, is marked instead, as a literal with a named element is)
     if (
@@ -279,6 +282,11 @@ export function joinElements(
     ): JoinDecided | "open" | null => {
       const at = joinSteps(["element"], path);
       const decider = joinDecider(admission, operand, node, at);
+      // (#2289: a literal's element a stop left undecided leaves the join undecided: it is reported, not compared)
+      if (decider?.stopped === true) {
+        halted = true;
+        return null;
+      }
       if (decider !== null && decider.term !== null) {
         const domain = joinedDomain(typeTags(decider.term));
         if (domain === "open") return "open";
@@ -680,6 +688,9 @@ export function joinElements(
         theirs === null || rejected ? ours : ours === null ? theirs : joined(ours, theirs),
       );
     }
+    const stop = undecided ?? stopped;
+    // (no test reaches this guard; it stays so that a stop never loses a check, #2289)
+    if (halted && stop !== undefined) return { held: null, report: () => stop(root.result) };
     return done(held.get(root.result) ?? null);
   };
   // (a tree after the earlier trees its operands reach: each asked before the tree reading it, without recursion)

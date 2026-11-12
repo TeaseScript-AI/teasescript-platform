@@ -25,7 +25,7 @@
     "text": "once #1413"
   },
   {
-    "file": "tests/type-core/type-core-stop.test.ts",
+    "file": "tests/type-core-stop/type-core-stop-settled.test.ts",
     "form": "when or after #N lands or merges",
     "text": "when #1216 lands"
   }

@@ -94,10 +94,11 @@ function required(
   receiver: ContextDetail["receiver"],
   read: PlaceId | undefined,
 ): boolean {
+  // (a test's mark keeps the forward route query away; a `null`'s ways into the use are still asked, r4-451)
+  const flagged = item.guarded === true || item.tested === true;
   if (
     walk.finishing ||
-    item.guarded === true ||
-    item.tested === true ||
+    (flagged && item.tag !== "null") ||
     (item.reasons & REASON.budget) !== 0 ||
     item.tag === "unknown" ||
     item.tag === "empty"
@@ -134,10 +135,11 @@ function required(
     others = members.filter((tag) => tag !== item.tag && !taken.includes(tag));
   }
   program.work.charge("checks");
-  const writer = walk.solve(
-    walk.pass.guards.narrowings(walk.pass).routes.required(value, item.tag, others),
+  const route = walk.solve(
+    walk.pass.guards.narrowings(walk.pass).routes.required(value, item.tag, others, flagged),
   );
-  if (writer === null) return false;
+  if (route === null) return false;
+  const { writer, block } = route;
   const diagnostic: CoreDiagnostic = {
     class: "compile-error",
     kind,
@@ -148,6 +150,9 @@ function required(
     requiredCheck: {
       rule: "N3",
       writer,
+      writerFile:
+        writer === null || writer.file === site.file ? null : program.files[writer.file]!.path,
+      block,
       missingTests: tests,
       subject: text,
       fits: kindsInOrder(new Set(fits.filter(concrete).map((found) => found.tag))),

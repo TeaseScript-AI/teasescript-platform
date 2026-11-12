@@ -1674,8 +1674,8 @@ function labelProved(
  * #1708, A′: the 17 diagnostic rule variants (`DiagnosticRule`) and, for each, whether its consumer
  * builds the obligation's words from the kinds it read. Only `member`'s does (`memberChecks`: a lacking kind `has`, an
  * unknown the method table's takers, a null `is not null`); every other variant's words are its rule's and label's,
- * compared exactly. A variant missing from this table is refused. `tests/type-core/type-core-stop.test.ts` holds the table to the
- * consumers (its kind-reading sites, the drift guard).
+ * compared exactly. A variant missing from this table is refused. `tests/type-core-stop/type-core-stop-words.test.ts`
+ * holds the table to the consumers (its kind-reading sites, the drift guard).
  */
 export const SENTENCE_VARIANTS: Readonly<Record<string, "memberChecks" | null>> = {
   member: "memberChecks",

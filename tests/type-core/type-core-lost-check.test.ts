@@ -61,6 +61,8 @@ interface Witness {
   readonly forbidden: Readonly<Record<string, SerializableRuntimeValue>>;
   readonly at: string;
   readonly storage?: readonly RuntimeScriptStorageEntrySnapshot[];
+  /** The demand allowance it is declined at: 16 unless given. */
+  readonly demand?: number;
 }
 
 const witness = (
@@ -83,7 +85,9 @@ const witness = (
 /**
  * At demand 16 in four modes: a required check is Lost at a settled decision stop. Where a rejection or a retarget lost
  * the completion's results, the decline names the first stopped mark it lost, often the place's first literal, before the
- * host store (#2080 part 1).
+ * host store (#2080 part 1). The demand a witness declines at moves with the core's costs (#2289 moved two); what each
+ * shows holds at every demand: from 4 to 128 in four modes, each of them and the typed-copy cycle below declines, errs
+ * at compile time or publishes a plan that rejects the forbidden input, never one that lets it through (#2289's sweep).
  */
 const DECLINED: readonly Witness[] = [
   witness(
@@ -134,13 +138,17 @@ const DECLINED: readonly Witness[] = [
   ),
   // (a store role's obligation, internal data: the natural compile rejects `combined={v:wide}`, the stop moves that to a
   // check against bare `unknown` at `let combined=base`; the rejection lost every completion result, so the decline
-  // names `let base`'s, the first)
-  witness(
-    "store-role-moved-error",
-    'let wide:number=53\nlet narrow:string="s"\nlet base={v:narrow}\nlet combined=base\ncombined={v:wide}\nlet outcome=[base,combined]',
-    {},
-    "{v:narrow}",
-  ),
+  // names `let base`'s, the first. At demand 8: from 12 on, the stop keeps `combined={v:wide}`'s check, which fails
+  // when the script runs, #2289)
+  {
+    ...witness(
+      "store-role-moved-error",
+      'let wide:number=53\nlet narrow:string="s"\nlet base={v:narrow}\nlet combined=base\ncombined={v:wide}\nlet outcome=[base,combined]',
+      {},
+      "{v:narrow}",
+    ),
+    demand: 8,
+  },
   // (Codex r1: a boundary the stop checks against bare `unknown`, no store, reader or part check carrying its contract)
   witness(
     "r1-get-default",
@@ -213,7 +221,7 @@ const passes = (source: string, run: ReturnType<typeof runGlobals>): boolean =>
 
 test("a program whose required check a settled stop lost is declined at its store, in four modes (#1526 decision 2, condition 1)", () => {
   for (const mode of MODES)
-    for (const { name, source, forbidden, at, storage } of DECLINED) {
+    for (const { name, source, forbidden, at, storage, demand } of DECLINED) {
       const where = `${name} (mode ${JSON.stringify(mode)})`;
       // (natural: no stop, no registry, nothing declined; the natural compile or its plan rejects the forbidden input)
       const natural = inMode(mode, () => compiled(source, null));
@@ -224,7 +232,7 @@ test("a program whose required check a settled stop lost is declined at its stor
           `${where}: the natural plan rejects`,
         );
       assert.throws(
-        () => inMode(mode, () => compiled(source, 16)),
+        () => inMode(mode, () => compiled(source, demand ?? 16)),
         // (the gate at the store's value; rule (R) at the typed call inside it)
         (error) =>
           error instanceof CandidateOutsideSlice &&
@@ -298,17 +306,18 @@ test("a stopped mark is kept by its part checks only where each carries the comp
 });
 
 test("a stopped mark whose completion result a rejection lost declines at its store: a typed-copy cycle (#2080)", () => {
-  // (at demand 64 in source order without sharing, every completion result is lost by the rejection, the stopped marks'
-  // too, and none of them has a complete store check: the program declines at its first, `m1`'s literal; a certificate
-  // that a copy of a checked place owes nothing would let it publish, #2131)
+  // (in source order without sharing, a completion result the rejection lost leaves a stopped mark with no complete store
+  // check: the program declines at it; a certificate that a copy of a checked place owes nothing would let it publish,
+  // #2131. At demand 36 the first is `m0`'s literal, in every mode from 35 to 37; before #2289 it was demand 64, at
+  // `m1`'s literal)
   const source =
     'let vi:integer=23\nlet vs:string="s"\nlet m0={f:vs,g:0}\nlet m1={f:vi,g:0}\nlet m2={f:vi,g:0}\nm1=m0\nm2=m1\nm0=m2\nlet final=[m0,m1]\nexit\n';
   assert.throws(
-    () => inMode(MODES[1]!, () => compiled(source, 64)),
+    () => inMode(MODES[1]!, () => compiled(source, 36)),
     (error) =>
       error instanceof CandidateOutsideSlice &&
       error.what === LOST &&
-      error.site.start === source.indexOf("{f:vi,g:0}"),
+      error.site.start === source.indexOf("{f:vs,g:0}"),
   );
 });
 

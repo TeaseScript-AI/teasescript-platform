@@ -1,7 +1,7 @@
 # XMP keyword fixtures
 
 Small images and a sidecar with XMP `dc:subject` keywords written by real metadata tools, for
-`tests/runtime/xmp-keywords.test.ts`. Made on 2026-10-04 with ffmpeg 9.0 (1×1 base images), ExifTool 13.25, and Exiv2 0.28.5,
+`tests/runtime/media/xmp-keywords.test.ts`. Made on 2026-10-04 with ffmpeg 9.0 (1×1 base images), ExifTool 13.25, and Exiv2 0.28.5,
 by running these commands in this directory (Bash):
 
 ```sh

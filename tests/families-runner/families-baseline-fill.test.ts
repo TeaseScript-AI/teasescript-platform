@@ -43,7 +43,9 @@ test("a fill on any worker: a seed, its shards computed and imported into a cent
       writeFileSync(join(folder, ".sha"), `${sha.repeat(40)}\n`);
       for (const tool of [
         "baselines.mjs",
+        "run-child.mjs",
         "run-contract.mjs",
+        "run-results.mjs",
         "run.mjs",
         "sources.mjs",
         "split.mjs",

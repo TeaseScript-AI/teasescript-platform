@@ -298,6 +298,12 @@ export interface SolverSeam {
     members: readonly SolvedMember[],
     replay: { readonly names: readonly string[]; readonly packet: unknown } | null,
   ) => void;
+  /**
+   * Hears of every run of a component's member: its key, its answer before the run and after it. A start from bottom
+   * (`#begin`: members found by a run, or the members' choices held) resets every answer to none, so `before` is always
+   * the same solve's earlier answer, or none.
+   */
+  readonly onRerun?: (key: string, before: readonly Item[], after: readonly Item[]) => void;
 }
 
 let activeSeam: SolverSeam | null = null;
@@ -1058,6 +1064,7 @@ export class Solver {
       itemsSignature(items, this.#scope) !== itemsSignature(member.value, this.#scope) ||
       (answered.proof?.signature(this.#scope) ?? null) !==
         (member.proof?.signature(this.#scope) ?? null);
+    this.#seam?.onRerun?.(member.demand.key, member.value, items);
     // its ingress cells took this run's stores whether or not its kinds changed
     member.value = items;
     member.proof = answered.proof;

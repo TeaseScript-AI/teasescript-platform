@@ -229,7 +229,7 @@ function pairOf({ file, in: holder }) {
 // The test below reads them with it over the repository and compares them with PAIRS as a set, so no change alters
 // the selection while it passes except an edit to PAIRS, which is the acknowledgement (the net misses formless pins).
 const PAIRS = [
-  "tests/type-core/type-core-candidate.test.ts",
+  "tests/type-core/candidate/type-core-candidate-operands.test.ts",
   "tests/type-core/type-core-closure.test.ts",
   "tests/type-core/type-core-contract-capture.test.ts",
   "tests/type-core/type-core-contract.test.ts",
@@ -243,7 +243,9 @@ const PAIRS = [
   "tests/type-core/type-core-work-b.test.ts in tests/helpers/type-core/families/w34-links.ts",
   "tests/type-core/type-core-work-c.test.ts",
   "tests/type-core/type-core-work-c.test.ts in tests/helpers/type-core/families/admission-products.ts",
+  "tests/type-core/type-core-work-c.test.ts in tests/helpers/type-core/families/narrowing.ts",
   "tests/type-core/type-core-work-c.test.ts in tests/helpers/type-core/families/property-names.ts",
+  "tests/type-core/type-core-written-default.test.ts",
 ];
 
 test("the marks name exactly the expected suites and the files holding their pins (#2094)", () => {
@@ -523,14 +525,18 @@ test("the four pin forms are found by their text, and a pin written another way 
   assert.deepEqual(pinFormsOf(digest, "tests/player/player-encryption.test.ts"), []);
 });
 
-test("the test files are the suite as the runner finds it: one folder down too, none in helpers/", (t) => {
+test("the test files are the suite as the runner finds it: two folders down too, none in helpers/", (t) => {
   const root = mkdtempSync(join(tmpdir(), "pin-suites-tests-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  for (const file of ["a.test.ts", "player/b.test.ts", "helpers/c.test.ts"]) {
+  for (const file of ["a.test.ts", "player/b.test.ts", "player/d/e.test.ts", "helpers/c.test.ts"]) {
     mkdirSync(join(root, "tests", file, ".."), { recursive: true });
     writeFileSync(join(root, "tests", file), "");
   }
-  assert.deepEqual(testFiles(root), ["tests/a.test.ts", "tests/player/b.test.ts"]);
+  assert.deepEqual(testFiles(root), [
+    "tests/a.test.ts",
+    "tests/player/b.test.ts",
+    "tests/player/d/e.test.ts",
+  ]);
 });
 
 test("an option the tool does not take is refused, not ignored", () => {

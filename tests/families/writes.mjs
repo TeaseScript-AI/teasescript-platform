@@ -184,9 +184,14 @@ const ALLOWED = {
       "`spawnSync` of `git -C <tree> rev-parse HEAD` (`state`'s commit of a checkout without `.sha`), with no option but `encoding`: it prints a commit and writes nothing",
     ],
     "the runner's own child": [
-      (call, { importedFrom, name }) => {
+      (call, { importedFrom, name, global, listed }) => {
         const [command, args, options] = call.arguments;
         const self = command === undefined ? undefined : strip(command);
+        const url = self !== undefined && ts.isCallExpression(self) ? self.arguments[0] : undefined;
+        const relative =
+          url !== undefined && ts.isNewExpression(url) && url.arguments?.length === 2
+            ? literal(url.arguments[0])
+            : undefined;
         const elements =
           args !== undefined && ts.isArrayLiteralExpression(args) ? args.elements : [];
         return (
@@ -197,7 +202,13 @@ const ALLOWED = {
           self.expression.text === "fileURLToPath" &&
           ["url", "node:url"].includes(importedFrom(self.expression)) &&
           self.arguments.length === 1 &&
-          self.arguments[0].getText() === "import.meta.url" &&
+          // (`./` and a plain file name: no folder, query or fragment, so the URL Node forks is the module listed)
+          /^\.\/[\w-]+(?:\.[\w-]+)*\.mjs$/.test(relative ?? "") &&
+          ts.isIdentifier(url.expression) &&
+          url.expression.text === "URL" &&
+          global(url.expression) &&
+          url.arguments[1].getText() === "import.meta.url" &&
+          listed(path.resolve(path.dirname(call.getSourceFile().fileName), relative)) &&
           literal(elements[0]) === "--child" &&
           onlyOptions(
             options,
@@ -213,16 +224,16 @@ const ALLOWED = {
           )
         );
       },
-      "`fork` of the runner's own module (`--child`), whose writes are this module's and so listed, with a heap limit and `--expose-gc` (which lets it collect, writing nothing, #1837) as its only `execArgv`",
+      '`fork` of the runner\'s child module (`new URL("./<module>", import.meta.url)`, `--child`), one of these modules, so its writes are listed, with a heap limit and `--expose-gc` (which lets it collect, writing nothing, #1837) as its only `execArgv`',
     ],
   },
   loads: {
     "a tree's oracle library": [
-      (call, { named, file }) => file === "run.mjs" && named === "oracles",
+      (call, { named, file }) => file === "run-child.mjs" && named === "oracles",
       "the built tree's own library, the code under test that the runner exists to run, not the tools",
     ],
     "a tree's work ledger": [
-      (call, { named, file }) => file === "run.mjs" && named === "ledgerOf",
+      (call, { named, file }) => file === "run-child.mjs" && named === "ledgerOf",
       "the built tree's own budget module, the code under test whose charges `--work` counts, not the tools",
     ],
     "an area's generators": [
@@ -794,7 +805,13 @@ export function inventory(checkout = process.cwd()) {
     const entry = { site: at, function: named(call), call: text(call) };
     if (of === "processes") {
       const allowed = Object.entries(ALLOWED.processes).find(([, [check]]) =>
-        check(call, { importedFrom, name }),
+        check(call, {
+          importedFrom,
+          name,
+          // (a name no module declares: with no library, the global's symbol is unresolved)
+          global: (identifier) => local(identifier) === undefined,
+          listed: (file) => files.includes(file),
+        }),
       );
       if (allowed !== undefined)
         used.processes.push({ ...entry, process: name, allowed: allowed[0] });

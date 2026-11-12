@@ -2,7 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <!-- resizes-content: Android browsers then shrink the page to the space above the software keyboard, which the
+         Player fills; their visual viewport alone overstates that space and hid the composer (#2483). It counts only
+         in the top page, so a page that frames the Player sets it too (PLAYER-UI.md). -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content"
+    />
     <link rel="icon" href="data:," />
     <title>TeaseScript Player</title>
   </head>
