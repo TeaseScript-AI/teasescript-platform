@@ -4,7 +4,7 @@ import type { DefinitionIndex } from "../definitions.js";
 import { makeItem, spelledBy, type Item, type ItemTag } from "../items.js";
 import { conversionCategory } from "../method-categories.js";
 import { propertyStep, type CoreProgram } from "../program.js";
-import { defaultOf, typeAtPath, typeKinds, writtenOf } from "./terms.js";
+import { defaultOf, typeTags, writtenOf } from "./terms.js";
 
 // A typed parse's or load's default read by its written type (ADR 0021 rule 2.6, "its default's type"; #1072 step 0):
 // the rule (`writtenDefault`) and the index of program facts it reads. A variable with a written type gives that type,
@@ -12,6 +12,15 @@ import { defaultOf, typeAtPath, typeKinds, writtenOf } from "./terms.js";
 
 /** What a value is to the rule: the written type at a read of a written binding, a literal with parts, or nothing. */
 type Start = { readonly term: TypeTerm } | { readonly literal: PlaceId } | null;
+
+/**
+ * A written type's kinds at one path into it, as `typeAtPath` then `typeKinds` give them: `null` where the path leaves
+ * the written type or reaches another place's type. Its paths one step longer by their step.
+ */
+interface KindsAt {
+  readonly kinds: readonly ItemTag[] | null;
+  readonly below: ReadonlyMap<string, KindsAt>;
+}
 
 /** A literal's cells at one step: their written types, each once, and the literals among them, each once. */
 interface Cells {
@@ -28,6 +37,8 @@ interface Cells {
  */
 export class WrittenDefaults {
   readonly #starts = new Map<PlaceId, Start>();
+  /** Each written type a start gives, by its kinds at every path into it (`kindsOf`). */
+  readonly #kinds = new Map<TypeTerm, KindsAt>();
   /** Per literal, its cells by step; `null` where a cell gives nothing. */
   readonly #cells = new Map<PlaceId, Map<string, Cells | null>>();
 
@@ -96,6 +107,7 @@ export class WrittenDefaults {
       met.add(binding);
       const written = writtenOf(program.place(binding).kind);
       if (written !== null) {
+        if (!this.#kinds.has(written)) this.#kinds.set(written, kindsOf(program, written));
         start = { term: written };
         break;
       }
@@ -132,6 +144,71 @@ export class WrittenDefaults {
   public cells(literal: PlaceId, step: string): Cells | null {
     return this.#cells.get(literal)?.get(step) ?? null;
   }
+
+  /** The kinds of a written type a start gave, at `rest` from its step `from` on (`KindsAt`). */
+  public kindsAt(term: TypeTerm, rest: readonly string[], from: number): readonly ItemTag[] | null {
+    let at = this.#kinds.get(term);
+    if (at === undefined)
+      throw new Error("A written default's type was read before the index held its kinds.");
+    for (let index = from; index < rest.length && at !== undefined; index += 1)
+      at = at.below.get(rest[index]!);
+    return at?.kinds ?? null;
+  }
+}
+
+/**
+ * A written type's kinds at every path into it, as `typeAtStep` reads them: a union taken apart into its members in
+ * written order, whose terms one step on are the next path's; a step one member lacks drops that member, and a step to
+ * another place's type (`ref`) leaves every path through it without kinds. Each term of the type is at one path, so it
+ * is entered once, charged `indexSteps` where the index is built (#2403 review r1: a demand that took a wide union
+ * apart again for each call grew with width times calls, uncharged). A worklist: a deep type recurses nowhere.
+ */
+function kindsOf(program: CoreProgram, term: TypeTerm): KindsAt {
+  type Node = { kinds: readonly ItemTag[] | null; below: Map<string, KindsAt> };
+  const root: Node = { kinds: null, below: new Map() };
+  const pending: {
+    readonly node: Node;
+    readonly parts: readonly TypeTerm[];
+    readonly ref: boolean;
+  }[] = [{ node: root, parts: [term], ref: false }];
+  for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
+    if (next.ref) continue;
+    // (the parts with their unions taken apart, in written order)
+    const terms: TypeTerm[] = [];
+    const open = [...next.parts].reverse();
+    for (let part = open.pop(); part !== undefined; part = open.pop()) {
+      program.work.charge("indexSteps");
+      if (part.kind === "union")
+        for (let at = part.members.length - 1; at >= 0; at -= 1) open.push(part.members[at]!);
+      else terms.push(part);
+    }
+    if (terms.length === 0) continue;
+    next.node.kinds = [...new Set(terms.flatMap(typeTags))];
+    const steps = new Map<string, { parts: TypeTerm[]; ref: boolean }>();
+    const add = (step: string, below: TypeTerm): void => {
+      const at = steps.get(step) ?? { parts: [], ref: false };
+      if (below.kind === "ref") at.ref = true;
+      else at.parts.push(below);
+      steps.set(step, at);
+    };
+    for (const at of terms)
+      if (at.kind === "list" || at.kind === "set" || at.kind === "dict") add("element", at.element);
+      else if (at.kind === "object" && at.properties !== null) {
+        // (a property's first entry only, as `typeAtStep` finds it)
+        const seen = new Set<string>();
+        for (const property of at.properties) {
+          const step = propertyStep(property.name);
+          if (!seen.has(step)) add(step, property.type);
+          seen.add(step);
+        }
+      }
+    for (const [step, { parts, ref }] of steps) {
+      const node: Node = { kinds: null, below: new Map() };
+      next.node.below.set(step, node);
+      pending.push({ node, parts, ref });
+    }
+  }
+  return root;
 }
 
 /** The steps of a literal's own type to its cells: a collection's `element`, an object's properties. */
@@ -169,10 +246,8 @@ export function writtenDefault(
   const met: { kinds: readonly ItemTag[] | null } = { kinds: null };
   const meet = (term: TypeTerm, level: number): boolean => {
     program.work.charge("invSteps");
-    const at = typeAtPath(term, rest, level);
-    if (at === null || !("term" in at)) return false;
-    const own = typeKinds(at.term);
-    if (own.includes("unknown")) return false;
+    const own = writtenDefaults.kindsAt(term, rest, level);
+    if (own === null || own.includes("unknown")) return false;
     const kinds = met.kinds;
     if (kinds !== null && (own.length !== kinds.length || own.some((tag, i) => tag !== kinds[i])))
       return false;
