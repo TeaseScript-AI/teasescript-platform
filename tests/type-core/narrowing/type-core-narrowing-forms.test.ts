@@ -450,194 +450,188 @@ test("a narrowing's refined location is its stable path's text; a computed path,
   );
 });
 
-test("a collection test defines its element steps; a negative one none (N1)", () => {
-  const rows = ["let rows: integer?[][] = [[1], [null]]"];
-  const xs = ["let xs: integer?[] = [1, null]", "let i = 0"];
-  check(
+const rows = ["let rows: integer?[][] = [[1], [null]]"];
+const xs = ["let xs: integer?[] = [1, null]", "let i = 0"];
+
+const ELEMENT_STEPS: readonly Case[] = [
+  [
+    "the tested row",
+    [...rows, "if rows[0] is integer[] { repeat rows[0][0] {}\n repeat rows[1][0] {} }"],
+    "repeat rows[0][0]",
+    7,
+    "is integer element: holds",
+  ],
+  [
+    "another row",
+    [...rows, "if rows[0] is integer[] { repeat rows[0][0] {}\n repeat rows[1][0] {} }"],
+    "repeat rows[1][0]",
+    7,
+    "none",
+  ],
+  [
+    "a variable index",
+    [...xs, "if xs is integer[] { repeat xs[i] {} }"],
+    "repeat xs[i]",
+    7,
+    "is integer element: holds",
+  ],
+  [
+    "a selection",
+    [...xs, "if xs is integer[] { repeat xs.first {} }"],
+    "repeat xs.first",
+    7,
+    "is integer element: holds",
+  ],
+  [
+    "the root's two steps",
     [
-      [
-        "the tested row",
-        [...rows, "if rows[0] is integer[] { repeat rows[0][0] {}\n repeat rows[1][0] {} }"],
-        "repeat rows[0][0]",
-        7,
-        "is integer element: holds",
-      ],
-      [
-        "another row",
-        [...rows, "if rows[0] is integer[] { repeat rows[0][0] {}\n repeat rows[1][0] {} }"],
-        "repeat rows[1][0]",
-        7,
-        "none",
-      ],
-      [
-        "a variable index",
-        [...xs, "if xs is integer[] { repeat xs[i] {} }"],
-        "repeat xs[i]",
-        7,
-        "is integer element: holds",
-      ],
-      [
-        "a selection",
-        [...xs, "if xs is integer[] { repeat xs.first {} }"],
-        "repeat xs.first",
-        7,
-        "is integer element: holds",
-      ],
-      [
-        "the root's two steps",
-        [
-          "let grid: integer?[][] = [[1]]",
-          "let i = 0",
-          "if grid is integer[][] { repeat grid[i][0] {} }",
-        ],
-        "repeat grid[i][0]",
-        7,
-        "is integer element: holds",
-      ],
-      // a computed or random step under a fixed or variable step or a selection reads the root's element fact (#1245)
-      [
-        "a computed row, then a fixed column",
-        [...rows, "let i = 0", "if rows is integer[][] { repeat rows[i + 1][0] {} }"],
-        "repeat rows[i",
-        7,
-        "is integer element: holds",
-      ],
-      [
-        "a computed row, then a variable column",
-        [...rows, "let i = 0", "if rows is integer[][] { repeat rows[i + 1][i] {} }"],
-        "repeat rows[i",
-        7,
-        "is integer element: holds",
-      ],
-      [
-        "a random row, then a fixed column",
-        [...rows, "if rows is integer[][] { repeat rows.random[0] {} }"],
-        "repeat rows.random",
-        7,
-        "is integer element: holds",
-      ],
-      [
-        "a computed row, then a selection",
-        [...rows, "let i = 0", "if rows is integer[][] { repeat rows[i + 1].last {} }"],
-        "repeat rows[i",
-        7,
-        "is integer element: holds",
-      ],
-      [
-        "below a property",
-        [
-          "let box = {rows: [[1], [null]]}",
-          "let i = 0",
-          "if box.rows is integer[][] { repeat box.rows[i + 1][0] {} }",
-        ],
-        "repeat box.rows[i",
-        7,
-        "is integer element: holds",
-      ],
-      [
-        "a computed key, then a fixed key",
-        [
-          'let d: integer? dict dict = dict {"a": dict {"b": 1}}',
-          'let k = "a"',
-          'if d is integer dict dict { repeat d[k + ""]["b"] {} }',
-        ],
-        "repeat d[k",
-        7,
-        "is integer element: holds",
-      ],
-      [
-        "a computed row beside a tested row",
-        [...rows, "let i = 0", "if rows[0] is integer[] { repeat rows[i + 1][0] {} }"],
-        "repeat rows[i",
-        7,
-        "none",
-      ],
-      [
-        "negative",
-        [
-          ...xs,
-          'if xs is not integer[] { say "x" } else { say 1 }',
-          "if xs is not integer[] { repeat xs[0] {} }",
-        ],
-        "repeat xs[0]",
-        7,
-        "none",
-      ],
-      [
-        "a negative test keeps the list",
-        [...xs, "if xs is not integer[] { say xs }"],
-        "say xs",
-        4,
-        "is-not: holds",
-      ],
-      [
-        "it removes `null` only",
-        [...xs, "if xs is not integer[]? { say xs }"],
-        "say xs",
-        4,
-        "is-not null: holds",
-      ],
-      [
-        "the complement arm",
-        [...xs, "if xs is not integer[] { say 1 } else { repeat xs[0] {} }"],
-        "repeat xs[0]",
-        7,
-        "is integer element: holds",
-      ],
-      [
-        "`not` of a negative test",
-        [...xs, "if not (xs is not integer[]) { repeat xs[0] {} }"],
-        "repeat xs[0]",
-        7,
-        "is integer element: holds",
-      ],
-      [
-        "after a leaving negative test",
-        [...xs, "if xs is not integer[] { exit }", "repeat xs[0] {}"],
-        "repeat xs[0]",
-        7,
-        "is integer element: holds",
-      ],
-      [
-        "the read's own test beside its collection's, at one entry: the more specific",
-        [
-          'let xs = load("xs", default: [])',
-          "if xs is number[] and xs[0] is integer { say xs[0] }",
-        ],
-        "say xs[0]",
-        4,
-        "is integer: holds",
-      ],
-      [
-        "the same, the tests reversed",
-        [
-          'let xs = load("xs", default: [])',
-          "if xs[0] is integer and xs is number[] { say xs[0] }",
-        ],
-        "say xs[0]",
-        4,
-        "is integer: holds",
-      ],
-      [
-        "an element scope beside a wider one, at one entry",
-        [
-          'let xs = load("xs", default: [])',
-          "if xs is number[][] and xs[0] is integer[] { say xs[0][0] }",
-        ],
-        "say xs[0][0]",
-        4,
-        "is integer element: holds",
-      ],
-      [
-        "an element step's collection reordered (N2)",
-        [...xs, "if xs is integer[] { xs.reverse()\n repeat xs[0] {} }"],
-        "repeat xs[0]",
-        7,
-        "is integer element: member",
-      ],
+      "let grid: integer?[][] = [[1]]",
+      "let i = 0",
+      "if grid is integer[][] { repeat grid[i][0] {} }",
     ],
-    at,
-  );
+    "repeat grid[i][0]",
+    7,
+    "is integer element: holds",
+  ],
+  // a computed or random step under a fixed or variable step or a selection reads the root's element fact (#1245)
+  [
+    "a computed row, then a fixed column",
+    [...rows, "let i = 0", "if rows is integer[][] { repeat rows[i + 1][0] {} }"],
+    "repeat rows[i",
+    7,
+    "is integer element: holds",
+  ],
+  [
+    "a computed row, then a variable column",
+    [...rows, "let i = 0", "if rows is integer[][] { repeat rows[i + 1][i] {} }"],
+    "repeat rows[i",
+    7,
+    "is integer element: holds",
+  ],
+  [
+    "a random row, then a fixed column",
+    [...rows, "if rows is integer[][] { repeat rows.random[0] {} }"],
+    "repeat rows.random",
+    7,
+    "is integer element: holds",
+  ],
+  [
+    "a computed row, then a selection",
+    [...rows, "let i = 0", "if rows is integer[][] { repeat rows[i + 1].last {} }"],
+    "repeat rows[i",
+    7,
+    "is integer element: holds",
+  ],
+  [
+    "below a property",
+    [
+      "let box = {rows: [[1], [null]]}",
+      "let i = 0",
+      "if box.rows is integer[][] { repeat box.rows[i + 1][0] {} }",
+    ],
+    "repeat box.rows[i",
+    7,
+    "is integer element: holds",
+  ],
+  [
+    "a computed key, then a fixed key",
+    [
+      'let d: integer? dict dict = dict {"a": dict {"b": 1}}',
+      'let k = "a"',
+      'if d is integer dict dict { repeat d[k + ""]["b"] {} }',
+    ],
+    "repeat d[k",
+    7,
+    "is integer element: holds",
+  ],
+  [
+    "a computed row beside a tested row",
+    [...rows, "let i = 0", "if rows[0] is integer[] { repeat rows[i + 1][0] {} }"],
+    "repeat rows[i",
+    7,
+    "none",
+  ],
+  [
+    "negative",
+    [
+      ...xs,
+      'if xs is not integer[] { say "x" } else { say 1 }',
+      "if xs is not integer[] { repeat xs[0] {} }",
+    ],
+    "repeat xs[0]",
+    7,
+    "none",
+  ],
+  [
+    "a negative test keeps the list",
+    [...xs, "if xs is not integer[] { say xs }"],
+    "say xs",
+    4,
+    "is-not: holds",
+  ],
+  [
+    "it removes `null` only",
+    [...xs, "if xs is not integer[]? { say xs }"],
+    "say xs",
+    4,
+    "is-not null: holds",
+  ],
+  [
+    "the complement arm",
+    [...xs, "if xs is not integer[] { say 1 } else { repeat xs[0] {} }"],
+    "repeat xs[0]",
+    7,
+    "is integer element: holds",
+  ],
+  [
+    "`not` of a negative test",
+    [...xs, "if not (xs is not integer[]) { repeat xs[0] {} }"],
+    "repeat xs[0]",
+    7,
+    "is integer element: holds",
+  ],
+  [
+    "after a leaving negative test",
+    [...xs, "if xs is not integer[] { exit }", "repeat xs[0] {}"],
+    "repeat xs[0]",
+    7,
+    "is integer element: holds",
+  ],
+  [
+    "the read's own test beside its collection's, at one entry: the more specific",
+    ['let xs = load("xs", default: [])', "if xs is number[] and xs[0] is integer { say xs[0] }"],
+    "say xs[0]",
+    4,
+    "is integer: holds",
+  ],
+  [
+    "the same, the tests reversed",
+    ['let xs = load("xs", default: [])', "if xs[0] is integer and xs is number[] { say xs[0] }"],
+    "say xs[0]",
+    4,
+    "is integer: holds",
+  ],
+  [
+    "an element scope beside a wider one, at one entry",
+    [
+      'let xs = load("xs", default: [])',
+      "if xs is number[][] and xs[0] is integer[] { say xs[0][0] }",
+    ],
+    "say xs[0][0]",
+    4,
+    "is integer element: holds",
+  ],
+  [
+    "an element step's collection reordered (N2)",
+    [...xs, "if xs is integer[] { xs.reverse()\n repeat xs[0] {} }"],
+    "repeat xs[0]",
+    7,
+    "is integer element: member",
+  ],
+];
+
+test("a collection test defines its element steps; a negative one none (N1)", () => {
+  check(ELEMENT_STEPS, at);
 });
 
 test("G's value is its input filtered by its form (N1)", () => {

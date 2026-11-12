@@ -10,13 +10,14 @@ import { derive, evaluate, syntaxOf } from "../../helpers/type-core-derived.js";
 import { runGlobals } from "../../helpers/type-core-route.js";
 import { candidate, inBothOrders } from "../../helpers/type-core/type-core-candidate-setup.js";
 
+// (functions are outside the candidate's slice: the core's analysis answers)
+const errs = (source: string): boolean => {
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
+  assert.ok(request !== null, source);
+  return analyseCore(request).diagnostics.some((d) => d.class === "compile-error");
+};
+
 test("the route rule's error stands where a run can bring the null unchecked, and a check the compiler cannot keep warns (AD-1, #1073 PR 4)", () => {
-  // (functions are outside the candidate's slice: the core's analysis answers)
-  const errs = (source: string): boolean => {
-    const request = coreRequest([{ path: "main.tease", source }], ["hostValue"]);
-    assert.ok(request !== null, source);
-    return analyseCore(request).diagnostics.some((d) => d.class === "compile-error");
-  };
   for (const [source, error] of [
     // (a loop's exit tests out the null: a check the compiler cannot keep, the warning; the other polarity is the error,
     // the fixture's `forms/while-false-exit`; Codex r1 F1 on #1937)
@@ -287,27 +288,328 @@ test("the tested-producer rule admits its closed set of forms over every axis, a
   assert.equal(covered.size, expected);
 });
 
+// (Sol's F2 on #1937, the lead's default (Codex r6, r7), narrowed by #1938: the expected outcome from
+// the rule's own table, never the engine's. A writer of a possible null; an `if` whose one arm overwrites the key; its
+// test of `other` gives an arm no run enters where `other` holds no kind that arm's entry narrowing keeps. The route
+// past the `if` takes the arm without the overwrite: the use errs where a run enters that arm, and keeps the warning
+// where none does. Unknown forms count as runs)
+const FEASIBILITY = {
+  // (`other` may be an object, null or text: every arm of every form is entered on some run)
+  feasible:
+    'let other = {k: 1}\nif askBoolean("o") { other = null }\nif askBoolean("p") { other = "s" }\n',
+  // (`other` is an object on every run)
+  "infeasible by entry narrowing": "let other = {k: 1}\n",
+  // (a comparison, not N1's form: the guard proves nothing, and the arm counts as a run, #1938's residual)
+  unknown: "let other = {k: 1}\n",
+} as const;
+// (each form: whether its truth, and its falsity, leaves an object no kind)
+const FORMS: readonly (readonly [string, boolean, boolean])[] = [
+  ["other != null", false, true],
+  ["other == null", true, false],
+  ["other is string", true, false],
+];
+
+// (the default's siblings, each the warning: a whole copy, nesting, `else if`, a loop's body, a second callable, a
+// callable reached through another; and a program whose arms are all entered keeps the error)
+const writer = 'let c = askBoolean "c"\nlet n = 1\nif c { n = null }\nlet other = {k: 1}\n';
+const SIBLINGS: readonly (readonly [string, string, boolean])[] = [
+  [
+    "a whole copy",
+    "let t:integer?=null\nlet root={n:t,nest:{n:t,keep:1},spare:t}\nlet other={n:8,nest:{n:8,keep:1},spare:1}\n" +
+      "let a=root\nif other != null { a=other }\nlet b=a\nrepeat b.n {}\nexit\n",
+    false,
+  ],
+  [
+    "a nested if",
+    `${writer}if other != null { if other != null { n = 1 } }\nrepeat n {}\nexit\n`,
+    false,
+  ],
+  [
+    "an else if",
+    `${writer}if askBoolean("e") { n = 1 } else if other != null { n = 1 }\nrepeat n {}\nexit\n`,
+    false,
+  ],
+  ["a loop's body", `${writer}repeat 2 { if other != null { n = 1 } }\nrepeat n {}\nexit\n`, false],
+  [
+    "a second callable",
+    "function g {\n  let o = {k: 1}\n  let r = null\n  if o != null { r = 1 }\n  return r\n}\nlet n = g()\nrepeat n {}\nexit\n",
+    false,
+  ],
+  // (Codex r7: a callable whose result or default reaches the use through another callable)
+  [
+    "two callees",
+    "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nfunction h { return g() }\nrepeat h() {}\nexit\n",
+    false,
+  ],
+  [
+    "two callees through a store",
+    "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nfunction h { return g() }\nlet n=h()\nrepeat n {}\nexit\n",
+    false,
+  ],
+  [
+    "two callees through a fallback",
+    "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nfunction h { return null otherwise g() }\nrepeat h() {}\nexit\n",
+    false,
+  ],
+  [
+    "a field copied from a callee",
+    "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nlet a={n:g()}\nlet b=a\nrepeat b.n {}\nexit\n",
+    false,
+  ],
+  [
+    "a default through two callees",
+    "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nfunction h { return g() }\nfunction f(n=h()) { repeat n {} }\nf()\nf(1)\nexit\n",
+    false,
+  ],
+  [
+    "a second callable whose arms are entered",
+    'function g {\n  if askBoolean("g") { return null }\n  return 1\n}\nlet n = g()\nrepeat n {}\nexit\n',
+    true,
+  ],
+];
+
+// (the unavailable axis, Sol's final F1 on #1937 and the lead's ruling: a tested read whose answer is missing blocks
+// promotion, at a demand allowance that stops its decision and at the natural one; external data's answer does not)
+const realRoute = "let n = 1\nif hostValue is boolean { n = null }\n";
+const UNAVAILABLE: readonly (readonly [string, string, number | null, boolean])[] = [
+  [
+    "a stopped tested read",
+    "function g { let o = {k: 1}\nlet r = null\nif o != null { r = 1 }\nreturn r }\nfunction h { return g() }\nrepeat h() {}\nexit\n",
+    64,
+    false,
+  ],
+  [
+    "a stopped tested read, natural allowance",
+    "function g { let o = {k: 1}\nlet r = null\nif o != null { r = 1 }\nreturn r }\nfunction h { return g() }\nrepeat h() {}\nexit\n",
+    null,
+    false,
+  ],
+  [
+    "a tested read admission has no items for (#2009)",
+    `${realRoute}let box = {first: {k: 1}}\nif box.first != null { say "y" }\nrepeat n {}\nexit\n`,
+    null,
+    false,
+  ],
+  [
+    "a tested read with an empty answer (Codex r9)",
+    `${realRoute}let xs = []\nlet q = xs[0].k\nif q != null { say "y" }\nrepeat n {}\nexit\n`,
+    null,
+    false,
+  ],
+  [
+    "a tested read of external data, the control",
+    `${realRoute}if hostValue != null { say "y" }\nrepeat n {}\nexit\n`,
+    null,
+    true,
+  ],
+];
+
+// (the default narrowed (#1938 and its design round): beside an arm no run enters, only a certificate its
+// own value proves promotes, through arms runs enter and loops they leave. The round's sources, each the warning where
+// no run reaches the use with null, and the under-offers the narrowing releases, each the error)
+const gate = "let n=1\nif hostValue is boolean { n=null }\n";
+const merged = "let a = null\nlet other = { k: 1 }\nif other != null { a = 1 }\n";
+const pasted = (save: string) =>
+  'let keyA = "alpha"\nlet keyB = "beta"\nlet raw = 1\nraw = load(keyA, default: null)\n' +
+  'if askBoolean("Second ingress?") { raw = load(keyB, default: null) }\n' +
+  'if askBoolean("Opaque source?") { let value = player.firstName\nif value is integer { raw = value } }\n' +
+  `${save}repeat raw {}\nexit\n`;
+const NARROWED: readonly (readonly [string, string, boolean])[] = [
+  [
+    "an inline fallback whose left side is merged",
+    `${merged}repeat (a otherwise null) {}\nexit\n`,
+    false,
+  ],
+  [
+    "an inline fallback of a copy",
+    `${merged}let b = a\nrepeat (b otherwise null) {}\nexit\n`,
+    false,
+  ],
+  [
+    "an inline fallback behind a nested overwrite",
+    "let a = null\nlet other = { k: 1 }\nif other != null { if other != null { a = 1 } }\n" +
+      "repeat (a otherwise null) {}\nexit\n",
+    false,
+  ],
+  [
+    "a lookup's default where the element exists",
+    'let data = [1]\nlet other = { k: 1 }\nif other != null { say "ok" }\nrepeat data.get(0, default: null) {}\nexit\n',
+    false,
+  ],
+  [
+    "a stored fallback whose left side is merged",
+    `${merged}let n = a otherwise null\nrepeat n {}\nexit\n`,
+    false,
+  ],
+  [
+    "a loop only an infeasible break leaves",
+    `${gate}let other = {k: 1}\nwhile true { if other == null { break } }\nrepeat n {}\nexit\n`,
+    false,
+  ],
+  [
+    "an unrelated guard before the use",
+    `${gate}let o={k:1}\nif o != null { say "guard" }\nrepeat n {}\nexit\n`,
+    true,
+  ],
+  [
+    "an unrelated guard after the use",
+    `${gate}repeat n {}\nlet o={k:1}\nif o != null { say "guard" }\nexit\n`,
+    true,
+  ],
+  [
+    "a loop whose header no run leaves",
+    `${gate}let o = {k: 1}\nif o != null { say "guard" }\nwhile o != null {}\nrepeat n {}\nexit\n`,
+    false,
+  ],
+  [
+    "a loop whose header a run leaves, beside an arm no run enters (the claim's residual)",
+    `${gate}let o = {k: 1}\nif o != null { say "guard" }\nwhile hostValue != null { say "w" }\nrepeat n {}\nexit\n`,
+    false,
+  ],
+  ...[
+    "while o != null or p != null {}",
+    "while o != null and p != null {}",
+    "while not (o == null and p == null) {}",
+  ].map((loop): readonly [string, string, boolean] => [
+    `a compound header no run leaves: ${loop}`,
+    `${gate}let o = {k: 1}\nif o != null { say "guard" }\nlet p = {k: 2}\n${loop}\nrepeat n {}\nexit\n`,
+    false,
+  ]),
+  [
+    "an inline load after a loop no run leaves",
+    'let declared: integer? = load("k", default: 1)\nlet o = {k: 1}\nif o != null { say "guard" }\n' +
+      'while o != null {}\nrepeat load("k", default: null) {}\nexit\n',
+    false,
+  ],
+  [
+    "a stored writer after a loop no run leaves",
+    'let o = {k: 1}\nif o != null { say "guard" }\nwhile o != null {}\n' +
+      "let n=1\nif hostValue is boolean { n=null }\nrepeat n {}\nexit\n",
+    false,
+  ],
+  [
+    "a function whose only call is in an arm no run enters",
+    "let o = {k: 1}\nfunction f { let n = 1\nif hostValue is boolean { n = null }\nrepeat n {} }\n" +
+      "if o == null { f() }\nexit\n",
+    false,
+  ],
+  [
+    "a label between the writer and the use",
+    `${gate}let o = {k: 1}\nif o != null { say "guard" }\nlabel again\nrepeat n {}\nexit\n`,
+    false,
+  ],
+  [
+    "a goto past the use",
+    `${gate}let o = {k: 1}\nif o == null { goto skip }\nrepeat n {}\nlabel skip\nexit\n`,
+    false,
+  ],
+  [
+    "a backward goto around the use",
+    `${gate}let o = {k: 1}\nlabel top\nif o != null { say "guard" }\nrepeat n {}\nif o == null { goto top }\nexit\n`,
+    false,
+  ],
+  [
+    "a call in the condition of the arm holding the use",
+    `${gate}function stop {\n  let box = {k: 1}\n  if box != null { exit }\n  return true\n}\nif stop() { repeat n {} }\nexit\n`,
+    false,
+  ],
+  [
+    "a handler declared in the condition of the arm holding the use",
+    `${gate}let o = {k: 1}\nif o != null { say "guard" }\nif (timer async 1 ms { exit }) != null {\nwait 2 ms\nrepeat n {}\n}\nexit\n`,
+    false,
+  ],
+  [
+    "a call in the subject of the switch holding the use",
+    `${gate}let o = {k: 1}\nif o != null { say "guard" }\nfunction pick {\n  let box = {k: 1}\n  if box != null { exit }\n  return 1\n}\nswitch pick() { case 2 { say "two" } default { repeat n {} } }\nexit\n`,
+    false,
+  ],
+  [
+    "a call in the condition of the arm holding the writer",
+    'let n=1\nlet o = {k: 1}\nif o != null { say "guard" }\nfunction stop {\n  let box = {k: 1}\n  if box != null { exit }\n  return true\n}\nif stop() { n=null }\nrepeat n {}\nexit\n',
+    false,
+  ],
+  [
+    "a conditional exit before the use",
+    `${gate}let o = {k: 1}\nif o != null { say "guard" }\nif askBoolean("q") { exit }\nrepeat n {}\nexit\n`,
+    false,
+  ],
+  [
+    "a timer declared before the use",
+    `${gate}let o = {k: 1}\nif o != null { say "guard" }\ntimer async 1 ms { exit }\nwait 2 ms\nrepeat n {}\nexit\n`,
+    false,
+  ],
+  [
+    "a writer in a loop whose header no run leaves",
+    'let n=1\nlet o = {k: 1}\nif o != null { say "guard" }\nwhile o != null { if hostValue is boolean { n=null } }\nrepeat n {}\nexit\n',
+    false,
+  ],
+  [
+    "a use in a loop body no run enters",
+    `${gate}let o = {k: 1}\nif o != null { say "guard" }\nwhile o == null { repeat n {} }\nexit\n`,
+    false,
+  ],
+  [
+    "a use in an arm no run enters",
+    `${gate}let o = {k: 1}\nif o == null { repeat n {} }\nexit\n`,
+    false,
+  ],
+  [
+    "a writer in an arm no run enters",
+    "let n=1\nlet o = {k: 1}\nif o == null { n=null }\nrepeat n {}\nexit\n",
+    false,
+  ],
+  [
+    "a scalar copy of a literal's witness",
+    `${gate}let o = {k: 1}\nif o != null { say "guard" }\nlet m = n\nrepeat m {}\nexit\n`,
+    true,
+  ],
+  [
+    "a stored fallback whose left side's own null reaches it",
+    'let a = null\nif hostValue is boolean { a = 1 }\nlet o = {k: 1}\nif o != null { say "guard" }\n' +
+      "let m = a otherwise null\nrepeat m {}\nexit\n",
+    true,
+  ],
+  [
+    "an inline load in an arm no run enters",
+    'let declared: integer? = load("k", default: 1)\nlet o = {k: 1}\nif o != null { say "guard" }\n' +
+      'if o == null { repeat load("k", default: null) {} }\nexit\n',
+    false,
+  ],
+  [
+    "an inline load in an unavailable arm",
+    'let box = {first: {k: 1}}\nif box.first != null { repeat load("k", default: null) {} }\nexit\n',
+    false,
+  ],
+  [
+    "an inline load in an entered arm",
+    'let declared: integer? = load("k", default: 1)\nlet o = {k: 1}\nif o != null { say "guard" }\n' +
+      'if o != null { repeat load("k", default: null) {} }\nexit\n',
+    true,
+  ],
+  ["a load's literal default beside an unavailable arm", pasted(""), true],
+  [
+    "a load's literal default where the program saves its key",
+    pasted('if askBoolean("Keep?") { save 2 as "beta" }\n'),
+    false,
+  ],
+  [
+    "a load's literal default where a function saves its key",
+    pasted('function keep { save 2 as "beta" }\nif askBoolean("Keep?") { keep() }\n'),
+    false,
+  ],
+  [
+    "a load's literal default where a timer saves its key",
+    pasted('timer async 1 s { save 2 as "beta" }\n'),
+    false,
+  ],
+  [
+    "a load's literal default where the program saves under a computed key",
+    pasted('let which = "be" + "ta"\nif askBoolean("Keep?") { save 2 as which }\n'),
+    false,
+  ],
+];
+
 test("a route through an arm its entry narrowing leaves no kind does not promote, and a route around it does (AD-1, #1938)", () => {
-  // (Sol's F2 on #1937, the lead's default (Codex r6, r7), narrowed by #1938: the expected outcome from
-  // the rule's own table, never the engine's. A writer of a possible null; an `if` whose one arm overwrites the key; its
-  // test of `other` gives an arm no run enters where `other` holds no kind that arm's entry narrowing keeps. The route
-  // past the `if` takes the arm without the overwrite: the use errs where a run enters that arm, and keeps the warning
-  // where none does. Unknown forms count as runs)
-  const FEASIBILITY = {
-    // (`other` may be an object, null or text: every arm of every form is entered on some run)
-    feasible:
-      'let other = {k: 1}\nif askBoolean("o") { other = null }\nif askBoolean("p") { other = "s" }\n',
-    // (`other` is an object on every run)
-    "infeasible by entry narrowing": "let other = {k: 1}\n",
-    // (a comparison, not N1's form: the guard proves nothing, and the arm counts as a run, #1938's residual)
-    unknown: "let other = {k: 1}\n",
-  } as const;
-  // (each form: whether its truth, and its falsity, leaves an object no kind)
-  const FORMS: readonly (readonly [string, boolean, boolean])[] = [
-    ["other != null", false, true],
-    ["other == null", true, false],
-    ["other is string", true, false],
-  ];
   const covered = new Set<string>();
   const wrong: string[] = [];
   for (const [feasibility, declare] of Object.entries(FEASIBILITY))
@@ -346,68 +648,6 @@ test("a route through an arm its entry narrowing leaves no kind does not promote
             wrong.push(`${routeArmDead ? "warning" : "error"} expected: ${source}`);
           covered.add([feasibility, test, negated, killIn].join(" | "));
         }
-  // (the default's siblings, each the warning: a whole copy, nesting, `else if`, a loop's body, a second callable, a
-  // callable reached through another; and a program whose arms are all entered keeps the error)
-  const writer = 'let c = askBoolean "c"\nlet n = 1\nif c { n = null }\nlet other = {k: 1}\n';
-  const SIBLINGS: readonly (readonly [string, string, boolean])[] = [
-    [
-      "a whole copy",
-      "let t:integer?=null\nlet root={n:t,nest:{n:t,keep:1},spare:t}\nlet other={n:8,nest:{n:8,keep:1},spare:1}\n" +
-        "let a=root\nif other != null { a=other }\nlet b=a\nrepeat b.n {}\nexit\n",
-      false,
-    ],
-    [
-      "a nested if",
-      `${writer}if other != null { if other != null { n = 1 } }\nrepeat n {}\nexit\n`,
-      false,
-    ],
-    [
-      "an else if",
-      `${writer}if askBoolean("e") { n = 1 } else if other != null { n = 1 }\nrepeat n {}\nexit\n`,
-      false,
-    ],
-    [
-      "a loop's body",
-      `${writer}repeat 2 { if other != null { n = 1 } }\nrepeat n {}\nexit\n`,
-      false,
-    ],
-    [
-      "a second callable",
-      "function g {\n  let o = {k: 1}\n  let r = null\n  if o != null { r = 1 }\n  return r\n}\nlet n = g()\nrepeat n {}\nexit\n",
-      false,
-    ],
-    // (Codex r7: a callable whose result or default reaches the use through another callable)
-    [
-      "two callees",
-      "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nfunction h { return g() }\nrepeat h() {}\nexit\n",
-      false,
-    ],
-    [
-      "two callees through a store",
-      "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nfunction h { return g() }\nlet n=h()\nrepeat n {}\nexit\n",
-      false,
-    ],
-    [
-      "two callees through a fallback",
-      "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nfunction h { return null otherwise g() }\nrepeat h() {}\nexit\n",
-      false,
-    ],
-    [
-      "a field copied from a callee",
-      "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nlet a={n:g()}\nlet b=a\nrepeat b.n {}\nexit\n",
-      false,
-    ],
-    [
-      "a default through two callees",
-      "function g {\n let other = {k:1}\n let r = null\n if other != null { r = 1 }\n return r\n}\nfunction h { return g() }\nfunction f(n=h()) { repeat n {} }\nf()\nf(1)\nexit\n",
-      false,
-    ],
-    [
-      "a second callable whose arms are entered",
-      'function g {\n  if askBoolean("g") { return null }\n  return 1\n}\nlet n = g()\nrepeat n {}\nexit\n',
-      true,
-    ],
-  ];
   for (const [name, source, expected] of SIBLINGS) {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
@@ -422,41 +662,6 @@ test("a route through an arm its entry narrowing leaves no kind does not promote
       wrong.push(`${expected ? "error" : "warning"} expected (${name}): ${source}`);
     covered.add(`sibling | ${name}`);
   }
-  // (the unavailable axis, Sol's final F1 on #1937 and the lead's ruling: a tested read whose answer is missing blocks
-  // promotion, at a demand allowance that stops its decision and at the natural one; external data's answer does not)
-  const realRoute = "let n = 1\nif hostValue is boolean { n = null }\n";
-  const UNAVAILABLE: readonly (readonly [string, string, number | null, boolean])[] = [
-    [
-      "a stopped tested read",
-      "function g { let o = {k: 1}\nlet r = null\nif o != null { r = 1 }\nreturn r }\nfunction h { return g() }\nrepeat h() {}\nexit\n",
-      64,
-      false,
-    ],
-    [
-      "a stopped tested read, natural allowance",
-      "function g { let o = {k: 1}\nlet r = null\nif o != null { r = 1 }\nreturn r }\nfunction h { return g() }\nrepeat h() {}\nexit\n",
-      null,
-      false,
-    ],
-    [
-      "a tested read admission has no items for (#2009)",
-      `${realRoute}let box = {first: {k: 1}}\nif box.first != null { say "y" }\nrepeat n {}\nexit\n`,
-      null,
-      false,
-    ],
-    [
-      "a tested read with an empty answer (Codex r9)",
-      `${realRoute}let xs = []\nlet q = xs[0].k\nif q != null { say "y" }\nrepeat n {}\nexit\n`,
-      null,
-      false,
-    ],
-    [
-      "a tested read of external data, the control",
-      `${realRoute}if hostValue != null { say "y" }\nrepeat n {}\nexit\n`,
-      null,
-      true,
-    ],
-  ];
   for (const [name, source, allowance, expected] of UNAVAILABLE) {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
@@ -472,210 +677,6 @@ test("a route through an arm its entry narrowing leaves no kind does not promote
       wrong.push(`${expected ? "error" : "warning"} expected (${name}): ${source}`);
     covered.add(`unavailable | ${name}`);
   }
-  // (the default narrowed (#1938 and its design round): beside an arm no run enters, only a certificate its
-  // own value proves promotes, through arms runs enter and loops they leave. The round's sources, each the warning where
-  // no run reaches the use with null, and the under-offers the narrowing releases, each the error)
-  const gate = "let n=1\nif hostValue is boolean { n=null }\n";
-  const merged = "let a = null\nlet other = { k: 1 }\nif other != null { a = 1 }\n";
-  const pasted = (save: string) =>
-    'let keyA = "alpha"\nlet keyB = "beta"\nlet raw = 1\nraw = load(keyA, default: null)\n' +
-    'if askBoolean("Second ingress?") { raw = load(keyB, default: null) }\n' +
-    'if askBoolean("Opaque source?") { let value = player.firstName\nif value is integer { raw = value } }\n' +
-    `${save}repeat raw {}\nexit\n`;
-  const NARROWED: readonly (readonly [string, string, boolean])[] = [
-    [
-      "an inline fallback whose left side is merged",
-      `${merged}repeat (a otherwise null) {}\nexit\n`,
-      false,
-    ],
-    [
-      "an inline fallback of a copy",
-      `${merged}let b = a\nrepeat (b otherwise null) {}\nexit\n`,
-      false,
-    ],
-    [
-      "an inline fallback behind a nested overwrite",
-      "let a = null\nlet other = { k: 1 }\nif other != null { if other != null { a = 1 } }\n" +
-        "repeat (a otherwise null) {}\nexit\n",
-      false,
-    ],
-    [
-      "a lookup's default where the element exists",
-      'let data = [1]\nlet other = { k: 1 }\nif other != null { say "ok" }\nrepeat data.get(0, default: null) {}\nexit\n',
-      false,
-    ],
-    [
-      "a stored fallback whose left side is merged",
-      `${merged}let n = a otherwise null\nrepeat n {}\nexit\n`,
-      false,
-    ],
-    [
-      "a loop only an infeasible break leaves",
-      `${gate}let other = {k: 1}\nwhile true { if other == null { break } }\nrepeat n {}\nexit\n`,
-      false,
-    ],
-    [
-      "an unrelated guard before the use",
-      `${gate}let o={k:1}\nif o != null { say "guard" }\nrepeat n {}\nexit\n`,
-      true,
-    ],
-    [
-      "an unrelated guard after the use",
-      `${gate}repeat n {}\nlet o={k:1}\nif o != null { say "guard" }\nexit\n`,
-      true,
-    ],
-    [
-      "a loop whose header no run leaves",
-      `${gate}let o = {k: 1}\nif o != null { say "guard" }\nwhile o != null {}\nrepeat n {}\nexit\n`,
-      false,
-    ],
-    [
-      "a loop whose header a run leaves, beside an arm no run enters (the claim's residual)",
-      `${gate}let o = {k: 1}\nif o != null { say "guard" }\nwhile hostValue != null { say "w" }\nrepeat n {}\nexit\n`,
-      false,
-    ],
-    ...[
-      "while o != null or p != null {}",
-      "while o != null and p != null {}",
-      "while not (o == null and p == null) {}",
-    ].map((loop): readonly [string, string, boolean] => [
-      `a compound header no run leaves: ${loop}`,
-      `${gate}let o = {k: 1}\nif o != null { say "guard" }\nlet p = {k: 2}\n${loop}\nrepeat n {}\nexit\n`,
-      false,
-    ]),
-    [
-      "an inline load after a loop no run leaves",
-      'let declared: integer? = load("k", default: 1)\nlet o = {k: 1}\nif o != null { say "guard" }\n' +
-        'while o != null {}\nrepeat load("k", default: null) {}\nexit\n',
-      false,
-    ],
-    [
-      "a stored writer after a loop no run leaves",
-      'let o = {k: 1}\nif o != null { say "guard" }\nwhile o != null {}\n' +
-        "let n=1\nif hostValue is boolean { n=null }\nrepeat n {}\nexit\n",
-      false,
-    ],
-    [
-      "a function whose only call is in an arm no run enters",
-      "let o = {k: 1}\nfunction f { let n = 1\nif hostValue is boolean { n = null }\nrepeat n {} }\n" +
-        "if o == null { f() }\nexit\n",
-      false,
-    ],
-    [
-      "a label between the writer and the use",
-      `${gate}let o = {k: 1}\nif o != null { say "guard" }\nlabel again\nrepeat n {}\nexit\n`,
-      false,
-    ],
-    [
-      "a goto past the use",
-      `${gate}let o = {k: 1}\nif o == null { goto skip }\nrepeat n {}\nlabel skip\nexit\n`,
-      false,
-    ],
-    [
-      "a backward goto around the use",
-      `${gate}let o = {k: 1}\nlabel top\nif o != null { say "guard" }\nrepeat n {}\nif o == null { goto top }\nexit\n`,
-      false,
-    ],
-    [
-      "a call in the condition of the arm holding the use",
-      `${gate}function stop {\n  let box = {k: 1}\n  if box != null { exit }\n  return true\n}\nif stop() { repeat n {} }\nexit\n`,
-      false,
-    ],
-    [
-      "a handler declared in the condition of the arm holding the use",
-      `${gate}let o = {k: 1}\nif o != null { say "guard" }\nif (timer async 1 ms { exit }) != null {\nwait 2 ms\nrepeat n {}\n}\nexit\n`,
-      false,
-    ],
-    [
-      "a call in the subject of the switch holding the use",
-      `${gate}let o = {k: 1}\nif o != null { say "guard" }\nfunction pick {\n  let box = {k: 1}\n  if box != null { exit }\n  return 1\n}\nswitch pick() { case 2 { say "two" } default { repeat n {} } }\nexit\n`,
-      false,
-    ],
-    [
-      "a call in the condition of the arm holding the writer",
-      'let n=1\nlet o = {k: 1}\nif o != null { say "guard" }\nfunction stop {\n  let box = {k: 1}\n  if box != null { exit }\n  return true\n}\nif stop() { n=null }\nrepeat n {}\nexit\n',
-      false,
-    ],
-    [
-      "a conditional exit before the use",
-      `${gate}let o = {k: 1}\nif o != null { say "guard" }\nif askBoolean("q") { exit }\nrepeat n {}\nexit\n`,
-      false,
-    ],
-    [
-      "a timer declared before the use",
-      `${gate}let o = {k: 1}\nif o != null { say "guard" }\ntimer async 1 ms { exit }\nwait 2 ms\nrepeat n {}\nexit\n`,
-      false,
-    ],
-    [
-      "a writer in a loop whose header no run leaves",
-      'let n=1\nlet o = {k: 1}\nif o != null { say "guard" }\nwhile o != null { if hostValue is boolean { n=null } }\nrepeat n {}\nexit\n',
-      false,
-    ],
-    [
-      "a use in a loop body no run enters",
-      `${gate}let o = {k: 1}\nif o != null { say "guard" }\nwhile o == null { repeat n {} }\nexit\n`,
-      false,
-    ],
-    [
-      "a use in an arm no run enters",
-      `${gate}let o = {k: 1}\nif o == null { repeat n {} }\nexit\n`,
-      false,
-    ],
-    [
-      "a writer in an arm no run enters",
-      "let n=1\nlet o = {k: 1}\nif o == null { n=null }\nrepeat n {}\nexit\n",
-      false,
-    ],
-    [
-      "a scalar copy of a literal's witness",
-      `${gate}let o = {k: 1}\nif o != null { say "guard" }\nlet m = n\nrepeat m {}\nexit\n`,
-      true,
-    ],
-    [
-      "a stored fallback whose left side's own null reaches it",
-      'let a = null\nif hostValue is boolean { a = 1 }\nlet o = {k: 1}\nif o != null { say "guard" }\n' +
-        "let m = a otherwise null\nrepeat m {}\nexit\n",
-      true,
-    ],
-    [
-      "an inline load in an arm no run enters",
-      'let declared: integer? = load("k", default: 1)\nlet o = {k: 1}\nif o != null { say "guard" }\n' +
-        'if o == null { repeat load("k", default: null) {} }\nexit\n',
-      false,
-    ],
-    [
-      "an inline load in an unavailable arm",
-      'let box = {first: {k: 1}}\nif box.first != null { repeat load("k", default: null) {} }\nexit\n',
-      false,
-    ],
-    [
-      "an inline load in an entered arm",
-      'let declared: integer? = load("k", default: 1)\nlet o = {k: 1}\nif o != null { say "guard" }\n' +
-        'if o != null { repeat load("k", default: null) {} }\nexit\n',
-      true,
-    ],
-    ["a load's literal default beside an unavailable arm", pasted(""), true],
-    [
-      "a load's literal default where the program saves its key",
-      pasted('if askBoolean("Keep?") { save 2 as "beta" }\n'),
-      false,
-    ],
-    [
-      "a load's literal default where a function saves its key",
-      pasted('function keep { save 2 as "beta" }\nif askBoolean("Keep?") { keep() }\n'),
-      false,
-    ],
-    [
-      "a load's literal default where a timer saves its key",
-      pasted('timer async 1 s { save 2 as "beta" }\n'),
-      false,
-    ],
-    [
-      "a load's literal default where the program saves under a computed key",
-      pasted('let which = "be" + "ta"\nif askBoolean("Keep?") { save 2 as which }\n'),
-      false,
-    ],
-  ];
   for (const [name, source, expected] of NARROWED) {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);

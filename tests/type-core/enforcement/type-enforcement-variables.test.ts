@@ -209,6 +209,9 @@ test("a fix writes another type where the place declares its type, and the code 
     ),
     [],
   );
+});
+
+test("a place with no declaration to change, a property, a loop variable, a dict's computed list or a media handle, gets a fix without one, and a property given a typed first value takes both types", () => {
   // A property has no written type (V30 §15, §37), so its first value gives it one. A loop variable, a property that a
   // dict computes (V30 §40), whose change is also lost with the copy (owner decision O3), and a media block's own handle
   // have no declaration to change.
