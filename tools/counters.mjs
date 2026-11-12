@@ -15,13 +15,19 @@
 //   nothing, and a `src` block's file counts as a file of its own. A lint disable is a comment whose text after `//`
 //   or `/*` and any spaces begins with the word `oxlint-disable` or `eslint-disable`, bare or with `-line` or
 //   `-next-line`. A `@ts-` directive is one whose text after `//`, `///` or `/*`, any further `*`, and any spaces
-//   begins with `@ts-expect-error` or `@ts-ignore`. Each comment counts once.
+//   begins with `@ts-expect-error` or `@ts-ignore`. Each comment counts once. The `@ts-` directives are also counted
+//   apart in tests and outside tests: a file is in tests when its path begins `tests/` or its name contains `.test.`.
 // - Skipped and todo tests are node:test sites, in three forms: a call `test.skip(…)` (or `it`, `describe`, `suite`);
 //   a `skip` property whose value is not `false` in an object literal passed to a call of one of those four names or a
 //   member of one, such as `test.only`; and `X.skip(…)` where TypeScript's binder resolves the name X to a test's
 //   context: the first parameter of a function passed to such a call as its last argument. So a closer binding of the
 //   same name hides the context, as it does when the code runs, and a name with no declaration is no context. Todo is
-//   the same with `todo`. Not counted: an aliased import of `test`, and a context's subtests.
+//   the same with `todo`. Not counted: an aliased import of `test`, and a context's subtests. Each skip is also counted
+//   as on a condition or without one. On a condition: a `skip` option whose value, parentheses removed, is a `?:`, a
+//   call, a `!` or a comparison or logical operation (`===` `!==` `==` `!=` `<` `>` `<=` `>=` `&&` `||` `??` `in`
+//   `instanceof`), as `skip: process.platform === "win32"`; and `X.skip(…)` lying, below its nearest enclosing
+//   function, in a branch of an `if` or a `?:`, or the right operand of `&&`, `||` or `??`. Every other skip,
+//   `test.skip(…)` among them, is counted as without a condition: a test that never runs.
 // - The lists count their entries: the `files` of each `.oxlintrc.json` override that is a waiting list (docs/LINTING.md
 //   "Waiting lists", by tools/oxlint/check-waiting-overrides.mjs's `isWaitingEntry`), the items of
 //   tools/oxlint/comment-forecasts-allowed.json, comment-declarations-waiting.json and comment-external-names.json
@@ -35,10 +41,10 @@
 //   above the function limit over all long functions, and the files above the folder limit over all broad folders; 0
 //   when the list is empty, so a file shrinking from 2,000 to 1,500 lines lowers its sum by 500. As in the count, a
 //   function over the limit inside another is a row of its own, so its lines count in its own excess and again in its
-//   holder's.
+//   holder's. The long functions' count and sum are also given in tests and outside tests, by the `@ts-` rule above.
 //
 // --json prints {root, commit, counters, sites}: `commit` is ROOT's HEAD (null before the first commit), `counters`
-// the values above, and `sites` the `file:line` of every directive and test site.
+// the values above, and `sites` the `file:line` of every directive and test site, the skips also in their two lists.
 // Exit status: 0 when printed, 2 when it cannot run: ROOT is no checkout's top folder, a list file is not JSON of the
 // shape named above, or structure-report fails. On SIGINT or SIGTERM it stops
 // structure-report, removes its temporary folder and exits 130 or 143.
@@ -56,6 +62,25 @@ const CODE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs|vue)$/u;
 const LINT_DISABLE = /^(?:\/\/|\/\*)\s*(?:oxlint|eslint)-disable(?:-next-line|-line)?(?![\w-])/u;
 const TS_DIRECTIVE = /^(?:\/\/\/?|\/\*\**)\s*@ts-(?:expect-error|ignore)/u;
 const TEST_NAMES = new Set(["test", "it", "describe", "suite"]);
+const IN_TESTS = /^tests\/|\.test\.[^/]*$/u;
+const LOGICAL = new Set([
+  ts.SyntaxKind.AmpersandAmpersandToken,
+  ts.SyntaxKind.BarBarToken,
+  ts.SyntaxKind.QuestionQuestionToken,
+]);
+const COMPARISONS = new Set([
+  ...LOGICAL,
+  ts.SyntaxKind.EqualsEqualsEqualsToken,
+  ts.SyntaxKind.ExclamationEqualsEqualsToken,
+  ts.SyntaxKind.EqualsEqualsToken,
+  ts.SyntaxKind.ExclamationEqualsToken,
+  ts.SyntaxKind.LessThanToken,
+  ts.SyntaxKind.GreaterThanToken,
+  ts.SyntaxKind.LessThanEqualsToken,
+  ts.SyntaxKind.GreaterThanEqualsToken,
+  ts.SyntaxKind.InKeyword,
+  ts.SyntaxKind.InstanceOfKeyword,
+]);
 const LISTS = {
   forecastsAllowed: "tools/oxlint/comment-forecasts-allowed.json",
   declarationsWaiting: "tools/oxlint/comment-declarations-waiting.json",
@@ -123,7 +148,35 @@ function isTestContext(declaration) {
   );
 }
 
-/** The skip-or-todo kinds of a test call's options: each `skip` or `todo` property whose value is not `false`. */
+/** Whether a `skip` option's value is a condition: a `?:`, a call, a `!`, or a comparison or logical operation. */
+function isCondition(value) {
+  const v = ts.skipParentheses(value);
+  return (
+    ts.isConditionalExpression(v) ||
+    ts.isCallExpression(v) ||
+    (ts.isPrefixUnaryExpression(v) && v.operator === ts.SyntaxKind.ExclamationToken) ||
+    (ts.isBinaryExpression(v) && COMPARISONS.has(v.operatorToken.kind))
+  );
+}
+
+/** Whether a call lies below its nearest function in a branch of an `if` or `?:`, or right of `&&`, `||` or `??`. */
+function isBranched(call) {
+  for (let node = call; !ts.isFunctionLike(node.parent) && !ts.isSourceFile(node.parent);) {
+    const parent = node.parent;
+    if (ts.isIfStatement(parent) && parent.expression !== node) return true;
+    if (ts.isConditionalExpression(parent) && parent.condition !== node) return true;
+    if (
+      ts.isBinaryExpression(parent) &&
+      parent.right === node &&
+      LOGICAL.has(parent.operatorToken.kind)
+    )
+      return true;
+    node = parent;
+  }
+  return false;
+}
+
+/** The skip-or-todo options of a test call, as [kind, on a condition]: each `skip` or `todo` property not `false`. */
 function optionKinds(call) {
   const kinds = [];
   for (const argument of call.arguments) {
@@ -139,7 +192,7 @@ function optionKinds(call) {
         property.initializer.kind === ts.SyntaxKind.FalseKeyword
       )
         continue;
-      kinds.push(name);
+      kinds.push([name, ts.isPropertyAssignment(property) && isCondition(property.initializer)]);
     }
   }
   return kinds;
@@ -162,7 +215,7 @@ function checkerOf(source) {
   return ts.createProgram({ rootNames: [source.fileName], options, host }).getTypeChecker();
 }
 
-/** The skip and todo sites of a parsed file, each as [kind, the position of its call]. */
+/** The skip and todo sites of a parsed file, each as [kind, the position of its call, whether on a condition]. */
 function testSites(source) {
   const sites = [];
   const receivers = []; // [kind, call, name] of each `X.skip(…)` or `X.todo(…)` whose X may be a context
@@ -171,11 +224,13 @@ function testSites(source) {
       const callee = node.expression;
       const kind = ts.isPropertyAccessExpression(callee) ? callee.name.text : null;
       if ((kind === "skip" || kind === "todo") && ts.isIdentifier(callee.expression)) {
-        if (TEST_NAMES.has(callee.expression.text)) sites.push([kind, node.getStart(source)]);
+        if (TEST_NAMES.has(callee.expression.text))
+          sites.push([kind, node.getStart(source), false]);
         else receivers.push([kind, node, callee.expression]);
       }
       if (isTestCall(node))
-        for (const option of optionKinds(node)) sites.push([option, node.getStart(source)]);
+        for (const [option, conditional] of optionKinds(node))
+          sites.push([option, node.getStart(source), conditional]);
     }
     ts.forEachChild(node, visit);
   };
@@ -184,7 +239,7 @@ function testSites(source) {
     const checker = checkerOf(source);
     for (const [kind, call, name] of receivers)
       if (isTestContext(checker.getSymbolAtLocation(name)?.valueDeclaration))
-        sites.push([kind, call.getStart(source)]);
+        sites.push([kind, call.getStart(source), isBranched(call)]);
   }
   return sites.sort((a, b) => a[1] - b[1]);
 }
@@ -211,7 +266,14 @@ function directivesAndTests(root) {
   if (listed.status !== 0)
     throw new CannotRun(`git ls-files failed in ${root}: ${listed.stderr.trim()}`);
   const files = listed.stdout.split("\0").filter((f) => CODE.test(f));
-  const sites = { lintDisables: [], tsDirectives: [], skippedTests: [], todoTests: [] };
+  const sites = {
+    lintDisables: [],
+    tsDirectives: [],
+    skippedTests: [],
+    todoTests: [],
+    skippedTestsUnconditional: [],
+    skippedTestsConditional: [],
+  };
   for (const file of files) {
     const full = path.join(root, file);
     if (!existsSync(full)) continue; // tracked but deleted in the working tree
@@ -223,8 +285,15 @@ function directivesAndTests(root) {
         const kind = directiveOf(piece.text.slice(range.pos, range.end));
         if (kind) sites[kind].push(at(range.pos));
       }
-      for (const [kind, pos] of testSites(source))
-        sites[kind === "skip" ? "skippedTests" : "todoTests"].push(at(pos));
+      for (const [kind, pos, conditional] of testSites(source)) {
+        if (kind === "todo") sites.todoTests.push(at(pos));
+        else {
+          sites.skippedTests.push(at(pos));
+          sites[conditional ? "skippedTestsConditional" : "skippedTestsUnconditional"].push(
+            at(pos),
+          );
+        }
+      }
     }
   }
   return sites;
@@ -315,6 +384,8 @@ async function structure(root) {
     const largest = r.largeFiles[0];
     const longest = r.longFunctions[0];
     const excess = (rows, field, limit) => rows.reduce((sum, row) => sum + row[field] - limit, 0);
+    const inTests = r.longFunctions.filter((row) => IN_TESTS.test(row.file));
+    const outside = r.longFunctions.filter((row) => !IN_TESTS.test(row.file));
     return {
       signals: r.signals,
       counters: {
@@ -328,6 +399,10 @@ async function structure(root) {
         largeFilesExcessLines: excess(r.largeFiles, "lines", r.signals.fileLines),
         broadFoldersExcessFiles: excess(r.broadFolders, "files", r.signals.folderFiles),
         longFunctionsExcessLines: excess(r.longFunctions, "lines", r.signals.functionLines),
+        longFunctionsOutsideTests: outside.length,
+        longFunctionsOutsideTestsExcessLines: excess(outside, "lines", r.signals.functionLines),
+        longFunctionsInTests: inTests.length,
+        longFunctionsInTestsExcessLines: excess(inTests, "lines", r.signals.functionLines),
       },
     };
   } finally {
@@ -355,8 +430,11 @@ async function main(argv) {
   const sites = directivesAndTests(root);
   const listCounts = lists(root);
   const { signals, counters: structureCounts } = await structure(root);
+  const tsInTests = sites.tsDirectives.filter((s) => IN_TESTS.test(s.slice(0, s.lastIndexOf(":"))));
   const counters = {
     ...Object.fromEntries(Object.entries(sites).map(([key, list]) => [key, list.length])),
+    tsDirectivesOutsideTests: sites.tsDirectives.length - tsInTests.length,
+    tsDirectivesInTests: tsInTests.length,
     ...listCounts,
     ...structureCounts,
   };
@@ -369,7 +447,11 @@ async function main(argv) {
   console.log(`Counters of ${root} at ${commit ?? "no commit"}`);
   console.log(`Lint disables: ${c.lintDisables}`);
   console.log(`@ts-expect-error and @ts-ignore: ${c.tsDirectives}`);
+  console.log(`@ts- directives outside tests: ${c.tsDirectivesOutsideTests}`);
+  console.log(`@ts- directives in tests: ${c.tsDirectivesInTests}`);
   console.log(`Skipped tests: ${c.skippedTests}`);
+  console.log(`Skipped tests without a condition: ${c.skippedTestsUnconditional}`);
+  console.log(`Skipped tests on a condition: ${c.skippedTestsConditional}`);
   console.log(`Todo tests: ${c.todoTests}`);
   console.log(`.oxlintrc.json waiting-list files: ${value(c.oxlintOverrideFiles)}`);
   console.log(`Comment forecasts allowed: ${value(c.forecastsAllowed)}`);
@@ -389,6 +471,17 @@ async function main(argv) {
   console.log(
     `Lines above ${signals.functionLines}, summed over those functions: ${c.longFunctionsExcessLines}`,
   );
+  for (const [where, key] of [
+    ["outside tests", "OutsideTests"],
+    ["in tests", "InTests"],
+  ]) {
+    console.log(
+      `Functions over ${signals.functionLines} lines ${where}: ${c[`longFunctions${key}`]}`,
+    );
+    console.log(
+      `Lines above ${signals.functionLines}, summed over those ${where}: ${c[`longFunctions${key}ExcessLines`]}`,
+    );
+  }
   const { largestFile: f, longestFunction: fn } = c;
   console.log(
     `Largest file: ${f ? `${f.lines} lines, ${f.file}` : `none over ${signals.fileLines} lines`}`,
