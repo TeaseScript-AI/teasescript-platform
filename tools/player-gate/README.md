@@ -43,6 +43,7 @@ says beside the label what that claims.
   - `<cell> / cross-clock`: the signed differences between the page's clock and the Worker's, its sign kept.
 
   A section's failure fails the cells whose fields read it, and no other.
+
 - **A measured failure is a value** (`cells.mjs`): a pass/fail scenario's failing run is its result, with its finding.
 
 The validation is of the records. It does not prove that a derivation pairs the right records or computes the right
@@ -57,6 +58,7 @@ Pass or fail is derived from primary records, never from a cached flag:
 
 - the smoke's pass comes from its exit status;
 - the demo's pass comes from its errors and turns;
+- the keys' pass comes from each case's outcome against its expected one and its errors;
 - a keep trial's outcome comes from its lifecycle and transactions;
 - a byte request's phase comes from its start against the cold page's mark, not its cached phase flag;
 - a cached flag that disagrees with its records is a problem.
@@ -75,7 +77,14 @@ Pass or fail is derived from primary records, never from a cached flag:
     and the Pixel;
   - `bridge`;
   - the hidden-page keep: `keepHandler` on the desktop, `keepCompletion` and `keepDurable` on the Pixel;
-  - `demo`.
+  - `demo`;
+  - `keys`: keys pressed right after Enter on a `delayed` build, while the answer is in flight (#2430), on
+    `/player/?dev` and the `answer-flight` fixture package. Each case expects the outcome the composer's rules give
+    (`scenarios/keys.mjs`): nothing typed in flight is lost, and Enter, Send and Space in an empty composer act on no
+    other question while the answer is pending. It runs on the `delayed` variant at 250 ms (**The keys** below); a build whose answers settle at once is no oracle,
+    since a key can land after the answer settled and then belongs to the next question. A block case moves the page's
+    clock past its block's timer just before Enter, so the block always overtakes the answer, and fails by that name
+    if it does not.
 - **`validate.mjs`** derives every field again from a row's validated records, scenario by scenario and part by part,
   and checks each value against its unit's domain.
 - **`report.mjs`** prints the cost report: `node tools/player-gate/report.mjs --phase r0|r1 --artifacts FILE
@@ -110,6 +119,8 @@ Each step runs through the queue; nothing runs on the LXC except the Pixel, whic
   `localabstract:chrome_devtools_remote`, then runs `drive.mjs --engine pixel` for each phone scenario.
 - **The delayed smoke.** The delayed smoke job builds the `delayed` variant at 0, 50 and 250 ms into the checkout and
   runs `tools/player-browser-smoke.mjs` unchanged.
+- **The keys.** The keys job builds the `delayed` variant at 250 ms and runs `drive.mjs --scenario keys` in each
+  desktop engine, with `--packages tests/fixtures/packages`.
 - **The report.** Run `artifacts.mjs` on the tree's `dist/player-app`, then `report.mjs --phase r0` over every
   engine's rows. The R0 evidence is kept with its scripts under `~/work/evidence/l5-gate/r0-<head>/`.
 

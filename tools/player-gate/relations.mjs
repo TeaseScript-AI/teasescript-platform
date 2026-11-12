@@ -250,6 +250,13 @@ export const RELATIONS = [
     "the recorded ok (false) is not its records' (true)",
   ],
   [
+    "keys: the cached pass against its cases",
+    "keys chromium",
+    (r) => (r.result.cases[0].after.value = ""),
+    ["counts", "timing"],
+    "the recorded ok (true) is not its records' (false)",
+  ],
+  [
     "smoke: the cached pass against the exit (R6)",
     "delayedSmoke chromium",
     (r) => (r.result.exit = 1),

@@ -282,6 +282,32 @@ const keepResult = () => ({
 
 const row = (scenario, options, result) => ({ ...header(scenario, options), result });
 
+/** A `keys` sample: one case that ends as on `main`, and one residual case that differs, recorded only. */
+function keysResult() {
+  const shown = (value, notice) => ({ value, notice, entries: 2, dialog: "", pages: 0 });
+  return {
+    ok: true,
+    cases: [
+      {
+        name: "completed key",
+        residual: "",
+        expect: shown("x", ""),
+        after: shown("x", ""),
+        errors: [],
+        error: "",
+      },
+      {
+        name: "refused backspace",
+        residual: "residual 1",
+        expect: shown("Not an optio", ""),
+        after: shown("Not an option", ""),
+        errors: [],
+        error: "",
+      },
+    ],
+  };
+}
+
 /** Every scenario's intact fixtures: each validates complete in every cell that applies. */
 export const BASES = {
   "session chromium main": row("session", {}, sessionResult()),
@@ -348,6 +374,7 @@ export const BASES = {
     { script: "demo" },
     { ok: true, errors: [], turns: 6, failed: false, ended: true },
   ),
+  "keys chromium": row("keys", { script: "answer-flight" }, keysResult()),
   "delayedSmoke chromium": {
     ...row("delayedSmoke", { script: "smoke" }, { ok: true, exit: 0 }),
     delayMs: 0,
@@ -407,6 +434,17 @@ export const VARIANTS = {
       { script: "demo" },
       { ok: false, errors: ["TypeError: x"], turns: 6, failed: false },
     ),
+    failing: [],
+  },
+  "keys with a case that differs from main: a measured failure": {
+    row: (() => {
+      const base = clone(BASES["keys chromium"]);
+      base.ok = false;
+      base.result.ok = false;
+      base.result.cases[0].after.value = "";
+      base.result.cases[1].errors = ["TypeError: x"];
+      return base;
+    })(),
     failing: [],
   },
   "a taps sample with a CDP send error": {
