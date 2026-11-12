@@ -165,7 +165,8 @@ function touchElements(
  * element's store, the literal's cell, the path, the earliest element's kinds there (by family, and its own, which a
  * sentence names) and the offending element's (D1). `undecided`, after a stop before admission settled: a literal
  * whose element needs a decision admission did not make (a named element, or one the finishing read leaves `STOPPED`)
- * is not compared; it is reported there instead, so its store marks.
+ * is not compared; it is reported there instead, so its store marks. `stopped`, after admission settled: a literal
+ * whose cell a stop left undecided (R26) is not compared and is reported there.
  */
 export function literalElements(
   admission: Admission,
@@ -185,6 +186,7 @@ export function literalElements(
     },
   ) => void,
   undecided?: (cell: PlaceId) => void,
+  stopped?: (cell: PlaceId) => void,
 ): void {
   const { program, definitions, contract } = admission.pass;
   // a named element: one whose structure holds a source (a copy, a call, what a carrier takes of either)
@@ -422,8 +424,8 @@ export function literalElements(
       for (const path of [[], ...below]) {
         const at = keptText(admission.work, path);
         const items = admission.valueAt(d, path);
-        // (a stop left the element's value unknown: the cell is undecided, R26)
-        const stop = undecided;
+        // (a stop left the element's value unknown: the cell is undecided, R26, and its holder's stores marked)
+        const stop = undecided ?? stopped;
         if (
           stop !== undefined &&
           items.some((item) => item.tag === "unknown" && (item.reasons & REASON.budget) !== 0)
