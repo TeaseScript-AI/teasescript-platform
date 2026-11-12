@@ -31,6 +31,8 @@ const CHARGED_FILES = [
   "src/type-inference/core/narrowing/routes.ts",
   "src/type-inference/core/narrowing/route-tests.ts",
   "src/type-inference/core/narrowing/route-candidates.ts",
+  "src/type-inference/core/narrowing/route-entries.ts",
+  "src/type-inference/core/narrowing/route-holding.ts",
   "src/type-inference/core/narrowing/statement-tree.ts",
 ];
 
@@ -116,6 +118,8 @@ const CHARGING = [
   ...core("type-inference/core/operator-table.ts", ["operationItems"]),
   ...core("type-inference/core/program.ts", [
     "CoreProgram.blockReachable",
+    // (the regions around a node, one `regionWalks` unit each)
+    "CoreProgram.handlerOf",
     "CoreProgram.inBlockCode",
   ]),
   // (a key's read at a node: the value side's charged work, as `valueItems`)
@@ -132,7 +136,13 @@ const STEP = [
   "lib:Number",
   "lib:String.replace",
   "lib:String.startsWith",
-  ...core("expression-children.ts", ["expressionChildren"]),
+  ...core("expression-children.ts", [
+    "expressionChildren",
+    // (a statement's own expressions and an expression's parts, as `expressionChildren`: each taken charged, r4-451's
+    // holding walk)
+    "expressionParts",
+    "statementExpressions",
+  ]),
   ...core("switch-cases.ts", ["caseLiteral"]),
   ...core("type-inference/core/budget.ts", ["joinParts"]),
   ...core("type-inference/core/definitions.ts", ["keyBelow", "keyOf", "keyPath", "keyPlace"]),
