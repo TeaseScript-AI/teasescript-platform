@@ -5,7 +5,6 @@ import type { InteractionAccessibleName, InteractionUiPayload } from "../../plan
 import type { SerializableRuntimeValue } from "../values/serializable-values.js";
 import type { CapturedMediaAdmission } from "./capture.js";
 import type { TemporalContext } from "../../temporal.js";
-import { recordValidationTestWork } from "../../validation-testing.js";
 import type { RuntimeInteractionActionSnapshot } from "./model.js";
 
 /**
@@ -46,9 +45,7 @@ export function resolveInteractionCompletion(
           message:
             "Password completion requires { kind: 'submittedPassword', hash } with the SHA-256 of the typed text as 64 lowercase hexadecimal digits.",
         };
-  return resolveAnswer(action, payload, context, capturedMedia, () =>
-    recordValidationTestWork("interactionUtf8Measurements"),
-  );
+  return resolveAnswer(action, payload, context, capturedMedia);
 }
 
 type ImageInteractionUi = Extract<InteractionUiPayload, { kind: "image" }>;

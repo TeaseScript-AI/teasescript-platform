@@ -30,6 +30,7 @@ import {
   type PresentationSettings,
   type TemporalContext,
 } from "./temporal.js";
+import { recordValidationTestWork } from "./validation-testing.js";
 
 export type ResolvedInteraction =
   | {
@@ -46,20 +47,15 @@ export type ResolvedInteraction =
 
 /**
  * What `payload` answers for `action`. `context` is the player's presentation now, which shows a date or time answer in
- * the transcript. `capturedMedia` vouches for an image answer; without it no image request completes. `measured` is
- * called each time a text is measured against the interaction limit. A password action is not answered here.
+ * the transcript. `capturedMedia` vouches for an image answer; without it no image request completes. A password action
+ * is not answered here.
  */
 export function resolveAnswer(
   action: RuntimeInteractionActionSnapshot,
   payload: Readonly<Record<string, unknown>>,
   context: TemporalContext,
   capturedMedia: CapturedMediaAdmission | undefined,
-  measured?: () => void,
 ): ResolvedInteraction {
-  const fits = (value: string): boolean => {
-    measured?.();
-    return interactionStringFits(value);
-  };
   // A form is submitted with the answers its edits gave it; the payload carries none.
   if (action.ui.kind === "form") {
     if (
@@ -110,7 +106,7 @@ export function resolveAnswer(
     if (
       payload.kind !== "submittedText" ||
       typeof payload.submittedText !== "string" ||
-      !fits(payload.submittedText)
+      !completionStringFits(payload.submittedText)
     ) {
       return {
         ok: false,
@@ -126,7 +122,7 @@ export function resolveAnswer(
     if (
       payload.kind !== "submittedText" ||
       typeof payload.submittedText !== "string" ||
-      !fits(payload.submittedText)
+      !completionStringFits(payload.submittedText)
     )
       return {
         ok: false,
@@ -145,7 +141,7 @@ export function resolveAnswer(
     if (
       payload.kind !== "submittedText" ||
       typeof payload.submittedText !== "string" ||
-      !fits(payload.submittedText)
+      !completionStringFits(payload.submittedText)
     )
       return {
         ok: false,
@@ -164,7 +160,7 @@ export function resolveAnswer(
     if (
       payload.kind !== "submittedText" ||
       typeof payload.submittedText !== "string" ||
-      !fits(payload.submittedText)
+      !completionStringFits(payload.submittedText)
     )
       return {
         ok: false,
@@ -190,7 +186,7 @@ export function resolveAnswer(
         : { ok: false, message: "This image request cannot be skipped, so it needs an image." };
     const reference =
       payload.kind === "image" && Object.keys(payload).length === 2 ? payload.reference : undefined;
-    if (typeof reference !== "string" || reference.length === 0 || !fits(reference))
+    if (typeof reference !== "string" || reference.length === 0 || !completionStringFits(reference))
       return {
         ok: false,
         message: action.ui.allowSkip
@@ -209,7 +205,7 @@ export function resolveAnswer(
   if (
     payload.kind === "submittedText" &&
     typeof payload.submittedText === "string" &&
-    fits(payload.submittedText)
+    completionStringFits(payload.submittedText)
   ) {
     const matches = options.filter((option) => option.text === payload.submittedText);
     if (matches.length !== 1)
@@ -289,4 +285,9 @@ export function routeComposerText(
     return null;
   }
   return { kind: "complete", payload: { kind: "submittedText", submittedText } };
+}
+
+function completionStringFits(value: string): boolean {
+  recordValidationTestWork("interactionUtf8Measurements");
+  return interactionStringFits(value);
 }

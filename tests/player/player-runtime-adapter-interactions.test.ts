@@ -423,6 +423,21 @@ test("a form presents its fields as their answers stand, takes edits, and surviv
   assert.equal(playerRuntimeForm(done.session), null);
 });
 
+test("the composer's text answers a form only as the exact text of one of its buttons", () => {
+  const session = createPlayerRuntimeSession(
+    [
+      'let answers = askForm fields: { go: { value: false, text: "Go" }, rope: { value: false, text: "Rope" } }, submit: "Go"',
+      "exit",
+    ].join("\n"),
+  );
+  // A field and the submit button both read "Go", so it names neither.
+  assert.equal(submitPlayerRuntimeComposer(session, "Go"), null);
+  assert.equal(submitPlayerRuntimeComposer(session, "rope"), null);
+  const stepped = submitPlayerRuntimeComposer(session, "Rope");
+  assert.equal(stepped?.outcome.kind, "updated");
+  assert.equal(playerRuntimeForm(stepped!.session)?.fields[1]?.pressed, true);
+});
+
 test("a toggle with options and a cycle list every text they can show, so a press keeps their width", () => {
   const session = createPlayerRuntimeSession(
     [
