@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { compareSides, controlFailures } from "./split-test-compare.mjs";
+import { compareSides, controlFailures, main } from "./split-test-compare.mjs";
 
 const TOOL = fileURLToPath(new URL("./split-test-compare.mjs", import.meta.url));
 
@@ -60,6 +60,30 @@ function trees(t, head, baseExtra = {}) {
   };
   return { root, run };
 }
+
+test("a comparison that sees nothing makes the run's own controls fail: it cannot judge", (t) => {
+  const { root } = trees(t, SPLIT);
+  const args = [
+    ...["base", "head", "out"].map((name) => join(root, name)),
+    "--old",
+    "tests/old.test.ts",
+    "--new",
+    "tests/split/one.test.ts",
+    "tests/split/two.test.ts",
+  ];
+  const printed = [];
+  assert.equal(
+    main(args, (line) => printed.push(line)),
+    0,
+    printed.join("\n"),
+  );
+  const blind = () => ({ equal: true, lines: ["blind"] });
+  assert.equal(
+    main(args, (line) => printed.push(line), blind),
+    2,
+  );
+  assert.match(printed.join("\n"), /^control: a dropped title compared equal$/mu);
+});
 
 const SPLIT = {
   "split/one.test.js": testFile({ first: true }),

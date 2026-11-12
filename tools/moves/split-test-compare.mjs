@@ -170,8 +170,8 @@ function run(tree, files, out, side) {
   return { titles, counts };
 }
 
-/** Runs the comparison with `argv`; returns the exit status. */
-export function main(argv, print = console.log) {
+/** Runs the comparison with `argv` (`compare` the comparison, replaceable to test its controls); returns the status. */
+export function main(argv, print = console.log, compare = compareSides) {
   try {
     const positional = [];
     const lists = { "--old": [], "--new": [] };
@@ -211,9 +211,9 @@ export function main(argv, print = console.log) {
     if (problems.length === 0) {
       const base = run(baseTree, oldPaths, out, "base");
       const head = run(headTree, newPaths, out, "head");
-      const { equal, lines } = compareSides(base, head);
+      const { equal, lines } = compare(base, head);
       // (the controls guard a verdict of equal: only there can a comparison that sees nothing pass)
-      const controls = equal ? controlFailures(base, head) : [];
+      const controls = equal ? controlFailures(base, head, compare) : [];
       report.push(...lines, ...controls.map((failure) => `control: ${failure}`));
       status = controls.length > 0 ? 2 : equal ? 0 : 1;
     }
