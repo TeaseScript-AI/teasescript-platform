@@ -504,7 +504,7 @@ test("a changed type-core test file that costly-test-files does not list prints 
   assert.deepEqual(
     unknownToCostly([
       "tests/type-core-unlisted.test.ts",
-      "tests/type-core/type-core-cells.test.ts",
+      "tests/type-core/type-core-written.test.ts",
       "tests/unlisted-other.test.ts",
       "tests/helpers/type-core-unlisted.ts",
       "src/type-inference/core/type-core-unlisted.test.ts",
@@ -513,7 +513,7 @@ test("a changed type-core test file that costly-test-files does not list prints 
   );
   for (const file of [
     "tests/type-core-unlisted.test.ts",
-    "tests/type-core/type-core-cells.test.ts",
+    "tests/type-core/type-core-written.test.ts",
   ]) {
     const { directory } = repository({ passing: true });
     try {
