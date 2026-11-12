@@ -1,4 +1,6 @@
 import type { SyntaxKind } from "../../../src/type-inference/core/slice-syntax.js";
+import { CONVERSIONS, isConversion } from "../../../src/conversions.js";
+import type { SerializableRuntimeValue } from "../../../src/runtime/values/serializable-values.js";
 import type { ValueKind } from "../../../src/value-kinds.js";
 
 /*
@@ -149,11 +151,8 @@ export const ROW_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly string[
   ),
 };
 
-/**
- * A written value of each kind (`VALUE_KINDS`) the slice admits: each command operand holds each in turn in place of its
- * host global (`misfitSources`).
- */
-const ADMITTED_VALUES = {
+/** A literal of each kind the slice writes one of: a sample's first origin. */
+const LITERALS: Readonly<Partial<Record<ValueKind, string>>> = {
   integer: "2",
   number: "2.5",
   string: '"text"',
@@ -163,71 +162,148 @@ const ADMITTED_VALUES = {
   range: "1..=2",
   list: "[1]",
   object: "{v: 1}",
-  // (a date or time value only as a conversion's, whose default the slice admits only as a value of unknown kind)
-  date: 'toDate("2027-04-17", default: hostValue)',
-  time: 'toTime("14:30", default: hostValue)',
-  datetime: 'toDateTime("2027-04-17T18:00", default: hostValue)',
-  absoluteDateTime: 'toAbsoluteDateTime("2027-04-17T12:30:00Z", default: hostValue)',
-} as const satisfies Partial<Record<ValueKind, string>>;
-
-type AdmittedKind = keyof typeof ADMITTED_VALUES;
-
-/** The kinds the slice admits a value of. */
-export const ADMITTED_KINDS: readonly AdmittedKind[] =
-  // EVIDENCE: invariant: the record's keys are its kinds (its type).
-  Object.keys(ADMITTED_VALUES) as AdmittedKind[];
-
-/** The kinds the slice admits a value of but `kinds`. */
-function but(...kinds: AdmittedKind[]): AdmittedKind[] {
-  return ADMITTED_KINDS.filter((kind) => !kinds.includes(kind));
-}
+};
 
 /**
- * Each other kind (`VALUE_KINDS`), which the slice admits no value of: only syntax the slice refuses writes one (a unit,
- * a set or dict literal, `script(…)`, a speaker's name, the expressions that give a handle), and no conversion, method,
- * `get`, load or `fromJson` the slice admits gives one (`toSet`, the one list method that gives a set, is a copy the
- * slice refuses; the row guard checks the conversions). Each holds a source with a value of the kind, which the route
- * refuses or publishes no plan for. A new kind does not type-check here until it is placed.
+ * The text each conversion the slice admits (`sliceCall`'s: a value's, not `toString`) converts: a sample's second
+ * origin, `<conversion>(<text>, default: hostValue)`, a value of the conversion's result kind. The declared positions'
+ * test requires one for each such conversion.
  */
-export const REFUSED_KINDS: Readonly<Record<Exclude<ValueKind, AdmittedKind>, string>> = {
-  duration: "let m = 2 s",
-  calendarDuration: "let m = 2 calendar months",
-  angle: "let m = 90 deg",
-  script: 'let m = script("main.tease")',
-  set: "let m = set[1]",
-  dict: "let m = dict{ a: 1 }",
-  speaker: 'speaker guide { displayName: "Guide" }\nlet m = guide',
-  timer: "let m = timer async 1 s",
-  media: 'let m = playAudio async "a.mp3"',
-  camera: "let m = showCamera",
-  permanentButton: 'let m = showPermanentButton "Hint" {\n  say "a"\n}',
-  messageHandle: 'let m = say "a"',
+export const CONVERSION_INPUTS: Readonly<Record<string, string>> = {
+  toNumber: '"2.5"',
+  toInteger: '"8"',
+  toBoolean: '"true"',
+  toDate: '"2027-04-17"',
+  toTime: '"14:30"',
+  toDateTime: '"2027-04-17T18:00"',
+  toAbsoluteDateTime: '"2027-04-17T12:30:00Z"',
+};
+
+/** The kinds no host value can be (`HOSTLESS_VALUES`). */
+type HostlessKind = "speaker" | "timer" | "media" | "messageHandle" | "camera" | "permanentButton";
+
+/**
+ * A host value of each other kind (`VALUE_KINDS`): a sample's third origin, a typed ingress of the host global
+ * (`let m: <kind> = hostValue`) whose runs take that value too. A new kind does not type-check here until it is placed.
+ */
+export const HOST_VALUES: Readonly<
+  Record<Exclude<ValueKind, HostlessKind>, SerializableRuntimeValue>
+> = {
+  integer: 2,
+  number: 2.5,
+  string: "text",
+  boolean: true,
+  null: null,
+  duration: { kind: "duration", milliseconds: 2000 },
+  calendarDuration: { kind: "calendarDuration", months: 1, days: 0, milliseconds: 0 },
+  angle: { kind: "angle", degrees: 90 },
+  date: { kind: "date", year: 2027, month: 4, day: 17 },
+  time: { kind: "time", hour: 14, minute: 30, second: 0, millisecond: 0 },
+  datetime: {
+    kind: "datetime",
+    year: 2027,
+    month: 4,
+    day: 17,
+    hour: 14,
+    minute: 30,
+    second: 0,
+    millisecond: 0,
+  },
+  absoluteDateTime: { kind: "absoluteDateTime", epochMilliseconds: 1807000000000 },
+  script: { kind: "script", path: "main.tease" },
+  regex: { kind: "regex", source: "a", flags: "" },
+  range: { kind: "range", start: 1, end: 2, inclusive: true },
+  list: { kind: "list", items: [1] },
+  set: { kind: "set", items: [1] },
+  dict: { kind: "dict", entries: [{ key: "n", value: 1 }] },
+  object: { kind: "object", properties: [{ name: "v", value: 1 }] },
+};
+
+/**
+ * A value of each kind no host value can be: a speaker reference and a timer, media or message handle, which only the
+ * runtime creates, and a camera view and a permanent button, which have no written type either. The declared positions'
+ * test requires the host to refuse each.
+ */
+export const HOSTLESS_VALUES: Readonly<Record<HostlessKind, SerializableRuntimeValue>> = {
+  speaker: { kind: "speakerReference", speakerId: 0, identifier: "guide" },
+  timer: { kind: "timerHandle", timerId: 1 },
+  media: { kind: "mediaHandle", mediaId: 1 },
+  messageHandle: { kind: "messageHandle", messageId: 1 },
+  camera: { kind: "cameraView" },
+  permanentButton: { kind: "permanentButtonHandle", buttonId: 1 },
 };
 
 /** A command operand's first template with `value` in place of the host global. */
-const misfitSource = (row: SyntaxKind, operand: string, value: string): string =>
+const commandWith = (row: SyntaxKind, operand: string, value: string): string =>
   OPERAND_TEMPLATES[row]![operand]![0]!.replace("hostValue", value);
 
-/**
- * Each command operand's first template with a value of each kind the slice admits in place of the host global: the
- * sources on which today's compile-time operand checks may differ from the route's (`DECLARED_RULE_DIFFERENCES`).
- */
-export function misfitSources(): { row: SyntaxKind; operand: string; source: string }[] {
+/** A value of one kind, from one origin, in one command operand position (the lead's R14). */
+export interface Sample {
+  readonly row: SyntaxKind;
+  readonly operand: string;
+  readonly kind: string;
+  readonly origin: "literal" | "conversion" | "ingress";
+  /** What stands before the command: the typed ingress, or nothing. */
+  readonly prelude: string;
+  /** The operand's value as the command writes it. */
+  readonly value: string;
+  /** The command holding it. */
+  readonly command: string;
+  /** The host value its runs take besides `DOMAIN`'s: the ingress's kind. */
+  readonly host?: SerializableRuntimeValue;
+}
+
+/** Every sample: each command operand position (`OPERAND_TEMPLATES`) with each kind from each origin. */
+export function samples(): Sample[] {
+  const values = [
+    ...Object.entries(LITERALS).map(([kind, value]) => ({
+      kind,
+      origin: "literal" as const,
+      prelude: "",
+      value: value!,
+    })),
+    ...Object.entries(CONVERSION_INPUTS).map(([name, text]) => ({
+      kind: isConversion(name) ? CONVERSIONS[name].result : name,
+      origin: "conversion" as const,
+      prelude: "",
+      value: `${name}(${text}, default: hostValue)`,
+    })),
+    ...Object.entries(HOST_VALUES).map(([kind, host]) => ({
+      kind,
+      origin: "ingress" as const,
+      prelude: `let m: ${kind} = hostValue\n`,
+      value: "m",
+      host,
+    })),
+  ];
   return Object.entries(OPERAND_TEMPLATES).flatMap(([key, operands]) => {
     // EVIDENCE: invariant: the templates' keys are AST kinds (`OPERAND_TEMPLATES`' type).
     const row = key as SyntaxKind;
     return Object.keys(operands!).flatMap((operand) =>
-      Object.values(ADMITTED_VALUES).map((value) => ({
+      values.map((value) => ({
         row,
         operand,
-        source: misfitSource(row, operand, value),
+        ...value,
+        command: commandWith(row, operand, value.value),
       })),
     );
   });
 }
 
+/** A `say`'s value of a kind it shows only by S9b's rules, written in place: the route refuses it after the analysis. */
+const SAY_REFUSED: ReadonlySet<string> = new Set([
+  "regex",
+  "range",
+  "list",
+  "object",
+  "date",
+  "time",
+  "datetime",
+  "absoluteDateTime",
+]);
+
 /**
- * The positions of open rows whose host global, or misfit (`misfitSources`), the route refuses after the syntax gate, by
+ * The positions of open rows whose host global, or sample (`samples`), the route refuses after the syntax gate, by
  * name: that source, which must be refused with `text` in every mode, and the same position with a value the slice
  * admits, which must pass the guard's three rules. `gate` names the refusal's place; the record carries only `text`,
  * which only that gate writes. A refusal not listed fails the guard, and so does a listed one that no longer occurs.
@@ -258,17 +334,23 @@ export const DECLARED_REFUSALS: readonly {
     gate: "outsideAnswers (src/type-inference/core/backend.ts)",
     text: "this operand",
   },
-  // (a `say`'s value of a kind it shows only by S9b's rules, the misfit sources')
-  ...(
-    ["regex", "range", "list", "object", "date", "time", "datetime", "absoluteDateTime"] as const
-  ).map((kind) => ({
-    row: "sayStatement" as const,
-    position: `the value, ${kind}`,
-    refused: misfitSource("sayStatement", "value", ADMITTED_VALUES[kind]),
-    admitted: 'say "text"',
-    gate: "outsideAnswers (src/type-inference/core/backend.ts)",
-    text: "this say",
-  })),
+  // (a `say`'s value of a kind it shows only by S9b's rules, written in place)
+  ...samples()
+    .filter(
+      (sample) =>
+        sample.row === "sayStatement" &&
+        sample.operand === "value" &&
+        sample.origin !== "ingress" &&
+        SAY_REFUSED.has(sample.kind),
+    )
+    .map((sample) => ({
+      row: "sayStatement" as const,
+      position: `the value, ${sample.kind} (${sample.origin})`,
+      refused: sample.command,
+      admitted: 'say "text"',
+      gate: "outsideAnswers (src/type-inference/core/backend.ts)",
+      text: "this say",
+    })),
   // (a check that no store takes: a typed default inside a command's operand or a `say`'s value, the lead's R11; its
   // place is the command operand table's, step 1½)
   ...(
@@ -345,9 +427,44 @@ export const DECLARED_RUN_DIFFERENCES: readonly {
 ];
 
 /**
- * A fitting value of each command operand that has a declared rule difference: the command with it is that difference's
- * fitting twin (the lead's R12). A duration literal is outside the slice, so a twin with one is compared on today's
- * checker.
+ * The command operand positions with a declared rule difference (#2488's design rulings, R2, keyed by position as the
+ * lead's R14 has it: a closed list, which the command operand table empties). For a value the operand does not take,
+ * whatever its kind and origin: where today's checker gives one of `today`'s compile errors, the route publishes as for
+ * its fitting twin (the command with `FITTING_OPERANDS`' value), and a run reaching the command fails there with one of
+ * `failure`'s codes, at the statement or at the value, nothing of the statement's effect happening; where today's checker
+ * gives no error, both publish and their runs are equal. That holds wherever the command stands (R12), where the route
+ * admits the value alone there (`let v = <the value>`); where it refuses that, it refuses the command alike (R16). The
+ * guard samples kinds and origins (`samples`) and contexts (`CONTEXTS`).
+ */
+export const DECLARED_RULE_DIFFERENCES: readonly {
+  readonly row: SyntaxKind;
+  readonly operand: string;
+  readonly today: readonly string[];
+  readonly failure: readonly string[];
+  readonly at: "statement" | "value";
+}[] = (
+  [
+    ["deleteStatement", "key", ["TSV038"], ["TSR054"], "value"],
+    ["exportTextStatement", "text", ["TSV043"], ["TSR050"], "statement"],
+    ["exportTextStatement", "title", ["TSV040", "TSV042"], ["TSR021"], "statement"],
+    ["exportTextStatement", "fileName", ["TSV043"], ["TSR050"], "statement"],
+    ["openUrlStatement", "url", ["TSV043"], ["TSR050"], "statement"],
+    ["openUrlStatement", "buttonText", ["TSV040", "TSV042"], ["TSR021"], "statement"],
+    ["openUrlStatement", "alwaysButton", ["TSV043"], ["TSR050"], "statement"],
+    ["sayStatement", "pacing", ["TSV043"], ["TSR050", "TSR065"], "statement"],
+    ["showButtonStatement", "label", ["TSV040", "TSV042"], ["TSR021"], "statement"],
+    ["showButtonStatement", "background", ["TSV029"], ["TSR052"], "statement"],
+    ["showButtonStatement", "timeout", ["TSV043"], ["TSR050", "TSR065"], "statement"],
+    ["showImageStatement", "image", ["TSV036"], ["TSR050"], "statement"],
+    ["showPopupStatement", "message", ["TSV040", "TSV042"], ["TSR021"], "statement"],
+    ["showPopupStatement", "buttonText", ["TSV040", "TSV042"], ["TSR021"], "statement"],
+    ["waitStatement", "duration", ["TSV043"], ["TSR050", "TSR065"], "value"],
+  ] as const
+).map(([row, operand, today, failure, at]) => ({ row, operand, today, failure, at }));
+
+/**
+ * A fitting value of each declared position: the command with it is a sample's fitting twin (the lead's R12). A duration
+ * literal is outside the slice, so a twin with one is compared on today's checker.
  */
 const FITTING_OPERANDS: Readonly<Partial<Record<SyntaxKind, Readonly<Record<string, string>>>>> = {
   showImageStatement: { image: '"a.png"' },
@@ -360,9 +477,13 @@ const FITTING_OPERANDS: Readonly<Partial<Record<SyntaxKind, Readonly<Record<stri
   sayStatement: { pacing: "instant" },
 };
 
+/** A sample's fitting twin: its command with the position's fitting value. */
+export const twinCommand = (sample: Sample): string =>
+  commandWith(sample.row, sample.operand, FITTING_OPERANDS[sample.row]![sample.operand]!);
+
 /**
- * The control-flow contexts the guard samples each declared rule difference's command in (R12): wherever the command
- * stands, the route answers as for its fitting twin, but that a run reaching it fails there.
+ * The control-flow contexts the guard samples a command in (R12, R16): wherever it stands, the route answers as for its
+ * fitting twin, but that a run reaching it fails there.
  */
 export const CONTEXTS: Readonly<Record<string, (command: string) => string>> = {
   straight: (command) => `${command}\nexit\n`,
@@ -370,64 +491,10 @@ export const CONTEXTS: Readonly<Record<string, (command: string) => string>> = {
   "after an exiting if": (command) => `if true {\n  exit\n}\n${command}\nexit\n`,
   "after an exiting for": (command) => `for part in [1] {\n  exit\n}\n${command}\nexit\n`,
   "in a branch": (command) => `let b = hostValue == null\nif b {\n  ${command}\n}\nexit\n`,
+  "where the host global is null": (command) => `if hostValue == null {\n  ${command}\n}\nexit\n`,
+  "where it is not null": (command) =>
+    `if hostValue == null {\n  say "n"\n} else {\n  ${command}\n}\nexit\n`,
+  "where it is text": (command) => `if hostValue is string {\n  ${command}\n}\nexit\n`,
+  "where it is no text": (command) =>
+    `if hostValue is string {\n  say "t"\n} else {\n  ${command}\n}\nexit\n`,
 };
-
-/**
- * The command operands where today's checker gives a compile error for a value of a kind the operand does not take, and
- * the route publishes a plan whose instruction refuses that value when it runs (#2488's design rulings, R2: a closed
- * list, which the command operand table empties): the misfit's source (`misfitSources`), today's code, and the route's
- * failure, its code at the text `at`. The guard requires each in every mode, with nothing of the statement's effect
- * happening, and fails on a difference no entry names and on an entry that no longer occurs. An entry stands for its
- * command wherever it stands (R12): today the same error and no plan; the route answers as for its fitting twin (`value`
- * replaced by its fitting operand, `fitting`), diagnostics and runs, but that a run reaching the command fails there with
- * the entry's code. The guard samples that in `CONTEXTS`.
- */
-export const DECLARED_RULE_DIFFERENCES: readonly {
-  readonly row: SyntaxKind;
-  readonly operand: string;
-  readonly source: string;
-  /** The misfitting value in `source`, at its template's host global. */
-  readonly value: string;
-  /** The same command with a fitting operand (`FITTING_OPERANDS`). */
-  readonly fitting: string;
-  readonly code: string;
-  readonly failure: { readonly code: string; readonly at: string };
-}[] = (
-  [
-    // row, operand, today's code, the route's failure code, whether it stands at the statement or the operand's value,
-    // and the kinds (`ADMITTED_VALUES`), each one entry
-    ["deleteStatement", "key", "TSV038", "TSR054", "value", but("string")],
-    ["exportTextStatement", "text", "TSV043", "TSR050", "statement", but("string")],
-    ["exportTextStatement", "title", "TSV040", "TSR021", "statement", ["list"]],
-    ["exportTextStatement", "title", "TSV042", "TSR021", "statement", ["range", "object"]],
-    ["exportTextStatement", "fileName", "TSV043", "TSR050", "statement", but("string")],
-    ["openUrlStatement", "url", "TSV043", "TSR050", "statement", but()],
-    ["openUrlStatement", "buttonText", "TSV040", "TSR021", "statement", ["list"]],
-    ["openUrlStatement", "buttonText", "TSV042", "TSR021", "statement", ["range", "object"]],
-    ["openUrlStatement", "alwaysButton", "TSV043", "TSR050", "statement", but("boolean")],
-    ["sayStatement", "pacing", "TSV043", "TSR050", "statement", but()],
-    ["showButtonStatement", "label", "TSV040", "TSR021", "statement", ["list"]],
-    ["showButtonStatement", "label", "TSV042", "TSR021", "statement", ["range", "object"]],
-    ["showButtonStatement", "background", "TSV029", "TSR052", "statement", but("null")],
-    ["showButtonStatement", "timeout", "TSV043", "TSR050", "statement", but()],
-    ["showImageStatement", "image", "TSV036", "TSR050", "statement", but("string", "null")],
-    ["showPopupStatement", "message", "TSV040", "TSR021", "statement", ["list"]],
-    ["showPopupStatement", "message", "TSV042", "TSR021", "statement", ["range", "object"]],
-    ["showPopupStatement", "buttonText", "TSV040", "TSR021", "statement", ["list"]],
-    ["showPopupStatement", "buttonText", "TSV042", "TSR021", "statement", ["range", "object"]],
-    ["waitStatement", "duration", "TSV043", "TSR050", "value", but()],
-  ] as const
-).flatMap(([row, operand, code, failure, at, kinds]) =>
-  kinds.map((kind) => {
-    const source = misfitSource(row, operand, ADMITTED_VALUES[kind]);
-    return {
-      row,
-      operand,
-      source,
-      value: ADMITTED_VALUES[kind],
-      fitting: misfitSource(row, operand, FITTING_OPERANDS[row]![operand]!),
-      code,
-      failure: { code: failure, at: at === "value" ? ADMITTED_VALUES[kind] : source },
-    };
-  }),
-);
