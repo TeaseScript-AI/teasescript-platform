@@ -124,6 +124,17 @@ test("a loop's earlier round, source to runtime on the candidate route", () => {
       "valid",
     ],
     ["a store before the use", program("repeat 2", "  n = 2", use), "valid"],
+    // (a test of the variable after the round's store, on the seed's way to the loop's head; one in the loop's header)
+    [
+      "a test after the store",
+      `let n: integer? = 1\nrepeat 2 {\n${use}\n  n = null\n  let ok = n != null\n}\nexit\n`,
+      "check",
+    ],
+    [
+      "a test in the loop's header",
+      `let k = 2\n${program("while n != null or k > 0", "  k -= 1", use)}`,
+      "check",
+    ],
   ];
   for (const [name, source, expected] of rows) {
     const result = compileSourceWithBackend(source, { globals: ["hostValue"] }, CORE_BACKEND);
