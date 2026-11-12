@@ -88,6 +88,65 @@ test("a split that keeps the original file: its old path is not stale, and its n
   assert.match(out, /^== 3\. renamed name \(classify\): 0$/mu);
 });
 
+test("a name every one of whose old paths a split keeps is no hit of form 4 or 5 after any folder; a leaving name's is, and one leaving path of a shared name keeps it in (#2526)", (t) => {
+  const r = repository(t);
+  r.write({
+    "src/core/big.ts": "export const big = 1;\n",
+    "src/core/part.ts": "export const part = 1;\n",
+    "src/core/gone.ts": "export const gone = 1;\n",
+    // (a fixture's invented module paths, as a lint test's sources name them: no folder of the tree)
+    "tools/refs.mjs": [
+      'const kept = "./fixture/big.js";',
+      "const keptGroup = /fixture\\/(big|other)\\.js/;",
+      'const left = "./fixture/old.js";',
+      "const leftGroup = /fixture\\/(old|other)\\.js/;",
+      "",
+    ].join("\n"),
+  });
+  r.commit();
+  const kept = r.run(
+    "--renames",
+    r.json("kept", {
+      renames: {
+        "src/core/big.ts": ["src/core/big.ts", "src/core/part.ts"],
+        "src/core/old.ts": ["src/core/gone.ts"],
+      },
+    }),
+  );
+  assert.equal(kept.status, 1);
+  assert.deepEqual(section(kept.out, "4"), ['tools/refs.mjs:3: const left = "./fixture/old.js";']);
+  assert.deepEqual(section(kept.out, "5"), [
+    "tools/refs.mjs:4: const leftGroup = /fixture\\/(old|other)\\.js/;",
+  ]);
+  // (the same lines, `big.ts` now leaving: both its lines are hits)
+  const leaving = r.run(
+    "--renames",
+    r.json("leaving", { renames: { "src/core/big.ts": ["src/core/part.ts"] } }),
+  );
+  assert.deepEqual(section(leaving.out, "4"), [
+    'tools/refs.mjs:1: const kept = "./fixture/big.js";',
+  ]);
+  assert.deepEqual(section(leaving.out, "5"), [
+    "tools/refs.mjs:2: const keptGroup = /fixture\\/(big|other)\\.js/;",
+  ]);
+  // (a name two old paths share, one kept and one leaving: the leaving one keeps the name in forms 4 and 5)
+  const shared = r.run(
+    "--renames",
+    r.json("shared", {
+      renames: {
+        "src/core/big.ts": ["src/core/big.ts", "src/core/part.ts"],
+        "src/other/big.ts": ["src/core/gone.ts"],
+      },
+    }),
+  );
+  assert.deepEqual(section(shared.out, "4"), [
+    'tools/refs.mjs:1: const kept = "./fixture/big.js";',
+  ]);
+  assert.deepEqual(section(shared.out, "5"), [
+    "tools/refs.mjs:2: const keptGroup = /fixture\\/(big|other)\\.js/;",
+  ]);
+});
+
 test("a move referenced without its extension: form 1 and form 4 find it, 2b lists the bare name last (witness-split 3)", (t) => {
   const r = repository(t);
   r.write({

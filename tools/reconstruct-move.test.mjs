@@ -1,0 +1,330 @@
+import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { isolateGit } from "./fixture-git.mjs";
+
+isolateGit();
+
+const TOOL = fileURLToPath(new URL("./reconstruct-move.mjs", import.meta.url));
+
+/** The old file: imports, a header line, four declarations, one of them long enough to rewrap with `export`. */
+const OLD = [
+  'import { a } from "./a.js";',
+  "import {",
+  "  b,",
+  '} from "./b.js";',
+  "",
+  "// The old file's header.",
+  "",
+  "export function first(): number {",
+  "  return a;",
+  "}",
+  "",
+  "function second(): number {",
+  "  return b;",
+  "}",
+  "",
+  "function third(walk: WalkerOfTheTree, value: PlaceOfTheValue, rest: readonly string[]): number {",
+  "  return second() + 1;",
+  "}",
+  "",
+  "const LAST = 3;",
+  "",
+].join("\n");
+
+/** The split: `first`, the header and `LAST` stay; `second` and `third` leave, each gaining `export`, `third` rewrapped. */
+const KEPT = [
+  'import { a } from "./a.js";',
+  'import { second, third } from "./part.js";',
+  "",
+  "// The old file's header.",
+  "",
+  "export function first(): number {",
+  "  return a;",
+  "}",
+  "",
+  "const LAST = 3;",
+  "",
+].join("\n");
+const PART = [
+  "// The part that left.",
+  "",
+  'import { b } from "./b.js";',
+  "",
+  "export function second(): number {",
+  "  return b;",
+  "}",
+  "",
+  "export function third(",
+  "  walk: WalkerOfTheTree,",
+  "  value: PlaceOfTheValue,",
+  "  rest: readonly string[],",
+  "): number {",
+  "  return second() + 1;",
+  "}",
+  "",
+].join("\n");
+
+/** A repository whose one commit holds `src/big.ts` as OLD, with the split written over it; `run` runs the check. */
+function repository(t, files = { "src/big.ts": KEPT, "src/part.ts": PART }, old = OLD) {
+  const fixture = mkdtempSync(join(tmpdir(), "reconstruct-move-"));
+  t.after(() => rmSync(fixture, { recursive: true, force: true }));
+  const git = (...args) => execFileSync("git", args, { cwd: fixture, encoding: "utf8" }).trim();
+  git("init", "-q");
+  mkdirSync(join(fixture, "src"));
+  writeFileSync(join(fixture, "src/big.ts"), old);
+  git("add", "-A");
+  git("commit", "-q", "-m", "base");
+  const base = git("rev-parse", "HEAD");
+  for (const [file, text] of Object.entries(files)) {
+    mkdirSync(dirname(join(fixture, file)), { recursive: true });
+    writeFileSync(join(fixture, file), text);
+  }
+  const run = (...extra) => {
+    const result = spawnSync(
+      process.execPath,
+      [TOOL, base, "src/big.ts", ...Object.keys(files), ...extra],
+      { cwd: fixture, encoding: "utf8" },
+    );
+    return { status: result.status, out: result.stdout, err: result.stderr };
+  };
+  return { base, run, fixture };
+}
+
+/** `text` with its line `at` (1-based) replaced by `lines`. */
+const replaced = (text, at, ...lines) => {
+  const all = text.split("\n");
+  all.splice(at - 1, 1, ...lines);
+  return all.join("\n");
+};
+
+test("a split that keeps the old file is proven: every line once, `export` added and a rewrap listed", (t) => {
+  const { status, out } = repository(t).run();
+  assert.equal(status, 0, out);
+  assert.match(
+    out,
+    /^old body lines: 11, taken: 10; runs: 5; export added: 1; residue: 1 old, 5 new; edits: 0$/mu,
+  );
+  assert.match(out, /^export added: src\/part\.ts:5 <- old 12$/mu);
+  assert.match(out, /^residue rewrapped:\n {2}old 16: function third\(/mu);
+});
+
+test("each kind of change that is no move fails: a dropped, an edited, a repeated or a reordered line", (t) => {
+  const cases = {
+    dropped: { "src/big.ts": KEPT, "src/part.ts": replaced(PART, 6) },
+    edited: { "src/big.ts": KEPT, "src/part.ts": replaced(PART, 6, "  return b + 1;") },
+    repeated: { "src/big.ts": KEPT, "src/part.ts": `${PART}\nconst LAST = 3;\n` },
+    // (valid source, `LAST` now before `first`)
+    reordered: {
+      "src/big.ts": KEPT.replace("\nconst LAST = 3;\n", "\n").replace(
+        "export function first",
+        "const LAST = 3;\n\nexport function first",
+      ),
+      "src/part.ts": PART,
+    },
+  };
+  for (const [name, files] of Object.entries(cases)) {
+    const { status, out } = repository(t, files).run();
+    assert.equal(status, 1, `${name}\n${out}`);
+    assert.match(out, /^failure: /mu, name);
+  }
+});
+
+test("a residue is admitted only as a rewrap of a declaration that gained `export`", (t) => {
+  // (`async` added: the group no longer equals the old line)
+  const added = repository(t, {
+    "src/big.ts": KEPT,
+    "src/part.ts": replaced(PART, 9, "export async function third("),
+  }).run();
+  assert.equal(added.status, 1, added.out);
+  assert.match(added.out, /^residue not a rewrap:$/mu);
+  // (a break that can end a statement: after `return`, where a semicolon is inserted)
+  const unsafe = repository(t, {
+    "src/big.ts": KEPT,
+    "src/part.ts": [
+      'import { b } from "./b.js";',
+      "",
+      "export function second(): number {",
+      "  return b;",
+      "}",
+      "",
+      // (equal to old 16 and 17 as rewrapped, but broken after `return`: only the break rejects it)
+      "export function third(walk: WalkerOfTheTree, value: PlaceOfTheValue, rest: readonly string[]): number { return",
+      "  second() + 1;",
+      "}",
+      "",
+    ].join("\n"),
+  }).run();
+  assert.equal(unsafe.status, 1, unsafe.out);
+  assert.match(unsafe.out, /^residue not a rewrap:$/mu);
+  // (rewrapped without `export`: Prettier had no reason to)
+  const plain = repository(t, {
+    "src/big.ts": KEPT.replace("import { second, third }", "import { second }"),
+    "src/part.ts": PART.replace("export function third(", "function third("),
+  }).run();
+  assert.equal(plain.status, 1, plain.out);
+});
+
+test("--edit declares one changed line and prints both; an edit that names no line cannot run", (t) => {
+  const files = { "src/big.ts": KEPT, "src/part.ts": replaced(PART, 6, "  return b; // edited") };
+  const r = repository(t, files);
+  const declared = r.run("--edit", "src/part.ts:6=13");
+  assert.equal(declared.status, 0, declared.out);
+  assert.match(
+    declared.out,
+    /^edit: src\/part\.ts:6: {3}return b; \/\/ edited\n {2}read as old 13: {3}return b;$/mu,
+  );
+  assert.equal(r.run().status, 1);
+  assert.equal(r.run("--edit", "src/part.ts:99=13").status, 2);
+  assert.equal(r.run("--edit", "src/other.ts:6=13").status, 2);
+  assert.equal(r.run("--edit", "src/part.ts:six").status, 2);
+});
+
+test("usage, an unknown option, an unknown commit or a missing file cannot run", (t) => {
+  const r = repository(t);
+  const run = (...args) =>
+    spawnSync(process.execPath, [TOOL, ...args], { cwd: r.fixture, encoding: "utf8" }).status;
+  assert.equal(run(), 2);
+  assert.equal(run(r.base, "src/big.ts"), 2);
+  assert.equal(run("--help"), 2);
+  assert.equal(run("0000000000000000000000000000000000000000", "src/big.ts", "src/big.ts"), 2);
+  assert.equal(run(r.base, "src/big.ts", "src/missing.ts"), 2);
+});
+
+/** A declaration a later line reads, long enough that `export` makes Prettier break it. */
+const OBJECT = [
+  'const first = { value: "a b", other: 1, more: "long enough to wrap the line once export is added" };',
+  "",
+  "const second = first.value;",
+  "",
+].join("\n");
+const wrapped = (value) =>
+  [
+    "export const first = {",
+    `  value: ${value},`,
+    "  other: 1,",
+    '  more: "long enough to wrap the line once export is added",',
+    "};",
+  ].join("\n");
+
+test("a rewrap keeps each literal's text and the old order; `export` goes only on a declaration at the margin (#2534 r1)", (t) => {
+  const run = (text, old = OBJECT) => repository(t, { "src/big.ts": text }, old).run();
+  assert.equal(run(`${wrapped('"a b"')}\n\nconst second = first.value;\n`).status, 0);
+  // (a string's spaces, or a comma inside it, are its text, not layout)
+  assert.equal(run(`${wrapped('"ab"')}\n\nconst second = first.value;\n`).status, 1);
+  const comma = OBJECT.replace('"a b"', '"a,)"');
+  assert.equal(run(`${wrapped('"a,)"')}\n\nconst second = first.value;\n`, comma).status, 0);
+  assert.equal(run(`${wrapped('"a)"')}\n\nconst second = first.value;\n`, comma).status, 1);
+  // (a rewrap holding a regular expression or a template literal is refused, its text unread by the token scan)
+  const regex = OBJECT.replace('"a b"', "/a b/u");
+  assert.equal(run(`${wrapped("/a b/u")}\n\nconst second = first.value;\n`, regex).status, 1);
+  const template = OBJECT.replace('"a b"', "`a b`");
+  assert.equal(run(`${wrapped("`a b`")}\n\nconst second = first.value;\n`, template).status, 1);
+  // (the rewrapped declaration after the line that reads it: out of the old order)
+  const after = run(`const second = first.value;\n\n${wrapped('"a b"')}\n`);
+  assert.equal(after.status, 1);
+  assert.match(after.out, /^failure: src\/big\.ts:3: out of the old file's order/mu);
+  // (`export` before a line that is no declaration, where the result still parses: a block becomes an export list)
+  assert.equal(run("const a = 1;\nexport { a };\n", "const a = 1;\n{ a };\n").status, 1);
+  // (a generator is a declaration too)
+  assert.equal(
+    run(
+      "export function* gen(): Generator<number> {\n  yield 1;\n}\n",
+      "function* gen(): Generator<number> {\n  yield 1;\n}\n",
+    ).status,
+    0,
+  );
+});
+
+test("the header is the parsed imports: a trailing comment ends one, code after one is body, other line ends cannot run (#2534 r1)", (t) => {
+  const old =
+    'import { value } from "./values.js"; // shared fixture\n\nconst result = value + 1;\n';
+  const run = (text) => repository(t, { "src/big.ts": text }, old).run();
+  const same = run(old);
+  assert.equal(same.status, 0, same.out);
+  assert.match(same.out, /^old body lines: 1, taken: 1;/mu);
+  assert.equal(run(old.replace("value + 1", "value + 999")).status, 1);
+  assert.equal(run('import { value } from "./values.js"; const result = value + 1;\n').status, 1);
+  // (code after an import on its line, every old line kept: only the header rule fails it)
+  assert.equal(run(old.replace("// shared fixture", "const added = 2;")).status, 1);
+  // (a header line outside the listed forms is body: a shebang, a block comment before or between imports)
+  const stable = "const stable = 1;\n";
+  const header = (text) => repository(t, { "src/big.ts": text }, stable).run().status;
+  assert.equal(header('import "./setup.js";\nexport const stable = 1;\n'), 0);
+  assert.equal(header('#!/usr/bin/env node\nimport "./setup.js";\nexport const stable = 1;\n'), 1);
+  assert.equal(header('/* added */\nimport "./setup.js";\nexport const stable = 1;\n'), 1);
+  assert.equal(
+    header('import "./setup.js";\n/* added */\nimport "./more.js";\nexport const stable = 1;\n'),
+    1,
+  );
+  assert.equal(run(old.replaceAll("\n", "\r\n")).status, 2);
+  assert.equal(run(`// header\u2028const hidden = 1;\n${old}`).status, 2);
+});
+
+test("a line break inside a token is its content: a blank line in a template or a comment is compared, and a token's lines stay together (#2534 final)", (t) => {
+  const run = (old, files) => repository(t, files, old).run();
+  const template = "const text = `alpha\n\nbeta`;\n";
+  // (unchanged, `export` added: passes; the blank line inside the literal is a line like any other)
+  assert.equal(run(template, { "src/big.ts": `export ${template}` }).status, 0);
+  // (a blank line dropped from, or added to, the literal: its value changes)
+  assert.equal(run(template, { "src/big.ts": "export const text = `alpha\nbeta`;\n" }).status, 1);
+  assert.equal(
+    run("const text = `alpha\nbeta`;\n", { "src/big.ts": "const text = `alpha\n\nbeta`;\n" })
+      .status,
+    1,
+  );
+  // (the same in a block comment)
+  const comment = "/* first\n\nsecond */\nconst value = 1;\n";
+  assert.equal(run(comment, { "src/big.ts": "/* first\nsecond */\nconst value = 1;\n" }).status, 1);
+  // (and in a comment after a statement on its line)
+  const trailing = "const value = 1; /* first\n\nsecond */\nconst other = 2;\n";
+  assert.equal(
+    run(trailing, { "src/big.ts": "const value = 1; /* first\nsecond */\nconst other = 2;\n" })
+      .status,
+    1,
+  );
+  // (a literal's middle line in another file: each file keeps OLD's order, but the literal is cut)
+  const three = "const text = `one\ntwo\nthree`;\n";
+  assert.equal(
+    run(three, { "src/big.ts": "const text = `one\nthree`;\n", "src/part.ts": "two\n" }).status,
+    1,
+  );
+  // (a line inside a literal that reads like a declaration takes no `export`)
+  const inner = "const text = `head\nconst inner = 1;\n`;\n";
+  assert.equal(
+    run(inner, { "src/big.ts": "const text = `head\nexport const inner = 1;\n`;\n" }).status,
+    1,
+  );
+});
+
+test("in a rewrap a comma is dropped only as a trailing comma, never an elision, comments not counted (#2534 final)", (t) => {
+  const old = (array) =>
+    `const veryLongDescriptiveDeclarationName = { firstValue: ${array}, secondValue: "123456789012345" };\n`;
+  const wrapped = (array) =>
+    [
+      "export const veryLongDescriptiveDeclarationName = {",
+      `  firstValue: ${array},`,
+      '  secondValue: "123456789012345",',
+      "};",
+      "",
+    ].join("\n");
+  const run = (before, after) =>
+    repository(t, { "src/big.ts": wrapped(after) }, old(before)).run().status;
+  assert.equal(run("[]", "[]"), 0);
+  // (an elision is content, bare or after a comment: a comment is no element)
+  assert.equal(run("[]", "[,]"), 1);
+  assert.equal(run("[/* placeholder */]", "[/* placeholder */,]"), 1);
+  assert.equal(run("[, /* hole */]", "[, /* hole */,]"), 1);
+  // (a trailing comma after an element is layout, with or without a comment before it)
+  assert.equal(run("[1]", "[1,]"), 0);
+  assert.equal(run("[1 /* one */]", "[1 /* one */,]"), 0);
+});
+
+test("a file that does not parse cannot run (#2534 final)", (t) => {
+  const r = repository(t, { "src/big.ts": "const text = `open;\n" }, "const value = 1;\n");
+  assert.equal(r.run().status, 2);
+});
