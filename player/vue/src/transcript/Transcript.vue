@@ -54,7 +54,62 @@ const props = defineProps<{
    * positions, which the virtual list counts, skip them.
    */
   removedRows?: readonly number[];
+  /**
+   * The answer the player just gave, shown after the entries until the entry with its `renderKey` arrives, which takes
+   * its row and element over (PLAYER-UI.md "Composer and foreground interactions").
+   */
+  pending?: PlayerTranscriptEntryPresentation | null;
 }>();
+/** The key of an entry's row: an answer keeps the key its predicted row had, so its element stays. */
+function rowKey(entry: PlayerTranscriptEntryPresentation): string {
+  return (entry.kind === "message" ? entry.renderKey : undefined) ?? entry.id;
+}
+/** What a row's content is, for its measurement: a message's content event, else an answer's own entry. */
+function contentOf(entry: PlayerTranscriptEntryPresentation): string | undefined {
+  if (entry.kind !== "message") return undefined;
+  return entry.contentSequence !== undefined
+    ? String(entry.contentSequence)
+    : entry.renderKey !== undefined
+      ? entry.id
+      : undefined;
+}
+// The rows the conversation shows: `entries`, then `pending` while no entry has its key. Its own entry arrives among the
+// last of an update, after a block's messages at most, so only the last entries are searched. The list depends on the
+// entries, their length and the pending row only: typing in the composer leaves it as it is.
+const ARRIVAL_SEARCH = 64;
+let listed: {
+  readonly entries: readonly PlayerTranscriptEntryPresentation[];
+  readonly length: number;
+  readonly pending: PlayerTranscriptEntryPresentation | null;
+  readonly value: readonly PlayerTranscriptEntryPresentation[];
+} | null = null;
+function list(): readonly PlayerTranscriptEntryPresentation[] {
+  const entries = props.entries;
+  const pending = props.pending ?? null;
+  if (
+    listed === null ||
+    listed.entries !== entries ||
+    listed.length !== entries.length ||
+    listed.pending !== pending
+  ) {
+    const key = pending === null ? null : rowKey(pending);
+    let arrived = false;
+    for (
+      let index = entries.length - 1;
+      index >= Math.max(0, entries.length - ARRIVAL_SEARCH);
+      index -= 1
+    )
+      if (rowKey(entries[index]!) === key) arrived = true;
+    const value = pending === null || arrived ? entries : [...entries, pending];
+    listed = { entries, length: entries.length, pending, value };
+  }
+  return listed.value;
+}
+/** The row key of the pending answer while it shows. */
+function shownPendingKey(): string | null {
+  const value = list();
+  return value !== props.entries && props.pending ? rowKey(props.pending) : null;
+}
 const NO_REMOVED_ROWS: readonly number[] = Object.freeze([]);
 function currentRemovedRows(): readonly number[] {
   return props.removedRows ?? NO_REMOVED_ROWS;
@@ -95,7 +150,7 @@ watch(
 );
 // Whether the entry at `index` is a grey future message of Debug's rewind.
 function future(index: number): boolean {
-  const entry = props.entries[index];
+  const entry = list()[index];
   return entry?.kind === "message" && entry.future === true;
 }
 const enhancedContrast = inject(enhancedTranscriptContrast, undefined);
@@ -125,7 +180,7 @@ let entryKey = (_index: number): string => "";
 function itemKeyFor(entries: readonly PlayerTranscriptEntryPresentation[]) {
   if (entries !== keyedEntries) {
     keyedEntries = entries;
-    entryKey = (position) => entries[entryIndexAt(position)]!.id;
+    entryKey = (position) => rowKey(entries[entryIndexAt(position)]!);
   }
   return entryKey;
 }
@@ -137,7 +192,7 @@ watch(
 // Each measurement reports the row and content its element shows; an entry updated in place is ahead of the element
 // until Vue renders it.
 const measureEntry: typeof measureElement<HTMLElement> = (element, entry, instance) => {
-  const key = element.dataset.messageId;
+  const key = element.dataset.rowKey;
   if (key !== undefined)
     measurement.measured(key, element.dataset.contentSequence, entry !== undefined);
   return measureElement(element, entry, instance);
@@ -158,7 +213,12 @@ const glide = new ConversationGlide(
   () => virtualizer.value.scrollRect?.height ?? 0,
 );
 let liveUntil = 0;
-let shown = { entries: props.entries, length: props.entries.length, revision: props.revision ?? 0 };
+let shown = {
+  entries: props.entries,
+  length: props.entries.length,
+  revision: props.revision ?? 0,
+  pending: shownPendingKey(),
+};
 // While following, the first entry the latest update added: following scrolls no further than to show it at the top.
 let firstNewEntry: number | null = null;
 // Whether following stopped there, with more of the update below.
@@ -168,19 +228,42 @@ function gliding() {
   return performance.now() < liveUntil && !touching.value && reducedMotion.value !== "reduce";
 }
 watch(
-  [() => props.entries, () => props.revision, () => props.entries.length],
+  [() => props.entries, () => props.revision, () => props.entries.length, shownPendingKey],
   () => {
     const previous = shown;
-    shown = { entries: props.entries, length: props.entries.length, revision: props.revision ?? 0 };
-    if (shown.revision === previous.revision && shown.entries === previous.entries) return;
+    shown = {
+      entries: props.entries,
+      length: props.entries.length,
+      revision: props.revision ?? 0,
+      pending: shownPendingKey(),
+    };
+    if (
+      shown.revision === previous.revision &&
+      shown.entries === previous.entries &&
+      shown.pending === previous.pending
+    )
+      return;
     // Whether the reader follows now, also after scrolling back to the end since the last update.
     rememberFollow();
-    const added = props.entries.slice(previous.length);
+    // New content is decided against the entries: those appended to the same list since the last update, and a pending
+    // answer when it first shows. An answer that showed before its entry arrived is not new, wherever its entry lands.
+    const appended = props.entries
+      .slice(previous.length)
+      .filter((entry) => rowKey(entry) !== previous.pending);
+    const added =
+      shown.pending !== null && shown.pending !== previous.pending
+        ? [...appended, props.pending!]
+        : appended;
     // The first entries of a transcript open it, also when the script shows them only once the host answered.
     const opening = previous.length === 0;
+    // Following stops at the first new row, wherever the shown list places it.
+    const first =
+      added.length === 0
+        ? -1
+        : list().findLastIndex((entry) => rowKey(entry) === rowKey(added[0]!));
     firstNewEntry =
-      following.value && props.entries === previous.entries && added.length > 0 && !opening
-        ? shownPosition(currentRemovedRows(), previous.length)
+      following.value && props.entries === previous.entries && first !== -1 && !opening
+        ? shownPosition(currentRemovedRows(), first)
         : null;
     if (
       initialPositioning ||
@@ -199,7 +282,7 @@ watch(
     entrances.admit(
       added.flatMap((entry) =>
         entry.kind === "message" && entry.future !== true && entry.removed !== true
-          ? [entry.id]
+          ? [rowKey(entry)]
           : [],
       ),
     );
@@ -215,7 +298,7 @@ function showControls(live: boolean) {
   shownControls = controls;
 }
 watch(
-  [() => props.entries, () => props.revision],
+  [() => props.entries, () => props.revision, shownPendingKey],
   () => showControls(performance.now() < liveUntil),
   { flush: "post" },
 );
@@ -241,7 +324,7 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
   computed(() => {
     // Capture the supplied list so replacing fixtures retains the previous key mapping on prepend.
     void props.revision; // The session's store appends in place and raises the transcript revision.
-    const entries = props.entries;
+    const entries = list();
     return {
       count: entries.length - currentRemovedRows().length,
       getScrollElement: () => scrollElement.value,
@@ -323,12 +406,12 @@ virtualizer.value.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, in
   measurement.compensates(item, instance);
 // Once Vue has rendered every row, a message whose new text kept its size counts as measured with that text.
 watch(
-  [() => props.entries, () => props.revision],
+  [() => props.entries, () => props.revision, shownPendingKey],
   () => {
     const sizes = virtualizer.value.itemSizeCache;
     for (const element of scrollElement.value?.querySelectorAll<HTMLElement>(".transcript-entry") ??
       []) {
-      const key = element.dataset.messageId;
+      const key = element.dataset.rowKey;
       if (key === undefined) continue;
       measurement.rendered(key, element.dataset.contentSequence, sizes.get(key), () =>
         Math.round(element.getBoundingClientRect().height),
@@ -383,7 +466,7 @@ onBeforeUnmount(() => {
 const rows = computed(() =>
   virtualizer.value.getVirtualItems().map((item) => {
     const index = entryIndexAt(item.index);
-    const entry = props.entries[index]!;
+    const entry = list()[index]!;
     return {
       item,
       index,
@@ -404,10 +487,10 @@ const showLatest = computed(
 const scrolled = computed(() => (virtualizer.value.scrollOffset ?? 0) > 1);
 // Grouping compares the shown neighbours of the row at `position`: the messages around a removed one adjoin.
 function continues(position: number) {
-  return adjoins(props.entries, entryIndexAt(position), entryIndexAt(position - 1));
+  return adjoins(list(), entryIndexAt(position), entryIndexAt(position - 1));
 }
 function continued(position: number) {
-  return adjoins(props.entries, entryIndexAt(position), entryIndexAt(position + 1));
+  return adjoins(list(), entryIndexAt(position), entryIndexAt(position + 1));
 }
 const following = ref(true);
 let initialPositioning = true;
@@ -428,9 +511,11 @@ function releaseFollow() {
   else if (readingLatest()) heldAtNewEntry.value = false;
 }
 // Capture intent before rendering; revision also covers in-place adapter updates.
-watch([() => props.entries, () => props.revision, () => props.entries.length], rememberFollow, {
-  flush: "pre",
-});
+watch(
+  [() => props.entries, () => props.revision, () => props.entries.length, shownPendingKey],
+  rememberFollow,
+  { flush: "pre" },
+);
 let measuredTotal = 0;
 let measuredInset = 0;
 watch(
@@ -440,7 +525,7 @@ watch(
     const messagesGrew = total - measuredTotal !== inset - measuredInset;
     measuredTotal = total;
     measuredInset = inset;
-    if (!messagesGrew || !following.value || touching.value || props.entries.length === 0) return;
+    if (!messagesGrew || !following.value || touching.value || list().length === 0) return;
     const instance = virtualizer.value;
     void nextTick(() =>
       instance.scrollToOffset(
@@ -586,17 +671,16 @@ onMounted(() => {
             <div role="list">
               <article
                 v-for="{ item, index, entry, appearance } in rows"
-                :key="entry.id"
-                :ref="(element) => measureRow(element as HTMLElement | null, entry.id)"
+                :key="rowKey(entry)"
+                :ref="(element) => measureRow(element as HTMLElement | null, rowKey(entry))"
                 :data-index="item.index"
                 :data-message-id="entry.id"
-                :data-content-sequence="
-                  entry.kind === 'message' ? entry.contentSequence : undefined
-                "
+                :data-row-key="rowKey(entry)"
+                :data-content-sequence="contentOf(entry)"
                 :data-speaker-id="entry.kind === 'message' ? entry.speakerId : undefined"
                 role="listitem"
                 :aria-posinset="item.index + 1"
-                :aria-setsize="entries.length - currentRemovedRows().length"
+                :aria-setsize="list().length - currentRemovedRows().length"
                 class="transcript-entry"
                 :data-continues="continues(item.index)"
                 :data-prose="appearance.placement !== null || undefined"
