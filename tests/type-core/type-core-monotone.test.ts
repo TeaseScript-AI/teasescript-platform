@@ -27,6 +27,11 @@ test("the oracle names a lost kind, a lost reason and an unknown's word moved la
     kinds(judgeRun("m", [unknown(5, "deferred-parameter")], [unknown(5, "unknown")], moves)),
     ["unknown's word later unknown"],
   );
+  // (an `integer` replaced by `number` widens and is kept; one lost with no `number` beside it is not)
+  assert.deepEqual(judgeRun("m", [integer], [makeItem("number"), makeItem("string")], moves), []);
+  assert.deepEqual(kinds(judgeRun("m", [integer], [makeItem("string")], moves)), [
+    "kind lost integer",
+  ]);
   // (what only grows: a kind, a reason, a word earlier in the order or following a new reason)
   assert.deepEqual(
     judgeRun(
@@ -41,7 +46,10 @@ test("the oracle names a lost kind, a lost reason and an unknown's word moved la
     judgeRun("m", [unknown(4, "deferred-parameter")], [unknown(5, "unknown")], moves),
     [],
   );
-  assert.deepEqual(Object.fromEntries(moves), { "unknown word with its reasons": 2 });
+  assert.deepEqual(Object.fromEntries(moves), {
+    "integer widened to number": 1,
+    "unknown word with its reasons": 2,
+  });
 });
 
 test("the oracle counts the moves of the fields it does not judge", () => {
