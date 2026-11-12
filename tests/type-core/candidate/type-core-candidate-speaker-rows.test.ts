@@ -47,16 +47,21 @@ const errors = (result: ProjectCompilationResult): string[] =>
     .map((diagnostic) => `${diagnostic.code} ${diagnostic.span.start.offset}`)
     .sort();
 
+const DECLARED = "speaker boss {\n  mood: 1\n  tags: [3, 1]\n}\n";
+
 test("a store through a speaker is refused at the speaker's name, in every form, for a declared speaker and the player", () => {
-  const declared = "speaker boss {\n  mood: 1\n  tags: [3, 1]\n}\n";
-  // (the store, the name it is refused at, and that name's text from where it stands)
+  // (the store, the name it is refused at, and that name's text from where it stands; `speaker`, which is a value only
+  // in a message and in a declaration, is refused where a declaration reads it)
   const forms: readonly (readonly [Files, string, string])[] = [
-    [main(`${declared}boss.mood = 2`), "boss", "boss.mood = 2"],
-    [main(`${declared}speaker boss\nlet s = speaker\ns.mood = 2`), "speaker", "speaker\ns.mood"],
-    [main(`${declared}let s = boss\ns.mood = 2`), "boss", "boss\ns.mood"],
-    [main(`${declared}boss.tags.sort()`), "boss", "boss.tags.sort()"],
+    [main(`${DECLARED}boss.mood = 2`), "boss", "boss.mood = 2"],
+    [main(`${DECLARED}let s = boss\ns.mood = 2`), "boss", "boss\ns.mood"],
+    [main(`${DECLARED}boss.tags.sort()`), "boss", "boss.tags.sort()"],
+    [
+      main('speaker boss {\n  mood: 1\n  other: speaker.mood\n}\nsay as boss "a"'),
+      "speaker",
+      "speaker.mood",
+    ],
     [main("player.mood = 2"), "player", "player.mood = 2"],
-    [main("speaker player\nlet s = speaker\ns.mood = 2"), "speaker", "speaker\ns.mood"],
     [main("let s = player\ns.mood = 2"), "player", "player\ns.mood"],
     // (the player's list is stored in another file, so the method's receiver is the first name the route meets)
     [
@@ -77,6 +82,21 @@ test("a store through a speaker is refused at the speaker's name, in every form,
     const start = source.indexOf(at);
     assert.ok(start >= 0 && start === source.lastIndexOf(at), source);
     assert.deepEqual(refused.site, { file: 0, start, end: start + name.length }, source);
+  }
+});
+
+test("a store through `speaker` outside a message gets today's compile error on the route alike", () => {
+  // (`speaker.mood = 2` does not parse, a statement starting with `speaker` being a declaration or the setter; through a
+  // variable, `speaker` is no value outside a message or a declaration: today's TSV002 on both)
+  for (const set of [`${DECLARED}speaker boss`, "speaker player"]) {
+    const files = main(`${set}\nlet s = speaker\ns.mood = 2`);
+    const today = compileProject(files, OPTIONS);
+    const route = compileProjectWithBackend(files, OPTIONS, CORE_BACKEND);
+    assert.equal(today.plan, null, set);
+    assert.equal(route.plan, null, set);
+    const start = files[0]!.source.indexOf("speaker\ns.mood");
+    assert.deepEqual(errors(today), [`TSV002 ${start}`], set);
+    assert.deepEqual(errors(route), errors(today), set);
   }
 });
 
