@@ -272,11 +272,11 @@ test("a generator's shared build counts to the total, never to the asker, and en
 });
 
 /**
- * #2289 (R67): a shared build of structure (`sharedStructure`) counts its own steps to the total and not to the asker,
+ * #2289: a shared build of structure (`sharedStructure`) counts its own steps to the total and not to the asker,
  * but what runs while it is suspended at a yield, the read it yielded, is the asker's: no demand runs inside it. A build
  * abandoned at its yield leaves nothing open.
  */
-test("a shared structure build counts its own steps to the total, and each read it yields to the asker (#2289 R67)", () => {
+test("a shared structure build counts its own steps to the total, and each read it yields to the asker (#2289)", () => {
   const work = new WorkLedger(1_000);
   work.charge("checks", 7);
   const steps = work.sharedStructure(

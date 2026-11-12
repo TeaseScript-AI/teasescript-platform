@@ -77,7 +77,7 @@ test("a literal's type is the one all its elements fit, in either order (#2289 B
         assert.match(got[0]!, new RegExp(`, error @${at}$`, "u"), source);
       }
     }
-  // (a dict's values by the same rule, R7)
+  // (a dict's values by the same rule)
   assert.deepEqual(answered(`${DECLARED}let d = dict{p: 2, q: lives}\nexit\n`, "d", ["element"]), [
     "strict integer",
   ]);
@@ -102,7 +102,7 @@ test("a store into a literal's place meets the type its elements fit, not its ea
 
 test("after `[lives, 2.5]` no allowance makes a store into its place a check against a whole number (#2289 invariant)", () => {
   // (`x` copies a number down a chain long enough for its decision to stop at small demand allowances; a stop leaves an
-  // element's value unknown, which decides nothing beside `lives` and makes the literal's cell undecided, R26, never
+  // element's value unknown, which decides nothing beside `lives` and makes the literal's cell undecided, never
   // the declared integer)
   const chain = Array.from({ length: 24 }, (_, i) => `let x${i + 1} = x${i}`).join("\n");
   const source = `let lives: integer = 3\nlet x0 = 2.5\n${chain}\nlet xs = [lives, x24]\nxs.add(1.5)\nxs[0] = 1.5\nexit\n`;
@@ -140,15 +140,15 @@ test("after `[lives, 2.5]` no allowance makes a store into its place a check aga
   assert.ok(marked > 0, "some allowance leaves the stores marked");
 });
 
-test("a nested literal's cell reads a projection's elements, its read counted to the decision that asks (#2289 R67's witness)", () => {
+test("a nested literal's cell reads a projection's elements, its read counted to the decision that asks (#2289)", () => {
   const source =
     'let w: integer = 1\nlet q = dict{a: w}\nlet xs = [q.values, [w]]\nlet n = xs[0][0]\nsay "${n}"\nexit\n';
   assert.deepEqual(answered(source, "n", []), ["strict integer"]);
 });
 
-test("a choice's selected value is decided by its declared option, and nothing an author sees changes (#2289 R55, R61)", () => {
-  // (`r55.host-at-selection`: `p0` is declared, so the options' selected values are its type, strict, by rule 5; no
-  // message or check reads the decider, R61's outcome (c))
+test("a choice's selected value is decided by its declared option, and nothing an author sees changes (#2289)", () => {
+  // (`p0` is declared, so the options' selected values are its type, strict, by rule 5; no message or check reads the
+  // decider)
   const source =
     'let p0: object = {f0: 1}\nlet p1 = {f1: 1}\nlet p2 = {f2: 1}\np0 = hostValue\nlet options = [{text: "0", value: p0}, {text: "1", value: p1}, {text: "2", value: p2}]\nlet picked = askChoice options\nrepeat picked.f0 {}\nrepeat picked.f1 {}\nrepeat picked.f2 {}\nexit\n';
   const request = coreRequest([{ path: "main.tease", source }]);

@@ -166,7 +166,7 @@ function touchElements(
  * sentence names) and the offending element's (D1). `undecided`, after a stop before admission settled: a literal
  * whose element needs a decision admission did not make (a named element, or one the finishing read leaves `STOPPED`)
  * is not compared; it is reported there instead, so its store marks. `stopped`, after admission settled: a literal
- * whose cell a stop left undecided (R26) is not compared and is reported there.
+ * whose cell a stop left undecided (#2289) is not compared and is reported there.
  */
 export function literalElements(
   admission: Admission,
@@ -219,7 +219,7 @@ export function literalElements(
     compared(cell, list) ? list.flatMap((d) => (d.value === undefined ? [] : [d.value])) : [],
   );
   expectStructures(admission, elements);
-  // (#2289 R49: this invocation's one comparison evaluation, its cells' completed answers by key; dropped on return)
+  // (#2289: this invocation's one comparison evaluation, its cells' completed answers by key; dropped on return)
   const batch = cellBatch(admission);
   cells: for (const [cell, list] of order([...definitions.cellDefs])) {
     const owner = program.cellOwner.get(cell);
@@ -424,7 +424,7 @@ export function literalElements(
       for (const path of [[], ...below]) {
         const at = keptText(admission.work, path);
         const items = admission.valueAt(d, path);
-        // (a stop left the element's value unknown: the cell is undecided, R26, and its holder's stores marked)
+        // (a stop left the element's value unknown: the cell is undecided, #2289, and its holder's stores marked)
         const stop = undecided ?? stopped;
         if (
           stop !== undefined &&

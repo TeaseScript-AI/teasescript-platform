@@ -8,7 +8,7 @@ import type { FlowNode } from "../../flow-graph.js";
 import { type ItemTag, REASON } from "../../items.js";
 import { withoutEmpty } from "../../exact-path.js";
 import type { Expansion, Inheriting, View } from "../model.js";
-import { scanView, textDepth, type DeciderAnswer } from "../scan.js";
+import type { DeciderAnswer } from "../scan.js";
 import { cellSteps, expandRead, partOfRead, viaSignature, viewOfRead } from "../walk.js";
 import { sourceOfRead } from "../structure.js";
 import { isRead, type Reads } from "../../inherited/reads.js";
@@ -35,7 +35,7 @@ export interface Descriptor {
  * A cell's answer at a path (B1): `fit`, the kinds every element fits (rule 1 or 2), strict where a declared element
  * has exactly them (rule 5), its term then the earliest such element's; `conflict`, none fits all (rule 3), the
  * earliest element's type counting, and each later element that does not fit it a misfit, by value (`misfits`);
- * `none`, no element decides; `stopped`, an element's value a stop left unknown, so the cell is undecided (R26).
+ * `none`, no element decides; `stopped`, an element's value a stop left unknown, so the cell is undecided (#2289).
  */
 export type CellAnswer =
   | {
@@ -47,13 +47,13 @@ export type CellAnswer =
       readonly nullable: boolean;
       readonly site: SourceSite | null;
       readonly own: boolean;
-      /** An element, or one nested in an element's literal, decides nothing and may hold host data (R38). */
+      /** An element, or one nested in an element's literal, decides nothing and may hold host data (#2289). */
       readonly host: boolean;
     }
   | {
       readonly kind: "conflict";
       readonly earliest: Descriptor;
-      /** The later elements that do not fit the earliest's type (`misfits`), a copy R37 left out by its first's. */
+      /** The later elements that do not fit the earliest's type (`misfits`), with the copies of earlier elements its body leaves out. */
       readonly misfits: ReadonlyMap<PlaceId, Descriptor>;
       readonly nullable: boolean;
       readonly host: boolean;
@@ -69,7 +69,7 @@ export interface CellSource {
 }
 
 /**
- * #2289 (R50): an element of a literal's body at a cell: its value, its position in the literal's source, the step it
+ * #2289: an element of a literal's body at a cell: its value, its position in the literal's source, the step it
  * stands at (`null` in a projection's body, where the cells stand at the literal's own path), the strip its reading
  * keeps, its recipe, and its view (`viewOfRead`), made when the body's index is first asked.
  */
@@ -84,7 +84,7 @@ export interface BodyScope {
 }
 
 /**
- * #2289 (R50): a literal's body for one reading of it (`strip` empty: whole; else through a projection, its cells the
+ * #2289: a literal's body for one reading of it (`strip` empty: whole; else through a projection, its cells the
  * strip's first step's), shared by every view that links it and by the comparisons: its elements by cell step, each
  * read as its own walk reads it (its recipe, its own context), a nested literal in one a link of that element's view,
  * never walked or copied again here. `index`: per local path, the elements with a stop or link there, made when first
@@ -95,7 +95,7 @@ export interface Body {
   readonly node: FlowNode;
   readonly strip: readonly string[];
   readonly scopes: ReadonlyMap<string | null, readonly BodyScope[]>;
-  /** Per cell step, each element R37 left out, by the first it copies (both by value). */
+  /** Per cell step, each element left out as a copy of an earlier one, by the first it copies (both by value). */
   readonly copies: ReadonlyMap<string | null, ReadonlyMap<PlaceId, PlaceId>>;
   index: {
     readonly reach: Map<string, BodyScope[]>;
@@ -105,7 +105,7 @@ export interface Body {
 
 /**
  * A literal's body for a reading (`Body`), once: its cell steps' elements, of the elements reading one source identity
- * at one snapshot the first (R37, with sharing on).
+ * at one snapshot the first (#2289, with sharing on).
  */
 export function* bodyOfRead(
   admission: Admission,
@@ -116,7 +116,7 @@ export function* bodyOfRead(
   const name = `${value}\u0001${node.id}\u0001${strip.join("\u0001")}`;
   const known = admission.bodies.get(name);
   if (known !== undefined) return known;
-  // (shared by every later reader: counted as `viewOfRead` counts a view, R53)
+  // (shared by every later reader: counted as `viewOfRead` counts a view, #2289)
   return yield* admission.pass.program.work.sharedStructure(
     buildBody(admission, name, value, node, strip),
   );
@@ -175,7 +175,7 @@ function* buildBody(
 /** A body's index (`Body.index`), once: each element's view, its maps' paths as the body's own (below its step). */
 function* indexOf(admission: Admission, body: Body): Reads<NonNullable<Body["index"]>> {
   if (body.index !== null) return body.index;
-  // (shared as a view is, R53)
+  // (shared as a view is, #2289)
   return yield* admission.pass.program.work.sharedStructure(buildIndex(admission, body));
 }
 
@@ -202,7 +202,7 @@ function* buildIndex(admission: Admission, body: Body): Reads<NonNullable<Body["
       for (const map of [view.written, view.links])
         for (const text of map.keys()) add(reach, mount(text), scope);
       // (F2 across the body's elements: a value stop reading a source identity at a snapshot, through the same
-      // operations, that an earlier element's view holds at the same path stands for nothing new, R37)
+      // operations, that an earlier element's view holds at the same path stands for nothing new, #2289)
       for (const [text, stops] of view.values) {
         const at = mount(text);
         let fresh = !sharing() || at === "";
@@ -239,7 +239,7 @@ function* buildIndex(admission: Admission, body: Body): Reads<NonNullable<Body["
 }
 
 /**
- * #2289 (R50): a literal's cell in its body at the steps below the literal (`rel`; whole, the cell's step first): B1
+ * #2289: a literal's cell in its body at the steps below the literal (`rel`; whole, the cell's step first): B1
  * over the elements with a stop or link on the path, each element's descriptor its own view's scan (`scanView`) at the
  * rest below it, so a nested literal in it answers by its own body's cell. Answers are shared only as `memoCell` admits.
  */
@@ -271,12 +271,12 @@ function cellKey(
 }
 
 /**
- * #2289 (R49): one comparison evaluation, lexical to one invocation of `literalElements` and passed down explicitly:
+ * #2289: one comparison evaluation, lexical to one invocation of `literalElements` and passed down explicitly:
  * each completed cell answer it computed, by its normalised key (`cellKey`, `into` null), so a nest's inner cell is an
  * intermediate result of the enclosing comparison, never a result kept for another query. Never on `Admission`, in a
  * memoised closure or in a proof demand: a solver run entered from it (`drive` resolving a key) evaluates without it and
  * records its own reads. A forget empties it; a stopped answer empties it and ends its use, so no answer made before a
- * stop or a forget is consumed after it. Premise (R52): an outside resolution returns finished inputs.
+ * stop or a forget is consumed after it. Premise: an outside resolution returns finished inputs.
  */
 export interface CellBatch {
   forgets: number;
@@ -365,9 +365,9 @@ function* evaluateBody(
   // itself, and a step of none, as a list's own `#value`, has no element to describe)
   if (!body.scopes.has(step)) return none;
   const below = whole ? rel.slice(1) : rel;
-  // (R55: a pseudo-step, `#value` and `#text` (V30 §19) or any other `#` step, is keyed by no walk: each element is read
-  // through its projection up to that step, as the carrier rules read it (`carriedByRead`, `termAt`), and every element
-  // of the cell is described, so none is omitted there)
+  // (#2289: a pseudo-step, `#value` and `#text` (V30 §19) or any other `#` step, is keyed by no walk: each element
+  // is read through its projection up to that step, as the carrier rules read it (`carriedByRead`, `termAt`), and
+  // every element of the cell is described, so none is omitted there)
   const selection = below.findIndex((each) => each.startsWith("#"));
   program.work.charge("checks", below.length);
   if (selection >= 0)
@@ -379,7 +379,7 @@ function* evaluateBody(
   const index = yield* indexOf(admission, body);
   const found = new Set<BodyScope>();
   // (`buildIndex` appends to each list in the body's order, so one list's scopes need no sort; a merge of two or more
-  // does, and is charged where it sorts: R65, the choice lists' sort per evaluation otherwise grows as m·log m)
+  // does, and is charged where it sorts: otherwise the choice lists' sort per evaluation grows as m·log m, #2289)
   let lists = 0;
   const take = (list: readonly BodyScope[] | undefined): void => {
     if (list === undefined) return;
@@ -403,8 +403,7 @@ function* evaluateBody(
   for (const scope of scopes) {
     program.work.charge("checks");
     const view = scope.view!;
-    const answer = yield* scanView(
-      admission,
+    const answer = yield* admission.scanView(
       view,
       at,
       below,
@@ -426,7 +425,7 @@ function* evaluateBody(
   return withCopies(admission, fitOf(admission, descriptors), body.copies.get(step));
 }
 
-/** A conflict's misfits with the copies R37 left out of its body: each misfits as the first it copies does. */
+/** A conflict's misfits with the copies its body left out: each misfits as the first it copies does. */
 function withCopies(
   admission: Admission,
   answer: CellAnswer,
@@ -444,8 +443,9 @@ function withCopies(
 }
 
 /**
- * R55: a cell at a path with a pseudo-step (`below[selection]`): each element's descriptor its projected reading's
- * scan, its recipe the element's strip and the path to that step (`expandRead`, the carrier rules), at the rest below.
+ * #2289: a cell at a path with a pseudo-step (`below[selection]`): each element's descriptor its projected
+ * reading's scan, its recipe the element's strip and the path to that step (`expandRead`, the carrier rules), at the
+ * rest below.
  */
 function* evaluateSelected(
   admission: Admission,
@@ -468,8 +468,7 @@ function* evaluateSelected(
       keptSteps(admission.work, scope.strip, below.slice(0, selection + 1)),
     );
     const view = yield* viewOfRead(admission, projected);
-    const answer = yield* scanView(
-      admission,
+    const answer = yield* admission.scanView(
       view,
       at,
       rest,
@@ -522,6 +521,14 @@ function describe(
     kinds.length === 0 &&
     items.some((item) => item.tag === "unknown" && (item.reasons & REASON.external) !== 0);
   return { value, tags: kinds, term: null, nullable, site: answer?.site ?? null, own: false, host };
+}
+
+/** The depth of a path text (`pathText`): its steps' count, none for the empty path. */
+export function textDepth(text: string): number {
+  if (text === "") return 0;
+  let depth = 1;
+  for (let at = text.indexOf("."); at >= 0; at = text.indexOf(".", at + 1)) depth += 1;
+  return depth;
 }
 
 /** A view's deepest path per map, once (`scanView`'s loops). */
@@ -652,7 +659,7 @@ const NULL: TypeTerm = { kind: "atom", name: "null" };
 const SHAPED: ReadonlySet<ItemTag> = new Set(["list", "set", "dict", "object", "unknown", "empty"]);
 
 /**
- * R3-5: a strict answer's complete term, built down its deciding term: each collection's element and each object's
+ * #2289: a strict answer's complete term, built down its deciding term: each collection's element and each object's
  * property the cell's own answer one step below (a strict one's complete term, an inferred one's kinds, a conflict's
  * earliest element's type), the written part kept where none decides there; `null` where a stop left any of them
  * undecided, so a strict answer is never published with an old leaf below a stopped one.
@@ -712,7 +719,9 @@ export function* completeTerm(
 /** A term of scalar kinds, `null` added where `nullable`; `null` where a kind needs a shape. */
 function termOfTags(tags: readonly ItemTag[], nullable: boolean): TypeTerm | null {
   if (tags.some((tag) => SHAPED.has(tag))) return null;
-  const members: TypeTerm[] = tags.map((tag) => ({ kind: "atom", name: tag as never }));
+  const members: TypeTerm[] = [];
+  for (const tag of tags)
+    if (tag !== "unknown" && tag !== "empty") members.push({ kind: "atom", name: tag });
   if (nullable) members.push(NULL);
   return members.length === 1 ? members[0]! : { kind: "union", members };
 }

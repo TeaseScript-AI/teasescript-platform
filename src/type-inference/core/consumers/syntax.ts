@@ -174,7 +174,7 @@ export function cheapDecided(
   root: PlaceId,
   path: readonly string[],
 ): CheapDecision | null {
-  // (#2289 R3-10: nor where a literal's stopped element left the key or a key above it undecided)
+  // (#2289: nor where a literal's stopped element left the key or a key above it undecided)
   if (
     !syntaxDecides(walk) ||
     walk.admission.decisionStopped(root, path) ||

@@ -243,12 +243,12 @@ export interface DeciderGroup {
   readonly written: Map<number, boolean>;
   /** Whether a literal task stands on the path, per rest (`literalOn`), apart from `written`. */
   readonly literal: Map<number, boolean>;
+  /** Whether a member is a literal with a cell read through a projection (`literalOn`), once asked. */
+  cellMember: boolean | null;
   /**
    * #2289: per rest, `literalOn`'s visit of the region's path as `writtenOn` reads it (whether a written copy there
    * asks a type, and the groups below), so the decided path is walked once for both.
    */
-  /** Whether a member is a literal with a cell read through a projection (`literalOn`), once asked. */
-  cellMember: boolean | null;
   readonly visits: Map<
     number,
     { readonly asks: boolean; readonly below: readonly { group: DeciderGroup; rest: number }[] }
@@ -875,7 +875,7 @@ export function* literalRoute(admission: Admission, decider: DeciderRoot): Reads
   return (yield* holdsWritten(admission, decider.root)) && (yield* literalOn(admission, decider));
 }
 
-export function* literalOn(admission: Admission, decider: DeciderRoot): Reads<boolean> {
+function* literalOn(admission: Admission, decider: DeciderRoot): Reads<boolean> {
   const { root, at, ids } = decider;
   interface Frame {
     readonly group: DeciderGroup;

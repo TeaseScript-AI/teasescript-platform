@@ -407,7 +407,7 @@ export interface Stops {
 }
 
 /**
- * #2289 (R50): a literal a view's walk meets where a step of it has several elements (a cell, B1), by the path it stands
+ * #2289: a literal a view's walk meets where a step of it has several elements (a cell, B1), by the path it stands
  * at and the context it is read in there: one contribution, answered by its body's cell (`literals/cell.ts`), never
  * walked into. Its path and context are its view's own.
  */
@@ -423,7 +423,7 @@ export interface Link {
 }
 
 /**
- * #2289 (R50): a value's stops as the decider and the comparisons read them (`viewOfRead`), in its own coordinates: the
+ * #2289: a value's stops as the decider and the comparisons read them (`viewOfRead`), in its own coordinates: the
  * stops outside every cell and each literal with a cell as a link. Shared by each reader of the value's recipe; a
  * nested literal's body is linked, never copied into the view of a value that holds it. The raw `Stops` of the walk
  * keep every stop for the other readers. `depths`: the deepest path of each map, once asked.
@@ -548,7 +548,7 @@ export interface Decision {
   /** The store that decided (A2, A4), `null` for a written type. */
   readonly decider: Definition | null;
   /**
-   * #2289 (R38): the decider is a strict literal cell one of whose elements decides nothing and may hold host data: the
+   * #2289: the decider is a strict literal cell one of whose elements decides nothing and may hold host data: the
    * decider's own store is a candidate too, its value's host data checked against the decision.
    */
   readonly deciderHost?: true;
@@ -589,7 +589,7 @@ export interface Decided {
   readonly transfer: boolean;
   readonly permitsNull: boolean;
   readonly decider: Definition | null;
-  /** #2289 (R38): as `Decision.deciderHost`. */
+  /** #2289: as `Decision.deciderHost`. */
   readonly deciderHost?: true;
   readonly site: SourceSite | null;
   readonly published: boolean;
@@ -600,7 +600,7 @@ export interface Decided {
   readonly copied: TypeTerm | null;
   /** Where A3 settled the path without a scan: the one family of kinds its contract holds, which names it (`kindsAt`). */
   readonly settled: readonly Item[] | null;
-  /** #2289 (R26): its scan met a literal element a stop left undecided, so it is undecided (`budgetUndecided`). */
+  /** #2289: its scan met a literal element a stop left undecided, so it is undecided (`budgetUndecided`). */
   readonly budget?: true;
 }
 

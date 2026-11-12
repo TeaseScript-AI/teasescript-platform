@@ -137,8 +137,8 @@ export function forgetDecision(admission: Admission, key: CanonicalKey): void {
   admission.budgetUndecided.delete(key);
 }
 
-/** #2289 R26: whether a path's own decision met a literal's element a stop left undecided (`budgetUndecided`). */
-export function budgetUndecidedAt(admission: Admission, at: DecidedAt): boolean {
+/** #2289: whether a path's own decision met a literal's element a stop left undecided (`budgetUndecided`). */
+export function budgetUndecidedKey(admission: Admission, at: DecidedAt): boolean {
   return (
     admission.budgetUndecided.size > 0 && admission.budgetUndecided.has(atOf(admission, at).key)
   );
@@ -146,13 +146,13 @@ export function budgetUndecidedAt(admission: Admission, at: DecidedAt): boolean 
 
 /**
  * Whether the decision of a decided path or of a key above it stopped (`stopDecision`), or the path's own decision met a
- * literal's element a stop left undecided (#2289 R3-10: `budgetUndecided`, the exact key; a key below it meets the same
+ * literal's element a stop left undecided (#2289: `budgetUndecided`, the exact key; a key below it meets the same
  * element in its own evaluation).
  */
 export function decisionStoppedAt(admission: Admission, at: DecidedAt): boolean {
   // (a completion pass carries no stopped key, #1526 phase C: nothing is asked, no path made a cursor to ask it)
   if (admission.pass.closure && !admission.pass.contract.anyStopped) return false;
-  if (budgetUndecidedAt(admission, at)) return true;
+  if (budgetUndecidedKey(admission, at)) return true;
   return at.key === undefined
     ? admission.pass.contract.stopped(at.root, at.path)
     : admission.pass.contract.keyStopped(at.key);
@@ -490,7 +490,7 @@ function decision(admission: Admission, at: At, key: Key, inputs: Inputs): Decid
   }
   if (tags === null) {
     const found = drive(admission, scanAt(admission, direct, prefixes, key));
-    // (#2289, R26: a literal element a stop left undecided leaves the path undecided; C9's branch is not asked)
+    // (#2289: a literal element a stop left undecided leaves the path undecided; C9's branch is not asked)
     if (found?.stopped === true) {
       admission.budgetUndecided.set(contract.canonicalKey(key), {
         place: root,

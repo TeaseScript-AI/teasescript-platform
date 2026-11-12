@@ -651,7 +651,7 @@ export function* stopsOfRead(
 }
 
 /**
- * #2289 (R50): a recipe's view (`View`), the walk of `stopsOfRead` from that task in its own coordinates, but a literal
+ * #2289: a recipe's view (`View`), the walk of `stopsOfRead` from that task in its own coordinates, but a literal
  * with a step of several elements (a cell) is a link where it stands: its steps of one element are walked as before
  * (a cell of one element is that element's own reading), its cells are not, so a literal's body is never walked again
  * for each value that holds it (`literals/cell.ts`). Once per recipe and pass, built when first asked.
@@ -659,8 +659,8 @@ export function* stopsOfRead(
 export function* viewOfRead(admission: Admission, start: Expansion): Reads<View> {
   const known = admission.views.get(start.id);
   if (known !== undefined) return known;
-  // (#2289 R53, R67: the structure every later reader shares, counted to the analysis total and never to the decision
-  // that first asked (r4-349). Only the lazy builds of a view, a body and a body's index, and only their own steps:
+  // (#2289: the structure every later reader shares, counted to the analysis total and never to the
+  // decision that first asked (r4-349). Only the lazy builds of a view, a body and a body's index, and only their own steps:
   // every read a build yields, a read of a built one, the comparison evaluation and every item read run and are charged
   // to the decision that asks (`sharedStructure`); the total's allowance stays their bound)
   return yield* admission.pass.program.work.sharedStructure(buildView(admission, start));
@@ -784,11 +784,14 @@ function* buildView(admission: Admission, start: Expansion): Reads<View> {
     }
   }
   rankKeys(program.work, root);
-  for (const map of [view.written, view.values, view.literals, view.links])
-    for (const list of map.values() as Iterable<{ readonly key: EvaluationKey }[]>) {
-      program.work.charge("checks", sortCost(list.length));
-      list.sort((a, b) => compareKeys(a.key, b.key));
-    }
+  const sortByKey = (list: { readonly key: EvaluationKey }[]): void => {
+    program.work.charge("checks", sortCost(list.length));
+    list.sort((a, b) => compareKeys(a.key, b.key));
+  };
+  for (const list of view.written.values()) sortByKey(list);
+  for (const list of view.values.values()) sortByKey(list);
+  for (const list of view.literals.values()) sortByKey(list);
+  for (const list of view.links.values()) sortByKey(list);
   admission.views.set(start.id, view);
   return view;
 }

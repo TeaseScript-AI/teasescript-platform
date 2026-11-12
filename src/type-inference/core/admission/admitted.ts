@@ -157,7 +157,7 @@ function retainedSource(
     const term = written === null ? null : termAt(written, at.path);
     if (term !== null) return { tags: [...new Set(typeTags(term))], inherited: at.copied };
     // (a decision that stopped, the path's own or a copy's source's, retains nothing: undecided, S3 §5; nor one a
-    // literal's stopped element left undecided, at the path or above it, #2289 R3-10)
+    // literal's stopped element left undecided, at the path or above it, #2289)
     if (
       admission.decisionStopped(at.place, at.path) ||
       admission.budgetUndecidedAt(at.place, at.path, true)
@@ -188,8 +188,8 @@ function retainedSource(
     seen.add(key);
     const { seeds, into, cycleOf } = inheritance(admission);
     const levels = seeds.get(at.place)?.get(pathText(at.path));
-    // (#2289 R3-10: a seed a copy landed through a literal's cell is the literal's own type, not the copy's: its
-    // decision's answer, by the cell's query, where no program stop is; none after one, R24)
+    // (#2289: a seed a copy landed through a literal's cell is the literal's own type, not the copy's: its
+    // decision's answer, by the cell's query, where no program stop is; none after one, #2289)
     if (levels !== undefined && literalBorne(admission, at.place, at.path))
       return literalSeed(admission, at.place, at.path);
     if (levels !== undefined)
@@ -232,7 +232,8 @@ function literalBorne(admission: Admission, place: PlaceId, path: readonly strin
 
 /**
  * A literal-borne seed's level (`retainedSource`): the path's decision as its scan gives it, the literal's cell's
- * answer among its contributions, as `deciderAt` asks it; `null` after a program stop (R24) or where nothing decides.
+ * answer among its contributions, as `deciderAt` asks it; `null` after a program stop (#2289) or where nothing
+ * decides.
  */
 function literalSeed(
   admission: Admission,

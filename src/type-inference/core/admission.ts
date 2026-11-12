@@ -9,7 +9,7 @@ import {
   takeBackReadChecks,
 } from "./admission/boundaries.js";
 import {
-  budgetUndecidedAt,
+  budgetUndecidedKey,
   compareLanded,
   copiedAt,
   decide,
@@ -64,6 +64,7 @@ import { levelsOf, permittedAt } from "./admission/permitted.js";
 import { storeRequirement } from "./admission/requirements.js";
 import type { Composed } from "./admission/structure.js";
 import type { DeciderCaches, DeciderGroup, HeldInput } from "./admission/transfers.js";
+import { scanView } from "./admission/scan.js";
 import { copySources } from "./admission/walk.js";
 import type { CorePass } from "./answers.js";
 import { joinSteps, keptSteps, type WorkLedger } from "./budget.js";
@@ -427,7 +428,7 @@ export class Admission {
   readonly decisions = new Map<CanonicalKey, Decided | null>();
   readonly attempted = new Set<CanonicalKey>();
   /**
-   * #2289 (R26, R3-10): the keys whose decision met a literal element a stop left undecided, each with its place and
+   * #2289: the keys whose decision met a literal element a stop left undecided, each with its place and
    * path. Each enters every list a stopped key enters but the contract's stops: no forget, no restart, its values never
    * `STOPPED`.
    */
@@ -436,18 +437,18 @@ export class Admission {
     { readonly place: PlaceId; readonly path: readonly string[] }
   >();
   /**
-   * #2289 (R3-5, R3-10): the keys A4's copies land at through a literal's cell of more than one element, where the
+   * #2289: the keys A4's copies land at through a literal's cell of more than one element, where the
    * literal's type is the one all its elements fit, not the copy's: a seed there or below is never retained.
    */
   readonly literalLandings = new Set<Key>();
   /**
-   * #2289 (R50): each recipe's view (`viewOfRead`, by the recipe's id) and each literal reading's body (`bodyOfRead`),
+   * #2289: each recipe's view (`viewOfRead`, by the recipe's id) and each literal reading's body (`bodyOfRead`),
    * built when first asked, kept with the `stops` memo's lifetime.
    */
   readonly views = new Map<number, View>();
   readonly bodies = new Map<string, Body>();
   /**
-   * #2289 (R36 mechanism 2, R49): cell answers by literal, the steps below the cell and the decision they go
+   * #2289: cell answers by literal, the steps below the cell and the decision they go
    * into, for the solver's `forgets` they were made at; only an evaluation outside every solver run that waited on no
    * key and did not stop enters (`memoCell`).
    */
@@ -799,13 +800,29 @@ export class Admission {
     return this.decisionStoppedAt({ root: place, path });
   }
 
-  /** #2289 (R26): whether a path's own decision met a literal's element a stop left undecided (`budgetUndecided`). */
+  /**
+   * #2289: `earliestDecider`'s scan of a view (`scanView`), as a literal's cell describes its elements through it: the
+   * cell's module reaches the scan here, since the scan reads the cell's.
+   */
+  public scanView(
+    stops: Parameters<typeof scanView>[1],
+    at: Parameters<typeof scanView>[2],
+    asked: Parameters<typeof scanView>[3],
+    into: Parameters<typeof scanView>[4],
+    depthsOf: Parameters<typeof scanView>[5],
+    from?: Parameters<typeof scanView>[6],
+    batch?: Parameters<typeof scanView>[7],
+  ): ReturnType<typeof scanView> {
+    return scanView(this, stops, at, asked, into, depthsOf, from, batch);
+  }
+
+  /** #2289: whether a path's own decision met a literal's element a stop left undecided (`budgetUndecided`). */
   public budgetUndecidedKey(at: DecidedAt): boolean {
-    return budgetUndecidedAt(this, at);
+    return budgetUndecidedKey(this, at);
   }
 
   /**
-   * #2289 (R3-10): whether a stop left a literal's element on a key's path undecided (`budgetUndecided`), at the key, or
+   * #2289: whether a stop left a literal's element on a key's path undecided (`budgetUndecided`), at the key, or
    * with `above` at the key or a key above it (the readers after the pass's decisions, where no decision runs).
    */
   public budgetUndecidedAt(place: PlaceId, path: readonly string[], above: boolean): boolean {

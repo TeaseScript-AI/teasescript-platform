@@ -59,7 +59,7 @@ const RESOLVED: ReadonlySet<string> = new Set([
  * operand's, the tree's value, whose declaration a fix may give the type (#1268), and the type it writes: `levels`, what
  * the tree's elements hold at each list level down to the path, its `null`s and numbers kept. `undecided`, before
  * admission settled (`Consumers.#freshStores`): a join an operand of which is read through a decision. `stopped`, after
- * it settled: a join an operand of which a stop left undecided (#2289 R26, a literal's element), not compared.
+ * it settled: a join an operand of which a stop left undecided (#2289: a literal's element), not compared.
  */
 export function joinElements(
   admission: Admission,
@@ -282,7 +282,7 @@ export function joinElements(
     ): JoinDecided | "open" | null => {
       const at = joinSteps(["element"], path);
       const decider = joinDecider(admission, operand, node, at);
-      // (#2289 R26: a literal's element a stop left undecided leaves the join undecided: it is reported, not compared)
+      // (#2289: a literal's element a stop left undecided leaves the join undecided: it is reported, not compared)
       if (decider?.stopped === true) {
         halted = true;
         return null;

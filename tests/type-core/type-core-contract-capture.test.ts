@@ -585,7 +585,7 @@ test("the capture ends at the first store whose contract leaves the slice's dept
   // 1: `holdersOf`; 12 fewer since #1906: the mixed errors' later element `b` is described by the kinds its comparison
   // read, its value no longer read again at the two paths it offends at, `valueAt`'s 2 checks, 2 frames, 2 `invSteps`
   // and 6 yields; 738 more since #2289: B1 compares `[a,b]`'s two elements at each path it is asked at, through the
-  // literal's body, its index and its elements' views, R50: 345 checks, 144 yields, 98 event steps, 50 `rdWalk`, 40
+  // literal's body, its index and its elements' views: 345 checks, 144 yields, 98 event steps, 50 `rdWalk`, 40
   // frames, 33 `invSteps` and 60 others, 32 literal and structure units fewer)
   assert.equal(budget.total, 22_963_795);
 });

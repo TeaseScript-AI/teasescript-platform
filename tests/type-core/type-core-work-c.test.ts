@@ -289,6 +289,9 @@ test("the route rule's queries beside arms no run enters grow with the program i
   assert.deepEqual(steepCounters(ROUTE_FEASIBILITY_FAMILIES), []);
 });
 
+/** The depth to which #1438's written union, reversed, keeps its decision within its demand allowance (main: 70). */
+const REVERSED_UNION = 60;
+
 /**
  * #1438: a decider group's region holds each path below the group as a node one step below its parent's, never an
  * array or a text, so the decision of a literal nested k deep grows with k: the largest decision's units per doubling
@@ -296,13 +299,10 @@ test("the route rule's queries beside arms no run enters grow with the program i
  * (2.01 and 2.06 here). Reversed, that one's decision costs depth × copies, G6 in #1319's design-round list (about 3.6,
  * as before G3 2c), so it is pinned by where it stops instead: its decision stays within its demand allowance to
  * `REVERSED_UNION` levels and stops one level deeper. Main stopped it at 71: #2289's B1 compares the literal's two
- * elements on each decided path and charges that comparison to the decision (R53), a known cost of decision B that
- * reaches the allowance sooner (R71); the allowance is unchanged. A region that made each level's path and its text
+ * elements on each decided path and charges that comparison to the decision, a known cost of decision B that
+ * reaches the allowance sooner; the allowance is unchanged. A region that made each level's path and its text
  * measured 4.42 and 4.45, and stopped both shapes' decisions at their allowance at 300 levels.
  */
-/** The depth to which #1438's written union, reversed, keeps its decision within its demand allowance (main: 70). */
-const REVERSED_UNION = 60;
-
 test("a deep literal's decision grows with its depth, never with its square (#1438)", () => {
   const nest = (k: number, leaf: string): string => `${"[".repeat(k)}${leaf}${"]".repeat(k)}`;
   const shapes: readonly (readonly [string, (k: number) => string, readonly boolean[]])[] = [

@@ -46,6 +46,7 @@ import {
   bodyOfRead,
   cellOfBody,
   completeTerm,
+  textDepth,
   viewDepths,
   type CellAnswer,
   type CellBatch,
@@ -129,9 +130,9 @@ export function* scanAt(
   readonly own?: boolean;
   readonly decider: Definition;
   readonly site: SourceSite | null;
-  /** #2289 (R38): the deciding strict cell holds an element that decides nothing and may hold host data. */
+  /** #2289: the deciding strict cell holds an element that decides nothing and may hold host data. */
   readonly host?: true;
-  /** #2289 (R26): a stop left a literal's element on the path undecided, so the path is: nothing else is set. */
+  /** #2289: a stop left a literal's element on the path undecided, so the path is: nothing else is set. */
   readonly stopped?: true;
 } | null> {
   const { program, lists } = admission.pass;
@@ -202,7 +203,7 @@ export function* scanAt(
     const first =
       d.value === undefined ? null : yield* earliestDecider(admission, d.value, d.node, at, into);
     if (first?.stopped === true) return stoppedScan(d);
-    // (#2289: a literal's strict cell carries its complete type, R3-5)
+    // (#2289: a literal's strict cell carries its complete type)
     const copied =
       first?.cell === undefined || first.term === null
         ? (first?.term ?? null)
@@ -282,9 +283,9 @@ export interface DeciderAnswer {
   readonly own?: boolean;
   /** #2289: a literal's strict cell decides (`term`), where it was asked (`completeTerm`). */
   readonly cell?: CellSource;
-  /** #2289 (R38): that strict cell holds an element that decides nothing and may hold host data. */
+  /** #2289: that strict cell holds an element that decides nothing and may hold host data. */
   readonly host?: true;
-  /** #2289 (R26): a stop left an element of a literal on the path undecided; nothing is set beside it. */
+  /** #2289: a stop left an element of a literal on the path undecided; nothing is set beside it. */
   readonly stopped?: true;
 }
 
@@ -320,7 +321,7 @@ export function* earliestDecider(
             tags: transferred.tags,
           };
   }
-  // (R50: the value's view, each literal with a cell a link to its body, where the literal route answers)
+  // (#2289: the value's view, each literal with a cell a link to its body, where the literal route answers)
   if (literal) {
     const view = yield* viewOfRead(admission, task);
     return yield* scanView(admission, view, at, asked, into, () => viewDepths(admission, view));
@@ -330,7 +331,7 @@ export function* earliestDecider(
 }
 
 /**
- * `earliestDecider`'s scan of one set of stops: a walk's own, or a view's (`View`, #2289 R50: a value's, or an element's
+ * `earliestDecider`'s scan of one set of stops: a walk's own, or a view's (`View`, #2289: a value's, or an element's
  * in a literal's body), each link among them one contribution by its body's cell (`cellOfBody`).
  */
 export function* scanView(
@@ -342,7 +343,7 @@ export function* scanView(
   depthsOf: () => { readonly written: number; readonly values: number; readonly literals: number },
   /** The shallowest path any of the stops stands at: an element scope's own (#2289). */
   from = 0,
-  /** The comparison evaluation a cell's scan belongs to (#2289 R49), passed down to the cells it reads. */
+  /** The comparison evaluation a cell's scan belongs to (#2289), passed down to the cells it reads. */
   batch: CellBatch | null = null,
 ): Inheriting<DeciderAnswer | null> {
   const { program, values, contract } = admission.pass;
@@ -435,7 +436,7 @@ export function* scanView(
     }
   }
   // #2289: each literal task on the path, in key order, by its cell's answer: a strict one as a written copy, an
-  // inferred one as a value, a stopped one ending the scan where it comes first (R3-2, R26)
+  // inferred one as a value, a stopped one ending the scan where it comes first (#2289)
   const cellValues: {
     readonly key: EvaluationKey;
     readonly task: Link;
@@ -586,10 +587,11 @@ export function* scanView(
   }
 }
 
-/** A scan that met a stopped literal element (R26): nothing decides, and the path is undecided. */
+/** A scan that met a stopped literal element (#2289: nothing decides, and the path is undecided. */
 function stoppedScan(decider: Definition) {
+  const tags: ItemTag[] = [];
   return {
-    tags: [] as ItemTag[],
+    tags,
     nullable: false,
     byWritten: false,
     permitsNull: false,
@@ -601,7 +603,7 @@ function stoppedScan(decider: Definition) {
 }
 
 /**
- * #2289 (R50): the links of a view on the asked path's prefixes, in key order, with the path's length at each (the
+ * #2289: the links of a view on the asked path's prefixes, in key order, with the path's length at each (the
  * literal's own path).
  */
 function linksOn(
@@ -624,14 +626,6 @@ function linksOn(
 /** Whether a literal task's operations select it (`selectsRead`), or `surely` do. */
 function* taskSelected(admission: Admission, task: Link, surely = false): Reads<boolean> {
   return live(admission, task.value) && (yield* chosen(admission, task.via, surely));
-}
-
-/** The depth of a path text (`pathText`): its steps' count, none for the empty path. */
-export function textDepth(text: string): number {
-  if (text === "") return 0;
-  let depth = 1;
-  for (let at = text.indexOf("."); at >= 0; at = text.indexOf(".", at + 1)) depth += 1;
-  return depth;
 }
 
 /** The deepest path a walk's stops stand at, per kind of stop, once per walk (`earliestDecider`'s loops). */

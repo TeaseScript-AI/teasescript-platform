@@ -4795,7 +4795,7 @@ test("a value any carrier gives brings its elements' types, decided and checked 
   assert.deepEqual(differing, []);
 });
 
-test("a literal cell's elements are compared in the literal's order, however its index lists them (#2289 R65)", () => {
+test("a literal cell's elements are compared in the literal's order, however its index lists them (#2289)", () => {
   // (`q` is listed where its own value stands, `{p: w}` where its property's written stop does: a merge of two lists
   // that must be sorted; `{p: w}` and `{p: s}` are both listed by their written stops, one list in the literal's order.
   // In both the earliest element decides: `xs`'s element is `{p: w}`, and `n` copies its written integer)
@@ -5372,7 +5372,7 @@ test("named external data a carrier stores into a place published with a kind ow
     ["get's receiver", "let raw = hostValue\nlet out = [1, raw].get(1, default: 1)\nexit", "raw]"],
     ["first", "let raw = hostValue\nlet out = [1, raw].first\nexit", "raw]"],
     // (the literal is the written integer, strict, its host element deciding nothing: the data leaves through the
-    // store of the read that copies the cell's element, which owes the check, #2289 R38)
+    // store of the read that copies the cell's element, which owes the check, #2289)
     [
       "a written element beside",
       "let typed: integer = 1\nlet raw = hostValue\nlet out = [typed, raw][1]\nexit",

@@ -488,11 +488,10 @@ same way. A build abandoned at a yield leaves nothing open. The total's allowanc
 3,840 at depth 32), stopped, and left every deeper path `budget`. The author saw one "would take too long" warning per
 copy where the unshared route gave one per element. Charging a shared build to the total keeps sharing from stopping a
 decision that the unshared run finishes. A literal's body charged to the first decision that compares its elements
-passed that decision's demand allowance where main's finished, and made the count depend on which decision asked first
-(#2289's R53); a read run inside the window would be charged to no decision at all (R67).
+passed that decision's demand allowance where main's finished, and made the count depend on which decision asked first;
+a read run inside the window would be charged to no decision at all.
 
-**Source.** PR #1714, merged as `63254271e` (#1703), 2026-11-04; #2289's rulings R53 and R67 (2026-11-11), in its
-pull request.
+**Source.** PR #1714, merged as `63254271e` (#1703), 2026-11-04; #2289 (2026-11-11), in its pull request.
 
 ### r4-358
 

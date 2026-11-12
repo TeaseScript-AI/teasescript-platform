@@ -83,7 +83,7 @@ export function decide(walk: Consumers, group: DecidedAt, lazily = false): Decis
   let stopped = false;
   try {
     const decision = walk.admission.decide(group, lazily);
-    // (#2289 R26: a decision a literal's stopped element left undecided owes what a stopped one's stores owe)
+    // (#2289: a decision a literal's stopped element left undecided owes what a stopped one's stores owe)
     if (decision === null && walk.admission.budgetUndecidedKey(group))
       walk.stoppedStores(root, stepsArray(walk.admission.stepsAt(group)));
     return decision;
@@ -276,7 +276,7 @@ export function admittedStores(
     }
     // C1 per candidate; an equivalent copy (`Candidate.members`) only where its representative leaves an obligation
     const visit = (d: Definition, at: Steps): void => {
-      // (#2289, R38: a strict literal cell's undeclared host element leaves through its decider's own store, which is
+      // (#2289: a strict literal cell's undeclared host element leaves through its decider's own store, which is
       // checked)
       if (d === decider && at.length === 0 && decision.deciderHost !== true) return;
       walk.reading = d.node;

@@ -647,7 +647,7 @@ export class Consumers {
         this.#ingressSites.push(site);
       }
       this.rule = 3;
-      // (a literal or join a stop left undecided (#2289 R26) is not compared: its holders' stores are marked)
+      // (a literal or join a stop left undecided (#2289) is not compared: its holders' stores are marked)
       this.admission.literalElements(
         this.order,
         (site, found) => mixed(this, site, found),

@@ -397,8 +397,8 @@ export class WorkLedger {
   }
 
   /**
-   * #2289 (R53, R67): a shared build of structure, a literal's view, body or index: its own steps count to the total and
-   * never to the decision that first asked, as `sharedSteps`'s do, but each read it yields runs outside the build,
+   * #2289: a shared build of structure, a literal's view, body or index: its own steps count to the total
+   * and never to the decision that first asked, as `sharedSteps`'s do, but each read it yields runs outside the build,
    * charged to the decision that asks as any read is, so no demand runs inside it. Inside another shared build it is
    * that build's.
    */
@@ -435,7 +435,7 @@ export class WorkLedger {
   }
 
   /**
-   * #2289 (R67): `callback`, a read a structure build makes without yielding it (a contract's identity or snapshot of a
+   * #2289: `callback`, a read a structure build makes without yielding it (a contract's identity or snapshot of a
    * value), run outside the open `sharedStructure` window: charged to the decision that asks, as a yielded read is.
    */
   public outside<T>(callback: () => T): T {
