@@ -134,16 +134,32 @@ function directiveFixture() {
   return { files, untracked, expected };
 }
 
-// Each test-site form, one per line: the counted ones name their kind, the others none.
+// Each test-site form, one per line: the counted ones name their kind, the others none; a skip is "off" (without a
+// condition) or "on condition".
 const SITES = [
-  ["skip", 'test.skip("a", () => {});'],
-  ["skip", 'it.skip("b", () => {});'],
-  ["skip", 'describe.skip("c", () => {});'],
-  ["skip", 'suite.skip("d", () => {});'],
-  ["skip", 'test("e", { skip: true }, () => {});'],
-  ["skip", 'test("f", { skip: process.platform === "win32" }, () => {});'],
-  ["skip", 'test.only("g", { "skip": "a reason" }, () => {});'],
-  ["skip", 'test("h", (t) => { t.skip("why"); });'],
+  ["skip", 'test.skip("a", () => {});', "off"],
+  ["skip", 'it.skip("b", () => {});', "off"],
+  ["skip", 'describe.skip("c", () => {});', "off"],
+  ["skip", 'suite.skip("d", () => {});', "off"],
+  ["skip", 'test("e", { skip: true }, () => {});', "off"],
+  ["skip", 'test("f", { skip: process.platform === "win32" }, () => {});', "on condition"],
+  ["skip", 'test.only("g", { "skip": "a reason" }, () => {});', "off"],
+  ["skip", 'test("h", (t) => { t.skip("why"); });', "off"],
+  ["skip", 'test("sa", { skip }, () => {});', "off"],
+  ["skip", 'test("sb", { skip: flag }, () => {});', "off"],
+  ["skip", 'test("sc", { skip: `reason` }, () => {});', "off"],
+  ["skip", 'test("sd", { skip: !tool }, () => {});', "on condition"],
+  ["skip", 'test("se", { skip: has("age") }, () => {});', "on condition"],
+  ["skip", 'test("sf", { skip: env.X === "1" ? false : "opt in" }, () => {});', "on condition"],
+  ["skip", 'test("sg", { skip: (a && b) }, () => {});', "on condition"],
+  ["skip", 'test("sh", (t) => { if (!tool) { t.skip("none"); return; } });', "on condition"],
+  ["skip", 'test("si", (t) => { if (tool) {} else t.skip(); });', "on condition"],
+  ["skip", 'test("sj", (t) => { x ? t.skip() : 0; });', "on condition"],
+  ["skip", 'test("sk", (t) => { missing && t.skip(); });', "on condition"],
+  ["skip", 'test("sl", (t) => { if (t.skip()) {} });', "off"],
+  ["skip", 'test("sm", (t) => { t.skip() || x; });', "off"],
+  ["skip", 'test("sn", (t) => { if (x) [1].forEach(() => { t.skip(); }); });', "off"],
+  ["skip", 'test("so", (t) => { [1].forEach(() => { if (x) t.skip(); }); });', "on condition"],
   ["todo", 'test.todo("i");'],
   ["todo", 'it("j", { todo: true });'],
   ["todo", 'test("k", (context) => { context.todo(); });'],
@@ -264,6 +280,21 @@ test("each node:test skip and todo form counts, and calls that only look like on
   assert.deepEqual(of(result.sites.todoTests), at("todo"));
 });
 
+test("a skip is on a condition only in the forms the header names, and without one otherwise", () => {
+  const at = (when) =>
+    SITES.flatMap(([, , w], i) => (w === when ? [`tests/sites.test.ts:${i + 1}`] : []));
+  const of = (sites) => sites.filter((s) => s.startsWith("tests/sites.test.ts:"));
+  assert.deepEqual(of(result.sites.skippedTestsConditional), at("on condition"));
+  assert.deepEqual(of(result.sites.skippedTestsUnconditional), at("off"));
+  // every skip, also the scope family's, is in exactly one of the two
+  const c = result.counters;
+  assert.equal(c.skippedTestsConditional + c.skippedTestsUnconditional, c.skippedTests);
+  assert.deepEqual(
+    [...result.sites.skippedTestsConditional, ...result.sites.skippedTestsUnconditional].toSorted(),
+    result.sites.skippedTests.toSorted(),
+  );
+});
+
 test("a context's use counts only where the binder resolves its name to the test's context", () => {
   // Coverage: every form, use and kind, and every pair of them, is a case.
   const names = new Set(SCOPES.map((c) => c.name));
@@ -326,6 +357,8 @@ test("a missing list is absent, and a list of another shape or a ROOT that is no
     "largeFilesExcessLines",
     "broadFoldersExcessFiles",
     "longFunctionsExcessLines",
+    "longFunctionsOutsideTestsExcessLines",
+    "longFunctionsInTestsExcessLines",
   ])
     assert.equal(c[key], 0, key);
   assert.match(run(root).stdout, /^Comment external names \(may grow\): absent$/mu);
@@ -397,6 +430,44 @@ test("each structure sum adds the excess over its limit, so a shrinking file low
   writeFileSync(path.join(root, "src/shrink.ts"), lines(1500));
   git(root, "commit", "-q", "-am", "shrink");
   assert.deepEqual(measure(), { files: [1, 500], functions: [2, 15], folders: [1, 2] });
+});
+
+test("@ts- directives and long functions are counted in tests and outside, by the path", () => {
+  // a function of `n` lines with a directive above it
+  const fn = (n) => `// @ts-expect-error\nfunction f() {\n${"void 0;\n".repeat(n - 2)}}\n`;
+  // each place, the excess of its function: a power of two, so each sum names its places
+  const places = {
+    "tests/a.ts": 1,
+    "src/a.test.ts": 2,
+    "tests/helpers/h.ts": 4,
+    "src/a.ts": 8,
+    "tools/t.mjs": 16,
+    "src/tests/x.ts": 32,
+    "src/a.testing.ts": 64,
+  };
+  const root = checkout(
+    Object.fromEntries(Object.entries(places).map(([file, excess]) => [file, fn(150 + excess)])),
+  );
+  const r = run(root, "--json");
+  assert.equal(r.status, 0, r.stderr);
+  const c = JSON.parse(r.stdout).counters;
+  assert.deepEqual([c.tsDirectives, c.tsDirectivesInTests, c.tsDirectivesOutsideTests], [7, 3, 4]);
+  assert.deepEqual([c.longFunctionsInTests, c.longFunctionsInTestsExcessLines], [3, 1 + 2 + 4]);
+  assert.deepEqual(
+    [c.longFunctionsOutsideTests, c.longFunctionsOutsideTestsExcessLines],
+    [4, 8 + 16 + 32 + 64],
+  );
+  assert.equal(c.longFunctionsExcessLines, 127);
+  const text = run(root);
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(
+    text.stdout,
+    /^@ts-expect-error and @ts-ignore: 7\n@ts- directives outside tests: 4\n@ts- directives in tests: 3\nSkipped tests: 0\nSkipped tests without a condition: 0\nSkipped tests on a condition: 0$/mu,
+  );
+  assert.match(
+    text.stdout,
+    /^Lines above 150, summed over those functions: 127\nFunctions over 150 lines outside tests: 4\nLines above 150, summed over those outside tests: 120\nFunctions over 150 lines in tests: 3\nLines above 150, summed over those in tests: 7$/mu,
+  );
 });
 
 // What this checks: a SIGTERM while the tool holds its temporary folder ends the run with exit 143 and leaves no
