@@ -1,6 +1,6 @@
 /*
  * #1072 step 1b (R21, R28): `tools/test-output-filter.mjs` imports this into every test process. In a test file of
- * `tests/type-core/` or `tests/type-core-stop/` it installs the retained-state instrument for the whole process, so that suite runs frozen: in CI
+ * `tests/type-core/` or `tests/type-core-stop/` (or a folder one down in either) it installs the retained-state instrument for the whole process, so that suite runs frozen: in CI
  * only the files of the frozen subset (`tests/helpers/retained-subset.ts`), with `RETAINED_FREEZE=all` every one (the
  * whole survey, a queue job, docs/TESTING.md). Anywhere else, the production shard's files included, it does nothing.
  *
@@ -20,7 +20,11 @@ const survey = process.env["RETAINED_SURVEY"];
 const measure = process.env["RETAINED_MEASURE"];
 const all =
   process.env["RETAINED_FREEZE"] === "all" || survey !== undefined || measure !== undefined;
-const name = /[\\/]tests[\\/]type-core(?:-stop)?[\\/]([^\\/]+\.test)\.js$/u.exec(file)?.[1];
+// (a test file of `tests/type-core/` or `tests/type-core-stop/`, or of a folder one down in either, as the suite reads
+// its files two folders down, `tools/test-shards.mjs`)
+const name = /[\\/]tests[\\/]type-core(?:-stop)?[\\/](?:[^\\/]+[\\/])?([^\\/]+\.test)\.js$/u.exec(
+  file,
+)?.[1];
 if (name !== undefined && (all || FROZEN_IN_CI.has(name))) {
   // (imported here, not above: the instrument loads much of the type core, which every other test process, and each
   // process a test spawns, would load for nothing)
