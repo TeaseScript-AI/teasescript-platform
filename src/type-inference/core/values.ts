@@ -100,6 +100,7 @@ import { indexedPlus } from "./indexes/plus-index.js";
 import { stepName, type CoreProgram, type ValueConstraint } from "./program.js";
 import { Position, positions, UNPOSITIONED } from "./positions.js";
 import type { Proof, ProofDemand, Proven, Work } from "./solver.js";
+import { Retained } from "./retained/retained.js";
 
 /*
  * The value side of the coarse core (checkpoint 9): a read of a key at a node takes, in this order, the host
@@ -111,7 +112,7 @@ import type { Proof, ProofDemand, Proven, Work } from "./solver.js";
  * and operations are demands, once per value and path.
  */
 
-const COLLECTIONS = new Set(["list", "set", "dict", "object"]);
+const COLLECTIONS: ReadonlySet<string> = new Set(["list", "set", "dict", "object"]);
 
 /** The receiver kinds a copy of their elements (F10) is not. */
 const COPIED: ReadonlySet<ItemTag> = new Set(["list", "set", "range"]);
@@ -164,15 +165,19 @@ function copyMethod(c: ValueConstraint): c is CopyOperation {
 
 export class Values {
   /** The route each read took, by key, node and `before`, recorded as the read is answered. */
-  readonly #routes = new Map<string, ReadRoute>();
+  readonly #routes = Retained.map<string, ReadRoute>("Values.#routes");
   /** Per read, the narrowing it takes (`#narrowingOf`), and per place, its stable chain's binding (`#stableBinding`). */
-  readonly #narrowings = new Map<PlaceId, NarrowedRead | null>();
-  readonly #narrowingsBelow = new Map<PlaceId, Map<string, NarrowedRead | null>>();
-  readonly #bindings = new Map<PlaceId, PlaceId | null>();
+  readonly #narrowings = Retained.map<PlaceId, NarrowedRead | null>("Values.#narrowings");
+  readonly #narrowingsBelow = Retained.map<PlaceId, Map<string, NarrowedRead | null>>(
+    "Values.#narrowingsBelow",
+  );
+  readonly #bindings = Retained.map<PlaceId, PlaceId | null>("Values.#bindings");
   /** Per type test's form, its spelling (`#testSpelling`). */
-  readonly #testSpellings = new Map<NarrowingForm, Spelling>();
+  readonly #testSpellings = Retained.map<NarrowingForm, Spelling>("Values.#testSpellings");
 
-  public constructor(readonly pass: CorePass) {}
+  public constructor(readonly pass: CorePass) {
+    Retained.owner(this, "Values");
+  }
 
   /**
    * A type test's spelling (`NarrowingForm`'s `test`): its kinds in their written order, which the kinds it narrows to
@@ -371,7 +376,8 @@ export class Values {
     const g = guards.narrowing.nearestAt(read, rest);
     const found: NarrowedRead | null =
       g === null ? null : { g, read, root: at, key, node: program.occNode.get(at) ?? node };
-    if (byKey === undefined) this.#narrowingsBelow.set(value, (byKey = new Map()));
+    if (byKey === undefined)
+      this.#narrowingsBelow.set(value, (byKey = Retained.map("Values.#narrowingsBelow[]")));
     byKey.set(key, found);
     return found;
   }
