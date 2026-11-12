@@ -3,6 +3,7 @@ import test from "node:test";
 
 import { compileProjectWithBackend } from "../../src/compiler.js";
 import { parse } from "../../src/parser.js";
+import { SLICE_DEPTH } from "../../src/type-inference/core/contract-descriptors.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import {
   DISPOSITIONS,
@@ -152,9 +153,10 @@ interface Condition {
 
 /**
  * The inventory of the modelled rows' own conditions: the conditions of main's `outsideSyntax` cases
- * (a85dc7d8f929ea7cd74f133834b3ce4c9ff487a3) that became the rows, one source each, and a second where the condition
- * reads through parentheses or a key could be read as absent (the empty key). Every other modelled row has none
- * (`UNCONDITIONAL`); the inventory test below keeps the two lists equal to the table's modelled rows.
+ * (a85dc7d8f929ea7cd74f133834b3ce4c9ff487a3) that became the rows, with those of the predicates they call
+ * (`annotationOutside`, `nullTest`, `sliceCall`, `sliceMethod`): a source for each operand, comparison and unwrapping
+ * that, weakened, would admit a refused source (#2501 lists them with their mutants). Every other modelled row has
+ * none (`UNCONDITIONAL`); the inventory test below keeps the two lists equal to the table's modelled rows.
  */
 const CONDITIONS: readonly Condition[] = [
   {
@@ -162,6 +164,13 @@ const CONDITIONS: readonly Condition[] = [
     condition: "a written type of the slice",
     source: "let x: integer | string = 1",
     at: "integer | string",
+    what: "this written type",
+  },
+  {
+    row: "letStatement",
+    condition: "a written list type above the facts' deepest depth (`SLICE_DEPTH`)",
+    source: `let x: integer${"[]".repeat(SLICE_DEPTH)} = []`,
+    at: "integer[]",
     what: "this written type",
   },
   {
@@ -214,6 +223,13 @@ const CONDITIONS: readonly Condition[] = [
     what: "this say",
   },
   {
+    row: "sayStatement",
+    condition: "a shown value other than a text literal is walked",
+    source: "say toInteger(hostValue)",
+    at: "toInteger(hostValue)",
+    what: "this call expression",
+  },
+  {
     row: "expressionStatement",
     condition: "a call",
     source: 'askBooleans("Q?", texts: ["A"], prefill: [false], cancel: "Back")',
@@ -263,6 +279,13 @@ const CONDITIONS: readonly Condition[] = [
     what: "this binary expression",
   },
   {
+    row: "binaryExpression",
+    condition: "a null test is `==` or `!=`",
+    source: "let b = hostValue < null",
+    at: "hostValue < null",
+    what: "this binary expression",
+  },
+  {
     row: "typeTestExpression",
     condition: "a written type of the slice",
     source: "let b = hostValue is integer | string",
@@ -281,6 +304,118 @@ const CONDITIONS: readonly Condition[] = [
     condition: "a method of `sliceMethod`'s shapes",
     source: "let xs = [1]\nxs.add(2)",
     at: "xs.add(2)",
+    what: "this call expression",
+  },
+  {
+    row: "callExpression",
+    condition: "a method's receiver is walked",
+    source: "let n = [hostValue + 1].get(0, default: 1)",
+    at: "hostValue + 1",
+    what: "this binary expression",
+  },
+  {
+    row: "callExpression",
+    condition: "a method other than `get` takes no named argument",
+    source: "let xs = [1]\nlet b = xs.contains(1, default: false)",
+    at: "xs.contains(1, default: false)",
+    what: "this call expression",
+  },
+  {
+    row: "callExpression",
+    condition: "a method takes no more arguments than its contract",
+    source: "let xs = [1]\nlet b = xs.contains(1, 2)",
+    at: "xs.contains(1, 2)",
+    what: "this call expression",
+  },
+  {
+    row: "callExpression",
+    condition: "a method takes its contract's required arguments",
+    source: "let xs = [1]\nlet b = xs.contains()",
+    at: "xs.contains()",
+    what: "this call expression",
+  },
+  {
+    row: "callExpression",
+    condition: "a method that copies its receiver's elements",
+    source: "let xs = [1]\nlet ys = xs.take(1)",
+    at: "xs.take(1)",
+    what: "this call expression",
+  },
+  {
+    row: "callExpression",
+    condition: "`get` with `default:` alone",
+    source: "let xs = [1]\nlet n = xs.get(0, default: 1, other: 2)",
+    at: "xs.get(0, default: 1, other: 2)",
+    what: "this call expression",
+  },
+  {
+    row: "callExpression",
+    condition: "`toJson` of one value",
+    source: "let t = toJson(hostValue, hostValue)",
+    at: "toJson(hostValue, hostValue)",
+    what: "this call expression",
+  },
+  {
+    row: "callExpression",
+    condition: "`toJson` with no named argument",
+    source: 'let t = toJson(hostValue, default: "")',
+    at: 'toJson(hostValue, default: "")',
+    what: "this call expression",
+  },
+  {
+    row: "callExpression",
+    condition: "one positional argument beside `default:`",
+    source: "let n = toInteger(hostValue, hostValue, default: 0)",
+    at: "toInteger(hostValue, hostValue, default: 0)",
+    what: "this call expression",
+  },
+  {
+    row: "callExpression",
+    condition: "a conversion with `default:` alone",
+    source: "let n = toInteger(hostValue, default: 0, other: 1)",
+    at: "toInteger(hostValue, default: 0, other: 1)",
+    what: "this call expression",
+  },
+  {
+    row: "callExpression",
+    condition: "a conversion of a value of named kinds (not `toString`)",
+    source: 'let t = toString(hostValue, default: "")',
+    at: 'toString(hostValue, default: "")',
+    what: "this call expression",
+  },
+  {
+    row: "callExpression",
+    condition: "`fromJson` with `files:` alone beside `default:`",
+    source: 'let v = fromJson("1", default: 0, other: 1)',
+    at: 'fromJson("1", default: 0, other: 1)',
+    what: "this call expression",
+  },
+  {
+    row: "callExpression",
+    condition: "`fromJson` with `files: false` only",
+    source: 'let v = fromJson("1", default: 0, files: true)',
+    at: 'fromJson("1", default: 0, files: true)',
+    what: "this call expression",
+  },
+  {
+    row: "callExpression",
+    condition: "`fileFromBase64` with `default:` alone",
+    source: 'let f = fileFromBase64("YQ==", default: hostValue, other: 1)',
+    at: 'fileFromBase64("YQ==", default: hostValue, other: 1)',
+    what: "this call expression",
+  },
+  {
+    row: "callExpression",
+    condition: "a decryption with one of `password:` and `key:`",
+    source: 'let t = decryptText("x", default: "", password: "p", key: "k")',
+    at: 'decryptText("x", default: "", password: "p", key: "k")',
+    what: "this call expression",
+  },
+  {
+    row: "callExpression",
+    condition: "a decryption with `password:` or `key:`",
+    source: 'let t = decryptText("x", default: "", other: "p")',
+    at: 'decryptText("x", default: "", other: "p")',
     what: "this call expression",
   },
   {
@@ -316,6 +451,13 @@ const CONDITIONS: readonly Condition[] = [
     condition: "a key no earlier load of the project wrote, the empty key",
     source: 'let a = load "", default: 1\nlet b = load "", default: 2',
     at: 'load "", default: 2',
+    what: "this load expression",
+  },
+  {
+    row: "loadExpression",
+    condition: "a key no earlier load of the project wrote, written in parentheses",
+    source: 'let a = load(("key"), default: 1)\nlet b = load(("key"), default: 2)',
+    at: 'load(("key"), default: 2)',
     what: "this load expression",
   },
 ];
