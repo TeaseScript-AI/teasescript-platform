@@ -180,9 +180,56 @@ async function pressEnter(cdp) {
 }
 
 /**
+ * Whether the composer's placeholder shows whole beside its buttons, at the layout's width and at 360 px on a touch
+ * screen (narrow phones, whose buttons are larger): the placeholder's text, measured in the field's own font, against
+ * the field's content width.
+ */
+async function assertPlaceholderWhole(cdp, expected) {
+  const measure = `(() => {
+    const field = document.querySelector('[data-composer-input]');
+    const style = getComputedStyle(field);
+    const probe = document.createElement('span');
+    probe.style.cssText = 'position:absolute;visibility:hidden;white-space:pre';
+    for (const name of ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing']) probe.style[name] = style[name];
+    probe.textContent = field.placeholder;
+    document.body.append(probe);
+    const text = probe.getBoundingClientRect().width;
+    probe.remove();
+    return {
+      placeholder: field.placeholder,
+      text: Math.ceil(text),
+      room: Math.floor(field.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight)),
+      eye: !!document.querySelector('[data-composer-password-toggle]'),
+      send: !!document.querySelector('.composer-send'),
+    };
+  })()`;
+  try {
+    for (const width of [1280, 360]) {
+      await setViewport(cdp, width, 800);
+      await cdp.call("Emulation.setTouchEmulationEnabled", {
+        enabled: width < 600,
+        maxTouchPoints: 1,
+      });
+      await delay(200);
+      const shown = await value(cdp, measure);
+      assertEqual(shown.placeholder, expected, `The placeholder at ${width} px`);
+      assertEqual(
+        shown.eye && shown.send && shown.text <= shown.room,
+        true,
+        `"${expected}" does not show whole at ${width} px: ${JSON.stringify(shown)}`,
+      );
+    }
+  } finally {
+    await cdp.call("Emulation.setTouchEmulationEnabled", { enabled: false });
+    await setViewport(cdp, 1280, 800);
+  }
+}
+
+/**
  * askPassword (V30 §20) in the composer, coarsely: its answer is the hash of what was typed; written directly in
- * `password:` its field asks twice for an encrypt call and once for a decrypt call; and with an opener written `true`,
- * the lock dialog follows the field. No typed password is shown or kept.
+ * `password:` its field asks twice on one line for an encrypt call, with its placeholders whole, and once for a
+ * decrypt call; and with an opener written `true`, the lock dialog follows the field. No typed password is shown or
+ * kept.
  */
 export async function passwordScenario(cdp, origin) {
   const identifier = await standInRelays(cdp);
@@ -196,7 +243,7 @@ export async function passwordScenario(cdp, origin) {
     const field = `document.querySelector('[data-composer-input]')`;
     const fieldOpen = (question) =>
       `${said(question)} && ${noLoginField(field)} && !${field}.disabled`;
-    const repeat = `!!document.querySelector('[data-composer-repeat]')`;
+    const repeatPhase = `${field}.getAttribute('aria-label') === 'Repeat password' && ${field}.value === ''`;
 
     // A password has one line: one pasted with a line break answers without it.
     await waitFor(cdp, fieldOpen("Your code?"), 8_000, "askPassword did not open a password field");
@@ -209,18 +256,22 @@ export async function passwordScenario(cdp, origin) {
     await pressEnter(cdp);
     await waitFor(cdp, said("Same: true"), 8_000, "askPassword did not give the typed text's hash");
 
-    // In `password:` of an encrypt call the field asks twice, of a decrypt call once.
-    await waitFor(cdp, fieldOpen("Choose a code") + ` && ${repeat}`, 8_000, "No repeat field");
-    assertEqual(
-      await value(cdp, noLoginField(`document.querySelector('[data-composer-repeat]')`)),
-      true,
-      "The repeat field is a login field",
-    );
+    // In `password:` of an encrypt call the field asks twice on one line, of a decrypt call once.
+    await waitFor(cdp, fieldOpen("Choose a code"), 8_000, "No password field to lock");
+    await assertPlaceholderWhole(cdp, "Password");
     await typeInto(cdp, "[data-composer-input]", "field pass");
-    await typeInto(cdp, "[data-composer-repeat]", "field pass");
+    await pressEnter(cdp);
+    await waitFor(
+      cdp,
+      `${repeatPhase} && ${noLoginField(field)} && !!document.querySelector('[data-composer-back]')`,
+      8_000,
+      "The field did not ask again on its line",
+    );
+    await assertPlaceholderWhole(cdp, "Repeat it");
+    await typeInto(cdp, "[data-composer-input]", "field pass");
     await pressEnter(cdp);
     await waitFor(cdp, said("Locked."), 15_000, "The password field did not lock");
-    await waitFor(cdp, fieldOpen("Type it again") + ` && !(${repeat})`, 8_000, "No field to open");
+    await waitFor(cdp, fieldOpen("Type it again"), 8_000, "No field to open");
     await typeInto(cdp, "[data-composer-input]", "field pass");
     await pressEnter(cdp);
     await waitFor(cdp, said("Opened: Field note"), 15_000, "The password field did not open it");
@@ -228,7 +279,9 @@ export async function passwordScenario(cdp, origin) {
     // With `timeLock: true` the lock dialog follows the field and asks for the time lock alone.
     await waitFor(cdp, fieldOpen("Choose another code"), 8_000, "No field before the dialog");
     await typeInto(cdp, "[data-composer-input]", "timed pass");
-    await typeInto(cdp, "[data-composer-repeat]", "timed pass");
+    await pressEnter(cdp);
+    await waitFor(cdp, repeatPhase, 8_000, "The field did not ask again on its line");
+    await typeInto(cdp, "[data-composer-input]", "timed pass");
     await pressEnter(cdp);
     await waitFor(
       cdp,
@@ -455,7 +508,6 @@ export async function passwordInterruptionScenario(cdp, origin) {
   const said = (text) =>
     `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.trim().endsWith(${JSON.stringify(text)}))`;
   const input = `document.querySelector('[data-composer-input]')`;
-  const repeat = `document.querySelector('[data-composer-repeat]')`;
   const field = (id) => `document.querySelector('[data-form-field="${id}"]')`;
   await waitFor(
     cdp,
@@ -490,17 +542,19 @@ export async function passwordInterruptionScenario(cdp, origin) {
   await clickLabelled(cdp, "Lock it", "[data-permanent-button]");
   await waitFor(
     cdp,
-    `${said("Interrupting password")} && !!${repeat} && !${input}.disabled && ${noLoginField(input)}`,
+    `${said("Interrupting password")} && ${input}.getAttribute('aria-label') === 'Password' && !${input}.disabled && ${noLoginField(input)}`,
     8_000,
     "The lock's password field did not open",
   );
   assertEqual(await value(cdp, `${input}.value`), "", "The password field took the form's text");
   await typeInto(cdp, "[data-composer-input]", "p");
-  await typeInto(cdp, "[data-composer-repeat]", "p");
+  await pressEnter(cdp);
+  await waitFor(cdp, `${input}.getAttribute('aria-label') === 'Repeat password'`);
+  await typeInto(cdp, "[data-composer-input]", "p");
   await pressEnter(cdp);
   await waitFor(
     cdp,
-    `!${repeat} && !!${field("name")} && ${input}.value === "Bea" && !(${masked})`,
+    `!!${field("name")} && ${input}.value === "Bea" && !(${masked})`,
     15_000,
     "The form's text being typed was lost after a lock's password field",
   );

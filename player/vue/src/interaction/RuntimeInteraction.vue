@@ -822,7 +822,7 @@ function escape() {
           :placeholder="
             lockField
               ? lockPhase === 'repeat'
-                ? 'Repeat password'
+                ? 'Repeat it'
                 : (lockField.hint ?? 'Password')
               : locking ||
                   foreground?.kind === 'popup' ||
