@@ -129,7 +129,31 @@ checked outside dictionary types, including test helpers and mutation callbacks.
 Runtime `typeof`, descriptor/prototype inspection, property omission, and partial static analyses are legitimate
 techniques. Lint does not require schema dependencies, forbid every reflective operation, or determine whether a
 boundary validation is sufficient. `Reflect.get` and `Reflect.apply` require a specific justification because they
-bypass ordinary typed property access or invocation.
+bypass ordinary typed property access or invocation. Type inference is the exception: see the next section.
+
+## Retained state in type inference
+
+`tools/oxlint/check-retained-state.mjs` holds the code side of the frozen retained-state regime (docs/TESTING.md,
+"Frozen retained state"), which catches a write to retained state that the type core makes by ordinary code, across
+runs, in test mode; it does not claim to resist code written to get around it (#1072 R33).
+
+Its widest rule closes the meta-object layer: in every file of `src/type-inference/`, the core files its other lines
+leave out included, a property changes only by assignment or by a kind's own method (#1072 R30, R34). Refused there:
+
+- `Object`, but as `Object.freeze`, `hasOwn`, `keys`, `values`, `entries`, `fromEntries`, `assign` or `is`: another
+  member, an alias (`const O = Object`) and a computed member (`Object[name]`) are refused;
+- `Reflect`, `globalThis`, `Function` and `eval`;
+- the `delete` operator;
+- `.prototype`, `__proto__` and `.constructor`, as a member or as a computed key;
+- `defineProperty`, `defineProperties`, `__defineGetter__` and `__defineSetter__`, by name anywhere;
+- a constructor's `return <value>`.
+
+What these reach (a descriptor, a prototype, an integrity level, a deletion) could change a locked owner's field or a
+retained collection's writer unseen by the instrument, or make a frozen run compute what production does not. Only
+`src/type-inference/` and the tests import the core. The tests and `tests/helpers/` hold retained owners and use this
+layer on purpose, to observe the core (`type-core-held-host.ts` defines accessors on an owner to watch its reads); they
+are outside the rule, which reads only type inference. A type-inference author who needs a refused form takes it to the
+coordinator; there is no waiting list and no local disable.
 
 ## Evidence and exceptions
 
