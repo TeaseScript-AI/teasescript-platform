@@ -1,0 +1,24 @@
+let line = 0
+repeat 24 {
+    line += 1
+    say "Earlier line ${line} of the conversation.", instant
+}
+timer async 600 s {
+    say "Line 1 of the first block, a block's message taller than the view.\nLine 2 of the first block, a block's message taller than the view.\nLine 3 of the first block, a block's message taller than the view.\nLine 4 of the first block, a block's message taller than the view.\nLine 5 of the first block, a block's message taller than the view.\nLine 6 of the first block, a block's message taller than the view.\nLine 7 of the first block, a block's message taller than the view.\nLine 8 of the first block, a block's message taller than the view.\nLine 9 of the first block, a block's message taller than the view.\nLine 10 of the first block, a block's message taller than the view.\nLine 11 of the first block, a block's message taller than the view.\nLine 12 of the first block, a block's message taller than the view.\nLine 13 of the first block, a block's message taller than the view.\nLine 14 of the first block, a block's message taller than the view.\nLine 15 of the first block, a block's message taller than the view.\nLine 16 of the first block, a block's message taller than the view.\nLine 17 of the first block, a block's message taller than the view.\nLine 18 of the first block, a block's message taller than the view.\nLine 19 of the first block, a block's message taller than the view.\nLine 20 of the first block, a block's message taller than the view.\nLine 21 of the first block, a block's message taller than the view.\nLine 22 of the first block, a block's message taller than the view.\nLine 23 of the first block, a block's message taller than the view.\nLine 24 of the first block, a block's message taller than the view.\nLine 25 of the first block, a block's message taller than the view.\nLine 26 of the first block, a block's message taller than the view.\nLine 27 of the first block, a block's message taller than the view.\nLine 28 of the first block, a block's message taller than the view.\nLine 29 of the first block, a block's message taller than the view.\nLine 30 of the first block, a block's message taller than the view.", instant
+}
+timer async 1200 s {
+    say "Line 1 of the second block, a block's message taller than the view.\nLine 2 of the second block, a block's message taller than the view.\nLine 3 of the second block, a block's message taller than the view.\nLine 4 of the second block, a block's message taller than the view.\nLine 5 of the second block, a block's message taller than the view.\nLine 6 of the second block, a block's message taller than the view.\nLine 7 of the second block, a block's message taller than the view.\nLine 8 of the second block, a block's message taller than the view.\nLine 9 of the second block, a block's message taller than the view.\nLine 10 of the second block, a block's message taller than the view.\nLine 11 of the second block, a block's message taller than the view.\nLine 12 of the second block, a block's message taller than the view.\nLine 13 of the second block, a block's message taller than the view.\nLine 14 of the second block, a block's message taller than the view.\nLine 15 of the second block, a block's message taller than the view.\nLine 16 of the second block, a block's message taller than the view.\nLine 17 of the second block, a block's message taller than the view.\nLine 18 of the second block, a block's message taller than the view.\nLine 19 of the second block, a block's message taller than the view.\nLine 20 of the second block, a block's message taller than the view.\nLine 21 of the second block, a block's message taller than the view.\nLine 22 of the second block, a block's message taller than the view.\nLine 23 of the second block, a block's message taller than the view.\nLine 24 of the second block, a block's message taller than the view.\nLine 25 of the second block, a block's message taller than the view.\nLine 26 of the second block, a block's message taller than the view.\nLine 27 of the second block, a block's message taller than the view.\nLine 28 of the second block, a block's message taller than the view.\nLine 29 of the second block, a block's message taller than the view.\nLine 30 of the second block, a block's message taller than the view.", instant
+}
+timer async 1800 s {
+    let aside = askText "A question of the third block?"
+}
+let colour = askChoice "Red", "Blue"
+say "After the first answer.", instant
+let side = askChoice "Left", "Right"
+say "After the second answer.", instant
+let way = askChoice "Up", "Down"
+say "After the third answer.", instant
+let word = askText "Your word?"
+say "After the word.", instant
+let done = askChoice "Done"
+exit
