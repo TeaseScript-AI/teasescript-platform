@@ -66,6 +66,7 @@ import {
 } from "./slice-index.js";
 import { lostCheck, runtimeChecks } from "./runtime-plan.js";
 import { Contracts } from "./store-contracts.js";
+import { identityView } from "../identity-view.js";
 
 /*
  * The consumer of the coarse core (the port plan's S5, completed in S9b): one walk over the source with the core's
@@ -345,7 +346,9 @@ export function asked<T>(answers: Answers, ask: (answers: Answers) => T): T {
  * there reads its JSON without its expected type.
  */
 export function checkedResult(answers: Answers, request: CoreAnalysisRequest): CoreResult {
-  const index = new SliceIndex(request.files.map((file) => file.program));
+  // (the analysis read the request through its identity view: `analyseCore`)
+  const viewed = identityView(request).request;
+  const index = new SliceIndex(viewed.files.map((file) => file.program));
   return asked(answers, (answers) => {
     let contracts: Contracts | null = null;
     const expected = (call: CallExpression): TypePlan | undefined => {
@@ -630,10 +633,12 @@ export function storeContracts(
   answers: Answers,
   request: CoreAnalysisRequest,
 ): ReadonlyMap<string, ContractResult> {
-  const index = new SliceIndex(request.files.map((file) => file.program));
+  // (the analysis read the request through its identity view: `analyseCore`)
+  const viewed = identityView(request).request;
+  const index = new SliceIndex(viewed.files.map((file) => file.program));
   return asked(answers, (answers) => {
     const out = new Map<string, ContractResult>();
-    for (const [store, result] of runtimeChecks(answers, index, request).contracts)
+    for (const [store, result] of runtimeChecks(answers, index, viewed).contracts)
       out.set(`${index.fileOf(store)}:${store.span.start.offset}:${store.span.end.offset}`, result);
     return out;
   });
