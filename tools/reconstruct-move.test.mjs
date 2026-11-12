@@ -601,10 +601,10 @@ test("a move that passes runs its own controls: a dropped, a duplicated and a sw
   );
   // (an edit below the control's line moves with it)
   const numbers = "const one = 1;\nconst two = 2;\nconst three = 3;\nconst four = 4;\n";
-  const edited = repository(t, { "src/big.ts": numbers.replace("4;", "5;") }, numbers).run(
-    "--edit",
-    "src/big.ts:4=4",
-  );
+  // (no control lines: the edit is the file's last line, so one that did not move would name no line)
+  const edited = repository(t, { "src/big.ts": numbers.replace("4;", "5;") }, numbers, {
+    controls: false,
+  }).run("--edit", "src/big.ts:4=4");
   assert.equal(edited.status, 0, edited.out);
   assert.match(edited.out, /^control: dropped src\/big\.ts:1, failed$/mu);
   // (a move of repeated lines only builds no control)
