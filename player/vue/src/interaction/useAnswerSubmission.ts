@@ -89,6 +89,7 @@ const STAGES: readonly AnswerStage[] = ["accepted", "fenced", "posted", "settled
 /** Moves `record` forward to `stage`, the one writer of a stage: never back, and nothing after `settled`. */
 function advance(record: PendingAnswer, stage: AnswerStage): boolean {
   if (STAGES.indexOf(stage) <= STAGES.indexOf(record.stage)) return false;
+  // EVIDENCE: invariant: every record is this module's own object literal; `stage` is read-only to every other reader.
   (record as { stage: AnswerStage }).stage = stage;
   return true;
 }
