@@ -13,6 +13,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { FROZEN_IN_CI } from "./retained-subset.js";
 
+// (the preload's own, taken before any test replaces it: a test may count every call of the global one)
+const stringify = JSON.stringify;
 const file = process.argv[1] ?? "";
 const survey = process.env["RETAINED_SURVEY"];
 const measure = process.env["RETAINED_MEASURE"];
@@ -34,7 +36,7 @@ if (name !== undefined && (all || FROZEN_IN_CI.has(name))) {
         : (report): void => {
             const owners = [...report.owners].sort((a, b) => b[1] - a[1]).slice(0, 8);
             process.stderr.write(
-              `retained trace: ${report.switches} switches, owners ${JSON.stringify(owners)}, opened ${JSON.stringify([...report.opened])}\n`,
+              `retained trace: ${report.switches} switches, owners ${stringify(owners)}, opened ${stringify([...report.opened])}\n`,
             );
           },
   });
@@ -55,7 +57,7 @@ if (name !== undefined && (all || FROZEN_IN_CI.has(name))) {
       mkdirSync(measure, { recursive: true });
       writeFileSync(
         join(measure, `${name}-${process.pid}.json`),
-        `${JSON.stringify({ file: name, exercised: [...instrument.report().exercised].sort() }, null, 1)}\n`,
+        `${stringify({ file: name, exercised: [...instrument.report().exercised].sort() }, null, 1)}\n`,
       );
     });
   if (survey !== undefined) {
@@ -90,7 +92,7 @@ if (name !== undefined && (all || FROZEN_IN_CI.has(name))) {
       }
       writeFileSync(
         join(survey, `${basename(file, ".js")}-${process.pid}.json`),
-        `${JSON.stringify({ file: basename(file), switches: report.switches, sealed: report.sealed, noted: Object.fromEntries(report.noted), frozen: Object.fromEntries(frozen), valueMarks: Object.fromEntries(report.valueMarks), owners: Object.fromEntries(report.owners), opened: Object.fromEntries(report.opened) }, null, 1)}\n`,
+        `${stringify({ file: basename(file), switches: report.switches, sealed: report.sealed, noted: Object.fromEntries(report.noted), frozen: Object.fromEntries(frozen), valueMarks: Object.fromEntries(report.valueMarks), owners: Object.fromEntries(report.owners), opened: Object.fromEntries(report.opened) }, null, 1)}\n`,
       );
     });
   }
