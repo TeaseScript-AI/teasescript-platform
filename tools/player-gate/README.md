@@ -5,7 +5,7 @@ runs real browsers and the Pixel 4a, outside CI, and never sets a threshold. It 
 
 - the production Playroom builds it is given;
 - gate variants of those builds, made by `variants/vite.config.mjs`: an `instrumented` bridge seam on both backends,
-  and `delayed` replies at 0, 50 or 250 ms;
+  and `delayed` replies at 0, 50 or 250 ms; both give the driver the Playroom's host object (`globalThis.__gatePlayer`);
 - the bridge page (`bridge/`), which runs the real engine Worker entry and the in-process backend below the Playroom.
 
 Playwright is loaded from the package.json that `PLAYWRIGHT_PACKAGE` names. Without it, or without a phone, the kit
@@ -89,6 +89,8 @@ Pass or fail is derived from primary records, never from a cached flag:
     that name if it does not. On the `composer-area` fixture package, an answer of each question kind leaves the
     composer's area, in its flight, as it is while nothing is asked (a password's empty read-only field excepted); and
     a form's date or time field committed by Enter, and the lock's phases, keep the focus their continuation gives.
+    A Start the host prepares over each of those questions or the lock's dialog, alone or after an error stop in the
+    same task, is reached by the pointer and by Tab, and activates.
 - **`validate.mjs`** derives every field again from a row's validated records, scenario by scenario and part by part,
   and checks each value against its unit's domain.
 - **`report.mjs`** prints the cost report: `node tools/player-gate/report.mjs --phase r0|r1 --artifacts FILE

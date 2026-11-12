@@ -840,7 +840,7 @@ function escape() {
           @close="submission.closeExport()"
         />
         <LockDialog
-          v-if="lock && lockDialog"
+          v-if="session && lock && lockDialog"
           :key="lockDialog.dialog.key"
           :dialog="lockDialog.dialog"
           :busy="lockDialog.busy"
