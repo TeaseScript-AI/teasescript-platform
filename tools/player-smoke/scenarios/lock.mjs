@@ -17,6 +17,7 @@ import {
   navigate,
   physicalClick,
   pressEnter,
+  pressEscape,
   reloadKept,
   removeInitScript,
   setViewport,
@@ -218,9 +219,9 @@ async function assertPlaceholderWhole(cdp, expected) {
 
 /**
  * askPassword (V30 §20) in the composer, coarsely: its answer is the hash of what was typed; written directly in
- * `password:` its field asks twice on one line for an encrypt call, with its placeholders whole, and once for a
- * decrypt call; and with an opener written `true`, the lock dialog follows the field. No typed password is shown or
- * kept.
+ * `password:` its field asks twice on one line for an encrypt call, with its placeholders whole, its focus and Caps Lock
+ * warning kept, and Escape in the repeat asking again; and once for a decrypt call; and with an opener written `true`,
+ * the lock dialog follows the field. No typed password is shown or kept.
  */
 export async function passwordScenario(cdp, origin) {
   const identifier = await standInRelays(cdp);
@@ -250,15 +251,43 @@ export async function passwordScenario(cdp, origin) {
     // In `password:` of an encrypt call the field asks twice on one line, of a decrypt call once.
     await waitFor(cdp, fieldOpen("Choose a code"), 8_000, "No password field to lock");
     await assertPlaceholderWhole(cdp, "Password");
+    // The two entries are one field, so its focus and its Caps Lock warning stay from one to the other. CDP cannot turn
+    // Caps Lock on: a key event the page dispatches reports it, and Send, a click, ends the first entry.
     await typeInto(cdp, "[data-composer-input]", "field pass");
-    await pressEnter(cdp);
+    const capsLock = `document.querySelector('[data-composer-caps-lock]')?.textContent.trim()`;
+    await evaluate(
+      cdp,
+      `${field}.smokeFirstEntry = true; ${field}.dispatchEvent(new KeyboardEvent('keyup', { key: 'Shift', modifierCapsLock: true, bubbles: true })); return true;`,
+    );
+    await waitFor(cdp, `${capsLock} === 'Caps Lock is on'`, 2_000, "No Caps Lock warning");
+    await physicalClick(cdp, ".composer-container button[type=submit]");
     await waitFor(
       cdp,
       `${repeatPhase} && ${noLoginField(field)} && !!document.querySelector('[data-composer-back]')`,
       8_000,
       "The field did not ask again on its line",
     );
+    assertEqual(
+      await value(
+        cdp,
+        `[${field}.smokeFirstEntry === true, document.activeElement === ${field}, ${capsLock}].join()`,
+      ),
+      "true,true,Caps Lock is on",
+      "The repeat is not the first entry's field, focused, with its Caps Lock warning",
+    );
     await assertPlaceholderWhole(cdp, "Repeat it");
+    // Escape in the repeat asks for the password again: both entries go, and the lock still waits.
+    await typeInto(cdp, "[data-composer-input]", "field pass");
+    await pressEscape(cdp);
+    await waitFor(
+      cdp,
+      `${field}?.getAttribute('aria-label') === 'Password' && ${field}.value === '' && !document.querySelector('[data-composer-back]')`,
+      4_000,
+      "Escape in the repeat did not ask for the password again",
+    );
+    await typeInto(cdp, "[data-composer-input]", "field pass");
+    await pressEnter(cdp);
+    await waitFor(cdp, repeatPhase, 8_000, "The field did not ask again after Escape");
     await typeInto(cdp, "[data-composer-input]", "field pass");
     await pressEnter(cdp);
     await waitFor(cdp, said("Locked."), 15_000, "The password field did not lock");

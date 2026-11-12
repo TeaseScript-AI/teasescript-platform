@@ -5,9 +5,11 @@ import {
   clickLabelled,
   delay,
   evaluate,
+  focusSeen,
   navigate,
   physicalClick,
   pressEnter,
+  pressSpace,
   removeInitScript,
   setViewport,
   typeInto,
@@ -293,5 +295,135 @@ export async function instantAnswersScenario(cdp, origin) {
     );
   } finally {
     await removeInitScript(cdp, identifier);
+  }
+}
+
+/** A stand-in for the browser's `window.open`: the first tab is blocked, a later one opens; each call counted. */
+const BLOCKED_FIRST_TAB = `(() => {
+  window.__opens = [];
+  window.open = (url) => {
+    window.__opens.push(url);
+    return window.__opens.length === 1 ? null : { opener: window, location: { replace: (to) => window.__opens.push(to) } };
+  };
+})();`;
+
+/**
+ * Composer states (`composer-states` package): Space in the empty composer types a space while a text question waits,
+ * and nothing while only buttons wait. An `openUrl` the Player opens at once, whose tab the browser blocks, is tried
+ * once and shows its button, with no notice; the button then opens it. A popup closes in the frame of its click; when the
+ * block's question overtakes that close, the notice says so, and the popup shows again once the block is answered, its
+ * button focused.
+ */
+export async function composerStatesScenario(cdp, origin) {
+  await setViewport(cdp, 1280, 800);
+  const clock = await addInitScript(cdp, SHIFTED_CLOCK);
+  const tabs = await addInitScript(cdp, BLOCKED_FIRST_TAB);
+  const field = `document.querySelector('[data-composer-input]')`;
+  const said = (text) =>
+    `[...document.querySelectorAll('.transcript-entry')].some((row) => row.textContent.includes(${JSON.stringify(text)}))`;
+  const start = async () => {
+    await navigate(cdp, `${origin}/player/?package=composer-states`);
+    await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+    await physicalClick(cdp, "[data-session-activation] button");
+    await waitFor(cdp, said("Your word?"), 10_000, "The text question did not show");
+    await delay(500);
+  };
+  try {
+    // Space in the empty composer: a space while a text question waits, nothing while only buttons wait.
+    await start();
+    await focusSeen(cdp, field);
+    await pressSpace(cdp);
+    assertEqual(await value(cdp, `${field}.value`), " ", "Space at a text question typed no space");
+    await typeInto(cdp, "[data-composer-input]", "x");
+    await pressEnter(cdp);
+    await waitFor(cdp, button("Link"), 8_000, "The choices did not show");
+    await delay(500);
+    await focusSeen(cdp, field);
+    await pressSpace(cdp);
+    await delay(300);
+    assertEqual(
+      await value(cdp, `${field}.value + '|' + ${button("Link")}`),
+      "|true",
+      "Space at the choices typed or answered",
+    );
+
+    // The automatic link whose tab the browser blocked: its button and no notice; the button opens it.
+    await clickLabelled(cdp, "Link");
+    await waitFor(cdp, `!!document.querySelector('[data-open-url]')`, 8_000, "No link button");
+    await delay(300);
+    assertEqual(
+      await value(
+        cdp,
+        `[window.__opens.length, document.querySelector('.composer-notice')?.textContent.trim() ?? ''].join('|')`,
+      ),
+      "1|",
+      "A blocked automatic link: tried once, no notice",
+    );
+    await physicalClick(cdp, "[data-open-url]");
+    await waitFor(
+      cdp,
+      said("After the link."),
+      8_000,
+      "The link's button did not let the script go on",
+    );
+    assertEqual(
+      await value(cdp, `window.__opens.join(' ')`),
+      "about:blank about:blank https://example.com/",
+      "The link's button did not open its address",
+    );
+
+    // A popup closes in the frame of its click; the block's question overtakes the close, with the notice, and once
+    // the block is answered the popup shows again with its button focused.
+    await start();
+    await typeInto(cdp, "[data-composer-input]", "x");
+    await pressEnter(cdp);
+    await waitFor(cdp, button("Popup"), 8_000, "The choices did not show");
+    await delay(500);
+    await clickLabelled(cdp, "Popup");
+    const popup = `document.querySelector('[role=dialog]')`;
+    await waitFor(cdp, `!!${popup}`, 8_000, "The popup did not show");
+    await delay(500);
+    await evaluate(
+      cdp,
+      `window.__timeShift = 700_000; document.addEventListener('click', () => requestAnimationFrame(() => { window.__popupAfterClick = !!${popup}; }), { capture: true, once: true }); return true;`,
+    );
+    await clickLabelled(cdp, "OK", "[role=dialog] button");
+    await waitFor(cdp, `window.__popupAfterClick !== undefined`, 2_000);
+    assertEqual(
+      await value(cdp, `window.__popupAfterClick`),
+      false,
+      "The popup did not close at once",
+    );
+    await waitFor(
+      cdp,
+      said("A block's question?"),
+      8_000,
+      "The block did not overtake the popup's close",
+    );
+    const notice = `document.querySelector('.composer-notice')?.textContent.trim() ?? ''`;
+    const overtaken = await value(cdp, `[!!${popup}, ${notice}].join('|')`);
+    await typeInto(cdp, "[data-composer-input]", "b");
+    await pressEnter(cdp);
+    await waitFor(cdp, `!!${popup}`, 8_000, "The overtaken popup did not show again");
+    await delay(300);
+    const again = await value(
+      cdp,
+      `[${popup}.contains(document.activeElement), ${notice}].join('|')`,
+    );
+    assertEqual(
+      `${overtaken} / ${again}`,
+      "false|This interaction is no longer available. / true|",
+      "The overtaken popup: shown under the block | notice / focused | notice",
+    );
+    await clickLabelled(cdp, "OK", "[role=dialog] button");
+    await waitFor(
+      cdp,
+      said("After the popup."),
+      8_000,
+      "The popup's close did not let the script go on",
+    );
+  } finally {
+    await removeInitScript(cdp, tabs);
+    await removeInitScript(cdp, clock);
   }
 }
