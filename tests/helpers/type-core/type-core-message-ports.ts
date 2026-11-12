@@ -368,8 +368,8 @@ export const PORTS: readonly Port[] = [
     from: /^Assign a new text to the variable instead\.$/,
     to: (_, { subject }) => exact(`Assign a new text to '${subject}' instead.`),
   },
-  // a speaker's property: the receiver as the source writes it (S9b's speaker flow names the speaker, below), without a
-  // value to write (#1268)
+  // a speaker's property: the receiver as the source writes it (S9b's speaker flow names the speaker: `INTENDED` in
+  // `type-core-messages-parity.test.ts`), without a value to write (#1268)
   {
     from: /^Assign it before this line, as in '(.+) = \.\.\.'\.$/,
     to: ([, property]) => exact(`Assign '${property}' before this line.`),
@@ -454,9 +454,10 @@ export const PORTS: readonly Port[] = [
     from: /^Round the number with the floor, round or ceil function first\.$/,
     to: ([text]) => exact(text),
   },
-  // #1241: each code form where its predicate holds at the diagnosed site (`codeAt`, which the paste
-  // test below proves), the same fix in words where it does not; so a kept fix is one of the two, with the actual
-  // operand and the receiver as the source writes it (the current checker writes '5 s' into an element and a result)
+  // #1241: each code form where its predicate holds at the diagnosed site (`codeAt`, which
+  // `type-core-messages-paste.test.ts` proves), the same fix in words where it does not; so a kept fix is one of the
+  // two, with the actual operand and the receiver as the source writes it (the current checker writes '5 s' into an
+  // element and a result)
   {
     from: /^Give the number a unit, such as '.+ (s|deg)'\.$/,
     to: ([, unit], { subject }) =>

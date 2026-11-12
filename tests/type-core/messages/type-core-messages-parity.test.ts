@@ -38,10 +38,10 @@ import {
 /*
  * The new checker keeps every fix the current checker gives (#1195): on every record of the expectation set, the two
  * checkers' TSV diagnostics pair by file, line and code, and each fix sentence of the current checker's message is in
- * the new checker's, in the new form (`PORTS`), or the pair is one of the intended differences (`INTENDED`); and the
- * code the fixes suggest compiles where it stands. Severity is not compared: where the current checker errs and the
- * new one warns for a possible null or a union value, the narrowing step (#1073) brings the error. When the current
- * checker is removed (#1076), this compares with its messages captured before.
+ * the new checker's, in the new form (`PORTS`), or the pair is one of the intended differences (`INTENDED`); the code
+ * the fixes suggest compiles where it stands (`type-core-messages-paste.test.ts`). Severity is not compared: where the
+ * current checker errs and the new one warns for a possible null or a union value, the narrowing step (#1073) brings
+ * the error. When the current checker is removed (#1076), this compares with its messages captured before.
  */
 
 /** The review's test for a sentence that names a fix (`message-review-2026-10-27/compare.mjs`): every one is ported. */
