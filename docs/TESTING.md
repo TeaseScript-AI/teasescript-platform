@@ -343,7 +343,18 @@ review round, beside the generator areas above.
 
 In the type-core suites, a test-mode instrument (`tests/helpers/retained-instrument.ts`, installed by its preload
 through `tools/test-output-filter.mjs`) checks the state the type core keeps between solver runs where it is stored and
-at each run switch, and freezes what an ended run stored (#1072). It runs in two regimes:
+at each run switch, and freezes what an ended run stored (#1072). It catches a write to retained state that the type
+core makes by ordinary code, across runs, in test mode; it does not claim to resist code written to get around it
+(#1072 R33). Outside it:
+
+- reflective or deliberately evasive code; in `src/type-inference/` the lint closes the meta-object layer it would need
+  (docs/LINTING.md, "Retained state in type inference");
+- the tests and `tests/helpers/`, which hold retained owners and observe the core through that layer;
+- what a registered function (`Retained.closure`) captures, which the comment at its registration names for review;
+- a private `readonly` field assigned again in its constructor after a run switch inside that constructor;
+- a write within one run, production (no instrument), and admission's state and the receiving domain (#1072 1b ii).
+
+It runs in two regimes:
 
 - **CI** freezes only the files of `tests/helpers/retained-subset.ts`: a greedy cover, by their frozen cost, of every
   retained kind by its site, owner kind and registered function that the type-core files exercise frozen, within no CI
