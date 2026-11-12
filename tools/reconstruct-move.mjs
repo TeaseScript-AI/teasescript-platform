@@ -18,10 +18,10 @@
 // each starting at the left margin with nothing after it on its last line but a `//` comment. The first other line (a
 // shebang, a block comment, code) starts the body. OLD's leading `//` lines (a pin mark, a description) are content:
 // each is carried byte for byte by exactly one NEW file, among the leading `//` lines it opens with, before its own and
-// in OLD's order; one dropped, changed, carried twice or after the file's own fails. A NEW file's other leading `//`
-// lines are its own (the split's description of it). A line break inside a token (a string, a template literal's
-// part, a comment) is the token's content; a blank line is layout only when its line break lies outside every token.
-// Then:
+// in OLD's order (repeated texts are taken by the NEW files in their argument order); one dropped, changed, carried
+// twice or after the file's own fails. A NEW file's other leading `//` lines are its own (the split's description of
+// it). A line break inside a token (a string, a template literal's part, a comment) is the token's content; a blank
+// line is layout only when its line break lies outside every token. Then:
 //   - every line of a NEW body that is not a layout blank is a line of OLD's body, equal byte for byte, or, for a line
 //     outside tokens that declares at the left margin (`function`, `function*`, `async function`, `async function*`,
 //     `const`, `let`, `var`, `class`, `abstract class`, `interface`, `type`, `enum`, `declare`), that line with
@@ -54,9 +54,11 @@
 // sides are printed whole, so a reviewer reads each edit. The unit counts in the order check and in keeping a token's
 // lines together as a run does: an edit may take part of a token's lines (one line of a doc comment) only where the run
 // or edit before it and the one after it are its neighbours in NEW and in OLD alike. `OLD:` may be left out (given, it
-// is OLD's path as given), and `-B` or `-D` for a range of one line: `NEW:LINE=OLDLINE` is one line on each side. An
-// edit that names no body line of a NEW file or of OLD, an empty range, or one that overlaps another edit on either
-// side cannot run; a run never takes a declared line.
+// is OLD's path as given; a path holding both `:` and `=` is spelled without it), and `-B` or `-D` for a range of one
+// line: `NEW:LINE=OLDLINE` is one line on each side. An edit that names no body line of a NEW file or of OLD, an empty
+// range, or one that overlaps another edit on either side cannot run; a run never takes a declared line, and the runs
+// it cuts are matched as if its lines matched: a run that meets it at its OLD start, or starts after it, keeps to the
+// OLD lines around it.
 //
 // Output: a summary line (`old body lines: N, taken: N; runs: N; export added: N; residue: N old, N new; edits: N`),
 // then each `export` added, each OLD header line carried, each edit, the residue with its verdict, and each failure.
@@ -265,6 +267,7 @@ function declareEdits(edits, oldLength, start, unitsOf, taken, place) {
     )
       return `--edit ${spelled(edit)} names no body lines of a NEW file and of OLD`;
     const id = place({
+      edit: true,
       file: edit.file,
       line: edit.from,
       end: edit.to - 1,
@@ -328,6 +331,88 @@ function placementFailures(oldShape, start, taken, unitsOf, places) {
 }
 
 /**
+ * The runs of one NEW file (`file`; its `shape`, its `unit` map, its `first` body line): each the longest stretch of
+ * lines equal to untaken OLD lines from where it starts (`taken`, `place` and `places` shared with the other units).
+ * Returns the number of runs, the lines that gained `export`, and the lines no OLD line matched.
+ */
+function matchRuns({ oldShape, start, taken, places, place }, file, { shape, unit, first }) {
+  const old = oldShape.lines;
+  const exported = [];
+  const unmatched = [];
+  let runs = 0;
+  const { lines } = shape;
+  // (a layout blank only against a layout blank; `export ` only before a declaration line that starts outside tokens)
+  const fits = (o, k) =>
+    layoutBlank(oldShape, o) === layoutBlank(shape, k) &&
+    (old[o] === lines[k] ||
+      (!oldShape.inToken[o] &&
+        !shape.inToken[k] &&
+        EXPORTABLE.test(old[o]) &&
+        `export ${old[o]}` === lines[k]));
+  // (a run is scored as reaching through a declared edit it meets at the edit's own old start, and a run that
+  // starts after an edit, past layout blanks only, is the one that continues the edit's old lines: as if the
+  // edit's lines matched, so that an edit does not cut the run it sits in loose from its place in OLD)
+  const extent = (o, j) => {
+    let n = 0;
+    while (
+      j + n < lines.length &&
+      o + n < old.length &&
+      !taken.has(o + n) &&
+      !unit.has(j + n) &&
+      fits(o + n, j + n) &&
+      !(n > 0 && layoutBlank(shape, j + n - 1) && !/^(?:$|\s)/u.test(lines[j + n]))
+    )
+      n += 1;
+    return n;
+  };
+  const reach = (o, j) => {
+    const n = extent(o, j);
+    const edit = places.get(unit.get(j + n));
+    if (edit?.edit !== true || edit.line - 1 !== j + n || edit.first !== o + n) return n;
+    return n + edit.end - edit.line + 2 + reach(edit.last + 1, edit.end + 1);
+  };
+  for (let k = first; k < lines.length;) {
+    if (layoutBlank(shape, k) || unit.has(k)) {
+      k += 1;
+      continue;
+    }
+    let before = k - 1;
+    while (before >= first && layoutBlank(shape, before) && !unit.has(before)) before -= 1;
+    const previous = places.get(unit.get(before));
+    const continues = previous?.edit === true ? previous.last + k - previous.end : -1;
+    let best = -1;
+    let length = 0;
+    let score = 0;
+    for (let o = start; o < old.length; o += 1) {
+      if (taken.has(o) || !fits(o, k)) continue;
+      const reached = o === continues ? Infinity : reach(o, k);
+      if (reached > score) [best, length, score] = [o, extent(o, k), reached];
+    }
+    if (best === -1) {
+      unmatched.push({ file, line: k + 1, text: lines[k] });
+      k += 1;
+      continue;
+    }
+    const id = place({
+      file,
+      line: k + 1,
+      end: k + length - 1,
+      first: best,
+      last: best + length - 1,
+    });
+    for (let n = 0; n < length; n += 1) {
+      taken.set(best + n, { file, unit: id });
+      unit.set(k + n, id);
+      if (old[best + n] !== lines[k + n])
+        exported.push(`${file}:${k + n + 1} <- old ${best + n + 1}`);
+    }
+    runs += 1;
+    k += length;
+  }
+  return { runs, exported, unmatched };
+}
+
+/**
  * Reconstructs OLD (`oldFile`: `{ file, text }`) from `files` (each `{ file, text }`), with `edits` (each `{ file,
  * from, to, oldFrom, oldTo }`: NEW file `file`'s lines `from` to `to` take OLD's lines `oldFrom` to `oldTo`, 1-based and
  * inclusive). Returns the counts, the added exports, the residue and the failures; or `{ refused }`, a message, when an
@@ -363,58 +448,10 @@ export function reconstruct(oldFile, files, edits = []) {
   const refused = declareEdits(edits, old.length, start, unitsOf, taken, place);
   if (refused !== undefined) return { refused };
   for (const { file } of files) {
-    const { shape, unit } = unitsOf.get(file);
-    const { lines } = shape;
-    // (a layout blank only against a layout blank; `export ` only before a declaration line that starts outside tokens)
-    const fits = (o, k) =>
-      layoutBlank(oldShape, o) === layoutBlank(shape, k) &&
-      (old[o] === lines[k] ||
-        (!oldShape.inToken[o] &&
-          !shape.inToken[k] &&
-          EXPORTABLE.test(old[o]) &&
-          `export ${old[o]}` === lines[k]));
-    for (let k = unitsOf.get(file).first; k < lines.length;) {
-      if (layoutBlank(shape, k) || unit.has(k)) {
-        k += 1;
-        continue;
-      }
-      let best = -1;
-      let length = 0;
-      for (let o = start; o < old.length; o += 1) {
-        if (taken.has(o) || !fits(o, k)) continue;
-        let n = 0;
-        while (
-          k + n < lines.length &&
-          o + n < old.length &&
-          !taken.has(o + n) &&
-          !unit.has(k + n) &&
-          fits(o + n, k + n) &&
-          !(n > 0 && layoutBlank(shape, k + n - 1) && !/^(?:$|\s)/u.test(lines[k + n]))
-        )
-          n += 1;
-        if (n > length) [best, length] = [o, n];
-      }
-      if (best === -1) {
-        unmatched.push({ file, line: k + 1, text: lines[k] });
-        k += 1;
-        continue;
-      }
-      const id = place({
-        file,
-        line: k + 1,
-        end: k + length - 1,
-        first: best,
-        last: best + length - 1,
-      });
-      for (let n = 0; n < length; n += 1) {
-        taken.set(best + n, { file, unit: id });
-        unit.set(k + n, id);
-        if (old[best + n] !== lines[k + n])
-          exported.push(`${file}:${k + n + 1} <- old ${best + n + 1}`);
-      }
-      runs += 1;
-      k += length;
-    }
+    const found = matchRuns({ oldShape, start, taken, places, place }, file, unitsOf.get(file));
+    runs += found.runs;
+    exported.push(...found.exported);
+    unmatched.push(...found.unmatched);
   }
   const wanted = [];
   for (let o = start; o < old.length; o += 1) if (!layoutBlank(oldShape, o)) wanted.push(o);

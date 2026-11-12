@@ -448,3 +448,33 @@ test("OLD's leading `//` lines are header, each carried unchanged first in one N
   assert.equal(twice.status, 1, twice.out);
   assert.match(twice.out, /^failure: src\/part\.ts:1: an old header line among the file's own/mu);
 });
+
+test("the runs around a declared edit keep their place in OLD, where a repeated line could take another (#2548 r1)", (t) => {
+  // (the kept file first: the lone `}` after the edit is the edited function's, not the moved one's)
+  const functions = (last) =>
+    ["first", "moved", "last"]
+      .map(
+        (name) => `function ${name}() {\n  console.log("${name === "last" ? last : name}");\n}\n`,
+      )
+      .join("\n");
+  const kept = functions("last").replace(/function moved[^}]*\}\n\n/u, "");
+  const after = repository(
+    t,
+    {
+      "src/big.ts": kept.replace('"last"', '"last changed"'),
+      "src/part.ts": 'function moved() {\n  console.log("moved");\n}\n',
+    },
+    functions("last"),
+  ).run("--edit", "src/big.ts:6=10");
+  assert.equal(after.status, 0, after.out);
+  // (the run before the edit: of two equal lines, the one the edit's OLD lines follow)
+  const before = repository(
+    t,
+    {
+      "src/big.ts": "const x = 1;\nsecond(); // edited\n",
+      "src/part.ts": "const x = 1;\nfirst();\n",
+    },
+    "const x = 1;\nfirst();\n\nconst x = 1;\nsecond();\n",
+  ).run("--edit", "src/big.ts:2=5");
+  assert.equal(before.status, 0, before.out);
+});
