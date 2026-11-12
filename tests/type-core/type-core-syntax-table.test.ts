@@ -467,6 +467,14 @@ const CONDITIONS: readonly Condition[] = [
     at: 'load(("key"), default: 2)',
     what: "this load expression",
   },
+  {
+    row: "loadExpression",
+    condition:
+      "a key no earlier load of the project wrote, written in parentheses within parentheses",
+    source: 'let a = load((("key")), default: 1)\nlet b = load((("key")), default: 2)',
+    at: 'load((("key")), default: 2)',
+    what: "this load expression",
+  },
 ];
 
 /** The modelled rows that check nothing of their own: each walks its children. */
