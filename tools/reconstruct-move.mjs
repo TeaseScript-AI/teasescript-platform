@@ -69,7 +69,6 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { ts } from "ts-morph";
 
 const USAGE = "usage: node tools/reconstruct-move.mjs BASE OLD NEW… [--edit NEW:A-B=OLD:C-D]…";
@@ -604,5 +603,4 @@ export function main(argv, cwd = process.cwd(), print = console.log) {
   return failures.length === 0 ? 0 : 1;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]))
-  process.exitCode = main(process.argv.slice(2));
+if (import.meta.main) process.exitCode = main(process.argv.slice(2));

@@ -38,7 +38,6 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { ts } from "ts-morph";
 
 const USAGE = "usage: node tools/moves/split-write.mjs ASSIGN [--base REV] [--list]";
@@ -450,5 +449,4 @@ export function main(argv, cwd = process.cwd(), print = console.log) {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]))
-  process.exitCode = main(process.argv.slice(2));
+if (import.meta.main) process.exitCode = main(process.argv.slice(2));
