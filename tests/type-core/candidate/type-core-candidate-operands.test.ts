@@ -323,7 +323,7 @@ test("a for loop's range bound that is a number or text is an error at the bound
  * repeat count, a list index, a `for` range's start and end, `take`, a text method's position, count or length) and the
  * places a use reads (written `number`, `number?`, `integer` or none, a whole or fractional start value, host data into
  * a `number`), the candidate's errors are the current checker's, in the four modes. A `number` narrowed by `is integer`
- * is quiet (`narrowing/type-core-narrowing-forms.test.ts`).
+ * is quiet (`narrowing/type-core-narrowing-reads.test.ts`).
  */
 test("an integer-only use of a written number place is the current checker's error at every use, in the four modes (#1173)", () => {
   const uses = [
