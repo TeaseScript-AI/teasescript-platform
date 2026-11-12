@@ -648,6 +648,23 @@ export const ROUTE_ENTRY_FAMILIES: readonly WorkFamily[] = [
 ];
 
 /**
+ * The route rule's jump index over k files each left by a computed `goto script(...)` (#2497, r4-451's give-up: such a
+ * transfer enters no file). The program's flow already grows as files × transfers here, a computed transfer having an
+ * edge to every file, so the family is gated on the index's own counter, never on the total.
+ */
+export const ROUTE_ENTRY_COMPUTED_TRANSFERS: WorkFamily = {
+  name: "E-computed-transfers",
+  measures:
+    "N3: k files, each a use of one global and a store of `null` before a computed `goto script(...)`, which enters no file",
+  program: (k) => [
+    file("main.tease", 'global n: integer? = 1\ngoto "f0.tease"'),
+    ...Array.from({ length: k }, (_, i) =>
+      file(`f${i}.tease`, `${USE_THEN_NULL}\ngoto script(hostValue)`),
+    ),
+  ],
+};
+
+/**
  * The route rule's entries over many keys (#2497, r4-451): each key's `null` reaches every later loop's head or label,
  * so its relation tries each later jump once, keys × jumps in all; a known product, gated at its measured doubling.
  */

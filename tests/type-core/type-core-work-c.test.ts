@@ -25,6 +25,7 @@ import { DECISION_HOLDER_FAMILIES } from "../helpers/type-core/families/copy-cha
 import { LAYER_FAMILIES } from "../helpers/type-core/families/property-names.js";
 import {
   NARROWING_FAMILIES,
+  ROUTE_ENTRY_COMPUTED_TRANSFERS,
   ROUTE_ENTRY_FAMILIES,
   ROUTE_ENTRY_PRODUCTS,
   ROUTE_FEASIBILITY_FAMILIES,
@@ -307,6 +308,24 @@ const REVERSED_UNION = 60;
  */
 test("the route rule's entry routes grow with the program in either order (#2497)", () => {
   assert.deepEqual(steepCounters(ROUTE_ENTRY_FAMILIES), []);
+});
+
+/**
+ * A computed transfer enters no file (r4-451), so the jump index scans no file for it: the index's work grows with the
+ * program, though the flow's grows as files × transfers (`ROUTE_ENTRY_COMPUTED_TRANSFERS`).
+ */
+test("the jump index scans no file for a computed transfer (#2497)", () => {
+  const family = ROUTE_ENTRY_COMPUTED_TRANSFERS;
+  const [at64, at128] = [sized(family, 64), sized(family, 128)];
+  for (const reversed of [false, true]) {
+    const small = analysed(at64, reversed).budget.counts;
+    const large = analysed(at128, reversed).budget.counts;
+    const scale = (large.get("syntaxNodes") ?? 0) / (small.get("syntaxNodes") ?? 1);
+    const steps = (large.get("indexSteps") ?? 0) / (small.get("indexSteps") ?? 1);
+    const doubling = (2 * steps) / scale;
+    const name = `indexSteps${reversed ? " reversed" : ""}`;
+    assert.ok(doubling <= COUNTER_DOUBLING, `${name}: ${doubling.toFixed(3)}`);
+  }
 });
 
 /**

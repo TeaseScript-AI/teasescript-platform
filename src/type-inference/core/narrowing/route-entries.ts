@@ -517,6 +517,8 @@ export abstract class RouteEntries extends RouteCandidates {
         continue;
       }
       const path = literalPath(jump.node, this.#work);
+      // (a computed transfer enters no file: r4-451's give-up, so its files are not scanned)
+      if (path === null) continue;
       for (const file of each(this.#work, "indexSteps", jump.files)) {
         const root = file.path === path ? this.tree.root(file.id) : undefined;
         if (root !== undefined && !flow.isDeadEdge(jump.node, file.entry))
