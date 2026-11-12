@@ -15,16 +15,17 @@ import { inMode, MODES } from "../helpers/type-core-oracles.js";
 import { plannedContent, runGlobals } from "../helpers/type-core-route.js";
 
 // #1072 step 0: a typed parse's or load's default with a written type is read by that type (ADR 0021 rule 2.6,
-// `writtenDefault` in `core/contract/terms.ts`), source to runtime, and the forms the rule leaves to the snapshot.
+// `writtenDefault` in `core/contract/written-default.ts`), source to runtime, and the forms the rule leaves to the
+// snapshot.
 
 const GLOBALS = ["hostValue"];
 
 /**
  * #1072 step 0: a default with a written type is read by that type (ADR 0021 rule 2.6, "its default's type";
  * `writtenDefault`): a row per form the rule admits and per class of its acceptance rows, `@` the typed call, its reader
- * in the plan and what the call's value shows of each JSON text. A row named "awaits the owner" reads the written type
- * where the narrowed one (rules 5.1, 5.2) reads otherwise: which of the two rule 2.6 means is the owner's open question
- * (`writtenAt`).
+ * in the plan and what the call's value shows of each JSON text. A variable with a written type gives that type,
+ * whatever value it holds at the call, also where a type test or an assignment narrows its read there (rules 5.1, 5.2):
+ * the nullable rows below and the type test's.
  */
 const WRITTEN_DEFAULTS: readonly {
   readonly name: string;
@@ -75,7 +76,7 @@ const WRITTEN_DEFAULTS: readonly {
     ],
   },
   {
-    name: "integer? holding null (R11's let-through), awaits the owner",
+    name: "integer? holding null (R11's let-through)",
     source: "let fb: integer? = null\nlet v = @\nsay v",
     fallback: "fb",
     reader: "integer|null",
@@ -88,7 +89,7 @@ const WRITTEN_DEFAULTS: readonly {
     ],
   },
   {
-    name: "number? holding null, through a copy, awaits the owner",
+    name: "number? holding null, through a copy",
     source: "let w: number? = null\nlet fb = w\nlet v = @\nsay v",
     fallback: "fb",
     reader: "null|number",
@@ -99,7 +100,7 @@ const WRITTEN_DEFAULTS: readonly {
   },
   {
     // (its kinds certain: as possible ones the plan's later copy `v = a` left the slice, #1072 step 0's R7)
-    name: "number? holding a whole number, a written copy stored later (#2307's nullable callfirst), awaits the owner",
+    name: "number? holding a whole number, a written copy stored later (#2307's nullable callfirst)",
     source: "let a: number? = 0\nlet fb: number? = 0\nlet v = @\nsay v\nv = a",
     fallback: "fb",
     reader: "null|number",
@@ -110,13 +111,35 @@ const WRITTEN_DEFAULTS: readonly {
     ],
   },
   {
-    name: "string? holding null, awaits the owner",
+    name: "string? holding null",
     source: "let fb: string? = null\nlet v = @\nsay v",
     fallback: "fb",
     reader: "null|string",
     runs: [
       ["1", "null"],
       ['"x"', "x"],
+    ],
+  },
+  {
+    name: "integer? holding a whole number: JSON null arrives",
+    source: "let fb: integer? = 5\nlet v = @\nsay v",
+    fallback: "fb",
+    reader: "integer|null",
+    runs: [
+      ["null", "null"],
+      ["2", "2"],
+      ["1.5", "5"],
+    ],
+  },
+  {
+    name: "number? read inside a type test that narrows it to integer",
+    source: "let fb: number? = 0\nif fb is integer {\n  let v = @\n  say v\n}",
+    fallback: "fb",
+    reader: "null|number",
+    runs: [
+      ["1.5", "1.5"],
+      ["null", "null"],
+      ['"x"', "0"],
     ],
   },
   {

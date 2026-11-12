@@ -7,17 +7,8 @@ import { propertyStep, type CoreProgram } from "../program.js";
 import { defaultOf, typeAtPath, typeKinds, writtenOf } from "./terms.js";
 
 // A typed parse's or load's default read by its written type (ADR 0021 rule 2.6, "its default's type"; #1072 step 0):
-// the rule (`writtenDefault`), the index of program facts it reads, and the one decision that awaits the owner
-// (`writtenAt`).
-
-/**
- * The written type a read of a written binding gives a default. Rules 5.1 and 5.2 narrow a read (a type test, an
- * assignment): whether rule 2.6's "its default's type" is then the written or the narrowed type is an open owner
- * question, and this function is where it is answered. It answers the written type.
- */
-function writtenAt(written: TypeTerm, _read: PlaceId): TypeTerm {
-  return written;
-}
+// the rule (`writtenDefault`) and the index of program facts it reads. A variable with a written type gives that type,
+// whatever value it holds at the call: no narrowing at the read (rules 5.1, 5.2) enters it.
 
 /** What a value is to the rule: the written type at a read of a written binding, a literal with parts, or nothing. */
 type Start = { readonly term: TypeTerm } | { readonly literal: PlaceId } | null;
@@ -105,7 +96,7 @@ export class WrittenDefaults {
       met.add(binding);
       const written = writtenOf(program.place(binding).kind);
       if (written !== null) {
-        start = { term: writtenAt(written, reads[reads.length - 1]!) };
+        start = { term: written };
         break;
       }
       const d = definitions.declOf.get(binding);
@@ -157,7 +148,7 @@ function cellSteps(type: TypeTerm): [string, PlaceId][] {
  * A typed parse's or load's default at `rest` by its written type, from the index's program facts
  * (`WrittenDefaults`); `null` where its syntax gives none, and the default's demands (`dk`, `vdk`) then read the value
  * it holds at the call. The forms it admits, a closed set:
- * - a read of a binding or parameter with a written type: that type at the level (`writtenAt`);
+ * - a read of a binding or parameter with a written type: that type at the level, whatever value it holds there;
  * - a read of an unwritten binding whose declaration has a start value: that value, at the same level;
  * - a list, set, dict or object literal above the level: its cells at the next step, which all give the same kinds.
  * Anything else gives `null`: another expression, a binding without a start value (a loop variable, an unwritten
