@@ -15,6 +15,7 @@ import {
   key,
   navigate,
   physicalClick,
+  pressEnter,
   reloadKept,
   setViewport,
   typeInto,
@@ -165,18 +166,6 @@ export async function lockScenario(cdp, origin) {
   } finally {
     await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
   }
-}
-
-/** A real Enter key in the focused field. */
-async function pressEnter(cdp) {
-  for (const type of ["keyDown", "keyUp"])
-    await cdp.call("Input.dispatchKeyEvent", {
-      type,
-      key: "Enter",
-      code: "Enter",
-      windowsVirtualKeyCode: 13,
-      ...(type === "keyDown" ? { text: "\r" } : {}),
-    });
 }
 
 /**
