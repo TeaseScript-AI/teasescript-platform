@@ -1065,8 +1065,10 @@ export class DefinitionLists {
     readonly index: DefinitionIndex,
     /** Whether a store takes part: not rejected by admission (A6). */
     readonly live: (d: Definition) => boolean,
-    /** Whether a list `+`'s operand gives the join its elements: not rejected by admission (A6, `joinElements`). */
-    // (#1072 R26: captures nothing)
+    /**
+     * Whether a list `+`'s operand gives the join its elements: not rejected by admission (A6, `joinElements`); by
+     * default every operand (#1072 R26: captures nothing).
+     */
     readonly joined: (operand: PlaceId) => boolean = Retained.closure(
       "DefinitionLists.joined",
       () => true,
