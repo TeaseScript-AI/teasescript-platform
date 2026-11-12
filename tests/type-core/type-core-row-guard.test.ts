@@ -60,8 +60,8 @@ interface GuardCase {
   readonly refusal?: string;
 }
 
+// EVIDENCE: invariant: the table's keys are exactly the AST kinds (its mapped type).
 const OPEN = (Object.keys(DISPOSITIONS) as SyntaxKind[]).filter(
-  // EVIDENCE: invariant: the table's keys are exactly the AST kinds (its mapped type).
   (kind) => DISPOSITIONS[kind].row !== "refused",
 );
 
@@ -101,12 +101,13 @@ function records(cases: readonly GuardCase[], folder: string): DifferentialRecor
     { encoding: "utf8" },
   );
   assert.notEqual(ran.status, 2, ran.stderr);
-  return (
-    readFileSync(out, "utf8")
-      .split("\n")
-      .filter((line) => line !== "")
+  const written = readFileSync(out, "utf8")
+    .split("\n")
+    .filter((line) => line !== "");
+  return written.map(
+    (line) =>
       // EVIDENCE: invariant: `differential.mjs` writes one record a line (tests/families/README.md).
-      .map((line) => JSON.parse(line) as DifferentialRecord)
+      JSON.parse(line) as DifferentialRecord,
   );
 }
 
@@ -162,6 +163,7 @@ function judge(guardCase: GuardCase, record: DifferentialRecord, seen: Set<strin
 }
 
 test("every open row of the syntax table has templates, and the declared lists name only open rows and templates", () => {
+  // EVIDENCE: invariant: the templates' keys are AST kinds (`ROW_TEMPLATES`' type).
   assert.deepEqual((Object.keys(ROW_TEMPLATES) as SyntaxKind[]).sort(), [...OPEN].sort());
   for (const declared of DECLARED_REFUSALS) assert.ok(OPEN.includes(declared.row), declared.row);
   for (const declared of DECLARED_RUN_DIFFERENCES) {
