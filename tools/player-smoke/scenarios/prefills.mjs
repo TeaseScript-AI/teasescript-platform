@@ -11,8 +11,9 @@ import {
   waitFor,
 } from "../driver.mjs";
 
-// A prefill starts as the composer text, also when an answer to the question before it presents it (#2465), and a
-// question a block interrupted shows again with the text typed for it. The composer is read at each question.
+// A prefill starts as the composer text, also when an answer to the question before it presents it (#2465), and leaves
+// and returns with its question. Text the player typed is the chat's, whichever question shows: a block's question
+// shows it, and once sent there it is gone. The composer is read at each question.
 export async function prefillsScenario(cdp, origin) {
   await setViewport(cdp, 1280, 800);
   await navigate(cdp, `${origin}/player/?package=prefills`);
@@ -98,8 +99,8 @@ export async function prefillsScenario(cdp, origin) {
         "First?": "",
         "Name?": "Ada",
         "Typed before the block?": "",
-        "In the block?": "",
-        "Typed before the block?, after the block": "Typed",
+        "In the block?": "Typed",
+        "Typed before the block?, after the block": "",
         "Resumed?": "Back",
         "In the block again?": "",
         "Resumed?, after the block": "Back",

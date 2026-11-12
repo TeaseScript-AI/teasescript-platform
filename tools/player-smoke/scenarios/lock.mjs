@@ -11,6 +11,7 @@ import {
   assertEqual,
   clickLabelled,
   delay,
+  evaluate,
   key,
   navigate,
   physicalClick,
@@ -308,6 +309,138 @@ export async function passwordCompositionScenario(cdp, origin) {
   await typeInto(cdp, "[data-composer-input]", "done");
   await pressEnter(cdp);
   await waitFor(cdp, said("Answer: done"), 8_000, "The text answer was not the text typed");
+}
+
+/**
+ * The composer's edit path (decision 1 of 2026-11-11/12): an input method's composition under way belongs to the field it
+ * is typed in. A switch to another field ends it there first, so a timer's password field over the chat, or a lock's over
+ * a form field, starts empty and the composed text waits in its own field; nothing is written after the switch. A send
+ * while composing, by Send or by the Enter of a keyboard that does not commit with Enter, sends the whole text shown,
+ * in the chat and in the lock's first entry, and nothing is written after it.
+ */
+export async function composerEditPathScenario(cdp, origin) {
+  await setViewport(cdp, 1280, 800);
+  await navigate(cdp, `${origin}/player/?package=composer-edit-path`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  const said = (text) =>
+    `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.trim().endsWith(${JSON.stringify(text)}))`;
+  const input = `document.querySelector('[data-composer-input]')`;
+  const masked = `getComputedStyle(${input}).webkitTextSecurity !== 'none'`;
+  const ready = `!!${input} && !${input}.disabled && !${input}.readOnly`;
+  const compose = (text) =>
+    cdp.call("Input.imeSetComposition", {
+      text,
+      selectionStart: text.length,
+      selectionEnd: text.length,
+    });
+  // The Enter of a keyboard that does not commit with Enter: not marked as composing while the composition is open.
+  const uncommittedEnter = () =>
+    evaluate(
+      cdp,
+      `${input}.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true, cancelable: true }))`,
+    );
+  // Every value an input event leaves in a composer field, from now.
+  const watchEdits = () =>
+    evaluate(
+      cdp,
+      `window.__edits = []; window.__editWatch ??= document.addEventListener('input', (event) => event.target.matches?.('[data-composer-input]') && window.__edits.push(event.target.value), true) ?? true`,
+    );
+  const nothingWrittenAfter = async (allowed, what) => {
+    await delay(400);
+    assertEqual(await value(cdp, `${input}.value`), "", `${what}: the field is not empty`);
+    const edits = await value(cdp, "window.__edits");
+    assertEqual(
+      edits.every((edit) => allowed.includes(edit)),
+      true,
+      `${what}: written after it: ${JSON.stringify(edits)}`,
+    );
+  };
+
+  // A timer's password over a chat composition: the chat keeps the composed text, the password field starts empty.
+  await waitFor(cdp, `${said("Chat?")} && ${ready}`, 8_000, "No chat question");
+  await physicalClick(cdp, "[data-composer-input]");
+  await cdp.call("Input.insertText", { text: "CHAT " });
+  await compose("かな");
+  await watchEdits();
+  await waitFor(cdp, `${said("Timer password")} && ${masked}`, 8_000, "No timer password");
+  await nothingWrittenAfter(["CHAT かな"], "The switch to the password");
+  await cdp.call("Input.insertText", { text: "pw" });
+  await pressEnter(cdp);
+  await waitFor(
+    cdp,
+    `${said("Timer password given")} && !(${masked}) && ${input}.value === "CHAT かな"`,
+    8_000,
+    "The chat lost its composed text",
+  );
+  await physicalClick(cdp, "[data-composer-input]");
+  await pressEnter(cdp);
+  await waitFor(cdp, said("Chat: CHAT かな"), 8_000, "The chat did not answer its text");
+
+  // A lock's password over a form field's composition: the form keeps it for its return.
+  await waitFor(cdp, `!!document.querySelector('[data-form-field="name"]')`, 8_000, "No form");
+  await physicalClick(cdp, '[data-form-field="name"]');
+  await waitFor(cdp, `${input}.value === "Ada" && document.activeElement === ${input}`);
+  await compose("かな");
+  await watchEdits();
+  await waitFor(cdp, `${said("Timer lock")} && ${masked}`, 8_000, "No timer lock");
+  await nothingWrittenAfter(["かな"], "The switch to the lock");
+  await cdp.call("Input.insertText", { text: "pw" });
+  await pressEnter(cdp);
+  await waitFor(cdp, `${input}.getAttribute('aria-label') === "Repeat password"`);
+  await cdp.call("Input.insertText", { text: "pw" });
+  await pressEnter(cdp);
+  await waitFor(
+    cdp,
+    `${said("Timer locked")} && !(${masked}) && ${input}.value === "かな"`,
+    15_000,
+    "The form lost its composed text",
+  );
+  await physicalClick(cdp, "[data-composer-input]");
+  await pressEnter(cdp);
+  await clickLabelled(cdp, "Continue", "[data-form-actions] button");
+  await waitFor(cdp, said("Name: かな"), 8_000, "The form did not answer its text");
+
+  // Sends while composing, in the chat.
+  await waitFor(cdp, `${said("Send?")} && ${ready}`, 8_000, "No Send question");
+  await physicalClick(cdp, "[data-composer-input]");
+  await cdp.call("Input.insertText", { text: "SEND " });
+  await compose("かな");
+  await watchEdits();
+  await physicalClick(cdp, ".composer-send");
+  await waitFor(cdp, said("Sent: SEND かな"), 8_000, "Send did not send the whole text");
+  await nothingWrittenAfter(["SEND かな"], "Send while composing");
+  await waitFor(cdp, `${said("Enter?")} && ${ready}`, 8_000, "No Enter question");
+  await physicalClick(cdp, "[data-composer-input]");
+  await cdp.call("Input.insertText", { text: "ENTER " });
+  await compose("かな");
+  await watchEdits();
+  await uncommittedEnter();
+  await waitFor(cdp, said("Entered: ENTER かな"), 8_000, "Enter did not send the whole text");
+  await nothingWrittenAfter(["ENTER かな"], "Enter while composing");
+
+  // And in the lock's first entry: the repeat starts empty.
+  const repeatPhase = `${input}.getAttribute('aria-label') === "Repeat password"`;
+  await waitFor(cdp, `${said("Lock by Send")} && ${masked} && ${ready}`, 8_000, "No lock");
+  await physicalClick(cdp, "[data-composer-input]");
+  await compose("かな");
+  await watchEdits();
+  await physicalClick(cdp, ".composer-send");
+  await waitFor(cdp, repeatPhase, 4_000, "Send did not ask the password again");
+  await nothingWrittenAfter(["かな"], "Send while composing the lock's password");
+  await cdp.call("Input.insertText", { text: "かな" });
+  await pressEnter(cdp);
+  await waitFor(cdp, said("Locked by Send"), 15_000, "The lock by Send did not lock");
+  await waitFor(cdp, `${said("Lock by Enter")} && ${masked} && ${ready}`, 8_000, "No second lock");
+  await physicalClick(cdp, "[data-composer-input]");
+  await compose("かな");
+  await watchEdits();
+  await uncommittedEnter();
+  await waitFor(cdp, repeatPhase, 4_000, "Enter did not ask the password again");
+  await nothingWrittenAfter(["かな"], "Enter while composing the lock's password");
+  await compose("かな");
+  await uncommittedEnter();
+  await waitFor(cdp, said("Locked by Enter"), 15_000, "The lock by Enter did not lock");
 }
 
 /**

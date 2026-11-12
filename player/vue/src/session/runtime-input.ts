@@ -112,7 +112,7 @@ const answer = <O extends InputOp>(...[op, args, input]: AnswerCall<O>): InputIn
 
 /** The op each of the Player's controls answers with; `input` is how the player answered, which the recording keeps. */
 export const intents = {
-  // The values a control submits are those of the click; the composer is read-only while the answer is in flight.
+  // The values a control submits are those of the click or key, which the intent holds whatever the composer shows next.
   composer: (text: string, input: DebugAnswerInput) =>
     answer("submitComposer", () => ({ text }), input),
   /** A choice's option, or the button of `showButton` for `null`. */
@@ -140,32 +140,37 @@ export const intents = {
 
 /**
  * Stores `text` as the draft of the form field `target`, as the draft timer does: without an observation, as today's
- * has none, and only while the session owns the UI. The session it published once the draft `updated`, or `null`.
+ * has none, and only while the session owns the UI. `taken` once the form holds that text (`updated`, or `unchanged`
+ * when it held it already); `session` is the one it published once the draft `updated`.
  */
 export async function draftInput(
   section: InputSectionHost,
   target: { readonly actionId: number; readonly fieldId: string },
   text: string,
-): Promise<PlayerSession | null> {
+): Promise<{ readonly session: PlayerSession | null; readonly taken: boolean }> {
   const drafted = await section("inputDraft", async (input) => {
     if (!input.owned()) return null;
     const outcome = await input.send("draftForm", { ...target, text });
-    return outcome !== RETIRED && outcome?.kind === "updated" && input.owned()
-      ? input.session
-      : null;
+    if (outcome === RETIRED || !input.owned()) return null;
+    return {
+      session: outcome?.kind === "updated" ? input.session : null,
+      taken: outcome?.kind === "updated" || outcome?.kind === "unchanged",
+    };
   });
-  return drafted ?? null;
+  return drafted ?? { session: null, taken: false };
 }
 
 /**
- * `RuntimeInteraction.complete`'s chain in one section: observe, check ownership and that `presented`, the action the
- * player acted on, is still `target`'s, then the intent, its effect, and the op with that action's ID.
+ * An answer's chain in one section (`useAnswerSubmission`): observe, check ownership and that `presented`, the action
+ * the player acted on, is still `target`'s, then the intent, its effect, and the op with that action's ID. `onPost` is
+ * called as the op is handed to the session, after which the host may have run it.
  */
 export async function runInput(
   section: InputSectionHost,
   presented: number | undefined,
   target: (session: PlayerSession) => number | undefined,
   intent: InputIntent,
+  onPost?: () => void,
 ): Promise<InputResult> {
   const result = await section("inputAnswer", async (input, observed) => {
     if (observed === null || !input.owned()) return { kind: "retired" } as const;
@@ -183,6 +188,7 @@ export async function runInput(
     // `chosen` pairs its op with its arguments but `actionId` (`InputAnswer`), which TypeScript does not see once
     // inserted; the assertion drops only that pairing, and the result stays the input ops' own (`OpResult<InputOp>`).
     // EVIDENCE: invariant: the pair `chosen` holds, with the presented action's ID.
+    onPost?.();
     const outcome = await (
       input as { send(op: InputOp, args: unknown): Promise<OpResult<InputOp> | typeof RETIRED> }
     ).send(chosen.op, { ...chosen.args, actionId: presented });

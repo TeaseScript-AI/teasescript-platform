@@ -140,11 +140,12 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   clipping bubble borders; the scrollbar ends above the composer. The trailing slot contributes foreground-control
   height to the end inset. Message rendering and contrast are split into `transcript/TranscriptMessage.vue`, `transcript/TranscriptMarkup.vue`,
   `transcript/TranscriptLine.vue`, `transcript/transcriptPresentation.ts` and `transcript/messageContrast.ts`.
-- `interaction/RuntimeInteraction.vue` composes `interaction/Composer.vue` and `interaction/ForegroundControls.vue` and submits their runtime actions,
-  including [pacing skips](../../../docs/ui/PLAYER-UI.md#composer-and-foreground-interactions), with shared
-  submission guards and focus handling. `interaction/useComposerFields.ts` owns the composer's text: `interaction/RuntimeInteraction.vue`
-  reads it and writes it only through `writeField`, which ends an input-method composition first, and only
-  `interaction/Composer.vue` takes the writable model. The composer uses shadcn Textarea/Button and VueUse autosizing;
+- `interaction/RuntimeInteraction.vue` composes `interaction/Composer.vue` and `interaction/ForegroundControls.vue` and
+  handles focus. `interaction/useComposerState.ts` owns the composer's slots (chat, form field, date control,
+  password, lock password): only the player's edits, each under its field's token, and its own operations change them,
+  and `select` alone changes the slot shown. `interaction/useAnswerSubmission.ts` checks each answer at once with
+  `src/interaction-completion.ts`, sends it, including [pacing skips](../../../docs/ui/PLAYER-UI.md#composer-and-foreground-interactions),
+  and settles it by the runtime's outcome or the session's end. The composer uses shadcn Textarea/Button and VueUse autosizing;
   foreground controls use `components/PlayerActionButton.vue` in the transcript's trailing slot.
   `playerRuntimeForeground` maps authored backgrounds from live/restored actions; `player/theme/story-choice.ts`
   supplies theme/authored button material. See [ADR 0018](../../../docs/decisions/0018-first-standard-library-poc-contract.md)

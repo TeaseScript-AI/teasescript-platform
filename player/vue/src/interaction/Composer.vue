@@ -1,18 +1,25 @@
 <script setup lang="ts" generic="Request">
-import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from "vue";
+import { computed, nextTick, ref, useId, watch } from "vue";
 import { useTextareaAutosize } from "@vueuse/core";
 import { Eye, EyeOff, Paperclip } from "@lucide/vue";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { usePlayerConditions } from "./usePlayerConditions";
 import { playerKeys } from "./playerKeys";
-import { useComposerModel, type ComposerField } from "./useComposerFields";
 import { keepOneLine, passwordAttributes } from "./passwordText";
 
 const props = withDefaults(
   defineProps<{
     disabled?: boolean;
-    submitting?: boolean;
+    /** The text the field shows: the slot the composer's controller shows now (`useComposerState`). */
+    value?: string;
+    /** The token of the slot shown; the player's edits are reported under the token of the field they were typed in. */
+    token?: number;
+    /**
+     * Whether the field takes no typing for now, without looking unavailable: just after a password was sent, while a
+     * form field's commit is acknowledged, while an image is read, or while the lock works.
+     */
+    readonly?: boolean;
     placeholder?: string;
     accessibleName?: string;
     inputMode?: "text" | "decimal" | "numeric";
@@ -23,11 +30,8 @@ const props = withDefaults(
      * chooses to, and a warning while Caps Lock is on. Each new interaction starts masked. Its text has one line.
      */
     password?: boolean;
-    /**
-     * With `password`, a "Repeat password" field under it, whose text the model's `repeated` holds: Enter in the
-     * password field moves to it, and Enter there submits.
-     */
-    repeat?: boolean;
+    /** The lock's password asked again on the same line: its eye button names the repeated password. */
+    repeated?: boolean;
     feedback?: string;
     /** A skippable pacing gate is waiting; Space in the empty input settles it. */
     pacing?: boolean;
@@ -49,13 +53,15 @@ const props = withDefaults(
   }>(),
   {
     disabled: false,
-    submitting: false,
+    value: "",
+    token: 0,
+    readonly: false,
     placeholder: "Type your response…",
     accessibleName: "Response",
     inputMode: "text",
     inputType: "text",
     password: false,
-    repeat: false,
+    repeated: false,
     feedback: "",
     pacing: false,
     preselected: false,
@@ -66,6 +72,8 @@ const props = withDefaults(
 );
 
 const emit = defineEmits<{
+  /** The player's edit of the field rendered with `token`. */
+  edit: [token: number, text: string];
   submit: [source: "input" | "button"];
   skip: [];
   /** Space in the empty input while a preselected button waits. */
@@ -78,27 +86,22 @@ const emit = defineEmits<{
 
 const textarea = ref<InstanceType<typeof Textarea> | null>(null);
 const picker = ref<HTMLInputElement | null>(null);
-const repeatTextarea = ref<InstanceType<typeof Textarea> | null>(null);
 const textareaElement = computed(() => {
   const element = textarea.value?.$el;
   return element instanceof HTMLTextAreaElement ? element : undefined;
 });
-const repeatElement = computed(() => {
-  const element = repeatTextarea.value?.$el;
-  return element instanceof HTMLTextAreaElement ? element : undefined;
-});
 const input = computed(() => picker.value ?? textareaElement.value);
-// The text and repeat belong to the component that renders the composer (`useComposerFields`); the player's typing
-// writes them here.
-const model = useComposerModel();
-const value = computed({
-  get: () => model.draft.value,
-  set: (text: string) => (model.draft.value = text),
-});
-const repeatedValue = computed({
-  get: () => model.repeated.value,
-  set: (text: string) => (model.repeated.value = text),
-});
+const value = computed(() => props.value);
+/**
+ * The player's typing, in the field's own `input` event and at once, also while a word is composed and when it ends:
+ * each field carries the token it was rendered with, so an edit of a field that has given way is dropped by the
+ * controller, never taken by another slot.
+ */
+function reportEdit(event: Event): void {
+  const field = event.target;
+  if (!(field instanceof HTMLTextAreaElement || field instanceof HTMLInputElement)) return;
+  emit("edit", Number(field.dataset.composerToken), field.value);
+}
 
 const feedbackId = useId();
 const capsLockId = useId();
@@ -121,9 +124,7 @@ function handleKeydown(event: KeyboardEvent): void {
   if (event.key === "Enter" && (!event.shiftKey || props.password)) {
     event.preventDefault();
     if (!fresh) return;
-    if (props.password && props.repeat && event.currentTarget === textareaElement.value)
-      repeatElement.value?.focus({ preventScroll: true });
-    else emit("submit", "input");
+    emit("submit", "input");
     return;
   }
   if (event.key === "Escape") {
@@ -151,16 +152,9 @@ function guardSendKey(event: KeyboardEvent): void {
     event.preventDefault();
 }
 
-function updateFromPicker(event: Event): void {
-  if (event.target instanceof HTMLInputElement) value.value = event.target.value;
-}
-function updateRepeated(text: string): void {
-  repeatedValue.value = text;
-}
-
 /** Whether one of the composer's fields has focus. */
 function editing(): boolean {
-  return document.activeElement === input.value || document.activeElement === repeatElement.value;
+  return document.activeElement === input.value;
 }
 
 function preserveEditingFocus(event: PointerEvent): void {
@@ -198,19 +192,26 @@ function releaseOnBlur(): void {
   if (!replacingField) allowSoftwareKeyboard();
 }
 
-// The password fields' eye buttons, one each, and their Caps Lock warning. Only a key event says whether Caps Lock is
-// on; a field that has seen none shows no warning.
+// The password field's eye button and its Caps Lock warning. Only a key event says whether Caps Lock is on; a field
+// that has seen none shows no warning. Each new password, and the lock's repeat, starts masked.
 const shown = ref(false);
-const repeatShown = ref(false);
 const capsLock = ref(false);
+const eyeLabel = computed(() =>
+  props.repeated
+    ? shown.value
+      ? "Hide repeated password"
+      : "Show repeated password"
+    : shown.value
+      ? "Hide password"
+      : "Show password",
+);
 function readCapsLock(event: KeyboardEvent): void {
   capsLock.value = event.getModifierState("CapsLock");
 }
 watch(
-  () => [props.password, props.freshAfter],
+  () => [props.password, props.freshAfter, props.repeated],
   () => {
     shown.value = false;
-    repeatShown.value = false;
   },
 );
 
@@ -296,7 +297,7 @@ function endComposition(field?: HTMLElement): void {
   const element = document.activeElement;
   if (
     !(element instanceof HTMLElement) ||
-    (element !== input.value && element !== repeatElement.value) ||
+    element !== input.value ||
     (field !== undefined && element !== field)
   )
     return;
@@ -308,35 +309,21 @@ function endComposition(field?: HTMLElement): void {
     endingComposition = false;
   }
 }
-/**
- * Brings a field in line with a text written from outside, such as a reset or a prefill, before its owner publishes the
- * text (`useComposerFields`' `writeField`): a composition under way in that field ends first, and a text field that
- * shows another text takes it as typed input does, so the field and the Textarea's own copy of the model hold it too. A
- * date or time control never composes, and shows the model.
- */
-function writeField(field: ComposerField, text: string): void {
-  const element = field === "repeat" ? repeatElement.value : input.value;
-  if (element) {
-    if (composing.value && document.activeElement === element) endComposition(element);
-    const holdsText = element instanceof HTMLTextAreaElement || element.type === "text";
-    if (holdsText && element.value !== text) {
-      element.value = text;
-      element.dispatchEvent(new Event("input"));
-    }
-  }
-}
-onBeforeUnmount(model.attach(writeField));
-// Whatever makes the fields read-only (an answer in flight, an image being read, a lock at work) ends a composition
-// first, so none stays open in a read-only field.
+// Whatever makes the field read-only ends a composition first, so none stays open in a read-only field.
 watch(
-  () => props.submitting,
+  () => props.readonly,
   (busy) => {
     if (busy) endComposition();
   },
   { flush: "pre" },
 );
 
-defineExpose({ focusInput, selectInput, openPicker });
+/** Ends a composition under way, whose last edit then arrives at once (`useComposerState`'s `select`). */
+function finishComposition(): void {
+  endComposition();
+}
+
+defineExpose({ focusInput, selectInput, openPicker, finishComposition });
 </script>
 
 <template>
@@ -375,7 +362,7 @@ defineExpose({ focusInput, selectInput, openPicker });
             data-composer-attach
             :aria-label="attach.label"
             :title="attach.label"
-            :disabled="disabled || submitting"
+            :disabled="disabled || readonly"
             @click="openPicker"
           >
             <Paperclip aria-hidden="true" />
@@ -397,22 +384,23 @@ defineExpose({ focusInput, selectInput, openPicker });
             :type="inputType"
             :step="inputType === 'date' ? undefined : 1"
             :value="value"
+            :data-composer-token="token"
             :aria-label="placeholder ? `${accessibleName}: ${placeholder}` : accessibleName"
             :aria-invalid="feedback ? true : undefined"
             :aria-describedby="feedback ? feedbackId : undefined"
             :inputmode="effectiveInputMode"
             :disabled="disabled"
-            :readonly="submitting"
+            :readonly="readonly"
             class="composer-input composer-picker"
-            @input="updateFromPicker"
+            @input="reportEdit"
             @keydown="handleKeydown"
             @pointerdown="allowSoftwareKeyboard"
             @blur="releaseOnBlur"
           />
         </div>
-        <!-- One text field for every typed answer. A password's is masked, with its own eye button, and "Repeat password"
-        as a second field below it, past a line. A password field is no login field: a browser offers, fills or saves
-        passwords only in a password-type field, so the mask is a style. -->
+        <!-- One text field for every typed answer. A password's is masked, with its own eye button. A password field is
+        no login field: a browser offers, fills or saves passwords only in a password-type field, so the mask is a
+        style. -->
         <div
           v-else
           class="composer-text-field"
@@ -426,6 +414,7 @@ defineExpose({ focusInput, selectInput, openPicker });
               data-composer-input
               rows="1"
               :model-value="value"
+              :data-composer-token="token"
               :aria-label="accessibleName"
               :aria-invalid="feedback ? true : undefined"
               :aria-describedby="
@@ -438,8 +427,7 @@ defineExpose({ focusInput, selectInput, openPicker });
                     : undefined
               "
               :placeholder="placeholder"
-              :readonly="submitting"
-              :enterkeyhint="password && repeat ? 'next' : undefined"
+              :readonly="readonly"
               :inputmode="effectiveInputMode"
               :disabled="disabled"
               v-bind="password ? passwordAttributes : {}"
@@ -448,7 +436,7 @@ defineExpose({ focusInput, selectInput, openPicker });
                 'composer-input',
                 { 'composer-one-line': password, 'composer-masked': password && !shown },
               ]"
-              @update:model-value="value = String($event)"
+              @input="reportEdit"
               @keydown="
                 readCapsLock($event);
                 handleKeydown($event);
@@ -462,8 +450,8 @@ defineExpose({ focusInput, selectInput, openPicker });
               type="button"
               variant="ghost"
               size="icon-sm"
-              :aria-label="shown ? 'Hide password' : 'Show password'"
-              :title="shown ? 'Hide password' : 'Show password'"
+              :aria-label="eyeLabel"
+              :title="eyeLabel"
               :disabled="disabled"
               data-composer-password-toggle
               @click="
@@ -474,50 +462,6 @@ defineExpose({ focusInput, selectInput, openPicker });
               @mousedown="keepMouseEditingFocus"
             >
               <EyeOff v-if="shown" aria-hidden="true" />
-              <Eye v-else aria-hidden="true" />
-            </Button>
-          </div>
-          <div v-if="password && repeat" class="composer-text-row composer-password-repeat">
-            <Textarea
-              ref="repeatTextarea"
-              data-composer-repeat
-              rows="1"
-              :model-value="repeatedValue"
-              placeholder="Repeat password"
-              :readonly="submitting"
-              aria-label="Repeat password"
-              :aria-invalid="feedback ? true : undefined"
-              :aria-describedby="feedback ? `${feedbackId} ${capsLockId}` : capsLockId"
-              :inputmode="effectiveInputMode"
-              :disabled="disabled"
-              v-bind="passwordAttributes"
-              variant="embedded"
-              :class="['composer-input composer-one-line', { 'composer-masked': !repeatShown }]"
-              @update:model-value="updateRepeated(String($event))"
-              @keydown="
-                readCapsLock($event);
-                handleKeydown($event);
-              "
-              @keyup="readCapsLock"
-              @pointerdown="allowSoftwareKeyboard"
-              @blur="releaseOnBlur"
-            />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              :aria-label="repeatShown ? 'Hide repeated password' : 'Show repeated password'"
-              :title="repeatShown ? 'Hide repeated password' : 'Show repeated password'"
-              :disabled="disabled"
-              data-composer-repeat-toggle
-              @click="
-                endComposition();
-                repeatShown = !repeatShown;
-              "
-              @pointerdown="preserveEditingFocus"
-              @mousedown="keepMouseEditingFocus"
-            >
-              <EyeOff v-if="repeatShown" aria-hidden="true" />
               <Eye v-else aria-hidden="true" />
             </Button>
           </div>
@@ -534,7 +478,7 @@ defineExpose({ focusInput, selectInput, openPicker });
           type="submit"
           variant="default"
           class="composer-send"
-          :disabled="disabled || submitting"
+          :disabled="disabled"
           @keydown="guardSendKey"
           @pointerdown="preserveEditingFocus"
           @mousedown="keepMouseEditingFocus"
@@ -632,8 +576,7 @@ defineExpose({ focusInput, selectInput, openPicker });
   display: grid;
   min-inline-size: 0;
 }
-/* Each field takes its line, with a password's eye button at the end; a line between them makes the repeat a field of
-   its own. */
+/* The field takes its line, with a password's eye button at the end. */
 .composer-text-row {
   display: flex;
   align-items: center;
@@ -643,9 +586,6 @@ defineExpose({ focusInput, selectInput, openPicker });
 .composer-form .composer-text-row > .composer-input {
   flex: 1 1 auto;
   min-inline-size: 0;
-}
-.composer-password-repeat {
-  border-block-start: 1px solid var(--border);
 }
 /* A password stays on one line and scrolls sideways, as a text input does. */
 .composer-form .composer-one-line {

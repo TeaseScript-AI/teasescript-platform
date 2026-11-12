@@ -1,0 +1,467 @@
+import { computed, ref, shallowRef, type ComputedRef } from "vue";
+
+/*
+ * The composer's field and who owns its text (PLAYER-UI "Composer"). The field shows one slot at a time, its tenant:
+ * the chat's text, a form field being edited, a date or time answer, a password, or the lock's password. Each slot
+ * keeps its own text while another is shown. Only the player's typing (`edit`) and this controller's own operations
+ * change a slot; one function, `select`, changes which slot the field shows. The composer writes nothing back but the
+ * player's edits, each under the token of the field it was rendered with, so an edit of a field that has given way is
+ * dropped, never taken by another slot.
+ */
+
+/** Which slot the field shows. */
+export type ComposerTenant =
+  | { readonly kind: "chat" }
+  | { readonly kind: "form"; readonly actionId: number; readonly fieldId: string }
+  | { readonly kind: "temporal"; readonly actionId: number }
+  | { readonly kind: "password"; readonly actionId: number; readonly resumes: number }
+  | { readonly kind: "lock"; readonly dialogKey: string; readonly repeat: boolean }
+  | { readonly kind: "none" };
+
+/** What the shown session presents, which decides the tenant (`RuntimeInteraction`'s descriptor). */
+export interface ComposerDescriptor {
+  /** The shown session's identity, its plan instance and the host's reset count; `null` without a session. */
+  readonly session: string | null;
+  /** The chat the session belongs to (`usePlayerSession`'s `chat`): another chat starts an empty composer. */
+  readonly chat: number;
+  readonly tenant: ComposerTenant;
+  /** The foreground interaction's action, or `null`. */
+  readonly actionId: number | null;
+  /** Whether that action's answer is under way: its form field or date control waits, kept, for the outcome. */
+  readonly answered: boolean;
+  /** The interactions the session can still answer, whose slots it keeps. */
+  readonly liveActions: readonly number[];
+  /** A text, number or ISO-text date question's prefill, the suggestion the chat may take. */
+  readonly prefill: string | null;
+  /** For a form field: the text the form holds for it, which a new editor opens with. */
+  readonly editorText: string | null;
+  /** For a date or time control: its prefill, which its slot starts with. */
+  readonly temporalPrefill: string | null;
+}
+
+/** A prefill's fate in the chat (decision 3): not yet shown, shown untouched, or the player's own text now. */
+type PrefillState = "unshown" | "offered" | "taken";
+
+interface FormSlot {
+  /** Each opening of the field's editor is its own; an acknowledgment of another opening changes nothing. */
+  readonly opening: number;
+  draft: string;
+  revision: number;
+  ackRevision: number;
+}
+
+/** The lock's password asked twice on one line (decision 8). */
+interface LockSlot {
+  readonly key: string;
+  readonly repeat: boolean;
+  phase: "first" | "repeat";
+  first: string;
+  text: string;
+}
+
+/** The outcome of Enter in the lock's password. */
+export type LockEntry =
+  | { readonly kind: "empty" }
+  | { readonly kind: "repeat" }
+  | { readonly kind: "match"; readonly password: string }
+  | { readonly kind: "mismatch" };
+
+/** A form draft to store, addressed to its slot's opening and revision. */
+export interface FormDraft {
+  readonly actionId: number;
+  readonly fieldId: string;
+  readonly text: string;
+  readonly opening: number;
+  readonly revision: number;
+}
+
+const NONE: ComposerTenant = { kind: "none" };
+
+function tenantKey(tenant: ComposerTenant): string {
+  switch (tenant.kind) {
+    case "form":
+      return `form:${tenant.actionId}:${tenant.fieldId}`;
+    case "temporal":
+      return `temporal:${tenant.actionId}`;
+    case "password":
+      return `password:${tenant.actionId}:${tenant.resumes}`;
+    case "lock":
+      return `lock:${tenant.dialogKey}`;
+    default:
+      return tenant.kind;
+  }
+}
+
+/**
+ * The composer's controller. `draft` stores a dirty form draft after the player paused (the host's draft op); its
+ * promise says whether the form took it (`updated` or `unchanged`).
+ */
+export function useComposerState(host: {
+  readonly draft: (draft: FormDraft) => Promise<boolean>;
+  /** While true, form drafts stay local, as for a state Debug's rewind restored. */
+  readonly holdDrafts: () => boolean;
+  /** The draft timer's pause, in milliseconds. */
+  readonly draftDelayMs?: number;
+}) {
+  const draftDelayMs = host.draftDelayMs ?? 400;
+  let chatId: number | null = null;
+  let session: string | null = null;
+  const chat = ref("");
+  const forms = new Map<string, FormSlot>();
+  let openings = 0;
+  const temporals = new Map<number, string>();
+  const prefills = new Map<number, PrefillState>();
+  /** The interaction whose untouched prefill the chat holds now; its text is then exactly that prefill. */
+  let offer: number | null = null;
+  let password: { readonly key: string; text: string } | null = null;
+  let lock: LockSlot | null = null;
+  const tenant = shallowRef<ComposerTenant>(NONE);
+  /** The token of the field the composer shows; an edit under another is dropped. */
+  const token = ref(0);
+  /** Bumps whenever a slot the field may show changes, so `displayed` follows. */
+  const revision = ref(0);
+  let finish: () => void = () => {};
+  let draftTimer: ReturnType<typeof setTimeout> | undefined;
+  let disposed = false;
+
+  const formKey = (actionId: number, fieldId: string) => `${actionId}:${fieldId}`;
+  const touch = () => revision.value++;
+
+  const displayed: ComputedRef<string> = computed(() => {
+    void revision.value;
+    const shown = tenant.value;
+    switch (shown.kind) {
+      case "form":
+        return forms.get(formKey(shown.actionId, shown.fieldId))?.draft ?? "";
+      case "temporal":
+        return temporals.get(shown.actionId) ?? "";
+      case "password":
+        return password?.text ?? "";
+      case "lock":
+        return lock?.text ?? "";
+      default:
+        return chat.value;
+    }
+  });
+
+  /** Drops what belongs to another session or to interactions that ended. */
+  function prune(next: ComposerDescriptor) {
+    if (next.session !== session) {
+      session = next.session;
+      forms.clear();
+      temporals.clear();
+      prefills.clear();
+      withdrawOffer();
+      return;
+    }
+    const live = new Set(next.liveActions);
+    for (const key of [...forms.keys()])
+      if (!live.has(Number(key.slice(0, key.indexOf(":"))))) forms.delete(key);
+    for (const id of [...temporals.keys()]) if (!live.has(id)) temporals.delete(id);
+    for (const id of [...prefills.keys()]) if (!live.has(id)) prefills.delete(id);
+  }
+
+  /** An untouched prefill leaves with its question; the chat is empty again. */
+  function withdrawOffer() {
+    if (offer === null) return;
+    chat.value = "";
+    offer = null;
+  }
+
+  function offerPrefill(actionId: number, text: string) {
+    chat.value = text;
+    prefills.set(actionId, "offered");
+    offer = actionId;
+  }
+
+  /**
+   * Shows the slot `next` names. The composition under way ends first, so its last edit reaches the slot it was typed
+   * in; then the old field's token retires, a secret slot is erased, and the new slot is shown (an untouched prefill
+   * leaving or returning, a new editor opening with the form's text, a date control with its prefill).
+   */
+  function select(next: ComposerDescriptor) {
+    if (disposed) return;
+    const previous = tenant.value;
+    // Another slot, chat or session ends the field's composition and retires its token; the same slot keeps both, so a
+    // question that comes while the player types in the chat does not interrupt the typing.
+    const switching =
+      tenantKey(next.tenant) !== tenantKey(previous) ||
+      next.chat !== chatId ||
+      next.session !== session;
+    if (switching) finish();
+    if (next.chat !== chatId) {
+      chatId = next.chat;
+      chat.value = "";
+      offer = null;
+    }
+    // A field closed while its form is still presented ends its opening; a suspended or answered one keeps it.
+    if (
+      previous.kind === "form" &&
+      !next.answered &&
+      (next.tenant.kind !== "form" || tenantKey(next.tenant) !== tenantKey(previous)) &&
+      next.actionId === previous.actionId &&
+      next.session === session
+    )
+      forms.delete(formKey(previous.actionId, previous.fieldId));
+    if (previous.kind === "password" && tenantKey(previous) !== tenantKey(next.tenant))
+      password = null;
+    if (next.tenant.kind !== "lock" || lock?.key !== next.tenant.dialogKey) lock = null;
+    prune(next);
+    if (offer !== null && offer !== next.actionId) withdrawOffer();
+    const shown = next.tenant;
+    if (shown.kind === "chat" && next.actionId !== null && next.prefill !== null) {
+      const state = prefills.get(next.actionId);
+      if (state === undefined) {
+        if (chat.value === "") offerPrefill(next.actionId, next.prefill);
+        else prefills.set(next.actionId, "unshown");
+      } else if (state !== "taken" && offer !== next.actionId && chat.value === "")
+        offerPrefill(next.actionId, next.prefill);
+    } else if (shown.kind === "form") {
+      const key = formKey(shown.actionId, shown.fieldId);
+      if (!forms.has(key))
+        forms.set(key, {
+          opening: ++openings,
+          draft: next.editorText ?? "",
+          revision: 0,
+          ackRevision: 0,
+        });
+    } else if (shown.kind === "temporal") {
+      if (!temporals.has(shown.actionId)) temporals.set(shown.actionId, next.temporalPrefill ?? "");
+    } else if (shown.kind === "password") {
+      if (password?.key !== tenantKey(shown)) password = { key: tenantKey(shown), text: "" };
+    } else if (shown.kind === "lock" && lock === null)
+      lock = { key: shown.dialogKey, repeat: shown.repeat, phase: "first", first: "", text: "" };
+    tenant.value = shown;
+    if (switching) {
+      clearTimeout(draftTimer);
+      token.value++;
+      if (shown.kind === "form") armDraft();
+    }
+    touch();
+  }
+
+  /** The player's edit of the field rendered with `editToken`; dropped once that field gave way. */
+  function edit(editToken: number, text: string) {
+    if (disposed || editToken !== token.value) return;
+    const shown = tenant.value;
+    switch (shown.kind) {
+      case "form": {
+        const slot = forms.get(formKey(shown.actionId, shown.fieldId));
+        if (!slot || slot.draft === text) return;
+        slot.draft = text;
+        slot.revision++;
+        armDraft();
+        break;
+      }
+      case "temporal":
+        temporals.set(shown.actionId, text);
+        break;
+      case "password":
+        if (password) password.text = text;
+        break;
+      case "lock":
+        if (lock) lock.text = text;
+        break;
+      default:
+        if (chat.value === text) return;
+        if (offer !== null) {
+          prefills.set(offer, "taken");
+          offer = null;
+        }
+        chat.value = text;
+    }
+    touch();
+  }
+
+  /** The form slot the field shows, or `null`. */
+  function shownForm(): { readonly key: string; readonly slot: FormSlot } | null {
+    const shown = tenant.value;
+    if (shown.kind !== "form") return null;
+    const key = formKey(shown.actionId, shown.fieldId);
+    const slot = forms.get(key);
+    return slot ? { key, slot } : null;
+  }
+
+  // A dirty draft is stored once the player paused, while its field is shown and drafts are not held.
+  function armDraft() {
+    clearTimeout(draftTimer);
+    const shown = tenant.value;
+    const form = shownForm();
+    if (shown.kind !== "form" || !form || form.slot.revision <= form.slot.ackRevision) return;
+    draftTimer = setTimeout(() => {
+      if (disposed || host.holdDrafts()) return;
+      const current = shownForm();
+      if (current?.slot !== form.slot) return;
+      const draft: FormDraft = {
+        actionId: shown.actionId,
+        fieldId: shown.fieldId,
+        text: form.slot.draft,
+        opening: form.slot.opening,
+        revision: form.slot.revision,
+      };
+      void host.draft(draft).then((taken) => {
+        if (taken) acknowledge(draft);
+      });
+    }, draftDelayMs);
+  }
+
+  /**
+   * The form took `draft`, or a commit of it: its slot is clean up to that revision, only for the same opening; an
+   * older acknowledgment never cleans a newer edit.
+   */
+  function acknowledge(draft: Pick<FormDraft, "actionId" | "fieldId" | "opening" | "revision">) {
+    const slot = forms.get(formKey(draft.actionId, draft.fieldId));
+    if (!slot || slot.opening !== draft.opening) return;
+    slot.ackRevision = Math.max(slot.ackRevision, draft.revision);
+  }
+
+  /** The shown form field's draft, addressed to its opening and revision, for a commit or a step. */
+  function formDraft(): FormDraft | null {
+    const shown = tenant.value;
+    const form = shownForm();
+    if (shown.kind !== "form" || !form) return null;
+    return {
+      actionId: shown.actionId,
+      fieldId: shown.fieldId,
+      text: form.slot.draft,
+      opening: form.slot.opening,
+      revision: form.slot.revision,
+    };
+  }
+
+  /** Re-arms a dirty draft whose storing was held, as when Debug's held drafts are released. */
+  function resumeDrafts() {
+    if (tenant.value.kind === "form") armDraft();
+  }
+
+  /**
+   * Takes the chat's text for a send: the composition ends first, so the sent text is the whole text shown; the chat
+   * is then empty. An untouched prefill sent is the player's answer now.
+   */
+  function takeChat(): string {
+    finish();
+    const text = chat.value;
+    if (offer !== null) {
+      prefills.set(offer, "taken");
+      offer = null;
+    }
+    chat.value = "";
+    touch();
+    return text;
+  }
+
+  /** The text of the slot the field shows, after the composition ends, without taking it. */
+  function current(): string {
+    finish();
+    return displayed.value;
+  }
+
+  /** Erases the password slot after a send: keys typed until the next tenant are ignored (decision 2). */
+  function erasePassword() {
+    if (password) password.text = "";
+    touch();
+  }
+
+  /**
+   * Puts a refused answer's text back before what the chat holds now, in its own chat only. An untouched prefill there
+   * leaves first, and is offered again only on its question's return.
+   */
+  function restoreChat(chat_: number, sent: string) {
+    if (disposed || chat_ !== chatId) return;
+    finish();
+    if (offer !== null) {
+      prefills.set(offer, "unshown");
+      chat.value = "";
+      offer = null;
+    }
+    chat.value = sent + chat.value;
+    touch();
+  }
+
+  /** Enter or Send in the lock's password: the first entry is asked again; the second matches it or starts over. */
+  function lockEnter(): LockEntry {
+    finish();
+    if (!lock || lock.text === "") return { kind: "empty" };
+    if (!lock.repeat) {
+      const entered = lock.text;
+      lock.text = "";
+      touch();
+      return { kind: "match", password: entered };
+    }
+    if (lock.phase === "first") {
+      lock.first = lock.text;
+      lock.text = "";
+      lock.phase = "repeat";
+      token.value++;
+      touch();
+      return { kind: "repeat" };
+    }
+    const result: LockEntry =
+      lock.text === lock.first ? { kind: "match", password: lock.text } : { kind: "mismatch" };
+    restartLock();
+    return result;
+  }
+
+  /** Back or Escape in the repeat, and a mismatch: both entries go, and the password is asked again. */
+  function restartLock() {
+    finish();
+    if (!lock) return;
+    lock.first = "";
+    lock.text = "";
+    lock.phase = "first";
+    token.value++;
+    touch();
+  }
+
+  /** Erases every secret, as on a stop or a lost connection. */
+  function eraseSecrets() {
+    finish();
+    password = null;
+    lock = null;
+    touch();
+  }
+
+  /** Registers the field's composition ending (`Composer.vue`); the returned function detaches it. */
+  function attach(end: () => void): () => void {
+    finish = end;
+    return () => {
+      if (finish === end) finish = () => {};
+    };
+  }
+
+  function dispose() {
+    disposed = true;
+    clearTimeout(draftTimer);
+    password = null;
+    lock = null;
+  }
+
+  return {
+    tenant: computed(() => tenant.value),
+    token: computed(() => token.value),
+    displayed,
+    /** The lock's phase, for its field's name and eye: `first` or `repeat`; `null` without the lock's password. */
+    lockPhase: computed(() => {
+      void revision.value;
+      return tenant.value.kind === "lock" ? (lock?.phase ?? "first") : null;
+    }),
+    /** The chat's text, wherever the field is. */
+    chatText: computed(() => chat.value),
+    select,
+    edit,
+    formDraft,
+    acknowledge,
+    resumeDrafts,
+    takeChat,
+    current,
+    erasePassword,
+    restoreChat,
+    lockEnter,
+    restartLock,
+    eraseSecrets,
+    attach,
+    dispose,
+  };
+}
+
+export type ComposerState = ReturnType<typeof useComposerState>;
