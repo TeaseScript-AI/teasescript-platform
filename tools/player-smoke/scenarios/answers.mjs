@@ -1,5 +1,6 @@
 // The Player browser smoke's instant answers scenario, taking the driver's `cdp`.
 import {
+  addInitScript,
   assertEqual,
   clickLabelled,
   delay,
@@ -7,6 +8,7 @@ import {
   navigate,
   physicalClick,
   pressEnter,
+  removeInitScript,
   setViewport,
   typeInto,
   value,
@@ -130,9 +132,7 @@ function shownAtOnce({ frames, entered }, text, what) {
  */
 export async function instantAnswersScenario(cdp, origin) {
   await setViewport(cdp, 1280, 800);
-  const { identifier } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
-    source: SHIFTED_CLOCK,
-  });
+  const identifier = await addInitScript(cdp, SHIFTED_CLOCK);
   try {
     await navigate(cdp, `${origin}/player/?package=instant-answers`);
     await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
@@ -292,6 +292,6 @@ export async function instantAnswersScenario(cdp, origin) {
       "A refused answer's text did not come back with the notice",
     );
   } finally {
-    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+    await removeInitScript(cdp, identifier);
   }
 }
