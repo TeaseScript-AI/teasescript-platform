@@ -35,8 +35,9 @@ import { ts } from "ts-morph";
  *   reference can hold what production keeps and the instrument copies;
  * - in the checked core files, `Reflect.set`, a branch on a frozen state (`Object.isFrozen`, `isSealed`, `isExtensible`)
  *   and `structuredClone` are refused: a frozen run computes what production computes only without them; and so is a
- *   property defined in place (`Object.defineProperty`, `defineProperties`, `Reflect.defineProperty`), which could
- *   reopen a locked owner's field or make it an accessor past the instrument;
+ *   definer by its name in any position (`defineProperty`, `defineProperties`, `__defineGetter__`, `__defineSetter__`,
+ *   an alias or a computed key included), which could reopen a locked owner's field or make it an accessor past the
+ *   instrument;
  * - a `Retained.closure` registration stands right below its comment, which names what the function captures
  *   (`#1072 R26: captures …`, or `#1072 R26: as …` for one capturing as a named neighbour does): the instrument does not
  *   see the captures, and that comment is what review reads (#1072 R26).
@@ -183,9 +184,16 @@ const FROZEN_DIFFERENCES = new Map([
   ["Object.isSealed", `it branches on a frozen state, ${DIFFERS}`],
   ["Object.isExtensible", `it branches on a frozen state, ${DIFFERS}`],
   ["structuredClone", `it refuses a maker's proxy that production's value passes, ${DIFFERS}`],
-  ["Object.defineProperty", IN_PLACE],
-  ["Object.defineProperties", IN_PLACE],
-  ["Reflect.defineProperty", IN_PLACE],
+]);
+/**
+ * The definers refused in the checked core files by their name in any position (a call, an alias, a computed key, a
+ * destructuring), not by their call alone: one taken out of `Object` or `Reflect` defines as well.
+ */
+const IN_PLACE_DEFINERS = new Set([
+  "defineProperty",
+  "defineProperties",
+  "__defineGetter__",
+  "__defineSetter__",
 ]);
 
 /** The intrinsic, maker and frozen-difference lines' diagnostics in `source` (`level` its `levelOf`, or `helper`). */
@@ -254,6 +262,11 @@ function guardLines(source, file, level) {
       const reason = callee === null ? undefined : FROZEN_DIFFERENCES.get(callee);
       if (reason !== undefined)
         found.push({ node, message: `\`${callee}\` in the type core: ${reason} (#1072 R21)` });
+      if (
+        (ts.isIdentifier(node) || ts.isStringLiteralLike(node)) &&
+        IN_PLACE_DEFINERS.has(node.text)
+      )
+        found.push({ node, message: `\`${node.text}\` in the type core: ${IN_PLACE} (#1072 R30)` });
     }
     ts.forEachChild(node, visit);
   };
