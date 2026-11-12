@@ -11,7 +11,7 @@ import { inMode, type Mode } from "./type-core-oracles-modes.js";
 import { run } from "../../src/runtime/engine.js";
 
 /** The identity helper a marked source's expressions pass through. */
-const HELPER = "global function pass(value) {\n  return value\n}\n";
+const HELPER = "global function pass(given) {\n  return given\n}\n";
 
 /**
  * `marked` after the helper's declaration, each `⟦expression⟧` written as it is (`plain`, the twin), as
