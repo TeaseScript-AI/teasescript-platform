@@ -52,14 +52,17 @@ const ROWS: readonly Row[] = readFileSync(
     return row;
   });
 
-/** The diagnostics of a record at a file's line (1-based) of the row's sources. */
+/** The diagnostics and the checks of a record at a file's line (1-based) of the row's sources. */
 function atLine(row: Row, record: CompactRecord, path: string, line: number) {
   const lines = row.files.find((file) => file.path === path)!.lines;
   const start = lines.slice(0, line - 1).reduce((sum, text) => sum + text.length + 1, 0);
   const end = start + lines[line - 1]!.length;
-  return record.diagnostics.filter(
-    (d) => d.site.file === path && d.site.offset >= start && d.site.offset < end,
-  );
+  const at = (site: { readonly file: string; readonly offset: number }): boolean =>
+    site.file === path && site.offset >= start && site.offset < end;
+  return {
+    found: record.diagnostics.filter((d) => at(d.site)),
+    checks: record.checks.filter((c) => at(c.site)),
+  };
 }
 
 test("each design row gives its answer by the text in the four modes: the error, no error, or a check that stands", () => {
@@ -78,7 +81,7 @@ test("each design row gives its answer by the text in the four modes: the error,
         wrong.push(`${row.name}: the modes differ`);
     const record = records[0]!;
     for (const { path, line } of row.watch) {
-      const found = atLine(row, record, path, line);
+      const { found, checks } = atLine(row, record, path, line);
       const errors = found.filter((d) => d.class === "compile-error");
       const required = errors.filter((d) => d.requiredCheck !== undefined);
       const fits =
@@ -93,10 +96,14 @@ test("each design row gives its answer by the text in the four modes: the error,
           : row.expect === "no-error"
             ? errors.length === 0
             : row.expect === "warning"
-              ? errors.length === 0 && found.some((d) => d.class === "warning-runtime-check")
+              ? errors.length === 0 &&
+                found.some((d) => d.class === "warning-runtime-check") &&
+                checks.length > 0
               : errors.length > 0 || found.some((d) => d.class === "warning-runtime-check");
       if (!fits)
-        wrong.push(`${row.name} (${row.expect}) at ${path}:${line}: ${JSON.stringify(found)}`);
+        wrong.push(
+          `${row.name} (${row.expect}) at ${path}:${line}: ${JSON.stringify({ found, checks })}`,
+        );
     }
   }
   assert.deepEqual(wrong, []);
