@@ -1,5 +1,6 @@
 // The Player browser smoke's conversation and layout scenarios on `/player/`, each taking the driver's `cdp`.
 import {
+  addInitScript,
   assertEqual,
   click,
   delay,
@@ -10,6 +11,7 @@ import {
   physicalClickOn,
   pressPoint,
   pressSpace,
+  removeInitScript,
   setViewport,
   typeInto,
   value,
@@ -38,10 +40,9 @@ export async function insecureOriginScenario(cdp, origin) {
 }
 
 export async function demoScenario(cdp, origin) {
-  const {
-    result: { identifier },
-  } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
-    source: `window.__played = [];
+  const identifier = await addInitScript(
+    cdp,
+    `window.__played = [];
       const play = HTMLMediaElement.prototype.play;
       HTMLMediaElement.prototype.play = function () {
         if (!window.__played.includes(this)) window.__played.push(this);
@@ -59,7 +60,7 @@ export async function demoScenario(cdp, origin) {
         if (!String(event.message).startsWith('ResizeObserver loop')) window.__errors.push(String(event.message));
       });
       addEventListener('unhandledrejection', (event) => window.__errors.push(String(event.reason)));`,
-  });
+  );
   await setViewport(cdp, 1440, 900);
   await navigate(cdp, `${origin}/player/`);
   await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
@@ -181,7 +182,7 @@ export async function demoScenario(cdp, origin) {
     "[]",
     "The demo reported errors in the console",
   );
-  await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+  await removeInitScript(cdp, identifier);
 }
 
 /** The latest message in the conversation. */
@@ -332,16 +333,15 @@ async function smartFollowCheck(cdp) {
  */
 export async function packageScenario(cdp, origin) {
   await setViewport(cdp, 1440, 900);
-  const {
-    result: { identifier },
-  } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
-    source: `window.__played = [];
+  const identifier = await addInitScript(
+    cdp,
+    `window.__played = [];
       const play = HTMLMediaElement.prototype.play;
       HTMLMediaElement.prototype.play = function () {
         if (!window.__played.includes(this)) window.__played.push(this);
         return play.call(this);
       };`,
-  });
+  );
   try {
     await navigate(cdp, `${origin}/player/?package=house`);
     await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
@@ -367,7 +367,7 @@ export async function packageScenario(cdp, origin) {
       "The house package did not play its own sound",
     );
   } finally {
-    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+    await removeInitScript(cdp, identifier);
   }
 
   // A package that does not compile says so in plain words, with its errors under Technical details, collapsed.

@@ -8,6 +8,7 @@ import {
   x25519Identity,
 } from "../../../dist/tests/helpers/player/age-keyholder.js";
 import {
+  addInitScript,
   assertEqual,
   clickLabelled,
   delay,
@@ -17,6 +18,7 @@ import {
   physicalClick,
   pressEnter,
   reloadKept,
+  removeInitScript,
   setViewport,
   typeInto,
   value,
@@ -34,8 +36,9 @@ async function standInRelays(cdp) {
     signature:
       "b55e7cb2d5c613ee0b2e28d6750aabbb78c39dcc96bd9d38c2c2e12198df95571de8e8e402a0cc48871c7089a2b3af4b",
   };
-  const { identifier } = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
-    source: `(() => {
+  return addInitScript(
+    cdp,
+    `(() => {
       const beacon = ${JSON.stringify(round1)};
       const original = window.fetch.bind(window);
       window.__drandRequests = [];
@@ -50,8 +53,7 @@ async function standInRelays(cdp) {
         );
       };
     })();`,
-  });
-  return identifier;
+  );
 }
 
 /**
@@ -164,7 +166,7 @@ export async function lockScenario(cdp, origin) {
       "A typed password was kept",
     );
   } finally {
-    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+    await removeInitScript(cdp, identifier);
   }
 }
 
@@ -289,7 +291,7 @@ export async function passwordScenario(cdp, origin) {
       "A typed password was shown or kept",
     );
   } finally {
-    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+    await removeInitScript(cdp, identifier);
   }
 }
 
@@ -574,7 +576,7 @@ export async function lockKeptScenario(cdp, origin) {
     await waitFor(cdp, `!!${dialog}`, 8_000, "Continue did not return to the lock dialog");
     assertEqual(await value(cdp, resume), false, "Continue returned to the block's button");
   } finally {
-    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+    await removeInitScript(cdp, identifier);
   }
 }
 
@@ -643,6 +645,6 @@ export async function publicKeyScenario(cdp, origin, profile) {
       "The unlock key did not open it",
     );
   } finally {
-    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+    await removeInitScript(cdp, identifier);
   }
 }
