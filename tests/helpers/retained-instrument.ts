@@ -255,6 +255,7 @@ interface OwnerRecord {
   readonly owner: object;
   readonly name: string;
   readonly hidden: ((owner: never) => Readonly<Record<string, unknown>>) | null;
+  /** Its own data fields, once settled (`null` before): those a lock makes read-only and a mark writable. */
   keys: readonly PropertyKey[] | null;
   open: boolean;
 }
@@ -401,8 +402,9 @@ export class RetainedInstrument implements RetainedRecorder {
     name: string,
   ): T {
     MADE.set(made, { instrument: this, name, kind, holder: made });
+    // (non-configurable and read-only: nothing removes or replaces a writer, so none falls back to the native one)
     for (const [writer, method] of Object.entries(COLLECTION_WRITERS[kind]))
-      Object.defineProperty(made, writer, { value: method, writable: true, configurable: true });
+      Object.defineProperty(made, writer, { value: method, writable: false, configurable: false });
     // (R24 a: a new own property on a collection throws at its line)
     Object.preventExtensions(made);
     this.#registered.add(made);
@@ -611,18 +613,20 @@ export class RetainedInstrument implements RetainedRecorder {
     const hidden = record.hidden as ((owner: WeakKey) => Readonly<Record<string, unknown>>) | null;
     const shown = hidden === null ? {} : hidden(owner);
     for (const key in shown) this.#admit(shown[key], `${record.name}.#${key}`, true);
-    const keys = Reflect.ownKeys(owner);
-    for (const key of keys) {
+    const data: PropertyKey[] = [];
+    for (const key of Reflect.ownKeys(owner)) {
       const descriptor = Object.getOwnPropertyDescriptor(owner, key)!;
-      if ("value" in descriptor)
+      if ("value" in descriptor) {
         this.#admit(descriptor.value, `${record.name}.${String(key)}`, true);
+        data.push(key);
+      }
       // (an own getter without a setter that `hidden` shows, read there: a value fixed once its owner is made, as
       // `CorePass`'s; made non-configurable, so nothing replaces it later)
       else if (typeof key === "string" && Object.hasOwn(shown, key) && descriptor.set === undefined)
         Object.defineProperty(owner, key, { configurable: false });
       else this.#refuse(`an accessor \`${String(key)}\` of the owner ${record.name}`);
     }
-    record.keys = keys;
+    record.keys = data;
     Object.preventExtensions(owner);
     this.#lock(record);
   }
@@ -632,7 +636,6 @@ export class RetainedInstrument implements RetainedRecorder {
     const { owner } = record;
     for (const key of record.keys!) {
       const descriptor = Object.getOwnPropertyDescriptor(owner, key)!;
-      if (!("value" in descriptor)) continue;
       this.#admit(descriptor.value, `${record.name}.${String(key)}`, true);
       if (descriptor.writable === true) Object.defineProperty(owner, key, { writable: false });
     }
