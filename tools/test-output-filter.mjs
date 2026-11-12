@@ -1,7 +1,8 @@
 import { spawn, spawnSync } from "node:child_process";
-import { fstatSync, globSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, fstatSync, globSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
+import { pathToFileURL } from "node:url";
 import { testPathArguments } from "./test-arguments.mjs";
 import { TEST_LIMIT_MS } from "./test-in-flight.mjs";
 import { shardFiles, shardOption, suiteTestFiles } from "./test-shards.mjs";
@@ -137,6 +138,23 @@ const nodeArguments = fullSuite
     ];
 // (without `TEST_FULL_OUTPUT`: a test that runs this filter itself chooses its own output)
 const { TEST_FULL_OUTPUT: _, ...environment } = process.env;
+// (#1072 R21: every test process imports the retained-state instrument's preload, which installs it in a test file of
+// `tests/type-core/` alone: those suites run frozen, and `tests/type-core-production/` runs some of them again without it)
+const instrument = join(
+  import.meta.dirname,
+  "..",
+  "dist",
+  "tests",
+  "helpers",
+  "retained-instrument-preload.js",
+);
+if (existsSync(instrument))
+  environment.NODE_OPTIONS = [
+    environment.NODE_OPTIONS,
+    `--import=${pathToFileURL(instrument).href}`,
+  ]
+    .filter(Boolean)
+    .join(" ");
 const child = spawn(process.execPath, nodeArguments, {
   env: environment,
   stdio: fullOutput ? "inherit" : ["inherit", "pipe", "inherit"],
