@@ -273,8 +273,8 @@ test("a generator's shared build counts to the total, never to the asker, and en
 
 /**
  * #2289: a shared build of structure (`sharedStructure`) counts its own steps to the total and not to the asker,
- * but what runs while it is suspended at a yield, the read it yielded, is the asker's: no demand runs inside it. A build
- * abandoned at its yield leaves nothing open.
+ * but what runs while it is suspended at a yield, the read it yielded, is the asker's, and so is a read it runs
+ * `outside` its window: no demand runs inside it. A build abandoned at its yield leaves nothing open.
  */
 test("a shared structure build counts its own steps to the total, and each read it yields to the asker (#2289)", () => {
   const work = new WorkLedger(1_000);
@@ -308,6 +308,21 @@ test("a shared structure build counts its own steps to the total, and each read 
   assert.deepEqual(
     { total: work.total, own: work.own, sharing: work.sharing },
     { total: 22, own: 10, sharing: false },
+  );
+  // (a read the build makes without yielding it, run `outside` its window: the asker's, as a yielded one is)
+  const unyielded = work.sharedStructure(
+    (function* (): Generator<never, number, never> {
+      work.charge("checks", 2);
+      return work.outside(() => {
+        work.charge("checks", 3);
+        return 1;
+      });
+    })(),
+  );
+  assert.deepEqual(unyielded.next(), { value: 1, done: true });
+  assert.deepEqual(
+    { total: work.total, own: work.own, sharing: work.sharing },
+    { total: 27, own: 13, sharing: false },
   );
 });
 
