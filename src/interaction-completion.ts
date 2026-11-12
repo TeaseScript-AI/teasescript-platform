@@ -1,9 +1,10 @@
 /**
- * The answer rules of the interactions the Player answers, shared by the runtime, which settles an answer with them,
- * and the Player, which checks an answer with them before it sends it: what each payload answers, its result, and its
- * transcript text. Request shape, identity, time, settlement and events stay with the runtime
- * (`runtime/actions/interaction.ts`, `runtime/operations/complete-action.ts`), and so does the check of a password
- * answer's hash. Every function here reads only its arguments.
+ * The answer rules of the interactions the Player answers: what each payload answers, its result and its transcript
+ * text (`resolveAnswer`, which the runtime settles an answer with), and where the composer's text goes
+ * (`routeComposerText`, which the Player's adapter routes it with). Every import is one the Player's page may load.
+ * Request shape, identity, time, settlement and events stay with the runtime (`runtime/actions/interaction.ts`,
+ * `runtime/operations/complete-action.ts`), and so does the check of a password answer's hash. Apart from the test-only
+ * work counter, every function here reads only its arguments.
  */
 
 import { cloneInteractionChoiceValue } from "./choice-values.js";
@@ -47,7 +48,7 @@ export type ResolvedInteraction =
 
 /**
  * What `payload` answers for `action`. `context` is the player's presentation now, which shows a date or time answer in
- * the transcript. `capturedMedia` vouches for an image answer; without it no image request completes. A password action
+ * the transcript. `capturedMedia` vouches for an image reference; without it only a skip answers an image request. A password action
  * is not answered here.
  */
 export function resolveAnswer(
