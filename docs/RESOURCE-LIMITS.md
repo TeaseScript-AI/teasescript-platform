@@ -249,7 +249,8 @@ changed warning or wording applies to the same change, the entry is its report:
   step 0, PR #2403).** Reading such a default's type builds an index of each typed default's start values and literal
   cells once per program, before anything is solved, one work unit for each binding followed, each step and cell
   entered and each part of a written type taken apart, and the default's two demands walk it, one unit for each literal
-  and written type met at a level; a program with no typed default that reads a binding or is a literal pays nothing. A
+  entered, reference to a literal followed and written type met at a level, and for each step read down a written
+  type; a program with no typed default that reads a binding or is a literal pays nothing. A
   maker would notice nothing for a script that fits its budget. For a script whose budget falls in the window: a stop
   where main completed or the reverse, with the warnings a stop leaves. Measured at a1aa92c18 against main 2b574316a in
   four modes: over the corpus set (15,406 sources), 144 change their charged work (30 units more at the median, 174 at
