@@ -159,7 +159,8 @@ export function useAnswerSubmission(host: {
     if (terminal === "lost") return "undone";
     if (terminal === null) {
       const shown = host.session();
-      // A session another shows in the same chat (Debug's time change) holds no answer posted to this one.
+      // A session another shows in the same chat holds no answer posted to this one. Only the Continue after a lost
+      // connection shows one, and the loss settled the answer before it; this keeps that order from mattering.
       return shown !== null && shown.lineage !== record.lineage ? "undone" : null;
     }
     if (record.stage !== "posted") return "undone";

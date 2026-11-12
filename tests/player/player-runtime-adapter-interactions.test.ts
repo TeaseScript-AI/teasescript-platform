@@ -23,7 +23,11 @@ import {
   playerRuntimeSnapshot,
   type PlayerRuntimeSession,
 } from "../../player/runtime/runtime-adapter.js";
-import { playerRuntimeForm } from "../../player/runtime/runtime-view.js";
+import {
+  activePlayerRuntimeInteraction,
+  playerRuntimeForm,
+} from "../../player/runtime/runtime-view.js";
+import { routeComposerText } from "../../src/interaction-completion.js";
 import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
 import {
   playerTemporalContext,
@@ -642,4 +646,30 @@ test("a form's cancel button and its exact text cancel the form", () => {
     ),
     null,
   );
+});
+
+test("the submit label typed submits a form, and Enter in an empty optional field commits it without a value", () => {
+  const source = [
+    'let answers = askForm fields: { weight: { type: "number", optional: true, text: "Weight" } }, submit: "Continue"',
+    'say "${answers.weight}", instant',
+    "exit",
+  ].join("\n");
+  // The Player's own check routes the composer's text as the runtime does (`src/interaction-completion.ts`).
+  const route = (session: PlayerRuntimeSession, text: string) =>
+    routeComposerText(activePlayerRuntimeInteraction(session.state), text)?.kind ?? null;
+  const fresh = createPlayerRuntimeSession(source);
+  assert.equal(route(fresh, "Continue"), "formSubmit");
+  const submitted = submitPlayerRuntimeComposer(fresh, "Continue")!;
+  assert.equal(submitted.outcome.kind, "completed");
+  assert.deepEqual(
+    submitted.session.transcriptEntries.map((entry) => entry.text),
+    ["Weight: Not set", "null"],
+  );
+  const opened = stepPlayerRuntimeFormField(createPlayerRuntimeSession(source), "weight")!;
+  assert.equal(playerRuntimeForm(opened.session)!.editor?.fieldId, "weight");
+  assert.equal(route(opened.session, ""), "formCommit");
+  const committed = submitPlayerRuntimeComposer(opened.session, "")!;
+  assert.equal(committed.outcome.kind, "updated");
+  assert.equal(playerRuntimeForm(committed.session)!.editor, null);
+  assert.equal(playerRuntimeForm(committed.session)!.fields[0]!.state, null);
 });

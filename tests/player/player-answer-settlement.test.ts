@@ -10,6 +10,8 @@ import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import type { PlayerRuntimeSessionOptions } from "../../player/runtime/runtime-adapter.js";
 import {
   activePlayerRuntimeInteraction,
+  playerRuntimeForeground,
+  playerRuntimeForm,
   playerRuntimeInteractionActionIds,
   type PlayerSession,
 } from "../../player/runtime/runtime-view.js";
@@ -52,6 +54,7 @@ interface SessionHost {
   readonly bridge: Promise<PlayerBridge>;
   readonly inputSection: InputSectionHost;
   update(session: PlayerSession): void;
+  observe(): Promise<PlayerSession | null>;
   reportHostError(error: unknown): void;
   prepare(create: {
     readonly plan: string;
@@ -64,6 +67,16 @@ let usePlayerSession: (options: {
   readonly debugHistorySpill: () => Promise<null>;
   readonly keptSessions?: KeptSessionStore;
 }) => SessionHost;
+let composerDescriptor: (shown: {
+  readonly session: PlayerSession | null;
+  readonly reset: number;
+  readonly chat: number;
+  readonly foreground: ReturnType<typeof playerRuntimeForeground>;
+  readonly form: ReturnType<typeof playerRuntimeForm>;
+  readonly lock: null;
+  readonly consumed: number | null;
+}) => ComposerDescriptor;
+let descriptorKey: (next: ComposerDescriptor) => string;
 let useComposerState: (host: {
   readonly draft: (draft: FormDraft) => Promise<boolean>;
   readonly holdDrafts: () => boolean;
@@ -103,6 +116,10 @@ before(async () => {
   const composer = await loadPlayerModule("player/vue/src/interaction/useComposerState.ts");
   // EVIDENCE: validation: as above, the composer's controller.
   useComposerState = composer.useComposerState as typeof useComposerState;
+  // EVIDENCE: validation: as above, the composer's descriptor and its identity.
+  composerDescriptor = composer.composerDescriptor as typeof composerDescriptor;
+  // EVIDENCE: validation: as above.
+  descriptorKey = composer.descriptorKey as typeof descriptorKey;
   const submission = await loadPlayerModule("player/vue/src/interaction/useAnswerSubmission.ts");
   // EVIDENCE: validation: as above, the answers' controller.
   useAnswerSubmission = submission.useAnswerSubmission as typeof useAnswerSubmission;
@@ -215,26 +232,18 @@ async function page(context: TestContext, topology: Topology, script: string) {
     });
     const descriptor = (): ComposerDescriptor => {
       const session = shown();
-      const action = session ? activePlayerRuntimeInteraction(session.state) : null;
-      const password = action?.ui.kind === "password";
-      return {
-        session: session ? session.planToken : null,
+      return composerDescriptor({
+        session,
+        reset: 0,
         chat: player.chat.value,
-        tenant:
-          action && password
-            ? { kind: "password", actionId: action.actionId, resumes: action.resumes ?? 0 }
-            : { kind: "chat" },
-        actionId: action?.actionId ?? null,
-        answered: action !== null && submission.consumed.value === action?.actionId,
-        liveActions: session ? playerRuntimeInteractionActionIds(session.state) : [],
-        prefill: null,
-        editorText: null,
-        editorField: null,
-        temporalPrefill: null,
-      };
+        foreground: session ? playerRuntimeForeground(session) : null,
+        form: session ? playerRuntimeForm(session) : null,
+        lock: null,
+        consumed: submission.consumed.value,
+      });
     };
     watch(
-      () => JSON.stringify(descriptor()),
+      () => descriptorKey(descriptor()),
       () => composer.select(descriptor()),
       { immediate: true },
     );
@@ -280,6 +289,7 @@ const CASES = {
   "posted, unmount": TOPOLOGIES,
   "rowless, posted, stop": TOPOLOGIES,
   "a script failure after the answer": TOPOLOGIES,
+  "the origin gone after the yield": TOPOLOGIES,
 } as const;
 const RERUN = rerunRegistry(CASES);
 
@@ -322,8 +332,12 @@ for (const stage of ["accepted", "fenced", "posted"] as const)
         assert.equal(record.stage, stage);
         const chatBefore = player.chat.value;
         let started: Promise<void> | null = null;
-        if (event === "stop") player.reportHostError(new TypeError("a component failed"));
-        else if (event === "loss") await connection.lose();
+        if (event === "stop") {
+          player.reportHostError(new TypeError("a component failed"));
+          // The error stop halts the session until the host acknowledges it, behind the reply a row holds; with nothing
+          // in flight an in-process host acknowledges it at once.
+          if (stage !== "accepted") assert.equal(player.terminal.value, "freezing");
+        } else if (event === "loss") await connection.lose();
         else if (event === "start") {
           player.prepare(other!);
           started = player.activate();
@@ -400,6 +414,34 @@ RERUN.rows(
     assert.equal(player.terminal.value, null, "a published failure is no stop");
     assert.equal(composer.chatText.value, "", "released: the text stays sent");
     assert.equal(submission.notice.value, "");
+    return end();
+  },
+);
+
+RERUN.rows(
+  "the origin gone after the yield",
+  "a block that takes the screen during the answer's painted frame refuses it before it is sent: it is undone with the notice",
+  async (context, topology, end) => {
+    const { player, composer, submission, connection, frame } = await page(
+      context,
+      topology,
+      'timer async 60 s {\n  showButton "Back"\n}\nlet pick = askChoice "Go"\nsay "after", instant\nexit',
+    );
+    type(composer, "Go");
+    frame.hold();
+    submission.send("input");
+    const record = submission.pending.value!;
+    await until(() => frame.waiting() === 1, "the frame", "step");
+    // The scene clock's wake runs the due block while the answer waits for its frame.
+    const now = performance.now() + 61_000;
+    context.mock.method(performance, "now", () => now);
+    await player.observe();
+    assert.equal(record.stage, "accepted");
+    frame.release();
+    await until(() => record.stage === "settled", "the answer settled", "host");
+    assert.equal(composer.chatText.value, "Go");
+    assert.equal(submission.notice.value, "This interaction is no longer available.");
+    assert.equal(connection.posts.filter((post) => post.op === ANSWER_OP).length, 0);
     return end();
   },
 );
