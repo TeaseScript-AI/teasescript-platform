@@ -6,7 +6,7 @@ import { withSolverSeam } from "../../../src/type-inference/core/solver.js";
 
 /**
  * What a run may not do to its member's previous answer: drop one of its kinds (`empty`, the emptiness mark, included;
- * an `integer` where `number` is listed instead is kept), drop a reason of a kind it keeps, or move an unknown's word later in the merge's order (`firstContext`) while its
+ * an `integer` where `number` is listed instead, with every reason it had, is kept), drop a reason of a kind it keeps, or move an unknown's word later in the merge's order (`firstContext`) while its
  * reasons stay as they were. An unknown's word may follow its reasons as they grow (`reasonContext`), which happens at most
  * once per reason; a word that moves later under the same reasons went round a component (#2486's Domme ring).
  */
@@ -69,8 +69,10 @@ export function judgeRun(
       // (`number` holds every integer, so an `integer` replaced by `number` widens: a narrowed read whose test a store in
       // its loop fails takes the place's own kinds, once, as in `let n: number | string = 2` /
       // `if n is integer { repeat 2 { repeat n {} n = n / 2 } }`, #2486's ruling R9)
-      if (was.tag === "integer" && now.has("number")) count("integer widened to number");
-      else violation("kind lost");
+      const wider = was.tag === "integer" ? now.get("number") : undefined;
+      if (wider !== undefined && (was.reasons & ~wider.reasons) === 0)
+        count("integer widened to number");
+      else violation(wider === undefined ? "kind lost" : "reason lost");
       continue;
     }
     if ((was.reasons & ~is.reasons) !== 0) violation("reason lost");

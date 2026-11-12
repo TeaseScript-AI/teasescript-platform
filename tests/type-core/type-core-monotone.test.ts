@@ -32,6 +32,12 @@ test("the oracle names a lost kind, a lost reason and an unknown's word moved la
   assert.deepEqual(kinds(judgeRun("m", [integer], [makeItem("string")], moves)), [
     "kind lost integer",
   ]);
+  // (the widened `number` keeps the integer's reasons: an external reason lost while another number stays is a loss)
+  const external = makeItem("integer", null, { reasons: REASON.external });
+  const opaque = makeItem("number", null, { reasons: REASON.opaque });
+  assert.deepEqual(kinds(judgeRun("m", [external, opaque], [opaque], moves)), [
+    "reason lost integer",
+  ]);
   // (what only grows: a kind, a reason, a word earlier in the order or following a new reason)
   assert.deepEqual(
     judgeRun(

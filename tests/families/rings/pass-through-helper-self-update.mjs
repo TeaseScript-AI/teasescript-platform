@@ -1,8 +1,9 @@
 // A variable set from a pass-through helper, as the converter writes one, and updated from itself (#2486): every pair of
 // its axes' values (the helper's call sites and form, its argument, the update, the update's other operand, where the
-// update stands), and every combination of the call sites, the helper, the update and its other operand, which together
-// decide whether main's solver settles, in one source at least, chosen greedily from the product; the coverage check below
-// fails the module otherwise. Its run: the oracle sweep and the replay of #2486's pull request.
+// update stands, its operator), and every combination of the call sites, the update, its other operand and its operator,
+// which together decide whether main's solver settles, in one source at least, chosen greedily from the product; the
+// coverage check below fails the module otherwise. `*` has no compound form (V30 has `+=` and `-=` only), so that pair
+// is no source. Its run: the oracle sweep and the replay of #2486's pull request.
 export const axes = {
   sites: ["once", "twice"],
   helper: ["passOn", "loader"],
@@ -10,6 +11,7 @@ export const axes = {
   update: ["two operations", "compound", "one operation"],
   other: ["built-in", "constant"],
   place: ["straight", "loop", "goto"],
+  operator: ["+", "-", "*"],
 };
 
 const ARGUMENT = {
@@ -21,9 +23,9 @@ const ARGUMENT = {
 };
 const OTHER = { "built-in": "randomInteger(0..3)", constant: "2" };
 const UPDATE = {
-  "two operations": (x) => `n = n + 1 + ${x}`,
-  compound: (x) => `n += ${x} + 1`,
-  "one operation": (x) => `n = n + ${x}`,
+  "two operations": (x, op) => `n = n ${op} ${op === "*" ? 2 : 1} ${op} ${x}`,
+  compound: (x, op) => `n ${op}= ${x} ${op} 1`,
+  "one operation": (x, op) => `n = n ${op} ${x}`,
 };
 const PASS_ON = "global function passOn(value) {\n  return value\n}\n";
 const LOADER =
@@ -33,7 +35,7 @@ const LOADER =
 function source(c) {
   const call = (key, argument) =>
     c.helper === "passOn" ? `passOn(${argument})` : `loadWhole("${key}", ${argument})`;
-  const update = UPDATE[c.update](OTHER[c.other]);
+  const update = UPDATE[c.update](OTHER[c.other], c.operator);
   const placed =
     c.place === "straight"
       ? `${update}\n`
@@ -53,12 +55,14 @@ function source(c) {
 const names = Object.keys(axes);
 const pairsOf = (c) => [
   ...names.flatMap((a, i) => names.slice(i + 1).map((b) => `${a}=${c[a]}|${b}=${c[b]}`)),
-  `sites=${c.sites}|helper=${c.helper}|update=${c.update}|other=${c.other}`,
+  `sites=${c.sites}|update=${c.update}|other=${c.other}|operator=${c.operator}`,
 ];
-const product = names.reduce(
-  (done, name) => done.flatMap((c) => axes[name].map((value) => ({ ...c, [name]: value }))),
-  [{}],
-);
+const product = names
+  .reduce(
+    (done, name) => done.flatMap((c) => axes[name].map((value) => ({ ...c, [name]: value }))),
+    [{}],
+  )
+  .filter((c) => !(c.update === "compound" && c.operator === "*"));
 // (greedy: the combination covering the most pairs not yet covered, the first in the product's order on a tie)
 const chosen = [];
 const covered = new Set();
@@ -89,6 +93,6 @@ export const recorded = {
       "~/work/evidence/2486/family/cases.jsonl",
     ],
   ],
-  sources: 24,
-  sha256: "6252a3847af15fff1c80d4615a0d4e1f036ad44b15f18bef1d72560b201b3edc",
+  sources: 32,
+  sha256: "b9a3b4c34016b239720c497ee0181cf00d86d4cfcffb3b78147d5997f8714464",
 };
