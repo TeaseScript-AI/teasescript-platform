@@ -9,7 +9,8 @@
 // passed, bound or stored). An object literal's property that holds a forwarder is followed through its property's
 // references, and reported as an escape too, so the admit-list names it; a destructured binding that declares the
 // variable a shorthand property returns is no reference of that property. The test that runs the census
-// (`tests/player/player-session-work-census.test.ts`) holds the classifications; this tool only discovers.
+// (`tests/player/player-session-work-census.test.ts`) holds the classifications, in its tables
+// (`tests/helpers/player/session-work-census-tables.ts`); this tool only discovers.
 
 import { readdirSync } from "node:fs";
 import { join, relative, resolve } from "node:path";
