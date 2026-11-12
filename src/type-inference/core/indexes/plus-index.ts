@@ -13,6 +13,7 @@ import {
   type Writer,
 } from "../items.js";
 import type { CoreProgram, ValueConstraint } from "../program.js";
+import { Retained } from "../retained/retained.js";
 import { sharing } from "../sharing.js";
 import type { Work } from "../solver.js";
 
@@ -136,7 +137,12 @@ export function plusRun(pass: CorePass, value: PlaceId, step: string, exact: boo
   let state = contract.plusIndex;
   if (state === null) {
     contract.keep(3);
-    state = contract.plusIndex = { seed: step, seen: new Map(), indexed: null };
+    state = Retained.record<PlusIndex>("PlusIndex", {
+      seed: step,
+      seen: Retained.map<PlaceId, string>("PlusIndex.seen"),
+      indexed: null,
+    });
+    contract.plusIndex = Retained.held(contract, state);
   }
   const known = state.indexed?.runs.get(value);
   if (known !== undefined) return known;
@@ -187,20 +193,21 @@ function collapsed(pass: CorePass, root: PlaceId, exact: boolean): boolean {
 /** The index's shared parts, made at its first run. */
 function indexed(pass: CorePass, state: PlusIndex): Indexed {
   const { program, contract } = pass;
-  const below = new Set<PlaceId>();
+  const below = Retained.set<PlaceId>("PlusIndex.below");
   contract.keep(5);
   for (const key of pass.definitions.byKey.keys()) {
     program.work.charge("indexSteps");
     if (!key.endsWith("|")) below.add(keyPlace(key));
   }
   contract.keep(below.size);
+  // (the state made at an earlier ask, its index filled here)
   state.indexed = {
     below,
-    shapes: new Map(),
-    bindings: new Map(),
-    terms: new Map(),
-    bindingsHolding: new Map(),
-    runs: new Map(),
+    shapes: Retained.map("PlusIndex.shapes"),
+    bindings: Retained.map("PlusIndex.bindings"),
+    terms: Retained.map("PlusIndex.terms"),
+    bindingsHolding: Retained.map("PlusIndex.bindingsHolding"),
+    runs: Retained.map("PlusIndex.runs"),
   };
   return state.indexed;
 }
@@ -239,8 +246,8 @@ function runOf(pass: CorePass, ix: Indexed, root: PlaceId): Run | null {
     return null;
   }
   // (a literal's names posted at its position, a literal standing once in one run; a binding's reads by its proof)
-  const holders = new Map<string, number[]>();
-  const groupOf = new Map<Proof, Reads>();
+  const holders = Retained.map<string, number[]>("PlusIndex.run.holders");
+  const groupOf = Retained.map<Proof, Reads>("PlusIndex.run.groupOf");
   const positionsOf = new Map<Proof, number[]>();
   const reads: Reads[] = [];
   for (const [index, { shape, read }] of kinds.entries()) {
@@ -292,7 +299,7 @@ function runOf(pass: CorePass, ix: Indexed, root: PlaceId): Run | null {
     reads,
     byWriter,
     groupOf,
-    holding: new Map(),
+    holding: Retained.map("PlusIndex.run.holding"),
     nextLiteral,
     writers,
   };
@@ -327,7 +334,7 @@ function holdersOf(pass: CorePass, ix: Indexed, run: Run, step: string): Readonl
     found.sort((a, b) => a.positions[0]! - b.positions[0]!);
   }
   contract.keep(2 + found.length);
-  const holding = new Set(found);
+  const holding = Retained.set("PlusIndex.run.holding[]", found);
   run.holding.set(step, holding);
   return holding;
 }
@@ -391,10 +398,15 @@ function bindingProof(pass: CorePass, ix: Indexed, binding: PlaceId): Proof | nu
       // (its names once per binding, whatever reads it, as a set and posted in the pass: `holdersOf`)
       program.work.charge("indexSteps", 2 * shape.names.length);
       contract.keep(3 + 3 * shape.names.length);
-      proof = { node: own[0]!.node, shape, names: new Set(shape.names) };
+      proof = {
+        node: own[0]!.node,
+        shape,
+        names: Retained.set("PlusIndex.proof.names", shape.names),
+      };
       for (const name of shape.names) {
         let list = ix.bindingsHolding.get(name);
-        if (list === undefined) ix.bindingsHolding.set(name, (list = []));
+        if (list === undefined)
+          ix.bindingsHolding.set(name, (list = Retained.array("PlusIndex.bindingsHolding[]")));
         list.push(proof);
       }
     }
