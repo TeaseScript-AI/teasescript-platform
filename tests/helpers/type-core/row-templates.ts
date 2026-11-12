@@ -269,6 +269,33 @@ export const DECLARED_REFUSALS: readonly {
     gate: "outsideAnswers (src/type-inference/core/backend.ts)",
     text: "this say",
   })),
+  // (a check that no store takes: a typed default inside a command's operand or a `say`'s value, the lead's R11; its
+  // place is the command operand table's, step 1½)
+  ...(
+    [
+      [
+        "showPopupStatement",
+        "the message, a `fromJson` with a typed default",
+        "showPopup",
+        "fromJson",
+      ],
+      ["showPopupStatement", "the message, a load with a typed default", "showPopup", "load"],
+      ["sayStatement", "the value, a `fromJson` with a typed default", "say", "fromJson"],
+    ] as const
+  ).map(([row, position, command, form]) => {
+    const value =
+      form === "load"
+        ? 'load "n", default: toInteger("8", default: hostValue)'
+        : 'fromJson("broken", default: toInteger("8", default: hostValue))';
+    return {
+      row,
+      position,
+      refused: `${command} ${value}`,
+      admitted: `let m = ${value}\n${command} m`,
+      gate: "runtimeChecks (src/type-inference/core/check-result/runtime-plan.ts)",
+      text: "a check that no store takes",
+    };
+  }),
 ];
 
 /**
@@ -318,17 +345,51 @@ export const DECLARED_RUN_DIFFERENCES: readonly {
 ];
 
 /**
+ * A fitting value of each command operand that has a declared rule difference: the command with it is that difference's
+ * fitting twin (the lead's R12). A duration literal is outside the slice, so a twin with one is compared on today's
+ * checker.
+ */
+const FITTING_OPERANDS: Readonly<Partial<Record<SyntaxKind, Readonly<Record<string, string>>>>> = {
+  showImageStatement: { image: '"a.png"' },
+  openUrlStatement: { url: '"https://example.com"', buttonText: '"Go"', alwaysButton: "true" },
+  exportTextStatement: { text: '"t"', title: '"t"', fileName: '"f.txt"' },
+  showPopupStatement: { message: '"m"', buttonText: '"Go"' },
+  waitStatement: { duration: "2 s" },
+  deleteStatement: { key: '"k"' },
+  showButtonStatement: { label: '"Go"', background: '"red"', timeout: "2 s" },
+  sayStatement: { pacing: "instant" },
+};
+
+/**
+ * The control-flow contexts the guard samples each declared rule difference's command in (R12): wherever the command
+ * stands, the route answers as for its fitting twin, but that a run reaching it fails there.
+ */
+export const CONTEXTS: Readonly<Record<string, (command: string) => string>> = {
+  straight: (command) => `${command}\nexit\n`,
+  "after exit": (command) => `exit\n${command}\n`,
+  "after an exiting if": (command) => `if true {\n  exit\n}\n${command}\nexit\n`,
+  "after an exiting for": (command) => `for part in [1] {\n  exit\n}\n${command}\nexit\n`,
+  "in a branch": (command) => `let b = hostValue == null\nif b {\n  ${command}\n}\nexit\n`,
+};
+
+/**
  * The command operands where today's checker gives a compile error for a value of a kind the operand does not take, and
  * the route publishes a plan whose instruction refuses that value when it runs (#2488's design rulings, R2: a closed
  * list, which the command operand table empties): the misfit's source (`misfitSources`), today's code, and the route's
  * failure, its code at the text `at`. The guard requires each in every mode, with nothing of the statement's effect
- * happening, and fails on a difference no entry names and on an entry that no longer occurs. Each entry also stands for
- * its twin after `exit` (the lead's R9): today the same error, the route a plan with only the unreachable warning TSV065.
+ * happening, and fails on a difference no entry names and on an entry that no longer occurs. An entry stands for its
+ * command wherever it stands (R12): today the same error and no plan; the route answers as for its fitting twin (`value`
+ * replaced by its fitting operand, `fitting`), diagnostics and runs, but that a run reaching the command fails there with
+ * the entry's code. The guard samples that in `CONTEXTS`.
  */
 export const DECLARED_RULE_DIFFERENCES: readonly {
   readonly row: SyntaxKind;
   readonly operand: string;
   readonly source: string;
+  /** The misfitting value in `source`, at its template's host global. */
+  readonly value: string;
+  /** The same command with a fitting operand (`FITTING_OPERANDS`). */
+  readonly fitting: string;
   readonly code: string;
   readonly failure: { readonly code: string; readonly at: string };
 }[] = (
@@ -363,6 +424,8 @@ export const DECLARED_RULE_DIFFERENCES: readonly {
       row,
       operand,
       source,
+      value: ADMITTED_VALUES[kind],
+      fitting: misfitSource(row, operand, FITTING_OPERANDS[row]![operand]!),
       code,
       failure: { code: failure, at: at === "value" ? ADMITTED_VALUES[kind] : source },
     };
