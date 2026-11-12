@@ -243,6 +243,7 @@ const PAIRS = [
   "tests/type-core/type-core-work-b.test.ts in tests/helpers/type-core/families/w34-links.ts",
   "tests/type-core/type-core-work-c.test.ts",
   "tests/type-core/type-core-work-c.test.ts in tests/helpers/type-core/families/admission-products.ts",
+  "tests/type-core/type-core-work-c.test.ts in tests/helpers/type-core/families/narrowing.ts",
   "tests/type-core/type-core-work-c.test.ts in tests/helpers/type-core/families/property-names.ts",
   "tests/type-core/type-core-written-default.test.ts",
 ];
