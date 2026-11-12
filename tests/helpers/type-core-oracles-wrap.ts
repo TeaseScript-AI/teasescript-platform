@@ -52,6 +52,32 @@ export function analysisByLine(
   });
 }
 
+/**
+ * A source's analysis (`checkedResult`) in `mode` by line: each diagnostic's class and code, and each run-time check,
+ * a warning's or a boundary check's; `null` when the files do not parse or resolve.
+ */
+export function checkedByLine(
+  files: readonly SourceFile[],
+  mode: Mode,
+): { readonly errors: readonly string[]; readonly checks: readonly string[] } | null {
+  const request = coreRequest(files);
+  if (request === null) return null;
+  const result = inMode(mode, () => checkedResult(analyseCore(request), request));
+  const at = (site: { readonly file: number; readonly start: number }): string =>
+    lineAt(files, site.file, site.start);
+  return {
+    errors: result.diagnostics
+      .filter((diagnostic) => diagnostic.class === "compile-error")
+      .map((diagnostic) => `${at(diagnostic.site)} ${diagnostic.code}`),
+    checks: [
+      ...result.diagnostics
+        .filter((diagnostic) => diagnostic.class === "warning-runtime-check")
+        .map((diagnostic) => `${at(diagnostic.site)} ${diagnostic.code}`),
+      ...result.checks.map((check) => `${at(check.site)} ${check.kind}`),
+    ],
+  };
+}
+
 /** What a finished compile gives by line: its diagnostics, its plan's checks and its run's events. */
 export interface CompiledByLine {
   readonly diagnostics: readonly string[];
