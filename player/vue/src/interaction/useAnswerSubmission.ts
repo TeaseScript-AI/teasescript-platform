@@ -166,11 +166,11 @@ export function useAnswerSubmission(host: {
    */
   const closed = () => host.terminal() !== null || host.epoch() !== host.inputEpoch();
 
-  // As the token moves (a stop, a lost connection, a replacement), at once: the secrets go, a form draft waiting to be
-  // stored is not, and the notice goes with its timer. The chat's text stays: a stop never changes what was typed.
+  // As the token moves (a stop, a lost connection, a replacement), at once: the secrets go, and the notice goes with its
+  // timer. The chat's text stays: a stop never changes what was typed. A form draft waiting to be stored is refused when
+  // its timer asks (`closed`).
   const offEpoch = host.onEpoch(() => {
     host.composer.eraseSecrets();
-    host.composer.cancelDraft();
     clearNotice();
   });
 

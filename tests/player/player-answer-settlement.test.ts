@@ -955,7 +955,7 @@ function missedStop(player: SessionHost, other: Awaited<ReturnType<typeof otherS
 
 RERUN.rows(
   "a missed stop with nothing pending",
-  "a stop a preparation retires in the same task still erases the secret, drops the notice and cancels a form draft waiting to be stored",
+  "a stop a preparation retires in the same task still erases the secret, drops the notice and stores no form draft that was waiting",
   async (context, topology, end) => {
     {
       const { player, composer, submission } = await page(context, topology, PASSWORD);
