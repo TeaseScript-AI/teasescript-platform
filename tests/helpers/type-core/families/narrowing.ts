@@ -5,6 +5,7 @@ import {
   rows,
   lines,
   cells,
+  fields,
   main,
   file,
   balancedSum,
@@ -616,6 +617,42 @@ export const ROUTE_ENTRY_FAMILIES: readonly WorkFamily[] = [
             (i) =>
               `label l${i}\n${USE_THEN_NULL}\nif hostValue is boolean { goto l${i} }\nn = ${i}`,
           ),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "E-default-copied-fields",
+    measures:
+      "N3 under the program default (R2.2): a record of k fields copied k times, then one loop reading each field",
+    program: (k) =>
+      main(
+        lines(
+          `let seed = {${fields(k, () => "1")}}`,
+          `if hostValue is boolean { seed = {${fields(k, () => "null")}} }`,
+          'if seed == null { say "absent" }',
+          rows(k, (i) => `let c${i} = seed\nseed = c${i}`),
+          "repeat 2 {",
+          rows(k, (i) => `let value${i}: integer = seed.f${i}`),
+          "}",
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "E-default-copied-in-loop",
+    measures:
+      "N3 under the program default (R2.2): a record of k fields copied k times inside one loop, then each field read",
+    program: (k) =>
+      main(
+        lines(
+          `let seed = {${fields(k, () => "1")}}`,
+          `if hostValue is boolean { seed = {${fields(k, () => "null")}} }`,
+          'if seed == null { say "absent" }',
+          "repeat 2 {",
+          rows(k, (i) => `let c${i} = seed\nseed = c${i}`),
+          rows(k, (i) => `let value${i}: integer = seed.f${i}`),
+          "}",
           "exit",
         ),
       ),
