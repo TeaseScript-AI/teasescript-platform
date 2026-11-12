@@ -1,4 +1,13 @@
 import { computed, ref, shallowRef, type ComputedRef } from "vue";
+import type {
+  PlayerFormPresentation,
+  PlayerForegroundPresentation,
+} from "../../../presentation/model.js";
+import {
+  activePlayerRuntimeInteraction,
+  playerRuntimeInteractionActionIds,
+  type PlayerSession,
+} from "../../../runtime/runtime-view.js";
 
 /*
  * The composer's field and who owns its text (PLAYER-UI "Composer"). The field shows one slot at a time, its tenant:
@@ -39,6 +48,72 @@ export interface ComposerDescriptor {
   readonly editorField: string | null;
   /** For a date or time control: its prefill, which its slot starts with. */
   readonly temporalPrefill: string | null;
+}
+
+const TEMPORAL_KINDS = new Set(["ask-date", "ask-time", "ask-datetime"]);
+
+/**
+ * The descriptor of what `shown` presents (`RuntimeInteraction`'s): the lock's password while its dialog shows; else the
+ * foreground interaction's own field (a password, a form field being edited, a date or time control), or the chat. An
+ * answered form or date control gives the field to the chat until its answer settles; a refusal shows them again.
+ */
+export function composerDescriptor(shown: {
+  readonly session: PlayerSession | null;
+  /** The host's reset count, which with the plan instance names the session. */
+  readonly reset: number;
+  readonly chat: number;
+  /** What the session's foreground presents (`playerRuntimeForeground`), and its form (`playerRuntimeForm`). */
+  readonly foreground: PlayerForegroundPresentation | null;
+  readonly form: PlayerFormPresentation | null;
+  /** The lock's password dialog while it shows (`usePlayerSession`'s `lock`). */
+  readonly lock: { readonly key: string; readonly repeat: boolean } | null;
+  /** The action an answer under way took (`useAnswerSubmission`'s `consumed`). */
+  readonly consumed: number | null;
+}): ComposerDescriptor {
+  const { session, foreground, form, lock, consumed } = shown;
+  const action = session ? activePlayerRuntimeInteraction(session.state) : null;
+  const id = action?.actionId ?? null;
+  const editor = form?.editor ?? null;
+  const editorField =
+    id !== null && editor !== null && form?.actionId === id ? editor.fieldId : null;
+  let tenant: ComposerTenant;
+  if (lock) tenant = { kind: "lock", dialogKey: lock.key, repeat: lock.repeat };
+  else if (id !== null && foreground?.kind === "ask-password")
+    tenant = { kind: "password", actionId: id, resumes: action?.resumes ?? 0 };
+  else if (id !== null && consumed === id) tenant = { kind: "chat" };
+  else if (id !== null && editorField !== null)
+    tenant = { kind: "form", actionId: id, fieldId: editorField };
+  // A year-0000 prefill shows as editable ISO text (`isoText`): still the date's own slot, not the chat's.
+  else if (id !== null && foreground && TEMPORAL_KINDS.has(foreground.kind))
+    tenant = { kind: "temporal", actionId: id };
+  else tenant = { kind: "chat" };
+  const prefill = foreground && "prefill" in foreground ? (foreground.prefill ?? null) : null;
+  return {
+    session: session ? `${session.planToken}:${shown.reset}` : null,
+    chat: shown.chat,
+    tenant,
+    actionId: id,
+    answered: id !== null && consumed === id,
+    liveActions: session ? playerRuntimeInteractionActionIds(session.state) : [],
+    prefill: tenant.kind === "chat" ? prefill : null,
+    editorText: editor?.text ?? null,
+    editorField,
+    temporalPrefill: tenant.kind === "temporal" ? prefill : null,
+  };
+}
+
+/** The identity of a descriptor: the composer selects again whenever it changes. */
+export function descriptorKey(next: ComposerDescriptor): string {
+  return JSON.stringify([
+    next.session,
+    next.chat,
+    next.tenant,
+    next.actionId,
+    next.answered,
+    next.liveActions,
+    next.prefill,
+    next.editorField,
+  ]);
 }
 
 /** A prefill's fate in the chat (decision 3): not yet shown, shown untouched, or the player's own text now. */
