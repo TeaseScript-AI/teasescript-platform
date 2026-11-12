@@ -384,13 +384,13 @@
     "waits": "#1899"
   },
   {
-    "file": "tests/type-core/type-core-sharing.test.ts",
+    "file": "tests/type-core/sharing/type-core-sharing-reads.test.ts",
     "kind": "reference",
     "text": "x.p.f_i",
     "waits": "#1937"
   },
   {
-    "file": "tests/type-core/type-core-sharing.test.ts",
+    "file": "tests/type-core/sharing/type-core-sharing-reads.test.ts",
     "kind": "reference",
     "text": "membersMissing",
     "waits": "#1937"
