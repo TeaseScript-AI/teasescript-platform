@@ -42,6 +42,7 @@ import {
   union,
   viewOf,
 } from "./tries.js";
+import { Retained } from "../../retained/retained.js";
 
 /** The layer an alias of `place` inherits: the place's own stores below its root over the place's layers, once. */
 export function aliasLayer(
@@ -50,10 +51,10 @@ export function aliasLayer(
   place: PlaceId,
 ): SubLayer | null {
   if (contract.aliasLayers.has(inner)) return contract.aliasLayers.get(inner)!;
-  const own = new Map<string, Set<Key>>();
+  const own = Retained.map<string, Set<Key>>("SubLayer.own");
   for (const step of subFirstOf(contract, place)) {
     contract.pass.program.work.charge("invSteps");
-    own.set(step, new Set([keptKey(contract.work, place, [])]));
+    own.set(step, Retained.set("SubLayer.own[]", [keptKey(contract.work, place, [])]));
   }
   // (the layers its source joins are referenced, never listed again per copy; stores cut at an open copy cycle are
   // their own query's, another query or pass reads the place otherwise, so their layer has no origin to be found by)
@@ -83,14 +84,14 @@ export function projectedLayer(
   if (contract.projectedLayers.has(id)) return contract.projectedLayers.get(id)!;
   const { program, definitions, lists } = contract.pass;
   const sub = keptKeyOfText(contract.work, place, text);
-  const own = new Map<string, Set<Key>>();
+  const own = Retained.map<string, Set<Key>>("SubLayer.own");
   for (const below of definitions.keysBelow(sub)) {
     program.work.charge("invSteps");
     if ((definitions.byKey.get(below) ?? []).some((d) => lists.live(d))) {
       // (a step below the projection, its text charged where the layer first keeps it)
       const step = keyPath(below)[projection.length]!;
       if (!own.has(step)) keepText(contract.work, step.length);
-      own.set(step, new Set([sub]));
+      own.set(step, Retained.set("SubLayer.own[]", [sub]));
     }
   }
   const layer = layerOf(contract, own, null, [], {
@@ -168,7 +169,7 @@ function layerOf(
     joins: kept,
     only: joins.length === 0 ? (only ?? null) : null,
     origin,
-    paths: new Map(),
+    paths: Retained.map("SubLayer.paths"),
     id,
     depth: parent === null ? 0 : parent.depth + 1,
     jumps,
@@ -211,7 +212,7 @@ function ownPaths(contract: Contract, sub: Key): ReadonlySet<string> {
   const known = contract.subPaths.get(sub);
   if (known !== undefined) return known;
   const { program, definitions, lists } = contract.pass;
-  const paths = new Set<string>();
+  const paths = Retained.set<string>("Contract.subPaths[]");
   const base = keyPath(sub);
   for (const below of definitions.keysBelow(sub)) {
     program.work.charge("invSteps");
@@ -221,7 +222,8 @@ function ownPaths(contract: Contract, sub: Key): ReadonlySet<string> {
   for (const path of paths) {
     contract.keep(1);
     const subs = contract.subsByPath.get(path);
-    if (subs === undefined) contract.subsByPath.set(path, new Set([sub]));
+    if (subs === undefined)
+      contract.subsByPath.set(path, Retained.set("Contract.subsByPath[]", [sub]));
     else subs.add(sub);
   }
   contract.subPaths.set(sub, paths);
@@ -251,7 +253,8 @@ export function listingBelow(
 ): SupportNode | null {
   // (a layer's set below it at a step is the same for every path under the step: found once per layer and step)
   let bySteps = contract.layersBelow.get(layer);
-  if (bySteps === undefined) contract.layersBelow.set(layer, (bySteps = new Map()));
+  if (bySteps === undefined)
+    contract.layersBelow.set(layer, (bySteps = Retained.map("Contract.layersBelow[]")));
   const known = bySteps.get(step);
   if (known !== undefined) return known;
   const set = mapGet(contract, layer.under, step);
@@ -345,7 +348,7 @@ function madePathId(path: ReadPath): number | undefined {
 export function atPath(contract: Contract, layer: SubLayer, path: number): LayerPath {
   let at = layer.paths.get(path);
   if (at === undefined) {
-    layer.paths.set(path, (at = {}));
+    layer.paths.set(path, (at = Retained.record<LayerPath>("SubLayer.paths[]", {})));
     contract.keep(1);
     contract.facts.supportEdges += 1;
   }
@@ -394,7 +397,8 @@ function layerSupport(
     }
     for (const child of childrenAt(contract, layer, ref, path))
       root = union(contract, root, child.paths.get(path)!.support ?? null);
-    atPath(contract, layer, path).support = root;
+    const at = atPath(contract, layer, path);
+    at.support = root;
   }
   return top.paths.get(path)!.support ?? null;
 }
@@ -427,11 +431,12 @@ function stepLayersOf(
 ): StepLayers {
   const work = contract.pass.program.work;
   let bySteps = contract.stepLayers.get(owner);
-  if (bySteps === undefined) contract.stepLayers.set(owner, (bySteps = new Map()));
+  if (bySteps === undefined)
+    contract.stepLayers.set(owner, (bySteps = Retained.map("Contract.stepLayers[]")));
   const known = bySteps.get(step);
   if (known !== undefined) return known;
   const found = find();
-  const own = new Map<Key, number[]>();
+  const own = Retained.map<Key, number[]>("Contract.stepLayers.own");
   const sets: { set: SupportNode; over: number; defs: Set<LayerFound["defs"]> }[] = [];
   const setAt = new Map<number, number>();
   const belowOf: number[] = [];
@@ -462,7 +467,7 @@ function stepLayersOf(
   // (a set below found layers brought by several prefixes' stores is brought by all of them, as one set made once)
   const below = sets.map(({ set, over, defs }) => {
     if (defs.size === 1) return { set, over, defs: [...defs][0]! };
-    const all = new Set<Definition | null>();
+    const all = Retained.set<Definition | null>("Contract.stepLayers.below.defs");
     for (const each of defs)
       for (const d of each ?? []) {
         work.charge("invSteps");
@@ -585,7 +590,8 @@ function holdersIn(
 /** A set's holders kept by path id (`Contract.holdersBelow`), made where first asked. */
 function holdersOf(contract: Contract, set: SupportNode): Map<number, SupportNode | null> {
   let byPath = contract.holdersBelow.get(set);
-  if (byPath === undefined) contract.holdersBelow.set(set, (byPath = new Map()));
+  if (byPath === undefined)
+    contract.holdersBelow.set(set, (byPath = Retained.map("Contract.holdersBelow[]")));
   return byPath;
 }
 
@@ -622,7 +628,8 @@ export function topsAt(
   }
   const passed = passedBelow(contract, layers, holding);
   if (passed.length === 0) return out;
-  const answers = madePathId(path) ?? (path.holders ??= new Map());
+  const answers =
+    madePathId(path) ?? (path.holders ??= Retained.held(path, Retained.map("ReadPath.holders")));
   for (const index of passed) {
     const { set, defs } = layers.below[index]!;
     for (const layer of layersIn(contract, holdersIn(contract, set, ref, answers)))
@@ -727,7 +734,7 @@ export function relevantSubs(
       let own = owned.get(sub);
       if (own === undefined) {
         contract.pass.program.work.charge("invSteps", brought.size);
-        owned.set(sub, (own = new Set(brought)));
+        owned.set(sub, (own = Retained.set("SubSource.defs", brought)));
         found.set(sub, own);
       }
       contract.pass.program.work.charge("invSteps", defs.size);
