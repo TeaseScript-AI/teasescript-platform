@@ -75,12 +75,12 @@ type Visit =
 
 /**
  * Where the runtime checks one operand of a `pass` row whatever the plan carries: the function of `file` that fails on a
- * value the operand does not take, with the failure's code (the row guard reads that the function holds the code).
+ * value the operand does not take (`type-core-pass-rows.test.ts` reads that it raises a runtime fault; the row guard's
+ * misfit runs show each operand's code).
  */
 export interface OperandCheck {
   readonly file: string;
   readonly function: string;
-  readonly code: string;
 }
 
 /**
@@ -129,13 +129,8 @@ const INTERACTION = "src/runtime/instructions/interaction.ts";
 const SHOWN_TEXT: OperandCheck = {
   file: "src/runtime/values/value-text.ts",
   function: "fieldText",
-  code: "TSR021",
 };
-const UI_CHECK = (code: string): OperandCheck => ({
-  file: INTERACTION,
-  function: "materializeInteractionUi",
-  code,
-});
+const UI_CHECK: OperandCheck = { file: INTERACTION, function: "materializeInteractionUi" };
 
 /**
  * The route's syntax table: a row for every AST kind (a kind without one, or a row for no kind, fails the build), so a
@@ -160,8 +155,8 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
     row: "pass",
     operands: {
       label: SHOWN_TEXT,
-      background: UI_CHECK("TSR052"),
-      timeout: { file: INTERACTION, function: "buttonTimeoutMs", code: "TSR050" },
+      background: UI_CHECK,
+      timeout: { file: INTERACTION, function: "buttonTimeoutMs" },
     },
     // (a button shown as a speaker names the speaker, which the slice does not hold)
     visit: (node) =>
@@ -170,38 +165,22 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
         : walk([...statementExpressions(node)]),
   },
   waitStatement: pass({
-    duration: {
-      file: "src/runtime/instructions/timers.ts",
-      function: "timerDurationMs",
-      code: "TSR050",
-    },
+    duration: { file: "src/runtime/instructions/timers.ts", function: "timerDurationMs" },
   }),
   timerStatement: REFUSED,
-  showImageStatement: pass({ image: { file: MEDIA, function: "showImage", code: "TSR050" } }),
+  showImageStatement: pass({ image: { file: MEDIA, function: "showImage" } }),
   hideImageStatement: pass({}),
   showCameraStatement: REFUSED,
   hideCameraStatement: REFUSED,
   showPopupStatement: pass({ message: SHOWN_TEXT, buttonText: SHOWN_TEXT }),
-  openUrlStatement: pass({
-    url: UI_CHECK("TSR050"),
-    buttonText: SHOWN_TEXT,
-    alwaysButton: UI_CHECK("TSR050"),
-  }),
-  exportTextStatement: pass({
-    text: UI_CHECK("TSR050"),
-    title: SHOWN_TEXT,
-    fileName: UI_CHECK("TSR050"),
-  }),
+  openUrlStatement: pass({ url: UI_CHECK, buttonText: SHOWN_TEXT, alwaysButton: UI_CHECK }),
+  exportTextStatement: pass({ text: UI_CHECK, title: SHOWN_TEXT, fileName: UI_CHECK }),
   showPermanentButtonStatement: REFUSED,
   playMediaStatement: REFUSED,
   stopAudioStatement: pass({}),
   saveStatement: REFUSED,
   deleteStatement: pass({
-    key: {
-      file: "src/runtime/host-data/script-storage.ts",
-      function: "storageKey",
-      code: "TSR054",
-    },
+    key: { file: "src/runtime/host-data/script-storage.ts", function: "storageKey" },
   }),
   exitStatement: modelled(),
   endStatement: REFUSED,
