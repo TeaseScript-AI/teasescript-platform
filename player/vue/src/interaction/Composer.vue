@@ -181,14 +181,20 @@ function keepMouseEditingFocus(event: MouseEvent): void {
 }
 
 // A date or time control, the password field and the text field replace each other; the field removed while focused
-// blurs, and its keyboard state carries over to the replacement instead of being released. The password field and the
-// text field are one textarea, keyed by kind, so a composition under way in one never carries over to the other.
+// blurs, and its focus and keyboard state carry over to the replacement instead of being released, also within one
+// question, as when a date's answer under way gives the field back to the chat. The password field and the text field
+// are one textarea, keyed by kind, so a composition under way in one never carries over to the other.
 let replacingField = false;
 watch(
   () => (props.password ? "password" : props.inputType === "text" ? "text" : "picker"),
   () => {
     replacingField = true;
-    void nextTick(() => (replacingField = false));
+    const focused = input.value !== null && input.value === document.activeElement;
+    void nextTick(() => {
+      replacingField = false;
+      if (focused && input.value !== document.activeElement)
+        input.value?.focus({ preventScroll: true });
+    });
   },
   { flush: "pre" },
 );

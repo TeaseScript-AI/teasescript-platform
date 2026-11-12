@@ -299,6 +299,22 @@ const formUpdates = useFormUpdates({
 });
 const { displayed, token: composerToken, lockPhase } = composerState;
 const consumed = submission.consumed;
+/**
+ * The question whose field the composer shows, from the slot it shows (`useComposerState`'s tenant): while the chat
+ * stands in for an answered question, as while a date's or a form's answer is under way, the field is the chat's text
+ * field, with its hint and name, not the answered question's control.
+ */
+const fieldForeground = computed(() =>
+  composerState.tenant.value.kind === "chat" &&
+  consumed.value !== null &&
+  consumed.value === actionId.value
+    ? null
+    : foreground.value,
+);
+/** The form field the composer edits, only while its slot shows. */
+const fieldEditor = computed(() =>
+  composerState.tenant.value.kind === "form" ? formEditor.value : null,
+);
 const feedback = computed(() => submission.notice.value);
 onUnmounted(composerState.attach(() => composer.value?.finishComposition()));
 onUnmounted(composerState.dispose);
@@ -849,10 +865,10 @@ function escape() {
                   foreground?.kind === 'export-text' ||
                   foreground?.kind === 'open-url'
                 ? ''
-                : formEditor
-                  ? formEditor.hint
-                  : foreground && 'hint' in foreground
-                    ? foreground.hint
+                : fieldEditor
+                  ? fieldEditor.hint
+                  : fieldForeground && 'hint' in fieldForeground
+                    ? fieldForeground.hint
                     : 'Type your response…'
           "
           :attach="attach"
@@ -863,27 +879,27 @@ function escape() {
               ? lockPhase === 'repeat'
                 ? 'Repeat password'
                 : 'Password'
-              : (formEditor?.label ?? foreground?.accessibleName ?? 'Response')
+              : (fieldEditor?.label ?? fieldForeground?.accessibleName ?? 'Response')
           "
           :input-mode="
-            formEditor
-              ? formEditor.inputMode
-              : foreground?.kind !== 'ask-number'
+            fieldEditor
+              ? fieldEditor.inputMode
+              : fieldForeground?.kind !== 'ask-number'
                 ? 'text'
-                : foreground.integer
+                : fieldForeground.integer
                   ? 'numeric'
                   : 'decimal'
           "
           :input-type="
-            formEditor
-              ? formEditor.inputType
-              : foreground && 'isoText' in foreground && foreground.isoText
+            fieldEditor
+              ? fieldEditor.inputType
+              : fieldForeground && 'isoText' in fieldForeground && fieldForeground.isoText
                 ? 'text'
-                : foreground?.kind === 'ask-date'
+                : fieldForeground?.kind === 'ask-date'
                   ? 'date'
-                  : foreground?.kind === 'ask-time'
+                  : fieldForeground?.kind === 'ask-time'
                     ? 'time'
-                    : foreground?.kind === 'ask-datetime'
+                    : fieldForeground?.kind === 'ask-datetime'
                       ? 'datetime-local'
                       : 'text'
           "

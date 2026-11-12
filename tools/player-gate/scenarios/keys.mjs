@@ -66,6 +66,23 @@ const committing = (text) => async (page) => {
   if (field.value !== text || field.readOnly !== true || field.disabled !== false)
     throw new Error(`The field in its commit was not ${text}, read-only: ${JSON.stringify(field)}`);
 };
+/** A step that fails unless the composer's field is a text field showing `text`, writable and not disabled. */
+const chatField = (text) => async (page) => {
+  const field = await page.evaluate(() => {
+    const input = document.querySelector("[data-composer-input]");
+    return {
+      tag: input?.tagName,
+      type: input?.type,
+      value: input?.value,
+      readOnly: input?.readOnly,
+      disabled: input?.disabled,
+    };
+  });
+  if (field.tag !== "TEXTAREA" || field.value !== text || field.readOnly || field.disabled)
+    throw new Error(
+      `The field in the flight was not the chat's text field with ${JSON.stringify(text)}: ${JSON.stringify(field)}`,
+    );
+};
 /** A step that fails unless form field `id`'s button shows `text`. */
 const fieldShows = (id, text) => async (page) => {
   const shows = (await page.locator(`[data-form-field=${id}]`).innerText())
@@ -265,6 +282,18 @@ function cases(engine) {
       before: ["Form", { type: "Stay" }, { type: "name" }],
       answer: "Bea",
       lastly: focusedField("name", "name: Bea"),
+    },
+    // While a date's answer is in flight, the composer's field is the chat's text field again, with the chat's text: a
+    // key typed then is the chat's.
+    {
+      ...fixture(
+        "date key",
+        "Date",
+        seq(chatField(""), press("x"), chatField("x")),
+        shown("x", "", 5),
+      ),
+      before: ["Date", { type: "Stay" }],
+      answer: "2026-10-04",
     },
     // A form's updates are never greyed and go in order: the toggle's label typed and sent, then the toggle clicked
     // while that first update is in flight, flip it twice.
