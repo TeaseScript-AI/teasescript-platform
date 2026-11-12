@@ -30,7 +30,12 @@
 //   null, printed "absent"; an `overrides` or `files` field left out counts 0, and one of another type is malformed.
 // - The structure signals are this checkout's tools/structure-report.mjs run in ROOT, so one definition measures any
 //   ROOT: its counts of large files, broad folders and long functions, and the largest of the files and the longest of
-//   the functions it lists, each null when none passes its threshold.
+//   the functions it lists, each null when none passes its threshold. Beside each count, the excess summed over the
+//   same list, by structure-report's own thresholds: the lines above the file limit over all large files, the lines
+//   above the function limit over all long functions, and the files above the folder limit over all broad folders; 0
+//   when the list is empty, so a file shrinking from 2,000 to 1,500 lines lowers its sum by 500. As in the count, a
+//   function over the limit inside another is a row of its own, so its lines count in its own excess and again in its
+//   holder's.
 //
 // --json prints {root, commit, counters, sites}: `commit` is ROOT's HEAD (null before the first commit), `counters`
 // the values above, and `sites` the `file:line` of every directive and test site.
@@ -309,6 +314,7 @@ async function structure(root) {
     const r = JSON.parse(readFileSync(out, "utf8"));
     const largest = r.largeFiles[0];
     const longest = r.longFunctions[0];
+    const excess = (rows, field, limit) => rows.reduce((sum, row) => sum + row[field] - limit, 0);
     return {
       signals: r.signals,
       counters: {
@@ -319,6 +325,9 @@ async function structure(root) {
         longestFunction: longest
           ? { file: longest.file, name: longest.name, lines: longest.lines }
           : null,
+        largeFilesExcessLines: excess(r.largeFiles, "lines", r.signals.fileLines),
+        broadFoldersExcessFiles: excess(r.broadFolders, "files", r.signals.folderFiles),
+        longFunctionsExcessLines: excess(r.longFunctions, "lines", r.signals.functionLines),
       },
     };
   } finally {
@@ -369,8 +378,17 @@ async function main(argv) {
   console.log(`Comment external names (may grow): ${value(c.externalNames)}`);
   console.log(`Imports waiting (cycles and crossings): ${value(c.importsWaiting)}`);
   console.log(`Files over ${signals.fileLines} lines: ${c.largeFiles}`);
+  console.log(
+    `Lines above ${signals.fileLines}, summed over those files: ${c.largeFilesExcessLines}`,
+  );
   console.log(`Folders over ${signals.folderFiles} files: ${c.broadFolders}`);
+  console.log(
+    `Files above ${signals.folderFiles}, summed over those folders: ${c.broadFoldersExcessFiles}`,
+  );
   console.log(`Functions over ${signals.functionLines} lines: ${c.longFunctions}`);
+  console.log(
+    `Lines above ${signals.functionLines}, summed over those functions: ${c.longFunctionsExcessLines}`,
+  );
   const { largestFile: f, longestFunction: fn } = c;
   console.log(
     `Largest file: ${f ? `${f.lines} lines, ${f.file}` : `none over ${signals.fileLines} lines`}`,

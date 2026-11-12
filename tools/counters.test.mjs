@@ -296,6 +296,10 @@ test("the lists count their entries, the structure signals come from structure-r
     [3, 2, 1, 0, 4, 7],
   );
   assert.deepEqual([c.largeFiles, c.broadFolders, c.longFunctions], [1, 1, 1]);
+  assert.deepEqual(
+    [c.largeFilesExcessLines, c.broadFoldersExcessFiles, c.longFunctionsExcessLines],
+    [102, 1, 952],
+  );
   assert.deepEqual(c.largestFile, { file: "src/big.ts", lines: 1102 });
   assert.deepEqual(c.longestFunction, { file: "src/big.ts", name: "big", lines: 1102 });
   assert.equal(result.commit, git(fixture.root, "rev-parse", "HEAD"));
@@ -318,6 +322,12 @@ test("a missing list is absent, and a list of another shape or a ROOT that is no
     "citations",
   ])
     assert.equal(c[key], null, key);
+  for (const key of [
+    "largeFilesExcessLines",
+    "broadFoldersExcessFiles",
+    "longFunctionsExcessLines",
+  ])
+    assert.equal(c[key], 0, key);
   assert.match(run(root).stdout, /^Comment external names \(may grow\): absent$/mu);
 
   for (const [file, text, message] of [
@@ -346,6 +356,47 @@ test("a missing list is absent, and a list of another shape or a ROOT that is no
   folders.push(notCheckout);
   assert.equal(run(notCheckout).status, 2);
   assert.equal(run(path.join(fixture.root, "src")).status, 2);
+});
+
+test("each structure sum adds the excess over its limit, so a shrinking file lowers it while its count stays", () => {
+  const lines = (n) => "void 0;\n".repeat(n);
+  // a function of `n` lines, Git's: its first and last line and the body between
+  const fn = (name, n, body = lines(n - 2)) => `function ${name}() {\n${body}}\n`;
+  const files = {
+    "src/shrink.ts": lines(2000),
+    // exactly at each limit: a file of 1000 lines holding a function of 150
+    "src/edge.ts": fn("edge", 150) + lines(850),
+    // a function of 160 lines holding one of 155: both are rows, as in the count
+    "src/nest.ts": fn("outer", 160, fn("inner", 155) + lines(3)),
+    ...Object.fromEntries(
+      Array.from({ length: 20 }, (_, i) => [`player/edge/f${i}.ts`, "export {};\n"]),
+    ),
+    ...Object.fromEntries(
+      Array.from({ length: 22 }, (_, i) => [`player/wide/f${i}.ts`, "export {};\n"]),
+    ),
+  };
+  const root = checkout(files);
+  const measure = () => {
+    const r = run(root, "--json");
+    assert.equal(r.status, 0, r.stderr);
+    const c = JSON.parse(r.stdout).counters;
+    return {
+      files: [c.largeFiles, c.largeFilesExcessLines],
+      functions: [c.longFunctions, c.longFunctionsExcessLines],
+      folders: [c.broadFolders, c.broadFoldersExcessFiles],
+    };
+  };
+  assert.deepEqual(measure(), { files: [1, 1000], functions: [2, 15], folders: [1, 2] });
+  const text = run(root);
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(
+    text.stdout,
+    /^Files over 1000 lines: 1\nLines above 1000, summed over those files: 1000\nFolders over 20 files: 1\nFiles above 20, summed over those folders: 2\nFunctions over 150 lines: 2\nLines above 150, summed over those functions: 15$/mu,
+  );
+
+  writeFileSync(path.join(root, "src/shrink.ts"), lines(1500));
+  git(root, "commit", "-q", "-am", "shrink");
+  assert.deepEqual(measure(), { files: [1, 500], functions: [2, 15], folders: [1, 2] });
 });
 
 // What this checks: a SIGTERM while the tool holds its temporary folder ends the run with exit 143 and leaves no
