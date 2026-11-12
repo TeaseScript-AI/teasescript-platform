@@ -77,8 +77,8 @@ export function useFormUpdates(host: {
     unacknowledged.set(actionId, (unacknowledged.get(actionId) ?? 0) + 1);
     try {
       const sent = await run(actionId, intent);
-      // An outcome after a stop or a replacement belongs to no shown session: nothing is published and no notice shows;
-      // for `after`, nothing took it.
+      // An outcome after a stop or a replacement belongs to no shown session: this controller publishes nothing more and
+      // shows no notice; for `after`, nothing took it. What the section published on its own before stays.
       const moved = host.epoch() !== epoch;
       const result: InputResult = moved ? { kind: "retired" } : sent;
       after?.(result);
