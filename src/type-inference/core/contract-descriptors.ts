@@ -16,6 +16,7 @@ import { concrete } from "./admission/kinds.js";
 import type { AdmittedType, CorePass } from "./answers.js";
 import { REASON, type Item, type ItemTag } from "./items.js";
 import { propertyStep, type CoreProgram } from "./program.js";
+import { Retained, retainedModule } from "./retained/retained.js";
 
 // The contract proof/descriptor service (#1526 phase A): a store's required contract, assembled level by
 // level from the stable admission pass's proofs, as an immutable descriptor one per distinct contract, with whether its
@@ -36,20 +37,20 @@ export const SLICE_DEPTH = 256;
 export type ContractRef = TypePlan;
 
 /** Each analysis's passes so far, and each pass's number among them: the admission epoch its contracts belong to. */
-const PASSES = new WeakMap<CoreProgram, number>();
-const EPOCHS = new WeakMap<CorePass, number>();
+const PASSES = retainedModule("contract-descriptors.PASSES", Retained.weakMap<CoreProgram, number>);
+const EPOCHS = retainedModule("contract-descriptors.EPOCHS", Retained.weakMap<CorePass, number>);
 
 /** Numbers a new admission pass of `program` (`createPass`), its contracts' epoch. */
 export function newEpoch(program: CoreProgram, pass: CorePass): number {
-  const epoch = (PASSES.get(program) ?? 0) + 1;
-  PASSES.set(program, epoch);
-  EPOCHS.set(pass, epoch);
+  const epoch = (PASSES().get(program) ?? 0) + 1;
+  PASSES().set(program, epoch);
+  EPOCHS().set(pass, epoch);
   return epoch;
 }
 
 /** A pass's epoch (`newEpoch`); 0 for one no analysis numbered. */
 export function epochOf(pass: CorePass): number {
-  return EPOCHS.get(pass) ?? 0;
+  return EPOCHS().get(pass) ?? 0;
 }
 
 /** A level of a place: its root and the path below it. */
