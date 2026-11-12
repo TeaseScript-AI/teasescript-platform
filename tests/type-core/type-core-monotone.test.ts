@@ -76,7 +76,7 @@ test("the oracle hears a component's runs, in both worklist orders", () => {
   const request = coreRequest([{ path: "main.tease", source }]);
   assert.ok(request);
   for (const reversed of [false, true]) {
-    const { record } = withMonotoneOracle((): unknown => analyseCore(request), reversed);
+    const { record } = withMonotoneOracle((): void => void analyseCore(request), reversed);
     assert.ok(record.compared > 0, `runs compared (${reversed ? "reversed" : "canonical"})`);
     assert.equal(record.violations, 0, JSON.stringify(record.first));
   }
