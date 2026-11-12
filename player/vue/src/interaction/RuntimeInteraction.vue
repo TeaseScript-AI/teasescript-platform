@@ -335,6 +335,7 @@ const descriptor = computed((): ComposerDescriptor => {
     liveActions: session ? playerRuntimeInteractionActionIds(session.state) : [],
     prefill: tenant.kind === "chat" ? prefill : null,
     editorText: editor?.text ?? null,
+    editorField: id !== null && editor && form.value?.actionId === id ? editor.fieldId : null,
     temporalPrefill: tenant.kind === "temporal" ? prefill : null,
   };
 });
@@ -348,6 +349,7 @@ const composerKey = computed(() => {
     next.answered,
     next.liveActions,
     next.prefill,
+    next.editorField,
   ]);
 });
 // Before the field renders the new slot, so an edit still under way reaches the slot it was typed in.
@@ -387,17 +389,27 @@ watch(
       : null,
   async (key, closed) => {
     if (key?.actionId === closed?.actionId && key?.fieldId === closed?.fieldId) return;
-    const closedHere = closed !== null && closed.actionId === form.value?.actionId;
     // A field that opens, also in a form that resumes, shows its text selected in the composer.
     if (key !== null) {
       composer.value?.selectInput();
       return;
     }
-    if (!closedHere) return;
-    // Focus returns to the closed field's button, unless the player went on elsewhere meanwhile.
+    if (closed === null) return;
     const descriptorAtClose = composerKey.value;
+    const chatAtClose = composerState.chatText.value;
     await nextTick();
-    if (composerKey.value !== descriptorAtClose) return;
+    // Focus returns to the closed field's button only when the field showed it as it closed and the chat took the
+    // field, not a lock's password or another question's field; and only if nothing changed since (the composer's
+    // selection has run by now).
+    const shown = composerState.closedField();
+    if (
+      shown?.actionId !== closed.actionId ||
+      shown.fieldId !== closed.fieldId ||
+      composerState.tenant.value.kind !== "chat" ||
+      composerKey.value !== descriptorAtClose ||
+      composerState.chatText.value !== chatAtClose
+    )
+      return;
     const active = document.activeElement;
     if (active && active !== document.body && !active.matches("[data-composer-input]")) return;
     root.value
