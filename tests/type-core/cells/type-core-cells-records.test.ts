@@ -41,7 +41,7 @@ test("the core gives the expected record for every record of the cells it comple
   }
   assert.deepEqual(Object.fromEntries(held), {
     "the adapters' records (S9b)": 3,
-    "the route rule's corridor across locations (#1938)": 13,
+    "the route rule's corridor across locations (#1938)": 12,
     "a copy whose source's null arrives through an entry: r4-451's give-up, a check stands (#2497)": 2,
     "a method no member of a receiver's union supports (#2258)": 1,
     "a written optional load's definite number error (#1173, listed in #1938)": 1,
@@ -55,7 +55,7 @@ test("the core gives the expected record for every record of the cells it comple
     "a known-value error the record lacks (decision 3 on #1072)": 1,
     "C13's warning of a choice value from outside the script the record lacks (#1437)": 3,
   });
-  assert.equal(asserted.length, 1_954);
+  assert.equal(asserted.length, 1_955);
   // (records of one exact input, their files in order, share its analysis; each is compared with its own record)
   const analyses = new Map<string, CompactRecord>();
   const failures = asserted.flatMap((record) => {
@@ -152,7 +152,7 @@ test("each stage 3b record held by name exists, has an N cell, and differs in ev
     }
   }
   assert.deepEqual(wrong, []);
-  assert.equal(HELD_S10_RECORDS.size, 31);
+  assert.equal(HELD_S10_RECORDS.size, 30);
 });
 
 test("the record comparison the asserted records rest on reports each part: outcome, sites, context and N10's payload (#1073 U6)", () => {
