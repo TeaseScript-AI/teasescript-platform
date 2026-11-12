@@ -233,13 +233,16 @@ export function useComposerState(host: {
     }
   });
 
-  /** Drops what belongs to another session or to interactions that ended. */
+  /**
+   * Drops what belongs to another session or to interactions that ended. A prefill's provenance is the chat's (decisions
+   * 1 and 3): what the player deleted stays deleted also after a lost connection, whose stop shows no session, and the
+   * recovery's Continue in the same chat; only another chat (`select`) or the question's end drops it.
+   */
   function prune(next: ComposerDescriptor) {
     if (next.session !== session) {
       session = next.session;
       forms.clear();
       temporals.clear();
-      prefills.clear();
       withdrawOffer();
       return;
     }
@@ -247,7 +250,8 @@ export function useComposerState(host: {
     // A Map's iteration visits each remaining key once while its entries are deleted.
     for (const [key, slot] of forms) if (!live.has(slot.actionId)) forms.delete(key);
     for (const id of temporals.keys()) if (!live.has(id)) temporals.delete(id);
-    for (const id of prefills.keys()) if (!live.has(id)) prefills.delete(id);
+    if (next.session !== null)
+      for (const id of prefills.keys()) if (!live.has(id)) prefills.delete(id);
   }
 
   /** An untouched prefill leaves with its question; the chat is empty again. */
@@ -287,6 +291,7 @@ export function useComposerState(host: {
       chatId = next.chat;
       chat.value = "";
       offer = null;
+      prefills.clear();
     }
     // A field whose editor closed while its form is still presented ends its opening, whichever slot the field showed
     // meanwhile; a suspended or answered form keeps it.
