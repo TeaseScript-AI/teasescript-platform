@@ -5,6 +5,7 @@ import { keptPath, keyOf, keyPath, type Definition, type Key } from "../definiti
 import {
   canonicalKey,
   isKeyId,
+  keyStepsIn,
   isPathSteps,
   keptKeyAt,
   keptKeyBelowIn,
@@ -12,6 +13,7 @@ import {
   keptStepsFrom,
   keyDepthIn,
   keyIdPath,
+  someStep,
   keyWalk,
   stepsArray,
   stepsTo,
@@ -36,30 +38,65 @@ export function sourceOf(admission: Admission, value: PlaceId): CanonicalKey | n
 
 /** `sourceOf` with its dict owners' contracts reads (`Read`, #1072 A2). */
 export function* sourceOfRead(admission: Admission, value: PlaceId): Reads<CanonicalKey | null> {
-  const { contract, program } = admission.pass;
+  const { contract } = admission.pass;
   const found = contract.copiedKey(value) ?? contract.resultKey(value);
   if (found === null) return null;
   // (the source in its identity, as the structures and depths hold it: G3 stage 1)
   const key = canonicalKey(contract, found);
   // (G3 stage 1: a cursor with no built-in member on its path holds no dict's list step: itself, never walked)
   if (isKeyId(key) && contract.pathMembers[keyIdPath(key)] === 0) return key;
+  const read = yield* dictStepsRead(admission, key);
+  return read === null ? null : contract.keyAt(read.place, read.path);
+}
+
+/**
+ * Whether a key's path holds a dict's `values` step by its spelling; a cursor with no built-in member holds none (G3
+ * stage 1).
+ */
+export function spellsValues(admission: Admission, key: Key): boolean {
+  const { contract } = admission.pass;
+  if (isKeyId(key) && contract.pathMembers[keyIdPath(key)] === 0) return false;
+  return someStep(keyStepsIn(contract, key), (step) => dictList(step) === "values");
+}
+
+/**
+ * A key's place and path with each dict's list step read by its owner's contract: a dict's `values` dropped (its values
+ * stand at `element`, as a list's elements do), `dropped` their positions in the key's path, `values` whether the last
+ * step was one; `null` at a dict's `keys`, which hold text. Any other step, an object's property of that name too,
+ * stays.
+ */
+export function* dictStepsRead(
+  admission: Admission,
+  key: Key,
+): Reads<{
+  readonly place: PlaceId;
+  readonly path: string[];
+  readonly dropped: number[];
+  readonly values: boolean;
+} | null> {
+  const { contract, program } = admission.pass;
   const walk = keyWalk(contract, key);
   const path: string[] = [];
+  const dropped: number[] = [];
+  let values = false;
   for (let index = 0; index < walk.path.length; index += 1) {
     const step = walk.path.at(index)!;
     const list = dictList(step);
+    values = false;
     if (list !== undefined) {
       program.work.charge("indexSteps");
       const prefix = walk.prefix(index);
       const owner = withoutEmpty(yield* admission.runRead(() => contract.contractOf(prefix)));
       if (owner.some((item) => item.tag === "dict")) {
         if (list === "keys") return null;
+        values = true;
+        dropped.push(index);
         continue;
       }
     }
     path.push(step);
   }
-  return contract.keyAt(walk.place, path);
+  return { place: walk.place, path, dropped, values };
 }
 
 /** A stored value's own structure: its literals' fields and elements at every depth, and their sources (F2). */
