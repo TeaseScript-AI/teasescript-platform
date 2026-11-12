@@ -190,6 +190,25 @@ function refuse(what: string): never {
   throw new TypeError(`${REFUSED}: ${what}`);
 }
 
+/** A test helper's observer of a made map's writes (`watchWrites`), called after each, by the map. */
+const WATCHERS = new WeakMap<WeakKey, (key: unknown, value: unknown) => void>();
+
+/**
+ * Has `written` called after each write to `map`, a map `Retained` made, through the instrument's own writer, which
+ * stays in place: a test helper observes the map so (`type-core-held-host.ts`). `false`, and nothing done, for a map
+ * the instrument did not make.
+ */
+export function watchWrites<K, V>(map: Map<K, V>, written: (key: K, value: V) => void): boolean {
+  if (MADE.get(map)?.kind !== "map") return false;
+  const before = WATCHERS.get(map);
+  WATCHERS.set(map, (key, value) => {
+    before?.(key, value);
+    // EVIDENCE: invariant: the map's own writer passes the key and value it was given, of the map's types.
+    written(key as K, value as V);
+  });
+  return true;
+}
+
 /** The writers a collection is given (one function each for all collections, so its call sites stay production's). */
 const COLLECTION_WRITERS: Readonly<
   Record<"map" | "set" | "weakMap" | "weakSet", Readonly<Record<string, Method>>>
@@ -198,7 +217,9 @@ const COLLECTION_WRITERS: Readonly<
     set(this: WeakKey, key: unknown, value: unknown): WeakKey {
       const made = MADE.get(this)!;
       made.instrument.stored(made, key, value, true);
-      return Map.prototype.set.call(this, key, value);
+      const done = Map.prototype.set.call(this, key, value);
+      WATCHERS.get(this)?.(key, value);
+      return done;
     },
   },
   weakMap: {

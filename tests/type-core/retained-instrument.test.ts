@@ -9,7 +9,12 @@ import {
 } from "../../src/type-inference/core/retained/retained.js";
 import { Solver, type Demand, type Work } from "../../src/type-inference/core/solver.js";
 import { itemScope } from "../helpers/type-core-items.js";
-import { InstrumentProbe, REFUSED, RetainedInstrument } from "../helpers/retained-instrument.js";
+import {
+  InstrumentProbe,
+  REFUSED,
+  RetainedInstrument,
+  watchWrites,
+} from "../helpers/retained-instrument.js";
 
 // #1072 step 1b: the instrument's controls. Each shape stores into retained state in one solver run and writes in a
 // later one; a step's outcome is `ok`, `refused` (the instrument's refusal at the store or the switch) or `frozen` (a
@@ -330,6 +335,23 @@ test("a collection's own writers are neither removed nor replaced, so none falls
     ]);
     assert.deepEqual(steps, ["ok", "frozen"]);
   }
+});
+
+test("a helper watches a made map's writes through its own writer, which stays in place; a native map is not watched", () => {
+  const seen: string[] = [];
+  withRetainedRecorder(new RetainedInstrument(), () => {
+    const made = Retained.map<string, number>("T.watched");
+    assert.equal(
+      watchWrites(made, (key, value) => seen.push(`${key}=${value}`)),
+      true,
+    );
+    made.set("a", 1);
+    assert.equal(
+      watchWrites(new Map<string, number>(), () => seen.push("native")),
+      false,
+    );
+  });
+  assert.deepEqual(seen, ["a=1"]);
 });
 
 test("a run's mark stands in each of its intervals: a write after the run resumes is open, another run's is not", () => {
