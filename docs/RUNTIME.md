@@ -43,8 +43,8 @@ ADR 0016 accepts the resumable pending-action contract for waits, timers, choice
 
 Shared serializable action and settlement contracts are owned by
 `src/runtime/actions/model.ts`. Interaction answer normalization and matching live in
-`src/interaction-completion.ts`, a module the Player's page can load; `actions/interaction.ts`
-keeps the payload's shape and password checks. Delay helpers and replay classification remain
+`src/interaction-completion.ts`, whose value imports the Player's page may already load;
+`actions/interaction.ts` keeps the plain-record guard and the password-hash check. Delay helpers and replay classification remain
 action-specific. Canonical completion and time-observation transitions are
 implemented in `src/runtime/operations/complete-action.ts` and
 `src/runtime/operations/observe-time.ts`, with a small shared operation support

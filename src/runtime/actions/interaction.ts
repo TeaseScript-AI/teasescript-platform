@@ -23,7 +23,7 @@ export type { ResolvedInteraction } from "../../interaction-completion.js";
 
 /**
  * `context` is the player's presentation now, which shows a date or time answer in the transcript. `capturedMedia`
- * vouches for an image answer; without it no image request completes.
+ * vouches for an image reference; a skip needs no admission.
  */
 export function resolveInteractionCompletion(
   action: RuntimeInteractionActionSnapshot,

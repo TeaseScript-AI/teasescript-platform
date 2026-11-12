@@ -423,7 +423,7 @@ test("a form presents its fields as their answers stand, takes edits, and surviv
   assert.equal(playerRuntimeForm(done.session), null);
 });
 
-test("the composer's text answers a form only as the exact text of one of its buttons", () => {
+test("a form with no open editor takes only the exact text of one of its buttons from the composer", () => {
   const session = createPlayerRuntimeSession(
     [
       'let answers = askForm fields: { go: { value: false, text: "Go" }, rope: { value: false, text: "Rope" } }, submit: "Go"',
