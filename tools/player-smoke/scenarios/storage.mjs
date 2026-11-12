@@ -4,6 +4,7 @@ import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { gunzipSync } from "node:zlib";
 import {
+  addInitScript,
   assertEqual,
   connectCdp,
   delay,
@@ -16,6 +17,7 @@ import {
   pressEscape,
   pressPoint,
   reloadKept,
+  removeInitScript,
   setInputFiles,
   setViewport,
   solidPng,
@@ -139,11 +141,12 @@ export async function scriptStorageScenario(cdp, origin) {
   await reloadBeforeStart();
 
   // A denied read makes the next run session-local and disables clearing even before Start.
-  const deniedStorage = await cdp.call("Page.addScriptToEvaluateOnNewDocument", {
-    source: `Object.defineProperty(Storage.prototype, 'length', {
+  const deniedStorage = await addInitScript(
+    cdp,
+    `Object.defineProperty(Storage.prototype, 'length', {
       get() { throw new Error('Storage denied for smoke'); }
     });`,
-  });
+  );
   try {
     await reloadBeforeStart();
     await openSettings();
@@ -157,9 +160,7 @@ export async function scriptStorageScenario(cdp, origin) {
     await physicalClick(cdp, start);
     await waitFor(cdp, `${messages}.some((text) => text.includes('Eyes on me.'))`);
   } finally {
-    await cdp.call("Page.removeScriptToEvaluateOnNewDocument", {
-      identifier: deniedStorage.result.identifier,
-    });
+    await removeInitScript(cdp, deniedStorage);
   }
   await reloadBeforeStart();
   assertEqual(
