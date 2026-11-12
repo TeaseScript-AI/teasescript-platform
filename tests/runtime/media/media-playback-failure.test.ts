@@ -11,10 +11,10 @@ import {
   type InstructionPlan,
   type InterpreterEvent,
   type RuntimeSnapshot,
-} from "../../src/index.js";
-import type { RuntimeMediaActionSnapshot } from "../../src/runtime/actions/model.js";
-import { compileValidPlan as plan } from "../helpers/compile-valid-plan.js";
-import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
+} from "../../../src/index.js";
+import type { RuntimeMediaActionSnapshot } from "../../../src/runtime/actions/model.js";
+import { compileValidPlan as plan } from "../../helpers/compile-valid-plan.js";
+import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
 
 // A playback failure after load (#2113): the Player reports `failed` for media it already reported `loaded`, as when the
 // browser's audio output errors. It stops the media as a stop does and releases its wait, so the script goes on.

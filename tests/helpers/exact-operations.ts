@@ -3,7 +3,7 @@ import { relative, resolve } from "node:path";
 import ts from "typescript";
 
 /*
- * The colour conversion's static checks (#2147, `tests/runtime/colour-conversion.test.ts`). With the counted
+ * The colour conversion's static checks (#2147, `tests/runtime/values/colour-conversion.test.ts`). With the counted
  * throwing-`Math` run in that test, they are what the claim "a normalized colour is the same text in every engine"
  * rests on beyond the conversion as it stands, whose evidence is the four-engine job over the sample, not a guard that
  * runs. The checks, over `color.ts`, `color-text.ts`, `deterministic-math.ts` and `numeric-functions.ts`:

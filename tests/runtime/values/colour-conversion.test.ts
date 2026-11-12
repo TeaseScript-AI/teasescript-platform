@@ -3,10 +3,10 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import test from "node:test";
 import Color from "colorjs.io";
-import { compileSource } from "../../src/compiler.js";
-import { isNormalizedColor, isNormalizedOpaqueColor, normalizeColor } from "../../src/color.js";
-import { authoredColorToOklch } from "../../player/theme/color.js";
-import { exactOperationEscapes } from "../helpers/exact-operations.js";
+import { compileSource } from "../../../src/compiler.js";
+import { isNormalizedColor, isNormalizedOpaqueColor, normalizeColor } from "../../../src/color.js";
+import { authoredColorToOklch } from "../../../player/theme/color.js";
+import { exactOperationEscapes } from "../../helpers/exact-operations.js";
 
 /*
  * Colours normalize to the same text in every JavaScript engine (#2147): `src/color.ts` converts with operations

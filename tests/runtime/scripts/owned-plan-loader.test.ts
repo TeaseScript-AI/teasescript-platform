@@ -18,21 +18,21 @@ import {
   type InstructionPlan,
   type InstructionPlanLoad,
   type ProjectSourceFile,
-} from "../../src/index.js";
+} from "../../../src/index.js";
 import {
   isValidatedImmutableInstructionPlan,
   markValidatedImmutableInstructionPlan,
-} from "../../src/plan/validated-immutable.js";
-import { createCapturedArray } from "../../src/external-data-capture.js";
-import { validateCapturedInstructionPlan } from "../../src/plan/validation.js";
-import { classifyCapturedRuntimeSnapshot } from "../../src/runtime/snapshot/snapshot-validation.js";
-import { compileValidPlan } from "../helpers/compile-valid-plan.js";
+} from "../../../src/plan/validated-immutable.js";
+import { createCapturedArray } from "../../../src/external-data-capture.js";
+import { validateCapturedInstructionPlan } from "../../../src/plan/validation.js";
+import { classifyCapturedRuntimeSnapshot } from "../../../src/runtime/snapshot/snapshot-validation.js";
+import { compileValidPlan } from "../../helpers/compile-valid-plan.js";
 import {
   ARRAY_ITERATOR_PROTOTYPE,
   type PrototypeChange,
   withPrototypeChange,
-} from "../helpers/prototype-changes.js";
-import { assertRuntimeResumeEquivalent } from "../helpers/runtime-equivalence.js";
+} from "../../helpers/prototype-changes.js";
+import { assertRuntimeResumeEquivalent } from "../../helpers/runtime-equivalence.js";
 
 /*
  * The owned plan loader (docs/RUNTIME.md "Low-level runtime route") must decide every JSON text as the external route,

@@ -1,5 +1,5 @@
 // The text of a normalized colour's coordinates (#2147). Fixed precision: 15 significant digits, or 17 above the
-// conservative overflow cutoff. A closed module: it imports nothing, and `tests/runtime/colour-conversion.test.ts`
+// conservative overflow cutoff. A closed module: it imports nothing, and `tests/runtime/values/colour-conversion.test.ts`
 // checks it whole.
 
 /** A conservative cutoff: above it, 15 digits could round past the largest double, so 17 are printed; 17 always read back. */

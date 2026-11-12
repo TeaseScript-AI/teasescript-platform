@@ -14,10 +14,10 @@ import {
   validateRuntimeSnapshot,
   type InstructionPlan,
   type RuntimeSession,
-} from "../../src/index.js";
-import { compileValidPlan } from "../helpers/compile-valid-plan.js";
-import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
-import { assertRuntimeResumeEquivalent } from "../helpers/runtime-equivalence.js";
+} from "../../../src/index.js";
+import { compileValidPlan } from "../../helpers/compile-valid-plan.js";
+import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
+import { assertRuntimeResumeEquivalent } from "../../helpers/runtime-equivalence.js";
 
 // Every record of a runtime snapshot has exactly the fields its revision defines (#1779). An own `__proto__` key is the
 // case that matters most: validation used to accept it in some records, and the trusted copy, which assigns each key

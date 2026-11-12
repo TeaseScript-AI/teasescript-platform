@@ -9,7 +9,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
-import type { FreshRuntimeOptions, ProjectSourceFile } from "../../src/index.js";
+import type { FreshRuntimeOptions, ProjectSourceFile } from "../../../src/index.js";
 import {
   differentialRun,
   type DifferentialInput,
@@ -18,10 +18,10 @@ import {
   type PipelineAdapter,
   type SideRecord,
   thisBuild,
-} from "../helpers/runtime-differential.js";
+} from "../../helpers/runtime-differential.js";
 
 // The compiled test runs from dist/tests; the benchmark lives at the checkout root.
-const root = fileURLToPath(new URL("../../../", import.meta.url));
+const root = fileURLToPath(new URL("../../../../", import.meta.url));
 const benchmark = path.join(root, "benchmarks", "runtime");
 const read = (file: string): string => fs.readFileSync(path.join(benchmark, file), "utf8");
 

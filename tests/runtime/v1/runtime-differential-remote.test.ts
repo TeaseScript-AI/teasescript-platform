@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { decodeReply, type RunnerOp } from "../helpers/runtime-differential-remote.js";
+import { decodeReply, type RunnerOp } from "../../helpers/runtime-differential-remote.js";
 
 // The cross-process reply decoder (docs/TESTING.md "Differential harness"): the one path from a runner's reply bytes to
 // what the driver sees. Over a generated family of every valid reply shape, each mutated at every position the harness

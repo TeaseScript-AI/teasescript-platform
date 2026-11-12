@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSource } from "../../src/compiler.js";
-import { run } from "../../src/runtime/engine.js";
-import { createFreshRuntimeSession } from "../../src/runtime/session.js";
-import { createFreshRuntimeSnapshot } from "../../src/runtime/snapshot/snapshot-construction.js";
-import { runRetentionChild } from "../helpers/retention-witness.js";
+import { compileSource } from "../../../src/compiler.js";
+import { run } from "../../../src/runtime/engine.js";
+import { createFreshRuntimeSession } from "../../../src/runtime/session.js";
+import { createFreshRuntimeSnapshot } from "../../../src/runtime/snapshot/snapshot-construction.js";
+import { runRetentionChild } from "../../helpers/retention-witness.js";
 
 /*
  * The say markup memos (`src/runtime/instructions/say.ts`): a literal say's markup is kept by the plan's instruction, for
@@ -17,7 +17,7 @@ import { runRetentionChild } from "../helpers/retention-witness.js";
 
 test("a say that interpolates a session's data keeps nothing of it once the session is gone, while its plan lives", () => {
   const { report, hits } = runRetentionChild(
-    new URL("../helpers/say-memo-retention-child.js", import.meta.url),
+    new URL("../../helpers/say-memo-retention-child.js", import.meta.url),
     ["ended", "kept"],
   );
   assert.deepEqual(report, { plans: 2, kept: 1 });
