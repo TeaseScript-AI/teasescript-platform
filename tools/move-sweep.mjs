@@ -68,7 +68,6 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
 const USAGE =
   "usage: node tools/move-sweep.mjs [BASE] [--renames FILE] [--splits FILE] [--declare FILE] [--forms 1,2,3,4,5]";
@@ -464,7 +463,7 @@ export function main(argv, cwd = process.cwd(), print = console.log) {
   return findings.some((h) => !declared.has(key(h))) ? 1 : 0;
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (import.meta.main) {
   try {
     process.exitCode = main(process.argv.slice(2));
   } catch (error) {

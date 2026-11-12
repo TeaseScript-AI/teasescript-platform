@@ -279,5 +279,4 @@ export function testFiles(root) {
   return suiteTestFiles(join(root, "tests"), ".test.ts").map((name) => `tests/${name}`);
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url))
-  process.exitCode = main(process.argv.slice(2));
+if (import.meta.main) process.exitCode = main(process.argv.slice(2));
