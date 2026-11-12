@@ -9,7 +9,7 @@ import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { withTestAllowance } from "../../src/type-inference/core/budget.js";
 import { messageSource } from "../../src/type-inference/core/messages.js";
 import { requiredSentence } from "../../src/type-inference/core/messages/causes.js";
-import { RouteHolding } from "../../src/type-inference/core/narrowing/route-holding.js";
+import { CALL, RouteHolding } from "../../src/type-inference/core/narrowing/route-holding.js";
 import { StatementTree } from "../../src/type-inference/core/narrowing/statement-tree.js";
 import { CoreProgram } from "../../src/type-inference/core/program.js";
 import type { RequiredCheck } from "../../src/type-inference/core/result.js";
@@ -186,6 +186,10 @@ test("each closer of an entry's segment holds the variable alone in its witness:
     ["T5", "switch n { case 1 { say n } }", true],
     ["a store", "box.next = 2", true],
     ["a hand-off", "fix(box)", true],
+    // (a grouped callee: a test in its parts, a receiver below its parentheses, a function's name in them)
+    ["a test in a grouped callee", 'let ok = ([n != null].join)(",")', true],
+    ["a grouped method's receiver", "let t = (n.toString)()", true],
+    ["a grouped function's call", "(fix)(box)", true], // (as `CALL`: a callee may store a key owned away)
     ["a plain read", "let copy = n + 1", false],
   ];
   for (const [name, line, held] of witnesses) {
@@ -193,7 +197,11 @@ test("each closer of an entry's segment holds the variable alone in its witness:
     const { tree, holding } = holdingOf(source);
     const statement = tree.statementAt(0, source.indexOf(line));
     assert.ok(statement !== null, name);
-    const root = line.startsWith("box") || line.startsWith("fix") ? "box" : "n";
+    const root = line.startsWith("(fix)")
+      ? CALL
+      : line.startsWith("box") || line.startsWith("fix")
+        ? "box"
+        : "n";
     assert.equal(holding.holds(root, statement), held, name);
   }
 });

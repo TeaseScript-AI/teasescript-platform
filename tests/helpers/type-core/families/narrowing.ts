@@ -1,3 +1,4 @@
+// pins for tests/type-core/type-core-work-c.test.ts: main's 64 → 128 growth step of the route rule's entries over many keys (a known product), as gates | line /^\s*measured: \d/u
 import {
   type KnownProduct,
   type WorkFamily,
@@ -616,6 +617,38 @@ export const ROUTE_ENTRY_FAMILIES: readonly WorkFamily[] = [
         file(`f${i}.tease`, `${USE_THEN_NULL}\ngoto "f${(i + 1) % k}.tease"`),
       ),
     ],
+  },
+  {
+    name: "E-functions",
+    measures:
+      "N3: one global, k functions each a loop that reads it and stores `null` after the read, each called once",
+    program: (k) =>
+      main(
+        lines(
+          "global n: integer? = 1",
+          rows(k, (i) => `function f${i} {\nrepeat 2 {\nrepeat n {}\nn = null\n}\n}`),
+          rows(k, (i) => `n = 1\nf${i}()`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "E-functions-labels",
+    measures:
+      "N3: one global, k functions each a label, a read of it and a store of `null` with a `goto` back",
+    program: (k) =>
+      main(
+        lines(
+          "global n: integer? = 1",
+          rows(
+            k,
+            (i) =>
+              `function f${i} {\nlabel a${i}\nrepeat n {}\nn = null\nif hostValue is boolean { goto a${i} }\n}`,
+          ),
+          rows(k, (i) => `n = 1\nf${i}()`),
+          "exit",
+        ),
+      ),
   },
   {
     name: "E-block-bodies",
