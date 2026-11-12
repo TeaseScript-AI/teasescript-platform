@@ -140,7 +140,7 @@ export class FlowGraphBuilder {
   public readonly expressionNodes = new Map<string, BuildNode>();
   public readonly statementNodes = new Map<string, BuildNode>();
   readonly #startupNodes = new Map<string, BuildNode>();
-  /** Where each speaker and each `global` without `default:` stands in its file's flow (see `FlowGraph.placeOf`). */
+  /** Where each statement of a statement list stands in its region's flow (see `FlowGraph.placeOf`). */
   public readonly places = new Map<string, FlowNode | null>();
   public readonly loopBindings = new Map<string, BuildNode>();
   public readonly labels = new Map<string, BuildNode>();

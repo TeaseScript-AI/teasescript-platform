@@ -29,15 +29,11 @@ export function* blockTask(
   let lastLive = current;
   let deadCursor: FlowNode | null = null;
   for (const statement of statements) {
-    // (a statement with no node of its own, whose values are the startup region's: where it stands, for `placeOf`)
-    if (
-      statement.kind === "speakerDeclaration" ||
-      (statement.kind === "globalStatement" && statement.assignment === null)
-    )
-      builder.places.set(
-        siteKey(context.file, statement.span.start.offset, statement.span.end.offset),
-        current,
-      );
+    // (where each statement of the list stands: the node control has reached before it, for `placeOf`)
+    builder.places.set(
+      siteKey(context.file, statement.span.start.offset, statement.span.end.offset),
+      current,
+    );
     if (current === null) {
       if (statement.kind === "labelStatement") {
         // A label after code that does not go on is reached only by a `goto`; until then it is dead code.

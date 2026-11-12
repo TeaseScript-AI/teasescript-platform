@@ -233,8 +233,8 @@ export interface FlowGraph {
   /** The session-start node of the `global` or speaker declared at `site`, in the startup region (F1a's start store). */
   startupAt(site: SourceSite): FlowNode | undefined;
   /**
-   * Where the speaker or the `global` without `default:` declared at `site` stands in its file's flow, which has no node
-   * of its own for it: the node control has reached just before it, or `null` in code that does not go on there.
+   * Where the statement at `site` of a statement list stands in its region's flow: the node control has reached just
+   * before it, or `null` in code that does not go on there; `undefined` for a statement of no list (an `else if`).
    */
   placeOf(site: SourceSite): FlowNode | null | undefined;
   /** The binding node of the `for` loop whose statement or iterable is at `site`. */

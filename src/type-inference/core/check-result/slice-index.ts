@@ -404,10 +404,9 @@ export class SliceIndex {
 }
 
 /**
- * The flow graph's node of a statement or an expression of the slice: an `if`'s and a `while`'s is its condition's, a
- * `repeat`'s its count's, a `for`'s its iterable's and a `switch`'s its subject's, which run first; parentheses have their
- * content's, whose value they are (S3 §3.4: a consumer's site is the expression inside them). A function, a speaker and
- * a `global` without `default:` have none, which it throws for (where they stand: `FlowGraph.placeOf`).
+ * The flow graph's node of a statement or an expression of the slice: an `if`'s is its condition's, a `repeat`'s its
+ * count's and a `for`'s its iterable's, which run first; parentheses have their content's, whose value they are (S3 §3.4: a consumer's site is the
+ * expression inside them).
  */
 export function nodeOf(
   answers: Answers,
@@ -419,8 +418,6 @@ export function nodeOf(
     if (current.kind === "ifStatement") current = current.condition;
     else if (current.kind === "repeatStatement") current = current.count;
     else if (current.kind === "forStatement") current = current.iterable;
-    else if (current.kind === "whileStatement") current = current.condition;
-    else if (current.kind === "switchStatement") current = current.subject;
     else if (current.kind === "expressionStatement") current = current.expression;
     else if (current.kind === "parenthesizedExpression") current = current.expression;
     else break;
