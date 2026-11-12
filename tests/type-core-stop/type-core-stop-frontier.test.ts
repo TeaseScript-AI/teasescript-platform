@@ -12,7 +12,7 @@ import {
   FRONTIER_DEPTH,
   withFrontierBound,
   type FrontierRead,
-} from "../../src/type-inference/core/consumers/finishing.js";
+} from "../../src/type-inference/core/consumers/host-frontier.js";
 import { coreRequest } from "../helpers/type-core-analysis.js";
 import {
   heldDemands,
