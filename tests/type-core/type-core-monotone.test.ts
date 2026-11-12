@@ -1,0 +1,79 @@
+// #2486's solver oracle (`withMonotoneOracle`): it names a run that loses a kind, a reason or an unknown's word, and
+// stays quiet on runs that only add.
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { analyseCore } from "../../src/type-inference/core/answers.js";
+import { makeItem, REASON, type Item } from "../../src/type-inference/core/items.js";
+import { coreRequest } from "../helpers/type-core-analysis.js";
+import { judgeRun, withMonotoneOracle } from "../helpers/type-core/type-core-monotone.js";
+
+const unknown = (reasons: number, context: Item["context"] = null): Item =>
+  makeItem("unknown", null, { reasons, context, cert: "pos" });
+const integer = makeItem("integer");
+
+test("the oracle names a lost kind, a lost reason and an unknown's word moved later", () => {
+  const moves = new Map<string, number>();
+  const kinds = (violations: ReturnType<typeof judgeRun>): string[] =>
+    violations.map((violation) => `${violation.kind} ${violation.tag}`);
+  assert.deepEqual(kinds(judgeRun("m", [integer, unknown(4)], [integer], moves)), [
+    "kind lost unknown",
+  ]);
+  assert.deepEqual(
+    kinds(judgeRun("m", [unknown(REASON.deferred | REASON.external)], [unknown(4)], moves)),
+    ["reason lost unknown"],
+  );
+  assert.deepEqual(
+    kinds(judgeRun("m", [unknown(5, "deferred-parameter")], [unknown(5, "unknown")], moves)),
+    ["unknown's word later unknown"],
+  );
+  // (what only grows: a kind, a reason, a word earlier in the order)
+  assert.deepEqual(
+    judgeRun(
+      "m",
+      [unknown(1, "unknown")],
+      [integer, unknown(5, "deferred-parameter"), makeItem("empty")],
+      moves,
+    ),
+    [],
+  );
+  assert.equal(moves.size, 0);
+});
+
+test("the oracle counts the moves of the fields it does not judge", () => {
+  const moves = new Map<string, number>();
+  judgeRun(
+    "m",
+    [makeItem("integer", null, { context: "call" })],
+    [makeItem("integer", null, { cert: "pos", context: "loop", guarded: true })],
+    moves,
+  );
+  assert.deepEqual(Object.fromEntries(moves), {
+    "known word later": 1,
+    "cert def→pos": 1,
+    "guarded gained": 1,
+  });
+});
+
+test("the oracle hears a component's runs, in both worklist orders", () => {
+  // (a helper with two call sites, whose result a variable updates through one operation: a component of the variable's
+  // contract and the operation, which settles)
+  const source = [
+    "global function passOn(value) {",
+    "  return value",
+    "}",
+    "let a = passOn(1)",
+    'let n = passOn(fromJson(askText("v?"), default: 0))',
+    "n = n + 1",
+    'say "${n}"',
+    "exit",
+    "",
+  ].join("\n");
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request);
+  for (const reversed of [false, true]) {
+    const { record } = withMonotoneOracle((): unknown => analyseCore(request), reversed);
+    assert.ok(record.compared > 0, `runs compared (${reversed ? "reversed" : "canonical"})`);
+    assert.equal(record.violations, 0, JSON.stringify(record.first));
+  }
+});
