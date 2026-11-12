@@ -61,5 +61,10 @@ export {
 } from "./type-core-oracles-decisions.js";
 export type { DecisionRecords, DecisionRecordKind } from "./type-core-oracles-decisions.js";
 export { partProblems } from "./type-core-oracles-part-checks.js";
-export { analysisByLine, compiledByLine, markedSource } from "./type-core-oracles-wrap.js";
+export {
+  analysisByLine,
+  checkedByLine,
+  compiledByLine,
+  markedSource,
+} from "./type-core-oracles-wrap.js";
 export type { CompiledByLine } from "./type-core-oracles-wrap.js";
