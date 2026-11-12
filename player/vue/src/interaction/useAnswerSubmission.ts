@@ -6,10 +6,16 @@ import {
 } from "../../../../src/interaction-completion.js";
 import { invalidAnswerMessage } from "../../../../src/interaction-answers.js";
 import { IMAGE_ANSWER_TRANSCRIPT_TEXT } from "../../../../src/image-input.js";
-import { applyFormUpdate } from "../../../../src/runtime/actions/form.js";
+import {
+  applyFormUpdate,
+  formSummaryOf,
+  type FormSummaryLine,
+} from "../../../../src/runtime/actions/form.js";
+import type { PlayerTranscriptEntryPresentation } from "../../../presentation/model.js";
 import type { RuntimeInteractionActionSnapshot } from "../../../../src/runtime/actions/model.js";
 import {
   activePlayerRuntimeInteraction,
+  answerRenderKey,
   choiceOptionId,
   playerRuntimeInteractionActionIds,
   playerRuntimePacingGate,
@@ -55,6 +61,8 @@ export type AnswerStage = "accepted" | "fenced" | "posted" | "settled";
 export interface PredictedAnswer {
   readonly text: string;
   readonly responseKind?: "choice" | "button" | "form";
+  /** A submitted form's lines, as the runtime's summary of the same answers shows them. */
+  readonly formSummary?: readonly FormSummaryLine[];
 }
 
 /** The one answer under way: what it answered, how, and how far it went. */
@@ -66,6 +74,11 @@ export interface PendingAnswer {
   /** The chat text it sent, which a refusal puts back; only for the `chat` origin. */
   readonly sent: string | null;
   readonly row: PredictedAnswer | null;
+  /**
+   * The line the transcript shows for it until the runtime's own takes its row over: the predicted text in the style the
+   * player's answer had when it was given, under the answer's row key (`answerRenderKey`).
+   */
+  readonly entry: PlayerTranscriptEntryPresentation | null;
   stage: AnswerStage;
 }
 
@@ -255,6 +268,19 @@ export function useAnswerSubmission(host: {
       origin,
       sent,
       row,
+      entry:
+        row === null
+          ? null
+          : Object.freeze({
+              kind: "message",
+              id: `predicted-${answerRenderKey(action.actionId)}`,
+              renderKey: answerRenderKey(action.actionId),
+              speakerId: "user",
+              text: row.text,
+              presentation: session.state.answerPresentation,
+              ...(row.responseKind ? { responseKind: row.responseKind } : {}),
+              ...(row.formSummary ? { formSummary: row.formSummary } : {}),
+            }),
       stage: "accepted",
     };
     pending.value = record;
@@ -489,10 +515,22 @@ export function useAnswerSubmission(host: {
       undefined,
     );
     if (!resolved.ok) return showNotice(resolved.message);
+    const summary = resolved.temporalPresentation
+      ? formSummaryOf(
+          action.ui,
+          resolved.result,
+          resolved.shownOptions,
+          resolved.temporalPresentation,
+        )
+      : null;
     begin(
       action,
       typed ? "chat" : "formSubmit",
-      { text: resolved.transcriptText ?? "", responseKind: "form" },
+      {
+        text: resolved.transcriptText ?? "",
+        responseKind: "form",
+        ...(summary === null ? {} : { formSummary: summary }),
+      },
       typed,
       intent,
     );
@@ -524,6 +562,8 @@ export function useAnswerSubmission(host: {
 
   return {
     pending: computed(() => pending.value),
+    /** The answer's line the transcript shows while the answer is pending, or `null`. */
+    predicted: computed(() => pending.value?.entry ?? null),
     /** The action whose controls an answer took; they are not shown, and no input reaches it. */
     consumed: computed(() => pending.value?.actionId ?? null),
     notice: computed(() => notice.value),

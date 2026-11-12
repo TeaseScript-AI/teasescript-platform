@@ -718,6 +718,7 @@ function escape() {
           :revision="revision ?? 0"
           :jumped-revision="jumpedRevision ?? -1"
           :removed-rows="removedRows ?? []"
+          :pending="submission.predicted.value"
           :bottom-inset="bottomInset"
         >
           <template #foreground>
