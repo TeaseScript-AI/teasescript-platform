@@ -150,8 +150,9 @@ export function operatorRow(
  * - a combination the table has no row for fails at runtime and gives nothing (C4 reports it);
  * - an `unknown` operand gives, as possibilities, the results of every row the other operands' kinds allow (`x / 4`
  *   with `x` unknown: number, duration, calendar duration, angle), and these items stand for that one operand (`fan`,
- *   §4), explained by its writer and reason; a combination of unknowns only, or one whose unknowns are all
- *   deferred parameters, stays unknown;
+ *   §4), explained by its writer and reason; a combination of unknowns only stays unknown, and an unknown operand with
+ *   the reason `deferred` (a parameter with several call sites) gives an unknown too, beside the rows where it has
+ *   another reason as well, so the result only grows as the operand's reasons do;
  * - a result kind is definite when no operand is unknown, every operand item is definite, and every combination that
  *   succeeds gives that kind by a row that needs no check by value.
  * The reasons and the first context word of a combination's items go to its result, an unknown bringing its reason's
@@ -196,13 +197,17 @@ export function operationItems(
     const known = external ? { ...shared, extOnly: true as const } : shared;
     const explained = combination.reduce((first, item) => firstWriter(first, item.writer), writer);
     const unknowns = combination.filter((item) => item.tag === "unknown");
-    if (
-      unknowns.length === combination.length ||
-      (unknowns.length > 0 && unknowns.every((item) => item.reasons === REASON.deferred))
-    ) {
+    if (unknowns.length === combination.length) {
       results.push(makeItem("unknown", explained, shared));
       unsure = true;
       continue;
+    }
+    // (#2486: a deferred parameter's part stays unknown and any other reason merged with it fans, each reason giving what
+    // it gives, so the result only grows as the operand's reasons do and a solver component settles)
+    if (unknowns.some((item) => (item.reasons & REASON.deferred) !== 0)) {
+      results.push(makeItem("unknown", explained, shared));
+      unsure = true;
+      if (unknowns.every((item) => (item.reasons & ~REASON.deferred) === 0)) continue;
     }
     // the unknown operand these results stand for, when the combination holds exactly one, and the earliest writer of
     // the items that carry it, so that `+` and `*` explain alike in either order

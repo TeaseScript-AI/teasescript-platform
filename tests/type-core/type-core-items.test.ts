@@ -264,6 +264,35 @@ test("the item algebra keeps its laws over random items from a fixed seed", () =
 
 const writer = (kind: string, start: number): Writer => ({ kind, file: 0, start, end: start + 1 });
 
+test("an operation's result only grows as its unknown operand's reasons do (#2486)", () => {
+  // (a component re-runs an operation as its operand's reasons grow: a result that dropped a kind or a reason as one is
+  // added could take back what brought it, and the component would alternate)
+  const scope = itemScope();
+  const known = [makeItem("integer"), makeItem("number"), makeItem("string")];
+  const sets = Array.from({ length: 31 }, (_, at) => at + 1);
+  for (const operator of ["+", "/", "<"] as const)
+    for (const other of known)
+      for (const fewer of sets)
+        for (const more of sets) {
+          if ((fewer & more) !== fewer || fewer === more) continue;
+          const result = (reasons: number): Item[] =>
+            operationItems(
+              operator,
+              [[makeItem("unknown", null, { cert: "pos", reasons })], [other]],
+              scope,
+              SITE,
+            );
+          const grown = new Map(result(more).map((item) => [item.tag, item]));
+          for (const item of result(fewer)) {
+            const kept = grown.get(item.tag);
+            assert.ok(
+              kept !== undefined && (item.reasons & ~kept.reasons) === 0,
+              `${operator} ${other.tag}: reasons ${fewer} give ${item.tag}, ${more} ${kept === undefined ? "do not" : "lose a reason"}`,
+            );
+          }
+        }
+});
+
 test("an external reason survives every merge, with the earliest writer", () => {
   const scope = itemScope();
   const external = makeItem("unknown", writer("argument", 1), {

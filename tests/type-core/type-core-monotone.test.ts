@@ -89,3 +89,48 @@ test("the oracle hears a component's runs, in both worklist orders", () => {
     assert.equal(record.violations, 0, JSON.stringify(record.first));
   }
 });
+
+/** A variable set from a pass-through helper with two call sites and updated from itself (#2486's reproduction). */
+const passThrough = (argument: string, update: string): string =>
+  [
+    "global function passOn(value) {",
+    "  return value",
+    "}",
+    "let a = passOn(1)",
+    `let n = passOn(${argument})`,
+    update,
+    'say "${n}"',
+    "exit",
+    "",
+  ].join("\n");
+
+const SETTLING: readonly (readonly [string, string])[] = [
+  [
+    "outside data",
+    passThrough('fromJson(askText("v?"), default: 0)', "n = n + 1 + randomInteger(0..3)"),
+  ],
+  ["a constant", passThrough("0", "n = n + 1 + randomInteger(0..3)")],
+  ["a typed load", passThrough('load "k", default: 0', "n = n + 1 + randomInteger(0..3)")],
+  ["a compound update", passThrough("0", "n += randomInteger(0..4) + 1")],
+  [
+    "the update in a loop",
+    passThrough("0", 'while askBoolean("again?") {\n  n = n + 1 + randomInteger(0..3)\n}'),
+  ],
+];
+
+test("a component of a pass-through helper's variable settles, its runs only growing (#2486)", () => {
+  for (const [name, source] of SETTLING) {
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request, name);
+    for (const reversed of [false, true]) {
+      let exhausted: ReturnType<typeof analyseCore>["budget"]["exhausted"] | "not run" = "not run";
+      const { record } = withMonotoneOracle((): void => {
+        exhausted = analyseCore(request).budget.exhausted;
+      }, reversed);
+      assert.equal(exhausted, null, `${name}: the analysis finishes inside its allowance`);
+      // (no kind or reason lost; an unknown's word may still move, which the word rule's commit repairs)
+      const lost = record.first.filter((violation) => violation.kind !== "unknown's word later");
+      assert.deepEqual(lost, [], name);
+    }
+  }
+});
