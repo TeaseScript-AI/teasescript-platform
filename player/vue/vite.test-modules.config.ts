@@ -32,6 +32,8 @@ const modules = [
   "player/vue/src/debug/useDebugView.ts",
   "player/vue/src/debug/useDevelopmentTime.ts",
   "player/vue/src/stage/useImageCapture.ts",
+  "player/vue/src/interaction/useAnswerSubmission.ts",
+  "player/vue/src/interaction/useComposerState.ts",
   "player/vue/src/transcript/useMessageUpdateAnnouncements.ts",
   "player/vue/src/debug/usePlayerDebug.ts",
   "player/vue/src/notifications/usePlayerNotifications.ts",
