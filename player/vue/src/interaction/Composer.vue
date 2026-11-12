@@ -1,7 +1,7 @@
 <script setup lang="ts" generic="Request">
 import { computed, nextTick, ref, useId, watch } from "vue";
 import { useTextareaAutosize } from "@vueuse/core";
-import { Eye, EyeOff, Paperclip } from "@lucide/vue";
+import { ArrowLeft, Eye, EyeOff, Paperclip } from "@lucide/vue";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { usePlayerConditions } from "./usePlayerConditions";
@@ -363,15 +363,16 @@ defineExpose({ focusInput, selectInput, openPicker, finishComposition });
           v-if="repeated"
           type="button"
           variant="ghost"
-          size="sm"
+          size="icon-sm"
           data-composer-back
-          title="Type the password again"
+          aria-label="Back"
+          title="Back"
           :disabled="disabled || readonly"
           @click="emit('back')"
           @pointerdown="preserveEditingFocus"
           @mousedown="keepMouseEditingFocus"
         >
-          Back
+          <ArrowLeft aria-hidden="true" />
         </Button>
         <template v-if="attach">
           <Button
