@@ -155,10 +155,11 @@ export function useComposerState(host: {
       return;
     }
     const live = new Set(next.liveActions);
-    for (const key of [...forms.keys()])
+    // A Map's iteration visits each remaining key once while its entries are deleted.
+    for (const key of forms.keys())
       if (!live.has(Number(key.slice(0, key.indexOf(":"))))) forms.delete(key);
-    for (const id of [...temporals.keys()]) if (!live.has(id)) temporals.delete(id);
-    for (const id of [...prefills.keys()]) if (!live.has(id)) prefills.delete(id);
+    for (const id of temporals.keys()) if (!live.has(id)) temporals.delete(id);
+    for (const id of prefills.keys()) if (!live.has(id)) prefills.delete(id);
   }
 
   /** An untouched prefill leaves with its question; the chat is empty again. */
