@@ -135,14 +135,30 @@ function directiveFixture() {
 }
 
 // Each test-site form, one per line: the counted ones name their kind, the others none; a skip is "off" (without a
-// condition) or "on condition".
+// condition), "on condition" or "platform" (a platform guard, #2568).
 const SITES = [
   ["skip", 'test.skip("a", () => {});', "off"],
   ["skip", 'it.skip("b", () => {});', "off"],
   ["skip", 'describe.skip("c", () => {});', "off"],
   ["skip", 'suite.skip("d", () => {});', "off"],
   ["skip", 'test("e", { skip: true }, () => {});', "off"],
-  ["skip", 'test("f", { skip: process.platform === "win32" }, () => {});', "on condition"],
+  ["skip", 'test("f", { skip: process.platform === "win32" }, () => {});', "platform"],
+  ["skip", 'test("pa", { skip: "darwin" !== process.platform }, () => {});', "platform"],
+  ["skip", 'test("pb", { skip: (process.platform == `win32`) }, () => {});', "platform"],
+  [
+    "skip",
+    'test("pc", { skip: process.platform === "win32" || process.platform === "aix" }, () => {});',
+    "platform",
+  ],
+  [
+    "skip",
+    'test("pd", { skip: process.platform === "win32" || !tool }, () => {});',
+    "on condition",
+  ],
+  ["skip", 'test("pe", { skip: process.platform.startsWith("win") }, () => {});', "on condition"],
+  ["skip", 'test("pf", { skip: os.platform() === "win32" }, () => {});', "on condition"],
+  ["skip", 'test("pg", { skip: process.platform === other }, () => {});', "on condition"],
+  ["skip", 'test("ph", (t) => { if (process.platform === "win32") t.skip(); });', "on condition"],
   ["skip", 'test.only("g", { "skip": "a reason" }, () => {});', "off"],
   ["skip", 'test("h", (t) => { t.skip("why"); });', "off"],
   ["skip", 'test("sa", { skip }, () => {});', "off"],
@@ -280,17 +296,25 @@ test("each node:test skip and todo form counts, and calls that only look like on
   assert.deepEqual(of(result.sites.todoTests), at("todo"));
 });
 
-test("a skip is on a condition only in the forms the header names, and without one otherwise", () => {
+test("a skip is a platform guard or on a condition only in the forms the header names, and without one otherwise", () => {
   const at = (when) =>
     SITES.flatMap(([, , w], i) => (w === when ? [`tests/sites.test.ts:${i + 1}`] : []));
   const of = (sites) => sites.filter((s) => s.startsWith("tests/sites.test.ts:"));
   assert.deepEqual(of(result.sites.skippedTestsConditional), at("on condition"));
   assert.deepEqual(of(result.sites.skippedTestsUnconditional), at("off"));
-  // every skip, also the scope family's, is in exactly one of the two
+  assert.deepEqual(of(result.sites.skippedTestsPlatform), at("platform"));
+  // every skip, also the scope family's, is in exactly one of the three
   const c = result.counters;
-  assert.equal(c.skippedTestsConditional + c.skippedTestsUnconditional, c.skippedTests);
+  assert.equal(
+    c.skippedTestsConditional + c.skippedTestsUnconditional + c.skippedTestsPlatform,
+    c.skippedTests,
+  );
   assert.deepEqual(
-    [...result.sites.skippedTestsConditional, ...result.sites.skippedTestsUnconditional].toSorted(),
+    [
+      ...result.sites.skippedTestsConditional,
+      ...result.sites.skippedTestsUnconditional,
+      ...result.sites.skippedTestsPlatform,
+    ].toSorted(),
     result.sites.skippedTests.toSorted(),
   );
 });
@@ -462,7 +486,7 @@ test("@ts- directives and long functions are counted in tests and outside, by th
   assert.equal(text.status, 0, text.stderr);
   assert.match(
     text.stdout,
-    /^@ts-expect-error and @ts-ignore: 7\n@ts- directives outside tests: 4\n@ts- directives in tests: 3\nSkipped tests: 0\nSkipped tests without a condition: 0\nSkipped tests on a condition: 0$/mu,
+    /^@ts-expect-error and @ts-ignore: 7\n@ts- directives outside tests: 4\n@ts- directives in tests: 3\nSkipped tests: 0\nSkipped tests without a condition: 0\nSkipped tests on a condition: 0\nSkipped tests on the platform: 0$/mu,
   );
   assert.match(
     text.stdout,
