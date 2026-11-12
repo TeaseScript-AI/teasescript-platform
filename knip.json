@@ -15,6 +15,7 @@
     "player/vue/src/debug/debugStageImage.ts",
     "player/vue/src/debug/random/randomDrawPresentation.ts",
     "player/vue/src/stage/stagePhotos.ts",
+    "player/vue/src/transcript/displayedList.ts",
     "player/vue/src/transcript/transcriptPresentation.ts",
     "player/vue/src/debug/random/useDebugRandom.ts",
     "player/vue/src/debug/history/useDebugRewind.ts",

@@ -31,6 +31,7 @@ import type {
   PlayerSpeakerPresentation,
 } from "../../../presentation/model.js";
 import TranscriptMessage from "./TranscriptMessage.vue";
+import { displayedList, rowKey } from "./displayedList";
 import { recordSpeakerAvatarMessage, speakerAvatarPalette } from "./speakerAvatar";
 import { backdropBehind, resolveColour, vignetteEdge } from "./messageContrast";
 import {
@@ -60,10 +61,6 @@ const props = defineProps<{
    */
   pending?: PlayerTranscriptEntryPresentation | null;
 }>();
-/** The key of an entry's row: an answer keeps the key its predicted row had, so its element stays. */
-function rowKey(entry: PlayerTranscriptEntryPresentation): string {
-  return (entry.kind === "message" ? entry.renderKey : undefined) ?? entry.id;
-}
 /** What a row's content is, for its measurement: a message's content event, else an answer's own entry. */
 function contentOf(entry: PlayerTranscriptEntryPresentation): string | undefined {
   if (entry.kind !== "message") return undefined;
@@ -73,37 +70,10 @@ function contentOf(entry: PlayerTranscriptEntryPresentation): string | undefined
       ? entry.id
       : undefined;
 }
-// The rows the conversation shows: `entries`, then `pending` while no entry has its key. Its own entry arrives among the
-// last of an update, after a block's messages at most, so only the last entries are searched. The list depends on the
-// entries, their length and the pending row only: typing in the composer leaves it as it is.
-const ARRIVAL_SEARCH = 64;
-let listed: {
-  readonly entries: readonly PlayerTranscriptEntryPresentation[];
-  readonly length: number;
-  readonly pending: PlayerTranscriptEntryPresentation | null;
-  readonly value: readonly PlayerTranscriptEntryPresentation[];
-} | null = null;
+// The rows the conversation shows: the entries, then the pending answer until its entry arrives (`displayedList`).
+const listed = displayedList();
 function list(): readonly PlayerTranscriptEntryPresentation[] {
-  const entries = props.entries;
-  const pending = props.pending ?? null;
-  if (
-    listed === null ||
-    listed.entries !== entries ||
-    listed.length !== entries.length ||
-    listed.pending !== pending
-  ) {
-    const key = pending === null ? null : rowKey(pending);
-    let arrived = false;
-    for (
-      let index = entries.length - 1;
-      index >= Math.max(0, entries.length - ARRIVAL_SEARCH);
-      index -= 1
-    )
-      if (rowKey(entries[index]!) === key) arrived = true;
-    const value = pending === null || arrived ? entries : [...entries, pending];
-    listed = { entries, length: entries.length, pending, value };
-  }
-  return listed.value;
+  return listed(props.entries, props.pending ?? null);
 }
 /** The row key of the pending answer while it shows. */
 function shownPendingKey(): string | null {
