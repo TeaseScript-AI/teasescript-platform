@@ -23,7 +23,7 @@ import { contributionOf } from "./own.js";
 import { joinedDomain, permittedAt } from "./permitted.js";
 import { inheritedInto } from "../inherited/waiting.js";
 import type { Reads } from "../inherited/reads.js";
-import { partOf, partOfRead, TYPED_ROLES } from "./walk.js";
+import { hasCell, partOf, partOfRead, TYPED_ROLES } from "./walk.js";
 
 // The carriers' transfers (G3 2c): what a stored value's walk answers, over its tasks' recipes (`expand`): each
 // carrier's operands answer once per pass, whatever value walks to them, a literal's cells with their literal, by path,
@@ -241,6 +241,18 @@ export interface DeciderGroup {
   region: Region | null;
   holdsWritten: boolean | null;
   readonly written: Map<number, boolean>;
+  /** Whether a literal task stands on the path, per rest (`literalOn`), apart from `written`. */
+  readonly literal: Map<number, boolean>;
+  /**
+   * #2289: per rest, `literalOn`'s visit of the region's path as `writtenOn` reads it (whether a written copy there
+   * asks a type, and the groups below), so the decided path is walked once for both.
+   */
+  /** Whether a member is a literal with a cell read through a projection (`literalOn`), once asked. */
+  cellMember: boolean | null;
+  readonly visits: Map<
+    number,
+    { readonly asks: boolean; readonly below: readonly { group: DeciderGroup; rest: number }[] }
+  >;
   readonly values: Map<string, DecidingValue | null>;
 }
 
@@ -282,6 +294,9 @@ function groupOf(
     region: null,
     holdsWritten: null,
     written: new Map(),
+    literal: new Map(),
+    visits: new Map(),
+    cellMember: null,
     values: new Map(),
   };
   caches.deciders.set(name, group);
@@ -817,15 +832,108 @@ function* writtenOn(
         continue;
       }
       let asks = false;
-      const below: { group: DeciderGroup; rest: number }[] = [];
-      forEachPath(yield* regionOf(admission, group), at, rest, (path, length) => {
-        admission.pass.program.work.charge("checks");
-        for (const entry of path?.written ?? [])
-          asks ||= asksType(admission, group, entry, rest + length === at.length);
-        for (const entry of path?.values ?? [])
-          if (entry.bound !== null) below.push({ group: entry.bound.group, rest: rest + length });
-      });
+      let below: readonly { group: DeciderGroup; rest: number }[] = [];
+      const visited = group.visits.get(ids(rest));
+      if (visited !== undefined) ({ asks, below } = visited);
+      else {
+        const found: { group: DeciderGroup; rest: number }[] = [];
+        forEachPath(yield* regionOf(admission, group), at, rest, (path, length) => {
+          admission.pass.program.work.charge("checks");
+          for (const entry of path?.written ?? [])
+            asks ||= asksType(admission, group, entry, rest + length === at.length);
+          for (const entry of path?.values ?? [])
+            if (entry.bound !== null) found.push({ group: entry.bound.group, rest: rest + length });
+        });
+        below = found;
+      }
       if (asks) {
+        finish(true);
+        continue;
+      }
+      frame.below = below;
+    }
+    const below = frame.below!;
+    if (frame.next < below.length) {
+      stack.push({ ...below[frame.next++]!, below: null, next: 0 });
+      continue;
+    }
+    finish(false);
+  }
+  return answer!;
+}
+
+/**
+ * #2289: whether a literal with a cell stands on the asked path (a link of the value's `View`), so its cell answers there and no
+ * summary of its flattened parts may: a literal read whole at a rest shorter than the path (its own stop,
+ * `RegionPath.literals`), or a literal read through a projection as a member of a group on it (whose cells are the
+ * group below it). Any other part is reached by a literal's cell step, below a literal read whole that is found first.
+ * Pruned by no written test; once per group and rest, structural.
+ */
+export function* literalRoute(admission: Admission, decider: DeciderRoot): Reads<boolean> {
+  // (a program whose every cell has one element at most has none: its paths are main's)
+  if (!admission.pass.definitions.manyCells) return false;
+  return (yield* holdsWritten(admission, decider.root)) && (yield* literalOn(admission, decider));
+}
+
+export function* literalOn(admission: Admission, decider: DeciderRoot): Reads<boolean> {
+  const { root, at, ids } = decider;
+  interface Frame {
+    readonly group: DeciderGroup;
+    readonly rest: number;
+    below: readonly { readonly group: DeciderGroup; readonly rest: number }[] | null;
+    next: number;
+  }
+  const stack: Frame[] = [{ group: root, rest: 0, below: null, next: 0 }];
+  let answer: boolean | null = null;
+  const finish = (value: boolean): void => {
+    const frame = stack.pop()!;
+    frame.group.literal.set(ids(frame.rest), value);
+    answer = value;
+  };
+  while (stack.length > 0) {
+    const frame = stack.at(-1)!;
+    const { group, rest } = frame;
+    if (answer !== null) {
+      if (answer) {
+        finish(true);
+        continue;
+      }
+      answer = null;
+    } else if (frame.below === null) {
+      const known = group.literal.get(ids(rest));
+      if (known !== undefined) {
+        stack.pop();
+        answer = known;
+        continue;
+      }
+      // (a literal with a cell only: a step of one element is that element's own reading, which the summaries read;
+      // whether a member is one, once per group)
+      if (group.cellMember === null) {
+        admission.pass.program.work.charge("checks", group.members.length);
+        group.cellMember = group.members.some(
+          (member) => member.task.strip.length > 0 && hasCell(admission, member.task),
+        );
+      }
+      let on = group.cellMember;
+      const below: { group: DeciderGroup; rest: number }[] = [];
+      if (!on) {
+        let asks = false;
+        forEachPath(yield* regionOf(admission, group), at, rest, (path, length) => {
+          admission.pass.program.work.charge("checks");
+          if (path === null) return;
+          if (
+            rest + length < at.length &&
+            path.literals.some((entry) => hasCell(admission, entry.task))
+          )
+            on = true;
+          for (const entry of path.written)
+            asks ||= asksType(admission, group, entry, rest + length === at.length);
+          for (const entry of path.values)
+            if (entry.bound !== null) below.push({ group: entry.bound.group, rest: rest + length });
+        });
+        group.visits.set(ids(rest), { asks, below });
+      }
+      if (on) {
         finish(true);
         continue;
       }
@@ -973,19 +1081,9 @@ export function* transferredDecider(
   task: Expansion,
   asked: Rest,
   written?: { root: DeciderGroup | null; ids: ((rest: number) => number) | null },
+  decider: DeciderRoot = deciderRoot(admission, task, asked),
 ): Reads<DecidingValue | null | undefined> {
-  const root = groupOf(admission, [
-    { task, deep: false, single: true, typed: false, chosen: true, surely: true, joined: false },
-  ]);
-  // (an array's rests named as before, all at once; a span's by its rests' path ids as asked, below zero so the two
-  // never meet in a group's answers, G3 stage 1)
-  const at = restRef(admission.pass.contract, asked);
-  let ids: (rest: number) => number;
-  if (at.kind === "span") ids = (rest) => -1 - at.from(rest).id();
-  else {
-    const list = restIds(admission, at.steps());
-    ids = (rest) => list[rest]!;
-  }
+  const { root, at, ids } = decider;
   if (yield* writtenOn(admission, root, at, ids)) {
     if (written !== undefined) [written.root, written.ids] = [root, ids];
     return undefined;
@@ -1006,6 +1104,27 @@ export function* transferredDecider(
   )
     return null;
   return yield* firstValue(admission, root, at, ids);
+}
+
+/** A stored value's root group and asked path with its rests' ids, as `transferredDecider` and `literalOn` read them. */
+export interface DeciderRoot {
+  readonly root: DeciderGroup;
+  readonly at: PathRef;
+  readonly ids: (rest: number) => number;
+}
+
+export function deciderRoot(admission: Admission, task: Expansion, asked: Rest): DeciderRoot {
+  const root = groupOf(admission, [rootMember(task)]);
+  // (an array's rests named as before, all at once; a span's by its rests' path ids as asked, below zero so the two
+  // never meet in a group's answers, G3 stage 1)
+  const at = restRef(admission.pass.contract, asked);
+  let ids: (rest: number) => number;
+  if (at.kind === "span") ids = (rest) => -1 - at.from(rest).id();
+  else {
+    const list = restIds(admission, at.steps());
+    ids = (rest) => list[rest]!;
+  }
+  return { root, at, ids };
 }
 
 /** The decider's root group's one member: the stored value's own task, chosen, not below an operation. */

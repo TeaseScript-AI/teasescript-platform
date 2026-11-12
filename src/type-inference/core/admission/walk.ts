@@ -21,7 +21,17 @@ import type { FlowNode } from "../flow-graph.js";
 import { dictList } from "../method-categories.js";
 import { stepName, type CoreProgram } from "../program.js";
 import { sharing } from "../sharing.js";
-import type { EvaluationKey, Expansion, Part, Stop, Stops, Via, ViaChain } from "./model.js";
+import type {
+  EvaluationKey,
+  Expansion,
+  Link,
+  Part,
+  Stop,
+  Stops,
+  Via,
+  ViaChain,
+  View,
+} from "./model.js";
 import { permittedAt } from "./permitted.js";
 import { fieldsOf, sourceOfRead } from "./structure.js";
 import { readNow, type Reads } from "../inherited/reads.js";
@@ -392,7 +402,10 @@ export function* expandRead(
   let stop: Expansion["stop"] = null;
   const parts: Part[] = [];
   const carried =
-    literal || after || term !== null || (yield* sourceOfRead(admission, value)) !== null
+    literal ||
+    after ||
+    term !== null ||
+    (yield* program.work.outsideSteps(sourceOfRead(admission, value))) !== null
       ? []
       : yield* admission.carriersOfRead(value, strip);
   if (literal && strip.length > 0) {
@@ -463,6 +476,7 @@ export function* expandRead(
     node,
     strip,
     inherits,
+    literal,
     stop,
     parts,
   };
@@ -616,6 +630,169 @@ export function* stopsOfRead(
     }
   memo.set(value, stops);
   return stops;
+}
+
+/**
+ * #2289 (R50): a recipe's view (`View`), the walk of `stopsOfRead` from that task in its own coordinates, but a literal
+ * with a step of several elements (a cell) is a link where it stands: its steps of one element are walked as before
+ * (a cell of one element is that element's own reading), its cells are not, so a literal's body is never walked again
+ * for each value that holds it (`literals/cell.ts`). Once per recipe and pass, built when first asked.
+ */
+export function* viewOfRead(admission: Admission, start: Expansion): Reads<View> {
+  const known = admission.views.get(start.id);
+  if (known !== undefined) return known;
+  // (#2289 R53, R67: the structure every later reader shares, counted to the analysis total and never to the decision
+  // that first asked (r4-349). Only the lazy builds of a view, a body and a body's index, and only their own steps:
+  // every read a build yields, a read of a built one, the comparison evaluation and every item read run and are charged
+  // to the decision that asks (`sharedStructure`); the total's allowance stays their bound)
+  return yield* admission.pass.program.work.sharedStructure(buildView(admission, start));
+}
+
+function* buildView(admission: Admission, start: Expansion): Reads<View> {
+  const { program, contract } = admission.pass;
+  const view: View = {
+    written: new Map(),
+    values: new Map(),
+    literals: new Map(),
+    links: new Map(),
+    depths: null,
+  };
+  const sources = new Set<string>();
+  const root = rootKey();
+  const pending: (readonly [
+    Expansion,
+    readonly string[],
+    boolean,
+    ViaChain | null,
+    boolean,
+    EvaluationKey,
+  ])[] = [[start, [], false, null, true, root]];
+  while (pending.length > 0) {
+    const [task, path, deep, via, single, key] = pending.pop()!;
+    program.work.charge("indexSteps");
+    const { value: current, node: at, strip } = task;
+    if (task.inherits !== null) {
+      const inherits: Stop = {
+        key,
+        value: current,
+        node: at,
+        path,
+        term: null,
+        from: task.inherits.from,
+        strip: task.inherits.strip,
+        deep,
+        single,
+        via,
+      };
+      const text = keptText(admission.work, path);
+      const list = view.written.get(text);
+      if (list === undefined) view.written.set(text, [inherits]);
+      else list.push(inherits);
+    }
+    const own = task.stop;
+    // (F2's dedupe, as `stopsOfRead`'s)
+    const map = own === null ? null : view[own.list];
+    const pathKey = own === null ? "" : keptText(admission.work, path);
+    let kept = own !== null;
+    if (
+      own !== null &&
+      sharing() &&
+      path.length > 0 &&
+      own.list === "values" &&
+      (yield* program.work.outsideSteps(sourceOfRead(admission, current))) !== null &&
+      program.work.outside(() => contract.ingressOf(current)) === null
+    ) {
+      const identity = keptParts(
+        admission.work,
+        pathKey,
+        strip,
+        viaSignature(admission, via),
+        deep,
+        single,
+        program.work.outside(() => contract.identityOf(current).id),
+        program.work.outside(() => contract.readSnapshot(current)) ?? "",
+      );
+      if (sources.has(identity)) kept = false;
+      else sources.add(identity);
+    }
+    if (kept) {
+      const stop: Stop = {
+        key,
+        value: current,
+        node: at,
+        path,
+        term: own!.term,
+        from: null,
+        strip: own!.strip,
+        deep,
+        single,
+        via,
+      };
+      const list = map!.get(pathKey);
+      if (list === undefined) map!.set(pathKey, [stop]);
+      else list.push(stop);
+    } else if (own !== null) continue;
+    // (a literal's cells: a link where it stands, its steps of one element walked)
+    if (task.literal) program.work.charge("checks", task.parts.length);
+    const cellular = task.literal ? cellSteps(task) : null;
+    if (cellular !== null && cellular.size > 0) {
+      const text = keptText(admission.work, path);
+      const link: Link = { key, value: current, node: at, path, strip, deep, single, via };
+      keep(admission.work, 1);
+      const list = view.links.get(text);
+      if (list === undefined) view.links.set(text, [link]);
+      else list.push(link);
+    }
+    for (let index = task.parts.length - 1; index >= 0; index -= 1) {
+      const part = task.parts[index]!;
+      if (cellular?.has(part.step) === true) continue;
+      pending.push([
+        yield* partOfRead(admission, part),
+        part.step === null ? path : keptSteps(admission.work, path, [part.step]),
+        part.deep ?? deep,
+        part.role === null
+          ? via
+          : viaLink(program, via, {
+              value: current,
+              node: at,
+              path,
+              strip,
+              operand: part.value,
+              role: part.role,
+            }),
+        single && part.single,
+        longerKey(key, part.position),
+      ]);
+    }
+  }
+  rankKeys(program.work, root);
+  for (const map of [view.written, view.values, view.literals, view.links])
+    for (const list of map.values() as Iterable<{ readonly key: EvaluationKey }[]>) {
+      program.work.charge("checks", sortCost(list.length));
+      list.sort((a, b) => compareKeys(a.key, b.key));
+    }
+  admission.views.set(start.id, view);
+  return view;
+}
+
+/** Whether a literal task has a cell (`cellSteps`), once per recipe: its parts counted when first asked. */
+export function hasCell(admission: Admission, task: Expansion): boolean {
+  let known = cellular.get(task);
+  if (known === undefined) {
+    admission.pass.program.work.charge("checks", task.parts.length);
+    cellular.set(task, (known = task.literal && cellSteps(task).size > 0));
+  }
+  return known;
+}
+const cellular = new WeakMap<Expansion, boolean>();
+
+/** A literal task's steps of several elements (its cells, B1); `step` `null` for a projection's. */
+export function cellSteps(task: Expansion): ReadonlySet<string | null> {
+  const counts = new Map<string | null, number>();
+  for (const part of task.parts) counts.set(part.step, (counts.get(part.step) ?? 0) + 1);
+  const out = new Set<string | null>();
+  for (const [step, count] of counts) if (count > 1) out.add(step);
+  return out;
 }
 
 /**
