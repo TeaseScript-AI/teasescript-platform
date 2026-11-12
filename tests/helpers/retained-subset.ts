@@ -1,0 +1,84 @@
+/*
+ * #1072 step 1b (R28): the type-core test files CI runs frozen (`retained-instrument-preload.ts`), chosen by measurement:
+ * per file, what it exercises frozen (each kind `Retained` makes, by its name and site; each owner kind; each registered
+ * function) and what freezing it costs in CI; then a greedy cover of everything the 86 files exercise, the cheapest
+ * first per item it adds. The whole frozen survey (`RETAINED_FREEZE=all`, docs/TESTING.md) runs every file. Measured at
+ * #2417's head 10a2ad0f (notes `o4-lead/plans/1072-retained-head0.md`, Amendment 3, "The frozen subset").
+ */
+
+/** The files CI freezes, by name, each with what it is the first of the subset to exercise. */
+export const FROZEN_IN_CI: ReadonlyMap<string, string> = new Map<string, string>([
+  [
+    "type-core-landings.test",
+    "302 first: arena Contract.layersById (contract.ts), arena Contract.pathChildren (contract.ts) and 300 more",
+  ],
+  [
+    "type-core-answers.test",
+    "32 first: array Contract.#stopped[] (contract.ts), array Listing.run.sources (property-names.ts) and 30 more",
+  ],
+  [
+    "type-core-contract-descriptors.test",
+    "14 first: arena Frontier.pending (contract/frontier.ts), arena Frontier.pending (contract/frontier.ts) and 12 more",
+  ],
+  [
+    "type-core-discharge-runtime.test",
+    "4 first: map answers.KEPT_NAMES[] (answers.ts), map site.EVALUATIONS.at (messages/site.ts) and 2 more",
+  ],
+  [
+    "type-core-labels.test",
+    "5 first: function DefinitionLists.joined (definitions.ts), function DefinitionLists.live (tests/helpers/type-core/type-core-narrowing.ts) and 3 more",
+  ],
+  [
+    "type-core-plus-index.test",
+    "13 first: array PlusIndex.bindingsHolding[] (indexes/plus-index.ts), map DefinitionIndex.storeTargets (answers.ts) and 11 more",
+  ],
+  [
+    "type-core-contributions.test",
+    "2 first: map SubLayer.own (contract/prefix-index/layers.ts), record SubLayer.paths[] (contract/prefix-index/layers.ts)",
+  ],
+  [
+    "type-core-object-presence.test",
+    "8 first: function PathSteps.kept (contract/key-ids.ts), map ExactPath.#sourceSpans[] (exact-path.ts) and 6 more",
+  ],
+  ["type-core-items.test", "1 first: record IngressCell (items.ts)"],
+  [
+    "type-core-discharge.test",
+    "8 first: map Contract.prefixUnions[] (contract/prefix-index/tries.ts), map Contract.prefixViews[] (contract/prefix-index/tries.ts) and 6 more",
+  ],
+  [
+    "type-core-written-decider.test",
+    "2 first: map PathFacts.joined (contract/key-ids.ts), map PathFacts.prefixAt (contract/key-ids.ts)",
+  ],
+  [
+    "type-core-pushed-reads.test",
+    "47 first: arena Frontier.product.atoms (contract/frontier.ts), arena Frontier.terms.pending (contract/frontier.ts) and 45 more",
+  ],
+  [
+    "type-core-lost-check.test",
+    "2 first: map Contract.#belowStop[] (contract.ts), set SubLayer.own[] (contract/prefix-index/layers.ts)",
+  ],
+  [
+    "type-core-property-names.test",
+    "9 first: function SubLayer.paths.demand (contract/prefix-index/summaries.ts), map Contract.holdersBelow[] (contract/prefix-index/layers.ts) and 7 more",
+  ],
+  [
+    "type-core-key-ids.test",
+    "4 first: function PathSteps.followedBy (contract/key-ids.ts), function test.copiedKey (tests/type-core/type-core-key-ids.test.ts) and 2 more",
+  ],
+  [
+    "type-core-messages.test",
+    "4 first: map site.PARAMETERS[] (messages/site.ts), map site.PROPERTIES[] (messages/site.ts) and 2 more",
+  ],
+  [
+    "type-core-signatures.test",
+    "1 first: set Contract.bindingNamesOf.stored (contract/selections.ts)",
+  ],
+  [
+    "type-core-work-a.test",
+    "3 first: map ExactPath.copies.exits[] (exact-path.ts), map ExactPath.copies.markSeveral[] (exact-path.ts) and 1 more",
+  ],
+]);
+
+// What the subset does not exercise, by site; the whole survey covers the first, and no test makes the second:
+// - function `test.subAt` (`tests/type-core/type-core-contract.test.ts`): a test's probe, exercised only by that file;
+// - set `SubSource.defs` (`contract/prefix-index/layers.ts`, `relevantSubs`): a source two found layers bring.
