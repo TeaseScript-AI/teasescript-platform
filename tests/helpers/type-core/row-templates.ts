@@ -7,7 +7,7 @@ import type { SyntaxKind } from "../../../src/type-inference/core/slice-syntax.j
  * its arguments). A row without a position has one source that uses it. Sources are minimal
  * programs inside today's slice; the guard adds the `exit` each script ends with.
  */
-export const ROW_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly string[]>>> = {
+const BASE_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly string[]>>> = {
   letStatement: [
     "let x: integer = hostValue",
     "let x = hostValue",
@@ -23,7 +23,6 @@ export const ROW_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly string[
   ifStatement: ['if hostValue == null {\n  say "y"\n} else {\n  say "n"\n}'],
   repeatStatement: ['repeat hostValue {\n  say "r"\n}'],
   forStatement: ["for item in hostValue {\n  say item\n}"],
-  sayStatement: ["say hostValue"],
   expressionStatement: ["toJson(hostValue)"],
   // (the guard ends every source with `exit`, which a script needs; this row's source is that `exit`)
   exitStatement: ['say "a"'],
@@ -71,7 +70,103 @@ export const ROW_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly string[
     'let n: integer = load "k", default: hostValue',
     "let n = load hostValue, default: 1",
   ],
+  // the `pass` rows without operands
+  speakerSetterStatement: ['speaker player\nsay "a"'],
+  stopAudioStatement: ["stopAudio"],
+  hideImageStatement: ["hideImage"],
+  // (no nested form after `skippable`, which reads a following `[` as an element of a name)
+  sayStatement: ["say skippable hostValue"],
 };
+
+/**
+ * The operand positions of the commands, by the names their rows cite (`OperandCheck`, `DISPOSITIONS`' `operands`; a
+ * `say`'s are its parts), each a source with the host global there: the row guard compares the names with the rows', so
+ * a position without a citation, or a citation without a position, fails it.
+ */
+export const OPERAND_TEMPLATES: Readonly<
+  Partial<Record<SyntaxKind, Readonly<Record<string, readonly string[]>>>>
+> = {
+  showImageStatement: { image: ["showImage hostValue"] },
+  openUrlStatement: {
+    url: ["openUrl(hostValue)"],
+    buttonText: ['openUrl("https://example.com", buttonText: hostValue)'],
+    alwaysButton: ['openUrl("https://example.com", alwaysButton: hostValue)'],
+  },
+  exportTextStatement: {
+    text: ["exportText(hostValue)"],
+    title: ['exportText("t", title: hostValue)'],
+    fileName: ['exportText("t", fileName: hostValue)'],
+  },
+  showPopupStatement: {
+    message: ["showPopup hostValue"],
+    buttonText: ['showPopup(message: "m", buttonText: hostValue)'],
+  },
+  waitStatement: { duration: ["wait hostValue", "wait hostValue s"] },
+  deleteStatement: { key: ["delete hostValue"] },
+  showButtonStatement: {
+    label: ["showButton hostValue"],
+    background: ['showButton "Go", background: hostValue'],
+    timeout: ['showButton "Go", timeout: hostValue'],
+  },
+  sayStatement: {
+    presentation: ['say bubble(color: hostValue) "a"', 'say prose(align: hostValue) "a"'],
+    value: ["say hostValue"],
+    pacing: ['say "a", hostValue'],
+  },
+};
+
+/**
+ * What an operand may hold in place of the host global, each holding it in turn: a load's default, a `get`'s default and
+ * a call's argument, so a nested expression of each kind the check result indexes stands at every operand position.
+ */
+export const NESTED_OPERANDS: readonly string[] = [
+  // (none starts with a parenthesis, which some commands read as their own argument list)
+  '[load "n", default: hostValue][0]',
+  "[hostValue].get(0, default: hostValue)",
+  "fromJson(hostValue, default: hostValue)",
+];
+
+/** A command's templates: each operand's own, then each again with every nested form in place of the host global. */
+function operandTemplates(operands: Readonly<Record<string, readonly string[]>>): string[] {
+  const own = Object.values(operands).flat();
+  return [
+    ...own,
+    ...own.flatMap((template) =>
+      NESTED_OPERANDS.map((nested) => template.replace("hostValue", nested)),
+    ),
+  ];
+}
+
+export const ROW_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly string[]>>> = {
+  ...BASE_TEMPLATES,
+  ...Object.fromEntries(
+    Object.entries(OPERAND_TEMPLATES).map(([row, operands]) => {
+      // EVIDENCE: invariant: the templates' keys are AST kinds (`OPERAND_TEMPLATES`' type).
+      const kind = row as SyntaxKind;
+      return [row, [...(BASE_TEMPLATES[kind] ?? []), ...operandTemplates(operands)]];
+    }),
+  ),
+};
+
+/** A value of each kind class in place of an operand's host global: a whole number, text, a truth value, `null`. */
+export const MISFIT_LITERALS: readonly string[] = ["2", '"text"', "true", "null"];
+
+/**
+ * Each command operand's first template with each literal of `MISFIT_LITERALS` in place of the host global: the sources
+ * on which today's compile-time operand checks may differ from the route's (`DECLARED_RULE_DIFFERENCES`).
+ */
+export function misfitSources(): { row: SyntaxKind; operand: string; source: string }[] {
+  return Object.entries(OPERAND_TEMPLATES).flatMap(([row, operands]) =>
+    Object.entries(operands!).flatMap(([operand, [template]]) =>
+      MISFIT_LITERALS.map((literal) => ({
+        // EVIDENCE: invariant: the templates' keys are AST kinds (`OPERAND_TEMPLATES`' type).
+        row: row as SyntaxKind,
+        operand,
+        source: template!.replace("hostValue", literal),
+      })),
+    ),
+  );
+}
 
 /**
  * The positions of open rows whose host global the route refuses after the syntax gate, by name: the source with the
@@ -152,3 +247,152 @@ export const DECLARED_RUN_DIFFERENCES: readonly {
     todayAt: call!,
   })),
 ];
+
+/**
+ * The command operands where today's checker gives a compile error for a literal of a kind the operand does not take,
+ * and the route publishes a plan whose instruction refuses that value when it runs (#2488's design rulings, R2: a
+ * closed list, which the command operand table empties): the misfit's source (`misfitSources`), today's code, and the
+ * route's failure, its code at the text `at`. The guard requires each in every mode, with nothing of the statement's
+ * effect happening, and fails on a difference no entry names and on an entry that no longer occurs.
+ */
+export const DECLARED_RULE_DIFFERENCES: readonly {
+  readonly row: SyntaxKind;
+  readonly operand: string;
+  readonly source: string;
+  readonly code: string;
+  readonly failure: { readonly code: string; readonly at: string };
+}[] = (
+  [
+    // row, operand, source, today's code, the route's failure code, and the text it stands at
+    ["deleteStatement", "key", "delete 2", "TSV038", "TSR054", "2"],
+    ["deleteStatement", "key", "delete true", "TSV038", "TSR054", "true"],
+    ["deleteStatement", "key", "delete null", "TSV038", "TSR054", "null"],
+    [
+      "exportTextStatement",
+      "fileName",
+      'exportText("t", fileName: 2)',
+      "TSV043",
+      "TSR050",
+      'exportText("t", fileName: 2)',
+    ],
+    [
+      "exportTextStatement",
+      "fileName",
+      'exportText("t", fileName: true)',
+      "TSV043",
+      "TSR050",
+      'exportText("t", fileName: true)',
+    ],
+    [
+      "exportTextStatement",
+      "fileName",
+      'exportText("t", fileName: null)',
+      "TSV043",
+      "TSR050",
+      'exportText("t", fileName: null)',
+    ],
+    ["exportTextStatement", "text", "exportText(2)", "TSV043", "TSR050", "exportText(2)"],
+    ["exportTextStatement", "text", "exportText(true)", "TSV043", "TSR050", "exportText(true)"],
+    ["exportTextStatement", "text", "exportText(null)", "TSV043", "TSR050", "exportText(null)"],
+    [
+      "openUrlStatement",
+      "alwaysButton",
+      'openUrl("https://example.com", alwaysButton: 2)',
+      "TSV043",
+      "TSR050",
+      'openUrl("https://example.com", alwaysButton: 2)',
+    ],
+    [
+      "openUrlStatement",
+      "alwaysButton",
+      'openUrl("https://example.com", alwaysButton: "text")',
+      "TSV043",
+      "TSR050",
+      'openUrl("https://example.com", alwaysButton: "text")',
+    ],
+    [
+      "openUrlStatement",
+      "alwaysButton",
+      'openUrl("https://example.com", alwaysButton: null)',
+      "TSV043",
+      "TSR050",
+      'openUrl("https://example.com", alwaysButton: null)',
+    ],
+    ["openUrlStatement", "url", "openUrl(2)", "TSV043", "TSR050", "openUrl(2)"],
+    ["openUrlStatement", "url", 'openUrl("text")', "TSV043", "TSR050", 'openUrl("text")'],
+    ["openUrlStatement", "url", "openUrl(true)", "TSV043", "TSR050", "openUrl(true)"],
+    ["openUrlStatement", "url", "openUrl(null)", "TSV043", "TSR050", "openUrl(null)"],
+    ["sayStatement", "pacing", 'say "a", 2', "TSV043", "TSR050", 'say "a", 2'],
+    ["sayStatement", "pacing", 'say "a", "text"', "TSV043", "TSR050", 'say "a", "text"'],
+    ["sayStatement", "pacing", 'say "a", true', "TSV043", "TSR050", 'say "a", true'],
+    ["sayStatement", "pacing", 'say "a", null', "TSV043", "TSR050", 'say "a", null'],
+    [
+      "showButtonStatement",
+      "background",
+      'showButton "Go", background: 2',
+      "TSV029",
+      "TSR052",
+      'showButton "Go", background: 2',
+    ],
+    [
+      "showButtonStatement",
+      "background",
+      'showButton "Go", background: "text"',
+      "TSV029",
+      "TSR052",
+      'showButton "Go", background: "text"',
+    ],
+    [
+      "showButtonStatement",
+      "background",
+      'showButton "Go", background: true',
+      "TSV029",
+      "TSR052",
+      'showButton "Go", background: true',
+    ],
+    [
+      "showButtonStatement",
+      "timeout",
+      'showButton "Go", timeout: 2',
+      "TSV043",
+      "TSR050",
+      'showButton "Go", timeout: 2',
+    ],
+    [
+      "showButtonStatement",
+      "timeout",
+      'showButton "Go", timeout: "text"',
+      "TSV043",
+      "TSR050",
+      'showButton "Go", timeout: "text"',
+    ],
+    [
+      "showButtonStatement",
+      "timeout",
+      'showButton "Go", timeout: true',
+      "TSV043",
+      "TSR050",
+      'showButton "Go", timeout: true',
+    ],
+    [
+      "showButtonStatement",
+      "timeout",
+      'showButton "Go", timeout: null',
+      "TSV043",
+      "TSR050",
+      'showButton "Go", timeout: null',
+    ],
+    ["showImageStatement", "image", "showImage 2", "TSV036", "TSR050", "showImage 2"],
+    ["showImageStatement", "image", "showImage true", "TSV036", "TSR050", "showImage true"],
+    ["waitStatement", "duration", "wait 2", "TSV043", "TSR050", "2"],
+    ["waitStatement", "duration", 'wait "text"', "TSV043", "TSR050", '"text"'],
+    ["waitStatement", "duration", "wait true", "TSV043", "TSR050", "true"],
+    ["waitStatement", "duration", "wait null", "TSV043", "TSR050", "null"],
+  ] as const
+).map(([row, operand, source, code, failure, at]) => ({
+  row,
+  operand,
+  source,
+  code,
+  failure: { code: failure, at },
+}));
