@@ -159,7 +159,7 @@ export const NOT_PINS = [
     is: "a runner's fixture timings",
   },
   { file: "tests/semantic/list-function-checks.test.ts", is: "random seeds" },
-  { file: "tests/runtime/language/message-markup.test.ts", is: "character codes" },
+  { file: "tests/runtime/presentation/message-markup.test.ts", is: "character codes" },
   { file: "tests/runtime/engine/runtime-random.test.ts", is: "a generator's expected states" },
   { file: "tests/type-core/messages/type-core-messages-examples.test.ts", is: "random seeds" },
   { file: "tests/helpers/type-core/type-core-enclosing.ts", is: "sample values of a host global" },
