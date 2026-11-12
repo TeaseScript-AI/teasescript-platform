@@ -24,6 +24,7 @@ import type {
   ComposerState,
   FormDraft,
 } from "../../player/vue/src/interaction/useComposerState.js";
+import type { PlayerTranscriptEntryPresentation } from "../../player/presentation/model.js";
 import type { FormUpdates } from "../../player/vue/src/interaction/useFormUpdates.js";
 import type { InputSectionHost } from "../../player/vue/src/session/runtime-input.js";
 import { normalizeColor } from "../../src/color.js";
@@ -87,6 +88,11 @@ type Modules = {
     readonly consumed: number | null;
   }) => ComposerDescriptor;
   descriptorKey: (next: ComposerDescriptor) => string;
+  displayedList: () => (
+    entries: readonly PlayerTranscriptEntryPresentation[],
+    pending: PlayerTranscriptEntryPresentation | null,
+  ) => readonly PlayerTranscriptEntryPresentation[];
+  rowKey: (entry: PlayerTranscriptEntryPresentation) => string;
   useAnswerSubmission: (host: {
     readonly composer: ComposerState;
     readonly forms: Pick<FormUpdates, "unacknowledged" | "commitField" | "stepField">;
@@ -123,6 +129,7 @@ before(async () => {
   const submission = await loadPlayerModule("player/vue/src/interaction/useAnswerSubmission.ts");
   const forms = await loadPlayerModule("player/vue/src/interaction/useFormUpdates.ts");
   const input = await loadPlayerModule("player/vue/src/session/runtime-input.ts");
+  const list = await loadPlayerModule("player/vue/src/transcript/displayedList.ts");
   // EVIDENCE: validation: Vite loaded the real source modules; these are their exports.
   modules = {
     usePlayerSession: session.usePlayerSession,
@@ -131,6 +138,8 @@ before(async () => {
     descriptorKey: composer.descriptorKey,
     useAnswerSubmission: submission.useAnswerSubmission,
     useFormUpdates: forms.useFormUpdates,
+    displayedList: list.displayedList,
+    rowKey: list.rowKey,
   } as Modules;
   // EVIDENCE: validation: as above, the input sections' intents.
   intents = input.intents as typeof intents;
@@ -358,6 +367,7 @@ const CASES = {
   "N5 popup": TOPOLOGIES,
   "N6 local and runtime agree": TOPOLOGIES,
   "N6 the predicted line is the runtime's": TOPOLOGIES,
+  "N6 a continuation of more than 64 rows": TOPOLOGIES,
   "N7 commit": TOPOLOGIES,
   "N7 refused commit": TOPOLOGIES,
   "N7 a block that returns at once": TOPOLOGIES,
@@ -943,6 +953,61 @@ RERUN.rows(
     const record = await sendSettled(p);
     assert.equal(record?.row, null);
     assert.equal(p.submission.pending.value, null);
+    return end();
+  },
+);
+
+RERUN.rows(
+  "N6 a continuation of more than 64 rows",
+  "the answer's runtime row takes its row over also when the answer's continuation adds more than 64 rows at once",
+  async (context, topology, end) => {
+    const p = await page(
+      context,
+      topology,
+      script(
+        'let go = askText "Go?"',
+        'repeat 100 {\n    say "A line of the continuation.", instant\n}',
+        'let next = askChoice "On"',
+      ),
+    );
+    const list = modules.displayedList();
+    // Each publication while the answer is pending, listed as `Transcript` lists it. The adapter appends to one entries
+    // array, so each publication is a new session, not a new array, and its listing is copied as it was then.
+    const shown: (readonly PlayerTranscriptEntryPresentation[])[] = [];
+    const stop = watch(
+      () => p.player.session.value,
+      (session) => {
+        const pending = p.submission.predicted.value;
+        if (session && pending) shown.push([...list(session.transcriptEntries, pending)]);
+      },
+      { flush: "sync" },
+    );
+    context.after(stop);
+    type(p.composer, "Go");
+    p.submission.send("input");
+    const record = p.submission.pending.value!;
+    const answer = record.entry!;
+    assert.equal(answer.kind, "message", "the answer has a predicted row");
+    await until(() => record.stage === "settled", "settled", "host");
+    const arrived = shown.filter((rows) =>
+      rows.some((row) => row !== answer && modules.rowKey(row) === modules.rowKey(answer)),
+    );
+    assert.ok(
+      arrived.length > 0,
+      "a publication with the runtime's row while the answer was pending",
+    );
+    for (const rows of arrived) {
+      assert.equal(
+        new Set(rows.map(modules.rowKey)).size,
+        rows.length,
+        "one row per key: the pending row is not listed beside its runtime row",
+      );
+      assert.ok(!rows.includes(answer), "the runtime's row replaced the pending one");
+    }
+    assert.ok(
+      p.player.session.value!.transcriptEntries.length > 64 + 1,
+      "the continuation is longer than 64 rows",
+    );
     return end();
   },
 );
