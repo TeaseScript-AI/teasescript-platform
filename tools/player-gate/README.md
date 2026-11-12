@@ -86,9 +86,12 @@ Pass or fail is derived from primary records, never from a cached flag:
     usable. It runs on the `delayed` variant at 250 ms (**The keys** below); a build whose answers settle at once is no
     oracle, since a key can land after the answer settled and then belongs to the next question. A block case moves
     the page's clock past its block's timer just before Enter, so the block always overtakes the answer, and fails by
-    that name if it does not. On the `composer-area` fixture package, an answer of each question kind leaves the
-    composer's area, in its flight, as it is while nothing is asked (a password's empty read-only field excepted); and
-    a form's date or time field committed by Enter, and the lock's phases, keep the focus their continuation gives.
+    that name if it does not. On the `composer-area` fixture package, the answer to each of its thirteen question
+    kinds, read while it is on its way, leaves the composer's area as it is while nothing is asked: the same elements
+    in the same order, with their attributes, own text, `disabled`, `readOnly` and `value`. Left out are the field's
+    token, `id`, `for`, `aria-describedby` and `aria-controls`, and behaviour, focus and styles; a password's field is
+    checked only as empty and read-only. A form's date or time field committed by Enter, and the lock's phases, keep
+    the focus their continuation gives.
     A Start the host prepares over each of those questions or the lock's dialog, alone or after an error stop in the
     same task, is reached by the pointer and by Tab, and activates.
 - **`validate.mjs`** derives every field again from a row's validated records, scenario by scenario and part by part,
