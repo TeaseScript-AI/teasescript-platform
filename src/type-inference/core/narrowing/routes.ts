@@ -19,7 +19,13 @@ import { countIn, type TreeBlock, type TreeStatement } from "./statement-tree.js
 import { selectsElement } from "../method-categories.js";
 import type { Feasibility, Place } from "./route-tests.js";
 import type { Candidate, Candidates, Layer } from "./route-candidates.js";
-import { RouteEntries, rootName, type EntryPoint, type RouteWriter } from "./route-entries.js";
+import {
+  RouteEntries,
+  rootName,
+  type Entry,
+  type EntryPoint,
+  type RouteWriter,
+} from "./route-entries.js";
 import { propertyName } from "../program.js";
 
 /*
@@ -224,7 +230,6 @@ export class NarrowingRoutes extends RouteEntries {
     const { program, handlers } = this.pass;
     if (
       tag !== "null" ||
-      this.#feasible !== null ||
       !program.live(node) ||
       some(program.work, "exactQueries", path.steps, (step) => step.kind !== "property")
     )
@@ -238,13 +243,25 @@ export class NarrowingRoutes extends RouteEntries {
     return yield* this.entered(node, key);
   }
 
+  /** The program default's feasibility, where the default holds (`#feasible`, set by the first `required`). */
+  protected defaultHolds(): Feasibility | null {
+    return this.#feasible;
+  }
+
   /**
    * The seed at a jump's point (r4-451): the nearest certified `null` store before it in its body (the candidate a use
    * there would examine, a block's own in a block's body), its route to the point open, its segment holding nothing.
    */
-  protected *seedAt(key: Key, name: string, point: EntryPoint): Work<Definition | null> {
+  protected *seedAt(
+    key: Key,
+    name: string,
+    point: EntryPoint,
+    into: Entry,
+  ): Work<Definition | null> {
     this.#work.charge("exactQueries");
-    const found = yield* this.#examinedAt(key, "null", point.node, point.chain, point.at, []);
+    // (under the program default, the jump stands at the entry it makes, R2.2)
+    if (!this.standsAt(into, point.node, point.chain)) return null;
+    const found = yield* this.#examinedAt(key, "null", point.node, point.chain, point.at, [], into);
     return found !== null &&
       (yield* this.certifies(found, key)) &&
       this.writerOpen(key, name, found.chain, point)
@@ -360,6 +377,7 @@ export class NarrowingRoutes extends RouteEntries {
     place: readonly Place[] | null,
     at: number,
     others: readonly ItemTag[],
+    into: Entry | null = null,
   ): Work<Candidate | null> {
     this.#work.charge("exactQueries");
     const { program, contract } = this.pass;
@@ -392,7 +410,7 @@ export class NarrowingRoutes extends RouteEntries {
     const stored = found.def.value === undefined ? null : program.places[found.def.value]?.site;
     if (stored !== undefined && stored !== null && stored.start <= at && at < stored.end)
       return null;
-    return this.#open(key, tag, found, chain, node) ? found : null;
+    return this.#open(key, tag, found, chain, node, into) ? found : null;
   }
 
   /** X7's registration-before-read predicate (`afterSomeCreation`), its scan of the read's loops charged. */
@@ -591,14 +609,22 @@ export class NarrowingRoutes extends RouteEntries {
     found: Candidate,
     chain: readonly Place[],
     node: FlowNode,
+    into: Entry | null,
   ): boolean {
     this.#work.charge("eventSteps");
     const { program } = this.pass;
     const d = found.def;
     if (!program.live(d.node) || program.dom.edom(d.node) !== program.dom.edom(node)) return false;
-    // (in a program the default holds, the writer and the use stand where a route may promote: `#plain`)
-    if (this.#feasible !== null && (!this.#plain(d.node, found.chain) || !this.#plain(node, chain)))
+    // (in a program the default holds, the writer and the use stand where a route may promote: `#plain`, or at the
+    // entry a seed's jump makes, R2.2, the jump already standing there)
+    if (
+      this.#feasible !== null &&
+      (into === null
+        ? !this.#plain(d.node, found.chain) || !this.#plain(node, chain)
+        : !this.standsAt(into, d.node, found.chain))
+    )
       return false;
+    const hazards = into === null ? this.#feasible?.hazards : this.#feasible?.entryHazards;
     const layer = this.#testLayer(key, tag);
     const writer = found.chain;
     let level = 0;
@@ -625,13 +651,8 @@ export class NarrowingRoutes extends RouteEntries {
       if (block.owner !== null && !this.leaves(block.owner, layer.calls)) return false;
       // (in a program the default holds, nothing after the writer in its block that a run might not pass, #1938)
       if (
-        this.#feasible !== null &&
-        countIn(
-          this.#work,
-          this.#feasible.hazards.get(block.id) ?? [],
-          index + 1,
-          block.statements.length,
-        ) > 0
+        hazards !== undefined &&
+        countIn(this.#work, hazards.get(block.id) ?? [], index + 1, block.statements.length) > 0
       )
         return false;
     }
@@ -776,25 +797,9 @@ export class NarrowingRoutes extends RouteEntries {
    * declaration (`Feasibility.headed`). Anything else keeps the warning: that a run reaches it there is not proved.
    */
   #plain(node: FlowNode, chain: readonly Place[]): boolean {
-    this.#work.charge("eventSteps");
-    const work = this.#work;
-    const { unentered, files, hazards, headed } = this.#feasible!;
-    return (
-      chain.length > 0 &&
-      files.has(chain[0]!.block) &&
-      this.pass.program.dom.edom(node) === null &&
-      !some(
-        work,
-        "eventSteps",
-        chain,
-        (place) =>
-          unentered.has(place.block) ||
-          (place.block.owner !== null && place.block.owner.loop !== null) ||
-          (place.index >= 0 && headed.has(place.block.statements[place.index]!)) ||
-          countIn(work, hazards.get(place.block.id) ?? [], 0, place.index) > 0,
-      )
-    );
+    return this.clear(this.#feasible!, this.#feasible!.hazards, node, chain, null);
   }
+
 
   /**
    * A `load` read where it is used, in a program the default holds (#1938): its literal default (`#ownLoad`) where the
