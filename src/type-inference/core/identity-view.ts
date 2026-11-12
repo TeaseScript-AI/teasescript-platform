@@ -21,8 +21,8 @@ import type { CoreAnalysisRequest, CoreFile } from "./program.js";
  * A call is read so only where its callee is a plain name that the project declares as exactly one function, that
  * declaration is an identity function visible from the call's file (global, or the file's own), no parameter or
  * variable of the enclosing function has that name, the call has one positional argument, and it stands in no place
- * slot; every other call stays a call. A place slot is where the analysis reads parentheses as the place they hold, not
- * its value (`placeSlots`): there the call's result is a copy of its argument, so the call stays one.
+ * slot; every other call stays a call. A place slot is where a write through parentheses reaches the place they hold
+ * (`placeSlots`): there the call's result is a copy of its argument, so the call stays one.
  *
  * The view keeps every node of the source that holds no such call and copies the others, a call becoming a
  * parenthesized expression with the call's span. The analysis reads the view; the front end and the plan read the
@@ -325,14 +325,12 @@ function viewProgram(
   return { program: viewedProgram(rebuilt.get(program)), calls: reads.size, steps };
 }
 
-const COMPARISONS: ReadonlySet<string> = new Set(["==", "!=", "<", "<=", ">", ">="]);
-
 /**
- * The place slots directly below `node`, `held` where `node` stands in one (#2493, r4-452): a store's target's receiver
- * (P1), the receiver of a method that changes it (P2), a test's operand, as the narrowings and the guards read it (a
- * comparison's, a type test's, a `switch` subject; P3), and below a slot, what parentheses hold and a property's or an
- * element's receiver. The analysis's readers that take a parenthesized expression for its place read these slots only
- * (the inventory in tests/type-core/type-core-identity.test.ts).
+ * The place slots directly below `node`, `held` where `node` stands in one (#2493, r4-452): the slots through which a
+ * write reaches, a store's target's receiver and the receiver of a method that changes it, and below a slot, what
+ * parentheses hold and a property's or an element's receiver. The analysis's readers that take a parenthesized
+ * expression for its place read these slots only, as a write's; a test reads its subject's value, which a call's result
+ * shares with its argument when it runs (the inventory in tests/type-core/type-core-identity.test.ts).
  */
 function placeSlots(node: SyntaxNode, held: boolean): readonly unknown[] {
   const value = syntaxOf(node);
@@ -349,12 +347,6 @@ function placeSlots(node: SyntaxNode, held: boolean): readonly unknown[] {
         changesReceiver(value.callee.property.name)
         ? [value.callee.object]
         : [];
-    case "typeTestExpression":
-      return [value.value];
-    case "binaryExpression":
-      return COMPARISONS.has(value.operator) ? [value.left, value.right] : [];
-    case "switchStatement":
-      return [value.subject];
     default:
       return [];
   }
