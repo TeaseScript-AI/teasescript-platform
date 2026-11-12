@@ -132,7 +132,10 @@ test("an open construct holding or followed by a closed one is refused at the cl
   }
 });
 
-/** A modelled row's own condition, on its refusing side: the source, the construct's text, and the row's words. */
+/**
+ * A modelled row's own condition, on its refusing side: the source, the refused construct's whole text (its offsets),
+ * and the row's words.
+ */
 interface Condition {
   readonly row: SyntaxKind;
   /** What the row checks, in words. */
@@ -143,8 +146,9 @@ interface Condition {
 }
 
 /**
- * The inventory of the modelled rows' own conditions, one source each: the conditions of main's `outsideSyntax` cases
- * (a85dc7d8f929ea7cd74f133834b3ce4c9ff487a3) that became the rows. Every other modelled row has none
+ * The inventory of the modelled rows' own conditions: the conditions of main's `outsideSyntax` cases
+ * (a85dc7d8f929ea7cd74f133834b3ce4c9ff487a3) that became the rows, one source each, and a second where the condition
+ * reads through parentheses or a key could be read as absent (the empty key). Every other modelled row has none
  * (`UNCONDITIONAL`); the inventory test below keeps the two lists equal to the table's modelled rows.
  */
 const CONDITIONS: readonly Condition[] = [
@@ -173,42 +177,42 @@ const CONDITIONS: readonly Condition[] = [
     row: "sayStatement",
     condition: "no presentation",
     source: 'say prose(color: "red") "A letter."',
-    at: "say prose",
+    at: 'say prose(color: "red") "A letter."',
     what: "this say",
   },
   {
     row: "sayStatement",
     condition: "no speaker",
     source: 'say as player "Hold."',
-    at: "say as",
+    at: 'say as player "Hold."',
     what: "this say",
   },
   {
     row: "sayStatement",
     condition: "no skip policy",
     source: 'say skippable "Hold."',
-    at: "say skippable",
+    at: 'say skippable "Hold."',
     what: "this say",
   },
   {
     row: "sayStatement",
     condition: "no pacing",
     source: 'say "Hold.", instant',
-    at: "say",
+    at: 'say "Hold.", instant',
     what: "this say",
   },
   {
     row: "sayStatement",
     condition: "shown text without interpolation",
     source: 'say "Hi ${hostValue}"',
-    at: "say",
+    at: 'say "Hi ${hostValue}"',
     what: "this say",
   },
   {
     row: "expressionStatement",
     condition: "a call",
     source: 'askBooleans("Q?", texts: ["A"], prefill: [false], cancel: "Back")',
-    at: "askBooleans",
+    at: 'askBooleans("Q?", texts: ["A"], prefill: [false], cancel: "Back")',
     what: "this expression statement",
   },
   {
@@ -222,7 +226,7 @@ const CONDITIONS: readonly Condition[] = [
     row: "stringLiteral",
     condition: "no interpolation",
     source: 'let t = "a ${hostValue}"',
-    at: '"a',
+    at: '"a ${hostValue}"',
     what: "text with interpolation",
   },
   {
@@ -233,10 +237,24 @@ const CONDITIONS: readonly Condition[] = [
     what: "this member or element read",
   },
   {
+    row: "propertyAccessExpression",
+    condition: "a receiver that is no literal of another kind than object, in parentheses",
+    source: 'let n = ("abc").size',
+    at: '("abc").size',
+    what: "this member or element read",
+  },
+  {
     row: "binaryExpression",
     condition: "`otherwise` or a null test",
     source: "let n = hostValue + 1",
     at: "hostValue + 1",
+    what: "this binary expression",
+  },
+  {
+    row: "binaryExpression",
+    condition: "a comparison is a null test only with a `null` side",
+    source: "let b = hostValue == 1",
+    at: "hostValue == 1",
     what: "this binary expression",
   },
   {
@@ -250,21 +268,35 @@ const CONDITIONS: readonly Condition[] = [
     row: "callExpression",
     condition: "one of `sliceCall`'s shapes",
     source: "let n = toInteger(hostValue)",
-    at: "toInteger",
+    at: "toInteger(hostValue)",
+    what: "this call expression",
+  },
+  {
+    row: "callExpression",
+    condition: "a method of `sliceMethod`'s shapes",
+    source: "let xs = [1]\nxs.add(2)",
+    at: "xs.add(2)",
     what: "this call expression",
   },
   {
     row: "loadExpression",
     condition: "a `default:`",
     source: 'let v = load "k"',
-    at: "load",
+    at: 'load "k"',
     what: "this load expression",
   },
   {
     row: "loadExpression",
     condition: "a default that is no `null`",
     source: 'let v = load "k", default: null',
-    at: "load",
+    at: 'load "k", default: null',
+    what: "this load expression",
+  },
+  {
+    row: "loadExpression",
+    condition: "a default that is no `null`, in parentheses",
+    source: 'let v = load "k", default: (null)',
+    at: 'load "k", default: (null)',
     what: "this load expression",
   },
   {
@@ -272,6 +304,13 @@ const CONDITIONS: readonly Condition[] = [
     condition: "a key no earlier load of the project wrote",
     source: 'let a = load "k", default: 1\nlet b = load "k", default: 2',
     at: 'load "k", default: 2',
+    what: "this load expression",
+  },
+  {
+    row: "loadExpression",
+    condition: "a key no earlier load of the project wrote, the empty key",
+    source: 'let a = load "", default: 1\nlet b = load "", default: 2',
+    at: 'load "", default: 2',
     what: "this load expression",
   },
 ];
@@ -323,9 +362,10 @@ test("each modelled row refuses where its own condition fails, at its construct,
       refused = error;
     }
     assert.ok(refused instanceof CandidateOutsideSlice, `${name}: refused`);
+    const start = source.indexOf(condition.at);
     assert.deepEqual(
-      { start: refused.site.start, what: refused.what },
-      { start: source.indexOf(condition.at), what: condition.what },
+      { start: refused.site.start, end: refused.site.end, what: refused.what },
+      { start, end: start + condition.at.length, what: condition.what },
       name,
     );
   }
