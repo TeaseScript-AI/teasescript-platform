@@ -8,6 +8,7 @@ import {
   computedMarks,
   mergeItems,
   ownContext,
+  reasonContext,
   REASON,
   type ContextWord,
   type Item,
@@ -156,7 +157,7 @@ export function operatorRow(
  * - a result kind is definite when no operand is unknown, every operand item is definite, and every combination that
  *   succeeds gives that kind by a row that needs no check by value.
  * The reasons and the first context word of a combination's items go to its result, an unknown bringing its reason's
- * word (`ownContext`); a guarded operand marks it (§3.2).
+ * word (`ownContext`); an unknown result takes its reasons' word (`reasonContext`); a guarded operand marks it (§3.2).
  * `operation` is the operation's site, the identity of an unknown operand without a writer; `writer` explains a result
  * whose operands have no writer.
  */
@@ -197,15 +198,18 @@ export function operationItems(
     const known = external ? { ...shared, extOnly: true as const } : shared;
     const explained = combination.reduce((first, item) => firstWriter(first, item.writer), writer);
     const unknowns = combination.filter((item) => item.tag === "unknown");
+    // (#2486: an unknown result's word is its reasons', as a merged unknown's is (`mergePair`); the first word of its
+    // operands would keep a word its operand's earlier, fewer reasons gave)
+    const unknown = { ...shared, context: reasonContext(reasons) };
     if (unknowns.length === combination.length) {
-      results.push(makeItem("unknown", explained, shared));
+      results.push(makeItem("unknown", explained, unknown));
       unsure = true;
       continue;
     }
     // (#2486: a deferred parameter's part stays unknown and any other reason merged with it fans, each reason giving what
     // it gives, so the result only grows as the operand's reasons do and a solver component settles)
     if (unknowns.some((item) => (item.reasons & REASON.deferred) !== 0)) {
-      results.push(makeItem("unknown", explained, shared));
+      results.push(makeItem("unknown", explained, unknown));
       unsure = true;
       if (unknowns.every((item) => (item.reasons & ~REASON.deferred) === 0)) continue;
     }
