@@ -17,8 +17,9 @@ export const AXES = {
     "keepDurable",
     "demo",
     "delayedSmoke",
+    "keys",
   ],
-  script: ["CelebWorship", "DisciplineClinic", "demo", "smoke"],
+  script: ["CelebWorship", "DisciplineClinic", "demo", "smoke", "answer-flight"],
   route: ["source", "plan"],
   backend: ["main", "worker"],
   engine: ["chromium", "firefox", "webkit", "pixel"],
@@ -35,6 +36,7 @@ const FULL_PLAYER = new Set([
   "keepDurable",
   "demo",
   "delayedSmoke",
+  "keys",
 ]);
 const SCRIPT_OF = {
   session: ["CelebWorship", "DisciplineClinic"],
@@ -48,6 +50,7 @@ const SCRIPT_OF = {
   keepDurable: ["CelebWorship"],
   demo: ["demo"],
   delayedSmoke: ["smoke"],
+  keys: ["answer-flight"],
 };
 
 /** The rules, in order; the first whose `when` holds decides. `reason: null` makes the cell required. */
@@ -85,6 +88,11 @@ const RULES = [
     name: "smoke engine",
     when: (cell) => cell.scenario === "delayedSmoke" && cell.engine !== "chromium",
     reason: "the browser smoke is Chromium's",
+  },
+  {
+    name: "keys on the Pixel",
+    when: (cell) => cell.scenario === "keys" && cell.engine === "pixel",
+    reason: "a phone keyboard's keys in flight are an open witness of #2430",
   },
   {
     name: "aa engines",
