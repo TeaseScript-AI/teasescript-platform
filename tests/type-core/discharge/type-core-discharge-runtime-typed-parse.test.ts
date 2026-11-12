@@ -497,12 +497,12 @@ test("a literal wider than a native call takes compiles and keeps its checks, in
   const url = (path: string): string => JSON.stringify(new URL(path, import.meta.url).href);
   const script = `
     import {readFileSync} from "node:fs";
-    import {compileSourceWithBackend} from ${url("../../src/compiler.js")};
-    import {validateInstructionPlan} from ${url("../../src/plan/validation.js")};
-    import {run} from ${url("../../src/runtime/engine.js")};
-    import {CORE_BACKEND} from ${url("../../src/type-inference/core/backend.js")};
-    import {createImmediatePacingRuntimeSnapshot} from ${url("../helpers/immediate-pacing-runtime.js")};
-    import {compactAnalysis, coreRequest} from ${url("../helpers/type-core-analysis.js")};
+    import {compileSourceWithBackend} from ${url("../../../src/compiler.js")};
+    import {validateInstructionPlan} from ${url("../../../src/plan/validation.js")};
+    import {run} from ${url("../../../src/runtime/engine.js")};
+    import {CORE_BACKEND} from ${url("../../../src/type-inference/core/backend.js")};
+    import {createImmediatePacingRuntimeSnapshot} from ${url("../../helpers/immediate-pacing-runtime.js")};
+    import {compactAnalysis, coreRequest} from ${url("../../helpers/type-core-analysis.js")};
     const source = readFileSync(0, "utf8");
     const options = ${JSON.stringify(OPTIONS)};
     const {checks} = compactAnalysis(coreRequest([{path: "main.tease", source}], options.globals));
