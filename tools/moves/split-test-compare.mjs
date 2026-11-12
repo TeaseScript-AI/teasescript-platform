@@ -18,8 +18,8 @@
 //    result (`base-titles.jsonl`, `head-titles.jsonl`). The counts say how the tests ended; the titles, which tests
 //    they are: a test lost beside one added keeps the counts and changes the titles.
 // 3. The comparison (`compare.txt`): equal when the titles are the same, each as many times on both sides (a title may
-//    repeat, in different suites or files), the summed counts are the same in each class, and no test failed or was
-//    cancelled and no file failed outside its tests, on either side.
+//    repeat, in different suites or files), the summed counts are the same in each class, and each side's run exited 0.
+//    The exit status is the only witness of a failed suite or hook, which has no count and whose title is the same.
 // 4. Its own controls, run whenever it finds the two sides equal: the head with one title dropped, and with one
 //    passed test counted as failed, must each compare unequal; if either compares equal, the comparison cannot judge.
 //
@@ -82,7 +82,7 @@ export function summed(counts) {
   return { ...sum, fileFailed };
 }
 
-/** The comparison of two sides (each `{ titles, counts }`, counts summed): `{ equal, lines }`, `lines` the report. */
+/** The comparison of two sides (each `{ titles, counts, exit }`, counts summed): `{ equal, lines }`, `lines` the report. */
 export function compareSides(base, head) {
   const tally = (titles) => {
     const keys = new Map();
@@ -104,13 +104,13 @@ export function compareSides(base, head) {
   for (const name of CLASSES)
     if (base.counts[name] !== head.counts[name])
       lines.push(`${name} differs: ${base.counts[name]} -> ${head.counts[name]}`);
-  for (const [side, { counts }] of [
+  for (const [side, { counts, exit }] of [
     ["base", base],
     ["head", head],
   ])
-    if (counts.failed > 0 || counts.cancelled > 0 || counts.fileFailed)
+    if (exit !== 0)
       lines.push(
-        `failed at ${side}: ${counts.failed} failed, ${counts.cancelled} cancelled${counts.fileFailed ? ", a file failed" : ""}`,
+        `failed at ${side}: exit ${exit}; ${counts.failed} failed, ${counts.cancelled} cancelled${counts.fileFailed ? ", a file failed" : ""}`,
       );
   return { equal: lines.length === 1, lines };
 }
@@ -130,7 +130,7 @@ export function controlFailures(base, head, compare = compareSides) {
   return failures;
 }
 
-/** Runs `files` in `tree` with both reporters; returns the side's titles and summed counts. */
+/** Runs `files` in `tree` with both reporters; returns the side's titles, summed counts and exit status (or signal). */
 function run(tree, files, out, side) {
   const [countsFile, titlesFile] = [`${side}-counts.json`, `${side}-titles.jsonl`].map((name) =>
     path.join(out, name),
@@ -153,6 +153,7 @@ function run(tree, files, out, side) {
       env: { ...process.env, NODE_TEST_CONTEXT: undefined },
     },
   );
+  if (result.error) throw new CannotRun(`the ${side}'s run did not start: ${result.error.message}`);
   writeFileSync(path.join(out, `${side}-stderr.txt`), result.stderr);
   if (!existsSync(countsFile) || !existsSync(titlesFile))
     throw new CannotRun(`the ${side}'s run reported nothing (${side}-stderr.txt)`);
@@ -163,7 +164,7 @@ function run(tree, files, out, side) {
     .map((line) => JSON.parse(line));
   if (titles.length === 0)
     throw new CannotRun(`the ${side}'s run reported no test (${side}-stderr.txt)`);
-  return { titles, counts };
+  return { titles, counts, exit: result.signal ?? result.status };
 }
 
 /** Runs the comparison with `argv` (`compare` the comparison, replaceable to test its controls); returns the status. */

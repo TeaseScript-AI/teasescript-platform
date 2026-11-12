@@ -9,13 +9,13 @@ import { compareSides, controlFailures, main } from "./split-test-compare.mjs";
 
 const TOOL = fileURLToPath(new URL("./split-test-compare.mjs", import.meta.url));
 
-/** A compiled test file holding `tests` (title → true to pass, false to fail, "skip", "suite"; or a list of pairs). */
+/** A compiled test file holding `tests` (title → true to pass, false to fail, "skip", "suite", "failing suite"; or pairs). */
 const testFile = (tests) =>
   [
     'const test = require("node:test");',
     ...(Array.isArray(tests) ? tests : Object.entries(tests)).map(([title, state]) =>
-      state === "suite"
-        ? `test.describe(${JSON.stringify(title)}, () => {});`
+      state === "suite" || state === "failing suite"
+        ? `test.describe(${JSON.stringify(title)}, () => { ${state === "suite" ? "" : 'test.after(() => { throw new Error("no"); });'} });`
         : `test${state === "skip" ? ".skip" : ""}(${JSON.stringify(title)}, () => { ${state === false ? 'throw new Error("no");' : ""} });`,
     ),
     "",
@@ -139,7 +139,7 @@ test("a test lost, added, failing or skipped is not equal, each by its own rule"
   ];
   const cases = {
     "missing at head: 0 second (1)": { ...SPLIT, "split/two.test.js": testFile({}) },
-    "failed at head: 1 failed, 0 cancelled": {
+    "failed at head: exit 1; 1 failed, 0 cancelled": {
       ...SPLIT,
       "split/two.test.js": testFile({ second: false }),
     },
@@ -149,7 +149,12 @@ test("a test lost, added, failing or skipped is not equal, each by its own rule"
       "split/two.test.js": testFile({ second: true, extra: "suite" }),
     },
     "skipped differs: 0 -> 1": { ...SPLIT, "split/two.test.js": testFile({ second: "skip" }) },
-    "failed at base: 1 failed, 0 cancelled": both({ second: false }),
+    "failed at base: exit 1; 1 failed, 0 cancelled": both({ second: false }),
+    // (a suite's hook that fails has no count and keeps its title: only the run's exit status sees it)
+    "failed at head: exit 1; 0 failed, 0 cancelled": [
+      { ...SPLIT, "split/two.test.js": testFile({ second: true, empty: "failing suite" }) },
+      { "old.test.js": testFile({ first: true, second: true, empty: "suite" }) },
+    ],
   };
   for (const [line, value] of Object.entries(cases)) {
     const [head, baseExtra] = Array.isArray(value) ? value : [value];
@@ -216,6 +221,7 @@ test("the comparison's own controls find a dropped title and a passed test count
       { nesting: 0, name: "second" },
     ],
     counts,
+    exit: 0,
   };
   assert.deepEqual(controlFailures(side, side), []);
   assert.deepEqual(
@@ -229,6 +235,7 @@ test("the comparison's own controls find a dropped title and a passed test count
       { nesting: 1, name: "case" },
     ],
     counts,
+    exit: 0,
   };
   assert.equal(compareSides(nested, nested).equal, true);
   assert.equal(compareSides(nested, { ...nested, titles: nested.titles.slice(1) }).equal, false);
