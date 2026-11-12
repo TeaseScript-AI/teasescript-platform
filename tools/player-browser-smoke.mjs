@@ -43,6 +43,7 @@ import {
   viewfinderScenario,
 } from "./player-smoke/scenarios/media.mjs";
 import {
+  composerEditPathScenario,
   lockKeptScenario,
   lockScenario,
   passwordCompositionScenario,
@@ -138,6 +139,7 @@ async function main() {
         ["password", () => passwordScenario(cdp, origin)],
         ["passwordInterruption", () => passwordInterruptionScenario(cdp, origin)],
         ["passwordComposition", () => passwordCompositionScenario(cdp, origin)],
+        ["composerEditPath", () => composerEditPathScenario(cdp, origin)],
         ["lockKept", () => lockKeptScenario(cdp, origin)],
         ["publicKey", () => publicKeyScenario(cdp, origin, profile)],
         ["prefills", () => prefillsScenario(cdp, origin)],
