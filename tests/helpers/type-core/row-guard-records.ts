@@ -47,12 +47,11 @@ export interface DifferentialRecord {
   readonly candidate: { readonly modes: readonly (Entry & { readonly mode: string })[] };
 }
 
-/** A source the guard compiles, and the host values its runs take after `DOMAIN`'s. */
-export interface RecordCase {
-  readonly name: string;
-  readonly source: string;
-  readonly hosts?: readonly unknown[];
-}
+/** A source the guard compiles, or a project's files, and the host values its runs take after `DOMAIN`'s. */
+export type RecordCase = { readonly name: string; readonly hosts?: readonly unknown[] } & (
+  | { readonly source: string }
+  | { readonly files: readonly { readonly path: string; readonly source: string }[] }
+);
 
 /** A template as a script: the `exit` each script ends with. */
 export const script = (template: string): string => `${template}\nexit\n`;
@@ -61,11 +60,11 @@ export const script = (template: string): string => `${template}\nexit\n`;
 export function records(cases: readonly RecordCase[], folder: string): DifferentialRecord[] {
   const casesFile = join(folder, "cases.jsonl");
   const out = join(folder, "records.jsonl");
-  const lines = cases.map(({ name, source, hosts }) =>
+  const lines = cases.map((recordCase) =>
     JSON.stringify({
-      name,
-      source,
-      runs: [...DOMAIN, ...(hosts ?? [])].map((hostValue) => ({ hostValue })),
+      name: recordCase.name,
+      ...("files" in recordCase ? { files: recordCase.files } : { source: recordCase.source }),
+      runs: [...DOMAIN, ...(recordCase.hosts ?? [])].map((hostValue) => ({ hostValue })),
     }),
   );
   writeFileSync(casesFile, lines.map((line) => `${line}\n`).join(""));

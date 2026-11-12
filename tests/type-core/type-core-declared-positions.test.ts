@@ -30,6 +30,7 @@ import {
   HOST_VALUES,
   HOSTLESS_VALUES,
   FAILING_PRODUCER,
+  filesOf,
   OPERAND_TEMPLATES,
   PAIRED_SAMPLES,
   type Sample,
@@ -83,6 +84,9 @@ const UNREACHED: ReadonlySet<string> = new Set([
   "after an exiting for",
 ]);
 
+/** The refusal of a transfer's path the core knows to be no text (`argumentKinds`, `src/type-inference/core/backend.ts`). */
+const PATH_REFUSAL = "an argument that its built-in checks";
+
 /** A run's failure as `[code, start, end]`, or `null` for a run that does not fail with a site. */
 function failureOf(run: string): [string, number, number] | null {
   const match = /^failed (\w+)@(\d+):(\d+)$/u.exec(run);
@@ -93,14 +97,19 @@ function failureOf(run: string): [string, number, number] | null {
 const ROUTE_ONLY: readonly string[] = ["TSV010", "TSV011", "TSV012", "TSV041", "TSV043"];
 const TODAY_ONLY: readonly string[] = ["TSV046"];
 
-/** Where a reaching run fails: the command, or the value in it, in a source whose command starts at `start`. */
+/**
+ * Where a reaching run fails: the command, the value in it, or the call holding the value (a transfer's `script(…)`), in
+ * a source whose command starts at `start`.
+ */
 function reached(sample: Sample, start: number): Set<string> {
   const declared = position(sample)!;
   const value = start + OPERAND_TEMPLATES[sample.row]![sample.operand]![0]!.indexOf("hostValue");
   const [from, to] =
     declared.at === "statement"
       ? [start, start + sample.command.length]
-      : [value, value + sample.value.length];
+      : declared.at === "value"
+        ? [value, value + sample.value.length]
+        : [value - "script(".length, value + sample.value.length + ")".length];
   return new Set(declared.failure.map((code) => `failed ${code}@${from}:${to}`));
 }
 
@@ -131,6 +140,20 @@ function judge(
       if (mode.outside !== aloneMode.outside)
         failures.push(
           `${at}: the value alone is refused (${aloneMode.outside}), the command ${mode.outside ?? "not"}`,
+        );
+      return;
+    }
+    // in code no run reaches, the core reads a typed ingress at its written type: a transfer's path of a written type
+    // other than text is refused by the path's argument rule, as one written in place is (`DECLARED_REFUSALS`, R28)
+    if (
+      declared?.at === "call" &&
+      sample.origin === "ingress" &&
+      sample.kind !== "string" &&
+      UNREACHED.has(context)
+    ) {
+      if (mode.outside !== PATH_REFUSAL)
+        failures.push(
+          `${at}: route ${mode.outside ?? mode.threw ?? "a plan"}, not "${PATH_REFUSAL}"`,
         );
       return;
     }
@@ -253,20 +276,27 @@ test("each sampled kind, origin and position answers as today's checker's answer
   const folder = mkdtempSync(join(tmpdir(), "declared-positions-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));
   // each sample straight, and the context samples in every context; each with its fitting twin and its value alone
-  const sources = new Map<string, readonly unknown[]>();
+  const sources = new Map<
+    string,
+    { readonly sample: Sample; readonly hosts: readonly unknown[] }
+  >();
   const add = (sample: Sample, context: string) => {
     const hosts = sample.host === undefined ? [] : [sample.host];
-    sources.set(inContext(sample, sample.command, context), hosts);
-    sources.set(inContext(sample, `let v = ${sample.value}`, context), hosts);
+    sources.set(inContext(sample, sample.command, context), { sample, hosts });
+    sources.set(inContext(sample, `let v = ${sample.value}`, context), { sample, hosts });
     if (position(sample) !== undefined)
-      sources.set(inContext(sample, twinCommand(sample), context), hosts);
+      sources.set(inContext(sample, twinCommand(sample), context), { sample, hosts });
   };
   for (const sample of SAMPLES) add(sample, "straight");
   for (const sample of IN_CONTEXTS)
     for (const context of Object.keys(CONTEXTS)) add(sample, context);
-  const cases = [...sources].map(([source, hosts], index) => ({ name: `${index}`, source, hosts }));
+  const cases = [...sources].map(([source, { sample, hosts }], index) => ({
+    name: `${index}`,
+    files: filesOf(sample.row, source),
+    hosts,
+  }));
   const found = new Map(
-    records(cases, folder).map((record, index) => [cases[index]!.source, record]),
+    records(cases, folder).map((record, index) => [cases[index]!.files[0]!.source, record]),
   );
   const seen = new Set<string>();
   const failures = [
@@ -295,14 +325,14 @@ test("each sampled kind, origin and position answers as today's checker's answer
 });
 
 test("where the route refuses a value alone in a context, it refuses the command at the same site with the same text", () => {
-  const refusal = (source: string, mode: (typeof HELD_MODES)[number]): string | null => {
+  const refusal = (
+    row: Sample["row"],
+    source: string,
+    mode: (typeof HELD_MODES)[number],
+  ): string | null => {
     try {
       mode.run(() =>
-        compileProjectWithBackend(
-          [{ path: "main.tease", source }],
-          { globals: ["hostValue"] },
-          CORE_BACKEND,
-        ),
+        compileProjectWithBackend(filesOf(row, source), { globals: ["hostValue"] }, CORE_BACKEND),
       );
       return null;
     } catch (error) {
@@ -314,11 +344,15 @@ test("where the route refuses a value alone in a context, it refuses the command
   for (const sample of IN_CONTEXTS)
     for (const context of Object.keys(CONTEXTS))
       for (const mode of HELD_MODES) {
-        const alone = refusal(inContext(sample, `let v = ${sample.value}`, context), mode);
+        const alone = refusal(
+          sample.row,
+          inContext(sample, `let v = ${sample.value}`, context),
+          mode,
+        );
         if (alone === null) continue;
         refused += 1;
         assert.equal(
-          refusal(inContext(sample, sample.command, context), mode),
+          refusal(sample.row, inContext(sample, sample.command, context), mode),
           alone,
           `${sample.command} ${context}`,
         );
@@ -376,7 +410,7 @@ test("a declared position's instruction refuses a value it does not take before 
     const declared = position(sample);
     if (declared === undefined) continue;
     const source = `${sample.prelude}${sample.command}\nexit\n`;
-    const today = compileProject([{ path: "main.tease", source }], { globals: ["hostValue"] });
+    const today = compileProject(filesOf(sample.row, source), { globals: ["hostValue"] });
     const errors = today.diagnostics.filter((diagnostic) => diagnostic.severity === "error");
     if (
       today.plan !== null ||
@@ -392,7 +426,7 @@ test("a declared position's instruction refuses a value it does not take before 
       const at = `${source} [${mode.name}]`;
       const { plan } = mode.run(() =>
         compileProjectWithBackend(
-          [{ path: "main.tease", source }],
+          filesOf(sample.row, source),
           { globals: ["hostValue"] },
           CORE_BACKEND,
         ),

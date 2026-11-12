@@ -22,16 +22,21 @@ import {
 import {
   DECLARED_REFUSALS,
   DECLARED_RUN_DIFFERENCES,
+  filesOf,
   OPERAND_TEMPLATES,
+  ROW_HOSTS,
   ROW_TEMPLATES,
+  type Template,
+  type TemplateFile,
 } from "../helpers/type-core/row-templates.js";
 
 /*
  * The row guard (#2500; #2488's design, Addition 2, "The row guard", with the lead's R8 and R9): every open row of the
- * candidate route's syntax table is compiled from its templates (`row-templates.ts`) by today's checker and by the
- * candidate route in the four held modes, through the differential record (`tests/families/differential.mjs`, on this
- * tree), and judged per source and mode: (1) the route publishes a plan, never refusing or throwing, except a refusal
- * `DECLARED_REFUSALS` names, which must occur; (2) every check today's plan carries is in the route's, by path, offsets
+ * candidate route's syntax table is compiled from its templates (`row-templates.ts`, a source or a project's files) by
+ * today's checker and by the candidate route in the four held modes, through the differential record
+ * (`tests/families/differential.mjs`, on this tree), and judged per source and mode: (1) the route publishes a plan,
+ * never refusing or throwing, except a refusal `DECLARED_REFUSALS` names, which must occur whatever today's checker
+ * answers (the route publishes nothing there); (2) every check today's plan carries is in the route's, by path, offsets
  * and field; (3) each run, with the host global at every value of the derived domain, ends as today's does (status and
  * failure, with its site), except a difference `DECLARED_RUN_DIFFERENCES` names, which must occur. A `pass` row's runtime
  * citations exempt no check of today's plan from rule 2. The command operands' declared rule differences are
@@ -40,10 +45,17 @@ import {
 
 interface GuardCase {
   readonly name: string;
-  readonly source: string;
+  /** The project: `main.tease` first. */
+  readonly files: readonly TemplateFile[];
+  /** The host values its runs take after the domain's. */
+  readonly hosts: readonly string[];
   /** The refusal the route must make in every mode, for a declared refusal's source. */
   readonly refusal?: string;
 }
+
+/** A template of `row` as the project the guard compiles: a source ends with `exit`, beside the row's destinations. */
+const projectOf = (row: SyntaxKind, template: Template): readonly TemplateFile[] =>
+  typeof template === "string" ? filesOf(row, script(template)) : template;
 
 // EVIDENCE: invariant: the table's keys are exactly the AST kinds (its mapped type).
 const OPEN = (Object.keys(DISPOSITIONS) as SyntaxKind[]).filter(
@@ -56,16 +68,22 @@ function guardCases(): GuardCase[] {
     ...OPEN.flatMap((row) =>
       (ROW_TEMPLATES[row] ?? []).map((template, at) => ({
         name: `${row} ${at}`,
-        source: script(template),
+        files: projectOf(row, template),
+        hosts: ROW_HOSTS[row] ?? [],
       })),
     ),
     ...DECLARED_REFUSALS.flatMap((declared) => [
       {
         name: `${declared.row} ${declared.position}, refused`,
-        source: script(declared.refused),
+        files: projectOf(declared.row, declared.refused),
+        hosts: ROW_HOSTS[declared.row] ?? [],
         refusal: declared.text,
       },
-      { name: `${declared.row} ${declared.position}, admitted`, source: script(declared.admitted) },
+      {
+        name: `${declared.row} ${declared.position}, admitted`,
+        files: projectOf(declared.row, declared.admitted),
+        hosts: ROW_HOSTS[declared.row] ?? [],
+      },
     ]),
   ];
 }
@@ -78,23 +96,29 @@ const failureAt = (source: string, code: string, at: string | null): string | nu
 function judge(guardCase: GuardCase, record: DifferentialRecord, seen: Set<string>): string[] {
   const failures: string[] = [];
   const { checker } = record;
-  if (checker.threw !== undefined || !checker.plan)
-    return [
-      `${record.name}: today's checker publishes no plan (${checker.threw ?? JSON.stringify(checker.diagnostics)})`,
-    ];
-  const declared = DECLARED_RUN_DIFFERENCES.find(
-    (difference) => script(difference.template) === guardCase.source,
-  );
+  const source = guardCase.files[0]!.source;
   const modes = record.candidate.modes.map((mode) => mode.mode);
   if (JSON.stringify(modes) !== JSON.stringify(HELD_MODES.map((mode) => mode.name)))
     failures.push(`${record.name}: the record's modes are ${modes.join(", ")}, not the held modes`);
+  // a declared refusal publishes nothing, whatever today's checker answers
+  if (guardCase.refusal !== undefined) {
+    for (const mode of record.candidate.modes)
+      if (mode.outside !== guardCase.refusal)
+        failures.push(
+          `${record.name} [${mode.mode}]: the declared refusal "${guardCase.refusal}" no longer occurs`,
+        );
+    return failures;
+  }
+  if (checker.threw !== undefined || !checker.plan)
+    return [
+      ...failures,
+      `${record.name}: today's checker publishes no plan (${checker.threw ?? JSON.stringify(checker.diagnostics)})`,
+    ];
+  const declared = DECLARED_RUN_DIFFERENCES.find(
+    (difference) => script(difference.template) === source,
+  );
   for (const mode of record.candidate.modes) {
     const at = `${record.name} [${mode.mode}]`;
-    if (guardCase.refusal !== undefined) {
-      if (mode.outside !== guardCase.refusal)
-        failures.push(`${at}: the declared refusal "${guardCase.refusal}" no longer occurs`);
-      continue;
-    }
     if (mode.outside !== undefined || mode.threw !== undefined || !mode.plan) {
       failures.push(`${at}: rule 1, no plan: ${mode.outside ?? mode.threw ?? "an error"}`);
       continue;
@@ -107,21 +131,21 @@ function judge(guardCase: GuardCase, record: DifferentialRecord, seen: Set<strin
       if (outcome(run) === outcome(other)) return;
       if (
         declared !== undefined &&
-        run.failure === failureAt(guardCase.source, declared.code, declared.todayAt) &&
-        other?.failure === failureAt(guardCase.source, declared.code, declared.at) &&
+        run.failure === failureAt(source, declared.code, declared.todayAt) &&
+        other?.failure === failureAt(source, declared.code, declared.at) &&
         mode.plan?.checks.some(
           (check) =>
             check.field === declared.field &&
             check.path === "main.tease" &&
-            check.offset === guardCase.source.indexOf(declared.checkAt) &&
-            check.end === guardCase.source.indexOf(declared.checkAt) + declared.checkAt.length,
+            check.offset === source.indexOf(declared.checkAt) &&
+            check.end === source.indexOf(declared.checkAt) + declared.checkAt.length,
         )
       ) {
         seen.add(`${declared.template} [${mode.mode}]`);
         return;
       }
       failures.push(
-        `${at}: rule 3, run ${JSON.stringify(DOMAIN[index])}: today ${outcome(run)}, route ${outcome(other)}`,
+        `${at}: rule 3, run ${JSON.stringify([...DOMAIN, ...guardCase.hosts][index])}: today ${outcome(run)}, route ${outcome(other)}`,
       );
     });
   }
@@ -132,13 +156,15 @@ test("every open row of the syntax table has templates, and the declared lists n
   // EVIDENCE: invariant: the templates' keys are AST kinds (`ROW_TEMPLATES`' type).
   assert.deepEqual((Object.keys(ROW_TEMPLATES) as SyntaxKind[]).sort(), [...OPEN].sort());
   for (const declared of DECLARED_REFUSALS) assert.ok(OPEN.includes(declared.row), declared.row);
-  // each command operand position is a cited operand of its row, and each cited operand has a position
+  // each `pass` row's operand position is a cited operand of its row, and each cited operand has a position
   for (const row of OPEN) {
     const disposition = DISPOSITIONS[row];
-    const cited = disposition.row === "pass" ? Object.keys(disposition.operands).sort() : [];
-    const positions =
-      row === "sayStatement" ? [] : Object.keys(OPERAND_TEMPLATES[row] ?? {}).sort();
-    assert.deepEqual(positions, cited, row);
+    if (disposition.row !== "pass") continue;
+    assert.deepEqual(
+      Object.keys(OPERAND_TEMPLATES[row] ?? {}).sort(),
+      Object.keys(disposition.operands).sort(),
+      row,
+    );
   }
   for (const declared of DECLARED_RUN_DIFFERENCES) {
     assert.ok(Object.values(ROW_TEMPLATES).flat().includes(declared.template), declared.template);

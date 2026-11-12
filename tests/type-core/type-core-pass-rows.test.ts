@@ -90,7 +90,10 @@ function effects(source: string): {
 function pairs(row: SyntaxKind): { readonly command: string; readonly operand: string | null }[] {
   const operands = OPERAND_TEMPLATES[row];
   if (operands === undefined)
-    return (ROW_TEMPLATES[row] ?? []).map((command) => ({ command, operand: null }));
+    // (a `pass` row's templates are sources, never a project's files)
+    return (ROW_TEMPLATES[row] ?? []).flatMap((command) =>
+      typeof command === "string" ? [{ command, operand: null }] : [],
+    );
   return Object.values(operands)
     .flat()
     .flatMap((template) =>
