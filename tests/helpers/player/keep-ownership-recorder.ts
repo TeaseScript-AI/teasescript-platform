@@ -21,7 +21,7 @@ import { LIFECYCLE, SURFACES } from "./plan-json-family.js";
 import { type CapturedMediaRecord } from "../../../player/media/captured-media.js";
 import type { PlayerBridge } from "../../../player/runtime/player-bridge.js";
 import { FakeMediaRepository } from "./fake-media-repository.js";
-import { KeepHost, browserSavedData, SCOPE, browser, held } from "./keep-host.js";
+import { KeepHost, browserSavedData, SCOPE, browser } from "./keep-host.js";
 
 export const OPERATION = "operation";
 export const MOVE = "move";
