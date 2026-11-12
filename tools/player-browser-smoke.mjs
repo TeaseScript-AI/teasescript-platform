@@ -2,7 +2,10 @@ import { mkdir, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { findChromium } from "./find-chromium.mjs";
 import { prefillsScenario } from "./player-smoke/scenarios/prefills.mjs";
-import { instantAnswersScenario } from "./player-smoke/scenarios/answers.mjs";
+import {
+  composerStatesScenario,
+  instantAnswersScenario,
+} from "./player-smoke/scenarios/answers.mjs";
 import { startSmokeServer } from "./player-smoke/server.mjs";
 import {
   connectCdp,
@@ -145,6 +148,7 @@ async function main() {
         ["publicKey", () => publicKeyScenario(cdp, origin, profile)],
         ["prefills", () => prefillsScenario(cdp, origin)],
         ["instantAnswers", () => instantAnswersScenario(cdp, origin)],
+        ["composerStates", () => composerStatesScenario(cdp, origin)],
       ];
       const named = (process.env.PLAYER_SMOKE_ONLY ?? "")
         .split(",")
