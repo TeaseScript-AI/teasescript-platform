@@ -3,7 +3,8 @@ title: "Composer area"
 ---
 // The composer's area while an answer is in flight (#2430): each choice presents one kind of question, which the browser
 // kit's `keys` scenario answers and compares, in the answer's flight, with the area while nothing is asked ("Idle").
-let which = askChoice "Idle", "Text", "Number", "Date", "Time", "Choice", "Button", "Form", "Popup", "Export", "Image", "Password"
+// "Dated form" and "Lock" hold the focus rows: a date or time field's commit, and the lock's phases.
+let which = askChoice "Idle", "Text", "Number", "Date", "Time", "Choice", "Button", "Form", "Popup", "Export", "Image", "Password", "Dated form", "Lock"
 if which == "Idle" {
     say "Nothing is asked.", instant
     wait 600 s
@@ -29,6 +30,10 @@ if which == "Idle" {
     let picture = askImage("A picture?", allowSkip: true) otherwise "none"
 } else if which == "Password" {
     let secret = askPassword "Secret?"
+} else if which == "Dated form" {
+    let when = askForm "When?", fields: { day: toDate("2026-10-04"), at: toTime("18:30") }
+} else if which == "Lock" {
+    let note = encryptText("A note", password: askPassword("Choose a code"), publicKey: false, timeLock: false)
 }
 showButton "Done"
 exit

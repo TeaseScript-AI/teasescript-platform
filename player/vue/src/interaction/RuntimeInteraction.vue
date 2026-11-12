@@ -39,6 +39,7 @@ import {
   type SessionTerminal,
 } from "./useAnswerSubmission";
 import { useFormUpdates } from "./useFormUpdates";
+import { focusMark } from "./scheduledFocus";
 import type { ImageCapture } from "../stage/useImageCapture";
 
 /** How the host stores an image file the player chose for `askImage`. */
@@ -397,6 +398,7 @@ watch(
     if (closed === null) return;
     const descriptorAtClose = composerKey.value;
     const chatAtClose = composerState.chatText.value;
+    const free = focusMark();
     await nextTick();
     // Focus returns to the closed field's button only when the field showed it as it closed and the chat took the
     // field, not a lock's password or another question's field; and only if nothing changed since (the composer's
@@ -410,8 +412,7 @@ watch(
       composerState.chatText.value !== chatAtClose
     )
       return;
-    const active = document.activeElement;
-    if (active && active !== document.body && !active.matches("[data-composer-input]")) return;
+    if (!free()) return;
     root.value
       ?.querySelector<HTMLElement>(`[data-form-field="${CSS.escape(closed.fieldId)}"]`)
       ?.focus({ preventScroll: true });
@@ -480,10 +481,13 @@ watch(
     const returnToChoice = restoreChoiceFocus;
     restoreChoiceFocus = false;
     const keyboardNavigation = document.documentElement.dataset.playerKeyboardFocus === "true";
+    const free = focusMark();
     clearFeedback();
     await nextTick();
     // The answer's publication goes first.
     await nextTick();
+    // A control that took the focus meanwhile, such as a form field's button after its commit, keeps it.
+    if (!free()) return;
     // A control outside the interaction that this update removed, such as Start, leaves focus unowned as well.
     const releasedFocus =
       !ownedFocus &&
@@ -742,8 +746,9 @@ watch(
     const owned = !!active && !!root.value?.contains(active);
     const typing = typingBeforeField;
     typingBeforeField = false;
+    const free = focusMark();
     await nextTick();
-    if (unowned || owned || typing) focusInput();
+    if (free() && (unowned || owned || typing)) focusInput();
   },
 );
 

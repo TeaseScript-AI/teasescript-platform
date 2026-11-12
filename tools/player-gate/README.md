@@ -87,7 +87,8 @@ Pass or fail is derived from primary records, never from a cached flag:
     oracle, since a key can land after the answer settled and then belongs to the next question. A block case moves
     the page's clock past its block's timer just before Enter, so the block always overtakes the answer, and fails by
     that name if it does not. On the `composer-area` fixture package, an answer of each question kind leaves the
-    composer's area, in its flight, as it is while nothing is asked (a password's empty read-only field excepted).
+    composer's area, in its flight, as it is while nothing is asked (a password's empty read-only field excepted); and
+    a form's date or time field committed by Enter, and the lock's phases, keep the focus their continuation gives.
 - **`validate.mjs`** derives every field again from a row's validated records, scenario by scenario and part by part,
   and checks each value against its unit's domain.
 - **`report.mjs`** prints the cost report: `node tools/player-gate/report.mjs --phase r0|r1 --artifacts FILE
