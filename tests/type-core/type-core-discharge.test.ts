@@ -160,8 +160,14 @@ function rowOf(check: Obligation, program: unknown): Row | null {
   }
 }
 
-/** Programs beside the set for the rows its records do not reach: the set's lazy file and lock defaults are all `null`. */
-const BESIDE = ['let file = fileFromBase64("!", default: hostValue)\nexit'];
+/**
+ * Programs beside the set for the rows its records do not reach: the set's lazy file and lock defaults are all `null`,
+ * and its null at a use came only through an identity function's result, which the analysis reads as its argument.
+ */
+const BESIDE = [
+  'let file = fileFromBase64("!", default: hostValue)\nexit',
+  "function pass(p: string?) {\n  return p\n}\nlet n = null\nif n != null { say pass(n).length }\nexit",
+];
 
 test("every check the core emits has a row of the discharge map, which names its runtime check (S3)", () => {
   const witnessed = new Map<Row, number>();
