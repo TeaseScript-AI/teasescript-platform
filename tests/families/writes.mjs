@@ -202,7 +202,8 @@ const ALLOWED = {
           self.expression.text === "fileURLToPath" &&
           ["url", "node:url"].includes(importedFrom(self.expression)) &&
           self.arguments.length === 1 &&
-          relative?.startsWith("./") === true &&
+          // (`./` and a plain file name: no folder, query or fragment, so the URL Node forks is the module listed)
+          /^\.\/[\w-]+(?:\.[\w-]+)*\.mjs$/.test(relative ?? "") &&
           ts.isIdentifier(url.expression) &&
           url.expression.text === "URL" &&
           global(url.expression) &&
