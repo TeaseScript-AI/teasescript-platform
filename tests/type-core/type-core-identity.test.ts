@@ -152,7 +152,7 @@ const WRAPPED: readonly (readonly [string, string])[] = [
   ],
   [
     "a function's sole return value",
-    "global function half(n) {\n  return ⟦n / 2⟧\n}\nrepeat half(3) {}\nexit",
+    'global function ratio {\n  return ⟦3 / 2⟧\n}\nlet r = ratio()\nsay "${r}"\nexit',
   ],
   [
     "list elements and property values, a condition and its operands",
