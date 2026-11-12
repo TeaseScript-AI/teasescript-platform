@@ -9,13 +9,13 @@ import { compareSides, controlFailures } from "./split-test-compare.mjs";
 
 const TOOL = fileURLToPath(new URL("./split-test-compare.mjs", import.meta.url));
 
-/** A compiled test file holding `tests` (title → whether it passes). */
+/** A compiled test file holding `tests` (title → true to pass, false to fail, "skip"; or a list of such pairs). */
 const testFile = (tests) =>
   [
     'const test = require("node:test");',
-    ...Object.entries(tests).map(
-      ([title, passes]) =>
-        `test(${JSON.stringify(title)}, () => { ${passes ? "" : 'throw new Error("no");'} });`,
+    ...(Array.isArray(tests) ? tests : Object.entries(tests)).map(
+      ([title, state]) =>
+        `test${state === "skip" ? ".skip" : ""}(${JSON.stringify(title)}, () => { ${state === false ? 'throw new Error("no");' : ""} });`,
     ),
     "",
   ].join("\n");
@@ -106,7 +106,12 @@ test("any lists of test files: two moved into one, and a file outside tests/ run
   assert.equal(result.status, 0, result.out + result.err);
 });
 
-test("a test lost, failing, or named twice is not equal", (t) => {
+test("a test lost, failing, skipped, or named twice is not equal, each by its own rule", (t) => {
+  // (each case is caught by the one rule its line names: the titles, the classes, a failure, a repeated title)
+  const both = (tests) => [
+    { ...SPLIT, "split/two.test.js": testFile(tests) },
+    { "old.test.js": testFile({ first: true, ...tests }) },
+  ];
   const cases = {
     "missing at head: 0 second (1)": { ...SPLIT, "split/two.test.js": testFile({}) },
     "failed at head: 1 failed, 0 cancelled": {
@@ -117,9 +122,28 @@ test("a test lost, failing, or named twice is not equal", (t) => {
       ...SPLIT,
       "split/two.test.js": testFile({ second: true, first: true }),
     },
+    "skipped differs: 0 -> 1": { ...SPLIT, "split/two.test.js": testFile({ second: "skip" }) },
+    "failed at base: 1 failed, 0 cancelled": both({ second: false }),
+    "a top-level title 2 times at base: 0 first": [
+      {
+        ...SPLIT,
+        "split/two.test.js": testFile([
+          ["second", true],
+          ["first", true],
+        ]),
+      },
+      {
+        "old.test.js": testFile([
+          ["first", true],
+          ["second", true],
+          ["first", true],
+        ]),
+      },
+    ],
   };
-  for (const [line, head] of Object.entries(cases)) {
-    const result = trees(t, head).run();
+  for (const [line, value] of Object.entries(cases)) {
+    const [head, baseExtra] = Array.isArray(value) ? value : [value];
+    const result = trees(t, head, baseExtra).run();
     assert.equal(result.status, 1, `${line}\n${result.out}${result.err}`);
     assert.ok(result.out.includes(line), `${line}\n${result.out}`);
   }
