@@ -1,13 +1,5 @@
 [
   {
-    "id": "say-speaker",
-    "scope": "row sayStatement",
-    "expression": "node.speaker !== null",
-    "mutant": "false",
-    "expected": "kill",
-    "witness": "say as"
-  },
-  {
     "id": "say-literal-and",
     "scope": "row sayStatement",
     "expression": "node.value.kind === \"stringLiteral\"",
@@ -727,14 +719,6 @@
     "mutant": "(name !== null && Math.random() < 0)",
     "expected": "kill",
     "witness": "load repeated"
-  },
-  {
-    "id": "button-speaker",
-    "scope": "row showButtonStatement",
-    "expression": "node.speaker !== null",
-    "mutant": "false",
-    "expected": "kill",
-    "witness": "showButton as"
   },
   {
     "id": "say-interpolated",

@@ -13,6 +13,7 @@ import { coreRequest } from "../helpers/type-core-analysis.js";
 import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import {
   checkKey,
+  diagnosed,
   DOMAIN,
   type DifferentialRecord,
   outcome,
@@ -20,6 +21,7 @@ import {
   script,
 } from "../helpers/type-core/row-guard-records.js";
 import {
+  ANSWERED_AS_TODAY,
   DECLARED_REFUSALS,
   DECLARED_RUN_DIFFERENCES,
   OPERAND_TEMPLATES,
@@ -33,9 +35,10 @@ import {
  * tree), and judged per source and mode: (1) the route publishes a plan, never refusing or throwing, except a refusal
  * `DECLARED_REFUSALS` names, which must occur; (2) every check today's plan carries is in the route's, by path, offsets
  * and field; (3) each run, with the host global at every value of the derived domain, ends as today's does (status and
- * failure, with its site), except a difference `DECLARED_RUN_DIFFERENCES` names, which must occur. A `pass` row's runtime
- * citations exempt no check of today's plan from rule 2. The command operands' declared rule differences are
- * `type-core-declared-positions.test.ts`'s.
+ * failure, with its site), except a difference `DECLARED_RUN_DIFFERENCES` names, which must occur. A source of
+ * `ANSWERED_AS_TODAY`, which today's compiler refuses, gets today's diagnostics and no plan in every mode. A `pass`
+ * row's runtime citations exempt no check of today's plan from rule 2. The command operands' declared rule differences
+ * are `type-core-declared-positions.test.ts`'s.
  */
 
 interface GuardCase {
@@ -43,6 +46,8 @@ interface GuardCase {
   readonly source: string;
   /** The refusal the route must make in every mode, for a declared refusal's source. */
   readonly refusal?: string;
+  /** A source today's compiler refuses with a compile error, which the route must give alike (`ANSWERED_AS_TODAY`). */
+  readonly asToday?: true;
 }
 
 // EVIDENCE: invariant: the table's keys are exactly the AST kinds (its mapped type).
@@ -67,6 +72,11 @@ function guardCases(): GuardCase[] {
       },
       { name: `${declared.row} ${declared.position}, admitted`, source: script(declared.admitted) },
     ]),
+    ...ANSWERED_AS_TODAY.map((source) => ({
+      name: `as today: ${source}`,
+      source: script(source),
+      asToday: true as const,
+    })),
   ];
 }
 
@@ -78,6 +88,21 @@ const failureAt = (source: string, code: string, at: string | null): string | nu
 function judge(guardCase: GuardCase, record: DifferentialRecord, seen: Set<string>): string[] {
   const failures: string[] = [];
   const { checker } = record;
+  if (guardCase.asToday === true) {
+    if (checker.threw !== undefined || checker.plan)
+      return [`${record.name}: today's checker publishes a plan or throws`];
+    for (const mode of record.candidate.modes)
+      if (
+        mode.outside !== undefined ||
+        mode.threw !== undefined ||
+        mode.plan ||
+        JSON.stringify(diagnosed(mode)) !== JSON.stringify(diagnosed(checker))
+      )
+        failures.push(
+          `${record.name} [${mode.mode}]: not today's answer: ${mode.outside ?? mode.threw ?? JSON.stringify(diagnosed(mode))}`,
+        );
+    return failures;
+  }
   if (checker.threw !== undefined || !checker.plan)
     return [
       `${record.name}: today's checker publishes no plan (${checker.threw ?? JSON.stringify(checker.diagnostics)})`,
