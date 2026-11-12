@@ -11,6 +11,197 @@ import {
   OUTSIDE,
 } from "../../helpers/type-core/type-core-messages-setup.js";
 
+const warned = (into: string, value: string, fix: string) =>
+  `${into}, but '${value}' may be a value of another type here. ${STOPS} ${fix} ${OUTSIDE(value)}`;
+const nullable = "'a' holds whole numbers or null (integer?[])";
+const cases: readonly (readonly [source: string, site: string, message: string])[] = [
+  [
+    'let a:integer?[]=[1]\na=hostValue\nlet b=a\nlet c=b\nlet xs=[c,["x"]]\nexit\n',
+    "hostValue",
+    warned(
+      nullable,
+      "hostValue",
+      "Check 'hostValue' first, as in 'if hostValue is integer?[] { a=hostValue }'.",
+    ),
+  ],
+  [
+    'let a:integer?[]=[1]\na=hostValue\nlet b=a\nlet c=b\nlet xs=[c,["x"]]\nexit\n',
+    '"x"',
+    "This list mixes a list (integer?[]) and a list (string[]). A list holds one type. Use values of one type in it.",
+  ],
+  [
+    'let a:integer?[]=[1]\na=hostValue\nlet xs=[{f:a},{f:["x"]}]\nexit\n',
+    '"x"',
+    "This list mixes objects whose property 'f' holds a list (integer?[]) in one and a list (string[]) in another. " +
+      "A list holds one type. Give 'f' one type in every element.",
+  ],
+  [
+    'let xs=[[1,null],["x"]]\nexit\n',
+    '"x"',
+    "This list mixes a list (integer?[]) and a list (string[]). A list holds one type. Use values of one type in it.",
+  ],
+  [
+    'let n:integer?=1\nlet xs=[n,"x"]\nexit\n',
+    '"x"',
+    "This list mixes a whole number (integer) and text (string). A list holds one type. To allow both, declare it " +
+      "as 'let xs: (integer | string)[] =[n,\"x\"]'.",
+  ],
+  [
+    "let d:integer? dict=dict {}\nd=hostValue\nexit\n",
+    "hostValue",
+    warned(
+      "'d' holds whole numbers or null (integer? dict)",
+      "hostValue",
+      "Check 'hostValue' first, as in 'if hostValue is integer? dict { d=hostValue }'.",
+    ),
+  ],
+  [
+    "let a:integer?[][]=[[1]]\na=hostValue\nexit\n",
+    "hostValue",
+    warned(
+      "An element of an element of 'a' is declared as a whole number (integer) or null",
+      "hostValue",
+      "Check 'hostValue' first, as in 'if hostValue is integer?[][] { a=hostValue }'.",
+    ),
+  ],
+  [
+    "let a:integer[]=[1]\nlet b=[1, hostValue]\na=b\nexit\n",
+    "b",
+    warned(
+      "'a' holds whole numbers (integer[])",
+      "b",
+      "Check 'b' first, as in 'if b is integer[] { a=b }'.",
+    ),
+  ],
+  [
+    "let a:integer[]=[1]\nlet b=[hostValue otherwise null]\na=b\nexit\n",
+    "b",
+    "'a' holds whole numbers (integer[]), but 'b' may be null here. " +
+      `${STOPS} Check 'b' first, as in 'if b is integer[] { a=b }'.`,
+  ],
+  // (every layer's `null`, from the written type: Codex r1's B1)
+  ...[
+    "An element of 'a' is declared as a list or null",
+    "An element of an element of 'a' is declared as a whole number (integer)",
+  ].map(
+    (into) =>
+      [
+        "let a:integer[]?[]=[[1]]\na=hostValue\nexit\n",
+        "hostValue",
+        warned(
+          into,
+          "hostValue",
+          "Check 'hostValue' first, as in 'if hostValue is integer[]?[] { a=hostValue }'.",
+        ),
+      ] as const,
+  ),
+  [
+    "let a:integer[]?=[1]\na=hostValue\nexit\n",
+    "hostValue",
+    warned(
+      "'a' holds whole numbers (integer[])",
+      "hostValue",
+      "Check 'hostValue' first, as in 'if hostValue is integer[]? { a=hostValue }'.",
+    ),
+  ],
+  [
+    "global g: integer[]? dict = dict {}\ng=hostValue\nexit\n",
+    "hostValue",
+    warned(
+      "An element of an element of 'g' is declared as a whole number (integer)",
+      "hostValue",
+      "Check 'hostValue' first, as in 'if hostValue is integer[]? dict { g=hostValue }'.",
+    ),
+  ],
+  [
+    'function f(p: integer[]?[]) {\n    p=hostValue\n    say "${p.length}"\n}\nf([[1]])\nexit\n',
+    "hostValue",
+    warned(
+      "An element of an element of 'p' is declared as a whole number (integer)",
+      "hostValue",
+      "Check 'hostValue' first, as in 'if hostValue is integer[]?[] { p=hostValue }'.",
+    ),
+  ],
+  // (the annotation as the parser reads it, beside a comment and a default: Codex r2's B2)
+  [
+    'let a /* was: string[][] = [["old"]] */ : integer[]?[] = [[1]]\na=hostValue\nexit\n',
+    "hostValue",
+    warned(
+      "An element of an element of 'a' is declared as a whole number (integer)",
+      "hostValue",
+      "Check 'hostValue' first, as in 'if hostValue is integer[]?[] { a=hostValue }'.",
+    ),
+  ],
+  [
+    'function f(p: integer[]?[] = [[1]]) {\n    p=hostValue\n    say "${p.length}"\n}\nf()\nexit\n',
+    "hostValue",
+    warned(
+      "An element of an element of 'p' is declared as a whole number (integer)",
+      "hostValue",
+      "Check 'hostValue' first, as in 'if hostValue is integer[]?[] { p=hostValue }'.",
+    ),
+  ],
+  // (a copy of a written type: no written type proves its layers, so the words name the elements)
+  [
+    "let x:integer[]?[]=[[1]]\nlet b=x\nb=hostValue\nexit\n",
+    "hostValue",
+    warned(
+      "An element of an element of 'b' holds a whole number (integer) since line 2",
+      "hostValue",
+      "Check that every element of every element of 'hostValue' is a whole number (integer) first.",
+    ),
+  ],
+  [
+    "let x:integer[]? dict=dict {}\nlet b=x\nb=hostValue\nexit\n",
+    "hostValue",
+    warned(
+      "An element of an element of 'b' holds a whole number (integer) since line 2",
+      "hostValue",
+      "Check that every element of every value of 'hostValue' is a whole number (integer) first.",
+    ),
+  ],
+  // (unproved, the layer between keeps its own check)
+  [
+    "let x:integer[]? dict=dict {}\nlet b=x\nb=hostValue\nexit\n",
+    "hostValue",
+    `An element of 'b' holds a list or null since line 2, but 'hostValue' may be a value of another type here. ${STOPS} ${OUTSIDE("hostValue")}`,
+  ],
+  [
+    "let x:integer[]?[]=[[1]]\nlet a={f: x}\na.f=[hostValue]\nexit\n",
+    "hostValue",
+    warned(
+      "An element of an element of 'a.f' holds a whole number (integer) since line 2",
+      "hostValue",
+      "Check that every element of 'hostValue' is a whole number (integer) first.",
+    ),
+  ],
+  // (words where no form holds: a declaration's start value)
+  [
+    "let a:integer?[]=hostValue\nexit\n",
+    "hostValue",
+    warned(nullable, "hostValue", "Check that 'hostValue' is a list (integer?[]) first."),
+  ],
+  // (an element store, and a literal's element: the element's own test)
+  [
+    "let a:integer?[]=[1]\na[0]=hostValue\nexit\n",
+    "hostValue",
+    warned(
+      nullable,
+      "hostValue",
+      "Check 'hostValue' first, as in 'if hostValue is integer { a[0]=hostValue }'.",
+    ),
+  ],
+  [
+    "let a:integer?[]=[1]\na=[1, hostValue]\nexit\n",
+    "hostValue",
+    warned(
+      nullable,
+      "hostValue",
+      "Check 'hostValue' first, as in 'if hostValue is integer { a=[1, hostValue] }'.",
+    ),
+  ],
+];
+
 /**
  * #1753 (ADR 0021 rule 4.2): a store whose place is an element below the stored value, through collections alone, is
  * checked by the value's whole receiving type, which tests every element, where the root's written type proves every
@@ -23,196 +214,6 @@ import {
  * kinds' words. In four modes.
  */
 test("a store below its value checks the whole receiving type, null kept, and the mixed error names it (#1753)", () => {
-  const warned = (into: string, value: string, fix: string) =>
-    `${into}, but '${value}' may be a value of another type here. ${STOPS} ${fix} ${OUTSIDE(value)}`;
-  const nullable = "'a' holds whole numbers or null (integer?[])";
-  const cases: readonly (readonly [source: string, site: string, message: string])[] = [
-    [
-      'let a:integer?[]=[1]\na=hostValue\nlet b=a\nlet c=b\nlet xs=[c,["x"]]\nexit\n',
-      "hostValue",
-      warned(
-        nullable,
-        "hostValue",
-        "Check 'hostValue' first, as in 'if hostValue is integer?[] { a=hostValue }'.",
-      ),
-    ],
-    [
-      'let a:integer?[]=[1]\na=hostValue\nlet b=a\nlet c=b\nlet xs=[c,["x"]]\nexit\n',
-      '"x"',
-      "This list mixes a list (integer?[]) and a list (string[]). A list holds one type. Use values of one type in it.",
-    ],
-    [
-      'let a:integer?[]=[1]\na=hostValue\nlet xs=[{f:a},{f:["x"]}]\nexit\n',
-      '"x"',
-      "This list mixes objects whose property 'f' holds a list (integer?[]) in one and a list (string[]) in another. " +
-        "A list holds one type. Give 'f' one type in every element.",
-    ],
-    [
-      'let xs=[[1,null],["x"]]\nexit\n',
-      '"x"',
-      "This list mixes a list (integer?[]) and a list (string[]). A list holds one type. Use values of one type in it.",
-    ],
-    [
-      'let n:integer?=1\nlet xs=[n,"x"]\nexit\n',
-      '"x"',
-      "This list mixes a whole number (integer) and text (string). A list holds one type. To allow both, declare it " +
-        "as 'let xs: (integer | string)[] =[n,\"x\"]'.",
-    ],
-    [
-      "let d:integer? dict=dict {}\nd=hostValue\nexit\n",
-      "hostValue",
-      warned(
-        "'d' holds whole numbers or null (integer? dict)",
-        "hostValue",
-        "Check 'hostValue' first, as in 'if hostValue is integer? dict { d=hostValue }'.",
-      ),
-    ],
-    [
-      "let a:integer?[][]=[[1]]\na=hostValue\nexit\n",
-      "hostValue",
-      warned(
-        "An element of an element of 'a' is declared as a whole number (integer) or null",
-        "hostValue",
-        "Check 'hostValue' first, as in 'if hostValue is integer?[][] { a=hostValue }'.",
-      ),
-    ],
-    [
-      "let a:integer[]=[1]\nlet b=[1, hostValue]\na=b\nexit\n",
-      "b",
-      warned(
-        "'a' holds whole numbers (integer[])",
-        "b",
-        "Check 'b' first, as in 'if b is integer[] { a=b }'.",
-      ),
-    ],
-    [
-      "let a:integer[]=[1]\nlet b=[hostValue otherwise null]\na=b\nexit\n",
-      "b",
-      "'a' holds whole numbers (integer[]), but 'b' may be null here. " +
-        `${STOPS} Check 'b' first, as in 'if b is integer[] { a=b }'.`,
-    ],
-    // (every layer's `null`, from the written type: Codex r1's B1)
-    ...[
-      "An element of 'a' is declared as a list or null",
-      "An element of an element of 'a' is declared as a whole number (integer)",
-    ].map(
-      (into) =>
-        [
-          "let a:integer[]?[]=[[1]]\na=hostValue\nexit\n",
-          "hostValue",
-          warned(
-            into,
-            "hostValue",
-            "Check 'hostValue' first, as in 'if hostValue is integer[]?[] { a=hostValue }'.",
-          ),
-        ] as const,
-    ),
-    [
-      "let a:integer[]?=[1]\na=hostValue\nexit\n",
-      "hostValue",
-      warned(
-        "'a' holds whole numbers (integer[])",
-        "hostValue",
-        "Check 'hostValue' first, as in 'if hostValue is integer[]? { a=hostValue }'.",
-      ),
-    ],
-    [
-      "global g: integer[]? dict = dict {}\ng=hostValue\nexit\n",
-      "hostValue",
-      warned(
-        "An element of an element of 'g' is declared as a whole number (integer)",
-        "hostValue",
-        "Check 'hostValue' first, as in 'if hostValue is integer[]? dict { g=hostValue }'.",
-      ),
-    ],
-    [
-      'function f(p: integer[]?[]) {\n    p=hostValue\n    say "${p.length}"\n}\nf([[1]])\nexit\n',
-      "hostValue",
-      warned(
-        "An element of an element of 'p' is declared as a whole number (integer)",
-        "hostValue",
-        "Check 'hostValue' first, as in 'if hostValue is integer[]?[] { p=hostValue }'.",
-      ),
-    ],
-    // (the annotation as the parser reads it, beside a comment and a default: Codex r2's B2)
-    [
-      'let a /* was: string[][] = [["old"]] */ : integer[]?[] = [[1]]\na=hostValue\nexit\n',
-      "hostValue",
-      warned(
-        "An element of an element of 'a' is declared as a whole number (integer)",
-        "hostValue",
-        "Check 'hostValue' first, as in 'if hostValue is integer[]?[] { a=hostValue }'.",
-      ),
-    ],
-    [
-      'function f(p: integer[]?[] = [[1]]) {\n    p=hostValue\n    say "${p.length}"\n}\nf()\nexit\n',
-      "hostValue",
-      warned(
-        "An element of an element of 'p' is declared as a whole number (integer)",
-        "hostValue",
-        "Check 'hostValue' first, as in 'if hostValue is integer[]?[] { p=hostValue }'.",
-      ),
-    ],
-    // (a copy of a written type: no written type proves its layers, so the words name the elements)
-    [
-      "let x:integer[]?[]=[[1]]\nlet b=x\nb=hostValue\nexit\n",
-      "hostValue",
-      warned(
-        "An element of an element of 'b' holds a whole number (integer) since line 2",
-        "hostValue",
-        "Check that every element of every element of 'hostValue' is a whole number (integer) first.",
-      ),
-    ],
-    [
-      "let x:integer[]? dict=dict {}\nlet b=x\nb=hostValue\nexit\n",
-      "hostValue",
-      warned(
-        "An element of an element of 'b' holds a whole number (integer) since line 2",
-        "hostValue",
-        "Check that every element of every value of 'hostValue' is a whole number (integer) first.",
-      ),
-    ],
-    // (unproved, the layer between keeps its own check)
-    [
-      "let x:integer[]? dict=dict {}\nlet b=x\nb=hostValue\nexit\n",
-      "hostValue",
-      `An element of 'b' holds a list or null since line 2, but 'hostValue' may be a value of another type here. ${STOPS} ${OUTSIDE("hostValue")}`,
-    ],
-    [
-      "let x:integer[]?[]=[[1]]\nlet a={f: x}\na.f=[hostValue]\nexit\n",
-      "hostValue",
-      warned(
-        "An element of an element of 'a.f' holds a whole number (integer) since line 2",
-        "hostValue",
-        "Check that every element of 'hostValue' is a whole number (integer) first.",
-      ),
-    ],
-    // (words where no form holds: a declaration's start value)
-    [
-      "let a:integer?[]=hostValue\nexit\n",
-      "hostValue",
-      warned(nullable, "hostValue", "Check that 'hostValue' is a list (integer?[]) first."),
-    ],
-    // (an element store, and a literal's element: the element's own test)
-    [
-      "let a:integer?[]=[1]\na[0]=hostValue\nexit\n",
-      "hostValue",
-      warned(
-        nullable,
-        "hostValue",
-        "Check 'hostValue' first, as in 'if hostValue is integer { a[0]=hostValue }'.",
-      ),
-    ],
-    [
-      "let a:integer?[]=[1]\na=[1, hostValue]\nexit\n",
-      "hostValue",
-      warned(
-        nullable,
-        "hostValue",
-        "Check 'hostValue' first, as in 'if hostValue is integer { a=[1, hostValue] }'.",
-      ),
-    ],
-  ];
   for (const mode of MODES)
     for (const [source, site, message] of cases) {
       const found = inMode(mode, () => reported(main(source))).filter(
