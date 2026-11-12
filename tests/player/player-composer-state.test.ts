@@ -365,6 +365,10 @@ const CASES = {
   "N8 rowless, then an answer": TOPOLOGIES,
   "N8 automatic URL after an answer": TOPOLOGIES,
   "N8 blocked automatic tab": TOPOLOGIES,
+  "N8 a waiting URL crosses a Start": TOPOLOGIES,
+  "N8 an unmount while a URL waits": TOPOLOGIES,
+  "N8 a URL behind a refused answer": TOPOLOGIES,
+  "N8 a URL behind a lost answer": TOPOLOGIES,
   "N9 year 0000": TOPOLOGIES,
   "N11 two quick toggles": TOPOLOGIES,
   "N12 a toggle, then Submit": TOPOLOGIES,
@@ -1196,6 +1200,110 @@ RERUN.rows(
     p.submission.openUrl(blocked, true);
     assert.equal(p.submission.pending.value, null, "not tried again by itself");
     assert.equal(tries, 1);
+    return end();
+  },
+);
+
+const URL_BLOCK = 'timer async 60 s {\n  openUrl("https://example.com/block")\n}';
+
+/**
+ * Sends `SENT` with its painted frame held, then lets the block's URL take the screen and asks for it at once, as
+ * `RuntimeInteraction`'s watcher does: it waits behind the pending answer. Returns that answer and the tabs opened.
+ */
+async function waitBehindAnswer(context: TestContext, p: Page) {
+  const opened: string[] = [];
+  const open = () => (opened.push("tab"), true);
+  p.submission.urlOpener(open);
+  p.frame.hold();
+  type(p.composer, "SENT");
+  p.submission.send("input");
+  const answer = p.submission.pending.value!;
+  due(context);
+  await p.player.observe();
+  assert.equal(action(p)?.ui.kind, "url");
+  p.submission.openUrl(open, true);
+  assert.equal(p.submission.pending.value, answer, "the URL waits");
+  return { answer, opened };
+}
+
+RERUN.rows(
+  "N8 a waiting URL crosses a Start",
+  "a URL waiting behind an answer is not admitted in the next chat, even for an action with its number",
+  async (context, topology, end) => {
+    const p = await page(context, topology, script(URL_BLOCK, 'let a = askText "A?"'));
+    const { answer, opened } = await waitBehindAnswer(context, p);
+    const waited = action(p)!.actionId;
+    // Another Start whose own URL has the same number, one the Player never opens by itself.
+    const timers = Array.from(
+      { length: waited - 1 },
+      () => 'timer async 600 s {\n  say "later", instant\n}',
+    );
+    const other = await sourceStart(
+      p.player.bridge,
+      [...timers, 'openUrl("https://example.com/new", alwaysButton: true)', "exit"].join("\n"),
+      () => ({ wallClockMs: 0 }),
+    );
+    p.player.prepare(other);
+    await p.player.activate();
+    await until(() => answer.stage === "settled", "the answer dropped", "host");
+    assert.equal(action(p)?.actionId, waited, "the same number");
+    p.submission.openUrl(() => (opened.push("own"), true), true);
+    assert.equal(p.submission.pending.value, null, "its own URL is never opened by itself");
+    p.frame.release();
+    await settled();
+    assert.equal(p.submission.pending.value, null);
+    assert.deepEqual(opened, []);
+    assert.equal(ops(p, "openUrl").length, 0);
+    return end();
+  },
+);
+
+RERUN.rows(
+  "N8 an unmount while a URL waits",
+  "an unmount drops the answer and the URL waiting behind it, and admits nothing",
+  async (context, topology, end) => {
+    const p = await page(context, topology, script(URL_BLOCK, 'let a = askText "A?"'));
+    const { answer, opened } = await waitBehindAnswer(context, p);
+    p.scope.stop();
+    assert.equal(answer.stage, "settled");
+    assert.equal(p.submission.pending.value, null, "nothing admitted");
+    p.frame.release();
+    await settled();
+    assert.equal(p.submission.pending.value, null);
+    assert.deepEqual(opened, []);
+    return end();
+  },
+);
+
+RERUN.rows(
+  "N8 a URL behind a refused answer",
+  "a URL that took the screen from the answer it waited behind opens once by its own right when that answer is refused",
+  async (context, topology, end) => {
+    const p = await page(context, topology, script(URL_BLOCK, 'let a = askText "A?"'));
+    const { answer, opened } = await waitBehindAnswer(context, p);
+    p.frame.release();
+    await until(() => answer.stage === "settled", "the answer refused", "host");
+    assert.equal(p.composer.chatText.value, "SENT", "undone");
+    await until(() => p.submission.pending.value === null, "the URL settled", "host");
+    assert.deepEqual(opened, ["tab"]);
+    assert.equal(ops(p, "openUrl").length, 1);
+    return end();
+  },
+);
+
+RERUN.rows(
+  "N8 a URL behind a lost answer",
+  "a URL waiting behind an answer the connection's loss undid is not admitted",
+  async (context, topology, end) => {
+    const p = await page(context, topology, script(URL_BLOCK, 'let a = askText "A?"'));
+    const { answer, opened } = await waitBehindAnswer(context, p);
+    await p.connection.lose();
+    await until(() => answer.stage === "settled", "the answer undone", "host");
+    assert.equal(p.composer.chatText.value, "SENT");
+    assert.equal(p.submission.pending.value, null, "nothing admitted");
+    p.frame.release();
+    await settled();
+    assert.deepEqual(opened, []);
     return end();
   },
 );

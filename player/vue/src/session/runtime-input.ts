@@ -162,22 +162,23 @@ export async function draftInput(
 
 /**
  * An answer's chain in one section (`useAnswerSubmission`): observe, check ownership and that `presented`, the action
- * the player acted on, is still `target`'s, then the intent, its effect, and the op with that action's ID. `onPost` is
- * called as the op is handed to the session, after which the host may have run it.
+ * the player acted on, is still `target`'s, then the intent, its effect, and the op with that action's ID. `admit` is
+ * asked before the effect and the op: an answer it refuses runs neither and is retired; one it admits may have been run
+ * by the host from then on.
  */
 export async function runInput(
   section: InputSectionHost,
   presented: number | undefined,
   target: (session: PlayerSession) => number | undefined,
   intent: InputIntent,
-  onPost?: () => void,
+  admit?: () => boolean,
 ): Promise<InputResult> {
   const result = await section("inputAnswer", async (input, observed) => {
     if (observed === null || !input.owned()) return { kind: "retired" } as const;
     if (target(observed) !== presented) return { kind: "unavailable" } as const;
     const chosen = presented === undefined ? null : intent(observed);
     if (chosen === null) return { kind: "unanswered" } as const;
-    if (!input.owned()) {
+    if (!input.owned() || (admit !== undefined && !admit())) {
       chosen.settle?.(null);
       return { kind: "retired" } as const;
     }
@@ -185,7 +186,6 @@ export async function runInput(
       chosen.settle?.(null);
       return { kind: "unanswered" } as const;
     }
-    onPost?.();
     // `chosen` pairs its op with its arguments but `actionId` (`InputAnswer`), which TypeScript does not see once
     // inserted; the assertion drops only that pairing, and the result stays the input ops' own (`OpResult<InputOp>`).
     // EVIDENCE: invariant: the pair `chosen` holds, with the presented action's ID.
