@@ -54,155 +54,248 @@ function annotationOutside(annotation: TypeAnnotation): TypeAnnotation | null {
   return null;
 }
 
+/** An AST kind: a row of the route's syntax table (`DISPOSITIONS`). */
+export type SyntaxKind = Statement["kind"] | Expression["kind"];
+
+type NodeOfKind<K extends SyntaxKind> = Extract<Statement | Expression, { readonly kind: K }>;
+
+/** What the walk knows beside a node: its file's `let` names, the host values, and the keys loaded so far. */
+interface SyntaxWalk {
+  readonly lets: ReadonlySet<string>;
+  readonly globals: ReadonlySet<string>;
+  /** Each key loaded so far, once in the project: the agreement of a key's loads is S9b's (S3 §3). */
+  readonly loaded: Set<string>;
+}
+
+/** What a modelled row does at a node: the children walked after it, in source order, or its refusal there. */
+type Visit =
+  | { readonly walk: readonly (Statement | Expression | Block | null)[] }
+  | { readonly refuse: { readonly span: SourceSpan; readonly what: string } };
+
+/**
+ * A row of the table: `refused`, a construct outside the slice, refused at its span as `this <kind in words>`; or
+ * `modelled`, a construct of the slice, with the conditions under which it is, which its `visit` checks.
+ */
+type Disposition<K extends SyntaxKind> =
+  | { readonly row: "refused" }
+  | { readonly row: "modelled"; readonly visit: (node: NodeOfKind<K>, walk: SyntaxWalk) => Visit };
+
+const REFUSED = { row: "refused" } as const;
+const walk = (...children: (Statement | Expression | Block | null)[]): Visit => ({
+  walk: children,
+});
+const refuse = (span: SourceSpan, what: string): Visit => ({ refuse: { span, what } });
+/** A construct of the slice under no condition of its own, with these children. */
+const modelled = <K extends SyntaxKind>(
+  children: (node: NodeOfKind<K>) => (Statement | Expression | Block | null)[] = () => [],
+): Disposition<K> => ({ row: "modelled", visit: (node) => walk(...children(node)) });
+
+/**
+ * The route's syntax table: a row for every AST kind (a kind without one, or a row for no kind, fails the build), so a
+ * new construct is refused by its row, never by a default, and opening one is a change of its row.
+ */
+export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
+  // ------------------------------------------------------------------------------------------- statements
+  speakerDeclaration: REFUSED,
+  speakerSetterStatement: REFUSED,
+  sayStatement: {
+    row: "modelled",
+    visit: (node) =>
+      node.presentation !== null ||
+      node.speaker !== null ||
+      node.skipPolicy !== null ||
+      node.pacing !== null ||
+      (node.value.kind === "stringLiteral" &&
+        node.value.parts.some((part) => part.kind !== "stringText"))
+        ? refuse(node.span, "this say")
+        : node.value.kind === "stringLiteral"
+          ? walk()
+          : walk(node.value),
+  },
+  showButtonStatement: REFUSED,
+  waitStatement: REFUSED,
+  timerStatement: REFUSED,
+  showImageStatement: REFUSED,
+  hideImageStatement: REFUSED,
+  showCameraStatement: REFUSED,
+  hideCameraStatement: REFUSED,
+  showPopupStatement: REFUSED,
+  openUrlStatement: REFUSED,
+  exportTextStatement: REFUSED,
+  showPermanentButtonStatement: REFUSED,
+  playMediaStatement: REFUSED,
+  stopAudioStatement: REFUSED,
+  saveStatement: REFUSED,
+  deleteStatement: REFUSED,
+  exitStatement: modelled(),
+  endStatement: REFUSED,
+  labelStatement: REFUSED,
+  gotoStatement: REFUSED,
+  callFileStatement: REFUSED,
+  letStatement: {
+    row: "modelled",
+    visit: (node) => {
+      const written = node.typeAnnotation === null ? null : annotationOutside(node.typeAnnotation);
+      return written !== null ? refuse(written.span, "this written type") : walk(node.initializer);
+    },
+  },
+  globalStatement: REFUSED,
+  assignmentStatement: {
+    row: "modelled",
+    visit: (node) =>
+      node.operator !== "="
+        ? refuse(node.span, "this assignment")
+        : node.target.kind === "identifier"
+          ? walk(node.target, node.value)
+          : node.target.kind === "propertyAccessExpression"
+            ? walk(node.target.object, node.value)
+            : refuse(node.span, "this assignment"),
+  },
+  ifStatement: modelled((node) => [node.condition, node.thenBlock, node.elseBlock]),
+  switchStatement: REFUSED,
+  repeatStatement: modelled((node) => [node.count, node.body]),
+  forStatement: modelled((node) => [node.iterable, node.body]),
+  whileStatement: REFUSED,
+  breakStatement: REFUSED,
+  continueStatement: REFUSED,
+  functionDeclaration: REFUSED,
+  returnStatement: REFUSED,
+  expressionStatement: {
+    row: "modelled",
+    // (a call for what it does, such as `xs.sort()`)
+    visit: (node) =>
+      node.expression.kind === "callExpression"
+        ? walk(node.expression)
+        : refuse(node.span, "this expression statement"),
+  },
+  // ------------------------------------------------------------------------------------------- expressions
+  identifier: {
+    row: "modelled",
+    visit: (node, { lets, globals }) =>
+      lets.has(node.name) || globals.has(node.name)
+        ? walk()
+        : refuse(node.span, `the name '${node.name}'`),
+  },
+  booleanLiteral: modelled(),
+  nullLiteral: modelled(),
+  numberLiteral: modelled(),
+  durationLiteral: REFUSED,
+  unitExpression: REFUSED,
+  angleExpression: REFUSED,
+  stringLiteral: {
+    row: "modelled",
+    visit: (node) =>
+      node.parts.some((part) => part.kind !== "stringText")
+        ? refuse(node.span, "text with interpolation")
+        : walk(),
+  },
+  regexLiteral: modelled(),
+  listLiteral: modelled((node) => [...node.elements]),
+  objectLiteral: modelled((node) => node.properties.map((property) => property.value)),
+  setLiteral: REFUSED,
+  dictLiteral: REFUSED,
+  parenthesizedExpression: modelled((node) => [node.expression]),
+  propertyAccessExpression: {
+    row: "modelled",
+    // (a member of a literal that is no object, written as the receiver: its members are S9b's, as the route refuses any
+    // receiver that may be no object after the analysis, `outsideAnswers`)
+    visit: (node) =>
+      NOT_OBJECT_LITERALS.has(unwrapped(node.object).kind)
+        ? refuse(node.span, "this member or element read")
+        : walk(node.object),
+  },
+  indexExpression: modelled((node) => [node.object, node.index]),
+  callExpression: {
+    row: "modelled",
+    visit: (node) =>
+      sliceCall(node) === null
+        ? refuse(node.span, "this call expression")
+        : walk(
+            ...(node.callee.kind === "propertyAccessExpression" ? [node.callee.object] : []),
+            ...node.arguments.map((argument) => argument.value),
+          ),
+  },
+  unaryExpression: REFUSED,
+  binaryExpression: {
+    row: "modelled",
+    // (`otherwise`, and the narrowing's own null tests, `x != null` and `x == null`, §13.2's G: every other operator is
+    // S9b's, by its own rule)
+    visit: (node) =>
+      node.operator !== "otherwise" && !nullTest(node)
+        ? refuse(node.span, "this binary expression")
+        : walk(node.left, node.right),
+  },
+  rangeExpression: modelled((node) => [node.start, node.end]),
+  interactionExpression: REFUSED,
+  sayExpression: REFUSED,
+  showButtonExpression: REFUSED,
+  showPopupExpression: REFUSED,
+  timerExpression: REFUSED,
+  playMediaExpression: REFUSED,
+  showCameraExpression: REFUSED,
+  showPermanentButtonExpression: REFUSED,
+  loadExpression: {
+    row: "modelled",
+    visit: (node, { loaded }) => {
+      const key = unwrapped(node.key);
+      // the key as the session names it, whatever its spelling
+      const name =
+        key.kind === "stringLiteral" && key.parts.every((part) => part.kind === "stringText")
+          ? key.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join("")
+          : null;
+      // (a computed key is external data, F19: no other load's key; a default written as `null` is only null, which the
+      // route refuses after the analysis wherever it finds one, `outsideAnswers`: without a declared type, the storage
+      // rules' error, S9b's)
+      if (
+        node.defaultValue === null ||
+        (name !== null && loaded.has(name)) ||
+        unwrapped(node.defaultValue).kind === "nullLiteral"
+      )
+        return refuse(node.span, "this load expression");
+      if (name !== null) loaded.add(name);
+      return walk(node.key, node.defaultValue);
+    },
+  },
+  tagQueryExpression: REFUSED,
+  typeTestExpression: {
+    row: "modelled",
+    // (`x is T` and `x is not T`, the narrowing's type test, its type a written type of the slice)
+    visit: (node) => {
+      const written = annotationOutside(node.type);
+      return written !== null ? refuse(written.span, "this written type") : walk(node.value);
+    },
+  },
+};
+
 /**
  * The first construct of the files outside the slice's syntax, in source order: a statement, an expression, a written
- * type, or a name that is neither one of its file's variables nor a host value (a built-in, a speaker).
+ * type, or a name that is neither one of its file's variables nor a host value (a built-in, a speaker). Each node is
+ * judged by its row of `DISPOSITIONS`, then its children, so an open construct holding a closed one is refused at the
+ * closed one.
  */
 export function outsideSyntax(
   files: readonly CoreFile[],
   globals: ReadonlySet<string>,
 ): Outside | null {
-  // the keys loaded so far, each once in the project: the agreement of a key's loads is S9b's (S3 §3)
   const loaded = new Set<string>();
   for (const [file, { program }] of files.entries()) {
-    const lets = letNames(program);
-    const outside = (span: SourceSpan, what: string): Outside => ({ file, span, what });
+    const context: SyntaxWalk = { lets: letNames(program), globals, loaded };
     const pending: (Statement | Expression)[] = [...program.statements].reverse();
     for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+      // EVIDENCE: invariant: a node's row is the row of its own kind, so its `visit` takes that node.
+      const row = DISPOSITIONS[node.kind] as Disposition<SyntaxKind>;
+      if (row.row === "refused")
+        return { file, span: node.span, what: `this ${describe(node.kind)}` };
+      const visit = row.visit(node, context);
+      if ("refuse" in visit) return { file, ...visit.refuse };
       // children are pushed last to first, so they are visited in source order
-      const push = (children: readonly (Statement | Expression | Block | null)[]): void => {
-        for (let position = children.length - 1; position >= 0; position -= 1) {
-          const child = children[position];
-          if (child === null || child === undefined) continue;
-          if (child.kind === "block")
-            for (let at = child.statements.length - 1; at >= 0; at -= 1)
-              pending.push(child.statements[at]!);
-          else pending.push(child);
-        }
-      };
-      switch (node.kind) {
-        case "letStatement": {
-          const written =
-            node.typeAnnotation === null ? null : annotationOutside(node.typeAnnotation);
-          if (written !== null) return outside(written.span, "this written type");
-          push([node.initializer]);
-          break;
-        }
-        case "assignmentStatement":
-          if (node.operator !== "=") return outside(node.span, "this assignment");
-          if (node.target.kind === "identifier") push([node.target, node.value]);
-          else if (node.target.kind === "propertyAccessExpression")
-            push([node.target.object, node.value]);
-          else return outside(node.span, "this assignment");
-          break;
-        case "ifStatement":
-          push([node.condition, node.thenBlock, node.elseBlock]);
-          break;
-        case "repeatStatement":
-          push([node.count, node.body]);
-          break;
-        case "forStatement":
-          push([node.iterable, node.body]);
-          break;
-        case "sayStatement":
-          if (
-            node.presentation !== null ||
-            node.speaker !== null ||
-            node.skipPolicy !== null ||
-            node.pacing !== null ||
-            (node.value.kind === "stringLiteral" &&
-              node.value.parts.some((part) => part.kind !== "stringText"))
-          )
-            return outside(node.span, "this say");
-          if (node.value.kind !== "stringLiteral") push([node.value]);
-          break;
-        case "expressionStatement":
-          // (a call for what it does, such as `xs.sort()`)
-          if (node.expression.kind !== "callExpression")
-            return outside(node.span, "this expression statement");
-          push([node.expression]);
-          break;
-        case "exitStatement":
-        case "numberLiteral":
-        case "booleanLiteral":
-        case "nullLiteral":
-        case "regexLiteral":
-          break;
-        case "stringLiteral":
-          if (node.parts.some((part) => part.kind !== "stringText"))
-            return outside(node.span, "text with interpolation");
-          break;
-        case "identifier":
-          if (!lets.has(node.name) && !globals.has(node.name))
-            return outside(node.span, `the name '${node.name}'`);
-          break;
-        case "listLiteral":
-          push(node.elements);
-          break;
-        case "indexExpression":
-          push([node.object, node.index]);
-          break;
-        case "rangeExpression":
-          push([node.start, node.end]);
-          break;
-        case "parenthesizedExpression":
-          push([node.expression]);
-          break;
-        case "objectLiteral":
-          push(node.properties.map((property) => property.value));
-          break;
-        case "propertyAccessExpression":
-          // (a member of a literal that is no object, written as the receiver: its members are S9b's, as the route
-          // refuses any receiver that may be no object after the analysis, `outsideAnswers`)
-          if (NOT_OBJECT_LITERALS.has(unwrapped(node.object).kind))
-            return outside(node.span, "this member or element read");
-          push([node.object]);
-          break;
-        case "binaryExpression":
-          // (`otherwise`, and the narrowing's own null tests, `x != null` and `x == null`, §13.2's G: every other operator
-          // is S9b's, by its own rule)
-          if (node.operator !== "otherwise" && !nullTest(node))
-            return outside(node.span, "this binary expression");
-          push([node.left, node.right]);
-          break;
-        case "typeTestExpression": {
-          // (`x is T` and `x is not T`, the narrowing's type test, its type a written type of the slice)
-          const written = annotationOutside(node.type);
-          if (written !== null) return outside(written.span, "this written type");
-          push([node.value]);
-          break;
-        }
-        case "callExpression": {
-          const call = sliceCall(node);
-          if (call === null) return outside(node.span, "this call expression");
-          push([
-            ...(node.callee.kind === "propertyAccessExpression" ? [node.callee.object] : []),
-            ...node.arguments.map((argument) => argument.value),
-          ]);
-          break;
-        }
-        case "loadExpression": {
-          const key = unwrapped(node.key);
-          // the key as the session names it, whatever its spelling
-          const name =
-            key.kind === "stringLiteral" && key.parts.every((part) => part.kind === "stringText")
-              ? key.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join("")
-              : null;
-          // (a computed key is external data, F19: no other load's key; a default written as `null` is only null, which
-          // the route refuses after the analysis wherever it finds one, `outsideAnswers`: without a declared type, the
-          // storage rules' error, S9b's)
-          if (
-            node.defaultValue === null ||
-            (name !== null && loaded.has(name)) ||
-            unwrapped(node.defaultValue).kind === "nullLiteral"
-          )
-            return outside(node.span, "this load expression");
-          if (name !== null) loaded.add(name);
-          push([node.key, node.defaultValue]);
-          break;
-        }
-        default:
-          return outside(node.span, `this ${describe(node.kind)}`);
+      for (let position = visit.walk.length - 1; position >= 0; position -= 1) {
+        const child = visit.walk[position];
+        if (child === null || child === undefined) continue;
+        if (child.kind === "block")
+          for (let at = child.statements.length - 1; at >= 0; at -= 1)
+            pending.push(child.statements[at]!);
+        else pending.push(child);
       }
     }
   }
