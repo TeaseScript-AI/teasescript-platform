@@ -340,6 +340,23 @@ test("a collection's own writers are neither removed nor replaced, so none falls
   }
 });
 
+test("a typed array holds its elements alone: an own field beside them is refused, and none is added once sealed", () => {
+  let table: Int32Array | undefined;
+  const store = (given: Int32Array): void => {
+    Retained.map<string, { up: Int32Array }>("DefinitionLists.#sorted").set("k", { up: given });
+  };
+  const fielded = stepped(() => [
+    () => store(Object.assign(new Int32Array([1]), { memo: { n: 0 } })),
+    () => undefined,
+  ]);
+  assert.equal(fielded.run, "refused");
+  const plain = stepped(() => [
+    () => store((table = new Int32Array([1]))),
+    () => Object.assign(table!, { memo: 1 }),
+  ]);
+  assert.deepEqual(plain, { steps: ["ok", "frozen"], run: "ok" });
+});
+
 test("a helper watches a made map's writes through its own writer, which stays in place; a native map is not watched", () => {
   const seen: string[] = [];
   withRetainedRecorder(new RetainedInstrument(), () => {
