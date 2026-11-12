@@ -412,23 +412,25 @@ export function useAnswerSubmission(host: {
     begin(action, "image", { text: IMAGE_ANSWER_TRANSCRIPT_TEXT }, false, intent);
   }
 
-  /** The `openUrl` button, or the request the Player opens at once (`auto`), tried once per request. */
+  /**
+   * The `openUrl` button, or the request the Player opens at once (`auto`): that one waits while another answer is
+   * pending, and is tried once per request, counted when it is admitted as the pending answer.
+   */
   function openUrl(open: (session: PlayerSession) => boolean, auto: boolean): void {
     const session = host.session();
     const action = presentedAction(session);
     if (session === null || action === null) return;
+    const tried = urlTried.get(session.lineage) ?? new Set<number>();
     if (auto) {
-      const tried = urlTried.get(session.lineage) ?? new Set<number>();
-      urlTried.set(session.lineage, tried);
       if (tried.has(action.actionId)) return;
       if (pending.value !== null) {
         urlWaiting = action.actionId;
         return;
       }
-      tried.add(action.actionId);
     }
     const record = accept(action, "url", null);
     if (record === null) return;
+    if (auto) urlTried.set(session.lineage, tried.add(action.actionId));
     void dispatch(record, intents.url(open, auto ? null : "button"));
   }
   let openAtOnce: ((session: PlayerSession) => boolean) | null = null;

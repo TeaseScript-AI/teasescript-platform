@@ -419,24 +419,19 @@ useEventListener(
 
 /**
  * `openUrl` (V30 §33): when this session's own run requested it and the player's recent click lets the browser open a
- * tab, the Player opens the address at once and settles the request, so its button never shows. Each request is tried
- * once, when its runtime session first presents it: one that a block interrupted, or that Debug's Return or turning
- * Debug off reinstates with its session, is not tried again. A request a restore, rewind, or reload brought back is
+ * tab, the Player opens the address at once and settles the request, so its button never shows. It is admitted like
+ * every answer (`useAnswerSubmission`), after the answer still pending settles, and tried once, counted at its
+ * admission: one that a block interrupted after that, or that Debug's Return or turning Debug off reinstates with its
+ * session, is not tried again. A request a restore, rewind, or reload brought back is
  * never opened by itself, and neither is one written with `alwaysButton: true` or one whose tab the browser did not
  * open: its button opens it.
  */
-const urlTried = new Map<string, Set<number>>();
 submission.urlOpener(openRequestedUrl);
 watch(
   [actionId, () => props.reset],
   () => {
     const session = props.session;
-    const id = actionId.value;
-    if (!session || id === undefined || foreground.value?.kind !== "open-url") return;
-    const tried = urlTried.get(session.id) ?? new Set<number>();
-    urlTried.set(session.id, tried);
-    if (tried.has(id)) return;
-    tried.add(id);
+    if (!session || actionId.value === undefined || foreground.value?.kind !== "open-url") return;
     // Typically an answer the player just gave presents it, within the activation of that answer's click.
     if (!playerRuntimeUrlRequest(session)?.atOnce || !props.inputSection) return;
     // Host input happens at the observed time; the tab opens only for the request still presented there, and the
