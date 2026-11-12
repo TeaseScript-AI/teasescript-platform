@@ -2,21 +2,21 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import type { Expression, Statement } from "../../src/ast.js";
-import { compileSourceWithBackend } from "../../src/compiler.js";
-import { run } from "../../src/runtime/engine.js";
-import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
-import { withTestAllowance } from "../../src/type-inference/core/budget.js";
-import { messageSource } from "../../src/type-inference/core/messages.js";
-import { requiredSentence } from "../../src/type-inference/core/messages/causes.js";
-import { RouteHolding } from "../../src/type-inference/core/narrowing/route-holding.js";
-import { StatementTree } from "../../src/type-inference/core/narrowing/statement-tree.js";
-import { CoreProgram } from "../../src/type-inference/core/program.js";
-import type { RequiredCheck } from "../../src/type-inference/core/result.js";
-import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
-import { compactAnalysis, coreRequest } from "../helpers/type-core-analysis.js";
-import { inMode, MODES } from "../helpers/type-core-oracles.js";
-import type { CompactRecord } from "../helpers/type-core-records.js";
+import type { Expression, Statement } from "../../../src/ast.js";
+import { compileSourceWithBackend } from "../../../src/compiler.js";
+import { run } from "../../../src/runtime/engine.js";
+import { CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
+import { withTestAllowance } from "../../../src/type-inference/core/budget.js";
+import { messageSource } from "../../../src/type-inference/core/messages.js";
+import { requiredSentence } from "../../../src/type-inference/core/messages/causes.js";
+import { RouteHolding } from "../../../src/type-inference/core/narrowing/route-holding.js";
+import { StatementTree } from "../../../src/type-inference/core/narrowing/statement-tree.js";
+import { CoreProgram } from "../../../src/type-inference/core/program.js";
+import type { RequiredCheck } from "../../../src/type-inference/core/result.js";
+import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
+import { compactAnalysis, coreRequest } from "../../helpers/type-core-analysis.js";
+import { inMode, MODES } from "../../helpers/type-core-oracles.js";
+import type { CompactRecord } from "../../helpers/type-core-records.js";
 
 /*
  * #2497: the route rule's error where an unchecked route enters the use through a loop's earlier round, a label, a
@@ -41,7 +41,7 @@ interface Row {
 }
 
 const ROWS: readonly Row[] = readFileSync(
-  new URL("../../../tests/fixtures/type-core/route-entries.jsonl", import.meta.url),
+  new URL("../../../../tests/fixtures/type-core/route-entries.jsonl", import.meta.url),
   "utf8",
 )
   .split("\n")
