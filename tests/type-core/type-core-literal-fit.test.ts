@@ -6,6 +6,7 @@ import {
   withTestAllowance,
   withTestDemandAllowance,
 } from "../../src/type-inference/core/budget.js";
+import { coreMessage, messageSource } from "../../src/type-inference/core/messages.js";
 import { CoreProgram } from "../../src/type-inference/core/program.js";
 import { compactAnalysis, coreRequest } from "../helpers/type-core-analysis.js";
 import { inMode, MODES } from "../helpers/type-core-oracles.js";
@@ -81,6 +82,75 @@ test("a literal's type is the one all its elements fit, in either order (#2289 B
   assert.deepEqual(answered(`${DECLARED}let d = dict{p: 2, q: lives}\nexit\n`, "d", ["element"]), [
     "strict integer",
   ]);
+});
+
+test("a literal of constants answers as the same elements named do, in every order (#2289, the short route)", () => {
+  // (a literal of no named element is compared by its elements' definite kinds through `fitOf`, asked only where one
+  // does not fit the earliest's; the same constants bound to names take the cell query; both give the same admitted
+  // type and each diagnostic at the same element with the same sentence. The site is the innermost offending expression
+  // in the literal (A6): a constant's own, a named element's reference)
+  const constants = [
+    "1",
+    "2.5",
+    '"s"',
+    "true",
+    "null",
+    "{a: 1}",
+    '{a: "s"}',
+    "{a: 2.5}",
+    "[1]",
+    '["s"]',
+  ];
+  const rows: string[][] = [];
+  for (const a of constants) for (const b of constants) rows.push([a, b]);
+  for (const a of constants.slice(0, 5))
+    for (const b of constants.slice(0, 5))
+      for (const c of constants.slice(0, 5)) rows.push([a, b, c]);
+  rows.push(
+    ["{a: 1}", "{a: 2.5}", '{a: "s"}'],
+    ['{a: "s"}', "{a: 1}", "{a: 2.5}"],
+    ["[1]", '["s"]', "[2.5]"],
+  );
+  /** The list's admitted element type, and each diagnostic by the element it is in, with its sentence. */
+  const outcome = (elements: readonly string[], named: boolean): string[] => {
+    const lets = named ? elements.map((each, i) => `let e${i} = ${each}\n`).join("") : "";
+    const texts = named ? elements.map((_, i) => `e${i}`) : elements;
+    const written = `[${texts.join(", ")}]`;
+    const source = `${lets}let xs = ${written}\nexit\n`;
+    // (each element's span in the literal)
+    const spans: (readonly [number, number])[] = [];
+    let at = source.indexOf(written) + 1;
+    for (const text of texts) {
+      spans.push([at, at + text.length]);
+      at += text.length + 2;
+    }
+    const reference = (offset: number): string => {
+      const i = spans.findIndex(([start, end]) => offset >= start && offset < end);
+      return i >= 0 ? `element ${i}` : `@${offset}`;
+    };
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    const xs = bindingOf(source, "xs");
+    return MODES.flatMap((mode) =>
+      inMode(mode, () => {
+        const answers = analyseCore(request);
+        const shown = messageSource([source], answers.diagnostics);
+        const admitted = answers.place(xs, ["element"]).admitted;
+        return [
+          admitted.by === "decided"
+            ? `${admitted.inherited ? "strict" : "inferred"} ${[...admitted.kinds].sort().join("|")}`
+            : admitted.by,
+          ...answers.diagnostics.map(
+            // (a fix quotes the literal as written, its names or its constants)
+            (d) =>
+              `${d.code} ${reference(d.site.start)}: ${coreMessage(d, shown).replaceAll(written, "[…]")}`,
+          ),
+        ];
+      }),
+    );
+  };
+  for (const row of rows)
+    assert.deepEqual(outcome(row, false), outcome(row, true), `[${row.join(", ")}]`);
 });
 
 test("a store into a literal's place meets the type its elements fit, not its earliest's (#2289 B1)", () => {
