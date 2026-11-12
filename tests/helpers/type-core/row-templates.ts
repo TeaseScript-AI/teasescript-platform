@@ -149,7 +149,7 @@ export const ROW_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly string[
 };
 
 /** A value of each kind class in place of an operand's host global: a whole number, text, a truth value, `null`. */
-export const MISFIT_LITERALS: readonly string[] = ["2", '"text"', "true", "null"];
+const MISFIT_LITERALS: readonly string[] = ["2", '"text"', "true", "null"];
 
 /**
  * Each command operand's first template with each literal of `MISFIT_LITERALS` in place of the host global: the sources
