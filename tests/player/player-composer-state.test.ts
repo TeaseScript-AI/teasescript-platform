@@ -358,6 +358,7 @@ const CASES = {
   "N4 password over chat": TOPOLOGIES,
   "N4 lock phases": TOPOLOGIES,
   "N4 a retired token": TOPOLOGIES,
+  "N4 no slot for a popup": TOPOLOGIES,
   "N5 chat": TOPOLOGIES,
   "N5 date": TOPOLOGIES,
   "N5 form submit": TOPOLOGIES,
@@ -736,6 +737,27 @@ RERUN.rows(
     p.composer.edit(chatToken, "late");
     assert.equal(p.composer.displayed.value, "");
     assert.equal(p.composer.chatText.value, "");
+    return end();
+  },
+);
+
+RERUN.rows(
+  "N4 no slot for a popup",
+  "a popup gives the field no slot: an edit then writes nothing, and the chat's text is back unchanged after it",
+  async (context, topology, end) => {
+    const p = await page(
+      context,
+      topology,
+      script('showButton "Go"', 'showPopup "Hello"', 'let name = askText "Name?"'),
+    );
+    type(p.composer, "CHAT");
+    p.submission.choose(null);
+    await shows(p, "none", "the popup's");
+    p.composer.edit(p.composer.token.value, "typed at the popup");
+    assert.equal(p.composer.chatText.value, "CHAT", "nothing written");
+    p.submission.closePopup();
+    await shows(p, "chat", "the question after the popup");
+    assert.equal(p.composer.displayed.value, "CHAT");
     return end();
   },
 );
