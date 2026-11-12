@@ -70,13 +70,13 @@ const PART = [
 ].join("\n");
 
 /** A repository whose one commit holds `src/big.ts` as OLD, with the split written over it; `run` runs the check. */
-function repository(t, files = { "src/big.ts": KEPT, "src/part.ts": PART }) {
+function repository(t, files = { "src/big.ts": KEPT, "src/part.ts": PART }, old = OLD) {
   const fixture = mkdtempSync(join(tmpdir(), "reconstruct-move-"));
   t.after(() => rmSync(fixture, { recursive: true, force: true }));
   const git = (...args) => execFileSync("git", args, { cwd: fixture, encoding: "utf8" }).trim();
   git("init", "-q");
   mkdirSync(join(fixture, "src"));
-  writeFileSync(join(fixture, "src/big.ts"), OLD);
+  writeFileSync(join(fixture, "src/big.ts"), old);
   git("add", "-A");
   git("commit", "-q", "-m", "base");
   const base = git("rev-parse", "HEAD");
@@ -193,4 +193,50 @@ test("usage, an unknown option, an unknown commit or a missing file cannot run",
   assert.equal(run("--help"), 2);
   assert.equal(run("0000000000000000000000000000000000000000", "src/big.ts", "src/big.ts"), 2);
   assert.equal(run(r.base, "src/big.ts", "src/missing.ts"), 2);
+});
+
+/** A declaration a later line reads, long enough that `export` makes Prettier break it. */
+const OBJECT = [
+  'const first = { value: "a b", other: 1, more: "long enough to wrap the line once export is added" };',
+  "",
+  "const second = first.value;",
+  "",
+].join("\n");
+const wrapped = (value) =>
+  [
+    "export const first = {",
+    `  value: ${value},`,
+    "  other: 1,",
+    '  more: "long enough to wrap the line once export is added",',
+    "};",
+  ].join("\n");
+
+test("a rewrap keeps each literal's text and the old order; `export` goes only on a declaration at the margin (#2534 r1)", (t) => {
+  const run = (text, old = OBJECT) => repository(t, { "src/big.ts": text }, old).run();
+  assert.equal(run(`${wrapped('"a b"')}\n\nconst second = first.value;\n`).status, 0);
+  // (a string's spaces, or a comma inside it, are its text, not layout)
+  assert.equal(run(`${wrapped('"ab"')}\n\nconst second = first.value;\n`).status, 1);
+  const comma = OBJECT.replace('"a b"', '"a,)"');
+  assert.equal(run(`${wrapped('"a,)"')}\n\nconst second = first.value;\n`, comma).status, 0);
+  assert.equal(run(`${wrapped('"a)"')}\n\nconst second = first.value;\n`, comma).status, 1);
+  // (the rewrapped declaration after the line that reads it: out of the old order)
+  const after = run(`const second = first.value;\n\n${wrapped('"a b"')}\n`);
+  assert.equal(after.status, 1);
+  assert.match(after.out, /^failure: src\/big\.ts:3: out of the old file's order/mu);
+  // (`export` before a statement inside a body)
+  const body = "function f(): void {\n  run();\n}\n";
+  assert.equal(run("function f(): void {\n  export run();\n}\n", body).status, 1);
+});
+
+test("the header is the parsed imports: a trailing comment ends one, code after one is body, other line ends cannot run (#2534 r1)", (t) => {
+  const old =
+    'import { value } from "./values.js"; // shared fixture\n\nconst result = value + 1;\n';
+  const run = (text) => repository(t, { "src/big.ts": text }, old).run();
+  const same = run(old);
+  assert.equal(same.status, 0, same.out);
+  assert.match(same.out, /^old body lines: 1, taken: 1;/mu);
+  assert.equal(run(old.replace("value + 1", "value + 999")).status, 1);
+  assert.equal(run('import { value } from "./values.js"; const result = value + 1;\n').status, 1);
+  assert.equal(run(old.replaceAll("\n", "\r\n")).status, 2);
+  assert.equal(run(`// header\u2028const hidden = 1;\n${old}`).status, 2);
 });

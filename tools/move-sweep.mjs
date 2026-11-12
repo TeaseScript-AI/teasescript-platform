@@ -22,9 +22,9 @@
 // to new path. --splits FILE merges in a JSON `{"renames": {old: [new, …]}}` for a split, one old path into several,
 // which Git does not report as a rename; --renames FILE replaces the whole map (and BASE is then not needed). A hit
 // counts as rewritten when it names any of an old path's new paths: an old path that is also one of its own new paths
-// (a split that keeps the original file) is not stale in form 1, its name is no moved name in forms 4 and 5 (that file
-// still has it, whatever folder a string puts before it), and form 3 lists an old name only when none of its new files
-// keeps that name.
+// (a split that keeps the original file) is not stale in form 1, forms 4 and 5 skip a name when every old path with it
+// is kept so (those files still have it, whatever folder a string puts before it), and form 3 lists an old name only
+// when none of its new files keeps that name.
 //
 // The tree is HEAD's committed tree (commit first): its tracked regular files with a text extension, outside
 // `node_modules/` and `dist/`, read as UTF-8 with a byte-order mark kept as a character (a file that is not UTF-8 is
@@ -262,8 +262,8 @@ export function sweep(cwd, renames, forms = new Set(["1", "2", "3", "4", "5"])) 
   const { tracked, files, notRead } = treeOf(cwd);
   const moved = new Set(Object.keys(renames).map(stem));
   const names = [...moved].map(escape).sort(byLengthDown).join("|");
-  // (forms 4 and 5: only the names of old paths that leave; a name whose every old path stays among its own new paths
-  // still names that file wherever a string puts it)
+  // (forms 4 and 5: the names of old paths that leave; a name whose every old path stays among its own new paths still
+  // names those files wherever a string puts it, and one old path that leaves keeps the name in)
   const left = new Set(
     Object.entries(renames)
       .filter(([old, next]) => !next.includes(old))

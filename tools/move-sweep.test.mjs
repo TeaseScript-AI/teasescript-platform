@@ -88,7 +88,7 @@ test("a split that keeps the original file: its old path is not stale, and its n
   assert.match(out, /^== 3\. renamed name \(classify\): 0$/mu);
 });
 
-test("a split that keeps the original file: its name after any folder is no hit of form 4 or 5, a leaving name's is (#2526)", (t) => {
+test("a name every one of whose old paths a split keeps is no hit of form 4 or 5 after any folder; a leaving name's is, and one leaving path of a shared name keeps it in (#2526)", (t) => {
   const r = repository(t);
   r.write({
     "src/core/big.ts": "export const big = 1;\n",
@@ -127,6 +127,22 @@ test("a split that keeps the original file: its name after any folder is no hit 
     'tools/refs.mjs:1: const kept = "./fixture/big.js";',
   ]);
   assert.deepEqual(section(leaving.out, "5"), [
+    "tools/refs.mjs:2: const keptGroup = /fixture\\/(big|other)\\.js/;",
+  ]);
+  // (a name two old paths share, one kept and one leaving: the leaving one keeps the name in forms 4 and 5)
+  const shared = r.run(
+    "--renames",
+    r.json("shared", {
+      renames: {
+        "src/core/big.ts": ["src/core/big.ts", "src/core/part.ts"],
+        "src/other/big.ts": ["src/core/gone.ts"],
+      },
+    }),
+  );
+  assert.deepEqual(section(shared.out, "4"), [
+    'tools/refs.mjs:1: const kept = "./fixture/big.js";',
+  ]);
+  assert.deepEqual(section(shared.out, "5"), [
     "tools/refs.mjs:2: const keptGroup = /fixture\\/(big|other)\\.js/;",
   ]);
 });

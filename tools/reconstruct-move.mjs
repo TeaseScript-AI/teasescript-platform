@@ -10,20 +10,27 @@
 // (OLD may be one of them: a split that keeps the original file). Paths are relative to the current directory, which is
 // inside the repository.
 //
-// The body of a file is its lines after its header: leading `//` comment lines (a new file's header), then its import
-// statements (`import …` up to the line ending `"…";`), blank lines between them included. OLD's body starts after its
-// imports. Then:
-//   - every line of a NEW body that is not blank is a line of OLD's body, equal byte for byte, or that line with
-//     `export ` put before it (a declaration a sibling now reads, listed);
-//   - each OLD body line that is not blank is taken once, and within one NEW file in OLD's order;
+// The body of a file is its lines after its header: a NEW file's leading `//` lines, then the import declarations that
+// open the file as TypeScript parses them (the line an import ends on is header only when no code follows it there).
+// OLD's body starts after its imports. Then:
+//   - every line of a NEW body that is not blank is a line of OLD's body, equal byte for byte, or, for a declaration at
+//     the left margin (`function`, `async function`, `const`, `let`, `var`, `class`, `abstract class`, `interface`,
+//     `type`, `enum`, `declare`), that line with `export ` put before it (a declaration a sibling now reads, listed);
+//   - each OLD body line that is not blank is taken once;
 //   - a run of lines is taken whole, longest first, never across a blank line followed by a line at the left margin
 //     (one declaration's boundary), so a line repeated in OLD (a `}`) goes with its own block;
 //   - blank lines are layout and not compared.
 // What is left over is the residue: OLD lines no run took, and NEW lines no OLD line matched. It is admitted only as
 // Prettier's rewrap of a declaration that gained `export `: each group of consecutive left-over NEW lines starts with
-// `export `, breaks only after `(`, `,`, `=>` or `{`, or before `)` (where a break cannot end a statement: none after
-// `return`), and equals one run of consecutive left-over OLD lines with `export` dropped, whitespace and a trailing
-// comma before a closing bracket ignored. Anything else fails.
+// `export ` before such a declaration, breaks only after `(`, `,`, `=>` or `{`, or before `)` (where a break cannot end
+// a statement: none after `return`), and has the tokens of one run of consecutive left-over OLD lines, as TypeScript
+// scans them: comments and literals by their exact text, whitespace dropped, and a comma before a closing bracket
+// dropped. A group holding a template literal or a `/` is no rewrap (a scan without context cannot tell a regular
+// expression from a division). Last, within each NEW file its runs and admitted groups follow OLD's order. Anything
+// else fails. The rules are the closed set above: a line or a group they do not admit fails.
+//
+// A line ends at `\n` only: an input holding a carriage return or a line or paragraph separator (U+2028, U+2029, which
+// end a line in JavaScript and could end a `//` header line early) cannot run.
 //
 // --edit NEW:LINE=OLDLINE declares one changed line: NEW's line LINE is read as OLD's line OLDLINE (both 1-based, NEW's
 // counted in the file), and both are printed, so a reviewer reads each edit. A declaration that names no such line
@@ -32,11 +39,13 @@
 // Output: a summary line (`old body lines: N, taken: N; runs: N; export added: N; residue: N old, N new; edits: N`),
 // then each `export` added, each edit, the residue with its verdict, and each failure. Exit status: 0 when every line
 // is accounted for; 1 when one is not (a line not in OLD, out of order, an OLD line not taken, a residue that is no
-// rewrap); 2 when it cannot run (usage, an unreadable file or commit, a malformed or unmatched --edit).
+// rewrap); 2 when it cannot run (usage, an unreadable file or commit, a line separator other than `\n`, a malformed or
+// unmatched --edit).
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { ts } from "ts-morph";
 
 const USAGE = "usage: node tools/reconstruct-move.mjs BASE OLD NEW… [--edit NEW:LINE=OLDLINE]…";
 
@@ -47,50 +56,94 @@ function linesOf(text) {
   return lines;
 }
 
-/** The index after the import statements from `start` on, blank lines between them included. */
-function afterImports(lines, start) {
-  let i = start;
-  while (i < lines.length) {
-    if (lines[i] === "") {
-      i += 1;
-      continue;
-    }
-    if (!lines[i].startsWith("import ")) break;
-    while (i < lines.length && !/"[^"]+";$/u.test(lines[i])) i += 1;
-    i += 1;
+/**
+ * The index of a file's first body line: after its leading `//` lines when `header` (a NEW file), then after the
+ * import declarations that open it, as TypeScript parses them. The line an import ends on is header only when nothing
+ * but a comment follows the import on it.
+ */
+function bodyStart(text, lines, header) {
+  let first = 0;
+  if (header) while (first < lines.length && lines[first].startsWith("//")) first += 1;
+  const source = ts.createSourceFile("file.ts", text, ts.ScriptTarget.Latest, true);
+  let end = -1;
+  for (const statement of source.statements) {
+    if (!ts.isImportDeclaration(statement)) break;
+    end = statement.end;
   }
-  return i;
+  if (end === -1) return first;
+  const line = source.getLineAndCharacterOfPosition(end).line;
+  const rest = lines[line].slice(source.getLineAndCharacterOfPosition(end).character).trim();
+  return Math.max(first, rest === "" || rest.startsWith("//") ? line + 1 : line);
 }
 
-/** The text a residue compares: no whitespace, no trailing comma before a closing bracket. */
-const normal = (text) => text.replace(/\s+/gu, "").replace(/,(?=[)\]}])/gu, "");
+/** The declarations a moved line may gain `export` on: one at the left margin that a module can export. */
+const EXPORTABLE =
+  /^(?:async function|function|const|let|var|class|abstract class|interface|type|enum|declare) /u;
+
+/**
+ * A text's tokens as TypeScript scans them, comments kept with their text, whitespace and line breaks dropped, and a
+ * comma before a closing bracket dropped (the trailing comma Prettier adds); `null` for a text with a template literal
+ * or a `/` (a regular expression's text, or a division, which a scan without context cannot tell apart).
+ */
+function tokensOf(text) {
+  const scanner = ts.createScanner(
+    ts.ScriptTarget.Latest,
+    false,
+    ts.LanguageVariant.Standard,
+    text,
+  );
+  const tokens = [];
+  for (let kind = scanner.scan(); kind !== ts.SyntaxKind.EndOfFileToken; kind = scanner.scan()) {
+    if (kind === ts.SyntaxKind.WhitespaceTrivia || kind === ts.SyntaxKind.NewLineTrivia) continue;
+    if (
+      kind === ts.SyntaxKind.SlashToken ||
+      kind === ts.SyntaxKind.SlashEqualsToken ||
+      kind === ts.SyntaxKind.NoSubstitutionTemplateLiteral ||
+      kind === ts.SyntaxKind.TemplateHead ||
+      kind === ts.SyntaxKind.BacktickToken
+    )
+      return null;
+    tokens.push(scanner.getTokenText());
+  }
+  return tokens.filter((token, i) => !(token === "," && [")", "]", "}"].includes(tokens[i + 1])));
+}
 
 /** Whether a line break after `line` and before `next` cannot end a statement. */
 const safeBreak = (line, next) =>
   /(?:\(|,|=>|\{)$/u.test(line.trimEnd()) || next.trimStart().startsWith(")");
 
+/** Whether `group` (new lines) is Prettier's rewrap of `run` (old lines) after the declaration gained `export`. */
+function rewraps(group, run) {
+  if (!group[0].startsWith("export ") || !EXPORTABLE.test(run[0])) return false;
+  if (!group.every((text, n) => n === 0 || safeBreak(group[n - 1], text))) return false;
+  const before = tokensOf(run.join("\n"));
+  const after = tokensOf(group.join("\n").slice("export ".length));
+  return before !== null && after !== null && before.join("\0") === after.join("\0");
+}
+
 /**
- * Reconstructs `old` (its lines) from `files` (each `{ file, lines }`), with `edits` (a map from `file:line` to the old
- * line, 1-based, it is read as). Returns the counts, the added exports, the residue and the failures.
+ * Reconstructs OLD (`old`: its text) from `files` (each `{ file, text }`), with `edits` (a map from `file:line` to the
+ * old line, 1-based, it is read as). Returns the counts, the added exports, the residue and the failures.
  */
-export function reconstruct(old, files, edits = new Map()) {
-  const start = afterImports(old, 0);
+export function reconstruct(oldText, files, edits = new Map()) {
+  const old = linesOf(oldText);
+  const start = bodyStart(oldText, old, false);
   const taken = new Map();
   const failures = [];
   const exported = [];
   const unmatched = [];
+  /** Per NEW file, each run's or residue group's place: its first new line, and its first and last old line. */
+  const placed = new Map();
   let runs = 0;
-  for (const { file, lines: original } of files) {
-    const lines = original.map((line, index) => {
+  for (const { file, text } of files) {
+    const lines = linesOf(text).map((line, index) => {
       const edit = edits.get(`${file}:${index + 1}`);
       return edit === undefined ? line : old[edit - 1];
     });
-    let i = 0;
-    while (i < lines.length && lines[i].startsWith("//")) i += 1;
-    const first = afterImports(lines, i);
-    const fits = (o, k) => old[o] === lines[k] || `export ${old[o]}` === lines[k];
-    let last = -1;
-    for (let k = first; k < lines.length;) {
+    placed.set(file, []);
+    const fits = (o, k) =>
+      old[o] === lines[k] || (EXPORTABLE.test(old[o]) && `export ${old[o]}` === lines[k]);
+    for (let k = bodyStart(text, linesOf(text), true); k < lines.length;) {
       if (lines[k] === "") {
         k += 1;
         continue;
@@ -115,17 +168,13 @@ export function reconstruct(old, files, edits = new Map()) {
         k += 1;
         continue;
       }
-      if (best <= last)
-        failures.push(
-          `${file}:${k + 1}: out of the old file's order (old ${best + 1} after ${last + 1})`,
-        );
       for (let n = 0; n < length; n += 1) {
         taken.set(best + n, file);
         if (old[best + n] !== lines[k + n])
           exported.push(`${file}:${k + n + 1} <- old ${best + n + 1}`);
       }
+      placed.get(file).push({ line: k + 1, first: best, last: best + length - 1 });
       runs += 1;
-      last = best + length - 1;
       k += length;
     }
   }
@@ -151,25 +200,37 @@ export function reconstruct(old, files, edits = new Map()) {
   const used = new Set();
   for (const group of groups) {
     const texts = group.lines.map((entry) => entry.text);
-    const rewrap =
-      texts[0].startsWith("export ") &&
-      texts.every((text, n) => n === 0 || safeBreak(texts[n - 1], text));
-    const target = normal(texts.join("").replace(/^export\s+/u, ""));
-    const match = rewrap
-      ? oldRuns.findIndex(
-          (run, index) => !used.has(index) && normal(run.map((o) => old[o]).join("")) === target,
-        )
-      : -1;
-    if (match !== -1) used.add(match);
+    const match = oldRuns.findIndex(
+      (run, index) =>
+        !used.has(index) &&
+        rewraps(
+          texts,
+          run.map((o) => old[o]),
+        ),
+    );
     residue.push({ group, run: match === -1 ? null : oldRuns[match] });
-    if (match === -1)
+    if (match === -1) {
       for (const entry of group.lines)
         failures.push(`${entry.file}:${entry.line}: not an old line: ${entry.text.slice(0, 100)}`);
+      continue;
+    }
+    used.add(match);
+    const run = oldRuns[match];
+    placed.get(group.file).push({ line: group.lines[0].line, first: run[0], last: run.at(-1) });
   }
   oldRuns.forEach((run, index) => {
     if (!used.has(index))
       for (const o of run) failures.push(`old ${o + 1}: not taken: ${old[o].slice(0, 100)}`);
   });
+  // The old order within each NEW file, over its runs and its rewrapped declarations alike.
+  for (const [file, places] of placed) {
+    places.sort((a, b) => a.line - b.line);
+    for (let i = 1; i < places.length; i += 1)
+      if (places[i].first <= places[i - 1].last)
+        failures.push(
+          `${file}:${places[i].line}: out of the old file's order (old ${places[i].first + 1} after ${places[i - 1].last + 1})`,
+        );
+  }
   return {
     counts: { old: wanted.length, taken: wanted.length - missing.length, runs },
     exported,
@@ -198,49 +259,47 @@ export function main(argv, cwd = process.cwd(), print = console.log) {
   }
   if (positional.length < 3) return cannotRun(USAGE);
   const [base, oldPath, ...newPaths] = positional;
-  let old;
+  let oldText;
   try {
     const prefix = execFileSync("git", ["rev-parse", "--show-prefix"], {
       cwd,
       encoding: "utf8",
     }).trim();
     const show = path.posix.normalize(`${prefix}${oldPath}`);
-    old = linesOf(
-      execFileSync("git", ["show", `${base}:${show}`], {
-        cwd,
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      }),
-    );
+    oldText = execFileSync("git", ["show", `${base}:${show}`], {
+      cwd,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
   } catch {
     return cannotRun(`cannot read ${oldPath} at ${base}`);
   }
   const files = [];
   for (const file of newPaths) {
     try {
-      files.push({ file, lines: linesOf(readFileSync(path.resolve(cwd, file), "utf8")) });
+      files.push({ file, text: readFileSync(path.resolve(cwd, file), "utf8") });
     } catch {
       return cannotRun(`cannot read ${file}`);
     }
   }
+  // (a line ends only at `\n`: a carriage return or a JavaScript line separator would end a line the check reads as one)
+  for (const [name, text] of [[oldPath, oldText], ...files.map(({ file, text }) => [file, text])])
+    if (/[\r\u2028\u2029]/u.test(text))
+      return cannotRun(`${name} holds a carriage return or a line or paragraph separator`);
+  const old = linesOf(oldText);
   for (const [place, oldLine] of edits) {
     const [file, line] = [
       place.slice(0, place.lastIndexOf(":")),
       Number(place.slice(place.lastIndexOf(":") + 1)),
     ];
     const target = files.find((entry) => entry.file === file);
-    if (
-      target === undefined ||
-      line < 1 ||
-      line > target.lines.length ||
-      oldLine < 1 ||
-      oldLine > old.length
-    )
+    const lines = target === undefined ? [] : linesOf(target.text);
+    if (line < 1 || line > lines.length || oldLine < 1 || oldLine > old.length)
       return cannotRun(`--edit ${place}=${oldLine} names no line of a NEW file and of OLD`);
-    print(`edit: ${place}: ${target.lines[line - 1]}`);
+    print(`edit: ${place}: ${lines[line - 1]}`);
     print(`  read as old ${oldLine}: ${old[oldLine - 1]}`);
   }
-  const { counts, exported, residue, failures } = reconstruct(old, files, edits);
+  const { counts, exported, residue, failures } = reconstruct(oldText, files, edits);
   const residueOld = residue.reduce((sum, { run }) => sum + (run?.length ?? 0), 0);
   const residueNew = residue.reduce((sum, { group }) => sum + group.lines.length, 0);
   print(
