@@ -29,13 +29,21 @@ import type { MixedSteps } from "../../result.js";
 import { refText, type Touch, Touches, type TouchRef } from "../../touch.js";
 import { hotSets } from "../groups.js";
 import { heldMeetings } from "../held.js";
-import { concrete, deciding, fits, NUMERIC } from "../kinds.js";
+import { concrete, deciding, NUMERIC } from "../kinds.js";
 import { inheritance, landedBelow } from "../landings/inheritance.js";
 import type { OwnStructure } from "../model.js";
 import { ownOf } from "../own.js";
-import { earliestDecider } from "../scan.js";
+import {
+  type CellAnswer,
+  cellBatch,
+  cellOfLiteral,
+  type Descriptor,
+  fitOf,
+  misfits,
+} from "./cell.js";
 import {
   expectStructures,
+  fieldsOf,
   holdsSource,
   literalLanding,
   pathsBelow,
@@ -150,14 +158,14 @@ function touchElements(
 
 /**
  * ADR 0021 1.3, A8: a list's, set's or dict's literal elements (values), and the properties its objects share, have
- * one type at every path their known structure gives, a copy's or a call's its source's (F2): the earliest element's,
- * or a copy of a written binding's written type (A4), unless the literal lands directly in a written place, whose
- * type then checks them (A1). A definite element of another type is an error at the innermost offending expression
- * and is rejected: later uses see the earliest element's type (A6). `error` hears of each with the element's
- * store, the literal's cell, the path, the earliest element's kinds there (by family, and its own, which a sentence
- * names) and the offending element's (D1). `undecided`, after a stop before admission settled: a literal whose element
- * needs a decision admission did not make (a named element, or one the finishing read leaves `STOPPED`) is not
- * compared; it is reported there instead, so its store marks.
+ * one type at every path their known structure gives, a copy's or a call's its source's (F2): the type all its elements
+ * fit (B1, `fitOf`: #2289), unless the literal lands directly in a written place, whose type then checks them (A1).
+ * Where none fits all, each element that does not fit the earliest's type (`misfits`) is an error at the innermost
+ * offending expression and is rejected: later uses see the earliest element's type (A6). `error` hears of each with the
+ * element's store, the literal's cell, the path, the earliest element's kinds there (by family, and its own, which a
+ * sentence names) and the offending element's (D1). `undecided`, after a stop before admission settled: a literal
+ * whose element needs a decision admission did not make (a named element, or one the finishing read leaves `STOPPED`)
+ * is not compared; it is reported there instead, so its store marks.
  */
 export function literalElements(
   admission: Admission,
@@ -210,6 +218,8 @@ export function literalElements(
     compared(cell, list) ? list.flatMap((d) => (d.value === undefined ? [] : [d.value])) : [],
   );
   expectStructures(admission, elements);
+  // (#2289 R49: this invocation's one comparison evaluation, its cells' completed answers by key; dropped on return)
+  const batch = cellBatch(admission);
   cells: for (const [cell, list] of order([...definitions.cellDefs])) {
     const owner = program.cellOwner.get(cell);
     if (!compared(cell, list) || owner?.kind !== "cell") continue;
@@ -285,11 +295,51 @@ export function literalElements(
       shared = paths;
       atCopy = atCopies.get(key)!;
     }
-    const first = new Map<
+    // (#2289: the cell's step, as its owner's type names it, and its elements by value)
+    let step: string | null = null;
+    for (const has of program.hasOf.get(owner.owner) ?? [])
+      for (const [name, field] of fieldsOf(has.type))
+        if (field.kind === "ref" && field.place === cell) step = name;
+    const byValue = new Map<PlaceId, Definition>();
+    for (const d of list) if (d.value !== undefined) byValue.set(d.value, d);
+    // per path, the cell's answer (B1): a literal with a named element by its query (`cellOfLiteral`); one with none,
+    // whose elements are all inferred, by its elements' kinds there, asked only once an element does not fit the
+    // earliest's (`misfits`), so a literal no element of which misfits is read once per element and path, as before
+    const answers = new Map<string, CellAnswer>();
+    const earliestAt = new Map<string, Descriptor>();
+    const inferred = (d: Definition, items: readonly Item[]): Descriptor => {
+      const tags = [...new Set(deciding(items).map((item) => item.tag))];
+      return {
+        value: d.value!,
+        tags: tags.includes("number") ? tags.filter((tag) => tag !== "integer") : tags,
+        term: null,
+        nullable: items.some((item) => item.tag === "null"),
+        site: d.site,
+        own: false,
+        host: false,
+      };
+    };
+    const cellAt = (at: string, path: readonly string[], d: Definition): CellAnswer => {
+      let answer = answers.get(at);
+      if (answer !== undefined) return answer;
+      if (shared !== null && step !== null)
+        answer = drive(admission, cellOfLiteral(admission, owner.owner, d.node, step, path, batch));
+      else {
+        const descriptors: Descriptor[] = [];
+        for (const e of list)
+          if (e.value !== undefined) descriptors.push(inferred(e, admission.valueAt(e, path)));
+        answer = fitOf(admission, descriptors);
+      }
+      answers.set(at, answer);
+      return answer;
+    };
+    // (a conflict's earliest element at a path, its kinds as the sentence names them: a declared one's written type,
+    // with the null its leaf may hold below the element by the form rule's copy case (`mayHoldNull`; #1901), an
+    // inferred one's family and its own kinds, the null it may hold below the element (#1753), read once per path)
+    const sentences = new Map<
       string,
       {
-        readonly tags: readonly ItemTag[];
-        readonly written: boolean;
+        readonly decided: readonly ItemTag[];
         readonly own: readonly ItemTag[];
         readonly d: Definition;
         // (#1765: its layers at this path, `layersAt`'s, once asked; #1762: its dict layers too)
@@ -298,33 +348,45 @@ export function literalElements(
         sets?: boolean[];
       }
     >();
-    // an element of one family offends where none of its kinds fits: a written type by the kinds themselves (a whole
-    // number fits a written integer, a fraction does not), an earliest element's by their family; an element its written
-    // type decides (`laterKinds`) offends where none of that type's kinds fits, as the earliest's decides it, and a
-    // number it gives fits a written whole number, as in an inferred literal (ADR 0021 rule 1.3; #1906, F4 of #2267's
-    // final review)
-    const offends = (at: string, tags: readonly ItemTag[], written = false): boolean => {
-      const decided = first.get(at)!;
-      const families = [...new Set(tags.map(family))];
-      return (
-        (written ? families.length > 0 : families.length === 1) &&
-        (decided.written ? tags : families).every(
-          (tag) => !decided.tags.some((ref) => fits(tag, ref, decided.written && !written)),
-        )
-      );
+    const earliestOf = (at: string, path: readonly string[], earliest: Descriptor) => {
+      const known = sentences.get(at);
+      if (known !== undefined) return known;
+      const d = byValue.get(earliest.value)!;
+      const below = path.length > 0;
+      let made;
+      if (earliest.term !== null) {
+        const leafNull = earliest.own
+          ? occurrenceNull(admission, d.value!, d.node, path)
+          : typeTags(earliest.term).includes("null");
+        made = {
+          decided: earliest.tags,
+          own: below && leafNull ? [...earliest.tags, "null" as const] : earliest.tags,
+          d,
+        };
+      } else {
+        const items = admission.valueAt(d, path);
+        const own = [...new Set(deciding(items).map((item) => item.tag))];
+        const nulls = below && items.some((item) => item.tag === "null");
+        made = {
+          decided: [...new Set(own.map(family))],
+          own: nulls ? [...own, "null" as const] : own,
+          d,
+        };
+      }
+      sentences.set(at, made);
+      return made;
     };
     // the error at the innermost offending expression, the element rejected (A6)
     const offended = (
       d: Definition,
       path: readonly string[],
-      decided?: readonly ItemTag[],
+      earliest: Descriptor,
+      misfit: Descriptor,
     ): void => {
       const at = pathText(path);
       const inner =
         path.length > 0
-          ? admission.offendingAt(d, path, (items) =>
-              offends(at, [...new Set(deciding(items).map((item) => item.tag))]),
-            )
+          ? admission.offendingAt(d, path, (items) => misfits(earliest, inferred(d, items).tags))
           : null;
       // (#1765: the layers between the element and the leaf that may hold null, each element's by its form
       // (`mayHoldNull`); the sentence's type alone, as the leaf's own null is, #1753)
@@ -335,32 +397,35 @@ export function literalElements(
       const depths = intermediateDepths(path);
       const layers = (of: Definition): boolean[] =>
         layersAt(admission, of.value!, of.node, path, depths);
-      const earliest = first.get(at)!;
-      earliest.layers ??= layers(earliest.d);
+      const first = earliestOf(at, path, earliest);
+      first.layers ??= layers(first.d);
       // (#1790: the later element's compared kinds, with the null it may hold at the leaf by #1765's rule, read
       // by the same walk one depth more: a value at its own level as it is read at its node (a narrowed copy holds none,
       // a typed host value may), a copy below its own level by its term, an `otherwise`'s fallback only where its
       // operand may be null. Codex r1–r4, Astra r1 on #1819; the null decides nothing, #1753)
       const later = layersAt(admission, d.value!, d.node, path, [...depths, path.length]);
-      const optional = mixedOptional(earliest.layers, later.slice(0, -1));
-      const own = decided ?? laterKinds(admission, d, path, admission.valueAt(d, path)).kinds;
+      const optional = mixedOptional(first.layers, later.slice(0, -1));
+      // (its kinds: its value's definite kinds there, as its occurrence holds them (a type test's, #1790); where it has
+      // none, a declared element's written type's, without the null, which decides nothing (#1753, #1906))
+      const held = [...new Set(deciding(admission.valueAt(d, path)).map((item) => item.tag))];
+      const own = held.length > 0 || misfit.term === null ? held : misfit.tags;
       const kinds = later.at(-1)! ? [...own, "null" as const] : own;
       error(inner === null ? d.site : (program.place(inner.value!).site ?? d.site), {
         d,
         cell,
         path,
-        decided: first.get(at)!.tags,
-        earliest: first.get(at)!.own,
+        decided: first.decided,
+        earliest: first.own,
         kinds,
         atCopy: atCopy.has(at),
         ...(optional === undefined ? {} : { optional }),
         ...shownOf(
           path,
           (fact, steps, asked) =>
-            (earliest[fact === "dict" ? "dicts" : "sets"] ??= layersAt(
+            (first[fact === "dict" ? "dicts" : "sets"] ??= layersAt(
               admission,
-              earliest.d.value!,
-              earliest.d.node,
+              first.d.value!,
+              first.d.node,
               steps,
               asked,
               fact,
@@ -372,98 +437,64 @@ export function literalElements(
     };
     // a named literal's elements are compared at those paths, a literal's own elements at their structure's; per source
     // identity in the literal, the paths its first element offends at, where each later one offends too
-    const offending = new Map<string, (readonly string[])[]>();
+    const offending = new Map<
+      string,
+      {
+        readonly path: readonly string[];
+        readonly earliest: Descriptor;
+        readonly misfit: Descriptor;
+      }[]
+    >();
     for (const d of list) {
       if (d.value === undefined) continue;
       const identity = named(d) ? contract.identityOf(d.value).id : null;
       const known = identity === null ? undefined : offending.get(identity);
-      const found: (readonly string[])[] = [];
+      const found: {
+        readonly path: readonly string[];
+        readonly earliest: Descriptor;
+        readonly misfit: Descriptor;
+      }[] = [];
       if (identity !== null && known === undefined) offending.set(identity, found);
       const below = known !== undefined ? [] : (shared ?? pathsBelow(admission, d.value, []));
       for (const path of [[], ...below]) {
         const at = keptText(admission.work, path);
         const items = admission.valueAt(d, path);
+        // (a stop left the element's value unknown: the cell is undecided, R26)
+        const stop = undecided;
         if (
-          undecided !== undefined &&
+          stop !== undefined &&
           items.some((item) => item.tag === "unknown" && (item.reasons & REASON.budget) !== 0)
         ) {
-          undecided(cell);
+          stop(cell);
           continue cells;
         }
-        const own = [...new Set(deciding(items).map((item) => item.tag))];
-        if (!first.has(at)) {
-          // A4: a copy of a written binding gives its written type, whatever it holds now, where it is the earliest
-          // decider on the path; an element whose structure holds no source holds no copy (#1106: k literals nested
-          // in each other asked each other's stops)
-          const decider =
-            identity === null
-              ? null
-              : drive(admission, earliestDecider(admission, d.value, d.node, path, null));
-          const copied = decider?.term ?? null;
-          const kinds = [...new Set(own.map(family))];
-          // (the kinds its error names: below the element, with any null the earliest may hold there, as its written
-          // type is described; the null decides nothing, #1753)
-          const below = path.length > 0;
-          if (copied !== null) {
-            const written = typeTags(copied);
-            const tags = written.filter((tag) => tag !== "null");
-            // (its leaf's null by the form rule's copy case, as the later element's (`mayHoldNull`): at the deciding
-            // copy's own level as it is read, narrowed, below it by the copied term. #1901, Astra r1's B1 on #1908; from
-            // the decider already asked, so no walk down the element, Codex r3)
-            const leafNull =
-              decider!.own === true
-                ? occurrenceNull(admission, d.value, d.node, path)
-                : written.includes("null");
-            first.set(at, {
-              tags,
-              written: true,
-              own: below && leafNull ? [...tags, "null"] : tags,
-              d,
-            });
-          } else if (kinds.length === 1) {
-            const nulls = below && items.some((item) => item.tag === "null");
-            first.set(at, { tags: kinds, written: false, own: nulls ? [...own, "null"] : own, d });
+        if (shared === null || step === null) {
+          // (with no named element, the earliest deciding element at the path, and a later one only where it does not
+          // fit it)
+          const mine = inferred(d, items);
+          if (mine.tags.length === 0) continue;
+          const earliest = earliestAt.get(at);
+          if (earliest === undefined) {
+            earliestAt.set(at, mine);
+            continue;
           }
-          continue;
+          if (!misfits(earliest, mine.tags)) continue;
         }
-        const later = laterKinds(admission, d, path, items);
-        if (!offends(at, later.kinds, later.written)) continue;
-        offended(d, path, later.kinds);
-        if (path.length > 0) found.push(path);
+        const answer = cellAt(at, path, d);
+        if (answer.kind === "stopped") {
+          if (stop === undefined) continue;
+          stop(cell);
+          continue cells;
+        }
+        if (answer.kind !== "conflict") continue;
+        const misfit = answer.misfits.get(d.value);
+        if (misfit === undefined) continue;
+        offended(d, path, answer.earliest, misfit);
+        if (path.length > 0) found.push({ path, earliest: answer.earliest, misfit });
       }
-      for (const path of known ?? []) offended(d, path);
+      for (const { path, earliest, misfit } of known ?? []) offended(d, path, earliest, misfit);
     }
   }
-}
-
-/**
- * A later element's kinds at a path below it (`literalElements`): its value's definite kinds there; where it has none,
- * a named element whose value may hold a kind there (a join's elements, `pos`) or holds what the script cannot know
- * (a typed host value, `unknown`) is a copy of what decides it, as the earliest element is (A4): its decider's written
- * type, without `null`, which decides nothing (#1753, #1906), `written`. A value proved to hold only `null` there, and
- * an `unknown` a stop left (`REASON.budget`), keep their own kinds, none.
- */
-function laterKinds(
-  admission: Admission,
-  d: Definition,
-  path: readonly string[],
-  items: readonly Item[],
-): { readonly kinds: readonly ItemTag[]; readonly written: boolean } {
-  const own = [...new Set(deciding(items).map((item) => item.tag))];
-  if (
-    own.length > 0 ||
-    !holdsSource(admission, d.value!) ||
-    !items.some(
-      (item) => concrete(item) || (item.tag === "unknown" && (item.reasons & REASON.budget) === 0),
-    )
-  )
-    return { kinds: own, written: false };
-  const decider = drive(admission, earliestDecider(admission, d.value!, d.node, path, null));
-  // (no test pins dropping the written type's `null`: it keeps the sentence from naming it once a `!= null` test marks
-  // a typed host value, #1847)
-  return decider?.term == null
-    ? { kinds: own, written: false }
-    : { kinds: typeTags(decider.term).filter((tag) => tag !== "null"), written: true };
 }
 
 /**
