@@ -22,7 +22,7 @@ import {
 } from "../../src/index.js";
 import { withValidationTestStatistics } from "../../src/validation-testing.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
-import { utc } from "../helpers/temporal-fixtures.js";
+import { utc } from "../helpers/runtime/temporal-fixtures.js";
 
 import {
   activatePlayerRuntimeButton,

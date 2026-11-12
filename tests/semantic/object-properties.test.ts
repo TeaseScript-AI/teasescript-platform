@@ -6,7 +6,7 @@ import { run } from "../../src/runtime/engine.js";
 import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
 import { runValidSource } from "../helpers/run-valid-source.js";
 import { sayTexts } from "../helpers/runtime-events.js";
-import { Story } from "../helpers/story-session.js";
+import { Story } from "../helpers/runtime/story-session.js";
 
 // A parameter without a type or default is unknown, so `pick(...)` gives a value the compiler cannot know.
 const PICK = "function pick(value) {\n    return value\n}\n";

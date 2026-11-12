@@ -4,7 +4,7 @@ import test from "node:test";
 import { compileSource } from "../../src/compiler.js";
 import { runValidSource } from "../helpers/run-valid-source.js";
 import { sayTexts } from "../helpers/runtime-events.js";
-import { Story } from "../helpers/story-session.js";
+import { Story } from "../helpers/runtime/story-session.js";
 
 function diagnostics(source: string): [string, string, string][] {
   return compileSource(source).diagnostics.map((diagnostic) => [

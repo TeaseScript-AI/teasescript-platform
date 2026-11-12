@@ -10,7 +10,7 @@ import { LIST_FUNCTIONS } from "../../src/language-facts.js";
 import { LIST_FUNCTION_CONTRACTS, type ListFunction } from "../../src/list-function-rules.js";
 import { runValidSource } from "../helpers/run-valid-source.js";
 import { sayTexts } from "../helpers/runtime-events.js";
-import { Story } from "../helpers/story-session.js";
+import { Story } from "../helpers/runtime/story-session.js";
 
 function said(source: string, seed?: number): string[] {
   const result = runValidSource(source, seed);

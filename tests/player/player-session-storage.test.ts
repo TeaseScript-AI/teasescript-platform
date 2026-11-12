@@ -24,7 +24,7 @@ import {
   type SerializableRuntimeValue,
 } from "../../src/index.js";
 import { DEFAULT_TEMPORAL_CONTEXT, type TemporalContext } from "../../src/temporal.js";
-import { AMSTERDAM, utc } from "../helpers/temporal-fixtures.js";
+import { AMSTERDAM, utc } from "../helpers/runtime/temporal-fixtures.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 
 // Load the real Vue composable through the existing build tool: its browser-source imports use Vite resolution.

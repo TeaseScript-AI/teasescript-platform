@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { MediaDevice, type MediaDeviceElement } from "../../../player/media-device.js";
+import { MediaDevice, type MediaDeviceElement } from "../../../../player/media-device.js";
 import {
   advancePlayerRuntimeTime,
   createPlayerRuntimeSession,
@@ -7,8 +7,8 @@ import {
   playerRuntimeMedia,
   reportPlayerRuntimeMediaLoad,
   type PlayerRuntimeSession,
-} from "../../../player/runtime-adapter.js";
-import type { MediaLoadReport } from "../../../src/index.js";
+} from "../../../../player/runtime-adapter.js";
+import type { MediaLoadReport } from "../../../../src/index.js";
 
 // A deterministic stand-in for HTMLAudioElement: tests move `position` to simulate what was actually played.
 class FakeElement implements MediaDeviceElement {

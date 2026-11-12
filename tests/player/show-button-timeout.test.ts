@@ -24,7 +24,7 @@ import type { RuntimeSnapshot } from "../../src/runtime/snapshot/state.js";
 import { compileValidPlan } from "../helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "../helpers/runtime-equivalence.js";
-import { playerStateOf } from "../helpers/player-state.js";
+import { playerStateOf } from "../helpers/player/player-state.js";
 import { createFreshRuntimeSnapshot } from "../../src/runtime/snapshot/snapshot-construction.js";
 import { validateRuntimeSnapshot } from "../../src/runtime/snapshot/snapshot-validation.js";
 
