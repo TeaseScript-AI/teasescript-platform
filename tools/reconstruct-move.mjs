@@ -10,15 +10,17 @@
 // (OLD may be one of them: a split that keeps the original file). Paths are relative to the current directory, which is
 // inside the repository.
 //
-// The body of a file is its lines after its header: a NEW file's leading `//` lines, then the import declarations that
-// open the file as TypeScript parses them (the line an import ends on is header only when no code follows it there).
-// OLD's body starts after its imports. Then:
+// The body of a file is its lines after its header. The header is a closed list of lines: a NEW file's leading `//`
+// lines, then blank lines and the import declarations that open the file as TypeScript parses them, each starting at
+// the left margin with nothing after it on its last line but a `//` comment. The first other line (a shebang, a block
+// comment, code) starts the body, OLD's and NEW's alike. Then:
 //   - every line of a NEW body that is not blank is a line of OLD's body, equal byte for byte, or, for a declaration at
 //     the left margin (`function`, `async function`, `const`, `let`, `var`, `class`, `abstract class`, `interface`,
 //     `type`, `enum`, `declare`), that line with `export ` put before it (a declaration a sibling now reads, listed);
 //   - each OLD body line that is not blank is taken once;
 //   - a run of lines is taken whole, longest first, never across a blank line followed by a line at the left margin
-//     (one declaration's boundary), so a line repeated in OLD (a `}`) goes with its own block;
+//     (one declaration's boundary), which prefers a block's own `}` but does not prove that a line repeated in OLD
+//     stays with its block (a `}` moved to another file's block passes here; the compile fails it);
 //   - blank lines are layout and not compared.
 // What is left over is the residue: OLD lines no run took, and NEW lines no OLD line matched. It is admitted only as
 // Prettier's rewrap of a declaration that gained `export `: each group of consecutive left-over NEW lines starts with
@@ -57,23 +59,27 @@ function linesOf(text) {
 }
 
 /**
- * The index of a file's first body line: after its leading `//` lines when `header` (a NEW file), then after the
- * import declarations that open it, as TypeScript parses them. The line an import ends on is header only when nothing
- * but a comment follows the import on it.
+ * The index of a file's first body line. The header is read line by line, and only these lines belong to it: a NEW
+ * file's leading `//` lines (`header`), then blank lines and the import declarations that open the file as TypeScript
+ * parses them, each starting at the left margin of its first line, with nothing after it on its last line but a `//`
+ * comment. The first line that is none of these (a shebang, a block comment, code, an import that does not start or end
+ * so) is body.
  */
 function bodyStart(text, lines, header) {
-  let first = 0;
-  if (header) while (first < lines.length && lines[first].startsWith("//")) first += 1;
+  let at = 0;
+  if (header) while (at < lines.length && lines[at].startsWith("//")) at += 1;
   const source = ts.createSourceFile("file.ts", text, ts.ScriptTarget.Latest, true);
-  let end = -1;
   for (const statement of source.statements) {
     if (!ts.isImportDeclaration(statement)) break;
-    end = statement.end;
+    const start = source.getLineAndCharacterOfPosition(statement.getStart(source));
+    const end = source.getLineAndCharacterOfPosition(statement.end);
+    while (at < start.line && lines[at] === "") at += 1;
+    if (at !== start.line || start.character !== 0) break;
+    const rest = lines[end.line].slice(end.character).trim();
+    if (rest !== "" && !rest.startsWith("//")) break;
+    at = end.line + 1;
   }
-  if (end === -1) return first;
-  const line = source.getLineAndCharacterOfPosition(end).line;
-  const rest = lines[line].slice(source.getLineAndCharacterOfPosition(end).character).trim();
-  return Math.max(first, rest === "" || rest.startsWith("//") ? line + 1 : line);
+  return at;
 }
 
 /** The declarations a moved line may gain `export` on: one at the left margin that a module can export. */

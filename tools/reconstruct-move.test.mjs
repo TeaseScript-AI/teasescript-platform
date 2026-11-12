@@ -219,6 +219,11 @@ test("a rewrap keeps each literal's text and the old order; `export` goes only o
   const comma = OBJECT.replace('"a b"', '"a,)"');
   assert.equal(run(`${wrapped('"a,)"')}\n\nconst second = first.value;\n`, comma).status, 0);
   assert.equal(run(`${wrapped('"a)"')}\n\nconst second = first.value;\n`, comma).status, 1);
+  // (a rewrap holding a regular expression or a template literal is refused, its text unread by the token scan)
+  const regex = OBJECT.replace('"a b"', "/a b/u");
+  assert.equal(run(`${wrapped("/a b/u")}\n\nconst second = first.value;\n`, regex).status, 1);
+  const template = OBJECT.replace('"a b"', "`a b`");
+  assert.equal(run(`${wrapped("`a b`")}\n\nconst second = first.value;\n`, template).status, 1);
   // (the rewrapped declaration after the line that reads it: out of the old order)
   const after = run(`const second = first.value;\n\n${wrapped('"a b"')}\n`);
   assert.equal(after.status, 1);
@@ -241,6 +246,16 @@ test("the header is the parsed imports: a trailing comment ends one, code after 
   assert.equal(run('import { value } from "./values.js"; const result = value + 1;\n').status, 1);
   // (code after an import on its line, every old line kept: only the header rule fails it)
   assert.equal(run(old.replace("// shared fixture", "const added = 2;")).status, 1);
+  // (a header line outside the listed forms is body: a shebang, a block comment before or between imports)
+  const stable = "const stable = 1;\n";
+  const header = (text) => repository(t, { "src/big.ts": text }, stable).run().status;
+  assert.equal(header('import "./setup.js";\nexport const stable = 1;\n'), 0);
+  assert.equal(header('#!/usr/bin/env node\nimport "./setup.js";\nexport const stable = 1;\n'), 1);
+  assert.equal(header('/* added */\nimport "./setup.js";\nexport const stable = 1;\n'), 1);
+  assert.equal(
+    header('import "./setup.js";\n/* added */\nimport "./more.js";\nexport const stable = 1;\n'),
+    1,
+  );
   assert.equal(run(old.replaceAll("\n", "\r\n")).status, 2);
   assert.equal(run(`// header\u2028const hidden = 1;\n${old}`).status, 2);
 });
