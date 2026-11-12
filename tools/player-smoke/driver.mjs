@@ -89,6 +89,18 @@ export async function key(cdp, name, { modifiers = 0, commands } = {}) {
   await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", ...event });
 }
 
+/** A real Enter in the focused element: its key code and its text, as a keyboard sends them. */
+export async function pressEnter(cdp) {
+  for (const type of ["keyDown", "keyUp"])
+    await cdp.call("Input.dispatchKeyEvent", {
+      type,
+      key: "Enter",
+      code: "Enter",
+      windowsVirtualKeyCode: 13,
+      ...(type === "keyDown" ? { text: "\r" } : {}),
+    });
+}
+
 /** Replaces a text field's text: a press on the field, Select All, then the new text typed or deleted. */
 export async function typeInto(cdp, selector, text) {
   await physicalClick(cdp, selector);
