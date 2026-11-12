@@ -281,23 +281,23 @@ function ruleAt(
 
 test("a written parameter or global, which the candidate route declines, a chain of copies and a literal's cells give their written type; the index pays per binding and cell, the walk per literal and type (#1072 step 0)", () => {
   const rows = [
-    { text: "function f(fb: number) {\n  @\n}\nf(0)", built: 1, walked: 1 },
-    { text: "global fb: number = 0\n@", built: 1, walked: 1 },
-    { text: "let w: number = 0\nlet f1 = w\nlet fb = f1\n@", built: 3, walked: 1 },
-    // (the index: the binding, the literal's step, each cell and the binding each reads; the walk: the literal and the
-    // one written type its cells hold, however many cells hold it)
-    { text: "let w: number = 0\nlet fb = [w, w]\n@", rest: ["element"], built: 6, walked: 2 },
+    { text: "function f(fb: number) {\n  @\n}\nf(0)", built: 2, walked: 1 },
+    { text: "global fb: number = 0\n@", built: 2, walked: 1 },
+    { text: "let w: number = 0\nlet f1 = w\nlet fb = f1\n@", built: 4, walked: 1 },
+    // (the index: the binding, the literal's step, each cell and the binding each reads, and each written type taken
+    // apart once; the walk: the literal and the one written type its cells hold, however many cells hold it)
+    { text: "let w: number = 0\nlet fb = [w, w]\n@", rest: ["element"], built: 7, walked: 2 },
     {
       text: "let w: number = 0\nlet fb = [w, w, w, w]\n@",
       rest: ["element"],
-      built: 10,
+      built: 11,
       walked: 2,
     },
     // (a literal in a literal: each entered once, by the index and by the walk)
     {
       text: "let w: number = 0\nlet a = [w]\nlet fb = [a, a]\n@",
       rest: ["element", "element"],
-      built: 9,
+      built: 10,
       walked: 3,
     },
   ];
