@@ -3,14 +3,34 @@ import { CONVERSIONS, isConversion } from "../../../src/conversions.js";
 import type { SerializableRuntimeValue } from "../../../src/runtime/values/serializable-values.js";
 import type { ValueKind } from "../../../src/value-kinds.js";
 
+/** A file of a project the guard compiles: its path and its whole source. */
+export interface TemplateFile {
+  readonly path: string;
+  readonly source: string;
+}
+
+/** A template: a source, which the guard ends with `exit`, or the files of a project, the first `main.tease`. */
+export type Template = string | readonly TemplateFile[];
+
+const main = (source: string): TemplateFile => ({ path: "main.tease", source });
+const PART_TYPED: TemplateFile = {
+  path: "part.tease",
+  source: 'let z: integer = hostValue\nsay "in part"\nexit\n',
+};
+const PART_NULLABLE: TemplateFile = {
+  path: "part.tease",
+  source: "let x: integer? = hostValue\nif x != null {\n  let y: integer = x\n}\nexit\n",
+};
+
 /*
  * The row guard's templates (#2500, `tests/type-core/type-core-row-guard.test.ts`): for each open row of the candidate
  * route's syntax table (`DISPOSITIONS`), one source per operand and store position of the construct, the host global
  * `hostValue` there, so its value is unknown to both checkers, and one per shape of a call (`sliceCall`'s, with each of
  * its arguments). A row without a position has one source that uses it. Sources are minimal
- * programs inside today's slice; the guard adds the `exit` each script ends with.
+ * programs inside today's slice; the guard adds the `exit` each script ends with. A template of several files is their
+ * list, each file written whole.
  */
-const BASE_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly string[]>>> = {
+const BASE_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly Template[]>>> = {
   letStatement: [
     "let x: integer = hostValue",
     "let x = hostValue",
@@ -79,6 +99,54 @@ const BASE_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly string[]>>> =
   hideImageStatement: ["hideImage"],
   // (no nested form after `skippable`, which reads a following `[` as an element of a name)
   sayStatement: ["say skippable hostValue"],
+  // a transfer by each target form the row holds, a typed store of the host global in every file; then a nullable stored
+  // before each of the literal forms and a computed one, a variable of the same name used in the target (#2514's file
+  // starts: `let`s are per file and globals closed, so nothing nullable crosses a file)
+  gotoStatement: [
+    [main('let n: integer = hostValue\ngoto "part.tease"\n'), PART_TYPED],
+    [main('let n: integer = hostValue\ngoto script("part.tease")\n'), PART_TYPED],
+    [
+      main("let n: string? = hostValue\ngoto script(hostValue)\n"),
+      { path: "part.tease", source: 'let z: string = hostValue\nsay "in part"\nexit\n' },
+      { path: "third.tease", source: "let w: integer = hostValue\nexit\n" },
+    ],
+    [
+      main('if hostValue == null {\n  goto "part.tease"\n}\nlet n: integer = hostValue\nexit\n'),
+      { path: "part.tease", source: "let z: integer? = hostValue\nexit\n" },
+    ],
+    [
+      main('let x: integer? = hostValue\ngoto "part.tease"\n'),
+      {
+        path: "part.tease",
+        source: 'let x: integer? = null\nlet y: integer = x otherwise 1\nsay "in part"\nexit\n',
+      },
+    ],
+    [main('let x: integer? = hostValue\ngoto script("part.tease")\n'), PART_NULLABLE],
+    [
+      main("let x: integer? = null\ngoto script(hostValue)\n"),
+      PART_NULLABLE,
+      { path: "third.tease", source: "let x = 1\nlet y: integer = x\nexit\n" },
+    ],
+  ],
+};
+
+/**
+ * The files a row's one-file sources compile with beside `main.tease`: a transfer's destination, so that a fitting path
+ * starts a file other than the one transferring.
+ */
+const DESTINATIONS: Readonly<Partial<Record<SyntaxKind, readonly TemplateFile[]>>> = {
+  gotoStatement: [{ path: "part.tease", source: "exit\n" }],
+};
+
+/** A source of `row` as the project the guard compiles: `main.tease`, then the row's destinations. */
+export const filesOf = (row: SyntaxKind, source: string): readonly TemplateFile[] => [
+  main(source),
+  ...(DESTINATIONS[row] ?? []),
+];
+
+/** The host values a row's runs take beside the domain: for a transfer, the paths of the files it may start. */
+export const ROW_HOSTS: Readonly<Partial<Record<SyntaxKind, readonly string[]>>> = {
+  gotoStatement: ["part.tease", "third.tease"],
 };
 
 /**
@@ -116,6 +184,7 @@ export const OPERAND_TEMPLATES: Readonly<
     value: ["say hostValue"],
     pacing: ['say "a", hostValue'],
   },
+  gotoStatement: { path: ["goto script(hostValue)"] },
 };
 
 /**
@@ -140,7 +209,7 @@ function operandTemplates(operands: Readonly<Record<string, readonly string[]>>)
   ];
 }
 
-export const ROW_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly string[]>>> = {
+export const ROW_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly Template[]>>> = {
   ...BASE_TEMPLATES,
   ...Object.fromEntries(
     Object.entries(OPERAND_TEMPLATES).map(([row, operands]) => {
@@ -359,6 +428,20 @@ export const DECLARED_REFUSALS: readonly {
       gate: "outsideAnswers (src/type-inference/core/backend.ts)",
       text: "this say",
     })),
+  // (a transfer's path the core knows to be no text, written in place: the path's argument rule, `argumentKinds`)
+  ...samples()
+    .filter(
+      (sample) =>
+        sample.row === "gotoStatement" && sample.origin !== "ingress" && sample.kind !== "string",
+    )
+    .map((sample) => ({
+      row: "gotoStatement" as const,
+      position: `the path, ${sample.kind} (${sample.origin})`,
+      refused: sample.command,
+      admitted: 'goto script("part.tease")',
+      gate: "outsideAnswers (src/type-inference/core/backend.ts)",
+      text: "an argument that its built-in checks",
+    })),
   // (a check that no store takes: a typed default inside a command's operand or a `say`'s value, the lead's R11; its
   // place is the command operand table's, step 1½)
   ...(
@@ -442,7 +525,8 @@ export const DECLARED_RUN_DIFFERENCES: readonly {
  * the order the runtime works (R18): where it does not reach the command, as the twin's; where an operand's evaluation
  * fails, as that operand alone does (`let v = <operand>` there), same code and site; where every operand evaluates, the
  * command refuses the value with one of `failure`'s codes, at the statement or at the value, nothing of its effect
- * happening. Where today's checker gives no error, both publish and their runs are equal. That holds wherever the command
+ * happening; `at` is the statement, the value, or the call holding the value (a transfer's `script(…)`, whose failure
+ * comes before any file is entered). Where today's checker gives no error, both publish and their runs are equal. That holds wherever the command
  * stands (R12), where the route admits the value alone there; where it refuses that, it refuses the command alike (R16).
  * The guard samples kinds and origins (`samples`, `PAIRED_SAMPLES`) and contexts (`CONTEXTS`).
  */
@@ -451,7 +535,7 @@ export const DECLARED_RULE_DIFFERENCES: readonly {
   readonly operand: string;
   readonly today: readonly string[];
   readonly failure: readonly string[];
-  readonly at: "statement" | "value";
+  readonly at: "statement" | "value" | "call";
 }[] = (
   [
     ["deleteStatement", "key", ["TSV038"], ["TSR054"], "value"],
@@ -469,6 +553,7 @@ export const DECLARED_RULE_DIFFERENCES: readonly {
     ["showPopupStatement", "message", ["TSV040", "TSV042"], ["TSR021"], "statement"],
     ["showPopupStatement", "buttonText", ["TSV040", "TSV042"], ["TSR021"], "statement"],
     ["waitStatement", "duration", ["TSV043"], ["TSR050", "TSR065"], "value"],
+    ["gotoStatement", "path", ["TSV043"], ["TSR058"], "call"],
   ] as const
 ).map(([row, operand, today, failure, at]) => ({ row, operand, today, failure, at }));
 
@@ -485,6 +570,7 @@ const FITTING_OPERANDS: Readonly<Partial<Record<SyntaxKind, Readonly<Record<stri
   deleteStatement: { key: '"k"' },
   showButtonStatement: { label: '"Go"', background: '"red"', timeout: "2 s" },
   sayStatement: { pacing: "instant" },
+  gotoStatement: { path: '"part.tease"' },
 };
 
 /** A sample's fitting twin: its command with the position's fitting value. */

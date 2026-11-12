@@ -484,6 +484,48 @@ const CONDITIONS: readonly Condition[] = [
     at: 'load((("key")), default: 2)',
     what: "this load expression",
   },
+  {
+    row: "gotoStatement",
+    condition: "a file or `script(…)` target, not a label",
+    source: "goto top\nlabel top",
+    at: "goto top",
+    what: "this goto statement",
+  },
+  {
+    row: "gotoStatement",
+    condition: "a `script(…)` call, not a grouped target",
+    source: "goto (hostValue)",
+    at: "goto (hostValue)",
+    what: "this goto statement",
+  },
+  {
+    row: "gotoStatement",
+    condition: "`script(…)` with an argument",
+    source: "goto script()",
+    at: "goto script()",
+    what: "this goto statement",
+  },
+  {
+    row: "gotoStatement",
+    condition: "`script(…)` with one argument",
+    source: 'goto script("main.tease", "b")',
+    at: 'goto script("main.tease", "b")',
+    what: "this goto statement",
+  },
+  {
+    row: "gotoStatement",
+    condition: "`script(…)` with a positional argument",
+    source: 'goto script(path: "main.tease")',
+    at: 'goto script(path: "main.tease")',
+    what: "this goto statement",
+  },
+  {
+    row: "gotoStatement",
+    condition: "the path is walked",
+    source: "goto script(-hostValue)",
+    at: "-hostValue",
+    what: "this unary expression",
+  },
 ];
 
 /** The open rows that check nothing of their own: each walks its children. */
