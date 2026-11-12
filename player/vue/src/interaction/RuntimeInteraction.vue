@@ -409,10 +409,10 @@ watch(
   () => {
     const session = props.session;
     if (!session || actionId.value === undefined || foreground.value?.kind !== "open-url") return;
-    // Typically an answer the player just gave presents it, within the activation of that answer's click.
-    if (!playerRuntimeUrlRequest(session)?.atOnce || !props.inputSection) return;
-    // Host input happens at the observed time; the tab opens only for the request still presented there, and the
-    // request is settled only once its tab opened. While an answer is pending, the request waits for it to settle.
+    // Typically an answer the player just gave presents it, within the activation of that answer's click. Host input
+    // happens at the observed time; the tab opens only for the request still presented there, and the request is
+    // settled only once its tab opened. The submission admits only a request the session's own run asked to open at
+    // once, and one that comes while an answer is pending waits for it to settle.
     submission.openUrl(openRequestedUrl, true);
   },
   { immediate: true },

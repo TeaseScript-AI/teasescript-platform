@@ -187,6 +187,8 @@ async function page(context: TestContext, topology: Topology, script: string) {
   const connections = await topologyConnections(context, topology);
   const connection = connections.first;
   const frame = frames();
+  // The input section the answers use: what each run returned, and an act a row runs just before the answer's op is sent.
+  const sections = { returned: [] as (string | null)[], beforeSend: null as (() => void) | null };
   const scope = effectScope();
   const made = scope.run(() => {
     const player = usePlayerSession({
@@ -195,6 +197,30 @@ async function page(context: TestContext, topology: Topology, script: string) {
       keptSessions: memoryKeptSessionStore(),
     });
     const shown = () => (player.stopped.value ? null : player.session.value);
+    const section: InputSectionHost = async (work, body) => {
+      const result = await player.inputSection(work, (input, observed) =>
+        body(
+          new Proxy(input, {
+            get(target, key) {
+              const act = sections.beforeSend;
+              if (key === "send" && act !== null) {
+                sections.beforeSend = null;
+                act();
+              }
+              const value: unknown = Reflect.get(target, key, target);
+              return typeof value === "function" ? value.bind(target) : value;
+            },
+          }),
+          observed,
+        ),
+      );
+      sections.returned.push(
+        result !== null && typeof result === "object" && "kind" in result
+          ? String(result.kind)
+          : null,
+      );
+      return result;
+    };
     const composer: ComposerState = useComposerState({
       draft: (draft) => forms.draft(draft),
       holdDrafts: () => false,
@@ -211,7 +237,7 @@ async function page(context: TestContext, topology: Topology, script: string) {
       stoppedSession: () => (player.stopped.value ? player.session.value : null),
       chat: () => player.chat.value,
       terminal: () => player.terminal.value,
-      inputSection: () => player.inputSection,
+      inputSection: () => section,
       prepareInput: () => true,
       publish: (session) => player.update(session),
       unansweredMessage: () => "Nothing answers that.",
@@ -254,7 +280,7 @@ async function page(context: TestContext, topology: Topology, script: string) {
   player.prepare(await sourceStart(player.bridge, script, () => ({ wallClockMs: 0 })));
   await player.activate();
   await until(() => activeAction(player) !== undefined, "the question", "host");
-  return { ...made, connection, connections, frame, scope };
+  return { ...made, connection, connections, frame, scope, sections };
 }
 
 const activeAction = (player: SessionHost) =>
@@ -288,6 +314,9 @@ const CASES = {
   "posted, start": TOPOLOGIES,
   "posted, unmount": TOPOLOGIES,
   "rowless, posted, stop": TOPOLOGIES,
+  "posted, stop, still presented": TOPOLOGIES,
+  "fenced, stop, then a preparation": TOPOLOGIES,
+  "posted, stop, then a preparation": TOPOLOGIES,
   "a script failure after the answer": TOPOLOGIES,
   "the origin gone after the yield": TOPOLOGIES,
 } as const;
@@ -393,6 +422,120 @@ RERUN.rows(
     assert.equal(composer.chatText.value, "", "nothing is written to the chat");
     assert.equal(submission.notice.value, "");
     assert.equal(connection.posts.filter((post) => post.op === ANSWER_OP).length, 1);
+    return end();
+  },
+);
+
+RERUN.rows(
+  "posted, stop, still presented",
+  "an answer the stop overtook as it was sent is undone once the final publication still presents its action",
+  async (context, topology, end) => {
+    const { player, composer, submission, connection, sections } = await page(
+      context,
+      topology,
+      CHOICE,
+    );
+    const actionId = activeAction(player)!;
+    type(composer, "Go");
+    // The stop comes after the answer's admission, before its op reaches the host.
+    sections.beforeSend = () => player.reportHostError(new TypeError("a component failed"));
+    submission.send("input");
+    const record = submission.pending.value!;
+    await until(() => player.terminal.value === "stopped", "the final publication", "host");
+    await until(() => record.stage === "settled", "the answer settled", "host");
+    const frozen = player.session.value!;
+    assert.ok(playerRuntimeInteractionActionIds(frozen.state).includes(actionId), "not taken");
+    assert.equal(connection.posts.filter((post) => post.op === ANSWER_OP).length, 0, "never sent");
+    assert.equal(composer.chatText.value, "Go", "undone");
+    assert.equal(submission.notice.value, "");
+    assert.equal(submission.pending.value, null);
+    return end();
+  },
+);
+
+/** A Start shown over the stopped session (`prepare`), whose preparation retires the stop while it still shows. */
+async function otherStart(player: SessionHost) {
+  return sourceStart(player.bridge, 'say "other", instant\nexit', () => ({ wallClockMs: 0 }));
+}
+
+RERUN.rows(
+  "fenced, stop, then a preparation",
+  "an answer a stop undid before it was sent is never sent when another Start's preparation retires that stop",
+  async (context, topology, end) => {
+    const { player, composer, submission, connection, sections } = await page(
+      context,
+      topology,
+      CHOICE,
+    );
+    const other = await otherStart(player);
+    type(composer, "Go");
+    connection.hold("observeInput");
+    submission.send("input");
+    const record = submission.pending.value!;
+    await connection.held();
+    assert.equal(record.stage, "fenced");
+    player.reportHostError(new TypeError("a component failed"));
+    await until(() => record.stage === "settled", "undone at the stop", "step");
+    assert.equal(composer.chatText.value, "Go");
+    // The held observation comes back once the stop is retired, while the stopped session still shows.
+    player.prepare(other);
+    assert.equal(player.terminal.value, null);
+    connection.release();
+    await until(() => sections.returned.length === 1, "the answer's section returned", "host");
+    assert.equal(sections.returned[0], "retired");
+    assert.equal(composer.chatText.value, "Go", "undone once");
+    assert.equal(connection.posts.filter((post) => post.op === ANSWER_OP).length, 0, "never sent");
+    assert.equal(submission.notice.value, "");
+    assert.equal(submission.pending.value, null);
+    return end();
+  },
+);
+
+RERUN.rows(
+  "posted, stop, then a preparation",
+  "an answer posted before a stop is undone, without a notice or a resend, when another Start's preparation retires the stop before its final publication",
+  async (context, topology, end) => {
+    const { player, composer, submission, connection, sections } = await page(
+      context,
+      topology,
+      CHOICE,
+    );
+    const other = await otherStart(player);
+    // The stop's halt settles only once the row lets it.
+    let halted = () => {};
+    const halt = new Promise<void>((resolve) => (halted = resolve));
+    const bridgeHalt = connection.bridge.halt.bind(connection.bridge);
+    context.mock.method(
+      connection.bridge,
+      "halt",
+      async (...args: Parameters<typeof bridgeHalt>) => {
+        await bridgeHalt(...args);
+        await halt;
+      },
+    );
+    type(composer, "Go");
+    connection.hold(ANSWER_OP);
+    submission.send("input");
+    const record = submission.pending.value!;
+    await connection.held();
+    player.reportHostError(new TypeError("a component failed"));
+    assert.equal(player.terminal.value, "freezing");
+    connection.release();
+    await until(() => sections.returned.length === 1, "the answer's section returned", "host");
+    assert.equal(sections.returned[0], "retired");
+    assert.equal(record.stage, "posted", "kept through the freeze");
+    player.prepare(other);
+    await until(() => record.stage === "settled", "the answer settled", "step");
+    assert.equal(player.terminal.value, null);
+    assert.equal(composer.chatText.value, "Go", "undone: the outcome is unknown");
+    assert.equal(submission.notice.value, "");
+    assert.equal(submission.pending.value, null);
+    halted();
+    assert.equal(
+      connection.posts.filter((post) => post.op === ANSWER_OP).length,
+      1,
+      "never sent again",
+    );
     return end();
   },
 );
