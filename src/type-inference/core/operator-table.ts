@@ -156,7 +156,8 @@ export function operatorRow(
  * - a result kind is definite when no operand is unknown, every operand item is definite, and every combination that
  *   succeeds gives that kind by a row that needs no check by value.
  * The reasons and the first context word of a combination's items go to its result, an unknown bringing its reason's
- * word (`ownContext`); a guarded operand marks it (§3.2).
+ * word (`ownContext`), an unknown result its reasons' word through the merge (`mergeItems`); a guarded operand marks it
+ * (§3.2).
  * `operation` is the operation's site, the identity of an unknown operand without a writer; `writer` explains a result
  * whose operands have no writer.
  */

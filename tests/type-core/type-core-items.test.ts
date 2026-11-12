@@ -29,6 +29,18 @@ const TRIALS = 1500;
 
 const SITE = { file: 0, start: 100, end: 105 };
 
+/** The word of an unknown's reasons, the first present in the rank `external`, `opaque`, `deferred`, `missing`, `budget`. */
+const reasonWord = (reasons: number): ContextWord =>
+  (
+    [
+      [REASON.external, "unknown"],
+      [REASON.opaque, "unmodelled"],
+      [REASON.deferred, "deferred-parameter"],
+      [REASON.missing, "missing"],
+      [REASON.budget, "budget"],
+    ] as const
+  ).find(([bit]) => (reasons & bit) !== 0)?.[1] ?? "unknown";
+
 const writerRank = (writer: Writer | null): number =>
   writer === null ? Infinity : writer.file * 1e9 + writer.start;
 const contextRank = (context: ContextWord | null): number =>
@@ -88,8 +100,20 @@ test("the item algebra keeps its laws over random items from a fixed seed", () =
       merged,
     });
 
+    // the unknown a merge gives speaks its reasons' word, the first of its parts' words where that is `later` or none
+    // (#2486: kept by the word order, an earlier word outlived the reasons that gave it)
+    const unknownWord = (reasons: number): ContextWord | null => {
+      const first = [...a, ...b]
+        .filter((item) => item.tag === "unknown")
+        .reduce<ContextWord | null>(
+          (word, item) => (contextRank(item.context) < contextRank(word) ? item.context : word),
+          null,
+        );
+      return first === null || first === "later" ? first : reasonWord(reasons);
+    };
     // nothing lost: definite stays definite unless guarded, every reason and ingress store kept (no boundary check is
-    // erased), the earliest writer, the first context word, the mark, and external data without an ingress store
+    // erased), the earliest writer, the first context word (an unknown's as above), the mark, and external data without
+    // an ingress store
     for (const item of [...a, ...b]) {
       const kept = byTag(merged, item.tag);
       law(
@@ -98,7 +122,9 @@ test("the item algebra keeps its laws over random items from a fixed seed", () =
           (item.cert !== "def" || kept.cert === "def" || kept.guarded === true) &&
           (item.reasons & kept.reasons) === item.reasons &&
           writerRank(kept.writer) <= writerRank(item.writer) &&
-          contextRank(kept.context) <= contextRank(item.context) &&
+          (item.tag === "unknown"
+            ? kept.context === unknownWord(kept.reasons)
+            : contextRank(kept.context) <= contextRank(item.context)) &&
           (item.guarded !== true || kept.guarded === true) &&
           storesOf(item).every((store) => storesOf(kept).includes(store)) &&
           (!loose(item) || kept.ingress === undefined || kept.loose === true),
@@ -111,7 +137,9 @@ test("the item algebra keeps its laws over random items from a fixed seed", () =
       law(
         "merge.only-from-operands",
         parts.some((item) => item.writer === kept.writer) &&
-          parts.some((item) => item.context === kept.context) &&
+          (kept.tag === "unknown"
+            ? kept.context === unknownWord(kept.reasons)
+            : parts.some((item) => item.context === kept.context)) &&
           kept.reasons === parts.reduce((all, item) => all | item.reasons, 0) &&
           (kept.cert === "def") ===
             (parts.some((item) => item.cert === "def") &&

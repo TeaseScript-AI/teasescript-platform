@@ -104,6 +104,47 @@ const passThrough = (argument: string, update: string): string =>
     "",
   ].join("\n");
 
+/**
+ * The converter's integer loader called with a variable as its default, in two functions that each add a parameter with
+ * several call sites to their variable (#2486's reduction of a package's ring, where only an unknown's word moved).
+ */
+const loaderRing = (): string => {
+  const update = (name: string, key: string): string =>
+    [
+      `function ${name}(count) {`,
+      "  let p = 0",
+      `  let saved: integer? = load "${key}", default: null`,
+      "  if saved == null {",
+      "    p = 0",
+      "  } else {",
+      `    p = loadWhole("${key}", p)`,
+      "  }",
+      "  if floor(count) >= 1 {",
+      "    p += floor(count)",
+      "  }",
+      `  save p as "${key}"`,
+      "}",
+      `${name}(1)`,
+      `${name}(randomInteger(1..3))`,
+    ].join("\n");
+  return [
+    "global function passOn(value) {",
+    "  return value",
+    "}",
+    "global function loadWhole(key, whenMissing = null) {",
+    "  let value = load key, default: null",
+    "  if value == null {",
+    "    return whenMissing",
+    "  }",
+    "  return passOn(toInteger(value))",
+    "}",
+    update("punish", "k.punish"),
+    update("reward", "k.reward"),
+    "exit",
+    "",
+  ].join("\n");
+};
+
 const SETTLING: readonly (readonly [string, string])[] = [
   [
     "outside data",
@@ -116,6 +157,7 @@ const SETTLING: readonly (readonly [string, string])[] = [
     "the update in a loop",
     passThrough("0", 'while askBoolean("again?") {\n  n = n + 1 + randomInteger(0..3)\n}'),
   ],
+  ["the loader's ring", loaderRing()],
 ];
 
 test("a component of a pass-through helper's variable settles, its runs only growing (#2486)", () => {
@@ -128,9 +170,7 @@ test("a component of a pass-through helper's variable settles, its runs only gro
         exhausted = analyseCore(request).budget.exhausted;
       }, reversed);
       assert.equal(exhausted, null, `${name}: the analysis finishes inside its allowance`);
-      // (no kind or reason lost; an unknown's word may still move, which the word rule's commit repairs)
-      const lost = record.first.filter((violation) => violation.kind !== "unknown's word later");
-      assert.deepEqual(lost, [], name);
+      assert.equal(record.violations, 0, `${name}: ${JSON.stringify(record.first)}`);
     }
   }
 });
