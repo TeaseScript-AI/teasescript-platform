@@ -324,6 +324,26 @@ test("a shared structure build counts its own steps to the total, and each read 
     { total: work.total, own: work.own, sharing: work.sharing },
     { total: 27, own: 13, sharing: false },
   );
+  // (and each step of a generator it runs through `outsideSteps`)
+  const stepped = work.sharedStructure(
+    (function* (): Generator<string, string, string> {
+      work.charge("checks", 1);
+      return yield* work.outsideSteps(
+        (function* (): Generator<string, string, string> {
+          work.charge("checks", 2);
+          const answer = yield "inner";
+          work.charge("checks", 4);
+          return answer;
+        })(),
+      );
+    })(),
+  );
+  assert.deepEqual(stepped.next(), { value: "inner", done: false });
+  assert.deepEqual(stepped.next("done"), { value: "done", done: true });
+  assert.deepEqual(
+    { total: work.total, own: work.own, sharing: work.sharing },
+    { total: 34, own: 19, sharing: false },
+  );
 });
 
 /**
