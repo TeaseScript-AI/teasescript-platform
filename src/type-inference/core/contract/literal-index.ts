@@ -30,7 +30,7 @@ import type {
   WalkRank,
 } from "./model.js";
 import { typeTags } from "./terms.js";
-import { amend, Retained, retainedModule } from "../retained/retained.js";
+import { Retained, retainedModule } from "../retained/retained.js";
 
 // The literal index (§8): one index of a literal's structure per literal value or cell, its paths and signature.
 
@@ -295,7 +295,6 @@ export function heldBelow(contract: Contract, node: IndexNode): NodeBelow {
     const own = top.node;
     const sum = (count: (below: NodeBelow) => number): number =>
       top.children.reduce((total, child) => total + count(child.below!), 0);
-    amend(top.node);
     top.node.below = {
       holds: ownsAny(own) || top.children.some((child) => child.below!.holds),
       reference: own.reference || top.children.some((child) => child.below!.reference),
@@ -510,7 +509,6 @@ export function* indexWork(contract: Contract, literal: PlaceId): IdentityWork {
       if (term.kind === "object") {
         if (node.objects === null) {
           contract.keep(4);
-          amend(node);
           node.objects = { list: [], count: Retained.map("LiteralNode.objects.count") };
         }
         // its property names, and the property its button value reads, decided once per record (V30 §19)
