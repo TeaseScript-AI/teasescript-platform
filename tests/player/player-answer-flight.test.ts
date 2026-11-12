@@ -721,6 +721,7 @@ async function reference(at: Page, row: Coordinates, keys: readonly string[]) {
   if (row.settle === "unprepared") ui.prepareWith(async () => false);
   if (row.settle === "unavailable") at.elapse(61_000);
   await ui.press("Enter");
+  await ui.idle();
   for (const key of keys) {
     await ui.press(key);
     await ui.idle();
@@ -804,9 +805,11 @@ for (const topology of TOPOLOGIES)
       // Where the commands do not run, the row ends as the answer alone does, with what was left unsent added.
       const expected = await reference(at, row, drains(row) ? keys : []);
       const unsent = unsentOf(keys);
-      // A prefill that arrives while the field holds text is the Owner's open question (#2463): only the answers
-      // posted and where the session went are compared there.
+      // A prefill that arrives while the field holds text is the Owner's open question (#2463). In the reference it
+      // arrives before the keys, in the flight at the settlement, after them, so what a held Enter sends, and so where
+      // a later one goes, follows from that answer: only the commands posted, in order, are compared there.
       const pending = row.settle === "prefill" && unsent.typed !== "";
+      const commands = (seen: typeof expected) => seen.posts.map(([op]) => op);
       if (!drains(row) && row.departs === "text") {
         const left = (row.settle === "completed" ? "" : scriptOf(row).aside) + unsent.text;
         if (row.presents === "picker") expected.parked = left;
@@ -821,11 +824,8 @@ for (const topology of TOPOLOGIES)
         // An edit within the flight does not reach text the settlement puts in the field (#2463, residual 1); a
         // password field drops the composer's text until the Owner decides (#2463): only the answers posted and where
         // the session went are compared there.
-        if (
-          pending ||
-          row.history === "edit" ||
-          (row.presents === "password" && row.departs === "text")
-        )
+        if (pending) assert.deepEqual(commands(actual), commands(expected), where);
+        else if (row.history === "edit" || (row.presents === "password" && row.departs === "text"))
           assert.deepEqual([actual.posts, actual.status], [expected.posts, expected.status], where);
         else assert.deepEqual(actual, expected, where);
       }
