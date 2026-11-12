@@ -371,12 +371,12 @@ export function useAnswerSubmission(host: {
     }
   }
 
-  /** A choice's button, or `showButton`'s for `null`. */
-  function choose(optionId: string | null): void {
+  /** A choice's button, or `showButton`'s for `null`: clicked, or the preselected one by Space (`preselectedKey`). */
+  function choose(optionId: string | null, input: "button" | "preselectedKey" = "button"): void {
     const action = presentedAction(host.session());
     if (action === null) return;
     if (optionId === null) {
-      answerWith("button", { kind: "activate" }, intents.choice(null, "button"), "button");
+      answerWith("button", { kind: "activate" }, intents.choice(null, input), "button");
       return;
     }
     if (action.ui.kind !== "choice") return;
@@ -387,28 +387,7 @@ export function useAnswerSubmission(host: {
     answerWith(
       "choice",
       { kind: "selectedOption", optionIndex },
-      intents.choice(optionId, "button"),
-      "choice",
-    );
-  }
-
-  /** The preselected button, by Space. */
-  function activatePreselected(optionId: string | null): void {
-    const action = presentedAction(host.session());
-    if (action === null) return;
-    if (optionId === null) {
-      answerWith("button", { kind: "activate" }, intents.choice(null, "preselectedKey"), "button");
-      return;
-    }
-    if (action.ui.kind !== "choice") return;
-    const optionIndex = action.ui.options.findIndex(
-      (_option, index) => choiceOptionId(action.actionId, index) === optionId,
-    );
-    if (optionIndex === -1) return;
-    answerWith(
-      "choice",
-      { kind: "selectedOption", optionIndex },
-      intents.choice(optionId, "preselectedKey"),
+      intents.choice(optionId, input),
       "choice",
     );
   }
@@ -549,7 +528,6 @@ export function useAnswerSubmission(host: {
     showNotice,
     send,
     choose,
-    activatePreselected,
     closePopup,
     closeExport,
     skipImage,

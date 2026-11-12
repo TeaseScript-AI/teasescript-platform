@@ -167,7 +167,7 @@ const presentedAt = ref(0);
 function activatePreselected() {
   const target = preselected.value;
   if (target === undefined) return;
-  submission.activatePreselected(target);
+  submission.choose(target, "preselectedKey");
 }
 // An image request accepts a file through the paperclip or a drop only while it allows files.
 const imageRequest = computed(() =>
