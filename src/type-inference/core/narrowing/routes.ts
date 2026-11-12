@@ -147,8 +147,8 @@ export class NarrowingRoutes extends RouteEntries {
    * Past that query, a `null` read of a stable path may come through a way into the use (r4-451, `RouteEntries`): a
    * loop's earlier round, a label, a file's start, a block's body. In a block's body the query above runs inside the
    * body alone, past X7, by r4-451's segment. `flagged`: the use's item carries a test's mark, so the query above is
-   * not asked outside a block's body; the ways in are, as they hold the test to their own segments. None of this in
-   * a program the default holds.
+   * not asked outside a block's body; the ways in are, as they hold the test to their own segments. In a program the
+   * default holds, only a loop's or a label's way in, by R2.2 (`RouteEntries.standsAt`).
    */
   public *required(
     value: PlaceId,
@@ -222,8 +222,8 @@ export class NarrowingRoutes extends RouteEntries {
 
   /**
    * A way into the use of a stable path's `null` (r4-451, `RouteEntries.entered`): none for a kind but `null`, an
-   * element step, in a program the default holds, and outside a block's body for code a block may reach and for a key
-   * a block stores once registered (X7).
+   * element step, and outside a block's body for code a block may reach and for a key a block stores once registered
+   * (X7); in a program the default holds, a loop's or a label's alone, by R2.2.
    */
   *#entered(node: FlowNode, path: StablePath, tag: ItemTag): Work<RouteWriter | null> {
     this.#work.charge("exactQueries");
