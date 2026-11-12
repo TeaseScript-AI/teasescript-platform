@@ -40,8 +40,11 @@ const props = withDefaults(
     pacing?: boolean;
     /** A preselected button waits; Space in the empty input activates it. */
     preselected?: boolean;
-    /** Only buttons wait, no field: Space in the empty input types nothing, and activates only a preselected button. */
-    buttonsOnly?: boolean;
+    /**
+     * Space in the empty input types nothing (decision 6 of 2026-11-11, #2430): only buttons wait, an answer is under way,
+     * or nothing is asked. It still activates a preselected button.
+     */
+    inertSpace?: boolean;
     /**
      * When the waiting interaction appeared, as a `performance.now()` time: a key pressed earlier, or held down, does
      * not submit it or activate its button.
@@ -68,7 +71,7 @@ const props = withDefaults(
     feedback: "",
     pacing: false,
     preselected: false,
-    buttonsOnly: false,
+    inertSpace: false,
     freshAfter: 0,
     attach: null,
   },
@@ -143,7 +146,7 @@ function handleKeydown(event: KeyboardEvent): void {
     emit("skip");
   } else if (
     event.key === playerKeys.preselectedButton.key &&
-    (props.preselected || props.buttonsOnly) &&
+    (props.preselected || props.inertSpace) &&
     empty
   ) {
     event.preventDefault();

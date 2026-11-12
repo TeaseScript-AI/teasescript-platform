@@ -827,10 +827,13 @@ function escape() {
           "
           :pacing="!foreground && !!pacing"
           :preselected="preselected !== undefined"
-          :buttons-only="
-            foreground?.kind === 'choose' ||
-            foreground?.kind === 'show-button' ||
-            (foreground?.kind === 'form' && !formEditor)
+          :inert-space="
+            !lockField &&
+            (foreground?.kind === 'choose' ||
+              foreground?.kind === 'show-button' ||
+              (foreground?.kind === 'form' && !formEditor) ||
+              !foreground ||
+              submission.pending.value !== null)
           "
           :fresh-after="presentedAt"
           :value="displayed"
