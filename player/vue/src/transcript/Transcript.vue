@@ -256,11 +256,15 @@ watch(
         : appended;
     // The first entries of a transcript open it, also when the script shows them only once the host answered.
     const opening = previous.length === 0;
-    // Following stops at the first new row, wherever the shown list places it.
-    const first =
-      added.length === 0
-        ? -1
-        : list().findLastIndex((entry) => rowKey(entry) === rowKey(added[0]!));
+    // Following stops at the first row the update brings, wherever the shown list places it: a new one, or the answer
+    // its entry takes over now, which enters no second time but still starts what this update brings, as when an
+    // answer and its reply arrive together.
+    const takenOver =
+      previous.pending !== null && shown.pending === null && props.entries === previous.entries
+        ? props.entries.slice(previous.length).filter((entry) => rowKey(entry) === previous.pending)
+        : [];
+    const starts = new Set([...added, ...takenOver].map(rowKey));
+    const first = starts.size === 0 ? -1 : list().findIndex((entry) => starts.has(rowKey(entry)));
     firstNewEntry =
       following.value && props.entries === previous.entries && first !== -1 && !opening
         ? shownPosition(currentRemovedRows(), first)
