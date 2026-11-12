@@ -236,3 +236,46 @@ test("a choice's selected value is decided by its declared option, and nothing a
       );
     });
 });
+
+test("a declared element that does not fit is named by its written type, at today's site (#2289 rule 3)", () => {
+  // (`n` holds a whole number, but it is compared as the number it is declared: the sentence names that; the error
+  // sits where main puts a misfit, the element, as `n` holds no kind that misfits)
+  const declared = "let a: integer = 1\nlet n: number = 1\n";
+  const cases: readonly (readonly [string, string, string])[] = [
+    [
+      '[a, n, "s"]',
+      "n",
+      "This list mixes a whole number (integer) and a number. A list holds one type. To allow both, declare it with the type 'number[]'.",
+    ],
+    [
+      '[{p: a}, {p: n}, {p: "s"}]',
+      "{p: n}",
+      "This list mixes objects whose property 'p' holds a whole number (integer) in one and a number in another. A list holds one type. Give 'p' one type in every element.",
+    ],
+  ];
+  for (const [literal, at, sentence] of cases) {
+    const source = `${declared}let xs = ${literal}\nexit\n`;
+    const request = coreRequest([{ path: "main.tease", source }]);
+    assert.ok(request !== null, source);
+    for (const mode of MODES)
+      inMode(mode, () => {
+        const { diagnostics } = analyseCore(request);
+        const shown = messageSource([source], diagnostics);
+        const site = source.indexOf(at, source.indexOf("let xs"));
+        assert.deepEqual(
+          diagnostics
+            .filter((d) => d.site.start === site)
+            .map((d) => [d.code, d.site.end, coreMessage(d, shown)]),
+          [["TSV044", site + at.length, sentence]],
+          `${JSON.stringify(mode)}: ${source}`,
+        );
+      });
+  }
+});
+
+test("equal unions spelled with and without the whole number give one type in either order (#2289 rule 2)", () => {
+  const source =
+    "let a: number | string = 1.5\nlet b: integer | number | string = 1\nlet xs = [a, b]\nlet ys = [b, a]\nexit\n";
+  assert.deepEqual(answered(source, "xs", ["element"]), ["strict number|string"]);
+  assert.deepEqual(answered(source, "ys", ["element"]), ["strict number|string"]);
+});

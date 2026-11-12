@@ -372,8 +372,10 @@ export function literalElements(
       const optional = mixedOptional(first.layers, later.slice(0, -1));
       // (its kinds: its value's definite kinds there, as its occurrence holds them (a type test's, #1790); where it has
       // none, a declared element's written type's, without the null, which decides nothing (#1753, #1906))
+      // (a declared misfit's own kinds where they misfit too, else its written type's, which is what misfits)
       const held = [...new Set(deciding(admission.valueAt(d, path)).map((item) => item.tag))];
-      const own = held.length > 0 || misfit.term === null ? held : misfit.tags;
+      const own =
+        misfit.term === null || (held.length > 0 && misfits(earliest, held)) ? held : misfit.tags;
       const kinds = later.at(-1)! ? [...own, "null" as const] : own;
       error(inner === null ? d.site : (program.place(inner.value!).site ?? d.site), {
         d,

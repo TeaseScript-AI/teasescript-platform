@@ -620,8 +620,10 @@ export function fitOf(admission: Admission, descriptors: readonly Descriptor[]):
     for (const candidate of distinct) {
       work.charge("checks", distinct.length);
       if (distinct.every((set) => set.every((tag) => fitsIn(tag, candidate)))) {
-        kinds = candidate;
-        break;
+        // (kinds a whole number and a number spell alike, `integer | number | string` beside `number | string`: the
+        // narrowest, so the order does not choose the spelling)
+        if (kinds === null || candidate.length < kinds.length) kinds = candidate;
+        if (!(kinds.includes("integer") && kinds.includes("number"))) break;
       }
     }
   if (kinds === null) {
