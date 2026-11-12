@@ -32,9 +32,12 @@ type Walked = { readonly result: Answers; readonly reads: ReadonlyMap<string, Fr
  * diagnostics and marks; where one was, every exact check's obligation (its kind, target, requirement, site and
  * boundary flag) kept or owned by a mark. A cut read answers its place's component's host data, a superset of what its
  * walk names, so its consumers may owe checks the exact walk does not, never fewer: those may read more, and one worded
- * for external data needs no read of its receiver (#1449's wording difference at a stop).
+ * for external data needs no read of its receiver (#1449's wording difference at a stop). The exact walk is cut nowhere,
+ * so a walk that ignored the bound `withFrontierBound` sets would fail here, its two runs agreeing at the default bound.
  */
 function boundedKeepsExact(bounded: Walked, exact: Walked, where: string): boolean {
+  for (const [read, walked] of exact.reads)
+    assert.equal(walked.cut, false, `${where} ${read}: the exact walk was cut`);
   const cut = [...bounded.reads.values()].some((read) => read.cut);
   if (!cut) {
     const whole = ({ result, reads }: Walked) => ({
