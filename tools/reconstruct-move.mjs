@@ -17,8 +17,8 @@
 // file's leading `//` lines, then blank lines and the import declarations that open the file as TypeScript parses them,
 // each starting at the left margin with nothing after it on its last line but a `//` comment. The first other line (a
 // shebang, a block comment, code) starts the body. A later top-level import declaration that starts and ends so is
-// header too, wherever it stands, on both sides: OLD's need not be taken, and NEW's need no OLD line (a comment above it
-// stays body). Import lines are not compared: their bindings are `pure-move-check`'s rule, a set over
+// header too, wherever it stands, on both sides: OLD's need not be taken, NEW's need no OLD line, and no run holds one
+// (a comment above it stays body). Import lines are not compared: their bindings are `pure-move-check`'s rule, a set over
 // all the change's files whose key holds no importing file, and the compiler's where a name is used. An import dropped
 // from a file that uses none of its names, or carried twice, is seen by neither: a reconstructed move is not a proof of
 // its imports. OLD's leading `//` lines (a pin mark, a description) are content:
@@ -68,8 +68,8 @@
 //
 // Its own controls, run whenever every line is accounted for: the check again on the NEW files with one line dropped,
 // with that line duplicated in place, and with it and the next line swapped, each of which must fail. The line is the
-// first, in the NEW files' order, of two adjacent lines of one run whose texts OLD holds once each (a repeated text
-// could be matched elsewhere, and a swap pass for that reason alone). A move with no such pair builds no control and
+// first, in the NEW files' order, of two adjacent lines of one run, neither a layout blank, whose texts OLD holds once
+// each (a repeated text could be matched elsewhere, and a swap with a layout blank changes nothing the check reads). A move with no such pair builds no control and
 // cannot be judged.
 //
 // Output: a summary line (`old body lines: N, taken: N; runs: N; export added: N; residue: N old, N new; edits: N`),
@@ -381,7 +381,10 @@ function matchRuns({ oldShape, start, taken, places, place }, file, { shape, uni
   let runs = 0;
   const { lines } = shape;
   // (a layout blank only against a layout blank; `export ` only before a declaration line that starts outside tokens)
+  // (an import line of the header, on either side, is in no run)
   const fits = (o, k) =>
+    !oldShape.imports.has(o) &&
+    !shape.imports.has(k) &&
     layoutBlank(oldShape, o) === layoutBlank(shape, k) &&
     (old[o] === lines[k] ||
       (!oldShape.inToken[o] &&
@@ -576,7 +579,7 @@ export function reconstruct(oldFile, files, edits = []) {
 /**
  * The controls of a move that passed (`result`, `check`'s result for `oldFile`, `files` and `edits`): `check` again with
  * one line dropped, duplicated in place, and swapped with the next, each of which must fail. The line is the first of two
- * adjacent lines of one run whose texts OLD holds once each. Returns each
+ * adjacent lines of one run, neither a layout blank, whose texts OLD holds once each. Returns each
  * control `{ name, file, line, failed }`, or `null` when no such pair exists.
  */
 export function controlsOf(oldFile, files, edits, result, check = reconstruct) {
@@ -584,9 +587,12 @@ export function controlsOf(oldFile, files, edits, result, check = reconstruct) {
   const once = (text) => old.indexOf(text) !== -1 && old.indexOf(text) === old.lastIndexOf(text);
   for (const run of result.runs) {
     const target = files.find(({ file }) => file === run.file);
-    const lines = linesOf(target.text);
+    const shape = structureOf(target.file, target.text);
+    const { lines } = shape;
+    // (compared lines only: a layout blank swapped with its neighbour changes nothing the check reads)
+    const compared = (k) => !layoutBlank(shape, k) && once(lines[k]);
     for (let k = run.line - 1; k < run.end; k += 1) {
-      if (!once(lines[k]) || !once(lines[k + 1])) continue;
+      if (!compared(k) || !compared(k + 1)) continue;
       const end = target.text.endsWith("\n") ? "\n" : "";
       const variants = {
         dropped: [lines.toSpliced(k, 1), -1],

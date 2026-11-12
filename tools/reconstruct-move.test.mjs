@@ -607,6 +607,24 @@ test("a move that passes runs its own controls: a dropped, a duplicated and a sw
   }).run("--edit", "src/big.ts:4=4");
   assert.equal(edited.status, 0, edited.out);
   assert.match(edited.out, /^control: dropped src\/big\.ts:1, failed$/mu);
+  // (a layout blank is no control line, though OLD holds it once: a swap with it changes nothing the check reads)
+  const blank = repository(
+    t,
+    {
+      "src/a.ts": "export const SWEEP = 1;\n\n",
+      "src/b.ts": 'import { SWEEP } from "./a.js";\n\nexport function f() {\n  return SWEEP;\n}\n',
+    },
+    "export const SWEEP = 1;\n\nexport function f() {\n  return SWEEP;\n}\n",
+    { controls: false },
+  ).run();
+  assert.equal(blank.status, 0, blank.out);
+  assert.match(blank.out, /^control: swapped src\/b\.ts:3, failed$/mu);
+  // (nor is a line of a late import: no run holds one)
+  const imports =
+    'import {\n  pre,\n} from "./pre.js";\nf();\nf();\nimport {\n  x,\n  y,\n} from "./x.js";\n';
+  const late = repository(t, { "src/big.ts": imports }, imports, { controls: false }).run();
+  assert.equal(late.status, 2, late.out);
+  assert.match(late.out, /^control: none built/mu);
   // (a move of repeated lines only builds no control)
   const repeated = repository(t, { "src/big.ts": "f();\nf();\n" }, "f();\nf();\n", {
     controls: false,
