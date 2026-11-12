@@ -26,7 +26,6 @@ export const costlyTestSeconds = {
   "type-core/type-core-mixed-family.test.js": 48,
   "families-runner/families-shadow.test.js": 46,
   "language-tooling/deep-literal-scale.test.js": 46,
-  "type-core/type-core-messages.test.js": 37,
   "type-core/type-core-contract-capture.test.js": 36,
   "type-core/type-core-property-names.test.js": 35,
   "type-core-stop/type-core-stop-labels.test.js": 34,
