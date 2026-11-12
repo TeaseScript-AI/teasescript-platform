@@ -6,6 +6,7 @@ import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { isolateGit } from "./fixture-git.mjs";
+import { main, reconstruct } from "./reconstruct-move.mjs";
 
 isolateGit();
 
@@ -69,8 +70,25 @@ const PART = [
   "",
 ].join("\n");
 
+/**
+ * Two lines that end OLD and the first NEW file of every fixture unless `controls` is false: a passing check runs its
+ * controls on two adjacent lines OLD holds once each, which a fixture of a few lines may not have.
+ */
+const CONTROL_LINES = "\nconst controlOne = 1;\nconst controlTwo = 2;\n";
+
 /** A repository whose one commit holds `src/big.ts` as OLD, with the split written over it; `run` runs the check. */
-function repository(t, files = { "src/big.ts": KEPT, "src/part.ts": PART }, old = OLD) {
+function repository(
+  t,
+  files = { "src/big.ts": KEPT, "src/part.ts": PART },
+  old = OLD,
+  { controls = true } = {},
+) {
+  if (controls) {
+    const ended = (text) => `${text}${text.endsWith("\n") ? "" : "\n"}${CONTROL_LINES}`;
+    old = ended(old);
+    const [first] = Object.keys(files);
+    files = { ...files, [first]: ended(files[first]) };
+  }
   const fixture = mkdtempSync(join(tmpdir(), "reconstruct-move-"));
   t.after(() => rmSync(fixture, { recursive: true, force: true }));
   const git = (...args) => execFileSync("git", args, { cwd: fixture, encoding: "utf8" }).trim();
@@ -107,7 +125,7 @@ test("a split that keeps the old file is proven: every line once, `export` added
   assert.equal(status, 0, out);
   assert.match(
     out,
-    /^old body lines: 11, taken: 10; runs: 5; export added: 1; residue: 1 old, 5 new; edits: 0$/mu,
+    /^old body lines: 13, taken: 12; runs: 6; export added: 1; residue: 1 old, 5 new; edits: 0$/mu,
   );
   assert.match(out, /^export added: src\/part\.ts:5 <- old 12$/mu);
   assert.match(out, /^residue rewrapped:\n {2}old 16: function third\(/mu);
@@ -248,7 +266,7 @@ test("the header is the parsed imports: a trailing comment ends one, code after 
   const run = (text) => repository(t, { "src/big.ts": text }, old).run();
   const same = run(old);
   assert.equal(same.status, 0, same.out);
-  assert.match(same.out, /^old body lines: 1, taken: 1;/mu);
+  assert.match(same.out, /^old body lines: 3, taken: 3;/mu);
   assert.equal(run(old.replace("value + 1", "value + 999")).status, 1);
   assert.equal(run('import { value } from "./values.js"; const result = value + 1;\n').status, 1);
   // (code after an import on its line, every old line kept: only the header rule fails it)
@@ -342,7 +360,7 @@ test("a range --edit declares a rewrap whose line count changes: one unit, both 
   assert.equal(declared.status, 0, declared.out);
   assert.match(
     declared.out,
-    /^old body lines: 2, taken: 2; runs: 1; export added: 0; residue: 0 old, 0 new; edits: 1$/mu,
+    /^old body lines: 4, taken: 4; runs: 2; export added: 0; residue: 0 old, 0 new; edits: 1$/mu,
   );
   assert.match(
     declared.out,
@@ -387,7 +405,7 @@ test("a declared edit is one unit: no run takes its lines, and it keeps OLD's or
   assert.equal(r.run().status, 1);
   const middle = r.run("--edit", "src/big.ts:2=2");
   assert.equal(middle.status, 0, middle.out);
-  assert.match(middle.out, /^old body lines: 3, taken: 3; runs: 2;/mu);
+  assert.match(middle.out, /^old body lines: 5, taken: 5; runs: 3;/mu);
   // (the literal's middle line in another file, its last line edited: every line taken, each file in OLD's order, but
   // the literal is cut on both sides)
   const cut = repository(
@@ -420,7 +438,7 @@ test("OLD's leading `//` lines are header, each carried unchanged first in one N
     "src/part.ts": part(MARKED.split("\n")[0], "// The part."),
   });
   assert.equal(carried.status, 0, carried.out);
-  assert.match(carried.out, /^old body lines: 2, taken: 2;/mu);
+  assert.match(carried.out, /^old body lines: 4, taken: 4;/mu);
   assert.match(carried.out, /^header carried: src\/part\.ts:1 <- old 1$/mu);
   // (kept in the old file itself, the part with only its own line)
   const kept = run({
@@ -477,4 +495,122 @@ test("the runs around a declared edit keep their place in OLD, where a repeated 
     "const x = 1;\nfirst();\n\nconst x = 1;\nsecond();\n",
   ).run("--edit", "src/big.ts:2=5");
   assert.equal(before.status, 0, before.out);
+});
+
+test("a late import is header on both sides: a split of a file with an import after its first statement is proven (#2556)", (t) => {
+  // (the shape of `type-core-oracles.test.ts`: imports, a declaration, one more import, the tests)
+  const old = [
+    'import { a } from "./a.js";',
+    "",
+    "const LIMIT = 3;",
+    'import { b } from "./b.js";',
+    "",
+    'test("first", () => {',
+    "  assert(a < LIMIT);",
+    "});",
+    "",
+    'test("second", () => {',
+    "  assert(b > LIMIT);",
+    "});",
+    "",
+  ].join("\n");
+  const files = {
+    "src/setup.ts": "export const LIMIT = 3;\n",
+    "src/one.ts": [
+      'import { a } from "./a.js";',
+      'import { LIMIT } from "./setup.js";',
+      "",
+      'test("first", () => {',
+      "  assert(a < LIMIT);",
+      "});",
+      "",
+    ].join("\n"),
+    // (late imports of the new file's own, one of them new: header too)
+    "src/two.ts": [
+      'test("second", () => {',
+      "  assert(b > LIMIT);",
+      "});",
+      'import { b } from "./b.js";',
+      'import { LIMIT } from "./setup.js";',
+      "",
+    ].join("\n"),
+  };
+  const r = repository(t, files, old);
+  const proven = r.run();
+  assert.equal(proven.status, 0, proven.out);
+  assert.match(proven.out, /^old body lines: 9, taken: 9; runs: 4; export added: 1;/mu);
+  // (an edit cannot take an import line of the header, on either side)
+  const oldSide = r.run("--edit", "src/two.ts:1=4");
+  assert.equal(oldSide.status, 2);
+  assert.match(oldSide.err, /holds OLD's import line 4$/mu);
+  const newSide = r.run("--edit", "src/two.ts:5=6");
+  assert.equal(newSide.status, 2);
+  assert.match(newSide.err, /holds the import line src\/two\.ts:5$/mu);
+  // (an import that does not end its line is no header line: compared, it is no old line)
+  const shared = repository(
+    t,
+    { ...files, "src/two.ts": files["src/two.ts"].replace('"./b.js";', '"./b.js"; const c = 1;') },
+    old,
+  ).run();
+  assert.equal(shared.status, 1, shared.out);
+  // (nor is one that does not start at the left margin)
+  const indented = repository(
+    t,
+    { ...files, "src/two.ts": files["src/two.ts"].replace("import { b }", "  import { b }") },
+    old,
+  ).run();
+  assert.equal(indented.status, 1, indented.out);
+});
+
+test("a line OLD holds that another line took is reported with the lines that took it (#2564)", (t) => {
+  const repeated = repository(t, {
+    "src/big.ts": KEPT,
+    "src/part.ts": `${PART}\nconst LAST = 3;\n`,
+  }).run();
+  assert.equal(repeated.status, 1, repeated.out);
+  assert.match(
+    repeated.out,
+    /^failure: src\/part\.ts:17: an old line, not matched here \(old 20 by src\/big\.ts:10\): const LAST = 3;$/mu,
+  );
+  const added = repository(t, {
+    "src/big.ts": KEPT,
+    "src/part.ts": `${PART}\nconst NEW = 4;\n`,
+  }).run();
+  assert.match(added.out, /^failure: src\/part\.ts:17: not an old line: const NEW = 4;$/mu);
+});
+
+test("a move that passes runs its own controls: a dropped, a duplicated and a swapped line must each fail (#2564)", (t) => {
+  const r = repository(t);
+  const passed = r.run();
+  assert.equal(passed.status, 0, passed.out);
+  for (const name of ["dropped", "duplicated", "swapped"])
+    assert.match(passed.out, new RegExp(`^control: ${name} src/big\\.ts:6, failed$`, "mu"));
+  // (a check that sees nothing passes its controls too: it cannot judge)
+  const printed = [];
+  const blind = (...args) => ({ ...reconstruct(...args), failures: [] });
+  const status = main(
+    [r.base, "src/big.ts", "src/big.ts", "src/part.ts"],
+    r.fixture,
+    (line) => printed.push(line),
+    blind,
+  );
+  assert.equal(status, 2, printed.join("\n"));
+  assert.match(
+    printed.join("\n"),
+    /^control: dropped src\/big\.ts:6, passed: the check cannot judge$/mu,
+  );
+  // (an edit below the control's line moves with it)
+  const numbers = "const one = 1;\nconst two = 2;\nconst three = 3;\nconst four = 4;\n";
+  const edited = repository(t, { "src/big.ts": numbers.replace("4;", "5;") }, numbers).run(
+    "--edit",
+    "src/big.ts:4=4",
+  );
+  assert.equal(edited.status, 0, edited.out);
+  assert.match(edited.out, /^control: dropped src\/big\.ts:1, failed$/mu);
+  // (a move of repeated lines only builds no control)
+  const repeated = repository(t, { "src/big.ts": "f();\nf();\n" }, "f();\nf();\n", {
+    controls: false,
+  }).run();
+  assert.equal(repeated.status, 2, repeated.out);
+  assert.match(repeated.out, /^control: none built/mu);
 });
