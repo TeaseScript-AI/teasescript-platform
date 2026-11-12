@@ -50,7 +50,32 @@ export interface ComposerDescriptor {
   readonly temporalPrefill: string | null;
 }
 
-const TEMPORAL_KINDS = new Set(["ask-date", "ask-time", "ask-datetime"]);
+const NONE: ComposerTenant = { kind: "none" };
+
+/**
+ * The slot each foreground kind gives the field, unless the lock's password, an answer under way or an open form field
+ * takes it (`composerDescriptor`). A closed table over the kinds: a new kind does not compile until it is placed here.
+ * The chat takes the text of a question typed, of a button or field label, and of an image's skip; a popup, an
+ * `exportText` dialog and an `openUrl` button take no typing (`none`).
+ */
+const FIELD_OF = {
+  "show-button": "chat",
+  choose: "chat",
+  "open-url": "none",
+  popup: "none",
+  "export-text": "none",
+  "ask-text": "chat",
+  "ask-number": "chat",
+  "ask-date": "temporal",
+  "ask-time": "temporal",
+  "ask-datetime": "temporal",
+  "ask-password": "password",
+  form: "chat",
+  "ask-image": "chat",
+} as const satisfies Record<
+  PlayerForegroundPresentation["kind"],
+  "chat" | "temporal" | "password" | "none"
+>;
 
 /**
  * The descriptor of what `shown` presents (`RuntimeInteraction`'s): the lock's password while its dialog shows; else the
@@ -78,15 +103,17 @@ export function composerDescriptor(shown: {
     id !== null && editor !== null && form?.actionId === id ? editor.fieldId : null;
   let tenant: ComposerTenant;
   if (lock) tenant = { kind: "lock", dialogKey: lock.key, repeat: lock.repeat };
-  else if (id !== null && foreground?.kind === "ask-password")
+  else if (id !== null && foreground && FIELD_OF[foreground.kind] === "password")
     tenant = { kind: "password", actionId: id, resumes: action?.resumes ?? 0 };
   else if (id !== null && consumed === id) tenant = { kind: "chat" };
   else if (id !== null && editorField !== null)
     tenant = { kind: "form", actionId: id, fieldId: editorField };
   // A year-0000 prefill shows as editable ISO text (`isoText`): still the date's own slot, not the chat's.
-  else if (id !== null && foreground && TEMPORAL_KINDS.has(foreground.kind))
+  else if (id !== null && foreground && FIELD_OF[foreground.kind] === "temporal")
     tenant = { kind: "temporal", actionId: id };
-  else tenant = { kind: "chat" };
+  // Nothing asked, a skippable pacing gate included: the chat takes typing (decision 6).
+  else if (foreground === null || FIELD_OF[foreground.kind] === "chat") tenant = { kind: "chat" };
+  else tenant = NONE;
   const prefill = foreground && "prefill" in foreground ? (foreground.prefill ?? null) : null;
   return {
     session: session ? `${session.planToken}:${shown.reset}` : null,
@@ -153,8 +180,6 @@ export interface FormDraft {
   readonly opening: number;
   readonly revision: number;
 }
-
-const NONE: ComposerTenant = { kind: "none" };
 
 function tenantKey(tenant: ComposerTenant): string {
   switch (tenant.kind) {
@@ -365,7 +390,9 @@ export function useComposerState(host: {
       case "lock":
         if (lock) lock.text = text;
         break;
-      default:
+      case "none":
+        return;
+      case "chat":
         if (chat.value === text) return;
         if (offer !== null) {
           prefills.set(offer, "taken");
