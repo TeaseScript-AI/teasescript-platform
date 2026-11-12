@@ -1442,7 +1442,7 @@ test("a literal's elements are compared at every field copies land, decided or n
   };
   // (the error at an element's last occurrence of its text)
   const errors = (source: string, ...texts: string[]) => ({
-    outcome: "compile-error",
+    outcome: texts.length === 0 ? "valid" : "compile-error",
     diagnostics: texts.map((text) => {
       const offset = source.lastIndexOf(text);
       return {
@@ -1488,11 +1488,10 @@ test("a literal's elements are compared at every field copies land, decided or n
       'let t:string="ok"\nlet root={spare:t,extra:1}\nlet b=root\nb.extra=2\nlet other={spare:1}\nlet a=[b,other]\n',
       "other",
     ],
-    // a union the plain element's kind fits, the copy's another
+    // a union the plain element's kind fits: the list's elements fit the union, in either order (#2289 B1)
     [
       "a union",
       'let t:integer|string="ok"\nlet root={spare:t}\nlet other={spare:1}\nlet a=[other,root]\n',
-      "root",
     ],
     // two plain elements where another store's copy lands
     [

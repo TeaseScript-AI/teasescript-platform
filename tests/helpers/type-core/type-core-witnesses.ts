@@ -410,6 +410,8 @@ export const HOT_CANDIDATE_WITNESSES: readonly (readonly [string, string, string
     D written-target error 88:103 -
     D written-target error 138:144 -`,
   ],
+  // (the list's type is the one all its elements fit, in either order, #2289 B1: `[a1, a0]` gives the record `[a0, a1]`
+  // gave before #2289, one error at `a0` in the list and `a1=a2` an error)
   [
     "a whole-copy ring whose members decide two properties differently, two of them in a list (Astra's review B1 of #1311)",
     "let ti:integer=7\n" +
@@ -425,11 +427,11 @@ export const HOT_CANDIDATE_WITNESSES: readonly (readonly [string, string, string
     D written-target error 101:103 -
     D written-target error 101:103 -
     D written-target error 107:109 -
-    D written-target warning 113:115 unknown
-    D written-target error 129:131 -
-    D written-target error 129:131 -
-    C copy-type a1.f [number] 113:115`,
+    D written-target error 113:115 -
+    D written-target error 129:131 -`,
   ],
+  // (in either order of the list, #2289 B1: `a2=a0` errs as it did with `a0` first, and no type fits the list's `g`, the
+  // written union beside a number, so both properties err at the later element)
   [
     "the same ring through a written union",
     "let ti:integer=7\n" +
@@ -444,10 +446,9 @@ export const HOT_CANDIDATE_WITNESSES: readonly (readonly [string, string, string
     `outcome compile-error
     D written-target error 106:108 -
     D written-target error 112:114 -
-    D written-target warning 118:120 unknown
+    D written-target error 118:120 -
     D written-target error 134:136 -
-    D written-target error 134:136 -
-    C copy-type a2.g [integer|string] 118:120`,
+    D written-target error 134:136 -`,
   ],
   [
     "a load default's contributor beside a shared record in two lists, the first fitting (Astra's PR review B1)",

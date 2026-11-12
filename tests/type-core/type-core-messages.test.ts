@@ -4296,9 +4296,11 @@ test("a mixed join names its leaf null as the occurrence holds it (#1828)", () =
       "let n:integer?[]= [1]\nlet xs=[{f:[false]}]+[{f:n}]\nexit\n",
       "'+' would mix objects whose property 'f' holds a list (boolean[]) in one and a list (integer?[]) in another. A list holds one type. Give 'f' one type in every element.",
     ],
+    // (the occurrence's leaf holds no null; the type the fix writes holds the literal's, `integer?` by `n`'s declaration,
+    // #2289 B1 rule 4, as a written copy's null is held, A4)
     [
       "let n:integer?=1\nlet xs=[[false]]+[[2,n]]\nexit\n",
-      "'+' would mix a list (boolean[]) and a list (integer[]). A list holds one type. To allow both, declare the list as 'let xs: (boolean | integer)[][] =[[false]]+[[2,n]]'.",
+      "'+' would mix a list (boolean[]) and a list (integer[]). A list holds one type. To allow both, declare the list as 'let xs: (boolean | integer | null)[][] =[[false]]+[[2,n]]'.",
     ],
     [
       'let xs=[[[1],null]]+[[["x"]]]\nexit\n',

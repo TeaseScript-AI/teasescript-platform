@@ -504,9 +504,10 @@ test("a mixed-list error's work grows as its dimensions do (#1765)", async () =>
 /**
  * #1906: a later element whose value holds no definite kind at a path, a join's elements (which may be either operand's)
  * or a typed host value (which the script cannot know), is a copy of what decides it, as the earliest element is (A4):
- * its decider's written type. So the mixed-list error is the current checker's in either order, in four modes. Its own
- * definite kinds still win (a narrowed union), a value proved to hold only `null` decides nothing, a written union
- * offends where none of its kinds fits, and a typed host value whose written type fits stays valid.
+ * its decider's written type. So the mixed-list error is the current checker's in either order, in four modes. A value
+ * proved to hold only `null` decides nothing, a written union offends where none of its kinds fits, and a typed host
+ * value whose written type fits stays valid. A narrowed copy of a written union is that union, which the list's other
+ * element fits: the list is the union in either order (#2289 B1), where the current checker names the narrowed kind.
  */
 test("a later element without a definite kind is compared by its decider's written type (#1906)", () => {
   const orders = (before: string, earlier: string, later: string): string[] => [
@@ -529,7 +530,6 @@ test("a later element without a definite kind is compared by its decider's writt
     `${host("string")}let xs = [1, atom, atom]\nexit\n`,
     // (a repeated identity below the root: its later copy is described by the paths the first one offends at, `known`)
     `${host("string")}let h = {v: atom}\nlet xs = [{v: 1}, h, h]\nexit\n`,
-    `${host("integer | string")}if atom is string {\n  let xs = [1, atom]\n}\nexit\n`,
   ];
   const valid = [
     `${host("number")}let xs = [1, atom]\nexit\n`,
@@ -541,7 +541,6 @@ test("a later element without a definite kind is compared by its decider's writt
     ...orders(`let a: integer = 1\n${host("number?")}`, "{v: a}", "{v: atom}"),
     ...orders(`let a: integer = 1\n${host("number")}`, "[a]", "[atom]"),
     "let xs = [1, hostValue]\nexit\n",
-    'let t: integer? = null\nlet root = {g: t}\nlet copy = root\nlet xs = [{g: "text"}, copy]\nexit\n',
   ];
   for (const source of reported) {
     const { current, core } = mixedSentences(source);
@@ -552,4 +551,23 @@ test("a later element without a definite kind is compared by its decider's writt
     const { current, core } = mixedSentences(source);
     assert.deepEqual([current, ...core], [[], [], [], [], []], source);
   }
+  for (const source of orders(`${host("integer | string")}if atom is string {\n`, "1", "atom")) {
+    const { current, core } = mixedSentences(source.replace("\nexit\n", "\n}\nexit\n"));
+    assert.notEqual(current.length, 0, source);
+    assert.deepEqual(core, [[], [], [], []], source);
+  }
+  // (a copy of a written `integer?` holding `null` is that written type, which text does not fit: an error in either
+  // order, #2289 B1, where main errs only with the copy first and the current checker in neither)
+  const text =
+    'let t: integer? = null\nlet root = {g: t}\nlet copy = root\nlet xs = [{g: "text"}, copy]\nexit\n';
+  const { current, core } = mixedSentences(text);
+  assert.deepEqual(current, [], text);
+  for (const each of core)
+    assert.deepEqual(
+      each,
+      [
+        "This list mixes objects whose property 'g' holds text (string) in one and a whole number (integer) or null in another.",
+      ],
+      text,
+    );
 });
