@@ -216,6 +216,8 @@ test("the meta-object layer is closed in type inference: `Object`'s listed membe
     "value['__proto__'];",
     "map.constructor;",
     "value['constructor'];",
+    "const { prototype } = Map;",
+    "const { constructor: made } = value;",
     "const O = Object;",
     "Object[name](value);",
     "globalThis.Object;",
