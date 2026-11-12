@@ -949,12 +949,12 @@ to keyboard navigation. Player controls and body-portaled tool controls share th
 
 Standard keyboard behavior is:
 
-- `Enter` submits;
+- `Enter` submits; while an answer is on its way, Enter and Send do nothing and the composer keeps its text;
 - `Shift+Enter` inserts a newline;
 - Space in the empty composer activates the preselected button: a `showButton`, or the button that `prefill:` of
-  `askChoice` or `askBoolean` preselects; without one it does nothing, and while a text, number, or date field waits
-  it types. A focused button keeps its own Space: it activates that button, and a focused form toggle flips without
-  submitting the form;
+  `askChoice` or `askBoolean` preselects; without one, and while an answer is on its way, it does nothing, and while a
+  text, number, or date field waits it types. A focused button keeps its own Space: it activates that button, and a
+  focused form toggle flips without submitting the form;
 - Enter, in the input or on Send, and that Space act only on a fresh press, one that began after the interaction appeared and is not a held key's
   repeat, so the Space that skips a message never also answers the button that appears after it, and a held Enter
   never submits the next field;
@@ -974,16 +974,31 @@ Send moves to an interaction whose field is of the other kind, the editing focus
 new field. `askPassword` masks the composer's field, which keeps its one line, with an eye button at its end, "Show
 password" or "Hide password", that shows the text while the person typing chooses to, and "Caps Lock is on" under it
 while a key event reports Caps Lock; an empty field answers nothing, and the answer adds no line to the chat; after a
-block interrupted it, the field is empty again. The password field of `password: askPassword(...)` in an encrypt or
-decrypt call is the same masked field; an encrypt call's adds a "Repeat password" field below it, past a dividing line,
-with its own eye button, "Show repeated password" or "Hide repeated password". Enter in the first moves to it, and Send
-or Enter there locks only when both match, else the composer notice says "The passwords do not match", the repeat
-empties, and the password is selected. A call with openers written `true` shows its lock dialog once the passwords
-match, and locks with both answers. While the Player locks or opens, the fields are read-only. The field starts empty
-each time it shows, also after a block interrupted it, and takes the focus back when the player was typing in the
-composer before it; nothing typed in it is kept. A prefill starts as the
-composer text, which the player submits unchanged or edits first; a cleared composer stays empty. After a checkpoint
-restore the composer shows the prefill again, and unsent edits are not kept.
+block interrupted it, the field is empty again; keys typed in the instant after a password is sent are ignored. The
+password field of `password: askPassword(...)` in an encrypt or decrypt call is the same masked field. A decrypt call's
+asks once. An encrypt call's asks twice on its one line: "Password" first; Enter or Send empties it, names it "Repeat
+password" with the hint "Repeat it", sends nothing, and adds nothing to the chat. The eye button, "Show repeated
+password" or "Hide repeated password" there, shows only the entry being typed. Enter or Send in the repeat locks when
+both entries match; else the composer notice says "The passwords do not match", both entries go, and the field asks for
+"Password" again. **Back** or Escape in the repeat asks for "Password" again and does not cancel the lock; an
+interruption, a stop, or a reload drops both entries. A call with openers written `true` shows its lock dialog once the
+passwords match, and locks with both answers. While the Player locks or opens, the field is read-only. The field starts
+empty each time it shows, also after a block interrupted it, and takes the focus back when the player was typing in the
+composer before it; nothing typed in it is kept.
+
+The composer keeps its text until the player sends or deletes it. Nothing that arrives changes it; a new session starts
+with an empty composer. While a question uses another field (a date, a time, a password), the text waits and is back
+with the text field. A password is the one exception: its field is masked, starts empty each time it shows, and nothing
+typed in it is kept or stored. A prefill is the question's suggestion: it fills only an empty composer, and until the
+player changes it, it leaves with its question; what the player deleted stays deleted. A key pressed while nothing on
+screen takes typing is ignored.
+
+An answer shows at once: a clicked choice, button, or form submit, and Enter or Send with typed text, put it in the chat
+straight away, and the question's controls go; nothing is greyed because an answer was sent. The Player first checks it
+by the runtime's own rules, and an answer they refuse never leaves the composer: the notice shows at once. The runtime
+stays the authority: when it refuses the answer, as when a block's question overtakes it, the answer leaves the chat,
+its controls show again, and its typed text is back before what was typed since, with the notice. A popup or an
+`exportText` dialog closes at once in the same way; when its close is refused, it shows again once it is the question.
 
 `askImage(...)` that allows files shows a paperclip before the composer's input, named "Attach an image", with the
 request's `hint:` as the input's hint, or "Add an image…" without one. The paperclip opens the browser's native file
@@ -1126,11 +1141,12 @@ option. The shown option's authored colour wins over the field's; the submit but
 `label: value`, or `Set…` (`Not set` when optional) without one; activating it opens it in the composer, which takes the
 field's name, its `hint:` as the input hint (`label…` by default), and the numeric keyboard or the date or time control
 of its kind, with the field's text selected so typing replaces it and Enter keeps it. The edited field stays pressed in
-and is marked current. Enter commits it and returns focus to the field's button; a refused answer keeps the text with
-the composer notice. While a field is edited, **Back** (and Escape in the input) closes it and drops the text, and
-**Clear** leaves an optional field without a value; selecting another field or submitting first commits the text. Every
-control keeps the action button geometry above, also among 43 toggles on a phone. An edit keeps focus on its control and
-adds nothing to the transcript; submitting adds the player's answer listing every field
+and is marked current. Enter commits it, the field read-only but not greyed until the form took it, and returns focus
+to the field's button; a refused answer keeps the text with the composer notice. While a field is edited, **Back** (and
+Escape in the input) closes it and drops the text, and **Clear** leaves an optional field without a value; selecting
+another field or submitting first commits the text. Every control keeps the action button geometry above, also among 43
+toggles on a phone. An edit is never greyed, goes in the order made, keeps focus on its control, and adds nothing to the
+transcript; submitting adds the player's answer listing every field
 ([V30](../specifications/accepted-syntaxes-v30.md#forms)) one per line, a toggle behind a check or an empty box instead
 of the `›` response marker; screen readers read its plain text. Each cycle line names the option the cycle showed,
 also where several of its options share a value, and a date or time keeps the presentation it was sent in, also after a

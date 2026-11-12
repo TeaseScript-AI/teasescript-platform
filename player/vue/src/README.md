@@ -136,7 +136,8 @@ rule in `AGENTS.md`. The copied code may need changes for the Player's TypeScrip
   remain visual trials.
 - `interaction/ConversationSurface.vue` places the overlay and forwards margin wheel input to `transcript/Transcript.vue`, excluding nested
   tools, composer input, horizontal gestures and browser zoom. Its measured composer inset keeps final content reachable.
-- `transcript/Transcript.vue` owns virtualization, grouping and scrolling. Its scrollport includes conversation padding to avoid
+- `transcript/Transcript.vue` owns virtualization, grouping and scrolling. It shows the pending answer as the last row of
+  its one list, under the row key (`renderKey`) its runtime entry then takes over. Its scrollport includes conversation padding to avoid
   clipping bubble borders; the scrollbar ends above the composer. The trailing slot contributes foreground-control
   height to the end inset. Message rendering and contrast are split into `transcript/TranscriptMessage.vue`, `transcript/TranscriptMarkup.vue`,
   `transcript/TranscriptLine.vue`, `transcript/transcriptPresentation.ts` and `transcript/messageContrast.ts`.
