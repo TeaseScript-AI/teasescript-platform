@@ -21,7 +21,6 @@ const props = defineProps<{
   text: string;
   fileName: string;
   modal: boolean;
-  busy: boolean;
   /** The session's area, which a dialog that is not modal centres on instead of the window. */
   area?: HTMLElement | null;
 }>();
@@ -108,7 +107,7 @@ function heldKey(event: KeyboardEvent) {
   if (event.repeat) event.preventDefault();
 }
 function close() {
-  if (!props.busy) emit("close");
+  emit("close");
 }
 </script>
 
