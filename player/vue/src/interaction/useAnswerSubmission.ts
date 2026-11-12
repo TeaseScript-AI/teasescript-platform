@@ -133,12 +133,8 @@ export function useAnswerSubmission(host: {
   const notice = ref("");
   let noticeTimer: ReturnType<typeof setTimeout> | undefined;
   let disposed = false;
-  /** An `openUrl` request waiting for the pending answer to settle, and those already tried, by session lineage. */
-  let urlWaiting: {
-    readonly chat: number;
-    readonly lineage: object;
-    readonly actionId: number;
-  } | null = null;
+  /** Whether an `openUrl` request waits for the pending answer to settle, and those already tried, by session lineage. */
+  let urlWaiting = false;
   const urlTried = new WeakMap<object, Set<number>>();
 
   function showNotice(message: string) {
@@ -169,8 +165,7 @@ export function useAnswerSubmission(host: {
       if (message) showNotice(message);
       host.undone?.(record);
     }
-    if (how === "dropped") urlWaiting = null;
-    else admitWaitingUrl();
+    admitWaitingUrl();
   }
 
   /**
@@ -477,8 +472,8 @@ export function useAnswerSubmission(host: {
 
   /**
    * The `openUrl` button, or the request the Player opens at once (`auto`), only one its session's own run requested
-   * (`atOnce`): that one waits while another answer is pending, for the same chat, session and action, and is tried
-   * once per request, counted when it is admitted as the pending answer.
+   * (`atOnce`): that one waits while another answer is pending, and is tried once per request, counted when it is
+   * admitted as the pending answer.
    */
   function openUrl(open: (session: PlayerSession) => boolean, auto: boolean): void {
     const session = host.session();
@@ -493,7 +488,7 @@ export function useAnswerSubmission(host: {
       )
         return;
       if (pending.value !== null) {
-        urlWaiting = { chat: host.chat(), lineage: session.lineage, actionId: action.actionId };
+        urlWaiting = true;
         return;
       }
     }
@@ -507,21 +502,15 @@ export function useAnswerSubmission(host: {
   function urlOpener(open: (session: PlayerSession) => boolean) {
     openAtOnce = open;
   }
-  /** Admits the automatic request that waited, if it is still the one its chat's session presents. */
+  /**
+   * Once the pending answer settled, asks again for an automatic request that waited: `openUrl` checks everything on
+   * what is presented now, so only a request the shown session still presents, asks to open at once and never tried
+   * is admitted, whichever chat or session asked first.
+   */
   function admitWaitingUrl() {
     const waiting = urlWaiting;
-    urlWaiting = null;
-    const session = host.session();
-    if (
-      waiting === null ||
-      openAtOnce === null ||
-      disposed ||
-      waiting.chat !== host.chat() ||
-      waiting.lineage !== session?.lineage ||
-      presentedAction(session)?.actionId !== waiting.actionId
-    )
-      return;
-    openUrl(openAtOnce, true);
+    urlWaiting = false;
+    if (waiting && openAtOnce !== null) openUrl(openAtOnce, true);
   }
 
   function presentedForm(): RuntimeInteractionActionSnapshot | null {
@@ -606,7 +595,7 @@ export function useAnswerSubmission(host: {
 
   onScopeDispose(() => {
     disposed = true;
-    urlWaiting = null;
+    urlWaiting = false;
     clearNotice();
     const record = pending.value;
     if (record) settle(record, "dropped");
