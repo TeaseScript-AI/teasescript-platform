@@ -152,9 +152,9 @@ test("a residue is admitted only as a rewrap of a declaration that gained `expor
       "  return b;",
       "}",
       "",
-      "export function third(walk: WalkerOfTheTree, value: PlaceOfTheValue, rest: readonly string[]): number {",
-      "  return",
-      "    second() + 1;",
+      // (equal to old 16 and 17 as rewrapped, but broken after `return`: only the break rejects it)
+      "export function third(walk: WalkerOfTheTree, value: PlaceOfTheValue, rest: readonly string[]): number { return",
+      "  second() + 1;",
       "}",
       "",
     ].join("\n"),
