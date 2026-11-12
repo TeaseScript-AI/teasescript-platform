@@ -9,13 +9,14 @@ import { compareSides, controlFailures, main } from "./split-test-compare.mjs";
 
 const TOOL = fileURLToPath(new URL("./split-test-compare.mjs", import.meta.url));
 
-/** A compiled test file holding `tests` (title → true to pass, false to fail, "skip"; or a list of such pairs). */
+/** A compiled test file holding `tests` (title → true to pass, false to fail, "skip", "suite"; or a list of pairs). */
 const testFile = (tests) =>
   [
     'const test = require("node:test");',
-    ...(Array.isArray(tests) ? tests : Object.entries(tests)).map(
-      ([title, state]) =>
-        `test${state === "skip" ? ".skip" : ""}(${JSON.stringify(title)}, () => { ${state === false ? 'throw new Error("no");' : ""} });`,
+    ...(Array.isArray(tests) ? tests : Object.entries(tests)).map(([title, state]) =>
+      state === "suite"
+        ? `test.describe(${JSON.stringify(title)}, () => {});`
+        : `test${state === "skip" ? ".skip" : ""}(${JSON.stringify(title)}, () => { ${state === false ? 'throw new Error("no");' : ""} });`,
     ),
     "",
   ].join("\n");
@@ -130,8 +131,8 @@ test("any lists of test files: two moved into one, and a file outside tests/ run
   assert.equal(result.status, 0, result.out + result.err);
 });
 
-test("a test lost, failing, skipped, or named twice is not equal, each by its own rule", (t) => {
-  // (each case is caught by the one rule its line names: the titles, the classes, a failure, a repeated title)
+test("a test lost, added, failing or skipped is not equal, each by its own rule", (t) => {
+  // (each case is caught by the one rule its line names: the titles, the classes, a failure)
   const both = (tests) => [
     { ...SPLIT, "split/two.test.js": testFile(tests) },
     { "old.test.js": testFile({ first: true, ...tests }) },
@@ -142,28 +143,13 @@ test("a test lost, failing, skipped, or named twice is not equal, each by its ow
       ...SPLIT,
       "split/two.test.js": testFile({ second: false }),
     },
-    "a top-level title 2 times at head: 0 first": {
+    // (a suite has a title and no count: only the titles see it)
+    "added at head: 0 extra (1)": {
       ...SPLIT,
-      "split/two.test.js": testFile({ second: true, first: true }),
+      "split/two.test.js": testFile({ second: true, extra: "suite" }),
     },
     "skipped differs: 0 -> 1": { ...SPLIT, "split/two.test.js": testFile({ second: "skip" }) },
     "failed at base: 1 failed, 0 cancelled": both({ second: false }),
-    "a top-level title 2 times at base: 0 first": [
-      {
-        ...SPLIT,
-        "split/two.test.js": testFile([
-          ["second", true],
-          ["first", true],
-        ]),
-      },
-      {
-        "old.test.js": testFile([
-          ["first", true],
-          ["second", true],
-          ["first", true],
-        ]),
-      },
-    ],
   };
   for (const [line, value] of Object.entries(cases)) {
     const [head, baseExtra] = Array.isArray(value) ? value : [value];
@@ -171,6 +157,25 @@ test("a test lost, failing, skipped, or named twice is not equal, each by its ow
     assert.equal(result.status, 1, `${line}\n${result.out}${result.err}`);
     assert.ok(result.out.includes(line), `${line}\n${result.out}`);
   }
+  // (a title repeated at the top, as many times on both sides, is no difference: #2546's runtime files share some)
+  const repeated = trees(
+    t,
+    {
+      ...SPLIT,
+      "split/two.test.js": testFile([
+        ["second", true],
+        ["first", true],
+      ]),
+    },
+    {
+      "old.test.js": testFile([
+        ["first", true],
+        ["second", true],
+        ["first", true],
+      ]),
+    },
+  ).run();
+  assert.equal(repeated.status, 0, repeated.out + repeated.err);
 });
 
 test("the suite's discovery must hold the new files and not the old one, and change nothing else", (t) => {

@@ -18,8 +18,8 @@
 //    result (`base-titles.jsonl`, `head-titles.jsonl`). The counts say how the tests ended; the titles, which tests
 //    they are: a test lost beside one added keeps the counts and changes the titles.
 // 3. The comparison (`compare.txt`): equal when the titles are the same, each as many times on both sides (a title may
-//    repeat inside different suites, never at the top of one side), the summed counts are the same in each class, and
-//    no test failed or was cancelled and no file failed outside its tests, on either side.
+//    repeat, in different suites or files), the summed counts are the same in each class, and no test failed or was
+//    cancelled and no file failed outside its tests, on either side.
 // 4. Its own controls, run whenever it finds the two sides equal: the head with one title dropped, and with one
 //    passed test counted as failed, must each compare unequal; if either compares equal, the comparison cannot judge.
 //
@@ -104,18 +104,14 @@ export function compareSides(base, head) {
   for (const name of CLASSES)
     if (base.counts[name] !== head.counts[name])
       lines.push(`${name} differs: ${base.counts[name]} -> ${head.counts[name]}`);
-  for (const [side, { counts }, keys] of [
-    ["base", base, before],
-    ["head", head, after],
-  ]) {
-    for (const [key, n] of keys)
-      if (key.startsWith("0 ") && n > 1)
-        lines.push(`a top-level title ${n} times at ${side}: ${key}`);
+  for (const [side, { counts }] of [
+    ["base", base],
+    ["head", head],
+  ])
     if (counts.failed > 0 || counts.cancelled > 0 || counts.fileFailed)
       lines.push(
         `failed at ${side}: ${counts.failed} failed, ${counts.cancelled} cancelled${counts.fileFailed ? ", a file failed" : ""}`,
       );
-  }
   return { equal: lines.length === 1, lines };
 }
 
