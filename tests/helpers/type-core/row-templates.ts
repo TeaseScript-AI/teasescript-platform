@@ -98,7 +98,37 @@ const BASE_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly Template[]>>>
   stopAudioStatement: ["stopAudio"],
   hideImageStatement: ["hideImage"],
   // (no nested form after `skippable`, which reads a following `[` as an element of a name)
-  sayStatement: ["say skippable hostValue"],
+  sayStatement: [
+    "say skippable hostValue",
+    `${declaration("displayName", '"Boss"')}\nsay as boss "a"`,
+    'say as player "a"',
+  ],
+  showButtonStatement: [
+    `${declaration("displayName", '"Boss"')}\nshowButton as boss "Go"`,
+    'showButton as player "Go"',
+  ],
+  // each built-in field (`SPEAKER_FIELD_KINDS`) with the host global where the runtime checks its value, else a literal
+  // of a kind it takes; a custom property; a declaration in a block
+  speakerDeclaration: [
+    ...[
+      "displayName",
+      "title",
+      "shortTitle",
+      "firstName",
+      "lastName",
+      "defaultSaySkippable",
+      "presentation",
+      "bubble",
+      "prose",
+      "font",
+      "avatar",
+      "mood",
+    ].map((field) => spoken(declaration(field, "hostValue"))),
+    spoken(declaration("color", '"#336699"')),
+    spoken(declaration("alias", '"pet"')),
+    spoken(declaration("gender", '"female"')),
+    `if hostValue == null {\n  speaker boss {\n    displayName: "Boss"\n  }\n}\nsay as boss "a"`,
+  ],
   // a transfer by each target form the row holds (a quoted glob of one file among them), a typed store of the host global
   // in every file; then a nullable stored
   // before each of the literal forms and a computed one, a variable of the same name used in the target (#2514's file
@@ -150,6 +180,25 @@ export const filesOf = (row: SyntaxKind, source: string): readonly TemplateFile[
 export const ROW_HOSTS: Readonly<Partial<Record<SyntaxKind, readonly string[]>>> = {
   gotoStatement: ["part.tease", "third.tease"],
 };
+
+/** A declaration of the speaker `boss` with one property. */
+function declaration(field: string, value: string): string {
+  return `speaker boss {\n  ${field}: ${value}\n}`;
+}
+
+/** A declaration followed by a message of its speaker, which reads its fields. */
+function spoken(declared: string): string {
+  return `${declared}\nsay as boss "a"`;
+}
+
+/**
+ * Sources the guard requires the route to answer as today's compiler does, which gives them a compile error: a `say as`
+ * of a name that declares no speaker (the lead's R26).
+ */
+export const ANSWERED_AS_TODAY: readonly string[] = [
+  'say as nobody "a"',
+  'let x = 1\nsay as x "a"',
+];
 
 /**
  * The operand positions of the commands, by the names their rows cite (`OperandCheck`, `DISPOSITIONS`' `operands`; a
@@ -444,6 +493,35 @@ export const DECLARED_REFUSALS: readonly {
       gate: "outsideAnswers (src/type-inference/core/backend.ts)",
       text: "an argument that its built-in checks",
     })),
+  // (a built-in speaker field's value of a kind it does not take, or unknown where no runtime check is cited; a
+  // `defaultSaySkippable` of any known kind but a truth value is today's compile error, so it has no entry here)
+  ...(
+    [
+      ["displayName", "/a/", '"Vera"'],
+      ["title", "/a/", '"Vera"'],
+      ["shortTitle", "/a/", '"Vera"'],
+      ["firstName", "/a/", '"Vera"'],
+      ["lastName", "/a/", '"Vera"'],
+      ["presentation", "[1]", '"bubble"'],
+      ["bubble", '"x"', '{background: "#334455"}'],
+      ["prose", '"x"', '{align: "left"}'],
+      ["font", "5", '"Georgia"'],
+      ["avatar", "5", '"a.jpg"'],
+      ["color", "[1]", '"#336699"'],
+      ["color", "hostValue", '"#336699"'],
+      ["alias", "5", '"pet"'],
+      ["alias", "hostValue", '"pet"'],
+      ["gender", "5", '"female"'],
+      ["gender", "hostValue", '"female"'],
+    ] as const
+  ).map(([field, refused, admitted]) => ({
+    row: "speakerDeclaration" as const,
+    position: `the field ${field}, ${refused}`,
+    refused: spoken(declaration(field, refused)),
+    admitted: spoken(declaration(field, admitted)),
+    gate: "outsideAnswers (src/type-inference/core/backend.ts)",
+    text: "this speaker property",
+  })),
   // (a check that no store takes: a typed default inside a command's operand or a `say`'s value, the lead's R11; its
   // place is the command operand table's, step 1½)
   ...(

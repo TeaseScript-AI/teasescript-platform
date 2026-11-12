@@ -1,5 +1,6 @@
 import type { CallArgument, CallExpression, Expression } from "../../ast.js";
 import { CONVERSIONS, isConversion, type Conversion } from "../../conversions.js";
+import { BUILT_IN_SPEAKER_PROPERTIES } from "../../speaker-terms.js";
 import type { TypeAnalysisBackend, TypeAnalysisOutcome, TypeAnalysisRequest } from "../backend.js";
 import type { SourceSite } from "../graph.js";
 import { analyseCore, type Answers } from "./answers.js";
@@ -11,8 +12,15 @@ import {
   OutsideContract,
   SLICE_DEPTH,
 } from "./check-result/slice-index.js";
+import type { ItemTag } from "./items.js";
 import type { CoreAnalysisRequest, CoreFile } from "./program.js";
-import { outsideSyntax, sliceCall, transferCall, type Outside } from "./slice-syntax.js";
+import {
+  outsideSyntax,
+  sliceCall,
+  transferCall,
+  type OperandCheck,
+  type Outside,
+} from "./slice-syntax.js";
 
 /*
  * The coarse core as a type analysis backend (the port plan's S5): complete for a stated slice of the language and
@@ -24,7 +32,8 @@ import { outsideSyntax, sliceCall, transferCall, type Outside } from "./slice-sy
  *
  * The slice: `let` with or without a written type (a named type, `T?` and `T[]` of them; no written union, whose
  * required checks come with narrowing, S10), assignment of a variable or of a property, `if` and `else`, `repeat` with
- * a count, `for` with one or two variables, `say` of plain text or of a value, a call as a statement, and `exit`;
+ * a count, `for` with one or two variables, `say` of plain text or of a value, also `as` a speaker, a speaker's
+ * declaration (never a speaker's name as a value), a call as a statement, and `exit`;
  * number, boolean, null, regex and plain text literals, variables, host values, list and object literals, index and
  * property reads, ranges, `otherwise`, a list's `get` with its `default:`, a method of text, a list, a set or a dict that
  * changes nothing in its receiver and a list's `sort`, `toJson` of a value, the conversions of a value with their `default:`, `fromJson`, `fileFromBase64`,
@@ -35,8 +44,8 @@ import { outsideSyntax, sliceCall, transferCall, type Outside } from "./slice-sy
  * loop's iterable, a method's arguments and the elements `join` and `sort` read); its ingresses are a host value, a load
  * and a parse, with C9's boundary check where it enters (the store's destination's admitted type) or where it is read.
  * Rejected after the analysis: any other consumer's diagnostic, a property read of a value that may be no object, a
- * value `say` may not show, an argument of another kind than a built-in function takes (the built-in signature check
- * C13, S9b), and lists nested `SLICE_DEPTH` deep. A possible `null` is the route rule's (AD-1): a compile error where a
+ * value `say` may not show, a built-in speaker field's value that may not fit it (`SPEAKER_FIELD_KINDS`), an argument
+ * of another kind than a built-in function takes (the built-in signature check C13, S9b), and lists nested `SLICE_DEPTH` deep. A possible `null` is the route rule's (AD-1): a compile error where a
  * route to the use has no check, else a warning whose use the runtime checks.
  * Refused during it: a value whose structure the slice does not follow, at the store whose capture established it
  * (`leftSlice`), the analysis ended there. A stop compiles with its warning and its checks at runtime (D4 a′), but a
@@ -182,6 +191,54 @@ function argumentKinds(call: CallExpression, argument: CallArgument): readonly s
 /** The kinds of the values a `say` of the slice shows: the scalars, and an unknown that the runtime shows as it is. */
 const SHOWN: readonly string[] = ["string", "integer", "number", "boolean", "null", "unknown"];
 
+/**
+ * The kinds a built-in field of a speaker declaration takes (V30 §37; the fields today's checker types by their own
+ * rules, `BUILT_IN_SPEAKER_PROPERTIES`), and the runtime function that refuses a value of another kind (`check`), where
+ * one does: a value that may be of a kind outside `fits` is outside the slice, and so is an unknown one where no
+ * function is cited, since nothing would refuse it. A built-in field without an entry here is outside for every value.
+ */
+interface FieldKinds {
+  readonly fits: readonly ItemTag[];
+  readonly check: OperandCheck | null;
+}
+const SPEAKER_TEXT_FIELD: FieldKinds = {
+  fits: ["string", "integer", "number", "boolean", "null"],
+  check: { file: "src/runtime/values/speaker-text.ts", function: "speakerText" },
+};
+const PRESENTATION_CHECK: OperandCheck = {
+  file: "src/runtime/message-presentation.ts",
+  function: "resolveMessagePresentation",
+};
+export const SPEAKER_FIELD_KINDS: ReadonlyMap<string, FieldKinds> = new Map([
+  ["displayName", SPEAKER_TEXT_FIELD],
+  ["title", SPEAKER_TEXT_FIELD],
+  ["shortTitle", SPEAKER_TEXT_FIELD],
+  ["firstName", SPEAKER_TEXT_FIELD],
+  ["lastName", SPEAKER_TEXT_FIELD],
+  [
+    "defaultSaySkippable",
+    {
+      fits: ["boolean"],
+      check: { file: "src/runtime/instructions/say.ts", function: "executeDeclareSpeaker" },
+    },
+  ],
+  ["presentation", { fits: ["string", "null"], check: PRESENTATION_CHECK }],
+  ["bubble", { fits: ["object", "null"], check: PRESENTATION_CHECK }],
+  ["prose", { fits: ["object", "null"], check: PRESENTATION_CHECK }],
+  ["font", { fits: ["string", "null"], check: PRESENTATION_CHECK }],
+  [
+    "avatar",
+    {
+      fits: ["string", "null"],
+      check: { file: "src/runtime/values/speaker-text.ts", function: "optionalSpeakerString" },
+    },
+  ],
+  // (the runtime drops a colour it cannot read, and nothing reads `alias` or `gender` as a kind: no check to cite)
+  ["color", { fits: ["string", "null"], check: null }],
+  ["alias", { fits: ["string", "null"], check: null }],
+  ["gender", { fits: ["string", "null"], check: null }],
+]);
+
 /** The first answer of the analysis that leaves the slice (see the module's comment), or `null`. */
 function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
   const at = (site: { readonly file: number; readonly start: number; readonly end: number }) =>
@@ -208,6 +265,22 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
   for (const value of index.shown)
     if (beyond(value, SHOWN))
       return { file: index.fileOf(value), span: value.span, what: "this say" };
+  // a built-in field's value of a speaker declaration that may not fit it (`SPEAKER_FIELD_KINDS`); a custom property's
+  // value matters only to the reads and stores of the speaker, which the slice's syntax refuses
+  for (const statement of index.statements)
+    if (statement.kind === "speakerDeclaration")
+      for (const property of statement.properties) {
+        if (!BUILT_IN_SPEAKER_PROPERTIES.has(property.name.name)) continue;
+        const field = SPEAKER_FIELD_KINDS.get(property.name.name);
+        const fits =
+          field === undefined ? [] : field.check === null ? field.fits : [...field.fits, "unknown"];
+        if (field === undefined || beyond(property.value, fits))
+          return {
+            file: index.fileOf(property.value),
+            span: property.value.span,
+            what: "this speaker property",
+          };
+      }
   // a load whose default is only null: without a declared type, the storage rules' error (F19, S9b's)
   for (const load of index.loads)
     if (
