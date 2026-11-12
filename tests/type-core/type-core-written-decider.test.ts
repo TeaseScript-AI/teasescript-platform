@@ -275,13 +275,16 @@ test("a decision never reads the written decider's summary, so it charges what i
  * The answer after the stop is the scan's with no memo of its own; the stop's forget is counted, the summary's maps are
  * replaced, and its groups' answers are made again. The inputs stopped: an `otherwise` operand (each link's answer and
  * the region it selects), the operand a `get` receives (an operation's own kinds, the mask), the earliest deciding
- * value, a written copy's own read, and an input the answer does not use (it stays).
+ * value, a written copy's own read, and an input the answer does not use (it stays). A literal with a cell and a written
+ * element on the path is answered by its cell (`cell`, #2289 `literalRoute`), which reads no summary: there the forget
+ * is counted and the answer is the scan's.
  */
 const STOPS: readonly {
   readonly name: string;
   readonly source: string;
   readonly stop: string;
   readonly path: string;
+  readonly cell?: true;
 }[] = [
   {
     name: "an otherwise operand",
@@ -310,6 +313,7 @@ const STOPS: readonly {
       'let typed: integer | string = 7\nlet flag = {p: 1}\nlet out = [[flag, {p: typed}][0], {p: typed}][0]\nsay "${out.p}"\nexit\n',
     stop: "flag",
     path: "p",
+    cell: true,
   },
   {
     name: "a written copy's own read",
@@ -317,6 +321,7 @@ const STOPS: readonly {
       'let typed: integer | string = 7\nlet copied = typed\nlet flag = {p: 1}\nlet out = [[{p: copied}, flag][0], {p: typed}][0]\nsay "${out.p}"\nexit\n',
     stop: "copied",
     path: "p",
+    cell: true,
   },
   {
     name: "an input the answer does not use",
@@ -324,6 +329,7 @@ const STOPS: readonly {
       'let typed: integer | string = 7\nlet flag = {p: 1}\nlet other = {p: 2}\nlet out = [[{p: typed}, flag][0], other][0]\nsay "${out.p}"\nexit\n',
     stop: "other",
     path: "p",
+    cell: true,
   },
 ];
 
@@ -367,7 +373,7 @@ test("after a stop on the same admission the written decider answers from what i
             admission.summaryEpochs > epochs,
             admission.summaryStates > states,
           ];
-          if (after !== reference || trace.includes(false))
+          if (after !== reference || (shape.cell === true ? !trace[0] : trace.includes(false)))
             wrong.push(
               `${shape.name} ${JSON.stringify(mode)}: before ${before}, after ${after}, reference ${reference}, trace ${trace}`,
             );
