@@ -302,9 +302,9 @@ const composing = ref(false);
 let endingComposition = false;
 /**
  * Ends the player's composition, only in `field` when given: the browser ends it, with its `compositionend`, when the
- * field loses focus, which it gets back in the same task with its state as it was (`releaseOnBlur`). The text and
- * password fields keep a composition as `v-model` does, neither taking its text nor rendering over it before it ends,
- * so an answer given meanwhile is the committed text of the click.
+ * field loses focus, which it gets back in the same task with its state as it was (`releaseOnBlur`). The fields report
+ * a composition's text at once, with every `input` event, composing ones too (`reportEdit`); ending it before a send or
+ * a switch makes the answer the whole text shown, and the switch take nothing after it.
  */
 function endComposition(field?: HTMLElement): void {
   if (!composing.value) return;
