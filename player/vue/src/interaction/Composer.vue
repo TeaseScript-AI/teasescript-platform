@@ -347,6 +347,7 @@ defineExpose({ focusInput, selectInput, openPicker, finishComposition });
     <div
       class="conversation-glass"
       data-composer-shell
+      :data-composer-pacing="pacing ? '' : undefined"
       :data-drop-active="dropActive ? true : undefined"
       @dragenter="dragEnter"
       @dragover="dragOver"
