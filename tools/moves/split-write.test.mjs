@@ -194,11 +194,43 @@ test("an assignment the split cannot follow is refused, and nothing is written",
     "test 2 is named by no file": files({}, { tests: [] }),
     "OLD has no test 3": files({ tests: [1, 3] }, {}),
     "OLD's leading line 1 is in no range": files({ lines: [] }, {}),
-    "overlaps another at line 21": files({ lines: [[20, 22]] }, { lines: [[21, 21]] }),
-    "a range cuts the statement's lines 15-17": files({ lines: [[15, 16]] }, {}),
-    "lies in OLD's imports": files({ lines: [[3, 3]] }, {}),
+    "overlaps another at line 21": files(
+      {
+        lines: [
+          [1, 1],
+          [20, 22],
+        ],
+      },
+      { lines: [[21, 21]] },
+    ),
+    "a range cuts the statement's lines 15-17": files(
+      {
+        lines: [
+          [1, 1],
+          [15, 16],
+        ],
+      },
+      {},
+    ),
+    "lies in OLD's imports": files(
+      {
+        lines: [
+          [1, 1],
+          [3, 3],
+        ],
+      },
+      {},
+    ),
     "the range 1-6 lies in OLD's imports or crosses": files({ lines: [[1, 6]] }, {}),
-    "the range 40-41 names no lines": files({ lines: [[40, 41]] }, {}),
+    "the range 40-41 names no lines": files(
+      {
+        lines: [
+          [1, 1],
+          [40, 41],
+        ],
+      },
+      {},
+    ),
     "reads PAIR, placed in tests/split/b.test.ts": files({}, { lines: [[19, 19]] }),
     "a.test.ts: no header sentence": files({ header: undefined }, {}),
     "split-setup.ts: no header sentence": { ...ASSIGN, setup: { path: SETUP, header: null } },
