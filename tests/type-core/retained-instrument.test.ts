@@ -264,11 +264,12 @@ test("an owner is locked at the switch after it is made: a field written in a la
   }
 });
 
-/** An owner whose one field is an own accessor its `hidden` shows: a getter, with a setter when `settable`. */
-function accessorOwner(settable: boolean): { field: number } {
+/** An owner with a data field `count` and an own accessor `field` its `hidden` shows: a getter, a setter if `settable`. */
+function accessorOwner(settable: boolean): { field: number; count: number } {
   let value = 0;
-  const owner: { field: number } = settable
+  const owner: { field: number; count: number } = settable
     ? {
+        count: 0,
         get field(): number {
           return value;
         },
@@ -277,6 +278,7 @@ function accessorOwner(settable: boolean): { field: number } {
         },
       }
     : {
+        count: 0,
         get field(): number {
           return value;
         },
@@ -286,7 +288,7 @@ function accessorOwner(settable: boolean): { field: number } {
 }
 
 test("an owner's own accessor stands only as a getter its `hidden` shows, which nothing replaces later; a setter is refused", () => {
-  let owner: { field: number } | undefined;
+  let owner: { field: number; count: number } | undefined;
   const fixed = stepped(() => [
     () => (owner = accessorOwner(false)),
     () => Object.defineProperty(owner!, "field", { value: 1 }),
@@ -295,6 +297,39 @@ test("an owner's own accessor stands only as a getter its `hidden` shows, which 
   const settable = stepped(() => [() => (owner = accessorOwner(true)), () => (owner!.field = 1)]);
   assert.equal(settable.steps[0], "ok");
   assert.equal(settable.run, "refused");
+});
+
+test("a mark opens an owner with an admitted getter: its data fields are written, the getter stays", () => {
+  let owner: { field: number; count: number } | undefined;
+  const { steps, run } = stepped(() => [
+    () => (owner = accessorOwner(false)),
+    () => {
+      amend(owner!);
+      owner!.count = 1;
+    },
+    () => (owner!.count = 2),
+  ]);
+  assert.deepEqual(steps, ["ok", "ok", "frozen"]);
+  assert.equal(run, "ok");
+  assert.equal(owner!.count, 1);
+});
+
+test("a collection's own writers are neither removed nor replaced, so none falls back to the native one", () => {
+  for (const change of [
+    (map: Map<string, unknown>) => Reflect.deleteProperty(map, "set") || "unchanged",
+    (map: Map<string, unknown>) => Object.defineProperty(map, "set", { value: Map.prototype.set }),
+    (map: Map<string, unknown>) => Object.assign(map, { set: Map.prototype.set }),
+  ]) {
+    let made: Map<string, unknown> | undefined;
+    const { steps } = stepped(() => [
+      () => (made = Retained.map<string, unknown>("T.writers")),
+      () => {
+        const result = change(made!);
+        if (result === "unchanged") throw new TypeError("Cannot delete property");
+      },
+    ]);
+    assert.deepEqual(steps, ["ok", "frozen"]);
+  }
 });
 
 test("a run's mark stands in each of its intervals: a write after the run resumes is open, another run's is not", () => {
