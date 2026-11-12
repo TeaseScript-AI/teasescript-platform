@@ -333,7 +333,7 @@ first, and `tools/test-shards.mjs` shares the files out so that the jobs end tog
 before the tests. Their costliest sweeps
 that claim something at every member of a list of settled stops or allowances (`testedStops`, the stops before admission
 settled in `type-core-stop-unsettled`, `completionAllowances`) visit of each list the first, the last and two evenly between
-(`sampled`, `tests/helpers/sweep.ts`), and `type-core-sharing` runs its fixture and matrix programs in the source order
+(`sampled`, `tests/helpers/sweep.ts`), and `type-core-sharing-differential` runs its fixture and matrix programs in the source order
 alone; a search for a member where something happens keeps its list. `TEASESCRIPT_SWEEP=full` makes every sampled list
 whole and runs those programs in both orders: `TEASESCRIPT_SWEEP=full npm run test:compiled`, after `npm run build`,
 is the sweeps' queue evidence, which the builder of a change that can move a stop runs on a worker before a type-core

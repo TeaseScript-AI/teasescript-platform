@@ -123,7 +123,8 @@ export const ORACLE_PROGRAMS: readonly {
  * class would merge: a parse without a default (open) and a default with a field of host data, every form of input,
  * another default, a written destination, a guard of the input, a store of the default between parses, literals of one
  * and of two host reads, records holding host data and adds of host reads. Each keeps its own leaves, diagnostics and
- * checks: the sharing differential and the leaf comparison (`type-core-sharing.test.ts`) run them in both orders.
+ * checks: the sharing differential and the leaf comparison (`sharing/type-core-sharing-differential.test.ts`) run them
+ * in both orders.
  */
 export const DIRECT_INGRESS_PROGRAMS: readonly {
   readonly name: string;
@@ -237,7 +238,7 @@ export const DIRECT_INGRESS_PROGRAMS: readonly {
 
 /**
  * S6's sharing faults that, with the sharing on, published their diagnostics in another order on
- * `main`: publication in source order of their sites makes them neutral (`type-core-sharing`'s own test).
+ * `main`: publication in source order of their sites makes them neutral (`type-core-sharing-differential`'s own test).
  */
 export const REORDERING_SHARING_FAULTS: readonly {
   readonly name: string;
