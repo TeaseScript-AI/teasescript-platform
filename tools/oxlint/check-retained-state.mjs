@@ -201,6 +201,13 @@ const OBJECT_MEMBERS = new Set([
   "is",
 ]);
 const META_GLOBALS = new Set(["Reflect", "globalThis", "Function", "eval"]);
+/** The makers of a collection, the only ones `retainedModule` may be given whole (`retainedForm`). */
+const COLLECTION_MAKERS = new Set(["map", "set", "weakMap", "weakSet"]);
+/** The retained API's own folder, which defines `Retained` and is outside its closed form. */
+const RETAINED_API = "src/type-inference/core/retained/";
+const RETAINED_FORM =
+  "a `Retained` maker taken any other way escapes the fresh-literal line, so production and the instrument could keep " +
+  "different objects; import `Retained` under its name and call `Retained.<member>(…)` directly";
 const META_PROPERTIES = new Set(["prototype", "__proto__", "constructor"]);
 const META =
   "it reaches past assignment and a kind's own methods (a descriptor, a prototype, an integrity level, a deletion), " +
@@ -283,6 +290,11 @@ function guardLines(source, file, level) {
       if (reason !== undefined)
         found.push({ node, message: `\`${callee}\` in the type core: ${reason} (#1072 R21)` });
     }
+    // (the closed form of `Retained`: every checked file but the retained API's own, which defines it)
+    if (!file.startsWith(RETAINED_API)) {
+      const form = retainedForm(node);
+      if (form !== null) found.push({ node, message: `${form}: ${RETAINED_FORM} (#1072 R38)` });
+    }
     // (the closed meta-object layer: every file of `src/type-inference/`, the core's left-out files included, since a
     // retained owner reaches no code outside it while runs remain)
     if (level !== "helper") {
@@ -302,6 +314,56 @@ function guardLines(source, file, level) {
   };
   visit(source);
   return found;
+}
+
+/**
+ * The binding `Retained` closed (#1072 R38): imported under that name, it stands only as the object of a direct call
+ * `Retained.<member>(…)`, so every maker call has the spelling the fresh-literal line reads. What else `node` makes of
+ * it, named for its diagnostic, or `null`.
+ */
+function retainedForm(node) {
+  if (ts.isImportSpecifier(node) || ts.isExportSpecifier(node)) {
+    const names = [node.name.text, node.propertyName?.text];
+    if (!names.includes("Retained")) return null;
+    if (ts.isExportSpecifier(node)) return "`Retained` exported again";
+    return node.propertyName !== undefined && node.propertyName.text !== node.name.text
+      ? "`Retained` imported under another name"
+      : null;
+  }
+  if (
+    (ts.isNamespaceImport(node) || ts.isNamespaceExport(node) || ts.isExportDeclaration(node)) &&
+    retainedModule(ts.isExportDeclaration(node) ? node : (node.parent.parent ?? node))
+  )
+    return ts.isExportDeclaration(node) && node.exportClause !== undefined
+      ? null
+      : "the retained module taken whole";
+  if (!ts.isIdentifier(node) || node.text !== "Retained" || !valueReference(node)) return null;
+  const parent = node.parent;
+  if (!ts.isPropertyAccessExpression(parent) || parent.expression !== node)
+    return "`Retained` other than as the object of a direct call `Retained.<member>(…)`";
+  const call = parent.parent;
+  if (ts.isCallExpression(call) && call.expression === parent) return null;
+  // (the one other form: a collection maker given whole to `retainedModule`, which calls it with the module's name
+  // alone; a collection maker takes no literal, so the fresh-literal line has nothing to read there)
+  const given = ts.isExpressionWithTypeArguments(call) ? call : parent;
+  const module = given.parent;
+  return COLLECTION_MAKERS.has(parent.name.text) &&
+    ts.isCallExpression(module) &&
+    ts.isIdentifier(module.expression) &&
+    module.expression.text === "retainedModule" &&
+    module.arguments[1] === given
+    ? null
+    : "`Retained` other than as the object of a direct call `Retained.<member>(…)`";
+}
+
+/** Whether `node`, an import or export declaration, names the retained API's module. */
+function retainedModule(node) {
+  const specifier = node.moduleSpecifier;
+  return (
+    specifier !== undefined &&
+    ts.isStringLiteralLike(specifier) &&
+    /(^|\/)retained\/retained\.js$/u.test(specifier.text)
+  );
 }
 
 /** What of the closed meta-object layer `node` reaches, named for its diagnostic, or `null` (`OBJECT_MEMBERS`). */
