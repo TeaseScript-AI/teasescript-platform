@@ -54,7 +54,7 @@ import {
   type PlayerSessionView,
 } from "./runtime-view.js";
 import type { RuntimeChatPacingGateActionSnapshot } from "../../src/runtime/actions/model.js";
-import { IMAGE_SKIP_TEXT } from "../../src/image-input.js";
+import { routeComposerText } from "../../src/interaction-completion.js";
 
 import type { RuntimePlayerProfileInput } from "../../src/runtime/host-data/player-profile.js";
 import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkpoint.js";
@@ -768,47 +768,28 @@ export function submitPlayerRuntimeComposer(
   submittedText: string,
 ): PlayerRuntimeControlResult<ActionCompletionOutcome | InteractionUpdateOutcome> | null {
   const action = activeInteraction(session.state);
-  if (action?.ui.kind === "button") {
-    return submittedText !== "" && submittedText === action.ui.buttonLabel
-      ? completePlayerAction(session, action, { kind: "activate" })
-      : null;
+  const route = routeComposerText(action, submittedText);
+  if (route === null || action === null) return null;
+  switch (route.kind) {
+    case "complete":
+      return completePlayerAction(session, action, { ...route.payload });
+    // A password is answered with the SHA-256 of what was typed, as hashText gives it; the text itself goes nowhere.
+    case "password":
+      return completePlayerAction(session, action, {
+        kind: "submittedPassword",
+        hash: textSha256(route.text),
+      });
+    case "imageSkip":
+      return skipPlayerRuntimeImage(session);
+    case "formCommit":
+      return commitPlayerRuntimeFormField(session, route.text);
+    case "formSubmit":
+      return submitPlayerRuntimeForm(session);
+    case "formCancel":
+      return cancelPlayerRuntimeForm(session);
+    case "formStep":
+      return stepPlayerRuntimeFormField(session, route.fieldId);
   }
-  // While a form field is edited, the composer's text is its answer. Otherwise the composer takes the exact text of
-  // one visible button: a field's label steps it, the submit label submits.
-  if (action?.ui.kind === "form") {
-    if (action.form?.editor != null) return commitPlayerRuntimeFormField(session, submittedText);
-    const fields = action.ui.fields.filter((field) => field.text === submittedText);
-    const submits = action.ui.submit.text === submittedText ? 1 : 0;
-    const cancels = action.ui.cancel?.text === submittedText ? 1 : 0;
-    if (submittedText === "" || fields.length + submits + cancels !== 1) return null;
-    return submits === 1
-      ? submitPlayerRuntimeForm(session)
-      : cancels === 1
-        ? cancelPlayerRuntimeForm(session)
-        : stepPlayerRuntimeFormField(session, fields[0]!.id);
-  }
-  // A password is answered with the SHA-256 of what was typed, as hashText gives it; the text itself goes nowhere. As
-  // askText needs text, it needs a password: an empty field answers nothing.
-  if (action?.ui.kind === "password")
-    return submittedText === ""
-      ? null
-      : completePlayerAction(session, action, {
-          kind: "submittedPassword",
-          hash: textSha256(submittedText),
-        });
-  // The exact text of a skippable image request's skip control skips it; other text never answers an image request.
-  if (action?.ui.kind === "image")
-    return submittedText === IMAGE_SKIP_TEXT ? skipPlayerRuntimeImage(session) : null;
-  if (
-    action === null ||
-    (action.interactionKind !== "text" &&
-      action.interactionKind !== "number" &&
-      action.interactionKind !== "temporal" &&
-      action.interactionKind !== "choice")
-  ) {
-    return null;
-  }
-  return completePlayerAction(session, action, { kind: "submittedText", submittedText });
 }
 
 /**
