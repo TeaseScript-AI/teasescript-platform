@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 
 import { compileProjectWithBackend } from "../../src/compiler.js";
+import { CONVERSIONS } from "../../src/conversions.js";
 import { run } from "../../src/runtime/engine.js";
 import type { RuntimeSnapshot } from "../../src/runtime/snapshot/state.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
@@ -13,6 +14,7 @@ import { DISPOSITIONS, type SyntaxKind } from "../../src/type-inference/core/sli
 import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
 import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import {
+  ADMITTED_KINDS,
   DECLARED_REFUSALS,
   DECLARED_RULE_DIFFERENCES,
   DECLARED_RUN_DIFFERENCES,
@@ -345,6 +347,13 @@ test("each open row's templates publish on the route, with today's checks and to
 });
 
 test("each value kind the slice admits no value of: the route refuses a source holding one, or publishes no plan", () => {
+  // (the conversions the slice admits, `sliceCall`'s, give only kinds it admits)
+  for (const [name, conversion] of Object.entries(CONVERSIONS))
+    if (conversion.takes === "value" && conversion.kinds !== "shown")
+      assert.ok(
+        ADMITTED_KINDS.some((kind) => kind === conversion.result),
+        name,
+      );
   for (const [kind, source] of Object.entries(REFUSED_KINDS))
     for (const mode of HELD_MODES) {
       let plan;
