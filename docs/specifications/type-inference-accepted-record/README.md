@@ -132,7 +132,7 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | `X7` | exact reads require freedom from block execution and previously registered handler interference |
 | `N1` | stable-path tests create narrowing definitions that filter kinds without proving collection non-emptiness |
 | `N2` | the nearest valid dominating narrowing answers a read until relevant events invalidate it ([r4-403](contract.md#r4-403)) |
-| `N3` | a route proof promotes an unchecked nullable or written-union use to an error ([r4-444](contract.md#r4-444)) |
+| `N3` | a route proof promotes an unchecked nullable or written-union use to an error ([r4-444](contract.md#r4-444)), also through an entry ([r4-451](contract.md#r4-451)) |
 | `N3a` | written-union offending members participate in the required-check route proof, as re-derived under AD-1 ([r4-444](contract.md#r4-444)) |
 | `N5` | loop narrowings survive jointly preserving stores solved as one greatest fixpoint ([r4-129](contract.md#r4-129)) |
 | `N8` | constants retain narrowing absent dependency changes; reference-member paths are never narrowed |
@@ -279,3 +279,4 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | [r4-432](sharing.md#r4-432) | sharing | A pushed read carries compiled mark states rather than mark histories. |
 | [r4-444](contract.md#r4-444) | contract | Route certificates prove producers conservatively and refuse unavailable arm evidence. |
 | [r4-450](contract.md#r4-450) | contract | Read closed-object property descendants from holders and pay for indexing by saved folds. |
+| [r4-451](contract.md#r4-451) | contract | A `null` that reaches a use through an entry is the use's required check. |

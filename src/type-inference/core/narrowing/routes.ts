@@ -1,5 +1,5 @@
 import type { Expression } from "../../../ast.js";
-import type { PlaceId, SourceSite } from "../../graph.js";
+import type { PlaceId } from "../../graph.js";
 import type { CorePass } from "../answers.js";
 import { joinParts, keepText, type WorkLedger } from "../budget.js";
 import {
@@ -18,12 +18,8 @@ import { locationOf, pathKey, peel, removes, stablePath, type StablePath } from 
 import { countIn, type TreeBlock, type TreeStatement } from "./statement-tree.js";
 import { selectsElement } from "../method-categories.js";
 import type { Feasibility, Place } from "./route-tests.js";
-import {
-  RouteCandidates,
-  type Candidate,
-  type Candidates,
-  type Layer,
-} from "./route-candidates.js";
+import type { Candidate, Candidates, Layer } from "./route-candidates.js";
+import { RouteEntries, rootName, type EntryPoint, type RouteWriter } from "./route-entries.js";
 import { propertyName } from "../program.js";
 
 /*
@@ -111,7 +107,7 @@ const CERTIFIED: ReadonlySet<string> = new Set([
   "parameter default",
 ]);
 
-export class NarrowingRoutes extends RouteCandidates {
+export class NarrowingRoutes extends RouteEntries {
   /** Per key and applicability its kill layer, per (key, offending kind) its test layer. */
   readonly #layers = new Map<string, Layer>();
   /** Per (key, node, offending kind): the witness found, or `null`. */
@@ -141,12 +137,19 @@ export class NarrowingRoutes extends RouteCandidates {
    * chains a run might not pass (`#plain`), and only by a certificate its own value proves: a literal, a scalar copy
    * of one, an `otherwise` selected by its left side's own witness, a `load` whose literal default a run selects
    * (`#ownLoad`). Everything else there keeps the warning (#1938).
+   *
+   * Past that query, a `null` read of a stable path may come through a way into the use (r4-451, `RouteEntries`): a
+   * loop's earlier round, a label, a file's start, a block's body. In a block's body the query above runs inside the
+   * body alone, past X7, by r4-451's segment. `flagged`: the use's item carries a test's mark, so the query above is
+   * not asked outside a block's body; the ways in are, as they hold the test to their own segments. None of this in
+   * a program the default holds.
    */
   public *required(
     value: PlaceId,
     tag: ItemTag,
     others: readonly ItemTag[] = [],
-  ): Work<SourceSite | null> {
+    flagged = false,
+  ): Work<RouteWriter | null> {
     this.#work.charge("exactQueries");
     const program = this.pass.program;
     const site = program.places[value]?.site ?? null;
@@ -157,6 +160,12 @@ export class NarrowingRoutes extends RouteCandidates {
       this.#feasible = yield* this.feasibility();
     // (a value whose node reads no expression, a call's, a `get`'s or a `load`'s result, is its own producer; any other,
     // a compound assignment's operand among them, keeps its warning)
+    if (flagged && (node === null || !this.inBody(node))) {
+      // (a marked read outside a block's body: only a way into it, past the forward query)
+      const path =
+        node?.expression === undefined ? null : stablePath(program, node.file, node.expression);
+      return node === null || path === null ? null : yield* this.#entered(node, path, tag);
+    }
     if (node === null || node.expression === undefined) {
       const c = program.opOf.get(value)?.kind;
       return (c === "call" || c === "get" || c === "load" || c === "fallback") &&
@@ -164,7 +173,7 @@ export class NarrowingRoutes extends RouteCandidates {
         (this.#feasible === null
           ? yield* this.#valueProduces(value, node, [], tag)
           : this.#inlineLoad(value, node, tag))
-        ? site
+        ? { writer: site, block: null }
         : null;
     }
     const expression = node.expression;
@@ -178,16 +187,88 @@ export class NarrowingRoutes extends RouteCandidates {
         (this.#feasible === null
           ? yield* this.#valueProduces(value, node, [], tag)
           : this.#inlineLoad(value, node, tag))
-        ? site
+        ? { writer: site, block: null }
         : null;
     if (some(program.work, "exactQueries", path.steps, (step) => step.kind !== "property"))
       return null;
-    const d = yield* this.witness(pathKey(path, program.work), tag, node, others);
+    const key = pathKey(path, program.work);
+    const d = yield* this.witness(key, tag, node, others);
     const writer = d?.value === undefined ? null : (program.places[d.value]?.site ?? null);
     // (a test of the needed form after the writer on every route to the use, `while n == null { … }`: the check on that
-    // route the compiler cannot keep, the warning; Codex r1 F1 on #1937)
-    if (writer === null || this.checked(node, this.text(site), tag, writer.start)) return null;
-    return writer;
+    // route the compiler cannot keep, the warning; Codex r1 F1 on #1937; in a block's body, r4-451's segment, r4-451)
+    if (writer !== null) {
+      const body = this.inBody(node);
+      const from = body ? this.chainOf(d!.node) : null;
+      const point = body ? this.pointOf(node) : null;
+      const name = body ? rootName(expression, program.work) : null;
+      if (
+        body
+          ? from !== null &&
+            point !== null &&
+            name !== null &&
+            this.writerOpen(key, name, from, point)
+          : !this.checked(node, this.text(site), tag, writer.start)
+      )
+        return { writer, block: null };
+    }
+    return yield* this.#entered(node, path, tag);
+  }
+
+  /**
+   * A way into the use of a stable path's `null` (r4-451, `RouteEntries.entered`): none for a kind but `null`, an
+   * element step, in a program the default holds, and outside a block's body for code a block may reach and for a key
+   * a block stores once registered (X7).
+   */
+  *#entered(node: FlowNode, path: StablePath, tag: ItemTag): Work<RouteWriter | null> {
+    this.#work.charge("exactQueries");
+    const { program, handlers } = this.pass;
+    if (
+      tag !== "null" ||
+      this.#feasible !== null ||
+      !program.live(node) ||
+      some(program.work, "exactQueries", path.steps, (step) => step.kind !== "property")
+    )
+      return null;
+    const key = pathKey(path, program.work);
+    if (
+      !this.inBody(node) &&
+      (program.blockReachable(node) || (handlers.handlerTouches(key) && this.#registered(node)))
+    )
+      return null;
+    return yield* this.entered(node, key);
+  }
+
+  /**
+   * The seed at a jump's point (r4-451): the nearest certified `null` store before it in its body (the candidate a use
+   * there would examine, a block's own in a block's body), its route to the point open, its segment holding nothing.
+   */
+  protected *seedAt(key: Key, name: string, point: EntryPoint): Work<Definition | null> {
+    this.#work.charge("exactQueries");
+    const found = yield* this.#examinedAt(key, "null", point.node, point.chain, point.at, []);
+    return found !== null &&
+      (yield* this.certifies(found, key)) &&
+      this.writerOpen(key, name, found.chain, point)
+      ? found.def
+      : null;
+  }
+
+  /** `seedAt`'s candidates by body: `key`'s and its kept prefixes' stores (`certifies` tells the `null` ones). */
+  protected *seedLists(key: Key): Work<readonly ReadonlyMap<TreeBlock, Candidates>[]> {
+    this.#work.charge("exactQueries");
+    const lists = [yield* this.#ownCandidates(key, "null", [])];
+    for (const prefix of each(this.#work, "eventSteps", keptPrefixes(this.#work, key)))
+      lists.push(this.wholeStores(prefix));
+    return lists;
+  }
+
+  /** Whether a candidate certifies `null`, through its copy source's own route where it copies one. */
+  protected *certifies(found: Candidate, key: Key): Work<boolean> {
+    this.#work.charge("exactQueries");
+    const source = yield* this.#certificate(found, key, "null", []);
+    return (
+      source === true ||
+      (source !== false && (yield* this.witness(source.key, source.tag, source.node)) !== null)
+    );
   }
 
   /**
@@ -260,20 +341,37 @@ export class NarrowingRoutes extends RouteCandidates {
     others: readonly ItemTag[],
   ): Work<Candidate | null> {
     this.#work.charge("exactQueries");
-    const { program, handlers, contract } = this.pass;
-    if (!program.live(node) || program.blockReachable(node) || node.span === null) return null;
+    const { program, handlers } = this.pass;
+    if (!program.live(node)) return null;
+    // (a read in a block's body examines the body's own stores, past X7: r4-451's same-body route)
+    const reached = program.blockReachable(node);
+    const own = reached && this.inBody(node);
+    if ((reached && !own) || node.span === null) return null;
     // X7 as the flat veto it is: a handler store of the key with a registration before the read
-    if (handlers.handlerTouches(key) && this.#registered(node)) return null;
+    if (!own && handlers.handlerTouches(key) && this.#registered(node)) return null;
+    return yield* this.#examinedAt(key, tag, node, null, node.span.start.offset, others);
+  }
+
+  /** `#examined` at a point given by its place (`chain`, else the node's own) and offset: a jump's, or a use's. */
+  *#examinedAt(
+    key: Key,
+    tag: ItemTag,
+    node: FlowNode,
+    place: readonly Place[] | null,
+    at: number,
+    others: readonly ItemTag[],
+  ): Work<Candidate | null> {
+    this.#work.charge("exactQueries");
+    const { program, contract } = this.pass;
     // positions and members are not facts: no element key and no reference member has a route
     const path = keyPath(key);
     // (`keyPath` walks the key's text)
     program.work.charge("eventSteps", path.length + 1);
     if (holds(program.work, "eventSteps", path, "element") || (yield* contract.refReceiver(key)))
       return null;
-    const chain = this.chainOf(node);
+    const chain = place ?? this.chainOf(node);
     if (chain === null) return null;
     const body = chain[0]!.block;
-    const at = node.span.start.offset;
     let best: Candidate | null = null;
     const consider = (lists: ReadonlyMap<TreeBlock, Candidates>): void => {
       program.work.charge("eventSteps");

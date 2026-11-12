@@ -262,6 +262,18 @@ changed warning or wording applies to the same change, the entry is its report:
   sources, a typed parse and a typed load nested 64, 128 and 256 deep, in two modes: the 18th to 20th levels stop
   inside the literal default itself, where main stopped the 20th at the read below (64 deep) or none of them (128 and
   256), and at 64 deep the 17th level newly stops at the read. The published route and plans are main's for each.
+- **Where a stop falls in a program that asks entry questions (#2497).** A `null` use past the forward route now asks
+  the ways into it (a loop's earlier round, a label, a file's start, a block's body): one walk of the statements and one
+  index of the jumps per program, a relation per variable over its `null` stores' stretches, a segment per use. Such a
+  program needs more work to complete: measured against main 6d3da90a7 on 11 constructed sources in four modes, 26.2%
+  to 87.2% more total work (289.1% for the keys-over-loops product at k = 16), and on the 183 converted packages a
+  median of 0.01% and at most 11.2%, with no stop moved. On the 11 constructed sources a demand-allowance sweep (1 to
+  400, 17,600 settings) moved no stop; the program allowance moves one only where the work grows faster than the program
+  (the product below). A maker would notice nothing for a script that fits its budget. For a script whose budget falls
+  between the two: a stop where main completed, with the warnings and checks a stop leaves and never an error, also where
+  the stop falls inside the relation (every allowance swept on one source, 4,996 such stops). The full `stops` replay
+  (2,277 sources, four modes) moves one decision stop: at a test demand of 256, in reversed order, one source's decision
+  now stops where main completed, leaving two more warnings with their checks.
 - **Which property a runtime message names after a stop (#2216, 664f1183f; open #2218).** A store's check taken from the
   receiving completion lists an object's properties by the store's own records. Where another store asked that level
   first with records that rank the properties otherwise, the listed order still follows where the stop fell. A maker
@@ -338,8 +350,8 @@ How a repair of the type core's work is accepted against `main` (its growth gate
 
 ### Accepted work products under the allowance
 
-These are not limits of their own: each shape below is a measured superlinear growth of the core's work that the Owner
-accepted as a gated known limit (each row's last column names the acceptance in the form
+These are not limits of their own: each shape below is a measured superlinear growth of the core's work accepted as a
+gated known limit (each row's last column names who accepted it and under what, in the form
 [Conventions](#conventions) gives), and each reaches
 `compiler.core-work-allowance` at the stated size, where the analysis stops as that row says. The gate is a regression
 check on the 64 → 128 doubling step in the `tests/type-core/type-core-work-*.test.ts` files (`KnownProduct.measured`, never a bound at larger
@@ -355,6 +367,7 @@ that reaches one of these opens an issue; until then the row is the record.
 | k pairs of a conditional store below the copied path, then a whole copy | `A2-interleaved-conditional-copies` (`ADMISSION_KNOWN_PRODUCTS`), gate 3.63 | 3.61; the allowance at k = 618 | Owner, 2026-10-26: accepted as a known limit, kept with a regression gate at its measured growth instead of normalising the copies to the first relevant event per key (the gate in [r4.45](specifications/type-inference-accepted-record/solver-and-work.md#r4-45)'s form); reconsidered when a realistic script has hundreds of such pairs in a straight line |
 | Copies of a global separated by calls of a function that stores it | `A2-copies-separated-by-storing-calls` (`ADMISSION_KNOWN_PRODUCTS`), gate 3.53 | 3.52; the allowance beyond k = 911 (re-measured by #1672 and #1679 under their charges) | Owner, 2026-10-26: the same acceptance, gate and alternative; the same trigger |
 | Adds of several sources into one list strictly in turn: each add's answer is the one before it with its value merged in, and certainty depends on the order of the merges, one step per add per path | `A5-two-sources-alternating-adds`, `A5-three-sources-adds`, `A5-cycle-of-8-sources-adds`, `A5-cycle-of-9-sources-adds` (`MIXED_ADD_PRODUCTS`), gates 3.36 / 3.22 / 2.78 / 2.73, in the source order on CI | 3.31 / 3.16 / 2.72 / 2.67 for 2 / 3 / 8 / 9 sources; two alternating sources reach the allowance at about 660 adds (a script writes tens by hand; a loop body is one add) | The lead, 2026-10-27, under the Owner's limit rule ([r4.83](specifications/type-inference-accepted-record/solver-and-work.md#r4-83)): accepted as a known limit, kept with a regression gate at its measured growth instead of an order-aware summary of a mixed run, a redesign of the exact add chain; reconsidered when a realistic straight-line run of alternating adds of several sources into one list approaches the allowance |
+| k variables, each read in its own one of k loops (or after its own one of k chained labels) and stored `null` after the read: each variable's `null` reaches every later loop's head or label, so the route rule's entry relation tries each later jump once per variable | `E-keys-over-loops`, `E-keys-over-labels` (`ROUTE_ENTRY_PRODUCTS`), gates 3.84 / 3.23 | 3.83 / 3.22 at 64 → 128 (3.93 / 3.58 at 128 → 256); the allowance at k = 560 and 1,098 (`main` completes both at 16,384) | Coordinator, 2026-11-12, under DEVELOPMENT-WORKFLOW.md "Proportional repair and owner escalation": a technical limit. It is reached only at about 560 loops or 1,098 labels, and no converted package comes near (+0.01% work at the median; the largest rise, 11%, on a script of 29,260 units). At the allowance the analysis stops into warnings with their checks, never an error (#2497's stop row). The known fix, a relation computed per use over the region it asks with a writer independent of the order of queries, changes a rule of the accepted design ([r4-451](specifications/type-inference-accepted-record/contract.md#r4-451)), needs a new design round, and still grows on a long chain of labels. Reconsidered when a real script's work in this part approaches the allowance, as the real-scripts measurement at each milestone shows |
 | A literal nested k deep read through k `.first`, index steps or properties: each link reads a key one step longer, whose contract and charged text grow with its depth | `F12-first-chain`, `F12-index-chain`, `F12-member-chain` (`READ_CHAIN_PRODUCTS`), gates 4.02 / 3.84 / 3.93 | 4.02 / 3.83 / 3.92 (re-measured by #1165); the list and member chains answer at k = 256 and reach the allowance at k = 512 (measured before #1165) | The lead, 2026-10-27, under the Owner's limit rule ([r4.83](specifications/type-inference-accepted-record/solver-and-work.md#r4-83)): accepted as a known limit, kept with a regression gate at its measured growth instead of keys that share their prefixes; reconsidered when a realistic read chain approaches the allowance |
 
 **Accepted without a gate:** a compound or multiple-top read through inherited layers runs its summary per layer and

@@ -25,6 +25,9 @@ import { DECISION_HOLDER_FAMILIES } from "../helpers/type-core/families/copy-cha
 import { LAYER_FAMILIES } from "../helpers/type-core/families/property-names.js";
 import {
   NARROWING_FAMILIES,
+  ROUTE_ENTRY_COMPUTED_TRANSFERS,
+  ROUTE_ENTRY_FAMILIES,
+  ROUTE_ENTRY_PRODUCTS,
   ROUTE_FEASIBILITY_FAMILIES,
 } from "../helpers/type-core/families/narrowing.js";
 import { type WorkFamily } from "../helpers/type-core/families/builders.js";
@@ -295,6 +298,55 @@ test("the route rule's queries beside arms no run enters grow with the program i
 
 /** The depth to which #1438's written union, reversed, keeps its decision within its demand allowance (main: 70). */
 const REVERSED_UNION = 60;
+
+/**
+ * The route rule's entries (#2497, r4-451): labels, `goto`s and uses of one key, each doubled alone; loops in
+ * sequence; a root held under nested compound statements; files in a transfer cycle; block bodies reading one key; one
+ * global read in loops in many functions.
+ * (Loops nested k deep are no family here: the analysis before the entries already grows faster than this gate there,
+ * and the nesting limit bounds their depth, so the entries' jumps × depth has a constant ceiling.)
+ */
+test("the route rule's entry routes grow with the program in either order (#2497)", () => {
+  assert.deepEqual(steepCounters(ROUTE_ENTRY_FAMILIES), []);
+});
+
+/**
+ * A computed transfer enters no file (r4-451), so the jump index scans no file for it: the index's work grows with the
+ * program, though the flow's grows as files × transfers (`ROUTE_ENTRY_COMPUTED_TRANSFERS`).
+ */
+test("the jump index scans no file for a computed transfer (#2497)", () => {
+  const family = ROUTE_ENTRY_COMPUTED_TRANSFERS;
+  const [at64, at128] = [sized(family, 64), sized(family, 128)];
+  for (const reversed of [false, true]) {
+    const small = analysed(at64, reversed).budget.counts;
+    const large = analysed(at128, reversed).budget.counts;
+    const scale = (large.get("syntaxNodes") ?? 0) / (small.get("syntaxNodes") ?? 1);
+    const steps = (large.get("indexSteps") ?? 0) / (small.get("indexSteps") ?? 1);
+    const doubling = (2 * steps) / scale;
+    const name = `indexSteps${reversed ? " reversed" : ""}`;
+    assert.ok(doubling <= COUNTER_DOUBLING, `${name}: ${doubling.toFixed(3)}`);
+  }
+});
+
+/**
+ * The route rule's entries over many keys (`ROUTE_ENTRY_PRODUCTS`): a known product (docs/RESOURCE-LIMITS.md, "Accepted
+ * work products under the allowance"), a regression check on the 64 → 128 step only, at its measured doubling.
+ */
+test("the route rule's entries over many keys grow at most as measured (#2497)", () => {
+  const steep: string[] = [];
+  for (const family of ROUTE_ENTRY_PRODUCTS) {
+    const [at64, at128] = [sized(family, 64), sized(family, 128)];
+    for (const reversed of [false, true]) {
+      const small = analysed(at64, reversed).budget;
+      const large = analysed(at128, reversed).budget;
+      const scale = (large.counts.get("syntaxNodes") ?? 0) / (small.counts.get("syntaxNodes") ?? 1);
+      const doubling = (2 * (large.total / small.total)) / scale;
+      if (doubling > family.measured)
+        steep.push(`${family.name}${reversed ? " reversed" : ""}: ${doubling.toFixed(3)}`);
+    }
+  }
+  assert.deepEqual(steep, []);
+});
 
 /**
  * #1438: a decider group's region holds each path below the group as a node one step below its parent's, never an

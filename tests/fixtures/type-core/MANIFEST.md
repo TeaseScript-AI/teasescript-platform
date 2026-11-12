@@ -11,7 +11,21 @@ The S10 builder (Opus) corrected one record of `cells.jsonl` by hand: `cp9-cells
 then leaves by an unconditional `break`, so no round starts with that value, and the use reads only the tested `n`.
 V30 §13: a loop's start accounts for the values an earlier round left, and a write drops a check only when the written value
 can make the check false. `cp9-cells/3b/loop/break/changed`'s two controls, without the `break` and with it under a
-condition, are rows of the cells test and keep the warning.
+condition, are rows of the cells test. They pinned the warning as the sign that a later round starts with the `null`;
+since #2497 they are the loop entry's compile error, which the text asks (V30 §13: no check in the round before the
+use). Today's checker refuses all three sources at their `null` stores, since it infers `n` as an integer (TSV041).
+
+## A `null` that reaches a use through a loop or a block body (#2497)
+
+The #2497 builder (Opus) edited 7 records of `cells.jsonl` by hand to the text's compile error TSV041 (V30 §13, the
+accepted record's r4-451), each with no check left: `cp9-cells/3b/loop/after/changed`,
+`cp9-cells/review-early/loop-breaking-after` and `…/loop-breaking-nested` (an earlier round's `null` reaches the use,
+the writer that store); `cp9-cells/3b/bodies/timer`, `…/button` and `…/media`, and
+`cp9-cells/review-early/n7-handler-no-inherit` (a block body's start carries a `null` item: no writer, the block the
+statement registering it). The current checker errs on each. No other record changed.
+`cp9-cells/3b/review-late/copies/back-edge` and `…/copies/entered-label` keep the text's error as their record and are
+held: a copy's certificate asks only the forward route, so its source's `null` through an entry leaves the check (the
+accepted give-up in r4-451).
 
 ## F18's call-site snapshot (#1072)
 
