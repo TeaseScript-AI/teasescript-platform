@@ -187,14 +187,17 @@ test("the filter's two shards run every compiled test file once between them, on
   const cwd = mkdtempSync(join(tmpdir(), "test-shards-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   mkdirSync(join(cwd, "dist", "tests"), { recursive: true });
-  // (one costly file more than a shard runs at once, and three others, one a name no list holds)
-  const names = [
-    ...costlyTestFiles.slice(0, testFilesAtOnce + 1),
-    "a.test.js",
-    "b.test.js",
-    "unlisted-new.test.js",
-    "player/c.test.js",
-  ];
+  // (the costliest files, at least one more than a shard runs at once and as many as the measured seconds need for
+  // both shards to run some: the last starts after the pre-test checks; and four others, one a name no list holds)
+  const others = ["a.test.js", "b.test.js", "unlisted-new.test.js", "player/c.test.js"];
+  const withCostly = (count) => [...costlyTestFiles.slice(0, count), ...others];
+  let costly = testFilesAtOnce + 1;
+  while (
+    costly < costlyTestFiles.length &&
+    [1, 2].some((shard) => shardFiles(withCostly(costly), shard, 2).length === 0)
+  )
+    costly += 1;
+  const names = withCostly(costly);
   mkdirSync(join(cwd, "dist", "tests", "player"));
   for (const name of names) {
     // (a costly file's name is its path under dist/tests/, in a folder for most)
