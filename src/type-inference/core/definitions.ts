@@ -374,6 +374,8 @@ export class DefinitionIndex {
   readonly byKey = new Map<Key, Definition[]>();
   /** The stores into a literal's own cells and properties, by the cell or property place. */
   readonly cellDefs = new Map<PlaceId, Definition[]>();
+  /** #2289: whether some cell has two elements or more, so a literal's cell can decide a path (`literalRoute`). */
+  manyCells = false;
   /** The stores into each destination key (an add at its element), with the path below the key they reach. */
   readonly candidates = new Map<
     Key,
@@ -537,8 +539,10 @@ export class DefinitionIndex {
 
   #add(d: Omit<Definition, "uid">, cell = false): Definition {
     const made: Definition = { uid: this.#serial++, ...d };
-    if (cell) append(this.cellDefs, made.place, made);
-    else {
+    if (cell) {
+      append(this.cellDefs, made.place, made);
+      this.manyCells ||= this.cellDefs.get(made.place)!.length > 1;
+    } else {
       append(this.byKey, made.key, made);
       this.program.work.charge("defs");
     }
