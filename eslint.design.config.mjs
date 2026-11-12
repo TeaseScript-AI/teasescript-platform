@@ -110,7 +110,7 @@ export default [
     contract("Button", ["player-action-button"]),
   ]),
   localContract("Composer.vue", [
-    contract("Textarea", ["composer-input"]),
+    contract("Textarea", ["composer-input", "composer-one-line", "composer-masked"]),
     contract("Button", ["composer-send"]),
   ]),
   localContract("PlayerToolsShell.vue", [contract("Button", ["player-control-square"])]),
