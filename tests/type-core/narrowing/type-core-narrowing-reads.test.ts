@@ -580,13 +580,25 @@ test("a test that holds removes kinds, not the read's cause: its read's warning 
   const loop = (head: string, store = "xs = []"): string =>
     `let xs = [1]\n${head} {\n    repeat 2 {\n        say xs.first\n        ${store}\n    }\n}\nexit\n`;
   const untested = "let xs = [1]\nrepeat 2 {\n    say xs.first\n    xs = []\n}\nexit\n";
+  // (a called function's null store: no entry R2.2 reaches, so the read keeps its warning and its null check)
+  const drop = "let xs = [1]\nfunction drop {\n    xs = null\n}\n";
+  const called = loop("if xs != null", "drop()").replace("let xs = [1]\n", drop);
+  const calledUntested = `${drop}repeat 2 {\n    say xs.first\n    drop()\n}\nexit\n`;
   for (const [name, source, check] of [
     ["the record: a null test that holds", loop("if xs != null"), "empty-check"],
     ["no test", untested, "empty-check"],
     ["a test of the emptiness itself", loop("if xs.length > 0"), "empty-check"],
-    ["a null test a null store fails (U5)", loop("if xs != null", "xs = null"), "null-check"],
+    ["a null test a called null store fails", called, "null-check"],
+    ["a called null store, no test", calledUntested, "null-check"],
   ] as const)
     assert.equal(answer(source), warned(source, "xs.first", "loop", check), name);
+  // R2.2: the loop's entry under the program default; the store's null reaches the read on the second run
+  const failed = loop("if xs != null", "xs = null");
+  assert.equal(
+    answer(failed),
+    `compile-error, member-read ${failed.indexOf("xs.first")} null`,
+    "a null test a null store fails (U5)",
+  );
   // the family: each test that holds, each store whose word explains the read, each selection, against the same
   // program without its test; the word equals the untested read's, or `unknown` where that read carries two words (the
   // host-data rows below)
