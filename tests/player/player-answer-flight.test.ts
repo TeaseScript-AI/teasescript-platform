@@ -156,6 +156,7 @@ async function page(context: TestContext, topology: Topology, { recoverable = fa
   // A fresh connection after a loss, as the Player opens one for its recovery (#2382).
   const connections = await topologyConnections(context, topology);
   const transport = connections.first;
+  const kept = memoryKeptSessionStore();
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
@@ -170,7 +171,7 @@ async function page(context: TestContext, topology: Topology, { recoverable = fa
           replace: async () => {},
           clear: async () => {},
         },
-        keptSessions: memoryKeptSessionStore(),
+        keptSessions: kept,
       }),
     }),
   )!;
@@ -181,6 +182,15 @@ async function page(context: TestContext, topology: Topology, { recoverable = fa
   return {
     host,
     transport,
+    /** Until the kept store holds the session, which a Worker's capture gives in its own time. */
+    async kept() {
+      for (let tries = 0; ; tries += 1) {
+        const stored = await kept.session("answer-flight");
+        if (stored !== null && stored.events.length > 0) return;
+        assert.ok(tries < 500, "the session was kept");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    },
     /** Moves the scene clock `ms` ahead, for the next observation. */
     elapse: (ms: number) => void (skew += ms),
     async start(script: string) {
@@ -1181,6 +1191,7 @@ for (const topology of TOPOLOGIES)
     context.after(() => ui.unmount());
     ui.field.value = "CHAT-DRAFT";
     await nextTick();
+    await at.kept();
     const lost: unknown[] = [];
     reportsInto(context, lost);
     await at.transport.lose();
