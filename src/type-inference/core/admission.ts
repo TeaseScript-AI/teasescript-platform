@@ -9,6 +9,7 @@ import {
   takeBackReadChecks,
 } from "./admission/boundaries.js";
 import {
+  budgetUndecidedAt,
   compareLanded,
   copiedAt,
   decide,
@@ -426,6 +427,20 @@ export class Admission {
   readonly decisions = new Map<CanonicalKey, Decided | null>();
   readonly attempted = new Set<CanonicalKey>();
   /**
+   * #2289 (R26, R3-10): the keys whose decision met a literal element a stop left undecided, each with its place and
+   * path. Each enters every list a stopped key enters but the contract's stops: no forget, no restart, its values never
+   * `STOPPED`.
+   */
+  readonly budgetUndecided = new Map<
+    CanonicalKey,
+    { readonly place: PlaceId; readonly path: readonly string[] }
+  >();
+  /**
+   * #2289 (R3-5, R3-10): the keys A4's copies land at through a literal's cell of more than one element, where the
+   * literal's type is the one all its elements fit, not the copy's: a seed there or below is never retained.
+   */
+  readonly literalLandings = new Set<Key>();
+  /**
    * #2289 (R50): each recipe's view (`viewOfRead`, by the recipe's id) and each literal reading's body (`bodyOfRead`),
    * built when first asked, kept with the `stops` memo's lifetime.
    */
@@ -512,7 +527,7 @@ export class Admission {
       ) {
         // (one landing path and key per copied path, its copies' shared one, charged before it is made)
         const landed = new Map<readonly string[], readonly string[]>();
-        for (const { path, binding, strip, cellsLive } of copySources(this, d.value)) {
+        for (const { path, binding, strip, cellsLive, literal } of copySources(this, d.value)) {
           const written = writtenOf(program.place(binding).kind);
           const term = written === null ? null : permittedAt(written, strip);
           if (term === null && (written !== null || !this.inheriting.has(binding))) continue;
@@ -528,8 +543,10 @@ export class Admission {
             this.a4Keys.add(keptKey(this.work, d.place, at));
             this.a4Places.set(d.place, null);
           }
-          if (term !== null) this.a4Copies.push({ place: d.place, path: at, term });
-          else
+          if (term !== null) {
+            this.a4Copies.push({ place: d.place, path: at, term });
+            if (literal) this.literalLandings.add(keptKey(this.work, d.place, at));
+          } else
             this.a4Inherits.push({
               place: d.place,
               path: at,
@@ -782,6 +799,25 @@ export class Admission {
     return this.decisionStoppedAt({ root: place, path });
   }
 
+  /** #2289 (R26): whether a path's own decision met a literal's element a stop left undecided (`budgetUndecided`). */
+  public budgetUndecidedKey(at: DecidedAt): boolean {
+    return budgetUndecidedAt(this, at);
+  }
+
+  /**
+   * #2289 (R3-10): whether a stop left a literal's element on a key's path undecided (`budgetUndecided`), at the key, or
+   * with `above` at the key or a key above it (the readers after the pass's decisions, where no decision runs).
+   */
+  public budgetUndecidedAt(place: PlaceId, path: readonly string[], above: boolean): boolean {
+    for (const at of this.budgetUndecided.values()) {
+      this.pass.program.work.charge("checks");
+      if (at.place !== place || at.path.length > path.length) continue;
+      if (!above && at.path.length !== path.length) continue;
+      if (at.path.every((step, index) => path[index] === step)) return true;
+    }
+    return false;
+  }
+
   /** The decision of a decided path in its identity (`DecidedAt`: a cursor's key alone, its steps never made). */
   public decide(at: DecidedAt, lazily?: boolean): Decision | null {
     return decide(this, at, lazily);
@@ -1009,8 +1045,9 @@ export class Admission {
       },
     ) => void,
     undecided?: (cell: PlaceId) => void,
+    stopped?: (cell: PlaceId) => void,
   ): void {
-    literalElements(this, order, error, undecided);
+    literalElements(this, order, error, undecided, stopped);
   }
 
   public joinElements(
@@ -1026,8 +1063,9 @@ export class Admission {
       readonly shown?: MixedSteps;
     }) => void,
     undecided?: (value: PlaceId) => void,
+    stopped?: (value: PlaceId) => void,
   ): void {
-    joinElements(this, order, error, undecided);
+    joinElements(this, order, error, undecided, stopped);
   }
 
   public typedByDefault(value: PlaceId): boolean {

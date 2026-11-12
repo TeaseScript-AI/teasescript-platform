@@ -140,6 +140,8 @@ export function copySources(
    * one's).
    */
   readonly cellsLive: boolean;
+  /** #2289: whether the copy passes through a literal's cell of more than one element (`Admission.literalLandings`). */
+  readonly literal: boolean;
 }[] {
   const known = admission.copies.get(value);
   if (known !== undefined) return known;
@@ -164,21 +166,30 @@ export function copySources(
     binding: PlaceId;
     strip: readonly string[];
     cellsLive: boolean;
+    literal: boolean;
   }[] = [];
   // (a read of a wrapper's family carries its strip as a path of the arena kept in reverse, one step on in front per
   // projection, made once for each copy it reaches: G3 stage 1; any other walk its arrays as before)
   const reversed = readsCursorFamily(admission, value);
   const start: CopyStrip = reversed ? reverseStrip(admission, 0) : admission.arrayStrip([]);
-  const pending: [PlaceId, Steps | null, CopyStrip, boolean][] = [[value, null, start, true]];
+  const pending: [PlaceId, Steps | null, CopyStrip, boolean, boolean][] = [
+    [value, null, start, true, false],
+  ];
   while (pending.length > 0) {
-    const [current, path, strip, cellsLive] = pending.pop()!;
+    const [current, path, strip, cellsLive, literal] = pending.pop()!;
     program.work.charge("indexSteps");
     const binding = program.occurrenceOf.get(current);
     if (binding !== undefined) {
-      out.push({ path: made(path), binding, strip: stripSteps(admission, strip), cellsLive });
+      out.push({
+        path: made(path),
+        binding,
+        strip: stripSteps(admission, strip),
+        cellsLive,
+        literal,
+      });
       continue;
     }
-    const next: [PlaceId, Steps | null, CopyStrip, boolean][] = [];
+    const next: [PlaceId, Steps | null, CopyStrip, boolean, boolean][] = [];
     // (its cells' tasks share one rest of the strip, charged as kept)
     let rest: CopyStrip | null = null;
     if (program.hasOf.has(current))
@@ -191,14 +202,21 @@ export function copySources(
             // (one step per field, which its cells share)
             const child: Steps | null =
               strip.length === 0 ? { parent: path, step: name, made: null } : path;
-            for (const d of definitions.cellDefs.get(term.place) ?? []) {
+            const cell = definitions.cellDefs.get(term.place) ?? [];
+            for (const d of cell) {
               rest ??=
                 strip.length === 0
                   ? strip
                   : strip.kind === "steps"
                     ? admission.arrayStrip(keptSlice(admission.work, strip.steps, 1))
                     : strip.rest();
-              next.push([d.value!, child, rest, cellsLive && admission.pass.lists.live(d)]);
+              next.push([
+                d.value!,
+                child,
+                rest,
+                cellsLive && admission.pass.lists.live(d),
+                literal || cell.length > 1,
+              ]);
             }
           }
       }
@@ -206,7 +224,7 @@ export function copySources(
       for (const [carried, rest] of strip.kind === "steps"
         ? admission.carriersBy(current, strip)
         : admission.carriersBy(current, strip))
-        next.push([carried, path, rest, cellsLive]);
+        next.push([carried, path, rest, cellsLive, literal]);
     for (let index = next.length - 1; index >= 0; index -= 1) pending.push(next[index]!);
   }
   admission.copies.set(value, out);
