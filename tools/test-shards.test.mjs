@@ -53,18 +53,22 @@ test("a type-core test file the table does not list runs, in exactly one shard, 
   assert.equal(shardSeconds([unlisted], 1, 1), otherTestSeconds);
 });
 
-test("the suite is each regular test file at the top and one folder down, but none in fixtures/, helpers/, deeper or behind a link", (t) => {
+test("the suite is each regular test file at the top and up to two folders down, but none in fixtures/, helpers/, deeper or behind a link", (t) => {
   const root = mkdtempSync(join(tmpdir(), "suite-test-files-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   for (const file of [
     "a.test.js",
     "player/b.test.js",
     "player/helper.js",
-    "player/deep/c.test.js",
+    "player/debug/c.test.js",
+    "player/debug/deeper/f.test.js",
+    "helpers/player/g.test.js",
     "helpers/d.test.js",
     "fixtures/e.test.js",
     "a.test.ts",
     "player/b.test.ts",
+    "player/debug/c.test.ts",
+    "player/debug/deeper/f.test.ts",
     "helpers/d.test.ts",
   ]) {
     mkdirSync(join(root, file, ".."), { recursive: true });
@@ -74,18 +78,33 @@ test("the suite is each regular test file at the top and one folder down, but no
   symlinkSync("player", join(root, "alias.test.js"));
   symlinkSync("a.test.js", join(root, "link.test.js"));
   symlinkSync("b.test.js", join(root, "player", "link.test.js"));
-  assert.deepEqual(suiteTestFiles(root, ".test.js"), ["a.test.js", "player/b.test.js"]);
-  assert.deepEqual(suiteTestFiles(root, ".test.ts"), ["a.test.ts", "player/b.test.ts"]);
+  symlinkSync("c.test.js", join(root, "player", "debug", "link.test.js"));
+  // (a file three folders down is not one: the depth is the suite's, `SUITE_FOLDER_DEPTH`)
+  assert.deepEqual(suiteTestFiles(root, ".test.js"), [
+    "a.test.js",
+    "player/b.test.js",
+    "player/debug/c.test.js",
+  ]);
+  assert.deepEqual(suiteTestFiles(root, ".test.ts"), [
+    "a.test.ts",
+    "player/b.test.ts",
+    "player/debug/c.test.ts",
+  ]);
   // (a type-core test file in a folder is one the costly table must list, as one at the top is)
   assert.deepEqual(
     unknownToCostly([
       "tests/type-core-new.test.ts",
       "tests/type-core/type-core-new.test.ts",
       "tests/type-core/deep/type-core-new.test.ts",
+      "tests/type-core/deep/deeper/type-core-new.test.ts",
       "tests/helpers/type-core-new.test.ts",
       "tests/type-core/new.test.ts",
     ]),
-    ["tests/type-core-new.test.ts", "tests/type-core/type-core-new.test.ts"],
+    [
+      "tests/type-core-new.test.ts",
+      "tests/type-core/type-core-new.test.ts",
+      "tests/type-core/deep/type-core-new.test.ts",
+    ],
   );
 });
 
