@@ -23,10 +23,10 @@ import type { CompactRecord } from "../../helpers/type-core-records.js";
  * file's start or a block's body (the accepted record's r4-451). The rows are the design's sources and their answers by
  * the text: `error` where some route into the use has no check and the rule proves it; `no-error` where every route has
  * one (the warning may stay), or where no proof of the error is possible (a block that may repair, X7; a check inside a
- * block's body, #2506); `warning` where a route has no check but r4-451's certificate proves no error (a passed
- * compound holds the variable): no error, and the warning with its check; `check` where the text asks the error and the
- * rule leaves the warning (a named give-up, or a program the route rule's default holds): a check stands, the warning or
- * the error.
+ * block's body, #2506); `warning` where a route has no check but the rule proves no error (a passed compound holds the
+ * variable, r4-451's certificate; or, in a program the route rule's default holds, R2.2 does not prove a run reaches
+ * the use that way): no error, and the warning with its check; `check` where the text asks the error and the rule
+ * leaves the warning (a named give-up): a check stands, the warning or the error.
  */
 
 interface Row {
@@ -137,6 +137,12 @@ test("a loop's earlier round, source to runtime on the candidate route", () => {
       "check",
     ],
     ["a test in the loop's header", program("for x in [n != null, true]", use), "check"],
+    // (an arm no run enters holds the program default; the loop is reached and the round stands at it, R2.2)
+    [
+      "under the program default",
+      `let n: integer? = 1\nif n == null { say "never" }\nrepeat 2 {\n${use}\n  n = null\n}\nexit\n`,
+      "error",
+    ],
   ];
   for (const [name, source, expected] of rows) {
     const result = compileSourceWithBackend(source, { globals: ["hostValue"] }, CORE_BACKEND);

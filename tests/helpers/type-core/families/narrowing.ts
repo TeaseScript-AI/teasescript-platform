@@ -589,6 +589,38 @@ export const ROUTE_ENTRY_FAMILIES: readonly WorkFamily[] = [
       ),
   },
   {
+    name: "E-default-loops",
+    measures:
+      "N3 under the program default (R2.2): an arm no run enters, then k loops in sequence, each with a use and a later store of `null` in its body",
+    program: (k) =>
+      main(
+        lines(
+          "let n: integer? = 1",
+          'if n == null { say "never" }',
+          rows(k, () => `repeat 2 {\n${USE_THEN_NULL}\n}\nn = 1`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "E-default-labels",
+    measures:
+      "N3 under the program default (R2.2): an arm no run enters, then k labels, each with a conditional `goto` back to it and a use after it",
+    program: (k) =>
+      main(
+        lines(
+          "let n: integer? = 1",
+          'if n == null { say "never" }',
+          rows(
+            k,
+            (i) =>
+              `label l${i}\n${USE_THEN_NULL}\nif hostValue is boolean { goto l${i} }\nn = ${i}`,
+          ),
+          "exit",
+        ),
+      ),
+  },
+  {
     name: "E-held-deep",
     measures:
       "N3: a label's segment over a test of the root k compound statements deep, and k uses after it",
