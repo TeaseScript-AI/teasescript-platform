@@ -33,15 +33,18 @@ import { ts } from "ts-morph";
  *   intrinsic is outside what the instrument sees, and this line holds it out of the code;
  * - a maker (`Retained.record`, `arena`, `array`) is given a fresh object or array literal, or nothing: no other
  *   reference can hold what production keeps and the instrument copies;
- * - in the checked core files, `Reflect.set`, a branch on a frozen state (`Object.isFrozen`, `isSealed`, `isExtensible`)
- *   and `structuredClone` are refused: a frozen run computes what production computes only without them; and so is a
- *   definer by its name in any position (`defineProperty`, `defineProperties`, `__defineGetter__`, `__defineSetter__`,
- *   an alias or a computed key included), which could reopen a locked owner's field or make it an accessor past the
- *   instrument;
+ * - in the checked core files the meta-object layer is closed: a property changes only by assignment or by a kind's
+ *   own method. `Object` stands only as `Object.freeze`, `hasOwn`, `keys`, `values`, `entries`, `fromEntries`, `assign`
+ *   or `is`; `Reflect`, `globalThis`, `Function`, `eval`, the `delete` operator, `.prototype`, `__proto__`,
+ *   `.constructor` and a constructor's `return <value>` are refused, and so is a definer by its name in any position
+ *   (`defineProperty`, `defineProperties`, `__defineGetter__`, `__defineSetter__`). What they reach (a descriptor, a
+ *   prototype, an integrity level, a deletion) could change a locked owner's field or a kind's writer unseen, or make a
+ *   frozen run compute what production does not. `structuredClone` is refused too: it refuses a maker's proxy;
  * - a `Retained.closure` registration stands right below its comment, which names what the function captures
  *   (`#1072 R26: captures …`, or `#1072 R26: as …` for one capturing as a named neighbour does): the instrument does not
  *   see the captures, and that comment is what review reads (#1072 R26).
  */
+const INFERENCE = "src/type-inference/";
 const CORE = "src/type-inference/core/";
 
 /** The files checked at their top level only (their module captures), each with why its classes are not. */
@@ -143,9 +146,10 @@ const INSTRUMENT = "tests/helpers/retained-instrument.ts";
 
 export function checkRetainedState(root) {
   const sources = [];
-  for (const found of globSync(`${CORE}**/*.ts`, { cwd: root }).sort()) {
+  for (const found of globSync(`${INFERENCE}**/*.ts`, { cwd: root }).sort()) {
     const file = found.split(sep).join("/");
-    sources.push({ file, text: readFileSync(resolve(root, found), "utf8"), level: levelOf(file) });
+    const level = file.startsWith(CORE) ? levelOf(file) : "meta";
+    sources.push({ file, text: readFileSync(resolve(root, found), "utf8"), level });
   }
   for (const found of globSync(`${HELPERS}**/*.ts`, { cwd: root }).sort()) {
     const file = found.split(sep).join("/");
@@ -179,12 +183,28 @@ const DIFFERS = "so a frozen run would differ from production";
 const IN_PLACE =
   "it can redefine a field in place, reopening a locked owner's field or making it an accessor past the instrument";
 const FROZEN_DIFFERENCES = new Map([
-  ["Reflect.set", `it writes a frozen value without throwing, ${DIFFERS}`],
-  ["Object.isFrozen", `it branches on a frozen state, ${DIFFERS}`],
-  ["Object.isSealed", `it branches on a frozen state, ${DIFFERS}`],
-  ["Object.isExtensible", `it branches on a frozen state, ${DIFFERS}`],
   ["structuredClone", `it refuses a maker's proxy that production's value passes, ${DIFFERS}`],
 ]);
+/**
+ * The meta-object layer, closed in the checked core files (#1072 R30): a property changes only by assignment or by a
+ * kind's own method. `Object` stands only as one of these members; `Reflect`, `globalThis`, `Function`, `eval`, the
+ * `delete` operator, `.prototype`, `__proto__`, `.constructor` and a constructor's `return <value>` not at all.
+ */
+const OBJECT_MEMBERS = new Set([
+  "freeze",
+  "hasOwn",
+  "keys",
+  "values",
+  "entries",
+  "fromEntries",
+  "assign",
+  "is",
+]);
+const META_GLOBALS = new Set(["Reflect", "globalThis", "Function", "eval"]);
+const META_PROPERTIES = new Set(["prototype", "__proto__", "constructor"]);
+const META =
+  "it reaches past assignment and a kind's own methods (a descriptor, a prototype, an integrity level, a deletion), " +
+  `which the retained-state instrument does not see, ${DIFFERS} or a locked owner's field could change unseen`;
 /**
  * The definers refused in the checked core files by their name in any position (a call, an alias, a computed key, a
  * destructuring), not by their call alone: one taken out of `Object` or `Reflect` defines as well.
@@ -262,16 +282,78 @@ function guardLines(source, file, level) {
       const reason = callee === null ? undefined : FROZEN_DIFFERENCES.get(callee);
       if (reason !== undefined)
         found.push({ node, message: `\`${callee}\` in the type core: ${reason} (#1072 R21)` });
+    }
+    // (the closed meta-object layer: every file of `src/type-inference/`, the core's left-out files included, since a
+    // retained owner reaches no code outside it while runs remain)
+    if (level !== "helper") {
+      const meta = metaReach(node);
+      if (meta !== null)
+        found.push({ node, message: `${meta} in type inference: ${META} (#1072 R30)` });
       if (
         (ts.isIdentifier(node) || ts.isStringLiteralLike(node)) &&
         IN_PLACE_DEFINERS.has(node.text)
       )
-        found.push({ node, message: `\`${node.text}\` in the type core: ${IN_PLACE} (#1072 R30)` });
+        found.push({
+          node,
+          message: `\`${node.text}\` in type inference: ${IN_PLACE} (#1072 R30)`,
+        });
     }
     ts.forEachChild(node, visit);
   };
   visit(source);
   return found;
+}
+
+/** What of the closed meta-object layer `node` reaches, named for its diagnostic, or `null` (`OBJECT_MEMBERS`). */
+function metaReach(node) {
+  if (ts.isDeleteExpression(node)) return "the `delete` operator";
+  if (ts.isIdentifier(node) && valueReference(node)) {
+    if (META_GLOBALS.has(node.text)) return `\`${node.text}\``;
+    if (node.text === "Object") {
+      const parent = node.parent;
+      if (!ts.isPropertyAccessExpression(parent) || parent.expression !== node)
+        return "`Object` taken whole";
+      return OBJECT_MEMBERS.has(parent.name.text) ? null : `\`Object.${parent.name.text}\``;
+    }
+  }
+  const name = ts.isPropertyAccessExpression(node)
+    ? node.name.text
+    : ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)
+      ? node.argumentExpression.text
+      : null;
+  if (name !== null && META_PROPERTIES.has(name)) return `\`.${name}\``;
+  if (ts.isReturnStatement(node) && node.expression !== undefined) {
+    let at = node.parent;
+    while (at !== undefined && !ts.isFunctionLike(at)) at = at.parent;
+    if (at !== undefined && ts.isConstructorDeclaration(at))
+      return "a constructor's `return <value>`";
+  }
+  return null;
+}
+
+/** Whether identifier `node` stands for a value, not a member's, key's, type's or import's name. */
+function valueReference(node) {
+  const parent = node.parent;
+  if (ts.isPropertyAccessExpression(parent)) return parent.expression === node;
+  if (ts.isBindingElement(parent)) return parent.propertyName !== node;
+  if (
+    ts.isPropertyAssignment(parent) ||
+    ts.isPropertyDeclaration(parent) ||
+    ts.isMethodDeclaration(parent) ||
+    ts.isPropertySignature(parent) ||
+    ts.isMethodSignature(parent) ||
+    ts.isGetAccessorDeclaration(parent) ||
+    ts.isSetAccessorDeclaration(parent) ||
+    ts.isEnumMember(parent)
+  )
+    return parent.name !== node;
+  return !(
+    ts.isTypeReferenceNode(parent) ||
+    ts.isQualifiedName(parent) ||
+    ts.isImportSpecifier(parent) ||
+    ts.isExportSpecifier(parent) ||
+    ts.isTypeQueryNode(parent)
+  );
 }
 
 /** Whether the comment lines right above `node`'s line name its captures (`#1072 R26: captures …` or `… as …`). */
@@ -379,7 +461,8 @@ function admitted(child, parent) {
 
 /**
  * The check's diagnostics for `sources` (each `{ file, text, level }`: `level` `file` or `module` for a checked core file,
- * `null` for a core file left out, `helper` for a test helper; the guard lines read all of them).
+ * `null` for a core file left out, `meta` for a file of `src/type-inference/` outside the core, `helper` for a test
+ * helper; the guard lines read all of them, the closed meta-object layer all but the helpers).
  */
 export function retainedStateDiagnostics(sources) {
   const diagnostics = [];
