@@ -13,10 +13,13 @@
 // The invariant: the check discards only what TypeScript's parse of the file shows to be layout, and compares all else
 // as text; what it cannot show to be layout fails, or is declared with --edit.
 //
-// The body of a file is its lines after its header. The header is a closed list of lines: a NEW file's leading `//`
-// lines, then blank lines and the import declarations that open the file as TypeScript parses them, each starting at
-// the left margin with nothing after it on its last line but a `//` comment. The first other line (a shebang, a block
-// comment, code) starts the body, OLD's and NEW's alike. A line break inside a token (a string, a template literal's
+// The body of a file is its lines after its header. The header is a closed list of lines, OLD's and NEW's alike: the
+// file's leading `//` lines, then blank lines and the import declarations that open the file as TypeScript parses them,
+// each starting at the left margin with nothing after it on its last line but a `//` comment. The first other line (a
+// shebang, a block comment, code) starts the body. OLD's leading `//` lines (a pin mark, a description) are content:
+// each is carried byte for byte by exactly one NEW file, among the leading `//` lines it opens with, before its own and
+// in OLD's order; one dropped, changed, carried twice or after the file's own fails. A NEW file's other leading `//`
+// lines are its own (the split's description of it). A line break inside a token (a string, a template literal's
 // part, a comment) is the token's content; a blank line is layout only when its line break lies outside every token.
 // Then:
 //   - every line of a NEW body that is not a layout blank is a line of OLD's body, equal byte for byte, or, for a line
@@ -56,10 +59,11 @@
 // side cannot run; a run never takes a declared line.
 //
 // Output: a summary line (`old body lines: N, taken: N; runs: N; export added: N; residue: N old, N new; edits: N`),
-// then each `export` added, each edit, the residue with its verdict, and each failure. Exit status: 0 when every line
-// is accounted for; 1 when one is not (a line not in OLD, out of order, an OLD line not taken, a residue that is no
-// rewrap, a token's lines apart); 2 when it cannot run (usage, an unreadable file or commit, a line separator other
-// than `\n`, a syntax error, a malformed, unmatched or overlapping --edit).
+// then each `export` added, each OLD header line carried, each edit, the residue with its verdict, and each failure.
+// Exit status: 0 when every line is accounted for; 1 when one is not (a line not in OLD, out of order, an OLD line not
+// taken or header line not carried, a residue that is no rewrap, a token's lines apart); 2 when it cannot run (usage,
+// an unreadable file or commit, a line separator other than `\n`, a syntax error, a malformed, unmatched or overlapping
+// --edit).
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -113,16 +117,21 @@ function structureOf(file, text) {
 /** Whether line `i` of a file is a blank line of layout: empty, and not inside a token. */
 const layoutBlank = (structure, i) => structure.lines[i] === "" && !structure.inToken[i];
 
-/**
- * The index of a file's first body line. The header is read line by line, and only these lines belong to it: a NEW
- * file's leading `//` lines (`header`), then blank lines and the import declarations that open the file as TypeScript
- * parses them, each starting at the left margin of its first line, with nothing after it on its last line but a `//`
- * comment. The first line that is none of these (a shebang, a block comment, code, an import that does not start or end
- * so) is body.
- */
-function bodyStart({ lines, source }, header) {
+/** The number of a file's leading `//` lines. */
+function leadingComments(lines) {
   let at = 0;
-  if (header) while (at < lines.length && lines[at].startsWith("//")) at += 1;
+  while (at < lines.length && lines[at].startsWith("//")) at += 1;
+  return at;
+}
+
+/**
+ * The index of a file's first body line. The header is read line by line, and only these lines belong to it: the
+ * file's leading `//` lines, then blank lines and the import declarations that open the file as TypeScript parses them,
+ * each starting at the left margin of its first line, with nothing after it on its last line but a `//` comment. The
+ * first line that is none of these (a shebang, a block comment, code, an import that does not start or end so) is body.
+ */
+function bodyStart({ lines, source }) {
+  let at = leadingComments(lines);
   for (const statement of source.statements) {
     if (!ts.isImportDeclaration(statement)) break;
     const start = source.getLineAndCharacterOfPosition(statement.getStart(source));
@@ -204,6 +213,38 @@ function rewraps(group, run) {
 
 /** An edit as written: `NEW:A-B=OLD:C-D`. */
 const spelled = ({ file, from, to, oldFrom, oldTo }) => `${file}:${from}-${to}=${oldFrom}-${oldTo}`;
+
+/**
+ * OLD's leading `//` lines (`old`), each carried by one NEW file (`unitsOf`): taken in OLD's order, byte for byte, by the
+ * leading `//` lines a NEW file opens with, before its own. Returns each carried line (`carried`) and the failures: an
+ * OLD line no file carries, and one among a NEW file's own leading lines (carried twice, or after the file's own).
+ */
+function carriedHeader(old, unitsOf) {
+  const lead = leadingComments(old);
+  const texts = new Set(old.slice(0, lead));
+  const taken = new Set();
+  const carried = [];
+  const failures = [];
+  for (const [file, { shape }] of unitsOf) {
+    const own = leadingComments(shape.lines);
+    let k = 0;
+    for (let o = 0; k < own; k += 1) {
+      while (o < lead && (taken.has(o) || old[o] !== shape.lines[k])) o += 1;
+      if (o === lead) break;
+      taken.add(o);
+      carried.push(`${file}:${k + 1} <- old ${o + 1}`);
+    }
+    for (; k < own; k += 1)
+      if (texts.has(shape.lines[k]))
+        failures.push(
+          `${file}:${k + 1}: an old header line among the file's own: ${shape.lines[k]}`,
+        );
+  }
+  for (let o = 0; o < lead; o += 1)
+    if (!taken.has(o))
+      failures.push(`old ${o + 1}: header line not carried: ${old[o].slice(0, 100)}`);
+  return { carried, failures };
+}
 
 /**
  * Places the declared edits before any run, each one unit (`place`): its OLD lines in `taken`, its NEW lines in its
@@ -295,7 +336,7 @@ function placementFailures(oldShape, start, taken, unitsOf, places) {
 export function reconstruct(oldFile, files, edits = []) {
   const oldShape = structureOf(oldFile.file, oldFile.text);
   const old = oldShape.lines;
-  const start = bodyStart(oldShape, false);
+  const start = bodyStart(oldShape);
   /** Each OLD line taken: its NEW file, and the run, edit or admitted group (`unit`) that took it. */
   const taken = new Map();
   const failures = [];
@@ -315,8 +356,10 @@ export function reconstruct(oldFile, files, edits = []) {
   };
   for (const { file, text } of files) {
     const shape = structureOf(file, text);
-    unitsOf.set(file, { shape, unit: new Map(), first: bodyStart(shape, true) });
+    unitsOf.set(file, { shape, unit: new Map(), first: bodyStart(shape) });
   }
+  const header = carriedHeader(old, unitsOf);
+  failures.push(...header.failures);
   const refused = declareEdits(edits, old.length, start, unitsOf, taken, place);
   if (refused !== undefined) return { refused };
   for (const { file } of files) {
@@ -430,6 +473,7 @@ export function reconstruct(oldFile, files, edits = []) {
   return {
     counts: { old: wanted.length, taken: wanted.length - missing.length, runs },
     exported,
+    carried: header.carried,
     residue,
     failures,
   };
@@ -498,7 +542,7 @@ export function main(argv, cwd = process.cwd(), print = console.log) {
       return cannotRun(`--edit ${spelled(edit)} names ${edit.oldName}, not OLD (${oldPath})`);
   const result = reconstruct({ file: oldPath, text: oldText }, files, edits);
   if (result.refused !== undefined) return cannotRun(result.refused);
-  const { counts, exported, residue, failures } = result;
+  const { counts, exported, carried, residue, failures } = result;
   const old = linesOf(oldText);
   const residueOld = residue.reduce((sum, { run }) => sum + (run?.length ?? 0), 0);
   const residueNew = residue.reduce((sum, { group }) => sum + group.lines.length, 0);
@@ -507,6 +551,7 @@ export function main(argv, cwd = process.cwd(), print = console.log) {
       `residue: ${residueOld} old, ${residueNew} new; edits: ${edits.length}`,
   );
   for (const line of exported) print(`export added: ${line}`);
+  for (const line of carried) print(`header carried: ${line}`);
   for (const edit of edits) {
     const lines = linesOf(files.find(({ file }) => file === edit.file).text);
     print(`edit: ${spelled(edit)}`);

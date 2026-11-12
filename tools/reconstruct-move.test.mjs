@@ -399,3 +399,52 @@ test("a declared edit is one unit: no run takes its lines, and it keeps OLD's or
   assert.match(cut.out, /^failure: old 3: a token's line taken apart/mu);
   assert.match(cut.out, /^failure: src\/big\.ts:2: a token's line placed apart/mu);
 });
+
+/** An old file that opens with a pin mark before its imports (#2545). */
+const MARKED = [
+  "// pins: the second value | line /^const second/u",
+  'import { a } from "./a.js";',
+  "",
+  "const first = a;",
+  "",
+  "const second = 2;",
+  "",
+].join("\n");
+const MARKED_KEPT = 'import { a } from "./a.js";\n\nconst first = a;\n';
+const part = (...header) => [...header, "", "const second = 2;", ""].join("\n");
+
+test("OLD's leading `//` lines are header, each carried unchanged first in one NEW file (#2545)", (t) => {
+  const run = (files) => repository(t, files, MARKED).run();
+  const carried = run({
+    "src/big.ts": MARKED_KEPT,
+    "src/part.ts": part(MARKED.split("\n")[0], "// The part."),
+  });
+  assert.equal(carried.status, 0, carried.out);
+  assert.match(carried.out, /^old body lines: 2, taken: 2;/mu);
+  assert.match(carried.out, /^header carried: src\/part\.ts:1 <- old 1$/mu);
+  // (kept in the old file itself, the part with only its own line)
+  const kept = run({
+    "src/big.ts": `${MARKED.split("\n")[0]}\n${MARKED_KEPT}`,
+    "src/part.ts": part("// The part."),
+  });
+  assert.equal(kept.status, 0, kept.out);
+  assert.match(kept.out, /^header carried: src\/big\.ts:1 <- old 1$/mu);
+  // (dropped, changed, after the file's own line, or carried twice)
+  const dropped = run({ "src/big.ts": MARKED_KEPT, "src/part.ts": part("// The part.") });
+  assert.equal(dropped.status, 1, dropped.out);
+  assert.match(dropped.out, /^failure: old 1: header line not carried: \/\/ pins: /mu);
+  const changed = MARKED.split("\n")[0].replace("second", "other");
+  assert.equal(run({ "src/big.ts": MARKED_KEPT, "src/part.ts": part(changed) }).status, 1);
+  const after = run({
+    "src/big.ts": MARKED_KEPT,
+    "src/part.ts": part("// The part.", MARKED.split("\n")[0]),
+  });
+  assert.equal(after.status, 1, after.out);
+  assert.match(after.out, /^failure: src\/part\.ts:2: an old header line among the file's own/mu);
+  const twice = run({
+    "src/big.ts": `${MARKED.split("\n")[0]}\n${MARKED_KEPT}`,
+    "src/part.ts": part(MARKED.split("\n")[0]),
+  });
+  assert.equal(twice.status, 1, twice.out);
+  assert.match(twice.out, /^failure: src\/part\.ts:1: an old header line among the file's own/mu);
+});
