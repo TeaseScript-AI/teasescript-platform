@@ -51,7 +51,8 @@ const sum = (counts) => [...counts.values()].reduce((a, b) => a + b, 0);
 const missing = suiteTestFiles("tests", ".test.ts")
   .filter((path) => /^type-core(-stop)?\//u.test(path))
   .map((path) => basename(path, ".ts"))
-  .filter((name) => !files.has(name));
+  .filter((name) => !files.has(name))
+  .sort();
 process.stdout.write(
   `retained survey: ${files.size} files, ${sum(noted)} refusals, ${sum(frozen)} frozen writes\n`,
 );
