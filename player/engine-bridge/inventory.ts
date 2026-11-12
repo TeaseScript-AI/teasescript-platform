@@ -67,6 +67,7 @@ export const ALLOWED_SOURCE: readonly {
       "src/handle-rules.ts",
       "src/image-input.ts",
       "src/interaction-answers.ts",
+      "src/interaction-completion.ts",
       "src/interaction-limits.ts",
       "src/language-facts.ts",
       "src/loop-rules.ts",
