@@ -260,8 +260,6 @@ export class NarrowingRoutes extends RouteEntries {
     into: Entry,
   ): Work<Definition | null> {
     this.#work.charge("exactQueries");
-    // (under the program default, the jump stands at the entry it makes, R2.2)
-    if (this.#feasible !== null && !this.standsAt(into, point.node, point.chain)) return null;
     const found = yield* this.#examinedAt(key, "null", point.node, point.chain, point.at, [], into);
     return found !== null &&
       (yield* this.certifies(found, key)) &&
