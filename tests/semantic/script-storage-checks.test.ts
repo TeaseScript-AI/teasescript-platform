@@ -1,7 +1,7 @@
 /*
  * The compiler's reading of storage: `save`, `load` and `delete` syntax, its checks, and the syntax cases a run
  * witnesses (where a bounded load ends, quoted load operands inside interpolation). The O4 lead's half of the storage
- * tests; the runtime protocol stays in `runtime/script-storage.test.ts`.
+ * tests; the runtime protocol stays in `runtime/persistence/script-storage.test.ts`.
  */
 
 import assert from "node:assert/strict";

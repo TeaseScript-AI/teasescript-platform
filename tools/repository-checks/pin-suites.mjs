@@ -153,14 +153,14 @@ export function readMarks(root) {
 
 /** The files the pin forms find that pin no work, each with what its numbers are. */
 export const NOT_PINS = [
-  { file: "tests/runtime/async-timer-runtime.test.ts", is: "timer milliseconds" },
+  { file: "tests/runtime/v1/async-timer-runtime.test.ts", is: "timer milliseconds" },
   {
     file: "tests/families-runner/families-baseline-fill.test.ts",
     is: "a runner's fixture timings",
   },
   { file: "tests/semantic/list-function-checks.test.ts", is: "random seeds" },
-  { file: "tests/runtime/message-markup.test.ts", is: "character codes" },
-  { file: "tests/runtime/runtime-random.test.ts", is: "a generator's expected states" },
+  { file: "tests/runtime/language/message-markup.test.ts", is: "character codes" },
+  { file: "tests/runtime/engine/runtime-random.test.ts", is: "a generator's expected states" },
   { file: "tests/type-core/messages/type-core-messages-examples.test.ts", is: "random seeds" },
   { file: "tests/helpers/type-core/type-core-enclosing.ts", is: "sample values of a host global" },
 ];
