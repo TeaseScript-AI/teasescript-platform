@@ -213,6 +213,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     beginning,
     lastStart,
     supersede,
+    epoch,
     prepare,
     prepareStart,
     prepareRestore,
@@ -1172,6 +1173,12 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
             ? "stopped"
             : null,
     ),
+    /**
+     * Moves before every change of `terminal` but the stop's own `freezing` → `stopped`, and with every preparation,
+     * activation or end: an answer accepted under another value belongs to a session that stopped or was replaced. A
+     * plain reader, read when an answer is admitted, so no render batching can hide a change that went back.
+     */
+    epoch,
     /**
      * What the stop after a lost engine connection offers (PLAYER-UI "Session end and failure"): Continue from the last
      * kept point or Start again, over the stopped session (`line`) or on the start page (`page`); `null` without one.

@@ -53,6 +53,7 @@ interface SessionHost {
   readonly stopped: Readonly<Ref<boolean>>;
   readonly chat: Readonly<Ref<number>>;
   readonly terminal: Readonly<Ref<SessionTerminal>>;
+  epoch(): number;
   readonly bridge: Promise<PlayerBridge>;
   readonly inputSection: InputSectionHost;
   readonly lock: {
@@ -99,6 +100,7 @@ type Modules = {
     readonly session: () => PlayerSession | null;
     readonly stoppedSession: () => PlayerSession | null;
     readonly chat: () => number;
+    readonly epoch: () => number;
     readonly terminal: () => SessionTerminal;
     readonly inputSection: () => InputSectionHost | undefined;
     readonly prepareInput: () => true;
@@ -225,6 +227,7 @@ async function page(context: TestContext, topology: Topology, script: string) {
       session: shown,
       stoppedSession: () => (player.stopped.value ? player.session.value : null),
       chat: () => player.chat.value,
+      epoch: player.epoch,
       terminal: () => player.terminal.value,
       inputSection: () => player.inputSection,
       prepareInput: () => true,
