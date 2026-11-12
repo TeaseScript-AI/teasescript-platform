@@ -4,7 +4,9 @@
  *
  * What it guarantees, and nothing stronger: a write to retained state is refused where it happens, or is made by a
  * closed-list kind's own writer (a `Retained` collection's `set`/`add`/`delete`/`clear`; a record's, an arena's or an
- * array's assignment, definition or deletion) or is a marked write to an owner's own field. A write made through an
+ * array's assignment, definition or deletion) or is a marked write to an owner's own field. A typed array
+ * (`TYPED_ENTRIES`), which no freeze holds, is the exception: a write to its elements after its run ended is caught at
+ * the process's exit (`changedTyped`), which fails the file, not at its line. A write made through an
  * intrinsic taken from a prototype (`Map.prototype.set` and its kind, called, bound or aliased) is outside what the
  * instrument sees, and is held out of the code by the lint (`tools/oxlint/check-retained-state.mjs`). The instrument does
  * not see what a registered function (`Retained.closure`) captures; that rests on the comment at each registration,
