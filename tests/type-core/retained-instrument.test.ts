@@ -27,14 +27,17 @@ function outcomeOf(error: unknown): Outcome {
   return error.message.startsWith(REFUSED) ? "refused" : "frozen";
 }
 
-/** Runs each step as its own solver run under a fresh instrument: each step's outcome, and the run's own (a switch's). */
-function stepped(shape: () => readonly (() => void)[]): {
-  readonly steps: Outcome[];
-  readonly run: Outcome;
-} {
+/**
+ * Runs each step as its own solver run under an instrument, a fresh one unless given: each step's outcome, and the
+ * run's own (a switch's).
+ */
+function stepped(
+  shape: () => readonly (() => void)[],
+  instrument = new RetainedInstrument(),
+): { readonly steps: Outcome[]; readonly run: Outcome } {
   const steps: Outcome[] = [];
   let run: Outcome = "ok";
-  withRetainedRecorder(new RetainedInstrument(), () => {
+  withRetainedRecorder(instrument, () => {
     const made = shape();
     const demands = made.map((step, index): Demand => ({
       key: `run${index}`,
@@ -352,6 +355,46 @@ test("a helper watches a made map's writes through its own writer, which stays i
     );
   });
   assert.deepEqual(seen, ["a=1"]);
+});
+
+test("a map's object key is sealed while its entry stands, under an `undefined` value too", () => {
+  for (const weak of [false, true]) {
+    let key: { n: number } | undefined;
+    const { steps } = stepped(() => [
+      () => {
+        key = { n: 0 };
+        (weak
+          ? Retained.weakMap<object, undefined>("T.keys")
+          : Retained.map<object, undefined>("T.keys")
+        ).set(key, undefined);
+      },
+      () => (key!.n = 1),
+    ]);
+    assert.deepEqual(steps, ["ok", "frozen"], String(weak));
+  }
+});
+
+test("a typed array sealed when its run ends and written in a later one is caught, by where it was stored", () => {
+  for (const write of [true, false]) {
+    const instrument = new RetainedInstrument();
+    let table: Int32Array | undefined;
+    const { steps } = stepped(
+      () => [
+        () => {
+          table = new Int32Array([1, 2]);
+          Retained.map<string, { up: Int32Array }>("DefinitionLists.#sorted").set("k", {
+            up: table,
+          });
+        },
+        () => {
+          if (write) table![0] = 5;
+        },
+      ],
+      instrument,
+    );
+    assert.deepEqual(steps, ["ok", "ok"]);
+    assert.deepEqual(instrument.changedTyped(), write ? ["DefinitionLists.#sorted.up"] : []);
+  }
 });
 
 test("a run's mark stands in each of its intervals: a write after the run resumes is open, another run's is not", () => {
