@@ -693,13 +693,13 @@ private runner implementation.
 ### Layout and discovery
 
 ```text
-tests/runtime/property.test.ts
+tests/runtime/engine/property.test.ts
 tests/property/
   replay.ts
   source-fuzz.ts
 ```
 
-`tests/runtime/property.test.ts` is a test entrypoint, so normal compiled-test
+`tests/runtime/engine/property.test.ts` is a test entrypoint, so normal compiled-test
 discovery executes the required 128-case campaign through `npm run check`.
 The fixed operation, rejected-completion, checkpoint, and malformed-input
 fixtures consume no randomness, so they run once each in that entrypoint and
@@ -775,7 +775,7 @@ preserve private harness bookkeeping as evidence.
 ## Source-to-runtime conformance corpus
 
 The current behavior-oriented corpus lives in focused test files under `tests/`
-next to the behavior they cover, with `tests/runtime/source-to-runtime-conformance.test.ts`
+next to the behavior they cover, with `tests/runtime/language/source-to-runtime-conformance.test.ts`
 exercising representative public-package scenarios. New representative cases
 start with real `.tease` source, call the root `compileSource(...)` API, and
 assert only the relevant observable diagnostic/span, event/order/provenance,
