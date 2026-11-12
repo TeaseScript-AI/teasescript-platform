@@ -322,6 +322,13 @@ const CONDITIONS: readonly Condition[] = [
   },
   {
     row: "callExpression",
+    condition: "a method other than `get` takes no named argument, also in its contract's count",
+    source: "let xs = [1]\nlet b = xs.contains(other: 1)",
+    at: "xs.contains(other: 1)",
+    what: "this call expression",
+  },
+  {
+    row: "callExpression",
     condition: "a method takes no more arguments than its contract",
     source: "let xs = [1]\nlet b = xs.contains(1, 2)",
     at: "xs.contains(1, 2)",
