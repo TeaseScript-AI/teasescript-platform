@@ -20,7 +20,7 @@ import { peel } from "./narrowings.js";
 import { RouteCandidates, type Candidate, type Candidates } from "./route-candidates.js";
 import { CALL, RouteHolding } from "./route-holding.js";
 import type { Feasibility, Place } from "./route-tests.js";
-import { countIn, type TreeBlock, type TreeStatement } from "./statement-tree.js";
+import { countIn, lowerBound, type TreeBlock, type TreeStatement } from "./statement-tree.js";
 
 /**
  * Where a segment ends: a place from a callable's body down; `own`, the last place's statement is on the route (the
@@ -439,7 +439,8 @@ export abstract class RouteEntries extends RouteCandidates {
     // (the key's stores in bodies that make a jump: each list's bodies or the jumps' bodies, whichever are fewer)
     const starts: Candidate[] = [];
     for (const lists of each(this.#work, "eventSteps", yield* this.seedLists(key)))
-      if (lists.size < byBody.size) {
+      if (this.defaultHolds() !== null) this.#windowed(name, calls, lists, byBody, starts);
+      else if (lists.size < byBody.size) {
         for (const [body, { list }] of each(this.#work, "eventSteps", lists))
           if (byBody.get(body) !== undefined)
             for (const found of each(this.#work, "eventSteps", list)) starts.push(found);
@@ -484,6 +485,60 @@ export abstract class RouteEntries extends RouteCandidates {
       }
     }
     return sorted(this.#work, "eventSteps", tried, (a, b) => a.order - b.order);
+  }
+
+  /**
+   * Under the program default (R2.2's few jumps), a key's stores whose stretch may hold one of a body's jumps. A store
+   * before the last statement of a block on a jump's chain, before the chain's place there, whose own expressions hold
+   * the variable (or a call, where `calls`) has its stretch end at that statement (`#cut`), so it holds no jump below:
+   * per jump, the windows between such statements, merged per body; a store whose statement is not known (`start` -1)
+   * is always kept.
+   */
+  #windowed(
+    name: string,
+    calls: boolean,
+    lists: ReadonlyMap<TreeBlock, Candidates>,
+    byBody: ReadonlyMap<TreeBlock, readonly Jump[]>,
+    starts: Candidate[],
+  ): void {
+    this.#work.charge("eventSteps");
+    const work = this.#work;
+    for (const [body, jumps] of each(work, "eventSteps", byBody)) {
+      const found = lists.get(body);
+      if (found === undefined) continue;
+      const windows: { from: number; to: number }[] = [{ from: -Infinity, to: 0 }];
+      for (const jump of each(work, "eventSteps", jumps)) {
+        const { chain } = jump.point;
+        let from = -Infinity;
+        let level = 0;
+        for (const _ of steps(work, "eventSteps", () => level < chain.length)) {
+          const { block, index } = chain[level]!;
+          const held = this.holding.before(name, block, index);
+          const call = calls ? this.holding.before(CALL, block, index) : null;
+          const last = held === null || (call !== null && call > held) ? call : held;
+          if (last !== null) {
+            if (level > 0) windows.push({ from, to: block.statements[0]!.start });
+            from = block.statements[last]!.start;
+          }
+          level += 1;
+        }
+        windows.push({ from, to: jump.point.at });
+      }
+      sorted(work, "eventSteps", windows, (a, b) => a.from - b.from);
+      // (each window from the first store at or after its start, never back before where the last one stopped)
+      let at = 0;
+      for (const { from, to } of each(work, "eventSteps", windows)) {
+        at = Math.max(at, lowerBound(work, found.starts, from));
+        for (const _ of steps(
+          work,
+          "eventSteps",
+          () => at < found.list.length && found.list[at]!.start < to,
+        )) {
+          starts.push(found.list[at]!);
+          at += 1;
+        }
+      }
+    }
   }
 
   /** The index of the first jump of a body's `jumps` from `low` on past offset `from` (a binary search). */
