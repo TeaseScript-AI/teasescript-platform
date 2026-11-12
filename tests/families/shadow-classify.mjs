@@ -132,7 +132,7 @@ const EXCLUSIONS = [
     "af90ea51aed2 1744-sol-v30-call-holes.mjs/plain-tag-predicate",
   ],
   // (v4, #1775's decline, `store-contracts.ts`'s `OPEN_BY_STOP`: a typed parse's or load's reader type a stop left
-  // open; no gate source has reached it yet, so its witness is #1767's own case in `type-core-stop.test.ts`)
+  // open; no gate source has reached it yet, so its witness is #1767's own case in `type-core-stop-route.test.ts`)
   [
     "a typed parse's or load's default that a stop left open",
     S9B,

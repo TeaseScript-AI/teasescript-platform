@@ -7,7 +7,6 @@
 
 /** Each compiled type-core test file's seconds, and every other's of 10 s or more, costliest first. */
 export const costlyTestSeconds = {
-  "type-core/type-core-stop.test.js": 177,
   "type-core/type-core-lost-check-matrix.test.js": 152,
   "type-core/type-core-written.test.js": 151,
   "type-core/type-core-work-c.test.js": 131,
