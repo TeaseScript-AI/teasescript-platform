@@ -316,11 +316,14 @@ function metaReach(node) {
       return OBJECT_MEMBERS.has(parent.name.text) ? null : `\`Object.${parent.name.text}\``;
     }
   }
+  const taken = ts.isBindingElement(node) ? (node.propertyName ?? node.name) : null;
   const name = ts.isPropertyAccessExpression(node)
     ? node.name.text
     : ts.isElementAccessExpression(node) && ts.isStringLiteralLike(node.argumentExpression)
       ? node.argumentExpression.text
-      : null;
+      : taken !== null && (ts.isIdentifier(taken) || ts.isStringLiteralLike(taken))
+        ? taken.text
+        : null;
   if (name !== null && META_PROPERTIES.has(name)) return `\`.${name}\``;
   if (ts.isReturnStatement(node) && node.expression !== undefined) {
     let at = node.parent;
