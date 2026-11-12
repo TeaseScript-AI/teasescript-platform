@@ -27,7 +27,8 @@
 //   - a run of lines is taken whole, longest first, never across a layout blank followed by a line at the left margin
 //     (one declaration's boundary);
 //   - a line whose line break lies inside a token goes with the line before it, on both sides: in one unit (a run, a
-//     declared edit or an admitted group), or in two units that follow each other in its NEW file and in OLD alike.
+//     declared edit or an admitted group), or in two runs or edits that follow each other in its NEW file and in OLD
+//     alike (never an admitted group, whose text is compared after normalizing).
 // What is left over is the residue: OLD lines no run or edit took, and NEW lines no OLD line matched. It is admitted
 // only as Prettier's rewrap of a declaration that gained `export `: each group of consecutive left-over NEW lines
 // starts with `export ` before such a declaration, breaks only after `(`, `,`, `=>` or `{`, or before `)` (where a
@@ -48,9 +49,9 @@
 // --edit NEW:A-B=OLD:C-D declares one changed passage: NEW's body lines A to B are one unit that takes OLD's body lines
 // C to D whole (1-based, counted in each file; the counts may differ). Nothing in it is compared or discarded: both
 // sides are printed whole, so a reviewer reads each edit. The unit counts in the order check and in keeping a token's
-// lines together as a run does: an edit may take part of a token's lines (one line of a doc comment) only where it
-// follows the unit before it, and the unit after it follows it, in NEW and in OLD alike. `OLD:` may be left out (given,
-// it is OLD's path as given), and `-B` or `-D` for a range of one line: `NEW:LINE=OLDLINE` is one line on each side. An
+// lines together as a run does: an edit may take part of a token's lines (one line of a doc comment) only where the run
+// or edit before it and the one after it are its neighbours in NEW and in OLD alike. `OLD:` may be left out (given, it
+// is OLD's path as given), and `-B` or `-D` for a range of one line: `NEW:LINE=OLDLINE` is one line on each side. An
 // edit that names no body line of a NEW file or of OLD, an empty range, or one that overlaps another edit on either
 // side cannot run; a run never takes a declared line.
 //
@@ -248,13 +249,16 @@ function declareEdits(edits, oldLength, start, unitsOf, taken, place) {
 function placementFailures(oldShape, start, taken, unitsOf, places) {
   const failures = [];
   // A token's lines stay together: a line whose break lies inside a token goes with the line before it, in one unit
-  // (run, edit or admitted group) or in two units that follow each other in its NEW file and in OLD alike.
+  // (run, edit or admitted group) or in two runs or edits that follow each other in its NEW file and in OLD alike. An
+  // admitted group joins no other unit: its text is compared after normalizing, which a token's content never is.
   const together = (a, b) => {
     if (a === undefined || b === undefined) return false;
     const [before, after] = [places.get(a), places.get(b)];
     return (
       a === b ||
-      (before.file === after.file &&
+      (!before.rewrap &&
+        !after.rewrap &&
+        before.file === after.file &&
         before.end + 1 === after.line - 1 &&
         before.last + 1 === after.first)
     );
@@ -408,6 +412,7 @@ export function reconstruct(oldFile, files, edits = []) {
     used.add(match);
     const run = oldRuns[match];
     const id = place({
+      rewrap: true,
       file: group.file,
       line: group.lines[0].line,
       end: group.lines.at(-1).line - 1,
