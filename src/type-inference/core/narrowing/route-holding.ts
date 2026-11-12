@@ -2,6 +2,7 @@ import type { Expression, Statement } from "../../../ast.js";
 import { expressionParts, statementExpressions } from "../../../expression-children.js";
 import type { WorkLedger } from "../budget.js";
 import { each, sorted, steps } from "../charged-iteration.js";
+import { peel } from "./narrowings.js";
 import {
   countIn,
   type StatementTree,
@@ -168,12 +169,15 @@ export class RouteHolding {
         continue;
       }
       if (at.kind === "callExpression") {
-        if (at.callee.kind === "identifier" && this.functions.has(at.callee.name)) names.add(CALL);
+        // (the callee, its parentheses peeled: a function's name, a method's receiver, or any other expression's parts)
+        const callee = peel(at.callee, this.work);
+        if (callee.kind === "identifier" && this.functions.has(callee.name)) names.add(CALL);
         // (the callee may store through what it is handed: its arguments and its receiver)
         for (const argument of each(this.work, "indexSteps", at.arguments))
           pending.push({ at: argument.value, held: true });
-        if (at.callee.kind === "propertyAccessExpression")
-          pending.push({ at: at.callee.object, held: true });
+        if (callee.kind === "propertyAccessExpression")
+          pending.push({ at: callee.object, held: true });
+        else if (callee.kind !== "identifier") pending.push({ at: callee, held });
         if (at.presentation !== undefined) pending.push({ at: at.presentation, held });
         continue;
       }

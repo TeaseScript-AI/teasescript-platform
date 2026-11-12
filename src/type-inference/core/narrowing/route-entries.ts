@@ -61,8 +61,8 @@ interface Jump {
 interface Jumps {
   /** In source order (file, offset). */
   readonly list: readonly Jump[];
-  /** The callable bodies the jumps are made in. */
-  readonly bodies: ReadonlySet<TreeBlock>;
+  /** Per callable body (a file's top level, a function's or a block's body), its jumps in source order. */
+  readonly byBody: ReadonlyMap<TreeBlock, readonly Jump[]>;
   /** Per entry, the jumps whose code it is a nearest entry of, with the level of the jump's chain it stands at. */
   readonly begun: ReadonlyMap<Entry, readonly { readonly jump: Jump; readonly level: number }[]>;
 }
@@ -299,35 +299,31 @@ export abstract class RouteEntries extends RouteCandidates {
    */
   *#tries(key: Key, name: string, calls: boolean): Work<readonly Jump[]> {
     this.#work.charge("eventSteps");
-    const { list, bodies } = this.#jumpIndex();
+    const { byBody } = this.#jumpIndex();
     // (a program without jumps: no store's search, no stretch)
-    if (list.length === 0) return [];
-    // (per body, its stores' stretches as offsets, merged so that each jump is looked at once)
-    const stretches = new Map<TreeBlock, { file: number; from: number; to: number }[]>();
-    // (each list's bodies or the jumps' bodies, whichever are fewer)
+    if (byBody.size === 0) return [];
+    // (the key's stores in bodies that make a jump: each list's bodies or the jumps' bodies, whichever are fewer)
     const starts: Candidate[] = [];
-    for (const byBody of each(this.#work, "eventSteps", yield* this.seedLists(key)))
-      if (byBody.size < bodies.size) {
-        for (const [body, { list }] of each(this.#work, "eventSteps", byBody))
-          if (bodies.has(body))
+    for (const lists of each(this.#work, "eventSteps", yield* this.seedLists(key)))
+      if (lists.size < byBody.size) {
+        for (const [body, { list }] of each(this.#work, "eventSteps", lists))
+          if (byBody.get(body) !== undefined)
             for (const found of each(this.#work, "eventSteps", list)) starts.push(found);
       } else
-        for (const body of each(this.#work, "eventSteps", bodies))
-          for (const found of each(this.#work, "eventSteps", byBody.get(body)?.list ?? []))
+        for (const [body] of each(this.#work, "eventSteps", byBody))
+          for (const found of each(this.#work, "eventSteps", lists.get(body)?.list ?? []))
             starts.push(found);
+    // (per body, its stores' stretches as offsets, merged so that each of its jumps is looked at once)
+    const stretches = new Map<TreeBlock, { from: number; to: number }[]>();
     for (const start of each(this.#work, "eventSteps", starts)) {
       const body = start.chain[0]!.block;
-      const stretch = {
-        file: start.def.node.file,
-        from: start.start,
-        to: this.#cut(name, calls, start.chain),
-      };
+      const jumps = byBody.get(body)!;
+      const stretch = { from: start.start, to: this.#cut(name, calls, start.chain) };
       // (a store certified only where its stretch holds a jump: the certificate is the costly part)
-      const first = this.#after(list, stretch.file, stretch.from, 0);
+      const first = this.#after(jumps, stretch.from, 0);
       if (
-        first >= list.length ||
-        list[first]!.point.node.file !== stretch.file ||
-        list[first]!.point.at >= stretch.to ||
+        first >= jumps.length ||
+        jumps[first]!.point.at >= stretch.to ||
         !(yield* this.certifies(start, key))
       )
         continue;
@@ -337,35 +333,33 @@ export abstract class RouteEntries extends RouteCandidates {
     }
     const tried: Jump[] = [];
     for (const [body, known] of each(this.#work, "eventSteps", stretches)) {
-      sorted(this.#work, "eventSteps", known, (a, b) => a.file - b.file || a.from - b.from);
+      const jumps = byBody.get(body)!;
+      sorted(this.#work, "eventSteps", known, (a, b) => a.from - b.from);
       let low = 0;
-      for (const { file, from, to } of each(this.#work, "eventSteps", known)) {
+      for (const { from, to } of each(this.#work, "eventSteps", known)) {
         // (the first jump past the stretch's start, and not before where the last stretch's scan stopped)
-        low = this.#after(list, file, from, low);
+        low = this.#after(jumps, from, low);
         for (const _ of steps(
           this.#work,
           "eventSteps",
-          () =>
-            low < list.length && list[low]!.point.node.file === file && list[low]!.point.at < to,
+          () => low < jumps.length && jumps[low]!.point.at < to,
         )) {
-          const jump = list[low]!;
+          tried.push(jumps[low]!);
           low += 1;
-          if (jump.point.chain[0]!.block === body) tried.push(jump);
         }
       }
     }
     return sorted(this.#work, "eventSteps", tried, (a, b) => a.order - b.order);
   }
 
-  /** The index of the first jump of `list` from `low` on past offset `from` of `file` (a binary search). */
-  #after(list: readonly Jump[], file: number, from: number, low: number): number {
+  /** The index of the first jump of a body's `jumps` from `low` on past offset `from` (a binary search). */
+  #after(jumps: readonly Jump[], from: number, low: number): number {
     this.#work.charge("eventSteps");
     let first = low;
-    let high = list.length;
+    let high = jumps.length;
     for (const _ of steps(this.#work, "eventSteps", () => first < high)) {
       const middle = (first + high) >> 1;
-      const at = list[middle]!.point;
-      if (at.node.file < file || (at.node.file === file && at.at <= from)) first = middle + 1;
+      if (jumps[middle]!.point.at <= from) first = middle + 1;
       else high = middle;
     }
     return first;
@@ -568,9 +562,14 @@ export abstract class RouteEntries extends RouteCandidates {
         else known.push({ jump, level });
       }
     }
-    const bodies = new Set<TreeBlock>();
-    for (const jump of each(this.#work, "indexSteps", list)) bodies.add(jump.point.chain[0]!.block);
-    this.#jumps = { list, begun, bodies };
+    const byBody = new Map<TreeBlock, Jump[]>();
+    for (const jump of each(this.#work, "indexSteps", list)) {
+      const body = jump.point.chain[0]!.block;
+      const known = byBody.get(body);
+      if (known === undefined) byBody.set(body, [jump]);
+      else known.push(jump);
+    }
+    this.#jumps = { list, begun, byBody };
     return this.#jumps;
   }
 
