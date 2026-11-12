@@ -64,29 +64,28 @@ export class WrittenDefaults {
       if (fallback !== undefined) enter(fallback);
     }
     // (literals in a worklist, each entered once: a deeply nested default recurses nowhere)
+    // (a step's cells gathered in place, so a step two of a literal's cells share is never copied)
+    type Gathered = { readonly terms: Set<TypeTerm>; readonly literals: Set<PlaceId>; found: boolean };
     for (let literal = pending.pop(); literal !== undefined; literal = pending.pop()) {
-      const steps = this.#cells.get(literal)!;
+      const gathered = new Map<string, Gathered>();
       for (const has of program.hasOf.get(literal) ?? [])
         for (const [step, cell] of cellSteps(has.type)) {
           program.work.charge("indexSteps");
-          if (steps.get(step) === null) continue;
-          const terms = new Set(steps.get(step)?.terms);
-          const literals = new Set(steps.get(step)?.literals);
-          let found = true;
+          const at = gathered.get(step) ?? { terms: new Set(), literals: new Set(), found: true };
+          gathered.set(step, at);
+          if (!at.found) continue;
           for (const d of definitions.cellDefs.get(cell) ?? []) {
             program.work.charge("indexSteps");
             const start = d.value === undefined ? null : enter(d.value);
-            if (start === null) found = false;
-            else if ("term" in start) terms.add(start.term);
-            else literals.add(start.literal);
+            if (start === null) at.found = false;
+            else if ("term" in start) at.terms.add(start.term);
+            else at.literals.add(start.literal);
           }
-          steps.set(
-            step,
-            found && terms.size + literals.size > 0
-              ? { terms: [...terms], literals: [...literals] }
-              : null,
-          );
+          if (at.terms.size + at.literals.size === 0) at.found = false;
         }
+      const steps = this.#cells.get(literal)!;
+      for (const [step, { terms, literals, found }] of gathered)
+        steps.set(step, found ? { terms: [...terms], literals: [...literals] } : null);
     }
   }
 
@@ -145,13 +144,23 @@ export class WrittenDefaults {
     return this.#cells.get(literal)?.get(step) ?? null;
   }
 
-  /** The kinds of a written type a start gave, at `rest` from its step `from` on (`KindsAt`). */
-  public kindsAt(term: TypeTerm, rest: readonly string[], from: number): readonly ItemTag[] | null {
+  /**
+   * The kinds of a written type a start gave, at `rest` from its step `from` on (`KindsAt`), each step down charged to
+   * `work` (#2403's final review: a demand's path is as long as its source makes it).
+   */
+  public kindsAt(
+    term: TypeTerm,
+    rest: readonly string[],
+    from: number,
+    work: CoreProgram["work"],
+  ): readonly ItemTag[] | null {
     let at = this.#kinds.get(term);
     if (at === undefined)
       throw new Error("A written default's type was read before the index held its kinds.");
-    for (let index = from; index < rest.length && at !== undefined; index += 1)
+    for (let index = from; index < rest.length && at !== undefined; index += 1) {
+      work.charge("invSteps");
       at = at.below.get(rest[index]!);
+    }
     return at?.kinds ?? null;
   }
 }
@@ -230,9 +239,10 @@ function cellSteps(type: TypeTerm): [string, PlaceId][] {
  * - a list, set, dict or object literal above the level: its cells at the next step, which all give the same kinds.
  * Anything else gives `null`: another expression, a binding without a start value (a loop variable, an unwritten
  * parameter), a step the written type does not reach, a level whose kinds hold `unknown`, cells that disagree or a
- * literal without cells. Each literal and written type it enters at a level charges a unit, however many cells hold
- * it. One item per kind, spelled as written (#1398) and certain, as the finishing read gives a written type's kinds
- * (`typedRead`).
+ * literal without cells. It charges a unit for each literal it enters at a level, each reference to a literal it
+ * follows from there, each written type it meets at a level, however many of one literal's cells hold it, and each
+ * step it reads that type down. One item per kind, spelled as written (#1398) and certain, as the finishing read gives
+ * a written type's kinds (`typedRead`).
  */
 export function writtenDefault(
   pass: CorePass,
@@ -246,7 +256,7 @@ export function writtenDefault(
   const met: { kinds: readonly ItemTag[] | null } = { kinds: null };
   const meet = (term: TypeTerm, level: number): boolean => {
     program.work.charge("invSteps");
-    const own = writtenDefaults.kindsAt(term, rest, level);
+    const own = writtenDefaults.kindsAt(term, rest, level, program.work);
     if (own === null || own.includes("unknown")) return false;
     const kinds = met.kinds;
     if (kinds !== null && (own.length !== kinds.length || own.some((tag, i) => tag !== kinds[i])))
@@ -266,7 +276,11 @@ export function writtenDefault(
         const cells = writtenDefaults.cells(literal, rest[level]!);
         if (cells === null) return null;
         for (const term of cells.terms) if (!meet(term, level + 1)) return null;
-        for (const each of cells.literals) below.add(each);
+        // (each reference charged: literals of one level can share the literals below them, #2403's final review)
+        for (const each of cells.literals) {
+          program.work.charge("invSteps");
+          below.add(each);
+        }
       }
       literals = below;
     }

@@ -293,12 +293,19 @@ test("a written parameter or global, which the candidate route declines, a chain
       built: 11,
       walked: 2,
     },
-    // (a literal in a literal: each entered once, by the index and by the walk)
+    // (a literal in a literal: each entered once by the index; the walk enters each and follows the one reference)
     {
       text: "let w: number = 0\nlet a = [w]\nlet fb = [a, a]\n@",
       rest: ["element", "element"],
       built: 10,
-      walked: 3,
+      walked: 4,
+    },
+    // (a written type read three steps down: the walk pays each step)
+    {
+      text: "let fb: number[][][] = [[[0]]]\n@",
+      rest: ["element", "element", "element"],
+      built: 5,
+      walked: 4,
     },
   ];
   for (const { text, rest = [], built, walked } of rows)
@@ -308,6 +315,26 @@ test("a written parameter or global, which the candidate route declines, a chain
         { items: ["number def"], built, walked },
         text,
       );
+});
+
+test("literals that share the literals below them: the walk pays each reference it follows, as many as it makes (#2403's final review)", () => {
+  // (n literals `a` of one written cell, n literals `b` each listing every `a`, and `fb` listing every `b`: read three
+  // steps down, the walk enters `fb`, n `b`s and n `a`s, follows n references from `fb` and n² from the `b`s, and
+  // meets `w` in each `a`; d1c7c787 charged only the literals entered and the types met, 3n + 1)
+  for (const n of [2, 4, 8]) {
+    const names = (prefix: string) => Array.from({ length: n }, (_, i) => `${prefix}${i}`);
+    const text = [
+      "let w: number = 0",
+      ...names("a").map((a) => `let ${a} = [w]`),
+      ...names("b").map((b) => `let ${b} = [${names("a").join(", ")}]`),
+      `let fb = [${names("b").join(", ")}]`,
+      "@",
+    ].join("\n");
+    for (const reversed of [false, true]) {
+      const { items, walked } = ruleAt(text, ["element", "element", "element"], reversed);
+      assert.deepEqual({ items, walked }, { items: ["number def"], walked: n * n + 4 * n + 1 }, `n = ${n}`);
+    }
+  }
 });
 
 test("a default's written type is none outside the forms the rule admits, the default then read as it holds at the call (#1072 step 0)", () => {
