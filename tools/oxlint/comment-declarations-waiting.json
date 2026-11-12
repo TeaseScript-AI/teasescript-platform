@@ -360,13 +360,13 @@
     "waits": "#1937"
   },
   {
-    "file": "tests/type-core/type-core-cells.test.ts",
+    "file": "tests/type-core/cells/type-core-cells-choices.test.ts",
     "kind": "docblock",
     "text": "A choice reads a written list's element as its literal analogue does (the lead's ruling on #1027):",
     "waits": "#1937"
   },
   {
-    "file": "tests/type-core/type-core-cells.test.ts",
+    "file": "tests/type-core/cells/type-core-cells-literals.test.ts",
     "kind": "docblock",
     "text": "The value carriers (round 11; the walk of `answers.ts` `#propertyNames`): each carrier over a direct, a named, a",
     "waits": "#1937"

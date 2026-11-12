@@ -18,7 +18,6 @@ export const costlyTestSeconds = {
   "type-core/type-core-sharing.test.js": 75,
   "type-core/type-core-closure.test.js": 65,
   "type-core/type-core-budget.test.js": 64,
-  "type-core/type-core-cells.test.js": 58,
   "type-core/type-core-mixed-family.test.js": 49,
   "type-core/type-core-oracles.test.js": 48,
   "type-core/type-core-pushed-reads.test.js": 44,
