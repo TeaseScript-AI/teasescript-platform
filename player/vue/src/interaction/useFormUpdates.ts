@@ -32,6 +32,9 @@ export function useFormUpdates(host: {
   /** The shown session; `null` once stopped or without one. */
   readonly session: () => PlayerSession | null;
   readonly chat: () => number;
+  /** The session's activation token and the one the shown session was shown under (`usePlayerSession`). */
+  readonly epoch: () => number;
+  readonly inputEpoch: () => number;
   readonly terminal: () => SessionTerminal;
   readonly inputSection: () => InputSectionHost | undefined;
   /** The input section's run for the presented action (`useAnswerSubmission`'s `run`). */
@@ -45,6 +48,8 @@ export function useFormUpdates(host: {
   const showNotice = host.showNotice;
   const clearNotice = host.clearNotice;
   const run = host.run;
+  /** As `useAnswerSubmission`'s: the session stops, or stopped or was replaced since it was shown. */
+  const closed = () => host.terminal() !== null || host.epoch() !== host.inputEpoch();
   /** Form updates sent and not yet answered, per form action: its Submit then gets no local check (rule 6). */
   const unacknowledged = new Map<number, number>();
   /** A typed field's commit under way: its field stays read-only until the form took it or refused it. */
@@ -67,11 +72,17 @@ export function useFormUpdates(host: {
     intent: InputIntent,
     after?: (result: InputResult) => void,
   ): Promise<void> {
-    if (host.terminal() !== null) return;
+    if (closed()) return;
+    const epoch = host.epoch();
     unacknowledged.set(actionId, (unacknowledged.get(actionId) ?? 0) + 1);
     try {
-      const result = await run(actionId, intent);
+      const sent = await run(actionId, intent);
+      // An outcome after a stop or a replacement belongs to no shown session: nothing is published and no notice shows;
+      // for `after`, nothing took it.
+      const moved = host.epoch() !== epoch;
+      const result: InputResult = moved ? { kind: "retired" } : sent;
       after?.(result);
+      if (moved) return;
       if (result.kind === "answered") {
         host.publish(result.session);
         const outcome = result.outcome;
@@ -88,7 +99,7 @@ export function useFormUpdates(host: {
   function commitField(action: RuntimeInteractionActionSnapshot, input: "enter" | "send") {
     const draft = host.composer.formDraft();
     if (draft === null || action.ui.kind !== "form" || action.form === undefined) return;
-    if (commitWindow.value !== null) return;
+    if (commitWindow.value !== null || closed()) return;
     let state = action.form;
     if (state.editor?.text !== draft.text) {
       const drafted = applyFormUpdate(action.ui, state, {
@@ -128,7 +139,7 @@ export function useFormUpdates(host: {
   /** A form field's button; typed as its label, the chat's text is the command and comes back on a refusal. */
   function stepField(fieldId: string, typed = false): void {
     const action = presentedForm();
-    if (action === null) return;
+    if (action === null || closed()) return;
     const chat = host.chat();
     const sent = typed ? host.composer.takeChat() : null;
     void update(action.actionId, intents.formStep(fieldId, formDraftText()), (result) => {
@@ -142,7 +153,8 @@ export function useFormUpdates(host: {
   /** Stores the field's draft (`useComposerState`'s timer), counted as an update of its form; whether it took it. */
   async function draft(draft: FormDraft): Promise<boolean> {
     const section = host.inputSection();
-    if (!section || host.terminal() !== null) return false;
+    if (!section || closed()) return false;
+    const epoch = host.epoch();
     unacknowledged.set(draft.actionId, (unacknowledged.get(draft.actionId) ?? 0) + 1);
     try {
       const drafted = await draftInput(
@@ -150,6 +162,7 @@ export function useFormUpdates(host: {
         { actionId: draft.actionId, fieldId: draft.fieldId },
         draft.text,
       );
+      if (host.epoch() !== epoch) return false;
       if (drafted.session !== null) host.publish(drafted.session);
       return drafted.taken;
     } finally {

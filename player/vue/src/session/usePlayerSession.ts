@@ -173,6 +173,8 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
   const interactionReset = ref(0);
   // Changes when another chat shows: a session the player did not have on screen before (`showSession`).
   const chat = ref(0);
+  // The epoch the shown session was shown under (`inputEpoch`).
+  let shownEpoch = 0;
   // The engine's host and this Player's hold on it (`session/useEngineConnection.ts`). Once it is ready, the Player's
   // random control takes its claim, its loss is observed (`bridgeLost`), and the tracing setting is sent before any
   // Start that waits for it.
@@ -214,6 +216,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     lastStart,
     supersede,
     epoch,
+    onEpoch,
     prepare,
     prepareStart,
     prepareRestore,
@@ -232,6 +235,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     connection,
     inspecting: () => inspecting.value,
     isDisposed: () => disposed,
+    reportDiagnostic,
     showSession,
     camera: { open: (capability) => camera.open(capability), release: () => camera.release() },
     captures: { reset: () => captures.reset() },
@@ -787,6 +791,7 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
     generation.value++;
     interactionReset.value++;
     if (!sameChat) chat.value++;
+    shownEpoch = epoch();
     jumpedRevision.value = -1;
     // An inspected state takes Debug's random control only once input adopts it (`adoptRewound` below).
     if (!paused) adoptRandom(next, origin);
@@ -1179,6 +1184,16 @@ export function usePlayerSession(options: PlayerSessionOptions = {}) {
      * plain reader, read when an answer is admitted, so no render batching can hide a change that went back.
      */
     epoch,
+    /**
+     * Registers synchronous work for every move of `epoch`, run inside the move (useSessionActivation's `onEpoch`); the
+     * returned function removes it.
+     */
+    onEpoch,
+    /**
+     * The `epoch` the shown session was shown under. Input asked while it differs from `epoch` belongs to a session that
+     * stopped or was replaced, also once its level went back, and is refused.
+     */
+    inputEpoch: (): number => shownEpoch,
     /**
      * What the stop after a lost engine connection offers (PLAYER-UI "Session end and failure"): Continue from the last
      * kept point or Start again, over the stopped session (`line`) or on the start page (`page`); `null` without one.

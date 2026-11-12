@@ -120,6 +120,10 @@ export function useAnswerSubmission(host: {
   readonly chat: () => number;
   /** The session's activation token (`usePlayerSession`'s `epoch`), read when an answer is admitted. */
   readonly epoch: () => number;
+  /** The `epoch` the shown session was shown under (`usePlayerSession`'s `inputEpoch`). */
+  readonly inputEpoch: () => number;
+  /** Registers work run as `epoch` moves (`usePlayerSession`'s `onEpoch`); the returned function removes it. */
+  readonly onEpoch: (work: () => void) => () => void;
   readonly terminal: () => SessionTerminal;
   readonly inputSection: () => InputSectionHost | undefined;
   readonly prepareInput: () => true | Promise<boolean>;
@@ -155,6 +159,20 @@ export function useAnswerSubmission(host: {
 
   const presentedAction = (session: PlayerSession | null) =>
     session ? activePlayerRuntimeInteraction(session.state) : null;
+
+  /**
+   * Whether input is closed: the session stops, or it stopped or was replaced since it was shown, also once its level went
+   * back (`inputEpoch`). Closed input shows nothing, sends nothing and leaves the composer's text as it is.
+   */
+  const closed = () => host.terminal() !== null || host.epoch() !== host.inputEpoch();
+
+  // As the token moves (a stop, a lost connection, a replacement), at once: the secrets go, a form draft waiting to be
+  // stored is not, and the notice goes with its timer. The chat's text stays: a stop never changes what was typed.
+  const offEpoch = host.onEpoch(() => {
+    host.composer.eraseSecrets();
+    host.composer.cancelDraft();
+    clearNotice();
+  });
 
   /**
    * Settles `record` once: `released` keeps what the runtime published, `undone` puts back what its origin took,
@@ -219,8 +237,7 @@ export function useAnswerSubmission(host: {
   // before, so a record whose level went to `freezing` and back between two flushes still settles by its token.
   watch(
     () => [host.terminal(), host.chat()] as const,
-    ([terminal]) => {
-      if (terminal !== null) host.composer.eraseSecrets();
+    () => {
       const record = pending.value;
       if (record === null) return;
       const how = disposition(record);
@@ -291,8 +308,7 @@ export function useAnswerSubmission(host: {
     sent: string | null = null,
   ): PendingAnswer | null {
     const session = host.session();
-    if (disposed || session === null || pending.value !== null || host.terminal() !== null)
-      return null;
+    if (disposed || session === null || pending.value !== null || closed()) return null;
     clearNotice();
     const record: PendingAnswer = {
       chat: host.chat(),
@@ -343,7 +359,7 @@ export function useAnswerSubmission(host: {
     typed = false,
   ): void {
     const action = presentedAction(host.session());
-    if (action === null || pending.value !== null) return;
+    if (action === null || pending.value !== null || closed()) return;
     const resolved = check(action, payload);
     if (!resolved.ok) return showNotice(resolved.message);
     const row =
@@ -361,7 +377,7 @@ export function useAnswerSubmission(host: {
     typed: boolean,
     intent: InputIntent,
   ) {
-    if (pending.value !== null || host.session() === null || host.terminal() !== null) return;
+    if (pending.value !== null || host.session() === null || closed()) return;
     const sent = typed ? host.composer.takeChat() : null;
     const record = accept(action, origin, row, sent);
     if (record !== null) void dispatch(record, intent);
@@ -378,7 +394,7 @@ export function useAnswerSubmission(host: {
       else if (entry.kind === "repeat") clearNotice();
       return;
     }
-    if (pending.value !== null || host.terminal() !== null) return;
+    if (pending.value !== null || closed()) return;
     const action = presentedAction(host.session());
     if (action === null) return;
     const input = source === "input" ? "enter" : "send";
@@ -480,7 +496,7 @@ export function useAnswerSubmission(host: {
   function openUrl(open: (session: PlayerSession) => boolean, auto: boolean): void {
     const session = host.session();
     const action = presentedAction(session);
-    if (disposed || session === null || action === null) return;
+    if (disposed || session === null || action === null || closed()) return;
     const tried = urlTried.get(session.lineage) ?? new Set<number>();
     if (auto) {
       if (
@@ -532,7 +548,7 @@ export function useAnswerSubmission(host: {
   function submitForm(input: "enter" | "send" | "button" = "button", typed = false): void {
     const action = presentedForm();
     if (action === null || action.ui.kind !== "form" || action.form === undefined) return;
-    if (pending.value !== null) return;
+    if (pending.value !== null || closed()) return;
     const draft = formDraftText();
     const intent = intents.formSubmit(draft, input);
     if (host.forms.unacknowledged(action.actionId) > 0)
@@ -580,7 +596,7 @@ export function useAnswerSubmission(host: {
 
   function cancelForm(input: "enter" | "send" | "button" = "button", typed = false): void {
     const action = presentedForm();
-    if (action === null || pending.value !== null) return;
+    if (action === null || pending.value !== null || closed()) return;
     if (host.forms.unacknowledged(action.actionId) > 0)
       return begin(action, typed ? "chat" : "formCancel", null, typed, intents.formCancel(input));
     answerWith("formCancel", { kind: "cancel" }, intents.formCancel(input), "form", typed);
@@ -589,13 +605,14 @@ export function useAnswerSubmission(host: {
   /** The pacing gate's skip: no answer, no pending record. */
   async function skipPacing(actionId?: number): Promise<void> {
     const session = host.session();
-    if (session === null || host.terminal() !== null) return;
+    if (session === null || closed()) return;
     const gate = actionId ?? playerRuntimePacingGate(session)?.actionId;
     const result = await run(gate, intents.pacing, undefined, "pacing");
     if (result.kind === "answered") host.publish(result.session);
   }
 
   onScopeDispose(() => {
+    offEpoch();
     disposed = true;
     urlWaiting = false;
     clearNotice();
