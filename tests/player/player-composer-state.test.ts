@@ -26,6 +26,7 @@ import type {
 } from "../../player/vue/src/interaction/useComposerState.js";
 import type { FormUpdates } from "../../player/vue/src/interaction/useFormUpdates.js";
 import type { InputSectionHost } from "../../player/vue/src/session/runtime-input.js";
+import { normalizeColor } from "../../src/color.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { sourceStart } from "../helpers/prepared-plan.js";
 import {
@@ -356,6 +357,7 @@ const CASES = {
   "N5 password": TOPOLOGIES,
   "N5 popup": TOPOLOGIES,
   "N6 local and runtime agree": TOPOLOGIES,
+  "N6 the predicted line is the runtime's": TOPOLOGIES,
   "N7 commit": TOPOLOGIES,
   "N7 refused commit": TOPOLOGIES,
   "N7 a block that returns at once": TOPOLOGIES,
@@ -937,6 +939,72 @@ RERUN.rows(
     const record = await sendSettled(p);
     assert.equal(record?.row, null);
     assert.equal(p.submission.pending.value, null);
+    return end();
+  },
+);
+
+RERUN.rows(
+  "N6 the predicted line is the runtime's",
+  "the line shown before the reply is the runtime's own: its row key, text, style, kind and form lines",
+  async (context, topology, end) => {
+    const p = await page(
+      context,
+      topology,
+      script(
+        'player.color = "#777777"',
+        'let pick = askChoice "Red", "Blue"',
+        "let answers = askForm fields: {",
+        '  pace: { text: "Pace", options: [{ value: 1, text: "Slow" }, { value: 1, text: "Fast" }] }, rope: true',
+        "}",
+      ),
+    );
+    // The style the player's answer has now is published with the session: plain data, kept in no checkpoint.
+    const presentation = p.player.session.value!.state.answerPresentation;
+    assert.equal(presentation.color, normalizeColor("#777777"));
+    assert.deepEqual(JSON.parse(JSON.stringify(presentation)), presentation);
+    const checkpoint = await checkpointSnapshot(p.connection.bridge, p.player.session.value!);
+    assert.ok(!JSON.stringify(checkpoint).includes("answerPresentation"));
+    const answers: (() => void)[] = [
+      () => {
+        type(p.composer, "Blue");
+        p.submission.send("input");
+      },
+      () => p.submission.submitForm(),
+    ];
+    for (const answer of answers) {
+      await until(
+        () => p.forms.unacknowledged(action(p)!.actionId) === 0,
+        "no update unanswered",
+        "host",
+      );
+      if (
+        action(p)?.ui.kind === "form" &&
+        playerRuntimeForm(p.player.session.value!)?.fields[0]?.state === "Slow"
+      ) {
+        p.forms.stepField("pace");
+        await until(
+          () => p.forms.unacknowledged(action(p)!.actionId) === 0,
+          "the step answered",
+          "host",
+        );
+      }
+      answer();
+      const record = p.submission.pending.value!;
+      const predicted = record.entry!;
+      assert.equal(predicted.kind, "message");
+      await until(() => record.stage === "settled", "settled", "host");
+      const canonical = p.player.session.value!.transcriptEntries.find(
+        (entry) => entry.kind === "message" && entry.renderKey === predicted.renderKey,
+      );
+      assert.ok(
+        canonical?.kind === "message" && predicted.kind === "message",
+        "the runtime's row has its key",
+      );
+      assert.deepEqual(
+        [predicted.text, predicted.presentation, predicted.responseKind, predicted.formSummary],
+        [canonical.text, canonical.presentation, canonical.responseKind, canonical.formSummary],
+      );
+    }
     return end();
   },
 );
