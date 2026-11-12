@@ -15,20 +15,8 @@ import {
 } from "../../helpers/type-core-records.js";
 import { summary } from "../../helpers/type-core/type-core-cells-setup.js";
 
-/**
- * #1026: a choice object gives its `value` where it has the key and its `text` where it has
- * none, decided by the key and never by what the value resolves to (an empty answer is unresolved, not an absent key),
- * per alternative, on the value side and through a function's result (the contract) alike; a dict's `values` and
- * `keys` are lists of its values and of text that may hold none. Per program its record in both orders, with its sites
- * written as the text they start at: the set's records `cp9-cells/s4/choice-value/…` (set `486ac8093b597b45`), C9's
- * boundary check left out (it joins with S6), and controls beside them.
- */
-test("a choice object's value is selected by its key, and a dict's values and keys are lists", () => {
-  const programs: readonly (readonly [
-    string,
-    string,
-    (at: (text: string) => number) => string[],
-  ])[] = [
+const programs: readonly (readonly [string, string, (at: (text: string) => number) => string[]])[] =
+  [
     [
       "set computed-integer",
       'let result: integer = askChoice {text:"A", value:dict{k:7}.values.first}\nsay [result]\nexit\n',
@@ -420,6 +408,16 @@ test("a choice object's value is selected by its key, and a dict's values and ke
       ],
     ],
   ];
+
+/**
+ * #1026: a choice object gives its `value` where it has the key and its `text` where it has
+ * none, decided by the key and never by what the value resolves to (an empty answer is unresolved, not an absent key),
+ * per alternative, on the value side and through a function's result (the contract) alike; a dict's `values` and
+ * `keys` are lists of its values and of text that may hold none. Per program its record in both orders, with its sites
+ * written as the text they start at: the set's records `cp9-cells/s4/choice-value/…` (set `486ac8093b597b45`), C9's
+ * boundary check left out (it joins with S6), and controls beside them.
+ */
+test("a choice object's value is selected by its key, and a dict's values and keys are lists", () => {
   const differing: string[] = [];
   for (const [name, source, expect] of programs) {
     const request = coreRequest([{ path: "main.tease", source }]);

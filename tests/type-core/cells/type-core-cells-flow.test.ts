@@ -46,6 +46,230 @@ test("a loop's write that an unconditional break follows leaves no value for a l
   assert.deepEqual(wrong, []);
 });
 
+const run = (request: NonNullable<ReturnType<typeof coreRequest>>, reversed: boolean) =>
+  reversed
+    ? withSolverSeam({ reverseWorklist: true }, () =>
+        withConsumerOrder(
+          (list) => [...list].reverse(),
+          () => compactAnalysis(request),
+        ),
+      )
+    : compactAnalysis(request);
+
+// a record by the file and text at its sites, so a live form and its dead one compare where their offsets differ
+const analysed = (program: string | readonly SourceFile[], reversed: boolean): string[] => {
+  const files = typeof program === "string" ? [{ path: "main.tease", source: program }] : program;
+  const request = coreRequest(files);
+  assert.ok(request !== null, files.map((file) => file.source).join("\n"));
+  const record = run(request, reversed);
+  const text = (site: CompactSite): string =>
+    `${site.file}:'${files.find((file) => file.path === site.file)!.source.slice(site.offset, site.end)}'`;
+  return [
+    record.outcome,
+    ...record.diagnostics
+      .map((d) => `${d.kind} ${d.class} ${d.context ?? "-"} ${text(d.site)}`)
+      .sort(),
+    ...record.checks
+      .map(
+        (c) =>
+          `${c.kind} ${c.target} [${c.against.join(", ")}]${c.boundary ? " B" : ""} ${text(c.site)}`,
+      )
+      .sort(),
+  ];
+};
+// per dead shape: the program with `before` live and `body` dead
+const shapes: readonly (readonly [string, (before: string, body: string) => string])[] = [
+  ["after exit", (before, body) => `${before}\nexit\n${body}\n`],
+  ["a branch on a literal false", (before, body) => `${before}\nif false {\n  ${body}\n}\nexit\n`],
+  [
+    "a handler never registered",
+    (before, body) =>
+      `${before}\nif false {\n  showPermanentButton "Never" {\n    ${body}\n  }\n}\nexit\n`,
+  ],
+  ["a label nothing enters", (before, body) => `${before}\nexit\nlabel never\n${body}\nend\n`],
+  [
+    "a function nothing calls",
+    (before, body) => `${before}\nfunction unused {\n  ${body}\n}\nexit\n`,
+  ],
+];
+const takesInteger = "function take(count: integer) {\n  say count\n}\ntake(1)";
+// an intrinsic violation of a known type: the live form's error (C2 twice, C5b, C7 at the root and an element)
+const violations: readonly (readonly [string, string, string])[] = [
+  ["a count that is text", 'let n = "bad"', "repeat n {}"],
+  ["an index that is text", 'let xs = [1, 2]\nlet i = "first"', "say xs[i]"],
+  ["a member of a whole number", "let n = 5", "say n.length"],
+  ["an argument of text for a whole number", `${takesInteger}\nlet s = "bad"`, "take(s)"],
+  [
+    "an argument's element of text for whole numbers",
+    'function takeAll(counts: integer[]) {\n  say counts\n}\ntakeAll([1])\nlet s = ["bad"]',
+    "takeAll(s)",
+  ],
+];
+// host data a dead call passes for a written parameter: the live form's warning and boundary, against that type
+const hostArguments: readonly (readonly [string, string, string])[] = [
+  ["host data for a whole number", takesInteger, "take(hostValue)"],
+  [
+    "host data in a list of whole numbers",
+    "function takeAll(counts: integer[]) {\n  say counts\n}\ntakeAll([1])",
+    "takeAll([hostValue])",
+  ],
+];
+
+// a kind only the reaching definition decides: the live form's error, a warning in dead code
+const flowOnly: readonly (readonly [string, string, string])[] = [
+  ["a count stored a number last", "let n = 1\nn = 2.5", "repeat n {}"],
+  ["an argument stored a number last", `${takesInteger}\nlet n = 1\nn = 2.5`, "take(n)"],
+];
+
+// a global is set up at the session's start wherever it is declared (V30 §12): a dead read before its declaration
+// or in another file is the live form's error too
+const global = 'global n: string = "bad"';
+const caller = { path: "main.tease", source: `${global}\ncall "other.tease"\nexit\n` };
+const globals: readonly (readonly [string, readonly SourceFile[], readonly SourceFile[]])[] = [
+  [
+    "a global declared after its dead read",
+    [{ path: "main.tease", source: `exit\nrepeat n {}\n${global}\n` }],
+    [{ path: "main.tease", source: `repeat n {}\n${global}\nexit\n` }],
+  ],
+  [
+    "a global read in dead code of another file",
+    [caller, { path: "other.tease", source: "exit\nrepeat n {}\n" }],
+    [caller, { path: "other.tease", source: "repeat n {}\n" }],
+  ],
+];
+// a dead call is no definition of its parameter: a guarded argument there leaves a live call's result as it was
+const results: readonly (readonly [string, string, readonly string[]])[] = [
+  [
+    "a number returned into a whole number",
+    "global n = 2.0\nfunction f(x: number) {\n  return x\n}\nlet out: integer = f(2.5)",
+    ["if n is integer { f(n) }", "if n is integer { f(x: n) }"],
+  ],
+  [
+    "numbers returned into whole numbers",
+    "global n = 2.0\nfunction f(x: number[]) {\n  return x\n}\nlet out: integer[] = f([2.5])",
+    ["if n is integer { f([n]) }"],
+  ],
+];
+// a parameter's and a result's marks come from their calls' bindings, which a dead call does not make: a guarded dead
+// call's result is no error where its live form warns (a written `number` result is an intrinsic error, #1173:
+// `writtenNumbers`)
+const guardedResults: readonly (readonly [string, string, string])[] = [
+  [
+    "an inferred result",
+    "global n = 2.0\nfunction f(x: number) {\n  return x\n}",
+    "if n is integer { repeat f(x: n) {} }",
+  ],
+  [
+    "an element of a result",
+    "global n = 2.0\nfunction f(x: number[]) {\n  return x\n}\nlet seen = f([1.5])",
+    "if n is integer { repeat f([n]).first {} }",
+  ],
+];
+// a kind that came through a call (`called`) stays possible in dead code, so a guarded value copied from a call's
+// result or a field or element of one warns as on `main`: the live form's record, X1's word on the use (reviews r3's
+// and r4's B3 shapes, standing, with an operation, a length and a merge); a written `number` destination is an error
+// at the use whatever it holds (#1173), in dead code too
+const written = `global n = 2.0\nfunction f(x: number): number {\n  return x\n}\nfunction fs(x: number[]): number[] {\n  return x\n}`;
+const transfers: readonly (readonly [string, string, string])[] = [
+  [
+    "a copy",
+    "global n = 2.0\nfunction f(x: number): number {\n  return x\n}",
+    "if n is integer { let v = f(n)\nrepeat v {} }",
+  ],
+  [
+    "a field",
+    "global n = 2.0\nfunction f(x: number): number {\n  return x\n}",
+    "if n is integer { let v = {a: f(n)}\nrepeat v.a {} }",
+  ],
+  [
+    "an element",
+    "global n = 2.0\nfunction f(x: number): number {\n  return x\n}",
+    "if n is integer { let v = [f(n)]\nrepeat v.first {} }",
+  ],
+  [
+    "a nested call's result",
+    "global n = 2.0\nfunction f(x: number): number {\n  return x\n}\nfunction g(x: number): number {\n  return f(x)\n}",
+    "if n is integer { let v = g(n)\nrepeat v {} }",
+  ],
+  [
+    "an operation on a call's result",
+    "global n = 2.0\nfunction f(x: number): number {\n  return x\n}",
+    "if n is integer { let v = f(n) * 1\nrepeat v {} }",
+  ],
+  [
+    "a length of a call's result",
+    "global ns = [2.0]\nfunction f(x: number[]): number[] {\n  return x\n}",
+    'if ns != null { let v = f(ns).length\nif v { say "yes" } }',
+  ],
+  [
+    "a place a call's result and a literal both store",
+    "global n = 2.0\nfunction f(x: number): number {\n  return x\n}",
+    "if n is integer { let v = f(n)\nrepeat v {}\nv = 3.5 }",
+  ],
+  [
+    "a recursive call's result",
+    "global n = 2.0\nfunction f(x: number): number {\n  if hostValue { return f(x) }\n  return x\n}",
+    "if n is integer { let v = f(n)\nrepeat v {} }",
+  ],
+  [
+    "a copy of a written copy",
+    written,
+    "if n is integer { let v: number = f(n)\nlet w = v\nrepeat w {} }",
+  ],
+];
+// a written `number` destination: an intrinsic error at the use whatever it holds (#1173), the same in dead code
+const writtenNumbers: readonly (readonly [string, string, string])[] = [
+  [
+    "a written result",
+    "global n = 2.0\nfunction f(x: number): number {\n  return x\n}",
+    "if n is integer { repeat f(n) {} }",
+  ],
+  ["a written copy", written, "if n is integer { let v: number = f(n)\nrepeat v {} }"],
+  ["a written list", written, "if n is integer { let v: number[] = [f(n)]\nrepeat v.first {} }"],
+  [
+    "a written list a call returns",
+    written,
+    "if n is integer { let v: number[] = fs([n])\nrepeat v.first {} }",
+  ],
+  ["a written element", written, "if n is integer { let v: number = fs([n]).first\nrepeat v {} }"],
+  [
+    "a written nested list",
+    written,
+    "if n is integer { let v: number[][] = [[f(n)]]\nrepeat v.first.first {} }",
+  ],
+  [
+    "a store into a written place",
+    written,
+    "if n is integer { let v: number = 0\nv = f(n)\nrepeat v {} }",
+  ],
+];
+// a parameter copied in a callee only one call calls: a live call's narrowed argument is the parameter's value, the
+// tested kind (S10 part 2b), which a dead call, binding nothing (F21), never gives: the dead form warns as on `main`,
+// X1's word on the use and the copy's check
+const narrowedArguments: readonly (readonly [string, string, string, readonly string[]])[] = [
+  [
+    "a parameter copied in its callee",
+    "global n = 2.0\nfunction f(x: number) {\n  let v = x\n  repeat v {}\n}",
+    "if n is integer { f(n) }",
+    [
+      "warning-runtime-check",
+      "integer-use warning-runtime-check dead-code main.tease:'v'",
+      "integer-check v [integer] main.tease:'v'",
+    ],
+  ],
+];
+// such a copy, written or not, as a dead call's argument for a written parameter stays unchecked, as every dead
+// argument was on `main`
+const copiedArguments: readonly (readonly [string, string])[] = [
+  [`${written}\n${takesInteger}`, "if n is integer { let v = f(n)\ntake(v) }"],
+  [`${written}\n${takesInteger}`, "if n is integer { let v: number = f(n)\ntake(v) }"],
+];
+// a member of a call's unknown result as a dead argument: the live form's record without the argument's own C7 (r4 N2)
+const unknownArgument = [
+  `function raw {\n  return hostValue\n}\n${takesInteger}`,
+  "let v = raw()\ntake(v.field)",
+] as const;
+
 /**
  * AD-3 (ADR 0021 1.8: type checks apply to all code, reachable or not): in dead code a read of a declared
  * place keeps its contract's one known kind, so an intrinsic violation of a known type is the error its live form is,
@@ -54,15 +278,6 @@ test("a loop's write that an unconditional break follows leaves no value for a l
  * whose marks would come from the dead call's binding, gives a warning, never an error the live form does not give.
  */
 test("dead code keeps its intrinsic type errors and drops its flow facts, in both orders (AD-3)", () => {
-  const run = (request: NonNullable<ReturnType<typeof coreRequest>>, reversed: boolean) =>
-    reversed
-      ? withSolverSeam({ reverseWorklist: true }, () =>
-          withConsumerOrder(
-            (list) => [...list].reverse(),
-            () => compactAnalysis(request),
-          ),
-        )
-      : compactAnalysis(request);
   const differing: string[] = [];
   const dead = records.filter((record) => record.name.startsWith("cp9-cells/s4/s6b/dead-code/"));
   assert.equal(dead.length, 6);
@@ -74,67 +289,6 @@ test("dead code keeps its intrinsic type errors and drops its flow facts, in bot
       if (differences.length > 0)
         differing.push(`${record.name}${reversed ? " reversed" : ""}: ${differences.join("; ")}`);
     }
-  // a record by the file and text at its sites, so a live form and its dead one compare where their offsets differ
-  const analysed = (program: string | readonly SourceFile[], reversed: boolean): string[] => {
-    const files = typeof program === "string" ? [{ path: "main.tease", source: program }] : program;
-    const request = coreRequest(files);
-    assert.ok(request !== null, files.map((file) => file.source).join("\n"));
-    const record = run(request, reversed);
-    const text = (site: CompactSite): string =>
-      `${site.file}:'${files.find((file) => file.path === site.file)!.source.slice(site.offset, site.end)}'`;
-    return [
-      record.outcome,
-      ...record.diagnostics
-        .map((d) => `${d.kind} ${d.class} ${d.context ?? "-"} ${text(d.site)}`)
-        .sort(),
-      ...record.checks
-        .map(
-          (c) =>
-            `${c.kind} ${c.target} [${c.against.join(", ")}]${c.boundary ? " B" : ""} ${text(c.site)}`,
-        )
-        .sort(),
-    ];
-  };
-  // per dead shape: the program with `before` live and `body` dead
-  const shapes: readonly (readonly [string, (before: string, body: string) => string])[] = [
-    ["after exit", (before, body) => `${before}\nexit\n${body}\n`],
-    [
-      "a branch on a literal false",
-      (before, body) => `${before}\nif false {\n  ${body}\n}\nexit\n`,
-    ],
-    [
-      "a handler never registered",
-      (before, body) =>
-        `${before}\nif false {\n  showPermanentButton "Never" {\n    ${body}\n  }\n}\nexit\n`,
-    ],
-    ["a label nothing enters", (before, body) => `${before}\nexit\nlabel never\n${body}\nend\n`],
-    [
-      "a function nothing calls",
-      (before, body) => `${before}\nfunction unused {\n  ${body}\n}\nexit\n`,
-    ],
-  ];
-  const takesInteger = "function take(count: integer) {\n  say count\n}\ntake(1)";
-  // an intrinsic violation of a known type: the live form's error (C2 twice, C5b, C7 at the root and an element)
-  const violations: readonly (readonly [string, string, string])[] = [
-    ["a count that is text", 'let n = "bad"', "repeat n {}"],
-    ["an index that is text", 'let xs = [1, 2]\nlet i = "first"', "say xs[i]"],
-    ["a member of a whole number", "let n = 5", "say n.length"],
-    ["an argument of text for a whole number", `${takesInteger}\nlet s = "bad"`, "take(s)"],
-    [
-      "an argument's element of text for whole numbers",
-      'function takeAll(counts: integer[]) {\n  say counts\n}\ntakeAll([1])\nlet s = ["bad"]',
-      "takeAll(s)",
-    ],
-  ];
-  // host data a dead call passes for a written parameter: the live form's warning and boundary, against that type
-  const hostArguments: readonly (readonly [string, string, string])[] = [
-    ["host data for a whole number", takesInteger, "take(hostValue)"],
-    [
-      "host data in a list of whole numbers",
-      "function takeAll(counts: integer[]) {\n  say counts\n}\ntakeAll([1])",
-      "takeAll([hostValue])",
-    ],
-  ];
   for (const reversed of [false, true])
     for (const [what, before, body] of hostArguments) {
       const live = analysed(`${before}\n${body}\nexit\n`, reversed);
@@ -144,11 +298,6 @@ test("dead code keeps its intrinsic type errors and drops its flow facts, in bot
           differing.push(`${what}, ${where}${reversed ? " reversed" : ""}: ${found.join("; ")}`);
       }
     }
-  // a kind only the reaching definition decides: the live form's error, a warning in dead code
-  const flowOnly: readonly (readonly [string, string, string])[] = [
-    ["a count stored a number last", "let n = 1\nn = 2.5", "repeat n {}"],
-    ["an argument stored a number last", `${takesInteger}\nlet n = 1\nn = 2.5`, "take(n)"],
-  ];
   for (const reversed of [false, true]) {
     const order = reversed ? " reversed" : "";
     for (const [what, before, body] of [...violations, ...flowOnly]) {
@@ -166,158 +315,6 @@ test("dead code keeps its intrinsic type errors and drops its flow facts, in bot
       }
     }
   }
-  // a global is set up at the session's start wherever it is declared (V30 §12): a dead read before its declaration
-  // or in another file is the live form's error too
-  const global = 'global n: string = "bad"';
-  const caller = { path: "main.tease", source: `${global}\ncall "other.tease"\nexit\n` };
-  const globals: readonly (readonly [string, readonly SourceFile[], readonly SourceFile[]])[] = [
-    [
-      "a global declared after its dead read",
-      [{ path: "main.tease", source: `exit\nrepeat n {}\n${global}\n` }],
-      [{ path: "main.tease", source: `repeat n {}\n${global}\nexit\n` }],
-    ],
-    [
-      "a global read in dead code of another file",
-      [caller, { path: "other.tease", source: "exit\nrepeat n {}\n" }],
-      [caller, { path: "other.tease", source: "repeat n {}\n" }],
-    ],
-  ];
-  // a dead call is no definition of its parameter: a guarded argument there leaves a live call's result as it was
-  const results: readonly (readonly [string, string, readonly string[]])[] = [
-    [
-      "a number returned into a whole number",
-      "global n = 2.0\nfunction f(x: number) {\n  return x\n}\nlet out: integer = f(2.5)",
-      ["if n is integer { f(n) }", "if n is integer { f(x: n) }"],
-    ],
-    [
-      "numbers returned into whole numbers",
-      "global n = 2.0\nfunction f(x: number[]) {\n  return x\n}\nlet out: integer[] = f([2.5])",
-      ["if n is integer { f([n]) }"],
-    ],
-  ];
-  // a parameter's and a result's marks come from their calls' bindings, which a dead call does not make: a guarded dead
-  // call's result is no error where its live form warns (a written `number` result is an intrinsic error, #1173:
-  // `writtenNumbers`)
-  const guardedResults: readonly (readonly [string, string, string])[] = [
-    [
-      "an inferred result",
-      "global n = 2.0\nfunction f(x: number) {\n  return x\n}",
-      "if n is integer { repeat f(x: n) {} }",
-    ],
-    [
-      "an element of a result",
-      "global n = 2.0\nfunction f(x: number[]) {\n  return x\n}\nlet seen = f([1.5])",
-      "if n is integer { repeat f([n]).first {} }",
-    ],
-  ];
-  // a kind that came through a call (`called`) stays possible in dead code, so a guarded value copied from a call's
-  // result or a field or element of one warns as on `main`: the live form's record, X1's word on the use (reviews r3's
-  // and r4's B3 shapes, standing, with an operation, a length and a merge); a written `number` destination is an error
-  // at the use whatever it holds (#1173), in dead code too
-  const written = `global n = 2.0\nfunction f(x: number): number {\n  return x\n}\nfunction fs(x: number[]): number[] {\n  return x\n}`;
-  const transfers: readonly (readonly [string, string, string])[] = [
-    [
-      "a copy",
-      "global n = 2.0\nfunction f(x: number): number {\n  return x\n}",
-      "if n is integer { let v = f(n)\nrepeat v {} }",
-    ],
-    [
-      "a field",
-      "global n = 2.0\nfunction f(x: number): number {\n  return x\n}",
-      "if n is integer { let v = {a: f(n)}\nrepeat v.a {} }",
-    ],
-    [
-      "an element",
-      "global n = 2.0\nfunction f(x: number): number {\n  return x\n}",
-      "if n is integer { let v = [f(n)]\nrepeat v.first {} }",
-    ],
-    [
-      "a nested call's result",
-      "global n = 2.0\nfunction f(x: number): number {\n  return x\n}\nfunction g(x: number): number {\n  return f(x)\n}",
-      "if n is integer { let v = g(n)\nrepeat v {} }",
-    ],
-    [
-      "an operation on a call's result",
-      "global n = 2.0\nfunction f(x: number): number {\n  return x\n}",
-      "if n is integer { let v = f(n) * 1\nrepeat v {} }",
-    ],
-    [
-      "a length of a call's result",
-      "global ns = [2.0]\nfunction f(x: number[]): number[] {\n  return x\n}",
-      'if ns != null { let v = f(ns).length\nif v { say "yes" } }',
-    ],
-    [
-      "a place a call's result and a literal both store",
-      "global n = 2.0\nfunction f(x: number): number {\n  return x\n}",
-      "if n is integer { let v = f(n)\nrepeat v {}\nv = 3.5 }",
-    ],
-    [
-      "a recursive call's result",
-      "global n = 2.0\nfunction f(x: number): number {\n  if hostValue { return f(x) }\n  return x\n}",
-      "if n is integer { let v = f(n)\nrepeat v {} }",
-    ],
-    [
-      "a copy of a written copy",
-      written,
-      "if n is integer { let v: number = f(n)\nlet w = v\nrepeat w {} }",
-    ],
-  ];
-  // a written `number` destination: an intrinsic error at the use whatever it holds (#1173), the same in dead code
-  const writtenNumbers: readonly (readonly [string, string, string])[] = [
-    [
-      "a written result",
-      "global n = 2.0\nfunction f(x: number): number {\n  return x\n}",
-      "if n is integer { repeat f(n) {} }",
-    ],
-    ["a written copy", written, "if n is integer { let v: number = f(n)\nrepeat v {} }"],
-    ["a written list", written, "if n is integer { let v: number[] = [f(n)]\nrepeat v.first {} }"],
-    [
-      "a written list a call returns",
-      written,
-      "if n is integer { let v: number[] = fs([n])\nrepeat v.first {} }",
-    ],
-    [
-      "a written element",
-      written,
-      "if n is integer { let v: number = fs([n]).first\nrepeat v {} }",
-    ],
-    [
-      "a written nested list",
-      written,
-      "if n is integer { let v: number[][] = [[f(n)]]\nrepeat v.first.first {} }",
-    ],
-    [
-      "a store into a written place",
-      written,
-      "if n is integer { let v: number = 0\nv = f(n)\nrepeat v {} }",
-    ],
-  ];
-  // a parameter copied in a callee only one call calls: a live call's narrowed argument is the parameter's value, the
-  // tested kind (S10 part 2b), which a dead call, binding nothing (F21), never gives: the dead form warns as on `main`,
-  // X1's word on the use and the copy's check
-  const narrowedArguments: readonly (readonly [string, string, string, readonly string[]])[] = [
-    [
-      "a parameter copied in its callee",
-      "global n = 2.0\nfunction f(x: number) {\n  let v = x\n  repeat v {}\n}",
-      "if n is integer { f(n) }",
-      [
-        "warning-runtime-check",
-        "integer-use warning-runtime-check dead-code main.tease:'v'",
-        "integer-check v [integer] main.tease:'v'",
-      ],
-    ],
-  ];
-  // such a copy, written or not, as a dead call's argument for a written parameter stays unchecked, as every dead
-  // argument was on `main`
-  const copiedArguments: readonly (readonly [string, string])[] = [
-    [`${written}\n${takesInteger}`, "if n is integer { let v = f(n)\ntake(v) }"],
-    [`${written}\n${takesInteger}`, "if n is integer { let v: number = f(n)\ntake(v) }"],
-  ];
-  // a member of a call's unknown result as a dead argument: the live form's record without the argument's own C7 (r4 N2)
-  const unknownArgument = [
-    `function raw {\n  return hostValue\n}\n${takesInteger}`,
-    "let v = raw()\ntake(v.field)",
-  ] as const;
   for (const reversed of [false, true]) {
     const order = reversed ? " reversed" : "";
     for (const [what, before, body] of writtenNumbers) {

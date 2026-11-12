@@ -167,6 +167,333 @@ test("a chain of methods without a category stays opaque", () => {
   assert.deepEqual(differing, []);
 });
 
+const f =
+  'function f(flag: boolean): string | boolean {\n  if flag { return "bad" }\n  return false\n}\n';
+const nest = (depth: number, value: string): string =>
+  `${"[".repeat(depth)}${value}${"]".repeat(depth)}`;
+// (a fourth part: what the reversed order gives where it differs)
+const programs: readonly (
+  | readonly [string, string, (at: (text: string) => number) => string[]]
+  | readonly [
+      string,
+      string,
+      (at: (text: string) => number) => string[],
+      (at: (text: string) => number) => string[],
+    ]
+)[] = [
+  [
+    "a start value after an earlier store in a function",
+    'function change { n = "bad" }\nlet n = 1\nrepeat n {}\nexit',
+    (at) => ["compile-error", `written-target compile-error @${at('"bad"')}`],
+  ],
+  [
+    "a literal element copying a written union",
+    'let original: integer | string = 1\nlet xs = [original, "ok"]\nsay xs\nexit',
+    () => ["valid"],
+  ],
+  [
+    "a dict value copying a written union",
+    'let original: integer | string = 1\nlet d = dict{a: original, b: "ok"}\nsay d\nexit',
+    () => ["valid"],
+  ],
+  [
+    "a shared field copying a written union",
+    'let original: integer | string = 1\nlet rows = [{n: original}, {n: "ok"}]\nsay rows\nexit',
+    () => ["valid"],
+  ],
+  [
+    "no kind fitting a decided field",
+    `${f}let box = {n: 1}\nbox.n = f(true)\nsay box.n\nexit`,
+    (at) => ["compile-error", `written-target compile-error @${at("f(true)")}`],
+  ],
+  [
+    "no kind fitting a decided element or entry",
+    `${f}let xs = [1]\nxs.add(f(true))\nlet d = dict{k: 1}\nd["k"] = f(true)\nexit`,
+    (at) => [
+      "compile-error",
+      `written-target compile-error @${at("f(true))")}`,
+      `written-target compile-error @${at("f(true)\nexit")}`,
+    ],
+  ],
+  [
+    "a null into a copy of a written binding",
+    "let n: integer = 1\nlet copy = n\ncopy = null\nrepeat copy {}\nexit",
+    (at) => ["compile-error", `written-target compile-error @${at("null")}`],
+  ],
+  [
+    "a literal's element of another type",
+    'let xs = [1, "bad"]\nlet r: integer = xs.first\nexit',
+    (at) => ["compile-error", `written-target compile-error @${at('"bad"')}`],
+  ],
+  [
+    "a literal's nested element of another type",
+    'let xs = [{n: 1}, {n: "bad"}]\nexit',
+    (at) => ["compile-error", `written-target compile-error @${at('"bad"')}`],
+  ],
+  [
+    "an unknown fallback landing in a written union",
+    "let r: integer | string = [1, null][1] otherwise hostValue\nexit",
+    (at) => [
+      "warning-runtime-check",
+      `written-target warning-runtime-check @${at("[1, null]")}`,
+      `written-target warning-runtime-check @${at("hostValue")}`,
+      `copy-type r [integer, string] @${at("[1, null]")}`,
+      `copy-type hostValue [integer, number, string] @${at("hostValue")}`,
+      `copy-type hostValue [unknown] boundary @${at("hostValue")}`,
+    ],
+  ],
+  [
+    "a fallback of two other kinds",
+    `${f}let x = [1, null][1] otherwise f(true)\nexit`,
+    (at) => [
+      "warning-runtime-check",
+      `written-target warning-runtime-check @${at("f(true)")}`,
+      `written-target warning-runtime-check @${at("f(true)")}`,
+      `copy-type f.result [integer, number] @${at("f(true)")}`,
+      `copy-type f.result [integer, number] @${at("f(true)")}`,
+    ],
+  ],
+  [
+    "a written integer copied beside a whole number",
+    "let n: integer = 1\nlet xs = [n, 2]\nrepeat xs[0] {}\nlet rows = [{n: n}, {n: 2}]\nexit",
+    () => ["valid"],
+  ],
+  [
+    // (#2289 B1 rule 1: whole numbers beside a number are numbers, whatever is declared)
+    "a written integer copied beside a fraction",
+    "let n: integer = 1\nlet xs = [n, 2.5]\nexit",
+    () => ["valid"],
+  ],
+  [
+    "a written union copied beside a whole number",
+    'let n: integer | string = "a"\nlet d = dict{first: n, second: 2}\nexit',
+    () => ["valid"],
+  ],
+  [
+    "no possible kind fitting a decided field",
+    `${f}let box = {n: 1}\nbox.n = f(true)\nrepeat box.n {}\nexit`,
+    (at) => ["compile-error", `written-target compile-error @${at("f(true)")}`],
+  ],
+  // (the decision of `xs` grows with the literal's depth, never its square, so it stays within its allowance, #1438)
+  [
+    "a deep literal's element of another type",
+    `let xs = [${nest(300, "1")}, ${nest(300, '"bad"')}]\nexit`,
+    (at) => ["compile-error", `written-target compile-error @${at('"bad"')}`],
+  ],
+  [
+    "a deep literal's element copying a written union",
+    `let typed: integer | string = 1\nlet xs = [${nest(300, "typed")}, ${nest(300, '"ok"')}]\nexit`,
+    () => ["valid"],
+    // (reversed, its deepest paths' decisions cost depth × copies past their allowance, G6 in #1319's design-round
+    // list: one restart, then a stop in it stops the analysis,
+    // docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-183; the G6 repair returns it to
+    // `valid`)
+    (at) => [
+      "warning-runtime-check",
+      `budget not-checked-budget @${at("[")}`,
+      `budget warning-runtime-check @${at("[")}`,
+      `copy-type xs [unknown] @${at("[")}`,
+    ],
+  ],
+  [
+    "a default's other kind beside the receiving union",
+    'function alternate(flag: boolean): string | integer {\n  if flag { return "allowed" }\n  return 2\n}\nlet r: boolean | string = toBoolean("bad", default: alternate(true))\nexit',
+    // (known text the conversion cannot convert is its own error, `default:` or not: V30 §13, #1105)
+    (at) => [
+      "compile-error",
+      `static compile-error @${at('"bad"')}`,
+      `written-target warning-runtime-check @${at("toBoolean")}`,
+      `written-target warning-runtime-check @${at("alternate(true)")}`,
+      `copy-type r [boolean, string] @${at("toBoolean")}`,
+      `copy-type alternate.result [string, boolean] @${at("alternate(true)")}`,
+    ],
+  ],
+  [
+    "a lazy file default of another kind",
+    'let r = fileFromBase64("!", default: false)\nexit',
+    (at) => ["compile-error", `written-target compile-error @${at("false")}`],
+  ],
+  [
+    "a lazy decryption default of external data",
+    'let r = decryptText("!", password: "p", default: hostValue)\nexit',
+    (at) => [
+      "warning-runtime-check",
+      `written-target warning-runtime-check @${at("hostValue")}`,
+      `copy-type hostValue [string] @${at("hostValue")}`,
+      `copy-type hostValue [unknown] boundary @${at("hostValue")}`,
+    ],
+  ],
+  [
+    "a lazy decryption default landing in a written union",
+    'let r: string | boolean = decryptFile("!", password: "p", default: false)\nexit',
+    () => ["valid"],
+  ],
+  [
+    "a lazy file default of null",
+    'let r = fileFromBase64("!", default: null)\nexit',
+    () => ["valid"],
+  ],
+  [
+    "a copy of a written list stored a list of another kind, its elements unread",
+    'let typed: integer[] = [1]\nlet copy = typed\nlet other = ["bad"]\ncopy = other\nexit',
+    (at) => ["compile-error", `written-target compile-error @${at("other\nexit")}`],
+  ],
+  [
+    "a copy of a written integer stored a possible null, then external data",
+    "let typed: integer = 1\nlet copy = typed\ncopy = [1, null][1]\ncopy = hostValue\nexit",
+    (at) => [
+      "warning-runtime-check",
+      `written-target warning-runtime-check @${at("[1, null]")}`,
+      `written-target warning-runtime-check @${at("hostValue")}`,
+      `null-check copy [integer] @${at("[1, null]")}`,
+      `copy-type copy [integer] @${at("hostValue")}`,
+      `copy-type copy [integer] boundary @${at("hostValue")}`,
+    ],
+  ],
+  // the earliest deciding element decides a literal's path, a written copy only where it comes first; a `null` or an
+  // unknown before it decides nothing (review: Astra's B2)
+  [
+    "a fraction before a copy of a written integer",
+    "let whole: integer = 1\nlet xs = [2.5, whole]\nxs = [3.5]\nexit",
+    () => ["valid"],
+  ],
+  [
+    "a fraction before a copy of a written integer, in dict values and shared fields",
+    "let whole: integer = 1\nlet d = dict{a: 2.5, b: whole}\nd = dict{c: 3.5}\nlet rows = [{n: 2.5}, {n: whole}]\nrows = [{n: 3.5}]\nexit",
+    () => ["valid"],
+  ],
+  [
+    "a whole number before a copy of a written text",
+    'let s: string = "a"\nlet xs = [1, s]\nexit',
+    (at) => ["compile-error", `written-target compile-error @${at("s]")}`],
+  ],
+  [
+    // (`[whole, 2.5]` holds numbers, #2289 B1 rule 1; `ys` the declared integer its one deciding element has)
+    "a copy of a written integer first, a null and external data before it",
+    "let whole: integer = 1\nlet xs = [whole, 2.5]\nlet ys = [null, hostValue, whole]\nys = [3.5]\nexit",
+    (at) => [
+      "compile-error",
+      `written-target compile-error @${at("3.5")}`,
+      // (the null element keeps the element optional, ADR 0021 1.3; the external one owes its check and boundary)
+      `written-target warning-runtime-check @${at("hostValue")}`,
+      `copy-type ys.element [integer, null] @${at("hostValue")}`,
+      `copy-type ys.element [integer, null] boundary @${at("hostValue")}`,
+    ],
+  ],
+  // a return's literal decides the result's paths as a store's does: a later return of another element kind errs
+  // (ADR 0021 1.5, A8; review r5)
+  [
+    "two returns' lists of different element kinds",
+    'function g(flag: boolean) {\n  if flag { return [1] }\n  return ["x"]\n}\nlet r = g(true)\nexit',
+    (at) => ["compile-error", `written-target compile-error @${at('"x"')}`],
+  ],
+  // a return of another kind is rejected, so the result's readers see the first return's kind (A6, F23; review:
+  // Astra's D1); a written result's alike
+  [
+    "a return of another element kind, its result read",
+    'function f(flag: boolean) {\n  if flag { return [3] }\n  return ["bad"]\n}\nlet n: integer = f(true).first\nexit',
+    (at) => ["compile-error", `written-target compile-error @${at('"bad"')}`],
+  ],
+  [
+    "a return of another kind, its result read",
+    'function f(flag: boolean) {\n  if flag { return 3 }\n  return "bad"\n}\nlet n: integer = f(true)\nexit',
+    (at) => ["compile-error", `written-target compile-error @${at('"bad"')}`],
+  ],
+  // a literal's `null` element beside the copy makes the element optional (ADR 0021 1.3, A8), its type strict
+  [
+    "a list whose first element copies a written integer, a later one possibly null, then external data",
+    "let typed: integer = 1\nlet xs = [typed, [1, null][1], hostValue]\nexit",
+    (at) => [
+      "warning-runtime-check",
+      `written-target warning-runtime-check @${at("hostValue")}`,
+      `copy-type xs.element [integer, null] @${at("hostValue")}`,
+      `copy-type xs.element [integer, null] boundary @${at("hostValue")}`,
+    ],
+  ],
+  // (a possible misfit warns at the store's value, the literal; an error would sit at its innermost expression)
+  [
+    // (a number beside the written integer makes the set's elements numbers, #2289 B1 rule 1: nothing to check)
+    "a set whose first element copies a written integer, a later one possibly a fraction",
+    "let typed: integer = 1\nlet xs = set[typed, [1, 2.5][1]]\nexit",
+    () => ["valid"],
+  ],
+  [
+    "a default whose written contract fits",
+    "let fallback: integer = hostValue\nlet result = [1].get(2, default: fallback)\nexit",
+    (at) => [
+      "warning-runtime-check",
+      `written-target warning-runtime-check @${at("hostValue")}`,
+      `copy-type fallback [integer] @${at("hostValue")}`,
+      `copy-type fallback [integer] boundary @${at("hostValue")}`,
+    ],
+  ],
+  // G3 2c: the earliest decider read through the carriers' transfers (`admission/transfers.ts`)
+  [
+    "nested selections' element of another type",
+    'let seed = "s"\nlet xs = [[[[seed, "o"][0], "o"][0], "o"][0], 1]\nexit',
+    (at) => ["compile-error", `written-target compile-error @${at("1]")}`],
+  ],
+  [
+    "a choice object's selected value read below the choice",
+    'let out = askChoice [{text: "a", value: {n: 1}}, {text: "b", value: {n: "x"}}]\nsay "${out.n}"\nexit',
+    // (each object as a button's value is TSV029's error too since S9b)
+    (at) => [
+      "compile-error",
+      `operator compile-error @${at("{n: 1}")}`,
+      `operator compile-error @${at('{n: "x"}')}`,
+      `written-target compile-error @${at('"x"')}`,
+    ],
+  ],
+  [
+    "the choice objects in the other order",
+    'let out = askChoice [{text: "b", value: {n: "x"}}, {text: "a", value: {n: 1}}]\nsay "${out.n}"\nexit',
+    (at) => [
+      "compile-error",
+      `operator compile-error @${at('{n: "x"}')}`,
+      `operator compile-error @${at("{n: 1}")}`,
+      `written-target compile-error @${at("1}")}`,
+    ],
+  ],
+  [
+    "nested selections of a nullable written source",
+    'let typed: string? = hostValue\nlet xs = [[[typed, "o"][0], "o"][0], 1]\nexit',
+    (at) => [
+      "compile-error",
+      `copy-type typed [string, null] @${at("hostValue")}`,
+      `copy-type typed [string, null] boundary @${at("hostValue")}`,
+      `written-target compile-error @${at("1]")}`,
+      `written-target warning-runtime-check @${at("hostValue")}`,
+    ],
+  ],
+  [
+    "nested selections before a fallback",
+    'let seed = "s"\nlet xs = [([[seed, "o"][0], "o"][0] otherwise 2), 1]\nexit',
+    (at) => [
+      "compile-error",
+      `copy-type xs.element [string] @${at("[(")}`,
+      // (#1072, V30 §18: the selection is never null, so its fallback never runs; the fallback stays checked)
+      `static warning @${at("otherwise 2")}`,
+      `written-target compile-error @${at("2)")}`,
+      `written-target compile-error @${at("1]")}`,
+      `written-target warning-runtime-check @${at("[(")}`,
+    ],
+  ],
+  [
+    "nested selections as a default",
+    'let seed = ["s"]\nlet xs = [seed.get(0, default: [["d", "o"][0], "o"][0]), 1]\nexit',
+    (at) => [
+      "warning-runtime-check",
+      `copy-type xs.element [integer] @${at("[seed")}`,
+      `written-target warning-runtime-check @${at("[seed")}`,
+    ],
+  ],
+  [
+    "a place decided below nested selections of objects",
+    'let seed = {p: "s"}\nlet box = [[seed, {p: "o"}][0], {p: "o"}][0]\nbox = {p: 2}\nsay box.p\nexit',
+    (at) => ["compile-error", `written-target compile-error @${at("2}")}`],
+  ],
+];
+
 /**
  * Admission's rules over stores, literals and fallbacks that the set leaves untested (review r1 of M4 S6), each in both
  * orders with its record, sites written as the text they start at: a declaration's start value decides before an
@@ -186,332 +513,6 @@ test("a chain of methods without a category stays opaque", () => {
  * below a choice of choice objects, in both orders of the objects.
  */
 test("admission decides from the start value, keeps written copies, rejects every definite misfit, and checks fallbacks per kind", () => {
-  const f =
-    'function f(flag: boolean): string | boolean {\n  if flag { return "bad" }\n  return false\n}\n';
-  const nest = (depth: number, value: string): string =>
-    `${"[".repeat(depth)}${value}${"]".repeat(depth)}`;
-  // (a fourth part: what the reversed order gives where it differs)
-  const programs: readonly (
-    | readonly [string, string, (at: (text: string) => number) => string[]]
-    | readonly [
-        string,
-        string,
-        (at: (text: string) => number) => string[],
-        (at: (text: string) => number) => string[],
-      ]
-  )[] = [
-    [
-      "a start value after an earlier store in a function",
-      'function change { n = "bad" }\nlet n = 1\nrepeat n {}\nexit',
-      (at) => ["compile-error", `written-target compile-error @${at('"bad"')}`],
-    ],
-    [
-      "a literal element copying a written union",
-      'let original: integer | string = 1\nlet xs = [original, "ok"]\nsay xs\nexit',
-      () => ["valid"],
-    ],
-    [
-      "a dict value copying a written union",
-      'let original: integer | string = 1\nlet d = dict{a: original, b: "ok"}\nsay d\nexit',
-      () => ["valid"],
-    ],
-    [
-      "a shared field copying a written union",
-      'let original: integer | string = 1\nlet rows = [{n: original}, {n: "ok"}]\nsay rows\nexit',
-      () => ["valid"],
-    ],
-    [
-      "no kind fitting a decided field",
-      `${f}let box = {n: 1}\nbox.n = f(true)\nsay box.n\nexit`,
-      (at) => ["compile-error", `written-target compile-error @${at("f(true)")}`],
-    ],
-    [
-      "no kind fitting a decided element or entry",
-      `${f}let xs = [1]\nxs.add(f(true))\nlet d = dict{k: 1}\nd["k"] = f(true)\nexit`,
-      (at) => [
-        "compile-error",
-        `written-target compile-error @${at("f(true))")}`,
-        `written-target compile-error @${at("f(true)\nexit")}`,
-      ],
-    ],
-    [
-      "a null into a copy of a written binding",
-      "let n: integer = 1\nlet copy = n\ncopy = null\nrepeat copy {}\nexit",
-      (at) => ["compile-error", `written-target compile-error @${at("null")}`],
-    ],
-    [
-      "a literal's element of another type",
-      'let xs = [1, "bad"]\nlet r: integer = xs.first\nexit',
-      (at) => ["compile-error", `written-target compile-error @${at('"bad"')}`],
-    ],
-    [
-      "a literal's nested element of another type",
-      'let xs = [{n: 1}, {n: "bad"}]\nexit',
-      (at) => ["compile-error", `written-target compile-error @${at('"bad"')}`],
-    ],
-    [
-      "an unknown fallback landing in a written union",
-      "let r: integer | string = [1, null][1] otherwise hostValue\nexit",
-      (at) => [
-        "warning-runtime-check",
-        `written-target warning-runtime-check @${at("[1, null]")}`,
-        `written-target warning-runtime-check @${at("hostValue")}`,
-        `copy-type r [integer, string] @${at("[1, null]")}`,
-        `copy-type hostValue [integer, number, string] @${at("hostValue")}`,
-        `copy-type hostValue [unknown] boundary @${at("hostValue")}`,
-      ],
-    ],
-    [
-      "a fallback of two other kinds",
-      `${f}let x = [1, null][1] otherwise f(true)\nexit`,
-      (at) => [
-        "warning-runtime-check",
-        `written-target warning-runtime-check @${at("f(true)")}`,
-        `written-target warning-runtime-check @${at("f(true)")}`,
-        `copy-type f.result [integer, number] @${at("f(true)")}`,
-        `copy-type f.result [integer, number] @${at("f(true)")}`,
-      ],
-    ],
-    [
-      "a written integer copied beside a whole number",
-      "let n: integer = 1\nlet xs = [n, 2]\nrepeat xs[0] {}\nlet rows = [{n: n}, {n: 2}]\nexit",
-      () => ["valid"],
-    ],
-    [
-      // (#2289 B1 rule 1: whole numbers beside a number are numbers, whatever is declared)
-      "a written integer copied beside a fraction",
-      "let n: integer = 1\nlet xs = [n, 2.5]\nexit",
-      () => ["valid"],
-    ],
-    [
-      "a written union copied beside a whole number",
-      'let n: integer | string = "a"\nlet d = dict{first: n, second: 2}\nexit',
-      () => ["valid"],
-    ],
-    [
-      "no possible kind fitting a decided field",
-      `${f}let box = {n: 1}\nbox.n = f(true)\nrepeat box.n {}\nexit`,
-      (at) => ["compile-error", `written-target compile-error @${at("f(true)")}`],
-    ],
-    // (the decision of `xs` grows with the literal's depth, never its square, so it stays within its allowance, #1438)
-    [
-      "a deep literal's element of another type",
-      `let xs = [${nest(300, "1")}, ${nest(300, '"bad"')}]\nexit`,
-      (at) => ["compile-error", `written-target compile-error @${at('"bad"')}`],
-    ],
-    [
-      "a deep literal's element copying a written union",
-      `let typed: integer | string = 1\nlet xs = [${nest(300, "typed")}, ${nest(300, '"ok"')}]\nexit`,
-      () => ["valid"],
-      // (reversed, its deepest paths' decisions cost depth × copies past their allowance, G6 in #1319's design-round
-      // list: one restart, then a stop in it stops the analysis,
-      // docs/specifications/type-inference-accepted-record/stops-and-finishing.md#r4-183; the G6 repair returns it to
-      // `valid`)
-      (at) => [
-        "warning-runtime-check",
-        `budget not-checked-budget @${at("[")}`,
-        `budget warning-runtime-check @${at("[")}`,
-        `copy-type xs [unknown] @${at("[")}`,
-      ],
-    ],
-    [
-      "a default's other kind beside the receiving union",
-      'function alternate(flag: boolean): string | integer {\n  if flag { return "allowed" }\n  return 2\n}\nlet r: boolean | string = toBoolean("bad", default: alternate(true))\nexit',
-      // (known text the conversion cannot convert is its own error, `default:` or not: V30 §13, #1105)
-      (at) => [
-        "compile-error",
-        `static compile-error @${at('"bad"')}`,
-        `written-target warning-runtime-check @${at("toBoolean")}`,
-        `written-target warning-runtime-check @${at("alternate(true)")}`,
-        `copy-type r [boolean, string] @${at("toBoolean")}`,
-        `copy-type alternate.result [string, boolean] @${at("alternate(true)")}`,
-      ],
-    ],
-    [
-      "a lazy file default of another kind",
-      'let r = fileFromBase64("!", default: false)\nexit',
-      (at) => ["compile-error", `written-target compile-error @${at("false")}`],
-    ],
-    [
-      "a lazy decryption default of external data",
-      'let r = decryptText("!", password: "p", default: hostValue)\nexit',
-      (at) => [
-        "warning-runtime-check",
-        `written-target warning-runtime-check @${at("hostValue")}`,
-        `copy-type hostValue [string] @${at("hostValue")}`,
-        `copy-type hostValue [unknown] boundary @${at("hostValue")}`,
-      ],
-    ],
-    [
-      "a lazy decryption default landing in a written union",
-      'let r: string | boolean = decryptFile("!", password: "p", default: false)\nexit',
-      () => ["valid"],
-    ],
-    [
-      "a lazy file default of null",
-      'let r = fileFromBase64("!", default: null)\nexit',
-      () => ["valid"],
-    ],
-    [
-      "a copy of a written list stored a list of another kind, its elements unread",
-      'let typed: integer[] = [1]\nlet copy = typed\nlet other = ["bad"]\ncopy = other\nexit',
-      (at) => ["compile-error", `written-target compile-error @${at("other\nexit")}`],
-    ],
-    [
-      "a copy of a written integer stored a possible null, then external data",
-      "let typed: integer = 1\nlet copy = typed\ncopy = [1, null][1]\ncopy = hostValue\nexit",
-      (at) => [
-        "warning-runtime-check",
-        `written-target warning-runtime-check @${at("[1, null]")}`,
-        `written-target warning-runtime-check @${at("hostValue")}`,
-        `null-check copy [integer] @${at("[1, null]")}`,
-        `copy-type copy [integer] @${at("hostValue")}`,
-        `copy-type copy [integer] boundary @${at("hostValue")}`,
-      ],
-    ],
-    // the earliest deciding element decides a literal's path, a written copy only where it comes first; a `null` or an
-    // unknown before it decides nothing (review: Astra's B2)
-    [
-      "a fraction before a copy of a written integer",
-      "let whole: integer = 1\nlet xs = [2.5, whole]\nxs = [3.5]\nexit",
-      () => ["valid"],
-    ],
-    [
-      "a fraction before a copy of a written integer, in dict values and shared fields",
-      "let whole: integer = 1\nlet d = dict{a: 2.5, b: whole}\nd = dict{c: 3.5}\nlet rows = [{n: 2.5}, {n: whole}]\nrows = [{n: 3.5}]\nexit",
-      () => ["valid"],
-    ],
-    [
-      "a whole number before a copy of a written text",
-      'let s: string = "a"\nlet xs = [1, s]\nexit',
-      (at) => ["compile-error", `written-target compile-error @${at("s]")}`],
-    ],
-    [
-      // (`[whole, 2.5]` holds numbers, #2289 B1 rule 1; `ys` the declared integer its one deciding element has)
-      "a copy of a written integer first, a null and external data before it",
-      "let whole: integer = 1\nlet xs = [whole, 2.5]\nlet ys = [null, hostValue, whole]\nys = [3.5]\nexit",
-      (at) => [
-        "compile-error",
-        `written-target compile-error @${at("3.5")}`,
-        // (the null element keeps the element optional, ADR 0021 1.3; the external one owes its check and boundary)
-        `written-target warning-runtime-check @${at("hostValue")}`,
-        `copy-type ys.element [integer, null] @${at("hostValue")}`,
-        `copy-type ys.element [integer, null] boundary @${at("hostValue")}`,
-      ],
-    ],
-    // a return's literal decides the result's paths as a store's does: a later return of another element kind errs
-    // (ADR 0021 1.5, A8; review r5)
-    [
-      "two returns' lists of different element kinds",
-      'function g(flag: boolean) {\n  if flag { return [1] }\n  return ["x"]\n}\nlet r = g(true)\nexit',
-      (at) => ["compile-error", `written-target compile-error @${at('"x"')}`],
-    ],
-    // a return of another kind is rejected, so the result's readers see the first return's kind (A6, F23; review:
-    // Astra's D1); a written result's alike
-    [
-      "a return of another element kind, its result read",
-      'function f(flag: boolean) {\n  if flag { return [3] }\n  return ["bad"]\n}\nlet n: integer = f(true).first\nexit',
-      (at) => ["compile-error", `written-target compile-error @${at('"bad"')}`],
-    ],
-    [
-      "a return of another kind, its result read",
-      'function f(flag: boolean) {\n  if flag { return 3 }\n  return "bad"\n}\nlet n: integer = f(true)\nexit',
-      (at) => ["compile-error", `written-target compile-error @${at('"bad"')}`],
-    ],
-    // a literal's `null` element beside the copy makes the element optional (ADR 0021 1.3, A8), its type strict
-    [
-      "a list whose first element copies a written integer, a later one possibly null, then external data",
-      "let typed: integer = 1\nlet xs = [typed, [1, null][1], hostValue]\nexit",
-      (at) => [
-        "warning-runtime-check",
-        `written-target warning-runtime-check @${at("hostValue")}`,
-        `copy-type xs.element [integer, null] @${at("hostValue")}`,
-        `copy-type xs.element [integer, null] boundary @${at("hostValue")}`,
-      ],
-    ],
-    // (a possible misfit warns at the store's value, the literal; an error would sit at its innermost expression)
-    [
-      // (a number beside the written integer makes the set's elements numbers, #2289 B1 rule 1: nothing to check)
-      "a set whose first element copies a written integer, a later one possibly a fraction",
-      "let typed: integer = 1\nlet xs = set[typed, [1, 2.5][1]]\nexit",
-      () => ["valid"],
-    ],
-    [
-      "a default whose written contract fits",
-      "let fallback: integer = hostValue\nlet result = [1].get(2, default: fallback)\nexit",
-      (at) => [
-        "warning-runtime-check",
-        `written-target warning-runtime-check @${at("hostValue")}`,
-        `copy-type fallback [integer] @${at("hostValue")}`,
-        `copy-type fallback [integer] boundary @${at("hostValue")}`,
-      ],
-    ],
-    // G3 2c: the earliest decider read through the carriers' transfers (`admission/transfers.ts`)
-    [
-      "nested selections' element of another type",
-      'let seed = "s"\nlet xs = [[[[seed, "o"][0], "o"][0], "o"][0], 1]\nexit',
-      (at) => ["compile-error", `written-target compile-error @${at("1]")}`],
-    ],
-    [
-      "a choice object's selected value read below the choice",
-      'let out = askChoice [{text: "a", value: {n: 1}}, {text: "b", value: {n: "x"}}]\nsay "${out.n}"\nexit',
-      // (each object as a button's value is TSV029's error too since S9b)
-      (at) => [
-        "compile-error",
-        `operator compile-error @${at("{n: 1}")}`,
-        `operator compile-error @${at('{n: "x"}')}`,
-        `written-target compile-error @${at('"x"')}`,
-      ],
-    ],
-    [
-      "the choice objects in the other order",
-      'let out = askChoice [{text: "b", value: {n: "x"}}, {text: "a", value: {n: 1}}]\nsay "${out.n}"\nexit',
-      (at) => [
-        "compile-error",
-        `operator compile-error @${at('{n: "x"}')}`,
-        `operator compile-error @${at("{n: 1}")}`,
-        `written-target compile-error @${at("1}")}`,
-      ],
-    ],
-    [
-      "nested selections of a nullable written source",
-      'let typed: string? = hostValue\nlet xs = [[[typed, "o"][0], "o"][0], 1]\nexit',
-      (at) => [
-        "compile-error",
-        `copy-type typed [string, null] @${at("hostValue")}`,
-        `copy-type typed [string, null] boundary @${at("hostValue")}`,
-        `written-target compile-error @${at("1]")}`,
-        `written-target warning-runtime-check @${at("hostValue")}`,
-      ],
-    ],
-    [
-      "nested selections before a fallback",
-      'let seed = "s"\nlet xs = [([[seed, "o"][0], "o"][0] otherwise 2), 1]\nexit',
-      (at) => [
-        "compile-error",
-        `copy-type xs.element [string] @${at("[(")}`,
-        // (#1072, V30 §18: the selection is never null, so its fallback never runs; the fallback stays checked)
-        `static warning @${at("otherwise 2")}`,
-        `written-target compile-error @${at("2)")}`,
-        `written-target compile-error @${at("1]")}`,
-        `written-target warning-runtime-check @${at("[(")}`,
-      ],
-    ],
-    [
-      "nested selections as a default",
-      'let seed = ["s"]\nlet xs = [seed.get(0, default: [["d", "o"][0], "o"][0]), 1]\nexit',
-      (at) => [
-        "warning-runtime-check",
-        `copy-type xs.element [integer] @${at("[seed")}`,
-        `written-target warning-runtime-check @${at("[seed")}`,
-      ],
-    ],
-    [
-      "a place decided below nested selections of objects",
-      'let seed = {p: "s"}\nlet box = [[seed, {p: "o"}][0], {p: "o"}][0]\nbox = {p: 2}\nsay box.p\nexit',
-      (at) => ["compile-error", `written-target compile-error @${at("2}")}`],
-    ],
-  ];
   const differing: string[] = [];
   for (const [name, source, expect, expectReversed = expect] of programs) {
     const request = coreRequest([{ path: "main.tease", source }]);
