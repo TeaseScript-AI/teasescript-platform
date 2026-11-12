@@ -156,8 +156,14 @@ test("a native writer taken from a prototype is refused in any position, in core
     "const read = Map.prototype.get.call(map, key);",
     "const known = Set.prototype.has;",
   ].join("\n");
-  for (const level of ["file", "module", null, "helper"])
-    assert.deepEqual(guarded(lines, level), [1, 2, 3, 4, 5, 6, 7, 8], String(level));
+  assert.deepEqual(guarded(lines, "helper"), [1, 2, 3, 4, 5, 6, 7, 8]);
+  // (in type inference the closed meta-object layer refuses every `.prototype`, a reader's too)
+  for (const level of ["file", "module", null, "meta"])
+    assert.deepEqual(
+      [...new Set(guarded(lines, level))],
+      [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      String(level),
+    );
 });
 
 test("a maker is given a fresh literal or nothing (#1072 R25)", () => {
@@ -180,27 +186,67 @@ test("a maker is given a fresh literal or nothing (#1072 R25)", () => {
   );
 });
 
-test("`Reflect.set`, a frozen-state branch, `structuredClone` and an in-place definer, by its name anywhere, are refused in the checked core files (#1072 R21)", () => {
-  const lines = [
+test("`structuredClone` is refused in the checked core files alone (#1072 R21)", () => {
+  const lines = "const copy = structuredClone(value);";
+  for (const level of ["file", "module"]) assert.deepEqual(guarded(lines, level), [1], level);
+  for (const level of [null, "meta", "helper"])
+    assert.deepEqual(guarded(lines, level), [], String(level));
+});
+
+test("the meta-object layer is closed in type inference: `Object`'s listed members, assignment and a kind's own methods alone (#1072 R30)", () => {
+  // (one line per refused form, each refused alone)
+  const refused = [
     "Reflect.set(value, 'n', 1);",
+    "Reflect.get(value, 'n');",
     "if (Object.isFrozen(value)) skip();",
     "Object.isSealed(value);",
     "Object.isExtensible(value);",
-    "const copy = structuredClone(value);",
-    "Reflect.get(value, 'n');",
+    "Object.getOwnPropertyDescriptor(value, 'n');",
+    "Object.getPrototypeOf(map).set.call(map, 'x', 1);",
+    "Object.setPrototypeOf(value, null);",
     "Object.defineProperty(value, 'n', { get: () => 1 });",
-    "Object.defineProperties(value, {});",
-    "Reflect.defineProperty(value, 'n', { value: 1 });",
     "const define = Object.defineProperty;",
     "const { defineProperties } = Object;",
     "Reflect['defineProperty'](value, 'n', { value: 1 });",
+    "value.__defineGetter__('n', () => 1);",
     "value.__defineSetter__('n', () => {});",
-    "const definesNothing = Object.getOwnPropertyDescriptor(value, 'n');",
-  ].join("\n");
-  assert.deepEqual(guarded(lines, "file"), [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13]);
-  assert.deepEqual(guarded(lines, "module"), [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13]);
-  assert.deepEqual(guarded(lines, null), []);
-  assert.deepEqual(guarded(lines, "helper"), []);
+    "delete value.n;",
+    "map.prototype;",
+    "value.__proto__;",
+    "value['__proto__'];",
+    "map.constructor;",
+    "value['constructor'];",
+    "const O = Object;",
+    "Object[name](value);",
+    "globalThis.Object;",
+    "new Function('return 1');",
+    "eval('1');",
+    "class Owner { constructor() { return existing; } }",
+  ];
+  // (a control per form left open: each listed member of `Object`, assignment, a kind's own method, a nested
+  // function's return in a constructor, and the refused names where they name no value)
+  const passed = [
+    "Object.freeze(value);",
+    "Object.hasOwn(value, 'n');",
+    "Object.keys(value).length;",
+    "Object.values(value);",
+    "Object.entries(value);",
+    "Object.fromEntries([]);",
+    "Object.assign(value, { n: 1 });",
+    "Object.is(value, other);",
+    "value.n = 1;",
+    "const { n, ...rest } = value; const spread = { ...value, n: 2 };",
+    "map.set('x', 1); map.delete('x');",
+    "class Owner { constructor() { const make = () => { return 1; }; this.n = make(); } }",
+    "type Keys = keyof typeof value; const shown: Record<string, number> = { constructor: 1, eval: 2 };",
+    "interface Shape { prototype: number; Reflect(): void }",
+  ];
+  for (const level of ["file", "module", null, "meta"]) {
+    for (const form of refused)
+      assert.deepEqual([...new Set(guarded(form, level))], [1], `${level}: ${form}`);
+    for (const form of passed) assert.deepEqual(guarded(form, level), [], `${level}: ${form}`);
+  }
+  assert.deepEqual(guarded([...refused, ...passed].join("\n"), "helper"), []);
 });
 
 test("a function is registered right below the comment naming its captures (#1072 R26)", () => {
