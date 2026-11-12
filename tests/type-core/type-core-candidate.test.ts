@@ -67,7 +67,11 @@ import {
   type CheckEvent,
   type PredictedRun,
 } from "../helpers/type-core-derived.js";
-import { heldBack, readFixture } from "../helpers/type-core/type-core-fixture.js";
+import {
+  type FixtureRecord,
+  heldBack,
+  readFixture,
+} from "../helpers/type-core/type-core-fixture.js";
 import { inMode, MODES } from "../helpers/type-core-oracles.js";
 import {
   assignments,
@@ -341,6 +345,35 @@ test("the route's diagnostics pair one to one with a record's, so one expected d
   assert.equal(unmatchedDiagnostics(twice, record.expected.diagnostics).length, 2);
 });
 
+/**
+ * Projects of two files inside the slice, recorded by today's analysis: the record loop's own cases of several files, which
+ * no fixture record inside the slice has. Each second file holds a checked store at the first file's offsets.
+ */
+function projectRecords(): FixtureRecord[] {
+  const projects = [
+    ["let n: integer = hostValue\nexit\n", "let z: integer = hostValue\nexit\n"],
+    [
+      'let n: integer = load "a", default: hostValue\nexit\n',
+      'let z: integer = load "b", default: hostValue\nexit\n',
+    ],
+  ];
+  return projects.map(([first, second], index) => {
+    const files = [
+      { path: "main.tease", source: first! },
+      { path: "part.tease", source: second! },
+    ];
+    const request = coreRequest(files);
+    assert.ok(request !== null, `project ${index}`);
+    return {
+      name: `two files ${index}`,
+      cells: [],
+      owner: null,
+      files,
+      expected: compactAnalysis(request),
+    };
+  });
+}
+
 test("every positive-list record the candidate route reaches plans and runs as its record derives, in both orders", (t) => {
   const routed = new Set(Object.values(RECORD_CODES).flat());
   const accepted: string[] = [];
@@ -354,7 +387,7 @@ test("every positive-list record the candidate route reaches plans and runs as i
   let projects = 0;
   let runs = 0;
   let compared = 0;
-  for (const record of readFixture()) {
+  for (const record of [...readFixture(), ...projectRecords()]) {
     if (heldBack(record) !== null) continue;
     positive += 1;
     let result: ReturnType<typeof compileProjectWithBackend>;
@@ -501,7 +534,10 @@ test("every positive-list record the candidate route reaches plans and runs as i
         `${at}: the checked stores`,
       );
       const companionSyntax = syntaxOf(companion.source);
-      const companionContent = derive(companionSyntax, record.expected).content;
+      const companionContent = derive(
+        companionSyntax,
+        recordOfFile(record.expected, record.files[0]!.path),
+      ).content;
       assert.deepEqual(
         plannedContent(compiled.plan, companion.source),
         derivedContent(companionContent, companion.source),
@@ -570,6 +606,8 @@ test("every positive-list record the candidate route reaches plans and runs as i
       `discharges: ${listed(classes)}; outside the candidate slice (later port steps): ${listed(outside)}`,
   );
   assert.equal(accepted.length + counted, positive);
+  // each project of `projectRecords` went through the loop, not around it
+  assert.equal(projects, projectRecords().length);
   // the literal witnesses of the rules: each class and each original outcome the note names
   // each discharge by its kind and site: two at one site are classified each by its own check
   const verdicts: readonly (readonly [string, string, string])[] = [

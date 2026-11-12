@@ -3,9 +3,8 @@ import type { SyntaxKind } from "../../../src/type-inference/core/slice-syntax.j
 /*
  * The row guard's templates (#2500, `tests/type-core/type-core-row-guard.test.ts`): for each open row of the candidate
  * route's syntax table (`DISPOSITIONS`), one source per operand and store position of the construct, the host global
- * `hostValue` there, so its value is unknown to both checkers. A position whose value the slice refuses unless it is
- * known to be of a kind (a member's receiver, a list read by index) holds a variable of that kind instead, and the host
- * global stands in the operand beside it. A row without a position has one source that uses it. Sources are minimal
+ * `hostValue` there, so its value is unknown to both checkers, and one per shape of a call (`sliceCall`'s, with each of
+ * its arguments). A row without a position has one source that uses it. Sources are minimal
  * programs inside today's slice; the guard adds the `exit` each script ends with.
  */
 export const ROW_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly string[]>>> = {
@@ -19,6 +18,7 @@ export const ROW_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly string[
     "let x: integer = 1\nx = hostValue",
     "let x = 1\nx = hostValue",
     "let o = {n: 1}\no.n = hostValue",
+    "hostValue.n = 1",
   ],
   ifStatement: ['if hostValue == null {\n  say "y"\n} else {\n  say "n"\n}'],
   repeatStatement: ['repeat hostValue {\n  say "r"\n}'],
@@ -36,18 +36,36 @@ export const ROW_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly string[
   listLiteral: ["let xs: integer[] = [1, hostValue]"],
   objectLiteral: ["let o = {n: hostValue}"],
   parenthesizedExpression: ["let x: integer = (hostValue)"],
-  propertyAccessExpression: ["let o = {n: hostValue}\nlet x: integer = o.n"],
-  indexExpression: ["let xs = [1, 2]\nlet x = xs[hostValue]"],
-  rangeExpression: ["for i in 1..hostValue {\n  say i\n}"],
-  binaryExpression: ["let x: integer = hostValue otherwise 1", "let b = hostValue == null"],
+  propertyAccessExpression: ["let o = {n: hostValue}\nlet x: integer = o.n", "let x = hostValue.n"],
+  indexExpression: ["let xs = [1, 2]\nlet x = xs[hostValue]", "let x = hostValue[0]"],
+  rangeExpression: ["for i in 1..hostValue {\n  say i\n}", "for i in hostValue..3 {\n  say i\n}"],
+  binaryExpression: [
+    "let x: integer = hostValue otherwise 1",
+    "let a: integer? = null\nlet x: integer = a otherwise hostValue",
+    "let b = hostValue == null",
+    "let b = null != hostValue",
+  ],
   typeTestExpression: ["let b = hostValue is integer"],
   callExpression: [
     "let xs = [1]\nlet x: integer = xs.get(hostValue, default: 0)",
+    "let xs = [1]\nlet x: integer = xs.get(0, default: hostValue)",
+    "let x: integer = hostValue.get(0, default: 0)",
     "let n: integer = toInteger(hostValue, default: 0)",
+    'let n: integer = toInteger("1", default: hostValue)',
     "let v: integer = fromJson(hostValue, default: 1)",
+    'let v: integer = fromJson("bad", default: hostValue)',
+    'let v: integer = fromJson("1", default: 1, files: false)',
     "let f = fileFromBase64(hostValue, default: null)",
+    'let f = fileFromBase64("YQ==", default: hostValue)',
     'let t = decryptText(hostValue, password: "pw", default: "")',
+    'let t = decryptText("x", password: hostValue, default: "")',
+    'let t: string = decryptText("x", password: "pw", default: hostValue)',
+    'let t = decryptText("x", key: hostValue, default: "")',
+    'let f = decryptFile(hostValue, password: "pw", default: null)',
+    'let f = decryptFile(hostValue, key: "k", default: null)',
     'let t = "abc"\nlet b = t.contains(hostValue)',
+    'let b = hostValue.contains("a")',
+    "let xs = [2, 1]\nxs.sort()",
     "let t = toJson(hostValue)",
   ],
   loadExpression: [
@@ -90,6 +108,8 @@ export const DECLARED_RUN_DIFFERENCES: readonly {
   readonly template: string;
   readonly record: string;
   readonly field: string;
+  /** The template's text the check stands at in the route's plan (`main.tease`). */
+  readonly checkAt: string;
   readonly code: string;
   readonly at: string;
 }[] = [
@@ -98,6 +118,7 @@ export const DECLARED_RUN_DIFFERENCES: readonly {
     record:
       "V30 §16, reading an element with a default: a non-whole index of unknown type fails with TSR024 on the new type checker, and still gives the default on today's",
     field: "indexCheck",
+    checkAt: "xs.get(hostValue, default: 0)",
     code: "TSR024",
     at: "hostValue",
   },

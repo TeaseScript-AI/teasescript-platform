@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 
 import { DISPOSITIONS, type SyntaxKind } from "../../src/type-inference/core/slice-syntax.js";
+import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import {
   DECLARED_REFUSALS,
   DECLARED_RUN_DIFFERENCES,
@@ -127,6 +128,9 @@ function judge(guardCase: GuardCase, record: DifferentialRecord, seen: Set<strin
   const declared = DECLARED_RUN_DIFFERENCES.find(
     (difference) => script(difference.template) === guardCase.source,
   );
+  const modes = record.candidate.modes.map((mode) => mode.mode);
+  if (JSON.stringify(modes) !== JSON.stringify(HELD_MODES.map((mode) => mode.name)))
+    failures.push(`${record.name}: the record's modes are ${modes.join(", ")}, not the held modes`);
   for (const mode of record.candidate.modes) {
     const at = `${record.name} [${mode.mode}]`;
     if (guardCase.refusal !== undefined) {
@@ -149,7 +153,13 @@ function judge(guardCase: GuardCase, record: DifferentialRecord, seen: Set<strin
         declared !== undefined &&
         run.failure === null &&
         other?.failure === `${declared.code}@${start}:${start + declared.at.length}` &&
-        mode.plan?.checks.some((check) => check.field === declared.field)
+        mode.plan?.checks.some(
+          (check) =>
+            check.field === declared.field &&
+            check.path === "main.tease" &&
+            check.offset === guardCase.source.indexOf(declared.checkAt) &&
+            check.end === guardCase.source.indexOf(declared.checkAt) + declared.checkAt.length,
+        )
       ) {
         seen.add(`${declared.template} [${mode.mode}]`);
         return;
@@ -185,9 +195,8 @@ test("each open row's templates publish on the route, with today's checks and to
   const seen = new Set<string>();
   const failures = cases.flatMap((guardCase, index) => judge(guardCase, found[index]!, seen));
   // each declared run difference occurs in every mode
-  const modes = found[0]!.candidate.modes.map((mode) => mode.mode);
   for (const declared of DECLARED_RUN_DIFFERENCES)
-    for (const mode of modes)
+    for (const mode of HELD_MODES.map((held) => held.name))
       if (!seen.has(`${declared.template} [${mode}]`))
         failures.push(
           `the declared run difference no longer occurs: ${declared.template} [${mode}]`,
