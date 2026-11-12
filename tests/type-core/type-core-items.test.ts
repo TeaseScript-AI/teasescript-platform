@@ -41,13 +41,13 @@ const reasonWord = (reasons: number): ContextWord =>
     ] as const
   ).find(([bit]) => (reasons & bit) !== 0)?.[1] ?? "unknown";
 
-/** The words `reasonWord` gives. */
-const REASON_WORDS: readonly ContextWord[] = [
-  "unknown",
+/** The reasons whose words come before every condition's, and those words. */
+const EARLY_REASONS = REASON.external | REASON.opaque | REASON.deferred | REASON.missing;
+const EARLY_WORDS: readonly ContextWord[] = [
   "unmodelled",
-  "deferred-parameter",
   "missing",
-  "budget",
+  "deferred-parameter",
+  "unknown",
 ];
 
 const writerRank = (writer: Writer | null): number =>
@@ -109,8 +109,8 @@ test("the item algebra keeps its laws over random items from a fixed seed", () =
       merged,
     });
 
-    // the unknown a merge gives speaks its reasons' word where its parts' first word is a reasons' word, else that first
-    // word (#2486: kept by the word order, an earlier reasons' word outlived the reasons that gave it)
+    // the unknown a merge gives speaks its reasons' word where its parts' first word and its reasons come before every
+    // condition's, else that first word (#2486: kept by the word order, an earlier word outlived the reasons that gave it)
     const unknownWord = (reasons: number): ContextWord | null => {
       const first = [...a, ...b]
         .filter((item) => item.tag === "unknown")
@@ -118,7 +118,9 @@ test("the item algebra keeps its laws over random items from a fixed seed", () =
           (word, item) => (contextRank(item.context) < contextRank(word) ? item.context : word),
           null,
         );
-      return first !== null && REASON_WORDS.includes(first) ? reasonWord(reasons) : first;
+      return first !== null && EARLY_WORDS.includes(first) && (reasons & EARLY_REASONS) !== 0
+        ? reasonWord(reasons)
+        : first;
     };
     // nothing lost: definite stays definite unless guarded, every reason and ingress store kept (no boundary check is
     // erased), the earliest writer, the first context word (an unknown's as above), the mark, and external data without

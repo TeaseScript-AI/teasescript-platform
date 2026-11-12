@@ -29,8 +29,8 @@ export const REASON = { external: 1, opaque: 2, deferred: 4, missing: 8, budget:
  * The context words in the order a warning names the first (§3.4): the words of §3's steps 1 and 2, which are decided
  * first, then those of the exact path's conditions X1 to X7, then A7's `later`, and last `budget`, a value the analysis
  * stopped before deciding (B1, D4; S3 §5). `reasonContext` orders the reasons' own words differently (`external`'s
- * `unknown` before `deferred-parameter`); where the unknown a merge gives has a reasons' word, it is its reasons' one
- * (`mergeItems`, which an operation's result passes too), so those two orders never meet.
+ * `unknown` before `deferred-parameter`); where the unknown a merge gives has one of those words, it is its reasons'
+ * one (`mergeItems`, which an operation's result passes too), so the two orders never meet.
  */
 export const CONTEXT_WORDS = [
   "unmodelled",
@@ -248,7 +248,7 @@ export function firstContext(a: ContextWord | null, b: ContextWord | null): Cont
  * The word of one unknown's reasons: the first present in the rank `external` (`unknown`), `opaque`
  * (`unmodelled`), `deferred` (`deferred-parameter`), `missing` (`missing`), `budget` (`budget`); an unknown without
  * reasons says `unknown`. This order differs from `CONTEXT_WORDS`' (`deferred-parameter` comes before `unknown` there);
- * the unknown a merge gives takes this one where its word is one of these (`mergeItems`).
+ * the unknown a merge gives takes this one where its word and reasons come before every condition's (`mergeItems`).
  */
 export function reasonContext(reasons: number): ContextWord {
   if ((reasons & REASON.external) !== 0) return "unknown";
@@ -259,13 +259,13 @@ export function reasonContext(reasons: number): ContextWord {
   return "unknown";
 }
 
-/** The words `reasonContext` gives. */
-const REASON_WORDS: ReadonlySet<ContextWord> = new Set([
-  "unknown",
+/** The reasons whose words come before every condition's (`CONTEXT_WORDS`), and those words. */
+const EARLY_REASONS = REASON.external | REASON.opaque | REASON.deferred | REASON.missing;
+const EARLY_WORDS: ReadonlySet<ContextWord> = new Set([
   "unmodelled",
-  "deferred-parameter",
   "missing",
-  "budget",
+  "deferred-parameter",
+  "unknown",
 ]);
 
 /**
@@ -524,7 +524,8 @@ export function kindsInOrder<Kind extends ItemTag>(kinds: Iterable<Kind>): Kind[
  * The items of one value, one per kind, in their one order (`inItsOrder`): an item is definite when one of its
  * kind is (and none is guarded); the reasons and ingress stores of all are kept, so no merge drops a boundary check
  * (C9); the earliest writer and the first context word stand for the kind (F28, §3.4), but an `unknown` whose first
- * word is a reasons' word takes its reasons' one (`reasonContext`); a guarded one marks the kind (§3.2).
+ * word and reasons come before every condition's takes its reasons' word (`reasonContext`); a guarded one marks the
+ * kind (§3.2).
  */
 export function mergeItems(items: readonly Item[], scope: ItemScope): Item[] {
   const byTag = new Map<ItemTag, Item>();
@@ -534,10 +535,16 @@ export function mergeItems(items: readonly Item[], scope: ItemScope): Item[] {
     byTag.set(item.tag, earlier === undefined ? item : mergePair(earlier, item, scope.ingress));
   }
   // (#2486: an unknown's reasons' word is its reasons' one (`reasonContext`), which changes only as they grow; kept by
-  // the word order, an earlier word outlived the reasons that gave it and went round a solver component. A condition's
-  // word, `later` and no word stay as the order gives them: a type test hands them to the kind it proves)
+  // the word order, an earlier word outlived the reasons that gave it and went round a solver component. Only a word
+  // before every condition's becomes one, so the merge stays associative; a condition's word, `later`, `budget` and no
+  // word stay as the order gives them, and a type test hands them to the kind it proves)
   const unknown = byTag.get("unknown");
-  if (unknown !== undefined && unknown.context !== null && REASON_WORDS.has(unknown.context)) {
+  if (
+    unknown !== undefined &&
+    unknown.context !== null &&
+    EARLY_WORDS.has(unknown.context) &&
+    (unknown.reasons & EARLY_REASONS) !== 0
+  ) {
     const context = reasonContext(unknown.reasons);
     if (context !== unknown.context) byTag.set("unknown", { ...unknown, context });
   }
