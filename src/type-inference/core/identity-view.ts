@@ -6,7 +6,10 @@ import type {
   LetStatement,
   ParenthesizedExpression,
   Program,
+  Statement,
 } from "../../ast.js";
+import { changesEntries } from "../../dict-operations.js";
+import { listMethod } from "../../list-methods.js";
 import type { SourceSpan } from "../../source.js";
 import type { CoreRuntimeChecks, TypeCheckOptions, TypeCheckResult } from "../backend.js";
 import type { CoreAnalysisRequest, CoreFile } from "./program.js";
@@ -17,8 +20,9 @@ import type { CoreAnalysisRequest, CoreFile } from "./program.js";
  * parameter, with no type and no default, no result type, and a body that is exactly `return` of that parameter.
  * A call is read so only where its callee is a plain name that the project declares as exactly one function, that
  * declaration is an identity function visible from the call's file (global, or the file's own), no parameter or
- * variable of the enclosing function has that name, and the call has one positional argument; every other call stays
- * a call.
+ * variable of the enclosing function has that name, the call has one positional argument, and it stands in no place
+ * slot; every other call stays a call. A place slot is where the analysis reads parentheses as the place they hold, not
+ * its value (`placeSlots`): there the call's result is a copy of its argument, so the call stays one.
  *
  * The view keeps every node of the source that holds no such call and copies the others, a call becoming a
  * parenthesized expression with the call's span. The analysis reads the view; the front end and the plan read the
@@ -41,6 +45,8 @@ export interface IdentityView {
   readonly request: CoreAnalysisRequest;
   /** How many calls the view reads as their argument. */
   readonly calls: number;
+  /** The units of work the view took (`identitySteps`): none where the project declares no identity function. */
+  readonly steps: number;
   /** The node of the source that a node of the view stands for: a call for the parentheses that read it. */
   sourceOf<T extends SyntaxNode>(node: T): T;
   /** The node of the view that stands for a node of the source. */
@@ -109,7 +115,22 @@ const VIEWS = new WeakMap<CoreAnalysisRequest, IdentityView>();
 export function identityView(request: CoreAnalysisRequest): IdentityView {
   const known = VIEWS.get(request);
   if (known !== undefined) return known;
-  const eligible = identityNames(request.files.map((file) => file.program));
+  const programs = request.files.map((file) => file.program);
+  const eligible = identityNames(programs);
+  if (eligible === null) {
+    const none: IdentityView = {
+      source: request,
+      request,
+      calls: 0,
+      steps: 0,
+      sourceOf: kept,
+      viewOf: kept,
+    };
+    VIEWS.set(request, none);
+    return none;
+  }
+  // (the declarations scanned, then each file's walk)
+  let steps = programs.reduce((sum, program) => sum + program.statements.length, 0);
   const back = new Map<SyntaxNode, SyntaxNode>();
   const forth = new Map<SyntaxNode, SyntaxNode>();
   const sourceOf: Counterpart = (node) => counterpart(back, node);
@@ -118,6 +139,7 @@ export function identityView(request: CoreAnalysisRequest): IdentityView {
   const files = request.files.map((file, index): CoreFile => {
     const viewed = viewProgram(file.program, (name) => eligible(name, index), back, forth);
     calls += viewed.calls;
+    steps += viewed.steps;
     return viewed.calls === 0
       ? file
       : { ...file, program: viewed.program, picks: nodeMap(file.picks, viewOf) };
@@ -129,6 +151,7 @@ export function identityView(request: CoreAnalysisRequest): IdentityView {
         ? request
         : { ...request, files, options: translated(request.options, OPTIONS_INTO_VIEW, viewOf) },
     calls,
+    steps,
     sourceOf,
     viewOf,
   };
@@ -155,10 +178,12 @@ function counterpart<N extends SyntaxNode>(nodes: ReadonlyMap<SyntaxNode, Syntax
 
 /**
  * Whether a call from a file reads a name as its argument: a name the project declares as exactly one function, an
- * identity function, global or of that file. (A function is declared at a file's top level only: V30 refuses a nested
- * one.)
+ * identity function, global or of that file; `null` where it declares none. (A function is declared at a file's top
+ * level only: V30 refuses a nested one.)
  */
-function identityNames(programs: readonly Program[]): (name: string, file: number) => boolean {
+function identityNames(
+  programs: readonly Program[],
+): ((name: string, file: number) => boolean) | null {
   const declared = new Map<string, { declaration: FunctionDeclaration; file: number }[]>();
   programs.forEach((program, file) => {
     for (const statement of program.statements)
@@ -176,6 +201,7 @@ function identityNames(programs: readonly Program[]): (name: string, file: numbe
     if (same.length === 1 && only !== undefined && isIdentity(only.declaration))
       identities.set(name, only);
   }
+  if (identities.size === 0) return null;
   return (name, file) => {
     const only = identities.get(name);
     return only !== undefined && (only.declaration.global || only.file === file);
@@ -221,33 +247,46 @@ interface Visit {
 
 /**
  * A program's view: the program itself where it holds no call the view reads, else a copy of each node on the way to
- * one, each such call a parenthesized expression. Iterative, so a deep program does not deepen the native stack.
+ * one, each such call a parenthesized expression; with the units of work it took, a unit per value walked. Iterative,
+ * so a deep program does not deepen the native stack.
  */
 function viewProgram(
   program: Program,
   eligible: (name: string) => boolean,
   back: Map<SyntaxNode, SyntaxNode>,
   forth: Map<SyntaxNode, SyntaxNode>,
-): { readonly program: Program; readonly calls: number } {
-  // every container once, before its contents (a tree: each has one holder), and the calls the view reads
+): { readonly program: Program; readonly calls: number; readonly steps: number } {
+  // every container once, before its contents (a tree: each has one holder), the place slots below each, and the calls
+  // the view reads
   const order: unknown[] = [];
   const holders = new Map<unknown, unknown>();
+  const places = new Set<unknown>();
   const reads = new Set<CallExpression>();
+  let steps = 0;
   const stack: Visit[] = [{ value: program, holder: null, shadowed: new Set() }];
   for (let visit = stack.pop(); visit !== undefined; visit = stack.pop()) {
+    steps += 1;
     const { value, holder } = visit;
     if (value === null || typeof value !== "object" || holders.has(value)) continue;
     holders.set(value, holder);
     order.push(value);
-    const shadowed = isFunction(value)
-      ? new Set([...visit.shadowed, ...ownNames(value)])
-      : visit.shadowed;
-    if (isCall(value) && readsAsArgument(value, (name) => eligible(name) && !shadowed.has(name)))
+    let shadowed = visit.shadowed;
+    if (isFunction(value)) {
+      const own = ownNames(value);
+      steps += own.steps;
+      shadowed = new Set([...shadowed, ...own.names]);
+    }
+    if (isNode(value)) for (const slot of placeSlots(value, places.has(value))) places.add(slot);
+    if (
+      isCall(value) &&
+      !places.has(value) &&
+      readsAsArgument(value, (name) => eligible(name) && !shadowed.has(name))
+    )
       reads.add(value);
     for (const [key, child] of Object.entries(value))
       if (key !== "span") stack.push({ value: child, holder: value, shadowed });
   }
-  if (reads.size === 0) return { program, calls: 0 };
+  if (reads.size === 0) return { program, calls: 0, steps };
   // the containers on the way to a call the view reads, each rebuilt after its contents
   const changed = new Set<unknown>();
   for (const call of reads)
@@ -255,6 +294,7 @@ function viewProgram(
       changed.add(at);
   // (each changed container's copy; any other value is kept)
   const rebuilt = new Map<unknown, object>();
+  steps += order.length;
   for (const value of order.reverse()) {
     if (!changed.has(value)) continue;
     if (isCall(value) && reads.has(value)) {
@@ -282,7 +322,47 @@ function viewProgram(
       rebuilt.set(value, copy);
     }
   }
-  return { program: viewedProgram(rebuilt.get(program)), calls: reads.size };
+  return { program: viewedProgram(rebuilt.get(program)), calls: reads.size, steps };
+}
+
+const COMPARISONS: ReadonlySet<string> = new Set(["==", "!=", "<", "<=", ">", ">="]);
+
+/**
+ * The place slots directly below `node`, `held` where `node` stands in one (#2493, r4-452): a store's target's receiver
+ * (P1), the receiver of a method that changes it (P2), a test's operand, as the narrowings and the guards read it (a
+ * comparison's, a type test's, a `switch` subject; P3), and below a slot, what parentheses hold and a property's or an
+ * element's receiver. The analysis's readers that take a parenthesized expression for its place read these slots only
+ * (the inventory in tests/type-core/type-core-identity.test.ts).
+ */
+function placeSlots(node: SyntaxNode, held: boolean): readonly unknown[] {
+  const value = syntaxOf(node);
+  switch (value.kind) {
+    case "parenthesizedExpression":
+      return held ? [value.expression] : [];
+    case "propertyAccessExpression":
+    case "indexExpression":
+      return held ? [value.object] : [];
+    case "assignmentStatement":
+      return value.target.kind === "identifier" ? [] : [value.target.object];
+    case "callExpression":
+      return value.callee.kind === "propertyAccessExpression" &&
+        changesReceiver(value.callee.property.name)
+        ? [value.callee.object]
+        : [];
+    case "typeTestExpression":
+      return [value.value];
+    case "binaryExpression":
+      return COMPARISONS.has(value.operator) ? [value.left, value.right] : [];
+    case "switchStatement":
+      return [value.subject];
+    default:
+      return [];
+  }
+}
+
+/** Whether a method of `name` changes its receiver: a list's, a set's or a dict's that changes it, or `copyFrom`. */
+function changesReceiver(name: string): boolean {
+  return listMethod(name)?.changes !== undefined || changesEntries(name) || name === "copyFrom";
 }
 
 /** The view's copy of an expression. */
@@ -291,17 +371,31 @@ function viewed(value: unknown): Expression {
   return value as Expression;
 }
 
+/** A node the walk meets, as the syntax it is a node of. */
+function syntaxOf(node: SyntaxNode): Expression | Statement {
+  // EVIDENCE: invariant: the walk meets only a program's nodes; a kind outside these two unions has no place slot.
+  return node as Expression | Statement;
+}
+
 /** The view's copy of a program. */
 function viewedProgram(value: unknown): Program {
   // EVIDENCE: invariant: a program's copy keeps its kind and members, its calls read as parentheses.
   return value as Program;
 }
 
-/** The names a function declares for its body: its parameters, its variables and its loop variables. */
-function ownNames(declaration: FunctionDeclaration): readonly string[] {
+/**
+ * The names a function declares for its body: its parameters, its variables and its loop variables; with the values
+ * walked to find them.
+ */
+function ownNames(declaration: FunctionDeclaration): {
+  readonly names: readonly string[];
+  readonly steps: number;
+} {
   const names = declaration.parameters.map((parameter) => parameter.name.name);
   const stack: unknown[] = [declaration.body];
+  let steps = 0;
   for (let value = stack.pop(); value !== undefined; value = stack.pop()) {
+    steps += 1;
     if (value === null || typeof value !== "object") continue;
     if (isLet(value)) names.push(value.name.name);
     if (isFor(value)) {
@@ -310,7 +404,7 @@ function ownNames(declaration: FunctionDeclaration): readonly string[] {
     }
     for (const [key, child] of Object.entries(value)) if (key !== "span") stack.push(child);
   }
-  return names;
+  return { names, steps };
 }
 
 function isNode(value: unknown): value is SyntaxNode {

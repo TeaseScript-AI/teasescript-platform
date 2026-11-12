@@ -266,6 +266,7 @@ export class CoreProgram {
     if (this.#indexed) return;
     this.hasOf.clear();
     this.work.charge("syntaxNodes", this.syntaxNodes);
+    if (this.identity.steps > 0) this.work.charge("identitySteps", this.identity.steps);
     // the graph and its dominators are setup work too: their nodes, their edges, and a step per node and edge of the
     // dominator search
     const edges = this.flow.nodes.reduce((sum, node) => sum + node.successors.length, 0);

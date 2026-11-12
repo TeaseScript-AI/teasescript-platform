@@ -301,15 +301,18 @@ closing a segment on any held name keeps every give-up a warning, never a false 
 is exactly `return` of that parameter. The analysis reads a call as `(argument)`, keeping the call's span, where its
 callee is a plain name that the project declares as exactly one function, that function is an identity function visible
 from the call's file (global, or the file's own), no parameter or variable of the enclosing function has the name, and
-the call has one positional argument. The analysis reads a view of the syntax built before the collector; the front end
-and the plan read the source, and each syntax node that crosses between them is translated. A call read as its argument
-is no function result: a guarded argument's mark ([section-3-2-guarded](#section-3-2-guarded)) travels as through
-parentheses. A narrowing holds across such a call as across `(argument)`. Rule 1.2's widening of the parameter by the
-function's other calls is not modelled: the call gives what `(argument)` gives, the class #1173 holds for copies.
+the call has one positional argument. A call that stands in a place slot (a store's receiver chain, the receiver of a
+method that changes it, and a test's operand: a comparison's, a type test's, a `switch` subject) stays a call: its
+result is a copy. The analysis reads a view of the syntax built before the collector; the front end and the plan read
+the source, and each syntax node that crosses between them is translated. A call read as its argument is no function
+result: a guarded argument's mark ([section-3-2-guarded](#section-3-2-guarded)) travels as through parentheses. A
+narrowing holds across such a call as across `(argument)`. Rule 1.2's widening of the parameter by the function's other
+calls is not modelled: the call gives what `(argument)` gives, the class #1173 holds for copies.
 
 **Reason.** One result shared by every call merged unrelated arguments: on the converted packages it gave false
 warnings and errors and ran past the work allowance. ADR 0021 rule 5.5 drops a check across a call because a call may
 run code that changes the path; an identity call runs its argument and nothing else.
 
 **Source.** The lead's rulings R22 to R26 on #2493's plan (AST view; the predicate; the widening a named gap; narrowing
-kept) and R34 (a guarded argument's mark through such a call), applied by #2493's pull request, 2026-11-12.
+kept), R34 (a guarded argument's mark through such a call) and R41 and R42 (a call in a place slot stays a call),
+applied by #2493's pull request, 2026-11-12.
