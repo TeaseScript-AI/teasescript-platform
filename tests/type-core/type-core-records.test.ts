@@ -55,14 +55,25 @@ test("a changed writer, rule or missing test, or a payload on one side alone, di
   const both = ["missing required check", "extra required check"];
 
   assert.deepEqual(recordDifferences(expected, expected), []);
+  const writer = payload!.writer;
+  assert.ok(writer !== null);
   for (const [offset, end] of [
     [28, 48],
     [27, 47],
   ] as const)
     assert.deepEqual(
-      differs(expected, paid({ ...payload, writer: { ...payload.writer, offset, end } })),
+      differs(expected, paid({ ...payload, writer: { ...writer, offset, end } })),
       both,
     );
+  // (a route from a block's body with no store of its own names the block instead, R2.3 of #2497)
+  const block = { file: "main.tease", offset: 10, end: 20 };
+  assert.deepEqual(differs(expected, paid({ ...payload, writer: null, block })), both);
+  const blockOnly = paid({ ...payload, writer: null, block });
+  assert.deepEqual(recordDifferences(blockOnly, blockOnly), []);
+  assert.deepEqual(
+    differs(blockOnly, paid({ ...payload, writer: null, block: { ...block, end: 21 } })),
+    both,
+  );
   assert.deepEqual(differs(expected, paid({ ...payload, rule: "N2" })), both);
   for (const missingTests of [["if n != null"], ["otherwise", "if n != null"], ["if n is integer"]])
     assert.deepEqual(differs(expected, paid({ ...payload, missingTests })), both);
@@ -96,11 +107,19 @@ test("a malformed N10 payload fails where it is", () => {
   });
   const writer = { file: "main.tease", offset: 27, end: 48 };
   assert.equal(readCompactRecord(line(null)).diagnostics[0]?.requiredCheck, undefined);
+  assert.deepEqual(
+    readCompactRecord(
+      line({ rule: "N3", writer: null, block: writer, missingTests: ["otherwise"] }),
+    ).diagnostics[0]?.requiredCheck,
+    { rule: "N3", writer: null, block: writer, missingTests: ["otherwise"] },
+  );
   for (const [payload, where] of [
     [{ rule: "N3", writer: { ...writer, end: 26 }, missingTests: ["otherwise"] }, /writer\.end/u],
     [{ rule: "N3", writer, missingTests: [] }, /missingTests: at least one/u],
     [{ rule: "N3", writer, missingTests: "otherwise" }, /missingTests: a list/u],
     [{ writer, missingTests: ["otherwise"] }, /requiredCheck\.rule/u],
+    [{ rule: "N3", missingTests: ["otherwise"] }, /requiredCheck\.writer/u],
+    [{ rule: "N3", missingTests: ["otherwise"] }, /requiredCheck\.writer/u],
   ] as const)
     assert.throws(() => readCompactRecord(line(payload)), where);
 });

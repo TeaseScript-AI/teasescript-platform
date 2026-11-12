@@ -55,7 +55,8 @@ test("the core gives the expected record for every record of the cells it comple
   }
   assert.deepEqual(Object.fromEntries(held), {
     "the adapters' records (S9b)": 3,
-    "the route rule's corridor across locations (#1938)": 17,
+    "the route rule's corridor across locations (#1938)": 13,
+    "a copy whose source's null arrives through an entry: r4-451's give-up, a check stands (#2497)": 2,
     "a method no member of a receiver's union supports (#2258)": 1,
     "a written optional load's definite number error (#1173, listed in #1938)": 1,
     "a static warning of S9b's otherwise (#1737)": 7,
@@ -68,7 +69,7 @@ test("the core gives the expected record for every record of the cells it comple
     "a known-value error the record lacks (decision 3 on #1072)": 1,
     "C13's warning of a choice value from outside the script the record lacks (#1437)": 3,
   });
-  assert.equal(asserted.length, 1_952);
+  assert.equal(asserted.length, 1_954);
   // (records of one exact input, their files in order, share its analysis; each is compared with its own record)
   const analyses = new Map<string, CompactRecord>();
   const failures = asserted.flatMap((record) => {
@@ -109,6 +110,14 @@ test("each stage 3b record held by name exists, has an N cell, and differs in ev
     [
       "cp9-cells/r46/m3/astra-m3/routes/method-null-kind",
       "a method no member of a receiver's union supports (#2258)",
+    ],
+    [
+      "cp9-cells/3b/review-late/copies/back-edge",
+      "a copy whose source's null arrives through an entry: r4-451's give-up, a check stands (#2497)",
+    ],
+    [
+      "cp9-cells/3b/review-late/copies/entered-label",
+      "a copy whose source's null arrives through an entry: r4-451's give-up, a check stands (#2497)",
     ],
   ]);
   const causeOf = (name: string, lines: readonly string[]): string => {
@@ -157,38 +166,37 @@ test("each stage 3b record held by name exists, has an N cell, and differs in ev
     }
   }
   assert.deepEqual(wrong, []);
-  assert.equal(HELD_S10_RECORDS.size, 33);
+  assert.equal(HELD_S10_RECORDS.size, 31);
 });
 
 /**
  * V30 §13 (a loop's start accounts for the values an earlier round left; a write in the body drops a check only when the
  * written value can make the check false): `cp9-cells/3b/loop/break/changed`'s write of `null` is followed by an
  * unconditional `break`, so no round starts with it and the use is valid, as its corrected record says (#2025). Its two
- * controls: without the `break`, and with the `break` under a condition, a later round can start with the `null`, and
- * the use is the warning with its `loop` context and its check.
+ * controls: without the `break`, and with the `break` under a condition, a later round can start with the `null`, which
+ * nothing in the round checks before the use: the route rule's error, its writer that `null` (ADR 0021 rule 5.6; the
+ * accepted record's r4-451).
  */
-test("a loop's write that an unconditional break follows leaves no value for a later round, and its controls warn (#2025)", () => {
+test("a loop's write that an unconditional break follows leaves no value for a later round, and its controls are errors (#2025)", () => {
   const head =
     'let flagHost = askBoolean "flag"\nlet n = 1\nif flagHost { n = null }\nif n != null { repeat 2 { repeat n {}\n n = null\n';
-  const rows: readonly (readonly [string, string, string | null])[] = [
-    ["an unconditional break (the corrected record)", `${head} break } }\nexit\n`, null],
-    ["no break", `${head}} }\nexit\n`, "loop"],
-    ["a conditional break", `${head} if askBoolean "b" { break } } }\nexit\n`, "loop"],
+  const rows: readonly (readonly [string, string, boolean])[] = [
+    ["an unconditional break (the corrected record)", `${head} break } }\nexit\n`, false],
+    ["no break", `${head}} }\nexit\n`, true],
+    ["a conditional break", `${head} if askBoolean "b" { break } } }\nexit\n`, true],
   ];
+  const writer = head.lastIndexOf("null");
   const wrong: string[] = [];
-  for (const [name, source, context] of rows) {
+  for (const [name, source, later] of rows) {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
     for (const mode of MODES) {
       const record = inMode(mode, () => compactAnalysis(request));
-      const warnings = record.diagnostics.filter((d) => d.class === "warning-runtime-check");
-      const fits =
-        context === null
-          ? record.outcome === "valid" && record.checks.length === 0
-          : record.outcome === "warning-runtime-check" &&
-            warnings.length === 1 &&
-            warnings[0]?.context === context &&
-            record.checks.some((check) => check.kind === "null-check" && check.target === "n");
+      const fits = !later
+        ? record.outcome === "valid" && record.checks.length === 0
+        : record.outcome === "compile-error" &&
+          record.diagnostics.length === 1 &&
+          record.diagnostics[0]?.requiredCheck?.writer?.offset === writer;
       if (!fits) wrong.push(`${name} in ${JSON.stringify(mode)}: ${JSON.stringify(record)}`);
     }
   }
