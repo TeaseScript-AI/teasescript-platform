@@ -73,8 +73,10 @@ import {
   assignments,
   derivedContent,
   derivedStores,
+  planOfFile,
   plannedContent,
   plannedStores,
+  recordOfFile,
   runGlobals,
 } from "../helpers/type-core-route.js";
 import { recordDifferences, recordOf } from "../helpers/type-core-records.js";
@@ -288,6 +290,8 @@ function unmatchedDiagnostics(
     diagnostic: CompilationResult["diagnostics"][number],
     wanted: ExpectedDiagnostic,
   ): boolean =>
+    // (a project's diagnostic stands in its expected entry's file)
+    (!("path" in diagnostic) || diagnostic.path === wanted.site.file) &&
     (wanted.class === "compile-error" ? "error" : "warning") === diagnostic.severity &&
     wanted.site.offset === diagnostic.span.start.offset &&
     wanted.site.end === diagnostic.span.end.offset &&
@@ -347,6 +351,7 @@ test("every positive-list record the candidate route reaches plans and runs as i
   const companionRuns = new Map<string, PredictedRun[]>();
   let positive = 0;
   let plans = 0;
+  let projects = 0;
   let runs = 0;
   let compared = 0;
   for (const record of readFixture()) {
@@ -362,8 +367,7 @@ test("every positive-list record the candidate route reaches plans and runs as i
       continue;
     }
     accepted.push(record.name);
-    assert.equal(record.files.length, 1, `${record.name}: one file`);
-    const source = record.files[0]!.source;
+    if (record.files.length > 1) projects += 1;
     // records: the diagnostics at their whole sites, each with a code of its kind's rules (D2, D3), the obligations
     // exactly, alike on the one-file route
     const reported = (compiled: Pick<CompilationResult, "diagnostics">) =>
@@ -378,6 +382,9 @@ test("every positive-list record the candidate route reaches plans and runs as i
         .sort();
     const request = coreRequest(record.files);
     assert.ok(request !== null, record.name);
+    // the project's files in project order: the session starts in the first, and inside the slice nothing transfers to
+    // another (no `goto` or `call`), so the runs are the first file's, and the stores and content each file's own
+    const source = request.files[0]!.source;
     // (a warning on a line that never runs is the record's, but the compiler reports the line instead, #1195)
     const analysis = analyseCore(request);
     const shown = new Set(reportedDiagnostics(analysis));
@@ -388,6 +395,7 @@ test("every positive-list record the candidate route reaches plans and runs as i
         (wanted) =>
           wanted.class === quiet.class &&
           wanted.kind === quiet.kind &&
+          wanted.site.file === request.files[quiet.site.file]!.path &&
           wanted.site.offset === quiet.site.start &&
           wanted.site.end === quiet.site.end,
       );
@@ -397,43 +405,51 @@ test("every positive-list record the candidate route reaches plans and runs as i
     assert.deepEqual(unmatchedDiagnostics(reported(result), expected), [], record.name);
     assert.deepEqual(recordDifferences(record.expected, compactAnalysis(request)), [], record.name);
     assert.equal(result.plan === null, record.expected.outcome === "compile-error", record.name);
-    const single = inBothOrders(() => candidate(source));
-    assert.deepEqual(diagnosed(single), diagnosed(result), `${record.name}: the one-file route`);
+    // a record of one file compiles alike on the one-file route
+    const single = record.files.length === 1 ? inBothOrders(() => candidate(source)) : null;
+    if (single !== null)
+      assert.deepEqual(diagnosed(single), diagnosed(result), `${record.name}: the one-file route`);
     if (result.plan === null) continue;
     plans += 1;
-    // discharges and checked stores, by rule (a construct the rules do not cover fails here, named); the source's syntax
-    // serves every evaluation of it below
-    const derived = (() => {
+    // each file's discharges and checked stores, by rule, from its own source and its record's entries (a construct the
+    // rules do not cover fails here, named); the first file's syntax serves every evaluation of it below
+    const derivedFiles = request.files.map((file) => {
       try {
-        const syntax = syntaxOf(source);
-        return [syntax, derive(syntax, record.expected)] as const;
+        const fileSyntax = syntaxOf(file.source);
+        return [fileSyntax, derive(fileSyntax, recordOfFile(record.expected, file.path))] as const;
       } catch (error) {
         if (error instanceof Underivable)
-          throw new Error(`${record.name}: underivable: ${error.message}`);
+          throw new Error(`${record.name}: ${file.path} underivable: ${error.message}`);
         throw error;
       }
-    })();
-    const [syntax, { stores, discharges, content }] = derived;
-    assert.deepEqual(
-      plannedContent(result.plan, source),
-      derivedContent(content, source),
-      `${record.name}: S7 content`,
-    );
-    assert.deepEqual(
-      plannedContent(single.plan!, source),
-      derivedContent(content, source),
-      `${record.name}: one-file S7 content`,
-    );
-    assert.deepEqual(
-      plannedStores(result.plan),
-      derivedStores(stores),
-      `${record.name}: the checked stores`,
-    );
-    assert.deepEqual(
-      plannedStores(single.plan!),
-      derivedStores(stores),
-      `${record.name}: the one-file route's`,
-    );
+    });
+    const [syntax, { stores, discharges, content }] = derivedFiles[0]!;
+    for (const [index, file] of request.files.entries()) {
+      const fileDerived = derivedFiles[index]![1];
+      const filePlan = planOfFile(result.plan, file.path);
+      assert.deepEqual(
+        plannedContent(filePlan, file.source),
+        derivedContent(fileDerived.content, file.source),
+        `${record.name}: S7 content of ${file.path}`,
+      );
+      assert.deepEqual(
+        plannedStores(filePlan),
+        derivedStores(fileDerived.stores),
+        `${record.name}: the checked stores of ${file.path}`,
+      );
+    }
+    if (single !== null) {
+      assert.deepEqual(
+        plannedContent(single.plan!, source),
+        derivedContent(content, source),
+        `${record.name}: one-file S7 content`,
+      );
+      assert.deepEqual(
+        plannedStores(single.plan!),
+        derivedStores(stores),
+        `${record.name}: the one-file route's`,
+      );
+    }
     // runs: the original under every assignment of its host input (in the domain's order), each run once, predicted
     // stopping at its first failing check and evaluated through every check (for the discharges)
     const plan = result.plan;
@@ -548,7 +564,8 @@ test("every positive-list record the candidate route reaches plans and runs as i
       .map(([what, count]) => `${what} ${count}`)
       .join(", ");
   t.diagnostic(
-    `${positive} positive-list records: ${accepted.length} on the candidate route, ${plans} with a plan, ${runs} ` +
+    `${positive} positive-list records: ${accepted.length} on the candidate route (${projects} of several files), ` +
+      `${plans} with a plan, ${runs} ` +
       `runs, ${compared} comparisons with a predicted run (each original's is its fitting assignment's run); ` +
       `discharges: ${listed(classes)}; outside the candidate slice (later port steps): ${listed(outside)}`,
   );
@@ -611,6 +628,53 @@ test("every positive-list record the candidate route reaches plans and runs as i
     "cp9-cells/r8/written-list/mixed",
   ])
     assert.ok(accepted.includes(name), `${name} inside the slice`);
+});
+
+test("a two-file project inside the slice: its first file's oracle is the one-file oracle's, its second file's its own", () => {
+  // the second file runs nothing inside the slice (no `goto` or `call` reaches it), and holds a checked store of its own
+  const second = { path: "part.tease", source: "let late: integer = hostValue\nexit\n" };
+  let checked = 0;
+  for (const record of readFixture()) {
+    if (heldBack(record) !== null || record.files.length !== 1) continue;
+    const source = record.files[0]!.source;
+    const files = [{ path: "main.tease", source }, second];
+    const one = insideSlice(() => candidate(source));
+    if (one === null || one.plan === null) continue;
+    const both = compileProjectWithBackend(files, OPTIONS, CORE_BACKEND);
+    assert.ok(both.plan !== null, record.name);
+    const request = coreRequest(files);
+    assert.ok(request !== null, record.name);
+    const projectRecord = compactAnalysis(request);
+    // the first file: the one-file oracle's derivation, stores, content and runs
+    const syntax = syntaxOf(source);
+    const alone = derive(syntax, record.expected);
+    const first = derive(syntax, recordOfFile(projectRecord, "main.tease"));
+    assert.deepEqual(derivedStores(first.stores), derivedStores(alone.stores), record.name);
+    assert.deepEqual(
+      derivedContent(first.content, source),
+      derivedContent(alone.content, source),
+      record.name,
+    );
+    const firstPlan = planOfFile(both.plan, "main.tease");
+    assert.deepEqual(plannedStores(firstPlan), plannedStores(one.plan), record.name);
+    assert.deepEqual(
+      plannedContent(firstPlan, source),
+      plannedContent(one.plan, source),
+      record.name,
+    );
+    for (const inputs of assignments(["hostValue"]))
+      assert.deepEqual(runGlobals(both.plan, inputs), runGlobals(one.plan, inputs), record.name);
+    // the second file: its own stores, derived from its source and its entries of the project's record
+    const secondDerived = derive(syntaxOf(second.source), recordOfFile(projectRecord, second.path));
+    assert.deepEqual(
+      plannedStores(planOfFile(both.plan, second.path)),
+      derivedStores(secondDerived.stores),
+      record.name,
+    );
+    assert.equal(secondDerived.stores.length, 1, record.name);
+    checked += 1;
+  }
+  assert.ok(checked >= 50, `${checked} records`);
 });
 
 test("the S7 oracle derives receiving written types and observes native discharges", () => {
