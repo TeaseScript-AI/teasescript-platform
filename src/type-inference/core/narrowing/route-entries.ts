@@ -283,21 +283,20 @@ export abstract class RouteEntries extends RouteCandidates {
     point: EntryPoint,
   ): Work<Definition | "body" | null> {
     this.#work.charge("eventSteps");
-    const carried = yield* this.#relation(key, name);
+    // (under the program default, the relation only once the use stands at an entry, R2.2)
+    const fallback = this.defaultHolds() !== null;
+    let carried = fallback ? null : yield* this.#relation(key, name);
     const calls = this.pass.definitions.ownedAway(key);
     let level = point.chain.length;
     for (const _ of steps(this.#work, "eventSteps", () => level > 0)) {
       level -= 1;
       const entry = this.#nearest(point.chain, level);
-      const writer = entry === null ? undefined : carried.get(entry);
-      if (
-        writer !== undefined &&
-        this.#open(name, calls, entry!, level, point) &&
-        (this.defaultHolds() === null || this.standsAt(entry!, point.node, point.chain))
-      )
-        return writer;
+      if (entry === null || (fallback && !this.standsAt(entry, point.node, point.chain))) continue;
+      carried ??= yield* this.#relation(key, name);
+      const writer = carried.get(entry);
+      if (writer !== undefined && this.#open(name, calls, entry, level, point)) return writer;
     }
-    if (this.defaultHolds() !== null) return null;
+    if (fallback) return null;
     const root = point.chain[0]!.block;
     const handler = this.pass.program.handlerOf(point.node);
     return handler !== null &&
@@ -596,7 +595,7 @@ export abstract class RouteEntries extends RouteCandidates {
     if (this.#jumps !== null) return this.#jumps;
     const { program } = this.pass;
     const flow = program.flow;
-    const list: Jump[] = [];
+    let list: Jump[] = [];
     // a jump made by block code is none, but a loop's own inside a block's body
     const outside = (node: FlowNode): boolean => {
       this.#work.charge("indexSteps");
@@ -684,6 +683,14 @@ export abstract class RouteEntries extends RouteCandidates {
       list,
       (a, b) => a.point.node.file - b.point.node.file || a.point.at - b.point.at,
     );
+    // (under the program default, only the jumps that stand at the loop or label they enter a run reaches, R2.2: the
+    // same for every key, so each key's relation tries no other)
+    if (this.defaultHolds() !== null) {
+      const standing: Jump[] = [];
+      for (const jump of each(this.#work, "indexSteps", list))
+        if (this.standsAt(jump.into, jump.point.node, jump.point.chain)) standing.push(jump);
+      list = standing;
+    }
     const begun = new Map<Entry, { readonly jump: Jump; readonly level: number }[]>();
     let order = 0;
     for (const jump of each(this.#work, "indexSteps", list)) {
