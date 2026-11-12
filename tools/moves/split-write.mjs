@@ -68,7 +68,9 @@ function scan(file, text) {
   host.getSourceFile = (name) => (name === file ? source : undefined);
   const program = ts.createProgram({
     rootNames: [file],
-    options: { noResolve: true, noLib: true },
+    // (`allowJs`: without it a JavaScript OLD is no file of the program, its names have no symbols, and the checker
+    // throws on some reads)
+    options: { noResolve: true, noLib: true, allowJs: true },
     host,
   });
   const checker = program.getTypeChecker();
