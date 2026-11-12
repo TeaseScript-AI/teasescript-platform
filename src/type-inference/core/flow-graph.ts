@@ -140,6 +140,8 @@ export class FlowGraphBuilder {
   public readonly expressionNodes = new Map<string, BuildNode>();
   public readonly statementNodes = new Map<string, BuildNode>();
   readonly #startupNodes = new Map<string, BuildNode>();
+  /** Where each speaker and each `global` without `default:` stands in its file's flow (see `FlowGraph.placeOf`). */
+  public readonly places = new Map<string, FlowNode | null>();
   public readonly loopBindings = new Map<string, BuildNode>();
   public readonly labels = new Map<string, BuildNode>();
   public readonly functions = new Map<string, FunctionRegion>();
@@ -233,6 +235,7 @@ export class FlowGraphBuilder {
     const expressionNodes = this.expressionNodes;
     const statementNodes = this.statementNodes;
     const startupNodes = this.#startupNodes;
+    const places = this.places;
     const loopBindings = this.loopBindings;
     const snapshots = this.#snapshotsOf();
     const valueDefaults = this.#valueDefaults;
@@ -267,6 +270,7 @@ export class FlowGraphBuilder {
       expressionAt: (site) => expressionNodes.get(siteKey(site.file, site.start, site.end)),
       statementAt: (site) => statementNodes.get(siteKey(site.file, site.start, site.end)),
       startupAt: (site) => startupNodes.get(siteKey(site.file, site.start, site.end)),
+      placeOf: (site) => places.get(siteKey(site.file, site.start, site.end)),
       loopBindingAt: (site) => loopBindings.get(siteKey(site.file, site.start, site.end)),
       snapshotOf: (node) => snapshots.get(node) ?? node,
       snapshotNeedsValue: (node) => valueDefaults.has(snapshots.get(node) ?? node),

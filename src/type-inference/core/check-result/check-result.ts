@@ -677,14 +677,16 @@ export function reportedDiagnostics(
 }
 
 /**
- * The statements that never run once their file runs (S3 §2, group W): those no way over the flow graph's live edges
- * reaches from the file's entry. Every file is asked on its own, whether or not the session enters it.
+ * The statements that never run once their file, function or block runs (S3 §2, group W, as `TypeCheckResult` states
+ * it): those no way over the flow graph's live edges reaches from that region's entry. Every file, function and block
+ * is asked on its own, whether or not anything enters it. A function's declaration is never one (it runs nothing where
+ * it stands); a speaker and a `global` without `default:` are where they stand (`placeOf`).
  */
 function unreachable(answers: Answers, index: SliceIndex): Set<Statement> {
   const { graph } = answers;
   const reached = new Set<FlowNode>();
   for (const region of graph.regions)
-    if (region.kind === "file") {
+    if (region.kind !== "startup") {
       const pending = [region.entry];
       reached.add(region.entry);
       for (let node = pending.pop(); node !== undefined; node = pending.pop())
@@ -695,7 +697,19 @@ function unreachable(answers: Answers, index: SliceIndex): Set<Statement> {
           }
     }
   return new Set(
-    index.statements.filter((statement) => !reached.has(nodeOf(answers, index, statement))),
+    index.statements.filter((statement) => {
+      if (statement.kind === "functionDeclaration") return false;
+      if (
+        statement.kind === "speakerDeclaration" ||
+        (statement.kind === "globalStatement" && statement.assignment === null)
+      ) {
+        const place = graph.placeOf(index.site(statement));
+        if (place === undefined)
+          throw new Error(`The flow graph has no place for this ${statement.kind}.`);
+        return place === null || !reached.has(place);
+      }
+      return !reached.has(nodeOf(answers, index, statement));
+    }),
   );
 }
 
