@@ -487,11 +487,9 @@ export class Contract {
    * #1599: per place, how many of the decisions that can stop it have not ended (admission's groups by their root,
    * `openDecisions`, `decided`); a place absent from it no decision stops, so nothing asked of it is kept. `null` while
    * every place may still stop: before the groups are known, and in a pass whose targets decide receivers (#1275,
-   * `targetsDecide`) until those have run (`closeDecisions`).
-   */
-  /**
-   * #1072 1b, a record: `open`, `#stopped`'s count of stopped paths (`stoppedCount`), and `deciding`, whether a decision
-   * of the pass can still stop: else nothing a stop forgets by is kept (`#close`).
+   * `targetsDecide`) until those have run (`closeDecisions`). With it, in a record (#1072 1b): `#stopped`'s count of
+   * stopped paths (`stoppedCount`), and `deciding`, whether a decision of the pass can still stop: else nothing a stop
+   * forgets by is kept (`#close`).
    */
   readonly #stops = Retained.record<{
     open: Map<PlaceId, number> | null;
