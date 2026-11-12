@@ -65,7 +65,8 @@ test("plain data stored in one run is frozen at the switch: the run that stored 
   const { steps, run } = stepped(() => [
     () => {
       map = Retained.map("T.plain");
-      const value = { n: 0, list: [] as number[] };
+      const list: number[] = [];
+      const value = { n: 0, list };
       map.set("a", value);
       value.n = 1;
       value.list.push(1);
@@ -129,7 +130,7 @@ test("an accessor or an own iterator in stored data is refused by its descriptor
   let gets = 0;
   let iterations = 0;
   const withGetter = Object.defineProperty({}, "n", { get: () => (gets += 1), enumerable: true });
-  const indexed = Object.defineProperty([] as number[], "0", {
+  const indexed = Object.defineProperty<number[]>([], "0", {
     get: () => (gets += 1),
     enumerable: true,
   });
@@ -163,7 +164,7 @@ test("plain data stored, then given a native map in the same run, is refused at 
   assert.equal(run, "refused");
 });
 
-test("a new own property on a collection or a write outside a maker's kind throws at its line (R24 a)", () => {
+test("a new own property on a collection or a write outside a maker's kind throws at its line ", () => {
   const { steps } = stepped(() => [
     () => {
       const shell = Retained.map<string, number>("T.shell");
@@ -183,7 +184,11 @@ test("a record's fields change in any run; what it is given is sealed, and its l
   let record: { n: number; child: { m: number } | null; later?: number } | undefined;
   let gets = 0;
   const { steps } = stepped(() => [
-    () => (record = Retained.record("T.fields", { n: 0, child: null as { m: number } | null })),
+    () =>
+      (record = Retained.record<{ n: number; child: { m: number } | null; later?: number }>(
+        "T.fields",
+        { n: 0, child: null },
+      )),
     () => {
       record!.n = 1;
       record!.child = { m: 0 };
@@ -356,7 +361,7 @@ test("a demand's factory runs as its own run: its caller's mark does not open th
   }
 });
 
-test("a function registered where it is made is admitted; any other stays refused at the store (R26)", () => {
+test("a function registered where it is made is admitted; any other stays refused at the store", () => {
   const { steps } = stepped(() => [
     () =>
       Retained.map<string, unknown>("T.registered").set(

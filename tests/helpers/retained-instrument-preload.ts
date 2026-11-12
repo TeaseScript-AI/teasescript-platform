@@ -45,7 +45,7 @@ if (/[\\/]tests[\\/]type-core[\\/][^\\/]+\.test\.js$/u.test(file)) {
         const key = `${error.message.replace(/\d+/gu, "N").slice(0, 140)} @ ${sites}`;
         frozen.set(key, (frozen.get(key) ?? 0) + 1);
       }
-      return `${Error.prototype.toString.call(error)}\n${frames.map((frame) => `    at ${frame.toString()}`).join("\n")}`;
+      return `${Error.prototype.toString.call(error)}\n${frames.map((frame) => `    at ${frame.getFunctionName() ?? "<anonymous>"} (${frame.getFileName() ?? "?"}:${frame.getLineNumber() ?? "?"})`).join("\n")}`;
     };
     process.on("exit", () => {
       mkdirSync(survey, { recursive: true });
