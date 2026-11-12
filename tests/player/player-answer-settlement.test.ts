@@ -22,6 +22,8 @@ import type {
   AnswerSubmission,
   SessionTerminal,
 } from "../../player/vue/src/interaction/useAnswerSubmission.js";
+import type { FormUpdates } from "../../player/vue/src/interaction/useFormUpdates.js";
+import type { InputSectionHost } from "../../player/vue/src/session/runtime-input.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { sourceStart } from "../helpers/prepared-plan.js";
 import {
@@ -48,7 +50,7 @@ interface SessionHost {
   readonly terminal: Readonly<Ref<SessionTerminal>>;
   readonly hostError: Readonly<Ref<string | null>>;
   readonly bridge: Promise<PlayerBridge>;
-  readonly inputSection: unknown;
+  readonly inputSection: InputSectionHost;
   update(session: PlayerSession): void;
   reportHostError(error: unknown): void;
   prepare(create: {
@@ -68,6 +70,7 @@ let useComposerState: (host: {
 }) => ComposerState;
 let useAnswerSubmission: (host: {
   readonly composer: ComposerState;
+  readonly forms: Pick<FormUpdates, "unacknowledged" | "commitField" | "stepField">;
   readonly session: () => PlayerSession | null;
   readonly stoppedSession: () => PlayerSession | null;
   readonly chat: () => number;
@@ -79,6 +82,18 @@ let useAnswerSubmission: (host: {
   readonly submitLock: (password: string) => void;
   readonly nextFrame: () => Promise<void>;
 }) => AnswerSubmission;
+let useFormUpdates: (host: {
+  readonly composer: ComposerState;
+  readonly session: () => PlayerSession | null;
+  readonly chat: () => number;
+  readonly terminal: () => SessionTerminal;
+  readonly inputSection: () => InputSectionHost | undefined;
+  readonly run: AnswerSubmission["run"];
+  readonly publish: (session: PlayerSession) => void;
+  readonly showNotice: (message: string) => void;
+  readonly clearNotice: () => void;
+  readonly unansweredMessage: () => string;
+}) => FormUpdates;
 
 before(async () => {
   const session = await loadPlayerModule("player/vue/src/session/usePlayerSession.ts");
@@ -90,6 +105,9 @@ before(async () => {
   const submission = await loadPlayerModule("player/vue/src/interaction/useAnswerSubmission.ts");
   // EVIDENCE: validation: as above, the answers' controller.
   useAnswerSubmission = submission.useAnswerSubmission as typeof useAnswerSubmission;
+  const forms = await loadPlayerModule("player/vue/src/interaction/useFormUpdates.ts");
+  // EVIDENCE: validation: as above, the form updates' controller.
+  useFormUpdates = forms.useFormUpdates as typeof useFormUpdates;
   await loadTopology();
 });
 
@@ -160,11 +178,16 @@ async function page(context: TestContext, topology: Topology, script: string) {
     });
     const shown = () => (player.stopped.value ? null : player.session.value);
     const composer: ComposerState = useComposerState({
-      draft: (draft) => submission.draft(draft),
+      draft: (draft) => forms.draft(draft),
       holdDrafts: () => false,
     });
     const submission: AnswerSubmission = useAnswerSubmission({
       composer,
+      forms: {
+        unacknowledged: (id) => forms.unacknowledged(id),
+        commitField: (action, input) => forms.commitField(action, input),
+        stepField: (fieldId, typed) => forms.stepField(fieldId, typed),
+      },
       session: shown,
       stoppedSession: () => (player.stopped.value ? player.session.value : null),
       chat: () => player.chat.value,
@@ -175,6 +198,18 @@ async function page(context: TestContext, topology: Topology, script: string) {
       unansweredMessage: () => "Nothing answers that.",
       submitLock: () => {},
       nextFrame: frame.next,
+    });
+    const forms: FormUpdates = useFormUpdates({
+      composer,
+      session: shown,
+      chat: () => player.chat.value,
+      terminal: () => player.terminal.value,
+      inputSection: () => player.inputSection,
+      run: (id, intent) => submission.run(id, intent),
+      publish: (session) => player.update(session),
+      showNotice: (message) => submission.showNotice(message),
+      clearNotice: () => submission.clearNotice(),
+      unansweredMessage: () => "Nothing answers that.",
     });
     const descriptor = (): ComposerDescriptor => {
       const session = shown();
