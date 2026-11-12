@@ -28,7 +28,9 @@ export const REASON = { external: 1, opaque: 2, deferred: 4, missing: 8, budget:
 /**
  * The context words in the order a warning names the first (§3.4): the words of §3's steps 1 and 2, which are decided
  * first, then those of the exact path's conditions X1 to X7, then A7's `later`, and last `budget`, a value the analysis
- * stopped before deciding (B1, D4; S3 §5).
+ * stopped before deciding (B1, D4; S3 §5). `reasonContext` orders the reasons' own words differently (`external`'s
+ * `unknown` before `deferred-parameter`); an unknown a merge or an operation makes follows `reasonContext` (`mergePair`,
+ * `operationItems`), so its word is its reasons' and only a known item's words meet in this order.
  */
 export const CONTEXT_WORDS = [
   "unmodelled",
@@ -245,7 +247,8 @@ export function firstContext(a: ContextWord | null, b: ContextWord | null): Cont
 /**
  * The word of one unknown's reasons: the first present in the rank `external` (`unknown`), `opaque`
  * (`unmodelled`), `deferred` (`deferred-parameter`), `missing` (`missing`), `budget` (`budget`); an unknown without
- * reasons says `unknown`.
+ * reasons says `unknown`. This order differs from `CONTEXT_WORDS`' (`deferred-parameter` comes before `unknown` there);
+ * an unknown a merge or an operation makes takes this one (`mergePair`, `operationItems`).
  */
 export function reasonContext(reasons: number): ContextWord {
   if ((reasons & REASON.external) !== 0) return "unknown";
@@ -409,12 +412,19 @@ function mergePair(first: Item, other: Item, ingress: IngressGraph): Item {
   const extOnly = first.extOnly === true && other.extOnly === true;
   // (a kind a written type spells keeps its spelling beside an inferred one of that kind, which adds nothing to it)
   const spelling = joinSpelling(first.spelling, other.spelling);
+  const reasons = first.reasons | other.reasons;
+  // (#2486: a merged unknown's word is its reasons' (`reasonContext`), which only change as they grow; kept by the word
+  // order, an earlier word outlived the reasons that gave it and went round a solver component. `later` and no word stay
+  // as the order gives them, as `contextOf` and a read's own word see them)
+  const met = firstContext(first.context, other.context);
+  const context =
+    first.tag === "unknown" && met !== null && met !== "later" ? reasonContext(reasons) : met;
   return {
     tag: first.tag,
     cert: marks.guarded !== true && (first.cert === "def" || other.cert === "def") ? "def" : "pos",
-    reasons: first.reasons | other.reasons,
+    reasons,
     writer: firstWriter(first.writer, other.writer),
-    context: firstContext(first.context, other.context),
+    context,
     ...(word === undefined ? {} : { word }),
     ...(node === undefined ? {} : { ingress: node }),
     ...(loose ? { loose: true } : {}),
