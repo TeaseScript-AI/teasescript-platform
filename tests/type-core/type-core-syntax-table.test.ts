@@ -66,11 +66,20 @@ const CASES: readonly Composite[] = [
   },
   {
     name: "the first of two closed constructs in source order, the later one deeper",
-    files: ["let a = [hostValue, -1]\nlet b = [[2 s]]\n"],
+    files: ["let a = [-1, [2 s]]\n"],
     outer: "listLiteral",
     inner: "unaryExpression",
     file: 0,
     at: "-1",
+  },
+  {
+    // (wider than the engine's argument count: a list of children is never spread into arguments)
+    name: "a closed element after 150,000 open ones",
+    files: [`let xs = [${"0, ".repeat(150_000)}-hostValue]\n`],
+    outer: "listLiteral",
+    inner: "unaryExpression",
+    file: 0,
+    at: "-hostValue",
   },
   {
     name: "a closed statement in a later file after an open file",
@@ -119,6 +128,120 @@ test("an open construct holding or followed by a closed one is refused at the cl
         what: refusedText(composite.inner),
       },
       composite.name,
+    );
+  }
+});
+
+/** A modelled row's own condition, on its refusing side: the source, the construct's text, and the row's words. */
+interface Condition {
+  readonly row: SyntaxKind;
+  readonly source: string;
+  readonly at: string;
+  readonly what: string;
+}
+
+/** Every condition of every modelled row that has one, each on its own (`DISPOSITIONS`, as main's walk had them). */
+const CONDITIONS: readonly Condition[] = [
+  {
+    row: "letStatement",
+    source: "let x: integer | string = 1",
+    at: "integer | string",
+    what: "this written type",
+  },
+  {
+    row: "assignmentStatement",
+    source: "let n = 1\nn += 1",
+    at: "n += 1",
+    what: "this assignment",
+  },
+  {
+    row: "assignmentStatement",
+    source: "let xs = [1]\nxs[0] = 2",
+    at: "xs[0] = 2",
+    what: "this assignment",
+  },
+  {
+    row: "sayStatement",
+    source: 'say prose(color: "red") "A letter."',
+    at: "say prose",
+    what: "this say",
+  },
+  { row: "sayStatement", source: 'say skippable "Hold."', at: "say skippable", what: "this say" },
+  { row: "sayStatement", source: 'say as player "Hold."', at: "say as", what: "this say" },
+  { row: "sayStatement", source: 'say "Hold.", instant', at: "say", what: "this say" },
+  { row: "sayStatement", source: 'say "Hi ${hostValue}"', at: "say", what: "this say" },
+  {
+    row: "expressionStatement",
+    source: 'askBooleans("Q?", texts: ["A"], prefill: [false], cancel: "Back")',
+    at: "askBooleans",
+    what: "this expression statement",
+  },
+  {
+    row: "stringLiteral",
+    source: 'let t = "a ${hostValue}"',
+    at: '"a',
+    what: "text with interpolation",
+  },
+  {
+    row: "propertyAccessExpression",
+    source: 'let n = "abc".size',
+    at: '"abc".size',
+    what: "this member or element read",
+  },
+  {
+    row: "binaryExpression",
+    source: "let n = hostValue + 1",
+    at: "hostValue + 1",
+    what: "this binary expression",
+  },
+  {
+    row: "typeTestExpression",
+    source: "let b = hostValue is integer | string",
+    at: "integer | string",
+    what: "this written type",
+  },
+  {
+    row: "callExpression",
+    source: "let n = toInteger(hostValue)",
+    at: "toInteger",
+    what: "this call expression",
+  },
+  { row: "loadExpression", source: 'let v = load "k"', at: "load", what: "this load expression" },
+  {
+    row: "loadExpression",
+    source: 'let v = load "k", default: null',
+    at: "load",
+    what: "this load expression",
+  },
+  {
+    row: "loadExpression",
+    source: 'let a = load "k", default: 1\nlet b = load "k", default: 2',
+    at: 'load "k", default: 2',
+    what: "this load expression",
+  },
+];
+
+test("each modelled row refuses where its own condition fails, at its construct, with its text", () => {
+  for (const condition of CONDITIONS) {
+    const name = `${condition.row}: ${condition.source}`;
+    assert.equal(DISPOSITIONS[condition.row].row, "modelled", name);
+    const source = `${condition.source}\n`;
+    assert.equal(source.indexOf(condition.at), source.lastIndexOf(condition.at), name);
+    let refused: unknown = null;
+    try {
+      compileProjectWithBackend(
+        [{ path: "main.tease", source }],
+        { globals: ["hostValue"] },
+        CORE_BACKEND,
+      );
+    } catch (error) {
+      refused = error;
+    }
+    assert.ok(refused instanceof CandidateOutsideSlice, `${name}: refused`);
+    assert.deepEqual(
+      { start: refused.site.start, what: refused.what },
+      { start: source.indexOf(condition.at), what: condition.what },
+      name,
     );
   }
 });

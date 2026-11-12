@@ -81,14 +81,15 @@ type Disposition<K extends SyntaxKind> =
   | { readonly row: "modelled"; readonly visit: (node: NodeOfKind<K>, walk: SyntaxWalk) => Visit };
 
 const REFUSED = { row: "refused" } as const;
-const walk = (...children: (Statement | Expression | Block | null)[]): Visit => ({
+/** The children to walk, as one list: never spread into arguments, whose count is bounded below a source's width. */
+const walk = (children: readonly (Statement | Expression | Block | null)[]): Visit => ({
   walk: children,
 });
 const refuse = (span: SourceSpan, what: string): Visit => ({ refuse: { span, what } });
 /** A construct of the slice under no condition of its own, with these children. */
 const modelled = <K extends SyntaxKind>(
   children: (node: NodeOfKind<K>) => (Statement | Expression | Block | null)[] = () => [],
-): Disposition<K> => ({ row: "modelled", visit: (node) => walk(...children(node)) });
+): Disposition<K> => ({ row: "modelled", visit: (node) => walk(children(node)) });
 
 /**
  * The route's syntax table: a row for every AST kind (a kind without one, or a row for no kind, fails the build), so a
@@ -109,8 +110,8 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
         node.value.parts.some((part) => part.kind !== "stringText"))
         ? refuse(node.span, "this say")
         : node.value.kind === "stringLiteral"
-          ? walk()
-          : walk(node.value),
+          ? walk([])
+          : walk([node.value]),
   },
   showButtonStatement: REFUSED,
   waitStatement: REFUSED,
@@ -136,7 +137,9 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
     row: "modelled",
     visit: (node) => {
       const written = node.typeAnnotation === null ? null : annotationOutside(node.typeAnnotation);
-      return written !== null ? refuse(written.span, "this written type") : walk(node.initializer);
+      return written !== null
+        ? refuse(written.span, "this written type")
+        : walk([node.initializer]);
     },
   },
   globalStatement: REFUSED,
@@ -146,9 +149,9 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
       node.operator !== "="
         ? refuse(node.span, "this assignment")
         : node.target.kind === "identifier"
-          ? walk(node.target, node.value)
+          ? walk([node.target, node.value])
           : node.target.kind === "propertyAccessExpression"
-            ? walk(node.target.object, node.value)
+            ? walk([node.target.object, node.value])
             : refuse(node.span, "this assignment"),
   },
   ifStatement: modelled((node) => [node.condition, node.thenBlock, node.elseBlock]),
@@ -165,7 +168,7 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
     // (a call for what it does, such as `xs.sort()`)
     visit: (node) =>
       node.expression.kind === "callExpression"
-        ? walk(node.expression)
+        ? walk([node.expression])
         : refuse(node.span, "this expression statement"),
   },
   // ------------------------------------------------------------------------------------------- expressions
@@ -173,7 +176,7 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
     row: "modelled",
     visit: (node, { lets, globals }) =>
       lets.has(node.name) || globals.has(node.name)
-        ? walk()
+        ? walk([])
         : refuse(node.span, `the name '${node.name}'`),
   },
   booleanLiteral: modelled(),
@@ -187,7 +190,7 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
     visit: (node) =>
       node.parts.some((part) => part.kind !== "stringText")
         ? refuse(node.span, "text with interpolation")
-        : walk(),
+        : walk([]),
   },
   regexLiteral: modelled(),
   listLiteral: modelled((node) => [...node.elements]),
@@ -202,7 +205,7 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
     visit: (node) =>
       NOT_OBJECT_LITERALS.has(unwrapped(node.object).kind)
         ? refuse(node.span, "this member or element read")
-        : walk(node.object),
+        : walk([node.object]),
   },
   indexExpression: modelled((node) => [node.object, node.index]),
   callExpression: {
@@ -210,10 +213,10 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
     visit: (node) =>
       sliceCall(node) === null
         ? refuse(node.span, "this call expression")
-        : walk(
+        : walk([
             ...(node.callee.kind === "propertyAccessExpression" ? [node.callee.object] : []),
             ...node.arguments.map((argument) => argument.value),
-          ),
+          ]),
   },
   unaryExpression: REFUSED,
   binaryExpression: {
@@ -223,7 +226,7 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
     visit: (node) =>
       node.operator !== "otherwise" && !nullTest(node)
         ? refuse(node.span, "this binary expression")
-        : walk(node.left, node.right),
+        : walk([node.left, node.right]),
   },
   rangeExpression: modelled((node) => [node.start, node.end]),
   interactionExpression: REFUSED,
@@ -253,7 +256,7 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
       )
         return refuse(node.span, "this load expression");
       if (name !== null) loaded.add(name);
-      return walk(node.key, node.defaultValue);
+      return walk([node.key, node.defaultValue]);
     },
   },
   tagQueryExpression: REFUSED,
@@ -262,7 +265,7 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
     // (`x is T` and `x is not T`, the narrowing's type test, its type a written type of the slice)
     visit: (node) => {
       const written = annotationOutside(node.type);
-      return written !== null ? refuse(written.span, "this written type") : walk(node.value);
+      return written !== null ? refuse(written.span, "this written type") : walk([node.value]);
     },
   },
 };
