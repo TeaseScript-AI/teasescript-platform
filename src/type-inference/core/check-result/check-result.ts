@@ -677,25 +677,40 @@ export function reportedDiagnostics(
 }
 
 /**
- * The statements that never run once their file runs (S3 §2, group W): those no way over the flow graph's live edges
- * reaches from the file's entry. Every file is asked on its own, whether or not the session enters it.
+ * The statements that never run once their file, function or block runs (S3 §2, group W, as `TypeCheckResult` states
+ * it): those no way over the flow graph's live edges reaches from that region's entry or from a label, a call counting
+ * as returning (ADR 0022 §4.3). Every file, function and block is asked on its own, whether or not anything enters it. A statement runs when control reaches its start: a statement
+ * of a statement list is decided where it stands (`placeOf`), not by its own node, which may lie after a call that never
+ * returns; a label by its own node, which a `goto` enters as well; an `else if`, which stands in no list, by its
+ * condition's. A function's declaration is never one: it runs nothing where it stands.
  */
 function unreachable(answers: Answers, index: SliceIndex): Set<Statement> {
   const { graph } = answers;
+  // a call counts as returning, also of a callee that never does (ADR 0022 §4.3): its call-in reaches its call-out
+  const returns = new Map(graph.sites.map((site) => [site.callIn, site.callOut] as const));
   const reached = new Set<FlowNode>();
-  for (const region of graph.regions)
-    if (region.kind === "file") {
-      const pending = [region.entry];
-      reached.add(region.entry);
-      for (let node = pending.pop(); node !== undefined; node = pending.pop())
-        for (const next of node.successors)
-          if (!reached.has(next) && !graph.isDeadEdge(node, next)) {
-            reached.add(next);
-            pending.push(next);
-          }
-    }
+  // the entry of every region but startup, and every label, which a `goto` can reach whatever comes before it
+  const pending = [
+    ...graph.regions.flatMap((region) => (region.kind === "startup" ? [] : [region.entry])),
+    ...graph.nodes.filter((node) => node.statement?.kind === "labelStatement"),
+  ];
+  for (const root of pending) reached.add(root);
+  for (let node = pending.pop(); node !== undefined; node = pending.pop()) {
+    const returned = returns.get(node);
+    for (const next of returned === undefined ? node.successors : [...node.successors, returned])
+      if (!reached.has(next) && (next === returned || !graph.isDeadEdge(node, next))) {
+        reached.add(next);
+        pending.push(next);
+      }
+  }
   return new Set(
-    index.statements.filter((statement) => !reached.has(nodeOf(answers, index, statement))),
+    index.statements.filter((statement) => {
+      if (statement.kind === "functionDeclaration") return false;
+      const place =
+        statement.kind === "labelStatement" ? undefined : graph.placeOf(index.site(statement));
+      if (place === undefined) return !reached.has(nodeOf(answers, index, statement));
+      return place === null || !reached.has(place);
+    }),
   );
 }
 
