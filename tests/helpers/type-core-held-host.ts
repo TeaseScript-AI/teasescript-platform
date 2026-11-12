@@ -48,7 +48,7 @@ import {
   type Globals,
   type StopRun,
 } from "./type-core-stop-oracle.js";
-import { watchRecord } from "./retained-instrument.js";
+import { watchRecord, watchWrites } from "./retained-instrument.js";
 import { sampled } from "./sweep.js";
 
 /*
@@ -1116,7 +1116,14 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
     if (hooked.has(map)) return;
     hooked.add(map);
     for (const [key, value] of map) each(key, value);
-    // (the writer it wraps is the map's own: the retained-state instrument's where it is installed, #1072 R24)
+    // (a map the retained-state instrument made is watched through its own writer, which stays in place, #1072 R35;
+    // any other has its writer wrapped)
+    if (
+      watchWrites(map, (key, value) => {
+        if (live) each(key, value);
+      })
+    )
+      return;
     const own = map.set;
     Object.defineProperty(map, "set", {
       configurable: true,
