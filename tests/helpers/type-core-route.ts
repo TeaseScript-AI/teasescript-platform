@@ -4,6 +4,7 @@ import type { RuntimeScriptStorageEntrySnapshot } from "../../src/runtime/host-d
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
 import { createImmediatePacingRuntimeSnapshot } from "./immediate-pacing-runtime.js";
 import { planText } from "./plan-checks.js";
+import type { CompactRecord } from "./type-core-records.js";
 import {
   defaultSites,
   derivedText,
@@ -171,4 +172,27 @@ export function assignments(
       partial.flatMap((assigned) => DOMAIN.map((value) => ({ ...assigned, [name]: value }))),
     [{}],
   );
+}
+
+/**
+ * A plan's part for one file of its project, as the derived oracle reads one file: the file's own block of instructions
+ * (`PlanFile`), offsets in its source; the whole plan for a project of one file.
+ */
+export function planOfFile(plan: InstructionPlan, path: string): InstructionPlan {
+  if (plan.files.length === 1) return plan;
+  const file = plan.files.find((planned) => planned.path === path);
+  if (file === undefined) throw new Error(`The plan has no file ${path}.`);
+  return {
+    ...plan,
+    instructions: plan.instructions.slice(file.startInstruction, file.endInstruction),
+  };
+}
+
+/** A record's diagnostics and checks of one file of its project, by the file's path. */
+export function recordOfFile(record: CompactRecord, path: string): CompactRecord {
+  return {
+    ...record,
+    diagnostics: record.diagnostics.filter((diagnostic) => diagnostic.site.file === path),
+    checks: record.checks.filter((check) => check.site.file === path),
+  };
 }
