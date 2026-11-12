@@ -48,6 +48,7 @@ import {
   type Globals,
   type StopRun,
 } from "./type-core-stop-oracle.js";
+import { watchRecord } from "./retained-instrument.js";
 import { sampled } from "./sweep.js";
 
 /*
@@ -1115,30 +1116,70 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
     if (hooked.has(map)) return;
     hooked.add(map);
     for (const [key, value] of map) each(key, value);
+    // (the writer it wraps is the map's own: the retained-state instrument's where it is installed, #1072 R24)
+    const own = map.set;
     Object.defineProperty(map, "set", {
       configurable: true,
       writable: true,
       value(this: Map<K, V>, key: K, value: V) {
         if (live) each(key, value);
-        return Map.prototype.set.call(this, key, value);
+        return own.call(this, key, value);
       },
     });
   };
   const onPush = (list: Obligation[], each: (check: Obligation) => void): void => {
     if (hooked.has(list)) return;
     hooked.add(list);
+    const own = list.push;
     Object.defineProperty(list, "push", {
       configurable: true,
       writable: true,
       value(this: Obligation[], ...checks: Obligation[]) {
         if (live) for (const check of checks) each(check);
-        return Array.prototype.push.apply(this, checks);
+        return own.apply(this, checks);
       },
     });
   };
   const observe = (recipe: Label): void => {
     if (hooked.has(recipe)) return;
     hooked.add(recipe);
+    // (#1072 1b: in a frozen run a recipe is a record, observed through its own proxy; its fields stay its own)
+    let quiet = false;
+    const watched = watchRecord(
+      recipe,
+      "text",
+      (value) => {
+        if (quiet) return;
+        // EVIDENCE: invariant: a recipe's text is a string or `null` (`Label`).
+        const shownText = (value as string | null) ?? plain(recipe);
+        if (shownText !== null) touch(recipe, shownText);
+      },
+      (value) => {
+        // EVIDENCE: invariant: as above.
+        if (value !== null) touch(recipe, value as string);
+      },
+    );
+    if (watched) {
+      watchRecord(
+        recipe,
+        "below",
+        () => {},
+        (value) => {
+          // EVIDENCE: invariant: a recipe's `below` is a map of recipes or `null` (`Label`).
+          if (value !== null) onSet(value as Map<string, Label>, (_, child) => observe(child));
+        },
+      );
+      slots.set(recipe, () => {
+        quiet = true;
+        try {
+          return recipe.text;
+        } finally {
+          quiet = false;
+        }
+      });
+      if (recipe.below !== null) onSet(recipe.below, (_, child) => observe(child));
+      return;
+    }
     let text = recipe.text;
     let below = recipe.below;
     slots.set(recipe, () => text);
