@@ -115,6 +115,7 @@ import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import type { IngressNode, Item, ItemTag } from "./items.js";
 import { propertyStep } from "./program.js";
+import { Retained } from "./retained/retained.js";
 import { elementStep, type MixedSteps, type Obligation } from "./result.js";
 import type { Work } from "./solver.js";
 import { Touches, type Touch } from "./touch.js";
@@ -574,20 +575,27 @@ export class Admission {
    * walked down a decision's path as far as it holds it.
    */
   public get dirty(): KeyTrie {
-    return (this.#dirty ??= new KeyTrie(this.work, "checks", () => [
-      ...this.rejectedKeys,
-      ...this.a4Keys,
-    ]));
+    return (this.#dirty ??= new KeyTrie(
+      this.work,
+      "checks",
+      // (#1072 R26: captures `this`, the admission, whose state is step 1b-ii's to record)
+      Retained.closure("Admission.dirty", () => [...this.rejectedKeys, ...this.a4Keys]),
+    ));
   }
 
   public get stored(): KeyTrie {
     const { definitions } = this.pass;
-    return (this.#stored ??= new KeyTrie(this.work, "checks", () => [
-      ...[...definitions.byKey]
-        .filter(([, list]) => list.some((d) => d.kind === "whole" || d.kind === "add"))
-        .map(([key]) => key),
-      ...definitions.deadArguments.keys(),
-    ]));
+    return (this.#stored ??= new KeyTrie(
+      this.work,
+      "checks",
+      // (#1072 R26: captures the pass's definition index, an owner)
+      Retained.closure("Admission.stored", () => [
+        ...[...definitions.byKey]
+          .filter(([, list]) => list.some((d) => d.kind === "whole" || d.kind === "add"))
+          .map(([key]) => key),
+        ...definitions.deadArguments.keys(),
+      ]),
+    ));
   }
 
   /** The analysis's ledger, which the paths and keys built here are charged to (`keptKey`, `keptText`). */

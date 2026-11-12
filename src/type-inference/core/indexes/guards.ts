@@ -24,6 +24,7 @@ import { NarrowingEvents } from "../narrowing/events.js";
 import { NarrowingRoutes } from "../narrowing/routes.js";
 import type { StatementTree } from "../narrowing/statement-tree.js";
 import { siteKey, stepName, type CoreProgram } from "../program.js";
+import { amend, Retained } from "../retained/retained.js";
 
 /*
  * The guard index of the coarse core (checkpoint 9, §3.2): a read of key k is guarded inside a branch
@@ -81,39 +82,55 @@ function testedOperands(expression: Expression): readonly Expression[] {
 
 export class GuardIndex {
   /** Per tested key and callable, the entries of the branches its tests guard. */
-  readonly #branches = new Map<Key, Map<Callable | null, Regions<FlowNode>>>();
+  readonly #branches = Retained.map<Key, Map<Callable | null, Regions<FlowNode>>>(
+    "GuardIndex.#branches",
+  );
   /** Per tested key and file, the right-operand regions its tests guard. */
-  readonly #operands = new Map<Key, Map<number, Regions<OperandRegion>>>();
+  readonly #operands = Retained.map<Key, Map<number, Regions<OperandRegion>>>(
+    "GuardIndex.#operands",
+  );
   /** Per tested key, the callables its operand regions stand in (W40). */
-  readonly #operandCallables = new Map<Key, Set<Callable | null>>();
+  readonly #operandCallables = Retained.map<Key, Set<Callable | null>>(
+    "GuardIndex.#operandCallables",
+  );
   /** G3 3b: the tested keys (`narrowed`), as a trie. */
   readonly #tested: KeyTrie;
   /** The keys with a tested key strictly below them: a copy of one carries its read as a mark (§3.2). */
-  readonly belowTested = new Set<Key>();
+  readonly belowTested = Retained.set<Key>("GuardIndex.belowTested");
   /** Per key, the tested keys strictly below it, and the guard regions of those keys once asked (`guardedBelow`). */
-  readonly #testedUnder = new Map<Key, Key[]>();
+  readonly #testedUnder = Retained.map<Key, Key[]>("GuardIndex.#testedUnder");
   /** Per read, the tested paths below it whose regions hold it (`guardedBelowRead`). */
-  readonly #belowReads = new Map<PlaceId, readonly string[]>();
-  readonly #nests = new Map<
+  readonly #belowReads = Retained.map<PlaceId, readonly string[]>("GuardIndex.#belowReads");
+  readonly #nests = Retained.map<
     Key,
     { readonly branches: Map<Callable | null, Nest>; readonly operands: Map<number, Nest> }
-  >();
+  >("GuardIndex.#nests");
   /** The tested keys q below each key, per relative path q, and the longest such path (§8). */
-  #testedRelative: Map<string, Set<Key>> | null = null;
-  #byPlace: ReadonlyMap<PlaceId, ReadonlyMap<number, Regions<OperandRegion>>> | null = null;
-  #testedLength = 0;
+  /** #1072 1b: what it fills on its first question, a record: the tested keys below, by place, their longest path. */
+  readonly #lazy = Retained.record<{
+    testedRelative: Map<string, Set<Key>> | null;
+    byPlace: ReadonlyMap<PlaceId, ReadonlyMap<number, Regions<OperandRegion>>> | null;
+    testedLength: number;
+    nestCount: number;
+  }>("GuardIndex.lazy", { testedRelative: null, byPlace: null, testedLength: 0, nestCount: 0 });
   /** Every step of a tested key's path (`testedSteps`). */
-  readonly #testedSteps = new Set<string>();
+  readonly #testedSteps = Retained.set<string>("GuardIndex.#testedSteps");
   #narrowing: NarrowingIndex | null = null;
   #queries: { readonly events: NarrowingEvents; readonly routes: NarrowingRoutes } | null = null;
 
   public constructor(readonly program: CoreProgram) {
+    // (its narrowing indexes, `#narrowing` and `#queries`, are not exposed: outside the recorder's domain in #1072 1b)
+    Retained.owner(this, "GuardIndex", (index) => ({ tested: index.#tested }));
     const work = program.work;
     const flow = program.flow;
     this.#tested = new KeyTrie(
       work,
       "eventSteps",
-      () => new Set([...this.#branches.keys(), ...this.#operands.keys()]),
+      // (#1072 R26: captures `this`, an owner)
+      Retained.closure(
+        "GuardIndex.tested",
+        () => new Set([...this.#branches.keys(), ...this.#operands.keys()]),
+      ),
     );
     const branches = new Map<Key, Map<Callable | null, FlowNode[]>>();
     for (const [uses, conditions] of [
@@ -143,7 +160,7 @@ export class GuardIndex {
             }
       }
     for (const [key, byCallable] of branches) {
-      const sorted = new Map<Callable | null, Regions<FlowNode>>();
+      const sorted = Retained.map<Callable | null, Regions<FlowNode>>("GuardIndex.#branches[]");
       for (const [callable, list] of byCallable) {
         work.charge("indexSteps", sortCost(list.length));
         list.sort((a, b) => program.position(a) - program.position(b));
@@ -262,13 +279,15 @@ export class GuardIndex {
     return out.sort();
   }
 
-  readonly #nestIds = new WeakMap<Nest, number>();
+  readonly #nestIds = Retained.weakMap<Nest, number>("GuardIndex.#nestIds");
   #nestId(nest: Nest): number {
     let id = this.#nestIds.get(nest);
-    if (id === undefined) this.#nestIds.set(nest, (id = ++this.#nestCount));
+    if (id === undefined) {
+      amend(this);
+      this.#nestIds.set(nest, (id = ++this.#lazy.nestCount));
+    }
     return id;
   }
-  #nestCount = 0;
 
   /**
    * `guardedBelow` at a value's read below its property and element projections (as `guardedRead`), once per read and
@@ -333,8 +352,14 @@ export class GuardIndex {
           add(operands, file, { start: region.start, end: region.end, label });
     }
     const nests = {
-      branches: new Map([...branches].map(([at, list]) => [at, this.#nest(list)] as const)),
-      operands: new Map([...operands].map(([at, list]) => [at, this.#nest(list)] as const)),
+      branches: Retained.map(
+        "GuardIndex.#nests.branches",
+        [...branches].map(([at, list]) => [at, this.#nest(list)] as const),
+      ),
+      operands: Retained.map(
+        "GuardIndex.#nests.operands",
+        [...operands].map(([at, list]) => [at, this.#nest(list)] as const),
+      ),
     };
     this.#nests.set(key, nests);
     return nests;
@@ -528,7 +553,11 @@ export class GuardIndex {
             if (list === undefined) byFile.set(file, [region]);
             else list.push(region);
             let callables = this.#operandCallables.get(key);
-            if (callables === undefined) this.#operandCallables.set(key, (callables = new Set()));
+            if (callables === undefined)
+              this.#operandCallables.set(
+                key,
+                (callables = Retained.set("GuardIndex.#operandCallables[]")),
+              );
             callables.add(callable);
           }
         for (const child of expressionChildren(top))
@@ -536,7 +565,7 @@ export class GuardIndex {
       }
     }
     for (const [key, byFile] of regions) {
-      const sorted = new Map<number, Regions<OperandRegion>>();
+      const sorted = Retained.map<number, Regions<OperandRegion>>("GuardIndex.#operands[]");
       for (const [file, list] of byFile) {
         work.charge("indexSteps", sortCost(list.length));
         list.sort((a, b) => a.start - b.start);
@@ -682,7 +711,7 @@ export class GuardIndex {
 
   /** The operand regions of each place's tests per file, merged from the per-key ones and sorted, once. */
   #placeOperands(): ReadonlyMap<PlaceId, ReadonlyMap<number, Regions<OperandRegion>>> {
-    if (this.#byPlace !== null) return this.#byPlace;
+    if (this.#lazy.byPlace !== null) return this.#lazy.byPlace;
     const program = this.program;
     const lists = new Map<PlaceId, Map<number, OperandRegion[]>>();
     for (const [key, byFile] of this.#operands)
@@ -695,9 +724,11 @@ export class GuardIndex {
         // (one by one: a place's operand regions grow with the source, past one call's arguments)
         else for (const region of regions.list) list.push(region);
       }
-    const merged = new Map<PlaceId, Map<number, Regions<OperandRegion>>>();
+    const merged = Retained.map<PlaceId, Map<number, Regions<OperandRegion>>>(
+      "GuardIndex.#lazy.byPlace",
+    );
     for (const [place, byFile] of lists) {
-      const sorted = new Map<number, Regions<OperandRegion>>();
+      const sorted = Retained.map<number, Regions<OperandRegion>>("GuardIndex.#lazy.byPlace[]");
       for (const [file, list] of byFile) {
         program.work.charge("indexSteps", sortCost(list.length));
         list.sort((x, y) => x.start - y.start);
@@ -706,7 +737,8 @@ export class GuardIndex {
       }
       merged.set(place, sorted);
     }
-    this.#byPlace = merged;
+    amend(this);
+    this.#lazy.byPlace = merged;
     return merged;
   }
 
@@ -744,7 +776,7 @@ export class GuardIndex {
   /** The longest path of a tested key below another key. */
   public testedLength(): number {
     this.#relative();
-    return this.#testedLength;
+    return this.#lazy.testedLength;
   }
 
   /**
@@ -757,11 +789,11 @@ export class GuardIndex {
   }
 
   #relative(): Map<string, Set<Key>> {
-    if (this.#testedRelative !== null) return this.#testedRelative;
-    const relative = new Map<string, Set<Key>>();
+    if (this.#lazy.testedRelative !== null) return this.#lazy.testedRelative;
+    const relative = Retained.map<string, Set<Key>>("GuardIndex.#lazy.testedRelative");
     for (const tested of new Set([...this.#branches.keys(), ...this.#operands.keys()])) {
       const path = keyPath(tested);
-      this.#testedLength = Math.max(this.#testedLength, path.length);
+      this.#lazy.testedLength = Math.max(this.#lazy.testedLength, path.length);
       for (let length = 0; length < path.length; length += 1) {
         this.program.work.charge("indexSteps");
         if (!this.#testedSteps.has(path[length]!)) {
@@ -770,11 +802,13 @@ export class GuardIndex {
         }
         const below = keptText(this.program.work, path.slice(length));
         let keys = relative.get(below);
-        if (keys === undefined) relative.set(below, (keys = new Set()));
+        if (keys === undefined)
+          relative.set(below, (keys = Retained.set("GuardIndex.#lazy.testedRelative[]")));
         keys.add(keptKey(this.program.work, keyPlace(tested), path.slice(0, length)));
       }
     }
-    this.#testedRelative = relative;
+    amend(this);
+    this.#lazy.testedRelative = relative;
     return relative;
   }
 }
