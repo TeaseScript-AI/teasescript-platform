@@ -193,6 +193,7 @@ watch(
 // until Vue renders it.
 const measureEntry: typeof measureElement<HTMLElement> = (element, entry, instance) => {
   const key = element.dataset.rowKey;
+  if (key === unmeasuredFirst) unmeasuredFirst = null;
   if (key !== undefined)
     measurement.measured(key, element.dataset.contentSequence, entry !== undefined);
   return measureElement(element, entry, instance);
@@ -221,6 +222,9 @@ let shown = {
 };
 // While following, the first entry the latest update added: following scrolls no further than to show it at the top.
 let firstNewEntry: number | null = null;
+// Its row key until its row was first measured: an update that comes before then adds to that one, whose first row
+// stays where following stops, as when a block's message and the reply after it are published one after the other.
+let unmeasuredFirst: string | null = null;
 // Whether following stopped there, with more of the update below.
 const heldAtNewEntry = ref(false);
 // Corrections that follow a live update glide; the reader's own scrolling ends that.
@@ -256,19 +260,23 @@ watch(
         : appended;
     // The first entries of a transcript open it, also when the script shows them only once the host answered.
     const opening = previous.length === 0;
-    // Following stops at the first row the update brings, wherever the shown list places it: a new one, or the answer
-    // its entry takes over now, which enters no second time but still starts what this update brings, as when an
-    // answer and its reply arrive together.
+    // Following stops at the first row the update brings, wherever the shown list places it: a new one, or the player's
+    // answer its runtime row takes over now, so the answer stays in view above its reply as when both arrived together.
+    // That row enters no second time: for entrances the answer counts only when it first shows.
     const takenOver =
       previous.pending !== null && shown.pending === null && props.entries === previous.entries
         ? props.entries.slice(previous.length).filter((entry) => rowKey(entry) === previous.pending)
         : [];
     const starts = new Set([...added, ...takenOver].map(rowKey));
+    if (unmeasuredFirst !== null) starts.add(unmeasuredFirst);
     const first = starts.size === 0 ? -1 : list().findIndex((entry) => starts.has(rowKey(entry)));
     firstNewEntry =
       following.value && props.entries === previous.entries && first !== -1 && !opening
         ? shownPosition(currentRemovedRows(), first)
         : null;
+    const firstKey = firstNewEntry === null ? null : rowKey(list()[first]!);
+    unmeasuredFirst =
+      firstKey !== null && !virtualizer.value.itemSizeCache.has(firstKey) ? firstKey : null;
     if (
       initialPositioning ||
       opening ||
@@ -582,6 +590,7 @@ function interruptFollow() {
   following.value = false;
   liveUntil = 0;
   firstNewEntry = null;
+  unmeasuredFirst = null;
   // Replace an in-flight measured end target before native user scrolling starts.
   virtualizer.value.scrollToOffset(scrollElement.value?.scrollTop ?? 0);
 }
