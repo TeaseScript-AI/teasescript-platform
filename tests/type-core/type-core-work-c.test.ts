@@ -301,7 +301,7 @@ const REVERSED_UNION = 60;
 /**
  * The route rule's entries (#2497, r4-451): labels, `goto`s and uses of one key, each doubled alone; loops in
  * sequence; a root held under nested compound statements; files in a transfer cycle; block bodies reading one key; one
- * global read in loops or after labels in many functions.
+ * global read in loops in many functions.
  * (Loops nested k deep are no family here: the analysis before the entries already grows faster than this gate there,
  * and the nesting limit bounds their depth, so the entries' jumps × depth has a constant ceiling.)
  */
