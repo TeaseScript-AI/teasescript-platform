@@ -1,0 +1,154 @@
+import type { SyntaxKind } from "../../../src/type-inference/core/slice-syntax.js";
+
+/*
+ * The row guard's templates (#2500, `tests/type-core/type-core-row-guard.test.ts`): for each open row of the candidate
+ * route's syntax table (`DISPOSITIONS`), one source per operand and store position of the construct, the host global
+ * `hostValue` there, so its value is unknown to both checkers, and one per shape of a call (`sliceCall`'s, with each of
+ * its arguments). A row without a position has one source that uses it. Sources are minimal
+ * programs inside today's slice; the guard adds the `exit` each script ends with.
+ */
+export const ROW_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly string[]>>> = {
+  letStatement: [
+    "let x: integer = hostValue",
+    "let x = hostValue",
+    "let xs: integer[] = hostValue",
+    "let x: integer? = hostValue",
+  ],
+  assignmentStatement: [
+    "let x: integer = 1\nx = hostValue",
+    "let x = 1\nx = hostValue",
+    "let o = {n: 1}\no.n = hostValue",
+    "hostValue.n = 1",
+  ],
+  ifStatement: ['if hostValue == null {\n  say "y"\n} else {\n  say "n"\n}'],
+  repeatStatement: ['repeat hostValue {\n  say "r"\n}'],
+  forStatement: ["for item in hostValue {\n  say item\n}"],
+  sayStatement: ["say hostValue"],
+  expressionStatement: ["toJson(hostValue)"],
+  // (the guard ends every source with `exit`, which a script needs; this row's source is that `exit`)
+  exitStatement: ['say "a"'],
+  identifier: ["let x = hostValue"],
+  booleanLiteral: ["let b: boolean = true"],
+  nullLiteral: ["let n: integer? = null"],
+  numberLiteral: ["let n: number = 1.5"],
+  stringLiteral: ['let t: string = "a"'],
+  regexLiteral: ["let r = /a+/"],
+  listLiteral: ["let xs: integer[] = [1, hostValue]"],
+  objectLiteral: ["let o = {n: hostValue}"],
+  parenthesizedExpression: ["let x: integer = (hostValue)"],
+  propertyAccessExpression: ["let o = {n: hostValue}\nlet x: integer = o.n", "let x = hostValue.n"],
+  indexExpression: ["let xs = [1, 2]\nlet x = xs[hostValue]", "let x = hostValue[0]"],
+  rangeExpression: ["for i in 1..hostValue {\n  say i\n}", "for i in hostValue..3 {\n  say i\n}"],
+  binaryExpression: [
+    "let x: integer = hostValue otherwise 1",
+    "let a: integer? = null\nlet x: integer = a otherwise hostValue",
+    "let b = hostValue == null",
+    "let b = null != hostValue",
+  ],
+  typeTestExpression: ["let b = hostValue is integer"],
+  callExpression: [
+    "let xs = [1]\nlet x: integer = xs.get(hostValue, default: 0)",
+    "let xs = [1]\nlet x: integer = xs.get(0, default: hostValue)",
+    "let n: integer = toInteger(hostValue, default: 0)",
+    'let n: integer = toInteger("1", default: hostValue)',
+    "let v: integer = fromJson(hostValue, default: 1)",
+    'let v: integer = fromJson("bad", default: hostValue)',
+    'let v: integer = fromJson("1", default: 1, files: false)',
+    "let f = fileFromBase64(hostValue, default: null)",
+    'let f = fileFromBase64("YQ==", default: hostValue)',
+    'let t = decryptText(hostValue, password: "pw", default: "")',
+    'let t = decryptText("x", password: hostValue, default: "")',
+    'let t: string = decryptText("x", password: "pw", default: hostValue)',
+    'let t = decryptText("x", key: hostValue, default: "")',
+    'let f = decryptFile(hostValue, password: "pw", default: null)',
+    'let f = decryptFile(hostValue, key: "k", default: null)',
+    'let t = "abc"\nlet b = t.contains(hostValue)',
+    'let b = hostValue.contains("a")',
+    "let xs = [2, 1]\nxs.sort()",
+    "let t = toJson(hostValue)",
+  ],
+  loadExpression: [
+    'let n: integer = load "k", default: hostValue',
+    "let n = load hostValue, default: 1",
+  ],
+};
+
+/**
+ * The positions of open rows whose host global the route refuses after the syntax gate, by name: the source with the
+ * host global there, which must be refused with `text` in every mode, and the same position with a value the slice
+ * admits, which must pass the guard's three rules. `gate` names the refusal's place; the record carries only `text`,
+ * which only that gate writes. A refusal not listed fails the guard, and so does a listed one that no longer occurs.
+ */
+export const DECLARED_REFUSALS: readonly {
+  readonly row: SyntaxKind;
+  readonly position: string;
+  readonly refused: string;
+  readonly admitted: string;
+  readonly gate: string;
+  readonly text: string;
+}[] = [
+  {
+    row: "ifStatement",
+    position: "the condition",
+    refused: 'if hostValue {\n  say "y"\n}',
+    admitted: 'let b = hostValue == null\nif b {\n  say "y"\n}',
+    // (an unknown condition's operator diagnostic, which the route refuses after the analysis)
+    gate: "outsideAnswers (src/type-inference/core/backend.ts)",
+    text: "this operand",
+  },
+  {
+    row: "callExpression",
+    position: "`get`'s receiver",
+    refused: "let x: integer = hostValue.get(0, default: 0)",
+    admitted: "let xs = [1]\nlet x: integer = xs.get(0, default: 0)",
+    // (`get` on a receiver of unknown kind, which the route refuses after the analysis)
+    gate: "outsideAnswers (src/type-inference/core/backend.ts)",
+    text: "this operand",
+  },
+];
+
+/**
+ * The runs of a template in which the route's plan fails otherwise than today's: the template, why the difference
+ * stands (an accepted record, or the open issue that decides it while nothing accepted does), the check's field and
+ * place in the route's plan, the failure's code at `at` on the route, and where today's run fails instead (`null`
+ * where it does not fail). The guard requires exactly that difference in every mode, and fails on any other difference.
+ */
+export const DECLARED_RUN_DIFFERENCES: readonly {
+  readonly template: string;
+  readonly basis: { readonly record: string } | { readonly issue: number };
+  readonly field: string;
+  /** The template's text the check stands at in the route's plan (`main.tease`). */
+  readonly checkAt: string;
+  readonly code: string;
+  readonly at: string;
+  readonly todayAt: string | null;
+}[] = [
+  {
+    template: "let xs = [1]\nlet x: integer = xs.get(hostValue, default: 0)",
+    basis: {
+      record:
+        "V30 §16, reading an element with a default: a non-whole index of unknown type fails with TSR024 on the new type checker, and still gives the default on today's",
+    },
+    field: "indexCheck",
+    checkAt: "xs.get(hostValue, default: 0)",
+    code: "TSR024",
+    at: "hostValue",
+    todayAt: null,
+  },
+  // undecided (#2536): which span TSR058 stands at when the value arrives through a call's default
+  ...[
+    ['let v: integer = fromJson("bad", default: hostValue)', 'fromJson("bad", default: hostValue)'],
+    [
+      'let t: string = decryptText("x", password: "pw", default: hostValue)',
+      'decryptText("x", password: "pw", default: hostValue)',
+    ],
+  ].map(([template, call]) => ({
+    template: template!,
+    basis: { issue: 2536 },
+    field: "fallbackCheck",
+    checkAt: "hostValue",
+    code: "TSR058",
+    at: "hostValue",
+    todayAt: call!,
+  })),
+];

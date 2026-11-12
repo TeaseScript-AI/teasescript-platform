@@ -21,7 +21,7 @@ import {
 // values of every pair of kinds, and a row must exist exactly where it accepts them, with the kind its result has. A
 // row the runtime takes by value must be one where some values fail the runtime's check of the kinds (`TSR009`), and
 // no other row's values may fail it. The operands come from host globals, which the compiler cannot see; speakers and
-// handles, which only the runtime creates, come from the script through `pick`, as in `tests/runtime/value-kinds.test.ts`.
+// handles, which only the runtime creates, come from the script through `pick`, as in `tests/runtime/values/value-kinds.test.ts`.
 
 const OPERATORS: readonly Operator[] = ["+", "-", "*", "/", "%", "<", "<=", ">", ">=", "neg"];
 

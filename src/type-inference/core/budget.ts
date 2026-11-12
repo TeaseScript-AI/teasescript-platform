@@ -293,6 +293,8 @@ export class WorkLedger {
   /** Units charged while building an index the program shares (`shared`), outermost builds only. */
   #shared = 0;
   #sharing = false;
+  /** Whether the open shared window is a `sharedStructure` build's. */
+  #structural = false;
   /** A `sharedSteps` build's start, while it runs: `own` stands there, repeats included. */
   #window: { readonly total: number; readonly repeated: number } | null = null;
   /** Units a demand counts for work the program did once for every reader (`repeat`). */
@@ -395,6 +397,68 @@ export class WorkLedger {
   }
 
   /**
+   * #2289: a shared build of structure, a literal's view, body or index: its own steps count to the total
+   * and never to the decision that first asked, as `sharedSteps`'s do, but each read it yields runs outside the build,
+   * charged to the decision that asks as any read is, so no demand runs inside it. Inside another shared build it is
+   * that build's.
+   */
+  public *sharedStructure<Y, R, N>(steps: Generator<Y, R, N>): Generator<Y, R, N> {
+    if (this.#sharing) return yield* steps;
+    const shared = (resume: () => IteratorResult<Y, R>): IteratorResult<Y, R> => {
+      this.#openStructure();
+      try {
+        return resume();
+      } finally {
+        this.closeShared();
+      }
+    };
+    let step = shared(() => steps.next());
+    while (step.done !== true) {
+      const yielded = step.value;
+      let answer: N;
+      try {
+        answer = yield yielded;
+      } catch (error) {
+        step = shared(() => steps.throw(error));
+        continue;
+      }
+      step = shared(() => steps.next(answer));
+    }
+    return step.value;
+  }
+
+  /** Opens a `sharedStructure` window. */
+  #openStructure(): void {
+    this.#sharing = true;
+    this.#structural = true;
+    this.#window = { total: this.#total, repeated: this.#repeated };
+  }
+
+  /**
+   * #2289: `callback`, a read a structure build makes without yielding it (a contract's identity or snapshot of a
+   * value), run outside the open `sharedStructure` window: charged to the decision that asks, as a yielded read is.
+   */
+  public outside<T>(callback: () => T): T {
+    if (!this.#structural) return callback();
+    this.closeShared();
+    try {
+      return callback();
+    } finally {
+      this.#openStructure();
+    }
+  }
+
+  /** `outside` for a generator's steps: each of them run outside the window, what it yields passed on. */
+  public *outsideSteps<Y, R, N>(steps: Generator<Y, R, N>): Generator<Y, R, N> {
+    let step = this.outside(() => steps.next());
+    while (step.done !== true) {
+      const answer: N = yield step.value;
+      step = this.outside(() => steps.next(answer));
+    }
+    return step.value;
+  }
+
+  /**
    * Ends an open `sharedSteps` build: its units counted as shared, what its readers repeated dropped. Its own end
    * calls it, and so does a solver run that abandons it unfinished (a stop leaves its generator suspended).
    */
@@ -403,6 +467,7 @@ export class WorkLedger {
     if (window === null) return;
     this.#window = null;
     this.#sharing = false;
+    this.#structural = false;
     this.#shared += this.#total - window.total;
     this.#repeated = window.repeated;
   }

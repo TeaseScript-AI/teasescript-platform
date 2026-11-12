@@ -198,6 +198,7 @@ export {
   writtenOf,
   writtenTypeSteps,
 } from "./contract/terms.js";
+export { writtenDefault, WrittenDefaults } from "./contract/written-default.js";
 export { presenceSteps } from "./contract/prefix-index/tries.js";
 export { withOwnSelection } from "./contract/value-kinds.js";
 

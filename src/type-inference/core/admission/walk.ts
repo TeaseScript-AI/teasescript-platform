@@ -21,7 +21,17 @@ import type { FlowNode } from "../flow-graph.js";
 import { dictList } from "../method-categories.js";
 import { stepName, type CoreProgram } from "../program.js";
 import { sharing } from "../sharing.js";
-import type { EvaluationKey, Expansion, Part, Stop, Stops, Via, ViaChain } from "./model.js";
+import type {
+  EvaluationKey,
+  Expansion,
+  Link,
+  Part,
+  Stop,
+  Stops,
+  Via,
+  ViaChain,
+  View,
+} from "./model.js";
 import { permittedAt } from "./permitted.js";
 import { fieldsOf, sourceOfRead } from "./structure.js";
 import { readNow, type Reads } from "../inherited/reads.js";
@@ -130,6 +140,8 @@ export function copySources(
    * one's).
    */
   readonly cellsLive: boolean;
+  /** #2289: whether the copy passes through a literal's cell of more than one element (`Admission.literalLandings`). */
+  readonly literal: boolean;
 }[] {
   const known = admission.copies.get(value);
   if (known !== undefined) return known;
@@ -154,21 +166,30 @@ export function copySources(
     binding: PlaceId;
     strip: readonly string[];
     cellsLive: boolean;
+    literal: boolean;
   }[] = [];
   // (a read of a wrapper's family carries its strip as a path of the arena kept in reverse, one step on in front per
   // projection, made once for each copy it reaches: G3 stage 1; any other walk its arrays as before)
   const reversed = readsCursorFamily(admission, value);
   const start: CopyStrip = reversed ? reverseStrip(admission, 0) : admission.arrayStrip([]);
-  const pending: [PlaceId, Steps | null, CopyStrip, boolean][] = [[value, null, start, true]];
+  const pending: [PlaceId, Steps | null, CopyStrip, boolean, boolean][] = [
+    [value, null, start, true, false],
+  ];
   while (pending.length > 0) {
-    const [current, path, strip, cellsLive] = pending.pop()!;
+    const [current, path, strip, cellsLive, literal] = pending.pop()!;
     program.work.charge("indexSteps");
     const binding = program.occurrenceOf.get(current);
     if (binding !== undefined) {
-      out.push({ path: made(path), binding, strip: stripSteps(admission, strip), cellsLive });
+      out.push({
+        path: made(path),
+        binding,
+        strip: stripSteps(admission, strip),
+        cellsLive,
+        literal,
+      });
       continue;
     }
-    const next: [PlaceId, Steps | null, CopyStrip, boolean][] = [];
+    const next: [PlaceId, Steps | null, CopyStrip, boolean, boolean][] = [];
     // (its cells' tasks share one rest of the strip, charged as kept)
     let rest: CopyStrip | null = null;
     if (program.hasOf.has(current))
@@ -181,14 +202,21 @@ export function copySources(
             // (one step per field, which its cells share)
             const child: Steps | null =
               strip.length === 0 ? { parent: path, step: name, made: null } : path;
-            for (const d of definitions.cellDefs.get(term.place) ?? []) {
+            const cell = definitions.cellDefs.get(term.place) ?? [];
+            for (const d of cell) {
               rest ??=
                 strip.length === 0
                   ? strip
                   : strip.kind === "steps"
                     ? admission.arrayStrip(keptSlice(admission.work, strip.steps, 1))
                     : strip.rest();
-              next.push([d.value!, child, rest, cellsLive && admission.pass.lists.live(d)]);
+              next.push([
+                d.value!,
+                child,
+                rest,
+                cellsLive && admission.pass.lists.live(d),
+                literal || cell.length > 1,
+              ]);
             }
           }
       }
@@ -196,7 +224,7 @@ export function copySources(
       for (const [carried, rest] of strip.kind === "steps"
         ? admission.carriersBy(current, strip)
         : admission.carriersBy(current, strip))
-        next.push([carried, path, rest, cellsLive]);
+        next.push([carried, path, rest, cellsLive, literal]);
     for (let index = next.length - 1; index >= 0; index -= 1) pending.push(next[index]!);
   }
   admission.copies.set(value, out);
@@ -392,7 +420,10 @@ export function* expandRead(
   let stop: Expansion["stop"] = null;
   const parts: Part[] = [];
   const carried =
-    literal || after || term !== null || (yield* sourceOfRead(admission, value)) !== null
+    literal ||
+    after ||
+    term !== null ||
+    (yield* program.work.outsideSteps(sourceOfRead(admission, value))) !== null
       ? []
       : yield* admission.carriersOfRead(value, strip);
   if (literal && strip.length > 0) {
@@ -463,6 +494,7 @@ export function* expandRead(
     node,
     strip,
     inherits,
+    literal,
     stop,
     parts,
   };
@@ -616,6 +648,172 @@ export function* stopsOfRead(
     }
   memo.set(value, stops);
   return stops;
+}
+
+/**
+ * #2289: a recipe's view (`View`), the walk of `stopsOfRead` from that task in its own coordinates, but a literal
+ * with a step of several elements (a cell) is a link where it stands: its steps of one element are walked as before
+ * (a cell of one element is that element's own reading), its cells are not, so a literal's body is never walked again
+ * for each value that holds it (`literals/cell.ts`). Once per recipe and pass, built when first asked.
+ */
+export function* viewOfRead(admission: Admission, start: Expansion): Reads<View> {
+  const known = admission.views.get(start.id);
+  if (known !== undefined) return known;
+  // (#2289: the structure every later reader shares, counted to the analysis total and never to the
+  // decision that first asked (r4-349). Only the lazy builds of a view, a body and a body's index, and only their own steps:
+  // every read a build yields, a read of a built one, the comparison evaluation and every item read run and are charged
+  // to the decision that asks (`sharedStructure`); the total's allowance stays their bound)
+  return yield* admission.pass.program.work.sharedStructure(buildView(admission, start));
+}
+
+function* buildView(admission: Admission, start: Expansion): Reads<View> {
+  const { program, contract } = admission.pass;
+  const view: View = {
+    written: new Map(),
+    values: new Map(),
+    literals: new Map(),
+    links: new Map(),
+    depths: null,
+  };
+  const sources = new Set<string>();
+  const root = rootKey();
+  const pending: (readonly [
+    Expansion,
+    readonly string[],
+    boolean,
+    ViaChain | null,
+    boolean,
+    EvaluationKey,
+  ])[] = [[start, [], false, null, true, root]];
+  while (pending.length > 0) {
+    const [task, path, deep, via, single, key] = pending.pop()!;
+    program.work.charge("indexSteps");
+    const { value: current, node: at, strip } = task;
+    if (task.inherits !== null) {
+      const inherits: Stop = {
+        key,
+        value: current,
+        node: at,
+        path,
+        term: null,
+        from: task.inherits.from,
+        strip: task.inherits.strip,
+        deep,
+        single,
+        via,
+      };
+      const text = keptText(admission.work, path);
+      const list = view.written.get(text);
+      if (list === undefined) view.written.set(text, [inherits]);
+      else list.push(inherits);
+    }
+    const own = task.stop;
+    // (F2's dedupe, as `stopsOfRead`'s)
+    const map = own === null ? null : view[own.list];
+    const pathKey = own === null ? "" : keptText(admission.work, path);
+    let kept = own !== null;
+    if (
+      own !== null &&
+      sharing() &&
+      path.length > 0 &&
+      own.list === "values" &&
+      (yield* program.work.outsideSteps(sourceOfRead(admission, current))) !== null &&
+      program.work.outside(() => contract.ingressOf(current)) === null
+    ) {
+      const identity = keptParts(
+        admission.work,
+        pathKey,
+        strip,
+        viaSignature(admission, via),
+        deep,
+        single,
+        program.work.outside(() => contract.identityOf(current).id),
+        program.work.outside(() => contract.readSnapshot(current)) ?? "",
+      );
+      if (sources.has(identity)) kept = false;
+      else sources.add(identity);
+    }
+    if (kept) {
+      const stop: Stop = {
+        key,
+        value: current,
+        node: at,
+        path,
+        term: own!.term,
+        from: null,
+        strip: own!.strip,
+        deep,
+        single,
+        via,
+      };
+      const list = map!.get(pathKey);
+      if (list === undefined) map!.set(pathKey, [stop]);
+      else list.push(stop);
+    } else if (own !== null) continue;
+    // (a literal's cells: a link where it stands, its steps of one element walked)
+    if (task.literal) program.work.charge("checks", task.parts.length);
+    const cellular = task.literal ? cellSteps(task) : null;
+    if (cellular !== null && cellular.size > 0) {
+      const text = keptText(admission.work, path);
+      const link: Link = { key, value: current, node: at, path, strip, deep, single, via };
+      keep(admission.work, 1);
+      const list = view.links.get(text);
+      if (list === undefined) view.links.set(text, [link]);
+      else list.push(link);
+    }
+    for (let index = task.parts.length - 1; index >= 0; index -= 1) {
+      const part = task.parts[index]!;
+      if (cellular?.has(part.step) === true) continue;
+      pending.push([
+        yield* partOfRead(admission, part),
+        part.step === null ? path : keptSteps(admission.work, path, [part.step]),
+        part.deep ?? deep,
+        part.role === null
+          ? via
+          : viaLink(program, via, {
+              value: current,
+              node: at,
+              path,
+              strip,
+              operand: part.value,
+              role: part.role,
+            }),
+        single && part.single,
+        longerKey(key, part.position),
+      ]);
+    }
+  }
+  rankKeys(program.work, root);
+  const sortByKey = (list: { readonly key: EvaluationKey }[]): void => {
+    program.work.charge("checks", sortCost(list.length));
+    list.sort((a, b) => compareKeys(a.key, b.key));
+  };
+  for (const list of view.written.values()) sortByKey(list);
+  for (const list of view.values.values()) sortByKey(list);
+  for (const list of view.literals.values()) sortByKey(list);
+  for (const list of view.links.values()) sortByKey(list);
+  admission.views.set(start.id, view);
+  return view;
+}
+
+/** Whether a literal task has a cell (`cellSteps`), once per recipe: its parts counted when first asked. */
+export function hasCell(admission: Admission, task: Expansion): boolean {
+  let known = cellular.get(task);
+  if (known === undefined) {
+    admission.pass.program.work.charge("checks", task.parts.length);
+    cellular.set(task, (known = task.literal && cellSteps(task).size > 0));
+  }
+  return known;
+}
+const cellular = new WeakMap<Expansion, boolean>();
+
+/** A literal task's steps of several elements (its cells, B1); `step` `null` for a projection's. */
+export function cellSteps(task: Expansion): ReadonlySet<string | null> {
+  const counts = new Map<string | null, number>();
+  for (const part of task.parts) counts.set(part.step, (counts.get(part.step) ?? 0) + 1);
+  const out = new Set<string | null>();
+  for (const [step, count] of counts) if (count > 1) out.add(step);
+  return out;
 }
 
 /**

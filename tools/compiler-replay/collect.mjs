@@ -34,8 +34,8 @@ const stopAt = (at) =>
   at === null || (Array.isArray(at) && at.length === 2 && at.every(Number.isInteger));
 
 /**
- * Whether `stops` is what `run.mjs` (`stopsApart`, #2355) writes on a stops difference: `{ unavailable }` text,
- * `{ listsEqual: true }`, or `added`, `removed` and `moved` lists of `{ label, path, base, head }`.
+ * Whether `stops` is what `run.mjs` (`run-results.mjs`'s `stopsApart`, #2355) writes on a stops difference:
+ * `{ unavailable }` text, `{ listsEqual: true }`, or `added`, `removed` and `moved` lists of `{ label, path, base, head }`.
  */
 function stopsForm(stops) {
   if (!isObject(stops)) return false;

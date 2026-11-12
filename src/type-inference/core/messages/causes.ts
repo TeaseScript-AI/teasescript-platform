@@ -3,6 +3,7 @@ import { REFERENCE } from "../contract.js";
 import { selectsElement } from "../method-categories.js";
 import type { ContextWord, ItemTag } from "../items.js";
 import type { ContextDetail, RequiredCheck } from "../result.js";
+import type { SourceSite } from "../../graph.js";
 import type { MessageSource } from "./site.js";
 import { described, parsedExpression } from "./words.js";
 
@@ -126,7 +127,10 @@ export function contextSentence(
  * where both are plain paths of one root; none where the writer is the read itself (a call, a `load`, a selection used
  * where it stands, as an argument too); `null` where it cannot be told.
  */
-function readBelow(required: RequiredCheck, source: MessageSource): readonly string[] | null {
+function readBelow(
+  required: RequiredCheck & { readonly writer: SourceSite },
+  source: MessageSource,
+): readonly string[] | null {
   // (the writer read where it is used, an argument among them: its own value)
   if (source.text(required.writer) === required.subject) return [];
   const landing = source.landing(required.writer);
@@ -150,24 +154,30 @@ function readBelow(required: RequiredCheck, source: MessageSource): readonly str
  * row. An object literal answers through the property the subject reads below it; any other row only where the writer
  * is the subject's own value. `null` gives the first clause alone: a writer that is no form a cause names.
  */
-function nullCause(required: RequiredCheck, source: MessageSource): string | null {
+function nullCause(
+  required: RequiredCheck & { readonly writer: SourceSite },
+  source: MessageSource,
+): string | null {
   const text = source.text(required.writer);
   const parsed = parsedExpression(text);
   const below = readBelow(required, source);
   if (parsed === null) return null;
   const own = (expression: Expression): string =>
     text.slice(expression.span.start.offset - parsed.at, expression.span.end.offset - parsed.at);
-  // (the writer's line, and the lines its text spans before the expression)
-  const lineOf = (expression: Expression): number =>
-    source.line(required.writer) +
-    text.slice(0, expression.span.start.offset - parsed.at).split("\n").length -
-    1;
+  // (the writer's line, and the lines its text spans before the expression; in another file, that file's as well)
+  const lineOf = (expression: Expression): string =>
+    inFile(
+      required,
+      source.line(required.writer) +
+        text.slice(0, expression.span.start.offset - parsed.at).split("\n").length -
+        1,
+    );
   const copy = (expression: Expression): string | null => {
     let at = expression;
     while (at.kind === "propertyAccessExpression" && !selectsElement(at.property.name))
       at = at.object;
     return at.kind === "identifier"
-      ? `it is a copy of '${own(expression)}' (line ${lineOf(expression)}), which can hold null`
+      ? `it is a copy of '${own(expression)}' (${lineOf(expression)}), which can hold null`
       : null;
   };
   const cause = (expression: Expression, steps: readonly string[] | null): string | null => {
@@ -175,7 +185,7 @@ function nullCause(required: RequiredCheck, source: MessageSource): string | nul
     switch (expression.kind) {
       case "nullLiteral":
         // (a `null` stored, a parameter's default among them, is the value of the place it is written for)
-        return `it is set to null on line ${line}`;
+        return `it is set to null on ${line}`;
       case "parenthesizedExpression":
         return cause(expression.expression, steps);
       case "objectLiteral": {
@@ -188,18 +198,18 @@ function nullCause(required: RequiredCheck, source: MessageSource): string | nul
     }
     switch (expression.kind) {
       case "loadExpression":
-        return `'load' on line ${line} can give null`;
+        return `'load' on ${line} can give null`;
       case "identifier":
         return copy(expression);
       case "propertyAccessExpression":
         return selectsElement(expression.property.name)
-          ? `'${own(expression)}' on line ${line} can give null`
+          ? `'${own(expression)}' on ${line} can give null`
           : copy(expression);
       case "indexExpression":
-        return `an element of '${own(expression.object)}' (line ${line}) can be null`;
+        return `an element of '${own(expression.object)}' (${line}) can be null`;
       case "binaryExpression":
         return expression.operator === "otherwise"
-          ? `'${own(expression)}' on line ${line} can give null`
+          ? `'${own(expression)}' on ${line} can give null`
           : null;
       case "callExpression": {
         const { callee } = expression;
@@ -209,11 +219,11 @@ function nullCause(required: RequiredCheck, source: MessageSource): string | nul
             : callee.kind === "propertyAccessExpression"
               ? callee.property.name
               : null;
-        return name === null ? null : `'${name}' on line ${line} can give null`;
+        return name === null ? null : `'${name}' on ${line} can give null`;
       }
       case "interactionExpression": {
         const name = /^[A-Za-z_]\w*/.exec(own(expression))?.[0];
-        return name === undefined ? null : `'${name}' on line ${line} can give null`;
+        return name === undefined ? null : `'${name}' on ${line} can give null`;
       }
       case "booleanLiteral":
       case "numberLiteral":
@@ -256,9 +266,21 @@ export function requiredSentence(
   required: RequiredCheck,
   source: MessageSource,
 ): string {
+  const { writer } = required;
   if (!kinds.includes("null"))
-    return `'${required.subject}' can be ${described(kinds)} here because of line ${source.line(required.writer)}.`;
-  const cause = nullCause(required, source);
+    return writer === null
+      ? `'${required.subject}' can be ${described(kinds)} here.`
+      : `'${required.subject}' can be ${described(kinds)} here because of ${inFile(required, source.line(writer))}.`;
+  // (a block's body that inherits no check, with no store of its own: the first clause alone)
+  const cause = writer === null ? null : nullCause({ ...required, writer }, source);
   const first = `'${required.subject}' must be checked for null before it is used here`;
   return cause === null ? `${first}.` : `${first}: ${cause}.`;
+}
+
+/**
+ * A writer's line as a message names it: `line 3`, or `line 3 of 'b.tease'` where the writer stands in another file
+ * than the use (the form the reachability diagnostics give a line in another file).
+ */
+function inFile(required: RequiredCheck, line: number): string {
+  return required.writerFile === null ? `line ${line}` : `line ${line} of '${required.writerFile}'`;
 }

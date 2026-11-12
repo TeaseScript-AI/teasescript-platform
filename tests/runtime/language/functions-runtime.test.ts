@@ -1,0 +1,895 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { compileSource } from "../../../src/compiler.js";
+import { run, type RuntimeBuiltinFunction } from "../../../src/runtime/engine.js";
+import type {
+  SerializableRuntimeList,
+  SerializableRuntimeObject,
+  SerializableRuntimeSet,
+  SerializableRuntimeValue,
+} from "../../../src/runtime/values/serializable-values.js";
+import {
+  DEFAULT_MAX_CALL_DEPTH,
+  MAX_SUPPORTED_CALL_DEPTH,
+  type RuntimeSnapshot,
+} from "../../../src/runtime/snapshot/state.js";
+import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
+import { compileValidPlan as plan } from "../../helpers/compile-valid-plan.js";
+import { runValidSource as runSource } from "../../helpers/run-valid-source.js";
+import { runValidSourceUntilExit } from "../../helpers/run-until-exit.js";
+import { createFreshRuntimeSession } from "../../../src/index.js";
+import { assertRuntimeResumeEquivalent } from "../../helpers/runtime-equivalence.js";
+import { sayTexts } from "../../helpers/runtime-events.js";
+import { createFreshRuntimeSnapshot } from "../../../src/runtime/snapshot/snapshot-construction.js";
+import { validateRuntimeSnapshot } from "../../../src/runtime/snapshot/snapshot-validation.js";
+
+test("executes positional and named function calls with returned values", () => {
+  const result = runValidSourceUntilExit(
+    [
+      "function add(left, right) { return left + right }",
+      "function subtract(left, right) { return left - right }",
+      "say add(2, 3)",
+      "say subtract(right: 2, left: 7)",
+      "exit",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(sayTexts(result), ["5", "5"]);
+  assert.deepEqual(result.snapshot.callFrames, []);
+  assert.deepEqual(result.snapshot.temporaries, []);
+});
+
+test("binds defaults per invocation after all supplied parameters", () => {
+  const result = runSource(
+    [
+      "let counter = 0",
+      "function next { counter = counter + 1\nreturn counter }",
+      "function describe(name, title = name, count = next()) {",
+      '  return "${title}:${name}:${count}"',
+      "}",
+      'say describe("pet")',
+      'say describe(name: "Alex", title: "puppy")',
+      "exit",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(sayTexts(result), ["pet:pet:1", "puppy:Alex:2"]);
+});
+
+test("bare and implicit returns produce null", () => {
+  const result = runSource(
+    [
+      "function bare { return }",
+      'function implicit { say "inside" }',
+      "say bare()",
+      "say implicit()",
+      "exit",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(sayTexts(result), ["null", "inside", "null"]);
+});
+
+test("parameters are deep copies of caller lists, objects, sets, and dicts", () => {
+  const result = runSource(
+    [
+      "let listValue = [[1]]",
+      "let objectValue = { nested: [1] }",
+      "let setValue = set[1, 2]",
+      "let dictValue = dict{ nested: [1] }",
+      "function mutate(listInput, objectInput, setInput, dictInput, sameList) {",
+      "  listInput[0][0] = 9",
+      "  objectInput.nested[0] = 8",
+      "  setInput.add(3)",
+      '  dictInput["nested"][0] = 7',
+      '  dictInput["added"] = [6]',
+      // The same caller list passed twice gives two copies.
+      '  return "${listInput[0][0]}:${objectInput.nested[0]}:${setInput.contains(3)}:${dictInput["nested"][0]}:${sameList[0][0]}"',
+      "}",
+      "say mutate(listValue, objectValue, setValue, dictValue, listValue)",
+      "exit",
+    ].join("\n"),
+  );
+
+  // The callee changed its copies, so the unchanged caller values below are not merely a failed call.
+  assert.equal(result.snapshot.status, "halted");
+  assert.deepEqual(sayTexts(result), ["9:8:true:7:1"]);
+  assert.deepEqual(rootValue(result.snapshot, "listValue"), {
+    kind: "list",
+    items: [{ kind: "list", items: [1] }],
+  });
+  assert.deepEqual(rootValue(result.snapshot, "dictValue"), {
+    kind: "dict",
+    entries: [{ key: "nested", value: { kind: "list", items: [1] } }],
+  });
+  assert.deepEqual(rootValue(result.snapshot, "objectValue"), {
+    kind: "object",
+    properties: [{ name: "nested", value: { kind: "list", items: [1] } }],
+  });
+  // EVIDENCE: source fixture declares setValue as a set before reading its captured items.
+  assert.deepEqual(
+    (rootValue(result.snapshot, "setValue") as SerializableRuntimeSet).items,
+    [1, 2],
+  );
+});
+
+test("parameters copy mixed nested and empty containers but keep the speakers and handles they hold", () => {
+  const result = runSource(
+    [
+      'speaker vera { displayName: "Vera"\ntitle: "Mistress" }',
+      "let running = timer async 10 s",
+      "let noItems: integer[] = []",
+      "let noEntries: integer dict = dict{}",
+      "let noMembers: integer set = set[]",
+      'let caller = { rows: dict{ first: [{ tags: set["a"], empty: noItems }] }, emptyList: noItems, emptyDict: noEntries, emptySet: noMembers, crew: [vera], clocks: dict{ main: running } }',
+      "function mutate(input) {",
+      '  input.rows["first"][0].tags.add("b")',
+      '  input.rows["first"][0].empty.add(1)',
+      "  input.emptyList.add(2)",
+      '  input.emptyDict["added"] = 3',
+      "  input.emptySet.add(4)",
+      '  input.crew[0].title = "Director"',
+      '  input.clocks["main"].pause()',
+      '  return "${input.rows["first"][0].tags.length}:${input.rows["first"][0].empty.length}:${input.emptyList.length}:${input.emptyDict.length}:${input.emptySet.length}"',
+      "}",
+      "say mutate(caller)",
+      'say "${caller.rows["first"][0].tags.length}:${caller.rows["first"][0].empty.length}:${caller.emptyList.length}:${caller.emptyDict.length}:${caller.emptySet.length}"',
+      "say vera.title",
+      "say running.state",
+      "exit",
+    ].join("\n"),
+  );
+
+  // The callee's containers changed and the caller's did not; the speaker and the timer the copies name are the caller's.
+  assert.deepEqual(sayTexts(result), ["2:1:1:1:1", "1:0:0:0:0", "Director", "paused"]);
+});
+
+test("returned lists, objects, and sets are independent deep copies", () => {
+  const result = runSource(
+    [
+      "let sourceList = [[1]]",
+      "let sourceObject = { nested: [1] }",
+      "let sourceSet = set[1, 2]",
+      "function listCopy { return sourceList }",
+      "function objectCopy { return sourceObject }",
+      "function setCopy { return sourceSet }",
+      "let copiedList = listCopy()",
+      "let copiedObject = objectCopy()",
+      "let copiedSet = setCopy()",
+      "copiedList[0][0] = 9",
+      "copiedObject.nested[0] = 9",
+      "copiedSet.add(3)",
+      "exit",
+    ].join("\n"),
+  );
+
+  const sourceList = rootValue(result.snapshot, "sourceList");
+  assert.ok(sourceList !== null && typeof sourceList === "object" && sourceList.kind === "list");
+  const nestedList = sourceList.items[0];
+  assert.ok(nestedList !== null && typeof nestedList === "object" && nestedList.kind === "list");
+  assert.deepEqual(nestedList.items, [1]);
+  const sourceObject = rootValue(result.snapshot, "sourceObject");
+  assert.ok(
+    sourceObject !== null && typeof sourceObject === "object" && sourceObject.kind === "object",
+  );
+  assert.deepEqual(objectProperty(sourceObject, "nested"), { kind: "list", items: [1] });
+  // EVIDENCE: source fixture declares sourceSet as a set before reading its captured items.
+  assert.deepEqual(
+    (rootValue(result.snapshot, "sourceSet") as SerializableRuntimeSet).items,
+    [1, 2],
+  );
+  // EVIDENCE: source fixture declares copiedSet as a set before reading its captured items.
+  assert.deepEqual(
+    (rootValue(result.snapshot, "copiedSet") as SerializableRuntimeSet).items,
+    [1, 2, 3],
+  );
+});
+
+test("speaker parameters preserve speaker identity", () => {
+  const result = runSource(
+    [
+      'speaker vera { displayName: "Vera"\ntitle: "Mistress" }',
+      'function rename(character) { character.title = "Director"\nreturn character }',
+      "let returned = rename(vera)",
+      "say returned.title",
+      "say vera.title",
+      "exit",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(sayTexts(result), ["Director", "Director"]);
+});
+
+test("early return unwinds if and every loop kind", () => {
+  const result = runValidSourceUntilExit(
+    [
+      "function fromIf { if true { return 1 }\nreturn 9 }",
+      "function fromRepeat { repeat 3 { return 2 }\nreturn 9 }",
+      "function fromFor { for item in [3, 4] { return item }\nreturn 9 }",
+      "function fromWhile { while true { return 4 }\nreturn 9 }",
+      "say fromIf()",
+      "say fromRepeat()",
+      "say fromFor()",
+      "say fromWhile()",
+      "exit",
+    ].join("\n"),
+    // Each `return 9` never runs.
+    ["TSV065", "TSV065", "TSV065", "TSV065"],
+  );
+
+  assert.deepEqual(sayTexts(result), ["1", "2", "3", "4"]);
+  assert.equal(result.snapshot.frames.length, 1);
+  assert.deepEqual(result.snapshot.loopFrames, []);
+});
+
+test("supports nested calls in arithmetic and templates", () => {
+  const result = runSource(
+    [
+      "function one { return 1 }",
+      "function add(left, right) { return left + right }",
+      "say one() + add(one(), one())",
+      'say "nested:${add(one(), one())}"',
+      "exit",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(sayTexts(result), ["3", "nested:2"]);
+});
+
+test("evaluates user calls used as if and while conditions, template parts, and return values", () => {
+  const result = runSource(
+    [
+      'let calls = ""',
+      'function check(name, value) { calls = "${calls}${name},"\nreturn value }',
+      "function relay(name, value) { return check(name, value) }",
+      "let count = 0",
+      'if check("if", count == 0) { say "then" } else { say "else" }',
+      'while check("while", count < 2) { count = count + 1 }',
+      'say "template:${relay("return", count)}"',
+      "say calls",
+      "exit",
+    ].join("\n"),
+  );
+
+  // The while condition is evaluated again before every iteration and once more to stop.
+  assert.deepEqual(sayTexts(result), ["then", "template:2", "if,while,while,while,return,"]);
+});
+
+test("preserves left-to-right call and named-argument side effects", () => {
+  const result = runSource(
+    [
+      "let order = []",
+      "function mark(value) { order.add(value)\nreturn value }",
+      'function combine(left, right) { return "${left}${right}" }',
+      'say combine(mark("a"), mark("b"))',
+      'say combine(right: mark("d"), left: mark("c"))',
+      'say "${order[0]}${order[1]}${order[2]}${order[3]}"',
+      "exit",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(sayTexts(result), ["ab", "cd", "abdc"]);
+});
+
+test("retains earlier argument RNG progress when a later argument faults", () => {
+  const seed = 0x1234_5678;
+  const failing = plan(
+    [
+      "function take(first, second) { return first }",
+      // A bound the compiler cannot know, so the empty range fails when the call runs.
+      "function dynamic(value) {\n    return value\n}",
+      "let one = dynamic(1)",
+      "take(random(), randomInteger(1..one))",
+      "exit",
+    ].join("\n"),
+  );
+  const control = plan("random()\nexit");
+  const failed = run(failing, createFreshRuntimeSnapshot(failing, { seed }));
+  const advancedOnce = run(control, createFreshRuntimeSnapshot(control, { seed }));
+
+  assert.equal(failed.snapshot.status, "failed");
+  // A core built-in's own failure keeps its code and message.
+  assert.equal(failed.snapshot.failure?.code, "TSR041");
+  assert.equal(
+    failed.snapshot.failure?.message,
+    "randomInteger(range) needs a range that holds at least one whole number, but 1..1 holds none. Check that the range is not empty first.",
+  );
+  assert.deepEqual(failed.snapshot.rng, advancedOnce.snapshot.rng);
+  assert.deepEqual(
+    failed.events.map((event) => event.kind),
+    ["runtimeFailure"],
+  );
+});
+
+test("evaluates a property-call receiver before its arguments", () => {
+  const result = runSource(
+    [
+      "let order = []",
+      "let values = []",
+      'function receiver { order.add("receiver")\nreturn values }',
+      'function argument { order.add("argument")\nreturn 7 }',
+      "receiver().contains(argument())",
+      'say "${order[0]}:${order[1]}"',
+      "exit",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(sayTexts(result), ["receiver:argument"]);
+});
+
+test("evaluates assignment indexes before right-hand values", () => {
+  const result = runSource(
+    [
+      "let order = []",
+      "let items = [0]",
+      'function indexFunction { order.add("index")\nreturn 0 }',
+      'function valueFunction { order.add("value")\nreturn 7 }',
+      "items[indexFunction()] = valueFunction()",
+      'say "${order[0]}:${order[1]}:${items[0]}"',
+      "exit",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(sayTexts(result), ["index:value:7"]);
+});
+
+test("evaluates observable built-ins in assignment target-before-value order", () => {
+  const compiledResult = compileSource(
+    "let items = [0]\nitems[indexBuiltin()] = valueBuiltin()\nsay items[0]\nexit",
+    { builtins: ["indexBuiltin", "valueBuiltin"] },
+  );
+  assert.deepEqual(compiledResult.diagnostics, []);
+  const compiled = compiledResult.plan!;
+  const order: string[] = [];
+  const indexBuiltin: RuntimeBuiltinFunction = () => {
+    order.push("index");
+    return 0;
+  };
+  const valueBuiltin: RuntimeBuiltinFunction = () => {
+    order.push("value");
+    return 9;
+  };
+  const result = run(compiled, createImmediatePacingRuntimeSnapshot(compiled), {
+    builtins: { indexBuiltin, valueBuiltin },
+  });
+
+  assert.deepEqual(order, ["index", "value"]);
+  assert.deepEqual(sayTexts(result), ["9"]);
+});
+
+test("preserves ordinary built-in order before later user calls in composite expressions", () => {
+  const source = [
+    'function userText { return mark("userText") }',
+    'function userNumber { mark("userNumber")\nreturn 2 }',
+    'function indexUser { mark("indexUser")\nreturn 0 }',
+    'let listValue = [mark("list"), userText()]',
+    'let setValue = set[mark("set"), userText()]',
+    'let objectValue = { first: mark("object"), second: userText() }',
+    'let templateValue = "${mark("template")}:${userText()}"',
+    'let binaryValue = markNumber(1, "binary") + userNumber()',
+    'let rangeValue = markNumber(1, "range")..userNumber()',
+    "let indexedValue = sourceList()[indexUser()]",
+    "receiverList().add(userNumber())",
+    "exit",
+  ].join("\n");
+  const compiledResult = compileSource(source, {
+    builtins: ["mark", "markNumber", "sourceList", "receiverList"],
+  });
+  assert.deepEqual(compiledResult.diagnostics, []);
+  const order: string[] = [];
+  const mark: RuntimeBuiltinFunction = (call) => {
+    const label = call.positional[0];
+    if (typeof label !== "string") throw new TypeError("Expected string label.");
+    order.push(label);
+    return label;
+  };
+  const markNumber: RuntimeBuiltinFunction = (call) => {
+    const value = call.positional[0];
+    const label = call.positional[1];
+    if (typeof value !== "number") throw new TypeError("Expected numeric value.");
+    if (typeof label !== "string") throw new TypeError("Expected string label.");
+    order.push(label);
+    return value;
+  };
+  const result = run(compiledResult.plan!, createFreshRuntimeSnapshot(compiledResult.plan!), {
+    builtins: {
+      mark,
+      markNumber,
+      sourceList: () => {
+        order.push("sourceList");
+        return { kind: "list", items: [7] };
+      },
+      receiverList: () => {
+        order.push("receiverList");
+        return { kind: "list", items: [] };
+      },
+    },
+  });
+
+  assert.equal(result.snapshot.status, "halted");
+  assert.deepEqual(order, [
+    "list",
+    "userText",
+    "set",
+    "userText",
+    "object",
+    "userText",
+    "template",
+    "userText",
+    "binary",
+    "userNumber",
+    "range",
+    "userNumber",
+    "sourceList",
+    "indexUser",
+    "receiverList",
+    "userNumber",
+  ]);
+});
+
+test("snapshots earlier composite values before a later user call mutates their source", () => {
+  const result = runSource(
+    [
+      "let items = [1]",
+      "function mutate { items.add(2)\nreturn [0] }",
+      "let combined = [items, mutate()]",
+      "say combined[0].length",
+      "say items.length",
+      "exit",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(sayTexts(result), ["1", "2"]);
+});
+
+test("keeps a prepared collection receiver attached through argument side effects", () => {
+  const result = runSource(
+    [
+      "let items = []",
+      "function argument { items.add(1)\nreturn 2 }",
+      "items.add(argument())",
+      'say "${items[0]}:${items[1]}"',
+      "exit",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(sayTexts(result), ["1:2"]);
+});
+
+test("fails an invalid prepared receiver before evaluating a user-call argument", () => {
+  const source = [
+    "let order = []",
+    // `dynamic` hides the receiver's type from the compiler, which rejects a known integer receiver before runtime.
+    "function dynamic(value) { return value }",
+    "let scalar = dynamic(1)",
+    'function argument { order.add("argument")\nreturn 2 }',
+    "scalar.add(argument())",
+    "exit",
+  ].join("\n");
+  const result = runSource(source);
+  const method = source.indexOf("scalar.add");
+
+  assert.equal(result.snapshot.status, "failed");
+  assert.equal(result.snapshot.failure?.code, "TSR016");
+  assert.deepEqual(
+    [result.snapshot.failure.span.start.offset, result.snapshot.failure.span.end.offset],
+    [method, method + "scalar.add".length],
+  );
+  // EVIDENCE: source fixture initializes order as a list before the failing function call.
+  assert.deepEqual((rootValue(result.snapshot, "order") as SerializableRuntimeList).items, []);
+});
+
+test("fails an earlier ordinary expression before a later user-call side effect", () => {
+  const source = [
+    "let order = []",
+    "function dynamic(value) {\n    return value\n}",
+    "let one = dynamic(1)",
+    'function later { order.add("later")\nreturn 1 }',
+    "let values = [randomInteger(1..one), later()]",
+    "exit",
+  ].join("\n");
+  const result = runSource(source);
+  const call = source.indexOf("randomInteger(1..one)");
+
+  assert.equal(result.snapshot.status, "failed");
+  assert.equal(result.snapshot.failure?.code, "TSR041");
+  assert.deepEqual(
+    [result.snapshot.failure.span.start.offset, result.snapshot.failure.span.end.offset],
+    [call, call + "randomInteger(1..one)".length],
+  );
+  // EVIDENCE: source fixture initializes order as a list before the failing built-in call.
+  assert.deepEqual((rootValue(result.snapshot, "order") as SerializableRuntimeList).items, []);
+});
+
+test("does not retarget prepared assignments after nested path replacement", () => {
+  const result = runSource(
+    [
+      "let first = { value: 0 }",
+      "let second = { value: 0 }",
+      "let target = first",
+      "let root = { child: { value: 0 } }",
+      "let items = [{ value: 0 }, { value: 1 }]",
+      "function replaceTarget { target = second\nreturn 5 }",
+      "function replaceChild { root.child = { value: 2 }\nreturn 7 }",
+      "function shiftItems { items.removeFirst()\nreturn 9 }",
+      "let positions = [{ value: 0 }, { value: 1 }]",
+      "function removePosition { positions.removeAt(0)\nreturn 9 }",
+      "target.value = replaceTarget()",
+      "root.child.value = replaceChild()",
+      "items[0].value = shiftItems()",
+      "positions[0].value = removePosition()",
+      "say first.value",
+      "say second.value",
+      "say root.child.value",
+      "say items[0].value",
+      "say positions[0].value",
+      "exit",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(sayTexts(result), ["0", "0", "2", "1", "1"]);
+});
+
+test("rebases prepared list descendants when earlier removals shift retained items", () => {
+  const result = runSource(
+    [
+      "let firstItems = [{ value: 0 }, { value: 1 }]",
+      "let middleItems = [{ value: 0 }, { value: 1 }, { value: 2 }]",
+      "let lastItems = [{ value: 0 }, { value: 1 }]",
+      "let positionItems = [{ value: 0 }, { value: 1 }, { value: 2 }]",
+      "function removeFirstItem { firstItems.removeFirst()\nreturn 9 }",
+      "function removeMiddleItem { middleItems.remove({ value: 1 })\nreturn 8 }",
+      "function removeLastItem { lastItems.removeLast()\nreturn 7 }",
+      "function removeItemAt { positionItems.removeAt(1)\nreturn 6 }",
+      "firstItems[1].value = removeFirstItem()",
+      "middleItems[2].value = removeMiddleItem()",
+      "lastItems[0].value = removeLastItem()",
+      "positionItems[2].value = removeItemAt()",
+      'say "${firstItems[0].value}:${middleItems[1].value}:${lastItems[0].value}:${positionItems[1].value}"',
+      "exit",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(sayTexts(result), ["9:8:7:6"]);
+});
+
+test("rebases prepared list descendants through speaker aliases", () => {
+  const result = runSource(
+    [
+      "speaker vera { items: [{ value: 0 }, { value: 1 }] }",
+      "let alias = vera",
+      "function shiftItems { alias.items.removeFirst()\nreturn 9 }",
+      "vera.items[1].value = shiftItems()",
+      "say vera.items[0].value",
+      "exit",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(sayTexts(result), ["9"]);
+});
+
+test("does not retarget prepared speaker paths through identity aliases", () => {
+  const result = runSource(
+    [
+      "speaker vera {",
+      '  title: "Initial"',
+      "  config: { value: 0 }",
+      "  items: [{ value: 0 }, { value: 1 }]",
+      "}",
+      "let alias = vera",
+      'function replaceTitle { alias.title = "Other"\nreturn "Final" }',
+      "function replaceConfig { alias.config = { value: 2 }\nreturn 7 }",
+      "function shiftItems { alias.items.removeFirst()\nreturn 9 }",
+      "vera.title = replaceTitle()",
+      "vera.config.value = replaceConfig()",
+      "vera.items[0].value = shiftItems()",
+      "say vera.title",
+      "say vera.config.value",
+      "say vera.items[0].value",
+      "exit",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(sayTexts(result), ["Final", "2", "1"]);
+});
+
+test("keeps a prepared speaker receiver when a call gives its variable another speaker", () => {
+  const result = runSource(
+    [
+      'speaker vera { title: "Mistress" }',
+      'speaker anna { title: "Miss" }',
+      "let current = vera",
+      'function swap { current = anna\nreturn "Lady" }',
+      "current.title = swap()",
+      "say vera.title",
+      "say anna.title",
+      "exit",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(sayTexts(result), ["Lady", "Miss"]);
+});
+
+test("a prepared receiver in a speaker's state keeps that speaker when a call replaces or removes its holder", () => {
+  const speakers = [
+    "speaker vera {\n    items: [1]\n    config: { value: 1 }\n}",
+    "speaker anna {\n    items: [2]\n    config: { value: 2 }\n}",
+    "speaker cara {\n    boss: vera\n}",
+    "speaker dora {\n    roles: dict{ boss: vera }\n}",
+  ].join("\n");
+  const toAnna = "let current = vera\nfunction change { current = anna\nreturn 5 }";
+  // A dict's `values` is a new list at each read, which clearing the dict does not change.
+  const throughValues =
+    "let box = { who: dora }\nfunction change { box = { who: anna }\ndora.roles.clear()\nreturn 5 }";
+  const added = "[1,5] 1 [2] 2";
+  const cases: readonly (readonly [string, string, string])[] = [
+    [toAnna, "current.items.add(change())", added],
+    [toAnna, "current.items[0] = change()", "[5] 1 [2] 2"],
+    [toAnna, "current.config.value = change()", "[1] 5 [2] 2"],
+    [
+      "let current = vera\nfunction change { current = vera\nreturn 5 }",
+      "current.items.add(change())",
+      added,
+    ],
+    [
+      "let people = [vera]\nfunction change { people[0] = anna\nreturn 5 }",
+      "people[0].items.add(change())",
+      added,
+    ],
+    [
+      "let people = [vera]\nfunction change { people.removeFirst()\nreturn 5 }",
+      "people[0].items.add(change())",
+      added,
+    ],
+    [
+      'let roles = dict{ boss: vera }\nfunction change { roles.remove("boss")\nreturn 5 }',
+      'roles["boss"].items.add(change())',
+      added,
+    ],
+    [
+      "let box = { who: vera }\nfunction change { box = { who: anna }\nreturn 5 }",
+      "box.who.items.add(change())",
+      added,
+    ],
+    [
+      "let current = cara\nfunction change { cara.boss = anna\nreturn 5 }",
+      "current.boss.items.add(change())",
+      added,
+    ],
+    [throughValues, "box.who.roles.values[0].items.add(change())", added],
+    [throughValues, "box.who.roles.values[0].items = [change()]", "[5] 1 [2] 2"],
+  ];
+  for (const [setup, store, expected] of cases) {
+    const result = runSource(
+      [
+        speakers,
+        setup,
+        store,
+        'say "${toJson(vera.items)} ${vera.config.value} ${toJson(anna.items)} ${anna.config.value}"',
+        "exit",
+      ].join("\n"),
+    );
+    assert.deepEqual(sayTexts(result), [expected], `${setup}\n${store}`);
+  }
+
+  // A read through the old holder still gives the value from before the call, which the call then changes.
+  const read = runSource(
+    [
+      speakers,
+      "let current = vera",
+      "function change { current = anna\nvera.items[0] = 9\nreturn 0 }",
+      'say "${current.items[0] + change()} ${vera.items[0]}"',
+      "exit",
+    ].join("\n"),
+  );
+  assert.deepEqual(sayTexts(read), ["1 9"]);
+});
+
+test("functions read and assign package-global variables without leaking locals", () => {
+  const result = runSource(
+    [
+      "let total = 1",
+      "function increase(value) {",
+      "  let local = value",
+      "  total = total + local",
+      "  return total",
+      "}",
+      "say increase(2)",
+      "say total",
+      "exit",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(sayTexts(result), ["3", "3"]);
+  assert.equal(
+    result.snapshot.frames[0]?.bindings.some((binding) => binding.name === "local"),
+    false,
+  );
+});
+
+test("supports direct and mutual recursion through explicit frames", () => {
+  const direct = runSource(
+    [
+      "function factorial(value) {",
+      "  if value <= 1 { return 1 }",
+      "  return value * factorial(value - 1)",
+      "}",
+      "say factorial(6)",
+      "exit",
+    ].join("\n"),
+  );
+  assert.deepEqual(sayTexts(direct), ["720"]);
+
+  const mutual = runSource(
+    [
+      "function even(value) { if value == 0 { return true }\nreturn odd(value - 1) }",
+      "function odd(value) { if value == 0 { return false }\nreturn even(value - 1) }",
+      "say even(8)",
+      "say odd(8)",
+      "exit",
+    ].join("\n"),
+  );
+  assert.deepEqual(sayTexts(mutual), ["true", "false"]);
+});
+
+test("fails structurally at configured call depth", () => {
+  const compiled = plan("function recurse { return recurse() }\nrecurse()\nexit");
+  const result = run(compiled, createFreshRuntimeSnapshot(compiled, { maxCallDepth: 8 }));
+
+  assert.equal(result.snapshot.status, "failed");
+  assert.equal(result.snapshot.failure?.code, "TSR047");
+  assert.equal(
+    result.snapshot.failure?.message,
+    "Function calls are nested 8 deep, the most this session allows. End the recursion sooner, or use a loop instead.",
+  );
+  assert.ok(result.snapshot.failure?.span.start.offset !== undefined);
+});
+
+test("fresh and validated runtime snapshots preserve the call-depth policy domain", () => {
+  const compiled = plan("exit");
+  assert.equal(createFreshRuntimeSnapshot(compiled).maxCallDepth, DEFAULT_MAX_CALL_DEPTH);
+
+  const ceiling = createFreshRuntimeSnapshot(compiled, { maxCallDepth: MAX_SUPPORTED_CALL_DEPTH });
+  assert.equal(validateRuntimeSnapshot(ceiling, compiled).valid, true);
+  assert.throws(
+    () => createFreshRuntimeSnapshot(compiled, { maxCallDepth: MAX_SUPPORTED_CALL_DEPTH + 1 }),
+    RangeError,
+  );
+});
+
+test("instruction budgets still stop recursive execution", () => {
+  const compiled = plan("function recurse { return recurse() }\nrecurse()\nexit");
+  const result = run(compiled, createFreshRuntimeSnapshot(compiled), {}, { instructionBudget: 20 });
+
+  assert.equal(result.snapshot.failure?.code, "TSR037");
+});
+
+test("exit inside nested calls terminates the complete execution", () => {
+  const result = runSource(
+    [
+      "function inner { exit }",
+      "function outer { inner()\nreturn 1 }",
+      "outer()",
+      'say "unreachable"',
+      "exit",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(
+    result.events.map((event) => event.kind),
+    ["exit"],
+  );
+  assert.deepEqual(result.snapshot.callFrames, []);
+  assert.deepEqual(result.snapshot.loopFrames, []);
+  assert.equal(result.snapshot.frames.length, 1);
+});
+
+test("break and continue cannot cross function boundaries", () => {
+  for (const keyword of ["break", "continue"]) {
+    const result = compileSource(
+      [`function invalid { ${keyword} }`, "repeat 1 { invalid() }"].join("\n"),
+    );
+    assert.equal(result.plan, null);
+    assert.ok(result.semanticDiagnostics.some((diagnostic) => diagnostic.code === "TSV008"));
+  }
+});
+
+function rootValue(snapshot: RuntimeSnapshot, name: string): SerializableRuntimeValue {
+  const binding = snapshot.frames[0]?.bindings.find((item) => item.name === name);
+  assert.ok(binding !== undefined);
+  return binding.value;
+}
+
+function objectProperty(object: SerializableRuntimeObject, name: string): SerializableRuntimeValue {
+  const property = object.properties.find((item) => item.name === name);
+  assert.ok(property !== undefined);
+  return property.value;
+}
+
+test("a recursive call inside a loop runs its own instance of the loop (#587)", () => {
+  const source = [
+    "function visit(depth) {",
+    "    repeat 2 {",
+    '        say "visit ${depth}"',
+    "        if depth > 0 { visit(depth - 1) }",
+    "    }",
+    "}",
+    "visit(1)",
+    "exit",
+  ].join("\n");
+  const result = assertRuntimeResumeEquivalent(source);
+  const said = result.events.flatMap((event) => (event.kind === "say" ? [event.text] : []));
+  assert.deepEqual(said, ["visit 1", "visit 0", "visit 0", "visit 1", "visit 0", "visit 0"]);
+});
+
+test("a call keeps its caller's live temporaries through waits, defaults, prepared references, and every checkpoint", () => {
+  // Each object field before a call stays a live temporary of its caller while the call, a call in its default, or a
+  // prepared assignment target's call waits; the earlier field keeps the list as it was before the call changed it.
+  // The list is a literal, so that resuming from each boundary does not build it again.
+  const items = Array.from(
+    { length: 300 },
+    (_, index) => `{ n: ${index + 1}, label: "item ${index + 1}" }`,
+  );
+  const result = assertRuntimeResumeEquivalent(
+    `let big = [${items.join(", ")}]
+function pausing(n) {
+    wait 1 s
+    return n
+}
+function withDefault(n = pausing(4)) {
+    return n + 1
+}
+function middle(xs) {
+    big.add({ n: 0, label: "late" })
+    return { seen: xs.length, paused: pausing(2), now: big.length, fallback: withDefault() }
+}
+let results = { before: big, inner: middle(big), text: "count \${pausing(3)}", after: big.length }
+big[1].label = "set by \${pausing(5)}"
+say results.before.length
+say results.inner
+say results.text
+say results.after
+say big[1].label
+say big.length
+exit
+`,
+    { scenarioName: "parked caller temporaries" },
+  );
+  assert.deepEqual(
+    result.events.flatMap((event) => (event.kind === "say" ? [event.text] : [])),
+    ["300", "{ seen: 300, paused: 2, now: 301, fallback: 5 }", "count 3", "301", "set by 5", "301"],
+  );
+});
+
+test("a returned local that a permanent button keeps is a copy, also while the next call waits", () => {
+  const session = createFreshRuntimeSession(
+    plan(`function make {
+    let local = [[1]]
+    showPermanentButton "Change" { local[0][0] = 9 }
+    return local
+}
+function pause {
+    wait 1 s
+    return [[0]]
+}
+let results = [make(), pause()]
+say results[0][0][0], instant
+exit
+`),
+    { baseDelayMs: 0, delayPerWordMs: 0, delayPerCharacterMs: 0 },
+  );
+  const said: string[] = [];
+  const collect = (events: readonly { readonly kind: string; readonly text?: string }[]) => {
+    for (const event of events) if (event.kind === "say") said.push(event.text!);
+  };
+  collect(session.run().events);
+  assert.equal(session.view().foregroundAction?.kind, "delay");
+  // The block changes the local that `make` returned while `make`'s result waits as a temporary of the caller.
+  assert.equal(session.pressPermanentButton(1).outcome.kind, "pressed");
+  collect(session.run().events);
+  collect(session.observeTime(1_000).events);
+  collect(session.run().events);
+  assert.equal(session.view().status, "halted");
+  assert.deepEqual(said, ["1"]);
+});

@@ -1,0 +1,362 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import {
+  RuntimeDataError,
+  cloneSerializableValue,
+  createFreshRuntimeSnapshot,
+  createSerializableList,
+  run,
+  validateInstructionPlan,
+  validateRuntimeSnapshot,
+  type InstructionPlan,
+  type RuntimeSnapshot,
+  type SerializableRuntimeList,
+  type SerializableRuntimeValue,
+} from "../../../src/index.js";
+import {
+  SerializableValueError,
+  validateSerializableValue,
+} from "../../../src/runtime/values/serializable-values.js";
+import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
+import { compileValidPlan } from "../../helpers/compile-valid-plan.js";
+import { withValidationTestStatistics } from "../../../src/validation-testing.js";
+
+function plan(source = "exit", builtins: readonly string[] = []): InstructionPlan {
+  return compileValidPlan(source, { builtins });
+}
+
+function deepList(depth: number): SerializableRuntimeValue {
+  let value: SerializableRuntimeValue = 0;
+  for (let index = 0; index < depth; index += 1) {
+    value = { kind: "list", items: [value] };
+  }
+  return value;
+}
+
+interface ProxyCounts {
+  ownKeys: number;
+  descriptors: number;
+  gets: number;
+  prototypes: number;
+}
+
+function stableProxy<T extends object>(
+  target: T,
+  counts: ProxyCounts,
+  changingGet: (key: PropertyKey) => unknown, // oxlint-disable-line anti-slop/no-unknown-returns -- EVIDENCE: fixture helper returns deliberately unvalidated external data for the validation boundary under test.
+): T {
+  return new Proxy(target, {
+    ownKeys(current) {
+      counts.ownKeys += 1;
+      return Reflect.ownKeys(current);
+    },
+    getOwnPropertyDescriptor(current, key) {
+      counts.descriptors += 1;
+      return Reflect.getOwnPropertyDescriptor(current, key);
+    },
+    getPrototypeOf(current) {
+      counts.prototypes += 1;
+      return Reflect.getPrototypeOf(current);
+    },
+    get(_current, key) {
+      counts.gets += 1;
+      return changingGet(key);
+    },
+  });
+}
+
+function zeroCounts(): ProxyCounts {
+  return { ownKeys: 0, descriptors: 0, gets: 0, prototypes: 0 };
+}
+
+test("fresh globals reject changing and throwing getters without invoking them", () => {
+  const compiled = plan();
+  for (const throws of [false, true]) {
+    let reads = 0;
+    const globals: Record<string, unknown> = {};
+    Object.defineProperty(globals, "payload", {
+      enumerable: true,
+      get() {
+        reads += 1;
+        if (throws) throw new Error("raw getter failure");
+        return reads === 1 ? 0 : deepList(20_000);
+      },
+    });
+
+    assert.throws(
+      () => {
+        return createFreshRuntimeSnapshot(compiled, {
+          // EVIDENCE: accessor-bearing globals deliberately violate the runtime-value contract for capture rejection.
+          globals: globals as never,
+        });
+      },
+      (error: unknown) =>
+        error instanceof TypeError && error.message.startsWith("$.globals.payload "),
+    );
+    assert.equal(reads, 0);
+  }
+});
+
+test("fresh globals reject an accessor deep in a set member without invoking it or comparing members", () => {
+  let reads = 0;
+  const leaf = { kind: "list" };
+  Object.defineProperty(leaf, "items", {
+    enumerable: true,
+    get() {
+      reads += 1;
+      return [];
+    },
+  });
+  const member = Array.from({ length: 1000 }).reduce<object>(
+    (inner) => ({ kind: "set", items: [inner] }),
+    leaf,
+  );
+  // An earlier duplicate pair: capture fails before any member is compared.
+  const one = { kind: "list", items: [1] };
+  const payload = { kind: "set", items: [one, { ...one, items: [1] }, member] };
+
+  const counts = withValidationTestStatistics((finish) => {
+    assert.throws(
+      () =>
+        createFreshRuntimeSnapshot(plan(), {
+          // EVIDENCE: an accessor-bearing global deliberately violates the runtime-value contract for capture rejection.
+          globals: { payload } as never,
+        }),
+      (error: unknown) =>
+        error instanceof TypeError && error.message.startsWith("$.globals.payload.items[2]."),
+    );
+    return finish().counts;
+  });
+  assert.equal(reads, 0);
+  assert.equal(counts.setValidationPrints, undefined);
+  assert.equal(counts.setValidationExactKeys, undefined);
+});
+
+test("fresh globals consume one captured proxy observation and never call get", () => {
+  const compiled = plan();
+  const counts = zeroCounts();
+  const target = { kind: "list" as const, items: [0] };
+  const payload = stableProxy(
+    target,
+    counts,
+    (key) => (key === "items" ? [deepList(20_000)] : Reflect.get(target, key)), // oxlint-disable-line anti-slop/no-reflect-get -- EVIDENCE: fixture observes dynamic proxy behavior through the exact property-access path under test.
+  );
+
+  const snapshot = createFreshRuntimeSnapshot(compiled, { globals: { payload } });
+
+  assert.deepEqual(snapshot.globals, [{ name: "payload", value: { kind: "list", items: [0] } }]);
+  assert.deepEqual(counts, { ownKeys: 1, descriptors: 2, gets: 0, prototypes: 1 });
+});
+
+test("instruction plans reject accessors before validation or execution", () => {
+  // EVIDENCE: JSON preserves the compiler-produced plan before its temporary count becomes an accessor.
+  const valid = JSON.parse(JSON.stringify(plan("exit"))) as InstructionPlan;
+  const temporaryCount = valid.temporaryCount;
+  let reads = 0;
+  // The getter returns the valid count, so only non-invocation can explain the rejection.
+  Object.defineProperty(valid, "temporaryCount", {
+    enumerable: true,
+    get() {
+      reads += 1;
+      return temporaryCount;
+    },
+  });
+
+  const validation = validateInstructionPlan(valid);
+  assert.equal(validation.valid, false);
+  assert.ok(
+    validation.errors.some((error) => error.code === "TSC002" && error.path === "$.temporaryCount"),
+  );
+
+  const safePlan = plan("exit");
+  const snapshot = createFreshRuntimeSnapshot(safePlan);
+  const before = structuredClone(snapshot);
+  let randomCalls = 0;
+  assert.throws(
+    () =>
+      run(valid, snapshot, {
+        random: {
+          next: () => {
+            randomCalls += 1;
+            return 0.5;
+          },
+        },
+      }),
+    (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR100",
+  );
+  assert.equal(reads, 0);
+  assert.equal(randomCalls, 0);
+  assert.deepEqual(snapshot, before);
+});
+
+test("runtime execution uses the captured proxy plan rather than proxy get results", () => {
+  const target = structuredClone(plan("exit"));
+  const counts = zeroCounts();
+  const proxied = stableProxy(
+    target,
+    counts,
+    (key) => (key === "instructions" ? [] : Reflect.get(target, key)), // oxlint-disable-line anti-slop/no-reflect-get -- EVIDENCE: fixture observes dynamic proxy behavior through the exact property-access path under test.
+  );
+  const snapshot = createFreshRuntimeSnapshot(target);
+
+  const result = run(proxied, snapshot);
+
+  assert.deepEqual(
+    result.events.map((event) => event.kind),
+    ["exit"],
+  );
+  assert.equal(result.snapshot.status, "halted");
+  assert.equal(counts.gets, 0);
+  assert.equal(counts.ownKeys, 1);
+});
+
+test("runtime snapshots reject accessors before clone, execution, events, or RNG", () => {
+  const compiled = plan("say random()\nexit");
+  const snapshot = structuredClone(createFreshRuntimeSnapshot(compiled));
+  assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
+  const canonical = structuredClone(snapshot);
+  const rng = snapshot.rng;
+  let reads = 0;
+  const get = () => {
+    reads += 1;
+    return rng;
+  };
+  Object.defineProperty(snapshot, "rng", { enumerable: true, configurable: true, get });
+
+  // The accessor would return the valid RNG state, so only non-invocation can explain the rejection.
+  assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, false);
+  let randomCalls = 0;
+  assert.throws(
+    () =>
+      run(compiled, snapshot, {
+        random: {
+          next: () => {
+            randomCalls += 1;
+            return 0.5;
+          },
+        },
+      }),
+    (error: unknown) => error instanceof RuntimeDataError && error.code === "TSR101",
+  );
+  assert.equal(randomCalls, 0);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(snapshot, "rng"), {
+    get,
+    set: undefined,
+    enumerable: true,
+    configurable: true,
+  });
+  // Descriptor values compare every other field without invoking the installed accessor.
+  const dataFields = (value: RuntimeSnapshot) =>
+    Object.keys(value)
+      .filter((key) => key !== "rng")
+      .map((key) => [key, Object.getOwnPropertyDescriptor(value, key)?.value]);
+  assert.deepEqual(dataFields(snapshot), dataFields(canonical));
+  assert.deepEqual(rng, canonical.rng);
+  assert.equal(reads, 0);
+});
+
+test("runtime execution consumes a stable captured proxy snapshot", () => {
+  const compiled = plan("exit");
+  const target = createFreshRuntimeSnapshot(compiled);
+  const counts = zeroCounts();
+  const proxied = stableProxy(
+    target,
+    counts,
+    (key) => (key === "status" ? "halted" : Reflect.get(target, key)), // oxlint-disable-line anti-slop/no-reflect-get -- EVIDENCE: fixture observes dynamic proxy behavior through the exact property-access path under test.
+  );
+
+  const result = run(compiled, proxied);
+
+  assert.deepEqual(
+    result.events.map((event) => event.kind),
+    ["exit"],
+  );
+  assert.equal(result.snapshot.status, "halted");
+  assert.equal(counts.gets, 0);
+  assert.equal(counts.ownKeys, 1);
+});
+
+test("serializable-value APIs reject accessors and consume stable proxy arrays", () => {
+  let reads = 0;
+  const unstable = { kind: "list" };
+  Object.defineProperty(unstable, "items", {
+    enumerable: true,
+    get() {
+      reads += 1;
+      return [0];
+    },
+  });
+
+  assert.ok(validateSerializableValue(unstable)?.startsWith("$.items "));
+  assert.throws(
+    () => {
+      // EVIDENCE: the accessor-bearing list deliberately violates the serializable-value input contract.
+      return cloneSerializableValue(unstable as never);
+    },
+    (error: unknown) => error instanceof SerializableValueError,
+  );
+  assert.equal(reads, 0);
+
+  const counts = zeroCounts();
+  const source = [0];
+  const proxied = stableProxy(source, counts, () => deepList(20_000));
+  assert.deepEqual(createSerializableList(proxied), { kind: "list", items: [0] });
+  assert.equal(counts.gets, 0);
+  assert.equal(counts.ownKeys, 1);
+});
+
+test("invalid accessor builtin results fail as TSR013 without invocation", () => {
+  const compiled = plan("let value = unstable()\nexit", ["unstable"]);
+  const initial = createFreshRuntimeSnapshot(compiled);
+  const before = structuredClone(initial);
+  let reads = 0;
+  const returned = { kind: "list" };
+  Object.defineProperty(returned, "items", {
+    enumerable: true,
+    get() {
+      reads += 1;
+      return [0];
+    },
+  });
+
+  const result = run(compiled, initial, {
+    builtins: {
+      unstable: () => {
+        // EVIDENCE: the builtin deliberately returns an accessor-bearing list for runtime capture rejection.
+        return returned as never;
+      },
+    },
+  });
+
+  assert.equal(reads, 0);
+  assert.deepEqual(
+    result.events.map((event) => event.kind),
+    ["runtimeFailure"],
+  );
+  assert.equal(result.snapshot.failure?.code, "TSR013");
+  assert.deepEqual(initial, before);
+});
+
+test("low-level builtin proxy results execute only the captured descriptor graph", () => {
+  const compiled = plan("say unstable().first\nexit", ["unstable"]);
+  const counts = zeroCounts();
+  const target: SerializableRuntimeList = { kind: "list", items: [0] };
+  const returned = stableProxy(
+    target,
+    counts,
+    (key) => (key === "items" ? [999] : Reflect.get(target, key)), // oxlint-disable-line anti-slop/no-reflect-get -- EVIDENCE: fixture observes dynamic proxy behavior through the exact property-access path under test.
+  );
+
+  const result = run(compiled, createImmediatePacingRuntimeSnapshot(compiled), {
+    builtins: { unstable: () => returned },
+  });
+
+  assert.equal(result.snapshot.failure, null);
+  assert.deepEqual(
+    result.events.filter((event) => event.kind === "say").map((event) => event.text),
+    ["0"],
+  );
+  assert.equal(counts.gets, 0);
+  assert.equal(counts.ownKeys, 1);
+});

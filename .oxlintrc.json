@@ -76,7 +76,9 @@
         "tests/families-runner/families-runner-compare.test.ts",
         "tests/type-core/type-core-closure.test.ts",
         "tests/type-core/type-core-mixed-family.test.ts",
-        "tests/type-core/type-core-stop.test.ts"
+        "tests/type-core-stop/type-core-stop-combined.test.ts",
+        "tests/type-core-stop/type-core-stop-labels.test.ts",
+        "tests/type-core-stop/type-core-stop-route.test.ts"
       ],
       "rules": {
         "no-control-regex": "off",
@@ -125,7 +127,6 @@
     },
     {
       "files": [
-        "src/runtime/values/serializable-values.ts",
         "tests/helpers/type-core-held-host.ts"
       ],
       "rules": {

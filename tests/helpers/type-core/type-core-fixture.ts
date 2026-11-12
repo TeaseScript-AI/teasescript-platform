@@ -59,6 +59,8 @@ const TSV062_REASON = "a static warning of S9b's otherwise (#1737)";
 const U4_REASON = "U4's consumer remainder (#2025)";
 const OUTLIER_REASON = "a fixture expectation awaiting its ruling (#2025)";
 const CROSS_REASON = "the numeric crossover (#1173, #2025)";
+const ENTRY_COPY_REASON =
+  "a copy whose source's null arrives through an entry: r4-451's give-up, a check stands (#2497)";
 /** A held record: why it is held, and the differences from its record the analysis gives in every mode. */
 export interface S10Hold {
   readonly reason: string;
@@ -131,32 +133,6 @@ export const HELD_S10_RECORDS: ReadonlyMap<string, S10Hold> = new Map([
     },
   ],
   [
-    "cp9-cells/3b/review-early/n7-entered-label",
-    {
-      reason: CORRIDOR_REASON,
-      differences: [
-        "outcome compile-error, got warning-runtime-check",
-        "missing diagnostic integer-use compile-error main.tease:102-103 ×1",
-        "extra diagnostic integer-use warning-runtime-check main.tease:102-103 ×1",
-        'missing required check integer-use main.tease:102-103 N3 writer main.tease:39-43 ["if n != null","otherwise"] ×1',
-        "extra check null-check n [integer] main.tease:102-103 ×1",
-      ],
-    },
-  ],
-  [
-    "cp9-cells/3b/review-early/n9-back-edge",
-    {
-      reason: CORRIDOR_REASON,
-      differences: [
-        "outcome compile-error, got warning-runtime-check",
-        "missing diagnostic integer-use compile-error main.tease:45-46 ×1",
-        "extra diagnostic integer-use warning-runtime-check main.tease:45-46 ×1",
-        'missing required check integer-use main.tease:45-46 N3 writer main.tease:55-59 ["if n != null","otherwise"] ×1',
-        "extra check null-check n [integer] main.tease:45-46 ×1",
-      ],
-    },
-  ],
-  [
     "cp9-cells/3b/review-early/n9-switch-multi",
     {
       reason: CORRIDOR_REASON,
@@ -198,7 +174,7 @@ export const HELD_S10_RECORDS: ReadonlyMap<string, S10Hold> = new Map([
   [
     "cp9-cells/3b/review-late/copies/back-edge",
     {
-      reason: CORRIDOR_REASON,
+      reason: ENTRY_COPY_REASON,
       differences: [
         "outcome compile-error, got warning-runtime-check",
         "missing diagnostic integer-use compile-error main.tease:70-75 ×1",
@@ -211,7 +187,7 @@ export const HELD_S10_RECORDS: ReadonlyMap<string, S10Hold> = new Map([
   [
     "cp9-cells/3b/review-late/copies/entered-label",
     {
-      reason: CORRIDOR_REASON,
+      reason: ENTRY_COPY_REASON,
       differences: [
         "outcome compile-error, got warning-runtime-check",
         "missing diagnostic integer-use compile-error main.tease:128-133 ×1",

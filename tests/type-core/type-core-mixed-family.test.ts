@@ -486,11 +486,12 @@ test("a mixed-list error's work grows as its dimensions do (#1765)", async () =>
     shapes: Record<string, (size: number) => string>;
     sizes: readonly number[];
   }>("nested-carriers-and-diagnostic-work/nested-mixed-list-composition-work.mjs");
-  const total = (source: string): number => {
+  const total = (source: string, mode = MODES[0]!): number => {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
-    const answers = inMode(MODES[0]!, () => analyseCore(request));
+    const answers = inMode(mode, () => analyseCore(request));
     assert.equal(answers.budget.exhausted, null, source);
+    assert.ok(!answers.budget.decisions.some((decision) => decision.stopped), source);
     return answers.budget.total;
   };
   for (const [shape, make] of Object.entries(shapes)) {
@@ -499,14 +500,49 @@ test("a mixed-list error's work grows as its dimensions do (#1765)", async () =>
     const [small, large] = [sizes[0]!, sizes[1]!].map((size) => total(make(size)));
     assert.ok(large! <= bound * small!, `${shape}: ${small}, ${large}`);
   }
+  // (the written index chain reversed as well, at the size it finishes: reversed, a larger one stops, `REVERSED_CHAIN`)
+  total(
+    shapes["index-chain:written"]!(sizes[0]!),
+    MODES.find((mode) => mode.reversed && !mode.unshared),
+  );
+});
+
+/**
+ * The index-chain length to which #1765's written index chain, reversed with sharing, keeps every decision within its
+ * demand allowance (main: 39). Since #2289's B1 the decision of a level evaluates the literal's cell at every level
+ * below it, and the deepest, asked first in reversed order, at every level, each evaluation describing both elements
+ * (the copy read through the chain by a scan of its own view): the deciding decision's work grows with the square of
+ * the nesting depth in either order (main: linearly forward), about 6.5 times main's reversed, while the analysis
+ * total per doubling stays inside the family's bound. A known cost of decision B (2026-11-12) in the safe direction: a
+ * decision that stops is declined or marked, never unchecked. Forward, no decision stops up to 40 on either tree;
+ * without sharing the head stops one level later.
+ */
+const REVERSED_CHAIN = 10;
+
+test("#1765's written index chain, reversed, keeps its decisions within their allowance to a pinned length (#2289)", async () => {
+  const { shapes } = await family<{ shapes: Record<string, (size: number) => string> }>(
+    "nested-carriers-and-diagnostic-work/nested-mixed-list-composition-work.mjs",
+  );
+  // (a decision past its allowance stops, and the pass it restarts stops the analysis: either is a stop)
+  const stopped = (n: number): boolean => {
+    const request = coreRequest([
+      { path: "main.tease", source: shapes["index-chain:written"]!(2 * n) },
+    ]);
+    assert.ok(request !== null);
+    const reversed = MODES.find((mode) => mode.reversed && !mode.unshared)!;
+    const { budget } = inMode(reversed, () => analyseCore(request));
+    return budget.exhausted !== null || budget.decisions.some((decision) => decision.stopped);
+  };
+  assert.deepEqual([stopped(REVERSED_CHAIN), stopped(REVERSED_CHAIN + 1)], [false, true]);
 });
 
 /**
  * #1906: a later element whose value holds no definite kind at a path, a join's elements (which may be either operand's)
  * or a typed host value (which the script cannot know), is a copy of what decides it, as the earliest element is (A4):
- * its decider's written type. So the mixed-list error is the current checker's in either order, in four modes. Its own
- * definite kinds still win (a narrowed union), a value proved to hold only `null` decides nothing, a written union
- * offends where none of its kinds fits, and a typed host value whose written type fits stays valid.
+ * its decider's written type. So the mixed-list error is the current checker's in either order, in four modes. A value
+ * proved to hold only `null` decides nothing, a written union offends where none of its kinds fits, and a typed host
+ * value whose written type fits stays valid. A narrowed copy of a written union is that union, which the list's other
+ * element fits: the list is the union in either order (#2289 B1), where the current checker names the narrowed kind.
  */
 test("a later element without a definite kind is compared by its decider's written type (#1906)", () => {
   const orders = (before: string, earlier: string, later: string): string[] => [
@@ -529,7 +565,6 @@ test("a later element without a definite kind is compared by its decider's writt
     `${host("string")}let xs = [1, atom, atom]\nexit\n`,
     // (a repeated identity below the root: its later copy is described by the paths the first one offends at, `known`)
     `${host("string")}let h = {v: atom}\nlet xs = [{v: 1}, h, h]\nexit\n`,
-    `${host("integer | string")}if atom is string {\n  let xs = [1, atom]\n}\nexit\n`,
   ];
   const valid = [
     `${host("number")}let xs = [1, atom]\nexit\n`,
@@ -541,7 +576,6 @@ test("a later element without a definite kind is compared by its decider's writt
     ...orders(`let a: integer = 1\n${host("number?")}`, "{v: a}", "{v: atom}"),
     ...orders(`let a: integer = 1\n${host("number")}`, "[a]", "[atom]"),
     "let xs = [1, hostValue]\nexit\n",
-    'let t: integer? = null\nlet root = {g: t}\nlet copy = root\nlet xs = [{g: "text"}, copy]\nexit\n',
   ];
   for (const source of reported) {
     const { current, core } = mixedSentences(source);
@@ -552,4 +586,23 @@ test("a later element without a definite kind is compared by its decider's writt
     const { current, core } = mixedSentences(source);
     assert.deepEqual([current, ...core], [[], [], [], [], []], source);
   }
+  for (const source of orders(`${host("integer | string")}if atom is string {\n`, "1", "atom")) {
+    const { current, core } = mixedSentences(source.replace("\nexit\n", "\n}\nexit\n"));
+    assert.notEqual(current.length, 0, source);
+    assert.deepEqual(core, [[], [], [], []], source);
+  }
+  // (a copy of a written `integer?` holding `null` is that written type, which text does not fit: an error in either
+  // order, #2289 B1, where main errs only with the copy first and the current checker in neither)
+  const text =
+    'let t: integer? = null\nlet root = {g: t}\nlet copy = root\nlet xs = [{g: "text"}, copy]\nexit\n';
+  const { current, core } = mixedSentences(text);
+  assert.deepEqual(current, [], text);
+  for (const each of core)
+    assert.deepEqual(
+      each,
+      [
+        "This list mixes objects whose property 'g' holds text (string) in one and a whole number (integer) or null in another.",
+      ],
+      text,
+    );
 });

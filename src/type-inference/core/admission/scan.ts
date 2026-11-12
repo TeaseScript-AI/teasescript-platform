@@ -11,6 +11,7 @@ import {
   restSteps,
   spanRef,
   stepsAfter,
+  stepsArray,
   stepsFrom,
   stepsJoin,
   stepsRest,
@@ -32,16 +33,28 @@ import type {
   EvaluationKey,
   Inheriting,
   Inputs,
+  Link,
   Stop,
   Stops,
   Via,
   ViaChain,
+  View,
 } from "./model.js";
 import { joinedDomain, permittedAt } from "./permitted.js";
-import { transferredDecider, writtenDecider } from "./transfers.js";
+import { deciderRoot, literalRoute, transferredDecider, writtenDecider } from "./transfers.js";
+import {
+  bodyOfRead,
+  cellOfBody,
+  completeTerm,
+  textDepth,
+  viewDepths,
+  type CellAnswer,
+  type CellBatch,
+  type CellSource,
+} from "./literals/cell.js";
 import { inheritedInto } from "../inherited/waiting.js";
 import { readNow, type Reads } from "../inherited/reads.js";
-import { compareKeys, expandRead, stopsOfRead, viaSignature } from "./walk.js";
+import { compareKeys, expandRead, stopsOfRead, viaSignature, viewOfRead } from "./walk.js";
 
 // A2's scan: the stores a path is decided from, and the earliest contribution in evaluation order that decides it.
 
@@ -117,6 +130,10 @@ export function* scanAt(
   readonly own?: boolean;
   readonly decider: Definition;
   readonly site: SourceSite | null;
+  /** #2289: the deciding strict cell holds an element that decides nothing and may hold host data. */
+  readonly host?: true;
+  /** #2289: a stop left a literal's element on the path undecided, so the path is: nothing else is set. */
+  readonly stopped?: true;
 } | null> {
   const { program, lists } = admission.pass;
   const work = program.work;
@@ -185,7 +202,13 @@ export function* scanAt(
     work.charge("checks", scans.length);
     const first =
       d.value === undefined ? null : yield* earliestDecider(admission, d.value, d.node, at, into);
-    const copied = first?.term ?? null;
+    if (first?.stopped === true) return stoppedScan(d);
+    // (#2289: a literal's strict cell carries its complete type)
+    const copied =
+      first?.cell === undefined || first.term === null
+        ? (first?.term ?? null)
+        : yield* completeTerm(admission, first.cell, first.term);
+    if (first?.cell !== undefined && copied === null) return stoppedScan(d);
     if (copied !== null) {
       // (its type stays strict, but a literal's `null` elements beside the copy make the place optional, ADR 0021
       // 1.3, A8; a list join's, a written operand's or an element's, make the joined list optional, ADR 0021 1.3, V30
@@ -208,6 +231,7 @@ export function* scanAt(
         own: first!.own === true,
         decider: d,
         site: first?.site ?? d.site,
+        ...(first!.host === true ? { host: true as const } : {}),
       };
     }
     // an unknown beside a kind does not decide, unless a literal's own element decides beside it; a null beside one
@@ -247,13 +271,7 @@ export function* scanAt(
  * carrier once; else, outside every decision and into no decision's place, their written-decider summary
  * (`writtenDecider`); else its stops are scanned here.
  */
-export function* earliestDecider(
-  admission: Admission,
-  value: PlaceId,
-  node: FlowNode,
-  asked: Rest,
-  into: Key | null,
-): Inheriting<{
+export interface DeciderAnswer {
   readonly term: TypeTerm | null;
   readonly site: SourceSite | null;
   /** A deciding value's kinds there (`term` `null`). */
@@ -263,33 +281,82 @@ export function* earliestDecider(
   readonly joinedNull?: boolean;
   /** Whether the deciding copy (`term`) stands at the asked path's end: the path is the copy's own level (#1901). */
   readonly own?: boolean;
-} | null> {
-  const { program, values, contract } = admission.pass;
+  /** #2289: a literal's strict cell decides (`term`), where it was asked (`completeTerm`). */
+  readonly cell?: CellSource;
+  /** #2289: that strict cell holds an element that decides nothing and may hold host data. */
+  readonly host?: true;
+  /** #2289: a stop left an element of a literal on the path undecided; nothing is set beside it. */
+  readonly stopped?: true;
+}
+
+export function* earliestDecider(
+  admission: Admission,
+  value: PlaceId,
+  node: FlowNode,
+  asked: Rest,
+  into: Key | null,
+): Inheriting<DeciderAnswer | null> {
+  const { program, contract } = admission.pass;
   // (a cursor's span read one step at a time and by its path's id, never made: G3 stage 1)
   const at = restRef(contract, asked);
   const task = yield* expandRead(admission, value, node, []);
-  const written = { root: null, ids: null };
-  const transferred = yield* transferredDecider(admission, task, asked, written);
-  // #1444(b,c): outside every decision and into no decision's place, the groups' written-decider summary answers; a
-  // decision's scan stays its stops', so each decision charges what it charged before
-  if (transferred === undefined && into === null && admission.deciding === 0)
-    return yield* writtenDecider(admission, task, asked, written);
-  if (transferred !== undefined)
-    return transferred === null
-      ? null
-      : {
-          term: null,
-          site: program.places[transferred.value]?.site ?? null,
-          tags: transferred.tags,
-        };
-  const stops = yield* stopsOfRead(admission, value, node);
+  // #2289: where a literal stands on the path and a declared contribution (a written copy) in the value's region, the
+  // literal's cell answers, one contribution, never a summary of its parts; with none declared every cell is inferred,
+  // and the summaries' kinds are B1's (the decision takes the store's own kinds there, `scanAt`)
+  const root = deciderRoot(admission, task, asked);
+  const literal = yield* literalRoute(admission, root);
+  if (!literal) {
+    const written = { root: null, ids: null };
+    const transferred = yield* transferredDecider(admission, task, asked, written, root);
+    // #1444(b,c): outside every decision and into no decision's place, the groups' written-decider summary answers; a
+    // decision's scan stays its stops', so each decision charges what it charged before
+    if (transferred === undefined && into === null && admission.deciding === 0)
+      return yield* writtenDecider(admission, task, asked, written);
+    if (transferred !== undefined)
+      return transferred === null
+        ? null
+        : {
+            term: null,
+            site: program.places[transferred.value]?.site ?? null,
+            tags: transferred.tags,
+          };
+  }
+  // (#2289: the value's view, each literal with a cell a link to its body, where the literal route answers)
+  if (literal) {
+    const view = yield* viewOfRead(admission, task);
+    return yield* scanView(admission, view, at, asked, into, () => viewDepths(admission, view));
+  }
+  const raw = yield* stopsOfRead(admission, value, node);
+  return yield* scanView(admission, raw, at, asked, into, () => stopDepths(admission, raw));
+}
+
+/**
+ * `earliestDecider`'s scan of one set of stops: a walk's own, or a view's (`View`, #2289: a value's, or an element's
+ * in a literal's body), each link among them one contribution by its body's cell (`cellOfBody`).
+ */
+export function* scanView(
+  admission: Admission,
+  stops: Pick<View, "written" | "values" | "literals"> & { readonly links?: View["links"] },
+  at: PathRef,
+  asked: Rest,
+  into: Key | null,
+  depthsOf: () => { readonly written: number; readonly values: number; readonly literals: number },
+  /** The shallowest path any of the stops stands at: an element scope's own (#2289). */
+  from = 0,
+  /** The comparison evaluation a cell's scan belongs to (#2289), passed down to the cells it reads. */
+  batch: CellBatch | null = null,
+): Inheriting<DeciderAnswer | null> {
+  const { program, values, contract } = admission.pass;
   const siteOf = (stop: Stop): SourceSite | null => program.places[stop.value]?.site ?? null;
   // the earliest copy whose written type reaches the rest of the path
   let copy: {
     readonly key: EvaluationKey;
     readonly term: TypeTerm;
-    readonly stop: Stop;
+    readonly site: SourceSite | null;
+    readonly joined: boolean;
     readonly own: boolean;
+    readonly cell?: CellSource;
+    readonly host?: boolean;
   } | null = null;
   // (a list join's written operands by `joinedDomain`, each whatever came before or after it: an open one leaves the
   // value open there, one holding `null` makes it optional, Codex r9's B1 on #1310)
@@ -324,9 +391,9 @@ export function* earliestDecider(
   }
   // (G3 3b: no stop stands deeper than its value's own paths, `stopDepths`; a join's written calls stand among the
   // values)
-  const depths = stopDepths(admission, stops);
+  const depths = depthsOf();
   const deepest = Math.min(at.length, Math.max(depths.written, depths.values));
-  for (let length = 0; length <= deepest; length += 1) {
+  for (let length = from; length <= deepest; length += 1) {
     program.work.charge("checks");
     // (a span's prefix text its record's, `textOf`; an array's made plain, as before)
     const prefix = at.text(length);
@@ -357,28 +424,90 @@ export function* earliestDecider(
       if (domain === "open") return { term, site: siteOf(stop) };
       joinedNull ||= typeTags(term).includes("null");
       if (domain === "kinds" && (copy === null || compareKeys(stop.key, copy.key) < 0))
-        copy = { key: stop.key, term, stop, own: ownLevel };
+        copy = { key: stop.key, term, site: siteOf(stop), joined: true, own: ownLevel };
     }
     for (const stop of written ?? []) {
       program.work.charge("checks");
       if (copy !== null && compareKeys(stop.key, copy.key) > 0) break;
       if (stop.via?.joined === true) continue;
       const term = yield* termOf(stop, length);
-      if (term !== null) copy = { key: stop.key, term, stop, own: ownLevel };
+      if (term !== null)
+        copy = { key: stop.key, term, site: siteOf(stop), joined: false, own: ownLevel };
     }
+  }
+  // #2289: each literal task on the path, in key order, by its cell's answer: a strict one as a written copy, an
+  // inferred one as a value, a stopped one ending the scan where it comes first (#2289)
+  const cellValues: {
+    readonly key: EvaluationKey;
+    readonly task: Link;
+    readonly tags: readonly ItemTag[] | null;
+    readonly site: SourceSite | null;
+  }[] = [];
+  for (const { link: t, length } of stops.links === undefined
+    ? []
+    : linksOn(admission, stops.links, at, from)) {
+    const joined = t.via?.joined === true;
+    if (!joined && copy !== null && compareKeys(t.key, copy.key) > 0) continue;
+    // (a literal read whole is asked at a step below it: at its own path its own stop answers)
+    if (t.strip.length === 0 && length === at.length) continue;
+    const rel = stepsArray(stepsFrom(restSteps(asked), length));
+    program.work.charge("checks", rel.length);
+    const body = yield* bodyOfRead(admission, t.value, t.node, t.strip);
+    const answer: CellAnswer = yield* cellOfBody(admission, body, rel, into, batch);
+    if (answer.kind === "none") continue;
+    if (answer.kind === "stopped") {
+      cellValues.push({ key: t.key, task: t, tags: null, site: null });
+      continue;
+    }
+    const term = answer.kind === "fit" ? answer.term : answer.earliest.term;
+    if (term === null) {
+      // (an inferred cell decides as a value: never under a typed default, nor at the path's end below an operation)
+      if (t.via?.typed !== true && !(t.deep && length === at.length))
+        cellValues.push({
+          key: t.key,
+          task: t,
+          tags: answer.kind === "fit" ? answer.tags : answer.earliest.tags,
+          // (the deciding element's own site, as its own reading gives it)
+          site: answer.kind === "fit" ? answer.site : answer.earliest.site,
+        });
+      continue;
+    }
+    // (a strict cell as a written copy: selected by its operations, at the path's end below one only where surely)
+    if (t.deep && length === at.length && !(t.single && (yield* taskSelected(admission, t, true))))
+      continue;
+    if (t.via !== null && !(yield* taskSelected(admission, t))) continue;
+    const site = answer.kind === "fit" ? answer.site : answer.earliest.site;
+    const own = answer.kind === "fit" ? answer.own : answer.earliest.own;
+    if (joined) {
+      const domain = joinedDomain(typeTags(term));
+      if (domain === "open") return { term, site };
+      joinedNull ||= typeTags(term).includes("null");
+      if (domain !== "kinds") continue;
+    }
+    if (copy === null || compareKeys(t.key, copy.key) < 0)
+      copy = {
+        key: t.key,
+        term,
+        site,
+        joined,
+        own,
+        ...(answer.kind === "fit" ? { cell: { body, rel, into }, host: answer.host } : {}),
+      };
   }
   const copied = () => ({
     term: copy!.term,
-    site: siteOf(copy!.stop),
-    joined: copy!.stop.via?.joined === true,
+    site: copy!.site,
+    joined: copy!.joined,
     joinedNull,
     own: copy!.own,
+    ...(copy!.cell === undefined ? {} : { cell: copy!.cell }),
+    ...(copy!.host === true ? { host: true as const } : {}),
   });
   // the values in evaluation order, those standing above the path's end with its rest, the literals at its end
   const lists: { readonly list: readonly Stop[]; readonly length: number }[] = [];
   // (a value a projection selects stands for its parts below the path, never at it; of the values of one class the
   // first alone, the others answering as it does, Astra's review B2)
-  for (let length = 0; length <= Math.min(at.length, depths.values); length += 1) {
+  for (let length = from; length <= Math.min(at.length, depths.values); length += 1) {
     const list = snapshots(
       admission,
       stops.values.get(at.text(length)),
@@ -394,6 +523,7 @@ export function* earliestDecider(
   if (literals !== undefined) lists.push({ list: literals, length: at.length });
   const positions = lists.map(() => 0);
   const throughs = new Map<string, WeakMap<ViaChain, boolean>>();
+  let cellPosition = 0;
   for (;;) {
     let best = -1;
     for (let index = 0; index < lists.length; index += 1)
@@ -406,45 +536,96 @@ export function* earliestDecider(
           ) < 0)
       )
         best = index;
-    const next = best < 0 ? null : lists[best]!.list[positions[best]!]!;
+    const stopNext = best < 0 ? null : lists[best]!.list[positions[best]!]!;
+    const cellNext = cellValues[cellPosition] ?? null;
+    const next =
+      cellNext !== null && (stopNext === null || compareKeys(cellNext.key, stopNext.key) < 0)
+        ? cellNext
+        : stopNext;
     // (a copy of a place that inherits a written type comes before that copy's own value, A4)
     if (next === null || (copy !== null && compareKeys(copy.key, next.key) <= 0))
       return copy === null ? null : copied();
-    program.work.charge("checks", lists.length);
+    program.work.charge("checks", lists.length + (cellValues.length > 0 ? 1 : 0));
+    if (next === cellNext) {
+      cellPosition += 1;
+      if (cellNext.tags === null) return { term: null, site: null, stopped: true };
+      if (!(yield* chosen(admission, cellNext.task.via))) continue;
+      const tags = cellNext.tags;
+      const kinds = [...tags].sort().join(",");
+      let holds = throughs.get(kinds);
+      if (holds === undefined) throughs.set(kinds, (holds = new WeakMap()));
+      if (yield* through(admission, cellNext.task.via, asked, tags, holds))
+        return { term: null, site: cellNext.site, tags };
+      continue;
+    }
+    const nextStop = stopNext!;
     positions[best]! += 1;
     // (a typed default's literal is the call's input, not the stored value's own element: where the default holds host
     // data it leaves the path open, and the call decides nothing there beside it, F18)
-    if (next.via?.typed === true) continue;
+    if (nextStop.via?.typed === true) continue;
     const items = withoutEmpty(
       yield* admission.runRead(() =>
         values.valueItems(
-          next.value,
-          next.node,
+          nextStop.value,
+          nextStop.node,
           at.kind === "span"
-            ? at.from(lists[best]!.length).after(next.strip)
-            : stepsAfter(next.strip, stepsFrom(restSteps(asked), lists[best]!.length)),
+            ? at.from(lists[best]!.length).after(nextStop.strip)
+            : stepsAfter(nextStop.strip, stepsFrom(restSteps(asked), lists[best]!.length)),
         ),
       ),
     );
     const definite = items.some((item) => item.tag === "unknown") ? [] : deciding(items);
     // (an operand its operation does not give decides nothing, F17a, F17b)
-    if (definite.length === 0 || !(yield* chosen(admission, next.via))) continue;
+    if (definite.length === 0 || !(yield* chosen(admission, nextStop.via))) continue;
     // (each chain's operations asked once per set of kinds at the path, whatever stops share them)
     const tags = definite.map((item) => item.tag);
     const kinds = [...tags].sort().join(",");
     let holds = throughs.get(kinds);
     if (holds === undefined) throughs.set(kinds, (holds = new WeakMap()));
-    if (yield* through(admission, next.via, asked, tags, holds))
-      return { term: null, site: siteOf(next), tags };
+    if (yield* through(admission, nextStop.via, asked, tags, holds))
+      return { term: null, site: siteOf(nextStop), tags };
   }
 }
 
-/** The depth of a path text (`pathText`): its steps' count, none for the empty path. */
-function textDepth(text: string): number {
-  if (text === "") return 0;
-  let depth = 1;
-  for (let at = text.indexOf("."); at >= 0; at = text.indexOf(".", at + 1)) depth += 1;
-  return depth;
+/** A scan that met a stopped literal element (#2289: nothing decides, and the path is undecided. */
+function stoppedScan(decider: Definition) {
+  const tags: ItemTag[] = [];
+  return {
+    tags,
+    nullable: false,
+    byWritten: false,
+    permitsNull: false,
+    copied: null,
+    decider,
+    site: null,
+    stopped: true as const,
+  };
+}
+
+/**
+ * #2289: the links of a view on the asked path's prefixes, in key order, with the path's length at each (the
+ * literal's own path).
+ */
+function linksOn(
+  admission: Admission,
+  links: View["links"],
+  at: PathRef,
+  from = 0,
+): { readonly link: Link; readonly length: number }[] {
+  const { program } = admission.pass;
+  if (links.size === 0) return [];
+  const out: { readonly link: Link; readonly length: number }[] = [];
+  for (let length = from; length <= at.length; length += 1) {
+    program.work.charge("checks");
+    for (const link of links.get(at.text(length)) ?? []) out.push({ link, length });
+  }
+  program.work.charge("checks", sortCost(out.length));
+  return out.sort((a, b) => compareKeys(a.link.key, b.link.key));
+}
+
+/** Whether a literal task's operations select it (`selectsRead`), or `surely` do. */
+function* taskSelected(admission: Admission, task: Link, surely = false): Reads<boolean> {
+  return live(admission, task.value) && (yield* chosen(admission, task.via, surely));
 }
 
 /** The deepest path a walk's stops stand at, per kind of stop, once per walk (`earliestDecider`'s loops). */

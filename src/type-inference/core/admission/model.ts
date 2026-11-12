@@ -407,6 +407,36 @@ export interface Stops {
 }
 
 /**
+ * #2289: a literal a view's walk meets where a step of it has several elements (a cell, B1), by the path it stands
+ * at and the context it is read in there: one contribution, answered by its body's cell (`literals/cell.ts`), never
+ * walked into. Its path and context are its view's own.
+ */
+export interface Link {
+  readonly key: EvaluationKey;
+  readonly value: PlaceId;
+  readonly node: FlowNode;
+  readonly path: readonly string[];
+  readonly strip: readonly string[];
+  readonly deep: boolean;
+  readonly single: boolean;
+  readonly via: ViaChain | null;
+}
+
+/**
+ * #2289: a value's stops as the decider and the comparisons read them (`viewOfRead`), in its own coordinates: the
+ * stops outside every cell and each literal with a cell as a link. Shared by each reader of the value's recipe; a
+ * nested literal's body is linked, never copied into the view of a value that holds it. The raw `Stops` of the walk
+ * keep every stop for the other readers. `depths`: the deepest path of each map, once asked.
+ */
+export interface View {
+  readonly written: Map<string, Stop[]>;
+  readonly values: Map<string, Stop[]>;
+  readonly literals: Map<string, Stop[]>;
+  readonly links: Map<string, Link[]>;
+  depths: { readonly written: number; readonly values: number; readonly literals: number } | null;
+}
+
+/**
  * One task of the store walk by its value, node and strip alone (`expand`), its own recipe: what it stands as at its
  * own path and the parts the walk takes below it, each a task of its own, whatever reached it. A walk (`stopsOf`) and
  * every transfer read over it (`admission/transfers.ts`) take a task's recipe once per pass.
@@ -418,6 +448,8 @@ export interface Expansion {
   readonly strip: readonly string[];
   /** A copy of an unwritten place that may inherit a written type: a written copy too, beside what it stands as. */
   readonly inherits: { readonly from: PlaceId; readonly strip: readonly string[] } | null;
+  /** A literal value with no written type, read whole or through a projection: its cells are its parts. */
+  readonly literal: boolean;
   /** Its own stop, where it is one (no literal read into, no carrier): its list, written type and strip. */
   readonly stop: {
     readonly list: "written" | "values" | "literals";
@@ -515,6 +547,11 @@ export interface Decision {
   readonly nullable: boolean;
   /** The store that decided (A2, A4), `null` for a written type. */
   readonly decider: Definition | null;
+  /**
+   * #2289: the decider is a strict literal cell one of whose elements decides nothing and may hold host data: the
+   * decider's own store is a candidate too, its value's host data checked against the decision.
+   */
+  readonly deciderHost?: true;
   /** The candidates in source order (A5). */
   readonly candidates: readonly Candidate[];
   /**
@@ -552,6 +589,8 @@ export interface Decided {
   readonly transfer: boolean;
   readonly permitsNull: boolean;
   readonly decider: Definition | null;
+  /** #2289: as `Decision.deciderHost`. */
+  readonly deciderHost?: true;
   readonly site: SourceSite | null;
   readonly published: boolean;
   /**
@@ -561,6 +600,8 @@ export interface Decided {
   readonly copied: TypeTerm | null;
   /** Where A3 settled the path without a scan: the one family of kinds its contract holds, which names it (`kindsAt`). */
   readonly settled: readonly Item[] | null;
+  /** #2289: its scan met a literal element a stop left undecided, so it is undecided (`budgetUndecided`). */
+  readonly budget?: true;
 }
 
 /** A list `+` (`joinElements`). */

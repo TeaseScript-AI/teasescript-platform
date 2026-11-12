@@ -54,18 +54,22 @@ test("a type-core test file the table does not list runs, in exactly one shard, 
   assert.equal(shardSeconds([unlisted], 1, 1), otherTestSeconds);
 });
 
-test("the suite is each regular test file at the top and one folder down, but none in fixtures/, helpers/, deeper or behind a link", (t) => {
+test("the suite is each regular test file at the top and up to two folders down, but none in fixtures/, helpers/, deeper or behind a link", (t) => {
   const root = mkdtempSync(join(tmpdir(), "suite-test-files-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   for (const file of [
     "a.test.js",
     "player/b.test.js",
     "player/helper.js",
-    "player/deep/c.test.js",
+    "player/debug/c.test.js",
+    "player/debug/deeper/f.test.js",
+    "helpers/player/g.test.js",
     "helpers/d.test.js",
     "fixtures/e.test.js",
     "a.test.ts",
     "player/b.test.ts",
+    "player/debug/c.test.ts",
+    "player/debug/deeper/f.test.ts",
     "helpers/d.test.ts",
   ]) {
     mkdirSync(join(root, file, ".."), { recursive: true });
@@ -75,18 +79,33 @@ test("the suite is each regular test file at the top and one folder down, but no
   symlinkSync("player", join(root, "alias.test.js"));
   symlinkSync("a.test.js", join(root, "link.test.js"));
   symlinkSync("b.test.js", join(root, "player", "link.test.js"));
-  assert.deepEqual(suiteTestFiles(root, ".test.js"), ["a.test.js", "player/b.test.js"]);
-  assert.deepEqual(suiteTestFiles(root, ".test.ts"), ["a.test.ts", "player/b.test.ts"]);
+  symlinkSync("c.test.js", join(root, "player", "debug", "link.test.js"));
+  // (a file three folders down is not one: the depth is the suite's, `SUITE_FOLDER_DEPTH`)
+  assert.deepEqual(suiteTestFiles(root, ".test.js"), [
+    "a.test.js",
+    "player/b.test.js",
+    "player/debug/c.test.js",
+  ]);
+  assert.deepEqual(suiteTestFiles(root, ".test.ts"), [
+    "a.test.ts",
+    "player/b.test.ts",
+    "player/debug/c.test.ts",
+  ]);
   // (a type-core test file in a folder is one the costly table must list, as one at the top is)
   assert.deepEqual(
     unknownToCostly([
       "tests/type-core-new.test.ts",
       "tests/type-core/type-core-new.test.ts",
       "tests/type-core/deep/type-core-new.test.ts",
+      "tests/type-core/deep/deeper/type-core-new.test.ts",
       "tests/helpers/type-core-new.test.ts",
       "tests/type-core/new.test.ts",
     ]),
-    ["tests/type-core-new.test.ts", "tests/type-core/type-core-new.test.ts"],
+    [
+      "tests/type-core-new.test.ts",
+      "tests/type-core/type-core-new.test.ts",
+      "tests/type-core/deep/type-core-new.test.ts",
+    ],
   );
 });
 
@@ -224,14 +243,17 @@ test("the filter's two shards run every compiled test file once between them, on
   const cwd = mkdtempSync(join(tmpdir(), "test-shards-"));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
   mkdirSync(join(cwd, "dist", "tests"), { recursive: true });
-  // (one costly file more than a shard runs at once, and three others, one a name no list holds)
-  const names = [
-    ...costlyTestFiles.slice(0, testFilesAtOnce + 1),
-    "a.test.js",
-    "b.test.js",
-    "unlisted-new.test.js",
-    "player/c.test.js",
-  ];
+  // (the costliest files, at least one more than a shard runs at once and as many as the measured seconds need for
+  // both shards to run some: the last starts after the pre-test checks; and four others, one a name no list holds)
+  const others = ["a.test.js", "b.test.js", "unlisted-new.test.js", "player/c.test.js"];
+  const withCostly = (count) => [...costlyTestFiles.slice(0, count), ...others];
+  let costly = testFilesAtOnce + 1;
+  while (
+    costly < costlyTestFiles.length &&
+    [1, 2].some((shard) => shardFiles(withCostly(costly), shard, 2).length === 0)
+  )
+    costly += 1;
+  const names = withCostly(costly);
   mkdirSync(join(cwd, "dist", "tests", "player"));
   for (const name of names) {
     // (a costly file's name is its path under dist/tests/, in a folder for most)

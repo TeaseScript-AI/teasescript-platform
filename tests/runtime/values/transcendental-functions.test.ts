@@ -1,0 +1,235 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+
+import { compileSource } from "../../../src/compiler.js";
+import type { NumericFunctionName } from "../../../src/language-facts.js";
+import { NUMERIC_CONTRACTS, numericResult } from "../../../src/numeric-functions.js";
+import { RANDOM_CONTRACTS } from "../../../src/random-functions.js";
+import { cubeRoot } from "../../../src/deterministic-math.js";
+import { runValidSource } from "../../helpers/run-valid-source.js";
+import { sayTexts } from "../../helpers/runtime-events.js";
+import { assertRuntimeResumeEquivalent } from "../../helpers/runtime-equivalence.js";
+
+function said(source: string, seed?: number): string[] {
+  const result = runValidSource(source, seed);
+  assert.equal(result.snapshot.failure, null, source);
+  return sayTexts(result);
+}
+
+function diagnostics(source: string): [string, string, string][] {
+  return compileSource(source).diagnostics.map((diagnostic) => [
+    diagnostic.code,
+    diagnostic.message,
+    source.slice(diagnostic.span.start.offset, diagnostic.span.end.offset),
+  ]);
+}
+
+function failure(source: string): [string | undefined, string | undefined] {
+  const failed = runValidSource(source).snapshot.failure;
+  return [failed?.code, failed?.message];
+}
+
+/** Hides a value's type from the compiler, as host data or untyped storage would. */
+const DYNAMIC = "function dynamic(value) {\n    return value\n}\n";
+
+/**
+ * The result of a numeric function, or of an angle function with its angles in degrees: an argument of `sin`, `cos`, or
+ * `tan` is an angle of that many degrees, and an angle result is its degrees.
+ */
+function apply(name: NumericFunctionName, ...values: number[]): number | undefined {
+  const result = numericResult(NUMERIC_CONTRACTS[name], values, {});
+  return typeof result === "number" ? result : "degrees" in result ? result.degrees : undefined;
+}
+
+test("exact angles give exact results", () => {
+  assert.deepEqual(
+    said(
+      [
+        'say "${sin(30 deg)} ${sin(90 deg)} ${sin(180 deg)} ${sin(-390 deg)} ${cos(60 deg)} ${cos(90 deg)} ${cos(120 deg)} ${tan(45 deg)} ${tan(135 deg)}"',
+        'say "${asin(0.5)} ${asin(-1)} ${acos(0.5)} ${acos(-1)} ${acos(0)} ${atan(1)} ${atan(1e300)}"',
+        'say "${atan2(1, 1)} ${atan2(1, -1)} ${atan2(0, -1)} ${atan2(-1, 0)} ${atan2(0, 0)}"',
+        'say "${exp(0)} ${ln(1)} ${log10(1000)} ${log10(0.001)} ${round(exp(1), decimals: 5)}"',
+        "exit",
+      ].join("\n"),
+    ),
+    [
+      "0.5 1 0 -0.5 0.5 0 -0.5 1 -1",
+      "30° -90° 60° 180° 90° 45° 90°",
+      "45° 135° 180° -90° 0°",
+      "1 0 3 -3 2.71828",
+    ],
+  );
+});
+
+test("exponentials, logarithms, and angles round correctly with the same operations on every JavaScript engine", () => {
+  // Correctly rounded values from 60-digit mpmath arithmetic on the exact binary arguments. V8's Math.exp, Math.log,
+  // and Math.log10 are one unit in the last place off for these, and degrees converted to radians lose more for tan.
+  const cases: [NumericFunctionName, number[], number][] = [
+    ["exp", [-5.240182620473206], 0.005299288988835954],
+    ["exp", [1.865231073461473], 6.457427853813894],
+    ["ln", [6.985742112079858], 1.9438712307418948],
+    ["log10", [3.8478154432198406], 0.5852142333467013],
+    ["sin", [1], 0.01745240643728351],
+    ["cos", [123.456], -0.5512964442855824],
+    ["tan", [89.9], 572.9572133543203],
+    ["atan2", [3, 4], 36.86989764584402],
+    ["asin", [0.3], 17.45760312372209],
+    ["acos", [-0.1185152162797749], 96.80641923801664],
+  ];
+  for (const [name, values, expected] of cases)
+    assert.equal(apply(name, ...values), expected, `${name}(${values.join(", ")})`);
+});
+
+test("a call without a finite result is a compile error when the arguments are known, and a runtime error otherwise", () => {
+  // A domain of one number names it.
+  const cases: [string, string, string?][] = [
+    ["ln(0)", "ln(0) has no result: only a number above 0 has a logarithm.", "0"],
+    ["log10(-1)", "log10(-1) has no result: only a number above 0 has a logarithm.", "-1"],
+    ["asin(2)", "asin(2) has no result: only a number from -1 through 1 has an arcsine.", "2"],
+    [
+      "acos(-1.5)",
+      "acos(-1.5) has no result: only a number from -1 through 1 has an arccosine.",
+      "-1.5",
+    ],
+    ["tan(90 deg)", "tan(90°) has no result: the tangent of 90° is infinite."],
+    ["tan(-270 deg)", "tan(-270°) has no result: the tangent of -270° is infinite."],
+    ["tan((pi / 2) rad)", "tan(90°) has no result: the tangent of 90° is infinite."],
+    ["exp(1000)", "exp(1000) gives a number too large to represent. Use smaller values."],
+  ];
+  for (const [call, message, at = call] of cases) {
+    assert.deepEqual(diagnostics(`say ${call}\nexit`), [["TSV043", message, at]], call);
+    const hidden = call.replace(/\((.+)\)/u, "(dynamic($1))");
+    assert.deepEqual(failure(`${DYNAMIC}say ${hidden}\nexit`), ["TSR036", message], hidden);
+  }
+  assert.deepEqual(diagnostics('say sin("30")\nexit')[0]?.[0], "TSV043");
+  assert.deepEqual(diagnostics("say atan2(1)\nexit"), [
+    ["TSV020", "atan2() takes 2 arguments (y, x), received 1.", "atan2(1)"],
+  ]);
+  assert.deepEqual(diagnostics("let ln = 2\nexit")[0]?.[0], "TSV001");
+});
+
+test("random distributions draw from the session generator", () => {
+  for (const seed of [11, 4242, 987654321]) {
+    // randomNormal always makes two draws: the random() after it is the generator's third number.
+    const plain = said('say "${random()}"\nsay "${random()}"\nsay "${random()}"\nexit', seed);
+    const [, after] = said('say "${randomNormal(20, 5)}"\nsay "${random()}"\nexit', seed);
+    assert.equal(after, plain[2], `seed ${seed}`);
+    // The same seed gives the same values.
+    const source =
+      'say "${randomNormal(20, 5)} ${randomBeta(2, 5)} ${randomPert(5, 10, 20)} ${randomPert(4, 4, 4)}"\nexit';
+    const [values] = said(source, seed);
+    assert.equal(said(source, seed)[0], values);
+    const [normal, beta, pert, point] = values!.split(" ").map(Number);
+    assert.equal(Number.isFinite(normal), true);
+    assert.equal(beta! >= 0 && beta! <= 1, true, `beta ${beta}`);
+    assert.equal(pert! >= 5 && pert! <= 20, true, `pert ${pert}`);
+    assert.equal(point, 4);
+  }
+  assert.deepEqual(diagnostics("say randomNormal(1, -1)\nexit"), [
+    ["TSV043", "randomNormal(...) needs a spread of at least 0, not -1.", "-1"],
+  ]);
+  assert.deepEqual(failure(`${DYNAMIC}say randomBeta(dynamic(0), 1)\nexit`), [
+    "TSR039",
+    "randomBeta(...) needs an alpha above 0, not 0.",
+  ]);
+  assert.deepEqual(failure(`${DYNAMIC}say randomPert(dynamic(5), 1, 2)\nexit`), [
+    "TSR039",
+    "randomPert(...) needs min <= mostLikely <= max, but min 5 is above max 2.",
+  ]);
+});
+
+test("random distributions follow their means", () => {
+  const count = 4000;
+  let state = 2463534242;
+  const draw = (): number => {
+    state ^= state << 13;
+    state >>>= 0;
+    state ^= state >>> 17;
+    state ^= state << 5;
+    state >>>= 0;
+    return state / 4294967296;
+  };
+  const mean = (
+    name: "randomNormal" | "randomBeta" | "randomPert",
+    values: number[],
+    expected: number,
+    tolerance: number,
+  ): void => {
+    let total = 0;
+    for (let index = 0; index < count; index += 1) {
+      const sample = RANDOM_CONTRACTS[name].sample(values, draw);
+      if (typeof sample !== "number") throw new Error(`${name} failed: ${sample.failure}`);
+      total += sample;
+    }
+    const average = total / count;
+    assert.equal(Math.abs(average - expected) < tolerance, true, `${name}: ${average}`);
+  };
+  // Expected means: the mean itself, alpha / (alpha + beta), and (min + 4 × mostLikely + max) / 6.
+  mean("randomNormal", [20, 5], 20, 0.3);
+  mean("randomBeta", [2, 5], 2 / 7, 0.01);
+  mean("randomPert", [5, 10, 20], 65 / 6, 0.15);
+});
+
+test("drawn values survive checkpoint resume", () => {
+  const source = [
+    "let pause = randomNormal(30, 5)",
+    "wait 1 s",
+    "let share = randomBeta(2, 2)",
+    "wait 1 s",
+    "let count = randomPert(5, 10, 20)",
+    "wait 1 s",
+    'say "${pause > 0} ${share >= 0 and share <= 1} ${count >= 5 and count <= 20} ${sin(30 deg)}"',
+    "exit",
+  ].join("\n");
+  const equivalent = assertRuntimeResumeEquivalent(source);
+  assert.deepEqual(
+    equivalent.events.filter((event) => event.kind === "say").map((event) => event.text),
+    ["true true true 0.5"],
+  );
+});
+
+test("cubeRoot is within one unit in the last place, exact for exact cubes, across the binary exponents", () => {
+  // An exact rational for a double: numerator × 2^exponent.
+  const view = new DataView(new ArrayBuffer(8));
+  const exact = (x: number): readonly [bigint, bigint] => {
+    view.setFloat64(0, x);
+    const bits = view.getBigUint64(0);
+    const field = (bits >> 52n) & 2047n;
+    const fraction = bits & ((1n << 52n) - 1n);
+    return field === 0n ? [fraction, -1074n] : [fraction + (1n << 52n), field - 1075n];
+  };
+  const neighbour = (y: number, step: bigint) => {
+    view.setFloat64(0, y);
+    view.setBigUint64(0, view.getBigUint64(0) + step);
+    return view.getFloat64(0);
+  };
+  // Whether a³ ≤ x ≤ b³, compared exactly with every value scaled to whole numbers.
+  const between = (a: number, x: number, b: number) => {
+    const [[an, ae], [xn, xe], [bn, be]] = [exact(a), exact(x), exact(b)];
+    const low = [an ** 3n, 3n * ae] as const;
+    const high = [bn ** 3n, 3n * be] as const;
+    const floor = [low[1], xe, high[1]].reduce((m, e) => (e < m ? e : m));
+    const at = ([n, e]: readonly [bigint, bigint]) => n << (e - floor);
+    return at(low) <= at([xn, xe]) && at([xn, xe]) <= at(high);
+  };
+  for (const [x, root] of [
+    [8, 2],
+    [27, 3],
+    [0.125, 0.5],
+    [-8, -2],
+    [2 ** -1071, 2 ** -357],
+    [2 ** 1023, 2 ** 341],
+  ] as const)
+    assert.equal(cubeRoot(x), root, String(x));
+  for (const x of [0, -0, Infinity, -Infinity]) assert.ok(Object.is(cubeRoot(x), x));
+  const inputs = [5e-324, 1e-320, 2.2250738585072014e-308, 1.7976931348623157e308];
+  // Each binary exponent with the three residues mod 3 and mantissas at both ends of [1, 2).
+  for (let exponent = -1074; exponent <= 1023; exponent += 7)
+    for (const mantissa of [1, 1.2599210498948732, 1.5, 1.9999999999999998])
+      inputs.push(mantissa * 2 ** exponent);
+  for (const x of inputs.filter((value) => Number.isFinite(value) && value > 0)) {
+    const y = cubeRoot(x);
+    assert.ok(between(neighbour(y, -1n), x, neighbour(y, 1n)), `${x}: ${y}`);
+    assert.equal(cubeRoot(-x), -y);
+  }
+});

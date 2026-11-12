@@ -1,4 +1,15 @@
-import { type WorkFamily, rows, lines, cells, main, balancedSum, record } from "./builders.js";
+// pins for tests/type-core/type-core-work-c.test.ts: main's 64 → 128 growth step of the route rule's entries over many keys (a known product), as gates | line /^\s*measured: \d/u
+import {
+  type KnownProduct,
+  type WorkFamily,
+  rows,
+  lines,
+  cells,
+  main,
+  file,
+  balancedSum,
+  record,
+} from "./builders.js";
 
 /**
  * Stage 3b's families (W27–W34 and the tested-copy variant), as the design defines them: each makes the
@@ -502,6 +513,189 @@ export const ROUTE_FEASIBILITY_FAMILIES: readonly WorkFamily[] = [
           "let o = {k: 1}",
           'if o != null { say "g" }',
           rows(k, () => 'repeat 2 { say "r" }\nrepeat n {}'),
+          "exit",
+        ),
+      ),
+  },
+];
+
+/** A use of `n` that errs where its `null` arrives unchecked, and a store of `null` after it. */
+const USE_THEN_NULL = "repeat n {}\nn = null";
+
+/**
+ * The route rule's entries (#2497, the accepted record's r4-451): per key, every jump a seed and each entry's segments
+ * once; per use, its nearest entry per level and one segment each; per root, its holding statements and the compound
+ * statements around them, once.
+ */
+export const ROUTE_ENTRY_FAMILIES: readonly WorkFamily[] = [
+  {
+    name: "E-labels",
+    measures:
+      "N3: one key over k labels, each with a conditional `goto` back to it and a use after it",
+    program: (k) =>
+      main(
+        lines(
+          "let n: integer? = 1",
+          rows(
+            k,
+            (i) =>
+              `label l${i}\n${USE_THEN_NULL}\nif hostValue is boolean { goto l${i} }\nn = ${i}`,
+          ),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "E-gotos",
+    measures:
+      "N3: one label, one use after it and k conditional `goto`s back to it, each after a store of `null`",
+    program: (k) =>
+      main(
+        lines(
+          "let n: integer? = 1",
+          "label top",
+          "repeat n {}",
+          rows(k, () => "n = null\nif hostValue is boolean { goto top }\nn = 1"),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "E-uses",
+    measures:
+      "N3: one label, one `goto` back to it after a store of `null`, and k uses between them",
+    program: (k) =>
+      main(
+        lines(
+          "let n: integer? = 1",
+          "label top",
+          rows(k, () => "repeat n {}"),
+          "n = null",
+          "if hostValue is boolean { goto top }",
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "E-loops-in-sequence",
+    measures: "N3: k loops in sequence, each with a use and a later store of `null` in its body",
+    program: (k) =>
+      main(
+        lines(
+          "let n: integer? = 1",
+          rows(k, () => `repeat 2 {\n${USE_THEN_NULL}\n}\nn = 1`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "E-held-deep",
+    measures:
+      "N3: a label's segment over a test of the root k compound statements deep, and k uses after it",
+    program: (k) =>
+      main(
+        lines(
+          "let n: integer? = 1",
+          "label top",
+          rows(k, () => "if hostValue is boolean {"),
+          'if n != null { say "x" }',
+          rows(k, () => "}"),
+          rows(k, () => "repeat n {}"),
+          "n = null",
+          "if hostValue is boolean { goto top }",
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "E-files",
+    measures:
+      "N3: k files in a transfer cycle, each a use of one global and a store of `null` before its `goto`",
+    program: (k) => [
+      file("main.tease", 'global n: integer? = 1\ngoto "f0.tease"'),
+      ...Array.from({ length: k }, (_, i) =>
+        file(`f${i}.tease`, `${USE_THEN_NULL}\ngoto "f${(i + 1) % k}.tease"`),
+      ),
+    ],
+  },
+  {
+    name: "E-functions",
+    measures:
+      "N3: one global, k functions each a loop that reads it and stores `null` after the read, each called once",
+    program: (k) =>
+      main(
+        lines(
+          "global n: integer? = 1",
+          rows(k, (i) => `function f${i} {\nrepeat 2 {\nrepeat n {}\nn = null\n}\n}`),
+          rows(k, (i) => `n = 1\nf${i}()`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "E-block-bodies",
+    measures: "N3: k timers' bodies, each reading one key that may be `null` when it is registered",
+    program: (k) =>
+      main(
+        lines(
+          "global n: integer? = 1",
+          "if hostValue is boolean { n = null }",
+          rows(k, () => 'timer async 1 s "t" { repeat n {} }'),
+          "exit",
+        ),
+      ),
+  },
+];
+
+/**
+ * The route rule's jump index over k files each left by a computed `goto script(...)` (#2497, r4-451's give-up: such a
+ * transfer enters no file). The program's flow already grows as files × transfers here, a computed transfer having an
+ * edge to every file, so the family is gated on the index's own counter, never on the total.
+ */
+export const ROUTE_ENTRY_COMPUTED_TRANSFERS: WorkFamily = {
+  name: "E-computed-transfers",
+  measures:
+    "N3: k files, each a use of one global and a store of `null` before a computed `goto script(...)`, which enters no file",
+  program: (k) => [
+    file("main.tease", 'global n: integer? = 1\ngoto "f0.tease"'),
+    ...Array.from({ length: k }, (_, i) =>
+      file(`f${i}.tease`, `${USE_THEN_NULL}\ngoto script(hostValue)`),
+    ),
+  ],
+};
+
+/**
+ * The route rule's entries over many keys (#2497, r4-451): each key's `null` reaches every later loop's head or label,
+ * so its relation tries each later jump once, keys × jumps in all; a known product, gated at its measured doubling.
+ */
+export const ROUTE_ENTRY_PRODUCTS: readonly KnownProduct[] = [
+  {
+    name: "E-keys-over-loops",
+    measures: "N3: k keys, each read in its own one of k loops and stored `null` after the read",
+    measured: 3.84,
+    program: (k) =>
+      main(
+        lines(
+          rows(k, (i) => `let v${i}: integer? = 1`),
+          rows(k, (i) => `repeat 2 {\nrepeat v${i} {}\nv${i} = null\n}`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "E-keys-over-labels",
+    measures:
+      "N3: k keys, each read after its own one of k labels in a chain and stored `null` after the read",
+    measured: 3.23,
+    program: (k) =>
+      main(
+        lines(
+          rows(k, (i) => `let v${i}: integer? = 1`),
+          rows(
+            k,
+            (i) =>
+              `label l${i}\nrepeat v${i} {}\nv${i} = null\nif hostValue is boolean { goto l${i} }`,
+          ),
           "exit",
         ),
       ),

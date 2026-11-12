@@ -86,9 +86,9 @@ wall clock, and `--zone Europe/Amsterdam` replaces UTC with that IANA time zone.
 Its `playerProfile` has person fields, which `playerProfile.petNames` reads and `player.copyFrom(playerProfile)`
 copies, only when `--player-profile profile.json` gives a JSON object of them, such as
 `{"firstName": "Alex", "petNames": ["puppy"]}`. The probe is a developer aid, not a test.
-The suite is every `tests/*.test.ts` and every `tests/<folder>/*.test.ts` one folder down, except in `fixtures/` and
-`helpers/`, which hold no tests (a closed list, `suiteTestFiles` in `tools/test-shards.mjs`); a file is named by its path
-under `tests/`, one at the top by its name alone.
+The suite is every `tests/*.test.ts`, `tests/<folder>/*.test.ts` and `tests/<folder>/<folder>/*.test.ts`, at most two
+folders down (none deeper), except under `fixtures/` and `helpers/`, which hold no tests (a closed list, `suiteTestFiles`
+in `tools/test-shards.mjs`); a file is named by its path under `tests/`, one at the top by its name alone.
 `npm run test -- dist/tests/<file>.test.js` runs one compiled test through the same compact filter, which fails before running anything when a passed path matches no file, and ends with each named file's test counts (`ℹ <file>: N passed`, and `; the file failed outside any test` when it threw while loading or its process ended non-zero); a named file that ran no test (a suite alone is none) fails the run, unless the tests were selected (a name or skip pattern, or `--test-only`, as an argument or in `NODE_OPTIONS`), where its line says the selection matched no test in it; the per-file counts, and this check, need Node's default process isolation, and a watch run is not checked per cycle; use `npm run test:full-output -- dist/tests/<file>.test.js` only for diagnosis. A compiled-only run (`node tools/test-output-filter.mjs dist/tests/<file>.test.js` after `npm run build:typescript`) fails every Player test that loads a module when `dist/player-test-modules` was built before a file of the checkout changed, a test file included; `npm run build:player-test-modules` rebuilds it. In the full suite and for named files, a test, or one of its hooks, that waits 5 minutes fails (`TEST_LIMIT_MS`, `tools/test-in-flight.mjs`), so an asynchronous hang fails by name (its line can wait until earlier files have reported); synchronous work is not ended. A test or hook that needs longer sets its own `timeout`.
 `node tools/check-changed.mjs` runs before a push the checks CI fails on for what changed since the base (`git diff --check`, `merge commits`, format, oxlint, knip, the doc links, the imports, `test:lint` for every change that is not documentation only, and the type checks and tool tests selected by every touched path, deleted ones and both sides of a move included; its header lists them and its exit codes); CI still runs the tests. `--merged` runs them on HEAD merged into the base's current commit, as CI tests after a squash. In a checkout the queue has already merged with its base (`--merged-with`), run `--merged-checkout "$SX_MERGED_HEAD" --base "$SX_MERGED_BASE"` instead (the queue sets both), so that `merge commits` judges the head's merge commits and not the queue's own merge.
 `node tools/check-shas.mjs [--repo <path>]... [<file>]` checks that the commit SHAs a report or pull-request body names exist and are on a remote (a remote-tracking ref, or an archived or pull-request head on `origin`; a tree hash only exists), and finds its unfilled placeholders and its closing clauses that name several issues after one keyword; it names and counts, without failing, the paths it reads into the scratch area `/tmp/agent-work/`, a count that claims no completeness (its header lists the rules and what it does not read); it never fetches. `--append` writes its last line into the checked file as that file's last line, replacing its earlier one, so the report sent is that file.
@@ -99,7 +99,7 @@ first parent, without Git's moved lines. Its `--summary` rows, each file over 1,
 that job's summary and the end of its log. It never fails; the plan or the review answers each signal.
 `node tools/reading-route-size.mjs [--rev REV] [--base REV]` prints the characters of each document the start route sends an implementing agent to read, their total, the conditional documents beside it, and each `.md` path that `AGENTS.md`, `docs/agents/README.md` or `docs/agents/DIRECT-REPOSITORY.md` names and its lists do not classify (its header names where the route is stated); CI's "Reading route size (reported)" step, after the structure step, prints it with a pull request's difference from the base and never fails.
 `node tools/ci-test-counts.mjs <run id>` prints a GitHub Actions run's node:test totals (tests, pass, fail, skipped) per job and step, read from `gh run view <run id> --log`, and their sum; `--log <file>` reads a saved log.
-`node tools/counters.mjs [ROOT] [--json]` counts a checkout's lint disables, `@ts-expect-error` and `@ts-ignore` directives, skipped and todo tests, shrink-only list entries and structure signals (its header defines each), for comparing them over time.
+`node tools/counters.mjs [ROOT] [--json]` counts a checkout's lint disables, `@ts-expect-error` and `@ts-ignore` directives, skipped and todo tests, shrink-only list entries, and structure signals with their excess summed, with the `@ts-` directives and long functions also counted in tests and outside, and the skipped tests on a condition and without one (its header defines each), for comparing them over time.
 
 For a compiler change meant to preserve behaviour, such as a refactor,
 `node tools/compiler-differential.mjs --base <dist> --head <dist>` loads two builds (each a `dist/` from
@@ -351,7 +351,7 @@ lands its entry from the merge's CI runs in a light pull request. The full suite
 first, and `tools/test-shards.mjs` shares the files out so that the jobs end together, `check-3`'s after its checks
 before the tests. Their costliest sweeps
 that claim something at every member of a list of settled stops or allowances (`testedStops`, the stops before admission
-settled in `type-core-stop`, `completionAllowances`) visit of each list the first, the last and two evenly between
+settled in `type-core-stop-unsettled`, `completionAllowances`) visit of each list the first, the last and two evenly between
 (`sampled`, `tests/helpers/sweep.ts`), and `type-core-sharing` runs its fixture and matrix programs in the source order
 alone; a search for a member where something happens keeps its list. `TEASESCRIPT_SWEEP=full` makes every sampled list
 whole and runs those programs in both orders: `TEASESCRIPT_SWEEP=full npm run test:compiled`, after `npm run build`,
@@ -882,13 +882,13 @@ private runner implementation.
 ### Layout and discovery
 
 ```text
-tests/runtime/property.test.ts
+tests/runtime/engine/property.test.ts
 tests/property/
   replay.ts
   source-fuzz.ts
 ```
 
-`tests/runtime/property.test.ts` is a test entrypoint, so normal compiled-test
+`tests/runtime/engine/property.test.ts` is a test entrypoint, so normal compiled-test
 discovery executes the required 128-case campaign through `npm run check`.
 The fixed operation, rejected-completion, checkpoint, and malformed-input
 fixtures consume no randomness, so they run once each in that entrypoint and
@@ -964,7 +964,7 @@ preserve private harness bookkeeping as evidence.
 ## Source-to-runtime conformance corpus
 
 The current behavior-oriented corpus lives in focused test files under `tests/`
-next to the behavior they cover, with `tests/runtime/source-to-runtime-conformance.test.ts`
+next to the behavior they cover, with `tests/runtime/language/source-to-runtime-conformance.test.ts`
 exercising representative public-package scenarios. New representative cases
 start with real `.tease` source, call the root `compileSource(...)` API, and
 assert only the relevant observable diagnostic/span, event/order/provenance,

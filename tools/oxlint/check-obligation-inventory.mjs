@@ -98,6 +98,14 @@ export const READS = new Map([
     "decisionWork",
     "a decision's work record (its path a packet's for a cursor's, G3 stage 1): research data, no obligation",
   ],
+  [
+    "budgetUndecidedAt",
+    "whether a path or a prefix of it met a literal element a stop left undecided (#2289: a test",
+  ],
+  [
+    "budgetUndecidedKey",
+    "whether a decided path's decision met a literal element a stop left undecided (#2289: a test",
+  ],
   ["destPath", "a store's destination path, an add's element: syntax"],
   [
     "expand",
@@ -225,6 +233,12 @@ const LISTED_READS = [
     ".clear",
     "consumers.ts",
     "the label recipes, dropped at a program stop so none straddles it (#1595): a label, no obligation",
+  ],
+  [
+    "budgetUndecided",
+    ".values",
+    "enclosing.ts",
+    "the keys a literal's stopped element left undecided (#2289), read to place their stores under a stop",
   ],
   ["boundaries", ".values", "answers.ts", "the published boundary checks, read after the walk"],
   ["boundaries", ".get", "answers.ts", "a key's published boundary checks, read after the walk"],

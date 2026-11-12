@@ -272,6 +272,81 @@ test("a generator's shared build counts to the total, never to the asker, and en
 });
 
 /**
+ * #2289: a shared build of structure (`sharedStructure`) counts its own steps to the total and not to the asker,
+ * but what runs while it is suspended at a yield, the read it yielded, is the asker's, and so is a read it runs
+ * `outside` its window: no demand runs inside it. A build abandoned at its yield leaves nothing open.
+ */
+test("a shared structure build counts its own steps to the total, and each read it yields to the asker (#2289)", () => {
+  const work = new WorkLedger(1_000);
+  work.charge("checks", 7);
+  const steps = work.sharedStructure(
+    (function* (): Generator<string, string, string> {
+      work.charge("checks", 5);
+      const answer = yield "read";
+      work.charge("checks", 3);
+      return answer;
+    })(),
+  );
+  assert.deepEqual(steps.next(), { value: "read", done: false });
+  assert.equal(work.sharing, false);
+  // (the read the build yielded, run by its driver)
+  work.charge("checks", 2);
+  assert.deepEqual({ total: work.total, own: work.own }, { total: 14, own: 9 });
+  assert.deepEqual(steps.next("answered"), { value: "answered", done: true });
+  assert.deepEqual(
+    { total: work.total, own: work.own, sharing: work.sharing },
+    { total: 17, own: 9, sharing: false },
+  );
+  const abandoned = work.sharedStructure(
+    (function* () {
+      work.charge("checks", 4);
+      yield "read";
+    })(),
+  );
+  abandoned.next();
+  work.charge("checks", 1);
+  assert.deepEqual(
+    { total: work.total, own: work.own, sharing: work.sharing },
+    { total: 22, own: 10, sharing: false },
+  );
+  // (a read the build makes without yielding it, run `outside` its window: the asker's, as a yielded one is)
+  const unyielded = work.sharedStructure(
+    (function* (): Generator<never, number, never> {
+      work.charge("checks", 2);
+      return work.outside(() => {
+        work.charge("checks", 3);
+        return 1;
+      });
+    })(),
+  );
+  assert.deepEqual(unyielded.next(), { value: 1, done: true });
+  assert.deepEqual(
+    { total: work.total, own: work.own, sharing: work.sharing },
+    { total: 27, own: 13, sharing: false },
+  );
+  // (and each step of a generator it runs through `outsideSteps`)
+  const stepped = work.sharedStructure(
+    (function* (): Generator<string, string, string> {
+      work.charge("checks", 1);
+      return yield* work.outsideSteps(
+        (function* (): Generator<string, string, string> {
+          work.charge("checks", 2);
+          const answer = yield "inner";
+          work.charge("checks", 4);
+          return answer;
+        })(),
+      );
+    })(),
+  );
+  assert.deepEqual(stepped.next(), { value: "inner", done: false });
+  assert.deepEqual(stepped.next("done"), { value: "done", done: true });
+  assert.deepEqual(
+    { total: work.total, own: work.own, sharing: work.sharing },
+    { total: 34, own: 19, sharing: false },
+  );
+});
+
+/**
  * S3: the pipeline handles depth 10,000; the consumers of statements nested past the core's 256 are
  * checked when the script runs, every other statement proved as ever (admission still decides every place from every
  * store), an `else if` one level more: a check inside them is moved, an error outside stands, and one warning names the

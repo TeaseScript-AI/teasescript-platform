@@ -29,6 +29,27 @@ const TRIALS = 1500;
 
 const SITE = { file: 0, start: 100, end: 105 };
 
+/** The word of an unknown's reasons, the first present in the rank `external`, `opaque`, `deferred`, `missing`, `budget`. */
+const reasonWord = (reasons: number): ContextWord =>
+  (
+    [
+      [REASON.external, "unknown"],
+      [REASON.opaque, "unmodelled"],
+      [REASON.deferred, "deferred-parameter"],
+      [REASON.missing, "missing"],
+      [REASON.budget, "budget"],
+    ] as const
+  ).find(([bit]) => (reasons & bit) !== 0)?.[1] ?? "unknown";
+
+/** The reasons whose words come before every condition's, and those words. */
+const EARLY_REASONS = REASON.external | REASON.opaque | REASON.deferred | REASON.missing;
+const EARLY_WORDS: readonly ContextWord[] = [
+  "unmodelled",
+  "missing",
+  "deferred-parameter",
+  "unknown",
+];
+
 const writerRank = (writer: Writer | null): number =>
   writer === null ? Infinity : writer.file * 1e9 + writer.start;
 const contextRank = (context: ContextWord | null): number =>
@@ -88,8 +109,22 @@ test("the item algebra keeps its laws over random items from a fixed seed", () =
       merged,
     });
 
+    // the unknown a merge gives speaks its reasons' word where its parts' first word and its reasons come before every
+    // condition's, else that first word (#2486: kept by the word order, an earlier word outlived the reasons that gave it)
+    const unknownWord = (reasons: number): ContextWord | null => {
+      const first = [...a, ...b]
+        .filter((item) => item.tag === "unknown")
+        .reduce<ContextWord | null>(
+          (word, item) => (contextRank(item.context) < contextRank(word) ? item.context : word),
+          null,
+        );
+      return first !== null && EARLY_WORDS.includes(first) && (reasons & EARLY_REASONS) !== 0
+        ? reasonWord(reasons)
+        : first;
+    };
     // nothing lost: definite stays definite unless guarded, every reason and ingress store kept (no boundary check is
-    // erased), the earliest writer, the first context word, the mark, and external data without an ingress store
+    // erased), the earliest writer, the first context word (an unknown's as above), the mark, and external data without
+    // an ingress store
     for (const item of [...a, ...b]) {
       const kept = byTag(merged, item.tag);
       law(
@@ -98,7 +133,9 @@ test("the item algebra keeps its laws over random items from a fixed seed", () =
           (item.cert !== "def" || kept.cert === "def" || kept.guarded === true) &&
           (item.reasons & kept.reasons) === item.reasons &&
           writerRank(kept.writer) <= writerRank(item.writer) &&
-          contextRank(kept.context) <= contextRank(item.context) &&
+          (item.tag === "unknown"
+            ? kept.context === unknownWord(kept.reasons)
+            : contextRank(kept.context) <= contextRank(item.context)) &&
           (item.guarded !== true || kept.guarded === true) &&
           storesOf(item).every((store) => storesOf(kept).includes(store)) &&
           (!loose(item) || kept.ingress === undefined || kept.loose === true),
@@ -111,7 +148,9 @@ test("the item algebra keeps its laws over random items from a fixed seed", () =
       law(
         "merge.only-from-operands",
         parts.some((item) => item.writer === kept.writer) &&
-          parts.some((item) => item.context === kept.context) &&
+          (kept.tag === "unknown"
+            ? kept.context === unknownWord(kept.reasons)
+            : parts.some((item) => item.context === kept.context)) &&
           kept.reasons === parts.reduce((all, item) => all | item.reasons, 0) &&
           (kept.cert === "def") ===
             (parts.some((item) => item.cert === "def") &&
@@ -263,6 +302,35 @@ test("the item algebra keeps its laws over random items from a fixed seed", () =
 });
 
 const writer = (kind: string, start: number): Writer => ({ kind, file: 0, start, end: start + 1 });
+
+test("an operation's result only grows as its unknown operand's reasons do (#2486)", () => {
+  // (a component re-runs an operation as its operand's reasons grow: a result that dropped a kind or a reason as one is
+  // added could take back what brought it, and the component would alternate)
+  const scope = itemScope();
+  const known = [makeItem("integer"), makeItem("number"), makeItem("string")];
+  const sets = Array.from({ length: 31 }, (_, at) => at + 1);
+  for (const operator of ["+", "/", "<"] as const)
+    for (const other of known)
+      for (const fewer of sets)
+        for (const more of sets) {
+          if ((fewer & more) !== fewer || fewer === more) continue;
+          const result = (reasons: number): Item[] =>
+            operationItems(
+              operator,
+              [[makeItem("unknown", null, { cert: "pos", reasons })], [other]],
+              scope,
+              SITE,
+            );
+          const grown = new Map(result(more).map((item) => [item.tag, item]));
+          for (const item of result(fewer)) {
+            const kept = grown.get(item.tag);
+            assert.ok(
+              kept !== undefined && (item.reasons & ~kept.reasons) === 0,
+              `${operator} ${other.tag}: reasons ${fewer} give ${item.tag}, ${more} ${kept === undefined ? "do not" : "lose a reason"}`,
+            );
+          }
+        }
+});
 
 test("an external reason survives every merge, with the earliest writer", () => {
   const scope = itemScope();

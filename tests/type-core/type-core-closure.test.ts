@@ -239,12 +239,12 @@ test("the copied and direct nested stores owe their checks at every mode's stop"
  * the unmarked function result (her M2), a checked argument and return, an `add`, a list join, a compound assignment and
  * an interpolation. The candidate route declines them, and the analysis is main's: no receiving obligation, no
  * completion, and every unit charged as on `main` at `92a970442`, its event searches charged by comparison since #1221
- * no narrowing index made for a program without a test since #1251, and a read signature's prefixes found by its charged trie walk since #1822 (`rdWalk`, 1–6 units more on four rows; a regression oracle of this gate only), and the route rule's queries since #1073 PR 4 (AD-1: a possible null's route asked at its use, on the rows that have one), at demand 16 and 64 in the four modes (each list: demand 16's four modes,
+ * no narrowing index made for a program without a test since #1251, and a read signature's prefixes found by its charged trie walk since #1822 (`rdWalk`, 1–6 units more on four rows; a regression oracle of this gate only), and the route rule's queries since #1073 PR 4 (AD-1: a possible null's route asked at its use, on the rows that have one), and its ways into the use since #2497 (r4-451: the program's jump index, made once, 11 to 44 units on three rows), at demand 16 and 64 in the four modes (each list: demand 16's four modes,
  * then 64's).
  */
 const frozen = `let a = {f: [[1]]}\nlet b = a\n${lines(16, (i) => `b = {f: [[${i}]]}`)}\nb.f = hostValue`;
 const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [
-  ["the C-R1 chain", chain(16), [11837, 12196, 11837, 12196, 19394, 13621, 19415, 13621]],
+  ["the C-R1 chain", chain(16), [11837, 12196, 11837, 12196, 19438, 13621, 19459, 13621]],
   [
     "the unmarked function result",
     'function make {\n  let r = {nest: {n: [[1]]}}\n  return r\n}\nlet out = make()\nsay "BEFORE"\nout.nest.n = hostValue',
@@ -254,13 +254,13 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [
   [
     "a checked argument",
     `${chain(4)}\nfunction take(x: integer[]) { }\nlet maybe = null\nif hostValue { maybe = [1] }\ntake(maybe)`,
-    [4958, 5673, 4958, 5401, 7632, 6667, 7653, 6395],
+    [4958, 5684, 4958, 5412, 7654, 6689, 7675, 6417],
   ],
   // (the same lookup's units at demand 64, #1073 PR 2)
   [
     "a checked return",
     `${chain(4)}\nfunction give: integer[] {\n  let maybe = null\n  if hostValue { maybe = [1] }\n  return maybe\n}\nlet got = give()`,
-    [5090, 5778, 5090, 5505, 7373, 6840, 7264, 6567],
+    [5090, 5789, 5090, 5516, 7386, 6862, 7277, 6589],
   ],
   ["an add", "let b = [[1]]\nb.add(hostValue)", [684, 1020, 684, 852, 1071, 1198, 1002, 1121]],
   // (18 units more at demand 64 since #1828: the mixed join's sentence walks each operand to its leaf and reads its
