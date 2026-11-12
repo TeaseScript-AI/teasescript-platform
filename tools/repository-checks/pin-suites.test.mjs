@@ -521,7 +521,10 @@ test("the four pin forms are found by their text, and a pin written another way 
   const digest =
     '  randomness: "1466a6cd24e327188770752f6134001c64d6efcc590ccc26b721611ad96f165a",';
   assert.deepEqual(pinFormsOf(digest, "tests/type-core-contract.test.ts"), ["digest"]);
-  assert.deepEqual(pinFormsOf(digest, "tests/type-core/type-enforcement.test.ts"), ["digest"]);
+  assert.deepEqual(
+    pinFormsOf(digest, "tests/type-core/enforcement/type-enforcement-variables.test.ts"),
+    ["digest"],
+  );
   assert.deepEqual(pinFormsOf(digest, "tests/player/player-encryption.test.ts"), []);
 });
 
