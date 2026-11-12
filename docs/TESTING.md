@@ -366,7 +366,7 @@ It runs in two regimes:
   counts. From the pull request's checkout, `<SHA>` its head's full SHA:
 
   ```sh
-  ls tests/type-core/*.test.ts | sed -E 's#^tests/#dist/tests/#; s#\.ts$#.js#' > /tmp/agent-work/<task>/survey-items.txt
+  ls tests/type-core/*.test.ts tests/type-core-stop/*.test.ts | sed -E 's#^tests/#dist/tests/#; s#\.ts$#.js#' > /tmp/agent-work/<task>/survey-items.txt
   sx-job submit --name 'survey-{i}' --owner <owner> --campaign <tag> --items /tmp/agent-work/<task>/survey-items.txt \
     --target 20m --checkout <SHA> --unmerged "the whole frozen survey of the head" --timeout 2h --mem 8G -- \
     bash -c 'cd "$SX_CHECKOUT" && mapfile -t items < "$SX_ITEMS" && RETAINED_SURVEY="$SX_OUT/survey" node tools/test-output-filter.mjs "${items[@]}" < /dev/null > "$SX_OUT/filter.txt" 2>&1'
