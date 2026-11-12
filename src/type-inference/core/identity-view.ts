@@ -159,26 +159,26 @@ function counterpart<N extends SyntaxNode>(nodes: ReadonlyMap<SyntaxNode, Syntax
  * one.)
  */
 function identityNames(programs: readonly Program[]): (name: string, file: number) => boolean {
-  const declared = new Map<string, FunctionDeclaration[]>();
-  const files = new Map<FunctionDeclaration, number>();
+  const declared = new Map<string, { declaration: FunctionDeclaration; file: number }[]>();
   programs.forEach((program, file) => {
     for (const statement of program.statements)
       if (statement.kind === "functionDeclaration") {
-        declared.set(statement.name.name, [
-          ...(declared.get(statement.name.name) ?? []),
-          statement,
-        ]);
-        files.set(statement, file);
+        const same = declared.get(statement.name.name);
+        if (same === undefined)
+          declared.set(statement.name.name, [{ declaration: statement, file }]);
+        else same.push({ declaration: statement, file });
       }
   });
+  // each name decided once: declared exactly once, as an identity function
+  const identities = new Map<string, { declaration: FunctionDeclaration; file: number }>();
+  for (const [name, same] of declared) {
+    const only = same[0];
+    if (same.length === 1 && only !== undefined && isIdentity(only.declaration))
+      identities.set(name, only);
+  }
   return (name, file) => {
-    const [only, ...more] = declared.get(name) ?? [];
-    return (
-      only !== undefined &&
-      more.length === 0 &&
-      isIdentity(only) &&
-      (only.global || files.get(only) === file)
-    );
+    const only = identities.get(name);
+    return only !== undefined && (only.declaration.global || only.file === file);
   };
 }
 
