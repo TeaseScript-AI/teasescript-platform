@@ -71,7 +71,6 @@ export const costlyTestSeconds = {
   "type-core/type-core-discharge.test.js": 9,
   "type-core/type-core-written-decider.test.js": 9,
   "type-core/type-core-objects.test.js": 9,
-  "type-core/type-core-narrowing.test.js": 8,
   "type-core/type-core-roles.test.js": 8,
   "type-core/type-core-lost-check.test.js": 7,
   "type-core/type-core-inline.test.js": 7,
