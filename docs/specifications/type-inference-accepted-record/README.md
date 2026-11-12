@@ -262,7 +262,7 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | [r4-332](stops-and-finishing.md#r4-332) | stops-and-finishing | Combined stops retain demand-only obligations with identical domains. |
 | [r4-336](admission.md#r4-336) | admission | Summarise written deciders only outside decisions, with forget epochs. |
 | [r4-339](stops-and-finishing.md#r4-339) | stops-and-finishing | Completion publishes the natural C1 obligations only as store-part checks. |
-| [r4-349](solver-and-work.md#r4-349) | solver-and-work | A structure built only for sharing is charged as shared work. |
+| [r4-349](solver-and-work.md#r4-349) | solver-and-work | A structure built for every later reader is charged as shared work; no demand runs inside it. |
 | [r4-358](solver-and-work.md#r4-358) | solver-and-work | Contribution provenance is opt-in and filtered by the consumers' own predicates. |
 | [r4-360](admission.md#r4-360) | admission | An admitted-structure certificate waits for its depth and noninterference proofs. |
 | [r4-363](oracles.md#r4-363) | oracles | After a stop, a diagnostic's type-reading sentence parts may follow a proven type (the owner's decision). |
