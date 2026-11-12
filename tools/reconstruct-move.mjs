@@ -20,9 +20,9 @@
 // part, a comment) is the token's content; a blank line is layout only when its line break lies outside every token.
 // Then:
 //   - every line of a NEW body that is not a layout blank is a line of OLD's body, equal byte for byte, or, for a line
-//     outside tokens that declares at the left margin (`function`, `async function`, `const`, `let`, `var`, `class`,
-//     `abstract class`, `interface`, `type`, `enum`, `declare`), that line with `export ` put before it (a declaration a
-//     sibling now reads, listed);
+//     outside tokens that declares at the left margin (`function`, `function*`, `async function`, `async function*`,
+//     `const`, `let`, `var`, `class`, `abstract class`, `interface`, `type`, `enum`, `declare`), that line with `export `
+//     put before it (a declaration a sibling now reads, listed);
 //   - each OLD body line that is not a layout blank is taken once;
 //   - a run of lines is taken whole, longest first, never across a layout blank followed by a line at the left margin
 //     (one declaration's boundary);
@@ -131,7 +131,7 @@ function bodyStart({ lines, source }, header) {
 
 /** The declarations a moved line may gain `export` on: one at the left margin that a module can export. */
 const EXPORTABLE =
-  /^(?:async function|function|const|let|var|class|abstract class|interface|type|enum|declare) /u;
+  /^(?:async function\*?|function\*?|const|let|var|class|abstract class|interface|type|enum|declare) /u;
 
 /**
  * A text's tokens as TypeScript scans them, comments kept with their text, whitespace and line breaks between tokens

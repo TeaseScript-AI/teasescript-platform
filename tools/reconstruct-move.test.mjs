@@ -118,11 +118,11 @@ test("each kind of change that is no move fails: a dropped, an edited, a repeate
     dropped: { "src/big.ts": KEPT, "src/part.ts": replaced(PART, 6) },
     edited: { "src/big.ts": KEPT, "src/part.ts": replaced(PART, 6, "  return b + 1;") },
     repeated: { "src/big.ts": KEPT, "src/part.ts": `${PART}\nconst LAST = 3;\n` },
+    // (valid source, `LAST` now before `first`)
     reordered: {
-      "src/big.ts": replaced(
-        replaced(KEPT, 6, "const LAST = 3;"),
-        10,
-        "export function first(): number {",
+      "src/big.ts": KEPT.replace("\nconst LAST = 3;\n", "\n").replace(
+        "export function first",
+        "const LAST = 3;\n\nexport function first",
       ),
       "src/part.ts": PART,
     },
@@ -228,11 +228,16 @@ test("a rewrap keeps each literal's text and the old order; `export` goes only o
   const after = run(`const second = first.value;\n\n${wrapped('"a b"')}\n`);
   assert.equal(after.status, 1);
   assert.match(after.out, /^failure: src\/big\.ts:3: out of the old file's order/mu);
-  // (`export` before a statement inside a body)
-  const body = "function f(): void {\n  run();\n}\n";
-  assert.equal(run("function f(): void {\n  export run();\n}\n", body).status, 1);
-  // (and before a statement at the margin, which no module can export)
-  assert.equal(run("export run();\n", "run();\n").status, 1);
+  // (`export` before a line that is no declaration, where the result still parses: a block becomes an export list)
+  assert.equal(run("const a = 1;\nexport { a };\n", "const a = 1;\n{ a };\n").status, 1);
+  // (a generator is a declaration too)
+  assert.equal(
+    run(
+      "export function* gen(): Generator<number> {\n  yield 1;\n}\n",
+      "function* gen(): Generator<number> {\n  yield 1;\n}\n",
+    ).status,
+    0,
+  );
 });
 
 test("the header is the parsed imports: a trailing comment ends one, code after one is body, other line ends cannot run (#2534 r1)", (t) => {
