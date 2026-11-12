@@ -221,7 +221,9 @@ test(
         child,
       );
       // (the descendant and its ancestors up to the part run-check started, each of which holds or waits on the part's
-      // output; the build's descendant, which ignores SIGTERM, run-parallel stops)
+      // output; the build's descendant, which ignores SIGTERM, run-parallel stops. The part goes first, while nothing
+      // can have ended it; one below it may have ended already, as a shell whose command was signalled, or a step that
+      // run-parallel's own handler stopped)
       const line = [pid];
       for (let next = pid; ;) {
         const stat = readFileSync(`/proc/${next}/stat`, "utf8");
@@ -229,7 +231,14 @@ test(
         if (next === child.pid) break;
         line.push(next);
       }
-      for (const each of line) process.kill(each, signal);
+      const [part, ...below] = line.reverse();
+      process.kill(part, signal);
+      for (const each of below)
+        try {
+          process.kill(each, signal);
+        } catch (error) {
+          if (error.code !== "ESRCH") throw error;
+        }
       const result = await done;
       const at = `${waits}, ${signal}: ${result.output}`;
       assert.deepEqual([result.code, result.signal], [status, null], at);
