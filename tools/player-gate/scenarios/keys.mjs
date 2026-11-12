@@ -57,6 +57,28 @@ const KEYS = {
   "send-click": click("send"),
 };
 const IME = new Set(["ime-committed", "ime-open"]);
+/** A step that fails unless the composer's field shows `text`, read-only and not disabled: a form field's commit. */
+const committing = (text) => async (page) => {
+  const field = await page.evaluate(() => {
+    const input = document.querySelector("[data-composer-input]");
+    return { value: input?.value, readOnly: input?.readOnly, disabled: input?.disabled };
+  });
+  if (field.value !== text || field.readOnly !== true || field.disabled !== false)
+    throw new Error(`The field in its commit was not ${text}, read-only: ${JSON.stringify(field)}`);
+};
+/** A step that fails unless form field `id`'s button shows `text`. */
+const fieldShows = (id, text) => async (page) => {
+  const shows = (await page.locator(`[data-form-field=${id}]`).innerText())
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (shows !== text) throw new Error(`The field ${id} shows ${JSON.stringify(shows)}`);
+};
+/** A step that fails unless form field `id`'s button shows `text` and has the focus. */
+const focusedField = (id, text) => async (page) => {
+  await fieldShows(id, text)(page);
+  const focused = await page.evaluate(() => document.activeElement?.dataset?.formField ?? null);
+  if (focused !== id) throw new Error(`The focus is not on the field ${id}'s button: ${focused}`);
+};
 const shown = (value, notice, entries, extra = {}) => ({
   value,
   notice,
@@ -234,6 +256,24 @@ function cases(engine) {
       ...fixture("form escape", "Form", seq(press("x"), press("Escape")), shown("Ada", "", 4)),
       before: ["Form", { type: "Stay" }],
       answer: "name",
+    },
+    // Enter in the form's field commits it, which is no answer: until the form took it, the field shows what it
+    // commits, read-only and not greyed, so a key pressed meanwhile goes nowhere; then the field closes, the chat shows
+    // again, and the focus is on the field's button, which shows the committed text.
+    {
+      ...fixture("form commit key", "Form", seq(press("x"), committing("Bea")), shown("", "", 4)),
+      before: ["Form", { type: "Stay" }, { type: "name" }],
+      answer: "Bea",
+      lastly: focusedField("name", "name: Bea"),
+    },
+    // A form's updates are never greyed and go in order: the toggle's label typed and sent, then the toggle clicked
+    // while that first update is in flight, flip it twice.
+    {
+      ...fixture("form toggle twice", "Form", click("toggle"), shown("", "", 4)),
+      before: ["Form", { type: "Stay" }],
+      answer: "tea",
+      points: { toggle: "[data-form-field=tea]" },
+      lastly: fieldShows("tea", "✗ tea"),
     },
     // A timer's block suspends the first question while its answer is in flight: Enter goes between the block's start
     // and its publication. The answer the block overtook comes back before what was typed since: a plain block's field
@@ -444,6 +484,9 @@ async function runCase(opened, origin, item) {
         ? await center(page.locator("[data-runtime-interaction] button[type=submit]"))
         : null,
     };
+    // A case's own click targets, by selector, where they show before Enter.
+    for (const [name, selector] of Object.entries(item.points ?? {}))
+      at[name] = await center(page.locator(selector));
     const entries = () =>
       page.evaluate(() => document.querySelectorAll(".transcript-entry").length);
     const entriesAtEnter = item.block ? await entries() : 0;

@@ -1,0 +1,16 @@
+// The Player browser smoke's composer states scenario (#2430): Space in the empty composer, an automatic link whose tab
+// the browser does not open, and a popup whose close the block's question overtakes once the smoke's clock passes its
+// timer.
+timer async 600 s {
+    let aside = askText "A block's question?"
+}
+let word = askText "Your word?"
+let which = askChoice "Link", "Popup"
+if which == "Link" {
+    openUrl("https://example.com")
+    say "After the link.", instant
+} else {
+    showPopup "Hello"
+    say "After the popup.", instant
+}
+exit
