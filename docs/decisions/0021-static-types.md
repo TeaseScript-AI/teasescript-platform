@@ -163,13 +163,14 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
 5. A conversion takes its fallback as `default:` (rule 7), never as a positional argument.
 6. `fromJson`'s result has an expected type: the written type of the place it lands in directly (rule 7), otherwise its
    default's type, where `[]` leaves the element type open and `null` leaves the value unknown, to be tested with `is`.
-   An object default, or an expected object type, reads the JSON as that object: a missing key, or one whose value has
-   the wrong type, takes that property's value from the default (in debug or test mode a developer warning names the
+   A default that is a variable with a written type gives that written type, whatever value the variable holds at that
+   line. An object default, or an expected object type, reads the JSON as that object: a missing key, or one whose value
+   has the wrong type, takes that property's value from the default (in debug or test mode a developer warning names the
    key), extra keys are ignored unless the destination is declared `object`, where V30 §13 keeps them all, nested
-   objects follow the same rules, and malformed text or JSON of another kind gives the whole default. A property that
-   is `null` in the default and gets no type elsewhere in the script stays unknown, tested with `is`. A dict default
-   gives a dict. The default declares the shape the script expects, so its uses are checked at compile time and one bad
-   field does not discard the others.
+   objects follow the same rules, and malformed text or JSON of another kind gives the whole default. A property that is
+   `null` in the default and gets no type elsewhere in the script stays unknown, tested with `is`. A dict default gives
+   a dict. The default declares the shape the script expects, so its uses are checked at compile time and one bad field
+   does not discard the others.
 
 ### 3. Type syntax and union types
 
@@ -240,11 +241,12 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
 2. A `load` of a key written as one string literal without `${...}`, also in parentheses, reads the stored value as the
    declared type of the variable it starts or is assigned to, as in `let level: integer | string = load("level",
    default: 1)`, or else as the type another load of the key declares, in any file, function, or handler, reachable or
-   not, or else as its default's type. A key is declared once: two loads that declare different types are an error that
-   names both. With `default: null`, the result is the key's declared type made optional; without a declared type for
-   the key, `default: null` is an error that names the fix. A default of a type the compiler cannot know, without a
-   declared type, gives a value of unknown type (rule 1.7), as does a key computed at runtime, such as `"toys.${id}"`,
-   `"toys." + id`, or a variable.
+   not, or else as its default's type. A default that is a variable with a written type gives that written type,
+   whatever value the variable holds at that line. A key is declared once: two loads that declare different types are an
+   error that names both. With `default: null`, the result is the key's declared type made optional; without a declared
+   type for the key, `default: null` is an error that names the fix. A default of a type the compiler cannot know,
+   without a declared type, gives a value of unknown type (rule 1.7), as does a key computed at runtime, such as
+   `"toys.${id}"`, `"toys." + id`, or a variable.
 3. Loads of a key without a declared type agree on its type: of two load types, one accepts every value of the other, as
    `number` does `integer`, or the later load in source order (rule 1.6) is an error that names the earlier one, and its
    file when that is another one. Saves never decide the type.

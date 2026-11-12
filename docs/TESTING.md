@@ -97,7 +97,7 @@ first parent, without Git's moved lines. Its `--summary` rows, each file over 1,
 that job's summary and the end of its log. It never fails; the plan or the review answers each signal.
 `node tools/reading-route-size.mjs [--rev REV] [--base REV]` prints the characters of each document the start route sends an implementing agent to read, their total, the conditional documents beside it, and each `.md` path that `AGENTS.md`, `docs/agents/README.md` or `docs/agents/DIRECT-REPOSITORY.md` names and its lists do not classify (its header names where the route is stated); CI's "Reading route size (reported)" step, after the structure step, prints it with a pull request's difference from the base and never fails.
 `node tools/ci-test-counts.mjs <run id>` prints a GitHub Actions run's node:test totals (tests, pass, fail, skipped) per job and step, read from `gh run view <run id> --log`, and their sum; `--log <file>` reads a saved log.
-`node tools/counters.mjs [ROOT] [--json]` counts a checkout's lint disables, `@ts-expect-error` and `@ts-ignore` directives, skipped and todo tests, shrink-only list entries and structure signals (its header defines each), for comparing them over time.
+`node tools/counters.mjs [ROOT] [--json]` counts a checkout's lint disables, `@ts-expect-error` and `@ts-ignore` directives, skipped and todo tests, shrink-only list entries, and structure signals with their excess summed (its header defines each), for comparing them over time.
 
 For a compiler change meant to preserve behaviour, such as a refactor,
 `node tools/compiler-differential.mjs --base <dist> --head <dist>` loads two builds (each a `dist/` from

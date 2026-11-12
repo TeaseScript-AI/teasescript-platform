@@ -203,9 +203,11 @@ no source, not shown impossible, #2183); and the gates do not test for a stop th
 sets (0 of #2080's moved stops; 16 natural compiles, each its unstopped form; 688 of #2183's sweep settings, 448 equal
 to the natural plan and 240 refused in both compiles); one built outside them publishes where the natural compile
 refuses (a `get` default at demand 16, as on the base; #2256). Nor does every such path need a stop: a typed parse whose
-written default holds `null` gets no reader, so JSON of any type arrives in a place typed by that default
-(`let fb: integer? = null` / `fromJson(hostValue, default: fb)` takes `"x"`, failing only at a later strict use), and
-the current checker does the same (#2307). Condition 2, every remaining case re-assessed before V2 replaces the legacy
+default does not lead to a written type through its start values is read by the value the default holds at the call (ADR
+0021 rule 2.6); for instance, a default that starts as `null` and takes its type from a later copy gets no reader, so
+JSON of any type arrives in a place typed by that default (`let fb = null`, `fb = w` with `let w: integer? = null`, then
+`fromJson(hostValue, default: fb)` takes `"x"`, failing only at a later strict use), and the current checker does the
+same (#2307). Condition 2, every remaining case re-assessed before V2 replaces the legacy
 compiler, is open; its cases open at the time of writing (2026-11-10) are #1832, #1845 (with #1846), #1838 and #1836,
 #1772, the claim (c)'s NoCheck still rests on (#2184, in the list below), #1781's conservative natural-outside declines (128 rows in 8 sources, as reported in PR
 #1781's work-stop set sweep), and (d)'s natural declines: 106 compiles, each in one of the four modes, that stop at the
@@ -243,6 +245,23 @@ changed warning or wording applies to the same change, the entry is its report:
   the families (67,155 sources, four modes, against 9f0b3a1b7's stored runs), 32 sources change their charged work. The
   natural compiles' work rises by 0.0001% in total, and by 2.5% over the 32 changed sources (21.8% at most). No natural
   compile newly reaches its allowance.
+- **Where a stop falls in a program with a typed parse or load whose default a written type or a literal decides (#1072
+  step 0, PR #2403).** Reading such a default's type builds an index of each typed default's start values and literal
+  cells once per program, before anything is solved, one work unit for each binding followed, each step and cell
+  entered and each part of a written type taken apart, and the default's two demands walk it, one unit for each literal
+  entered, reference to a literal followed and written type met at a level, and for each step read down a written
+  type; a program with no typed default that reads a binding or is a literal pays nothing. A maker would notice nothing
+  for a script that fits its budget. For a script whose budget falls in the window: a stop where main completed or the
+  reverse, with the warnings a stop leaves. Measured at dbfd8440e against main 2b574316a in four modes: over the corpus
+  set (15,406 sources), 144 change their charged work (42 units more at the median, 300 at most, 1.74% at most) and
+  none its plan or diagnostics; over the held family with its settled stops (805 sources), none adds, removes or moves
+  a stop; over `tools/corpus/fixture` (1,894 sources), the `property` area and the `stops` area (2,277) in full and a
+  sample of the other areas of `tests/families` (5,450 sources), no natural compile changes but the 137 of `stops`
+  whose defaults the rule now reads by their written type, and every stops check of `stops` stops the same decisions
+  at the same points. At a 256-unit allowance, `1165-astra-written-spines` (21 sources) moves its `layers` stops in six
+  sources, a typed parse and a typed load nested 64, 128 and 256 deep, in two modes: the 18th to 20th levels stop
+  inside the literal default itself, where main stopped the 20th at the read below (64 deep) or none of them (128 and
+  256), and at 64 deep the 17th level newly stops at the read. The published route and plans are main's for each.
 - **Which property a runtime message names after a stop (#2216, 664f1183f; open #2218).** A store's check taken from the
   receiving completion lists an object's properties by the store's own records. Where another store asked that level
   first with records that rank the properties otherwise, the listed order still follows where the stop fell. A maker

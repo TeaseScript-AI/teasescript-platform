@@ -244,6 +244,7 @@ const PAIRS = [
   "tests/type-core/type-core-work-c.test.ts",
   "tests/type-core/type-core-work-c.test.ts in tests/helpers/type-core/families/admission-products.ts",
   "tests/type-core/type-core-work-c.test.ts in tests/helpers/type-core/families/property-names.ts",
+  "tests/type-core/type-core-written-default.test.ts",
 ];
 
 test("the marks name exactly the expected suites and the files holding their pins (#2094)", () => {

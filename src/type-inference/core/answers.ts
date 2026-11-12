@@ -44,6 +44,7 @@ import {
   typeTags,
   termAt,
   writtenOf,
+  WrittenDefaults,
   type ContractFacts,
   type GatherSite,
   type StoppedKey,
@@ -131,6 +132,8 @@ export interface CorePass {
   readonly solver: Solver;
   /** A4's receiving domain state (`ReceivingDomain`): one per pass, made empty with its parts. */
   readonly receivingDomain: ReceivingDomain;
+  /** The program facts the typed defaults' written types read (`writtenDefault`), built before anything solves. */
+  readonly writtenDefaults: WrittenDefaults;
   /** The receiving closure of a completion pass (#1526 phase C, `Consumers.#completeFor`), absent in any other pass. */
   readonly closure?: Closure | null;
 }
@@ -159,6 +162,7 @@ function createPass(
     guards: GuardIndex;
     solver: Solver;
     receivingDomain: ReceivingDomain;
+    writtenDefaults: WrittenDefaults;
     closure: Closure | null;
   } = {
     program,
@@ -173,6 +177,7 @@ function createPass(
     guards: new GuardIndex(program),
     solver: new Solver(program.scope),
     receivingDomain: new ReceivingDomain(),
+    writtenDefaults: new WrittenDefaults(program, definitions),
     // (#1526 phase C: a completion pass keeps its cells for the receiving closure from its start, the completion lease)
     closure: completion ? new Closure(program.work) : null,
   };

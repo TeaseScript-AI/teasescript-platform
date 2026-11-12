@@ -591,7 +591,7 @@ const WITNESSES: readonly {
     name: "a written type without a join",
     source: "let d: number = 0\n@",
     read: "d",
-    derived: "integer",
+    derived: "number",
   },
   {
     name: "both arms",
@@ -693,19 +693,19 @@ const WITNESSES: readonly {
     name: "X2 written, a store in a nested arm ruled out",
     source: `let d: number = 0\nif ${FLAG} {\n  if false { d = 1.5 }\n}\n@`,
     read: "d",
-    derived: "integer",
+    derived: "number",
   },
   {
     name: "X2 written, a store in an else ruled out",
     source: `let d: number = 0\nif ${FLAG} { say "a" } else if true { say "b" } else { d = 1.5 }\n@`,
     read: "d",
-    derived: "integer",
+    derived: "number",
   },
   {
     name: "X2 written, a store after a nested exit",
     source: `let d: number = 0\nif ${FLAG} {\n  if true { exit }\n  d = 1.5\n}\n@`,
     read: "d",
-    derived: "integer",
+    derived: "number",
   },
   {
     name: "a self-copy after a join",
@@ -753,13 +753,13 @@ const WITNESSES: readonly {
     name: "a call in a loop reading an outer variable",
     source: "let d: number = 0\nfor entry in [0] {\n  @\n}",
     read: "d",
-    derived: { refused: "a variable read inside a loop" },
+    derived: "number",
   },
   {
     name: "a call in a repeat reading an outer variable",
     source: "let d: number = 0\nrepeat 1 {\n  @\n}",
     read: "d",
-    derived: { refused: "a variable read inside a loop" },
+    derived: "number",
   },
   {
     name: "a default that computes from a variable",
