@@ -146,14 +146,13 @@ export abstract class RouteEntries extends RouteCandidates {
   /**
    * R2.2 under the program default (r4-451): whether a run is proved to reach the entry and, after it, a node at
    * `chain`: the entry a loop or a label (never a file or a block's body) a run reaches (`#reached`), the node standing
-   * at it (`clear`). Outside the default, true.
+   * at it (`clear`). Outside the default, true; callers ask it only under the default.
    */
   protected standsAt(entry: Entry, node: FlowNode, chain: readonly Place[]): boolean {
+    this.#work.charge("eventSteps");
     const feasible = this.defaultHolds();
     if (feasible === null) return true;
-    this.#work.charge("eventSteps");
-    const at =
-      entry.header ?? (entry.start > 0 ? entry.block.statements[entry.start - 1]! : null);
+    const at = entry.header ?? (entry.start > 0 ? entry.block.statements[entry.start - 1]! : null);
     return (
       at !== null &&
       this.#reached(feasible, at) &&
@@ -294,7 +293,7 @@ export abstract class RouteEntries extends RouteCandidates {
       if (
         writer !== undefined &&
         this.#open(name, calls, entry!, level, point) &&
-        this.standsAt(entry!, point.node, point.chain)
+        (this.defaultHolds() === null || this.standsAt(entry!, point.node, point.chain))
       )
         return writer;
     }
@@ -412,7 +411,7 @@ export abstract class RouteEntries extends RouteCandidates {
       carried.set(jump.into, writer);
       queue.push(jump.into);
     }
-    // (under the program default, a seed alone: R2.2 states one entry, so no entry carries on, R53)
+    // (under the program default, a seed alone: R2.2 states one entry, so no entry carries on)
     let next = this.defaultHolds() === null ? 0 : queue.length;
     for (const _ of steps(this.#work, "eventSteps", () => next < queue.length)) {
       const entry = queue[next]!;
