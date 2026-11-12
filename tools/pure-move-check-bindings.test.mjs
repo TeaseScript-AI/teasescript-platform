@@ -422,8 +422,8 @@ test(
       "the configuration extends an installed package; the move's compiler run resolves it";
     const declared = run(before, after, "--renames", map, "--declare", (move) =>
       move.declare([
-        { file: "src/a.ts", side: "removed", line: 1, reason },
-        { file: "src/a.ts", side: "added", line: 1, reason },
+        { file: "src/a.ts", side: "removed", text: importer("./old.js").split("\n")[0], reason },
+        { file: "src/a.ts", side: "added", text: importer("./new").split("\n")[0], reason },
       ]),
     );
     assert.equal(declared.status, 0, declared.out);
@@ -586,5 +586,66 @@ test(
       unparsed.out,
       /not compared \(unparsed\): src\/view\.vue → src\/nested\/view\.vue/u,
     );
+  },
+);
+
+test(
+  "a declared refusal binds its declaration to its own line, as Git counts lines: one declaration covers one line (#2461)",
+  { timeout: 60_000 },
+  () => {
+    const missing = 'import "./missing.js";';
+    const run = (before, after, declared) => {
+      const move = moveOf({ "a.js": before }, { "a.js": after });
+      try {
+        const entries = declared.map(([side, text]) => ({
+          file: "a.js",
+          side,
+          text,
+          reason: "a witness",
+        }));
+        return move.run("--declare", move.declare(entries));
+      } finally {
+        move.done();
+      }
+    };
+    const twice = `${missing}\n${missing}\n`;
+    const pair = [
+      ["removed", missing],
+      ["added", missing],
+    ];
+    // two unchanged equal refused lines: one declaration per side covers one of them, two cover both
+    const one = run(twice, `${twice}\n`, pair);
+    assert.equal(one.status, 1, one.out);
+    assert.match(one.out, /declared 2; unadmitted 0; bindings differing 0; refused 2/u);
+    const both = run(twice, `${twice}\n`, [...pair, ...pair]);
+    assert.equal(both.status, 0, both.out);
+    // a declaration a changed line takes does not also cover an unchanged equal line
+    const added = run(`${missing}\n`, twice, pair);
+    assert.equal(added.status, 1, added.out);
+    assert.match(added.out, /refused 1/u);
+    // two refusals on one line share its declaration
+    const oneLine = 'import "./one.js"; import "./two.js";';
+    const shared = run(`${oneLine}\n`, `\n${oneLine}\n`, [
+      ["removed", oneLine],
+      ["added", oneLine],
+    ]);
+    assert.equal(shared.status, 0, shared.out);
+    assert.match(shared.out, /declared 2; unadmitted 0; bindings differing 0; refused 0/u);
+    // a lone CR or U+2028 ends no line for Git: the refusal's line is the one holding both, and another line's text
+    // does not declare it
+    for (const separator of ["\r", "\u2028"]) {
+      const text = `// heading${separator}${missing}`;
+      const exact = run(text, `\n${text}`, [
+        ["removed", text],
+        ["added", text],
+      ]);
+      assert.equal(exact.status, 0, `${JSON.stringify(separator)}: ${exact.out}`);
+      const footer = `${text}\n// unrelated footer`;
+      const other = run(footer, `\n${footer}`, [
+        ["removed", "// unrelated footer"],
+        ["added", "// unrelated footer"],
+      ]);
+      assert.equal(other.status, 1, `${JSON.stringify(separator)}: ${other.out}`);
+    }
   },
 );

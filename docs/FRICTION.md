@@ -36,6 +36,13 @@ touches. The open backlog
 per class is the open `friction` issues grouped by that first line. A line fixed in place needs no issue: its report is
 its record.
 
+An open friction issue is one its coordinator judges worth fixing. Triage comes before filing: a line whose fix adds no
+value or would cost more than the problem does gets no issue
+([`ORCHESTRATION.md`](ORCHESTRATION.md#structure-and-friction)). An issue already open that is not worth fixing is
+closed at once as not planned: the closing comment gives the reason and what would reopen the issue, and it is reopened
+when that happens. A closed issue holds no builder back: the launch check under [Priority](#priority) reads open issues
+only.
+
 ## Priority
 
 An open friction issue is either being built, or waits on an open issue or pull request named in its `Schedule:` line,
