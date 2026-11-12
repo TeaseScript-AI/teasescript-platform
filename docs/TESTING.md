@@ -693,13 +693,13 @@ private runner implementation.
 ### Layout and discovery
 
 ```text
-tests/runtime/collections/property.test.ts
+tests/runtime/engine/property.test.ts
 tests/property/
   replay.ts
   source-fuzz.ts
 ```
 
-`tests/runtime/collections/property.test.ts` is a test entrypoint, so normal compiled-test
+`tests/runtime/engine/property.test.ts` is a test entrypoint, so normal compiled-test
 discovery executes the required 128-case campaign through `npm run check`.
 The fixed operation, rejected-completion, checkpoint, and malformed-input
 fixtures consume no randomness, so they run once each in that entrypoint and
