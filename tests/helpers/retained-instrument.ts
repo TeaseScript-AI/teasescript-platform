@@ -327,6 +327,16 @@ export class RetainedInstrument implements RetainedRecorder {
   readonly #openCounts = new Map<string, number>();
   readonly #sealed = new WeakSet<object>();
   #sealedCount = 0;
+  /**
+   * Each typed array sealed (`TYPED_ENTRIES`), which no freeze holds: a copy of its bytes when its run ended, and where
+   * it was met; `changedTyped` compares them.
+   */
+  readonly #typed: {
+    readonly view: WeakRef<ArrayBufferView>;
+    readonly bytes: Uint8Array;
+    readonly path: string;
+  }[] = [];
+  readonly #typedSeen = new WeakSet<ArrayBufferView>();
   /** The current run; an interval outside any solver run is a run of its own. */
   #run: WeakKey = outsideRun();
   #outside = true;
@@ -336,6 +346,22 @@ export class RetainedInstrument implements RetainedRecorder {
   readonly #made = new Map<KindName, number>();
   readonly #outsideWrites = new Map<string, number>();
   readonly #valueMarks = new Map<string, number>();
+
+  /**
+   * Where a typed array sealed at a run's end (`TYPED_ENTRIES`) holds other bytes now: a write no freeze could refuse at
+   * its line, caught here instead. The preload asks at the process's exit and fails the file, or a survey counts it.
+   */
+  public changedTyped(): string[] {
+    const changed: string[] = [];
+    for (const { view, bytes, path } of this.#typed) {
+      const now = view.deref();
+      if (now === undefined) continue;
+      const current = new Uint8Array(now.buffer, now.byteOffset, now.byteLength);
+      if (current.length !== bytes.length || current.some((byte, at) => byte !== bytes[at]))
+        changed.push(path);
+    }
+    return changed;
+  }
 
   public report(): InstrumentReport {
     return {
@@ -605,15 +631,17 @@ export class RetainedInstrument implements RetainedRecorder {
     this.#pending = [];
     for (const entry of pending) {
       const [made, key] = entry;
-      const value = this.#current(made, key);
-      if (value === undefined) continue;
+      // (an object key is sealed while its entry stands, whatever its value, `undefined` included)
       if (
-        (made.kind === "map" || made.kind === "weakMap") &&
         typeof key === "object" &&
-        key !== null
+        key !== null &&
+        (made.kind === "map"
+          ? Map.prototype.has.call(made.holder, key)
+          : made.kind === "weakMap" && WeakMap.prototype.has.call(made.holder, key))
       )
         this.#admit(key, `${made.name}'s key`, true);
-      this.#admit(value, made.name, true);
+      const value = this.#current(made, key);
+      if (value !== undefined) this.#admit(value, made.name, true);
     }
     const made = this.#newOwners;
     this.#newOwners = [];
@@ -746,6 +774,11 @@ export class RetainedInstrument implements RetainedRecorder {
       else if (ArrayBuffer.isView(value)) {
         if (![...TYPED_ENTRIES.keys()].some((entry) => path.startsWith(entry)))
           this.#refuse(`a typed array at ${path}, under no entry of TYPED_ENTRIES`);
+        else if (seal && !this.#typedSeen.has(value)) {
+          this.#typedSeen.add(value);
+          const bytes = new Uint8Array(value.buffer, value.byteOffset, value.byteLength).slice();
+          this.#typed.push({ view: new WeakRef(value), bytes, path });
+        }
       } else if (!IDENTITY_CLASSES.has(constructorOf(value)))
         this.#refuse(
           `an instance of ${className(value)}, a class not in IDENTITY_CLASSES, at ${path}`,
