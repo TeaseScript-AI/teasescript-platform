@@ -754,6 +754,7 @@ async function toggleFullscreen() {
           :reset="player.interactionReset.value"
           :chat="player.chat.value"
           :terminal="player.terminal.value"
+          :epoch="player.epoch"
           :stopped-session="player.stopped.value ? session : null"
           :transcript-key="transcript.key"
           :entries="transcript.entries"
