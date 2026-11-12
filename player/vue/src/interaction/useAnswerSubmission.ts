@@ -68,8 +68,9 @@ export interface PredictedAnswer {
 
 /** The one answer under way: what it answered, how, and how far it went. */
 export interface PendingAnswer {
+  /** Its token, taken at `accept`: the chat and the session's `epoch`. Once either moved, they decide its settlement. */
   readonly chat: number;
-  readonly lineage: object;
+  readonly epoch: number;
   readonly actionId: number;
   readonly origin: AnswerOrigin;
   /** The chat text it sent, which a refusal puts back; only for the `chat` origin. */
@@ -117,6 +118,8 @@ export function useAnswerSubmission(host: {
   /** The stopped session, while it shows for the error dialog; its last publication is final once `terminal` is `stopped`. */
   readonly stoppedSession: () => PlayerSession | null;
   readonly chat: () => number;
+  /** The session's activation token (`usePlayerSession`'s `epoch`), read when an answer is admitted. */
+  readonly epoch: () => number;
   readonly terminal: () => SessionTerminal;
   readonly inputSection: () => InputSectionHost | undefined;
   readonly prepareInput: () => true | Promise<boolean>;
@@ -169,65 +172,63 @@ export function useAnswerSubmission(host: {
     admitWaitingUrl();
   }
 
+  /** Whether `record`'s token still holds: its chat shows and no stop or replacement has taken a new epoch since. */
+  function current(record: PendingAnswer): boolean {
+    return record.chat === host.chat() && record.epoch === host.epoch();
+  }
+
   /**
-   * How the session's end settles `record` as the terminal signal goes from `before` to `after`, or `null` while it
-   * waits; the one place that decides, a closed table by the record's stage, whose unnamed cells take the conservative
-   * case (undone, nothing published):
+   * How `record` settles now, or `null` while it waits; the one place that decides, a closed table over its token, the
+   * terminal level and its stage, whose unnamed cells take the conservative case (undone, nothing published). Every
+   * change of the level but `freezing` → `stopped` comes with a new epoch, so a level that left and came back still
+   * shows in the token:
    *
-   * | `before` → `after`             | accepted, fenced | posted                                                    |
-   * | ------------------------------ | ---------------- | --------------------------------------------------------- |
-   * | any, in another chat or gone   | dropped          | dropped                                                   |
-   * | `null` → `null`                | waits; undone once another session shows in the chat        |
-   * | any → `freezing`               | undone           | waits for the final publication                           |
-   * | any → `stopped`                | undone           | undone if the final publication still presents its action, else released |
-   * | any → `lost`                   | undone           | undone: the outcome is unknown, never sent again          |
-   * | `freezing` → `null`            | undone           | undone: a freeze retired without its final publication leaves the outcome unknown |
-   * | any other                      | undone           | undone                                                    |
+   * | now                                       | accepted, fenced | posted                                               |
+   * | ----------------------------------------- | ---------------- | ---------------------------------------------------- |
+   * | another chat, or unmounted                | dropped          | dropped                                              |
+   * | its token holds, the session runs         | waits: its outcome decides                              |
+   * | `freezing`                                | undone           | waits for the final publication                      |
+   * | `stopped`                                 | undone           | undone if the final publication still presents its action, else released |
+   * | anything else: lost, or another epoch     | undone           | undone: the outcome is unknown, never sent again     |
    *
    * `freezing` needs no timer of its own: it ends when the stop's halt settles, acknowledged or rejected
    * (`PlayerBridge.halt`, `stopAt`), or sooner with a loss, a later activation or an unmount.
    */
-  function terminalDisposition(
-    record: PendingAnswer,
-    before: SessionTerminal,
-    after: SessionTerminal,
-  ): "released" | "undone" | "dropped" | null {
+  function disposition(record: PendingAnswer): "released" | "undone" | "dropped" | null {
     if (disposed || record.chat !== host.chat()) return "dropped";
-    if (before === null && after === null) {
-      const shown = host.session();
-      // A session another shows in the same chat holds no answer posted to this one. Only the Continue after a lost
-      // connection shows one, and the loss settled the answer before it; this keeps that order from mattering.
-      return shown !== null && shown.lineage !== record.lineage ? "undone" : null;
-    }
+    const terminal = host.terminal();
+    if (current(record) && terminal === null) return null;
     // A record that never reached the host is undone at any end.
     if (record.stage !== "posted") return "undone";
-    if (after === "freezing") return null;
-    if (after === "stopped") {
-      // The final publication decides: an action it still presents was not answered.
+    if (terminal === "freezing") return null;
+    if (terminal === "stopped") {
+      // The final publication decides: an action it still presents was not answered. Its session is the record's: the
+      // chat is, and the only other session a chat shows is the recovery's Continue, after a loss that undid it.
       const frozen = host.stoppedSession();
       const live =
         frozen !== null &&
-        frozen.lineage === record.lineage &&
         playerRuntimeInteractionActionIds(frozen.state).includes(record.actionId);
       return live ? "undone" : "released";
     }
-    // A lost connection, a freeze retired without its final publication, or any other change: the outcome is unknown,
-    // so the answer is undone and never sent again.
+    // A lost connection, a freeze retired without its final publication, a replacement: the outcome is unknown, so the
+    // answer is undone and never sent again.
     return "undone";
   }
 
+  // One getter returning a new array: once a read of either value dirtied it, the callback runs even when both read as
+  // before, so a record whose level went to `freezing` and back between two flushes still settles by its token.
   watch(
     () => [host.terminal(), host.chat()] as const,
-    ([terminal], [before]) => {
+    ([terminal]) => {
       if (terminal !== null) host.composer.eraseSecrets();
       const record = pending.value;
       if (record === null) return;
-      const how = terminalDisposition(record, before, terminal);
+      const how = disposition(record);
       if (how !== null) settle(record, how);
     },
   );
 
-  /** Begins `record`: one painted frame, the fence, then the input section; its outcome settles it. */
+  /** Begins `record`: one painted frame, then the input section, which posts it only while its token holds. */
   async function dispatch(
     record: PendingAnswer,
     intent: InputIntent,
@@ -235,25 +236,25 @@ export function useAnswerSubmission(host: {
   ) {
     await nextFrame();
     if (record.stage === "settled") return;
-    const fenced = terminalDisposition(record, host.terminal(), host.terminal());
-    if (fenced !== null) return settle(record, fenced);
     advance(record, "fenced");
     let result: InputResult;
     try {
-      // A record settled meanwhile, by the session's end or a later one's preparation, is never posted.
-      result = await run(record.actionId, intent, () => advance(record, "posted"));
+      // A record settled meanwhile, or whose session stopped or was replaced, is never posted.
+      result = await run(
+        record.actionId,
+        intent,
+        () => current(record) && advance(record, "posted"),
+      );
     } catch (error) {
       settle(record, "undone");
       throw error;
     }
     onOutcome?.(result);
-    if (result.kind === "retired") {
-      // Not run here, or run before a stop whose final publication decides; otherwise nothing took it.
-      const how = terminalDisposition(record, host.terminal(), host.terminal());
-      if (how !== null) settle(record, how);
-      else if (host.terminal() !== "freezing") settle(record, "undone");
-      return;
-    }
+    // After a stop or a replacement the token decides, not the outcome; a posted answer waits for a freeze to end.
+    const how = disposition(record);
+    if (how !== null) return settle(record, how);
+    if (!current(record) || host.terminal() !== null) return;
+    if (result.kind === "retired") return settle(record, "undone");
     if (result.kind === "unanswered") return settle(record, "undone", host.unansweredMessage());
     // Only an answered result publishes; an unavailable action, or any other result, undoes the answer.
     if (result.kind !== "answered") return settle(record, "undone", NO_LONGER_AVAILABLE);
@@ -295,7 +296,7 @@ export function useAnswerSubmission(host: {
     clearNotice();
     const record: PendingAnswer = {
       chat: host.chat(),
-      lineage: session.lineage,
+      epoch: host.epoch(),
       actionId: action.actionId,
       origin,
       sent,
