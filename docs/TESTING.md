@@ -346,13 +346,27 @@ through `tools/test-output-filter.mjs`) checks the state the type core keeps bet
 at each run switch, and freezes what an ended run stored (#1072). It runs in two regimes:
 
 - **CI** freezes only the files of `tests/helpers/retained-subset.ts`: a greedy cover, by their frozen cost, of every
-  retained kind by its site, owner kind and registered function that the type-core files exercise frozen. That file
-  names what the subset does not exercise. Its work-pinning suites run again unfrozen in `tests/type-core-production/`.
+  retained kind by its site, owner kind and registered function that the type-core files exercise frozen, within no CI
+  shard above 10 minutes. That file names what the subset does not exercise. Its work-pinning suites run again
+  unfrozen in `tests/type-core-production/`.
 - **The whole survey** freezes every type-core file, as one queue pool, outside CI and never scheduled. A pull request
-  that changes `src/type-inference/core/**`, its retained makers included, reports it at its head in its READY: the
-  pool's job exits, and the files, refusals and frozen writes that `node tools/retained-survey.mjs FOLDER` counts from
-  its gathered results. Each job runs `RETAINED_SURVEY="$SX_OUT/survey" node tools/test-output-filter.mjs FILE...`.
-  `RETAINED_FREEZE=all` freezes every file without the survey's notes.
+  that changes `src/type-inference/core/**`, its retained makers included, carries in its READY the whole frozen survey
+  at its head: the pool's job exits, and the files, refusals and frozen writes that `node tools/retained-survey.mjs`
+  counts. From the pull request's checkout, `<SHA>` its head's full SHA:
+
+  ```sh
+  ls tests/type-core/*.test.ts | sed -E 's#^tests/#dist/tests/#; s#\.ts$#.js#' > /tmp/agent-work/<task>/survey-items.txt
+  sx-job submit --name 'survey-{i}' --owner <owner> --campaign <tag> --items /tmp/agent-work/<task>/survey-items.txt \
+    --target 20m --checkout <SHA> --unmerged "the whole frozen survey of the head" --timeout 2h --mem 8G -- \
+    bash -c 'cd "$SX_CHECKOUT" && mapfile -t items < "$SX_ITEMS" && RETAINED_SURVEY="$SX_OUT/survey" node tools/test-output-filter.mjs "${items[@]}" < /dev/null > "$SX_OUT/filter.txt" 2>&1'
+  sx-job wait --campaign <tag>
+  sx-job gather --campaign <tag> --into ~/work/evidence/<issue>/<SHA>/survey
+  node tools/retained-survey.mjs ~/work/evidence/<issue>/<SHA>/survey
+  ```
+
+  A job starts outside its checkout, hence the `cd "$SX_CHECKOUT"`. The last line exits 0 when every type-core file was
+  surveyed with no refusal and no frozen write; the tests' own outcome is the jobs' exits. `RETAINED_FREEZE=all` freezes
+  every file without the survey's notes.
 
 `RETAINED_MEASURE=<folder>`, with `NODE_OPTIONS=--enable-source-maps`, freezes every file too and writes what each
 exercises by its source site: the measurement the subset is chosen from.
