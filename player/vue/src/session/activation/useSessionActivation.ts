@@ -86,6 +86,11 @@ interface SessionActivationHost {
   /** Whether a state Debug's rewind restored is shown for inspection. */
   readonly inspecting: () => boolean;
   readonly isDisposed: () => boolean;
+  /** The Player's developer diagnostics (`usePlayerSession`'s `diagnostics`). */
+  readonly reportDiagnostic: (diagnostic: {
+    readonly code: string;
+    readonly message: string;
+  }) => void;
   /** Shows `next` as the Player's, for `origin`, the activation that began it; `sameChat`: the chat shown before. */
   readonly showSession: (
     next: PlayerSession,
@@ -123,6 +128,7 @@ export function useSessionActivation({
   connection,
   inspecting,
   isDisposed,
+  reportDiagnostic,
   showSession,
   camera,
   captures,
@@ -344,8 +350,21 @@ export function useSessionActivation({
    */
   function nextEpoch(): number {
     activationToken += 1;
+    // The work that must happen as the token moves (`onEpoch`) runs now, not when the level is next read: a stop that a
+    // replacement retires before anything looked still ends it. Each piece runs alone; a failure goes to the
+    // diagnostics, never to an error stop, which would take another token.
+    for (const work of epochWork)
+      try {
+        work();
+      } catch (error) {
+        reportDiagnostic({
+          code: "epoch-work-failed",
+          message: error instanceof Error ? error.message : String(error),
+        });
+      }
     return activationToken;
   }
+  const epochWork = new Set<() => void>();
   // A Continue under way in the host, whose session no other activation may let run on; see `supersede`.
   let continuing: PlayerSession | null = null;
   // The Start or Continue still beginning over the bridge. A later activation begins only once it settled, so the
@@ -748,6 +767,14 @@ export function useSessionActivation({
     supersede,
     /** The current activation token (`nextEpoch`): an answer's session ended or was replaced when it moved. */
     epoch: (): number => activationToken,
+    /**
+     * Registers synchronous work for every move of the token (an error stop, a lost connection, a supersession), run
+     * inside the move, before the level changes; the returned function removes it. The work calls no session API.
+     */
+    onEpoch(work: () => void): () => void {
+      epochWork.add(work);
+      return () => void epochWork.delete(work);
+    },
     prepare,
     prepareStart,
     prepareRestore,

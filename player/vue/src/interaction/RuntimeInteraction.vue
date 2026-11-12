@@ -61,6 +61,10 @@ const props = defineProps<{
   terminal?: SessionTerminal;
   /** The session's activation token (`usePlayerSession`'s `epoch`), a reader, not a value: an answer reads it when posted. */
   epoch?: () => number;
+  /** The `epoch` the shown session was shown under (`usePlayerSession`'s `inputEpoch`): input asked while it differs is refused. */
+  inputEpoch?: () => number;
+  /** Registers work run as `epoch` moves (`usePlayerSession`'s `onEpoch`); the returned function removes it. */
+  onEpoch?: (work: () => void) => () => void;
   /** The stopped session while it shows for the error dialog, whose final publication settles a posted answer. */
   stoppedSession?: PlayerSession | null;
   entries: readonly PlayerTranscriptEntryPresentation[];
@@ -275,6 +279,8 @@ const submission = useAnswerSubmission({
   stoppedSession: () => props.stoppedSession ?? null,
   chat: () => props.chat ?? 0,
   epoch: () => props.epoch?.() ?? 0,
+  inputEpoch: () => props.inputEpoch?.() ?? 0,
+  onEpoch: (work) => props.onEpoch?.(work) ?? (() => {}),
   terminal: () => props.terminal ?? null,
   inputSection: () => props.inputSection,
   prepareInput: () => props.prepareInput?.() ?? true,
@@ -292,6 +298,8 @@ const formUpdates = useFormUpdates({
   composer: composerState,
   session: () => props.session,
   chat: () => props.chat ?? 0,
+  epoch: () => props.epoch?.() ?? 0,
+  inputEpoch: () => props.inputEpoch?.() ?? 0,
   terminal: () => props.terminal ?? null,
   inputSection: () => props.inputSection,
   run: (id, intent) => submission.run(id, intent),

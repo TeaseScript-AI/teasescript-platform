@@ -52,6 +52,11 @@ interface SessionHost {
   readonly chat: Readonly<Ref<number>>;
   readonly terminal: Readonly<Ref<SessionTerminal>>;
   epoch(): number;
+  inputEpoch(): number;
+  onEpoch(work: () => void): () => void;
+  readonly diagnostics: Readonly<
+    Ref<readonly { readonly code: string; readonly message: string }[]>
+  >;
   /** Adopts a state Debug's rewind restored before input, as `RuntimeInteraction` asks for it. */
   prepareInput(): true | Promise<boolean>;
   /** Shows `next` as the session from now on, in another chat. */
@@ -95,6 +100,8 @@ let useAnswerSubmission: (host: {
   readonly stoppedSession: () => PlayerSession | null;
   readonly chat: () => number;
   readonly epoch: () => number;
+  readonly inputEpoch: () => number;
+  readonly onEpoch: (work: () => void) => () => void;
   readonly terminal: () => SessionTerminal;
   readonly inputSection: () => InputSectionHost | undefined;
   readonly prepareInput: () => true | Promise<boolean>;
@@ -107,6 +114,8 @@ let useFormUpdates: (host: {
   readonly composer: ComposerState;
   readonly session: () => PlayerSession | null;
   readonly chat: () => number;
+  readonly epoch: () => number;
+  readonly inputEpoch: () => number;
   readonly terminal: () => SessionTerminal;
   readonly inputSection: () => InputSectionHost | undefined;
   readonly run: AnswerSubmission["run"];
@@ -224,6 +233,8 @@ async function page(
   } = { returned: [], beforeBody: null, beforeSend: null, afterReturn: null };
   // Each level the answers' controller read, for a row that orders its reads against the session's changes.
   const terminalReads: SessionTerminal[] = [];
+  // The work the answers' controller registered for the epoch's moves, and how often it ran.
+  const epochWork = { registered: new Set<() => void>(), runs: 0 };
   const scope = effectScope();
   const made = scope.run(() => {
     const player = usePlayerSession({
@@ -281,6 +292,20 @@ async function page(
       stoppedSession: () => (player.stopped.value ? player.session.value : null),
       chat: () => player.chat.value,
       epoch: player.epoch,
+      inputEpoch: player.inputEpoch,
+      // The real registry, counting each run of the work the controller registers.
+      onEpoch: (work) => {
+        const counted = () => {
+          epochWork.runs += 1;
+          work();
+        };
+        epochWork.registered.add(counted);
+        const off = player.onEpoch(counted);
+        return () => {
+          epochWork.registered.delete(counted);
+          off();
+        };
+      },
       terminal: () => {
         const level = player.terminal.value;
         terminalReads.push(level);
@@ -297,6 +322,8 @@ async function page(
       composer,
       session: shown,
       chat: () => player.chat.value,
+      epoch: player.epoch,
+      inputEpoch: player.inputEpoch,
       terminal: () => player.terminal.value,
       inputSection: () => player.inputSection,
       run: (id, intent) => submission.run(id, intent),
@@ -324,7 +351,7 @@ async function page(
     );
     // Debug's rewind, as the Debug switch runs it, for a row that answers in an inspected state.
     const debug = rewind ? useDebugRewind(player) : null;
-    return { player, composer, submission, debug };
+    return { player, composer, submission, forms, debug };
   })!;
   context.after(() => scope.stop());
   const { player, debug } = made;
@@ -332,7 +359,7 @@ async function page(
   player.prepare(await sourceStart(player.bridge, script, () => ({ wallClockMs: 0 })));
   await player.activate();
   await until(() => activeAction(player) !== undefined, "the question", "host");
-  return { ...made, connection, connections, frame, scope, sections, terminalReads };
+  return { ...made, connection, connections, frame, scope, sections, terminalReads, epochWork };
 }
 
 const activeAction = (player: SessionHost) =>
@@ -380,6 +407,13 @@ const CASES = {
   "a retired outcome while freezing": TOPOLOGIES,
   // In-process, an error stop with no request in flight commits at once (`stopAt`'s `frozen()`): no freeze to miss.
   "an outcome inside a missed freeze": TOPOLOGIES.filter((topology) => topology === "worker"),
+  "a missed stop with nothing pending": TOPOLOGIES,
+  "an answer after a missed stop": TOPOLOGIES,
+  "a form update after a missed stop": TOPOLOGIES,
+  "an update's outcome after a missed stop": TOPOLOGIES,
+  "the epoch's work after an unmount": TOPOLOGIES,
+  "a failing piece of the epoch's work": TOPOLOGIES,
+  "the chat's text at a stop": TOPOLOGIES,
 } as const;
 const RERUN = rerunRegistry(CASES);
 
@@ -904,5 +938,187 @@ RERUN.rows(
       return end();
     }
     assert.fail("no microtask depth put the outcome inside the missed freeze");
+  },
+);
+
+// The epoch's boundary: what must happen as a stop, a loss or a replacement takes a new token happens inside that move,
+// and input asked on a session shown under an older token is refused, also when the stop went back before any flush.
+
+const FORM = 'let answers = askForm fields: { name: "Ada" }\nsay "${answers.name}", instant\nexit';
+const opPosts = (connection: { readonly posts: readonly { readonly op: string }[] }, op: string) =>
+  connection.posts.filter((post) => post.op === op).length;
+/** An error stop and another Start's preparation in one task: no flush between, so no watch saw the stop. */
+function missedStop(player: SessionHost, other: Awaited<ReturnType<typeof otherStart>>) {
+  player.reportHostError(new TypeError("a component failed"));
+  player.prepare(other);
+}
+
+RERUN.rows(
+  "a missed stop with nothing pending",
+  "a stop a preparation retires in the same task still erases the secret, drops the notice and cancels a form draft waiting to be stored",
+  async (context, topology, end) => {
+    {
+      const { player, composer, submission } = await page(context, topology, PASSWORD);
+      const other = await otherStart(player);
+      assert.equal(composer.tenant.value.kind, "password");
+      type(composer, "unsent-secret");
+      submission.showNotice("A notice.");
+      missedStop(player, other);
+      assert.equal(composer.displayed.value, "", "the secret is gone at once");
+      assert.equal(submission.notice.value, "", "the notice is gone");
+      assert.equal(submission.pending.value, null);
+    }
+    // A preparation alone, and a lost connection alone, each move the token and do the same.
+    {
+      const { player, composer } = await page(context, topology, PASSWORD);
+      const other = await otherStart(player);
+      type(composer, "unsent-secret");
+      player.prepare(other);
+      assert.equal(composer.displayed.value, "", "the secret is gone at the preparation");
+    }
+    {
+      const { player, composer, connection } = await page(context, topology, PASSWORD);
+      type(composer, "unsent-secret");
+      // Read inside the loss's own move of the token, after the controller's work and before the field leaves.
+      let atLoss: string | null = null;
+      context.after(player.onEpoch(() => void (atLoss = composer.displayed.value)));
+      await connection.lose();
+      assert.equal(atLoss, "", "the secret is gone at the loss");
+    }
+    {
+      const { player, composer, forms, connection } = await page(context, topology, FORM);
+      const other = await otherStart(player);
+      forms.stepField("name");
+      await until(() => composer.tenant.value.kind === "form", "the name field's editor", "host");
+      type(composer, "Bea");
+      missedStop(player, other);
+      // The draft would be stored 400 ms after the edit.
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      assert.equal(opPosts(connection, "draftForm"), 0, "no draft stored after the stop");
+    }
+    return end();
+  },
+);
+
+RERUN.rows(
+  "an answer after a missed stop",
+  "an answer to the question a retired stop left on screen shows nothing, sends nothing and keeps its text",
+  async (context, topology, end) => {
+    const { player, composer, submission, connection } = await page(context, topology, CHOICE);
+    const other = await otherStart(player);
+    missedStop(player, other);
+    assert.notEqual(
+      player.inputEpoch(),
+      player.epoch(),
+      "the shown session belongs to an older epoch",
+    );
+    type(composer, "Go");
+    submission.send("input");
+    submission.choose(null);
+    assert.equal(submission.pending.value, null, "not taken");
+    assert.equal(composer.chatText.value, "Go", "the text stays");
+    assert.equal(submission.notice.value, "", "no notice");
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(answerPosts(connection), 0, "never sent");
+    return end();
+  },
+);
+
+RERUN.rows(
+  "a form update after a missed stop",
+  "a form's field step asked after a retired stop sends nothing, and a typed label stays in the chat",
+  async (context, topology, end) => {
+    const { player, composer, forms, connection } = await page(context, topology, FORM);
+    const other = await otherStart(player);
+    missedStop(player, other);
+    // A typed label sent to the form: refused as it is asked, so the chat keeps it.
+    type(composer, "name");
+    forms.stepField("name", true);
+    assert.equal(composer.chatText.value, "name", "the label stays in the chat");
+    forms.stepField("name");
+    forms.clearField();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    assert.equal(opPosts(connection, "stepFormField"), 0);
+    assert.equal(opPosts(connection, "clearFormField"), 0);
+    return end();
+  },
+);
+
+RERUN.rows(
+  "an update's outcome after a missed stop",
+  "a typed field label whose step returns after a stop and its preparation shows no notice, and the label is back in the chat",
+  async (context, topology, end) => {
+    const { player, composer, submission, connection } = await page(context, topology, FORM);
+    const other = await otherStart(player);
+    type(composer, "name");
+    connection.hold("stepFormField");
+    submission.send("input");
+    await connection.held();
+    assert.equal(composer.chatText.value, "", "the label left the chat");
+    missedStop(player, other);
+    connection.release();
+    await until(() => composer.chatText.value === "name", "the label back in the chat", "host");
+    assert.equal(submission.notice.value, "", "no notice");
+    return end();
+  },
+);
+
+RERUN.rows(
+  "the epoch's work after an unmount",
+  "an unmounted interaction's work is no longer registered and does not run at a later stop",
+  async (context, topology, end) => {
+    const { player, scope, epochWork } = await page(context, topology, CHOICE);
+    assert.equal(epochWork.registered.size, 1, "registered while mounted");
+    scope.stop();
+    assert.equal(epochWork.registered.size, 0, "removed at the unmount");
+    const runs = epochWork.runs;
+    player.reportHostError(new TypeError("a component failed"));
+    assert.equal(epochWork.runs, runs, "nothing ran for the unmounted interaction");
+    return end();
+  },
+);
+
+RERUN.rows(
+  "a failing piece of the epoch's work",
+  "a piece of work that throws neither aborts the stop nor keeps the others from running, and its failure is a diagnostic",
+  async (context, topology, end) => {
+    const { player, composer } = await page(context, topology, PASSWORD);
+    let after = 0;
+    const offFailing = player.onEpoch(() => {
+      throw new Error("work failed");
+    });
+    const offAfter = player.onEpoch(() => void (after += 1));
+    context.after(() => {
+      offFailing();
+      offAfter();
+    });
+    type(composer, "unsent-secret");
+    player.reportHostError(new TypeError("a component failed"));
+    assert.notEqual(player.terminal.value, null, "the stop went on");
+    assert.equal(composer.displayed.value, "", "the controller's work ran");
+    assert.equal(after, 1, "the work after the failing one ran");
+    assert.deepEqual(
+      player.diagnostics.value.map((diagnostic) => [diagnostic.code, diagnostic.message]),
+      [["epoch-work-failed", "work failed"]],
+    );
+    return end();
+  },
+);
+
+RERUN.rows(
+  "the chat's text at a stop",
+  "a stop, retired by a preparation in the same task or not, leaves the chat's unsent text as it was",
+  async (context, topology, end) => {
+    for (const retired of [false, true]) {
+      const { player, composer, scope } = await page(context, topology, CHOICE);
+      const other = await otherStart(player);
+      type(composer, "Unsent words");
+      if (retired) missedStop(player, other);
+      else player.reportHostError(new TypeError("a component failed"));
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      assert.equal(composer.chatText.value, "Unsent words", `retired: ${retired}`);
+      scope.stop();
+    }
+    return end();
   },
 );
