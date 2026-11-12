@@ -622,8 +622,166 @@ export const keysCasePassed = (item) =>
       (field) => item.after[field] === item.expect[field],
     ));
 
+/**
+ * The composer's area, as a list of lines: every element under it with its attributes and its state (disabled, read-only,
+ * value, its own text). Identities a page draws anew (the field's token, generated ids) are left out.
+ */
+const areaSnapshot = () => {
+  const root = document.querySelector("[data-composer-shell]")?.closest(".composer-container");
+  if (!root) return ["no composer"];
+  const skip = new Set(["data-composer-token", "id", "for", "aria-describedby", "aria-controls"]);
+  return [root, ...root.querySelectorAll("*")].map((element) => {
+    const attributes = [...element.attributes]
+      .filter((attribute) => !skip.has(attribute.name))
+      .map((attribute) => `${attribute.name}=${attribute.value}`)
+      .sort();
+    const own = [...element.childNodes]
+      .filter((node) => node.nodeType === Node.TEXT_NODE)
+      .map((node) => node.textContent.trim())
+      .join("");
+    const state =
+      "disabled" in element
+        ? ` disabled=${element.disabled} readOnly=${element.readOnly ?? ""} value=${JSON.stringify(element.value ?? "")}`
+        : "";
+    return `${element.tagName} ${attributes.join(" ")}${state}${own ? ` "${own}"` : ""}`;
+  });
+};
+
+// Each question kind of the `composer-area` fixture and how it is answered. In the answer's flight the composer's area is
+// what it is while nothing is asked ("Idle"); a password's field, empty and read-only, is the one stated exception.
+const AREA_KINDS = {
+  Text: (page) =>
+    page
+      .locator("[data-composer-input]")
+      .fill("Hi")
+      .then(() => page.keyboard.press("Enter")),
+  Number: (page) =>
+    page
+      .locator("[data-composer-input]")
+      .fill("5")
+      .then(() => page.keyboard.press("Enter")),
+  Date: (page) =>
+    page
+      .locator("[data-composer-input]")
+      .fill("2026-10-04")
+      .then(() => page.keyboard.press("Enter")),
+  Time: (page) =>
+    page
+      .locator("[data-composer-input]")
+      .fill("20:00")
+      .then(() => page.keyboard.press("Enter")),
+  Choice: (page) => page.getByRole("button", { name: "Red", exact: true }).click(),
+  Button: (page) => page.getByRole("button", { name: "Go", exact: true }).click(),
+  Form: (page) => page.getByRole("button", { name: "Continue", exact: true }).click(),
+  Popup: (page) => page.getByRole("dialog").getByRole("button").first().click(),
+  Export: (page) =>
+    page.getByRole("dialog").getByRole("button", { name: "Close", exact: true }).click(),
+  Image: (page) => page.getByRole("button", { name: "Skip", exact: true }).click(),
+  Password: (page) =>
+    page
+      .locator("[data-composer-input]")
+      .fill("pw")
+      .then(() => page.keyboard.press("Enter")),
+};
+const AREA_QUESTION = {
+  Text: "[data-composer-input]",
+  Number: "[data-composer-input]",
+  Date: "input[data-composer-input]",
+  Time: "input[data-composer-input]",
+  Choice: "[data-foreground-controls] button",
+  Button: "[data-foreground-controls] button",
+  Form: "[data-foreground-controls] button",
+  Popup: "[role=dialog]",
+  Export: "[role=dialog]",
+  Image: "[data-foreground-controls] button",
+  Password: "[data-composer-password] [data-composer-input]",
+};
+
+/** The area while nothing is asked, or in the flight of `kind`'s answer; and the page errors. */
+async function areaOf(opened, origin, kind) {
+  const { page, close } = await opened.page();
+  const errors = [];
+  page.on("pageerror", (error) => {
+    if (countedError(error)) errors.push(String(error));
+  });
+  try {
+    await page.goto(`${origin}/player/?package=composer-area`);
+    await page.locator("[data-session-start]").click();
+    await page.getByRole("button", { name: kind ?? "Idle", exact: true }).click();
+    if (kind === null) {
+      await page.waitForFunction(() =>
+        [...document.querySelectorAll(".transcript-entry")].some((entry) =>
+          entry.textContent?.includes("Nothing is asked."),
+        ),
+      );
+      await page.waitForTimeout(SETTLE_MS);
+      return { snapshot: await page.evaluate(areaSnapshot), errors };
+    }
+    await page.locator(AREA_QUESTION[kind]).first().waitFor();
+    await page.waitForTimeout(SETTLE_MS);
+    await AREA_KINDS[kind](page);
+    // Read at once, inside the answer's flight of at least 250 ms.
+    return { snapshot: await page.evaluate(areaSnapshot), errors };
+  } finally {
+    await close();
+  }
+}
+
+/** One result per question kind, in the form of a case: its error names each line of the area that differs. */
+async function areaCases(opened, origin) {
+  const results = [];
+  let idle;
+  try {
+    idle = await areaOf(opened, origin, null);
+  } catch (error) {
+    return [
+      {
+        name: "area idle",
+        residual: "",
+        expect: shown("", "", 0),
+        after: shown("", "", 0),
+        errors: [],
+        error: String(error?.message ?? error).slice(0, 300),
+      },
+    ];
+  }
+  for (const kind of Object.keys(AREA_KINDS)) {
+    const result = {
+      name: `area ${kind}`,
+      residual: "",
+      expect: shown("", "", 0),
+      after: shown("", "", 0),
+      errors: [...idle.errors],
+      error: "",
+    };
+    try {
+      const flight = await areaOf(opened, origin, kind);
+      result.errors.push(...flight.errors);
+      if (kind === "Password") {
+        const field = flight.snapshot.find((line) => line.includes("data-composer-input"));
+        if (!field?.includes("readOnly=true") || !field.includes('value=""'))
+          result.error = `the password's field in its flight was not empty and read-only: ${field}`;
+      } else {
+        const missing = idle.snapshot.filter((line) => !flight.snapshot.includes(line));
+        const extra = flight.snapshot.filter((line) => !idle.snapshot.includes(line));
+        if (missing.length + extra.length > 0)
+          result.error =
+            `the area differs from the idle chat's: ${JSON.stringify({ missing, extra })}`.slice(
+              0,
+              600,
+            );
+      }
+    } catch (error) {
+      result.error = String(error?.message ?? error).slice(0, 300);
+    }
+    results.push(result);
+  }
+  return results;
+}
+
 export async function keys({ opened, origin }) {
   const results = [];
   for (const item of cases(opened.engine)) results.push(await runCase(opened, origin, item));
+  results.push(...(await areaCases(opened, origin)));
   return { ok: results.every(keysCasePassed), cases: results };
 }

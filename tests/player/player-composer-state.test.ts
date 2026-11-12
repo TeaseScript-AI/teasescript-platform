@@ -371,6 +371,7 @@ const CASES = {
   "N3 occupied, then empty on return": TOPOLOGIES,
   "N3 a block's own prefill": TOPOLOGIES,
   "N3 a refusal over a suggestion": TOPOLOGIES,
+  "N3 an answered question's prefill": TOPOLOGIES,
   "N4 password over chat": TOPOLOGIES,
   "N4 lock phases": TOPOLOGIES,
   "N4 a retired token": TOPOLOGIES,
@@ -774,6 +775,45 @@ RERUN.rows(
     p.submission.closePopup();
     await shows(p, "chat", "the question after the popup");
     assert.equal(p.composer.displayed.value, "CHAT");
+    return end();
+  },
+);
+
+// N3: while an answer is under way the chat stands in for its question, whose prefill is not the chat's.
+
+RERUN.rows(
+  "N3 an answered question's prefill",
+  "a date's prefill is not offered to the chat while the date's answer is under way: a key then typed is the chat's alone",
+  async (context, topology, end) => {
+    const p = await page(
+      context,
+      topology,
+      script(
+        'let day = askDate "Day?", prefill: toDate("2026-10-04")',
+        'let next = askText "Next?"',
+      ),
+    );
+    assert.equal(p.composer.tenant.value.kind, "temporal");
+    type(p.composer, "2026-11-12");
+    p.frame.hold();
+    p.submission.send("input");
+    const record = p.submission.pending.value!;
+    await until(
+      () => p.composer.tenant.value.kind === "chat",
+      "the chat standing in for the answered date",
+      "step",
+    );
+    assert.equal(record.stage, "accepted", "still under way");
+    assert.equal(p.composer.chatText.value, "", "no prefill offered");
+    type(p.composer, "x");
+    p.frame.release();
+    await until(() => record.stage === "settled", "the answer settled", "host");
+    await until(
+      () => p.composer.tenant.value.kind === "chat" && action(p) !== undefined,
+      "the next question",
+      "host",
+    );
+    assert.equal(p.composer.chatText.value, "x");
     return end();
   },
 );

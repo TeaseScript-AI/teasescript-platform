@@ -166,7 +166,7 @@ const pacing = computed(() => {
  * preselects; `undefined` without one.
  */
 const preselected = computed((): string | null | undefined => {
-  const presented = foreground.value;
+  const presented = fieldForeground.value;
   if (presented?.kind === "show-button") return null;
   if (presented?.kind !== "choose") return undefined;
   return presented.options.find((option) => option.preselected)?.id;
@@ -184,7 +184,10 @@ const imageRequest = computed(() =>
 );
 // A request is one action of one session; its identity is fixed while frequent observations publish new sessions.
 const plan = computed(() => props.session?.planToken);
+// The paperclip and the drop target are the composer's: they follow the question its field stands for, so an image request
+// whose answer is under way offers neither.
 const attach = computed(() =>
+  fieldForeground.value?.kind === "ask-image" &&
   imageRequest.value?.allowFile === true &&
   props.images &&
   props.capture &&
@@ -848,18 +851,18 @@ function escape() {
             session.state.status === 'halted' ||
             session.state.status === 'failed' ||
             (locking && !lockField) ||
-            foreground?.kind === 'popup' ||
-            foreground?.kind === 'export-text' ||
-            foreground?.kind === 'open-url'
+            fieldForeground?.kind === 'popup' ||
+            fieldForeground?.kind === 'export-text' ||
+            fieldForeground?.kind === 'open-url'
           "
-          :pacing="!foreground && !!pacing"
+          :pacing="!fieldForeground && !!pacing"
           :preselected="preselected !== undefined"
           :inert-space="
             !lockField &&
-            (foreground?.kind === 'choose' ||
-              foreground?.kind === 'show-button' ||
-              (foreground?.kind === 'form' && !formEditor) ||
-              !foreground ||
+            (fieldForeground?.kind === 'choose' ||
+              fieldForeground?.kind === 'show-button' ||
+              (fieldForeground?.kind === 'form' && !formEditor) ||
+              !fieldForeground ||
               submission.pending.value !== null)
           "
           :fresh-after="presentedAt"
@@ -872,9 +875,9 @@ function escape() {
                 ? 'Repeat it'
                 : (lockField.hint ?? 'Password')
               : locking ||
-                  foreground?.kind === 'popup' ||
-                  foreground?.kind === 'export-text' ||
-                  foreground?.kind === 'open-url'
+                  fieldForeground?.kind === 'popup' ||
+                  fieldForeground?.kind === 'export-text' ||
+                  fieldForeground?.kind === 'open-url'
                 ? ''
                 : fieldEditor
                   ? fieldEditor.hint
@@ -883,7 +886,7 @@ function escape() {
                     : 'Type your response…'
           "
           :attach="attach"
-          :password="foreground?.kind === 'ask-password' || lockField !== null"
+          :password="composerState.tenant.value.kind === 'password' || lockField !== null"
           :repeated="lockPhase === 'repeat'"
           :accessible-name="
             lockField
