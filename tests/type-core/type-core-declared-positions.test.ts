@@ -29,7 +29,9 @@ import {
   DECLARED_RULE_DIFFERENCES,
   HOST_VALUES,
   HOSTLESS_VALUES,
+  FAILING_PRODUCER,
   OPERAND_TEMPLATES,
+  PAIRED_SAMPLES,
   type Sample,
   samples,
   twinCommand,
@@ -40,10 +42,11 @@ import {
  * R14 has it; `DECLARED_RULE_DIFFERENCES`): each command operand position holds a value of every kind from every origin
  * (`samples`), compiled by today's checker and by the candidate route in the four held modes, and runs with the host
  * global at every value of the domain and, for a typed ingress, at a value of its kind. Where today's checker gives the
- * position's compile error, the route publishes as for the fitting twin, and a run reaching the command fails there with
- * the position's code (R15: asserted where the run reaches it); where today's checker gives none, both publish and their
- * runs are equal. The same holds in each context (`CONTEXTS`, R12), where the route admits the value alone there; where
- * it refuses that, it refuses the command alike (R16).
+ * position's compile error, the route publishes as for the fitting twin, and each run ends in one of R18's three ways: as
+ * the twin's where it does not reach the command; as the value alone does where its evaluation fails; with the
+ * position's code at the command where every operand evaluates (R15: asserted where the run reaches it). Where today's
+ * checker gives none, both publish and their runs are equal. The same holds in each context (`CONTEXTS`, R12), where the
+ * route admits the value alone there; where it refuses that, it refuses the command alike (R16).
  */
 
 const position = (sample: Sample) =>
@@ -69,8 +72,22 @@ const IN_CONTEXTS = SAMPLES.filter(
     position(sample) !== undefined &&
     ((sample.origin === "literal" && sample.kind === "list") ||
       (sample.origin === "conversion" && sample.kind === "date") ||
-      (sample.origin === "ingress" && sample.kind === "dict")),
+      (sample.origin === "ingress" && sample.kind === "dict") ||
+      sample.origin === "failing"),
 );
+
+/** The contexts no run reaches the command in: each run there ends as the fitting twin's. */
+const UNREACHED: ReadonlySet<string> = new Set([
+  "after exit",
+  "after an exiting if",
+  "after an exiting for",
+]);
+
+/** A run's failure as `[code, start, end]`, or `null` for a run that does not fail with a site. */
+function failureOf(run: string): [string, number, number] | null {
+  const match = /^failed (\w+)@(\d+):(\d+)$/u.exec(run);
+  return match === null ? null : [match[1]!, Number(match[2]), Number(match[3])];
+}
 
 /** The R5 ledger's inherited warnings the route gives where today's checker gives none, and the other way round. */
 const ROUTE_ONLY: readonly string[] = ["TSV010", "TSV011", "TSV012", "TSV041", "TSV043"];
@@ -152,7 +169,14 @@ function judge(
     // the declared difference: the route answers as for the fitting twin, but that a reaching run fails at the command
     const twinRecord = found.get(inContext(sample, twinCommand(sample), context))!;
     const twinMode = twinRecord.candidate.modes[index];
-    const reference: Entry = twinMode?.plan ? twinMode : twinRecord.checker;
+    // (today's twin only where the route refuses the twin at its duration literal, which the slice does not hold)
+    if (!twinMode?.plan && twinMode?.outside !== "this duration literal") {
+      failures.push(
+        `${at}: its twin ${twinMode?.outside ?? twinMode?.threw ?? "publishes no plan"}`,
+      );
+      return;
+    }
+    const reference: Entry = twinMode.plan ? twinMode : twinRecord.checker;
     const start = source.indexOf(sample.command, sample.prelude.length);
     const value = start + OPERAND_TEMPLATES[sample.row]![sample.operand]![0]!.indexOf("hostValue");
     const shift = twinCommand(sample).length - sample.command.length;
@@ -179,16 +203,41 @@ function judge(
       .sort();
     const runs = (mode.runs ?? []).map(outcome);
     const twinRuns = (reference.runs ?? []).map(outcome);
+    const aloneRuns = (aloneMode?.runs ?? []).map(outcome);
     const fails = reached(sample, start);
+    // each run ends in one of three ways, in the runtime's order (R18): it does not reach the command, as the twin's; an
+    // operand's evaluation fails, as the value alone does there; every operand evaluates, the command refuses the value
+    const aloneStart =
+      inContext(sample, `let v = ${sample.value}`, context).indexOf(
+        `let v = ${sample.value}`,
+        sample.prelude.length,
+      ) + "let v = ".length;
+    const wrong = runs.flatMap((ran, run) => {
+      const failed = failureOf(aloneRuns[run] ?? "");
+      if (
+        failed !== null &&
+        failed[1] >= aloneStart &&
+        failed[2] <= aloneStart + sample.value.length
+      ) {
+        const [code, from, to] = failed;
+        const shift = value - aloneStart;
+        return ran === `failed ${code}@${from + shift}:${to + shift}`
+          ? []
+          : [`run ${run}: ${ran}, its operand alone ${aloneRuns[run]}`];
+      }
+      if (ran === twinRuns[run] && !reach.includes(run)) return [];
+      return fails.has(ran) && !UNREACHED.has(context)
+        ? []
+        : [`run ${run}: ${ran}, its twin ${twinRuns[run]}`];
+    });
     if (
       !mode.plan ||
       JSON.stringify(answered) !== JSON.stringify(expected) ||
       runs.length !== twinRuns.length ||
-      runs.some((outcomeOf, run) => !fails.has(outcomeOf) && outcomeOf !== twinRuns[run]) ||
-      reach.some((run) => !fails.has(runs[run] ?? ""))
+      wrong.length > 0
     ) {
       failures.push(
-        `${at}: route ${mode.plan ? "a plan" : "no plan"}, ${answered.join(", ")}, runs ${runs.join(", ")}; its twin ${expected.join(", ")}, runs ${twinRuns.join(", ")}; reaching ${[...fails].join(" or ")} at runs ${reach.join(", ")}`,
+        `${at}: route ${mode.plan ? "a plan" : "no plan"}, ${answered.join(", ")}; its twin ${expected.join(", ")}; ${wrong.join("; ")}`,
       );
       return;
     }
@@ -354,12 +403,19 @@ test("a declared position's instruction refuses a value it does not take before 
         const before = fieldsOf(first);
         const result = run(plan, first);
         const failure = result.events.find((event) => event.kind === "runtimeFailure");
+        const failed =
+          failure?.kind === "runtimeFailure"
+            ? [failure.code, failure.span.start.offset, failure.span.end.offset]
+            : null;
+        // (a failing producer fails inside its value, before the command; any other value, at the command, R18)
+        const value =
+          start + OPERAND_TEMPLATES[sample.row]![sample.operand]![0]!.indexOf("hostValue");
         assert.ok(
-          failure?.kind === "runtimeFailure" &&
-            fails.has(
-              `failed ${failure.code}@${failure.span.start.offset}:${failure.span.end.offset}`,
-            ),
-          `${at} with ${JSON.stringify(hostValue)}`,
+          failed !== null &&
+            (sample.origin === "failing"
+              ? Number(failed[1]) >= value && Number(failed[2]) <= value + sample.value.length
+              : fails.has(`failed ${failed[0]}@${failed[1]}:${failed[2]}`)),
+          `${at} with ${JSON.stringify(hostValue)}: ${JSON.stringify(failed)}`,
         );
         // nothing of the statement's effect: no event of it but the failure, and the session's state as before the
         // statement, but for the run's own bookkeeping (the ingress's store is before it)
@@ -387,4 +443,50 @@ test("a declared position's instruction refuses a value it does not take before 
     }
   }
   assert.ok(judged > 0);
+});
+
+test("a command with one operand it does not take and another whose producer fails: its run fails, whichever comes first", (t) => {
+  const withPositions = Object.entries(OPERAND_TEMPLATES)
+    .filter(([, operands]) => Object.keys(operands!).length > 1)
+    .map(([row]) => row)
+    .sort();
+  assert.deepEqual(PAIRED_SAMPLES.map((paired) => paired.row).sort(), withPositions);
+  for (const paired of PAIRED_SAMPLES) {
+    const source = `${paired.command}\nexit\n`;
+    const today = compileProject([{ path: "main.tease", source }], { globals: ["hostValue"] });
+    assert.equal(today.plan, null, source);
+    const declared = DECLARED_RULE_DIFFERENCES.find(
+      (difference) => difference.row === paired.row && difference.operand === paired.misfit,
+    )!;
+    const producer = source.indexOf(FAILING_PRODUCER);
+    const first = new Set<string>();
+    for (const mode of HELD_MODES) {
+      const { plan } = mode.run(() =>
+        compileProjectWithBackend(
+          [{ path: "main.tease", source }],
+          { globals: ["hostValue"] },
+          CORE_BACKEND,
+        ),
+      );
+      assert.ok(plan !== null, `${source} [${mode.name}]`);
+      for (const hostValue of DOMAIN) {
+        const result = run(
+          plan,
+          createImmediatePacingRuntimeSnapshot(plan, { globals: { hostValue } }),
+        );
+        const failure = result.events.find((event) => event.kind === "runtimeFailure");
+        assert.ok(failure?.kind === "runtimeFailure", `${source} [${mode.name}]`);
+        const atProducer =
+          failure.span.start.offset >= producer &&
+          failure.span.end.offset <= producer + FAILING_PRODUCER.length;
+        assert.ok(
+          atProducer || declared.failure.includes(failure.code),
+          `${source}: ${failure.code}`,
+        );
+        first.add(atProducer ? `the producer (${failure.code})` : `the command (${failure.code})`);
+      }
+    }
+    // (which comes first is recorded, not ruled)
+    t.diagnostic(`${paired.command}: fails first at ${[...first].join(", ")}`);
+  }
 });

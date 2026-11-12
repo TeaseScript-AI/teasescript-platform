@@ -241,8 +241,9 @@ const commandWith = (row: SyntaxKind, operand: string, value: string): string =>
 export interface Sample {
   readonly row: SyntaxKind;
   readonly operand: string;
+  /** Its value's kind; none where the value fails before it is one (`FAILING_PRODUCER`). */
   readonly kind: string;
-  readonly origin: "literal" | "conversion" | "ingress";
+  readonly origin: "literal" | "conversion" | "ingress" | "failing";
   /** What stands before the command: the typed ingress, or nothing. */
   readonly prelude: string;
   /** The operand's value as the command writes it. */
@@ -252,6 +253,12 @@ export interface Sample {
   /** The host value its runs take besides `DOMAIN`'s: the ingress's kind. */
   readonly host?: SerializableRuntimeValue;
 }
+
+/**
+ * A value whose producer the slice admits and which fails at run time, before it is a value of any kind: a list read past
+ * its end. A sample's fourth origin, without a kind (the lead's R18).
+ */
+export const FAILING_PRODUCER = "[1][4]";
 
 /** Every sample: each command operand position (`OPERAND_TEMPLATES`) with each kind from each origin. */
 export function samples(): Sample[] {
@@ -275,6 +282,7 @@ export function samples(): Sample[] {
       value: "m",
       host,
     })),
+    { kind: "none", origin: "failing" as const, prelude: "", value: FAILING_PRODUCER },
   ];
   return Object.entries(OPERAND_TEMPLATES).flatMap(([key, operands]) => {
     // EVIDENCE: invariant: the templates' keys are AST kinds (`OPERAND_TEMPLATES`' type).
@@ -429,12 +437,14 @@ export const DECLARED_RUN_DIFFERENCES: readonly {
 /**
  * The command operand positions with a declared rule difference (#2488's design rulings, R2, keyed by position as the
  * lead's R14 has it: a closed list, which the command operand table empties). For a value the operand does not take,
- * whatever its kind and origin: where today's checker gives one of `today`'s compile errors, the route publishes as for
- * its fitting twin (the command with `FITTING_OPERANDS`' value), and a run reaching the command fails there with one of
- * `failure`'s codes, at the statement or at the value, nothing of the statement's effect happening; where today's checker
- * gives no error, both publish and their runs are equal. That holds wherever the command stands (R12), where the route
- * admits the value alone there (`let v = <the value>`); where it refuses that, it refuses the command alike (R16). The
- * guard samples kinds and origins (`samples`) and contexts (`CONTEXTS`).
+ * whatever its kind and origin, where today's checker gives one of `today`'s compile errors, the route publishes as for
+ * the command with a fitting operand (its fitting twin, `FITTING_OPERANDS`), and each run ends in one of three ways, in
+ * the order the runtime works (R18): where it does not reach the command, as the twin's; where an operand's evaluation
+ * fails, as that operand alone does (`let v = <operand>` there), same code and site; where every operand evaluates, the
+ * command refuses the value with one of `failure`'s codes, at the statement or at the value, nothing of its effect
+ * happening. Where today's checker gives no error, both publish and their runs are equal. That holds wherever the command
+ * stands (R12), where the route admits the value alone there; where it refuses that, it refuses the command alike (R16).
+ * The guard samples kinds and origins (`samples`, `PAIRED_SAMPLES`) and contexts (`CONTEXTS`).
  */
 export const DECLARED_RULE_DIFFERENCES: readonly {
   readonly row: SyntaxKind;
@@ -480,6 +490,48 @@ const FITTING_OPERANDS: Readonly<Partial<Record<SyntaxKind, Readonly<Record<stri
 /** A sample's fitting twin: its command with the position's fitting value. */
 export const twinCommand = (sample: Sample): string =>
   commandWith(sample.row, sample.operand, FITTING_OPERANDS[sample.row]![sample.operand]!);
+
+/**
+ * For each command with more than one operand position, the command with one operand it does not take and another whose
+ * producer fails at run time (R18): its run fails, whichever comes first.
+ */
+export const PAIRED_SAMPLES: readonly {
+  readonly row: SyntaxKind;
+  readonly misfit: string;
+  readonly failing: string;
+  readonly command: string;
+}[] = [
+  {
+    row: "openUrlStatement",
+    misfit: "url",
+    failing: "buttonText",
+    command: `openUrl(2, buttonText: ${FAILING_PRODUCER})`,
+  },
+  {
+    row: "exportTextStatement",
+    misfit: "text",
+    failing: "title",
+    command: `exportText(2, title: ${FAILING_PRODUCER})`,
+  },
+  {
+    row: "showPopupStatement",
+    misfit: "message",
+    failing: "buttonText",
+    command: `showPopup(message: [1], buttonText: ${FAILING_PRODUCER})`,
+  },
+  {
+    row: "showButtonStatement",
+    misfit: "background",
+    failing: "timeout",
+    command: `showButton "Go", background: 2, timeout: ${FAILING_PRODUCER}`,
+  },
+  {
+    row: "sayStatement",
+    misfit: "pacing",
+    failing: "presentation",
+    command: `say bubble(color: ${FAILING_PRODUCER}) "a", 2`,
+  },
+];
 
 /**
  * The control-flow contexts the guard samples a command in (R12, R16): wherever it stands, the route answers as for its
