@@ -1014,9 +1014,9 @@ screen takes typing is ignored.
 
 An answer shows at once: a clicked choice or button, and Enter or Send with typed text, put it in the chat straight
 away, and the question's controls go; a form's answer shows at once unless one of its edits is still on its way, and
-then with the runtime's reply. Nothing is greyed because an answer was sent. The Playroom first checks it by the
-runtime's own rules, and an answer they refuse never leaves the composer: the notice shows at once. The runtime stays
-the authority: when it refuses the answer, as when a block's question overtakes it, the answer leaves the chat, its
+then with the runtime's reply. Nothing is greyed because an answer was sent. Except while a form edit is still on its
+way, the Playroom first checks an answer by the runtime's own rules; one they refuse never leaves the composer, and the
+notice shows at once. The runtime stays the authority: when it refuses the answer, as when a block's question overtakes it, the answer leaves the chat, its
 typed text is back before what was typed since, with the notice, and its controls show again once its question does.
 A popup or an `exportText` dialog closes at once in the same way; when its close is refused, it shows again once it is
 the question.
