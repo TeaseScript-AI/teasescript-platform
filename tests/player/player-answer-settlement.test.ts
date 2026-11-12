@@ -6,6 +6,7 @@ import {
   memoryKeptSessionStore,
   type KeptSessionStore,
 } from "../../player/persistence/kept-sessions.js";
+import type { OpArgs, SessionOp } from "../../player/engine-bridge/op-catalogue.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import type { PlayerRuntimeSessionOptions } from "../../player/runtime/runtime-adapter.js";
 import {
@@ -188,7 +189,10 @@ async function page(context: TestContext, topology: Topology, script: string) {
   const connection = connections.first;
   const frame = frames();
   // The input section the answers use: what each run returned, and an act a row runs just before the answer's op is sent.
-  const sections = { returned: [] as (string | null)[], beforeSend: null as (() => void) | null };
+  const sections: { returned: (string | null)[]; beforeSend: (() => void) | null } = {
+    returned: [],
+    beforeSend: null,
+  };
   const scope = effectScope();
   const made = scope.run(() => {
     const player = usePlayerSession({
@@ -200,17 +204,20 @@ async function page(context: TestContext, topology: Topology, script: string) {
     const section: InputSectionHost = async (work, body) => {
       const result = await player.inputSection(work, (input, observed) =>
         body(
-          new Proxy(input, {
-            get(target, key) {
+          {
+            owned: () => input.owned(),
+            send: <O extends SessionOp>(
+              ...call: O extends unknown ? [op: O, args: OpArgs<O>] : never
+            ) => {
               const act = sections.beforeSend;
-              if (key === "send" && act !== null) {
-                sections.beforeSend = null;
-                act();
-              }
-              const value: unknown = Reflect.get(target, key, target);
-              return typeof value === "function" ? value.bind(target) : value;
+              sections.beforeSend = null;
+              act?.();
+              return input.send<O>(...call);
             },
-          }),
+            get session() {
+              return input.session;
+            },
+          },
           observed,
         ),
       );
