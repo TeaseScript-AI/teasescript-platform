@@ -30,7 +30,10 @@ const props = withDefaults(
      * chooses to, and a warning while Caps Lock is on. Each new interaction starts masked. Its text has one line.
      */
     password?: boolean;
-    /** The lock's password asked again on the same line: its eye button names the repeated password. */
+    /**
+     * The lock's password asked again on the same line: its eye button names the repeated password, and a Back button
+     * before the field asks for the password again from the start.
+     */
     repeated?: boolean;
     feedback?: string;
     /** A skippable pacing gate is waiting; Space in the empty input settles it. */
@@ -78,8 +81,10 @@ const emit = defineEmits<{
   skip: [];
   /** Space in the empty input while a preselected button waits. */
   activate: [];
-  /** Escape in the input, which closes an edited form field. */
+  /** Escape in the input, which closes an edited form field or, in the repeated password, asks for it again. */
   escape: [];
+  /** Back in the repeated password: the password is asked again from the start. */
+  back: [];
   /** Files the player chose or dropped, with the `attach.request` offered when the picker opened or at the drop. */
   files: [files: readonly File[], request: Request];
 }>();
@@ -354,6 +359,20 @@ defineExpose({ focusInput, selectInput, openPicker, finishComposition });
         data-runtime-composer
         @submit.prevent="emit('submit', 'button')"
       >
+        <Button
+          v-if="repeated"
+          type="button"
+          variant="ghost"
+          size="sm"
+          data-composer-back
+          title="Type the password again"
+          :disabled="disabled || readonly"
+          @click="emit('back')"
+          @pointerdown="preserveEditingFocus"
+          @mousedown="keepMouseEditingFocus"
+        >
+          Back
+        </Button>
         <template v-if="attach">
           <Button
             type="button"
@@ -531,7 +550,7 @@ defineExpose({ focusInput, selectInput, openPicker, finishComposition });
   gap: 8px;
   font-size: var(--player-reading-font-size, 1rem);
 }
-.composer-form:has(> [data-composer-attach]) {
+.composer-form:has(> [data-composer-attach], > [data-composer-back]) {
   grid-template-columns: auto minmax(0, 1fr) auto;
 }
 .conversation-glass[data-drop-active] {
