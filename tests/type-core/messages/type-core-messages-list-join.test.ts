@@ -223,6 +223,35 @@ test("a list join answers the same inline as kept in a variable (#1272)", () => 
         }
 });
 
+const domains = [
+  ["concrete", 1, "let d = [1]"],
+  ["nullable", 1, "let d: integer?[] = [1]"],
+  ["union", 1, "let d: (integer | string)[] = [1]"],
+  ["open", 1, "let d: list = [1]"],
+  ["null", 1, "let d: null[] = [null]"],
+  ["two-concrete", 2, "let d = [[1]]"],
+  ["two-open", 2, "let d: list[] = [[1]]"],
+  ["two-open-empty", 2, "let d: list[] = []"],
+  ["two-null", 2, "let d: null[][] = [[null]]"],
+] as const;
+// (whole numbers, text, `null`, and `w`, a written `integer[]`: before, after or beside the domain's operand)
+const neighbours = { I: "2", S: '"tail"', N: "null", W: "w" } as const;
+const positions = [
+  ["left", "X", (j: string) => j],
+  ["right", "X", (j: string) => j],
+  ["left of left", "XY", (j: string) => `${j} + Y`],
+  ["right of left", "XY", (j: string) => `${j} + Y`],
+  ["left of right", "XY", (j: string) => `Y + ${j}`],
+  ["right of right", "XY", (j: string) => `Y + ${j}`],
+] as const;
+const pairs = [
+  ["I", "S"],
+  ["N", "S"],
+  ["S", "I"],
+  ["W", "S"],
+  ["S", "W"],
+] as const;
+
 /**
  * #1272 (Astra r2's B1 and Codex r9's B1 on #1310, ADR 0021 1.3, V30 §13 and §16, `joinedDomain`): an operand's element
  * domain decides a join as it decides a variable holding the join. An open one (`list`, `list[]` with or without an
@@ -236,34 +265,6 @@ test("a list join answers the same inline as kept in a variable (#1272)", () => 
  * orders, the sharing on and off.
  */
 test("an open or null-only operand proves no conflict in a list join, inline as kept (#1272)", () => {
-  const domains = [
-    ["concrete", 1, "let d = [1]"],
-    ["nullable", 1, "let d: integer?[] = [1]"],
-    ["union", 1, "let d: (integer | string)[] = [1]"],
-    ["open", 1, "let d: list = [1]"],
-    ["null", 1, "let d: null[] = [null]"],
-    ["two-concrete", 2, "let d = [[1]]"],
-    ["two-open", 2, "let d: list[] = [[1]]"],
-    ["two-open-empty", 2, "let d: list[] = []"],
-    ["two-null", 2, "let d: null[][] = [[null]]"],
-  ] as const;
-  // (whole numbers, text, `null`, and `w`, a written `integer[]`: before, after or beside the domain's operand)
-  const neighbours = { I: "2", S: '"tail"', N: "null", W: "w" } as const;
-  const positions = [
-    ["left", "X", (j: string) => j],
-    ["right", "X", (j: string) => j],
-    ["left of left", "XY", (j: string) => `${j} + Y`],
-    ["right of left", "XY", (j: string) => `${j} + Y`],
-    ["left of right", "XY", (j: string) => `Y + ${j}`],
-    ["right of right", "XY", (j: string) => `Y + ${j}`],
-  ] as const;
-  const pairs = [
-    ["I", "S"],
-    ["N", "S"],
-    ["S", "I"],
-    ["W", "S"],
-    ["S", "W"],
-  ] as const;
   let checked = 0;
   for (const [domain, depth, declaration] of domains) {
     const wrap = (element: string) =>
