@@ -180,7 +180,7 @@ test("a maker is given a fresh literal or nothing (#1072 R25)", () => {
   );
 });
 
-test("`Reflect.set`, a frozen-state branch, `structuredClone` and an in-place definition are refused in the checked core files (#1072 R21)", () => {
+test("`Reflect.set`, a frozen-state branch, `structuredClone` and an in-place definer, by its name anywhere, are refused in the checked core files (#1072 R21)", () => {
   const lines = [
     "Reflect.set(value, 'n', 1);",
     "if (Object.isFrozen(value)) skip();",
@@ -191,9 +191,14 @@ test("`Reflect.set`, a frozen-state branch, `structuredClone` and an in-place de
     "Object.defineProperty(value, 'n', { get: () => 1 });",
     "Object.defineProperties(value, {});",
     "Reflect.defineProperty(value, 'n', { value: 1 });",
+    "const define = Object.defineProperty;",
+    "const { defineProperties } = Object;",
+    "Reflect['defineProperty'](value, 'n', { value: 1 });",
+    "value.__defineSetter__('n', () => {});",
+    "const definesNothing = Object.getOwnPropertyDescriptor(value, 'n');",
   ].join("\n");
-  assert.deepEqual(guarded(lines, "file"), [1, 2, 3, 4, 5, 7, 8, 9]);
-  assert.deepEqual(guarded(lines, "module"), [1, 2, 3, 4, 5, 7, 8, 9]);
+  assert.deepEqual(guarded(lines, "file"), [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13]);
+  assert.deepEqual(guarded(lines, "module"), [1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13]);
   assert.deepEqual(guarded(lines, null), []);
   assert.deepEqual(guarded(lines, "helper"), []);
 });
