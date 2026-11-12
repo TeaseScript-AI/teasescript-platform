@@ -689,6 +689,7 @@ export function joinElements(
       );
     }
     const stop = undecided ?? stopped;
+    // (no test reaches this guard; it stays so that a stop never loses a check, #2289)
     if (halted && stop !== undefined) return { held: null, report: () => stop(root.result) };
     return done(held.get(root.result) ?? null);
   };

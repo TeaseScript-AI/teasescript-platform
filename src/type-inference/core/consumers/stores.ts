@@ -84,6 +84,7 @@ export function decide(walk: Consumers, group: DecidedAt, lazily = false): Decis
   try {
     const decision = walk.admission.decide(group, lazily);
     // (#2289: a decision a literal's stopped element left undecided owes what a stopped one's stores owe)
+    // (no test reaches this guard; it stays so that a stop never loses a check, #2289)
     if (decision === null && walk.admission.budgetUndecidedKey(group))
       walk.stoppedStores(root, stepsArray(walk.admission.stepsAt(group)));
     return decision;

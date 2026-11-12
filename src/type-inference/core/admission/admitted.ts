@@ -90,6 +90,7 @@ export function admitted(admission: Admission, place: PlaceId, path: readonly st
   pull(admission, place, path, key);
   // (#2289 C-STOP-RECHECK: `lazily` or `pull` may have made the key's first decision, and a literal's stopped element
   // left it undecided, before any fallback below)
+  // (no test reaches this guard; it stays so that a stop never loses a check, #2289)
   if (admission.decisionStopped(place, path)) return [];
   // (an unrestricted written part, or a copy's, admits every kind at and below it: never what is stored)
   if (admission.unrestricted.has(key) || openBelow(admission, place, path)) return ["unknown"];
@@ -158,6 +159,7 @@ function retainedSource(
     if (term !== null) return { tags: [...new Set(typeTags(term))], inherited: at.copied };
     // (a decision that stopped, the path's own or a copy's source's, retains nothing: undecided, S3 §5; nor one a
     // literal's stopped element left undecided, at the path or above it, #2289)
+    // (no test reaches this guard; it stays so that a stop never loses a check, #2289)
     if (
       admission.decisionStopped(at.place, at.path) ||
       admission.budgetUndecidedAt(at.place, at.path, true)
@@ -223,6 +225,7 @@ function retainedSource(
 
 /** Whether a path, or a path above it, is one A4's copies land at through a literal's cell (`literalLandings`). */
 function literalBorne(admission: Admission, place: PlaceId, path: readonly string[]): boolean {
+  // (no test reaches this guard; it stays so that a stop never loses a check, #2289)
   if (admission.literalLandings.size === 0) return false;
   for (let length = 0; length <= path.length; length += 1)
     if (admission.literalLandings.has(keptKey(admission.work, place, path.slice(0, length))))

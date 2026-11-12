@@ -30,6 +30,7 @@ export function enclosingStores(walk: Consumers): void {
   const work = program.work;
   // (shortest first, so each meets every stop above it among those placed before it; with the keys a literal's stopped
   // element left undecided, `budgetUndecided`, #2289)
+  // (no test reaches this guard; it stays so that a stop never loses a check, #2289)
   const stops = [...contract.stoppedKeys(), ...walk.admission.budgetUndecided.values()].sort(
     (a, b) => a.path.length - b.path.length,
   );
