@@ -44,6 +44,11 @@ export interface PlayerMessagePresentation {
   readonly responseKind?: "choice" | "button" | "form";
   readonly presentation?: MessagePresentation;
   /**
+   * An answer's row key, from the interaction it answers (`answer-<actionId>`): the Player shows the answer under that key
+   * before the runtime settles it, and this entry then takes that row over.
+   */
+  readonly renderKey?: string;
+  /**
    * A submitted form's answer: every field in field order, a toggle with its state and any other field with its value
    * as shown, which the Player shows one per line; `text` is its plain form.
    */
