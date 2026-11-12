@@ -153,6 +153,26 @@ test("a split is written as assigned: lines verbatim in OLD's order, exports, im
   assert.match(r.read(A), /^import \{ twice, PAIR \} from "\.\.\/helpers\/split-setup\.js";$/mu);
 });
 
+test("a helper-module split: OLD keeps its tests, and ranges move its helpers into the setup module", (t) => {
+  const r = repository(t);
+  const result = r.run({
+    old: OLD_PATH,
+    setup: { path: SETUP, header: "The shared values.", lines: [[14, 17]] },
+    files: { [OLD_PATH]: { header: null, tests: [1, 2], lines: [[1, 1]] } },
+  });
+  assert.equal(result.status, 0, result.err);
+  assert.match(r.read(SETUP), /^export function twice\(/mu);
+  assert.match(
+    r.read(OLD_PATH),
+    /^\/\/ pins: [^\n]*\n\nimport assert[^]*\nimport \{ type One, ONE, twice \} from "\.\.\/helpers\/split-setup\.js";\n\nconst PAIR/u,
+  );
+  const check = spawnSync(process.execPath, [RECONSTRUCT, r.base, OLD_PATH, SETUP, OLD_PATH], {
+    cwd: r.fixture,
+    encoding: "utf8",
+  });
+  assert.equal(check.status, 0, check.stdout + check.stderr);
+});
+
 test("--list prints each statement: a test's number and title, a declaration's names and what it reads", (t) => {
   const r = repository(t);
   const listed = r.run(ASSIGN, "--list");
@@ -173,6 +193,7 @@ test("an assignment the split cannot follow is refused, and nothing is written",
     "test 2 is named by": files({ tests: [1, 2] }, {}),
     "test 2 is named by no file": files({}, { tests: [] }),
     "OLD has no test 3": files({ tests: [1, 3] }, {}),
+    "OLD's leading line 1 is in no range": files({ lines: [] }, {}),
     "overlaps another at line 21": files({ lines: [[20, 22]] }, { lines: [[21, 21]] }),
     "a range cuts the statement's lines 15-17": files({ lines: [[15, 16]] }, {}),
     "lies in OLD's imports": files({ lines: [[3, 3]] }, {}),

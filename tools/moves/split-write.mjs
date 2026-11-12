@@ -25,12 +25,13 @@
 // a type alias with `type`), and OLD's imports filtered to the names its statements use (a relative specifier rewritten
 // for its folder; an import without bindings goes to every file). Lines after OLD's last statement go with it.
 //
-// Refused, writing nothing (exit 2): a test named twice or not at all, or a number OLD does not have; a statement that is
-// neither a test nor a declaration and in no range; a declaration no test reaches; a range that overlaps another, cuts
-// a statement's own lines, lies in OLD's imports or crosses from its leading `//` lines into the body; a file whose
-// declaration reads one placed in another file that is not the setup module; a target that exists at REV and is not
-// OLD; a missing header. On success it removes OLD from the working tree unless OLD is a target, and prints each file
-// written with its line count. Prettier is not run: format the written files afterwards.
+// Refused, writing nothing (exit 2): a leading `//` line of OLD in no range (it would be lost); a test named twice or
+// not at all, or a number OLD does not have; a statement that is neither a test nor a declaration and in no range; a
+// declaration no test reaches; a range that overlaps another, cuts a statement's own lines, lies in OLD's imports or
+// crosses from its leading `//` lines into the body; a file whose declaration reads one placed in another file that is
+// not the setup module; a target that exists at REV and is not OLD; a missing header. On success it removes OLD from
+// the working tree unless OLD is a target, and prints each file written with its line count. Prettier is not run:
+// format the written files afterwards.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import path from "node:path";
@@ -167,6 +168,8 @@ function place(old, lines, assign) {
         ranged.set(line, file);
       }
     }
+  for (let line = 1; line <= lead; line += 1)
+    refuseUnless(ranged.has(line), `OLD's leading line ${line} is in no range: ${lines[line - 1]}`);
   const fileOfTest = new Map();
   for (const [file, spec] of Object.entries(assign.files))
     for (const test of spec.tests ?? []) {
