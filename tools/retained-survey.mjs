@@ -2,15 +2,16 @@
 // file wrote in a survey (`RETAINED_SURVEY=<folder>`, `tests/helpers/retained-instrument-preload.ts`), one JSON file per
 // test process, read from the folders given and every folder below them (a gathered queue campaign included). It prints
 // the files surveyed, the shapes refused and the writes to frozen data, then each refusal and frozen write by its
-// count, and names each test file of `tests/type-core/` and `tests/type-core-stop/` (read from the working directory)
-// that wrote no survey.
+// count, and names each test file of `tests/type-core/` and `tests/type-core-stop/`, a folder down in either included
+// (as the suite reads them, `suiteTestFiles`, from the working directory), that wrote no survey.
 //
 //   node tools/retained-survey.mjs FOLDER...
 //
 // Exit 0: every type-core test file surveyed, no refusal and no frozen write; 1: any of them missing or noted; 2: usage.
 // Whether the tests passed is not in these files: the runs' own exits say it.
 import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import { suiteTestFiles } from "./test-shards.mjs";
 
 /** Each survey under `folder` and below it: a JSON object naming its `file` with its `noted` and `frozen` counts. */
 function surveys(folder) {
@@ -47,10 +48,9 @@ for (const survey of folders.flatMap(surveys)) {
   add(frozen, survey.frozen);
 }
 const sum = (counts) => [...counts.values()].reduce((a, b) => a + b, 0);
-const missing = ["tests/type-core", "tests/type-core-stop"]
-  .flatMap((folder) => readdirSync(folder))
-  .filter((name) => name.endsWith(".test.ts"))
-  .map((name) => name.replace(/\.ts$/u, ""))
+const missing = suiteTestFiles("tests", ".test.ts")
+  .filter((path) => /^type-core(-stop)?\//u.test(path))
+  .map((path) => basename(path, ".ts"))
   .filter((name) => !files.has(name));
 process.stdout.write(
   `retained survey: ${files.size} files, ${sum(noted)} refusals, ${sum(frozen)} frozen writes\n`,
