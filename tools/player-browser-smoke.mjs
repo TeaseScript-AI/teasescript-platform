@@ -2,6 +2,7 @@ import { mkdir, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { findChromium } from "./find-chromium.mjs";
 import { prefillsScenario } from "./player-smoke/scenarios/prefills.mjs";
+import { instantAnswersScenario } from "./player-smoke/scenarios/answers.mjs";
 import { startSmokeServer } from "./player-smoke/server.mjs";
 import {
   connectCdp,
@@ -143,6 +144,7 @@ async function main() {
         ["lockKept", () => lockKeptScenario(cdp, origin)],
         ["publicKey", () => publicKeyScenario(cdp, origin, profile)],
         ["prefills", () => prefillsScenario(cdp, origin)],
+        ["instantAnswers", () => instantAnswersScenario(cdp, origin)],
       ];
       const named = (process.env.PLAYER_SMOKE_ONLY ?? "")
         .split(",")
@@ -165,7 +167,7 @@ async function main() {
       console.log(
         selected.size > 0
           ? `player-browser-smoke: PASS only ${[...selected].join(", ")}`
-          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a session kept across a reload, saved data exported and imported, a session exported and continued in another profile, the debug export after a script error, the rewind history's IndexedDB store, Back and Return in the Player, readable text on photo colours and the vignette, the reading position while messages change and enter, the camera, the camera view's controls on a phone, the lock dialogs, askPassword and the lock calls' password fields, also across blocks, a lock dialog kept across a reload, a public key's unlock request, and each question's prefill or typed text in the composer",
+          : "player-browser-smoke: PASS technical playground, the repository demo on /player/ and over plain HTTP, packages opened by URL, script storage, a session kept across a reload, saved data exported and imported, a session exported and continued in another profile, the debug export after a script error, the rewind history's IndexedDB store, Back and Return in the Player, readable text on photo colours and the vignette, the reading position while messages change and enter, the camera, the camera view's controls on a phone, the lock dialogs, askPassword and the lock calls' password fields, also across blocks, a lock dialog kept across a reload, a public key's unlock request, each question's prefill or typed text in the composer, and answers shown at once and handed over to the runtime's rows",
       );
     } finally {
       cdp.close();
