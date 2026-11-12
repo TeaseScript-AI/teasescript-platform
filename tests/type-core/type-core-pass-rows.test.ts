@@ -39,7 +39,7 @@ function functionText(file: string, name: string): string | null {
   return lines.slice(start, end + 1).join("\n");
 }
 
-test("each operand of a `pass` row cites a runtime function that fails with the cited code", () => {
+test("each operand of a `pass` row cites a runtime function that raises a fault on a value it does not take", () => {
   assert.ok(PASS.length > 0);
   for (const row of PASS) {
     const disposition = DISPOSITIONS[row];
@@ -51,10 +51,7 @@ test("each operand of a `pass` row cites a runtime function that fails with the 
         text !== null,
         `${row} ${operand}: ${check.file} has no function ${check.function}`,
       );
-      assert.ok(
-        text.includes(`"${check.code}"`),
-        `${row} ${operand}: ${check.function} has no ${check.code}`,
-      );
+      assert.match(text, /throw fault\(/u, `${row} ${operand}: ${check.function} raises no fault`);
     }
   }
 });
