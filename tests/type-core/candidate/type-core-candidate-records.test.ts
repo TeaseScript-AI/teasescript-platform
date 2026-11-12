@@ -30,6 +30,7 @@ import {
   heldBack,
   readFixture,
 } from "../../helpers/type-core/type-core-fixture.js";
+import { evaluateProject } from "../../helpers/type-core/derived-transfers.js";
 import {
   assignments,
   derivedContent,
@@ -302,11 +303,17 @@ test("every positive-list record the candidate route reaches plans and runs as i
     // runs: the original under every assignment of its host input (in the domain's order), each run once, predicted
     // stopping at its first failing check and evaluated through every check (for the discharges)
     const plan = result.plan;
+    // (across the record's files, from its first: a transfer starts the file it names, `derived-transfers.ts`)
+    const project = request.files.map((file, index) => ({
+      path: file.path,
+      syntax: derivedFiles[index]![0],
+      ...derivedFiles[index]![1],
+    }));
     const own = assignments(["hostValue"]).map((inputs) => ({
       inputs,
       ran: runGlobals(plan, inputs),
-      predicted: evaluate(syntax, stores, inputs, false, content).run,
-      events: evaluate(syntax, stores, inputs, true, content).events,
+      predicted: evaluateProject(project, inputs).run,
+      events: evaluateProject(project, inputs, true).events,
     }));
     // the original, as written: each input at the value fitting the earliest check it feeds
     const original =

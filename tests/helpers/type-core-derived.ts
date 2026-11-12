@@ -2236,6 +2236,16 @@ class Stop {
   public constructor(readonly failure: string | null) {}
 }
 
+/** Where a file's evaluation ends by a `goto`: the statement, and the value of its `script(…)` path or its quoted path. */
+export interface TransferEnd {
+  readonly statement: Extract<Statement, { kind: "gotoStatement" }>;
+  readonly path: SerializableRuntimeValue;
+}
+
+class Transfer {
+  public constructor(readonly end: TransferEnd) {}
+}
+
 function fitsType(value: SerializableRuntimeValue, type: DerivedType): boolean {
   if (type.kind === "union") return type.members.some((member) => fitsType(value, member));
   if (type.kind === "kinds")
@@ -2417,7 +2427,12 @@ export function evaluate(
     expected: [],
     loads: [],
   },
-): { readonly run: PredictedRun; readonly events: readonly CheckEvent[] } {
+): {
+  readonly run: PredictedRun;
+  readonly events: readonly CheckEvent[];
+  /** Where the file ends by a transfer (`derived-transfers.ts` runs the next file). */
+  readonly transfer: TransferEnd | null;
+} {
   const env = new Map<string, Value>();
   const said: { text: string; at: number }[] = [];
   const events: CheckEvent[] = [];
@@ -3063,16 +3078,31 @@ export function evaluate(
           at: statement.span.start.offset,
         });
       } else if (statement.kind === "exitStatement") throw new Stop(null);
-      else throw new Underivable(`a ${statement.kind}`);
+      else if (statement.kind === "gotoStatement") {
+        const { target } = statement;
+        const call = target.kind === "scriptTarget" ? target.expression : null;
+        const argument = call?.kind === "callExpression" ? call.arguments[0] : undefined;
+        const path = target.kind === "fileTarget" ? target.path : null;
+        throw new Transfer({
+          statement,
+          path: argument === undefined ? path : value(argument.value).v,
+        });
+      } else throw new Underivable(`a ${statement.kind}`);
     }
   };
   let failure: string | null = null;
+  let transfer: TransferEnd | null = null;
   try {
     run(statements);
   } catch (stop) {
-    if (!(stop instanceof Stop)) throw stop;
-    failure = stop.failure;
+    if (stop instanceof Transfer) transfer = stop.end;
+    else if (stop instanceof Stop) failure = stop.failure;
+    else throw stop;
   }
   failure ??= first;
-  return { run: { status: failure === null ? "halted" : "failed", failure, said }, events };
+  return {
+    run: { status: failure === null ? "halted" : "failed", failure, said },
+    events,
+    transfer,
+  };
 }
