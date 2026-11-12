@@ -126,11 +126,9 @@ function refer(
   holder.refSeen.add(key);
   contract.facts.markNodes += 1;
   const list = holder.refsAt.get(where);
-  if (list === undefined) holder.refsAt.set(where, [{ to, shift }]);
-  else {
-    amend(list);
-    list.push({ to, shift });
-  }
+  if (list === undefined)
+    holder.refsAt.set(where, Retained.array("Holder.refsAt[]", [{ to, shift }]));
+  else list.push({ to, shift });
 }
 
 /** A key's holder: its own reads, and a reference to its prefix's at its last step (one per projection). */
@@ -414,7 +412,6 @@ export function depthOf(contract: Contract, holder: Holder): number {
     depth: number;
   }[] = [];
   const open = (each: Holder): void => {
-    amend(each);
     each.depth = Infinity;
     let depth = guards.testedLength();
     for (const at of each.guarded) depth = Math.max(depth, contract.pathDepths[at]!);
@@ -496,7 +493,7 @@ export function marksAt(contract: Contract, holder: Holder | null, asked: Rest):
     const depth = depthOf(contract, asked);
     const rest = at.length > depth ? at.slice(0, depth) : at;
     const memoKey = pathText(rest);
-    asked.memo ??= Retained.held(asked, Retained.map("marks.asked.memo"));
+    asked.memo ??= Retained.map("marks.asked.memo");
     const known = asked.memo.get(memoKey);
     if (known !== undefined) return known;
     // a reference back to itself answers no
@@ -899,7 +896,7 @@ function referencesBy(
   where: number,
   references: readonly HolderReference[],
 ): ReferencesByStep {
-  holder.byStep ??= Retained.held(holder, Retained.map("Holder.byStep"));
+  holder.byStep ??= Retained.map("Holder.byStep");
   const known = holder.byStep.get(where);
   if (known !== undefined) return known;
   const byStep = Retained.map<string, HolderReference[]>("Holder.byStep[].byStep");
@@ -942,7 +939,6 @@ function markFirsts(contract: Contract, holder: Holder): ReadonlySet<string> | n
     if (!opened.has(top)) {
       opened.add(top);
       // (a cycle back to it may depend on any step)
-      amend(top);
       top.firsts = null;
       for (const reference of top.refsAt.get(0) ?? [])
         if (reference.shift.length === 0 && reference.to.firsts === undefined)
