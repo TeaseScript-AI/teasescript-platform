@@ -339,6 +339,24 @@ whole and runs those programs in both orders: `TEASESCRIPT_SWEEP=full npm run te
 is the sweeps' queue evidence, which the builder of a change that can move a stop runs on a worker before a type-core
 review round, beside the generator areas above.
 
+### Frozen retained state
+
+In the type-core suites, a test-mode instrument (`tests/helpers/retained-instrument.ts`, installed by its preload
+through `tools/test-output-filter.mjs`) checks the state the type core keeps between solver runs where it is stored and
+at each run switch, and freezes what an ended run stored (#1072). It runs in two regimes:
+
+- **CI** freezes only the files of `tests/helpers/retained-subset.ts`: a greedy cover, by their frozen cost, of every
+  retained kind by its site, owner kind and registered function that the type-core files exercise frozen. That file
+  names what the subset does not exercise. Its work-pinning suites run again unfrozen in `tests/type-core-production/`.
+- **The whole survey** freezes every type-core file, as one queue pool, outside CI and never scheduled. A pull request
+  that changes `src/type-inference/core/**`, its retained makers included, reports it at its head in its READY: the
+  pool's job exits, and the files, refusals and frozen writes that `node tools/retained-survey.mjs FOLDER` counts from
+  its gathered results. Each job runs `RETAINED_SURVEY="$SX_OUT/survey" node tools/test-output-filter.mjs FILE...`.
+  `RETAINED_FREEZE=all` freezes every file without the survey's notes.
+
+`RETAINED_MEASURE=<folder>`, with `NODE_OPTIONS=--enable-source-maps`, freezes every file too and writes what each
+exercises by its source site: the measurement the subset is chosen from.
+
 ## Test layers
 
 The testing strategy uses complementary layers:
