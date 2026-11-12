@@ -3,8 +3,9 @@ title: "Composer area"
 ---
 // The composer's area while an answer is in flight (#2430): each choice presents one kind of question, which the browser
 // kit's `keys` scenario answers and compares, in the answer's flight, with the area while nothing is asked ("Idle").
-// "Dated form" and "Lock" hold the focus rows: a date or time field's commit, and the lock's phases.
-let which = askChoice "Idle", "Text", "Number", "Date", "Time", "Choice", "Button", "Form", "Popup", "Export", "Image", "Password", "Dated form", "Lock"
+// "Dated form" and "Lock" hold the focus rows: a date or time field's commit, and the lock's phases. "Lock dialog" is
+// the lock's own dialog, which the rows of a Start prepared over a question show besides the kinds above.
+let which = askChoice "Idle", "Text", "Number", "Date", "Time", "Choice", "Button", "Form", "Popup", "Export", "Image", "Password", "Dated form", "Lock", "Lock dialog"
 if which == "Idle" {
     say "Nothing is asked.", instant
     wait 600 s
@@ -34,6 +35,8 @@ if which == "Idle" {
     let when = askForm "When?", fields: { day: toDate("2026-10-04"), at: toTime("18:30") }
 } else if which == "Lock" {
     let note = encryptText("A note", password: askPassword("Choose a code"), publicKey: false, timeLock: false)
+} else if which == "Lock dialog" {
+    let sealed = encryptText("A note")
 }
 showButton "Done"
 exit
