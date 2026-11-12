@@ -27,9 +27,9 @@ export interface RetainedRecorder {
   /** An array made from `items`, a fresh array literal (`Retained.array`). */
   array<T>(name: string, items: T[]): T[];
   /** `fn`, a function retained state may keep, registered where it is made (`Retained.closure`). */
-  closure(name: string, fn: object): void;
+  closure<T extends object>(name: string, fn: T): void;
   /** `program`, indexed: its graph is held as it is, never written after (`Retained.program`). */
-  program(program: object): void;
+  program<T extends object>(program: T): void;
   /** An owner's own enumerable fields, each an entry; `hidden` gives its private ones that hold retained state. */
   owner<T extends object>(
     owner: T,
@@ -108,7 +108,7 @@ export const Retained = {
    * names what the function captures and why that is covered: a closed-list kind or an owner, a value fixed when it is
    * made, or a module's own binding. The instrument does not see the captures; the comment is read at review.
    */
-  closure<T extends (...args: never[]) => unknown>(name: string, fn: T): T {
+  closure<T extends (...args: never[]) => void>(name: string, fn: T): T {
     if (active !== null) active.closure(name, fn);
     return fn;
   },
