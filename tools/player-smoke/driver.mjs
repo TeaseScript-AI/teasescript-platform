@@ -89,6 +89,34 @@ export async function key(cdp, name, { modifiers = 0, commands } = {}) {
   await cdp.call("Input.dispatchKeyEvent", { type: "keyUp", ...event });
 }
 
+/**
+ * Installs `source` in every document the page loads from now on. Returns what `removeInitScript` takes; a reply without
+ * an identifier fails here, so no scenario leaves a script installed by reading the reply wrong.
+ */
+export async function addInitScript(cdp, source) {
+  const reply = await cdp.call("Page.addScriptToEvaluateOnNewDocument", { source });
+  const identifier = reply?.result?.identifier;
+  if (typeof identifier !== "string")
+    throw new Error(`The page took no init script: ${JSON.stringify(reply?.error ?? reply)}`);
+  return identifier;
+}
+
+/** Removes the init script `addInitScript` installed. */
+export async function removeInitScript(cdp, identifier) {
+  const reply = await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
+  if (reply?.error)
+    throw new Error(`The init script was not removed: ${JSON.stringify(reply.error)}`);
+}
+
+/** The page as a PNG, `options` as `Page.captureScreenshot` takes them. */
+export async function screenshot(cdp, options = {}) {
+  const reply = await cdp.call("Page.captureScreenshot", { format: "png", ...options });
+  const data = reply?.result?.data;
+  if (typeof data !== "string")
+    throw new Error(`The page gave no screenshot: ${JSON.stringify(reply?.error ?? reply)}`);
+  return Buffer.from(data, "base64");
+}
+
 /** A real Enter in the focused element: its key code and its text, as a keyboard sends them. */
 export async function pressEnter(cdp) {
   for (const type of ["keyDown", "keyUp"])

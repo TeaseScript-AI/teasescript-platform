@@ -13,6 +13,7 @@ import {
   openPicker,
   physicalClick,
   pressPoint,
+  screenshot,
   setInputFiles,
   setViewport,
   solidPng,
@@ -252,9 +253,9 @@ export async function photoVignetteScenario(cdp, origin) {
         `const style = document.createElement('style'); style.id = 'smoke-hidden-glyphs'; style.textContent = '.transcript-entry, .transcript-entry * { -webkit-text-fill-color: transparent !important; text-decoration-color: transparent !important; text-shadow: none !important; }'; document.head.append(style);`,
       );
       await delay(100);
-      const shot = await cdp.call("Page.captureScreenshot", { format: "png" });
+      const shot = await screenshot(cdp);
       await evaluate(cdp, `document.getElementById('smoke-hidden-glyphs').remove();`);
-      const image = decodePng(Buffer.from(shot.result.data, "base64"));
+      const image = decodePng(shot);
       for (const { text, ink, x, y } of points) {
         const offset = (y * image.width + x) * image.channels;
         const background = new Color(
