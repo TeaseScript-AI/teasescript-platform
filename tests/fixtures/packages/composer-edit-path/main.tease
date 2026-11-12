@@ -1,0 +1,21 @@
+timer async hidden 3 s {
+    let interrupting = askPassword("Timer password")
+    say "Timer password given", instant
+}
+let chat = askText("Chat?")
+say "Chat: ${chat}", instant
+timer async hidden 3 s {
+    let locked = encryptText("x", password: askPassword("Timer lock"), publicKey: false, timeLock: false)
+    say "Timer locked", instant
+}
+let form = askForm("Form", fields: { name: "Ada" }, submit: "Continue")
+say "Name: ${form.name}", instant
+let sent = askText("Send?")
+say "Sent: ${sent}", instant
+let entered = askText("Enter?")
+say "Entered: ${entered}", instant
+let bySend = encryptText("y", password: askPassword("Lock by Send"), publicKey: false, timeLock: false)
+say "Locked by Send", instant
+let byEnter = encryptText("z", password: askPassword("Lock by Enter"), publicKey: false, timeLock: false)
+say "Locked by Enter", instant
+exit

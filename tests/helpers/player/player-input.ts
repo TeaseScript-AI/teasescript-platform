@@ -40,12 +40,13 @@ export interface RuntimeInput {
     presented: number | undefined,
     target: (session: PlayerSessionView) => number | undefined,
     intent: Intent,
+    onPost?: () => void,
   ): Promise<InputResult>;
   draftInput(
     section: unknown,
     target: { readonly actionId: number; readonly fieldId: string },
     text: string,
-  ): Promise<PlayerSessionView | null>;
+  ): Promise<{ readonly session: PlayerSessionView | null; readonly taken: boolean }>;
 }
 
 /** An intent of a control: opaque to the tests, which pass it from `intents` or a composable to the chain. */
