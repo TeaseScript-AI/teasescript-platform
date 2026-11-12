@@ -33,6 +33,7 @@ import {
   topsAt,
 } from "./layers.js";
 import { prefixStores } from "./stores.js";
+import { Retained } from "../../retained/retained.js";
 
 // #1466: what a consumer reads of a prefix's layers at a path, as one summary per layer and path: a demand that proves
 // its support with each source's own answer (`subAt`) in its leaf, so the solver owns it as every answer (its reads,
@@ -77,7 +78,10 @@ function layerDemand(contract: Contract, layer: SubLayer, path: number): ProofDe
     offset: -1,
     proves: true,
     // #1668: the demand's own run: its frame's flow, taken as it starts
-    make: () => layerMade(contract, layer, stepsOfId(contract, keyIdAt(0, path)).rest(), path),
+    // (#1072 R26: captures the contract (an owner), `layer`, fixed when it is made, and `path`, a number)
+    make: Retained.closure("SubLayer.paths.demand", () =>
+      layerMade(contract, layer, stepsOfId(contract, keyIdAt(0, path)).rest(), path),
+    ),
   };
   return at.demand;
 }

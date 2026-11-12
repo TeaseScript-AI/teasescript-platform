@@ -58,6 +58,7 @@ import {
   publishedUpToOrder,
   stopSet,
 } from "../helpers/type-core-oracles.js";
+import { Retained } from "../../src/type-inference/core/retained/retained.js";
 
 /*
  * The contract's identity and mark controls (checkpoint 9): every path that
@@ -967,13 +968,15 @@ test("no path or span id is made while a read's selection runs, its one holder's
             let forwarded = 0;
             let selected: ReturnType<typeof arenas> | undefined;
             const subAt = contract.subAt.bind(contract);
-            contract.subAt = function* (sub, asked) {
+            // (#1072 R26: captures `subAt`, `rest` and the contract, fixed when it is made, and the test's own counters
+            // `forwarded` and `selected`, which the test alone reads: the analysis reads nothing this probe writes)
+            contract.subAt = Retained.closure("test.subAt", function* (sub: Key, asked: Rest) {
               if (asked === rest) {
                 forwarded += 1;
                 selected ??= arenas(contract);
               }
               return yield* subAt(sub, asked);
-            };
+            });
             ask(contract, stores, rest, solver);
             assert.deepEqual(
               { forwarded, demands: contract.facts.layerDemands, selected },
