@@ -24,7 +24,7 @@ import {
 } from "../../helpers/type-core/type-core-discharge-runtime-setup.js";
 
 /*
- * The revisions (docs/RUNTIME.md "Format evolution"): the content above is new plan content, so the plan and checkpoint
+ * The revisions (docs/RUNTIME.md "Format evolution"): S7's fields are new plan content, so the plan and checkpoint
  * revisions both increase once for S7; a plan without it, such as every legacy plan, and its checkpoints stay valid and
  * run as before, and plan validation rejects the new fields where they do not belong.
  */
