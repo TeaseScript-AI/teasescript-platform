@@ -54,6 +54,8 @@ interface Entry {
     readonly code: string;
     readonly severity: string;
     readonly message?: string;
+    readonly offset?: number;
+    readonly end?: number;
   }[];
   readonly plan?: { readonly checks: readonly Check[] } | null;
   readonly runs?: readonly Run[];
@@ -74,6 +76,8 @@ interface GuardCase {
   readonly refusal?: string;
   /** A command operand's misfit, which today's checker may refuse at compile time (`DECLARED_RULE_DIFFERENCES`). */
   readonly misfit?: true;
+  /** A declared rule difference's twin after `exit` (`unreachable`). */
+  readonly unreachable?: true;
 }
 
 // EVIDENCE: invariant: the table's keys are exactly the AST kinds (its mapped type).
@@ -82,6 +86,8 @@ const OPEN = (Object.keys(DISPOSITIONS) as SyntaxKind[]).filter(
 );
 
 const script = (template: string): string => `${template}\nexit\n`;
+/** A command where it cannot run: a declared rule difference's twin (the lead's R9). */
+const unreachable = (command: string): string => `exit\n${command}\n`;
 
 /** Every case of the guard: each template, and each declared refusal's source and its admitted twin. */
 function guardCases(): GuardCase[] {
@@ -108,6 +114,11 @@ function guardCases(): GuardCase[] {
         source: script(source),
         misfit: true as const,
       })),
+    ...DECLARED_RULE_DIFFERENCES.map(({ row, operand, source }) => ({
+      name: `${row} ${operand}, unreachable: ${source}`,
+      source: unreachable(source),
+      unreachable: true as const,
+    })),
   ];
 }
 
@@ -148,6 +159,7 @@ const outcome = (run: Run | undefined): string =>
 function judge(guardCase: GuardCase, record: DifferentialRecord, seen: Set<string>): string[] {
   const failures: string[] = [];
   const { checker } = record;
+  if (guardCase.unreachable === true) return judgeUnreachable(guardCase, record);
   if (guardCase.misfit === true && checker.threw === undefined && !checker.plan)
     return judgeRefusedToday(guardCase, record, seen);
   if (checker.threw !== undefined || !checker.plan)
@@ -240,6 +252,43 @@ function judgeRefusedToday(
         `${at}: declared ${declared.code} and ${expected}, found today ${today.join(" ")}, runs ${runs.join(", ")}`,
       );
     else seen.add(`${declared.source} [${mode.mode}]`);
+  }
+  return failures;
+}
+
+/**
+ * A declared rule difference after `exit` (R9): today its code and no plan; the route a plan whose only diagnostic is the
+ * unreachable statement's warning at the command, and each run halting at `exit`, without a failure.
+ */
+function judgeUnreachable(guardCase: GuardCase, record: DifferentialRecord): string[] {
+  const declared = DECLARED_RULE_DIFFERENCES.find(
+    (difference) => unreachable(difference.source) === guardCase.source,
+  )!;
+  const failures: string[] = [];
+  const today = (record.checker.diagnostics ?? [])
+    .filter((diagnostic) => diagnostic.severity === "error")
+    .map((diagnostic) => diagnostic.code);
+  if (record.checker.plan || !today.includes(declared.code))
+    failures.push(
+      `${record.name}: today ${record.checker.plan ? "a plan" : "no plan"}, ${today.join(" ")}`,
+    );
+  const start = "exit\n".length;
+  const warning = `warning TSV065 ${start}:${start + declared.source.length}`;
+  for (const mode of record.candidate.modes) {
+    const found = (mode.diagnostics ?? []).map(
+      (diagnostic) =>
+        `${diagnostic.severity} ${diagnostic.code} ${diagnostic.offset}:${diagnostic.end}`,
+    );
+    const runs = (mode.runs ?? []).map(outcome);
+    if (
+      !mode.plan ||
+      JSON.stringify(found) !== JSON.stringify([warning]) ||
+      runs.length === 0 ||
+      runs.some((run) => run !== "halted null")
+    )
+      failures.push(
+        `${record.name} [${mode.mode}]: route ${mode.outside ?? mode.threw ?? (mode.plan ? "a plan" : "no plan")}, ${found.join(", ")}, runs ${runs.join(", ")}; declared ${warning}, every run halted`,
+      );
   }
   return failures;
 }

@@ -312,7 +312,8 @@ export const DECLARED_RUN_DIFFERENCES: readonly {
  * the route publishes a plan whose instruction refuses that value when it runs (#2488's design rulings, R2: a closed
  * list, which the command operand table empties): the misfit's source (`misfitSources`), today's code, and the route's
  * failure, its code at the text `at`. The guard requires each in every mode, with nothing of the statement's effect
- * happening, and fails on a difference no entry names and on an entry that no longer occurs.
+ * happening, and fails on a difference no entry names and on an entry that no longer occurs. Each entry also stands for
+ * its twin after `exit` (the lead's R9): today the same error, the route a plan with only the unreachable warning TSV065.
  */
 export const DECLARED_RULE_DIFFERENCES: readonly {
   readonly row: SyntaxKind;
