@@ -486,11 +486,12 @@ test("a mixed-list error's work grows as its dimensions do (#1765)", async () =>
     shapes: Record<string, (size: number) => string>;
     sizes: readonly number[];
   }>("nested-carriers-and-diagnostic-work/nested-mixed-list-composition-work.mjs");
-  const total = (source: string): number => {
+  const total = (source: string, mode = MODES[0]!): number => {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);
-    const answers = inMode(MODES[0]!, () => analyseCore(request));
+    const answers = inMode(mode, () => analyseCore(request));
     assert.equal(answers.budget.exhausted, null, source);
+    assert.ok(!answers.budget.decisions.some((decision) => decision.stopped), source);
     return answers.budget.total;
   };
   for (const [shape, make] of Object.entries(shapes)) {
@@ -499,6 +500,40 @@ test("a mixed-list error's work grows as its dimensions do (#1765)", async () =>
     const [small, large] = [sizes[0]!, sizes[1]!].map((size) => total(make(size)));
     assert.ok(large! <= bound * small!, `${shape}: ${small}, ${large}`);
   }
+  // (the written index chain reversed as well, at the size it finishes: reversed, a larger one stops, `REVERSED_CHAIN`)
+  total(
+    shapes["index-chain:written"]!(sizes[0]!),
+    MODES.find((mode) => mode.reversed && !mode.unshared),
+  );
+});
+
+/**
+ * The index-chain length to which #1765's written index chain, reversed with sharing, keeps every decision within its
+ * demand allowance (main: 39). Since #2289's B1 the decision of a level evaluates the literal's cell at every level
+ * below it, and the deepest, asked first in reversed order, at every level, each evaluation describing both elements
+ * (the copy read through the chain by a scan of its own view): the deciding decision's work grows with the square of
+ * the nesting depth in either order (main: linearly forward), about 6.5 times main's reversed, while the analysis
+ * total per doubling stays inside the family's bound. A known cost of decision B (2026-11-12) in the safe direction: a
+ * decision that stops is declined or marked, never unchecked. Forward, no decision stops up to 40 on either tree;
+ * without sharing the head stops one level later.
+ */
+const REVERSED_CHAIN = 10;
+
+test("#1765's written index chain, reversed, keeps its decisions within their allowance to a pinned length (#2289)", async () => {
+  const { shapes } = await family<{ shapes: Record<string, (size: number) => string> }>(
+    "nested-carriers-and-diagnostic-work/nested-mixed-list-composition-work.mjs",
+  );
+  // (a decision past its allowance stops, and the pass it restarts stops the analysis: either is a stop)
+  const stopped = (n: number): boolean => {
+    const request = coreRequest([
+      { path: "main.tease", source: shapes["index-chain:written"]!(2 * n) },
+    ]);
+    assert.ok(request !== null);
+    const reversed = MODES.find((mode) => mode.reversed && !mode.unshared)!;
+    const { budget } = inMode(reversed, () => analyseCore(request));
+    return budget.exhausted !== null || budget.decisions.some((decision) => decision.stopped);
+  };
+  assert.deepEqual([stopped(REVERSED_CHAIN), stopped(REVERSED_CHAIN + 1)], [false, true]);
 });
 
 /**

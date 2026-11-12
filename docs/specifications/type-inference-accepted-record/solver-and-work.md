@@ -491,6 +491,11 @@ decision that the unshared run finishes. A literal's body charged to the first d
 passed that decision's demand allowance where main's finished, and made the count depend on which decision asked first;
 a read run inside the window would be charged to no decision at all.
 
+**Costs.** The comparisons themselves, each element's description and every read it makes, are the asking decision's,
+so three shapes reach their allowance at a smaller size than on main (decision B's known costs, recorded in
+`docs/RESOURCE-LIMITS.md`): the whole-copy ring list (k = 403 against 482), #1438's written union reversed (60 levels
+against 70), and #1765's written index chain reversed (a list written 12 levels deep against 41).
+
 **Source.** PR #1714, merged as `63254271e` (#1703), 2026-11-04; #2289 (2026-11-11), in its pull request.
 
 ### r4-358
