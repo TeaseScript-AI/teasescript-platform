@@ -245,6 +245,20 @@ changed warning or wording applies to the same change, the entry is its report:
   the families (67,155 sources, four modes, against 9f0b3a1b7's stored runs), 32 sources change their charged work. The
   natural compiles' work rises by 0.0001% in total, and by 2.5% over the 32 changed sources (21.8% at most). No natural
   compile newly reaches its allowance.
+- **Where a stop falls in a program with a typed parse or load whose default a written type or a literal decides (#1072
+  step 0, PR #2403).** Reading such a default's type builds an index of each typed default's start values and literal
+  cells once per program, before anything is solved, one work unit for each binding followed, each step and cell
+  entered and each part of a written type taken apart, and the default's two demands walk it, one unit for each literal
+  and written type met at a level; a program with no typed default that reads a binding or is a literal pays nothing. A
+  maker would notice nothing for a script that fits its budget. For a script whose budget falls in the window: a stop
+  where main completed or the reverse, with the warnings a stop leaves. Measured at a1aa92c18 against main 2b574316a in
+  four modes: over the corpus set (15,406 sources), 144 change their charged work (30 units more at the median, 174 at
+  most, 1.09% at most) and none its plan or diagnostics; over the held family with its settled stops (805 sources), none
+  adds, removes or moves a stop; over `tools/corpus/fixture` (1,894 sources) and the `property` area in full and a
+  sample of the other areas of `tests/families` (5,451 sources), no natural compile changes. At a 256-unit allowance,
+  `1165-astra-written-spines` (21 sources) moves its `layers` stops in six sources, a typed parse and a typed load
+  nested 64, 128 and 256 deep, in two modes: the 20th level stops inside the literal default itself, where main stopped
+  it at the read below (64 deep) or not at all (128 and 256), and at 64 deep the 19th level newly stops at the read.
 - **Which property a runtime message names after a stop (#2216, 664f1183f; open #2218).** A store's check taken from the
   receiving completion lists an object's properties by the store's own records. Where another store asked that level
   first with records that rank the properties otherwise, the listed order still follows where the stop fell. A maker
