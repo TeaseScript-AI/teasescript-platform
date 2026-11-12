@@ -6,9 +6,9 @@ import { dirname, join } from "node:path";
 // memory (`jobMemoryMib`: the queue's reservation or a cgroup limit, the smaller) no more than fit in it. Measured on 2026-11-08 (desktop, main a7b8297ec, the full compiled suite at a
 // fixed number of files at once, its job's own processes sampled): the anonymous-memory peak of the whole run was 3.3,
 // 4.8, 7.1, 9.8 and 11.7 GB at 2, 4, 8, 12 and 15 files at once, close to 2.1 GB plus 0.64 GB a file; file cache
-// stayed under 90 MiB. Most of the 2.1 GB is the heaviest file alone (`type-core-cells`, 2.7 to 2.9 GB). The limit here
-// allows 3 GiB plus 640 MiB a file, at least 800 MiB over each measured peak, so that a run fits rather than being
-// killed at its cap. Remeasure when a test file's memory changes much.
+// stayed under 90 MiB. Most of the 2.1 GB is the heaviest file alone (`type-core-cells`, before its split, 2.7 to
+// 2.9 GB). The limit here allows 3 GiB plus 640 MiB a file, at least 800 MiB over each measured peak, so that a run
+// fits rather than being killed at its cap. Remeasure when a test file's memory changes much.
 export const RESERVE_MIB = 3 * 1024;
 export const PER_FILE_MIB = 640;
 

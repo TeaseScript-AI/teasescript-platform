@@ -15,7 +15,6 @@ export const costlyTestSeconds = {
   "type-core/type-core-closure.test.js": 88,
   "type-core/type-core-f18.test.js": 85,
   "families-runner/families-runner-limits.test.js": 84,
-  "type-core/type-core-cells.test.js": 82,
   "type-core/type-core-sharing.test.js": 82,
   "type-core/type-core-budget.test.js": 72,
   "type-core/type-core-oracles.test.js": 66,
