@@ -185,10 +185,10 @@ export async function runInput(
       chosen.settle?.(null);
       return { kind: "unanswered" } as const;
     }
+    onPost?.();
     // `chosen` pairs its op with its arguments but `actionId` (`InputAnswer`), which TypeScript does not see once
     // inserted; the assertion drops only that pairing, and the result stays the input ops' own (`OpResult<InputOp>`).
     // EVIDENCE: invariant: the pair `chosen` holds, with the presented action's ID.
-    onPost?.();
     const outcome = await (
       input as { send(op: InputOp, args: unknown): Promise<OpResult<InputOp> | typeof RETIRED> }
     ).send(chosen.op, { ...chosen.args, actionId: presented });
