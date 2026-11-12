@@ -15,7 +15,7 @@ const main = (source: string): SourceFile[] => [{ path: "main.tease", source }];
 const PASS = "global function pass(value) {\n  return value\n}\n";
 const OWN_PASS = "function pass(value) {\n  return value\n}\n";
 
-test("which calls the analysis reads as their argument (R23)", () => {
+test("which calls the analysis reads as their argument", () => {
   // [form, files, calls read as their argument; null where the names fail before the analysis]
   const rows: readonly (readonly [string, readonly SourceFile[], number | null])[] = [
     ["a call", main(`${PASS}let a = pass(3)\nrepeat a {}\nexit`), 1],
@@ -114,7 +114,7 @@ test("which calls the analysis reads as their argument (R23)", () => {
   }
 });
 
-test("an identity call keeps a narrowing as its argument in parentheses does, and ends what the argument ends (R25)", () => {
+test("an identity call keeps a narrowing as its argument in parentheses does, and ends what the argument ends", () => {
   // ADR 0021 rule 5.5 drops a check across "code that may run and change the path: a call"; the call of an identity
   // function runs its argument and nothing else
   const kept =
@@ -182,7 +182,7 @@ test("a source whose values pass through an identity function gives what its twi
   }
 });
 
-test("a widened identity result adds no run-time stop to its twin's run (R24), past the syntax check that refuses a function", () => {
+test("a widened identity result adds no run-time stop to its twin's run, past the syntax check that refuses a function", () => {
   // rule 1.2 makes `a` a number by the other calls, and its `repeat` a compile error the build does not give (#1173's
   // gap); the value is 3 when the script runs. A relation only: the route does not take a function yet.
   const marked = "let a = ⟦3⟧\nlet b = ⟦null⟧\nlet c = ⟦1.5⟧\nrepeat a {}\nexit";
