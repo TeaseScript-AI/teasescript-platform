@@ -779,9 +779,92 @@ async function areaCases(opened, origin) {
   return results;
 }
 
+/** What has the focus: an element's tag with its distinguishing attribute. */
+const focusedElement = () => {
+  const active = document.activeElement;
+  if (!active || active === document.body) return "nothing";
+  const mark = ["data-form-field", "data-composer-input"].find((name) => active.hasAttribute(name));
+  return `${active.tagName}${mark ? `[${mark}=${active.getAttribute(mark)}]` : ""}`;
+};
+
+// The focus a continuation gives stays given (one rule for every focus the composer schedules): a form's date or time
+// field committed by Enter leaves the focus on the field's button, and the lock's password keeps it in its field through
+// its phases.
+const FOCUS_CASES = {
+  "focus date commit": async (page) => {
+    await page.getByRole("button", { name: "Dated form", exact: true }).click();
+    return commitFocus(page, "day", "2026-11-12");
+  },
+  "focus time commit": async (page) => {
+    await page.getByRole("button", { name: "Dated form", exact: true }).click();
+    return commitFocus(page, "at", "21:30");
+  },
+  "focus lock phases": async (page) => {
+    await page.getByRole("button", { name: "Lock", exact: true }).click();
+    const field = page.locator("[data-composer-password] [data-composer-input]");
+    await field.waitFor();
+    await page.waitForTimeout(SETTLE_MS);
+    const seen = [];
+    for (const entry of ["pw", "px"]) {
+      await field.fill(entry);
+      await page.keyboard.press("Enter");
+      await page.waitForTimeout(SETTLE_MS);
+      seen.push(await page.evaluate(focusedElement));
+    }
+    const expected = ["TEXTAREA[data-composer-input=]", "TEXTAREA[data-composer-input=]"];
+    if (JSON.stringify(seen) !== JSON.stringify(expected))
+      throw new Error(`The focus through the lock's phases: ${JSON.stringify(seen)}`);
+  },
+};
+async function commitFocus(page, fieldId, value) {
+  const button = page.locator(`[data-form-field="${fieldId}"]`);
+  await button.waitFor();
+  await page.waitForTimeout(SETTLE_MS);
+  await button.click();
+  const input = page.locator("input[data-composer-input]");
+  await input.waitFor();
+  await input.fill(value);
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(SETTLE_MS);
+  const focused = await page.evaluate(focusedElement);
+  if (focused !== `BUTTON[data-form-field=${fieldId}]`)
+    throw new Error(`After the ${fieldId} field's commit the focus is on ${focused}`);
+}
+
+/** One result per focus case, in the form of a case. */
+async function focusCases(opened, origin) {
+  const results = [];
+  for (const [name, run] of Object.entries(FOCUS_CASES)) {
+    const result = {
+      name,
+      residual: "",
+      expect: shown("", "", 0),
+      after: shown("", "", 0),
+      errors: [],
+      error: "",
+    };
+    const { page, close } = await opened.page();
+    page.on("pageerror", (error) => {
+      if (countedError(error)) result.errors.push(String(error));
+    });
+    try {
+      await page.goto(`${origin}/player/?package=composer-area`);
+      await page.locator("[data-session-start]").click();
+      await run(page);
+    } catch (error) {
+      result.error = String(error?.message ?? error).slice(0, 300);
+    } finally {
+      await close();
+    }
+    results.push(result);
+  }
+  return results;
+}
+
 export async function keys({ opened, origin }) {
   const results = [];
   for (const item of cases(opened.engine)) results.push(await runCase(opened, origin, item));
   results.push(...(await areaCases(opened, origin)));
+  results.push(...(await focusCases(opened, origin)));
   return { ok: results.every(keysCasePassed), cases: results };
 }

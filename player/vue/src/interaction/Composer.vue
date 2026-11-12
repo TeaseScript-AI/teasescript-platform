@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { usePlayerConditions } from "./usePlayerConditions";
 import { playerKeys } from "./playerKeys";
 import { keepOneLine, passwordAttributes } from "./passwordText";
+import { focusMark } from "./scheduledFocus";
 
 const props = withDefaults(
   defineProps<{
@@ -120,7 +121,10 @@ const effectiveInputMode = computed(() =>
   suppressSoftwareKeyboard.value ? "none" : props.inputMode,
 );
 function focusInput(): void {
-  void nextTick(() => input.value?.focus({ preventScroll: true }));
+  const free = focusMark();
+  void nextTick(() => {
+    if (free()) input.value?.focus({ preventScroll: true });
+  });
 }
 
 function handleKeydown(event: KeyboardEvent): void {
@@ -182,17 +186,19 @@ function keepMouseEditingFocus(event: MouseEvent): void {
 
 // A date or time control, the password field and the text field replace each other; the field removed while focused
 // blurs, and its focus and keyboard state carry over to the replacement instead of being released, also within one
-// question, as when a date's answer under way gives the field back to the chat. The password field and the text field
-// are one textarea, keyed by kind, so a composition under way in one never carries over to the other.
+// question, as when a date's answer under way gives the field back to the chat, unless another control took the focus
+// meanwhile (`focusMark`). The password field and the text field are one textarea, keyed by kind, so a composition under
+// way in one never carries over to the other.
 let replacingField = false;
 watch(
   () => (props.password ? "password" : props.inputType === "text" ? "text" : "picker"),
   () => {
     replacingField = true;
     const focused = input.value !== null && input.value === document.activeElement;
+    const free = focusMark();
     void nextTick(() => {
       replacingField = false;
-      if (focused && input.value !== document.activeElement)
+      if (focused && free() && input.value !== document.activeElement)
         input.value?.focus({ preventScroll: true });
     });
   },
@@ -290,7 +296,9 @@ watch(
 
 /** Focuses the input with its text selected, so typing replaces a prefilled value and Enter keeps it. */
 function selectInput(): void {
+  const free = focusMark();
   void nextTick(() => {
+    if (!free()) return;
     const element = input.value;
     element?.focus({ preventScroll: true });
     if (element instanceof HTMLTextAreaElement) element.select();
