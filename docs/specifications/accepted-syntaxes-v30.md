@@ -1800,11 +1800,12 @@ its last value, as in a dict ([§40](#40-dictionaries)). A date or time comes ba
 `toDateTime`, and `toAbsoluteDateTime` read.
 
 The result has an expected type: the written type of the place the call's value lands in directly
-([§18](#defaults-follow-the-same-rule)). Without a written target, it comes from the default: `default: []` gives a
-list whose element type is not settled yet, and `default: null` leaves the value's type unknown, to be tested with
-`is`. A default that does not fit a written target is a compile error. Text that is not JSON, and JSON of the wrong
-shape for the expected type, give the default; in debug or test mode, a developer warning reports a fallback that JSON
-of the wrong shape caused.
+([§18](#defaults-follow-the-same-rule)). Without a written target, it comes from the default: `default: []` gives a list
+whose element type is not settled yet, and `default: null` leaves the value's type unknown, to be tested with `is`. A
+default that is a variable with a written type gives that written type, whatever value the variable holds at that line.
+A default that does not fit a written target is a compile error. Text that is not JSON, and JSON of the wrong shape for
+the expected type, give the default; in debug or test mode, a developer warning reports a fallback that JSON of the
+wrong shape caused.
 
 An object default, or an expected object type, reads the JSON as that object: the result is an object whose properties
 have the default's types, so their uses are checked at compile time. The runtime checks the JSON once when it is read: a

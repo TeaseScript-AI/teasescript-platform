@@ -203,9 +203,11 @@ no source, not shown impossible, #2183); and the gates do not test for a stop th
 sets (0 of #2080's moved stops; 16 natural compiles, each its unstopped form; 688 of #2183's sweep settings, 448 equal
 to the natural plan and 240 refused in both compiles); one built outside them publishes where the natural compile
 refuses (a `get` default at demand 16, as on the base; #2256). Nor does every such path need a stop: a typed parse whose
-written default holds `null` gets no reader, so JSON of any type arrives in a place typed by that default
-(`let fb: integer? = null` / `fromJson(hostValue, default: fb)` takes `"x"`, failing only at a later strict use), and
-the current checker does the same (#2307). Condition 2, every remaining case re-assessed before V2 replaces the legacy
+default does not lead to a written type through its start values is read by the value the default holds at the call (ADR
+0021 rule 2.6); for instance, a default that starts as `null` and takes its type from a later copy gets no reader, so
+JSON of any type arrives in a place typed by that default (`let fb = null`, `fb = w` with `let w: integer? = null`, then
+`fromJson(hostValue, default: fb)` takes `"x"`, failing only at a later strict use), and the current checker does the
+same (#2307). Condition 2, every remaining case re-assessed before V2 replaces the legacy
 compiler, is open; its cases open at the time of writing (2026-11-10) are #1832, #1845 (with #1846), #1838 and #1836,
 #1772, the claim (c)'s NoCheck still rests on (#2184, in the list below), #1781's conservative natural-outside declines (128 rows in 8 sources, as reported in PR
 #1781's work-stop set sweep), and (d)'s natural declines: 106 compiles, each in one of the four modes, that stop at the

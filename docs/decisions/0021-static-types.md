@@ -163,13 +163,14 @@ can prove one, starting with simple proofs, and otherwise a warning with a check
 5. A conversion takes its fallback as `default:` (rule 7), never as a positional argument.
 6. `fromJson`'s result has an expected type: the written type of the place it lands in directly (rule 7), otherwise its
    default's type, where `[]` leaves the element type open and `null` leaves the value unknown, to be tested with `is`.
-   An object default, or an expected object type, reads the JSON as that object: a missing key, or one whose value has
-   the wrong type, takes that property's value from the default (in debug or test mode a developer warning names the
+   A default that is a variable with a written type gives that written type, whatever value the variable holds at that
+   line. An object default, or an expected object type, reads the JSON as that object: a missing key, or one whose value
+   has the wrong type, takes that property's value from the default (in debug or test mode a developer warning names the
    key), extra keys are ignored unless the destination is declared `object`, where V30 §13 keeps them all, nested
-   objects follow the same rules, and malformed text or JSON of another kind gives the whole default. A property that
-   is `null` in the default and gets no type elsewhere in the script stays unknown, tested with `is`. A dict default
-   gives a dict. The default declares the shape the script expects, so its uses are checked at compile time and one bad
-   field does not discard the others.
+   objects follow the same rules, and malformed text or JSON of another kind gives the whole default. A property that is
+   `null` in the default and gets no type elsewhere in the script stays unknown, tested with `is`. A dict default gives
+   a dict. The default declares the shape the script expects, so its uses are checked at compile time and one bad field
+   does not discard the others.
 
 ### 3. Type syntax and union types
 
