@@ -127,6 +127,8 @@ test("recoveryKind gives an undeclared status of the shown session nothing to re
 
 interface RecoveryHost {
   readonly session: Readonly<Ref<PlayerSession | null>>;
+  /** The chat the shown session belongs to: the composer's text stays within one. */
+  readonly chat: Readonly<Ref<number>>;
   readonly hostError: Readonly<Ref<string | null>>;
   readonly activation: Readonly<Ref<"start" | "continue" | null>>;
   readonly recovery: Readonly<
@@ -405,6 +407,7 @@ RERUN.rows(
     connections.first.hold("captureKeep");
     await player.activate();
     await connections.first.held();
+    const chat = player.chat.value;
     await connections.first.lose();
     connections.first.release();
     await until(() => player.recovery.value !== null, "the offer", "step");
@@ -421,6 +424,7 @@ RERUN.rows(
     );
     assert.equal(connections.calls(), 1);
     await onTheFreshConnection(player, connections);
+    assert.notEqual(player.chat.value, chat, "Start begins another chat, with an empty composer");
     assert.equal(player.recovery.value, null);
     assert.equal(player.hostError.value, null);
     assert.equal(hostErrors(), 1, "the loss alone is logged, for the developer");
@@ -436,6 +440,7 @@ RERUN.rows(
     await player.activate();
     const stored = await keptAtTheQuestion(player, kept);
     const transcript = player.session.value!.transcriptEntries.length;
+    const chat = player.chat.value;
     await connections.first.lose();
     await until(() => player.recovery.value !== null, "the offer", "step");
     assert.deepEqual(player.recovery.value, { offer: "continue", where: "line" });
@@ -454,6 +459,11 @@ RERUN.rows(
     // The fresh host is asked for the plan's JSON, which its kept session's next save stores.
     assert.ok(connections.current().posts.some((post) => post.op === "preparePlanText"));
     assert.equal(player.session.value!.transcriptEntries.length, transcript);
+    assert.equal(
+      player.chat.value,
+      chat,
+      "Continue goes on in the same chat, the composer's text kept",
+    );
     assert.equal(player.recovery.value, null);
     assert.deepEqual(
       (await kept.session(SCOPE))?.events,

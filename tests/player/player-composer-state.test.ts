@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { before, type TestContext } from "node:test";
+import test, { before, type TestContext } from "node:test";
 import { effectScope, watch, type Ref } from "vue";
 
 import type { LockDialog, LockDialogInput } from "../../player/encryption/lock-service.js";
@@ -339,6 +339,7 @@ const CASES = {
   "N1 refused draft": TOPOLOGIES,
   "N1 older acknowledgment": TOPOLOGIES,
   "N2 an answer opens an editor": TOPOLOGIES,
+  "N2 a typed label after another chat": TOPOLOGIES,
   "N3 untouched prefill": TOPOLOGIES,
   "N3 deleted prefill": TOPOLOGIES,
   "N3 occupied, then empty on return": TOPOLOGIES,
@@ -466,6 +467,64 @@ RERUN.rows(
     return end();
   },
 );
+
+RERUN.rows(
+  "N2 a typed label after another chat",
+  "a typed field label the old session never took writes nothing into another chat",
+  async (context, topology, end) => {
+    const p = await page(context, topology, script(NAME_FORM));
+    // The other chat's Start is prepared before the hold, which would hold its preparation's reply too.
+    const other = await sourceStart(p.player.bridge, script('let a = askText "A?"'), () => ({
+      wallClockMs: 0,
+    }));
+    type(p.composer, "name");
+    p.connection.hold("stepFormField");
+    p.submission.send("input");
+    await p.connection.held();
+    const chat = p.player.chat.value;
+    p.player.prepare(other);
+    const started = p.player.activate();
+    p.connection.release();
+    await started;
+    await until(
+      () => p.player.chat.value !== chat && action(p)?.ui.kind === "text",
+      "the other chat",
+      "host",
+    );
+    await settled();
+    await settled();
+    assert.equal(p.composer.chatText.value, "", "nothing written into the other chat");
+    return end();
+  },
+);
+
+test("a new session in the same chat keeps the composer's text; another chat starts it empty", () => {
+  const composer = modules.useComposerState({
+    draft: async () => false,
+    holdDrafts: () => false,
+    fieldChanged: () => {},
+  });
+  const at = (session: string, chat: number): ComposerDescriptor => ({
+    session,
+    chat,
+    tenant: { kind: "chat" },
+    actionId: 1,
+    answered: false,
+    liveActions: [1],
+    prefill: null,
+    editorText: null,
+    editorField: null,
+    temporalPrefill: null,
+  });
+  composer.select(at("plan:0", 1));
+  type(composer, "TAIL");
+  // Continue after a lost connection: a new session of the same chat.
+  composer.select(at("plan:1", 1));
+  assert.equal(composer.chatText.value, "TAIL");
+  composer.select(at("plan:2", 2));
+  assert.equal(composer.chatText.value, "");
+  composer.dispose();
+});
 
 // N3: a prefill is the question's suggestion (decision 3).
 
@@ -679,6 +738,13 @@ RERUN.rows(
     const record = p.submission.pending.value!;
     assert.equal(record.row?.text, "SENT", "the line shows at once");
     type(p.composer, "TAIL");
+    p.submission.send("input");
+    assert.equal(
+      p.submission.pending.value,
+      record,
+      "Enter while an answer is pending sends nothing",
+    );
+    assert.equal(p.composer.chatText.value, "TAIL", "and the text stays");
     p.frame.release();
     await until(() => record.stage === "settled", "the answer settled", "host");
     assert.equal(p.composer.chatText.value, "SENTTAIL");
