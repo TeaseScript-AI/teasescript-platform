@@ -112,6 +112,10 @@ function records(cases: readonly GuardCase[], folder: string): DifferentialRecor
   );
 }
 
+/** A run's failure as the record writes it: the code at the span of `at` in the source, or `null` without one. */
+const failureAt = (source: string, code: string, at: string | null): string | null =>
+  at === null ? null : `${code}@${source.indexOf(at)}:${source.indexOf(at) + at.length}`;
+
 const checkKey = (check: Check): string =>
   `${check.field} ${check.path}:${check.offset}:${check.end}`;
 const outcome = (run: Run | undefined): string =>
@@ -148,11 +152,10 @@ function judge(guardCase: GuardCase, record: DifferentialRecord, seen: Set<strin
     (checker.runs ?? []).forEach((run, index) => {
       const other = mode.runs?.[index];
       if (outcome(run) === outcome(other)) return;
-      const start = guardCase.source.indexOf(declared?.at ?? "\0");
       if (
         declared !== undefined &&
-        run.failure === null &&
-        other?.failure === `${declared.code}@${start}:${start + declared.at.length}` &&
+        run.failure === failureAt(guardCase.source, declared.code, declared.todayAt) &&
+        other?.failure === failureAt(guardCase.source, declared.code, declared.at) &&
         mode.plan?.checks.some(
           (check) =>
             check.field === declared.field &&
@@ -178,8 +181,10 @@ test("every open row of the syntax table has templates, and the declared lists n
   for (const declared of DECLARED_REFUSALS) assert.ok(OPEN.includes(declared.row), declared.row);
   for (const declared of DECLARED_RUN_DIFFERENCES) {
     assert.ok(Object.values(ROW_TEMPLATES).flat().includes(declared.template), declared.template);
-    const at = declared.template.indexOf(declared.at);
-    assert.ok(at >= 0 && at === declared.template.lastIndexOf(declared.at), declared.template);
+    for (const text of [declared.at, declared.checkAt, declared.todayAt ?? declared.at]) {
+      const at = declared.template.indexOf(text);
+      assert.ok(at >= 0 && at === declared.template.lastIndexOf(text), declared.template);
+    }
   }
 });
 

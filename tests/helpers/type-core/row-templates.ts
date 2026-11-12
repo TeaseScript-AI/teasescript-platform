@@ -97,29 +97,59 @@ export const DECLARED_REFUSALS: readonly {
     gate: "outsideAnswers (src/type-inference/core/backend.ts)",
     text: "this operand",
   },
+  {
+    row: "callExpression",
+    position: "`get`'s receiver",
+    refused: "let x: integer = hostValue.get(0, default: 0)",
+    admitted: "let xs = [1]\nlet x: integer = xs.get(0, default: 0)",
+    // (`get` on a receiver of unknown kind, which the route refuses after the analysis)
+    gate: "outsideAnswers (src/type-inference/core/backend.ts)",
+    text: "this operand",
+  },
 ];
 
 /**
- * The runs of a template in which the route's plan fails where today's does not, by an accepted record: the template,
- * the record, the check's field in the route's plan, and the failure's code at `at`, the template's text where it
- * fails. The guard requires exactly that difference in at least one run, and fails on any other difference.
+ * The runs of a template in which the route's plan fails otherwise than today's: the template, why the difference
+ * stands (an accepted record, or the open issue that decides it while nothing accepted does), the check's field and
+ * place in the route's plan, the failure's code at `at` on the route, and where today's run fails instead (`null`
+ * where it does not fail). The guard requires exactly that difference in every mode, and fails on any other difference.
  */
 export const DECLARED_RUN_DIFFERENCES: readonly {
   readonly template: string;
-  readonly record: string;
+  readonly basis: { readonly record: string } | { readonly issue: number };
   readonly field: string;
   /** The template's text the check stands at in the route's plan (`main.tease`). */
   readonly checkAt: string;
   readonly code: string;
   readonly at: string;
+  readonly todayAt: string | null;
 }[] = [
   {
     template: "let xs = [1]\nlet x: integer = xs.get(hostValue, default: 0)",
-    record:
-      "V30 §16, reading an element with a default: a non-whole index of unknown type fails with TSR024 on the new type checker, and still gives the default on today's",
+    basis: {
+      record:
+        "V30 §16, reading an element with a default: a non-whole index of unknown type fails with TSR024 on the new type checker, and still gives the default on today's",
+    },
     field: "indexCheck",
     checkAt: "xs.get(hostValue, default: 0)",
     code: "TSR024",
     at: "hostValue",
+    todayAt: null,
   },
+  // undecided (#2536): which span TSR058 stands at when the value arrives through a call's default
+  ...[
+    ['let v: integer = fromJson("bad", default: hostValue)', 'fromJson("bad", default: hostValue)'],
+    [
+      'let t: string = decryptText("x", password: "pw", default: hostValue)',
+      'decryptText("x", password: "pw", default: hostValue)',
+    ],
+  ].map(([template, call]) => ({
+    template: template!,
+    basis: { issue: 2536 },
+    field: "fallbackCheck",
+    checkAt: "hostValue",
+    code: "TSR058",
+    at: "hostValue",
+    todayAt: call!,
+  })),
 ];
