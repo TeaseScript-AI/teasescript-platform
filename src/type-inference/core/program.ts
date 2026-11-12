@@ -23,6 +23,7 @@ import {
 } from "./flow-graph.js";
 import { IngressGraph, type ItemScope, type Writer } from "./items.js";
 import { selectsElement } from "./method-categories.js";
+import { Retained } from "./retained/retained.js";
 
 /**
  * The input of the coarse core's analysis (checkpoint 9): the request's files with both fields the core reads beside
@@ -360,6 +361,8 @@ export class CoreProgram {
         if (place !== undefined) this.#consumed(place, { kind: "use", what, span });
       }
     this.#indexed = true;
+    // (#1072 1b: its graph is held as it is from here on)
+    Retained.program(this);
   }
 
   #indexed = false;
