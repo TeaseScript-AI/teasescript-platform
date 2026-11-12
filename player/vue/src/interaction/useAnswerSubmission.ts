@@ -16,14 +16,14 @@ import {
   type PlayerSession,
 } from "../../../runtime/runtime-view.js";
 import {
-  draftInput,
   intents,
   runInput,
   type InputIntent,
   type InputResult,
   type InputSectionHost,
 } from "../session/runtime-input.js";
-import type { ComposerState, FormDraft } from "./useComposerState.js";
+import type { ComposerState } from "./useComposerState.js";
+import type { FormUpdates } from "./useFormUpdates.js";
 
 /*
  * The answers the player gives (PLAYER-UI "Composer and foreground interactions"; decisions of 2026-11-11/12): each is
@@ -72,7 +72,7 @@ export interface PendingAnswer {
 /** Where the session stands for input: stopping until its final publication shows, stopped, or its connection lost. */
 export type SessionTerminal = "freezing" | "stopped" | "lost" | null;
 
-const NO_LONGER_AVAILABLE = "This interaction is no longer available.";
+export const NO_LONGER_AVAILABLE = "This interaction is no longer available.";
 
 /** One painted frame: the answer shows before an engine on this thread takes it (the in-process backend). */
 function paintedFrame(): Promise<void> {
@@ -85,6 +85,8 @@ function paintedFrame(): Promise<void> {
 
 export function useAnswerSubmission(host: {
   readonly composer: ComposerState;
+  /** The form updates Enter in a field or a typed field label sends, and how many of a form's are unanswered. */
+  readonly forms: Pick<FormUpdates, "unacknowledged" | "commitField" | "stepField">;
   /** The shown session; `null` once stopped or without one. */
   readonly session: () => PlayerSession | null;
   /** The stopped session, while it shows for the error dialog; its last publication is final once `terminal` is `stopped`. */
@@ -107,15 +109,6 @@ export function useAnswerSubmission(host: {
   const notice = ref("");
   let noticeTimer: ReturnType<typeof setTimeout> | undefined;
   let disposed = false;
-  /** Form updates sent and not yet answered, per form action: its Submit then gets no local check (rule 6). */
-  const unacknowledged = new Map<number, number>();
-  /** A typed field's commit under way: its field stays read-only until the form took it or refused it. */
-  const commitWindow = shallowRef<{
-    readonly actionId: number;
-    readonly fieldId: string;
-    readonly opening: number;
-    readonly revision: number;
-  } | null>(null);
   /** An `openUrl` request waiting for the pending answer to settle, and those already tried, by session lineage. */
   let urlWaiting: number | null = null;
   const urlTried = new WeakMap<object, Set<number>>();
@@ -329,7 +322,7 @@ export function useAnswerSubmission(host: {
     const action = presentedAction(host.session());
     if (action === null) return;
     const input = source === "input" ? "enter" : "send";
-    if (tenant.kind === "form") return commitField(action, input);
+    if (tenant.kind === "form") return host.forms.commitField(action, input);
     const text = composer.current();
     const route = routeComposerText(action, text);
     if (route === null) return showNotice(host.unansweredMessage());
@@ -360,7 +353,7 @@ export function useAnswerSubmission(host: {
       case "formCancel":
         return cancelForm(input, typed);
       case "formStep":
-        return stepField(route.fieldId, typed);
+        return host.forms.stepField(route.fieldId, typed);
       case "formCommit":
         return;
       case "complete":
@@ -472,122 +465,14 @@ export function useAnswerSubmission(host: {
     openUrl(openAtOnce, true);
   }
 
-  /** A form update, in order with the others; never greyed and no answer (rule 6 counts it). */
-  async function update(
-    actionId: number,
-    intent: InputIntent,
-    after?: (result: InputResult) => void,
-  ): Promise<void> {
-    if (host.terminal() !== null) return;
-    unacknowledged.set(actionId, (unacknowledged.get(actionId) ?? 0) + 1);
-    try {
-      const result = await run(actionId, intent);
-      after?.(result);
-      if (result.kind === "answered") {
-        host.publish(result.session);
-        const outcome = result.outcome;
-        if (outcome.kind !== "updated" && outcome.kind !== "unchanged")
-          showNotice(refusalMessage(outcome));
-      } else if (result.kind === "unavailable") showNotice(NO_LONGER_AVAILABLE);
-      else if (result.kind === "unanswered") showNotice(host.unansweredMessage());
-    } finally {
-      release(actionId);
-    }
-  }
-
   function presentedForm(): RuntimeInteractionActionSnapshot | null {
     const action = presentedAction(host.session());
     return action?.ui.kind === "form" && action.form !== undefined ? action : null;
   }
 
-  /** Enter in a typed form field: checked at once; its field is read-only until the form took the commit. */
-  function commitField(action: RuntimeInteractionActionSnapshot, input: "enter" | "send") {
-    const draft = host.composer.formDraft();
-    if (draft === null || action.ui.kind !== "form" || action.form === undefined) return;
-    if (commitWindow.value !== null) return;
-    let state = action.form;
-    if (state.editor?.text !== draft.text) {
-      const drafted = applyFormUpdate(action.ui, state, {
-        kind: "draft",
-        fieldId: draft.fieldId,
-        text: draft.text,
-      });
-      if (!drafted.ok) return showNotice(drafted.message);
-      state = drafted.state;
-    }
-    const committed = applyFormUpdate(action.ui, state, { kind: "commit", fieldId: draft.fieldId });
-    if (!committed.ok) return showNotice(committed.message);
-    clearNotice();
-    const window = {
-      actionId: draft.actionId,
-      fieldId: draft.fieldId,
-      opening: draft.opening,
-      revision: draft.revision,
-    };
-    commitWindow.value = window;
-    void update(action.actionId, intents.composer(draft.text, input), (result) => {
-      if (
-        result.kind === "answered" &&
-        (result.outcome.kind === "updated" || result.outcome.kind === "unchanged")
-      )
-        host.composer.acknowledge(window);
-    }).finally(() => {
-      if (commitWindow.value === window) commitWindow.value = null;
-    });
-  }
-
   /** The draft the form's step, Submit or Back takes along, from the field being edited. */
   function formDraftText(): string | undefined {
     return host.composer.formDraft()?.text;
-  }
-
-  /** A form field's button; typed as its label, the chat's text is the command and comes back on a refusal. */
-  function stepField(fieldId: string, typed = false): void {
-    const action = presentedForm();
-    if (action === null) return;
-    const chat = host.chat();
-    const sent = typed ? host.composer.takeChat() : null;
-    void update(action.actionId, intents.formStep(fieldId, formDraftText()), (result) => {
-      const taken =
-        result.kind === "answered" &&
-        (result.outcome.kind === "updated" || result.outcome.kind === "unchanged");
-      if (!taken && sent !== null) host.composer.restoreChat(chat, sent);
-    });
-  }
-
-  /** Stores the field's draft (`useComposerState`'s timer), counted as an update of its form; whether it took it. */
-  async function draft(draft: FormDraft): Promise<boolean> {
-    const section = host.inputSection();
-    if (!section || host.terminal() !== null) return false;
-    unacknowledged.set(draft.actionId, (unacknowledged.get(draft.actionId) ?? 0) + 1);
-    try {
-      const drafted = await draftInput(
-        section,
-        { actionId: draft.actionId, fieldId: draft.fieldId },
-        draft.text,
-      );
-      if (drafted.session !== null) host.publish(drafted.session);
-      return drafted.taken;
-    } finally {
-      release(draft.actionId);
-    }
-  }
-
-  function release(actionId: number) {
-    const left = (unacknowledged.get(actionId) ?? 1) - 1;
-    if (left > 0) unacknowledged.set(actionId, left);
-    else unacknowledged.delete(actionId);
-  }
-
-  function dismissField(): void {
-    const action = presentedForm();
-    if (action === null) return;
-    void update(action.actionId, intents.formDismiss);
-  }
-  function clearField(): void {
-    const action = presentedForm();
-    if (action === null) return;
-    void update(action.actionId, intents.formClear);
   }
 
   /**
@@ -600,7 +485,7 @@ export function useAnswerSubmission(host: {
     if (pending.value !== null) return;
     const draft = formDraftText();
     const intent = intents.formSubmit(draft, input);
-    if ((unacknowledged.get(action.actionId) ?? 0) > 0)
+    if (host.forms.unacknowledged(action.actionId) > 0)
       return begin(action, typed ? "chat" : "formSubmit", null, typed, intent);
     let state = action.form;
     if (state.editor !== null && draft !== undefined) {
@@ -634,7 +519,7 @@ export function useAnswerSubmission(host: {
   function cancelForm(input: "enter" | "send" | "button" = "button", typed = false): void {
     const action = presentedForm();
     if (action === null || pending.value !== null) return;
-    if ((unacknowledged.get(action.actionId) ?? 0) > 0)
+    if (host.forms.unacknowledged(action.actionId) > 0)
       return begin(action, typed ? "chat" : "formCancel", null, typed, intents.formCancel(input));
     answerWith("formCancel", { kind: "cancel" }, intents.formCancel(input), "form", typed);
   }
@@ -662,8 +547,6 @@ export function useAnswerSubmission(host: {
     notice: computed(() => notice.value),
     clearNotice,
     showNotice,
-    /** The typed field whose commit is under way, read-only until the form took it. */
-    commitWindow: computed(() => commitWindow.value),
     send,
     choose,
     activatePreselected,
@@ -673,18 +556,18 @@ export function useAnswerSubmission(host: {
     useImage,
     openUrl,
     urlOpener,
-    stepField,
-    dismissField,
-    clearField,
     submitForm,
     cancelForm,
     skipPacing,
-    draft,
+    run,
   };
 }
 
 /** The notice of a refused answer or edit. */
-function refusalMessage(outcome: { readonly kind: string; readonly message?: string }): string {
+export function refusalMessage(outcome: {
+  readonly kind: string;
+  readonly message?: string;
+}): string {
   return outcome.kind === "invalidPayload" && outcome.message !== undefined
     ? outcome.message
     : outcome.kind === "executionPending"

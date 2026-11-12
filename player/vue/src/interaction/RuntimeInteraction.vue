@@ -35,6 +35,7 @@ import { openUrlTab } from "../../../url-tab.js";
 import type { InputSectionHost } from "../session/runtime-input";
 import { useComposerState, type ComposerDescriptor, type ComposerTenant } from "./useComposerState";
 import { useAnswerSubmission, type SessionTerminal } from "./useAnswerSubmission";
+import { useFormUpdates } from "./useFormUpdates";
 import type { ImageCapture } from "../stage/useImageCapture";
 
 /** How the host stores an image file the player chose for `askImage`. */
@@ -242,15 +243,28 @@ const composer = ref<{
 } | null>(null);
 const formEditor = computed(() => form.value?.editor ?? null);
 
+/** The notice for typed text that answers nothing here. */
+function unansweredMessage() {
+  return foreground.value?.kind === "show-button"
+    ? "Type the exact button text or activate it above."
+    : foreground.value?.kind === "form"
+      ? "Type the exact text of one button, or use the buttons above."
+      : imageTextFeedback.value;
+}
 // The composer's slots and the answers given, each with its own controller: the composer's text changes only by the
 // player's edits and these controllers (useComposerState), and an answer is checked at once and settled by the runtime
 // (useAnswerSubmission).
 const composerState = useComposerState({
-  draft: (draft) => submission.draft(draft),
+  draft: (draft) => formUpdates.draft(draft),
   holdDrafts: () => !!props.holdFormDrafts || !props.inputSection,
 });
 const submission = useAnswerSubmission({
   composer: composerState,
+  forms: {
+    unacknowledged: (id) => formUpdates.unacknowledged(id),
+    commitField: (action, input) => formUpdates.commitField(action, input),
+    stepField: (fieldId, typed) => formUpdates.stepField(fieldId, typed),
+  },
   session: () => props.session,
   stoppedSession: () => props.stoppedSession ?? null,
   chat: () => props.chat ?? 0,
@@ -258,17 +272,24 @@ const submission = useAnswerSubmission({
   inputSection: () => props.inputSection,
   prepareInput: () => props.prepareInput?.() ?? true,
   publish: (session) => emit("update:session", session),
-  unansweredMessage: () =>
-    foreground.value?.kind === "show-button"
-      ? "Type the exact button text or activate it above."
-      : foreground.value?.kind === "form"
-        ? "Type the exact text of one button, or use the buttons above."
-        : imageTextFeedback.value,
+  unansweredMessage: () => unansweredMessage(),
   submitLock: (password) => props.lock?.submit({ password, timeLockMs: null }),
   // A refused answer that came from the field gives it the focus back; one from a control shows its control again.
   undone: (record) => {
     if (record.origin === "chat" || record.origin === "temporal") focusInput();
   },
+});
+const formUpdates = useFormUpdates({
+  composer: composerState,
+  session: () => props.session,
+  chat: () => props.chat ?? 0,
+  terminal: () => props.terminal ?? null,
+  inputSection: () => props.inputSection,
+  run: (id, intent) => submission.run(id, intent),
+  publish: (session) => emit("update:session", session),
+  showNotice: (message) => submission.showNotice(message),
+  clearNotice: () => submission.clearNotice(),
+  unansweredMessage: () => unansweredMessage(),
 });
 const { displayed, token: composerToken, lockPhase } = composerState;
 const consumed = submission.consumed;
@@ -333,7 +354,7 @@ watch(composerKey, () => composerState.select(descriptor.value), { immediate: tr
 /** The field takes no typing for now: a password just sent, a form field's commit, an image read, the lock at work. */
 const composerReadonly = computed(() => {
   const tenant = composerState.tenant.value;
-  const window = submission.commitWindow.value;
+  const window = formUpdates.commitWindow.value;
   return (
     readingImage.value ||
     !!lockField.value?.busy ||
@@ -710,7 +731,7 @@ function askPasswordAgain() {
 /** Escape: in the lock's repeated password it asks the password again; in a form field it closes the field. */
 function escape() {
   if (lockPhase.value === "repeat") askPasswordAgain();
-  else if (formEditor.value) submission.dismissField();
+  else if (formEditor.value) formUpdates.dismissField();
 }
 </script>
 
@@ -735,11 +756,11 @@ function escape() {
                 :key="actionId ?? 0"
                 :form="form"
                 :accessible-name="foreground.accessibleName"
-                @step="(fieldId) => submission.stepField(fieldId)"
+                @step="(fieldId) => formUpdates.stepField(fieldId)"
                 @submit="fromControls(() => submission.submitForm())"
                 @cancel="fromControls(() => submission.cancelForm())"
-                @dismiss="submission.dismissField()"
-                @clear="submission.clearField()"
+                @dismiss="formUpdates.dismissField()"
+                @clear="formUpdates.clearField()"
               />
               <ForegroundControls
                 v-else
