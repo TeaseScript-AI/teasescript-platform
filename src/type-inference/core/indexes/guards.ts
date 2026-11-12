@@ -105,8 +105,10 @@ export class GuardIndex {
     Key,
     { readonly branches: Map<Callable | null, Nest>; readonly operands: Map<number, Nest> }
   >("GuardIndex.#nests");
-  /** The tested keys q below each key, per relative path q, and the longest such path (§8). */
-  /** #1072 1b: what it fills on its first question, a record: the tested keys below, by place, their longest path. */
+  /**
+   * The tested keys q below each key, per relative path q, and the longest such path (§8); by place, the operand
+   * regions; and the nests' count: what it fills on its first question, in a record (#1072 1b).
+   */
   readonly #lazy = Retained.record<{
     testedRelative: Map<string, Set<Key>> | null;
     byPlace: ReadonlyMap<PlaceId, ReadonlyMap<number, Regions<OperandRegion>>> | null;

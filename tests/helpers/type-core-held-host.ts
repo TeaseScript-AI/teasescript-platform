@@ -1155,8 +1155,7 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
         if (shownText !== null) touch(recipe, shownText);
       },
       (value) => {
-        // EVIDENCE: invariant: as above.
-        if (value !== null) touch(recipe, value as string);
+        if (typeof value === "string") touch(recipe, value);
       },
     );
     if (watched) {
@@ -1165,8 +1164,7 @@ function recordingReads<T extends { readonly answers: Answers }>(make: () => T):
         "below",
         () => {},
         (value) => {
-          // EVIDENCE: invariant: a recipe's `below` is a map of recipes or `null` (`Label`).
-          if (value !== null) onSet(value as Map<string, Label>, (_, child) => observe(child));
+          if (value instanceof Map) onSet(value, (_, child: Label) => observe(child));
         },
       );
       slots.set(recipe, () => {
