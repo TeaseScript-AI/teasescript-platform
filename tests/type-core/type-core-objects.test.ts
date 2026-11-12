@@ -448,6 +448,7 @@ function declinedWalk(source: string): {
     // are retained data, sealed in a frozen run, so the count stands outside them and is put back after)
     const reads = new Set<unknown>(groups.flatMap((group) => (group === null ? [] : [group.read])));
     const iterate = Array.prototype[Symbol.iterator];
+    // EVIDENCE: fixture: a generator over an array's entries is the arrays' iterator for the measured run.
     Array.prototype[Symbol.iterator] = function* (this: unknown[]) {
       if (!reads.has(this)) return yield* iterate.call(this);
       for (let at = 0; at < this.length; at += 1) {
