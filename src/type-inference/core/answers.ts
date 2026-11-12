@@ -35,6 +35,7 @@ import {
   type CanonicalKey,
 } from "./contract/key-ids.js";
 import { labelText } from "./contract/labels.js";
+import { factsOf } from "./contract/model.js";
 import { keyObjects, objectsAt } from "./contract/objects.js";
 import { replayLayer } from "./contract/prefix-index/summaries.js";
 import { selectLanes } from "./contract/lanes.js";
@@ -103,6 +104,7 @@ import {
 } from "./contract-descriptors.js";
 import { admittedLevel } from "./admission/admitted.js";
 import { stopDiagnostics } from "./stop-diagnostics.js";
+import { Retained, retainedModule } from "./retained/retained.js";
 
 // (a kind's closed type lives with the contract descriptors, which build types of kinds; the adapters read it here)
 export { closedType };
@@ -147,7 +149,7 @@ function createPass(
   program: CoreProgram,
   rejected: ReadonlyMap<number, unknown> = new Map(),
   stopped: readonly StoppedKey[] = [],
-  targets: StoreTargets = new Map(),
+  targets: StoreTargets = Retained.map("DefinitionIndex.storeTargets"),
   completion = false,
 ): CorePass {
   const definitions = new DefinitionIndex(program, targets);
@@ -166,8 +168,13 @@ function createPass(
     // admission's rejections take effect in the next pass (A6)
     lists: new DefinitionLists(
       definitions,
-      (d) => !rejected.has(d.uid),
-      (operand) => !rejected.has(joinedOperand(operand)),
+      // (#1072 R26: captures `rejected`, the pass's own, never written after it is given)
+      Retained.closure("DefinitionLists.live", (d: Definition) => !rejected.has(d.uid)),
+      // (#1072 R26: as `live`)
+      Retained.closure(
+        "DefinitionLists.joined",
+        (operand: PlaceId) => !rejected.has(joinedOperand(operand)),
+      ),
     ),
     handlers: new HandlerIndex(program, definitions),
     guards: new GuardIndex(program),
@@ -191,6 +198,12 @@ function createPass(
   const exact = new ExactPath(pass);
   const contract = new Contract(pass);
   const values = new Values(pass);
+  // (its getters give these three, made after it; its other fields are its parts)
+  Retained.owner(pass, "CorePass", (made) => ({
+    exact: made.exact,
+    contract: made.contract,
+    values: made.values,
+  }));
   // (#1526 phase C: no decision of a completion pass stops at its allowance, so nothing #1599 keeps for one is kept,
   // from before anything of the pass solves)
   if (completion) contract.closeDecisions();
@@ -259,7 +272,9 @@ function storeTargets(
   decide: (root: PlaceId, path: readonly string[], into: PlaceId) => void,
   stores: readonly SelectingStore[],
 ): StoreTargets {
-  const out = new Map<PlaceId, ReturnType<CoreProgram["targetRoot"]>>();
+  const out = Retained.map<PlaceId, ReturnType<CoreProgram["targetRoot"]>>(
+    "DefinitionIndex.storeTargets",
+  );
   // (per target, the kinds of the earliest value set there that decides: each value asked once, until one decides)
   const settled = new Map<Key, readonly ItemTag[]>();
   const objects = (kinds: readonly ItemTag[]): boolean =>
@@ -618,7 +633,7 @@ export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit)
   let stops: readonly StoppedKey[] = [];
   // #1275: the stores below a selection, their targets by the receivers each pass admits; new targets start the passes
   // again from no rejection, and targets a pass has used before are kept (no cycle of targets)
-  let targets: StoreTargets = new Map();
+  let targets: StoreTargets = Retained.map("DefinitionIndex.storeTargets");
   if (stopped !== undefined) program.work.stop(stopped);
   else
     try {
@@ -1128,7 +1143,10 @@ function termProperties(term: TypeTerm): string[] {
 }
 
 /** Each program's kept-variable names by base (`keptName`), one survey for all the answers asked of it. */
-const KEPT_NAMES = new WeakMap<CorePass["program"], Map<string, string>>();
+const KEPT_NAMES = retainedModule(
+  "answers.KEPT_NAMES",
+  Retained.weakMap<CorePass["program"], Map<string, string>>,
+);
 
 class CoreAnswers implements Answers {
   readonly outcome: CoreOutcome;
@@ -1250,7 +1268,7 @@ class CoreAnswers implements Answers {
       demands: consumers.reads,
       decisions: consumers.decisions,
       finished: pass.solver.demandWork(),
-      facts: { ...pass.contract.facts },
+      facts: factsOf(pass.contract.facts, pass.contract.supportIds),
       closure: consumers.completion,
     };
   }
@@ -1476,8 +1494,9 @@ class CoreAnswers implements Answers {
 
   public keptName(base: string): string {
     const { program } = this.#pass;
-    let names = KEPT_NAMES.get(program);
-    if (names === undefined) KEPT_NAMES.set(program, (names = new Map()));
+    let names = KEPT_NAMES().get(program);
+    if (names === undefined)
+      KEPT_NAMES().set(program, (names = Retained.map("answers.KEPT_NAMES[]")));
     let name = names.get(base);
     if (name === undefined) {
       const { work } = program;

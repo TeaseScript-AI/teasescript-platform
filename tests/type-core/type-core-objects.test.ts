@@ -444,26 +444,19 @@ function declinedWalk(source: string): {
       ...(contract.othersBelowOf.get(others) ?? others),
     ];
     let visits = 0;
-    const restore: (() => void)[] = [];
-    for (const group of groups) {
-      if (group === null) continue;
-      // (the group's own list, its iterator counting each entry taken, put back after)
-      const read: { [Symbol.iterator]: () => Iterator<unknown> } & ArrayLike<unknown> = group.read;
-      const prior = Object.getOwnPropertyDescriptor(read, Symbol.iterator);
-      Object.defineProperty(read, Symbol.iterator, {
-        configurable: true,
-        value: function* (this: ArrayLike<unknown>) {
-          for (let at = 0; at < this.length; at += 1) {
-            visits += 1;
-            yield this[at];
-          }
-        },
-      });
-      restore.push(() => {
-        if (prior === undefined) Reflect.deleteProperty(read, Symbol.iterator);
-        else Object.defineProperty(read, Symbol.iterator, prior);
-      });
-    }
+    // (each group's own list, its entries counted as they are taken, through the arrays' iterator: the lists themselves
+    // are retained data, sealed in a frozen run, so the count stands outside them and is put back after)
+    const reads = new Set<unknown>(groups.flatMap((group) => (group === null ? [] : [group.read])));
+    const iterate = Array.prototype[Symbol.iterator];
+    Array.prototype[Symbol.iterator] = function* (this: unknown[]) {
+      if (!reads.has(this)) return yield* iterate.call(this);
+      for (let at = 0; at < this.length; at += 1) {
+        visits += 1;
+        yield this[at];
+      }
+      return undefined;
+    } as typeof iterate;
+    const restore: (() => void)[] = [() => (Array.prototype[Symbol.iterator] = iterate)];
     try {
       const before = program.work.total;
       const { proof } = solver.run(solver.proven(objectsAt(contract, array, ["element", "zz"])));

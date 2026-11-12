@@ -1,6 +1,7 @@
 import { familyOf, VALUE_KIND_NAMES, type ValueKind } from "../../value-kinds.js";
 import type { SourceSite } from "../graph.js";
 import type { WorkLedger } from "./budget.js";
+import { Retained } from "./retained/retained.js";
 
 /**
  * The items of the coarse core (checkpoint 9): what the analysis knows of a value at a read. A value is a
@@ -319,7 +320,8 @@ export class IngressGraph {
   }
 
   public cell(): IngressCell {
-    return { id: this.#next++, contents: null };
+    // (#1072 1b: a record, so the solver's growth of a fixpoint's cell is a recorded write)
+    return Retained.record("IngressCell", { id: this.#next++, contents: null });
   }
 }
 

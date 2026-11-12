@@ -17,6 +17,7 @@ import type {
   StoredClass,
 } from "./model.js";
 import { termAt, typeKinds, writtenOf } from "./terms.js";
+import { Retained } from "../retained/retained.js";
 
 // A selection's objects on one side (#1278, #1233): the names a choice object may hold, its pieces, stored classes.
 
@@ -41,8 +42,8 @@ export function selectionOf(
   const objects = selectionObjects(contract, literal, index, path, byValue, below, exact);
   const open: number[] = [];
   const closed: number[] = [];
-  const sets = new Map<string, ReadonlySet<string>[]>();
-  const holding = new Map<ReadonlySet<string>, number[]>();
+  const sets = Retained.map<string, ReadonlySet<string>[]>("Contract.selectionsOf.sets");
+  const holding = Retained.map<ReadonlySet<string>, number[]>("Contract.selectionsOf.holding");
   let units = 6 + 3 * objects.length;
   objects.forEach((object, position) => {
     program.work.charge("invSteps");
@@ -74,7 +75,7 @@ export function selectionOf(
     sets,
     holding,
     every: objects.map((_, position) => position),
-    pieces: new Map(),
+    pieces: Retained.map("Contract.selectionsOf.pieces"),
   };
   contract.keepText(memoKey.length);
   contract.keep(units);
@@ -210,7 +211,7 @@ function bindingNames(contract: Contract, value: PlaceId): ReadonlySet<string> |
     addSource(contract, sources, names);
   }
   if (sources.size === 0) return null;
-  const stored = new Set<string>();
+  const stored = Retained.set<string>("Contract.bindingNamesOf.stored");
   for (const below of definitions.keysBelow(key)) {
     program.work.charge("invSteps");
     const step = keyPath(below)[0]!;
@@ -262,7 +263,7 @@ export function unionOf(
   sources: ReadonlySet<ReadonlySet<string>>,
 ): ReadonlySet<string> {
   if (sources.size === 1) return sources.values().next().value!;
-  const union = new Set<string>();
+  const union = Retained.set<string>("selections.union");
   for (const names of sources)
     for (const name of names) {
       contract.pass.program.work.charge("invSteps");
