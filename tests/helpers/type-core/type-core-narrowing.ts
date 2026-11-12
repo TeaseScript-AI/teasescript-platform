@@ -1,5 +1,5 @@
 import type { CorePass } from "../../../src/type-inference/core/answers.js";
-import { Contract } from "../../../src/type-inference/core/contract.js";
+import { Contract, WrittenDefaults } from "../../../src/type-inference/core/contract.js";
 import {
   DefinitionIndex,
   DefinitionLists,
@@ -40,6 +40,7 @@ export function narrowingPass(request: CoreAnalysisRequest): CorePass {
     guards: new GuardIndex(program),
     solver: new Solver(program.scope),
     receivingDomain: new ReceivingDomain(),
+    writtenDefaults: new WrittenDefaults(program, definitions),
   };
   const pass: CorePass = {
     ...parts,
