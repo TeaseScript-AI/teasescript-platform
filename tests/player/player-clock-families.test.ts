@@ -1,7 +1,7 @@
 /*
  * The scene clock's generated families: the first completion of every outcome, chains of two completions, and the
- * basis fence against a shown publication. Each covers its rows (`coverageGaps`); the single-case witnesses and the
- * clock-work tables are in `player-clock-work.test.ts`.
+ * basis fence against a shown publication. Each covers its rows (`coverageGaps`); the single-case witnesses are in
+ * `player-clock-observations.test.ts`, and the clock-work tables in `player-clock-work.test.ts`.
  */
 
 import assert from "node:assert/strict";
@@ -320,7 +320,7 @@ test("the completion-chain family covers every feasible row and states why each 
  *   publishes nothing, while the next one's waits";
  * - an injected orphaned reply: this family's precondition;
  * - a publication stored only, after the parked release: P promises no recovery from it; one existing opportunity
- *   reaches the deadline (the stored-only-publication witness in `player-clock-work.test.ts`);
+ *   reaches the deadline (the stored-only-publication witness in `player-clock-observations.test.ts`);
  * - a missing event segment against no gap: the store refuses a publication whose events do not continue its cursor
  *   (`player-bridge-session.test.ts`, "a store applies publications by revision and requires their events to continue
  *   its cursor"). No recovery is claimed;
