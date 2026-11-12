@@ -693,6 +693,56 @@ export interface ContractFacts {
   listedSources: number;
 }
 
+/**
+ * #1072 1b: the run facts' counters, apart from the support nodes' ids (`SupportIds`). Every run adds to them, and they
+ * are only copied into the answers' facts (`factsOf`) after the analysis: no decision reads them, so a retained-state
+ * check holds them as they are, as it holds the work ledger.
+ */
+export class ContractCounters {
+  prefixEntries = 0;
+  literalEntries = 0;
+  markNodes = 0;
+  markVisits = 0;
+  selectionVisits = 0;
+  decidedPaths = 0;
+  ringComponents = 0;
+  ringPorts = 0;
+  ringStops = 0;
+  supportEdges = 0;
+  layerDemands = 0;
+  listedSources = 0;
+}
+
+/**
+ * #1072 1b: the support nodes' ids, a pass-wide allocator (the entry lifecycle's rule for ids, C2.4): an id is never
+ * reused and the count never rolled back, so a retained-state check holds it as it is.
+ */
+export class SupportIds {
+  made = 0;
+  public next(): number {
+    return this.made++;
+  }
+}
+
+/** The answers' facts: the counters and the support nodes made, in the facts' order. */
+export function factsOf(counters: ContractCounters, ids: SupportIds): ContractFacts {
+  return {
+    prefixEntries: counters.prefixEntries,
+    literalEntries: counters.literalEntries,
+    markNodes: counters.markNodes,
+    markVisits: counters.markVisits,
+    selectionVisits: counters.selectionVisits,
+    decidedPaths: counters.decidedPaths,
+    ringComponents: counters.ringComponents,
+    ringPorts: counters.ringPorts,
+    ringStops: counters.ringStops,
+    supportNodes: ids.made,
+    supportEdges: counters.supportEdges,
+    layerDemands: counters.layerDemands,
+    listedSources: counters.listedSources,
+  };
+}
+
 /** A key whose admission decision stopped at its demand allowance (`Contract.stop`). */
 /** G3 3a: a chain of property reads of a read, by its read and its first step (`Contract.chainOf`). */
 export interface ChainRoot {
