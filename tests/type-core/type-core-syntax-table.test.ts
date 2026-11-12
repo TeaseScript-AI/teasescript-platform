@@ -64,11 +64,35 @@ const CASES: readonly Composite[] = [
   },
   {
     name: "a closed statement after an open one in the same list",
-    files: ["let a = hostValue\nwait 1 s\n"],
+    files: ['let a = hostValue\nsave a as "k"\n'],
     outer: "letStatement",
-    inner: "waitStatement",
+    inner: "saveStatement",
     file: 0,
-    at: "wait 1 s",
+    at: 'save a as "k"',
+  },
+  {
+    name: "a closed expression as a command's operand",
+    files: ['showButton "Go", timeout: 2 s\n'],
+    outer: "showButtonStatement",
+    inner: "durationLiteral",
+    file: 0,
+    at: "2 s",
+  },
+  {
+    name: "a closed expression as a command's only operand",
+    files: ["showImage -hostValue\n"],
+    outer: "showImageStatement",
+    inner: "unaryExpression",
+    file: 0,
+    at: "-hostValue",
+  },
+  {
+    name: "a closed expression as a say's pacing",
+    files: ['say "a", -hostValue\n'],
+    outer: "sayStatement",
+    inner: "unaryExpression",
+    file: 0,
+    at: "-hostValue",
   },
   {
     name: "the first of two closed constructs in source order, the later one deeper",
@@ -103,9 +127,9 @@ const refusedText = (kind: SyntaxKind): string =>
 
 test("an open construct holding or followed by a closed one is refused at the closed one, with its row's text", () => {
   for (const composite of CASES) {
-    assert.equal(
+    assert.notEqual(
       DISPOSITIONS[composite.outer].row,
-      "modelled",
+      "refused",
       `${composite.name}: outer row open`,
     );
     assert.equal(
@@ -139,7 +163,7 @@ test("an open construct holding or followed by a closed one is refused at the cl
 });
 
 /**
- * A modelled row's own condition, on its refusing side: the source, the refused construct's whole text (its offsets),
+ * An open row's own condition, on its refusing side: the source, the refused construct's whole text (its offsets),
  * and the row's words.
  */
 interface Condition {
@@ -152,11 +176,10 @@ interface Condition {
 }
 
 /**
- * The inventory of the modelled rows' own conditions: the conditions of main's `outsideSyntax` cases
- * (a85dc7d8f929ea7cd74f133834b3ce4c9ff487a3) that became the rows, with those of the predicates they call
- * (`annotationOutside`, `nullTest`, `sliceCall`, `sliceMethod`): a source for each operand, comparison and unwrapping
- * that, weakened, would admit a refused source (#2501 lists them with their mutants). Every other modelled row has
- * none (`UNCONDITIONAL`); the inventory test below keeps the two lists equal to the table's modelled rows.
+ * The inventory of the open rows' own conditions, with those of the predicates they call (`annotationOutside`,
+ * `nullTest`, `sliceCall`, `sliceMethod`): a source for each operand, comparison and unwrapping that, weakened, would
+ * admit a refused source (`tools/slice-conditions.json` lists them with their mutants). Every other open row has none
+ * (`UNCONDITIONAL`); the inventory test below keeps the two lists equal to the table's open rows.
  */
 const CONDITIONS: readonly Condition[] = [
   {
@@ -189,31 +212,17 @@ const CONDITIONS: readonly Condition[] = [
   },
   {
     row: "sayStatement",
-    condition: "no presentation",
-    source: 'say prose(color: "red") "A letter."',
-    at: 'say prose(color: "red") "A letter."',
-    what: "this say",
-  },
-  {
-    row: "sayStatement",
     condition: "no speaker",
     source: 'say as player "Hold."',
     at: 'say as player "Hold."',
     what: "this say",
   },
   {
-    row: "sayStatement",
-    condition: "no skip policy",
-    source: 'say skippable "Hold."',
-    at: 'say skippable "Hold."',
-    what: "this say",
-  },
-  {
-    row: "sayStatement",
-    condition: "no pacing",
-    source: 'say "Hold.", instant',
-    at: 'say "Hold.", instant',
-    what: "this say",
+    row: "showButtonStatement",
+    condition: "no speaker",
+    source: 'showButton as player "Go"',
+    at: 'showButton as player "Go"',
+    what: "this show button statement",
   },
   {
     row: "sayStatement",
@@ -477,8 +486,17 @@ const CONDITIONS: readonly Condition[] = [
   },
 ];
 
-/** The modelled rows that check nothing of their own: each walks its children. */
+/** The open rows that check nothing of their own: each walks its children. */
 const UNCONDITIONAL: readonly SyntaxKind[] = [
+  "speakerSetterStatement",
+  "waitStatement",
+  "showImageStatement",
+  "hideImageStatement",
+  "showPopupStatement",
+  "openUrlStatement",
+  "exportTextStatement",
+  "stopAudioStatement",
+  "deleteStatement",
   "exitStatement",
   "ifStatement",
   "repeatStatement",
@@ -494,10 +512,10 @@ const UNCONDITIONAL: readonly SyntaxKind[] = [
   "rangeExpression",
 ];
 
-test("every modelled row is in the condition inventory or has no condition of its own", () => {
+test("every open row is in the condition inventory or has no condition of its own", () => {
   // EVIDENCE: invariant: the table's keys are exactly the AST kinds (its mapped type).
   const modelled = (Object.keys(DISPOSITIONS) as SyntaxKind[])
-    .filter((kind) => DISPOSITIONS[kind].row === "modelled")
+    .filter((kind) => DISPOSITIONS[kind].row !== "refused")
     .sort();
   const conditional = [...new Set(CONDITIONS.map((condition) => condition.row))];
   assert.deepEqual(
@@ -507,10 +525,10 @@ test("every modelled row is in the condition inventory or has no condition of it
   assert.deepEqual([...conditional, ...UNCONDITIONAL].sort(), modelled);
 });
 
-test("each modelled row refuses where its own condition fails, at its construct, with its text", () => {
+test("each open row refuses where its own condition fails, at its construct, with its text", () => {
   for (const condition of CONDITIONS) {
     const name = `${condition.row}, ${condition.condition}: ${condition.source}`;
-    assert.equal(DISPOSITIONS[condition.row].row, "modelled", name);
+    assert.notEqual(DISPOSITIONS[condition.row].row, "refused", name);
     const source = `${condition.source}\n`;
     assert.equal(source.indexOf(condition.at), source.lastIndexOf(condition.at), name);
     let refused: unknown = null;
