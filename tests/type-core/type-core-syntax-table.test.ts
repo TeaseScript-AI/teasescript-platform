@@ -3,7 +3,12 @@ import test from "node:test";
 
 import { compileProjectWithBackend } from "../../src/compiler.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
-import { DISPOSITIONS, type SyntaxKind } from "../../src/type-inference/core/slice-syntax.js";
+import {
+  DISPOSITIONS,
+  outsideSyntax,
+  type SyntaxKind,
+} from "../../src/type-inference/core/slice-syntax.js";
+import { coreRequest } from "../helpers/type-core-analysis.js";
 
 /*
  * The candidate route's syntax table (`DISPOSITIONS`, #2498): a construct whose row is open is still refused when a
@@ -363,10 +368,22 @@ test("each modelled row refuses where its own condition fails, at its construct,
     }
     assert.ok(refused instanceof CandidateOutsideSlice, `${name}: refused`);
     const start = source.indexOf(condition.at);
+    const expected = { start, end: start + condition.at.length, what: condition.what };
     assert.deepEqual(
       { start: refused.site.start, end: refused.site.end, what: refused.what },
-      { start, end: start + condition.at.length, what: condition.what },
+      expected,
       name,
+    );
+    // the syntax rule alone, as the contract capture reads it (`consumers.ts`): a refusal the route makes after the
+    // analysis (`outsideAnswers`) at the same construct cannot stand in for the row's own
+    const own = outsideSyntax(
+      coreRequest([{ path: "main.tease", source }])!.files,
+      new Set(["hostValue"]),
+    );
+    assert.deepEqual(
+      { start: own?.span.start.offset, end: own?.span.end.offset, what: own?.what },
+      expected,
+      `${name}: the syntax rule`,
     );
   }
 });
