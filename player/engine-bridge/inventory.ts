@@ -256,6 +256,7 @@ export const VIEW_READERS: readonly string[] = [
   "playerRuntimeTranscript",
   "playerRuntimeTranscriptMessage",
   "appendTranscript",
+  "answerRenderKey",
   "activeInteraction",
   "choiceOptionId",
   "DEFAULT_SPEAKERS",
