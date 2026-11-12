@@ -46,9 +46,11 @@ export const ADMISSION_KNOWN_PRODUCTS: readonly KnownProduct[] = [
     name: "A6-ring-dormant-meetings-list",
     measures:
       "#1338: k copies of a record holding a fitting ring in one property, each stored and listed beside the record",
-    // 663,718 / 2,340,824 units at k = 64, 128 in both orders (3.5867; sharing off 3.6106; 3.7754 at 128 → 256), the
-    // allowance reached at k = 482
-    measured: 3.59,
+    // 898,222 / 3,260,384 units at k = 64, 128 in both orders (3.6914; sharing off 3.7083), the allowance reached at
+    // k = 403. #2289's B1 compares each list's elements on each decided path, which main did not: 1.35 to 1.43 times
+    // main's total from k = 64 to 1,024, settling (+0.040, +0.023, +0.013, +0.004 per doubling), and growing as main does
+    // (3.9734 at 512 → 1,024, main 3.9628). Main: 663,718 / 2,340,824 (3.5867; sharing off 3.6106), allowance at 482
+    measured: 3.7,
     program: (k) => ringDormantMeetings(k, "list"),
   },
   {

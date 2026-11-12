@@ -294,9 +294,15 @@ test("the route rule's queries beside arms no run enters grow with the program i
  * array or a text, so the decision of a literal nested k deep grows with k: the largest decision's units per doubling
  * of the source, for a literal of two kinds in either order and for one copying a written union in the source order
  * (2.01 and 2.06 here). Reversed, that one's decision costs depth × copies, G6 in #1319's design-round list (about 3.6,
- * as before G3 2c). A region that made each level's path and its text measured 4.42 and 4.45, and stopped both shapes'
- * decisions at their allowance at 300 levels.
+ * as before G3 2c), so it is pinned by where it stops instead: its decision stays within its demand allowance to
+ * `REVERSED_UNION` levels and stops one level deeper. Main stopped it at 71: #2289's B1 compares the literal's two
+ * elements on each decided path and charges that comparison to the decision (R53), a known cost of decision B that
+ * reaches the allowance sooner (R71); the allowance is unchanged. A region that made each level's path and its text
+ * measured 4.42 and 4.45, and stopped both shapes' decisions at their allowance at 300 levels.
  */
+/** The depth to which #1438's written union, reversed, keeps its decision within its demand allowance (main: 70). */
+const REVERSED_UNION = 60;
+
 test("a deep literal's decision grows with its depth, never with its square (#1438)", () => {
   const nest = (k: number, leaf: string): string => `${"[".repeat(k)}${leaf}${"]".repeat(k)}`;
   const shapes: readonly (readonly [string, (k: number) => string, readonly boolean[]])[] = [
@@ -307,6 +313,20 @@ test("a deep literal's decision grows with its depth, never with its square (#14
       [false],
     ],
   ];
+  const stops = (source: string, reversed: boolean): boolean => {
+    const request = coreRequest([{ path: "main.tease", source: `${source}\nexit` }]);
+    assert.ok(request !== null);
+    return analysed(
+      { name: "the written union reversed", request },
+      reversed,
+    ).budget.decisions.some((decision) => decision.stopped);
+  };
+  const union = shapes[1]![1];
+  assert.deepEqual(
+    [stops(union(REVERSED_UNION), true), stops(union(REVERSED_UNION + 1), true)],
+    [false, true],
+    "the written union reversed stops one level past its pinned depth",
+  );
   const largest = (budget: Answers["budget"]): number =>
     Math.max(...budget.decisions.map((decision) => decision.units));
   const steep: string[] = [];
@@ -360,8 +380,8 @@ test("every admission family's work and each of its counters grow with the progr
  * directly and through a copy of the written binding: each literal's elements asked their earliest decider outside
  * every decision are answered from the groups' summaries, each level once (`writtenDecider`), not each level's walk of
  * the nest inside it again (`checks` 4.11 to 4.29 per doubling before). With the leaf an object of another type, each
- * level's list mixes the property's types and each rejection shows only in the next pass, k passes (A6's chain, gated
- * as its own known limit): each pass's work grows with the program (2.69 per doubling before at k = 32 → 64). The
+ * level's list mixes the property's types; before #2289 each rejection showed only in the next pass, k passes (A6's
+ * chain, gated as its own known limit), and each pass's work is gated (2.69 per doubling before at k = 32 → 64). The
  * series to k = 128 in the four modes and the siblings are the step's evidence, outside CI.
  */
 const WRITTEN_NESTS: readonly WorkFamily[] = (
@@ -396,7 +416,11 @@ test("a written decider in nested selections is answered once per level, each pa
       const doubling = (before: number, after: number): number =>
         (2 * (per(b, after) / Math.max(1, per(a, before)))) / scale;
       const name = `${family.name}${reversed ? " reversed" : ""}`;
-      if (doubling(a!.total, b!.total) > DOUBLING)
+      // (#2289: the option's bound is its growth as measured, 2.1508 at k = 16 → 32 in both orders: B1 fits the
+      // leaf's text to the written union, so it takes one pass where main takes 17 and 33 (2.1461 per pass), and each
+      // level's list is evaluated as one body, about 0.004 over the comparison evaluation alone)
+      const bound = passes ? 2.16 : DOUBLING;
+      if (doubling(a!.total, b!.total) > bound)
         steep.push(`${name}: ${doubling(a!.total, b!.total).toFixed(3)}`);
       const checks = doubling(a!.counts.get("checks") ?? 0, b!.counts.get("checks") ?? 0);
       if (checks > COUNTER_DOUBLING) steep.push(`${name} checks: ${checks.toFixed(3)}`);
