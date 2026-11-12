@@ -257,6 +257,7 @@ function unansweredMessage() {
 const composerState = useComposerState({
   draft: (draft) => formUpdates.draft(draft),
   holdDrafts: () => !!props.holdFormDrafts || !props.inputSection,
+  fieldChanged: () => submission.clearNotice(),
 });
 const submission = useAnswerSubmission({
   composer: composerState,

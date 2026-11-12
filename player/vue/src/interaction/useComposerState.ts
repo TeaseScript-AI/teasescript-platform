@@ -102,6 +102,12 @@ export function useComposerState(host: {
   readonly holdDrafts: () => boolean;
   /** The draft timer's pause, in milliseconds. */
   readonly draftDelayMs?: number;
+  /**
+   * The player edited the field, or it shows another slot, chat or session: the composer's notice is then cleared
+   * (`useAnswerSubmission`). An answered action's field giving way to the chat, and coming back on a refusal, is
+   * neither.
+   */
+  readonly fieldChanged?: () => void;
 }) {
   const draftDelayMs = host.draftDelayMs ?? 400;
   let chatId: number | null = null;
@@ -120,6 +126,8 @@ export function useComposerState(host: {
   const token = ref(0);
   /** Bumps whenever a slot the field may show changes, so `displayed` follows. */
   const revision = ref(0);
+  /** The action whose answer was under way at the last selection, whose field the chat stands in for. */
+  let answering: number | null = null;
   let finish: () => void = () => {};
   let draftTimer: ReturnType<typeof setTimeout> | undefined;
   let disposed = false;
@@ -190,6 +198,11 @@ export function useComposerState(host: {
       next.chat !== chatId ||
       next.session !== session;
     if (switching) finish();
+    const answerSwitch =
+      next.actionId !== null &&
+      (next.answered || answering === next.actionId) &&
+      next.chat === chatId;
+    answering = next.answered ? next.actionId : null;
     if (next.chat !== chatId) {
       chatId = next.chat;
       chat.value = "";
@@ -234,6 +247,7 @@ export function useComposerState(host: {
       lock = { key: shown.dialogKey, repeat: shown.repeat, phase: "first", first: "", text: "" };
     tenant.value = shown;
     if (switching) {
+      if (!answerSwitch) host.fieldChanged?.();
       clearTimeout(draftTimer);
       token.value++;
       if (shown.kind === "form") armDraft();
@@ -271,6 +285,7 @@ export function useComposerState(host: {
         }
         chat.value = text;
     }
+    host.fieldChanged?.();
     touch();
   }
 
