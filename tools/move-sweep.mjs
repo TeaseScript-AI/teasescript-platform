@@ -22,8 +22,9 @@
 // to new path. --splits FILE merges in a JSON `{"renames": {old: [new, …]}}` for a split, one old path into several,
 // which Git does not report as a rename; --renames FILE replaces the whole map (and BASE is then not needed). A hit
 // counts as rewritten when it names any of an old path's new paths: an old path that is also one of its own new paths
-// (a split that keeps the original file) is not stale in form 1, and form 3 lists an old name only when none of its
-// new files keeps that name.
+// (a split that keeps the original file) is not stale in form 1, its name is no moved name in forms 4 and 5 (that file
+// still has it, whatever folder a string puts before it), and form 3 lists an old name only when none of its new files
+// keeps that name.
 //
 // The tree is HEAD's committed tree (commit first): its tracked regular files with a text extension, outside
 // `node_modules/` and `dist/`, read as UTF-8 with a byte-order mark kept as a character (a file that is not UTF-8 is
@@ -261,6 +262,14 @@ export function sweep(cwd, renames, forms = new Set(["1", "2", "3", "4", "5"])) 
   const { tracked, files, notRead } = treeOf(cwd);
   const moved = new Set(Object.keys(renames).map(stem));
   const names = [...moved].map(escape).sort(byLengthDown).join("|");
+  // (forms 4 and 5: only the names of old paths that leave; a name whose every old path stays among its own new paths
+  // still names that file wherever a string puts it)
+  const left = new Set(
+    Object.entries(renames)
+      .filter(([old, next]) => !next.includes(old))
+      .map(([old]) => stem(old)),
+  );
+  const leftNames = [...left].map(escape).sort(byLengthDown).join("|");
   const present = new Set(
     tracked.map((f) => `${f.includes("/") ? f.split("/").at(-2) : ""}\0${stem(f)}`),
   );
@@ -312,10 +321,10 @@ export function sweep(cwd, renames, forms = new Set(["1", "2", "3", "4", "5"])) 
     renamedNames.length > 0
       ? new RegExp(String.raw`(?<![${WORD}\-])(${alternation(renamedNames)})${EXT}`, "u")
       : null;
-  const form4 = names ? new RegExp(String.raw`${SEP}(?<name>${names})${END}`, "gu") : null;
-  const form5 = names
+  const form4 = leftNames ? new RegExp(String.raw`${SEP}(?<name>${leftNames})${END}`, "gu") : null;
+  const form5 = leftNames
     ? new RegExp(
-        String.raw`${SEP}\((?<group>(?:[${WORD}-]+\|)*(?:${names})(?:\|[${WORD}-]+)*)\)${END}`,
+        String.raw`${SEP}\((?<group>(?:[${WORD}-]+\|)*(?:${leftNames})(?:\|[${WORD}-]+)*)\)${END}`,
         "gu",
       )
     : null;
@@ -371,7 +380,7 @@ export function sweep(cwd, renames, forms = new Set(["1", "2", "3", "4", "5"])) 
           if (
             m.groups.group
               .split("|")
-              .some((name) => moved.has(name) && !namesAFile(file, before, name))
+              .some((name) => left.has(name) && !namesAFile(file, before, name))
           ) {
             hits[5].push(hit);
             break;
