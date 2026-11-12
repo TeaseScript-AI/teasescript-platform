@@ -304,3 +304,15 @@ test("a program stop that leaves a literal's cell undecided keeps its decision u
         );
       });
 });
+
+test("each copy of a misfitting element errs, the later ones its literal's body leaves out included (#2289 rule 3)", () => {
+  // (the second `s` copies the first at one snapshot, so the literal's body describes the first only; the cell's
+  // misfits carry it to the second, which errs as the first does, not checked when the script runs)
+  const source =
+    'let s: string = "x"\nlet n: integer = 1\nlet xs = [n, s, s]\nlet ys = [s, n, n]\nexit\n';
+  const xs = source.indexOf("[n, s, s]");
+  const ys = source.indexOf("[s, n, n]");
+  const sites = [xs + 4, xs + 7, ys + 4, ys + 7];
+  for (const got of answered(source, "xs", ["element"]))
+    assert.equal(got, `strict integer, ${sites.map((at) => `error @${at}`).join(", ")}`, source);
+});
