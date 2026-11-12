@@ -246,28 +246,23 @@ export class NarrowingRoutes extends RouteEntries {
     this.#work.charge("exactQueries");
     const found = yield* this.#examinedAt(key, "null", point.node, point.chain, point.at, []);
     return found !== null &&
-      (yield* this.#certified(found, key)) &&
+      (yield* this.certifies(found, key)) &&
       this.writerOpen(key, name, found.chain, point)
       ? found.def
       : null;
   }
 
-  /** `seedAt`'s candidates: `key`'s and its kept prefixes' certified `null` stores, every body. */
-  protected *seedStarts(key: Key): Work<readonly Candidate[]> {
+  /** `seedAt`'s candidates by body: `key`'s and its kept prefixes' stores (`certifies` tells the `null` ones). */
+  protected *seedLists(key: Key): Work<readonly ReadonlyMap<TreeBlock, Candidates>[]> {
     this.#work.charge("exactQueries");
     const lists = [yield* this.#ownCandidates(key, "null", [])];
     for (const prefix of each(this.#work, "eventSteps", keptPrefixes(this.#work, key)))
       lists.push(this.wholeStores(prefix));
-    const starts: Candidate[] = [];
-    for (const byBody of each(this.#work, "eventSteps", lists))
-      for (const [, { list }] of each(this.#work, "eventSteps", byBody))
-        for (const found of each(this.#work, "eventSteps", list))
-          if (yield* this.#certified(found, key)) starts.push(found);
-    return starts;
+    return lists;
   }
 
   /** Whether a candidate certifies `null`, through its copy source's own route where it copies one. */
-  *#certified(found: Candidate, key: Key): Work<boolean> {
+  protected *certifies(found: Candidate, key: Key): Work<boolean> {
     this.#work.charge("exactQueries");
     const source = yield* this.#certificate(found, key, "null", []);
     return (
