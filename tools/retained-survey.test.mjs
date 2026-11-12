@@ -8,13 +8,14 @@ import { fileURLToPath } from "node:url";
 
 const TOOL = fileURLToPath(new URL("./retained-survey.mjs", import.meta.url));
 
-/** A checkout with the type-core test files `a` and `b`, the `files` given written in it, the count run there. */
+/** A checkout with the type-core test files `a`, `b` and the stop file `c`, `files` written in it, the count run there. */
 function count(t, files) {
   const root = mkdtempSync(join(tmpdir(), "retained-survey-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   for (const [file, value] of Object.entries({
     "tests/type-core/a.test.ts": "",
     "tests/type-core/b.test.ts": "",
+    "tests/type-core-stop/c.test.ts": "",
     ...files,
   })) {
     mkdirSync(dirname(join(root, file)), { recursive: true });
@@ -30,8 +31,9 @@ test("every file surveyed with nothing noted passes, a gathered campaign's other
     "gathered/campaign.json": { jobs: 2 },
     "gathered/1/out/survey/a.test-10.json": survey("a.test.js"),
     "gathered/2/out/survey/b.test-11.json": survey("b.test.js"),
+    "gathered/2/out/survey/c.test-13.json": survey("c.test.js"),
   });
-  assert.equal(run.stdout, "retained survey: 2 files, 0 refusals, 0 frozen writes\n");
+  assert.equal(run.stdout, "retained survey: 3 files, 0 refusals, 0 frozen writes\n");
   assert.equal(run.status, 0);
 });
 
@@ -51,6 +53,7 @@ test("refusals and frozen writes are summed over the processes and listed; a fil
       "  refused 3x: a Map",
       "  frozen write 1x: read only property @ x",
       "  not surveyed: b.test",
+      "  not surveyed: c.test",
       "",
     ].join("\n"),
   );
