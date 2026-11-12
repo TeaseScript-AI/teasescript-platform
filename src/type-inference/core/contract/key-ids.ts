@@ -819,15 +819,6 @@ function ownSteps(steps: PathSteps): readonly string[] {
   return start === 0 && steps.length === raw.length ? raw : raw.slice(start, start + steps.length);
 }
 
-/**
- * A path's steps as its record keeps them (G3 stage 1), opaque: read by position (`length`, `at`), spelled only by the
- * record (`text`, `prefixText`, `textOf`), and copied out only by `toArray`, a charged copy, each site's listed with its
- * reason (`tests/type-core/type-core-key-ids.test.ts`). Its views (`from`, `to`) read the steps they view in place, never a
- * copy; a view's path's id and text, found where asked (`spanId`, `prefixId`, `textOf`), are kept on the steps it views
- * by its offset and length (an entry), so the same view made again finds both free, as a span view's own id is. Its
- * joins (`stepsJoin`, `stepsAfter`) hold the steps a join of arrays held, made as plainly, their path the arena's join
- * where asked. No text builder takes one, so a path's text is made by its record alone.
- */
 /** What steps find later (`PathSteps`), each once: its id and text, its views' entries, and its own entry as a view. */
 interface PathMemo {
   id: number | undefined;
@@ -838,6 +829,15 @@ interface PathMemo {
   entry: { readonly id: number; text?: string } | undefined;
 }
 
+/**
+ * A path's steps as its record keeps them (G3 stage 1), opaque: read by position (`length`, `at`), spelled only by the
+ * record (`text`, `prefixText`, `textOf`), and copied out only by `toArray`, a charged copy, each site's listed with its
+ * reason (`tests/type-core/type-core-key-ids.test.ts`). Its views (`from`, `to`) read the steps they view in place, never a
+ * copy; a view's path's id and text, found where asked (`spanId`, `prefixId`, `textOf`), are kept on the steps it views
+ * by its offset and length (an entry), so the same view made again finds both free, as a span view's own id is. Its
+ * joins (`stepsJoin`, `stepsAfter`) hold the steps a join of arrays held, made as plainly, their path the arena's join
+ * where asked. No text builder takes one, so a path's text is made by its record alone.
+ */
 export class PathSteps {
   static {
     offsetOf = (steps) => steps.#offset;
