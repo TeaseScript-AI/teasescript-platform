@@ -279,3 +279,28 @@ test("equal unions spelled with and without the whole number give one type in ei
   assert.deepEqual(answered(source, "xs", ["element"]), ["strict number|string"]);
   assert.deepEqual(answered(source, "ys", ["element"]), ["strict number|string"]);
 });
+
+test("a program stop that leaves a literal's cell undecided keeps its decision undecided and the read of its host element marked (#2289)", () => {
+  // (at the smallest demand allowances `x0`'s chain stops the program; the decision of `r`'s element meets `x24`, a
+  // stopped element, so it is left undecided and recorded as such: the program reports its stop, and `out`, the read of
+  // the host element, is checked when the script runs; unrecorded, the stop went unreported and `out` unchecked)
+  const chain = Array.from({ length: 24 }, (_, i) => `let x${i + 1} = x${i}`).join("\n");
+  const source = `let lives: integer = 3\nlet x0 = 2.5\n${chain}\nlet r = [lives, hostValue, x24]\nlet out = r[1]\nr.add(1.5)\nexit\n`;
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request !== null);
+  const out = source.indexOf("r[1]");
+  for (const mode of MODES)
+    for (const demand of [1, 2, 3, 4])
+      inMode(mode, () => {
+        const record = withTestDemandAllowance(demand, () => compactAnalysis(request));
+        const where = `${JSON.stringify(mode)} demand ${demand}`;
+        assert.ok(
+          record.diagnostics.some((d) => d.class === "not-checked-budget"),
+          `${where}: the stop is reported`,
+        );
+        assert.ok(
+          record.checks.some((check) => check.kind === "copy-type" && check.site.offset === out),
+          `${where}: \`out\` is checked`,
+        );
+      });
+});
