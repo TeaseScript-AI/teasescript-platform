@@ -39,6 +39,17 @@ if (name !== undefined && (all || FROZEN_IN_CI.has(name))) {
           },
   });
   installRetainedRecorder(instrument);
+  // (a typed array no freeze holds, written after its run ended: caught at the exit, which fails the file; a survey
+  // counts it as a frozen write)
+  if (survey === undefined)
+    process.on("exit", () => {
+      const changed = instrument.changedTyped();
+      if (changed.length === 0) return;
+      process.stderr.write(
+        `retained state: a typed array written after its run ended, at ${changed.join(", ")}\n`,
+      );
+      process.exitCode = 1;
+    });
   if (measure !== undefined)
     process.on("exit", () => {
       mkdirSync(measure, { recursive: true });
@@ -73,6 +84,10 @@ if (name !== undefined && (all || FROZEN_IN_CI.has(name))) {
     process.on("exit", () => {
       mkdirSync(survey, { recursive: true });
       const report = instrument.report();
+      for (const path of instrument.changedTyped()) {
+        const key = `a typed array written after its run ended @ ${path}`;
+        frozen.set(key, (frozen.get(key) ?? 0) + 1);
+      }
       writeFileSync(
         join(survey, `${basename(file, ".js")}-${process.pid}.json`),
         `${JSON.stringify({ file: basename(file), switches: report.switches, sealed: report.sealed, noted: Object.fromEntries(report.noted), frozen: Object.fromEntries(frozen), valueMarks: Object.fromEntries(report.valueMarks), owners: Object.fromEntries(report.owners), opened: Object.fromEntries(report.opened) }, null, 1)}\n`,
