@@ -10,8 +10,10 @@
 //   `delayed-client.mjs`, which delivers what a Worker port receives after the same delay, in order. The in-process
 //   backend's own `openBridge` call is left alone, so no reply is delayed twice; with GATE_LOG=1 it gets
 //   `instrumented-client.mjs` instead, which logs each reply as it arrives after the delay (a diagnostic build).
+// Both give the driver the Player's host object (`host-seam.mjs`).
 import { fileURLToPath } from "node:url";
 import productionConfig from "../../../player/vue/vite.config.ts";
+import { hostSeam } from "./host-seam.mjs";
 
 const variant = process.env.GATE_VARIANT;
 const out = process.env.OUT;
@@ -77,7 +79,7 @@ export default async (environment) => {
   return {
     ...base,
     define: { ...base.define, __GATE_DELAY_MS__: JSON.stringify(delayMs) },
-    plugins: [gateSwap(), ...base.plugins],
+    plugins: [hostSeam(), gateSwap(), ...base.plugins],
     build: { ...base.build, outDir: out, emptyOutDir: true },
   };
 };

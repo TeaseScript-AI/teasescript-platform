@@ -861,10 +861,84 @@ async function focusCases(opened, origin) {
   return results;
 }
 
+// A Start prepared over each kind of question above and over the lock's dialog, as a host prepares one (`prepare`), alone
+// and after an error stop in the same task: the prepared Start owns the page, so nothing of the old session keeps the
+// player from it. The pointer reaches it where it shows, Tab reaches it, and it activates: the new session asks its
+// first question.
+const START_KINDS = { ...AREA_QUESTION, "Lock dialog": "[role=dialog]" };
+
+/** Prepares the shown script's Start anew, after an error stop of the same task with `stop`. */
+const prepareStart = (stop) => {
+  const player = globalThis.__gatePlayer;
+  if (stop) player.reportHostError(new Error("The gate's error stop"));
+  player.prepare({
+    plan: player.session.value.planToken,
+    options: () => ({ ...player.scriptStorageOptions(), ...player.temporalCapture() }),
+  });
+};
+
+/** Fails unless the prepared Start takes the pointer at its center and the focus by Tab. */
+async function startReached(page) {
+  const start = page.locator("[data-session-start]");
+  await start.waitFor();
+  await page.waitForTimeout(SETTLE_MS);
+  const hit = await start.evaluate((element) => {
+    const box = element.getBoundingClientRect();
+    const at = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+    return at !== null && element.contains(at);
+  });
+  if (!hit) throw new Error("Something covers the prepared Start");
+  for (let tab = 0; tab < 30; tab += 1) {
+    if (await start.evaluate((element) => element === document.activeElement)) return start;
+    await page.keyboard.press("Tab");
+  }
+  throw new Error("Tab does not reach the prepared Start");
+}
+
+/** One result per kind, alone and after an error stop, in the form of a case. */
+async function startCases(opened, origin) {
+  const results = [];
+  for (const [kind, question] of Object.entries(START_KINDS))
+    for (const stop of [false, true]) {
+      const result = {
+        name: `start over ${kind}${stop ? " after a stop" : ""}`,
+        residual: "",
+        expect: shown("", "", 0),
+        after: shown("", "", 0),
+        errors: [],
+        error: "",
+      };
+      const { page, close } = await opened.page();
+      page.on("pageerror", (error) => {
+        if (countedError(error)) result.errors.push(String(error));
+      });
+      try {
+        await page.goto(`${origin}/player/?package=composer-area`);
+        await page.locator("[data-session-start]").click();
+        await page.getByRole("button", { name: kind, exact: true }).click();
+        await page.locator(question).first().waitFor();
+        await page.waitForTimeout(SETTLE_MS);
+        await page.evaluate(prepareStart, stop);
+        const start = await startReached(page);
+        // Activated by Enter where Tab left it, and after a stop by a click.
+        if (stop) await start.click({ timeout: 5_000 });
+        else await page.keyboard.press("Enter");
+        await page.getByRole("button", { name: "Idle", exact: true }).waitFor({ timeout: 10_000 });
+      } catch (error) {
+        result.error = String(error?.message ?? error).slice(0, 300);
+      } finally {
+        await close();
+      }
+      results.push(result);
+    }
+  return results;
+}
+
 export async function keys({ opened, origin }) {
   const results = [];
   for (const item of cases(opened.engine)) results.push(await runCase(opened, origin, item));
   results.push(...(await areaCases(opened, origin)));
   results.push(...(await focusCases(opened, origin)));
+  results.push(...(await startCases(opened, origin)));
   return { ok: results.every(keysCasePassed), cases: results };
 }
