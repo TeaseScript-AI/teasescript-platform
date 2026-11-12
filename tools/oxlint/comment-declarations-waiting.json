@@ -354,7 +354,7 @@
     "waits": "#1937"
   },
   {
-    "file": "tests/type-core/type-core-candidate.test.ts",
+    "file": "tests/type-core/candidate/type-core-candidate-records.test.ts",
     "kind": "docblock",
     "text": "The reached fixture, derived from its records (S6-CARRIERS revision 5; the lead's answer 3). Every",
     "waits": "#1937"

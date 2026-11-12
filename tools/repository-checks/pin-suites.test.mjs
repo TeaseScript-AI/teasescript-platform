@@ -229,7 +229,7 @@ function pairOf({ file, in: holder }) {
 // The test below reads them with it over the repository and compares them with PAIRS as a set, so no change alters
 // the selection while it passes except an edit to PAIRS, which is the acknowledgement (the net misses formless pins).
 const PAIRS = [
-  "tests/type-core/type-core-candidate.test.ts",
+  "tests/type-core/candidate/type-core-candidate-operands.test.ts",
   "tests/type-core/type-core-closure.test.ts",
   "tests/type-core/type-core-contract-capture.test.ts",
   "tests/type-core/type-core-contract.test.ts",
