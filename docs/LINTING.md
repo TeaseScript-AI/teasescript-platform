@@ -144,7 +144,7 @@ leave out included, a property changes only by assignment or by a kind's own met
   member, an alias (`const O = Object`) and a computed member (`Object[name]`) are refused;
 - `Reflect`, `globalThis`, `Function` and `eval`;
 - the `delete` operator;
-- `.prototype`, `__proto__` and `.constructor`, as a member or as a computed key;
+- `.prototype`, `__proto__` and `.constructor`, as a member, a computed key or a destructured name;
 - `defineProperty`, `defineProperties`, `__defineGetter__` and `__defineSetter__`, by name anywhere;
 - a constructor's `return <value>`.
 
