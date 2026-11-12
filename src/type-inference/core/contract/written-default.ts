@@ -4,6 +4,7 @@ import type { DefinitionIndex } from "../definitions.js";
 import { makeItem, spelledBy, type Item, type ItemTag } from "../items.js";
 import { conversionCategory } from "../method-categories.js";
 import { propertyStep, type CoreProgram } from "../program.js";
+import { Retained } from "../retained/retained.js";
 import { defaultOf, typeTags, writtenOf } from "./terms.js";
 
 // A typed parse's or load's default read by its written type (ADR 0021 rule 2.6, "its default's type"; #1072 step 0):
@@ -36,18 +37,18 @@ interface Cells {
  * A program with no typed default that reads a binding or is a literal builds nothing.
  */
 export class WrittenDefaults {
-  readonly #starts = new Map<PlaceId, Start>();
+  readonly #starts = Retained.map<PlaceId, Start>("WrittenDefaults.starts");
   /** Each written type a start gives, by its kinds at every path into it (`kindsOf`). */
-  readonly #kinds = new Map<TypeTerm, KindsAt>();
+  readonly #kinds = Retained.map<TypeTerm, KindsAt>("WrittenDefaults.kinds");
   /** Per literal, its cells by step; `null` where a cell gives nothing. */
-  readonly #cells = new Map<PlaceId, Map<string, Cells | null>>();
+  readonly #cells = Retained.map<PlaceId, Map<string, Cells | null>>("WrittenDefaults.cells");
 
   public constructor(program: CoreProgram, definitions: DefinitionIndex) {
     const pending: PlaceId[] = [];
     const enter = (value: PlaceId): Start => {
       const start = this.#startOf(program, definitions, value);
       if (start !== null && "literal" in start && !this.#cells.has(start.literal)) {
-        this.#cells.set(start.literal, new Map());
+        this.#cells.set(start.literal, Retained.map("WrittenDefaults.cells[]"));
         pending.push(start.literal);
       }
       return start;
@@ -91,6 +92,8 @@ export class WrittenDefaults {
       for (const [step, { terms, literals, found }] of gathered)
         steps.set(step, found ? { terms: [...terms], literals: [...literals] } : null);
     }
+    // (#1072 1b: registered once built, so the plain data it holds is sealed when the first run ends)
+    Retained.owner(this, "WrittenDefaults");
   }
 
   /** What a value starts as (`Start`), through unwritten bindings' start values, each binding followed once. */
@@ -178,7 +181,7 @@ export class WrittenDefaults {
  */
 function kindsOf(program: CoreProgram, term: TypeTerm): KindsAt {
   type Node = { kinds: readonly ItemTag[] | null; below: Map<string, KindsAt> };
-  const root: Node = { kinds: null, below: new Map() };
+  const root: Node = { kinds: null, below: Retained.map("WrittenDefaults.kinds.below") };
   const pending: {
     readonly node: Node;
     readonly parts: readonly TypeTerm[];
@@ -216,7 +219,7 @@ function kindsOf(program: CoreProgram, term: TypeTerm): KindsAt {
         }
       }
     for (const [step, { parts, ref }] of steps) {
-      const node: Node = { kinds: null, below: new Map() };
+      const node: Node = { kinds: null, below: Retained.map("WrittenDefaults.kinds.below") };
       next.node.below.set(step, node);
       pending.push({ node, parts, ref });
     }
