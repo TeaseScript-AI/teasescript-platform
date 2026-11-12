@@ -7,6 +7,7 @@ import { analyseCore } from "../../src/type-inference/core/answers.js";
 import { checkedResult } from "../../src/type-inference/core/check-result/check-result.js";
 import { makeItem, REASON, type Item } from "../../src/type-inference/core/items.js";
 import { coreRequest } from "../helpers/type-core-analysis.js";
+import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import { judgeRun, withMonotoneOracle } from "../helpers/type-core/type-core-monotone.js";
 
 const unknown = (reasons: number, context: Item["context"] = null): Item =>
@@ -203,4 +204,51 @@ test("a type test hands an unknown's condition word to the kind it proves (#2486
   );
   // (the repeat count's number came through a call that may change `n`: its sentence says so)
   assert.deepEqual(words, ["call"]);
+});
+
+test("a function returning text from a type test and an operation on outside data elsewhere is no compile error (#2486, #2493's measurement)", () => {
+  const source = [
+    "global function pass(value) {",
+    "  return value",
+    "}",
+    "global function first(values) {",
+    "  return values[0]",
+    "}",
+    "global function times(value, count) {",
+    "  if count is number {",
+    "    let whole = toInteger(count)",
+    "    if value is string {",
+    "      return value.repeat(whole)",
+    "    }",
+    "  }",
+    "  return value * count",
+    "}",
+    "let x = first([3])",
+    "let a = times(first([hostValue]), 2)",
+    "let other = pass(7)",
+    'say "${a} ${x} ${other}"',
+    "exit",
+    "",
+  ].join("\n");
+  const request = coreRequest([{ path: "main.tease", source }]);
+  assert.ok(request);
+  const lineOf = (offset: number): number => source.slice(0, offset).split("\n").length;
+  for (const mode of HELD_MODES) {
+    const found = mode
+      .run(() => checkedResult(analyseCore(request), request))
+      .diagnostics.map((d) => `${d.code} ${d.class} ${lineOf(d.site.start)}`);
+    // (V30 §17: a returned value of unknown type makes the result unknown; the product's warnings stay)
+    assert.ok(
+      !found.some((d) => d.endsWith(" compile-error 14")),
+      `${mode.name}: ${found.join("; ")}`,
+    );
+    assert.ok(
+      found.includes("TSV043 warning-runtime-check 14"),
+      `${mode.name}: ${found.join("; ")}`,
+    );
+    assert.ok(
+      found.includes("TSV042 warning-runtime-check 19"),
+      `${mode.name}: ${found.join("; ")}`,
+    );
+  }
 });
