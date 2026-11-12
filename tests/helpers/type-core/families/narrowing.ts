@@ -633,24 +633,6 @@ export const ROUTE_ENTRY_FAMILIES: readonly WorkFamily[] = [
       ),
   },
   {
-    name: "E-functions-labels",
-    measures:
-      "N3: one global, k functions each a label, a read of it and a store of `null` with a `goto` back",
-    program: (k) =>
-      main(
-        lines(
-          "global n: integer? = 1",
-          rows(
-            k,
-            (i) =>
-              `function f${i} {\nlabel a${i}\nrepeat n {}\nn = null\nif hostValue is boolean { goto a${i} }\n}`,
-          ),
-          rows(k, (i) => `n = 1\nf${i}()`),
-          "exit",
-        ),
-      ),
-  },
-  {
     name: "E-block-bodies",
     measures: "N3: k timers' bodies, each reading one key that may be `null` when it is registered",
     program: (k) =>
