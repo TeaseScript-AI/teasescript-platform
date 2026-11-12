@@ -5,11 +5,19 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import test from "node:test";
 
+import { compileProjectWithBackend } from "../../src/compiler.js";
+import { run } from "../../src/runtime/engine.js";
+import type { RuntimeSnapshot } from "../../src/runtime/snapshot/state.js";
+import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
 import { DISPOSITIONS, type SyntaxKind } from "../../src/type-inference/core/slice-syntax.js";
+import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
 import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import {
   DECLARED_REFUSALS,
+  DECLARED_RULE_DIFFERENCES,
   DECLARED_RUN_DIFFERENCES,
+  misfitSources,
+  OPERAND_TEMPLATES,
   ROW_TEMPLATES,
 } from "../helpers/type-core/row-templates.js";
 
@@ -41,7 +49,11 @@ interface Run {
 }
 
 interface Entry {
-  readonly diagnostics?: readonly { readonly code: string; readonly message?: string }[];
+  readonly diagnostics?: readonly {
+    readonly code: string;
+    readonly severity: string;
+    readonly message?: string;
+  }[];
   readonly plan?: { readonly checks: readonly Check[] } | null;
   readonly runs?: readonly Run[];
   readonly outside?: string;
@@ -59,6 +71,8 @@ interface GuardCase {
   readonly source: string;
   /** The refusal the route must make in every mode, for a declared refusal's source. */
   readonly refusal?: string;
+  /** A command operand's misfit, which today's checker may refuse at compile time (`DECLARED_RULE_DIFFERENCES`). */
+  readonly misfit?: true;
 }
 
 // EVIDENCE: invariant: the table's keys are exactly the AST kinds (its mapped type).
@@ -85,6 +99,11 @@ function guardCases(): GuardCase[] {
       },
       { name: `${declared.row} ${declared.position}, admitted`, source: script(declared.admitted) },
     ]),
+    ...misfitSources().map(({ row, operand, source }) => ({
+      name: `${row} ${operand}: ${source}`,
+      source: script(source),
+      misfit: true as const,
+    })),
   ];
 }
 
@@ -125,6 +144,8 @@ const outcome = (run: Run | undefined): string =>
 function judge(guardCase: GuardCase, record: DifferentialRecord, seen: Set<string>): string[] {
   const failures: string[] = [];
   const { checker } = record;
+  if (guardCase.misfit === true && checker.threw === undefined && !checker.plan)
+    return judgeRefusedToday(guardCase, record, seen);
   if (checker.threw !== undefined || !checker.plan)
     return [
       `${record.name}: today's checker publishes no plan (${checker.threw ?? JSON.stringify(checker.diagnostics)})`,
@@ -175,10 +196,65 @@ function judge(guardCase: GuardCase, record: DifferentialRecord, seen: Set<strin
   return failures;
 }
 
+/** A misfit today's checker refuses at compile time: the route refuses it alike, or a declared rule difference holds. */
+function judgeRefusedToday(
+  guardCase: GuardCase,
+  record: DifferentialRecord,
+  seen: Set<string>,
+): string[] {
+  const errors = (entry: Entry): string[] =>
+    (entry.diagnostics ?? [])
+      .filter((diagnostic) => diagnostic.severity === "error")
+      .map((diagnostic) => diagnostic.code)
+      .sort();
+  const today = errors(record.checker);
+  const declared = DECLARED_RULE_DIFFERENCES.find(
+    (difference) => script(difference.source) === guardCase.source,
+  );
+  const failures: string[] = [];
+  for (const mode of record.candidate.modes) {
+    const at = `${record.name} [${mode.mode}]`;
+    if (mode.outside !== undefined || mode.threw !== undefined) {
+      failures.push(`${at}: today ${today.join(" ")}, route ${mode.outside ?? mode.threw}`);
+      continue;
+    }
+    if (!mode.plan) {
+      if (JSON.stringify(errors(mode)) !== JSON.stringify(today))
+        failures.push(`${at}: today ${today.join(" ")}, route ${errors(mode).join(" ")}`);
+      continue;
+    }
+    const runs = (mode.runs ?? []).map((run) => run.threw ?? `${run.status} ${run.failure}`);
+    if (declared === undefined) {
+      failures.push(
+        `${at}: undeclared: today ${today.join(" ")}, route a plan, runs ${runs.join(", ")}`,
+      );
+      continue;
+    }
+    const expected = `failed ${failureAt(guardCase.source, declared.failure.code, declared.failure.at)}`;
+    if (!today.includes(declared.code) || runs.length === 0 || runs.some((run) => run !== expected))
+      failures.push(
+        `${at}: declared ${declared.code} and ${expected}, found today ${today.join(" ")}, runs ${runs.join(", ")}`,
+      );
+    else seen.add(`${declared.source} [${mode.mode}]`);
+  }
+  return failures;
+}
+
 test("every open row of the syntax table has templates, and the declared lists name only open rows and templates", () => {
   // EVIDENCE: invariant: the templates' keys are AST kinds (`ROW_TEMPLATES`' type).
   assert.deepEqual((Object.keys(ROW_TEMPLATES) as SyntaxKind[]).sort(), [...OPEN].sort());
   for (const declared of DECLARED_REFUSALS) assert.ok(OPEN.includes(declared.row), declared.row);
+  // each command operand position is a cited operand of its row, and each cited operand has a position
+  for (const row of OPEN) {
+    const disposition = DISPOSITIONS[row];
+    const cited = disposition.row === "pass" ? Object.keys(disposition.operands).sort() : [];
+    const positions =
+      row === "sayStatement" ? [] : Object.keys(OPERAND_TEMPLATES[row] ?? {}).sort();
+    assert.deepEqual(positions, cited, row);
+  }
+  const misfits = misfitSources().map(({ source }) => source);
+  for (const declared of DECLARED_RULE_DIFFERENCES)
+    assert.ok(misfits.includes(declared.source), declared.source);
   for (const declared of DECLARED_RUN_DIFFERENCES) {
     assert.ok(Object.values(ROW_TEMPLATES).flat().includes(declared.template), declared.template);
     for (const text of [declared.at, declared.checkAt, declared.todayAt ?? declared.at]) {
@@ -199,7 +275,13 @@ test("each open row's templates publish on the route, with today's checks and to
   );
   const seen = new Set<string>();
   const failures = cases.flatMap((guardCase, index) => judge(guardCase, found[index]!, seen));
-  // each declared run difference occurs in every mode
+  // each declared rule difference, and each declared run difference, occurs in every mode
+  for (const declared of DECLARED_RULE_DIFFERENCES)
+    for (const mode of HELD_MODES.map((held) => held.name))
+      if (!seen.has(`${declared.source} [${mode}]`))
+        failures.push(
+          `the declared rule difference no longer occurs: ${declared.source} [${mode}]`,
+        );
   for (const declared of DECLARED_RUN_DIFFERENCES)
     for (const mode of HELD_MODES.map((held) => held.name))
       if (!seen.has(`${declared.template} [${mode}]`))
@@ -207,4 +289,71 @@ test("each open row's templates publish on the route, with today's checks and to
           `the declared run difference no longer occurs: ${declared.template} [${mode}]`,
         );
   assert.deepEqual(failures, []);
+});
+
+/**
+ * The snapshot's fields a failing run changes whatever the statement does: its status, failure and event count, and,
+ * for a command whose operands are prepared before its instruction, its place in the plan and the prepared values.
+ */
+const BOOKKEEPING: readonly string[] = [
+  "status",
+  "failure",
+  "nextEventSequence",
+  "nextInstruction",
+  "temporaries",
+];
+
+/** Each field of a snapshot as JSON text, taken before the run changes it in place. */
+const fieldsOf = (snapshot: RuntimeSnapshot): Map<string, string> =>
+  new Map(Object.entries(snapshot).map(([key, value]) => [key, JSON.stringify(value)]));
+
+test("a declared rule difference's instruction refuses its operand before the statement acts, in every mode", () => {
+  for (const declared of DECLARED_RULE_DIFFERENCES) {
+    const source = script(declared.source);
+    // the statement is the source's first line
+    const end = declared.source.length;
+    for (const mode of HELD_MODES) {
+      const at = `${declared.source} [${mode.name}]`;
+      const { plan } = mode.run(() =>
+        compileProjectWithBackend(
+          [{ path: "main.tease", source }],
+          { globals: ["hostValue"] },
+          CORE_BACKEND,
+        ),
+      );
+      assert.ok(plan !== null, at);
+      for (const hostValue of DOMAIN) {
+        const start = createImmediatePacingRuntimeSnapshot(plan, { globals: { hostValue } });
+        const before = fieldsOf(start);
+        const result = run(plan, start);
+        // nothing of the statement's effect: the session's state as it started, but for the run's own bookkeeping
+        const after = fieldsOf(result.snapshot);
+        const changed = [...new Set([...before.keys(), ...after.keys()])].filter(
+          (key) => !BOOKKEEPING.includes(key) && before.get(key) !== after.get(key),
+        );
+        assert.deepEqual(changed, [], `${at}: the session's state`);
+        const failure = result.events.find((event) => event.kind === "runtimeFailure");
+        assert.equal(
+          failure?.kind === "runtimeFailure"
+            ? `${failure.code}@${failure.span.start.offset}:${failure.span.end.offset}`
+            : null,
+          failureAt(source, declared.failure.code, declared.failure.at),
+          at,
+        );
+        // nothing of the statement's effect: no event of it but the failure
+        const own = result.events.filter(
+          (event) =>
+            event.kind !== "runtimeFailure" &&
+            "span" in event &&
+            event.span !== null &&
+            event.span.start.offset < end,
+        );
+        assert.deepEqual(
+          own.map((event) => event.kind),
+          [],
+          at,
+        );
+      }
+    }
+  }
 });
