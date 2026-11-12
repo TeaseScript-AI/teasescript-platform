@@ -159,6 +159,22 @@ const SITES = [
   ["skip", 'test("pf", { skip: os.platform() === "win32" }, () => {});', "on condition"],
   ["skip", 'test("pg", { skip: process.platform === other }, () => {});', "on condition"],
   ["skip", 'test("ph", (t) => { if (process.platform === "win32") t.skip(); });', "on condition"],
+  // a binding of the name `process` that is not Node's
+  [
+    "skip",
+    '{ const process = { platform: "a" }; test("pi", { skip: process.platform === "a" }, () => {}); }',
+    "on condition",
+  ],
+  [
+    "skip",
+    'function pj(process) { test("pj", { skip: process.platform === "a" }, () => {}); }',
+    "on condition",
+  ],
+  [
+    "skip",
+    'try {} catch (process) { test("pk", { skip: process.platform === "a" }, () => {}); }',
+    "on condition",
+  ],
   ["skip", 'test.only("g", { "skip": "a reason" }, () => {});', "off"],
   ["skip", 'test("h", (t) => { t.skip("why"); });', "off"],
   ["skip", 'test("sa", { skip }, () => {});', "off"],
@@ -221,6 +237,23 @@ const FORMS = {
   "computed class member": { hides: false, line: (n, use) => `class C { [${use}](${n}) {} }` },
   "computed object member": { hides: false, line: (n, use) => `const o = { [${use}](${n}) {} };` },
 };
+// A file whose `process` is an import, and the list its skip on `process.platform` belongs in: Node's `process` makes
+// it a platform guard, another module's an ordinary condition.
+const PROCESS_IMPORTS = {
+  "tests/process-default.test.ts": ['import process from "node:process";', "skippedTestsPlatform"],
+  "tests/process-namespace.test.ts": [
+    'import * as process from "process";',
+    "skippedTestsPlatform",
+  ],
+  "tests/process-other.test.ts": [
+    'import { process } from "./host.js";',
+    "skippedTestsConditional",
+  ],
+  "tests/process-other-default.test.ts": [
+    'import process from "./host.js";',
+    "skippedTestsConditional",
+  ],
+};
 const USES = { shadowed: "t", other: "u" };
 const KINDS = ["skip", "todo"];
 const SCOPES = Object.entries(FORMS).flatMap(([form, { hides, line }]) =>
@@ -242,6 +275,12 @@ before(() => {
   const big = `export function big() {\n${"  void 0;\n".repeat(1100)}}\n`;
   Object.assign(files, {
     "tests/sites.test.ts": `${SITES.map(([, line]) => line).join("\n")}\n`,
+    ...Object.fromEntries(
+      Object.entries(PROCESS_IMPORTS).map(([file, [line]]) => [
+        file,
+        `${line}\ntest("x", { skip: process.platform === "win32" }, () => {});\n`,
+      ]),
+    ),
     "tests/scopes.test.ts": `const stub = { skip() {}, todo() {} };\n${SCOPES.map((c) => c.text).join("\n")}\n`,
     ".oxlintrc.json": JSON.stringify({
       overrides: [
@@ -317,6 +356,16 @@ test("a skip is a platform guard or on a condition only in the forms the header 
     ].toSorted(),
     result.sites.skippedTests.toSorted(),
   );
+});
+
+test("a skip on `process.platform` is a platform guard only where `process` is Node's, also when imported", () => {
+  for (const [file, [, list]] of Object.entries(PROCESS_IMPORTS))
+    for (const key of ["skippedTestsPlatform", "skippedTestsConditional"])
+      assert.deepEqual(
+        result.sites[key].filter((site) => site.startsWith(`${file}:`)),
+        key === list ? [`${file}:2`] : [],
+        `${file} ${key}`,
+      );
 });
 
 test("a context's use counts only where the binder resolves its name to the test's context", () => {

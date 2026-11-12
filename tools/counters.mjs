@@ -28,10 +28,11 @@
 //   `<=` `>=` `&&` `||` `??` `in` `instanceof`); and `X.skip(…)` lying, below its nearest enclosing function, in a
 //   branch of an `if` or a `?:`, or the right operand of `&&`, `||` or `??`. Every other skip, `test.skip(…)` among
 //   them, is counted as without a condition: a test that never runs. A skip on a condition whose `skip` option is,
-//   parentheses removed, a comparison of `process.platform` with a string by `===` `!==` `==` or `!=`, or such
+//   parentheses removed, a comparison of Node's `process.platform` with a string by `===` `!==` `==` or `!=`, or such
 //   comparisons joined by `&&` or `||`, as `skip: process.platform === "win32"`, is a platform guard and counted apart
-//   from the others on a condition (#2568): a platform the test cannot run on, not a test switched off. Any other form
-//   stays on a condition.
+//   from the others on a condition (#2568): a platform the test cannot run on, not a test switched off. `process` is
+//   Node's when the binder finds no other binding of the name in the file, or it is a default or namespace import of
+//   `node:process` or `process`. Any other form stays on a condition.
 // - The lists count their entries: the `files` of each `.oxlintrc.json` override that is a waiting list (docs/LINTING.md
 //   "Waiting lists", by tools/oxlint/check-waiting-overrides.mjs's `isWaitingEntry`), the items of
 //   tools/oxlint/comment-forecasts-allowed.json, comment-declarations-waiting.json and comment-external-names.json
@@ -186,36 +187,62 @@ const EQUALITY = new Set([
   ts.SyntaxKind.EqualsEqualsToken,
   ts.SyntaxKind.ExclamationEqualsToken,
 ]);
-const isProcessPlatform = (node) =>
+const PROCESS_MODULES = new Set(["process", "node:process"]);
+
+/**
+ * Whether `symbol`, what the binder resolves a name `process` to, is Node's `process`: no declaration in the file (the
+ * global), or a default or namespace import of `node:process` or `process`. Any other binding of the name is not.
+ */
+function isNodeProcess(symbol) {
+  if (symbol === undefined) return true;
+  const declaration = symbol.declarations?.[0];
+  const clause =
+    declaration && ts.isNamespaceImport(declaration) ? declaration.parent : declaration;
+  return (
+    clause !== undefined &&
+    ts.isImportClause(clause) &&
+    !clause.isTypeOnly &&
+    ts.isStringLiteral(clause.parent.moduleSpecifier) &&
+    PROCESS_MODULES.has(clause.parent.moduleSpecifier.text)
+  );
+}
+
+/** Whether `node` is `process.platform`, its `process` resolved by `resolve` (an identifier to its symbol). */
+const isProcessPlatform = (node, resolve) =>
   ts.isPropertyAccessExpression(node) &&
   node.name.text === "platform" &&
   ts.isIdentifier(node.expression) &&
-  node.expression.text === "process";
+  node.expression.text === "process" &&
+  isNodeProcess(resolve(node.expression));
 const isString = (node) => ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node);
 
-/** Whether a `skip` option's value is a platform guard: `process.platform` compared with a string, or such joined. */
-function isPlatformGuard(value) {
+/**
+ * Whether a `skip` option's value is a platform guard: Node's `process.platform` compared with a string, or such joined;
+ * `resolve` gives an identifier's symbol.
+ */
+function isPlatformGuard(value, resolve) {
   const v = ts.skipParentheses(value);
   if (!ts.isBinaryExpression(v)) return false;
   const operator = v.operatorToken.kind;
   if (operator === ts.SyntaxKind.AmpersandAmpersandToken || operator === ts.SyntaxKind.BarBarToken)
-    return isPlatformGuard(v.left) && isPlatformGuard(v.right);
+    return isPlatformGuard(v.left, resolve) && isPlatformGuard(v.right, resolve);
   const [left, right] = [ts.skipParentheses(v.left), ts.skipParentheses(v.right)];
   return (
     EQUALITY.has(operator) &&
-    ((isProcessPlatform(left) && isString(right)) || (isString(left) && isProcessPlatform(right)))
+    ((isProcessPlatform(left, resolve) && isString(right)) ||
+      (isString(left) && isProcessPlatform(right, resolve)))
   );
 }
 
 /** How a `skip` option's value holds the test back: `platform`, `conditional` or `unconditional`. */
-function skipKind(value) {
-  if (isPlatformGuard(value)) return "platform";
+function skipKind(value, resolve) {
+  if (isPlatformGuard(value, resolve)) return "platform";
   return isCondition(value) ? "conditional" : "unconditional";
 }
 
 /** The skip-or-todo options of a test call, as [kind, how]: each `skip` or `todo` property not `false`, `how` as
  * `skipKind` gives it (`unconditional` for a shorthand property). */
-function optionKinds(call) {
+function optionKinds(call, resolve) {
   const kinds = [];
   for (const argument of call.arguments) {
     if (!ts.isObjectLiteralExpression(argument)) continue;
@@ -232,7 +259,9 @@ function optionKinds(call) {
         continue;
       kinds.push([
         name,
-        ts.isPropertyAssignment(property) ? skipKind(property.initializer) : "unconditional",
+        ts.isPropertyAssignment(property)
+          ? skipKind(property.initializer, resolve)
+          : "unconditional",
       ]);
     }
   }
@@ -260,6 +289,8 @@ function checkerOf(source) {
 function testSites(source) {
   const sites = [];
   const receivers = []; // [kind, call, name] of each `X.skip(…)` or `X.todo(…)` whose X may be a context
+  let checker = null; // made only for a file that needs it
+  const resolve = (name) => (checker ??= checkerOf(source)).getSymbolAtLocation(name);
   const visit = (node) => {
     if (ts.isCallExpression(node)) {
       const callee = node.expression;
@@ -270,16 +301,15 @@ function testSites(source) {
         else receivers.push([kind, node, callee.expression]);
       }
       if (isTestCall(node))
-        for (const [option, how] of optionKinds(node))
+        for (const [option, how] of optionKinds(node, resolve))
           sites.push([option, node.getStart(source), how]);
     }
     ts.forEachChild(node, visit);
   };
   visit(source);
   if (receivers.length > 0) {
-    const checker = checkerOf(source);
     for (const [kind, call, name] of receivers)
-      if (isTestContext(checker.getSymbolAtLocation(name)?.valueDeclaration))
+      if (isTestContext(resolve(name)?.valueDeclaration))
         sites.push([
           kind,
           call.getStart(source),
