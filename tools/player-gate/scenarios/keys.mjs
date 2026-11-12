@@ -315,31 +315,37 @@ async function answerBlock(page, blockShows) {
   }
 }
 
-/** What the page shows: the composer's text, its notice, the transcript's entries, an open dialog, new pages. */
+/**
+ * What the page shows: the composer's text, its notice, the transcript's entries, an open dialog; and, read in the same
+ * task, whether an answer or a lock is at work: Send disabled while the composer still takes input (not a dialog).
+ */
 const snapshot = () => {
   const field = document.querySelector("[data-composer-input]");
   const dialog = document.querySelector("[role=dialog], [role=alertdialog]");
   return {
-    value: field?.value ?? "",
-    notice: document.querySelector(".composer-notice")?.textContent.trim() ?? "",
-    entries: document.querySelectorAll(".transcript-entry").length,
-    dialog: dialog?.textContent.trim().replace(/\s+/g, " ").slice(0, 60) ?? "",
+    shown: {
+      value: field?.value ?? "",
+      notice: document.querySelector(".composer-notice")?.textContent.trim() ?? "",
+      entries: document.querySelectorAll(".transcript-entry").length,
+      dialog: dialog?.textContent.trim().replace(/\s+/g, " ").slice(0, 60) ?? "",
+    },
+    busy:
+      document.querySelector("[data-runtime-interaction] button[type=submit]")?.disabled === true &&
+      field?.disabled !== true,
   };
 };
 
-/** Until the page shows the same twice, `SETTLE_MS` apart, with Send not disabled: every queued answer settled. */
+/**
+ * Until the page shows the same in two rounds, `SETTLE_MS` apart, neither of them busy: every queued answer settled. A
+ * busy round does not count, so a page that settles between two reads is read again.
+ */
 async function settled(page, pages) {
   let last = null;
   for (let round = 0; round < 30; round += 1) {
     await page.waitForTimeout(SETTLE_MS);
-    const now = { ...(await page.evaluate(snapshot)), pages: pages() };
-    // Send is disabled while an answer is in flight, and while the composer takes no input (a dialog).
-    const busy = await page.evaluate(
-      () =>
-        document.querySelector("[data-runtime-interaction] button[type=submit]")?.disabled ===
-          true && document.querySelector("[data-composer-input]")?.disabled !== true,
-    );
-    if (!busy && JSON.stringify(now) === JSON.stringify(last)) return now;
+    const { shown: seen, busy } = await page.evaluate(snapshot);
+    const now = busy ? null : { ...seen, pages: pages() };
+    if (now !== null && JSON.stringify(now) === JSON.stringify(last)) return now;
     last = now;
   }
   throw new Error("The page did not settle");
