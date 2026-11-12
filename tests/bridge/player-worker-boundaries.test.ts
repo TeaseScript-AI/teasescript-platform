@@ -1042,8 +1042,9 @@ RERUN.rows(
       }
     });
     // The timer's first deadline is a scene second away: the clock's own wake-up for it (a real timer, armed from the
-    // mocked scene time) is then about a second of real time away, so it cannot run before the page is shown again and
-    // take the catch-up's place with an observation of its own (#2494).
+    // mocked scene time) is then about a second of real time away, a wide margin for the setup and the held reply. Were
+    // it still to run before the page is shown again, it would take the catch-up's place with an observation of its own,
+    // and the assertion after the dispatch fails at once (#2494).
     await start(
       host,
       'let n = 0\ntimer(duration: 1000 ms, async: true, repeat: true, display: "hidden") {\n  n += 1\n}\nshowButton "Next"\nshowButton "After"\nexit',
