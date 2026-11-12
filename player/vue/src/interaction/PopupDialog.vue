@@ -12,13 +12,11 @@ import DialogTitle from "@/components/ui/dialog/DialogTitle.vue";
 // not a click beside it; closing it continues the script. While Debug runs it is not modal, so the Debug panel and its
 // rewind stay usable beside it: it stands in the middle of the session's `area`, below the drawer of a narrow layout,
 // and Escape closes it only from inside. A key held down since before it opened, such as
-// the Enter that answered the question before it, does not close it, and neither does anything while an answer is under
-// way (`busy`).
+// the Enter that answered the question before it, does not close it.
 const props = defineProps<{
   message: string;
   buttonText: string;
   modal: boolean;
-  busy: boolean;
   /** The session's area, which a dialog that is not modal centres on instead of the window. */
   area?: HTMLElement | null;
 }>();
@@ -52,7 +50,7 @@ function heldKey(event: KeyboardEvent) {
   if (event.repeat) event.preventDefault();
 }
 function close() {
-  if (!props.busy) emit("close");
+  emit("close");
 }
 </script>
 

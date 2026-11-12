@@ -7,8 +7,9 @@ import type { PlayerFormPresentation } from "../../../presentation/model.js";
 // One form stays in place while the player edits it: its fields wrap and scroll in a bounded region, and its submit
 // and cancel buttons stay visible below them. Each toggle shows and announces its own state. A toggle with options and a
 // cycle stack every text they can show in one cell, so they keep the width of the longest and a press never resizes
-// them; the others are invisible, so only the current text is shown and announced (Owner decision, 2026-10-07).
-defineProps<{ form: PlayerFormPresentation; accessibleName: string; disabled: boolean }>();
+// them; the others are invisible, so only the current text is shown and announced (Owner decision, 2026-10-07). No
+// control is greyed while the form's edits are under way: each press is its own edit, applied in order.
+defineProps<{ form: PlayerFormPresentation; accessibleName: string }>();
 const emit = defineEmits<{
   step: [fieldId: string];
   submit: [];
@@ -36,14 +37,9 @@ const emit = defineEmits<{
             v-if="field.kind === 'toggle'"
             as-child
             :model-value="field.pressed"
-            :disabled="disabled"
             @update:model-value="emit('step', field.id)"
           >
-            <PlayerActionButton
-              :data-form-field="field.id"
-              :authored-fill="field.authoredFill"
-              :disabled="disabled"
-            >
+            <PlayerActionButton :data-form-field="field.id" :authored-fill="field.authoredFill">
               <template v-if="field.state === null"
                 ><span aria-hidden="true">{{ field.pressed ? "✓ " : "✗ " }}</span
                 >{{ field.label }}</template
@@ -63,7 +59,6 @@ const emit = defineEmits<{
             :data-editing="field.editing ? '' : undefined"
             :aria-current="field.editing ? 'true' : undefined"
             :authored-fill="field.authoredFill"
-            :disabled="disabled"
             @click="emit('step', field.id)"
           >
             {{ field.label }}: {{ field.state ?? (field.optional ? "Not set" : "Set…") }}
@@ -72,7 +67,6 @@ const emit = defineEmits<{
             v-else
             :data-form-field="field.id"
             :authored-fill="field.authoredFill"
-            :disabled="disabled"
             @click="emit('step', field.id)"
           >
             <span class="state-stack">
@@ -88,24 +82,17 @@ const emit = defineEmits<{
     </ScrollArea>
     <div class="flex w-full min-w-0 flex-wrap items-center justify-center gap-2" data-form-actions>
       <template v-if="form.editor">
-        <PlayerActionButton :disabled="disabled" label="Back" @click="emit('dismiss')" />
-        <PlayerActionButton
-          v-if="form.editor.optional"
-          :disabled="disabled"
-          label="Clear"
-          @click="emit('clear')"
-        />
+        <PlayerActionButton label="Back" @click="emit('dismiss')" />
+        <PlayerActionButton v-if="form.editor.optional" label="Clear" @click="emit('clear')" />
       </template>
       <PlayerActionButton
         :authored-fill="form.submit.authoredFill"
-        :disabled="disabled"
         :label="form.submit.label"
         @click="emit('submit')"
       />
       <PlayerActionButton
         v-if="form.cancel"
         :authored-fill="form.cancel.authoredFill"
-        :disabled="disabled"
         :label="form.cancel.label"
         @click="emit('cancel')"
       />
