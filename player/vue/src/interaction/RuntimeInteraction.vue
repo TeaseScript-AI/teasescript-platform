@@ -701,12 +701,16 @@ watch(
   },
 );
 
+/** Back, or Escape, in the lock's repeated password: both entries go, and the password is asked again. */
+function askPasswordAgain() {
+  composerState.restartLock();
+  clearFeedback();
+  focusInput();
+}
 /** Escape: in the lock's repeated password it asks the password again; in a form field it closes the field. */
 function escape() {
-  if (lockPhase.value === "repeat") {
-    composerState.restartLock();
-    clearFeedback();
-  } else if (formEditor.value) submission.dismissField();
+  if (lockPhase.value === "repeat") askPasswordAgain();
+  else if (formEditor.value) submission.dismissField();
 }
 </script>
 
@@ -731,7 +735,6 @@ function escape() {
                 :key="actionId ?? 0"
                 :form="form"
                 :accessible-name="foreground.accessibleName"
-                :disabled="false"
                 @step="(fieldId) => submission.stepField(fieldId)"
                 @submit="fromControls(() => submission.submitForm())"
                 @cancel="fromControls(() => submission.cancelForm())"
@@ -771,7 +774,6 @@ function escape() {
           :message="foreground.message"
           :button-text="foreground.buttonText"
           :modal="popupModal ?? true"
-          :busy="false"
           :area="composition"
           @close="submission.closePopup()"
         />
@@ -782,7 +784,6 @@ function escape() {
           :text="foreground.text"
           :file-name="foreground.fileName"
           :modal="popupModal ?? true"
-          :busy="false"
           :area="composition"
           @close="submission.closeExport()"
         />
@@ -820,7 +821,9 @@ function escape() {
           :readonly="composerReadonly"
           :placeholder="
             lockField
-              ? (lockField.hint ?? 'Type your response…')
+              ? lockPhase === 'repeat'
+                ? 'Repeat password'
+                : (lockField.hint ?? 'Password')
               : locking ||
                   foreground?.kind === 'popup' ||
                   foreground?.kind === 'export-text' ||
@@ -870,6 +873,7 @@ function escape() {
           @skip="skipPacing(true)"
           @activate="activatePreselected"
           @escape="escape"
+          @back="askPasswordAgain"
           @files="submitImage"
         />
       </template>
