@@ -10,7 +10,6 @@ import { coreRequest, type SourceFile } from "../helpers/type-core-analysis.js";
 import {
   analysisByLine,
   checkedByLine,
-  type CompiledByLine,
   compiledByLine,
   markedSource,
   MODES,
@@ -131,16 +130,16 @@ test("which calls the analysis reads as their argument", () => {
     ],
     ["a reading method's receiver", main(`${PASS}let xs = [1]\nsay "\${pass(xs).count}"\nexit`), 1],
     [
-      "a null test's and a comparison's operands",
+      "a null test's and a comparison's operands (a test reads a value)",
       main(`${PASS}let a = hostValue\nif pass(a) != null and pass(a.n) < 2 {\n  say "x"\n}\nexit`),
-      0,
+      2,
     ],
     [
-      "a type test's subject and a switch subject",
+      "a type test's subject and a switch subject (a test reads a value)",
       main(
         `${PASS}let a = hostValue\nif pass(a) is string {\n  say "x"\n}\nswitch pass(a) {\n  case is string {\n    say "s"\n  }\n}\nexit`,
       ),
-      0,
+      2,
     ],
   ];
   for (const [form, files, calls] of rows) {
@@ -193,6 +192,28 @@ const WRAPPED: readonly (readonly [string, string])[] = [
     // (a comparison's operand is a place slot, r4-452: the operands of its operand are values)
     "list elements and property values, a condition and the operands of a comparison's operand",
     "let point = {x: ⟦1⟧, ys: [⟦2⟧, ⟦2.5⟧]}\nif ⟦⟦point.x⟧ + ⟦1⟧ > 1⟧ {\n  repeat point.ys[0] {}\n}\nexit",
+  ],
+  // a test reads its subject's value: a test of the call's result narrows its argument (r4-452)
+  [
+    "a type test's subject",
+    'let v = load("v", default: 4.5)\nif ⟦v⟧ is integer {\n  let whole: integer = v\n  say "${whole}"\n}\nexit',
+  ],
+  [
+    "a switch subject",
+    'let a: string? = "s"\nswitch ⟦a⟧ {\n  case is string {\n    let s: string = a\n    say s\n  }\n}\nexit',
+  ],
+  ["a comparison's operand", 'let a = "s"\nif ⟦a⟧ == "s" {\n  say a\n}\nexit'],
+  [
+    "a null test's subject changed inside the tested expression",
+    "global data: integer? = 1\nglobal function clear {\n  data = null\n  return true\n}\nif ⟦data⟧ != null and clear() {\n  repeat data {}\n}\nexit",
+  ],
+  [
+    "a tested path below the argument",
+    'let box = {n: 1}\nif load("clear", default: true) {\n  box.n = null\n}\nif ⟦box⟧.n != null {\n  repeat box.n {}\n}\nexit',
+  ],
+  [
+    "a tested path below the argument, changed after the test",
+    "let box = {n: 1}\nif ⟦box⟧.n != null {\n  box.n = null\n  repeat box.n {}\n}\nexit",
   ],
 ];
 
@@ -266,22 +287,6 @@ const PLACES: readonly (readonly [string, string])[] = [
     "the receiver of a dict method that changes it",
     'let d = dict{"a": null, "b": 2}\nlet held = d\nlet gone = ⟪d⟫.remove("a")\nfor k, v in d {\n  let w: integer = v\n  say "${k} ${w} ${gone}"\n}\nexit',
   ],
-  [
-    "a null test's subject",
-    'let a: string? = null\nlet held = a\nif ⟪a⟫ != null {\n  say "${a.length}"\n}\nexit',
-  ],
-  [
-    "a type test's subject",
-    'let a: string? = "s"\nlet held = a\nif ⟪a⟫ is string {\n  say "${a.length}"\n}\nexit',
-  ],
-  [
-    "a tested path's receiver",
-    'let box = {n: null}\nlet held = box\nif ⟪box⟫.n != null {\n  say "${box.n.length}"\n}\nexit',
-  ],
-  [
-    "a switch subject",
-    'let a: string? = "s"\nlet held = a\nswitch ⟪a⟫ {\n  case is string {\n    say "${a.length}"\n  }\n}\nexit',
-  ],
 ];
 
 const placeForm = (marked: string, form: "pass" | "copy"): SourceFile[] =>
@@ -291,22 +296,6 @@ const placeForm = (marked: string, form: "pass" | "copy"): SourceFile[] =>
         form === "pass" ? `pass(${argument})` : "held",
       ),
   );
-
-/**
- * Place rows the finished compile takes past the syntax check: the slice refuses an author function's argument that is
- * an object, a list or a dict, or may be `null`, as main does where the call stays one.
- */
-const PLANNED: readonly (readonly [string, string])[] = [
-  [
-    "a type test's subject",
-    'let a: string? = "s"\nlet held = a\nif ⟪a⟫ is string {\n  let s: string = a\n  say s\n}\nexit',
-  ],
-  [
-    "a switch subject",
-    'let a: string? = "s"\nlet held = a\nswitch ⟪a⟫ {\n  case is string {\n    let s: string = a\n    say s\n  }\n}\nexit',
-  ],
-  ["a comparison's operand", 'let a = "s"\nlet held = a\nif ⟪a⟫ == "s" {\n  say a\n}\nexit'],
-];
 
 /** `found` less each member of `kept`, as many times as `kept` holds it. */
 const less = (found: readonly string[], kept: readonly string[]): string[] => {
@@ -319,7 +308,7 @@ const less = (found: readonly string[], kept: readonly string[]): string[] => {
 };
 
 test("a call in a place slot stays a call: no error its copy does not give, every run-time check its copy has (#2493)", () => {
-  for (const [what, marked] of [...PLACES, ...PLANNED]) {
+  for (const [what, marked] of PLACES) {
     assert.equal(identityView(coreRequest(placeForm(marked, "pass"))!).calls, 0, what);
     for (const mode of MODES) {
       const called = checkedByLine(placeForm(marked, "pass"), mode)!;
@@ -330,30 +319,17 @@ test("a call in a place slot stays a call: no error its copy does not give, ever
   }
 });
 
-test("a call in a place slot stays a call, compiled and run past the syntax check: its copy's plan checks, its run (#2493)", () => {
-  for (const [what, marked] of PLANNED)
-    for (const mode of MODES) {
-      const called = compiledByLine(placeForm(marked, "pass"), mode);
-      const copied = compiledByLine(placeForm(marked, "copy"), mode);
-      const errors = (compiled: CompiledByLine): string[] =>
-        compiled.diagnostics.filter((line) => line.includes(" error "));
-      assert.deepEqual(less(errors(called), errors(copied)), [], `${what}: ${mode}`);
-      assert.deepEqual(less(copied.checks, called.checks), [], `${what}: ${mode}`);
-      assert.deepEqual(called.run, copied.run, `${what}: ${mode}`);
-    }
-});
-
 /**
  * Every reader of the analysis that unwraps parentheses (#2493, R41), by file: its mentions of a parenthesized
  * expression and its calls of the helpers that unwrap one (`unwrap`, `unwrapped`, `peel`), and the place slots among
- * them (P1 a store's receiver chain, P2 a changing method's receiver, P3 a test's subject), which the view keeps as
- * calls (`placeSlots`); every other reads a value, which a call's copy shares when it runs. A new reader fails here
- * until it is classed.
+ * them, the slots through which a write reaches (P1 a store's receiver chain, P2 a changing method's receiver), which the
+ * view keeps as calls (`placeSlots`); every other reads a value, which a call's copy shares when it runs, a test's
+ * subject too (it writes nothing). A new reader fails here until it is classed.
  */
 const UNWRAPPING: Readonly<Record<string, readonly [number, string]>> = {
   "collector.ts": [
     11,
-    "places: parentheses' own place (`#expression`), stored into only as a store's receiver (P1, `#assignment`) or a changing method's (P2, `#call`); `#mutate` (P1, P2); `#speakerName` (P1, P2's `copyFrom`, else a speaker's read); `#plainVariable` (P3); `label` (P2's receiver, named); the rest values",
+    "places: parentheses' own place (`#expression`), stored into only as a store's receiver (P1, `#assignment`) or a changing method's (P2, `#call`); `#mutate` (P1, P2); `#speakerName` (P1, P2's `copyFrom`, else a speaker's read); `label` (P2's receiver, named); the rest values",
   ],
   "core/admission/classes.ts": [1, "an index's value"],
   "core/check-result/check-result.ts": [
@@ -382,28 +358,22 @@ const UNWRAPPING: Readonly<Record<string, readonly [number, string]>> = {
     2,
     "the view: its parentheses, and a place slot's chain (`placeSlots`)",
   ],
-  "core/indexes/guards.ts": [4, "places: a test's operands and their receiver chains (P3)"],
+  "core/indexes/guards.ts": [4, "values: a test's operands and their receiver chains"],
   "core/messages/causes.ts": [1, "a value a message names"],
   "core/messages/site.ts": [7, "values: what a message names and where"],
   "core/messages/words.ts": [1, "a kind a message names"],
   "core/narrowing/narrowings.ts": [
     15,
-    "places: a test's subject (`testForm`, `define`, P3), a stable path's receiver chain (`stablePath`: a store's root, P1, or a tested path's, P3); the rest values: a read's path, an index it reads, a condition's own parentheses; `peel` itself",
+    "places: a stable path's receiver chain as a store's root (`stablePath`, P1); the rest values: a test's subject (`testForm`, `define`), a read's or a tested path, an index it reads, a condition's own parentheses; `peel` itself",
   ],
   "core/narrowing/route-entries.ts": [7, "values: a read's root, literals, a transfer's script"],
   "core/narrowing/route-holding.ts": [3, "places: a store's target chain (P1); a callee's value"],
-  "core/narrowing/route-tests.ts": [
-    2,
-    "places: a test's subject (P3); a condition's own parentheses",
-  ],
+  "core/narrowing/route-tests.ts": [2, "values: a test's subject; a condition's own parentheses"],
   "core/narrowing/routes.ts": [1, "a value: its producer"],
   "core/slice-syntax.ts": [7, "values: the syntax check's literals, on the source"],
   "effects.ts": [3, "the legacy backend's, on the source"],
   "legacy-rounds.ts": [3, "the legacy backend's, on the source"],
-  "narrowing-shapes.ts": [
-    3,
-    "places: a test's subject (`conditionShape`, P3); its operand's literal",
-  ],
+  "narrowing-shapes.ts": [3, "values: a test's subject (`conditionShape`); its operand's literal"],
   "syntax-evidence.ts": [7, "values: a selection's and an interaction's literal data"],
 };
 
