@@ -176,7 +176,7 @@ function keyBelowWith(contract: Contract, asked: Key, rest: Steps, kept: boolean
   const start = isKeyId(key) ? key : rootId(keyPlace(key));
   // (the path below a kept path, by its steps' text: made once per path and steps, found again at one visit)
   const facts = factsOf(contract, keyIdPath(start));
-  const below = (facts.below ??= Retained.held(facts, Retained.map("PathFacts.below")));
+  const below = (facts.below ??= Retained.map("PathFacts.below"));
   const text = stepsText(rest);
   let path = below.get(text);
   if (path === undefined) {
@@ -422,7 +422,7 @@ function spanId(contract: Contract, path: number, from: number): number {
   for (let index = way.length - 1; index >= 0; index -= 1) {
     id = pathAt(contract, id, steps[way[index]!]!);
     const facts = factsOf(contract, way[index]!);
-    (facts.spans ??= Retained.held(facts, Retained.map("PathFacts.spans"))).set(from, id);
+    (facts.spans ??= Retained.map("PathFacts.spans")).set(from, id);
   }
   return id;
 }
@@ -455,7 +455,7 @@ export function prefixId(contract: Contract, path: number, length: number): numb
   convert(contract, way.length + 1, 0, way.length);
   for (const node of way) {
     const facts = factsOf(contract, node);
-    (facts.prefixAt ??= Retained.held(facts, Retained.map("PathFacts.prefixAt"))).set(length, id);
+    (facts.prefixAt ??= Retained.map("PathFacts.prefixAt")).set(length, id);
   }
   return id;
 }
@@ -468,7 +468,7 @@ function joinedId(contract: Contract, base: number, rest: number): number {
   if (base === 0) return rest;
   const { pathParents: parents, pathLastSteps: steps } = contract;
   const facts = factsOf(contract, base);
-  const byRest = (facts.joined ??= Retained.held(facts, Retained.map("PathFacts.joined")));
+  const byRest = (facts.joined ??= Retained.map("PathFacts.joined"));
   const way: number[] = [];
   let at = rest;
   for (; at !== 0 && !byRest.has(at); at = parents[at]!) way.push(at);
@@ -801,8 +801,7 @@ export function stepsOfId(contract: Contract, id: KeyId, from = 0): PathSteps {
   }
   if (from === 0) {
     facts.steps = steps;
-  } else
-    (facts.suffixes ??= Retained.held(facts, Retained.map("PathFacts.suffixes"))).set(from, steps);
+  } else (facts.suffixes ??= Retained.map("PathFacts.suffixes")).set(from, steps);
   return steps;
 }
 
