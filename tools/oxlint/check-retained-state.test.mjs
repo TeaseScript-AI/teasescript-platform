@@ -186,6 +186,52 @@ test("a maker is given a fresh literal or nothing (#1072 R25)", () => {
   );
 });
 
+test("`Retained` stands only as the object of a direct call, in every checked file but the retained API's own (#1072 R38)", () => {
+  /** The closed-form findings of `text` as a file of `file` at `level`. */
+  const formed = (text, level, file = "src/type-inference/core/scratch.ts") =>
+    retainedStateDiagnostics([
+      { file: level === "helper" ? "tests/helpers/scratch.ts" : file, text, level },
+    ])
+      .filter(({ message }) => message.includes("#1072 R38"))
+      .map(({ line }) => line);
+  // (one line per refused form, each refused alone)
+  const refused = [
+    "const { record } = Retained;",
+    "const made = Retained;",
+    "use(Retained);",
+    "const api = { made: Retained };",
+    "const list = [Retained];",
+    "Retained['record']('T', { n: 0 });",
+    "const make = Retained.record;",
+    "const make = Retained.record.bind(null);",
+    "retainedModule('T', Retained.record);",
+    "retainedModule(Retained.weakMap, 'T');",
+    'import { Retained as Kept } from "./retained/retained.js";',
+    'import * as retained from "./retained/retained.js";',
+    'export { Retained } from "./retained/retained.js";',
+    'export * from "./retained/retained.js";',
+  ];
+  // (a control per allowed form)
+  const passed = [
+    'import { Retained, amend } from "./retained/retained.js";',
+    "const state = Retained.record('T', { n: 0 });",
+    "const kept = Retained.map<string, number>('T');",
+    "const MEMO = retainedModule('T', Retained.weakMap<object, number>);",
+    "const SET = retainedModule('T', Retained.set);",
+    "type Api = typeof Retained;",
+    'export { amend } from "./retained/retained.js";',
+  ];
+  for (const level of ["file", "module", null, "meta", "helper"]) {
+    for (const form of refused) assert.deepEqual(formed(form, level), [1], `${level}: ${form}`);
+    for (const form of passed) assert.deepEqual(formed(form, level), [], `${level}: ${form}`);
+  }
+  // (the retained API defines `Retained`, outside its closed form)
+  assert.deepEqual(
+    formed(refused.join("\n"), null, "src/type-inference/core/retained/retained.ts"),
+    [],
+  );
+});
+
 test("`structuredClone` is refused in the checked core files alone (#1072 R21)", () => {
   const lines = "const copy = structuredClone(value);";
   for (const level of ["file", "module"]) assert.deepEqual(guarded(lines, level), [1], level);
