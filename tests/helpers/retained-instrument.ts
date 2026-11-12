@@ -110,7 +110,7 @@ const INDEX = /^(?:0|[1-9]\d*)$/;
 const MAP_FOR_EACH = Map.prototype.forEach;
 const SET_FOR_EACH = Set.prototype.forEach;
 
-type Method = (this: object, ...args: unknown[]) => unknown;
+type Method = (this: WeakKey, ...args: unknown[]) => WeakKey;
 type KindName = "map" | "set" | "weakMap" | "weakSet" | "record" | "arena" | "array";
 
 /** A kind made here: its instrument, its name and kind, and what holds its contents (a collection itself, a proxy's private target). */
@@ -121,9 +121,13 @@ interface Made {
   readonly holder: object;
 }
 
-const MADE = new WeakMap<object, Made>();
+const MADE = new WeakMap<WeakKey, Made>();
+/** A run token for an interval outside any solver run. */
+function outsideRun(): WeakKey {
+  return { outside: true };
+}
 /** Each maker's proxy's own traps (`watchRecord`). */
-const HANDLERS = new WeakMap<object, ProxyHandler<object>>();
+const HANDLERS = new WeakMap<WeakKey, ProxyHandler<object>>();
 
 /**
  * A test's observer of one field of a record (`tests/helpers/type-core-held-host.ts`), through the record's own proxy:
@@ -131,7 +135,7 @@ const HANDLERS = new WeakMap<object, ProxyHandler<object>>();
  * write still passes the record's checks. `false` where `record` is no maker's proxy (no instrument installed).
  */
 export function watchRecord(
-  record: object,
+  record: WeakKey,
   field: string,
   read: (value: unknown) => void,
   written: (value: unknown) => void,
@@ -139,9 +143,12 @@ export function watchRecord(
   const handler = HANDLERS.get(record);
   if (handler === undefined) return false;
   const { get, set } = handler;
-  handler.get = (target, key, receiver): unknown => {
-    const value: unknown =
-      get === undefined ? Reflect.get(target, key, receiver) : get(target, key, receiver);
+  handler.get = (target, key, receiver) => {
+    const value =
+      get === undefined
+        ? // oxlint-disable-next-line anti-slop/no-reflect-get -- EVIDENCE: fixture: a test's observer forwards the proxy's read unchanged.
+          Reflect.get(target, key, receiver)
+        : get(target, key, receiver);
     if (key === field) read(value);
     return value;
   };
@@ -157,15 +164,14 @@ export function watchRecord(
 }
 
 /** An object's class: its prototype's own `constructor` where that is a data field, read through its descriptor. */
-function constructorOf(value: object): unknown {
+function constructorOf<T extends object>(value: T): WeakKey | undefined {
   const prototype: unknown = Object.getPrototypeOf(value);
-  if (prototype === null) return undefined;
-  // EVIDENCE: invariant: a prototype is an object, so it can hold a descriptor.
-  const descriptor = Object.getOwnPropertyDescriptor(prototype as object, "constructor");
+  if (typeof prototype !== "object" || prototype === null) return undefined;
+  const descriptor = Object.getOwnPropertyDescriptor(prototype, "constructor");
   return descriptor !== undefined && "value" in descriptor ? descriptor.value : undefined;
 }
 
-function className(value: object): string {
+function className<T extends object>(value: T): string {
   const made = constructorOf(value);
   return typeof made === "function" ? made.name || "anonymous" : "anonymous";
 }
@@ -189,14 +195,14 @@ const COLLECTION_WRITERS: Readonly<
   Record<"map" | "set" | "weakMap" | "weakSet", Readonly<Record<string, Method>>>
 > = {
   map: {
-    set(this: object, key: unknown, value: unknown): unknown {
+    set(this: WeakKey, key: unknown, value: unknown): WeakKey {
       const made = MADE.get(this)!;
       made.instrument.stored(made, key, value, true);
       return Map.prototype.set.call(this, key, value);
     },
   },
   weakMap: {
-    set(this: object, key: unknown, value: unknown): unknown {
+    set(this: WeakKey, key: unknown, value: unknown): WeakKey {
       const made = MADE.get(this)!;
       made.instrument.stored(made, key, value, true);
       // EVIDENCE: invariant: a weak map's key is an object; the native writer refuses one that is not.
@@ -204,14 +210,14 @@ const COLLECTION_WRITERS: Readonly<
     },
   },
   set: {
-    add(this: object, value: unknown): unknown {
+    add(this: WeakKey, value: unknown): WeakKey {
       const made = MADE.get(this)!;
       made.instrument.stored(made, value, value, false);
       return Set.prototype.add.call(this, value);
     },
   },
   weakSet: {
-    add(this: object, value: unknown): unknown {
+    add(this: WeakKey, value: unknown): WeakKey {
       const made = MADE.get(this)!;
       made.instrument.stored(made, value, value, false);
       // EVIDENCE: invariant: a weak set's member is an object; the native writer refuses one that is not.
@@ -289,10 +295,10 @@ export class RetainedInstrument implements RetainedRecorder {
   readonly #sealed = new WeakSet<object>();
   #sealedCount = 0;
   /** The current run; an interval outside any solver run is a run of its own. */
-  #run: object = { outside: true };
+  #run: WeakKey = outsideRun();
   #outside = true;
   /** The owners each run marked, in any of its intervals (a mark stands before the write it covers, R14). */
-  readonly #marks = new WeakMap<object, Set<OwnerRecord>>();
+  readonly #marks = new WeakMap<WeakKey, Set<OwnerRecord>>();
   #switches = 0;
   readonly #made = new Map<KindName, number>();
   readonly #outsideWrites = new Map<string, number>();
@@ -312,7 +318,7 @@ export class RetainedInstrument implements RetainedRecorder {
   }
 
   /** A function retained state may keep (`Retained.closure`): admitted as it is. */
-  public closure(_name: string, fn: object): void {
+  public closure<T extends object>(_name: string, fn: T): void {
     this.#registered.add(fn);
   }
 
@@ -321,7 +327,7 @@ export class RetainedInstrument implements RetainedRecorder {
    * collections' entries (read by the intrinsics), is admitted as it is, and its plain data frozen, as the program is
    * never written after its indexing. The walk stops at a listed class's instance.
    */
-  public program(program: object): void {
+  public program<T extends object>(program: T): void {
     const stack: unknown[] = [program];
     while (stack.length > 0) {
       const value = stack.pop();
@@ -407,13 +413,18 @@ export class RetainedInstrument implements RetainedRecorder {
   }
 
   /** A maker's private copy of the fresh literal it is given: its descriptors validated first, none of them run. */
-  #copy(given: object, kind: "record" | "arena" | "array", name: string): object {
+  #copy<T extends object>(given: T, kind: "record" | "arena" | "array", name: string): object {
     const prototype: unknown = Object.getPrototypeOf(given);
     if (kind === "record" ? !PLAIN.has(prototype) : prototype !== Array.prototype)
       refuse(
         `${name}: a ${kind} is made from a fresh ${kind === "record" ? "object" : "array"} literal`,
       );
-    const target: object = kind === "record" ? Object.create(prototype as object | null) : [];
+    const target: object =
+      kind !== "record"
+        ? []
+        : prototype === null
+          ? Object.create(null)
+          : Object.create(Object.prototype);
     for (const key of Reflect.ownKeys(given)) {
       const descriptor = Object.getOwnPropertyDescriptor(given, key)!;
       if (!("value" in descriptor))
@@ -447,13 +458,13 @@ export class RetainedInstrument implements RetainedRecorder {
 
   /** A maker's traps: each write checked and queued; a write outside its kind refused. */
   #traps(kind: "record" | "arena" | "array", name: string): ProxyHandler<object> {
-    const write = (target: object, key: string | symbol, value: unknown): void => {
+    const write = <T extends object>(target: T, key: string | symbol, value: unknown): void => {
       if (kind === "record") {
         if (typeof key === "symbol") refuse(`${name}: a symbol field of a record`);
       } else if (key === "length") {
         // EVIDENCE: invariant: an array's length is a number, which the native write checks.
         const length = value as number;
-        if (kind === "arena" && length < (target as unknown[]).length)
+        if (kind === "arena" && Array.isArray(target) && length < target.length)
           refuse(`${name}: an arena's length falls`);
         return;
       } else if (typeof key !== "string" || !INDEX.test(key))
@@ -468,7 +479,7 @@ export class RetainedInstrument implements RetainedRecorder {
     return {
       set: (target, key, value): boolean => {
         write(target, key, value);
-        return Reflect.set(target, key, value); // oxlint-disable-line anti-slop/no-reflect-set -- EVIDENCE: fixture: the instrument's own trap writes its private target.
+        return Reflect.set(target, key, value);
       },
       defineProperty: (target, key, descriptor): boolean => {
         if (
@@ -576,11 +587,9 @@ export class RetainedInstrument implements RetainedRecorder {
    */
   #settle(record: OwnerRecord): void {
     const { owner } = record;
-    const shown =
-      record.hidden === null
-        ? {}
-        : // EVIDENCE: invariant: `hidden` was given for this owner's class, so it takes this owner.
-          (record.hidden as (owner: object) => Readonly<Record<string, unknown>>)(owner);
+    // EVIDENCE: invariant: `hidden` was given for this owner's class, so it takes this owner.
+    const hidden = record.hidden as ((owner: WeakKey) => Readonly<Record<string, unknown>>) | null;
+    const shown = hidden === null ? {} : hidden(owner);
     for (const key in shown) this.#admit(shown[key], `${record.name}.#${key}`, true);
     const keys = Reflect.ownKeys(owner);
     for (const key of keys) {
@@ -622,6 +631,7 @@ export class RetainedInstrument implements RetainedRecorder {
   }
 
   /** What a kind holds at `key` now (a set's member is its key); `undefined` once it is gone. */
+  // oxlint-disable-next-line anti-slop/no-unknown-returns -- EVIDENCE: invariant: a stored value as stored, which the shape walk then checks.
   #current(made: Made, key: unknown): unknown {
     const { holder } = made;
     switch (made.kind) {
