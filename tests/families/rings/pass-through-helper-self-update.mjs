@@ -1,9 +1,9 @@
 // A variable set from a pass-through helper, as the converter writes one, and updated from itself (#2486): every pair of
 // its axes' values (the helper's call sites and form, its argument, the update, the update's other operand, where the
-// update stands, its operator), and every combination of the call sites, the update, its other operand and its operator,
-// which together decide whether main's solver settles, in one source at least, chosen greedily from the product; the
-// coverage check below fails the module otherwise. `*` has no compound form (V30 has `+=` and `-=` only), so that pair
-// is no source. Its run: the oracle sweep and the replay of #2486's pull request.
+// update stands, its operator), and every combination of the call sites, the helper, the update, its other operand and
+// its operator, which together decide whether main's solver settles, in one source at least, chosen greedily from the
+// product; the coverage check below fails the module otherwise. `*` has no compound form (V30 has `+=` and `-=` only),
+// so that pair is no source. Its run: the oracle sweep and the replay of #2486's pull request.
 export const axes = {
   sites: ["once", "twice"],
   helper: ["passOn", "loader"],
@@ -55,7 +55,7 @@ function source(c) {
 const names = Object.keys(axes);
 const pairsOf = (c) => [
   ...names.flatMap((a, i) => names.slice(i + 1).map((b) => `${a}=${c[a]}|${b}=${c[b]}`)),
-  `sites=${c.sites}|update=${c.update}|other=${c.other}|operator=${c.operator}`,
+  `sites=${c.sites}|helper=${c.helper}|update=${c.update}|other=${c.other}|operator=${c.operator}`,
 ];
 const product = names
   .reduce(
@@ -90,9 +90,9 @@ export const recorded = {
   commands: [
     [
       "node monotone-sweep.mjs --tree <checkout> --cases cases.jsonl --out family.jsonl (base and head)",
-      "~/work/evidence/2486/family/cases.jsonl",
+      "~/work/evidence/2486/family-64/cases.jsonl",
     ],
   ],
-  sources: 32,
-  sha256: "b9a3b4c34016b239720c497ee0181cf00d86d4cfcffb3b78147d5997f8714464",
+  sources: 64,
+  sha256: "51f302dd366d8bbd8d143449576f78a8eaee3ff541cfaa31ae4ea99f16c82746",
 };
