@@ -614,6 +614,7 @@ export function fitOf(admission: Admission, descriptors: readonly Descriptor[]):
   work.charge("checks", deciding.length);
   const distinct = [...sets.values()];
   let kinds: readonly ItemTag[] | null = null;
+  // (rule 1 as its own branch saves rule 2's search: rule 2 gives the same kinds, a whole number fitting a number)
   if (distinct.every((set) => set.length === 1 && (set[0] === "integer" || set[0] === "number")))
     kinds = distinct.some((set) => set[0] === "number") ? ["number"] : ["integer"];
   else
