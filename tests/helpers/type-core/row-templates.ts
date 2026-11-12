@@ -163,28 +163,36 @@ const ADMITTED_VALUES = {
   range: "1..=2",
   list: "[1]",
   object: "{v: 1}",
+  // (a date or time value only as a conversion's, whose default the slice admits only as a value of unknown kind)
+  date: 'toDate("2027-04-17", default: hostValue)',
+  time: 'toTime("14:30", default: hostValue)',
+  datetime: 'toDateTime("2027-04-17T18:00", default: hostValue)',
+  absoluteDateTime: 'toAbsoluteDateTime("2027-04-17T12:30:00Z", default: hostValue)',
 } as const satisfies Partial<Record<ValueKind, string>>;
 
 type AdmittedKind = keyof typeof ADMITTED_VALUES;
 
+/** The kinds the slice admits a value of. */
+export const ADMITTED_KINDS: readonly AdmittedKind[] =
+  // EVIDENCE: invariant: the record's keys are its kinds (its type).
+  Object.keys(ADMITTED_VALUES) as AdmittedKind[];
+
 /** The kinds the slice admits a value of but `kinds`. */
 function but(...kinds: AdmittedKind[]): AdmittedKind[] {
-  // EVIDENCE: invariant: the record's keys are its kinds (its type).
-  return (Object.keys(ADMITTED_VALUES) as AdmittedKind[]).filter((kind) => !kinds.includes(kind));
+  return ADMITTED_KINDS.filter((kind) => !kinds.includes(kind));
 }
 
 /**
- * Each other kind (`VALUE_KINDS`), which the slice admits no value of: a source holding one, which the route refuses or
- * publishes no plan for (the row guard requires it). A new kind does not type-check here until it is placed.
+ * Each other kind (`VALUE_KINDS`), which the slice admits no value of: only syntax the slice refuses writes one (a unit,
+ * a set or dict literal, `script(…)`, a speaker's name, the expressions that give a handle), and no conversion, method,
+ * `get`, load or `fromJson` the slice admits gives one (`toSet`, the one list method that gives a set, is a copy the
+ * slice refuses; the row guard checks the conversions). Each holds a source with a value of the kind, which the route
+ * refuses or publishes no plan for. A new kind does not type-check here until it is placed.
  */
 export const REFUSED_KINDS: Readonly<Record<Exclude<ValueKind, AdmittedKind>, string>> = {
   duration: "let m = 2 s",
   calendarDuration: "let m = 2 calendar months",
   angle: "let m = 90 deg",
-  date: 'let m = toDate("2026-10-04", default: null)',
-  time: 'let m = toTime("14:30", default: null)',
-  datetime: 'let m = toDateTime("2026-10-04T18:00", default: null)',
-  absoluteDateTime: 'let m = toAbsoluteDateTime("2026-10-04T12:30:00Z", default: null)',
   script: 'let m = script("main.tease")',
   set: "let m = set[1]",
   dict: "let m = dict{ a: 1 }",
@@ -251,7 +259,9 @@ export const DECLARED_REFUSALS: readonly {
     text: "this operand",
   },
   // (a `say`'s value of a kind it shows only by S9b's rules, the misfit sources')
-  ...(["regex", "range", "list", "object"] as const).map((kind) => ({
+  ...(
+    ["regex", "range", "list", "object", "date", "time", "datetime", "absoluteDateTime"] as const
+  ).map((kind) => ({
     row: "sayStatement" as const,
     position: `the value, ${kind}`,
     refused: misfitSource("sayStatement", "value", ADMITTED_VALUES[kind]),
