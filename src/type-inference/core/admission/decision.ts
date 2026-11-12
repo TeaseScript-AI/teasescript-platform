@@ -356,6 +356,7 @@ function decisionOf(admission: Admission, asked: DecidedAt, lazily: boolean): De
     own: found.own,
     nullable,
     decider,
+    ...(found.deciderHost === true ? { deciderHost: true as const } : {}),
     candidates: ordered,
     published,
   };
@@ -441,6 +442,7 @@ function decision(admission: Admission, at: At, key: Key, inputs: Inputs): Decid
   let decider: Definition | null = null;
   let deciderSite: SourceSite | null = null;
   let published = false;
+  let deciderHost = false;
   let copied: TypeTerm | null = null;
   // an inferred root whose every store's contract is plain scalar kinds of one family accepts every store
   if (tags === null && depth === 0 && !admission.a4Keys.has(keyOf(root, []))) {
@@ -477,6 +479,7 @@ function decision(admission: Admission, at: At, key: Key, inputs: Inputs): Decid
     const found = drive(admission, scanAt(admission, direct, prefixes, key));
     if (found !== null) {
       ({ tags, nullable, byWritten, permitsNull, decider, site: deciderSite } = found);
+      deciderHost = found.host === true;
       copied = optionalOf(found.copied, found.nullable);
     } else {
       // C9: where no contribution decides, but the contract holds kinds beside external data, those
@@ -509,6 +512,7 @@ function decision(admission: Admission, at: At, key: Key, inputs: Inputs): Decid
     byWritten,
     permitsNull,
     decider,
+    ...(deciderHost ? { deciderHost: true as const } : {}),
     site: deciderSite,
     published,
     copied,

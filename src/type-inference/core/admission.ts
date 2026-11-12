@@ -49,6 +49,7 @@ import type {
   LandingIndex,
   Level,
   LiveGroup,
+  View,
   OwnStructure,
   Stop,
   Stops,
@@ -57,6 +58,7 @@ import type {
   TouchPlace,
   ViaChain,
 } from "./admission/model.js";
+import type { Body, CellAnswer } from "./admission/literals/cell.js";
 import { levelsOf, permittedAt } from "./admission/permitted.js";
 import { storeRequirement } from "./admission/requirements.js";
 import type { Composed } from "./admission/structure.js";
@@ -423,6 +425,18 @@ export class Admission {
   /** Per key, its decision before it is recorded (`decided`); the keys `decide` took (`lazily`). */
   readonly decisions = new Map<CanonicalKey, Decided | null>();
   readonly attempted = new Set<CanonicalKey>();
+  /**
+   * #2289 (R50): each recipe's view (`viewOfRead`, by the recipe's id) and each literal reading's body (`bodyOfRead`),
+   * built when first asked, kept with the `stops` memo's lifetime.
+   */
+  readonly views = new Map<number, View>();
+  readonly bodies = new Map<string, Body>();
+  /**
+   * #2289 (R36 mechanism 2, R49): cell answers by literal, the steps below the cell and the decision they go
+   * into, for the solver's `forgets` they were made at; only an evaluation outside every solver run that waited on no
+   * key and did not stop enters (`memoCell`).
+   */
+  cellMemo: { readonly forgets: number; readonly answers: Map<string, CellAnswer> } | null = null;
   landings: LandingIndex | null = null;
   /** The touch tries of the pass (`Touches`, #1188), per place its trie and the paths its contributions meet at. */
   touches: Touches | null = null;
