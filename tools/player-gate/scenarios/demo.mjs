@@ -56,7 +56,8 @@ async function nextControl(page) {
     const lastChange = Math.max(state.t, gate.rows.at(-1)?.t ?? 0);
     if ((await page.evaluate(() => performance.now())) - lastChange > IDLE_MS) return null;
     if (Date.now() > deadline) throw new Error(`No control within ${TURN_MS} ms`);
-    if (state.composer?.enabled && !state.composer.asks)
+    // Only a skippable pacing gate takes Space: the composer is enabled also while nothing is asked.
+    if ((await page.locator("[data-composer-pacing]").count()) > 0)
       await page.locator("[data-composer-input]").press(" ");
     await page.waitForTimeout(250);
   }
