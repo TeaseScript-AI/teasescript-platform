@@ -9,8 +9,8 @@ import { spawnTool } from "./runner-test-support.mjs";
 // A tool whose entrypoint check compares `process.argv[1]` with `import.meta.url` does nothing when it is run through a
 // symbolic link, as the deployed `current` checkout is: Node resolves the link in the module's URL but not in argv, so
 // the tool exits 0 without output, which reads as a clean result. `import.meta.main` holds either way. The test finds a
-// check written as `import.meta.main`, `require.main`, `process.argv[1]` or `process.argv.at(1)`; a check written in any
-// other form (`process.argv` destructured, say) is not found by it (#2566).
+// check written as `import.meta.main`, `require.main`, `process.argv[1]` or `process.argv.at(1)`; a check written in
+// any other form (`process.argv` destructured, say) is not found by it (#2566).
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const tools = join(root, "tools");
