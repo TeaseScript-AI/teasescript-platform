@@ -130,6 +130,7 @@ async function main() {
         ["lock", () => lockScenario(cdp, origin)],
         ["password", () => passwordScenario(cdp, origin)],
         ["passwordInterruption", () => passwordInterruptionScenario(cdp, origin)],
+        ["passwordComposition", () => passwordCompositionScenario(cdp, origin)],
         ["lockKept", () => lockKeptScenario(cdp, origin)],
         ["publicKey", () => publicKeyScenario(cdp, origin, profile)],
         ["prefills", () => prefillsScenario(cdp, origin)],
@@ -1963,11 +1964,11 @@ async function standInRelays(cdp) {
 
 /**
  * Whether `element` (an expression) is a password field that no browser takes for a login field: browsers offer, fill
- * and save passwords in a `type="password"` field whatever its `autocomplete`, so the Player's is a text field, masked
- * by style while hidden, with completion off.
+ * and save passwords in a `type="password"` field whatever its `autocomplete`, and a phone's Chrome shows its key bar on
+ * a masked `<input>`, so the Player's is a textarea, masked by style while hidden, with completion off.
  */
 function noLoginField(element) {
-  return `(${element} instanceof HTMLTextAreaElement || ${element}?.type === 'text') && ${element}.autocomplete === 'off' && getComputedStyle(${element}).webkitTextSecurity === 'disc'`;
+  return `${element} instanceof HTMLTextAreaElement && ${element}.autocomplete === 'off' && getComputedStyle(${element}).webkitTextSecurity === 'disc'`;
 }
 
 /**
@@ -2264,6 +2265,66 @@ async function passwordScenario(cdp, origin) {
   } finally {
     await cdp.call("Page.removeScriptToEvaluateOnNewDocument", { identifier });
   }
+}
+
+/**
+ * A timer's question over a field in which an input method is composing (V30 §20): the password field and the text
+ * field never share the composition, so a password being composed never shows unmasked nor answers a text question, and
+ * text being composed never shows masked nor answers as a password.
+ */
+async function passwordCompositionScenario(cdp, origin) {
+  await setViewport(cdp, 1280, 800);
+  await navigate(cdp, `${origin}/player/?package=password-composition`);
+  await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
+  await physicalClick(cdp, "[data-session-activation] button");
+  const said = (text) =>
+    `[...document.querySelectorAll('.transcript-entry')].some((entry) => entry.textContent.trim().endsWith(${JSON.stringify(text)}))`;
+  const input = `document.querySelector('[data-composer-input]')`;
+  const masked = `getComputedStyle(${input}).webkitTextSecurity !== 'none'`;
+  const compose = async (text) => {
+    await physicalClick(cdp, "[data-composer-input]");
+    await cdp.call("Input.imeSetComposition", {
+      text,
+      selectionStart: text.length,
+      selectionEnd: text.length,
+    });
+  };
+
+  await waitFor(cdp, `${said("Code?")} && ${noLoginField(input)} && !${input}.disabled`);
+  await compose("secret");
+  await waitFor(cdp, `${said("Interrupting text")} && !(${masked})`, 8_000, "No text question");
+  assertEqual(
+    await value(cdp, `${input}.value`),
+    "",
+    "The text field shows the password being composed",
+  );
+  await typeInto(cdp, "[data-composer-input]", "plain");
+  await pressEnter(cdp);
+  await waitFor(cdp, said("Text answer: plain"), 8_000, "The text answer was not the text typed");
+  await waitFor(cdp, `${noLoginField(input)} && ${input}.value === ''`);
+  await typeInto(cdp, "[data-composer-input]", "corner");
+  await pressEnter(cdp);
+
+  await waitFor(cdp, `${said("Ordinary text?")} && !(${masked}) && !${input}.disabled`);
+  await compose("words");
+  await waitFor(
+    cdp,
+    `${said("Interrupting password")} && ${noLoginField(input)}`,
+    8_000,
+    "No password question",
+  );
+  assertEqual(
+    await value(cdp, `${input}.value`),
+    "",
+    "The password field holds the text being composed",
+  );
+  await typeInto(cdp, "[data-composer-input]", "p");
+  await pressEnter(cdp);
+  await waitFor(cdp, said("Password given"), 8_000, "The password was not answered");
+  await waitFor(cdp, `!(${masked}) && !${input}.disabled`);
+  await typeInto(cdp, "[data-composer-input]", "done");
+  await pressEnter(cdp);
+  await waitFor(cdp, said("Answer: done"), 8_000, "The text answer was not the text typed");
 }
 
 /**

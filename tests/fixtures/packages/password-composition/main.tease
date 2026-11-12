@@ -1,0 +1,13 @@
+timer async hidden 3 s {
+    let interrupting = askText("Interrupting text")
+    say "Text answer: ${interrupting}", instant
+}
+let code = askPassword("Code?")
+say "Code given", instant
+timer async hidden 3 s {
+    let secret = askPassword("Interrupting password")
+    say "Password given", instant
+}
+let answer = askText("Ordinary text?")
+say "Answer: ${answer}", instant
+exit

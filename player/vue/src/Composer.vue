@@ -175,11 +175,12 @@ function keepMouseEditingFocus(event: MouseEvent): void {
   if (editing()) event.preventDefault();
 }
 
-// A date or time control and the text field, also a password's, replace each other; the field removed while focused
-// blurs, and its keyboard state carries over to the replacement instead of being released.
+// A date or time control, the password field and the text field replace each other; the field removed while focused
+// blurs, and its keyboard state carries over to the replacement instead of being released. The password field and the
+// text field are one textarea, keyed by kind, so a composition under way in one never carries over to the other.
 let replacingField = false;
 watch(
-  () => (props.password || props.inputType === "text" ? "text" : "picker"),
+  () => (props.password ? "password" : props.inputType === "text" ? "text" : "picker"),
   () => {
     replacingField = true;
     void nextTick(() => (replacingField = false));
@@ -356,6 +357,7 @@ defineExpose({ focusInput, selectInput, openPicker });
         >
           <div class="composer-text-row">
             <Textarea
+              :key="password ? 'password' : 'text'"
               ref="textarea"
               data-composer-input
               rows="1"

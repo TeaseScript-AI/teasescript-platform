@@ -1,7 +1,7 @@
 // A password field is a textarea masked by style, not an `<input type="password">`: browsers offer, fill and save
 // passwords in a password-type field whatever its `autocomplete`. The composer's and the lock dialog's share these.
 
-/** What keeps a phone from capitalising, correcting, suggesting or completing a password as it is typed. */
+/** Keyboard and completion hints for a masked password field; a phone's keyboard may still suggest words. */
 export const passwordAttributes = {
   autocomplete: "off",
   autocapitalize: "off",
