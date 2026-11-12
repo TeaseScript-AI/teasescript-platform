@@ -1026,11 +1026,13 @@ RERUN.rows(
     const transport = await topologyBridge(context, topology);
     const { host } = await mount(context, transport);
     const refusals: unknown[] = [];
-    // EVIDENCE: test: the bridge's erased overload; the row forwards each call unchanged and reads only its refusal.
+    let catchUps = 0;
+    // EVIDENCE: test: the bridge's erased overload; the row forwards each call unchanged, reading its op and refusal.
     const request = transport.bridge.request.bind(transport.bridge) as (
       ...call: Call
     ) => Promise<OpResult<SessionOp>>;
     context.mock.method(transport.bridge, "request", async (...call: Call) => {
+      if (call[1] === "beginCatchUp") catchUps += 1;
       try {
         return await request(...call);
       } catch (error) {
@@ -1039,19 +1041,25 @@ RERUN.rows(
         throw error;
       }
     });
+    // The timer's first deadline is a scene second away: the clock's own wake-up for it (a real timer, armed from the
+    // mocked scene time) is then about a second of real time away, a wide margin for the setup and the held reply. Were
+    // it still to run before the page is shown again, it would take the catch-up's place with an observation of its own,
+    // and the assertion after the dispatch fails at once (#2494).
     await start(
       host,
-      'let n = 0\ntimer(duration: 10 ms, async: true, repeat: true, display: "hidden") {\n  n += 1\n}\nshowButton "Next"\nshowButton "After"\nexit',
+      'let n = 0\ntimer(duration: 1000 ms, async: true, repeat: true, display: "hidden") {\n  n += 1\n}\nshowButton "Next"\nshowButton "After"\nexit',
     );
     const input = await runtimeInput();
-    // The answer's section holds the session's queue while its observation's reply waits at the port. A second later the
-    // page is shown again: the late observation's catch-up, sampled from the revision before the answer, queues behind it.
+    // The answer's section holds the session's queue while its observation's reply waits at the port. Five seconds later
+    // the page is shown again: the late observation's catch-up, sampled from the revision before the answer, queues behind
+    // it.
     transport.hold("observeInput");
     const answering = answer(host, input.intents.choice(null, "button"));
     await transport.held();
     const heldAt = transport.posts.length;
-    nowMs += 1_000;
+    nowMs += 5_000;
     document.dispatchEvent(new Event("visibilitychange"));
+    assert.equal(catchUps, 1, "the page asks for the catch-up as it is shown again");
     for (let index = 0; index < 5; index += 1) await turn();
     const queued = transport.posts.slice(heldAt).map((post) => post.op);
     assert.equal(queued.indexOf("beginCatchUp"), -1, queued.join(", "));
@@ -1061,11 +1069,11 @@ RERUN.rows(
     assert.deepEqual(refusals, ["basis"]);
     await until(() => buttonLabel(host) === "After", "the answer's next button", "step");
     await until(
-      () => host.session.value!.state.observedSessionTimeMs >= 1_000,
+      () => host.session.value!.state.observedSessionTimeMs >= 5_000,
       "the fresh observation",
       "host",
     );
-    // Refused, the catch-up adopted nothing (a step already queued finds no copy); the clock observed the late second in
+    // Refused, the catch-up adopted nothing (a step already queued finds no copy); the clock observed the late seconds in
     // one go instead. Read once that observation is in, so a later adoption is in the log.
     const ops = transport.posts.slice(heldAt).map((post) => post.op);
     const begun = ops.indexOf("beginCatchUp");
