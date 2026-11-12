@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { analyseCore } from "../../src/type-inference/core/answers.js";
+import { checkedResult } from "../../src/type-inference/core/check-result/check-result.js";
 import { makeItem, REASON, type Item } from "../../src/type-inference/core/items.js";
 import { coreRequest } from "../helpers/type-core-analysis.js";
 import { judgeRun, withMonotoneOracle } from "../helpers/type-core/type-core-monotone.js";
@@ -179,4 +180,27 @@ test("a component of a pass-through helper's variable settles, its runs only gro
       assert.equal(record.violations, 0, `${name}: ${JSON.stringify(record.first)}`);
     }
   }
+});
+
+test("a type test hands an unknown's condition word to the kind it proves (#2486 review r2)", () => {
+  const source = [
+    "let n = 1",
+    "function change { if hostFlag { n = hostValue } }",
+    "if n is integer {",
+    "  change()",
+    "  let merged = [n, n].first",
+    "  if merged is number {",
+    "    repeat merged {}",
+    "  }",
+    "}",
+    "exit",
+    "",
+  ].join("\n");
+  const request = coreRequest([{ path: "main.tease", source }], ["hostValue", "hostFlag"]);
+  assert.ok(request);
+  const words = checkedResult(analyseCore(request), request).diagnostics.flatMap((d) =>
+    d.class === "warning-runtime-check" && d.kind === "integer-use" ? [d.provenance.context] : [],
+  );
+  // (the repeat count's number came through a call that may change `n`: its sentence says so)
+  assert.deepEqual(words, ["call"]);
 });
