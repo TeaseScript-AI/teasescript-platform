@@ -59,6 +59,7 @@ import { routeComposerText } from "../../src/interaction-completion.js";
 import type { RuntimePlayerProfileInput } from "../../src/runtime/host-data/player-profile.js";
 import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkpoint.js";
 
+import type { MessagePresentation } from "../../src/message-presentation.js";
 import type { DebugAnswerInput } from "../debug/debug-export.js";
 import type { DebugRecorder } from "../debug/debug-recorder.js";
 import type { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js";
@@ -77,6 +78,8 @@ export interface PlayerRuntimeState extends RuntimeSessionView {
   readonly permanentButtons: readonly PermanentButtonProjection[];
   readonly calls: readonly RuntimeSessionCall[];
   readonly temporalPresentation: PresentationSettings;
+  /** How the player's answer shows if it completes now, which the Player's predicted line takes. */
+  readonly answerPresentation: MessagePresentation;
 }
 
 export interface PlayerRuntimeSession extends PlayerSessionView {
@@ -380,6 +383,7 @@ function shownState(runtime: RuntimeSession): PlayerRuntimeState {
     permanentButtons: runtime.permanentButtonProjection(),
     calls: runtime.callStack(),
     temporalPresentation: runtime.temporalPresentation(),
+    answerPresentation: runtime.answerPresentation(),
   });
 }
 

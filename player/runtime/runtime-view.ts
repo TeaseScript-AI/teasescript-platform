@@ -525,6 +525,11 @@ export function playerRuntimeTranscriptMessage(
 // and a removal with one marked removed, which keeps its place. `rows` indexes the script messages, and `removedRows`
 // lists the removed ones in ascending order. A choice, button, or form answer is marked by its settlement, which the same
 // operation emits.
+/** The row key of the answer to interaction `actionId`, which its predicted row and its entry share. */
+export function answerRenderKey(actionId: number): string {
+  return `answer-${actionId}`;
+}
+
 export function appendTranscript(
   transcriptEntries: PlayerTranscriptEntryPresentation[],
   rows: Map<number, number>,
@@ -538,7 +543,18 @@ export function appendTranscript(
   // A submitted form's answer shows every field with its state, one per line (V30 askForm), in the presentation its
   // answers were sent in.
   const formSummaries = new Map<number, readonly FormSummaryLine[]>();
+  // Each answer's row key, from the interaction its settlement names.
+  const answerKeys = new Map<number, string>();
   for (const event of events) {
+    if (
+      event.kind === "actionCompleted" &&
+      event.settlement.actionKind === "interaction" &&
+      event.settlement.transcriptEventSequence !== null
+    )
+      answerKeys.set(
+        event.settlement.transcriptEventSequence,
+        answerRenderKey(event.settlement.actionId),
+      );
     if (
       event.kind === "actionCompleted" &&
       event.settlement.actionKind === "interaction" &&
@@ -610,6 +626,7 @@ export function appendTranscript(
           speakerId: "user",
           text: event.text,
           presentation: event.presentation,
+          ...(answerKeys.has(event.sequence) ? { renderKey: answerKeys.get(event.sequence)! } : {}),
           ...(responseKinds.has(event.sequence)
             ? { responseKind: responseKinds.get(event.sequence)! }
             : {}),
