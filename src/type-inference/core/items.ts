@@ -28,9 +28,10 @@ export const REASON = { external: 1, opaque: 2, deferred: 4, missing: 8, budget:
 /**
  * The context words in the order a warning names the first (§3.4): the words of §3's steps 1 and 2, which are decided
  * first, then those of the exact path's conditions X1 to X7, then A7's `later`, and last `budget`, a value the analysis
- * stopped before deciding (B1, D4; S3 §5). `reasonContext` orders the reasons' own words differently (`external`'s
- * `unknown` before `deferred-parameter`); where the unknown a merge gives has one of those words, it is its reasons'
- * one (`mergeItems`, which an operation's result passes too), so the two orders never meet.
+ * stopped before deciding (B1, D4; S3 §5). `reasonContext` orders the first four, the reasons' own words, differently
+ * (`external`'s `unknown` before `deferred-parameter`). So that the two orders never meet on an unknown (#2486), the
+ * unknown a merge gives takes `reasonContext`'s word where its word is one of those four and its reasons hold one of
+ * their bits (`mergeItems`, which an operation's result passes too); every other word stays as this order gives it.
  */
 export const CONTEXT_WORDS = [
   "unmodelled",
@@ -247,8 +248,15 @@ export function firstContext(a: ContextWord | null, b: ContextWord | null): Cont
 /**
  * The word of one unknown's reasons: the first present in the rank `external` (`unknown`), `opaque`
  * (`unmodelled`), `deferred` (`deferred-parameter`), `missing` (`missing`), `budget` (`budget`); an unknown without
- * reasons says `unknown`. This order differs from `CONTEXT_WORDS`' (`deferred-parameter` comes before `unknown` there);
- * the unknown a merge gives takes this one where its word and reasons come before every condition's (`mergeItems`).
+ * reasons says `unknown`. This order differs from `CONTEXT_WORDS`' (`deferred-parameter` comes before `unknown` there).
+ *
+ * The unknown a merge gives takes this word where its word comes before every condition's and its reasons hold
+ * `external`, `opaque`, `deferred` or `missing` (`mergeItems`, #2486): kept by `CONTEXT_WORDS`' order, such a word
+ * outlived the reasons that gave it and went round a solver component. Outside that rule:
+ * - a condition's word, `later` and no word, which name where the value comes from rather than its reasons, and which a
+ *   type test hands to the kind it proves (`narrowedItems`), so a message would lose them;
+ * - `budget`, the word and the reason, which comes after every condition's word: rewriting a word to it would let a
+ *   condition's word win a later merge that it lost before, so the merge would depend on its grouping.
  */
 export function reasonContext(reasons: number): ContextWord {
   if ((reasons & REASON.external) !== 0) return "unknown";
