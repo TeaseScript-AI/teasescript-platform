@@ -23,13 +23,15 @@ import type { CompactRecord } from "../helpers/type-core-records.js";
  * file's start or a block's body (the accepted record's r4-451). The rows are the design's sources and their answers by
  * the text: `error` where some route into the use has no check and the rule proves it; `no-error` where every route has
  * one (the warning may stay), or where no proof of the error is possible (a block that may repair, X7; a check inside a
- * block's body, #2506); `check` where the text asks the error and the rule leaves the warning (a named give-up, or a
- * program the route rule's default holds): a check stands, the warning or the error.
+ * block's body, #2506); `warning` where a route has no check but r4-451's certificate proves no error (a passed
+ * compound holds the variable): no error, and the warning with its check; `check` where the text asks the error and the
+ * rule leaves the warning (a named give-up, or a program the route rule's default holds): a check stands, the warning or
+ * the error.
  */
 
 interface Row {
   readonly name: string;
-  readonly expect: "error" | "no-error" | "check";
+  readonly expect: "error" | "no-error" | "warning" | "check";
   readonly files: readonly { readonly path: string; readonly lines: readonly string[] }[];
   readonly watch: readonly { readonly path: string; readonly line: number }[];
   /** For an error: the writer's file, or `null` where the route starts at a block's body with no store of its own. */
@@ -90,7 +92,9 @@ test("each design row gives its answer by the text in the four modes: the error,
               ))
           : row.expect === "no-error"
             ? errors.length === 0
-            : errors.length > 0 || found.some((d) => d.class === "warning-runtime-check");
+            : row.expect === "warning"
+              ? errors.length === 0 && found.some((d) => d.class === "warning-runtime-check")
+              : errors.length > 0 || found.some((d) => d.class === "warning-runtime-check");
       if (!fits)
         wrong.push(`${row.name} (${row.expect}) at ${path}:${line}: ${JSON.stringify(found)}`);
     }
