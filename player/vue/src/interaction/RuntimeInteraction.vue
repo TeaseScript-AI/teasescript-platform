@@ -59,6 +59,8 @@ const props = defineProps<{
   chat?: number;
   /** Where the shown session stands at its end: stopping, stopped, or its connection lost (`usePlayerSession`). */
   terminal?: SessionTerminal;
+  /** The session's activation token (`usePlayerSession`'s `epoch`), a reader, not a value: an answer reads it when posted. */
+  epoch?: () => number;
   /** The stopped session while it shows for the error dialog, whose final publication settles a posted answer. */
   stoppedSession?: PlayerSession | null;
   entries: readonly PlayerTranscriptEntryPresentation[];
@@ -272,6 +274,7 @@ const submission = useAnswerSubmission({
   session: () => props.session,
   stoppedSession: () => props.stoppedSession ?? null,
   chat: () => props.chat ?? 0,
+  epoch: () => props.epoch?.() ?? 0,
   terminal: () => props.terminal ?? null,
   inputSection: () => props.inputSection,
   prepareInput: () => props.prepareInput?.() ?? true,

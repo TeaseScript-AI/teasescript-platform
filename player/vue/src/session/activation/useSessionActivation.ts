@@ -196,9 +196,8 @@ export function useSessionActivation({
         : null;
     const name = waiting?.name ?? (error instanceof Error ? error.name : "Error");
     continuing = null;
-    activationToken += 1;
+    const stop = nextEpoch();
     beginning.value = false;
-    const stop = activationToken;
     const shown = session.value ?? restoring;
     // A Continue still beginning beside a shown session runs nothing more either: plain-halted, resource-bound cleanup.
     if (restoring !== null && restoring !== shown) void bridgeOf(restoring).halt(restoring);
@@ -266,7 +265,7 @@ export function useSessionActivation({
       clicking: beginning.value ? clickKind : null,
       prepared: activation.value?.kind ?? null,
     });
-    activationToken += 1;
+    nextEpoch();
     continuing = null;
     beginning.value = false;
     const target = session.value;
@@ -338,6 +337,15 @@ export function useSessionActivation({
   }
   const activation = shallowRef<Activation | null>(null);
   let activationToken = 0;
+  /**
+   * The token's one writer: an error stop, a lost connection and a supersession (a preparation, an activation, an end)
+   * each take a new one before they change `halting`, `hostError` or `lost`, so an answer accepted under the previous
+   * token sees that its session stopped or was replaced even when the terminal level went back before it looked.
+   */
+  function nextEpoch(): number {
+    activationToken += 1;
+    return activationToken;
+  }
   // A Continue under way in the host, whose session no other activation may let run on; see `supersede`.
   let continuing: PlayerSession | null = null;
   // The Start or Continue still beginning over the bridge. A later activation begins only once it settled, so the
@@ -357,7 +365,7 @@ export function useSessionActivation({
    * so its queued requests, such as starting the recording of an obsolete session, are refused without effect.
    */
   function supersede() {
-    activationToken++;
+    nextEpoch();
     nextPreparation();
     // A pending error stop is retired with the activation it stopped; the replacement's input runs.
     halting.value = false;
@@ -738,6 +746,8 @@ export function useSessionActivation({
     beginning,
     lastStart,
     supersede,
+    /** The current activation token (`nextEpoch`): an answer's session ended or was replaced when it moved. */
+    epoch: (): number => activationToken,
     prepare,
     prepareStart,
     prepareRestore,

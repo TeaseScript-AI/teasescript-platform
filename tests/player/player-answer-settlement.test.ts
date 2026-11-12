@@ -51,6 +51,11 @@ interface SessionHost {
   readonly stopped: Readonly<Ref<boolean>>;
   readonly chat: Readonly<Ref<number>>;
   readonly terminal: Readonly<Ref<SessionTerminal>>;
+  epoch(): number;
+  /** Adopts a state Debug's rewind restored before input, as `RuntimeInteraction` asks for it. */
+  prepareInput(): true | Promise<boolean>;
+  /** Shows `next` as the session from now on, in another chat. */
+  showSession(next: PlayerSession): void;
   readonly hostError: Readonly<Ref<string | null>>;
   readonly bridge: Promise<PlayerBridge>;
   readonly inputSection: InputSectionHost;
@@ -89,9 +94,10 @@ let useAnswerSubmission: (host: {
   readonly session: () => PlayerSession | null;
   readonly stoppedSession: () => PlayerSession | null;
   readonly chat: () => number;
+  readonly epoch: () => number;
   readonly terminal: () => SessionTerminal;
   readonly inputSection: () => InputSectionHost | undefined;
-  readonly prepareInput: () => true;
+  readonly prepareInput: () => true | Promise<boolean>;
   readonly publish: (session: PlayerSession) => void;
   readonly unansweredMessage: () => string;
   readonly submitLock: (password: string) => void;
@@ -109,6 +115,17 @@ let useFormUpdates: (host: {
   readonly clearNotice: () => void;
   readonly unansweredMessage: () => string;
 }) => FormUpdates;
+interface DebugRewind {
+  readonly state: Readonly<
+    Ref<{
+      readonly history: number | null;
+      readonly points: readonly { readonly id: number }[];
+      readonly inspection: unknown;
+    }>
+  >;
+  back(point: number): Promise<boolean>;
+}
+let useDebugRewind: (player: SessionHost) => DebugRewind;
 
 before(async () => {
   const session = await loadPlayerModule("player/vue/src/session/usePlayerSession.ts");
@@ -127,6 +144,9 @@ before(async () => {
   const forms = await loadPlayerModule("player/vue/src/interaction/useFormUpdates.ts");
   // EVIDENCE: validation: as above, the form updates' controller.
   useFormUpdates = forms.useFormUpdates as typeof useFormUpdates;
+  const rewind = await loadPlayerModule("player/vue/src/debug/history/useDebugRewind.ts");
+  // EVIDENCE: validation: as above, Debug's rewind.
+  useDebugRewind = rewind.useDebugRewind as typeof useDebugRewind;
   await loadTopology();
 });
 
@@ -183,16 +203,27 @@ function frames() {
  * The real composable on `topology`, started on `script`, with the composer's and the answers' controllers over it as
  * `RuntimeInteraction` runs them: the composer shows the chat, or a password's slot.
  */
-async function page(context: TestContext, topology: Topology, script: string) {
+async function page(
+  context: TestContext,
+  topology: Topology,
+  script: string,
+  { rewind = false }: { readonly rewind?: boolean } = {},
+) {
   browser(context);
   const connections = await topologyConnections(context, topology);
   const connection = connections.first;
   const frame = frames();
-  // The input section the answers use: what each run returned, and an act a row runs just before the answer's op is sent.
-  const sections: { returned: (string | null)[]; beforeSend: (() => void) | null } = {
-    returned: [],
-    beforeSend: null,
-  };
+  // The input section the answers use: what each run returned, and an act a row runs in the same task just before the
+  // section decides on the answer (`beforeBody`, ahead of its admission), just before its op is sent (`beforeSend`), or
+  // as the section returns (`afterReturn`).
+  const sections: {
+    returned: (string | null)[];
+    beforeBody: (() => void) | null;
+    beforeSend: (() => void) | null;
+    afterReturn: (() => void) | null;
+  } = { returned: [], beforeBody: null, beforeSend: null, afterReturn: null };
+  // Each level the answers' controller read, for a row that orders its reads against the session's changes.
+  const terminalReads: SessionTerminal[] = [];
   const scope = effectScope();
   const made = scope.run(() => {
     const player = usePlayerSession({
@@ -202,8 +233,11 @@ async function page(context: TestContext, topology: Topology, script: string) {
     });
     const shown = () => (player.stopped.value ? null : player.session.value);
     const section: InputSectionHost = async (work, body) => {
-      const result = await player.inputSection(work, (input, observed) =>
-        body(
+      const result = await player.inputSection(work, (input, observed) => {
+        const act = sections.beforeBody;
+        sections.beforeBody = null;
+        act?.();
+        return body(
           {
             owned: () => input.owned(),
             send: <O extends SessionOp>(
@@ -219,13 +253,16 @@ async function page(context: TestContext, topology: Topology, script: string) {
             },
           },
           observed,
-        ),
-      );
+        );
+      });
       sections.returned.push(
         result !== null && typeof result === "object" && "kind" in result
           ? String(result.kind)
           : null,
       );
+      const after = sections.afterReturn;
+      sections.afterReturn = null;
+      after?.();
       return result;
     };
     const composer: ComposerState = useComposerState({
@@ -243,9 +280,14 @@ async function page(context: TestContext, topology: Topology, script: string) {
       session: shown,
       stoppedSession: () => (player.stopped.value ? player.session.value : null),
       chat: () => player.chat.value,
-      terminal: () => player.terminal.value,
+      epoch: player.epoch,
+      terminal: () => {
+        const level = player.terminal.value;
+        terminalReads.push(level);
+        return level;
+      },
       inputSection: () => section,
-      prepareInput: () => true,
+      prepareInput: () => player.prepareInput(),
       publish: (session) => player.update(session),
       unansweredMessage: () => "Nothing answers that.",
       submitLock: () => {},
@@ -280,14 +322,17 @@ async function page(context: TestContext, topology: Topology, script: string) {
       () => composer.select(descriptor()),
       { immediate: true },
     );
-    return { player, composer, submission };
+    // Debug's rewind, as the Debug switch runs it, for a row that answers in an inspected state.
+    const debug = rewind ? useDebugRewind(player) : null;
+    return { player, composer, submission, debug };
   })!;
   context.after(() => scope.stop());
-  const { player } = made;
+  const { player, debug } = made;
+  if (debug) await until(() => debug.state.value.history !== null, "the history's open", "host");
   player.prepare(await sourceStart(player.bridge, script, () => ({ wallClockMs: 0 })));
   await player.activate();
   await until(() => activeAction(player) !== undefined, "the question", "host");
-  return { ...made, connection, connections, frame, scope, sections };
+  return { ...made, connection, connections, frame, scope, sections, terminalReads };
 }
 
 const activeAction = (player: SessionHost) =>
@@ -326,6 +371,15 @@ const CASES = {
   "posted, stop, then a preparation": TOPOLOGIES,
   "a script failure after the answer": TOPOLOGIES,
   "the origin gone after the yield": TOPOLOGIES,
+  "fenced, a stop and a preparation in one task": TOPOLOGIES,
+  "posted, a stop and a preparation in one task": TOPOLOGIES,
+  "fenced, a stop and a Start in one task": TOPOLOGIES,
+  "posted, a stop and a Start in one task": TOPOLOGIES,
+  "a chat change before the admission": TOPOLOGIES,
+  "an answer in an inspected state": TOPOLOGIES,
+  "a retired outcome while freezing": TOPOLOGIES,
+  // In-process, an error stop with no request in flight commits at once (`stopAt`'s `frozen()`): no freeze to miss.
+  "an outcome inside a missed freeze": TOPOLOGIES.filter((topology) => topology === "worker"),
 } as const;
 const RERUN = rerunRegistry(CASES);
 
@@ -593,5 +647,262 @@ RERUN.rows(
     assert.equal(submission.notice.value, "This interaction is no longer available.");
     assert.equal(connection.posts.filter((post) => post.op === ANSWER_OP).length, 0);
     return end();
+  },
+);
+
+// The answer's token: a stop, a loss or a replacement takes a new epoch, so an answer accepted before it is never posted
+// after it, and one posted before it settles by the token even when the terminal level went back before anything looked.
+
+/** The stop's halt, held until the row lets it settle. */
+function holdHalt(context: TestContext, connection: { readonly bridge: PlayerBridge }) {
+  let halted = () => {};
+  const halt = new Promise<void>((resolve) => (halted = resolve));
+  const bridgeHalt = connection.bridge.halt.bind(connection.bridge);
+  context.mock.method(connection.bridge, "halt", async (...args: Parameters<typeof bridgeHalt>) => {
+    await bridgeHalt(...args);
+    await halt;
+  });
+  return () => halted();
+}
+
+const answerPosts = (connection: { readonly posts: readonly { readonly op: string }[] }) =>
+  connection.posts.filter((post) => post.op === ANSWER_OP).length;
+
+for (const stage of ["fenced", "posted"] as const)
+  for (const then of ["preparation", "Start"] as const)
+    RERUN.rows(
+      `${stage}, a stop and a ${then} in one task`,
+      `an answer ${stage} when a stop and another ${then === "Start" ? "chat's Start" : "Start's preparation"} come in one task, with no flush between, is ${stage === "posted" ? "undone once, never sent again" : "never sent"}`,
+      async (context, topology, end) => {
+        const { player, composer, submission, connection, sections } = await page(
+          context,
+          topology,
+          CHOICE,
+        );
+        const other = await otherStart(player);
+        const chat = player.chat.value;
+        let started: Promise<void> | null = null;
+        const replace = () => {
+          player.reportHostError(new TypeError("a component failed"));
+          player.prepare(other);
+          if (then === "Start") started = player.activate();
+        };
+        type(composer, "Go");
+        // Never posted: the stop and its replacement come as the section decides, ahead of the admission.
+        if (stage === "fenced") sections.beforeBody = replace;
+        else connection.hold(ANSWER_OP);
+        submission.send("input");
+        const record = submission.pending.value!;
+        if (stage === "posted") {
+          await connection.held();
+          assert.equal(record.stage, "posted");
+          replace();
+          connection.release();
+        }
+        await until(() => record.stage === "settled", "the answer settled", "host");
+        if (then === "Start") {
+          await until(() => started !== null, "the Start", "step");
+          await started;
+        }
+        await until(() => sections.returned.length === 1, "the answer's section returned", "host");
+        if (stage === "fenced")
+          assert.equal(sections.returned[0], "retired", "refused at admission");
+        assert.equal(
+          answerPosts(connection),
+          stage === "posted" ? 1 : 0,
+          "never sent after the stop",
+        );
+        assert.equal(submission.notice.value, "");
+        assert.equal(submission.pending.value, null);
+        // Undone into its own chat; another chat's Start shows its own, empty.
+        if (then === "Start") {
+          await until(() => player.chat.value !== chat, "the other chat", "host");
+          assert.equal(composer.chatText.value, "");
+        } else assert.equal(composer.chatText.value, "Go", "undone: the outcome is unknown");
+        return end();
+      },
+    );
+
+RERUN.rows(
+  "a chat change before the admission",
+  "an answer whose chat another replaced, with no flush between, is refused at admission and dropped",
+  async (context, topology, end) => {
+    const { player, composer, submission, connection, sections } = await page(
+      context,
+      topology,
+      CHOICE,
+    );
+    const chat = player.chat.value;
+    const epoch = player.epoch();
+    type(composer, "Go");
+    // A chat change alone: the session shown again in a new chat, as the rewind shows its states; no epoch moves.
+    sections.beforeBody = () => player.showSession(player.session.value!);
+    submission.send("input");
+    const record = submission.pending.value!;
+    await until(() => record.stage === "settled", "the answer settled", "host");
+    await until(() => sections.returned.length === 1, "the answer's section returned", "host");
+    assert.notEqual(player.chat.value, chat, "another chat");
+    assert.equal(player.epoch(), epoch, "the same epoch");
+    assert.equal(sections.returned[0], "retired");
+    assert.equal(answerPosts(connection), 0, "never sent");
+    assert.equal(composer.chatText.value, "", "dropped: nothing written to the new chat");
+    assert.equal(submission.notice.value, "");
+    return end();
+  },
+);
+
+RERUN.rows(
+  "an answer in an inspected state",
+  "an answer in a state Debug's rewind restored adopts it and is sent once and released, as any answer",
+  async (context, topology, end) => {
+    const { player, composer, submission, connection, debug } = await page(
+      context,
+      topology,
+      'let first = askChoice "Red", "Blue"\nsay "First: ${first}.", instant\nlet second = askChoice "Left", "Right"\nsay "Second: ${second}.", instant\nexit',
+      { rewind: true },
+    );
+    const rewind = debug!;
+    type(composer, "Red");
+    submission.send("input");
+    const first = submission.pending.value!;
+    await until(() => first.stage === "settled", "the first answer", "host");
+    await until(() => rewind.state.value.points.length === 2, "the second point", "host");
+    assert.equal(await rewind.back(rewind.state.value.points[0]!.id), true, "Back");
+    await until(() => rewind.state.value.inspection !== null, "the inspection", "host");
+    const posts = answerPosts(connection);
+    type(composer, "Blue");
+    submission.send("input");
+    const record = submission.pending.value!;
+    await until(() => record.stage === "settled", "the answer settled", "host");
+    assert.equal(answerPosts(connection), posts + 1, "sent once");
+    assert.equal(rewind.state.value.inspection, null, "the state adopted");
+    assert.equal(composer.chatText.value, "", "released: nothing put back");
+    assert.equal(submission.notice.value, "");
+    assert.ok(
+      player.session.value!.transcriptEntries.some((entry) => entry.text === "First: Blue."),
+      "the adopted state ran the answer",
+    );
+    return end();
+  },
+);
+
+RERUN.rows(
+  "a retired outcome while freezing",
+  "a posted answer whose input returns while its stop freezes waits for the final publication, which releases it or undoes it once",
+  async (context, topology, end) => {
+    for (const each of [
+      { script: CHOICE, text: "Go", taken: true },
+      { script: PASSWORD, text: "secret", taken: true },
+      { script: CHOICE, text: "Go", taken: false },
+    ]) {
+      const { player, composer, submission, connection, sections, scope } = await page(
+        context,
+        topology,
+        each.script,
+      );
+      const actionId = activeAction(player)!;
+      const halted = holdHalt(context, connection);
+      type(composer, each.text);
+      const stop = () => player.reportHostError(new TypeError("a component failed"));
+      // Taken: the host runs the answer before the stop. Not taken: the stop comes as it is sent, so it is not.
+      if (each.taken) connection.hold(ANSWER_OP);
+      else sections.beforeSend = stop;
+      submission.send("input");
+      const record = submission.pending.value!;
+      if (each.taken) {
+        await connection.held();
+        stop();
+        connection.release();
+      }
+      await until(() => sections.returned.length === 1, "the answer's section returned", "host");
+      assert.equal(sections.returned[0], "retired");
+      // In-process, a stop with no request in flight commits at once (`stopAt`'s `frozen()`); otherwise it freezes.
+      if (each.taken || topology === "worker") {
+        assert.equal(player.terminal.value, "freezing");
+        assert.equal(record.stage, "posted", "waits through the freeze");
+      } else assert.equal(player.terminal.value, "stopped");
+      halted();
+      await until(() => player.terminal.value === "stopped", "the final publication", "host");
+      await until(() => record.stage === "settled", "the answer settled", "host");
+      const presented = playerRuntimeInteractionActionIds(player.session.value!.state).includes(
+        actionId,
+      );
+      assert.equal(presented, !each.taken);
+      const undone = !each.taken && each.script === CHOICE;
+      assert.equal(composer.chatText.value, undone ? "Go" : "", `${each.text}: once`);
+      assert.equal(answerPosts(connection), each.taken ? 1 : 0, "never sent again");
+      assert.equal(submission.notice.value, "");
+      scope.stop();
+    }
+    return end();
+  },
+);
+
+/** Runs `act` after `depth` microtasks. */
+function afterMicrotasks(depth: number, act: () => void) {
+  if (depth === 0) return act();
+  queueMicrotask(() => afterMicrotasks(depth - 1, act));
+}
+
+RERUN.rows(
+  "an outcome inside a missed freeze",
+  "a posted answer whose outcome reads a stop that a preparation retires before any flush is undone once by its token",
+  async (context, topology, end) => {
+    // The order: the stop, then the answer's outcome reading `freezing`, then the preparation, all before Vue's flush.
+    // Which microtask the outcome resumes in depends on the engine's promise hops, so the row steps the stop through
+    // them until the outcome reads `freezing` with no flush between the stop and the preparation.
+    for (let depth = 0; depth < 32; depth += 1) {
+      const made = await page(context, topology, CHOICE);
+      const { player, composer, submission, connection, sections, terminalReads, scope } = made;
+      const other = await otherStart(player);
+      const halted = holdHalt(context, connection);
+      let flushes = 0;
+      const flushed = watch(
+        () => [player.terminal.value],
+        () => void (flushes += 1),
+      );
+      context.after(flushed);
+      type(composer, "Go");
+      connection.hold(ANSWER_OP);
+      submission.send("input");
+      const record = submission.pending.value!;
+      await connection.held();
+      let missed = false;
+      sections.afterReturn = () =>
+        afterMicrotasks(depth, () => {
+          const reads = terminalReads.length;
+          const before = flushes;
+          queueMicrotask(() => {
+            missed =
+              terminalReads.slice(reads).includes("freezing") &&
+              flushes === before &&
+              record.stage === "posted";
+            player.prepare(other);
+          });
+          player.reportHostError(new TypeError("a component failed"));
+        });
+      connection.release();
+      await until(() => record.stage === "settled", "the answer settled", "host");
+      if (!missed) {
+        halted();
+        scope.stop();
+        continue;
+      }
+      assert.equal(player.terminal.value, null);
+      assert.equal(submission.pending.value, null);
+      assert.equal(composer.chatText.value, "Go", "undone: the outcome is unknown");
+      assert.equal(submission.notice.value, "");
+      assert.equal(answerPosts(connection), 1, "the original post only");
+      // The retired stop's halt settles: nothing changes.
+      halted();
+      for (let turn = 0; turn < 4; turn += 1)
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.equal(player.terminal.value, null);
+      assert.equal(composer.chatText.value, "Go");
+      assert.equal(submission.notice.value, "");
+      assert.equal(answerPosts(connection), 1);
+      return end();
+    }
+    assert.fail("no microtask depth put the outcome inside the missed freeze");
   },
 );
