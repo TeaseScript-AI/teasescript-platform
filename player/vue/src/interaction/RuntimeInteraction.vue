@@ -33,7 +33,11 @@ import { imagePickerAccept, type ImageFileFilters } from "../../../media/image-f
 import { openUrlTab } from "../../../url-tab.js";
 import type { InputSectionHost } from "../session/runtime-input";
 import { composerDescriptor, descriptorKey, useComposerState } from "./useComposerState";
-import { useAnswerSubmission, type SessionTerminal } from "./useAnswerSubmission";
+import {
+  useAnswerSubmission,
+  type PendingAnswer,
+  type SessionTerminal,
+} from "./useAnswerSubmission";
 import { useFormUpdates } from "./useFormUpdates";
 import type { ImageCapture } from "../stage/useImageCapture";
 
@@ -274,9 +278,11 @@ const submission = useAnswerSubmission({
   publish: (session) => emit("update:session", session),
   unansweredMessage: () => unansweredMessage(),
   submitLock: (password) => props.lock?.submit({ password, timeLockMs: null }),
-  // A refused answer that came from the field gives it the focus back; one from a control shows its control again.
+  // A refused answer that came from the field gives it the focus back, unless Send gave it; one from a control shows
+  // its control again.
   undone: (record) => {
-    if (record.origin === "chat" || record.origin === "temporal") focusInput();
+    if ((record.origin === "chat" || record.origin === "temporal") && record !== sentBySend)
+      focusInput();
   },
 });
 const formUpdates = useFormUpdates({
@@ -499,8 +505,25 @@ watch(submission.pending, (record) => {
   if (record === null)
     void nextTick(() => {
       restoreChoiceFocus = false;
+      suppressComposerRefocus = false;
+      sentBySend = null;
     });
 });
+/** The answer Send gave, while it is pending. */
+let sentBySend: PendingAnswer | null = null;
+/**
+ * Enter or Send in the composer. Send keeps the editing focus and the software keyboard as they are (PLAYER-UI "Input
+ * growth, focus, and keyboard behavior"): neither the next interaction's focus watch nor a refusal of its answer gives
+ * the field the focus again.
+ */
+function sendFromComposer(source: "input" | "button") {
+  const before = submission.pending.value;
+  submission.send(source);
+  const record = submission.pending.value;
+  if (source !== "button" || record === null || record === before) return;
+  sentBySend = record;
+  suppressComposerRefocus = true;
+}
 // The Player's controls and fields, which keep their own clicks and keys.
 const playerControls = [
   "button, a, input, textarea, select, label, summary, [contenteditable]",
@@ -866,7 +889,7 @@ function escape() {
           "
           :feedback="feedback"
           @edit="composerState.edit"
-          @submit="(source) => submission.send(source)"
+          @submit="sendFromComposer"
           @skip="skipPacing(true)"
           @activate="activatePreselected"
           @escape="escape"
