@@ -229,6 +229,7 @@ async function page(context: TestContext, topology: Topology, script: string) {
         liveActions: session ? playerRuntimeInteractionActionIds(session.state) : [],
         prefill: null,
         editorText: null,
+        editorField: null,
         temporalPrefill: null,
       };
     };
