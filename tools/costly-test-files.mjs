@@ -38,7 +38,6 @@ export const costlyTestSeconds = {
   "type-core/type-core-contract-capture.test.js": 22,
   "type-core-stop/type-core-stop-route.test.js": 20,
   "type-core/type-core-positions.test.js": 20,
-  "type-core/type-core-message-parity.test.js": 19,
   "type-core/type-core-enclosing.test.js": 18,
   "type-core/messages/type-core-messages-list-join.test.js": 17,
   "type-core/type-core-discharge-runtime.test.js": 17,

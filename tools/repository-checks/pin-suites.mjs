@@ -161,7 +161,7 @@ export const NOT_PINS = [
   { file: "tests/semantic/list-function-checks.test.ts", is: "random seeds" },
   { file: "tests/runtime/message-markup.test.ts", is: "character codes" },
   { file: "tests/runtime/runtime-random.test.ts", is: "a generator's expected states" },
-  { file: "tests/type-core/type-core-message-parity.test.ts", is: "random seeds" },
+  { file: "tests/type-core/messages/type-core-messages-examples.test.ts", is: "random seeds" },
   { file: "tests/helpers/type-core/type-core-enclosing.ts", is: "sample values of a host global" },
 ];
 

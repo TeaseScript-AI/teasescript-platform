@@ -17,7 +17,7 @@ import {
  * obligation's first sentence as an error and as a warning, with its rule's code and its fix (#1195), and each context
  * word's cause on the set's record for that word. The sentences are the owner's: a change here is a change of what an
  * author reads. The form of every sentence of the set's records is tested on the pairs' analysis of the set
- * (`type-core-message-parity.test.ts`).
+ * (`type-core-messages-parity.test.ts`).
  */
 
 const records = readFixture();
