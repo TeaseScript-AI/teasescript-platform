@@ -67,6 +67,7 @@ let usePlayerSession: (options: {
 let useComposerState: (host: {
   readonly draft: (draft: FormDraft) => Promise<boolean>;
   readonly holdDrafts: () => boolean;
+  readonly fieldChanged: () => void;
 }) => ComposerState;
 let useAnswerSubmission: (host: {
   readonly composer: ComposerState;
@@ -180,6 +181,7 @@ async function page(context: TestContext, topology: Topology, script: string) {
     const composer: ComposerState = useComposerState({
       draft: (draft) => forms.draft(draft),
       holdDrafts: () => false,
+      fieldChanged: () => submission.clearNotice(),
     });
     const submission: AnswerSubmission = useAnswerSubmission({
       composer,
