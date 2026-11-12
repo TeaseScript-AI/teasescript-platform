@@ -76,16 +76,20 @@ export function shardSeconds(files, index, count, weights = MEASURED) {
 /** The folders under `tests/` that hold no test files, so the suite reads none of them: a closed list. */
 const NOT_TEST_FOLDERS = new Set(["fixtures", "helpers"]);
 
+/** How many folders deep under `tests/` the suite reads test files: a folder, and one folder inside it. */
+const SUITE_FOLDER_DEPTH = 2;
+
 /**
  * Whether `name`, a path under `tests/` or `dist/tests/` with `/` between folders, is where the suite reads a test file
- * ending in `suffix`: at the top, or in a folder one level down other than `fixtures/` and `helpers/`
- * (`NOT_TEST_FOLDERS`), as `player/x.test.js`.
+ * ending in `suffix`: at the top, or at most `SUITE_FOLDER_DEPTH` folders down in a folder other than `fixtures/` and
+ * `helpers/` (`NOT_TEST_FOLDERS`), as `player/x.test.js` or `player/debug/x.test.js`. A file deeper is not one.
  */
 export function isSuiteTestPath(name, suffix) {
   const parts = name.split("/");
   return (
     name.endsWith(suffix) &&
-    (parts.length === 1 || (parts.length === 2 && !NOT_TEST_FOLDERS.has(parts[0])))
+    parts.length <= SUITE_FOLDER_DEPTH + 1 &&
+    (parts.length === 1 || !NOT_TEST_FOLDERS.has(parts[0]))
   );
 }
 
@@ -97,13 +101,15 @@ export function isSuiteTestPath(name, suffix) {
  */
 export function suiteTestFiles(folder, suffix) {
   const files = [];
-  for (const entry of readdirSync(folder, { withFileTypes: true }))
-    if (entry.isFile()) {
-      if (isSuiteTestPath(entry.name, suffix)) files.push(entry.name);
-    } else if (entry.isDirectory())
-      for (const inner of readdirSync(join(folder, entry.name), { withFileTypes: true }))
-        if (inner.isFile() && isSuiteTestPath(`${entry.name}/${inner.name}`, suffix))
-          files.push(`${entry.name}/${inner.name}`);
+  const read = (under, depth) => {
+    for (const entry of readdirSync(join(folder, under), { withFileTypes: true })) {
+      const name = under === "" ? entry.name : `${under}/${entry.name}`;
+      if (entry.isFile()) {
+        if (isSuiteTestPath(name, suffix)) files.push(name);
+      } else if (entry.isDirectory() && depth < SUITE_FOLDER_DEPTH) read(name, depth + 1);
+    }
+  };
+  read("", 0);
   return files.sort();
 }
 

@@ -524,14 +524,18 @@ test("the four pin forms are found by their text, and a pin written another way 
   assert.deepEqual(pinFormsOf(digest, "tests/player/player-encryption.test.ts"), []);
 });
 
-test("the test files are the suite as the runner finds it: one folder down too, none in helpers/", (t) => {
+test("the test files are the suite as the runner finds it: two folders down too, none in helpers/", (t) => {
   const root = mkdtempSync(join(tmpdir(), "pin-suites-tests-"));
   t.after(() => rmSync(root, { recursive: true, force: true }));
-  for (const file of ["a.test.ts", "player/b.test.ts", "helpers/c.test.ts"]) {
+  for (const file of ["a.test.ts", "player/b.test.ts", "player/d/e.test.ts", "helpers/c.test.ts"]) {
     mkdirSync(join(root, "tests", file, ".."), { recursive: true });
     writeFileSync(join(root, "tests", file), "");
   }
-  assert.deepEqual(testFiles(root), ["tests/a.test.ts", "tests/player/b.test.ts"]);
+  assert.deepEqual(testFiles(root), [
+    "tests/a.test.ts",
+    "tests/player/b.test.ts",
+    "tests/player/d/e.test.ts",
+  ]);
 });
 
 test("an option the tool does not take is refused, not ignored", () => {
