@@ -119,7 +119,7 @@ export function inventoryOf(app, build) {
   return { build, files: inventory, totals };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.main) {
   const { values } = parseArgs({ options: { app: { type: "string" }, build: { type: "string" } } });
   if (!values.app || !values.build) throw new Error("usage: artifacts.mjs --app DIR --build NAME");
   console.log(JSON.stringify(inventoryOf(values.app, values.build), null, 2));
