@@ -1,4 +1,4 @@
-import type { SyntaxKind } from "../../../src/type-inference/core/slice-syntax.js";
+import { operandRules, type SyntaxKind } from "../../../src/type-inference/core/slice-syntax.js";
 import { ASK_OPERANDS } from "./ask-templates.js";
 
 /** A file of a project the guard compiles: its path and its whole source. */
@@ -286,7 +286,7 @@ export const OPERAND_TEMPLATES: Readonly<
     message: ["showPopup hostValue"],
     buttonText: ['showPopup(message: "m", buttonText: hostValue)'],
   },
-  waitStatement: { duration: ["wait hostValue", "wait hostValue s"] },
+  waitStatement: { duration: ["wait hostValue"], amount: ["wait hostValue s"] },
   deleteStatement: { key: ["delete hostValue"] },
   showButtonStatement: {
     label: ["showButton hostValue"],
@@ -303,6 +303,22 @@ export const OPERAND_TEMPLATES: Readonly<
 };
 
 /**
+ * The positions of a choice object written in place whose value the button returns (`COMMAND_OPERANDS`'
+ * `askChoice.returnedText` and `.value`), each with the host global there, which the core's check of the buttons refuses
+ * (`DECLARED_REFUSALS`): the declared positions' samples hold other values there; no guard template has them.
+ */
+const CHOICE_OBJECT_OPERANDS: Readonly<Record<string, readonly string[]>> = {
+  "askChoice.returnedText": ["let r = askChoice {text: hostValue}"],
+  "askChoice.value": ['let r = askChoice {text: "t", value: hostValue}'],
+};
+
+/** Every command operand position the declared positions sample: the guard's (`OPERAND_TEMPLATES`) and a choice object's. */
+export const SAMPLED_TEMPLATES: typeof OPERAND_TEMPLATES = {
+  ...OPERAND_TEMPLATES,
+  interactionExpression: { ...ASK_OPERANDS, ...CHOICE_OBJECT_OPERANDS },
+};
+
+/**
  * What an operand may hold in place of the host global, each holding it in turn: a load's default, a `get`'s default and
  * a call's argument, so a nested expression of each kind the check result indexes stands at every operand position.
  */
@@ -313,13 +329,21 @@ export const NESTED_OPERANDS: readonly string[] = [
   "fromJson(hostValue, default: hostValue)",
 ];
 
-/** A command's templates: each operand's own, then each again with every nested form in place of the host global. */
-function operandTemplates(operands: Readonly<Record<string, readonly string[]>>): string[] {
-  const own = Object.values(operands).flat();
+/** A command's templates: each operand's own, then, at a position without a rule, each with every nested form in place of the host global. */
+function operandTemplates(
+  row: SyntaxKind,
+  operands: Readonly<Record<string, readonly string[]>>,
+): string[] {
   return [
-    ...own,
-    ...own.flatMap((template) =>
-      NESTED_OPERANDS.map((nested) => template.replace("hostValue", nested)),
+    ...Object.values(operands).flat(),
+    // (at a position of the command operand table, a nested form is an outside value carried, which the table declines,
+    // R10: `DECLARED_REFUSALS`)
+    ...Object.entries(operands).flatMap(([operand, templates]) =>
+      operandRules(row)?.[operand] === undefined
+        ? templates.flatMap((template) =>
+            NESTED_OPERANDS.map((nested) => template.replace("hostValue", nested)),
+          )
+        : [],
     ),
   ];
 }
@@ -330,7 +354,7 @@ export const ROW_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly Templat
     Object.entries(OPERAND_TEMPLATES).map(([row, operands]) => {
       // EVIDENCE: invariant: the templates' keys are AST kinds (`OPERAND_TEMPLATES`' type).
       const kind = row as SyntaxKind;
-      return [row, [...(BASE_TEMPLATES[kind] ?? []), ...operandTemplates(operands)]];
+      return [row, [...(BASE_TEMPLATES[kind] ?? []), ...operandTemplates(kind, operands)]];
     }),
   ),
 };
