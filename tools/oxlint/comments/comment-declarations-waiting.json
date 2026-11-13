@@ -138,12 +138,6 @@
     "waits": "the O4 lead's cleanup"
   },
   {
-    "file": "src/type-inference/core/exact-path.ts",
-    "kind": "docblock",
-    "text": "The exact path's answer: D with the path below its key, or the first failing condition's word.",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
     "file": "src/type-inference/core/messages.ts",
     "kind": "reference",
     "text": "base2",
@@ -153,18 +147,6 @@
     "file": "src/type-inference/core/messages/site.ts",
     "kind": "reference",
     "text": "base2",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
-    "file": "src/type-inference/core/solver.ts",
-    "kind": "docblock",
-    "text": "A run's result: its items, and a proof demand's proof (else `null`).",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
-    "file": "src/type-inference/core/values.ts",
-    "kind": "docblock",
-    "text": "F18: the kinds a `load` or `fromJson` takes from its default's value at `at` (`typedDefault`): definite,",
     "waits": "the O4 lead's cleanup"
   },
   {

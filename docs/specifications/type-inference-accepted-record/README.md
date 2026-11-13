@@ -46,7 +46,6 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | `PLAN` | the port plan for the new type core, a document outside the repository; its method-category extensibility rules and W34's work-product limits still apply |
 | `G1` | production graph rules govern returnability, reachable registrations, and file-transfer targets ([r4-26](solver-and-work.md#r4-26)) |
 | `G2` | preserve assignment targets in suggested fixes; never replace a store destination with a temporary value |
-| `S2` | the port’s item and result shapes, including shared ingress cells in solver components |
 | `G3` | admission’s shared-query work family for cursors, carrier transfers, and positioned proof frontiers ([r4-164](sharing.md#r4-164)) |
 | `S3` | the port plan's S3 design, a document outside the repository; it defines the answer queries, surviving checks, discharge and budget fallback the core still follows |
 | `G5` | cut whole-copy cycles finitely with distinct member ports; separately, retain a written spelling covering every concrete kind ([r4-181](admission.md#r4-181)) |
@@ -87,7 +86,6 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | `F1a` | a global default creates distinct startup and executable definitions |
 | `F2` | written declarations fix contracts; admission indexes values’ and source keys’ own fields, elements, depths, and shared source identities |
 | `F3` | as "the owner's F3", the owner's review finding that a fallback's default fits the expected type at every depth (ADR 0021 rules 1.2 and 7) |
-| `F4` | an uncertain-receiver store contributes to the contract but never becomes an exact definition |
 | `F5` | add and addAll contribute elements; an exact add also proves non-emptiness |
 | `F5a` | a guaranteed loop ending in an unconditional add proves the collection non-empty afterward |
 | `F6` | clear opens emptiness and removes exact elements while preserving the collection kind |
@@ -97,7 +95,6 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | `F10` | collection conversions and concatenation transfer element kinds and their specified emptiness |
 | `F11` | combine stored and copied property facts with missing evidence; dispatch built-in names by receiver, keeping object selections opaque |
 | `F12` | element projections follow literal structure; copied descendants take the contract answer ([section-2-f12](contract.md#section-2-f12)) |
-| `F13` | stores and mutations through element steps are weak and never exact definitions |
 | `F14` | built-in length reads produce integers on supported text and collection receivers |
 | `F16` | arithmetic and comparison results and obligations follow the runtime operator table |
 | `F17a` | otherwise removes the left operand’s null and joins fallback kinds, retaining them even when the graph never evaluates the fallback |
@@ -113,7 +110,6 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | `F25` | built-in results follow declared kinds, with choice results derived from option values |
 | `F26b` | interpolation returns text while checking showability and selected-list non-emptiness |
 | `F27` | loop variables receive iterable snapshots: elements, dictionary keys and values, or range integers |
-| `F27b` | dictionary loops bind string keys and, when requested, dictionary values |
 | `F28` | explanations retain the earliest admitted writer per offending kind without discarding obligations |
 | `X1` | the read and its reaching definition must both be live |
 | `X2` | choose the nearest dominating definition over the key and its prefixes |
@@ -129,11 +125,9 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | `N9` | unsupported narrowing forms retain guarded warnings rather than inventing stronger proofs |
 | `N10` | required-check errors identify the producer and missing test; failed narrowings name their invalidating event |
 | `U4a` | stored selections take their element narrowing while emptiness remains a separate proof |
-| `U5` | a lost narrowing names the failing event that prevented keeping its check ([r4-444](contract.md#r4-444)) |
 | `H6` | registrations reached through file transfers propagate possible handler interference |
 | `L10` | a call whose target cannot return leaves its continuation unreachable |
 | `L11` | computed transfers target every candidate file; glob targets use the name pass’s picks |
-| `O15` | block-local reads use the contract because handlers can run after intervening stores |
 | `P3` | a present, dominating, unguarded single-kind contract can prove a read definite |
 | `P7` | literal graph facts prove branch feasibility, loop entry, and selected literal elements |
 | `W5` | the work family for one text-valued preset over k numeric fields |
