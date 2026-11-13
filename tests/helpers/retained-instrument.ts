@@ -341,11 +341,14 @@ export class RetainedInstrument implements RetainedRecorder {
   /** The functions registered since the last switch, whose own properties' values are sealed there. */
   #functions: (readonly [string, object])[] = [];
 
-  /** `fn`'s own data properties' values (a frozen function's, fixed from its registration). */
+  /**
+   * `fn`'s own data properties' values (a frozen function's, fixed from its registration), but its `prototype`: the
+   * template its calls make instances from (a generator's is no plain object), which the freeze keeps in place.
+   */
   #ownValues<T extends object>(fn: T): unknown[] {
     return Reflect.ownKeys(fn).flatMap((key) => {
       const descriptor = Object.getOwnPropertyDescriptor(fn, key)!;
-      return "value" in descriptor ? [descriptor.value] : [];
+      return key !== "prototype" && "value" in descriptor ? [descriptor.value] : [];
     });
   }
 

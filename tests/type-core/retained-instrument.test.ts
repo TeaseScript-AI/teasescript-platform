@@ -596,8 +596,14 @@ test("a registered function's own properties are frozen at its registration, the
         "T.native",
         Object.assign(() => 1, { memo: new Map() }),
       ),
+    // (a function's own `prototype` is no data it holds: a generator's is admitted with its function)
+    () =>
+      Retained.map<string, unknown>("T.generators").set(
+        "g",
+        Retained.closure("T.generator", function* () {}),
+      ),
   ]);
-  assert.deepEqual(steps, ["ok", "frozen", "frozen", "frozen", "refused"]);
+  assert.deepEqual(steps, ["ok", "frozen", "frozen", "frozen", "refused", "ok"]);
   assert.deepEqual([fn.cache, fn.held.n], [0, 1]);
 });
 
