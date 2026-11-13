@@ -212,12 +212,10 @@ const SHOWN_TEXT: OperandCheck = {
 const UI_CHECK: OperandCheck = { file: INTERACTION, function: "materializeInteractionUi" };
 
 /**
- * A command or request operand's rule (#2488's command operand table, step 1½): the kinds its instruction takes, read
- * from today's checker's rule for the position; `form`, today's rule on the operand as written (a known text, a choice
- * object written in place), shared whole with today's checker; `today`, today's compile errors for a value the operand does not
- * take; `check`, where the instruction refuses such a value whatever the plan says. The route refuses an operand that
- * may hold a value its rule does not take (`backend.ts`'s `outsideAnswers`): no consumer of the core judges a command
- * operand against the kinds its instruction takes (its choice check reads only what a choice's buttons return).
+ * A command or request operand's rule (#2488's command operand table, step 1½): `takes`, the kinds its instruction
+ * takes; `form`, a rule on the operand as written (a known text, a choice object written in place); `today`, today's
+ * compile errors for a value the operand does not take; `check`, where the instruction refuses such a value whatever the
+ * plan says.
  */
 export interface OperandRule {
   readonly takes: readonly ItemTag[];
@@ -280,7 +278,7 @@ const knownText =
 /**
  * The command operand table: for each command of the slice and each operand position its rule names (the positions the
  * `pass` rows cite, a `say`'s pacing, a transfer's path), and for each ask (`interactionExpression`, positions as
- * `askText.question`), the operand's rule. `commandOperands` names a node's operands by these positions.
+ * `askText.question`), the operand's rule.
  */
 export const COMMAND_OPERANDS = {
   showImageStatement: {
@@ -355,7 +353,7 @@ export const COMMAND_OPERANDS = {
     },
   },
   interactionExpression: {
-    // (a prefill is no position: the slice takes one only as a literal its request takes, `askPrefillAdmitted`)
+    // (a prefill is no position)
     ...Object.fromEntries(
       (
         [
