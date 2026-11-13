@@ -126,167 +126,168 @@ test("a pass that asks for none records none, and recording changes no answer, d
     }
 });
 
+// (each hand-derived from the source: what the key's answer takes from another key, through the literal, operation,
+// projection and default slots on the way; a key read only to decide (a receiver, a written type's marks) is no edge)
+const cases: readonly (readonly [
+  string,
+  readonly (readonly [string, readonly string[], string | readonly string[]])[],
+])[] = [
+  [
+    'let a = 1\nlet b = a\nlet c = b\nsay "${c}"\nexit\n',
+    [
+      ["b", [], ["a"]],
+      ["c", [], ["b"]],
+      ["a", [], []],
+    ],
+  ],
+  // (a written place's contract is its written type: its stores give marks only)
+  [
+    'let typed: integer | string = 1\nlet x: integer | string = typed\nsay "${x}"\nexit\n',
+    [["x", [], []]],
+  ],
+  // (a whole copy of a literal's property: the literal's own items, no key's)
+  [
+    'let a = {p: 1}\nlet b = a\nsay "${b.p}"\nexit\n',
+    [
+      ["b", ["p"], []],
+      ["b", [], ["a"]],
+    ],
+  ],
+  // (a property read stored in a literal: the read key's property)
+  [
+    'let a = {p: {f: 1}}\nlet b = {q: a.p}\nsay "${b.q.f}"\nexit\n',
+    [
+      ["b", ["q"], ["a.p"]],
+      ["b", ["q", "f"], ["a.p.f"]],
+    ],
+  ],
+  // (a selection: each option's key at the path)
+  [
+    'let typed: integer | string = 1\nlet y = {q: 2}\nlet x = [{q: typed}, y][0]\nsay "${x.q}"\nexit\n',
+    [
+      ["x", ["q"], ["typed", "y.q"]],
+      ["x", [], ["y"]],
+    ],
+  ],
+  // (`otherwise`: both sides; `get`: the element and the default)
+  [
+    'let a = {f: 1}\nlet b = hostValue otherwise a\nsay "${b.f}"\nexit\n',
+    [
+      ["b", [], ["a", "hostValue"]],
+      ["b", ["f"], ["a.f", "hostValue.f"]],
+    ],
+  ],
+  [
+    'let typed: integer | string = 1\nlet d = {f: typed}\nlet xs = [d]\nlet g = xs.get(0, default: {f: 2})\nsay "${g.f}"\nexit\n',
+    [
+      ["g", [], ["xs.element"]],
+      ["g", ["f"], ["xs.element.f"]],
+    ],
+  ],
+  // (a load's default that reads a variable reads it at the call (F18), by the value side's walk, which
+  // records no flow: no edges, never none; a `null` default none)
+  [
+    'let d = {f: 1}\nlet v = load("k", default: d)\nsay "${v.f}"\nexit\n',
+    [
+      ["v", [], "exact records no flow"],
+      ["v", ["f"], "exact records no flow"],
+    ],
+  ],
+  ['let v = load("k", default: null)\nsay "${v}"\nexit\n', [["v", [], []]]],
+  // (a default or an `otherwise` side whose items the choice or the filter removes whole: none of its keys)
+  ['let a = null\nlet b = load("k", default: a)\nsay "${b}"\nexit\n', [["b", [], []]]],
+  ['let a = null\nlet b = a otherwise 1\nsay "${b}"\nexit\n', [["b", [], []]]],
+  // (an object's own selection replaces its elements: no key of them)
+  ['let a = {p: 1}\nlet b = a.first\nsay "${b}"\nexit\n', [["b", [], []]]],
+  // (a length, an iteration and two methods' results of an unknown value: the value's unknown, so its key)
+  ['let a = hostValue\nlet b = a.length\nsay "${b}"\nexit\n', [["b", [], ["a"]]]],
+  ['let a = hostValue\nfor b in a {\n  say "${b}"\n}\nexit\n', [["b", [], ["a"]]]],
+  ['let a = hostValue\nlet b = a.remove("k")\nsay "${b}"\nexit\n', [["b", [], ["a"]]]],
+  ['let a = hostValue\nlet b = a.startsWith("k")\nsay "${b}"\nexit\n', [["b", [], ["a"]]]],
+  // (an element an empty collection holds none of, which the selection removes: no key of it; a held one's its key)
+  ['let a = []\nlet b = a.get(0, default: 1)\nsay "${b}"\nexit\n', [["b", [], []]]],
+  ['let a = []\nfor b in a {\n  say "${b}"\n}\nexit\n', [["b", [], []]]],
+  ['let a = dict {}\nlet b = a.remove("k")\nsay "${b}"\nexit\n', [["b", [], []]]],
+  [
+    'let a = dict {"k": hostValue}\nlet b = a.remove("k")\nsay "${b}"\nexit\n',
+    [["b", [], ["a.element"]]],
+  ],
+  // (filters below a composition: a slot whose answer the path's filters remove whole is no edge, with all below it;
+  // one they remove in part stays)
+  [
+    'let n = null\nlet v = 1\nlet b = [v].get(0, default: n) otherwise 2\nsay "${b}"\nexit\n',
+    [["b", [], ["v"]]],
+  ],
+  [
+    'let e = []\nlet v = [hostValue]\nfor b in [e.first, v.first] {\n  say "${b}"\n}\nexit\n',
+    [["b", [], ["v.element"]]],
+  ],
+  [
+    'let e = []\nlet v = [hostValue]\nlet b = [e.first, v.first].get(0, default: 0)\nsay "${b}"\nexit\n',
+    [["b", [], ["v.element"]]],
+  ],
+  [
+    'let e = []\nlet v = [hostValue]\nlet b = dict {"e": e.first, "v": v.first}.remove("v")\nsay "${b}"\nexit\n',
+    [["b", [], ["v.element"]]],
+  ],
+  [
+    'let a = []\nlet b = []\nb.add(a.first)\nfor x in b {\n  say "${x}"\n}\nexit\n',
+    [["b", ["element"], []]],
+  ],
+  [
+    'let a = [hostValue]\nlet b = []\nb.add(a.first)\nfor x in b {\n  say "${x}"\n}\nexit\n',
+    [["b", ["element"], ["a.element"]]],
+  ],
+  // (two filters deep: the element's `empty` and the `otherwise` side's null each drop their own slot)
+  [
+    'let n = null\nlet e = []\nlet v = 1\nlet b = [e.first, v, n].get(0, default: 3) otherwise 2\nsay "${b}"\nexit\n',
+    [["b", [], ["v"]]],
+  ],
+  // (a slot the filters remove in part: its surviving items its own)
+  [
+    'let x = 1\nif hostValue is integer {\n  x = null\n}\nlet b = [x].get(0, default: 3) otherwise 2\nsay "${b}"\nexit\n',
+    [["b", [], ["x"]]],
+  ],
+  // (a join drops its operands' `empty` where one of them holds an element: an operand holding only it is no edge;
+  // where none holds one, each operand's emptiness is the join's)
+  [
+    'let a = []\nlet v = [1]\nlet b = a + v\nsay "${b.first}"\nexit\n',
+    [["b", ["element"], ["v.element"]]],
+  ],
+  [
+    'let a = []\nlet v = [1]\nlet b = v + a\nsay "${b.first}"\nexit\n',
+    [["b", ["element"], ["v.element"]]],
+  ],
+  [
+    'let a = []\nlet c = []\nlet b = a + c\nsay "${b.first}"\nexit\n',
+    [["b", ["element"], ["a.element", "c.element"]]],
+  ],
+  // (a reader that holds only its receiver's unknowns: a slot of the receiver without one is no edge)
+  [
+    'let n = 1\nlet u = hostValue\nlet b = [n, u].get(0, default: 0).length\nsay "${b}"\nexit\n',
+    [["b", [], ["u"]]],
+  ],
+  [
+    'let n = 1\nlet u = hostValue\nlet b = [n, u].get(0, default: 0).remove("k")\nsay "${b}"\nexit\n',
+    [["b", [], ["u"]]],
+  ],
+  [
+    'let n = 1\nlet u = hostValue\nlet b = [n, u].get(0, default: 0).startsWith("k")\nsay "${b}"\nexit\n',
+    [["b", [], ["u"]]],
+  ],
+  [
+    'let n = 1\nlet u = hostValue\nfor b in [n, u].get(0, default: 0) {\n  say "${b}"\n}\nexit\n',
+    [["b", [], ["u"]]],
+  ],
+  [
+    'let n = 1\nlet u = hostValue\nlet b = [n, u].get(0, default: 0).values.first\nsay "${b}"\nexit\n',
+    [["b", [], ["u"]]],
+  ],
+  // (below an unknown, its unknown: the unknown's key)
+  ['let a = hostValue\nlet b = a.f\nsay "${b}"\nexit\n', [["a", ["f"], ["a"]]]],
+];
+
 test("each key's edges are the keys its contract includes: copies, written places, projections, selections, defaults", () => {
-  // (each hand-derived from the source: what the key's answer takes from another key, through the literal, operation,
-  // projection and default slots on the way; a key read only to decide (a receiver, a written type's marks) is no edge)
-  const cases: readonly (readonly [
-    string,
-    readonly (readonly [string, readonly string[], string | readonly string[]])[],
-  ])[] = [
-    [
-      'let a = 1\nlet b = a\nlet c = b\nsay "${c}"\nexit\n',
-      [
-        ["b", [], ["a"]],
-        ["c", [], ["b"]],
-        ["a", [], []],
-      ],
-    ],
-    // (a written place's contract is its written type: its stores give marks only)
-    [
-      'let typed: integer | string = 1\nlet x: integer | string = typed\nsay "${x}"\nexit\n',
-      [["x", [], []]],
-    ],
-    // (a whole copy of a literal's property: the literal's own items, no key's)
-    [
-      'let a = {p: 1}\nlet b = a\nsay "${b.p}"\nexit\n',
-      [
-        ["b", ["p"], []],
-        ["b", [], ["a"]],
-      ],
-    ],
-    // (a property read stored in a literal: the read key's property)
-    [
-      'let a = {p: {f: 1}}\nlet b = {q: a.p}\nsay "${b.q.f}"\nexit\n',
-      [
-        ["b", ["q"], ["a.p"]],
-        ["b", ["q", "f"], ["a.p.f"]],
-      ],
-    ],
-    // (a selection: each option's key at the path)
-    [
-      'let typed: integer | string = 1\nlet y = {q: 2}\nlet x = [{q: typed}, y][0]\nsay "${x.q}"\nexit\n',
-      [
-        ["x", ["q"], ["typed", "y.q"]],
-        ["x", [], ["y"]],
-      ],
-    ],
-    // (`otherwise`: both sides; `get`: the element and the default)
-    [
-      'let a = {f: 1}\nlet b = hostValue otherwise a\nsay "${b.f}"\nexit\n',
-      [
-        ["b", [], ["a", "hostValue"]],
-        ["b", ["f"], ["a.f", "hostValue.f"]],
-      ],
-    ],
-    [
-      'let typed: integer | string = 1\nlet d = {f: typed}\nlet xs = [d]\nlet g = xs.get(0, default: {f: 2})\nsay "${g.f}"\nexit\n',
-      [
-        ["g", [], ["xs.element"]],
-        ["g", ["f"], ["xs.element.f"]],
-      ],
-    ],
-    // (a load's default that reads a variable reads it at the call (F18), by the value side's walk, which
-    // records no flow: no edges, never none; a `null` default none)
-    [
-      'let d = {f: 1}\nlet v = load("k", default: d)\nsay "${v.f}"\nexit\n',
-      [
-        ["v", [], "exact records no flow"],
-        ["v", ["f"], "exact records no flow"],
-      ],
-    ],
-    ['let v = load("k", default: null)\nsay "${v}"\nexit\n', [["v", [], []]]],
-    // (a default or an `otherwise` side whose items the choice or the filter removes whole: none of its keys)
-    ['let a = null\nlet b = load("k", default: a)\nsay "${b}"\nexit\n', [["b", [], []]]],
-    ['let a = null\nlet b = a otherwise 1\nsay "${b}"\nexit\n', [["b", [], []]]],
-    // (an object's own selection replaces its elements: no key of them)
-    ['let a = {p: 1}\nlet b = a.first\nsay "${b}"\nexit\n', [["b", [], []]]],
-    // (a length, an iteration and two methods' results of an unknown value: the value's unknown, so its key)
-    ['let a = hostValue\nlet b = a.length\nsay "${b}"\nexit\n', [["b", [], ["a"]]]],
-    ['let a = hostValue\nfor b in a {\n  say "${b}"\n}\nexit\n', [["b", [], ["a"]]]],
-    ['let a = hostValue\nlet b = a.remove("k")\nsay "${b}"\nexit\n', [["b", [], ["a"]]]],
-    ['let a = hostValue\nlet b = a.startsWith("k")\nsay "${b}"\nexit\n', [["b", [], ["a"]]]],
-    // (an element an empty collection holds none of, which the selection removes: no key of it; a held one's its key)
-    ['let a = []\nlet b = a.get(0, default: 1)\nsay "${b}"\nexit\n', [["b", [], []]]],
-    ['let a = []\nfor b in a {\n  say "${b}"\n}\nexit\n', [["b", [], []]]],
-    ['let a = dict {}\nlet b = a.remove("k")\nsay "${b}"\nexit\n', [["b", [], []]]],
-    [
-      'let a = dict {"k": hostValue}\nlet b = a.remove("k")\nsay "${b}"\nexit\n',
-      [["b", [], ["a.element"]]],
-    ],
-    // (filters below a composition: a slot whose answer the path's filters remove whole is no edge, with all below it;
-    // one they remove in part stays)
-    [
-      'let n = null\nlet v = 1\nlet b = [v].get(0, default: n) otherwise 2\nsay "${b}"\nexit\n',
-      [["b", [], ["v"]]],
-    ],
-    [
-      'let e = []\nlet v = [hostValue]\nfor b in [e.first, v.first] {\n  say "${b}"\n}\nexit\n',
-      [["b", [], ["v.element"]]],
-    ],
-    [
-      'let e = []\nlet v = [hostValue]\nlet b = [e.first, v.first].get(0, default: 0)\nsay "${b}"\nexit\n',
-      [["b", [], ["v.element"]]],
-    ],
-    [
-      'let e = []\nlet v = [hostValue]\nlet b = dict {"e": e.first, "v": v.first}.remove("v")\nsay "${b}"\nexit\n',
-      [["b", [], ["v.element"]]],
-    ],
-    [
-      'let a = []\nlet b = []\nb.add(a.first)\nfor x in b {\n  say "${x}"\n}\nexit\n',
-      [["b", ["element"], []]],
-    ],
-    [
-      'let a = [hostValue]\nlet b = []\nb.add(a.first)\nfor x in b {\n  say "${x}"\n}\nexit\n',
-      [["b", ["element"], ["a.element"]]],
-    ],
-    // (two filters deep: the element's `empty` and the `otherwise` side's null each drop their own slot)
-    [
-      'let n = null\nlet e = []\nlet v = 1\nlet b = [e.first, v, n].get(0, default: 3) otherwise 2\nsay "${b}"\nexit\n',
-      [["b", [], ["v"]]],
-    ],
-    // (a slot the filters remove in part: its surviving items its own)
-    [
-      'let x = 1\nif hostValue is integer {\n  x = null\n}\nlet b = [x].get(0, default: 3) otherwise 2\nsay "${b}"\nexit\n',
-      [["b", [], ["x"]]],
-    ],
-    // (a join drops its operands' `empty` where one of them holds an element: an operand holding only it is no edge;
-    // where none holds one, each operand's emptiness is the join's)
-    [
-      'let a = []\nlet v = [1]\nlet b = a + v\nsay "${b.first}"\nexit\n',
-      [["b", ["element"], ["v.element"]]],
-    ],
-    [
-      'let a = []\nlet v = [1]\nlet b = v + a\nsay "${b.first}"\nexit\n',
-      [["b", ["element"], ["v.element"]]],
-    ],
-    [
-      'let a = []\nlet c = []\nlet b = a + c\nsay "${b.first}"\nexit\n',
-      [["b", ["element"], ["a.element", "c.element"]]],
-    ],
-    // (a reader that holds only its receiver's unknowns: a slot of the receiver without one is no edge)
-    [
-      'let n = 1\nlet u = hostValue\nlet b = [n, u].get(0, default: 0).length\nsay "${b}"\nexit\n',
-      [["b", [], ["u"]]],
-    ],
-    [
-      'let n = 1\nlet u = hostValue\nlet b = [n, u].get(0, default: 0).remove("k")\nsay "${b}"\nexit\n',
-      [["b", [], ["u"]]],
-    ],
-    [
-      'let n = 1\nlet u = hostValue\nlet b = [n, u].get(0, default: 0).startsWith("k")\nsay "${b}"\nexit\n',
-      [["b", [], ["u"]]],
-    ],
-    [
-      'let n = 1\nlet u = hostValue\nfor b in [n, u].get(0, default: 0) {\n  say "${b}"\n}\nexit\n',
-      [["b", [], ["u"]]],
-    ],
-    [
-      'let n = 1\nlet u = hostValue\nlet b = [n, u].get(0, default: 0).values.first\nsay "${b}"\nexit\n',
-      [["b", [], ["u"]]],
-    ],
-    // (below an unknown, its unknown: the unknown's key)
-    ['let a = hostValue\nlet b = a.f\nsay "${b}"\nexit\n', [["a", ["f"], ["a"]]]],
-  ];
   for (const mode of MODES)
     for (const [source, asks] of cases) {
       const { pass } = analysed(source, mode, true);
