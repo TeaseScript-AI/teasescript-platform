@@ -3,29 +3,29 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
-import { withConsumerOrder } from "../../src/type-inference/core/consumers.js";
-import { writtenTypeSteps } from "../../src/type-inference/core/contract.js";
-import { withSolverSeam } from "../../src/type-inference/core/solver.js";
-import { coreRequest } from "../helpers/type-core-analysis.js";
+import { analyseCore, type Answers } from "../../../src/type-inference/core/answers.js";
+import { withConsumerOrder } from "../../../src/type-inference/core/consumers.js";
+import { writtenTypeSteps } from "../../../src/type-inference/core/contract.js";
+import { withSolverSeam } from "../../../src/type-inference/core/solver.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
 import {
   ADMISSION_FAMILIES,
   JOIN_REACH_FAMILIES,
-} from "../helpers/type-core/families/admission.js";
+} from "../../helpers/type-core/families/admission.js";
 import {
   COPY_RING_FAMILIES,
   HOT_CANDIDATE_FAMILIES,
   NESTED_OBJECT_SELECTIONS,
-} from "../helpers/type-core/families/candidates.js";
-import { INHERITED_FIELD_FAMILIES } from "../helpers/type-core/families/inherited.js";
-import { OUTPUT_BOUND_FAMILIES } from "../helpers/type-core/families/output-bound.js";
-import { W34_KNOWN_PRODUCTS, W34_VARIANTS } from "../helpers/type-core/families/w34-links.js";
+} from "../../helpers/type-core/families/candidates.js";
+import { INHERITED_FIELD_FAMILIES } from "../../helpers/type-core/families/inherited.js";
+import { OUTPUT_BOUND_FAMILIES } from "../../helpers/type-core/families/output-bound.js";
+import { W34_KNOWN_PRODUCTS, W34_VARIANTS } from "../../helpers/type-core/families/w34-links.js";
 import {
   W44_VARIANTS,
   W45_VARIANTS,
   WORK_FAMILIES,
-} from "../helpers/type-core/families/work-gates.js";
-import { type WorkFamily } from "../helpers/type-core/families/builders.js";
+} from "../../helpers/type-core/families/work-gates.js";
+import { type WorkFamily } from "../../helpers/type-core/families/builders.js";
 import {
   DOUBLING,
   sized,
@@ -34,7 +34,7 @@ import {
   type Measured,
   steepCounters,
   many,
-} from "../helpers/type-core/type-core-work.js";
+} from "../../helpers/type-core/type-core-work.js";
 
 /**
  * S3, revision 14: an admission decision is a demand with the program's nodes' allowance, since a key's stores come

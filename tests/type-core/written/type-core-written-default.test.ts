@@ -2,17 +2,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileProjectWithBackend } from "../../src/compiler.js";
-import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
+import { compileProjectWithBackend } from "../../../src/compiler.js";
+import { CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
 import {
   defaultOf,
   writtenDefault,
   WrittenDefaults,
-} from "../../src/type-inference/core/contract.js";
-import { coreRequest } from "../helpers/type-core-analysis.js";
-import { narrowingPassIn } from "../helpers/type-core/type-core-narrowing.js";
-import { inMode, MODES } from "../helpers/type-core-oracles.js";
-import { plannedContent, runGlobals } from "../helpers/type-core-route.js";
+} from "../../../src/type-inference/core/contract.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
+import { narrowingPassIn } from "../../helpers/type-core/type-core-narrowing.js";
+import { inMode, MODES } from "../../helpers/type-core-oracles.js";
+import { plannedContent, runGlobals } from "../../helpers/type-core-route.js";
 
 // #1072 step 0: a typed parse's or load's default with a written type is read by that type (ADR 0021 rule 2.6,
 // `writtenDefault` in `core/contract/written-default.ts`), source to runtime, and the forms the rule leaves to the

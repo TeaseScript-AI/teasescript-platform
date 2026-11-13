@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 
-import { Admission } from "../../../src/type-inference/core/admission.js";
-import { drive } from "../../../src/type-inference/core/inherited/inherited.js";
-import { earliestDecider } from "../../../src/type-inference/core/admission/scan.js";
-import { analyseCore } from "../../../src/type-inference/core/answers.js";
-import { withEveryRecord } from "../../../src/type-inference/core/solver.js";
-import type { Definition } from "../../../src/type-inference/core/definitions.js";
-import { coreRequest } from "../type-core-analysis.js";
-import { inMode, type Mode } from "../type-core-oracles.js";
+import { Admission } from "../../../../src/type-inference/core/admission.js";
+import { drive } from "../../../../src/type-inference/core/inherited/inherited.js";
+import { earliestDecider } from "../../../../src/type-inference/core/admission/scan.js";
+import { analyseCore } from "../../../../src/type-inference/core/answers.js";
+import { withEveryRecord } from "../../../../src/type-inference/core/solver.js";
+import type { Definition } from "../../../../src/type-inference/core/definitions.js";
+import { coreRequest } from "../../type-core-analysis.js";
+import { inMode, type Mode } from "../../type-core-oracles.js";
 
 // The written decider asked two ways on one admission (#1444): its summary, outside every decision, and the scan of its
-// stops, as a decision asks it; `tests/type-core/type-core-written-decider.test.ts` and the #1901 queue job compare them.
+// stops, as a decision asks it; `tests/type-core/written/type-core-written-decider.test.ts` and the #1901 queue job compare them.
 
 /**
  * An answer by what a reader takes of it: the term's spelling, the site, the kinds, the join's facts, and whether the

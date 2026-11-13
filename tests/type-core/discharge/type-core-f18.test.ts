@@ -2,27 +2,27 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileProjectWithBackend } from "../../src/compiler.js";
-import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
-import { CORE_BACKEND } from "../../src/type-inference/core/backend.js";
-import { nodeOf, SliceIndex } from "../../src/type-inference/core/check-result/slice-index.js";
-import { CoreProgram } from "../../src/type-inference/core/program.js";
-import { VALUE_KIND_NAMES } from "../../src/value-kinds.js";
-import { compactAnalysis, coreRequest } from "../helpers/type-core-analysis.js";
-import { syntaxOf, Underivable } from "../helpers/type-core/derived/type-core-derived.js";
+import { compileProjectWithBackend } from "../../../src/compiler.js";
+import { analyseCore, type Answers } from "../../../src/type-inference/core/answers.js";
+import { CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
+import { nodeOf, SliceIndex } from "../../../src/type-inference/core/check-result/slice-index.js";
+import { CoreProgram } from "../../../src/type-inference/core/program.js";
+import { VALUE_KIND_NAMES } from "../../../src/value-kinds.js";
+import { compactAnalysis, coreRequest } from "../../helpers/type-core-analysis.js";
+import { syntaxOf, Underivable } from "../../helpers/type-core/derived/type-core-derived.js";
 import {
   snapshotReads,
   snapshotVisits,
-} from "../helpers/type-core/derived/type-core-derived-snapshots.js";
-import { derive } from "../helpers/type-core/derived/type-core-derived-checks.js";
-import { readFixture } from "../helpers/type-core/type-core-fixture.js";
-import { narrowingPassIn } from "../helpers/type-core/type-core-narrowing.js";
-import { inMode, MODES } from "../helpers/type-core-oracles.js";
-import { roleClasses } from "../helpers/type-core/type-core-roles.js";
-import { derivedContent, plannedContent, runGlobals } from "../helpers/type-core-route.js";
-import { shapesOf } from "../helpers/type-core/type-core-rule.js";
-import type { Expression } from "../../src/ast.js";
-import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
+} from "../../helpers/type-core/derived/type-core-derived-snapshots.js";
+import { derive } from "../../helpers/type-core/derived/type-core-derived-checks.js";
+import { readFixture } from "../../helpers/type-core/type-core-fixture.js";
+import { narrowingPassIn } from "../../helpers/type-core/type-core-narrowing.js";
+import { inMode, MODES } from "../../helpers/type-core-oracles.js";
+import { roleClasses } from "../../helpers/type-core/type-core-roles.js";
+import { derivedContent, plannedContent, runGlobals } from "../../helpers/type-core-route.js";
+import { shapesOf } from "../../helpers/type-core/type-core-rule.js";
+import type { Expression } from "../../../src/ast.js";
+import type { SerializableRuntimeValue } from "../../../src/runtime/values/serializable-values.js";
 
 // #1072 (X05, A64): a typed `load` or `fromJson` reads its default at the call-site snapshot, one
 // domain in its four layers: the solver's answer at the call, the admitted type of the place it lands in, the per-site

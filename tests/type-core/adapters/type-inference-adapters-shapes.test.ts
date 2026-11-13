@@ -24,7 +24,7 @@ import {
   inputsOf,
   isClosedFact,
   legacyOperation,
-} from "../../helpers/type-core/adapter-parity.js";
+} from "../../helpers/type-core/adapter-cases/adapter-parity.js";
 
 /**
  * The input-shape tables of the three relations the PR review rounds found siblings in (work note, the
