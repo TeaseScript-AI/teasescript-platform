@@ -63,7 +63,8 @@ import type { Body, CellAnswer } from "./admission/literals/cell.js";
 import { levelsOf, permittedAt } from "./admission/permitted.js";
 import { storeRequirement } from "./admission/requirements.js";
 import type { Composed } from "./admission/structure.js";
-import type { DeciderCaches, DeciderGroup, HeldInput } from "./admission/transfers.js";
+import type { HeldInput } from "./admission/transfers/held-input.js";
+import type { DeciderCaches, DeciderGroup } from "./admission/transfers/regions.js";
 import { scanView } from "./admission/scan.js";
 import { copySources } from "./admission/walk.js";
 import type { CorePass } from "./answers.js";
@@ -271,7 +272,7 @@ export class Admission {
   /** The store walk's tasks by value, node, strip and whether a carrier's own (`expand`): each task's recipe once. */
   readonly expansions = new Map<string, Expansion>();
   /**
-   * The carriers' transfers over those recipes (`admission/transfers.ts`): A2's held input per task and lane, the
+   * The carriers' transfers over those recipes (`admission/transfers/`): A2's held input per task and lane, the
    * decider's groups by their members, and per operation link its answers and the kinds it holds at a path.
    */
   readonly heldInputs = new Map<string, HeldInput>();
