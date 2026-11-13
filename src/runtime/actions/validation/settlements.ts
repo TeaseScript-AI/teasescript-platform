@@ -44,7 +44,7 @@ import {
 export function validRetainedSettlement(
   settlement: unknown,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
 ): boolean {
   if (!isPlainRecord(settlement)) return settlement === null;
   if (!validSettlementShapeAndKind(settlement, snapshot, plan)) return false;
@@ -54,7 +54,7 @@ export function validRetainedSettlement(
 function validSettlementShapeAndKind(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
 ): boolean {
   return (
     isOneOf(settlement.actionKind, [
@@ -117,7 +117,7 @@ function validSettlementIdentityAndEventSequences(
 function validCaptureSettlement(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
 ): boolean {
   if (
     !hasExactKeys(settlement, [
@@ -156,7 +156,7 @@ function validCaptureSettlement(
     isOneOf(settlement.unavailableReason, CAPTURE_UNAVAILABLE_REASONS) &&
     settlement.warningEventSequence !== null;
   if (!captured && !unavailable) return false;
-  if (plan === undefined || !nonNegativeSafeInteger(settlement.owningInstruction)) return true;
+  if (!nonNegativeSafeInteger(settlement.owningInstruction)) return true;
   const owner = plan.instructions[settlement.owningInstruction];
   return (
     owner?.kind === "capture" && owner.destinationTemporary === settlement.destinationTemporary
@@ -167,7 +167,7 @@ function validCaptureSettlement(
 function validFileStoreSettlement(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
 ): boolean {
   const known = new Set<unknown>(Array.isArray(snapshot.storedFiles) ? snapshot.storedFiles : []);
   if (
@@ -198,7 +198,7 @@ function validFileStoreSettlement(
     settlement.completedAtMs > snapshot.currentSessionTimeMs
   )
     return false;
-  if (plan === undefined || !nonNegativeSafeInteger(settlement.owningInstruction)) return true;
+  if (!nonNegativeSafeInteger(settlement.owningInstruction)) return true;
   const owner = plan.instructions[settlement.owningInstruction];
   return (
     owner?.kind === "fileStore" &&
@@ -213,7 +213,7 @@ function validFileStoreSettlement(
 function validLockSettlement(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
 ): boolean {
   if (
     !hasExactKeys(settlement, [
@@ -244,7 +244,7 @@ function validLockSettlement(
     settlement.completedAtMs > snapshot.currentSessionTimeMs
   )
     return false;
-  if (plan === undefined || !nonNegativeSafeInteger(settlement.owningInstruction)) return true;
+  if (!nonNegativeSafeInteger(settlement.owningInstruction)) return true;
   const owner = plan.instructions[settlement.owningInstruction];
   return (
     owner?.kind === "lock" &&
@@ -256,7 +256,7 @@ function validLockSettlement(
 function validSettlementKindData(
   settlement: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
 ): boolean {
   if (settlement.actionKind === "chatPacingGate")
     return validPacingGateSettlement(settlement, snapshot);
@@ -467,7 +467,7 @@ function validSettlementKindData(
       return false;
   }
 
-  if (plan === undefined || !nonNegativeSafeInteger(settlement.owningInstruction)) return true;
+  if (!nonNegativeSafeInteger(settlement.owningInstruction)) return true;
   const instruction = plan.instructions[settlement.owningInstruction];
   if (
     instruction?.kind !== "interaction" ||
@@ -586,7 +586,7 @@ export function sameCanonicalSettlementResult(destination: unknown, result: unkn
 
 function validSettlementProvenance(
   settlement: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
 ): boolean {
   const owningInstruction = settlement.owningInstruction;
   const continuationInstruction = settlement.continuationInstruction;
@@ -599,7 +599,6 @@ function validSettlementProvenance(
         (settlement.actionKind === "fileStore" || settlement.actionKind === "lock" ? 0 : 1)
   )
     return false;
-  if (plan === undefined) return true;
   if (owningInstruction >= plan.instructions.length) return false;
   const expectedKind =
     settlement.actionKind === "delay"

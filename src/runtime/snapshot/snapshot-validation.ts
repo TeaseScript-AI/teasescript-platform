@@ -60,7 +60,6 @@ import { isCameraPlacement } from "../../handle-rules.js";
 import type { ChatPacingSettings } from "../../chat-pacing.js";
 import { validateCapturedSerializableValue } from "../values/serializable-values.js";
 import { startupDeclarations, type InstructionPlan } from "../../plan/model.js";
-import { packagePathProblem } from "../../project-paths.js";
 import { identityRootValues } from "./record-collection.js";
 import { interactionStringFits } from "../../interaction-limits.js";
 import { isCanonicalTagList } from "../../tags.js";
@@ -117,19 +116,10 @@ const RUNTIME_SNAPSHOT_KEYS = [
   "failure",
 ] as const;
 
-export function cloneRuntimeSnapshot(snapshot: RuntimeSnapshot): RuntimeSnapshot {
-  const captured = captureRuntimeSnapshot(snapshot);
-  if (!captured.validation.valid || captured.snapshot === null) {
-    throw new TypeError(captured.validation.errors[0] ?? "Malformed runtime snapshot.");
-  }
-  return captured.snapshot;
-}
-
 function captureRuntimeSnapshot(
   value: unknown,
-  plan?: InstructionPlan,
+  plan: InstructionPlan,
 ): CapturedRuntimeSnapshotResult {
-  if (plan === undefined) return captureRuntimeSnapshotWithValidatedPlan(value);
   const capturedPlan = captureOrReuseInstructionPlan(plan);
   if (!capturedPlan.validation.valid || capturedPlan.plan === null) {
     return Object.freeze({
@@ -149,7 +139,7 @@ function captureRuntimeSnapshot(
 /** Captures a caller snapshot against an instruction plan already captured and validated by this operation. */
 export function captureRuntimeSnapshotWithValidatedPlan(
   value: unknown,
-  plan?: InstructionPlan,
+  plan: InstructionPlan,
 ): CapturedRuntimeSnapshotResult {
   const snapshotCapture = captureExternalData(value);
   if (!snapshotCapture.ok) {
@@ -175,21 +165,21 @@ export function captureRuntimeSnapshotWithValidatedPlan(
 
 export function validateRuntimeSnapshot(
   value: unknown,
-  plan?: InstructionPlan,
+  plan: InstructionPlan,
 ): SnapshotValidationResult {
   return captureRuntimeSnapshot(value, plan).validation;
 }
 
 export function classifyCapturedRuntimeSnapshot(
   value: unknown,
-  plan?: InstructionPlan,
+  plan: InstructionPlan,
 ): ClassifiedSnapshotValidationResult {
   return validateCapturedRuntimeSnapshotDetails(value, plan);
 }
 
 function validateCapturedRuntimeSnapshotDetails(
   value: unknown,
-  plan?: InstructionPlan,
+  plan: InstructionPlan,
 ): ClassifiedSnapshotValidationResult {
   const errors: string[] = [];
   if (!isPlainRecord(value)) {
@@ -224,12 +214,12 @@ function validateCapturedRuntimeSnapshotDetails(
   );
   if (temporalProblem !== null)
     errors.push(`Runtime temporalCaptures is malformed: ${temporalProblem}`);
-  const analysis = plan === undefined ? undefined : snapshotValidationAnalysis(plan);
+  const analysis = snapshotValidationAnalysis(plan);
   const continuationRequests: ContinuationRequests = { graphs: new Map(), required: new Map() };
   // Every region ends in a transfer, so a position is always an instruction of the runnable plan.
   if (
     !nonNegativeSafeInteger(value.nextInstruction) ||
-    (plan !== undefined && plan.instructions[value.nextInstruction] === undefined)
+    plan.instructions[value.nextInstruction] === undefined
   ) {
     errors.push("Runtime nextInstruction is outside the plan.");
   }
@@ -240,8 +230,8 @@ function validateCapturedRuntimeSnapshotDetails(
   validateStartupPhase(value, plan, errors);
   const scopes = referenceScopes(value);
   const scopesById = referenceScopesById(scopes);
-  const preparedReferenceTemporaries = analysis?.preparedReferenceTemporaries;
-  const preparedSayTemporaryOwnership = analysis?.preparedSayTemporaryOwnership;
+  const preparedReferenceTemporaries = analysis.preparedReferenceTemporaries;
+  const preparedSayTemporaryOwnership = analysis.preparedSayTemporaryOwnership;
   validateTemporaries(value.temporaries, plan, "Runtime temporaries", errors);
   validatePreparedReferenceTemporaries(
     value.temporaries,
@@ -417,7 +407,7 @@ function validateCapturedRuntimeSnapshotDetails(
   validateFailure(value.failure, value.status, plan, errors);
   validateStatusConsistency(value, plan, errors);
   const validation = Object.freeze({ valid: errors.length === 0, errors: Object.freeze(errors) });
-  if (validation.valid && analysis !== undefined) {
+  if (validation.valid) {
     keepContinuationRequirements(analysis, continuationRequests);
   }
   return Object.freeze({ validation, failureKind: validation.valid ? null : failureKind });
@@ -452,7 +442,7 @@ function validateCameraView(
 
 function validateStatusConsistency(
   value: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
   errors: string[],
 ): void {
   const calls = Array.isArray(value.callFrames) ? value.callFrames.length : 0;
@@ -488,7 +478,6 @@ function validateStatusConsistency(
   // region's here. After exit, the position follows the exit wherever it stood.
   const context = serializedTopContext(value);
   if (
-    plan !== undefined &&
     value.status !== "halted" &&
     context !== undefined &&
     context.functionId === null &&
@@ -531,7 +520,7 @@ function validateStatusConsistency(
     ) {
       errors.push("Halted runtime state retains active execution state.");
     }
-    if (plan !== undefined && !isLegalHaltPosition(value.nextInstruction, plan)) {
+    if (!isLegalHaltPosition(value.nextInstruction, plan)) {
       errors.push("Halted runtime state is not at a legal halt position.");
     }
     if (
@@ -572,7 +561,7 @@ function isLegalHaltPosition(nextInstruction: unknown, plan: InstructionPlan): b
  */
 function validateGlobals(
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
   errors: string[],
 ): void {
   const globals = snapshot.globals;
@@ -610,7 +599,6 @@ function validateGlobals(
     )
   )
     errors.push("Runtime scope binding has the name of a global.");
-  if (plan === undefined) return;
   const declarations = startupDeclarations(plan);
   const setUp =
     nonNegativeSafeInteger(snapshot.nextInstruction) &&
@@ -666,10 +654,9 @@ const POSITION_HOLDERS = [
  */
 function validateStartupPhase(
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
   errors: string[],
 ): void {
-  if (plan === undefined) return;
   const prefixEnd = startupDeclarations(plan).length;
   if (prefixEnd === 0) return;
   if (nonNegativeSafeInteger(snapshot.nextInstruction) && snapshot.nextInstruction < prefixEnd) {
@@ -729,7 +716,7 @@ function validateStartupPhase(
 function validateScopes(
   frames: unknown,
   retainedScopes: unknown,
-  analysis: SnapshotValidationAnalysis | undefined,
+  analysis: SnapshotValidationAnalysis,
   errors: string[],
 ): void {
   if (!Array.isArray(frames) || frames.length === 0) {
@@ -757,7 +744,7 @@ function validateScopes(
         ? frame.entry !== null
         : !nonNegativeSafeInteger(frame.file) ||
           !nonNegativeSafeInteger(frame.entry) ||
-          (analysis !== undefined && !isFileEntry(analysis, frame.file, frame.entry)))
+          !isFileEntry(analysis, frame.file, frame.entry))
     ) {
       errors.push("Runtime scope frame is malformed.");
       continue;
@@ -852,7 +839,7 @@ function validateSpeakers(value: unknown, errors: string[]): Set<number> {
 function validateFailure(
   value: unknown,
   status: unknown,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
   errors: string[],
 ): void {
   if (value === null) {
@@ -864,9 +851,7 @@ function validateFailure(
     typeof value.code !== "string" ||
     typeof value.message !== "string" ||
     typeof value.path !== "string" ||
-    (plan === undefined
-      ? packagePathProblem(value.path) !== null
-      : !plan.files.some((file) => file.path === value.path)) ||
+    !plan.files.some((file) => file.path === value.path) ||
     !validSpan(value.span)
   ) {
     errors.push("Runtime failure information is malformed.");

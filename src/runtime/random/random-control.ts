@@ -899,7 +899,7 @@ const PENDING_KEYS = [
 export function validateRandomControl(
   value: unknown,
   snapshot: Readonly<Record<string, unknown>>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
   errors: string[],
 ): void {
   if (value === null) return;
@@ -936,7 +936,7 @@ export function validateRandomControl(
   }
   if (!sameNatural(resampledNatural(support, draw.drawId), draw.natural))
     errors.push("Runtime pending random draw's natural result does not follow from its draw ID.");
-  if (plan !== undefined && !randomSitesOf(plan).ids.has(draw.site))
+  if (!randomSitesOf(plan).ids.has(draw.site))
     errors.push("Runtime pending random draw names a site the plan does not have.");
   const { unit, root, instructionBudget, instructionsUsed, eventsBefore } = pending;
   if (unit !== "instruction" && unit !== "dueWork")

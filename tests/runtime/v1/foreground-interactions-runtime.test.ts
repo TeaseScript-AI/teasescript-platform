@@ -267,7 +267,7 @@ test("choice supports text, identifier, and numeric values, exact typed text, an
   assert.equal(run(numericRestored.plan, numericRestored.snapshot).snapshot.status, "halted");
 });
 
-test("choice completion snapshots validate without a plan for every result domain", () => {
+test("choice completion snapshots validate for every result domain", () => {
   const cases = [
     interactionPlan("choice", choiceDomains.text),
     interactionPlan("choice", choiceDomains.identifier),
@@ -280,13 +280,13 @@ test("choice completion snapshots validate without a plan for every result domai
   ] as const;
   for (let index = 0; index < cases.length; index += 1) {
     const completed = complete(cases[index]!, payloads[index], "choice");
-    assert.equal(validateRuntimeSnapshot(completed.snapshot).valid, true);
+    assert.equal(validateRuntimeSnapshot(completed.snapshot, cases[index]!).valid, true);
     for (const malformedResult of [null, { kind: "object", properties: [] }, -0]) {
       const malformed: any = structuredClone(completed.snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture rewrites the interaction result across settlement, handoff, and destination to values excluded by the canonical snapshot type.
       malformed.lastSettlement.result = malformedResult;
       malformed.interactionResultHandoff.result = malformedResult;
       malformed.temporaries[0].value = malformedResult;
-      assert.equal(validateRuntimeSnapshot(malformed).valid, false);
+      assert.equal(validateRuntimeSnapshot(malformed, cases[index]!).valid, false);
     }
   }
   const identifier = complete(cases[1], payloads[1], "choice");
@@ -294,8 +294,6 @@ test("choice completion snapshots validate without a plan for every result domai
   wrongForExactPlan.lastSettlement.result = 1;
   wrongForExactPlan.interactionResultHandoff.result = 1;
   wrongForExactPlan.temporaries[0].value = 1;
-  // The settlement records the presented options, which offer no value 1, so this fails even without the plan.
-  assert.equal(validateRuntimeSnapshot(wrongForExactPlan).valid, false);
   assert.equal(validateRuntimeSnapshot(wrongForExactPlan, cases[1]).valid, false);
   const wrongChoiceDestination: any = structuredClone(identifier.snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture makes the stored destination disagree with its retained choice settlement.
   wrongChoiceDestination.temporaries[0].value = "other";
@@ -315,7 +313,6 @@ test("numeric interactions reject negative-zero values and keep canonical zero r
   const pending = waiting(zeroChoice);
   const negativeZeroAction: any = structuredClone(pending.snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture injects negative zero into persisted choice UI data rejected by snapshot validation.
   negativeZeroAction.foregroundAction.ui.options[0].value = -0;
-  assert.equal(validateRuntimeSnapshot(negativeZeroAction).valid, false);
   assert.equal(validateRuntimeSnapshot(negativeZeroAction, zeroChoice).valid, false);
 
   const askNumber = interactionPlan("number", {
@@ -607,17 +604,17 @@ test("malformed pending interaction snapshot data is rejected", () => {
   // boundary evidence by the handoff settlement matrix.
   const standaloneUi: any = structuredClone(pending.snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture adds an unsupported accessible-name key to persisted UI data.
   standaloneUi.foregroundAction.ui.accessibleName.key = "continue";
-  assert.equal(validateRuntimeSnapshot(standaloneUi).valid, false);
+  assert.equal(validateRuntimeSnapshot(standaloneUi, plan).valid, false);
 });
 
-test("planless pending result interactions require positive destination temporary IDs", () => {
+test("pending result interactions require positive destination temporary IDs", () => {
   // Every result-bearing kind uses the same destination predicate, so text represents them.
   const plan = interactionPlan("text", { kind: "text", hint: null, accessibleName: defaults.text });
   const pending = waiting(plan);
   for (const destination of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, null]) {
     const hostile: any = structuredClone(pending.snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture assigns an out-of-range interaction destination before validation and completion.
     hostile.foregroundAction.destinationTemporary = destination;
-    assert.equal(validateRuntimeSnapshot(hostile).valid, false, String(destination));
+    assert.equal(validateRuntimeSnapshot(hostile, plan).valid, false, String(destination));
     assert.throws(
       () => restoreCheckpoint({ ...createCheckpoint(plan, pending.snapshot), snapshot: hostile }),
       String(destination),
@@ -631,7 +628,7 @@ test("planless pending result interactions require positive destination temporar
   const pendingButton = waiting(button);
   const hostileButton: any = structuredClone(pendingButton.snapshot); // oxlint-disable-line typescript/no-explicit-any -- EVIDENCE: fixture gives a result-free button an illegal destination temporary.
   hostileButton.foregroundAction.destinationTemporary = 1;
-  assert.equal(validateRuntimeSnapshot(hostileButton).valid, false);
+  assert.equal(validateRuntimeSnapshot(hostileButton, button).valid, false);
 });
 
 test("consumed interaction settlements enforce intrinsic text and number semantics", () => {
@@ -655,8 +652,8 @@ test("consumed interaction settlements enforce intrinsic text and number semanti
     { kind: "submittedText", submittedText: "1e1" },
     "number",
   );
-  assert.equal(validateRuntimeSnapshot(JSON.parse(JSON.stringify(text))).valid, true);
-  assert.equal(validateRuntimeSnapshot(JSON.parse(JSON.stringify(number))).valid, true);
+  assert.equal(validateRuntimeSnapshot(JSON.parse(JSON.stringify(text)), textPlan).valid, true);
+  assert.equal(validateRuntimeSnapshot(JSON.parse(JSON.stringify(number)), numberPlan).valid, true);
   // Each row changes only the retained settlement after the handoff and destination are gone.
   for (const [name, plan, consumed, result, transcript] of [
     ["text result differs from transcript", textPlan, text, "different", "answer"],
@@ -680,7 +677,6 @@ test("consumed interaction settlements enforce intrinsic text and number semanti
     };
     hostileSettlement.result = result;
     hostileSettlement.transcriptText = transcript;
-    assert.equal(validateRuntimeSnapshot(hostile).valid, false, name);
     assert.equal(validateRuntimeSnapshot(hostile, plan).valid, false, name);
     assert.throws(
       () => restoreCheckpoint({ ...createCheckpoint(plan, consumed), snapshot: hostile }),
@@ -876,10 +872,10 @@ test("oversized authored interaction strings reject at plan and snapshot boundar
   assert.ok(hostileOption !== undefined);
   // EVIDENCE: fixture replaces only the persisted choice value with an oversized identifier.
   (hostileOption as { value: string | number | null }).value = oversizedBeside("Visible");
-  assert.equal(validateRuntimeSnapshot(hostile).valid, false);
+  assert.equal(validateRuntimeSnapshot(hostile, identifier).valid, false);
 });
 
-/** Counts UTF-8 measurements while rejecting these choice options in a plan and a planless snapshot. */
+/** Counts UTF-8 measurements while rejecting these choice options in a plan and in a snapshot. */
 function exhaustedMeasurementCounts(
   base: InstructionPlan,
   options: Extract<InteractionUiPayload, { kind: "choice" }>["options"],
@@ -898,7 +894,7 @@ function exhaustedMeasurementCounts(
   // EVIDENCE: fixture replaces only the persisted choice options of the pending action.
   Object.assign(snapshot.foregroundAction.ui, { options });
   const snapshotStats = withValidationTestStatistics((finish) => {
-    assert.equal(validateRuntimeSnapshot(snapshot).valid, false);
+    assert.equal(validateRuntimeSnapshot(snapshot, base).valid, false);
     return finish();
   });
   return {

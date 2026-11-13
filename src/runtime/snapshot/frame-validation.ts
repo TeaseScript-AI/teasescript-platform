@@ -45,7 +45,7 @@ export function validateLoopFrames(
   nextInstruction: unknown,
   callFrames: unknown,
   callFrameIds: ReadonlySet<number>,
-  analysis: SnapshotValidationAnalysis | undefined,
+  analysis: SnapshotValidationAnalysis,
   snapshotValue: Record<string, unknown>,
   errors: string[],
 ): void {
@@ -132,13 +132,13 @@ function validateLoopContexts(
   frames: unknown,
   nextInstruction: unknown,
   callFrames: readonly unknown[],
-  analysis: SnapshotValidationAnalysis | undefined,
+  analysis: SnapshotValidationAnalysis,
   snapshotValue: Record<string, unknown>,
   errors: string[],
 ): void {
   const frameList = Array.isArray(frames) ? frames : [];
-  const plan = analysis?.plan;
-  const plannedLoops = analysis?.loops ?? new Map<number, never>();
+  const plan = analysis.plan;
+  const plannedLoops = analysis.loops;
   const depth = (frame: unknown, key: "loopBaseDepth" | "scopeBaseDepth", fallback: number) =>
     isPlainRecord(frame) && nonNegativeSafeInteger(frame[key]) ? frame[key] : fallback;
   // The call frames' own checks report impossible bases; only real, ordered partitions are walked.
@@ -184,16 +184,11 @@ function validateLoopContexts(
         nonNegativeSafeInteger(position) &&
         position > planned.start &&
         position < planned.target;
-      // Without a plan, the position cannot tell whether the loop's body, with its own scope, holds it.
       if (
         frame.callFrameId !== owner ||
         active.has(frame.loopId) ||
         scopeDepth <= outerDepth ||
-        (plan === undefined
-          ? scopeDepth > scopeEnd
-          : inBody
-            ? scopeDepth >= scopeEnd
-            : scopeDepth !== scopeEnd) ||
+        (inBody ? scopeDepth >= scopeEnd : scopeDepth !== scopeEnd) ||
         (scopeDepth < frameList.length &&
           (!isPlainRecord(frameList[scopeDepth]) || frameList[scopeDepth].file !== null))
       ) {
@@ -201,7 +196,6 @@ function validateLoopContexts(
       }
       active.add(frame.loopId);
       if (scopeDepth > outerDepth) outerDepth = scopeDepth;
-      if (plan === undefined) continue;
       if (
         planned === undefined ||
         planned.kind !== frame.kind ||
@@ -218,7 +212,7 @@ function validateLoopContexts(
       }
       previousStart = planned?.start ?? previousStart;
     }
-    if (plan === undefined || context === undefined || !nonNegativeSafeInteger(position)) continue;
+    if (context === undefined || !nonNegativeSafeInteger(position)) continue;
     for (const [loopId, planned] of plannedLoops) {
       if (
         position > planned.start &&
@@ -253,7 +247,7 @@ function iterationLength(source: Record<string, unknown>): number {
 
 export function validateTemporaries(
   value: unknown,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
   label: string,
   errors: string[],
 ): void {
@@ -267,7 +261,7 @@ export function validateTemporaries(
       !isPlainRecord(temporary) ||
       !nonNegativeSafeInteger(temporary.id) ||
       temporary.id < 1 ||
-      (plan !== undefined && temporary.id > plan.temporaryCount)
+      temporary.id > plan.temporaryCount
     ) {
       errors.push(`${label} contain an invalid temporary ID.`);
       continue;
@@ -286,8 +280,8 @@ export function validateCallFrames(
   loopFrames: unknown,
   nextInstruction: unknown,
   maxCallDepth: unknown,
-  plan: InstructionPlan | undefined,
-  analysis: SnapshotValidationAnalysis | undefined,
+  plan: InstructionPlan,
+  analysis: SnapshotValidationAnalysis,
   continuationRequests: ContinuationRequests,
   scopesById: ReferenceScopesById,
   preparedReferenceTemporaries: ReadonlyMap<number, boolean> | undefined,
@@ -338,7 +332,7 @@ export function validateCallFrames(
     if (!isFunction) validateFileCallFrame(frame, frames, plan, errors);
     const definition =
       isFunction && nonNegativeSafeInteger(frame.functionId)
-        ? analysis?.functionsById.get(frame.functionId)
+        ? analysis.functionsById.get(frame.functionId)
         : undefined;
     const interruption = isFunction ? frame.timerInterruption : null;
     // A function sees the top-level names of the activation it was called in; a block, those of its creator's.
@@ -379,7 +373,7 @@ export function validateCallFrames(
       isFunction &&
       (!nonNegativeSafeInteger(frame.functionId) ||
         frame.functionId < 1 ||
-        (plan !== undefined && definition === undefined) ||
+        definition === undefined ||
         typeof frame.functionName !== "string" ||
         frame.functionName.length === 0 ||
         (definition !== undefined && frame.functionName !== definition.name) ||
@@ -392,16 +386,16 @@ export function validateCallFrames(
     } else if (
       !nonNegativeSafeInteger(frame.returnInstruction) ||
       frame.returnInstruction < 1 ||
-      (plan !== undefined && frame.returnInstruction > plan.instructions.length)
+      frame.returnInstruction > plan.instructions.length
     ) {
       errors.push("Runtime call frame has an invalid return instruction.");
-    } else if (plan !== undefined && !isFunction) {
+    } else if (!isFunction) {
       // The called activation may have gone to another file since, so its root need not be the call's file.
       const call = plan.instructions[frame.returnInstruction - 1];
       if (call?.kind !== "transfer" || call.mode !== "call") {
         errors.push("Runtime call frame return target does not match its call instruction.");
       }
-    } else if (plan !== undefined) {
+    } else {
       const call = plan.instructions[frame.returnInstruction - 1];
       if (
         call?.kind !== "callFunction" ||
@@ -421,7 +415,7 @@ export function validateCallFrames(
         ? frame.destinationTemporary !== null
         : !nonNegativeSafeInteger(frame.destinationTemporary) ||
           frame.destinationTemporary < 1 ||
-          (plan !== undefined && frame.destinationTemporary > plan.temporaryCount)
+          frame.destinationTemporary > plan.temporaryCount
     ) {
       errors.push("Runtime call frame has an invalid result destination.");
     }
@@ -473,7 +467,6 @@ export function validateCallFrames(
     }
 
     if (
-      plan !== undefined &&
       nonNegativeSafeInteger(frame.returnInstruction) &&
       (!isFunction ||
         nonNegativeSafeInteger(frame.destinationTemporary) ||
@@ -491,17 +484,13 @@ export function validateCallFrames(
           nonNegativeSafeInteger(frame.loopBaseDepth) ? frame.loopBaseDepth : 0,
           callContextOwner(value, frameIndex),
         ),
-        analysis!,
+        analysis,
         continuationRequests,
         errors,
       );
     }
 
-    if (
-      plan !== undefined &&
-      nonNegativeSafeInteger(frame.returnInstruction) &&
-      !isPlainRecord(interruption)
-    ) {
+    if (nonNegativeSafeInteger(frame.returnInstruction) && !isPlainRecord(interruption)) {
       const caller = serializedContext(snapshotValue, frameIndex);
       if (
         caller === undefined ||
@@ -525,7 +514,7 @@ export function validateCallFrames(
           frame.parameterState,
           definition,
           nextInstruction,
-          analysis!,
+          analysis,
           errors,
         );
       } else if (
@@ -544,7 +533,7 @@ export function validateCallFrames(
             frame.parameterState,
             definition,
             child.returnInstruction,
-            analysis!,
+            analysis,
             errors,
           );
         }
@@ -553,14 +542,14 @@ export function validateCallFrames(
           frame.parameterState,
           definition,
           child.returnInstruction - 1,
-          analysis!,
+          analysis,
           errors,
         );
         validateExactParameterPosition(
           frame.parameterState,
           definition,
           child.returnInstruction,
-          analysis!,
+          analysis,
           errors,
         );
       }
@@ -583,7 +572,7 @@ const FILE_CALL_FRAME_KEYS = [
 function validateFileCallFrame(
   frame: Record<string, unknown>,
   frames: unknown,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
   errors: string[],
 ): void {
   const root =
@@ -595,7 +584,7 @@ function validateFileCallFrame(
     !validSpan(frame.callSiteSpan) ||
     !isPlainRecord(root) ||
     !nonNegativeSafeInteger(root.file) ||
-    (plan !== undefined && root.file >= plan.files.length)
+    root.file >= plan.files.length
   ) {
     errors.push("Runtime file call frame is malformed.");
   }
@@ -615,7 +604,7 @@ function validateTimerHandlerFrame(
   frames: unknown,
   loopFrames: unknown,
   snapshotValue: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
   errors: string[],
 ): void {
   const now = snapshotValue.currentSessionTimeMs;
@@ -649,7 +638,8 @@ function validateTimerHandlerFrame(
   const caller = serializedContext(snapshotValue, frameIndex);
   if (
     !nonNegativeSafeInteger(resume) ||
-    (plan !== undefined && (caller === undefined || !contextHoldsInstruction(plan, caller, resume)))
+    caller === undefined ||
+    !contextHoldsInstruction(plan, caller, resume)
   ) {
     errors.push("Runtime timer expiry block interrupted outside its caller.");
     return;
@@ -699,10 +689,10 @@ function validateSelfHandleBinding(
   frame: Record<string, unknown>,
   interruption: Record<string, unknown>,
   frames: unknown,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
   errors: string[],
 ): void {
-  if (plan === undefined || !nonNegativeSafeInteger(frame.functionId)) return;
+  if (!nonNegativeSafeInteger(frame.functionId)) return;
   const definition = plan.functions[frame.functionId - 1];
   if (
     definition?.selfHandle == null ||
@@ -770,7 +760,7 @@ function validateParameterBindings(
   frame: Record<string, unknown>,
   frames: unknown,
   definition: CompiledFunctionDefinition | undefined,
-  analysis: SnapshotValidationAnalysis | undefined,
+  analysis: SnapshotValidationAnalysis,
   errors: string[],
 ): void {
   if (
@@ -795,7 +785,7 @@ function validateParameterBindings(
   );
   if (
     parameterState.phase !== "body" &&
-    [...bindingNames].some((name) => !analysis?.parameterNames.get(definition.id)?.has(name))
+    [...bindingNames].some((name) => !analysis.parameterNames.get(definition.id)?.has(name))
   ) {
     errors.push("Runtime function prologue contains a non-parameter binding.");
   }
@@ -1212,11 +1202,10 @@ export function validateCurrentTemporaryRequirements(
   nextInstruction: unknown,
   status: unknown,
   readingTime: boolean,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
   errors: string[],
 ): void {
   if (
-    plan === undefined ||
     status === "halted" ||
     !Array.isArray(temporaries) ||
     !nonNegativeSafeInteger(nextInstruction)

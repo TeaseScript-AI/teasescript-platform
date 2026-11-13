@@ -61,7 +61,7 @@ const MEDIA_ACTION_KEYS = [
 export function validMediaAction(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
 ): boolean {
   const now = snapshot.currentSessionTimeMs;
   if (
@@ -82,7 +82,6 @@ export function validMediaAction(
   ) {
     return false;
   }
-  if (plan === undefined) return true;
   const owner = plan.instructions[action.owningInstruction];
   const media = action.media;
   return (
@@ -122,7 +121,7 @@ function validSettledMediaRecord(media: Record<string, unknown>): boolean {
 function validMediaRecord(
   media: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
 ): boolean {
   if (
     !hasExactKeys(media, MEDIA_KEYS) ||
@@ -306,10 +305,7 @@ function validRepeat(value: unknown): value is RuntimeMediaRepeatSnapshot {
   }
 }
 
-function validCues(
-  value: unknown,
-  plan: InstructionPlan | undefined,
-): value is RuntimeMediaCueSnapshot[] {
+function validCues(value: unknown, plan: InstructionPlan): value is RuntimeMediaCueSnapshot[] {
   return (
     isCanonicalJsonArray(value) &&
     value.every(
@@ -323,14 +319,10 @@ function validCues(
   );
 }
 
-function validHandlerId(
-  value: unknown,
-  plan: InstructionPlan | undefined,
-  nullable: boolean,
-): boolean {
+function validHandlerId(value: unknown, plan: InstructionPlan, nullable: boolean): boolean {
   if (value === null) return nullable;
   if (!positiveSafeInteger(value)) return false;
-  return plan === undefined || plan.functions[value - 1]?.handler === "media";
+  return plan.functions[value - 1]?.handler === "media";
 }
 
 /** Samples increase strictly in scene time, never decrease in progress, and were observed no later than now. */
@@ -361,7 +353,7 @@ function validPoints(value: unknown, observedSessionTimeMs: unknown): boolean {
  */
 export function validateMediaState(
   value: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
   handleIds: ReadonlySet<number>,
   errors: string[],
 ): void {
@@ -514,7 +506,7 @@ export function validateMediaState(
   const playOf = (functionId: unknown): PlayMediaInstruction | undefined => {
     if (blockPlays === undefined) {
       blockPlays = new Map();
-      for (const instruction of plan?.instructions ?? []) {
+      for (const instruction of plan.instructions) {
         if (instruction?.kind !== "playMedia") continue;
         for (const cue of instruction.cues) blockPlays.set(cue.functionId, instruction);
         if (instruction.finishFunctionId !== null)
@@ -535,10 +527,10 @@ export function validateMediaState(
         (block) =>
           block.rootScopeId !== first.rootScopeId ||
           !sameCaptures(block.captures, first.captures) ||
-          (plan !== undefined && playOf(block.functionId) !== play),
+          playOf(block.functionId) !== play,
       ) ||
-      (plan !== undefined &&
-        (play === undefined || (finishRuns > 0 && (finishRuns > 1 || media.state !== "finished"))))
+      play === undefined ||
+      (finishRuns > 0 && (finishRuns > 1 || media.state !== "finished"))
     ) {
       errors.push("Runtime settled media blocks do not belong to one play.");
     }

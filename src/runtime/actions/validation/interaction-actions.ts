@@ -117,7 +117,7 @@ function validInteractionTiming(
 export function validInteractionAction(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
   allowDue: boolean,
 ): boolean {
   if (
@@ -204,7 +204,7 @@ export function validInteractionAction(
     !(isFormUi(action.ui) && validFormState(action.ui, action.form))
   )
     return false;
-  if (plan === undefined || !nonNegativeSafeInteger(action.owningInstruction)) return true;
+  if (!nonNegativeSafeInteger(action.owningInstruction)) return true;
   const instruction = plan.instructions[action.owningInstruction];
   if (
     instruction?.kind !== "interaction" ||

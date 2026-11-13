@@ -9,7 +9,7 @@ import type { SnapshotValidationAnalysis } from "../snapshot/snapshot-validation
  */
 export function validateCaptureState(
   snapshot: Record<string, unknown>,
-  analysis: SnapshotValidationAnalysis | undefined,
+  analysis: SnapshotValidationAnalysis,
   errors: string[],
 ): void {
   const frames = Array.isArray(snapshot.frames) ? snapshot.frames : [];
@@ -33,12 +33,11 @@ export function validateCaptureState(
     below: number = Number.POSITIVE_INFINITY,
   ): void => {
     const captures = captureList(list);
-    const expected =
-      nonNegativeSafeInteger(functionId) && analysis !== undefined
-        ? (analysis.handlerCaptures.get(functionId) ?? [])
-        : functionId === null
-          ? []
-          : undefined;
+    const expected = nonNegativeSafeInteger(functionId)
+      ? (analysis.handlerCaptures.get(functionId) ?? [])
+      : functionId === null
+        ? []
+        : undefined;
     if (
       captures === null ||
       (expected !== undefined &&
@@ -83,7 +82,7 @@ export function validateCaptureState(
   for (const frame of Array.isArray(snapshot.callFrames) ? snapshot.callFrames : []) {
     if (!isPlainRecord(frame) || frame.kind !== "function") continue;
     const definition = nonNegativeSafeInteger(frame.functionId)
-      ? analysis?.functionsById.get(frame.functionId)
+      ? analysis.functionsById.get(frame.functionId)
       : undefined;
     // An ordinary function shares nothing.
     check(

@@ -40,15 +40,14 @@ import { validElapsedResult, sameCanonicalSettlementResult } from "./settlements
 
 export function validateInteractionResultHandoffState(
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
   errors: string[],
 ): void {
   const handoff = snapshot.interactionResultHandoff;
   const nextInstruction = snapshot.nextInstruction;
-  const precedingInstruction =
-    plan !== undefined && positiveSafeInteger(nextInstruction)
-      ? plan.instructions[nextInstruction - 1]
-      : undefined;
+  const precedingInstruction = positiveSafeInteger(nextInstruction)
+    ? plan.instructions[nextInstruction - 1]
+    : undefined;
   const requiresHandoff =
     (precedingInstruction?.kind === "interaction" &&
       precedingInstruction.destinationTemporary !== null) ||
@@ -148,7 +147,6 @@ export function validateInteractionResultHandoffState(
     errors.push("Runtime interaction result handoff disagrees with its retained settlement.");
   }
 
-  if (plan === undefined) return;
   const instruction = plan.instructions[handoff.owningInstruction];
   if (handoff.actionKind === "capture") {
     if (
@@ -191,7 +189,7 @@ export function validateInteractionResultHandoffState(
 function validateFileStoreHandoff(
   handoff: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
   errors: string[],
 ): void {
   const result = handoff.result;
@@ -245,7 +243,6 @@ function validateFileStoreHandoff(
     errors.push("Runtime file store answer handoff is malformed.");
     return;
   }
-  if (plan === undefined) return;
   const instruction = plan.instructions[handoff.owningInstruction];
   if (
     instruction?.kind !== "fileStore" ||
@@ -261,7 +258,7 @@ function validateFileStoreHandoff(
 function validateLockHandoff(
   handoff: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
   errors: string[],
 ): void {
   const result = handoff.result;
@@ -322,7 +319,6 @@ function validateLockHandoff(
     errors.push("Runtime lock answer handoff is malformed.");
     return;
   }
-  if (plan === undefined) return;
   const instruction = plan.instructions[handoff.owningInstruction];
   if (
     instruction?.kind !== "lock" ||
@@ -338,14 +334,13 @@ function validateLockHandoff(
 function validInteractionResultHandoffOwner(
   handoff: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
 ): boolean {
   const context = serializedTopContext(snapshot);
   if (context === undefined || handoff.ownerCallFrameId !== context.ownerId) return false;
   return (
-    plan === undefined ||
-    (nonNegativeSafeInteger(handoff.owningInstruction) &&
-      contextHoldsInstruction(plan, context, handoff.owningInstruction))
+    nonNegativeSafeInteger(handoff.owningInstruction) &&
+    contextHoldsInstruction(plan, context, handoff.owningInstruction)
   );
 }
 

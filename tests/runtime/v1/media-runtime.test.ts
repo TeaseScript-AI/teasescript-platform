@@ -1982,8 +1982,6 @@ test("restore validation never coerces media settlement enumerations to text", (
     // A one-element array stringifies to its element, so only an exact type check rejects it.
     corrupted.lastSettlement[field] = [corrupted.lastSettlement[field]];
     assert.equal(validateRuntimeSnapshot(corrupted, session.plan).valid, false, field);
-    // Without the plan, only the settlement's own shape rules apply.
-    assert.equal(validateRuntimeSnapshot(corrupted).valid, false, `${field} without the plan`);
   }
 });
 

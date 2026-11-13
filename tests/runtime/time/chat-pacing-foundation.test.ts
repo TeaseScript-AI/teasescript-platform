@@ -13,11 +13,11 @@ import {
   exactPacingMilliseconds,
 } from "../../../src/runtime/actions/pacing.js";
 import type { ChatPacingSettings } from "../../../src/runtime/snapshot/state.js";
+import { validateRuntimeSnapshot } from "../../../src/runtime/snapshot/snapshot-validation.js";
 import {
-  cloneRuntimeSnapshot,
-  validateRuntimeSnapshot,
-} from "../../../src/runtime/snapshot/snapshot-validation.js";
-import { createFreshRuntimeSnapshot } from "../../../src/runtime/snapshot/snapshot-construction.js";
+  cloneCapturedRuntimeSnapshot,
+  createFreshRuntimeSnapshot,
+} from "../../../src/runtime/snapshot/snapshot-construction.js";
 
 function plan() {
   const compiled = compileSource("exit");
@@ -71,7 +71,7 @@ test("captured settings clone, validate, and checkpoint through JSON", () => {
     delayPerWordMs: 19,
     delayPerCharacterMs: 23,
   });
-  const cloned = cloneRuntimeSnapshot(snapshot);
+  const cloned = cloneCapturedRuntimeSnapshot(snapshot);
   assert.deepEqual(cloned.chatPacingSettings, snapshot.chatPacingSettings);
   assert.equal(validateRuntimeSnapshot(cloned, compiled).valid, true);
 

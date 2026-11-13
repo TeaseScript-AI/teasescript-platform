@@ -32,7 +32,7 @@ import { validRetainedSettlement } from "./settlements.js";
 
 export function validatePendingActionState(
   value: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
   errors: string[],
 ): void {
   if (!validSessionTime(value.currentSessionTimeMs))
@@ -92,10 +92,7 @@ function validActiveActionCompletionCapacity(snapshot: Record<string, unknown>):
 }
 
 /** Background work is timers, media, and permanent buttons; a reading time is always the foreground action. */
-function validBackgroundActions(
-  snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
-): boolean {
+function validBackgroundActions(snapshot: Record<string, unknown>, plan: InstructionPlan): boolean {
   const actions = snapshot.backgroundActions;
   if (!isCanonicalJsonArray(actions)) return false;
 
@@ -120,7 +117,7 @@ function validBackgroundActions(
 function validForegroundActionKind(
   action: unknown,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
   delayTimesAreValid: boolean,
   allowDue: boolean,
 ): boolean {
@@ -176,7 +173,7 @@ function validActiveActionIdentityCoherence(snapshot: Record<string, unknown>): 
 export function validForegroundActionState(
   action: unknown,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
   allowDue: boolean,
 ): boolean {
   const callIds = Array.isArray(snapshot.callFrames)
@@ -212,8 +209,8 @@ export function validForegroundActionState(
   return (
     validForegroundActionBase(action, snapshot, callIds) &&
     validForegroundActionKind(action, snapshot, plan, delayTimesAreValid, allowDue) &&
-    (plan === undefined ||
-      (isPlainRecord(action) && validForegroundActionOwnership(action, snapshot, plan)))
+    isPlainRecord(action) &&
+    validForegroundActionOwnership(action, snapshot, plan)
   );
 }
 

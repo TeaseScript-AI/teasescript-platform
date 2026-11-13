@@ -35,7 +35,7 @@ import {
 export function validLockAction(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
 ): boolean {
   if (
     !hasExactKeys(action, [
@@ -140,7 +140,7 @@ export function validLockAction(
       return false;
     if (field && asks !== (action.dialogActionId === null)) return false;
   }
-  if (plan === undefined || !nonNegativeSafeInteger(action.owningInstruction)) return true;
+  if (!nonNegativeSafeInteger(action.owningInstruction)) return true;
   const owner = plan.instructions[action.owningInstruction];
   if (owner?.kind !== "lock" || owner.call !== action.call) return false;
   if ((owner.passwordField !== null) !== field) return false;
@@ -188,7 +188,7 @@ function isEpochMilliseconds(value: unknown): value is number {
 export function validFileStoreAction(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
 ): boolean {
   if (
     !hasExactKeys(action, [
@@ -240,7 +240,7 @@ export function validFileStoreAction(
     ) &&
     new Set(references).size === references.length;
   if (!stores && !reads) return false;
-  if (plan === undefined || !nonNegativeSafeInteger(action.owningInstruction)) return true;
+  if (!nonNegativeSafeInteger(action.owningInstruction)) return true;
   const owner = plan.instructions[action.owningInstruction];
   if (owner?.kind !== "fileStore") return false;
   const count = Math.max(files.length, references.length);
@@ -287,12 +287,11 @@ export function validStorageWriteAction(
 export function validCaptureAction(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
 ): boolean {
-  const owner =
-    plan === undefined || !nonNegativeSafeInteger(action.owningInstruction)
-      ? undefined
-      : plan.instructions[action.owningInstruction];
+  const owner = !nonNegativeSafeInteger(action.owningInstruction)
+    ? undefined
+    : plan.instructions[action.owningInstruction];
   return (
     (action.tags === null || isCanonicalTagList(action.tags)) &&
     (owner?.kind !== "capture" || (owner.tags === null) === (action.tags === null)) &&
@@ -321,9 +320,9 @@ export function validCaptureAction(
 /** An async play's wait ends with its load result; a blocking play's wait ends with its media. */
 export function validMediaWaitOutcome(
   settlement: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
 ): boolean {
-  if (plan === undefined || !nonNegativeSafeInteger(settlement.owningInstruction)) return true;
+  if (!nonNegativeSafeInteger(settlement.owningInstruction)) return true;
   const owner = plan.instructions[settlement.owningInstruction];
   if (owner?.kind !== "playMedia") return false;
   return owner.async
@@ -382,7 +381,7 @@ export function validMediaPlaybackAction(
 export function validPacingGateAction(
   action: unknown,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
   allowDue: boolean,
 ): boolean {
   return (
@@ -451,7 +450,7 @@ function validPacingGateTiming(
 function validPacingGateCreationProvenance(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
 ): boolean {
   if (
     !positiveSafeInteger(action.scopeDepth) ||
@@ -465,7 +464,6 @@ function validPacingGateCreationProvenance(
         action.ownerCallFrameId >= snapshot.nextCallFrameId))
   )
     return false;
-  if (plan === undefined) return true;
 
   const owningInstruction = action.owningInstruction;
   if (

@@ -125,13 +125,12 @@ export function serializedRootFiles(snapshot: Record<string, unknown>): Map<numb
 
 /** Whether a root exists for code of this function, one of its file's activations. */
 export function rootFitsFunction(
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
   roots: ReadonlyMap<number, unknown>,
   rootId: unknown,
   functionId: unknown,
 ): boolean {
   if (!nonNegativeSafeInteger(rootId) || !roots.has(rootId)) return false;
-  if (plan === undefined) return true;
   const definition = nonNegativeSafeInteger(functionId)
     ? plan.functions[functionId - 1]
     : undefined;

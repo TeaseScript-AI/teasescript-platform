@@ -144,7 +144,6 @@ test("result interaction destinations are produced only by the interaction and a
     );
     const hostile = structuredClone(pending.snapshot);
     hostile.temporaries.push({ id: destination, value: "old" });
-    assert.equal(validateRuntimeSnapshot(hostile).valid, false, owner);
     assert.equal(validateRuntimeSnapshot(hostile, plan).valid, false, owner);
     assert.throws(
       () => restoreCheckpoint({ ...createCheckpoint(plan, pending.snapshot), snapshot: hostile }),
@@ -787,11 +786,6 @@ interface RejectedSettlementHandoffRow {
     | "incompatible lifecycle"
     | "counter"
     | "chronology";
-  /**
-   * The row keeps the settlement and the handoff individually valid without a plan, so planless
-   * validation isolates the one check the row names from the plan-bound checks that also reject it.
-   */
-  readonly planless?: true;
   readonly mutate: (snapshot: ExternalRecord, fixture: SettlementHandoffFixture) => void;
 }
 
@@ -876,12 +870,9 @@ function assertRejectedSettlementHandoffSnapshot(
   validSnapshot: RuntimeSnapshot,
   invalidSnapshot: ExternalRecord,
   id: string,
-  planless = false,
 ): void {
   const beforeValidation = structuredClone(invalidSnapshot);
   assert.equal(validateRuntimeSnapshot(invalidSnapshot, plan).valid, false, id);
-  if (planless)
-    assert.equal(validateRuntimeSnapshot(invalidSnapshot).valid, false, `${id}: planless`);
   assert.deepEqual(invalidSnapshot, beforeValidation, `${id}: validation input`);
 
   const beforePlan = structuredClone(plan);
@@ -952,13 +943,12 @@ test("validation accepts matching settlement and handoff records and rejects inc
       },
     },
     // Each agreement row changes one field that the retained settlement with the handoff's action
-    // ID must share with the handoff, while both records stay individually valid without a plan.
+    // ID must share with the handoff, while both records stay individually valid.
     // A non-interaction settlement has no owner, destination or result fields, so those field
     // comparisons also reject the action-kind row.
     {
       id: "PR194-agreement-action-kind",
       category: "handoff disagreement",
-      planless: true,
       mutate: (snapshot, current) => {
         const handoff = externalRecord(snapshot.interactionResultHandoff, "handoff");
         snapshot.lastSettlement = {
@@ -970,7 +960,6 @@ test("validation accepts matching settlement and handoff records and rejects inc
     {
       id: "PR194-agreement-owning-instruction",
       category: "handoff disagreement",
-      planless: true,
       mutate: (snapshot) => {
         externalRecord(snapshot.interactionResultHandoff, "handoff").owningInstruction = 0;
       },
@@ -978,7 +967,6 @@ test("validation accepts matching settlement and handoff records and rejects inc
     {
       id: "PR194-agreement-continuation",
       category: "handoff disagreement",
-      planless: true,
       mutate: (snapshot, current) => {
         const continuation = current.injected.handoffInstruction + 1;
         externalRecord(snapshot.interactionResultHandoff, "handoff").continuationInstruction =
@@ -989,7 +977,6 @@ test("validation accepts matching settlement and handoff records and rejects inc
     {
       id: "PR194-agreement-owner",
       category: "handoff disagreement",
-      planless: true,
       mutate: (snapshot) => {
         externalRecord(snapshot.lastSettlement, "settlement").ownerCallFrameId = 1;
         snapshot.nextCallFrameId = 2;
@@ -998,7 +985,6 @@ test("validation accepts matching settlement and handoff records and rejects inc
     {
       id: "PR194-agreement-destination",
       category: "handoff disagreement",
-      planless: true,
       mutate: (snapshot, current) => {
         externalRecord(snapshot.lastSettlement, "settlement").destinationTemporary =
           current.injected.destinationTemporary + 1;
@@ -1007,7 +993,6 @@ test("validation accepts matching settlement and handoff records and rejects inc
     {
       id: "PR194-agreement-result",
       category: "handoff disagreement",
-      planless: true,
       mutate: (snapshot) => {
         // A text settlement stays self-consistent when its result and transcript change together.
         const settlement = externalRecord(snapshot.lastSettlement, "settlement");
@@ -1074,7 +1059,6 @@ test("validation accepts matching settlement and handoff records and rejects inc
     {
       id: "PR194-handoff-owner-not-active-frame",
       category: "handoff ownership",
-      planless: true,
       mutate: (snapshot) => {
         // The settlement agrees with the forged owner, so only the active-frame ownership check rejects it.
         externalRecord(snapshot.interactionResultHandoff, "handoff").ownerCallFrameId = 99;
@@ -1168,8 +1152,6 @@ test("validation accepts matching settlement and handoff records and rejects inc
       },
     },
   ];
-  // The root-owned committed snapshot is also valid without a plan, the baseline for planless rows.
-  assert.equal(validateRuntimeSnapshot(committed).valid, true);
   for (const row of rows) {
     const invalid = externalRecord(structuredClone(committed), row.id);
     row.mutate(invalid, fixture);
@@ -1178,7 +1160,6 @@ test("validation accepts matching settlement and handoff records and rejects inc
       committed,
       invalid,
       `${row.category}: ${row.id}`,
-      row.planless === true,
     );
   }
 

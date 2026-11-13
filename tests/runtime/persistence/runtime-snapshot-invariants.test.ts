@@ -100,7 +100,7 @@ test("accepts and round-trips every runtime-produced halted shape", () => {
   }
 });
 
-test("validates loops paused in their bodies with or without the plan", () => {
+test("validates loops paused in their bodies", () => {
   const compiled = plan(
     "for k, v in dict{ a: 1, b: 2 } {\n  repeat 2 {\n    wait 5 s\n  }\n}\nexit",
   );
@@ -109,13 +109,21 @@ test("validates loops paused in their bodies with or without the plan", () => {
   assert.equal(snapshot.loopFrames.length, 2);
   const copy = structuredClone(snapshot);
   assert.deepEqual(validateRuntimeSnapshot(copy, compiled), { valid: true, errors: [] });
-  assert.deepEqual(validateRuntimeSnapshot(copy), { valid: true, errors: [] });
-  // Without the plan, a loop that runs twice in one context is still refused.
+  // A loop that runs twice in one context is refused.
   // EVIDENCE: fixture: expose the readonly loop ID on a cloned snapshot to repeat the outer loop's ID.
   (copy.loopFrames[1] as { loopId: number }).loopId = copy.loopFrames[0]!.loopId;
-  assert.deepEqual(validateRuntimeSnapshot(copy).errors, [
+  assert.deepEqual(validateRuntimeSnapshot(copy, compiled).errors, [
     "Runtime loop frame does not belong to its call context.",
   ]);
+});
+
+test("a snapshot validates only against its plan", () => {
+  const compiled = plan("wait 5 s\nexit");
+  const { snapshot } = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
+  assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
+  // EVIDENCE: fixture: a caller without the types, such as plain JavaScript, leaves the plan out.
+  const untyped = validateRuntimeSnapshot as unknown as (value: unknown) => { valid: boolean };
+  assert.equal(untyped(snapshot).valid, false);
 });
 
 test("refuses a nested loop that claims the scopes of the loop around it", () => {
@@ -130,10 +138,9 @@ test("refuses a nested loop that claims the scopes of the loop around it", () =>
   // EVIDENCE: fixture: expose the readonly scope depth on a cloned snapshot to give the inner loop the outer one's.
   (checkpoint.snapshot.loopFrames[1] as { scopeDepth: number }).scopeDepth =
     checkpoint.snapshot.loopFrames[0]!.scopeDepth;
-  for (const withPlan of [compiled, undefined])
-    assert.deepEqual(validateRuntimeSnapshot(checkpoint.snapshot, withPlan).errors, [
-      "Runtime loop frame does not belong to its call context.",
-    ]);
+  assert.deepEqual(validateRuntimeSnapshot(checkpoint.snapshot, compiled).errors, [
+    "Runtime loop frame does not belong to its call context.",
+  ]);
   assertCheckpointRejected(checkpoint, "TSK002");
 });
 

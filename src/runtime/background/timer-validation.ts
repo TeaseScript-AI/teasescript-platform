@@ -66,7 +66,7 @@ function dueDeadlineMayRemain(snapshot: Record<string, unknown>): boolean {
 export function validTimerAction(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
 ): boolean {
   const now = snapshot.currentSessionTimeMs;
   if (
@@ -88,7 +88,6 @@ export function validTimerAction(
   ) {
     return false;
   }
-  if (plan === undefined) return true;
   const owner = plan.instructions[action.owningInstruction];
   const timer = action.timer;
   return (
@@ -205,7 +204,7 @@ function validSettledTimerRecord(timer: Record<string, unknown>, now: unknown): 
 function validTimerRecord(
   timer: Record<string, unknown>,
   now: unknown,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
   allowDue = false,
 ): boolean {
   if (
@@ -234,8 +233,7 @@ function validTimerRecord(
   if (!nonNegativeSafeInteger(timer.rootScopeId)) return false;
   if (timer.handlerFunctionId !== null) {
     if (!positiveSafeInteger(timer.handlerFunctionId)) return false;
-    if (plan !== undefined && plan.functions[timer.handlerFunctionId - 1]?.handler !== "timer")
-      return false;
+    if (plan.functions[timer.handlerFunctionId - 1]?.handler !== "timer") return false;
   }
   switch (timer.state) {
     case "running":
@@ -266,7 +264,7 @@ function validTimerRecord(
  */
 export function validateTimerState(
   value: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
   handleIds: ReadonlySet<number>,
   errors: string[],
 ): void {
@@ -302,8 +300,7 @@ export function validateTimerState(
         if (
           (action.timer.handlerFunctionId !== null &&
             !rootFitsFunction(plan, roots, root, action.timer.handlerFunctionId)) ||
-          (plan !== undefined &&
-            nonNegativeSafeInteger(root) &&
+          (nonNegativeSafeInteger(root) &&
             roots.has(root) &&
             nonNegativeSafeInteger(action.owningInstruction) &&
             !inGlobalCode(plan, action.owningInstruction) &&
@@ -488,7 +485,7 @@ export function validateTimerState(
   const startOf = (functionId: unknown): StartTimerInstruction | undefined => {
     if (blockStarts === undefined) {
       blockStarts = new Map();
-      for (const instruction of plan?.instructions ?? [])
+      for (const instruction of plan.instructions)
         if (instruction?.kind === "startTimer" && instruction.handlerFunctionId !== null)
           blockStarts.set(instruction.handlerFunctionId, instruction);
     }
@@ -506,11 +503,10 @@ export function validateTimerState(
           block.rootScopeId !== first.rootScopeId ||
           !sameCaptures(block.captures, first.captures),
       ) ||
-      (plan !== undefined &&
-        (start === undefined ||
-          start.persist !== record.persist ||
-          (start.label === null) !== (record.label === null) ||
-          (!start.repeat && (runs !== 1 || record.state !== "finished"))))
+      start === undefined ||
+      start.persist !== record.persist ||
+      (start.label === null) !== (record.label === null) ||
+      (!start.repeat && (runs !== 1 || record.state !== "finished"))
     ) {
       errors.push("Runtime settled timer blocks do not belong to one timer statement.");
     }

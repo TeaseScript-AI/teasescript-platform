@@ -459,12 +459,12 @@ test("structural validation refuses a block frame that suspends a host step", ()
   const story = new Story(`${BLOCK}\nwait 3 s\nexit`, { persistentScriptStorage: true });
   story.at(1_000);
   // Assembled: the engine's frame of a block that interrupted a wait, with the wait replaced by a storage write of the
-  // same identity and context. Validation without the plan leaves out ownership, so only the host step is wrong.
+  // same identity and context, so only the host step is wrong.
   // EVIDENCE: JSON serialization preserves the validated snapshot's plain-data shape; the case replaces one action.
   const tampered = JSON.parse(JSON.stringify(story.snapshot)) as {
     callFrames: { timerInterruption: { suspendedAction: Record<string, unknown> } | null }[];
   };
-  assert.deepEqual(validateRuntimeSnapshot(tampered).errors, []);
+  assert.deepEqual(validateRuntimeSnapshot(tampered, story.plan).errors, []);
   const interruption = tampered.callFrames.find(
     (frame) => frame.timerInterruption !== null,
   )!.timerInterruption!;
@@ -487,7 +487,7 @@ test("structural validation refuses a block frame that suspends a host step", ()
     key: "k",
     value: 2,
   };
-  assert.deepEqual(validateRuntimeSnapshot(tampered).errors, [
+  assert.deepEqual(validateRuntimeSnapshot(tampered, story.plan).errors, [
     "Runtime suspended foreground action is malformed.",
   ]);
 });

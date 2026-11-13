@@ -37,7 +37,7 @@ const INVOCATION_KEYS = [
 export function validPermanentButtonAction(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
 ): boolean {
   const button = action.button;
   if (
@@ -69,7 +69,6 @@ export function validPermanentButtonAction(
   ) {
     return false;
   }
-  if (plan === undefined) return true;
   const owner = plan.instructions[action.owningInstruction];
   return (
     owner?.kind === "showPermanentButton" &&
@@ -85,7 +84,7 @@ export function validPermanentButtonAction(
  */
 export function validatePermanentButtonState(
   value: Record<string, unknown>,
-  plan: InstructionPlan | undefined,
+  plan: InstructionPlan,
   handleIds: ReadonlySet<number>,
   errors: string[],
 ): void {
@@ -158,15 +157,14 @@ export function validatePermanentButtonState(
       continue;
     const id = frame.timerInterruption.buttonId;
     const button = positiveSafeInteger(id) ? shown.get(id)?.button : undefined;
-    const definition =
-      plan !== undefined && positiveSafeInteger(frame.functionId)
-        ? plan.functions[frame.functionId - 1]
-        : undefined;
+    const definition = positiveSafeInteger(frame.functionId)
+      ? plan.functions[frame.functionId - 1]
+      : undefined;
     if (
       !positiveSafeInteger(id) ||
       id >= next ||
       queued.has(id) ||
-      (plan !== undefined && definition?.handler !== "button") ||
+      definition?.handler !== "button" ||
       (button !== undefined &&
         (button.handlerFunctionId !== frame.functionId ||
           button.rootScopeId !== frame.rootScopeId ||
