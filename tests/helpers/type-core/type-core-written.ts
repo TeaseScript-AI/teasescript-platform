@@ -296,7 +296,7 @@ const DIRECT: readonly Host[] = ["direct"];
 /**
  * Whether `WRITTEN_DOMAIN_MATRIX` and `V30_TYPE_MATRIX` are their whole products, else the factored samples the tests
  * run (each matrix says what it keeps). The whole products are a laptop run outside CI: `WRITTEN_MATRICES_FULL=1 node
- * tools/test-output-filter.mjs dist/tests/type-core/type-core-written.test.js
+ * tools/test-output-filter.mjs dist/tests/type-core/written/type-core-written-matrices.test.js
  * dist/tests/type-core/sharing/type-core-sharing-differential.test.js`.
  */
 const FULL = process.env["WRITTEN_MATRICES_FULL"] === "1";

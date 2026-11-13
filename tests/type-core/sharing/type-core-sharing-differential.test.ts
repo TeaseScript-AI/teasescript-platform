@@ -67,9 +67,9 @@ import {
  * binding's admitted type at its root and its element (the decider's site with it) and the candidate route's lowered
  * plan (or its rejection) are byte-identical with the sharing on and off (`withoutSharing`; `type-core-oracles.ts`).
  * Any difference fails the test. Fixture records and written-domain matrix sources run in source order unless
- * `TEASESCRIPT_SWEEP=full`; every other program runs in both orders. `type-core-written.test.ts` compares the sources
- * of the matrices it checks in three layers (`WRITTEN_DOMAIN_MATRIX`, `V30_TYPE_MATRIX`, `INFERRED_COPY_MATRIX`,
- * `DEFAULT_CHAIN_MATRIX`) on the analyses and plans its own tests observe.
+ * `TEASESCRIPT_SWEEP=full`; every other program runs in both orders. `written/type-core-written-matrices.test.ts`
+ * compares the sources of the matrices it checks in three layers (`WRITTEN_DOMAIN_MATRIX`, `V30_TYPE_MATRIX`,
+ * `INFERRED_COPY_MATRIX`, `DEFAULT_CHAIN_MATRIX`) on the analyses and plans its own tests observe.
  *
  * Two components of a snapshot have no program here yet where they alone change the output (Astra r6): the guard bit
  * (`Contract.readSnapshot`) and the via signature in the stop identity and the decider's snapshots. No such program is
