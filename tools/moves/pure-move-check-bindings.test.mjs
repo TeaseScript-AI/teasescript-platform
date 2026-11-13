@@ -649,3 +649,92 @@ test(
     }
   },
 );
+
+test(
+  "an unchanged dynamic import in a file the change edits in place is printed as not judged; changed or in a renamed file it is refused (#2583)",
+  { timeout: 60_000 },
+  () => {
+    const loader = (dynamic, value = "weighted([1])") =>
+      [
+        'import { pathToFileURL } from "node:url";',
+        'import { weighted } from "./a.js";',
+        dynamic,
+        `export const value = ${value};`,
+        "",
+      ].join("\n");
+    const unchanged = "export const load = (p: string) => import(pathToFileURL(p).href);";
+    const before = {
+      "src/a.ts": `export ${helper("sumOfSquares")}\n\nexport ${helper("weighted")}\n`,
+      "src/loader.ts": loader(unchanged),
+    };
+    const moved = {
+      "src/a.ts": `export ${helper("sumOfSquares")}\n`,
+      "src/b.ts": `export ${helper("weighted")}\n`,
+    };
+    const run = (after) => {
+      const move = moveOf(before, { ...moved, ...after });
+      try {
+        return move.run("--renames", move.renames({ "src/a.ts": ["src/a.ts", "src/b.ts"] }));
+      } finally {
+        move.done();
+      }
+    };
+    // the loader edited only where it imports the moved function: its dynamic import's line is unchanged
+    const passed = run({ "src/loader.ts": loader(unchanged).replace("./a.js", "./b.js") });
+    assert.equal(passed.status, 0, passed.out);
+    assert.deepEqual(
+      passed.out.split("\n").filter((line) => line.includes("not judged:")),
+      ["  not judged: unchanged dynamic import, src/loader.ts:3"],
+    );
+    assert.match(passed.out, /; refused 0; declared whole 0; not judged 1$/mu);
+    // the same reference on a changed line is refused, on both sides
+    const changed = run({
+      "src/loader.ts": loader(
+        unchanged.replace("pathToFileURL(p)", "pathToFileURL(String(p))"),
+      ).replace("./a.js", "./b.js"),
+    });
+    assert.equal(changed.status, 1, changed.out);
+    assert.match(changed.out, /^ {2}refused: src\/loader\.ts:3 \(removed\) "import\(/mu);
+    assert.match(changed.out, /^ {2}refused: src\/loader\.ts:3 \(added\) "import\(/mu);
+    assert.doesNotMatch(changed.out, /not judged/u);
+    // an unchanged one in a file the change renames (its folder, which a relative path is read from, moved) is refused
+    const renamed = run({
+      "src/loader.ts": null,
+      "src/load/loader.ts": loader(unchanged).replace("./a.js", "../b.js"),
+    });
+    assert.equal(renamed.status, 1, renamed.out);
+    assert.match(renamed.out, /^ {2}refused: src\/load\/loader\.ts:3 \(added\) "import\(/mu);
+    assert.doesNotMatch(renamed.out, /not judged/u);
+  },
+);
+
+test(
+  "an unchanged line is not judged only when it is a dynamic import on both sides and nothing else (#2616 r1)",
+  { timeout: 60_000 },
+  () => {
+    const run = (before, after) => {
+      const move = moveOf({ "src/loader.ts": before }, { "src/loader.ts": after });
+      try {
+        return move.run();
+      } finally {
+        move.done();
+      }
+    };
+    // (the change puts the unchanged line inside a template literal: at HEAD it is no reference, so it stays refused)
+    const line = "export const load = (p: string) => import(p);";
+    const quoted = run(`const a = 1;\n${line}\nconst b = 2;\n`, `const a = \`\n${line}\n\`;\n`);
+    assert.equal(quoted.status, 1, quoted.out);
+    assert.match(quoted.out, /^ {2}refused: src\/loader\.ts:2 \(removed\) "import\(p\)"/mu);
+    assert.doesNotMatch(quoted.out, /not judged/u);
+    // (a dynamic import beside a `require` or a type import on one unchanged line is refused)
+    for (const mixed of [
+      "export const both = (p: string) => [import(p), require(p)];",
+      'export const both = (p: string) => import(p) as Promise<typeof import("./x.js")>;',
+    ]) {
+      const result = run(`${mixed}\nconst b = 1;\n`, `${mixed}\nconst b = 2;\n`);
+      assert.equal(result.status, 1, result.out);
+      assert.match(result.out, /^ {2}refused: src\/loader\.ts:1 \(added\) /mu);
+      assert.doesNotMatch(result.out, /not judged/u);
+    }
+  },
+);
