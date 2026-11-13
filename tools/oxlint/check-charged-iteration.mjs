@@ -78,10 +78,14 @@ const CONSTANT = [
   ...core("type-inference/core/flow-graph/dominators.ts", [
     "Dominators.dominates",
     "Dominators.edom",
+    // (an array read: a node's immediate dominator)
+    "Dominators.idom",
   ]),
   ...core("type-inference/core/flow-graph/model.ts", [
     "FlowGraph.isDeadEdge",
     "FlowGraph.ownerOf",
+    // (a map read by a statement's site)
+    "FlowGraph.placeOf",
     "FlowGraph.statementAt",
   ]),
   ...core("type-inference/core/items.ts", ["makeItem"]),

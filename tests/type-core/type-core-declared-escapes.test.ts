@@ -23,7 +23,7 @@ import {
 import { FIRST_ASKER_MAIN, MAIN } from "../helpers/type-core/type-core-declared-escapes-main.js";
 import { HELD_MODES } from "../helpers/type-core-held-host.js";
 import { everyAnswer } from "../helpers/type-core-oracles.js";
-import { hostValues } from "../helpers/type-core-stop-oracle.js";
+import { hostValues } from "../helpers/type-core-stop-runs.js";
 
 // #2116's declared difference under #2080: the O4 lead's rulings 6 to 21 on #2065's design round. Decision (B) is moot,
 // #2080 part 2 (#2227) having landed first; the owner's answer on the one-sided refusal is pending. This file pins known

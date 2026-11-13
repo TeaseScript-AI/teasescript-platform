@@ -263,7 +263,7 @@ makes excluding a landed copy fail closed.
 **A `null` that reaches a use through an entry is the use's required check.**
 
 **Rule.** This bounds [r4-444](#r4-444): beside its forward route, AD-1 promotes a `null` item reaching a use through an
-entry, where the program default is not held. An entry reads a route as the forward rule does, a route of the program's
+entry. An entry reads a route as the forward rule does, a route of the program's
 flow (ADR 0021 rules 5.5 and 5.6): a value the compiler knows, such as a loop's count or list held in a variable,
 removes no route. Entries: a loop's head (from its live predecessors in its body, none for a `for` over a one-element
 literal), a label (its live `goto`s and its fall-through), a file's start (from a literal
@@ -277,11 +277,18 @@ certified `null` stores' stretches (to the first later statement holding the nam
 other jump can be seeded) are tried as seeds in source order and propagated once per entry; the use takes its innermost
 nearest carrying entry, then its body's start. Many keys over many jumps cost their product (the gated known product
 in `docs/RESOURCE-LIMITS.md`); loops nested k deep cost jumps × depth, which the nesting limit bounds.
-Inside a block body the forward route admits the body's own definitions. Kept as warnings: written-union
-members, X7, block-reachable foreground uses, the program default, and copies whose source's `null` arrives through
-an entry.
+Inside a block body the forward route admits the body's own definitions. In a program the route rule's default holds
+(R2.2), only a loop's or a label's entry T is taken, and only where a run is proved to reach T and then the store, the
+jump and the use: a label in the top level of the file the session starts in, or a loop that stands where a route may
+promote, with nothing before it that a route may not pass; each of the three standing after T (its boundary none or
+T's label, no arm on its chain that no run is proved to enter, no loop's body but T's own), with no such statement
+before it in its blocks, counted after T in T's block. A statement inside an arm proved never entered marks no
+statement above that arm there. A seed alone carries; nothing is carried on through a further jump. Kept as warnings:
+written-union members, X7, block-reachable foreground uses, under the program default every other entry route, and
+copies whose source's `null` arrives through an entry.
 
 **Reason.** The text's error (V30 §13) for a value an earlier round, a label, a file transfer or a block body brings;
 closing a segment on any held name keeps every give-up a warning, never a false error.
 
-**Source.** The lead's HEAD 0 rulings R27 to R35 for #2497 pull request 1, 2026-11-12.
+**Source.** The lead's HEAD 0 rulings R27 to R35 for #2497 pull request 1, 2026-11-12; R52 to R56 for pull request 2
+(R2.2), 2026-11-12.

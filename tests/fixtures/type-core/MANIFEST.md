@@ -34,6 +34,9 @@ statement registering it). The current checker errs on each. No other record cha
 `cp9-cells/3b/review-late/copies/back-edge` and `…/copies/entered-label` keep the text's error as their record and are
 held: a copy's certificate asks only the forward route, so its source's `null` through an entry leaves the check (the
 accepted give-up in r4-451).
+`cp9-cells/3b/review-early/a3-kinds-only-box` is no longer held under the corridor reason; its record is unchanged. Its
+program holds the route rule's default, and R2.2 takes its loop's entry there (r4-451): the loop is reached, and the
+round's store and the use stand at it.
 
 ## F18's call-site snapshot (#1072)
 

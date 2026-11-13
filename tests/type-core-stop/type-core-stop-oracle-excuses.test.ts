@@ -401,6 +401,23 @@ test("a marked store's records within its value are compared alike on both sides
   assert.deepEqual(problems, [`extra check ${JSON.stringify(extra)}`]);
 });
 
+const nullCheck: Obligation = {
+  kind: "null-check",
+  target: "xs.element",
+  against: ["integer", "number"],
+  on: "check that xs.element is not null before /",
+  site: { file: 0, start: 27, end: 32 },
+  boundary: false,
+};
+const operand: Obligation = {
+  kind: "operand",
+  target: "xs[1]",
+  against: ["integer", "number"],
+  on: "check the operand of / when it runs",
+  site: nullCheck.site,
+  boundary: false,
+};
+
 /**
  * A stopped operand check stands for a lost null check only as the lead's ruling (A) on #1688 allows
  * (`standsForNullCheck`). `null-divisors@4`
@@ -444,22 +461,6 @@ test("a stopped operand check stands for a lost null check only at its site, exc
       assert.ok(problems.includes(`extra check ${operand}`), problem);
     }
   }
-  const nullCheck: Obligation = {
-    kind: "null-check",
-    target: "xs.element",
-    against: ["integer", "number"],
-    on: "check that xs.element is not null before /",
-    site: { file: 0, start: 27, end: 32 },
-    boundary: false,
-  };
-  const operand: Obligation = {
-    kind: "operand",
-    target: "xs[1]",
-    against: ["integer", "number"],
-    on: "check the operand of / when it runs",
-    site: nullCheck.site,
-    boundary: false,
-  };
   assert.equal(standsForNullCheck(operand, nullCheck), true);
   assert.equal(standsForNullCheck({ ...operand, against: ["integer"] }, nullCheck), true);
   const others: Obligation[] = [

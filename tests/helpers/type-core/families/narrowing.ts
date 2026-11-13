@@ -5,6 +5,7 @@ import {
   rows,
   lines,
   cells,
+  fields,
   main,
   file,
   balancedSum,
@@ -589,6 +590,112 @@ export const ROUTE_ENTRY_FAMILIES: readonly WorkFamily[] = [
       ),
   },
   {
+    name: "E-default-loops",
+    measures:
+      "N3 under the program default (R2.2): an arm no run enters, then k loops in sequence, each with a use and a later store of `null` in its body",
+    program: (k) =>
+      main(
+        lines(
+          "let n: integer? = 1",
+          'if n == null { say "never" }',
+          rows(k, () => `repeat 2 {\n${USE_THEN_NULL}\n}\nn = 1`),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "E-default-labels",
+    measures:
+      "N3 under the program default (R2.2): an arm no run enters, then k labels, each with a conditional `goto` back to it and a use after it",
+    program: (k) =>
+      main(
+        lines(
+          "let n: integer? = 1",
+          'if n == null { say "never" }',
+          rows(
+            k,
+            (i) =>
+              `label l${i}\n${USE_THEN_NULL}\nif hostValue is boolean { goto l${i} }\nn = ${i}`,
+          ),
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "E-default-copied-fields",
+    measures:
+      "N3 under the program default (R2.2): a record of k fields copied k times, then one loop reading each field",
+    program: (k) =>
+      main(
+        lines(
+          `let seed = {${fields(k, () => "1")}}`,
+          `if hostValue is boolean { seed = {${fields(k, () => "null")}} }`,
+          'if seed == null { say "absent" }',
+          rows(k, (i) => `let c${i} = seed\nseed = c${i}`),
+          "repeat 2 {",
+          rows(k, (i) => `let value${i}: integer = seed.f${i}`),
+          "}",
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "E-default-copied-in-loop",
+    measures:
+      "N3 under the program default (R2.2): a record of k fields copied k times inside one loop, then each field read",
+    program: (k) =>
+      main(
+        lines(
+          `let seed = {${fields(k, () => "1")}}`,
+          `if hostValue is boolean { seed = {${fields(k, () => "null")}} }`,
+          'if seed == null { say "absent" }',
+          "repeat 2 {",
+          rows(k, (i) => `let c${i} = seed\nseed = c${i}`),
+          rows(k, (i) => `let value${i}: integer = seed.f${i}`),
+          "}",
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "E-default-copied-nested",
+    measures:
+      "N3 under the program default (R2.2): a record of k fields copied k times inside a compound statement, then one loop reading each field",
+    program: (k) =>
+      main(
+        lines(
+          `let seed = {${fields(k, () => "1")}}`,
+          `if hostValue is boolean { seed = {${fields(k, () => "null")}} }`,
+          'if seed == null { say "absent" }',
+          "if true {",
+          rows(k, (i) => `let c${i} = seed\nseed = c${i}`),
+          "}",
+          "repeat 2 {",
+          rows(k, (i) => `let value${i}: integer = seed.f${i}`),
+          "}",
+          "exit",
+        ),
+      ),
+  },
+  {
+    name: "E-default-copied-siblings",
+    measures:
+      "N3 under the program default (R2.2): a record of k fields copied once in each of k compound statements, then one loop reading each field",
+    program: (k) =>
+      main(
+        lines(
+          `let seed = {${fields(k, () => "1")}}`,
+          `if hostValue is boolean { seed = {${fields(k, () => "null")}} }`,
+          'if seed == null { say "absent" }',
+          rows(k, (i) => `if true {\n  let c${i} = seed\n  seed = c${i}\n}`),
+          "repeat 2 {",
+          rows(k, (i) => `let value${i}: integer = seed.f${i}`),
+          "}",
+          "exit",
+        ),
+      ),
+  },
+  {
     name: "E-held-deep",
     measures:
       "N3: a label's segment over a test of the root k compound statements deep, and k uses after it",
@@ -646,6 +753,58 @@ export const ROUTE_ENTRY_FAMILIES: readonly WorkFamily[] = [
       ),
   },
 ];
+
+/**
+ * Under the program default (R2.2), k compound statements each storing `null` in one scalar, then one loop reading it:
+ * the jumps the scalar's k stores hold are found once (`RouteEntries.#held`), their stretches sorted by start, |L| log |L|
+ * charged once per list and name (R60). Main's own work on this shape grows faster per counter than the entry gate
+ * allows (its definitions' parent stack, `parentStackSteps`, the same on main), so the total is gated alone, at its
+ * measured 64 → 128 step.
+ */
+export const ROUTE_ENTRY_SIBLING_STORES: KnownProduct = {
+  name: "E-default-sibling-stores",
+  measures:
+    "N3 under the program default (R2.2): k compound statements each storing `null` in one scalar, then one loop reading it",
+  program: (k) =>
+    main(
+      lines(
+        "let token = 1",
+        'if token == null { say "absent" }',
+        "let n: integer? = 1",
+        rows(k, () => "if true { n = null }"),
+        "repeat 2 { let value: integer = n }",
+        "exit",
+      ),
+    ),
+  measured: 2.07,
+};
+
+/**
+ * Under the program default (R2.2), one scalar's `null` store before a `switch` of k cases, each a `goto` back to the
+ * label before the use: k standing jumps for one key, tried in source order after one sort per key (R63). The total is
+ * gated alone, at its measured 64 → 128 step, as `ROUTE_ENTRY_SIBLING_STORES`.
+ */
+export const ROUTE_ENTRY_SWITCH_JUMPS: KnownProduct = {
+  name: "E-default-switch-jumps",
+  measures:
+    "N3 under the program default (R2.2): one scalar's use after a label, its `null` store, then a switch of k cases each going back to the label",
+  program: (k) =>
+    main(
+      lines(
+        "let token = 1",
+        'if token == null { say "absent" }',
+        "let n: integer? = 1",
+        "label top",
+        "let value: integer = n",
+        "n = null",
+        "switch hostValue {",
+        rows(k, (i) => `  case ${i} { goto top }`),
+        "}",
+        "exit",
+      ),
+    ),
+  measured: 2.03,
+};
 
 /**
  * The route rule's jump index over k files each left by a computed `goto script(...)` (#2497, r4-451's give-up: such a

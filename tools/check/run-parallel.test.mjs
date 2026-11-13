@@ -11,7 +11,7 @@ import {
   killRecorded,
   spawnTool,
   waitFor,
-} from "./runner-test-support.mjs";
+} from "../runner-test-support.mjs";
 
 const runner = fileURLToPath(new URL("./run-parallel.mjs", import.meta.url));
 
@@ -105,7 +105,7 @@ test("--list runs the npm scripts a file lists, in its order, and refuses a list
   // without its file, `--list` is no npm script to run, but a usage error (Sol r1)
   const bare = await start(t, cwd, ["--list"]).done;
   assert.equal(bare.code, 1, bare.output);
-  assert.match(bare.stderr, /usage: node tools\/run-parallel\.mjs --list <file>/u);
+  assert.match(bare.stderr, /usage: node tools\/check\/run-parallel\.mjs --list <file>/u);
   assert.doesNotMatch(bare.stdout, /ran:/u);
 });
 

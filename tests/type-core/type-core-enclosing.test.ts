@@ -1,15 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
+import { type EnclosingCase } from "../helpers/type-core/enclosing/type-core-enclosing.js";
+import { certificateFamily } from "../helpers/type-core/enclosing/type-core-enclosing-certificates.js";
+import { enclosingFamily } from "../helpers/type-core/enclosing/type-core-enclosing-family.js";
 import {
   allowancesOf,
-  certificateFamily,
-  enclosingFamily,
   enclosingProblems,
   MODES,
-  type EnclosingCase,
   type Relation,
-} from "../helpers/type-core/type-core-enclosing.js";
+} from "../helpers/type-core/enclosing/type-core-enclosing-verdicts.js";
 import {
   collection,
   fits,

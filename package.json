@@ -7,8 +7,8 @@
     "node": "26.13.0"
   },
   "scripts": {
-    "build": "npm run build:typescript && node tools/run-parallel.mjs typecheck:player build:player build:player-test-modules",
-    "build:tree": "npm run build:typescript && node tools/run-parallel.mjs build:player build:player-test-modules",
+    "build": "npm run build:typescript && node tools/check/run-parallel.mjs typecheck:player build:player build:player-test-modules",
+    "build:tree": "npm run build:typescript && node tools/check/run-parallel.mjs build:player build:player-test-modules",
     "build:typescript": "node ./tools/clean-compiled-tests.mjs && tsc",
     "build:player": "vite build --config player/vue/vite.config.ts",
     "build:player-test-modules": "vite build --config player/vue/vite.test-modules.config.ts",
@@ -18,8 +18,8 @@
     "format:check": "prettier --check \"**/*.{ts,tsx,cts,mts,js,jsx,cjs,mjs,vue}\"",
     "test:compiled": "node ./tools/test-output-filter.mjs",
     "test": "npm run build && node ./tools/test-output-filter.mjs",
-    "check": "node tools/run-check.mjs",
-    "check:pretest": "node tools/run-parallel.mjs --list tools/check-pretest-steps.txt",
+    "check": "node tools/check/run-check.mjs",
+    "check:pretest": "node tools/check/run-parallel.mjs --list tools/check/check-pretest-steps.txt",
     "check:doc-links": "node tools/repository-checks/doc-links.mjs",
     "check:imports": "node tools/repository-checks/imports.mjs",
     "knip": "knip",

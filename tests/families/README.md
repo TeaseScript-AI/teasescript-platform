@@ -430,7 +430,7 @@ Exit statuses:
 
 `stop-runs.mjs` (#2080) looks, on one built tree, for a stop that lets a value through that the natural plan rejects.
 For each item it compiles the unit unstopped and at the item's demand allowance, in its mode, and runs both plans over
-host data: `stopRuns` and `hostValues` in `tests/helpers/type-core-stop-oracle.ts`, which also feed that data to
+host data: `stopRuns` and `hostValues` in `tests/helpers/type-core-stop-runs.ts`, which also feed that data to
 `stopProblems` as its violating runs. The host data holds scalars and collections, objects by the unit's own property
 names and paths, and values made from every type either plan checks.
 
@@ -739,6 +739,6 @@ folder on the desktop worker. A new kit's entry goes to its area's file.
 
 ## The oracle library's next step
 
-`tests/helpers/type-core/type-core-enclosing.ts` (#1434) keeps its own `MODES`: eight modes, with the consumers' order and the
+`tests/helpers/type-core/enclosing/type-core-enclosing-verdicts.ts` (#1434) keeps its own `MODES`: eight modes, with the consumers' order and the
 solver's order varied apart. The library's four modes reverse both together. Its modes are the candidate for the
 library's next step. Its stop verdict (`enclosingProblems`) is its own oracle and copies no library projection.

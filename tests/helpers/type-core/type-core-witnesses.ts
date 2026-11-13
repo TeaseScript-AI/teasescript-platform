@@ -1,18 +1,13 @@
 import type { SerializableRuntimeValue } from "../../../src/runtime/values/serializable-values.js";
 
-/*
- * S6-CARRIERS's carrier witnesses, each a name, its program before its final `exit` and its exact record: the cells
- * test compares them in both orders, the sharing differential runs them (the cells test's comment lists what each is).
- */
-export const CARRIER_WITNESSES: readonly (readonly [string, string, string])[] = (() => {
-  const nested = "let raw = hostValue\nlet root = {nested: {f0: [1, raw][1], f1: [1, raw][1]}}\n";
-  const copies = `
+const nested = "let raw = hostValue\nlet root = {nested: {f0: [1, raw][1], f1: [1, raw][1]}}\n";
+const copies = `
     D written-target warning 49:52 unknown
     D written-target warning 66:69 unknown
     C copy-type root.nested.f0 [integer] 49:52
     C copy-type root.nested.f1 [integer] 66:69
     B copy-type raw [unknown] 10:19`;
-  const conditional = `outcome warning-runtime-check
+const conditional = `outcome warning-runtime-check
     D written-target warning 31:75 later
     D written-target warning 66:69 unknown
     D integer-use warning 190:196 unknown
@@ -22,10 +17,16 @@ export const CARRIER_WITNESSES: readonly (readonly [string, string, string])[] =
     C integer-check box.f0 [integer] 190:196
     C integer-check box.f1 [integer] 207:213
     B copy-type raw [unknown] 10:19`;
-  const use = "function use(r) {\n  let n: integer = r.f\n  return true\n}\n";
-  const choices = (call: string): string =>
-    `let root = {f: 1}\nfunction bump {\n  root.f = null\n}\nlet a = askChoice {text: "a", value: root.f}\n${call}` +
-    'let b = askChoice {text: "b", value: root.f}\nrepeat a {}\nrepeat b {}\n';
+const use = "function use(r) {\n  let n: integer = r.f\n  return true\n}\n";
+const choices = (call: string): string =>
+  `let root = {f: 1}\nfunction bump {\n  root.f = null\n}\nlet a = askChoice {text: "a", value: root.f}\n${call}` +
+  'let b = askChoice {text: "b", value: root.f}\nrepeat a {}\nrepeat b {}\n';
+
+/*
+ * S6-CARRIERS's carrier witnesses, each a name, its program before its final `exit` and its exact record: the cells
+ * test compares them in both orders, the sharing differential runs them (the cells test's comment lists what each is).
+ */
+export const CARRIER_WITNESSES: readonly (readonly [string, string, string])[] = (() => {
   return [
     [
       "the across-function copy",

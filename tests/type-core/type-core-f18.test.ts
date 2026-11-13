@@ -9,13 +9,12 @@ import { nodeOf, SliceIndex } from "../../src/type-inference/core/check-result/s
 import { CoreProgram } from "../../src/type-inference/core/program.js";
 import { VALUE_KIND_NAMES } from "../../src/value-kinds.js";
 import { compactAnalysis, coreRequest } from "../helpers/type-core-analysis.js";
+import { syntaxOf, Underivable } from "../helpers/type-core/derived/type-core-derived.js";
 import {
-  derive,
   snapshotReads,
   snapshotVisits,
-  syntaxOf,
-  Underivable,
-} from "../helpers/type-core-derived.js";
+} from "../helpers/type-core/derived/type-core-derived-snapshots.js";
+import { derive } from "../helpers/type-core/derived/type-core-derived-checks.js";
 import { readFixture } from "../helpers/type-core/type-core-fixture.js";
 import { narrowingPassIn } from "../helpers/type-core/type-core-narrowing.js";
 import { inMode, MODES } from "../helpers/type-core-oracles.js";

@@ -1,4 +1,4 @@
-# The npm scripts `npm run check:pretest` runs side by side (`tools/run-parallel.mjs --list`): one per line, with no
+# The npm scripts `npm run check:pretest` runs side by side (`tools/check/run-parallel.mjs --list`): one per line, with no
 # separator, so that two added at different places merge, the end included.
 format:check
 lint
