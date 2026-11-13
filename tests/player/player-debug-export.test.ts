@@ -20,7 +20,7 @@ import {
   type DebugExport,
   type DebugOperation,
   type DebugSelection,
-} from "../../player/debug-export.js";
+} from "../../player/debug/debug-export.js";
 import {
   applyExternalStorageEdit,
   setDebugMode,

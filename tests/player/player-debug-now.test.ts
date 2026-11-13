@@ -2,23 +2,22 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { RuntimeDebugContext } from "../../src/index.js";
-import { playerDebugImageOrigin } from "../../player/debug-variables.js";
-import { debugStageImageStatus } from "../../player/presentation.js";
+import { playerDebugImageOrigin } from "../../player/debug/debug-variables.js";
+import { debugStageImageStatus } from "../../player/presentation/presentation.js";
 import {
   activatePlayerRuntimeButton,
   advancePlayerRuntimeTime,
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
   observePlayerRuntimeTime,
-  playerRuntimeCalls,
-  playerRuntimeDebugNow,
   reportPlayerRuntimeMediaLoad,
   restorePlayerRuntimeSession,
   submitPlayerRuntimeComposer,
   withPlayerRuntimeDebugTrace,
   type PlayerRuntimeSession,
   playerRuntimeSnapshot,
-} from "../../player/runtime-adapter.js";
+} from "../../player/runtime/runtime-adapter.js";
+import { debugCalls, debugNow } from "../helpers/debug-readers.js";
+import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
 
 // Player Debug's Now view (DEBUGGER.md "Player Debug") locates the session from canonical state: package paths with
 // every folder, one-based lines of the authored source, calls innermost first, and every timer, hidden ones included.
@@ -65,7 +64,7 @@ const project = {
 
 test("Now names the next statement, the wait's statement, and the calls across nested files", () => {
   let session = createPlayerRuntimeSession(project);
-  let now = playerRuntimeDebugNow(session, 0);
+  let now = debugNow(session, 0);
   assert.deepEqual(now.next, location("Domme3/spanking.tease", 3));
   assert.deepEqual(now.waitingAt, { kind: "button", at: location("Domme3/spanking.tease", 3) });
   assert.deepEqual(now.calls, [
@@ -91,10 +90,10 @@ test("Now names the next statement, the wait's statement, and the calls across n
       },
     ],
   );
-  assert.equal(playerRuntimeDebugNow(session, 1_500).timers[0]?.remainingMs, 598_500);
+  assert.equal(debugNow(session, 1_500).timers[0]?.remainingMs, 598_500);
 
   session = press(session);
-  now = playerRuntimeDebugNow(session, 0);
+  now = debugNow(session, 0);
   assert.deepEqual(now.waitingAt, { kind: "wait", at: location("Domme3/spanking.tease", 7) });
   assert.deepEqual(
     now.calls.map((call) => call.kind),
@@ -103,7 +102,7 @@ test("Now names the next statement, the wait's statement, and the calls across n
 
   session = press(observe(session, 5_000));
   assert.equal(session.state.status, "halted");
-  now = playerRuntimeDebugNow(session, 6_000);
+  now = debugNow(session, 6_000);
   assert.deepEqual(now, { next: null, waitingAt: null, calls: [], timers: [], media: [] });
 });
 
@@ -119,7 +118,7 @@ test("Now lists blocking, suspended and paused timers and the block that interru
       "exit",
     ].join("\n"),
   );
-  let now = playerRuntimeDebugNow(session, 0);
+  let now = debugNow(session, 0);
   assert.deepEqual(
     now.timers.map(({ label, blocking, state }) => ({ label, blocking, state })),
     [
@@ -131,7 +130,7 @@ test("Now lists blocking, suspended and paused timers and the block that interru
   assert.deepEqual(now.waitingAt, { kind: "timer", at: location("main.tease", 6) });
 
   session = observe(session, 1_000);
-  now = playerRuntimeDebugNow(session, 1_000);
+  now = debugNow(session, 1_000);
   assert.deepEqual(now.waitingAt, { kind: "wait", at: location("main.tease", 4) });
   assert.equal(now.calls[0]?.kind, "timer");
   assert.deepEqual(now.calls[0]?.from, location("main.tease", 6));
@@ -243,7 +242,7 @@ test("Now lists each active sound with the statement that started it", () => {
     ],
   });
   const sounds = () =>
-    playerRuntimeDebugNow(session, 0).media.map(({ source, loaded, startedAt }) => ({
+    debugNow(session, 0).media.map(({ source, loaded, startedAt }) => ({
       source,
       loaded,
       startedAt,
@@ -287,13 +286,13 @@ test("a failed session keeps the calls its error happened in, which the error di
   session = observe(session, 1_000);
   assert.equal(session.state.failure?.path, "rules.tease");
   assert.deepEqual(
-    playerRuntimeCalls(session).map(({ kind, from }) => ({ kind, from })),
+    debugCalls(session).map(({ kind, from }) => ({ kind, from })),
     [
       { kind: "function", from: location("main.tease", 2) },
       { kind: "timer", from: location("main.tease", 4) },
     ],
   );
-  assert.equal(playerRuntimeCalls(session)[0]?.name, "punish");
+  assert.equal(debugCalls(session)[0]?.name, "punish");
   // Debug's Now lists calls only while the session runs or waits.
-  assert.deepEqual(playerRuntimeDebugNow(session, 1_000).calls, []);
+  assert.deepEqual(debugNow(session, 1_000).calls, []);
 });

@@ -1,0 +1,8 @@
+---
+title: "Rewind fixture"
+---
+let first = askChoice "Red", "Blue"
+say "First: ${first}.", instant
+let second = askChoice "Left", "Right"
+say "Second: ${second}.", instant
+exit

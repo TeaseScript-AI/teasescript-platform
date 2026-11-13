@@ -27,25 +27,27 @@ import {
 import {
   advancePlayerRuntimeTime,
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
-  nextPlayerRuntimeEventMs,
   observePlayerRuntimeTime,
-  playerRuntimeMedia,
   reportPlayerRuntimeMediaLoad,
   restorePlayerRuntimeSession,
   applyPlayerRuntimeStorageEdit,
   completePlayerRuntimeStorageWrite,
   continuePlayerRuntimeSession,
-  pendingPlayerRuntimeStorageWrite,
-  playerRuntimeForeground,
-  playerRuntimePermanentButtons,
   pressPlayerRuntimePermanentButton,
   selectPlayerRuntimeChoice,
   submitPlayerRuntimeComposer,
   withPlayerRuntimeDebugTrace,
   type PlayerRuntimeSession,
   playerRuntimeSnapshot,
-} from "../../../player/runtime-adapter.js";
+} from "../../../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../../../player/runtime/compile-project.js";
+import {
+  nextPlayerRuntimeEventMs,
+  playerRuntimeMedia,
+  pendingPlayerRuntimeStorageWrite,
+  playerRuntimeForeground,
+  playerRuntimePermanentButtons,
+} from "../../../player/runtime/runtime-view.js";
 import { TraceStore } from "../../../src/runtime/debug/debug-trace.js";
 import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
 import { playerStateOf } from "../../helpers/player/player-state.js";

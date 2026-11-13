@@ -1,0 +1,8 @@
+let rows = [[1]]
+function mutate {
+    rows[0].add(9)
+    return [[3]]
+}
+rows += mutate()
+say "nested-method:${rows[0].length}:${rows[0][0]}:${rows[1][0]}", instant
+exit

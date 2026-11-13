@@ -4,14 +4,16 @@ import test from "node:test";
 import {
   activatePlayerRuntimeButton,
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
   observePlayerRuntimeTime,
-  playerRuntimeDeadlines,
-  playerRuntimeForeground,
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
   playerRuntimeSnapshot,
-} from "../../player/runtime-adapter.js";
+} from "../../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
+import {
+  playerRuntimeDeadlines,
+  playerRuntimeForeground,
+} from "../../player/runtime/runtime-view.js";
 import { compileSource } from "../../src/compiler.js";
 import type { InstructionPlan } from "../../src/plan/model.js";
 import { validateInstructionPlan } from "../../src/plan/validation.js";

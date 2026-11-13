@@ -1,22 +1,33 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { before, type TestContext } from "node:test";
+import { effectScope, shallowRef, type Ref } from "vue";
 
-import { CapturedMediaStore } from "../../player/captured-media.js";
-import { rebuildRecordedSession } from "../../player/debug-export.js";
-import { DebugRecorder } from "../../player/debug-recorder.js";
-import { loadAge, loadTlock, readLock, type LockServices } from "../../player/encryption/lock.js";
-import { roundTimeMs } from "../../player/encryption/drand.js";
-import { LockService, type LockDialog, type LockDialogInput } from "../../player/lock-service.js";
+import { CapturedMediaStore } from "../../player/media/captured-media.js";
+import { rebuildRecordedSession } from "../../player/debug/debug-export.js";
+import { DebugRecorder } from "../../player/debug/debug-recorder.js";
 import {
-  activePlayerRuntimeLock,
+  loadAge,
+  loadTlock,
+  readLock,
+  type LockServices,
+} from "../../player/encryption/content-lock.js";
+import { roundTimeMs } from "../../player/encryption/drand.js";
+import {
+  LockService,
+  type LockDialog,
+  type LockDialogInput,
+} from "../../player/encryption/lock-service.js";
+import {
   answerPlayerRuntimeLock,
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
   playerRuntimeSnapshot,
   restorePlayerRuntimeSession,
-  type PlayerRuntimeSession,
-} from "../../player/runtime-adapter.js";
-import { bytesFromBase64 } from "../../player/stored-files.js";
+} from "../../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
+import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
+import type { PlayerDiagnostic } from "../../player/media/session-camera.js";
+import { activePlayerRuntimeLock, type PlayerSession } from "../../player/runtime/runtime-view.js";
+import { bytesFromBase64 } from "../../player/media/stored-files.js";
 import type { SerializableRuntimeValue } from "../../src/index.js";
 import {
   fromBase64,
@@ -24,6 +35,24 @@ import {
   sshIdentity,
   x25519Identity,
 } from "../helpers/player/age-keyholder.js";
+import { hatch, inProcessBridge, introduced } from "../helpers/in-process-bridge.js";
+import { serviceSection } from "../helpers/service-section.js";
+import { loadPlayerModule } from "../helpers/player-modules.js";
+import { preparedSource, type PlanStart } from "../helpers/prepared-plan.js";
+import {
+  loadTopology,
+  rerunRegistry,
+  TOPOLOGIES,
+  topologyBridge,
+  until,
+  type Topology,
+} from "../helpers/player/worker-topology.js";
+
+// The engine's host the Player's sessions live in, as in production until the L5 series activates the Worker.
+let bridge: PlayerBridge;
+before(async () => {
+  bridge = await inProcessBridge();
+});
 
 /*
  * The Player's lock service (V30 §13): it answers each lock step with real locks, presents the lock and unlock dialogs,
@@ -62,10 +91,18 @@ function relays(down: () => boolean): typeof fetch {
 
 /** A Player around one session: it services lock steps and records the dialogs it shows. */
 class Harness {
-  session: PlayerRuntimeSession;
+  session: PlayerSession;
+  /** The published session's generation; a test that replaces the session advances it. */
+  generation = 1;
+  /** Runs when the service reads the published session, as it does first in each service. */
+  onSession: (() => void) | null = null;
+  /** Whether the Player holds the session from its services for now, as during a paused random draw. */
+  held = false;
+  /** Starts a new session of the same script under a new generation, as Start or Debug's rewind does. */
+  readonly replace: () => void;
   readonly media: CapturedMediaStore;
   readonly dialogs: ({ readonly dialog: LockDialog; readonly busy: boolean } | null)[] = [];
-  readonly diagnostics: unknown[] = [];
+  readonly diagnostics: PlayerDiagnostic[] = [];
   relaysDown = false;
   /** The device clock, which a test may move on. */
   nowMs = NOW_MS;
@@ -82,14 +119,28 @@ class Harness {
       readonly recorder?: DebugRecorder;
       /** Whether the service starts at once; a test may first answer a step itself. */
       readonly start?: boolean;
+      /** The engine's host, the shared in-process one by default. */
+      readonly bridge?: PlayerBridge;
+      /** Sees each request the service's sections post, right before it is posted. */
+      readonly onSend?: (op: string, args: unknown) => void;
     } = {},
   ) {
+    const host = options.bridge ?? bridge;
     this.media = options.media ?? new CapturedMediaStore(null, urls, "locks");
-    this.session = createPlayerRuntimeSession(source, {
-      wallClockMs: NOW_MS,
-      storedFiles: options.files ?? [],
-      ...(options.recorder ? { recorder: options.recorder } : {}),
-    });
+    const start = () =>
+      introduced(
+        host,
+        createPlayerRuntimeSession(source, {
+          wallClockMs: NOW_MS,
+          storedFiles: options.files ?? [],
+          ...(options.recorder ? { recorder: options.recorder } : {}),
+        }),
+      );
+    this.session = start();
+    this.replace = () => {
+      this.generation += 1;
+      this.session = start();
+    };
     const services: LockServices = {
       tlock: loadTlock,
       age: loadAge,
@@ -97,13 +148,20 @@ class Harness {
       nowMs: () => this.nowMs,
     };
     this.service = new LockService({
-      session: () => this.session,
-      generation: () => 1,
-      observe: () => this.session,
-      publish: (next) => {
-        this.session = next;
-        this.service.request();
+      session: () => {
+        this.onSession?.();
+        return this.held ? null : this.session;
       },
+      generation: () => this.generation,
+      section: serviceSection(
+        host,
+        () => this.session,
+        (next) => {
+          this.session = next;
+          this.service.request();
+        },
+        options.onSend,
+      ),
       media: this.media,
       diagnostic: (diagnostic) => this.diagnostics.push(diagnostic),
       dialog: (dialog, busy) => this.dialogs.push(dialog === null ? null : { dialog, busy }),
@@ -136,7 +194,7 @@ class Harness {
     await this.until(
       () => this.session.state.status === "halted" || this.session.state.status === "failed",
     );
-    const snapshot = playerRuntimeSnapshot(this.session);
+    const snapshot = hatch(this.session, playerRuntimeSnapshot);
     assert.equal(snapshot.failure, null, JSON.stringify(snapshot.failure));
     return Object.fromEntries(
       snapshot.frames[0]!.bindings.map((binding) => [binding.name, binding.value]),
@@ -214,7 +272,10 @@ test("the lock dialog asks for each opener, suggests 7 days, locks with what the
   // The dialog stayed, busy, while the Player locked or opened with what was typed.
   assert.ok(player.dialogs.some((shown) => shown?.busy === true));
   // What the player typed reached neither the state nor an event.
-  const recorded = JSON.stringify([playerRuntimeSnapshot(player.session), player.session.events]);
+  const recorded = JSON.stringify([
+    hatch(player.session, playerRuntimeSnapshot),
+    player.session.events,
+  ]);
   assert.ok(!recorded.includes("secret words"));
   assert.ok(!recorded.includes("not the password 7"));
 });
@@ -236,10 +297,10 @@ test("the lock dialog's time lock may be switched off: the lock opens only with 
   const unlock = await player.dialog();
   assert.deepEqual(unlock.kind === "unlock" && [unlock.password, unlock.moments], [true, []]);
   assert.deepEqual(player.wakes, []);
-  const waiting = playerRuntimeSnapshot(player.session);
+  const waiting = hatch(player.session, playerRuntimeSnapshot);
   assert.deepEqual(
     playerRuntimeSnapshot(
-      restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(player.session)),
+      restorePlayerRuntimeSession(hatch(player.session, createPlayerRuntimeRestorePoint)),
     ),
     waiting,
   );
@@ -259,7 +320,7 @@ test("the lock dialog's time lock may be switched off: the lock opens only with 
       recording.anchorSnapshot,
       recording.operations,
     ).exportSnapshot(),
-    playerRuntimeSnapshot(player.session),
+    hatch(player.session, playerRuntimeSnapshot),
   );
 });
 
@@ -332,7 +393,10 @@ test("password: askPassword(...) asks in the password field, locks with the type
   const values = await player.ended();
   player.stop();
   assert.deepEqual([values.opened, values.wrong, values.timed], ["fielded", "closed", "closed"]);
-  const recorded = JSON.stringify([playerRuntimeSnapshot(player.session), player.session.events]);
+  const recorded = JSON.stringify([
+    hatch(player.session, playerRuntimeSnapshot),
+    player.session.events,
+  ]);
   assert.ok(!recorded.includes("field words"));
 });
 
@@ -363,7 +427,10 @@ test("an encrypt call's password field asks first, then the lock dialog for the 
   assert.equal(values.opened, "both");
   const read = readLock(bytesFromBase64(String(values.both))!);
   assert.deepEqual([read?.passwords.length, read?.times.length], [1, 1]);
-  const recorded = JSON.stringify([playerRuntimeSnapshot(player.session), player.session.events]);
+  const recorded = JSON.stringify([
+    hatch(player.session, playerRuntimeSnapshot),
+    player.session.events,
+  ]);
   assert.ok(!recorded.includes("both words"));
 });
 
@@ -378,11 +445,8 @@ test("a password field whose typed password was lost, as on a reload, asks again
   // Another Player answered the field and was reloaded: this one has nothing typed for the step after it.
   const field = activePlayerRuntimeLock(player.session.state)!;
   assert.deepEqual([field.phase, field.passwordField], ["ask", { hint: null }]);
-  player.session = answerPlayerRuntimeLock(
-    player.session,
-    field.actionId,
-    { kind: "submitted" },
-    player.media,
+  player.session = hatch(player.session, (held) =>
+    answerPlayerRuntimeLock(held, field.actionId, { kind: "submitted" }, player.media),
   ).session;
   player.service.request();
   const again = await player.dialog();
@@ -435,7 +499,10 @@ test("the lock dialog takes public keys, and the unlock dialog sends the unlock 
   player.stop();
   assert.equal(values.opened, "kept for her");
   // The key never reached the state or an event.
-  const recorded = JSON.stringify([playerRuntimeSnapshot(player.session), player.session.events]);
+  const recorded = JSON.stringify([
+    hatch(player.session, playerRuntimeSnapshot),
+    player.session.events,
+  ]);
   assert.ok(!recorded.includes(key.trim()));
 });
 
@@ -521,11 +588,8 @@ test("a password field with a written key asks again for a password the Player l
   );
   // Another Player answered the field and was reloaded.
   const field = activePlayerRuntimeLock(player.session.state)!;
-  player.session = answerPlayerRuntimeLock(
-    player.session,
-    field.actionId,
-    { kind: "submitted" },
-    player.media,
+  player.session = hatch(player.session, (held) =>
+    answerPlayerRuntimeLock(held, field.actionId, { kind: "submitted" }, player.media),
   ).session;
   player.service.request();
   const again = await player.dialog();
@@ -639,7 +703,7 @@ test("without WebCrypto, as on a Player page over plain HTTP, a lock fails with 
   );
   await player.until(() => player.session.state.status === "failed");
   player.stop();
-  const failure = playerRuntimeSnapshot(player.session).failure;
+  const failure = hatch(player.session, playerRuntimeSnapshot).failure;
   assert.equal(failure?.code, "TSR086");
 });
 
@@ -706,3 +770,535 @@ test("a time lock's open dialog offers Try again when its moment comes but the r
   assert.equal((await player.ended()).opened, "closed");
   player.stop();
 });
+
+test("what the player types in a dialog, and the Player's own objects, never reach the engine's host", async (context) => {
+  // Every message of the in-process backend, as it is posted, before cloning could change what it is.
+  const messages: unknown[] = [];
+  const clone = globalThis.structuredClone;
+  context.after(() => void (globalThis.structuredClone = clone));
+  globalThis.structuredClone = <T>(value: T, options?: StructuredSerializeOptions): T => {
+    if (typeof value === "object" && value !== null && "v" in value) messages.push(value);
+    return clone(value, options);
+  };
+  const typed = "typed words 7f3a";
+  const player = new Harness(
+    [
+      'let locked = encryptText("fielded", password: askPassword("Choose a code"), publicKey: false, timeLock: false)',
+      'let opened = decryptText(locked, password: askPassword("Your code?"), default: "closed")',
+      "exit",
+    ].join("\n"),
+    { bridge: await inProcessBridge() },
+  );
+  await player.dialog();
+  player.answer({ password: typed, timeLockMs: null });
+  await player.dialog();
+  player.answer({ password: typed, timeLockMs: null });
+  assert.equal((await player.ended()).opened, "fielded");
+  player.stop();
+  assert.ok(messages.some((message) => JSON.stringify(message).includes("answerLock")));
+  assert.equal(messages.filter((message) => JSON.stringify(message).includes(typed)).length, 0);
+  // Only plain data crosses: no Blob, stream track, key, function or other class instance.
+  const plain = (value: unknown): boolean => {
+    if (value === null || typeof value !== "object") return typeof value !== "function";
+    const prototype: unknown = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== Array.prototype && prototype !== null)
+      return false;
+    return Object.values(value).every(plain);
+  };
+  assert.ok(messages.every(plain));
+});
+
+for (const stops of [false, true])
+  test(`a locked file the store does not vouch for fails the step${stops ? ", unless the Player stopped while its reply came" : ""}`, async () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13]);
+    const media = new CapturedMediaStore(null, urls, "locks");
+    const photo = media.add("image", new Blob([png], { type: "image/png" })).reference;
+    // The store keeps the locked file but does not vouch for it.
+    media.holds = () => false;
+    const host = await inProcessBridge(stops ? 50 : undefined);
+    const sent: string[] = [];
+    const player: Harness = new Harness(
+      [
+        `let photo = "${photo}"`,
+        'let locked = encryptFile(photo, password: "p", publicKey: false, timeLock: false)',
+        "exit",
+      ].join("\n"),
+      {
+        media,
+        files: [photo],
+        bridge: host,
+        onSend: (op, args) => {
+          if (op !== "answerLock") return;
+          const answer =
+            typeof args === "object" && args !== null && "answer" in args ? args.answer : null;
+          sent.push(
+            typeof answer === "object" && answer !== null && "kind" in answer
+              ? String(answer.kind)
+              : "",
+          );
+          // The Player error stop while the refusal's reply is in transit: the store froze at once in-process, and the
+          // stop then resets the service in the same tick.
+          if (stops)
+            queueMicrotask(() => {
+              void host.halt(player.session);
+              player.service.reset();
+            });
+        },
+      },
+    );
+    await player.until(
+      () => sent.length > 0 && (stops || player.session.state.status !== "waiting"),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    player.stop();
+    const answers = sent;
+    assert.deepEqual(answers, stops ? ["locked"] : ["locked", "failed"]);
+    assert.deepEqual(
+      player.diagnostics.map((diagnostic) => diagnostic.code),
+      stops ? [] : ["lock-rejected"],
+    );
+    if (!stops) assert.equal(player.session.state.status, "failed");
+  });
+
+/**
+ * Lets queued service tasks and their microtasks run out: reading a lock and loading its code, once loaded, wait for no
+ * I/O, so a few zero-delay task turns settle them.
+ */
+async function settled(): Promise<void> {
+  for (let turn = 0; turn < 5; turn++) await new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/** A lock that opens with "p" or, 7 days from now, by its time lock, as its Base64 text. */
+async function timedLock(): Promise<string> {
+  const maker = new Harness(
+    'let locked = encryptText("x", password: "p", publicKey: false, timeLock: getAbsoluteDateTime() + 7 days)\nexit',
+  );
+  const { locked } = await maker.ended();
+  maker.stop();
+  return String(locked);
+}
+
+test("a lock's unlock dialog whose preparation was retired never shows, nor waits for its time lock", async () => {
+  // Its unlock dialog shows the time lock's moment and waits for it. Made once; each run below only reads it.
+  const source = `let opened = decryptText("${await timedLock()}", default: "closed")\nexit`;
+  const control = new Harness(source);
+  assert.equal((await control.dialog()).kind, "unlock");
+  assert.equal(control.wakes.length, 1, "the uninterrupted dialog waits for its time lock");
+  control.stop();
+  // Retire the preparation after `hops` microtasks of the service's task: at every await of the preparation in turn.
+  const microtasks = async (hops: number) => {
+    for (let hop = 0; hop < hops; hop++) await Promise.resolve();
+  };
+  for (const retire of ["reset", "stop", "replace"] as const) {
+    let reached = false;
+    for (let hops = 0; hops < 400 && !reached; hops++) {
+      const player = new Harness(source, { start: false });
+      let retired = -1;
+      // Counted from the service's first read of the session at the step's ask, inside the task that prepares its dialog.
+      player.onSession = () => {
+        if (activePlayerRuntimeLock(player.session.state)?.phase !== "ask") return;
+        player.onSession = null;
+        void microtasks(hops).then(() => {
+          // Once the dialog showed before the retirement, later hops only retire a shown dialog, which reset handles.
+          if (player.dialogs.some((shown) => shown !== null)) reached = true;
+          retired = player.dialogs.length;
+          if (retire === "reset") player.service.reset();
+          else if (retire === "stop") player.service.stop();
+          else {
+            // A replacing session, published and serviced as the Player's watch does, without a reset.
+            player.replace();
+            player.service.request();
+          }
+        });
+      };
+      player.service.request();
+      await settled();
+      assert.ok(retired >= 0);
+      // The retired preparation's own dialog, of the step's key before the retirement. A replacement may present its
+      // own dialog, of the new generation's key, as the next service does.
+      const after = player.dialogs
+        .slice(retired)
+        .filter((shown) => shown !== null && shown.dialog.key.startsWith("1:"));
+      if (!reached) {
+        assert.deepEqual(after, [], `${retire} after ${hops} microtasks: no retired dialog`);
+        if (retire === "replace") {
+          // The replacing session's own step presents, and waits for its time lock.
+          const own = player.dialogs
+            .slice(retired)
+            .filter((shown) => shown?.dialog.key.startsWith("2:"));
+          assert.equal(own.length, 1, `replace after ${hops} microtasks: the new session's dialog`);
+          assert.equal(player.wakes.length, 1, `replace after ${hops} microtasks: its wake`);
+        } else assert.equal(player.wakes.length, 0, `${retire} after ${hops} microtasks: no wake`);
+      }
+      player.stop();
+    }
+    assert.ok(reached, `${retire}: the sweep reached the shown dialog`);
+  }
+});
+
+/** A Player whose lock file is read only when the test releases each read made while the step asks. */
+async function heldFileReads(locked: string) {
+  const media = new CapturedMediaStore(null, urls, "locks");
+  const file = media.add("file", new Blob([bytesFromBase64(locked)!])).reference;
+  const reads: (() => void)[] = [];
+  const read = media.read.bind(media);
+  let player: Harness | null = null;
+  media.read = (reference) => {
+    const asking = activePlayerRuntimeLock(player!.session.state)?.phase === "ask";
+    if (!asking) return read(reference);
+    return new Promise((resolve) => reads.push(() => void read(reference).then(resolve)));
+  };
+  player = new Harness(`let opened = decryptFile("${file}", default: null)\nexit`, {
+    media,
+    files: [file],
+  });
+  const dialogs = () => player!.dialogs.filter((shown) => shown !== null && !shown.busy);
+  return { player, reads, dialogs };
+}
+
+test("a retired preparation that finishes after a newer one began neither shows nor clears the newer one", async () => {
+  const { player, reads, dialogs } = await heldFileReads(await timedLock());
+  await player.until(() => reads.length === 1);
+  // The first preparation is retired while its read is pending, and a newer one of the same step starts its own.
+  player.service.reset();
+  player.service.request();
+  await player.until(() => reads.length === 2);
+  reads[0]!();
+  await settled();
+  assert.deepEqual(dialogs(), [], "the retired preparation shows nothing");
+  assert.equal(player.wakes.length, 0);
+  reads[1]!();
+  await player.until(() => dialogs().length > 0);
+  await settled();
+  assert.equal(dialogs().length, 1, "the newer preparation shows its dialog once");
+  assert.equal(player.wakes.length, 1, "and waits for its time lock");
+  player.stop();
+});
+
+test("a session held while its unlock dialog is prepared presents it once published again", async () => {
+  const { player, reads, dialogs } = await heldFileReads(await timedLock());
+  await player.until(() => reads.length === 1);
+  // As during a paused random draw: the same session and step, held from the services, then published again.
+  player.held = true;
+  reads[0]!();
+  await settled();
+  assert.deepEqual(dialogs(), []);
+  player.held = false;
+  player.service.request();
+  await player.until(() => reads.length === 2);
+  reads[1]!();
+  await player.until(() => dialogs().length > 0);
+  assert.equal(dialogs()[0]!.dialog.kind, "unlock");
+  assert.equal(player.wakes.length, 1);
+  player.stop();
+});
+
+/*
+ * The lock preload (L5i.7, F2): while a script that locks or opens is serviced, the Player loads the lock code its
+ * `planMetadata` reply asks for; a reply that arrives for a pair no longer serviced, after the page ended, or not at all
+ * loads nothing. The loaders are the injected `lockServices`, counted per call.
+ */
+
+/** What the session services read of the Player's session composable (`usePlayerSessionServices.ts`). */
+interface ServicesHost {
+  readonly camera: { answer(): null };
+  readonly capturedMedia: CapturedMediaStore;
+  readonly reportDiagnostic: (diagnostic: PlayerDiagnostic) => void;
+  readonly servicedSession: Readonly<Ref<PlayerSession | null>>;
+  readonly generation: Readonly<Ref<number>>;
+  readonly serviceSection: () => Promise<null>;
+  readonly options: { readonly lockServices?: LockServices };
+}
+let usePlayerSessionServices: (host: ServicesHost) => object;
+/** The real composable, as far as a lock's dialog and the shown session go. */
+interface LockingPlayer {
+  readonly session: Readonly<Ref<PlayerSession | null>>;
+  readonly hostError: Readonly<Ref<string | null>>;
+  readonly bridge: Promise<PlayerBridge>;
+  prepare(create: PlanStart): void;
+  activate(): Promise<void>;
+  readonly lock: {
+    readonly dialog: Readonly<Ref<{ readonly dialog: LockDialog; readonly busy: boolean } | null>>;
+    submit(input: LockDialogInput): void;
+  };
+}
+let usePlayerSession: (options: {
+  readonly bridge: Promise<PlayerBridge>;
+  readonly debugHistorySpill: () => Promise<null>;
+  readonly lockServices?: LockServices;
+}) => LockingPlayer;
+before(async () => {
+  await loadTopology();
+  const services = await loadPlayerModule("player/vue/src/session/usePlayerSessionServices.ts");
+  const session = await loadPlayerModule("player/vue/src/session/usePlayerSession.ts");
+  assert.equal(typeof services.usePlayerSessionServices, "function");
+  assert.equal(typeof session.usePlayerSession, "function");
+  // EVIDENCE: validation: checked as a function above; Vite loaded the real source module, and these are its host APIs.
+  usePlayerSessionServices = services.usePlayerSessionServices as typeof usePlayerSessionServices;
+  // EVIDENCE: validation: checked as a function above, from the same bundle.
+  usePlayerSession = session.usePlayerSession as typeof usePlayerSession;
+});
+
+/** The page globals the composable reads, for the test. */
+function pageSurface(context: TestContext): void {
+  const globals = {
+    document: Object.assign(new EventTarget(), { visibilityState: "visible" }),
+    window: new EventTarget(),
+    Audio: class {
+      src = "";
+      play = async () => {};
+      pause() {}
+      load() {}
+      removeAttribute() {}
+    },
+  };
+  for (const [name, value] of Object.entries(globals)) {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, name);
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+    context.after(() => {
+      if (previous) Object.defineProperty(globalThis, name, previous);
+      else Reflect.deleteProperty(globalThis, name);
+    });
+  }
+}
+
+/** The real loaders, counted per call. */
+function countedLoaders(): { readonly services: LockServices; readonly calls: string[] } {
+  const calls: string[] = [];
+  return {
+    calls,
+    services: {
+      tlock: () => (calls.push("tlock"), loadTlock()),
+      age: () => (calls.push("age"), loadAge()),
+      fetch: relays(() => false),
+      nowMs: () => NOW_MS,
+    },
+  };
+}
+
+/** Counts the `planMetadata` replies `bridge`'s client delivers, rejections included. */
+function metadataReplies(context: TestContext, bridge: PlayerBridge): () => number {
+  let replies = 0;
+  const request = bridge.client.request.bind(bridge.client);
+  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+    const reply = request(...args);
+    return args[0] === "planMetadata" ? reply.finally(() => (replies += 1)) : reply;
+  });
+  return () => replies;
+}
+
+/** A session of `script` started on `bridge`, at its first interaction. */
+async function startedAt(bridge: PlayerBridge, script: string): Promise<PlayerSession> {
+  return bridge.start(await preparedSource(bridge, script), { wallClockMs: NOW_MS }, false);
+}
+
+const SCRIPT_NAMES = ["no lock", "locks", "locks and encrypts"] as const;
+/** Each script pauses at a choice before its lock step, so no service runs one. */
+const PRELOAD_SCRIPTS: Record<(typeof SCRIPT_NAMES)[number], string> = {
+  "no lock": 'let pick = askChoice "Go"\nexit',
+  locks: 'let pick = askChoice "Go"\nsay decryptText("x", password: "p", default: "closed")\nexit',
+  "locks and encrypts":
+    'let pick = askChoice "Go"\nlet locked = encryptText("x", password: "p", publicKey: false, timeLock: false)\nexit',
+};
+/** What the preload of each script loads once its reply is taken. */
+const PRELOADED: Record<(typeof SCRIPT_NAMES)[number], readonly string[]> = {
+  "no lock": [],
+  locks: ["tlock"],
+  "locks and encrypts": ["tlock", "age"],
+};
+const PRELOAD_REPLIES = [
+  "current",
+  "another plan shown",
+  "another connection shown",
+  "unmounted",
+  "lost",
+] as const;
+const preloadCase = (
+  script: (typeof SCRIPT_NAMES)[number],
+  reply: (typeof PRELOAD_REPLIES)[number],
+): string => `preload: ${script}, ${reply}`;
+const LOCK_RERUN = rerunRegistry<string>({
+  ...Object.fromEntries(
+    SCRIPT_NAMES.flatMap((script) =>
+      PRELOAD_REPLIES.map((reply) => [preloadCase(script, reply), TOPOLOGIES]),
+    ),
+  ),
+  "real composable lock": TOPOLOGIES,
+  "lock before the preload's reply": TOPOLOGIES,
+  "preload's reply before the lock is answered": TOPOLOGIES,
+});
+
+for (const script of SCRIPT_NAMES)
+  for (const reply of PRELOAD_REPLIES)
+    LOCK_RERUN.rows(
+      preloadCase(script, reply),
+      `the lock preload of a script with ${script}, its reply ${reply === "current" ? "taken while its pair is serviced" : `arriving with ${reply}`}, loads ${reply === "current" ? `what the script needs (${PRELOADED[script].join(", ") || "nothing"})` : "nothing"}`,
+      async (context, topology, end) => {
+        const transport = await topologyBridge(context, topology, { delayMs: 20 });
+        transport.assertTopology();
+        const replies = metadataReplies(context, transport.bridge);
+        const serviced = await startedAt(transport.bridge, PRELOAD_SCRIPTS[script]);
+        // The next plan of the same connection, and the first of another, whose token equals the serviced one's.
+        const otherPlan =
+          reply === "another plan shown"
+            ? await startedAt(transport.bridge, PRELOAD_SCRIPTS["no lock"])
+            : null;
+        const other =
+          reply === "another connection shown" ? await topologyBridge(context, topology) : null;
+        const otherConnection =
+          other === null ? null : await startedAt(other.bridge, PRELOAD_SCRIPTS["no lock"]);
+        if (otherConnection !== null) assert.equal(otherConnection.planToken, serviced.planToken);
+        const otherReplies = other === null ? () => 0 : metadataReplies(context, other.bridge);
+        const loaders = countedLoaders();
+        const servicedSession = shallowRef<PlayerSession | null>(null);
+        const scope = effectScope();
+        scope.run(() =>
+          usePlayerSessionServices({
+            camera: { answer: () => null },
+            capturedMedia: new CapturedMediaStore(null, urls, "locks"),
+            reportDiagnostic: (diagnostic) => assert.fail(diagnostic.message),
+            servicedSession,
+            generation: shallowRef(1),
+            serviceSection: async () => null,
+            options: { lockServices: loaders.services },
+          }),
+        );
+        context.after(() => scope.stop());
+        transport.hold("planMetadata");
+        servicedSession.value = serviced;
+        await transport.held();
+        if (reply === "another plan shown") servicedSession.value = otherPlan;
+        if (reply === "another connection shown") servicedSession.value = otherConnection;
+        if (reply === "unmounted") scope.stop();
+        if (reply === "lost") await transport.lose();
+        transport.release();
+        // Each `planMetadata` reply delivered, the preload's own callback runs next.
+        const expected = reply === "another plan shown" ? 2 : 1;
+        await until(
+          () => replies() === expected && otherReplies() === (other === null ? 0 : 1),
+          "the preload's replies",
+          "host",
+        );
+        await settled();
+        assert.deepEqual(loaders.calls, reply === "current" ? PRELOADED[script] : []);
+        return end();
+      },
+    );
+
+/** Waits, in short real-time turns, until `check` holds: a lock's key derivation takes longer than a reply. */
+async function waitFor(check: () => boolean, label: string): Promise<void> {
+  const deadline = Date.now() + 20_000;
+  while (!check()) {
+    assert.ok(Date.now() < deadline, `never: ${label}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+/** Holds the outcome of `bridge`'s `planMetadata` requests from the caller until `release`; each is posted when made. */
+function heldMetadata(context: TestContext, bridge: PlayerBridge) {
+  let release = () => {};
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  let delivered = 0;
+  const request = bridge.client.request.bind(bridge.client);
+  context.mock.method(bridge.client, "request", (...args: Parameters<typeof request>) => {
+    const reply = request(...args);
+    return args[0] === "planMetadata"
+      ? gate.then(() => reply).finally(() => (delivered += 1))
+      : reply;
+  });
+  return { release, delivered: () => delivered };
+}
+
+/** The lock dialog asks for a password; the script then opens its lock with it. */
+const ASKS_A_PASSWORD = [
+  'let locked = encryptText("chosen", password: true, publicKey: false, timeLock: false)',
+  'say decryptText(locked, password: "words", default: "closed"), instant',
+  "exit",
+].join("\n");
+
+/** The real composable on `topology`, started on `ASKS_A_PASSWORD`, its lock asked through its own dialog. */
+async function lockingPlayer(context: TestContext, topology: Topology) {
+  pageSurface(context);
+  const transport = await topologyBridge(context, topology);
+  transport.assertTopology();
+  const loaders = countedLoaders();
+  const scope = effectScope();
+  const player = scope.run(() =>
+    usePlayerSession({
+      bridge: Promise.resolve(transport.bridge),
+      debugHistorySpill: async () => null,
+      lockServices: loaders.services,
+    }),
+  )!;
+  context.after(() => scope.stop());
+  const start = async () => {
+    player.prepare({
+      plan: await preparedSource(player.bridge, ASKS_A_PASSWORD),
+      options: () => ({ wallClockMs: NOW_MS }),
+    });
+    await player.activate();
+  };
+  /** Answers the dialog with a password and waits for the script to say what it opened. */
+  const answer = async () => {
+    await waitFor(() => player.lock.dialog.value?.busy === false, "the lock dialog");
+    const dialog = player.lock.dialog.value!.dialog;
+    assert.deepEqual(dialog.kind === "lock" && dialog.choices, ["password"]);
+    player.lock.submit({ password: "words", timeLockMs: null });
+    await waitFor(() => player.session.value?.state.status === "halted", "the script's end");
+    assert.deepEqual(
+      player.session.value?.transcriptEntries.map((entry) => entry.text),
+      ["chosen"],
+    );
+  };
+  return { transport, player, loaders, start, answer };
+}
+
+LOCK_RERUN.rows(
+  "real composable lock",
+  "a script's lock asked through the composable's dialog locks with the password the player gave",
+  async (context, topology, end) => {
+    const { player, start, answer } = await lockingPlayer(context, topology);
+    await start();
+    await answer();
+    assert.equal(player.hostError.value, null);
+    return end();
+  },
+);
+
+LOCK_RERUN.rows(
+  "lock before the preload's reply",
+  "a lock asked and answered while the preload's reply is held completes, and the late reply only preloads",
+  async (context, topology, end) => {
+    const { transport, player, loaders, start, answer } = await lockingPlayer(context, topology);
+    const metadata = heldMetadata(context, transport.bridge);
+    await start();
+    await answer();
+    assert.equal(metadata.delivered(), 0, "the preload's reply is still held");
+    const before = loaders.calls.length;
+    metadata.release();
+    await waitFor(() => metadata.delivered() === 1, "the preload's reply");
+    await settled();
+    // The injected loaders are plain functions, so the preload calls them again; the modules are evaluated once.
+    assert.deepEqual(loaders.calls.slice(before), ["tlock", "age"]);
+    assert.equal(player.lock.dialog.value, null, "no dialog again");
+    assert.equal(player.session.value?.state.status, "halted");
+    assert.equal(player.hostError.value, null);
+    return end();
+  },
+);
+
+LOCK_RERUN.rows(
+  "preload's reply before the lock is answered",
+  "the preload's reply let go as the session shows, before the lock's dialog is answered, changes nothing",
+  async (context, topology, end) => {
+    const { transport, player, start, answer } = await lockingPlayer(context, topology);
+    const metadata = heldMetadata(context, transport.bridge);
+    await start();
+    assert.ok(player.session.value !== null, "the session shows");
+    metadata.release();
+    await answer();
+    await waitFor(() => metadata.delivered() === 1, "the preload's reply");
+    assert.equal(player.hostError.value, null);
+    return end();
+  },
+);

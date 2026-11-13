@@ -10,11 +10,15 @@ import {
   type DebugCategory,
   type DebugExportCandidate,
   type DebugExportChoices,
-} from "../../player/debug-export-assembly.js";
-import { debugExportFile, parseDebugExport, replayDebugExport } from "../../player/debug-export.js";
-import { DebugRecorder } from "../../player/debug-recorder.js";
+} from "../../player/debug/debug-export-assembly.js";
 import {
-  activePlayerRuntimeLock,
+  debugExportFile,
+  parseDebugExport,
+  replayDebugExport,
+} from "../../player/debug/debug-export.js";
+import { DebugRecorder } from "../../player/debug/debug-recorder.js";
+import { prepareExport } from "../../player/engine-bridge/recording/export-replay.js";
+import {
   answerPlayerRuntimeLock,
   activatePlayerRuntimeButton,
   advancePlayerRuntimeTime,
@@ -23,16 +27,20 @@ import {
   applyPlayerRuntimeStorageEdit,
   beginPlayerRuntimeRecording,
   completePlayerRuntimeStorageWrite,
-  createPlayerRuntimeSession,
-  pendingPlayerRuntimeStorageWrite,
-  playerRuntimeForeground,
+  observePlayerRuntimeTime,
   playerRuntimeSnapshotJson,
   restorePlayerRuntimeSessionAt,
   selectPlayerRuntimeChoice,
   submitPlayerRuntimeComposer,
   type PlayerRuntimeSession,
   playerRuntimeSnapshot,
-} from "../../player/runtime-adapter.js";
+} from "../../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
+import {
+  activePlayerRuntimeLock,
+  pendingPlayerRuntimeStorageWrite,
+  playerRuntimeForeground,
+} from "../../player/runtime/runtime-view.js";
 
 const reference = "captured-media:11111111-1111-4111-8111-111111111111:1";
 const photoBytes = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 1, 2, 3]);
@@ -77,17 +85,25 @@ function candidate(
   recorder: DebugRecorder,
   read: () => Promise<Uint8Array<ArrayBuffer> | null> = async () => photoBytes,
 ): DebugExportCandidate {
+  const recording = recorder.recording();
+  const snapshot = playerRuntimeSnapshot(session);
   const frozen: Omit<DebugExportCandidate, "photos"> = {
     build: { commit: "abc", dirty: false, mode: "production", appVersion: "0.0.0" },
     package: { id: "development-package:test", version: null },
+    release: () => {},
+    // What the host prepares from the export's ticket (`exportPrepare`).
+    prepare: (replay) =>
+      prepareExport(
+        { plan: recording?.plan ?? session.plan, session: { snapshot }, recording },
+        replay,
+      ),
     session: {
-      plan: session.plan,
-      snapshot: playerRuntimeSnapshot(session),
+      snapshot,
       failure: session.state.failure,
       events: session.events,
       transcriptEntries: session.transcriptEntries,
     },
-    recording: recorder.recording(),
+    recording,
     hostError: null,
     editedWhileDebugging: null,
     rewoundWhileDebugging: null,
@@ -429,14 +445,56 @@ test("credential- and path-like text is removed from readable sections, and repl
   assert.ok(JSON.stringify(exported.sections["answers"]).includes("[removed]"));
 });
 
+test("replay data whose anchor cannot be checkpointed fails the export, unless its text already left it out", async (context) => {
+  // V8 cannot enumerate an array past its limit; a list of 1,500 stands for such a list. The recorder's log rolls over
+  // at its call limit while the list is full, then the script empties it: the current state is checkpointed, the
+  // anchor is not.
+  const ownKeys = Reflect.ownKeys;
+  context.mock.method(Reflect, "ownKeys", (target: Parameters<typeof Reflect.ownKeys>[0]) => {
+    if (Array.isArray(target) && target.length > 1_000)
+      throw new RangeError("Too many properties to enumerate");
+    return ownKeys(target);
+  });
+  const exported = async (answer: string) => {
+    const recorder = new DebugRecorder();
+    let session = createPlayerRuntimeSession(
+      'let xs = (1..=1500).toList()\nlet name = askText "Name"\nxs = []\nwait 1 s\nexit',
+      { recorder, wallClockMs: 0 },
+    );
+    for (let atMs = 1; atMs <= 2047; atMs++)
+      session = observePlayerRuntimeTime(session, atMs).session;
+    session = answeredByPlayerInput(session, "send", () =>
+      submitPlayerRuntimeComposer(session, answer),
+    )!.session;
+    const frozen = candidate(session, recorder);
+    const prepared = await frozen.prepare(true);
+    assert.deepEqual(
+      { role: prepared.checkpointRole, anchorRefused: prepared.anchorRefused },
+      { role: "current", anchorRefused: true },
+    );
+    return assembleDebugExport(frozen, all(frozen));
+  };
+  // Credential-like text leaves the replay data out first, so the export is written without it.
+  const left = await exported("Bearer abcdefghijklmnopqrstuvwx");
+  assert.equal(left.exported.replay, null);
+  assert.ok(left.exported.omissions.some((omission) => /looks like a credential/.test(omission)));
+  assert.equal(parseDebugExport(await fileText(left.exported)).replay, null);
+  // Replay data kept with that anchor fails the export, as its file could not be written with a valid anchor.
+  await assert.rejects(exported("Ann"), /The replay anchor could not be checkpointed\./);
+});
+
 test("a state that cannot be checkpointed is exported as the last good state, which replays", async () => {
   const recorder = new DebugRecorder();
   const session = createPlayerRuntimeSession('let name = askText "Name"\nexit', { recorder });
   const recording = recorder.recording()!;
+  // A Player defect left a state the engine's validation refuses.
+  const broken = { ...recording, endSnapshot: { ...recording.endSnapshot!, nextInstruction: -1 } };
+  const base = candidate(session, recorder);
   const frozen: DebugExportCandidate = {
-    ...candidate(session, recorder),
-    // A Player defect left a state the engine's validation refuses.
-    recording: { ...recording, endSnapshot: { ...recording.endSnapshot!, nextInstruction: -1 } },
+    ...base,
+    recording: broken,
+    prepare: (replay) =>
+      prepareExport({ plan: broken.plan, session: base.session, recording: broken }, replay),
     hostError: "TypeError",
   };
   const { exported } = await assembleDebugExport(frozen, all(frozen));

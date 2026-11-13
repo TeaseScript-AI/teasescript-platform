@@ -1,0 +1,358 @@
+// The playback entry: loading, running, saving, restoring and inspecting a compiled plan. It loads no compiler, parser,
+// lexer or language-tooling module (`tests/player/playback-entry.test.ts`); `index.ts`, the authoring entry, adds those.
+export {
+  cloneMessageMarkup,
+  escapeMarkup,
+  isMessageMarkup,
+  messageMarkupVisibleText,
+  parseMessageMarkup,
+  type MessageMarkup,
+  type MessageMarkupBlock,
+  type MessageMarkupHeading,
+  type MessageMarkupLine,
+  type MessageMarkupLineEnding,
+  type MessageMarkupList,
+  type MessageMarkupListItem,
+  type MessageMarkupParagraph,
+  type MessageMarkupQuote,
+  type MessageMarkupSpan,
+} from "./message-markup.js";
+export {
+  INTERACTION_LIMITS_VERSION,
+  INTERACTION_WHITESPACE_CLASSIFICATION,
+  MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
+  MAX_INTERACTION_OPTION_ENTRIES,
+  MAX_INTERACTION_STRING_UTF8_BYTES,
+  interactionUtf8ByteLength,
+} from "./interaction-limits.js";
+export { normalizeTagName, type Tag } from "./tags.js";
+export {
+  readImageXmpKeywords,
+  readXmpPacketKeywords,
+  type XmpKeywordsResult,
+} from "./xmp-keywords.js";
+export { MAIN_FILE_PATH, type UnreadablePackageFile } from "./project-paths.js";
+export {
+  INSTRUCTION_PLAN_FORMAT,
+  INSTRUCTION_PLAN_VERSION,
+  type ArgumentPlan,
+  type AssignmentTargetPlan,
+  type ExpressionPlan,
+  type Instruction,
+  type WaitInstruction,
+  type InteractionInstruction,
+  type PrepareInteractionSpeakerInstruction,
+  type InteractionKind,
+  type LockCall,
+  type InteractionResultDomain,
+  type InteractionUiPayload,
+  type InteractionChoiceOption,
+  type InteractionAccessibleName,
+  type PreparedInteractionUiPayload,
+  type PreparedInteractionChoiceValue,
+  type InstructionPlan,
+  type PlanFile,
+  type PlanSourceLocation,
+  type LoopControlInstruction,
+  type LoopStartInstruction,
+  type RangeExpressionPlan,
+  type CompiledFunctionDefinition,
+  type CompiledFunctionParameter,
+  type CallFunctionInstruction,
+  type CallArgumentPlan,
+  type TemporaryExpressionPlan,
+} from "./plan/model.js";
+export {
+  validateInstructionPlan,
+  type PlanValidationError,
+  type PlanValidationResult,
+} from "./plan/validation.js";
+export { loadInstructionPlan, type InstructionPlanLoad } from "./plan/load.js";
+export {
+  SOURCE_DEBUG_SIDECAR_FORMAT,
+  SOURCE_DEBUG_SIDECAR_VERSION,
+  loadSourceDebugSidecar,
+  type SourceDebugFile,
+  type SourceDebugSidecar,
+  type SourceDebugSidecarLoad,
+  type SourceDebugSpan,
+  type SourceDebugToken,
+} from "./runtime/debug/source-sidecar.js";
+export type { LanguageTokenClass } from "./token-classes.js";
+export type { RuntimeErrorInfo } from "./runtime/errors.js";
+export type { RuntimeWarningInfo } from "./runtime/warnings.js";
+export {
+  inspectRuntimeState,
+  type InvalidRuntimeStateInspection,
+  type RuntimeActionInspection,
+  type RuntimeInspectionError,
+  type RuntimeInspectionResult,
+  type RuntimeSettlementInspection,
+  type RuntimeStateInspection,
+} from "./runtime/debug/inspection.js";
+export type {
+  ActionCompletedEvent,
+  ActionRequestedEvent,
+  PlayerTranscriptEvent,
+  ExitEvent,
+  DeveloperWarningEvent,
+  InterpreterEvent,
+  OutputSpeaker,
+  PermanentButtonPressedEvent,
+  RuntimeFailureEvent,
+  SayEvent,
+  ScriptStorageEditedEvent,
+} from "./runtime/events.js";
+export { interpreterEventProblem } from "./runtime/event-validation.js";
+export {
+  validateScriptStorageEntries,
+  type RuntimeScriptStorageEntrySnapshot,
+} from "./runtime/host-data/script-storage.js";
+export {
+  executeInstruction,
+  resumeRandomDraw,
+  run,
+  RuntimeDataError,
+  stepToEvent,
+  type RuntimeBuiltinFunction,
+  type RuntimeCapabilities,
+  type RuntimeCapabilityCall,
+  type RuntimeOperationResult,
+  type RuntimeRunOptions,
+} from "./runtime/engine.js";
+export type {
+  RuntimeInstructionObserver,
+  RuntimeInstructionTrace,
+} from "./runtime/debug/instruction-trace.js";
+export {
+  randomDrawAlternatives,
+  type RandomDrawAlternatives,
+} from "./runtime/random/random-alternatives.js";
+export {
+  checkedOutcome,
+  listRandomSites,
+  pendingRandomDraw,
+  RANDOM_DRAW_KINDS,
+  replayRandomChoices,
+  type RandomChoiceReceipt,
+  type RandomControlFilter,
+  type RandomControlOptions,
+  type RandomDecision,
+  type RandomDecisionRefusal,
+  type RandomDrawKind,
+  type RandomDrawPendingOutcome,
+  type RandomDrawRequest,
+  type RandomDrawResolutionOutcome,
+  type RandomDrawView,
+  type RandomNatural,
+  type RandomOutcome,
+  type RandomSite,
+  type RandomSupport,
+  type RuntimePendingRandomDrawSnapshot,
+  type RuntimeRandomControlSnapshot,
+} from "./runtime/random/random-control.js";
+export {
+  createFreshRuntimeSession,
+  createRuntimeSession,
+  createTaggedRuntimeSession,
+  deserializeRuntimeSession,
+  restoreRuntimeSession,
+  RuntimeSessionError,
+  type RuntimeSession,
+  type RuntimeSessionCall,
+  type RuntimeSessionOptions,
+  type RuntimeSessionOutcomeResult,
+  type RuntimeSessionResult,
+  type RuntimeSessionRunOptions,
+  type RuntimeSessionScopePreview,
+  type RuntimeSessionVariablePreview,
+  type RuntimeSessionVariablePreviews,
+  type RuntimeSessionView,
+  type TaggedRuntimeSnapshot,
+} from "./runtime/session.js";
+export {
+  completeAction,
+  type ActionCompletionOptions,
+} from "./runtime/operations/complete-action.js";
+export type { CapturedMediaAdmission } from "./runtime/actions/capture.js";
+export { textSha256 } from "./runtime/values/sha256.js";
+export {
+  fileType,
+  OCTET_STREAM,
+  storedFileKind,
+  type StoredFileKind,
+} from "./runtime/host-data/stored-files.js";
+export {
+  updateInteraction,
+  type InteractionUpdateOutcome,
+} from "./runtime/operations/update-interaction.js";
+export {
+  observeTime,
+  runtimeTimedWork,
+  type MediaProgressReport,
+  type RuntimeTimedWork,
+} from "./runtime/operations/observe-time.js";
+export {
+  RuntimeDebugContext,
+  runtimeDebugPreview,
+  type RuntimeDebugDependency,
+  type RuntimeDebugLocation,
+  type RuntimeDebugRandomOperation,
+  type RuntimeDebugRecord,
+  type RuntimeDebugRecordDetail,
+  type RuntimeDebugRecordKind,
+  type RuntimeDebugTraceOptions,
+  type RuntimeDebugTraceOrigin,
+  type RuntimeDebugTraceStatus,
+  type RuntimeDebugUnrecordedReason,
+} from "./runtime/debug/debug-trace.js";
+export { RUNTIME_DEBUG_TRACE_LIMITS } from "./runtime/debug/debug-trace-limits.js";
+export {
+  recordContinueCapture,
+  type ContinueCaptureOutcome,
+} from "./runtime/operations/continue-capture.js";
+export {
+  applyExternalStorageEdit,
+  type ExternalStorageEditOutcome,
+} from "./runtime/operations/external-storage-edit.js";
+export { setDebugMode, type DebugModeOutcome } from "./runtime/operations/debug-mode.js";
+export type { RuntimeTemporalCapture } from "./runtime/host-data/temporal-captures.js";
+export {
+  reportMediaLoad,
+  type MediaLoadReport,
+  type MediaReportOutcome,
+} from "./runtime/operations/media-reports.js";
+export {
+  pressPermanentButton,
+  type PermanentButtonPressOutcome,
+} from "./runtime/operations/press-permanent-button.js";
+export {
+  permanentButtonProjection,
+  type PermanentButtonProjection,
+  type RuntimePermanentButtonSnapshot,
+} from "./runtime/background/permanent-buttons.js";
+export {
+  mediaPlaybackProjection,
+  stageProjection,
+  type MediaPlaybackProjection,
+  type StageProjection,
+} from "./runtime/background/media-projection.js";
+export type {
+  PendingActionOperationResult,
+  TimeObservationOutcome,
+  ActionCompletionOutcome,
+} from "./runtime/operations/model.js";
+export {
+  CHECKPOINT_FORMAT,
+  CHECKPOINT_VERSION,
+  CheckpointError,
+  createCheckpoint,
+  deserializeCheckpoint,
+  restoreCheckpoint,
+  serializeCheckpoint,
+  type CheckpointErrorInfo,
+  type RuntimeCheckpoint,
+} from "./runtime/snapshot/checkpoint.js";
+export {
+  DEFAULT_MAX_CALL_DEPTH,
+  MAX_RUNTIME_SESSION_TIME_MS,
+  MAX_SUPPORTED_CALL_DEPTH,
+  RUNTIME_SNAPSHOT_FORMAT,
+  RUNTIME_SNAPSHOT_VERSION,
+  type FreshRuntimeOptions,
+  type RuntimeBindingSnapshot,
+  type RuntimeFailureSnapshot,
+  type RuntimeScopeFrameSnapshot,
+  type RuntimeLoopFrameSnapshot,
+  type RuntimeCallArgumentSnapshot,
+  type RuntimeCallFrameSnapshot,
+  type RuntimeFileCallFrameSnapshot,
+  type RuntimeCameraViewSnapshot,
+  type RuntimeFrameSnapshot,
+  type RuntimeLiveMessageSnapshot,
+  type RuntimeParameterStateSnapshot,
+  type RuntimeTemporarySnapshot,
+  type RuntimeRepeatLoopFrameSnapshot,
+  type RuntimeForLoopFrameSnapshot,
+  type RuntimeWhileLoopFrameSnapshot,
+  type RuntimeSnapshot,
+  type RuntimeSpeakerSnapshot,
+  type RuntimeStatus,
+  type SnapshotValidationResult,
+} from "./runtime/snapshot/state.js";
+export { validateRuntimeSnapshot } from "./runtime/snapshot/snapshot-validation.js";
+export { createFreshRuntimeSnapshot } from "./runtime/snapshot/snapshot-construction.js";
+export type {
+  RuntimePlayerProfileFieldSnapshot,
+  RuntimePlayerProfileInput,
+} from "./runtime/host-data/player-profile.js";
+export type {
+  CaptureUnavailableReason,
+  RuntimeActionSettlementSnapshot,
+  RuntimeCaptureActionSettlementSnapshot,
+  RuntimeCaptureActionSnapshot,
+  RuntimeDelayActionSnapshot,
+  RuntimeFileStoreActionSettlementSnapshot,
+  RuntimeFileStoreActionSnapshot,
+  RuntimeFileToStore,
+  RuntimeInteractionActionSnapshot,
+  RuntimeLockActionSettlementSnapshot,
+  RuntimeLockActionSnapshot,
+  RuntimeLockChoice,
+  RuntimeLockNotice,
+  RuntimeMediaActionSnapshot,
+  RuntimeMediaPlaybackActionSnapshot,
+  RuntimeMediaPlaybackSettlementSnapshot,
+  RuntimeMediaSettlementSnapshot,
+  RuntimeDelayActionSettlementSnapshot,
+  RuntimeInteractionActionSettlementSnapshot,
+  RuntimePendingActionSnapshot,
+  RuntimeStorageWriteActionSnapshot,
+  RuntimeStorageWriteSettlementSnapshot,
+} from "./runtime/actions/model.js";
+export { interactionDeadlineMs } from "./runtime/actions/model.js";
+export { actionAwaitsHost } from "./runtime/actions/interrupts.js";
+export {
+  DEFAULT_PLAYGROUND_SEED,
+  createXorShift32State,
+  nextXorShift32,
+  XORSHIFT32_ALGORITHM,
+  type XorShift32State,
+} from "./runtime/random/random.js";
+export {
+  cloneSerializableValue,
+  createSerializableList,
+  createSerializableObject,
+  createSerializableSet,
+  type SerializableRuntimeList,
+  type SerializableRuntimeObject,
+  type SerializableRuntimeRange,
+  type SerializableRuntimeProperty,
+  type SerializableRuntimeScalar,
+  type SerializableRuntimeSet,
+  type SerializableRuntimeDict,
+  type SerializableRuntimeDictEntry,
+  type SerializableRuntimeValue,
+  type SerializableSpeakerReference,
+  type SerializableMediaHandle,
+  type SerializableScriptReference,
+  type SerializableRuntimeDate,
+  type SerializableRuntimeDateTime,
+  type SerializableRuntimeTime,
+  type SerializableRuntimeAbsoluteDateTime,
+} from "./runtime/values/serializable-values.js";
+export {
+  DEFAULT_TEMPORAL_CONTEXT,
+  type PresentationSettings,
+  type TemporalContext,
+  type ZoneRules,
+} from "./temporal.js";
+export { captureTemporalContext } from "./temporal-capture.js";
+export {
+  combineSourceSpans,
+  createSourcePosition,
+  createSourceSpan,
+  type SourcePosition,
+  type SourceSpan,
+} from "./source.js";
+export type { MessagePresentation } from "./message-presentation.js";

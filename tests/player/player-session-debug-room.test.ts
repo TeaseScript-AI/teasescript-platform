@@ -3,23 +3,24 @@ import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
 
 import {
-  activatePlayerRuntimeButton,
-  compilePlayerProject,
-  createPlayerRuntimeSession,
+  activatePlayerRuntimeButton as rawActivatePlayerRuntimeButton,
   restorePlayerRuntimeSessionAt,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
-} from "../../player/runtime-adapter.js";
-import type { CapturedMediaRepository } from "../../player/captured-media.js";
+} from "../../player/runtime/runtime-adapter.js";
+import { compilePlayerProject } from "../../player/runtime/compile-project.js";
+import { preparedPlan, type PlanStart } from "../helpers/prepared-plan.js";
+import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
+import type { BuildIdentity } from "../../player/engine-bridge/protocol.js";
+import type { CapturedMediaRepository } from "../../player/media/captured-media.js";
 import {
   keptSession,
   memoryKeptRoomStore,
   memoryKeptSessionStore,
   type KeptRoomStore,
   type KeptSessionStore,
-} from "../../player/kept-sessions.js";
-import type { DebugRecorder } from "../../player/debug-recorder.js";
-import type { ScriptStorageProvider } from "../../player/script-storage.js";
+} from "../../player/persistence/kept-sessions.js";
+import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
 import type {
   InstructionPlan,
   RuntimeScriptStorageEntrySnapshot,
@@ -27,6 +28,11 @@ import type {
 } from "../../src/index.js";
 import { FakeMediaRepository } from "../helpers/player/media/fake-media-repository.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
+import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
+import { inProcessBackend } from "../helpers/player/worker-topology.js";
+
+// The adapter's functions, also on the sessions the composables' host holds (`helpers/player/host-sessions.ts`).
+const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
 
 // The debug room (DEBUGGER.md "Debug room") through the real Vue session host: Debug on during a normal session goes on
 // with a copy in the debug room while the normal session stays as it was; a page opened in the debug room makes it from
@@ -43,19 +49,22 @@ interface RoomHost {
     resetDebug(): Promise<void>;
   };
   setDebugMode(enabled: boolean): void;
-  prepareScript(
-    plan: InstructionPlan,
-    create: (recording: {
-      readonly recorder: DebugRecorder;
-      readonly debugMode: boolean;
-    }) => PlayerRuntimeSession,
-  ): Promise<void>;
+  readonly bridge: Promise<PlayerBridge>;
+  prepareScript(plan: string, create: PlanStart): Promise<void>;
+  inputSection<T>(
+    work: "inputAnswer",
+    body: (
+      section: { send<R>(op: string, args: unknown): Promise<R | symbol> },
+      observed: PlayerRuntimeSession | null,
+    ) => Promise<T>,
+  ): Promise<T | null>;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
   activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
 }
 let usePlayerSession: (options: {
+  bridge?: Promise<PlayerBridge>;
   scriptStorage: ScriptStorageProvider;
   keptSessions: KeptSessionStore;
   debugRooms: KeptRoomStore;
@@ -68,10 +77,13 @@ let usePlayerDebug: (
 ) => { readonly menu: Ref<boolean>; readonly on: Readonly<Ref<boolean>> };
 
 before(async () => {
+  await loadHostFacade();
   const module: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
-  const debug: Record<string, unknown> = await loadPlayerModule("player/vue/src/usePlayerDebug.ts");
+  const debug: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/debug/usePlayerDebug.ts",
+  );
   assert.equal(typeof module.usePlayerSession, "function");
   assert.equal(typeof debug.usePlayerDebug, "function");
   // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their tested API.
@@ -115,6 +127,7 @@ function mountHost(
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
+      bridge: inProcessBackend(),
       scriptStorage: options.own,
       keptSessions: options.kept,
       debugRooms: options.rooms,
@@ -168,9 +181,8 @@ async function settle(context: TestContext) {
 
 async function prepare(context: TestContext, host: RoomHost, plan: InstructionPlan) {
   await host.loadScriptStorage();
-  await host.prepareScript(plan, (recording) =>
-    createPlayerRuntimeSession(plan, { ...recording, ...host.scriptStorageOptions() }),
-  );
+  const held = await preparedPlan(host.bridge, plan);
+  await host.prepareScript(held, { plan: held, options: () => host.scriptStorageOptions() });
   await settle(context);
 }
 
@@ -375,6 +387,7 @@ test("the debug room's start page also says why its session cannot continue afte
     ...kept,
     planJson: JSON.stringify({ ...plan, version: plan.version - 1 }),
     eventsFrom: 0,
+    eventsJson: kept.events.map((event) => JSON.stringify(event)),
   });
   const reopened = await open();
   assert.equal(reopened.activation.value, "start");
@@ -522,4 +535,108 @@ test("Debug off in the debug room only stops the script reading Debug as on", as
     { key: "off", value: false },
   ]);
   assert.deepEqual(own.entries, []);
+});
+
+test("Debug turned on while an ended normal session is being kept keeps it in the normal room and leaves the debug room's session", async (context) => {
+  for (const name of ["document", "window"]) {
+    const previous = Object.getOwnPropertyDescriptor(globalThis, name);
+    const value = Object.assign(new EventTarget(), { visibilityState: "visible" });
+    Object.defineProperty(globalThis, name, { configurable: true, value });
+    context.after(() => {
+      if (previous) Object.defineProperty(globalThis, name, previous);
+      else Reflect.deleteProperty(globalThis, name);
+    });
+  }
+  const previousAudio = Object.getOwnPropertyDescriptor(globalThis, "Audio");
+  Object.defineProperty(globalThis, "Audio", {
+    configurable: true,
+    value: class {
+      src = "";
+      play = () => Promise.resolve();
+      pause() {}
+      load() {}
+      removeAttribute() {}
+    },
+  });
+  context.after(() => {
+    if (previousAudio) Object.defineProperty(globalThis, "Audio", previousAudio);
+    else Reflect.deleteProperty(globalThis, "Audio");
+  });
+  const facade: Record<string, unknown> = await loadPlayerModule(
+    "player/engine-bridge/in-process.ts",
+  );
+  // EVIDENCE: validation: the bundle facade's backend factory, which the composable's sessions run on.
+  const backend = facade.createInProcessBackend as (
+    build: BuildIdentity,
+    options: { readonly delayMs?: number },
+  ) => PlayerBridge;
+  const build = { commit: null, dirty: null, mode: null, appVersion: null };
+  const rooms = memoryKeptRoomStore();
+  const kept = memoryKeptSessionStore();
+  const plan = compilePlayerProject('showButton "Go"\nexit').plan!;
+  const tasks = () => new Promise((resolve) => setTimeout(resolve, 5));
+  async function until(condition: () => Promise<boolean> | boolean, message: string) {
+    for (let turn = 0; !(await condition()); turn++) {
+      assert.ok(turn < 200, message);
+      await tasks();
+    }
+  }
+  /** A page in `room` whose replies arrive after `delayMs`, with the plan's Start prepared by its token. */
+  async function page(room: "normal" | "debug", delayMs: number) {
+    const bridge = backend(build, { delayMs });
+    const scope = effectScope();
+    const host = scope.run(() =>
+      usePlayerSession({
+        bridge: Promise.resolve(bridge),
+        scriptStorage: savedData([]),
+        keptSessions: kept,
+        debugRooms: rooms,
+        room,
+      }),
+    )!;
+    context.after(() => scope.stop());
+    await host.loadScriptStorage();
+    const token = await preparedPlan(host.bridge, plan);
+    await host.prepareScript(token, { plan: token, options: () => host.scriptStorageOptions() });
+    return { bridge, host, scope };
+  }
+  // The debug room keeps a session waiting at its button.
+  const debug = await page("debug", 0);
+  await debug.host.activate();
+  await until(async () => (await rooms.session("test")) !== null, "the debug session was not kept");
+  const debugBefore = await rooms.session("test");
+  debug.scope.stop();
+  // The normal session ends; Debug turns on while its end is being captured.
+  const normal = await page("normal", 50);
+  await normal.host.activate();
+  await until(async () => (await kept.session("test")) !== null, "the normal session was not kept");
+  let captured!: () => void;
+  const capturing = new Promise<void>((resolve) => (captured = resolve));
+  const request = normal.bridge.client.request.bind(normal.bridge.client);
+  context.mock.method(normal.bridge.client, "request", (...args: Parameters<typeof request>) => {
+    const sent = request(...args);
+    if (args[0] === "captureKeep") captured();
+    return sent;
+  });
+  await normal.host.inputSection("inputAnswer", async (input, observed) => {
+    const shown = observed?.state.foregroundAction ?? null;
+    assert.ok(shown !== null && "actionId" in shown);
+    await input.send("activateButton", { actionId: shown.actionId, input: null });
+  });
+  assert.equal(normal.host.session.value?.state.status, "halted");
+  await capturing;
+  normal.host.setDebugMode(true);
+  await until(
+    () => normal.host.rooms.current.value === "debug",
+    "the page did not open the debug room",
+  );
+  for (let turn = 0; turn < 40; turn++) await tasks();
+  assert.deepEqual(await rooms.session("test"), debugBefore, "the debug room's session stays");
+  const normalAfter = await kept.session("test");
+  assert.ok(normalAfter !== null);
+  assert.equal(
+    keptSession(normalAfter)?.events.at(-1)?.kind,
+    "exit",
+    "the normal room keeps the end",
+  );
 });

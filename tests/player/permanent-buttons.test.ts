@@ -20,12 +20,12 @@ import {
 import { permanentButtonProjection } from "../../src/runtime/background/permanent-buttons.js";
 import type { RuntimeSnapshot } from "../../src/runtime/snapshot/state.js";
 import {
-  createPlayerRuntimeSession,
   observePlayerRuntimeTime,
-  playerRuntimePermanentButtons,
   pressPlayerRuntimePermanentButton,
   playerRuntimeSnapshot,
-} from "../../player/runtime-adapter.js";
+} from "../../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
+import { playerRuntimePermanentButtons } from "../../player/runtime/runtime-view.js";
 import { compileValidPlan } from "../helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
 import { runValidSourceUntilExit } from "../helpers/run-until-exit.js";

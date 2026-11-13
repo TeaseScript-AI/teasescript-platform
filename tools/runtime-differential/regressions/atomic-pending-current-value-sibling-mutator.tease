@@ -1,0 +1,8 @@
+let root = { rows: [[1], [2]] }
+function mutate {
+    root.rows[1].add(9)
+    return [3]
+}
+root.rows[0] += mutate()
+say "sibling-method:${root.rows[0].join(",")}:${root.rows[1].join(",")}", instant
+exit

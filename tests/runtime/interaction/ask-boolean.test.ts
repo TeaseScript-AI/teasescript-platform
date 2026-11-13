@@ -3,15 +3,15 @@ import test from "node:test";
 
 import {
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
-  playerRuntimeForeground,
   restorePlayerRuntimeSession,
   selectPlayerRuntimeChoice,
   submitPlayerRuntimeComposer,
   submitPlayerRuntimeForm,
   type PlayerRuntimeSession,
   playerRuntimeSnapshot,
-} from "../../../player/runtime-adapter.js";
+} from "../../../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../../../player/runtime/compile-project.js";
+import { playerRuntimeForeground } from "../../../player/runtime/runtime-view.js";
 import { compileSource } from "../../../src/compiler.js";
 import { compileValidPlan } from "../../helpers/compile-valid-plan.js";
 

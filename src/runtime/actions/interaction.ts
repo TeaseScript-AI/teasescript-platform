@@ -1,32 +1,11 @@
 import { isTimeoutLength } from "../../delay-rules.js";
 import { isSha256Hex } from "../values/sha256.js";
-import { cloneInteractionChoiceValue } from "../../choice-values.js";
-import {
-  invalidAnswerMessage,
-  isBlankTextAnswer,
-  isIntegerAnswerText,
-  isNumberAnswerText,
-  temporalAnswer,
-} from "../../interaction-answers.js";
-import { interactionStringFits } from "../../interaction-limits.js";
-import { IMAGE_ANSWER_TRANSCRIPT_TEXT, IMAGE_SKIP_TEXT } from "../../image-input.js";
-import type {
-  InteractionAccessibleName,
-  InteractionChoiceOption,
-  InteractionUiPayload,
-} from "../../plan/model.js";
+import { resolveAnswer, type ResolvedInteraction } from "../../interaction-completion.js";
+import type { InteractionAccessibleName, InteractionUiPayload } from "../../plan/model.js";
 import type { SerializableRuntimeValue } from "../values/serializable-values.js";
 import type { CapturedMediaAdmission } from "./capture.js";
-import {
-  presentDate,
-  presentDateTime,
-  presentTime,
-  type PresentationSettings,
-  type TemporalContext,
-} from "../../temporal.js";
-import { recordValidationTestWork } from "../../validation-testing.js";
-import type { InteractionResultValue, RuntimeInteractionActionSnapshot } from "./model.js";
-import { submitForm } from "./form/submission.js";
+import type { TemporalContext } from "../../temporal.js";
+import type { RuntimeInteractionActionSnapshot } from "./model.js";
 
 /**
  * The milliseconds of a `showButton` timeout: an elapsed duration that is finite and greater than zero. Returns `null`
@@ -40,22 +19,11 @@ export function buttonTimeoutMilliseconds(value: unknown): number | null {
   return isTimeoutLength(milliseconds) ? milliseconds : null;
 }
 
-export type ResolvedInteraction =
-  | {
-      readonly ok: true;
-      readonly result: InteractionResultValue;
-      /** `null` for a popup, `openUrl`, `exportText`, or `askPassword`, which add nothing to the transcript. */
-      readonly transcriptText: string | null;
-      /** Only a form's: the options its cycles showed, `null` when it returns `null`. */
-      readonly shownOptions?: readonly (number | null)[] | null;
-      /** Only a form's: the presentation its answers were shown in, `null` when it sent none. */
-      readonly temporalPresentation?: PresentationSettings | null;
-    }
-  | { readonly ok: false; readonly message: string };
+export type { ResolvedInteraction } from "../../interaction-completion.js";
 
 /**
  * `context` is the player's presentation now, which shows a date or time answer in the transcript. `capturedMedia`
- * vouches for an image answer; without it no image request completes.
+ * vouches for an image reference; a skip needs no admission.
  */
 export function resolveInteractionCompletion(
   action: RuntimeInteractionActionSnapshot,
@@ -65,52 +33,6 @@ export function resolveInteractionCompletion(
 ): ResolvedInteraction {
   if (!isPlainRecord(payload)) {
     return { ok: false, message: "Interaction completion payload must be an object." };
-  }
-  // A form is submitted with the answers its edits gave it; the payload carries none.
-  if (action.ui.kind === "form") {
-    if (
-      (payload.kind !== "submit" && payload.kind !== "cancel") ||
-      Object.keys(payload).length !== 1 ||
-      action.form === undefined
-    )
-      return {
-        ok: false,
-        message: "Form completion payload must be { kind: 'submit' } or { kind: 'cancel' }.",
-      };
-    // Cancelling drops every edit, also text that is not an answer, and returns `null`.
-    if (payload.kind === "cancel")
-      return action.ui.cancel === null
-        ? { ok: false, message: "This form has no cancel button, so it can only be submitted." }
-        : {
-            ok: true,
-            result: null,
-            transcriptText: action.ui.cancel.text,
-            shownOptions: null,
-            temporalPresentation: null,
-          };
-    return submitForm(action.ui, action.form, context.presentation);
-  }
-  if (action.interactionKind === "button") {
-    return payload.kind === "activate" && action.ui.kind === "button"
-      ? { ok: true, result: null, transcriptText: action.ui.buttonLabel }
-      : { ok: false, message: "Button completion requires activation only." };
-  }
-  if (action.interactionKind === "popup") {
-    return payload.kind === "activate" && Object.keys(payload).length === 1
-      ? { ok: true, result: null, transcriptText: null }
-      : { ok: false, message: "Popup completion requires { kind: 'activate' } only." };
-  }
-  // The Player reports that it opened the address in a new tab.
-  if (action.interactionKind === "url") {
-    return payload.kind === "opened" && Object.keys(payload).length === 1
-      ? { ok: true, result: null, transcriptText: null }
-      : { ok: false, message: "openUrl completion requires { kind: 'opened' } only." };
-  }
-  // Copying and downloading are the Player's own; only closing the dialog completes it.
-  if (action.interactionKind === "export") {
-    return payload.kind === "close" && Object.keys(payload).length === 1
-      ? { ok: true, result: null, transcriptText: null }
-      : { ok: false, message: "exportText completion requires { kind: 'close' } only." };
   }
   // askPassword: the Player answers with the SHA-256 of the typed text, never the text (V30 §20).
   if (action.interactionKind === "password")
@@ -123,134 +45,7 @@ export function resolveInteractionCompletion(
           message:
             "Password completion requires { kind: 'submittedPassword', hash } with the SHA-256 of the typed text as 64 lowercase hexadecimal digits.",
         };
-  if (action.interactionKind === "text") {
-    if (
-      payload.kind !== "submittedText" ||
-      typeof payload.submittedText !== "string" ||
-      !completionStringFits(payload.submittedText)
-    ) {
-      return {
-        ok: false,
-        message: "Text completion requires submitted text within the shared UTF-8 byte limit.",
-      };
-    }
-    const normalized = payload.submittedText.replace(/\r\n?/gu, "\n");
-    if (isBlankTextAnswer(normalized)) return { ok: false, message: invalidAnswerMessage("text") };
-    return { ok: true, result: normalized, transcriptText: normalized };
-  }
-  // `askInteger` accepts only whole-number notation within the safe integer range, on one line like `askNumber`.
-  if (action.ui.kind === "number" && action.ui.integer === true) {
-    if (
-      payload.kind !== "submittedText" ||
-      typeof payload.submittedText !== "string" ||
-      !completionStringFits(payload.submittedText)
-    )
-      return {
-        ok: false,
-        message: "Number completion requires text within the shared UTF-8 byte limit.",
-      };
-    const submitted = payload.submittedText.trim();
-    const parsed = Number(submitted);
-    return !/[\r\n\u2028\u2029]/u.test(payload.submittedText) &&
-      isIntegerAnswerText(submitted) &&
-      Number.isSafeInteger(parsed)
-      ? { ok: true, result: Object.is(parsed, -0) ? 0 : parsed, transcriptText: submitted }
-      : { ok: false, message: invalidAnswerMessage("integer") };
-  }
-  // `askNumber` accepts one line of decimal or scientific notation with a finite value.
-  if (action.interactionKind === "number") {
-    if (
-      payload.kind !== "submittedText" ||
-      typeof payload.submittedText !== "string" ||
-      !completionStringFits(payload.submittedText)
-    )
-      return {
-        ok: false,
-        message: "Number completion requires text within the shared UTF-8 byte limit.",
-      };
-    const submitted = payload.submittedText.trim();
-    const parsed = Number(submitted);
-    return !/[\r\n\u2028\u2029]/u.test(payload.submittedText) &&
-      isNumberAnswerText(submitted) &&
-      Number.isFinite(parsed)
-      ? { ok: true, result: Object.is(parsed, -0) ? 0 : parsed, transcriptText: submitted }
-      : { ok: false, message: invalidAnswerMessage("number") };
-  }
-  // A date or time control submits strict ISO text; the transcript shows the answer as `say` would.
-  if (action.ui.kind === "temporal") {
-    if (
-      payload.kind !== "submittedText" ||
-      typeof payload.submittedText !== "string" ||
-      !completionStringFits(payload.submittedText)
-    )
-      return {
-        ok: false,
-        message: "Date and time completion requires text within the shared UTF-8 byte limit.",
-      };
-    const answer = temporalAnswer(action.ui.temporalKind, payload.submittedText);
-    if (answer === undefined)
-      return { ok: false, message: invalidAnswerMessage(action.ui.temporalKind) };
-    const transcriptText =
-      answer.kind === "date"
-        ? presentDate(context.presentation, answer)
-        : answer.kind === "time"
-          ? presentTime(context.presentation, answer)
-          : presentDateTime(context.presentation, answer);
-    return { ok: true, result: answer, transcriptText };
-  }
-  // The answer is an image the trusted host stored, by its reference; the transcript never shows the reference. A
-  // request that allows it may be skipped instead, which answers `null`.
-  if (action.ui.kind === "image") {
-    if (payload.kind === "skip" && Object.keys(payload).length === 1)
-      return action.ui.allowSkip
-        ? { ok: true, result: null, transcriptText: IMAGE_SKIP_TEXT }
-        : { ok: false, message: "This image request cannot be skipped, so it needs an image." };
-    const reference =
-      payload.kind === "image" && Object.keys(payload).length === 2 ? payload.reference : undefined;
-    if (typeof reference !== "string" || reference.length === 0 || !completionStringFits(reference))
-      return {
-        ok: false,
-        message: action.ui.allowSkip
-          ? "Image completion requires { kind: 'image', reference } with a stored image reference, or { kind: 'skip' }."
-          : "Image completion requires { kind: 'image', reference } with a stored image reference.",
-      };
-    if (capturedMedia?.holds(reference, "image") !== true)
-      return { ok: false, message: "The image is not stored media of this host." };
-    return { ok: true, result: reference, transcriptText: IMAGE_ANSWER_TRANSCRIPT_TEXT };
-  }
-  if (action.ui.kind !== "choice") {
-    return { ok: false, message: "Choice action payload is malformed." };
-  }
-  const options = action.ui.options;
-  let selected: InteractionChoiceOption;
-  if (
-    payload.kind === "submittedText" &&
-    typeof payload.submittedText === "string" &&
-    completionStringFits(payload.submittedText)
-  ) {
-    const matches = options.filter((option) => option.text === payload.submittedText);
-    if (matches.length !== 1)
-      return {
-        ok: false,
-        message: invalidAnswerMessage(matches.length === 0 ? "choice" : "ambiguousChoice"),
-      };
-    selected = matches[0]!;
-  } else if (
-    payload.kind === "selectedOption" &&
-    typeof payload.optionIndex === "number" &&
-    Number.isSafeInteger(payload.optionIndex) &&
-    payload.optionIndex >= 0 &&
-    payload.optionIndex < options.length
-  ) {
-    selected = options[payload.optionIndex]!;
-  } else {
-    return { ok: false, message: "Choice completion payload does not match the offered options." };
-  }
-  return {
-    ok: true,
-    result: cloneInteractionChoiceValue(selected.value),
-    transcriptText: selected.text,
-  };
+  return resolveAnswer(action, payload, context, capturedMedia);
 }
 
 type ImageInteractionUi = Extract<InteractionUiPayload, { kind: "image" }>;
@@ -298,11 +93,6 @@ export function imageRequestValue(
       ...(ui.mime === null ? [] : [{ name: "mime", value: texts(ui.mime) }]),
     ],
   };
-}
-
-function completionStringFits(value: string): boolean {
-  recordValidationTestWork("interactionUtf8Measurements");
-  return interactionStringFits(value);
 }
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {

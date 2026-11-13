@@ -1,0 +1,11 @@
+[
+  {"kind":"completeAction","args":[{"actionId":1,"actionKind":"storageWrite","payload":{"kind":"stored"}}],"unit":true},
+  {"kind":"completeAction","args":[{"actionId":2,"actionKind":"storageWrite","payload":{"kind":"stored"}}],"unit":true},
+  {"kind":"completeAction","args":[{"actionId":3,"actionKind":"storageWrite","payload":{"kind":"stored"}}],"unit":true},
+  {"kind":"completeAction","args":[{"actionId":4,"actionKind":"storageWrite","payload":{"kind":"stored"}}],"unit":true},
+  {"kind":"completeAction","args":[{"actionId":5,"actionKind":"storageWrite","payload":{"kind":"stored"}}],"unit":true},
+  {"kind":"completeAction","args":[{"actionId":6,"actionKind":"storageWrite","payload":{"kind":"stored"}}],"unit":true},
+  {"kind":"completeAction","args":[{"actionId":7,"actionKind":"storageWrite","payload":{"kind":"stored"}}],"unit":true},
+  {"kind":"completeAction","args":[{"actionId":8,"actionKind":"storageWrite","payload":{"kind":"failed"}}]},
+  {"kind":"completeAction","args":[{"actionId":9,"actionKind":"storageWrite","payload":{"kind":"stored"}}],"unit":true}
+]

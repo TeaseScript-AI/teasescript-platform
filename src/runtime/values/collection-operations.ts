@@ -174,9 +174,12 @@ export function readDict(
   }
 }
 
-/** Whether a list of `length` elements has the position `index`: a whole number from 0 up to below its length. */
-export function listHasPosition(length: number, index: unknown): index is number {
-  return typeof index === "number" && Number.isInteger(index) && index >= 0 && index < length;
+/**
+ * Whether a list of `length` elements has the position `index`: a whole number from 0 up to below its length. It is no
+ * type guard: a caller tests `typeof … === "number"` first, so a number it rejects stays a number (#2019).
+ */
+export function listHasPosition(length: number, index: number): boolean {
+  return Number.isInteger(index) && index >= 0 && index < length;
 }
 
 /**
@@ -232,7 +235,9 @@ export function readCollection(
       ]);
       if (problem !== undefined) throw fault("TSR028", problem.message, span);
       const index = positional[0]!;
-      return listHasPosition(receiver.items.length, index) ? receiver.items[index]! : undefined;
+      return typeof index === "number" && listHasPosition(receiver.items.length, index)
+        ? receiver.items[index]!
+        : undefined;
     }
     case "toSet":
       return createCapturedSerializableSet(receiver.items);

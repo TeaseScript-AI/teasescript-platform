@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import test, { after, before } from "node:test";
 
-import { compilePlayerProject, playerRuntimeStageImages } from "../../player/runtime-adapter.js";
+import { playerRuntimeStageImages } from "../../player/runtime/plan-metadata.js";
+import { compilePlayerProject } from "../../player/runtime/compile-project.js";
 import type { PhotoSwatches } from "../../player/theme/node-vibrant/swatches.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 
@@ -139,7 +140,7 @@ before(async () => {
       }),
     },
   });
-  const module = await loadPlayerModule("player/vue/src/stagePhotos.ts");
+  const module = await loadPlayerModule("player/vue/src/stage/stagePhotos.ts");
   assert.equal(typeof module.prepareStagePhoto, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export was checked callable just above.
   prepareStagePhoto = module.prepareStagePhoto as typeof prepareStagePhoto;

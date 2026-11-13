@@ -1,0 +1,6 @@
+let rows = [{ value: 1 }, { value: 2 }, { value: 3 }]
+rows.first.value = 4
+rows.last.value = 5
+rows.random.value += randomInteger(1..10)
+say "selected:${rows[0].value}:${rows[1].value}:${rows[2].value}", instant
+exit

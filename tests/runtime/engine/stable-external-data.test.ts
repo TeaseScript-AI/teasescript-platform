@@ -20,6 +20,7 @@ import {
 } from "../../../src/runtime/values/serializable-values.js";
 import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
 import { compileValidPlan } from "../../helpers/compile-valid-plan.js";
+import { withValidationTestStatistics } from "../../../src/validation-testing.js";
 
 function plan(source = "exit", builtins: readonly string[] = []): InstructionPlan {
   return compileValidPlan(source, { builtins });
@@ -95,6 +96,41 @@ test("fresh globals reject changing and throwing getters without invoking them",
     );
     assert.equal(reads, 0);
   }
+});
+
+test("fresh globals reject an accessor deep in a set member without invoking it or comparing members", () => {
+  let reads = 0;
+  const leaf = { kind: "list" };
+  Object.defineProperty(leaf, "items", {
+    enumerable: true,
+    get() {
+      reads += 1;
+      return [];
+    },
+  });
+  const member = Array.from({ length: 1000 }).reduce<object>(
+    (inner) => ({ kind: "set", items: [inner] }),
+    leaf,
+  );
+  // An earlier duplicate pair: capture fails before any member is compared.
+  const one = { kind: "list", items: [1] };
+  const payload = { kind: "set", items: [one, { ...one, items: [1] }, member] };
+
+  const counts = withValidationTestStatistics((finish) => {
+    assert.throws(
+      () =>
+        createFreshRuntimeSnapshot(plan(), {
+          // EVIDENCE: an accessor-bearing global deliberately violates the runtime-value contract for capture rejection.
+          globals: { payload } as never,
+        }),
+      (error: unknown) =>
+        error instanceof TypeError && error.message.startsWith("$.globals.payload.items[2]."),
+    );
+    return finish().counts;
+  });
+  assert.equal(reads, 0);
+  assert.equal(counts.setValidationPrints, undefined);
+  assert.equal(counts.setValidationExactKeys, undefined);
 });
 
 test("fresh globals consume one captured proxy observation and never call get", () => {

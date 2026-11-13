@@ -187,7 +187,7 @@ No `src/standard-library/` shell exists yet because the implemented ADR 0018 POC
 parser/compiler/runtime; linked reusable Standard Library modules remain future work.
 
 The technical playground workspace controller lives at `playground/workspace/controller.ts`. The framework-independent
-runtime-to-Player translation and shared action lookup/completion seam lives at `player/runtime-adapter.ts`. The Player
+runtime-to-Player translation and shared action lookup/completion seam lives at `player/runtime/runtime-adapter.ts`. The Player
 implementation is under `player/vue/src/`, using the accepted Vue/Tailwind/shadcn-vue/Reka foundation and
 TanStack Vue Virtual for transcript windowing and scroll anchoring. It presents supported interactions and pacing from
 canonical runtime state and events; browser-native CSS owns geometry. The Vue/toolchain boundary is accepted in ADR 0020. See [`player/README.md`](../player/README.md) for implementation seams, local inspection and the

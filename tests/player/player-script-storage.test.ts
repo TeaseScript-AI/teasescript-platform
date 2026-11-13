@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   createLocalScriptStorage,
   listLocalScriptStorageScopes,
-} from "../../player/script-storage.js";
+} from "../../player/persistence/script-storage.js";
 import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkpoint.js";
 import type { SerializableRuntimeValue } from "../../src/index.js";
 

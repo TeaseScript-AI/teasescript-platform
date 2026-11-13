@@ -1,0 +1,7 @@
+let table = dict{ "a": 1, "b": 2 }
+table["c"] = table.remove("a")
+let before = table.keys.join(",")
+let previous = table["b"]
+table["b"] = ({ changed: table.clear(), value: 9 }).value
+say "dict:${before}:${previous}:${table.length}:${table["b"]}", instant
+exit

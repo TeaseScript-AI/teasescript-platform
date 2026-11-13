@@ -41,10 +41,11 @@ import type {
 } from "../background/media.js";
 import type { RuntimePermanentButtonInvocationSnapshot } from "../background/permanent-buttons.js";
 import type { RuntimeScriptStorageEntrySnapshot } from "../host-data/script-storage.js";
-import { isPlainRecord } from "../values/plain-data.js";
+import { nonNegativeSafeInteger, RUNTIME_SNAPSHOT_VERSION } from "./snapshot-format.js";
+
+export { nonNegativeSafeInteger, RUNTIME_SNAPSHOT_VERSION, validSpan } from "./snapshot-format.js";
 
 export const RUNTIME_SNAPSHOT_FORMAT = "teasescript-runtime-snapshot";
-export const RUNTIME_SNAPSHOT_VERSION = 91;
 export const DEFAULT_MAX_CALL_DEPTH = 1024;
 export const MAX_SUPPORTED_CALL_DEPTH = 32768;
 export const MAX_RUNTIME_SESSION_TIME_MS = Number.MAX_SAFE_INTEGER;
@@ -446,30 +447,6 @@ export function validSessionTime(value: unknown): value is number {
 
 export function positiveSafeInteger(value: unknown): value is number {
   return Number.isSafeInteger(value) && typeof value === "number" && value >= 1;
-}
-
-/** Whether `value` is a source span: a start and an end position, the end not before the start. */
-export function validSpan(value: unknown): value is SourceSpan {
-  return (
-    isPlainRecord(value) &&
-    validPosition(value.start) &&
-    validPosition(value.end) &&
-    value.end.offset >= value.start.offset
-  );
-}
-
-function validPosition(value: unknown): value is { offset: number; line: number; column: number } {
-  return (
-    isPlainRecord(value) &&
-    nonNegativeSafeInteger(value.offset) &&
-    nonNegativeSafeInteger(value.line) &&
-    nonNegativeSafeInteger(value.column)
-  );
-}
-
-export function nonNegativeSafeInteger(value: unknown): value is number {
-  // EVIDENCE: validation: Number.isSafeInteger establishes the numeric value before comparison.
-  return Number.isSafeInteger(value) && (value as number) >= 0;
 }
 
 export function unsigned32(value: unknown): value is number {

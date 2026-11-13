@@ -11,3 +11,4 @@ check:imports
 test:build:typescript
 test:verification
 test:families
+check:readme-paths

@@ -61,6 +61,7 @@ export function repository({
     for (const path of [
       "tools/repository-checks/doc-links.mjs",
       "tools/repository-checks/imports.mjs",
+      "tools/repository-checks/readme-paths.mjs",
     ])
       write(path, "\n");
   run("add", ".");

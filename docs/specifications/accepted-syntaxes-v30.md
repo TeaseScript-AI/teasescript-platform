@@ -3932,8 +3932,9 @@ image, the camera view, and timers are unaffected. Without a running or paused s
 
 ### Failures, cleanup, and restore
 
-- When the Player cannot load a source, or the source leaves an empty playback range, the runtime reports developer
-  warning `TSW013`, the media becomes `stopped` without cues or `finish`, and the script continues. A `null` file plays
+- When the Player cannot load or play a source, or the source leaves an empty playback range, the runtime reports developer
+  warning `TSW013`, the media becomes `stopped`, and the script continues: no further cue block or `finish` starts, and a
+  cue block already running completes. A `null` file plays
   nothing, continues at once, and reports `TSW011`.
 - `exit` and the end of the session stop all media; the last Stage image stays. `goto`, `call`, and `end` do not stop
   media.
@@ -5597,7 +5598,9 @@ The restriction covers static and dynamic text/background colours in speaker pro
 not Player interface transparency.
 
 The compiler validates constant speaker-declaration and message-option colours while retaining their authored values.
-The runtime normalizes both constant and dynamic colours to OKLCH when preparing output. Converted values
+The runtime normalizes both constant and dynamic colours to OKLCH when preparing output. An authored colour whose
+numbers each have at most 20 significant digits normalizes to the same OKLCH text in every JavaScript engine that
+follows the ECMAScript standard's arithmetic and number formatting. Converted values
 are not parsed again as authored input: CSS input-channel clamping must not alter previously converted coordinates.
 Message markup follows its existing complete-string parse after interpolation. Invalid statically known colours in these authored positions produce source-associated compiler
 errors. Valid out-of-gamut coordinates are retained without a gamut warning or silent gamut mapping; display mapping

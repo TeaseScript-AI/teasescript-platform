@@ -5,15 +5,16 @@ import {
   CapturedMediaNotStoredError,
   CapturedMediaStore,
   storableCapturedMedia,
-} from "../../player/captured-media.js";
+  type CapturedMediaRepository,
+} from "../../player/media/captured-media.js";
 import {
   capturedMediaReferences,
   capturedMediaStorage,
   sweepCapturedMedia,
   withCapturedMedia,
   type CapturedMediaLocks,
-} from "../../player/captured-media-persistence.js";
-import type { ScriptStorageProvider } from "../../player/script-storage.js";
+} from "../../player/media/captured-media-persistence.js";
+import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
 import {
   compileSource,
   completeAction,
@@ -518,4 +519,80 @@ test("flushing waits for issued storage work and keeps storage open", async () =
   assert.deepEqual(provider.entries, new Map([["answer", 42]]));
   await storage.replace([{ key: "after", value: 1 }]);
   assert.deepEqual(provider.log.slice(-2), ["write answer", "replace after"]);
+});
+
+/** `repository`, whose reads can be held one by one after they read, as storage answering after later writes. */
+function heldReads(repository: FakeMediaRepository) {
+  const held: (() => void)[] = [];
+  const state = { reads: 0, hold: 0 };
+  const reader: CapturedMediaRepository = {
+    add: (record) => repository.add(record),
+    delete: (namespace, reference) => repository.delete(namespace, reference),
+    listReferences: (namespace) => repository.listReferences(namespace),
+    async get(namespace, reference) {
+      state.reads++;
+      const stored = await repository.get(namespace, reference);
+      if (state.hold > 0) {
+        state.hold--;
+        await new Promise<void>((resolve) => held.push(resolve));
+      }
+      return stored;
+    },
+  };
+  const release = () => held.shift()?.();
+  return { reader, state, release, waiting: () => held.length };
+}
+const tick = () => new Promise((resolve) => setTimeout(resolve, 0));
+/** Waits until `count` reads are held, at most a few hundred ticks. */
+async function held(waiting: () => number, count: number) {
+  for (let round = 0; waiting() < count; round++) {
+    assert.ok(round < 200, `${count} reads were not issued`);
+    await tick();
+  }
+}
+
+test("a read that settles after the durable storage changed keeps its bytes as session media, not as stored there", async () => {
+  const repository = new FakeMediaRepository();
+  const writer = new CapturedMediaStore(repository, urls, "package");
+  const reference = writer.add("image", png("photo")).reference;
+  await writer.promote([reference]);
+  const { reader, state, release, waiting } = heldReads(repository);
+  const media = new CapturedMediaStore(reader, urls, "package");
+  state.hold = 1;
+  const reading = media.read(reference);
+  await held(waiting, 1);
+  // The same repository object and namespace stand for a new, empty destination, as a debug room's Reset makes it.
+  await repository.delete("package", reference);
+  media.useRepository(reader, new Set());
+  release();
+  assert.equal((await reading)?.reference, reference);
+  assert.equal(media.resolve(reference, "image").state, "ready");
+  assert.equal(await media.readDurable(reference), null);
+  await media.promote([reference]);
+  assert.notEqual(await repository.get("package", reference), null, "a save stores it there");
+});
+
+test("a read of the earlier storage that found nothing leaves the current storage's read of the reference deciding", async () => {
+  const repository = new FakeMediaRepository();
+  const writer = new CapturedMediaStore(repository, urls, "package");
+  const reference = writer.add("image", png("photo")).reference;
+  const { reader, state, release, waiting } = heldReads(repository);
+  const media = new CapturedMediaStore(reader, urls, "package");
+  state.hold = 2;
+  assert.equal(media.resolve(reference, "image").state, "loading");
+  await held(waiting, 1);
+  // The current storage holds the photo; its read finds it.
+  await writer.promote([reference]);
+  media.useRepository(reader, new Set());
+  assert.equal(media.resolve(reference, "image").state, "loading");
+  await held(waiting, 2);
+  // The earlier storage's answer, nothing, arrives first: it decides nothing, and starts no further read.
+  release();
+  await tick();
+  assert.equal(media.resolve(reference, "image").state, "loading");
+  assert.equal(state.reads, 2);
+  release();
+  await tick();
+  assert.equal(media.resolve(reference, "image").state, "ready");
+  assert.equal((await media.readDurable(reference))?.reference, reference);
 });

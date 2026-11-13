@@ -1,19 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { rebuildRecordedSession } from "../../player/debug-export.js";
-import { DebugRecorder } from "../../player/debug-recorder.js";
+import { rebuildRecordedSession } from "../../player/debug/debug-export.js";
+import { DebugRecorder } from "../../player/debug/debug-recorder.js";
 import {
   closePlayerRuntimePopup,
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
   observePlayerRuntimeTime,
-  playerRuntimeDebugNow,
-  playerRuntimeForeground,
   playerRuntimeSnapshot,
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
-} from "../../player/runtime-adapter.js";
+} from "../../player/runtime/runtime-adapter.js";
+import { debugNow } from "../helpers/debug-readers.js";
+import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
+import { playerRuntimeForeground } from "../../player/runtime/runtime-view.js";
 import { compileSource } from "../../src/compiler.js";
 import type { InstructionPlan } from "../../src/plan/model.js";
 import { validateInstructionPlan } from "../../src/plan/validation.js";
@@ -100,7 +100,7 @@ test("showPopup waits until the player closes it with its one button, and nothin
       { kind: "popup", accessibleName: "Continue", message: "Task completed", buttonText },
       form,
     );
-    assert.equal(playerRuntimeDebugNow(session, 0).waitingAt?.kind, "popup");
+    assert.equal(debugNow(session, 0).waitingAt?.kind, "popup");
     assert.deepEqual(transcript(session), ["narrator: Before"], form);
     const result = closePlayerRuntimePopup(session);
     assert.equal(result?.outcome.kind, "completed", form);

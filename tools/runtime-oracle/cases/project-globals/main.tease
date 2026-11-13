@@ -1,0 +1,9 @@
+global level = load("level", default: 1)
+global function announce(count) { say "Count: ${count}", instant }
+function bump(step: integer = 2) { return level + step }
+announce(bump())
+call "lib/rounds.tease"
+let pick = randomInteger(1..=6)
+say "Pick ${pick}", instant
+wait 1 s
+exit

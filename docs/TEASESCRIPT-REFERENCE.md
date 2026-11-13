@@ -1253,7 +1253,7 @@ startAt: D, endAt: D, volume: v) { }`, the same for `playVideo`
 - **Takes:** `async:` must be the literal `true` or `false`; `repeat:` is `true` or `false`, a count (`3 times`) or a
   duration.
 - **Gives:** waits for the end; with `async`, gives a [media handle](#media-handles-stopaudio) once the file has
-  loaded, while playback continues. A file that fails to load warns and the script goes on.
+  loaded, while playback continues. A file that fails to load or to play warns and the script goes on.
 - **Fails:** invalid ranges or volume (0–1); endless repeat without `async`.
 - **Status:** Partly built: video does not play in the Playroom yet ·
   [audio and video](specifications/accepted-syntaxes-v30.md#audio-and-video)
@@ -1441,7 +1441,7 @@ exportText(toJson({ rounds: 3 }), title: "Your preset", fileName: "preset.txt")
 ### `debugMode`, warnings
 
 `debugMode` is a read-only `boolean`, true in a Debug session. A few problems, such as `showImage null` or a media
-file that fails to load, continue with a developer warning; other runtime errors stop at their line.
+file that fails to load or to play, continue with a developer warning; other runtime errors stop at their line.
 
 - **Status:** Partly built: replacing a bad value at runtime and continuing is not built ·
   [debug mode](specifications/accepted-syntaxes-v30.md#debug-mode),

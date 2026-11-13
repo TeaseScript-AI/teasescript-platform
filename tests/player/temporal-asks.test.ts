@@ -3,13 +3,13 @@ import test from "node:test";
 
 import {
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
-  playerRuntimeForeground,
   restorePlayerRuntimeSession,
   submitPlayerRuntimeComposer,
   type PlayerRuntimeSession,
   playerRuntimeSnapshot,
-} from "../../player/runtime-adapter.js";
+} from "../../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
+import { playerRuntimeForeground } from "../../player/runtime/runtime-view.js";
 import { compileSource } from "../../src/compiler.js";
 import type { InstructionPlan } from "../../src/plan/model.js";
 import { validateInstructionPlan } from "../../src/plan/validation.js";

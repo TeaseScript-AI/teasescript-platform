@@ -2,7 +2,7 @@ import { normalizeColor } from "../../src/color.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { preparePlayerMessageMarkup } from "../../player/message-markup.js";
+import { preparePlayerMessageMarkup } from "../../player/presentation/message-markup.js";
 import { parseMessageMarkup } from "../../src/message-markup.js";
 
 test("prepares constrained Player runs without input-depth recursion", () => {

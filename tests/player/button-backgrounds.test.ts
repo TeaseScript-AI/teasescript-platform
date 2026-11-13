@@ -7,14 +7,14 @@ import { deserializeCheckpoint } from "../../src/runtime/snapshot/checkpoint.js"
 import {
   activatePlayerRuntimeButton,
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
-  playerRuntimeForeground,
   observePlayerRuntimeTime,
   restorePlayerRuntimeSession,
   selectPlayerRuntimeChoice,
   submitPlayerRuntimeComposer,
   playerRuntimeSnapshot,
-} from "../../player/runtime-adapter.js";
+} from "../../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
+import { playerRuntimeForeground } from "../../player/runtime/runtime-view.js";
 import { validateRuntimeSnapshot } from "../../src/runtime/snapshot/snapshot-validation.js";
 
 const colours = ["gold", "oklch(0.7 0.18 45)"];

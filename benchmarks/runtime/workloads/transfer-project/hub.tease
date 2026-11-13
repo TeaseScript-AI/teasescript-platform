@@ -1,0 +1,11 @@
+enter("h")
+visits += 1
+if visits > 7 {
+  say "transfer:${entered}:${visits}:${trail}", instant
+  exit
+}
+if visits % 3 == 0 {
+  call "rooms/popup.tease"
+  trail += "${entered}"
+}
+goto (script("rooms/room-${visits % 2}.tease"))

@@ -1,0 +1,7 @@
+[
+  {"kind":"completeAction","args":[{"actionId":1,"actionKind":"fileStore","payload":{"kind":"stored","references":["captured-media:00000000-0000-4000-8000-000000000001:1"]}}],"admissionQueries":[{"reference":"captured-media:00000000-0000-4000-8000-000000000001:1","kind":"file","result":true}],"unit":true},
+  {"kind":"completeAction","args":[{"actionId":2,"actionKind":"fileStore","payload":{"kind":"stored","references":["captured-media:00000000-0000-4000-8000-000000000002:1"]}}],"admissionQueries":[{"reference":"captured-media:00000000-0000-4000-8000-000000000002:1","kind":"file","result":true}],"unit":true},
+  {"kind":"completeAction","args":[{"actionId":3,"actionKind":"fileStore","payload":{"kind":"read","files":["SGVsbG8sIGZpbGUh"]}}],"unit":true},
+  {"kind":"completeAction","args":[{"actionId":4,"actionKind":"fileStore","payload":{"kind":"hashed","hashes":["bf83a320cd5dafbbd791c1a46c3ac2aed0c5728100149796c45748bad8036341"]}}],"unit":true},
+  {"kind":"completeAction","args":[{"actionId":5,"actionKind":"fileStore","payload":{"kind":"read","files":["SGVsbG8sIGZpbGUh","U2Vjb25kIGZpbGU="]}}],"unit":true}
+]

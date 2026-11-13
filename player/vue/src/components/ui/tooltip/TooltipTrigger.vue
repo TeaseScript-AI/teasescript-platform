@@ -2,7 +2,7 @@
 import { definedProps } from "@/lib/definedProps";
 import type { TooltipTriggerProps } from "reka-ui";
 import { TooltipTrigger } from "reka-ui";
-import { playerPointerModality } from "@/usePlayerKeyboardFocus";
+import { playerPointerModality } from "@/shell/usePlayerKeyboardFocus";
 
 const props = defineProps<TooltipTriggerProps>();
 

@@ -57,8 +57,7 @@
   "overrides": [
     {
       "files": [
-        "player/capture-device.ts",
-        "player/captured-media.ts",
+        "player/media/captured-media.ts",
         "src/deterministic-math.ts",
         "src/message-markup.ts",
         "src/runtime/random/random.ts",
@@ -95,27 +94,25 @@
     },
     {
       "files": [
-        "player/vue/src/AbTestsPanel.vue",
-        "player/vue/src/CodeBlock.vue",
-        "player/vue/src/ExportTextDialog.vue",
-        "player/vue/src/FloatingViewfinder.vue",
-        "player/vue/src/LayoutDebug.vue",
-        "player/vue/src/LockDialog.vue",
-        "player/vue/src/PasswordField.vue",
-        "player/vue/src/PathBreadcrumb.vue",
-        "player/vue/src/PlayerApp.vue",
-        "player/vue/src/PlayerToolsShell.vue",
-        "player/vue/src/PopupDialog.vue",
-        "player/vue/src/RandomDrawPicker.vue",
-        "player/vue/src/SessionEndDialog.vue",
-        "player/vue/src/StageRightRail.vue",
-        "player/vue/src/StorageEditDialog.vue",
-        "player/vue/src/ToolPanelHeader.vue",
+        "player/vue/src/shell/AbTestsPanel.vue",
+        "player/vue/src/debug/random/CodeBlock.vue",
+        "player/vue/src/interaction/ExportTextDialog.vue",
+        "player/vue/src/stage/FloatingViewfinder.vue",
+        "player/vue/src/development/LayoutDebug.vue",
+        "player/vue/src/interaction/LockDialog.vue",
+        "player/vue/src/interaction/PasswordField.vue",
+        "player/vue/src/debug/random/PathBreadcrumb.vue",
+        "player/vue/src/shell/PlayerApp.vue",
+        "player/vue/src/shell/PlayerToolsShell.vue",
+        "player/vue/src/interaction/PopupDialog.vue",
+        "player/vue/src/debug/random/RandomDrawPicker.vue",
+        "player/vue/src/start-and-end/SessionEndDialog.vue",
+        "player/vue/src/stage/StageRightRail.vue",
+        "player/vue/src/debug/StorageEditDialog.vue",
+        "player/vue/src/shell/ToolPanelHeader.vue",
         "player/vue/src/components/ui/sidebar/SidebarProvider.vue"
       ],
-      "rules": {
-        "anti-slop/require-safety-comment-for-type-assertion": "off"
-      }
+      "rules": { "anti-slop/require-safety-comment-for-type-assertion": "off" }
     },
     {
       "files": [
@@ -130,13 +127,24 @@
     },
     {
       "files": [
-        "src/runtime/evaluation/access.ts",
         "tests/helpers/type-core-held-host.ts"
       ],
       "rules": {
         "typescript/no-base-to-string": "off",
         "typescript/restrict-template-expressions": "off"
       }
+    },
+    {
+      "files": ["tests/helpers/live-host-effects.ts", "tests/helpers/source-ops-lifecycle.ts"],
+      "rules": { "typescript/no-base-to-string": "off" }
+    },
+    {
+      "files": ["tests/player/player-session-rewind.test.ts"],
+      "rules": { "typescript/no-floating-promises": "off" }
+    },
+    {
+      "files": ["player/vue/src/session/activation/work/**"],
+      "rules": { "typescript/no-floating-promises": ["error", { "ignoreVoid": false }] }
     },
     {
       "files": ["**/*.{js,jsx,mjs,cjs}"],
@@ -162,6 +170,14 @@
         "StorageEvent": "readonly",
         "window": "readonly"
       }
+    },
+    {
+      "files": ["tools/player-gate/bridge/page.mjs", "tools/player-gate/bridge/worker-entry.mjs", "tools/player-gate/drive.mjs", "tools/player-gate/lib/player.mjs", "tools/player-gate/lib/probe.mjs", "tools/player-gate/scenarios/bridge.mjs", "tools/player-gate/scenarios/demo.mjs", "tools/player-gate/scenarios/keep.mjs", "tools/player-gate/scenarios/taps.mjs", "tools/player-gate/tapes/browser.mjs"],
+      "globals": {"document": "readonly", "Document": "readonly", "getComputedStyle": "readonly", "IDBDatabase": "readonly", "IDBObjectStore": "readonly", "indexedDB": "readonly", "innerHeight": "readonly", "innerWidth": "readonly", "location": "readonly", "requestAnimationFrame": "readonly", "self": "readonly", "window": "readonly", "Worker": "readonly"}
+    },
+    {
+      "files": ["tools/player-gate/variants/delayed-client.mjs", "tools/player-gate/variants/delayed-in-process.mjs"],
+      "globals": { "__GATE_DELAY_MS__": "readonly" }
     }
   ]
 }

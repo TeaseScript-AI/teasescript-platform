@@ -1,299 +1,68 @@
 import assert from "node:assert/strict";
-import test, { before, type TestContext } from "node:test";
-import { effectScope, nextTick, type Ref } from "vue";
-
-import type { DebugHistoryPoint, DebugHistorySpill } from "../../player/debug-history.js";
-import type { DebugRecorder } from "../../player/debug-recorder.js";
+import test, { before } from "node:test";
+import { effectScope } from "vue";
 import {
-  createPlayerRuntimeSession,
-  playerRuntimeForeground,
   restorePlayerRuntimeSessionAt,
-  selectPlayerRuntimeChoice,
   type PlayerRuntimeSession,
-  type PlayerRuntimeSessionOptions,
+} from "../../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
+import { playerRuntimeForeground } from "../../player/runtime/runtime-view.js";
+import { memoryKeptRoomStore } from "../../player/persistence/kept-sessions.js";
+import { coverageGaps, product, type Coordinates } from "../helpers/family-coverage.js";
+import {
+  hostTrace,
+  onHost,
+  hostIntroduced,
+  loadHostFacade,
+} from "../helpers/player/host-sessions.js";
+import { interceptSends } from "../helpers/bridge/sends.js";
+import {
+  selectPlayerRuntimeChoice,
   playerRuntimeSnapshot,
-} from "../../player/runtime-adapter.js";
-import type { ScriptStorageProvider } from "../../player/script-storage.js";
-import { memoryKeptRoomStore, type KeptRoomStore } from "../../player/kept-sessions.js";
-import type { RuntimeSnapshot, SerializableRuntimeValue } from "../../src/index.js";
-import type { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js";
-import { loadPlayerModule } from "../helpers/player-modules.js";
+  RewindHost,
+  reportsInto,
+  backTo,
+  BridgeLostError,
+  usePlayerDebug,
+  memoryStorage,
+  createHost,
+  settle,
+  script,
+  start,
+  choose,
+  shownView,
+  EXIT_AXES,
+  ExitCase,
+  holdRead,
+  heldInHost,
+  untilShown,
+} from "../helpers/player/rewind-host.js";
+import { sourceStart } from "../helpers/prepared-plan.js";
 
-// Debug's rewind through the Player's real session host (DEBUGGER.md "Rewind"): Back shows an earlier state for
-// inspection without running it or touching saved data; new input adopts it as the session, with its saved data.
-
-/** What reviewing an import gives, which the import then takes; these tests do not read it. */
-interface ImportReview {
-  readonly scripts: readonly object[];
-}
-interface RewindHost {
-  readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
-  readonly generation: Readonly<Ref<number>>;
-  readonly notices: Readonly<Ref<readonly { readonly key: string }[]>>;
-  readonly rewind: {
-    readonly inspecting: Readonly<Ref<boolean>>;
-    readonly canRewind: Readonly<Ref<boolean>>;
-  };
-  loadScriptStorage(): Promise<void>;
-  scriptStorageOptions(): PlayerRuntimeSessionOptions;
-  prepare(
-    create: (recording: {
-      readonly recorder: DebugRecorder;
-      readonly debugTrace?: RuntimeDebugContext;
-    }) => PlayerRuntimeSession,
-  ): void;
-  activate(): void;
-  toStartPage(): Promise<void>;
-  update(session: PlayerRuntimeSession): void;
-  prepareInput(): true | Promise<boolean>;
-  setDebugTracing(on: boolean): void;
-  reviewSavedDataImport(bundle: {
-    readonly scripts: readonly {
-      readonly scope: string;
-      readonly name: string | null;
-      readonly photos: readonly string[];
-      readonly entries: readonly {
-        readonly key: string;
-        readonly value: SerializableRuntimeValue;
-      }[];
-    }[];
-    readonly images: readonly never[];
-  }): Promise<ImportReview>;
-  importSavedData(review: ImportReview, chosen: ReadonlySet<string>): Promise<void>;
-  readonly debugTrace: Readonly<Ref<{ status(): { readonly epoch: number } } | null>>;
-  editSavedData(edit: {
-    key: string;
-    value: SerializableRuntimeValue;
-    expected: SerializableRuntimeValue | undefined;
-  }): Promise<{ readonly kind: string }>;
-  observe(): PlayerRuntimeSession | null;
-  debugRecording(): {
-    readonly anchorSnapshot: RuntimeSnapshot;
-    readonly endSnapshot: RuntimeSnapshot;
-  } | null;
-  debugExportCandidate(
-    player: Record<string, never>,
-  ): Promise<{
-    readonly session: { readonly snapshot: RuntimeSnapshot } | null;
-    readonly recording: {
-      readonly operations: readonly { readonly kind: string; readonly thrown: string | null }[];
-      readonly complete: boolean;
-    } | null;
-    readonly rewoundWhileDebugging: { restoredSceneTimeMs: number; rewindCount: number } | null;
-  }>;
-}
-interface Rewind {
-  readonly state: Readonly<
-    Ref<{
-      readonly points: readonly DebugHistoryPoint[];
-      readonly inspection: { readonly points: number; readonly canForward: boolean } | null;
-    }>
-  >;
-  back(index: number): Promise<boolean>;
-  forward(): Promise<boolean>;
-  resume(): Promise<boolean>;
-  returnToSession(): boolean;
-}
-let usePlayerSession: (options: {
-  scriptStorage: ScriptStorageProvider;
-  debugHistorySpill: () => Promise<DebugHistorySpill | null>;
-  debugHistoryMemoryBudget?: number;
-  debugRooms?: KeptRoomStore;
-}) => RewindHost;
-let useDebugRewind: (player: RewindHost) => Rewind;
-let usePlayerDebug: (
-  player: RewindHost,
-  initial: { readonly menu: boolean; readonly autoSkip: boolean },
-) => { readonly active: Ref<boolean>; readonly rewind: Readonly<Ref<Rewind | null>> };
-
-before(async () => {
-  const session: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+/** Ends the capture `reportsInto` began, at the check of what it captured, so that a later host error prints again. */
+function endCapture() {
+  // EVIDENCE: fixture: `reportsInto` replaced `console.error` by a mock of the test's context, a proxy whose `mock` a read finds but `in` does not.
+  const capture: unknown = (console.error as { readonly mock?: unknown }).mock;
+  assert.ok(
+    typeof capture === "object" &&
+      capture !== null &&
+      "restore" in capture &&
+      typeof capture.restore === "function",
+    "the capture reportsInto began",
   );
-  const rewind: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/useDebugRewind.ts",
-  );
-  const debug: Record<string, unknown> = await loadPlayerModule("player/vue/src/usePlayerDebug.ts");
-  assert.equal(typeof debug.usePlayerDebug, "function");
-  // EVIDENCE: validation: as above.
-  usePlayerDebug = debug.usePlayerDebug as typeof usePlayerDebug;
-  assert.equal(typeof session.usePlayerSession, "function");
-  assert.equal(typeof rewind.useDebugRewind, "function");
-  // EVIDENCE: validation: Vite loaded the real source modules and the exports are callable; this is their tested API.
-  usePlayerSession = session.usePlayerSession as typeof usePlayerSession;
-  // EVIDENCE: validation: as above.
-  useDebugRewind = rewind.useDebugRewind as typeof useDebugRewind;
-});
-
-/** Saved data in memory, recording each provider call; `replace` can be made to fail. */
-function memoryStorage() {
-  const entries = new Map<string, SerializableRuntimeValue>();
-  const calls: string[] = [];
-  let failReplace = false;
-  let replaceHeld: Promise<void> | null = null;
-  let writeHeld: Promise<void> | null = null;
-  const provider: ScriptStorageProvider = {
-    scope: "test",
-    load: async () => [...entries].map(([key, value]) => ({ key, value })),
-    write: async (key, value) => {
-      calls.push(`write ${key}`);
-      await writeHeld;
-      if (value === null) entries.delete(key);
-      else entries.set(key, value);
-    },
-    replace: async (replacement) => {
-      calls.push("replace");
-      await replaceHeld;
-      if (failReplace) throw new Error("quota");
-      entries.clear();
-      for (const entry of replacement) entries.set(entry.key, entry.value);
-    },
-    clear: async () => entries.clear(),
-  };
-  return {
-    provider,
-    calls,
-    saved: () => Object.fromEntries(entries),
-    failReplaces() {
-      failReplace = true;
-    },
-    /** Holds every write until `release` is called. */
-    holdWrites() {
-      let release!: () => void;
-      writeHeld = new Promise((resolve) => (release = resolve));
-      return () => release();
-    },
-    /** Holds every replacement until `release` is called. */
-    holdReplaces() {
-      let release!: () => void;
-      replaceHeld = new Promise((resolve) => (release = resolve));
-      return () => release();
-    },
-  };
+  capture.restore();
 }
 
-function memorySpill() {
-  const state = { destroyed: 0 };
-  const rows = new Map<number, string>();
-  let getHeld: Promise<void> | null = null;
-  const spill: DebugHistorySpill = {
-    put: async (id, json) => void rows.set(id, json),
-    get: async (id) => {
-      await getHeld;
-      return rows.get(id);
-    },
-    delete: async (ids) => ids.forEach((id) => rows.delete(id)),
-    destroy: async () => {
-      rows.clear();
-      state.destroyed += 1;
-    },
-  };
-  return {
-    spill,
-    state,
-    /** Holds every read until `release` is called. */
-    holdGets() {
-      let release!: () => void;
-      getHeld = new Promise((resolve) => (release = resolve));
-      return () => release();
-    },
-  };
-}
+// `hostIntroduced` registers adapter sessions through the facade of the bundle the composable runs in.
+before(loadHostFacade);
 
-function createHost(
-  context: TestContext,
-  provider: ScriptStorageProvider,
-  options: { readonly memoryBudget?: number; readonly debugRooms?: KeptRoomStore } = {},
-) {
-  // Event targets are the only browser surface these scripts use, besides the audio elements a Start primes while it
-  // reads the stored values.
-  const values = {
-    document: new EventTarget(),
-    window: new EventTarget(),
-    Audio: class {
-      src = "";
-      play = async () => {};
-      pause() {}
-      load() {}
-      removeAttribute() {}
-    },
-  };
-  for (const [name, value] of Object.entries(values)) {
-    const previous = Object.getOwnPropertyDescriptor(globalThis, name);
-    Object.defineProperty(globalThis, name, { configurable: true, value });
-    context.after(() => {
-      if (previous) Object.defineProperty(globalThis, name, previous);
-      else Reflect.deleteProperty(globalThis, name);
-    });
-  }
-  context.mock.timers.enable({ apis: ["setTimeout"] });
-  const spill = memorySpill();
-  const scope = effectScope();
-  const host = scope.run(() =>
-    usePlayerSession({
-      scriptStorage: provider,
-      debugHistorySpill: async () => spill.spill,
-      ...(options.debugRooms && { debugRooms: options.debugRooms }),
-      ...(options.memoryBudget === undefined
-        ? {}
-        : { debugHistoryMemoryBudget: options.memoryBudget }),
-    }),
-  );
-  assert.ok(host);
-  // Debug's features have a scope of their own, which turning Debug off stops.
-  const debug = effectScope();
-  const rewind = debug.run(() => useDebugRewind(host));
-  assert.ok(rewind);
-  context.after(() => {
-    debug.stop();
-    scope.stop();
-  });
-  return { host, rewind, debug, scope, spill: spill.state, holdGets: spill.holdGets };
-}
-
-// Lets storage writes report, which the host does in a later task.
-async function settle(context: TestContext) {
-  for (let round = 0; round < 4; round += 1) {
-    for (let turn = 0; turn < 5; turn += 1) await nextTick();
-    context.mock.timers.tick(0);
-  }
-  for (let turn = 0; turn < 5; turn += 1) await nextTick();
-}
-
-const script = [
-  'save 1 as "k"',
-  'let first = askChoice "One", "Two"',
-  'save first as "pick"',
-  'say "first ${first}", instant',
-  'let second = askChoice "Red", "Blue"',
-  'save second as "color"',
-  'say "second ${second}", instant',
-  'let third = askChoice "A", "B"',
-  "exit",
-].join("\n");
+/** The value trace the host's session runs with, as the host holds it. */
+const traceOf = (session: PlayerRuntimeSession | null | undefined) =>
+  session === null || session === undefined
+    ? null
+    : onHost((held: PlayerRuntimeSession) => held.debugTrace)(session);
 
 const SCOPES_USED_UP = /nextScopeId is at its largest value, so it cannot advance/u;
-
-async function start(context: TestContext, host: RewindHost) {
-  await host.loadScriptStorage();
-  host.prepare((recording) =>
-    createPlayerRuntimeSession(script, { ...host.scriptStorageOptions(), ...recording }),
-  );
-  host.activate();
-  await settle(context);
-}
-
-// Chooses as the Player's interaction does: the session is readied for input first, and only then is input evaluated.
-async function choose(context: TestContext, host: RewindHost, label: string) {
-  if (await host.prepareInput()) {
-    const session = host.session.value!;
-    const foreground = playerRuntimeForeground(session);
-    assert.ok(foreground?.kind === "choose", label);
-    const option = foreground.options.find((candidate) => candidate.label === label)!;
-    host.update(selectPlayerRuntimeChoice(session, option.id)!.session);
-  }
-  await settle(context);
-}
 
 function said(host: RewindHost): string[] {
   return (host.session.value?.transcriptEntries ?? []).map((entry) => entry.text);
@@ -311,31 +80,39 @@ test("Back shows an earlier state paused, and Forward and Return restore the sta
     ["One", null],
   );
 
-  assert.equal(await rewind.back(0), true);
+  assert.equal(await backTo(rewind, 0), true);
   assert.equal(host.rewind.inspecting.value, true);
   assert.deepEqual(said(host), []);
   assert.equal(playerRuntimeForeground(host.session.value!)?.kind, "choose");
   // Nothing runs on its own while inspecting: no time is observed, and saved data stay as they were.
   const inspected = host.session.value;
-  assert.equal(host.observe(), inspected);
+  assert.equal(await host.observe(), inspected);
   assert.deepEqual(storage.saved(), { k: 1, pick: "One" });
   // The restored state is a diagnostic fork, and its recording begins at it.
-  assert.deepEqual((await host.debugExportCandidate({})).rewoundWhileDebugging, {
-    restoredSceneTimeMs: inspected!.state.observedSessionTimeMs,
-    rewindCount: 1,
-  });
-  assert.deepEqual(host.debugRecording()?.anchorSnapshot, playerRuntimeSnapshot(inspected!));
+  assert.deepEqual(
+    (await host.debugExportCandidate(() => ({}), new AbortController().signal))
+      .rewoundWhileDebugging,
+    { restoredSceneTimeMs: inspected!.state.observedSessionTimeMs, rewindCount: 1 },
+  );
+  assert.deepEqual(
+    (await host.debugRecording())?.anchorSnapshot,
+    playerRuntimeSnapshot(inspected!),
+  );
 
   assert.equal(await rewind.forward(), true);
   assert.deepEqual(playerRuntimeSnapshot(host.session.value!), playerRuntimeSnapshot(tip));
   assert.deepEqual(said(host), ["One", "first One"]);
   assert.equal(host.rewind.inspecting.value, true);
 
-  assert.equal(await rewind.back(0), true);
-  assert.equal(rewind.returnToSession(), true);
+  assert.equal(await backTo(rewind, 0), true);
+  assert.equal(await rewind.returnToSession(), true);
   assert.equal(host.session.value, tip);
   assert.equal(host.rewind.inspecting.value, false);
-  assert.equal((await host.debugExportCandidate({})).rewoundWhileDebugging, null);
+  assert.equal(
+    (await host.debugExportCandidate(() => ({}), new AbortController().signal))
+      .rewoundWhileDebugging,
+    null,
+  );
   assert.deepEqual(storage.calls, ["write k", "write pick"]);
 });
 
@@ -359,8 +136,12 @@ test("after an engine call throws, the export, Back, Forward, and Return work fr
     ...playerRuntimeSnapshot(started),
     nextScopeId: Number.MAX_SAFE_INTEGER,
   });
-  host.prepare(({ recorder }) =>
-    restorePlayerRuntimeSessionAt(started.plan, usedUp, started.events, recorder),
+  // The used-up state, restored outside the host and registered there, goes on as a Continue, which begins the recording.
+  host.prepareRestore(
+    hostIntroduced(
+      await host.bridge,
+      restorePlayerRuntimeSessionAt(started.plan, usedUp, started.events),
+    ),
   );
   host.activate();
   await settle(context);
@@ -370,11 +151,14 @@ test("after an engine call throws, the export, Back, Forward, and Return work fr
   await assert.rejects(choose(context, host, "Long"), SCOPES_USED_UP);
   assert.equal(host.session.value, tip);
 
-  const candidate = await host.debugExportCandidate({});
+  const candidate = await host.debugExportCandidate(() => ({}), new AbortController().signal);
   assert.deepEqual(candidate.session?.snapshot, shown);
   assert.deepEqual(
     candidate.recording?.operations.map((operation) => [operation.kind, operation.thrown]),
     [
+      // A Continue's recording begins with its capture and the run that resumes the restored state.
+      ["recordContinueCapture", null],
+      ["run", null],
       ["completeAction", null],
       ["run", null],
       ["completeAction", null],
@@ -385,12 +169,12 @@ test("after an engine call throws, the export, Back, Forward, and Return work fr
 
   // After another error, Back keeps the state it left, the one the Player showed, for Forward.
   await assert.rejects(choose(context, host, "Long"), SCOPES_USED_UP);
-  assert.equal(await rewind.back(0), true);
+  assert.equal(await backTo(rewind, 0), true);
   assert.equal(playerRuntimeForeground(host.session.value!)?.kind, "choose");
   assert.equal(await rewind.forward(), true);
   assert.deepEqual(playerRuntimeSnapshot(host.session.value!), shown);
-  assert.equal(await rewind.back(0), true);
-  assert.equal(rewind.returnToSession(), true);
+  assert.equal(await backTo(rewind, 0), true);
+  assert.equal(await rewind.returnToSession(), true);
   assert.equal(host.session.value, tip);
   await choose(context, host, "Red");
   assert.equal(host.session.value!.state.status, "halted");
@@ -402,7 +186,7 @@ test("a different choice adopts the restored state: its saved data, then the new
   const { host, rewind, debug } = createHost(context, storage.provider);
   await start(context, host);
   await choose(context, host, "One");
-  assert.equal(await rewind.back(0), true);
+  assert.equal(await backTo(rewind, 0), true);
 
   await choose(context, host, "Two");
   assert.equal(host.rewind.inspecting.value, false);
@@ -415,9 +199,13 @@ test("a different choice adopts the restored state: its saved data, then the new
     rewind.state.value.points.map((point) => point.response?.text ?? null),
     ["Two", null],
   );
-  assert.equal(rewind.returnToSession(), false);
+  assert.equal(await rewind.returnToSession(), false);
   assert.equal(rewind.state.value.inspection, null);
-  assert.deepEqual((await host.debugExportCandidate({})).rewoundWhileDebugging?.rewindCount, 1);
+  assert.deepEqual(
+    (await host.debugExportCandidate(() => ({}), new AbortController().signal))
+      .rewoundWhileDebugging?.rewindCount,
+    1,
+  );
 
   // Turning Debug off keeps the branch: it is the session now.
   const branch = host.session.value;
@@ -432,11 +220,11 @@ test("Resume adopts the restored state without input", async (context) => {
   const { host, rewind } = createHost(context, storage.provider);
   await start(context, host);
   await choose(context, host, "One");
-  assert.equal(await rewind.back(0), true);
+  assert.equal(await backTo(rewind, 0), true);
   assert.equal(await rewind.resume(), true);
   assert.equal(host.rewind.inspecting.value, false);
   assert.deepEqual(storage.saved(), { k: 1 });
-  assert.equal(rewind.returnToSession(), false);
+  assert.equal(await rewind.returnToSession(), false);
 });
 
 test("when the saved data cannot be restored, the state stays inspected and Return still reinstates the session", async (context) => {
@@ -445,7 +233,7 @@ test("when the saved data cannot be restored, the state stays inspected and Retu
   await start(context, host);
   await choose(context, host, "One");
   const tip = host.session.value;
-  assert.equal(await rewind.back(0), true);
+  assert.equal(await backTo(rewind, 0), true);
   const inspected = host.session.value;
   storage.failReplaces();
   await choose(context, host, "Two");
@@ -453,8 +241,66 @@ test("when the saved data cannot be restored, the state stays inspected and Retu
   assert.equal(host.session.value, inspected);
   assert.ok(host.notices.value.some((notice) => notice.key === "rewind-not-adopted"));
   assert.deepEqual(storage.saved(), { k: 1, pick: "One" });
-  assert.equal(rewind.returnToSession(), true);
+  assert.equal(await rewind.returnToSession(), true);
   assert.equal(host.session.value, tip);
+});
+
+test("Debug off during a pending adoption, then a loss: the adoption's late outcome reinstates nothing and rejects nothing unhandled", async (context) => {
+  for (const hold of ["request", "reply"] as const) {
+    await context.test(hold, async (subtest) => {
+      const made = createHost(subtest, memoryStorage().provider, { lossy: true });
+      const { host, rewind } = made;
+      await start(subtest, host);
+      await choose(subtest, host, "One");
+      const tip = shownView(host);
+      assert.equal(await backTo(rewind, 0), true);
+      const held = holdRead(subtest, await host.bridge, "captureStorage", hold, false);
+      // Input adopts the inspected state; the adoption waits for its read.
+      const chosen = Promise.resolve(host.prepareInput());
+      await held.arrived;
+      const reported: unknown[] = [];
+      reportsInto(subtest, reported);
+      made.debug.stop();
+      made.lose!();
+      held.release();
+      await chosen.catch(() => {});
+      await settle(subtest);
+      endCapture();
+      assert.deepEqual(
+        reported.map((error) => (error instanceof Error ? error.message : String(error))),
+        ["The engine Worker failed: injected."],
+        "only the loss is reported",
+      );
+      assert.notEqual(
+        host.session.value === null ? null : shownView(host).lineage,
+        tip.lineage,
+        "the parked session is not reinstated",
+      );
+    });
+  }
+});
+
+test("a rewind reply that rejects on a live connection is reported as a host failure; one the loss ended is not", async (context) => {
+  for (const lost of [false, true]) {
+    await context.test(lost ? "lost" : "live", async (subtest) => {
+      const { host, rewind } = createHost(subtest, memoryStorage().provider);
+      await start(subtest, host);
+      await choose(subtest, host, "One");
+      assert.equal(await backTo(rewind, 0), true);
+      const bridge = await host.bridge;
+      const failure = lost
+        ? new BridgeLostError("The engine Worker failed: injected.")
+        : new Error("A host failure.");
+      interceptSends(subtest, bridge.client, (op, _args, send) =>
+        op === "rewindReturn" ? Promise.reject(failure) : send(),
+      );
+      const reported: unknown[] = [];
+      reportsInto(subtest, reported);
+      assert.equal(await rewind.returnToSession(), true);
+      await settle(subtest);
+      assert.deepEqual(reported, lost ? [] : [failure]);
+    });
+  }
 });
 
 test("turning Debug off while inspecting reinstates the session and deletes the history", async (context) => {
@@ -463,12 +309,110 @@ test("turning Debug off while inspecting reinstates the session and deletes the 
   await start(context, host);
   await choose(context, host, "One");
   const tip = host.session.value;
-  assert.equal(await rewind.back(0), true);
+  assert.equal(await backTo(rewind, 0), true);
   debug.stop();
+  // Debug off goes through the Player's lifecycle queue and the restart gate, then shows the parked session.
+  await settle(context);
   assert.equal(host.session.value, tip);
   assert.equal(host.rewind.inspecting.value, false);
   await settle(context);
   assert.equal(spill.destroyed, 1);
+});
+
+for (const end of ["Debug off", "unmount"] as const)
+  test(`after the connection is lost, ${end} while a state is inspected reinstates nothing and throws nothing`, async (context) => {
+    const storage = memoryStorage();
+    const made = createHost(context, storage.provider, { lossy: true });
+    const { host, rewind, debug } = made;
+    await start(context, host);
+    await choose(context, host, "One");
+    assert.equal(await backTo(rewind, 0), true);
+    const inspected = host.session.value;
+    const reported: unknown[] = [];
+    reportsInto(context, reported);
+    made.lose!();
+    await settle(context);
+    endCapture();
+    assert.deepEqual(
+      reported.map((error) => (error instanceof Error ? error.message : String(error))),
+      ["The engine Worker failed: injected."],
+      "the loss is reported",
+    );
+    // The lost host's states are gone, and with them Debug's history: the rewind is sealed by the loss.
+    assert.equal(host.rewind.owner.state.sealed, "loss");
+    if (end === "Debug off") debug.stop();
+    else made.scope.stop();
+    assert.equal(host.session.value, inspected, "nothing reinstated");
+  });
+
+for (const hold of ["request", "reply"] as const)
+  test(`Debug off while an adoption's read is held (${hold}), then a lost connection: nothing is reinstated, and nothing rejects`, async (context) => {
+    const rejections: unknown[] = [];
+    const record = (reason: unknown) => rejections.push(reason);
+    process.on("unhandledRejection", record);
+    context.after(() => void process.off("unhandledRejection", record));
+    // What the Player reports as host errors: the loss, and nothing a reinstatement attempted after it.
+    const reported: unknown[] = [];
+    context.mock.method(console, "error", (...args: unknown[]) => void reported.push(args[1]));
+    const storage = memoryStorage();
+    const made = createHost(context, storage.provider, { lossy: true });
+    const { host, rewind, debug } = made;
+    await start(context, host);
+    await choose(context, host, "One");
+    assert.equal(await backTo(rewind, 0), true);
+    const shown = host.session.value;
+    const held = holdRead(context, await host.bridge, "captureStorage", hold, false);
+    const chosen = choose(context, host, "Two");
+    await held.arrived;
+    debug.stop();
+    made.lose!();
+    held.release();
+    await chosen;
+    await settle(context);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(host.session.value, shown, "the lost session is not reinstated");
+    assert.deepEqual(rejections, [], "no promise rejected unhandled");
+    assert.deepEqual(
+      reported.map((error) => (error instanceof Error ? error.message : String(error))),
+      ["The engine Worker failed: injected."],
+      "only the loss was reported: no reinstatement was attempted",
+    );
+  });
+
+test("the Player's unmount releases the history's lineages on the connection that lives, an adoption's included", async (context) => {
+  for (const adopting of [false, true]) {
+    await context.test(adopting ? "adopting" : "inspecting", async (subtest) => {
+      // Debug on goes on in the debug room, whose saved data here are the ones `storage` holds.
+      const storage = memoryStorage();
+      const made = createHost(subtest, memoryStorage().provider, {
+        debugRooms: { ...memoryKeptRoomStore(), values: () => storage.provider },
+      });
+      const { host } = made;
+      // The Player's own Debug features, which unmount with it.
+      made.debug.stop();
+      const features = effectScope();
+      const debug = features.run(() => usePlayerDebug(host, { menu: true, autoSkip: false }))!;
+      await settle(subtest);
+      await start(subtest, host);
+      await choose(subtest, host, "One");
+      const parked = shownView(host);
+      assert.equal(await backTo(debug.rewind.value!, 0), true);
+      const shown = shownView(host);
+      const bridge = await host.bridge;
+      const release = adopting ? storage.holdReplaces() : null;
+      const chosen = adopting ? choose(subtest, host, "Two") : null;
+      if (adopting) await settle(subtest);
+      features.stop();
+      made.scope.stop();
+      release?.();
+      await chosen;
+      await settle(subtest);
+      assert.deepEqual(
+        { parked: await heldInHost(bridge, parked.id), shown: await heldInHost(bridge, shown.id) },
+        { parked: false, shown: false },
+      );
+    });
+  }
 });
 
 test("Back waits for a pending save, and a new session deletes the history", async (context) => {
@@ -481,7 +425,7 @@ test("Back waits for a pending save, and a new session deletes the history", asy
   // The choice saves; the write waits for the host until a later task, and Back with it.
   host.update(selectPlayerRuntimeChoice(session, foreground.options[0]!.id)!.session);
   assert.equal(host.rewind.canRewind.value, false);
-  assert.equal(await rewind.back(0), false);
+  assert.equal(await backTo(rewind, 0), false);
   await settle(context);
   assert.equal(host.rewind.canRewind.value, true);
   assert.equal(rewind.state.value.points.length, 2);
@@ -499,7 +443,7 @@ test("turning Debug off while an adoption is under way reinstates the session on
       await start(subtest, host);
       await choose(subtest, host, "One");
       const tip = host.session.value;
-      assert.equal(await rewind.back(0), true);
+      assert.equal(await backTo(rewind, 0), true);
       const release = storage.holdReplaces();
       if (fails) storage.failReplaces();
       const chosen = choose(subtest, host, "Two");
@@ -518,7 +462,7 @@ test("input to an inspected state is evaluated only once it is adopted, so a fai
   const { host, rewind } = createHost(context, storage.provider);
   await start(context, host);
   await choose(context, host, "One");
-  assert.equal(await rewind.back(0), true);
+  assert.equal(await backTo(rewind, 0), true);
   const inspected = host.session.value!;
   const events = inspected.events.length;
   storage.failReplaces();
@@ -526,7 +470,7 @@ test("input to an inspected state is evaluated only once it is adopted, so a fai
   assert.equal(host.session.value, inspected);
   assert.deepEqual(said(host), []);
   assert.equal(inspected.events.length, events);
-  assert.deepEqual(host.debugRecording()?.endSnapshot, playerRuntimeSnapshot(inspected));
+  assert.deepEqual((await host.debugRecording())?.endSnapshot, playerRuntimeSnapshot(inspected));
 });
 
 test("a second input while the state is being adopted is refused, and the first applies once", async (context) => {
@@ -534,7 +478,7 @@ test("a second input while the state is being adopted is refused, and the first 
   const { host, rewind } = createHost(context, storage.provider);
   await start(context, host);
   await choose(context, host, "One");
-  assert.equal(await rewind.back(0), true);
+  assert.equal(await backTo(rewind, 0), true);
   const release = storage.holdReplaces();
   const first = choose(context, host, "Two");
   assert.equal(await host.prepareInput(), false);
@@ -555,7 +499,7 @@ test("Back waits for a Storage editor change until the session took it", async (
   const edit = host.editSavedData({ key: "pick", value: "Edited", expected: "One" });
   await settle(context);
   assert.equal(host.rewind.canRewind.value, false);
-  assert.equal(await rewind.back(0), false);
+  assert.equal(await backTo(rewind, 0), false);
   release();
   assert.deepEqual(await edit, { kind: "saved", live: true });
   await settle(context);
@@ -567,7 +511,7 @@ test("an unmounted Player whose adoption fails publishes nothing", async (contex
   const { host, rewind, debug, scope } = createHost(context, storage.provider);
   await start(context, host);
   await choose(context, host, "One");
-  assert.equal(await rewind.back(0), true);
+  assert.equal(await backTo(rewind, 0), true);
   const release = storage.holdReplaces();
   storage.failReplaces();
   const chosen = choose(context, host, "Two");
@@ -585,16 +529,16 @@ test("every restored state begins a new epoch of the value trace, which may turn
   host.setDebugTracing(true);
   await start(context, host);
   await choose(context, host, "One");
-  const trace = host.debugTrace.value!;
+  const trace = hostTrace(await host.bridge)!;
   const epoch = trace.status().epoch;
-  assert.equal(await rewind.back(0), true);
-  assert.equal(host.session.value?.debugTrace, trace);
+  assert.equal(await backTo(rewind, 0), true);
+  assert.equal(traceOf(host.session.value), trace);
   assert.equal(trace.status().epoch, epoch + 1);
   assert.equal(await rewind.forward(), true);
   assert.equal(trace.status().epoch, epoch + 2);
 
   // Turning the trace off rewraps the inspected session; the adoption under way still completes.
-  assert.equal(await rewind.back(0), true);
+  assert.equal(await backTo(rewind, 0), true);
   const release = storage.holdReplaces();
   const chosen = choose(context, host, "Two");
   host.setDebugTracing(false);
@@ -621,7 +565,7 @@ test("turning the Debug switch off while an adoption fails reinstates the sessio
   await start(context, host);
   await choose(context, host, "One");
   const tip = playerRuntimeSnapshot(host.session.value!);
-  assert.equal(await debug.rewind.value!.back(0), true);
+  assert.equal(await backTo(debug.rewind.value!, 0), true);
   const release = storage.holdReplaces();
   storage.failReplaces();
   const chosen = choose(context, host, "Two");
@@ -639,21 +583,21 @@ test("turning the Debug switch off while an adoption fails reinstates the sessio
 
 test("input is refused while a step reads a spilled state, so the saved data stay as the shown session's", async (context) => {
   const storage = memoryStorage();
-  // Every point is spilled, so each step reads its state back.
-  const { host, rewind, holdGets } = createHost(context, storage.provider, { memoryBudget: 1 });
+  // Every point is written through to the spill store, so each step reads its state back.
+  const { host, rewind, holdGets } = createHost(context, storage.provider);
   await start(context, host);
   await choose(context, host, "One");
   await choose(context, host, "Red");
   assert.deepEqual(storage.saved(), { k: 1, pick: "One", color: "Red" });
-  assert.equal(await rewind.back(1), true);
+  assert.equal(await backTo(rewind, 1), true);
   const release = holdGets();
-  const back = rewind.back(0);
+  const back = backTo(rewind, 0);
   assert.equal(await host.prepareInput(), false);
-  assert.equal(rewind.returnToSession(), false);
+  assert.equal(await rewind.returnToSession(), false);
   release();
   assert.equal(await back, true);
   assert.deepEqual(storage.saved(), { k: 1, pick: "One", color: "Red" });
-  assert.equal(rewind.returnToSession(), true);
+  assert.equal(await rewind.returnToSession(), true);
   const view = Object.fromEntries(
     playerRuntimeSnapshot(host.session.value!).scriptStorage.map((entry) => [
       entry.key,
@@ -669,7 +613,7 @@ test("importing the shown script ends its rewind history and an inspected state,
   await start(context, host);
   for (const label of ["One", "Red", "A"]) await choose(context, host, label);
   assert.equal(host.session.value?.state.status, "halted");
-  assert.equal(await rewind.back(0), true);
+  assert.equal(await backTo(rewind, 0), true);
   assert.equal(await rewind.forward(), true);
   assert.equal(host.rewind.inspecting.value, true);
   const review = await host.reviewSavedDataImport({
@@ -680,31 +624,42 @@ test("importing the shown script ends its rewind history and an inspected state,
   assert.equal(host.rewind.inspecting.value, false);
   assert.deepEqual(rewind.state.value.points, []);
   assert.equal(await rewind.resume(), false);
-  assert.equal(rewind.returnToSession(), false);
+  assert.equal(await rewind.returnToSession(), false);
   assert.deepEqual(storage.saved(), { imported: 9 });
 });
 
-test("a step whose state was read after Start or Continue began changes nothing", async (context) => {
+test("a step whose prepared state arrives after Start or Continue began is dropped: it shows nothing and changes nothing", async (context) => {
   for (const step of ["back", "forward"] as const) {
     await context.test(step, async (subtest) => {
       const storage = memoryStorage();
-      const { host, rewind, holdGets } = createHost(subtest, storage.provider, { memoryBudget: 1 });
+      const { host, rewind, holdGets } = createHost(subtest, storage.provider);
       await start(subtest, host);
       await choose(subtest, host, "One");
       await choose(subtest, host, "Red");
-      assert.equal(await rewind.back(1), true);
-      if (step === "forward") assert.equal(await rewind.back(0), true);
+      assert.equal(await backTo(rewind, 1), true);
+      if (step === "forward") assert.equal(await backTo(rewind, 0), true);
       const shown = host.session.value;
       const before = rewind.state.value.inspection;
+      // Prepared before the hold: a source prepare posted behind the held read would wait for it.
+      const replacement = await sourceStart(host.bridge, script, () => ({
+        ...host.scriptStorageOptions(),
+      }));
       const release = holdGets();
-      const pending = step === "back" ? rewind.back(0) : rewind.forward();
-      host.prepare((recording) =>
-        createPlayerRuntimeSession(script, { ...host.scriptStorageOptions(), ...recording }),
-      );
+      const pending = step === "back" ? backTo(rewind, 0) : rewind.forward();
+      host.prepare(replacement);
       release();
       assert.equal(await pending, false);
-      assert.equal(host.session.value, shown);
+      await settle(subtest);
+      assert.equal(host.session.value, shown, "the restored state does not show");
+      // The handoff was dropped: the host's timeline and the page's are as before, and the shown session is held.
+      const bridge = await host.bridge;
+      const held = await bridge.historyTimeline(rewind.state.value.history!);
+      assert.deepEqual(held!.inspection, before);
       assert.deepEqual(rewind.state.value.inspection, before);
+      assert.equal(
+        (await bridge.read(shownView(host), "captureStorage")).revision,
+        shownView(host).revision,
+      );
     });
   }
 });
@@ -721,8 +676,9 @@ test("a session-local state that rewind adopted leaves Play again session-local"
     clear: async () => {},
   });
   await host.loadScriptStorage();
-  host.prepare((recording) =>
-    createPlayerRuntimeSession(
+  host.prepare(
+    await sourceStart(
+      host.bridge,
       [
         'let k = load("k", default: 0) + 1',
         'save k as "k"',
@@ -730,14 +686,14 @@ test("a session-local state that rewind adopted leaves Play again session-local"
         'say "${k}", instant',
         "exit",
       ].join("\n"),
-      { ...host.scriptStorageOptions(), ...recording },
+      () => ({ ...host.scriptStorageOptions() }),
     ),
   );
   host.activate();
-  await settle(context);
+  await untilShown(context, host);
   await choose(context, host, "Go");
   assert.equal(host.session.value?.state.status, "halted");
-  assert.equal(await rewind.back(0), true);
+  assert.equal(await backTo(rewind, 0), true);
   await choose(context, host, "Stay");
   assert.equal(host.rewind.inspecting.value, false);
   assert.equal(host.session.value?.state.status, "halted");
@@ -748,4 +704,194 @@ test("a session-local state that rewind adopted leaves Play again session-local"
   await choose(context, host, "Go");
   assert.equal(said(host).at(-1), "1");
   assert.deepEqual(writes, []);
+});
+
+test("the call view follows the shown session through Back and Return while a demand stands, and ends with it", async (context) => {
+  const { host, rewind, scope } = createHost(context, memoryStorage().provider);
+  await start(context, host);
+  await choose(context, host, "One");
+  const tip = shownView(host);
+  const bridge = tip.connection;
+  const sent: { readonly lineage: object; readonly on: boolean }[] = [];
+  const viewCalls = bridge.viewCalls.bind(bridge);
+  bridge.viewCalls = (session, on) => {
+    sent.push({ lineage: session.lineage, on });
+    return viewCalls(session, on);
+  };
+
+  // A demand released while its request is in flight: the end follows the start, and none stays.
+  host.demandCallView().release();
+  await settle(context);
+  assert.deepEqual(sent.splice(0), [
+    { lineage: tip.lineage, on: true },
+    { lineage: tip.lineage, on: false },
+  ]);
+  assert.equal(shownView(host).callView, null);
+
+  const demand = host.demandCallView();
+  // A second demand asks for nothing more.
+  const second = host.demandCallView();
+  await settle(context);
+  assert.deepEqual(sent, [{ lineage: tip.lineage, on: true }]);
+  assert.notEqual(shownView(host).callView, null);
+
+  // Back shows another lineage: the left one's calls are no longer viewed, the shown one's are.
+  assert.equal(await backTo(rewind, 0), true);
+  await settle(context);
+  const inspected = shownView(host);
+  assert.notEqual(inspected.lineage, tip.lineage);
+  assert.deepEqual(sent.slice(1), [
+    { lineage: tip.lineage, on: false },
+    { lineage: inspected.lineage, on: true },
+  ]);
+  assert.notEqual(shownView(host).callView, null);
+
+  // Return shows the left lineage again, with its calls viewed again.
+  assert.equal(await rewind.returnToSession(), true);
+  await settle(context);
+  assert.equal(shownView(host).lineage, tip.lineage);
+  assert.deepEqual(sent.slice(3), [
+    { lineage: inspected.lineage, on: false },
+    { lineage: tip.lineage, on: true },
+  ]);
+  assert.notEqual(shownView(host).callView, null);
+
+  // Released while inspecting: the call view ends, and Return asks for none.
+  assert.equal(await backTo(rewind, 0), true);
+  await settle(context);
+  second.release();
+  demand.release();
+  // A second release does nothing.
+  demand.release();
+  await settle(context);
+  const back = shownView(host);
+  assert.deepEqual(sent.slice(-1), [{ lineage: back.lineage, on: false }]);
+  assert.equal(back.callView, null);
+  const count = sent.length;
+  assert.equal(await rewind.returnToSession(), true);
+  await settle(context);
+  assert.equal(sent.length, count, "without a demand, Return asks for no call view");
+
+  // An unmount ends a demand still standing.
+  host.demandCallView();
+  await settle(context);
+  assert.deepEqual(sent.at(-1), { lineage: tip.lineage, on: true });
+  scope.stop();
+  assert.deepEqual(sent.at(-1), { lineage: tip.lineage, on: false });
+});
+const READS = { back: "rewindBack", adopt: "captureStorage" } as const;
+
+/**
+ * Why a combination is no case: a lost connection posts nothing more and delivers no reply; and an inspected state, which
+ * an adoption reads, shows no newer publication, for it runs nothing until it is adopted.
+ */
+const infeasible = ({ read, lifecycle, settlement }: Coordinates) =>
+  (lifecycle === "lost" && settlement === "reply") ||
+  (read === "adopt" && lifecycle === "publication");
+
+/** Every case of the declaration, but the infeasible. */
+function exitCases(): ExitCase[] {
+  const cases: ExitCase[] = [];
+  for (const read of EXIT_AXES.read)
+    for (const hold of EXIT_AXES.hold)
+      for (const lifecycle of EXIT_AXES.lifecycle)
+        for (const settlement of EXIT_AXES.settlement) {
+          const each: ExitCase = { read, hold, lifecycle, settlement };
+          if (!infeasible(each)) cases.push(each);
+        }
+  return cases;
+}
+
+/** What the step does in `each`: whether it succeeds, whether the saved values are written, and whether it says it failed. */
+function exitOutcome({ read, lifecycle, settlement }: ExitCase): {
+  readonly done: boolean;
+  readonly wrote: boolean;
+  readonly notice: boolean;
+} {
+  const replied = settlement === "reply";
+  // Back parks the host's session itself, not a capture of it, so a newer publication of it moves nothing.
+  if (read === "back")
+    return {
+      done:
+        replied && (lifecycle === "none" || lifecycle === "stopped" || lifecycle === "publication"),
+      wrote: false,
+      notice: false,
+    };
+  // The adoption owns the page while nothing replaced, stopped or unmounted it; Debug's end waits for it.
+  const owns = lifecycle === "none" || lifecycle === "debugOff";
+  return { done: owns && replied, wrote: owns && replied, notice: owns && !replied };
+}
+
+for (const each of exitCases())
+  test(`a rewind read in the host: ${Object.values(each).join(", ")}`, async (context) => {
+    const storage = memoryStorage();
+    const made = createHost(context, storage.provider, { lossy: each.lifecycle === "lost" });
+    const { host, rewind } = made;
+    await start(context, host);
+    await choose(context, host, "One");
+    if (each.read === "adopt") assert.equal(await backTo(rewind, 0), true);
+    const bridge = await host.bridge;
+    const shown = shownView(host);
+    const callsBefore = storage.calls.length;
+    const held = holdRead(
+      context,
+      bridge,
+      READS[each.read],
+      each.hold,
+      each.settlement === "rejection",
+    );
+    const step = each.read === "back" ? backTo(rewind, 0) : rewind.resume();
+    await held.arrived;
+    const reported: unknown[] = [];
+    reportsInto(context, reported);
+    if (each.lifecycle === "publication") {
+      // The page shows a newer publication of the session, which the read did not see: a later observation.
+      context.mock.timers.tick(1_000);
+      host.observe();
+      await settle(context);
+      assert.notEqual(shownView(host).revision, shown.revision, "a newer publication shows");
+    } else if (each.lifecycle === "replaced") {
+      host.prepare(
+        await sourceStart(host.bridge, script, () => ({ ...host.scriptStorageOptions() })),
+      );
+      host.activate();
+    } else if (each.lifecycle === "debugOff") made.debug.stop();
+    else if (each.lifecycle === "stopped") host.reportHostError(new Error("A Player error."));
+    else if (each.lifecycle === "disposed") {
+      made.debug.stop();
+      made.scope.stop();
+    } else if (each.lifecycle === "lost") made.lose!();
+    held.release();
+    const done = await step.catch(() => false);
+    await settle(context);
+    // The host errors the Player reports: the case's own Player error or loss, and nothing else.
+    endCapture();
+    assert.deepEqual(
+      reported.map((error) => (error instanceof Error ? error.message : String(error))),
+      each.lifecycle === "stopped"
+        ? ["A Player error."]
+        : each.lifecycle === "lost"
+          ? ["The engine Worker failed: injected."]
+          : [],
+      "the host errors reported",
+    );
+    const want = exitOutcome(each);
+    assert.equal(done, want.done, "the step's result");
+    assert.equal(
+      storage.calls.slice(callsBefore).includes("replace"),
+      want.wrote,
+      "the saved values written",
+    );
+    assert.equal(
+      host.notices.value.some((one) => one.key === "rewind-not-adopted"),
+      want.notice,
+      "the adoption's failure said",
+    );
+    if (each.read === "back")
+      assert.equal(host.rewind.inspecting.value, want.done, "a state parked");
+  });
+
+test("the rewind reads' exit cases are every feasible coordinate of their declaration", () => {
+  const all = product(EXIT_AXES).filter((each) => !infeasible(each));
+  assert.deepEqual(coverageGaps(all, exitCases(), { tuples: true }), []);
 });

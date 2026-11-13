@@ -39,6 +39,22 @@ import type { FlowEdge } from "../../plan/control-flow.js";
 // The call, loop, and continuation invariants of a captured snapshot: its call and loop frames, temporaries,
 // parameters, timer block frames, and the temporaries a suspended continuation still needs.
 
+const LOOP_FRAME_KEYS = ["kind", "loopId", "scopeDepth", "callFrameId"] as const;
+const FOR_LOOP_FRAME_KEYS = [...LOOP_FRAME_KEYS, "variable", "source", "position"] as const;
+
+/** Whether a loop frame has exactly its kind's fields; an unsupported kind is reported on its own. */
+function loopFrameHasItsKeys(frame: Record<string, unknown>): boolean {
+  if (frame.kind === "repeat") return hasExactKeys(frame, [...LOOP_FRAME_KEYS, "remaining"]);
+  if (frame.kind === "while") return hasExactKeys(frame, LOOP_FRAME_KEYS);
+  if (frame.kind !== "for") return true;
+  return hasExactKeys(
+    frame,
+    Object.hasOwn(frame, "valueVariable")
+      ? [...FOR_LOOP_FRAME_KEYS, "valueVariable"]
+      : FOR_LOOP_FRAME_KEYS,
+  );
+}
+
 export function validateLoopFrames(
   value: unknown,
   frames: unknown,
@@ -58,6 +74,7 @@ export function validateLoopFrames(
   for (const frame of value) {
     if (
       !isPlainRecord(frame) ||
+      !loopFrameHasItsKeys(frame) ||
       !nonNegativeSafeInteger(frame.loopId) ||
       frame.loopId < 1 ||
       !nonNegativeSafeInteger(frame.scopeDepth) ||
@@ -263,6 +280,10 @@ export function validateTemporaries(
   }
   const ids = new Set<number>();
   for (const temporary of value) {
+    if (isPlainRecord(temporary) && !hasExactKeys(temporary, ["id", "value"])) {
+      errors.push(`${label} contain a malformed temporary.`);
+      continue;
+    }
     if (
       !isPlainRecord(temporary) ||
       !nonNegativeSafeInteger(temporary.id) ||
@@ -329,7 +350,10 @@ export function validateCallFrames(
       previousId = frame.id;
       ids.add(frame.id);
     }
-    if (frame.kind !== "function" && frame.kind !== "file") {
+    if (
+      (frame.kind !== "function" && frame.kind !== "file") ||
+      (frame.kind === "function" && !hasExactKeys(frame, FUNCTION_CALL_FRAME_KEYS))
+    ) {
       errors.push("Runtime call frame is malformed.");
       return;
     }
@@ -568,6 +592,24 @@ export function validateCallFrames(
   });
   return ids;
 }
+
+const FUNCTION_CALL_FRAME_KEYS = [
+  "kind",
+  "id",
+  "rootScopeId",
+  "captures",
+  "functionId",
+  "functionName",
+  "callSiteSpan",
+  "returnInstruction",
+  "destinationTemporary",
+  "timerInterruption",
+  "callerTemporaries",
+  "scopeBaseDepth",
+  "loopBaseDepth",
+  "arguments",
+  "parameterState",
+] as const;
 
 const FILE_CALL_FRAME_KEYS = [
   "kind",
@@ -842,6 +884,12 @@ function validateCallArguments(
     const parameter = definition?.parameters[index];
     if (
       !isPlainRecord(argument) ||
+      !hasExactKeys(
+        argument,
+        Object.hasOwn(argument, "value")
+          ? ["parameterName", "supplied", "value"]
+          : ["parameterName", "supplied"],
+      ) ||
       typeof argument.parameterName !== "string" ||
       argument.parameterName.length === 0 ||
       typeof argument.supplied !== "boolean" ||
@@ -876,6 +924,7 @@ function validateParameterState(
 ): void {
   if (
     !isPlainRecord(value) ||
+    !hasExactKeys(value, ["phase", "parameterIndex"]) ||
     !isOneOf(value.phase, ["supplied", "defaults", "body"]) ||
     !nonNegativeSafeInteger(value.parameterIndex) ||
     (definition !== undefined && value.parameterIndex > definition.parameters.length) ||

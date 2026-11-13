@@ -1,26 +1,29 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import test, { before } from "node:test";
 
 import {
   CaptureDevice,
   type CaptureHost,
   type CaptureRequest,
   type CaptureTrack,
-} from "../../player/capture-device.js";
-import { nextCamera } from "../../player/camera-choice.js";
-import { CapturedMediaStore } from "../../player/captured-media.js";
-import { RgbaImage } from "../../player/rgba-image.js";
+} from "../../player/media/capture-device.js";
+import { nextCamera } from "../../player/media/camera-choice.js";
+import { CapturedMediaStore } from "../../player/media/captured-media.js";
+import { RgbaImage } from "../../player/media/rgba-image.js";
 import {
-  createPlayerRuntimeSession,
   type PlayerCaptureAnswer,
-  type PlayerRuntimeSession,
   playerRuntimeSnapshot,
-} from "../../player/runtime-adapter.js";
+} from "../../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
+import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
+import type { PlayerSession } from "../../player/runtime/runtime-view.js";
+import { hatch, inProcessBridge, introduced } from "../helpers/in-process-bridge.js";
+import { serviceSection } from "../helpers/service-section.js";
 import {
   CaptureService,
   SessionCamera,
   type PlayerDiagnostic,
-} from "../../player/session-camera.js";
+} from "../../player/media/session-camera.js";
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
@@ -378,27 +381,46 @@ test("a session released while the browser answers never reports its camera as o
   assert.equal(camera.available, false);
 });
 
-function serviceHarness(answer: () => Promise<PlayerCaptureAnswer>) {
-  const state: { session: PlayerRuntimeSession | null; generation: number } = {
+// The engine's host the Player's sessions live in, as in production until the L5 series activates the Worker.
+let bridge: PlayerBridge;
+before(async () => {
+  bridge = await inProcessBridge();
+});
+
+/** `retiring`: how many sections first find their session no longer owning the UI (a `null` observation). */
+function serviceHarness(answer: () => Promise<PlayerCaptureAnswer>, retiring = 0) {
+  const state: { session: PlayerSession | null; generation: number } = {
     session: null,
     generation: 0,
   };
   const diagnostics: PlayerDiagnostic[] = [];
   const held = new Set<string>();
+  const discarded: string[] = [];
+  const sent: string[] = [];
+  const observing = serviceSection(
+    bridge,
+    () => state.session,
+    (next) => (state.session = next),
+    (op) => void sent.push(op),
+  );
   const service = new CaptureService(answer, {
     session: () => state.session,
     generation: () => state.generation,
-    observe: () => state.session,
-    publish: (next) => (state.session = next),
-    capturedMedia: { holds: (reference, kind) => kind === "image" && held.has(reference) },
+    section: (body) =>
+      observing((section, observed) => body(section, retiring-- > 0 ? null : observed)),
+    capturedMedia: {
+      holds: (reference, kind) => kind === "image" && held.has(reference),
+      // The answers here name media no store made; what the service lets go of is only recorded.
+      discard: (reference) => void discarded.push(reference),
+    },
     diagnostic: (diagnostic) => diagnostics.push(diagnostic),
     later: (task) => setImmediate(task),
   });
   const start = (source: string) => {
     state.generation++;
-    state.session = createPlayerRuntimeSession(source);
+    state.session = introduced(bridge, createPlayerRuntimeSession(source));
   };
-  return { state, service, diagnostics, held, start };
+  return { state, service, diagnostics, held, discarded, start, sent };
 }
 
 test("a capture is answered once and its photo continues the script", async () => {
@@ -413,7 +435,7 @@ test("a capture is answered once and its photo continues the script", async () =
   await settle();
   assert.equal(answers, 1);
   assert.equal(harness.state.session?.state.status, "halted");
-  assert.equal(playerRuntimeSnapshot(harness.state.session!).stageImage, "photo-1");
+  assert.equal(hatch(harness.state.session!, playerRuntimeSnapshot).stageImage, "photo-1");
 });
 
 test("a session replaced while its photo is captured gets its own capture serviced", async () => {
@@ -434,7 +456,27 @@ test("a session replaced while its photo is captured gets its own capture servic
   answers[1]?.({ kind: "captured", reference: "new photo" });
   await settle();
   await settle();
-  assert.equal(playerRuntimeSnapshot(harness.state.session!).stageImage, "new photo");
+  assert.equal(hatch(harness.state.session!, playerRuntimeSnapshot).stageImage, "new photo");
+  // The replaced session's photo was never handed off, so the service let go of it (#1882); the new one was taken.
+  assert.deepEqual(harness.discarded, ["old photo"]);
+});
+
+// #1983: the clock runs a service's section body also when its observation is `null`, so the delivery settles its answer.
+test("a capture whose section finds its session retired sends no answer, and the next capture takes a new one", async () => {
+  let answers = 0;
+  const harness = serviceHarness(async () => {
+    answers++;
+    return { kind: "captured", reference: `photo-${answers}` };
+  }, 1);
+  harness.held.add("photo-1");
+  harness.held.add("photo-2");
+  harness.start("let photo = takePhoto()\nshowImage photo\nexit");
+  harness.service.request();
+  await settle();
+  await settle();
+  assert.equal(answers, 2, "the retired section settled the first answer");
+  assert.deepEqual(harness.sent, ["observeTime", "observeTime", "answerCapture"]);
+  assert.equal(hatch(harness.state.session!, playerRuntimeSnapshot).stageImage, "photo-2");
 });
 
 test("a captured reference the store does not hold never leaves the script waiting", async () => {

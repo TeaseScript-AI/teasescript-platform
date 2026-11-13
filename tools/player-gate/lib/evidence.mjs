@@ -1,0 +1,169 @@
+// The kit's strict reader of records: the derivations read a row's records only through `strictRecord`, and its target
+// is the validated copy `records.mjs` parsed from the row, never the raw row (#2122). A read of a missing value
+// (`undefined` or `null`) throws `MissingEvidence`; a value that may truly be absent (a frame not yet drawn, a reply
+// not yet arrived) is read with `nullable`, by name; `span` is the derivations' interval: both ends present and in
+// order, else it throws; and a write through the reader throws. `validateSample` (`validate.mjs`) turns any of these
+// errors into the problem of the cell whose derivation raised it.
+
+/** A required value a record does not hold. */
+export class MissingEvidence extends Error {
+  constructor(field) {
+    super(`missing evidence: ${field}`);
+    this.name = "MissingEvidence";
+    this.field = field;
+  }
+}
+
+/** A cached classification a record carries that its primary evidence contradicts. */
+export class ContradictoryEvidence extends Error {
+  constructor(what) {
+    super(`contradictory evidence: ${what}`);
+    this.name = "ContradictoryEvidence";
+  }
+}
+
+/** A value a record holds whose type or domain is not its shape's (`row-shapes.mjs`), or a path no shape declares. */
+export class MalformedEvidence extends Error {
+  constructor(field, what) {
+    super(`malformed evidence: ${field} ${what}`);
+    this.name = "MalformedEvidence";
+    this.field = field;
+  }
+}
+
+/** An interval whose end lies before its start. */
+export class ReversedInterval extends Error {
+  constructor(what, from, to) {
+    super(`reversed interval: ${what} runs from ${from} to ${to}`);
+    this.name = "ReversedInterval";
+  }
+}
+
+const RAW = Symbol("raw record");
+const PATH = Symbol("record path");
+
+/** A value read from a record: wrapped the same way, or `MissingEvidence` when it is `undefined` or `null`. */
+function strictValue(found, field) {
+  if (found === undefined || found === null) throw new MissingEvidence(field);
+  return strictRecord(found, field);
+}
+
+/** A trap that refuses a change of the record at `path`: the derivations read evidence, they never write it. */
+const refuse = (path) => () => {
+  throw new TypeError(`the evidence at ${path} is read-only`);
+};
+
+/**
+ * `value` read strictly: an object or array whose every property read returns the value wrapped the same way, or
+ * throws `MissingEvidence` (with the field's path) when it is `undefined` or `null`. A property descriptor's `value`
+ * comes back wrapped or throws the same way, and the key, `in` and prototype traps reveal no value; since the target is
+ * a validated copy, a reflective read reaches only validated data. Functions (an array's methods) pass through, so
+ * `records.find(…)` hands its callback wrapped elements. A write, a definition, a deletion, a prototype change or
+ * `Object.preventExtensions` throws. A primitive is returned as it is.
+ */
+export function strictRecord(value, path = "record") {
+  if (value === null || typeof value !== "object" || value[RAW] !== undefined) return value;
+  return new Proxy(value, {
+    get(target, key) {
+      if (key === RAW) return target;
+      if (key === PATH) return path;
+      const found = target[key];
+      if (typeof key === "symbol" || typeof found === "function") return found;
+      return strictValue(found, `${path}.${String(key)}`);
+    },
+    getOwnPropertyDescriptor(target, key) {
+      const descriptor = Object.getOwnPropertyDescriptor(target, key);
+      if (
+        descriptor === undefined ||
+        typeof key === "symbol" ||
+        !("value" in descriptor) ||
+        typeof descriptor.value === "function"
+      )
+        return descriptor;
+      return { ...descriptor, value: strictValue(descriptor.value, `${path}.${String(key)}`) };
+    },
+    // The keys, `in` and the prototype are the record's own: none of them hands out a value.
+    ownKeys: (target) => [
+      ...Object.getOwnPropertyNames(target),
+      ...Object.getOwnPropertySymbols(target),
+    ],
+    has: (target, key) => key in target,
+    getPrototypeOf: (target) => Object.getPrototypeOf(target),
+    set: refuse(path),
+    defineProperty: refuse(path),
+    deleteProperty: refuse(path),
+    setPrototypeOf: refuse(path),
+    preventExtensions: refuse(path),
+  });
+}
+
+/**
+ * The fields that may truly be absent, each with why; `nullable` reads no other. A classification or a required field is
+ * never on it, so a missing one cannot pass as an absence.
+ */
+export const NULLABLE = Object.freeze({
+  frame: "a record's animation-frame callback has not run yet",
+  shownFrame: "a row not yet drawn with a positive opacity",
+  start: "no start button is shown",
+  composer: "the page shows no composer",
+  control: "no foreground controls root is shown",
+  ready: "the engine Worker has not posted its ready",
+  end: "a transaction still open, or a turn the driver saw settle",
+  outcome: "a transaction still open",
+  scope: "a put whose stored record names no scope",
+  observedMs: "a plans put carries no scene time",
+  failed: "a request that did not fail",
+  usedBytes: "a Worker whose heap read failed",
+  id: "a bridge message outside a request (the Worker's ready)",
+  op: "a bridge message outside a request",
+  replyAt: "a request whose reply has not arrived",
+  size: "a reply that is not captureKeep's",
+  longTasks: "a browser that does not report long tasks",
+  longTasksUnavailable: "a browser that reports long tasks gives no reason",
+  storedMs: "the store held no snapshot",
+  sentAt: "a turn the driver could not send",
+  reason: "a turn that did not fail",
+});
+
+/**
+ * `record[key]` when it may truly be absent, `key` one of `NULLABLE`'s: `null` for `undefined` or `null`, else the value
+ * read strictly. On a raw record (a scenario's live call) it reads the plain value the same way. Another key throws.
+ */
+export function nullable(record, key) {
+  if (!Object.hasOwn(NULLABLE, key))
+    throw new Error(`'${String(key)}' is no field that may be absent (NULLABLE)`);
+  const raw = record[RAW] ?? record;
+  const found = raw[key];
+  if (found === undefined || found === null) return null;
+  return strictRecord(found, `${record[PATH] ?? "record"}.${String(key)}`);
+}
+
+/**
+ * The time from `from` to `to`, the only subtraction over timestamps the derivations make: both must be finite numbers
+ * (`MissingEvidence` otherwise) and `from <= to` (`ReversedInterval` otherwise). `what` names the interval.
+ */
+export function span(from, to, what = "an interval") {
+  if (!Number.isFinite(from)) throw new MissingEvidence(`${what}: its start`);
+  if (!Number.isFinite(to)) throw new MissingEvidence(`${what}: its end`);
+  if (from > to) throw new ReversedInterval(what, from, to);
+  return to - from;
+}
+
+/**
+ * The signed difference `to − from` between two realms' clocks (a page's epoch time and its Worker's), not an interval
+ * on one clock: both must be finite (`MissingEvidence` otherwise), but its sign is no ordering, since Firefox and WebKit
+ * coarsen each clock to 1 ms. The delivery latencies use it; they are their cell's `/ cross-clock` part, outside the
+ * headline (`validate.mjs`).
+ */
+export function crossClock(from, to, what = "a cross-clock difference") {
+  if (!Number.isFinite(from)) throw new MissingEvidence(`${what}: its start`);
+  if (!Number.isFinite(to)) throw new MissingEvidence(`${what}: its end`);
+  return to - from;
+}
+
+/** Whether `error` is one of the reader's: missing or malformed evidence, a reversed interval or a contradicted cache. */
+export const isEvidenceError = (error) =>
+  error instanceof MissingEvidence ||
+  error instanceof MalformedEvidence ||
+  error instanceof ReversedInterval ||
+  error instanceof ContradictoryEvidence;

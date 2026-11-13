@@ -1,0 +1,22 @@
+[
+  {"kind":"updateInteraction","args":[{"actionId":1,"actionKind":"interaction","interactionKind":"form","update":{"kind":"select","fieldId":"sound","optionIndex":1}}]},
+  {"kind":"updateInteraction","args":[{"actionId":1,"actionKind":"interaction","interactionKind":"form","update":{"kind":"select","fieldId":"level","optionIndex":2}}]},
+  {"kind":"updateInteraction","args":[{"actionId":1,"actionKind":"interaction","interactionKind":"form","update":{"kind":"edit","fieldId":"rounds"}}]},
+  {"kind":"updateInteraction","args":[{"actionId":1,"actionKind":"interaction","interactionKind":"form","update":{"kind":"draft","fieldId":"rounds","text":"25"}}]},
+  {"kind":"updateInteraction","args":[{"actionId":1,"actionKind":"interaction","interactionKind":"form","update":{"kind":"commit","fieldId":"rounds"}}]},
+  {"kind":"updateInteraction","args":[{"actionId":1,"actionKind":"interaction","interactionKind":"form","update":{"kind":"draft","fieldId":"rounds","text":"12"}}]},
+  {"kind":"updateInteraction","args":[{"actionId":1,"actionKind":"interaction","interactionKind":"form","update":{"kind":"commit","fieldId":"rounds"}}]},
+  {"kind":"updateInteraction","args":[{"actionId":1,"actionKind":"interaction","interactionKind":"form","update":{"kind":"edit","fieldId":"note"}}]},
+  {"kind":"updateInteraction","args":[{"actionId":1,"actionKind":"interaction","interactionKind":"form","update":{"kind":"draft","fieldId":"note","text":"quick"}}]},
+  {"kind":"updateInteraction","args":[{"actionId":1,"actionKind":"interaction","interactionKind":"form","update":{"kind":"commit","fieldId":"note"}}]},
+  {"kind":"completeAction","args":[{"actionId":1,"actionKind":"interaction","interactionKind":"form","payload":{"kind":"submit"}}],"unit":true},
+  {"kind":"updateInteraction","args":[{"actionId":2,"actionKind":"interaction","interactionKind":"form","update":{"kind":"select","fieldId":"level","optionIndex":1}}]},
+  {"kind":"completeAction","args":[{"actionId":2,"actionKind":"interaction","interactionKind":"form","payload":{"kind":"submit"}}],"unit":true},
+  {"kind":"updateInteraction","args":[{"actionId":3,"actionKind":"interaction","interactionKind":"form","update":{"kind":"edit","fieldId":"rounds"}}]},
+  {"kind":"updateInteraction","args":[{"actionId":3,"actionKind":"interaction","interactionKind":"form","update":{"kind":"draft","fieldId":"rounds","text":"8"}}]},
+  {"kind":"updateInteraction","args":[{"actionId":3,"actionKind":"interaction","interactionKind":"form","update":{"kind":"select","fieldId":"sound","optionIndex":1}}]},
+  {"kind":"updateInteraction","args":[{"actionId":3,"actionKind":"interaction","interactionKind":"form","update":{"kind":"select","fieldId":"sound","optionIndex":1}}]},
+  {"kind":"updateInteraction","args":[{"actionId":3,"actionKind":"interaction","interactionKind":"form","update":{"kind":"edit","fieldId":"note"}}]},
+  {"kind":"updateInteraction","args":[{"actionId":3,"actionKind":"interaction","interactionKind":"form","update":{"kind":"draft","fieldId":"note","text":"late"}}]},
+  {"kind":"completeAction","args":[{"actionId":3,"actionKind":"interaction","interactionKind":"form","payload":{"kind":"submit"}}],"unit":true}
+]

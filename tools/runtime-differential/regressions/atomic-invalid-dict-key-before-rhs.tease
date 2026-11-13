@@ -1,0 +1,6 @@
+function identity(value) { return value }
+let key = identity(1)
+let table = dict{ "k": 0 }
+let rhs = [90]
+table[key] = rhs.removeFirst() + randomInteger(1..4)
+exit

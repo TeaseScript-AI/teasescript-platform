@@ -1,7 +1,7 @@
 /**
  * Host-side capture of the zone rules and presentation settings that `temporal.ts` computes with (#532). This is the
- * only temporal code that reads `Intl`; a host calls it when a session starts or continues, and the engine records the
- * result, so a restored or replayed session never consults host locale or time-zone data.
+ * only temporal code that reads `Intl` or the host's `Temporal`; a host calls it when a session starts or continues, and
+ * the engine records the result, so a restored or replayed session never consults host locale or time-zone data.
  */
 
 import {
@@ -16,10 +16,6 @@ import {
 } from "./temporal.js";
 
 const MS_PER_SECOND = 1_000;
-/**
- * Offsets are sampled daily and each change is located to the second. Two changes less than a day apart that cancel
- * each other out are not seen; current time-zone data has none within the captured window.
- */
 const SCAN_STEP_MS = 86_400_000;
 
 const capturedZones = new Map<string, ZoneRules>();
@@ -37,7 +33,22 @@ export function captureZoneRules(timeZone: string): ZoneRules {
   const cached = capturedZones.get(timeZone);
   if (cached !== undefined) return cached;
   const formatter = new Intl.DateTimeFormat("en-US", { timeZone, timeZoneName: "longOffset" });
-  const offsetAt = (moment: number): number => {
+  const name = formatter.resolvedOptions().timeZone;
+  const formatted = formattedOffsets(formatter, timeZone);
+  const rules = scannedZoneRules(name, nativeOffsets(name, formatted) ?? formatted);
+  const problem = zoneRulesProblem(rules);
+  if (problem !== null)
+    throw new RangeError(`Time zone ${timeZone} cannot be captured: ${problem}`);
+  capturedZones.set(timeZone, rules);
+  return rules;
+}
+
+/** A zone's UTC offset in seconds at a moment in epoch milliseconds. */
+type OffsetAt = (moment: number) => number;
+
+/** The offsets as `formatter` writes them, which every host has. */
+function formattedOffsets(formatter: Intl.DateTimeFormat, timeZone: string): OffsetAt {
+  return (moment) => {
     const name = formatter
       .formatToParts(moment)
       .find((part) => part.type === "timeZoneName")?.value;
@@ -49,6 +60,90 @@ export function captureZoneRules(timeZone: string): ZoneRules {
     const seconds = Number(match[2]) * 3_600 + Number(match[3]) * 60 + Number(match[4] ?? 0);
     return match[1] === "-" ? -seconds : seconds;
   };
+}
+
+/**
+ * The offsets from the host's own transition list (`Temporal.ZonedDateTime.prototype.getTimeZoneTransition`), which
+ * reads the same zone data in a few calls instead of a formatter call per day; `null` when the host lacks it or its list
+ * is not one the scan can read as it reads `formatted`. Its last two checks compare the final year with `formatted`, so
+ * a host whose list ends early falls back.
+ */
+function nativeOffsets(name: string, formatted: OffsetAt): OffsetAt | null {
+  // EVIDENCE: invariant: the method is checked below, every other use is within the `try`, and any throw falls back.
+  const temporal = (globalThis as { Temporal?: NativeTemporal }).Temporal;
+  if (typeof temporal?.ZonedDateTime?.prototype?.getTimeZoneTransition !== "function") return null;
+  try {
+    let cursor = temporal.Instant.fromEpochMilliseconds(
+      ZONE_RULES_START_MILLISECONDS,
+    ).toZonedDateTimeISO(name);
+    const initialOffset = wholeSeconds(cursor.offsetNanoseconds);
+    if (initialOffset === null) return null;
+    const moments: number[] = [];
+    const offsets: number[] = [];
+    for (;;) {
+      const next = cursor.getTimeZoneTransition("next");
+      if (next === null) break;
+      const nanoseconds = next.epochNanoseconds;
+      if (nanoseconds % NANOSECONDS_PER_SECOND !== 0n) return null;
+      const moment = Number(nanoseconds / NANOSECONDS_PER_MILLISECOND);
+      if (moment <= (moments.at(-1) ?? ZONE_RULES_START_MILLISECONDS)) return null;
+      if (moment >= ZONE_RULES_END_MILLISECONDS) break;
+      const offset = wholeSeconds(next.offsetNanoseconds);
+      if (offset === null) return null;
+      moments.push(moment);
+      offsets.push(offset);
+      cursor = next;
+    }
+    const offsetAt: OffsetAt = (moment) => {
+      // The offset after the last transition at or before `moment`.
+      let low = 0;
+      let high = moments.length;
+      while (low < high) {
+        const middle = (low + high) >>> 1;
+        if (moments[middle]! <= moment) low = middle + 1;
+        else high = middle;
+      }
+      return low === 0 ? initialOffset : offsets[low - 1]!;
+    };
+    for (const moment of FINAL_YEAR_CHECKS) if (offsetAt(moment) !== formatted(moment)) return null;
+    return offsetAt;
+  } catch {
+    // A name the formatter knows but this host's Temporal does not, such as `SystemV/EST5`.
+    return null;
+  }
+}
+
+/** January and July of the window's last year, one in each half of a year with summer time. */
+const FINAL_YEAR_CHECKS = [Date.UTC(2099, 0, 15), Date.UTC(2099, 6, 15)];
+const NANOSECONDS_PER_SECOND = 1_000_000_000n;
+const NANOSECONDS_PER_MILLISECOND = 1_000_000n;
+
+/** `nanoseconds` in whole seconds, or `null` when it is not a whole number of them. */
+function wholeSeconds(nanoseconds: number): number | null {
+  return Number.isSafeInteger(nanoseconds) && nanoseconds % 1e9 === 0 ? nanoseconds / 1e9 : null;
+}
+
+/** The part of the host's Temporal that `nativeOffsets` reads. */
+interface NativeTemporal {
+  readonly Instant: {
+    fromEpochMilliseconds(epochMilliseconds: number): {
+      toZonedDateTimeISO(timeZone: string): NativeZonedDateTime;
+    };
+  };
+  readonly ZonedDateTime?: { readonly prototype?: { readonly getTimeZoneTransition?: unknown } };
+}
+
+interface NativeZonedDateTime {
+  readonly epochNanoseconds: bigint;
+  readonly offsetNanoseconds: number;
+  getTimeZoneTransition(direction: "next"): NativeZonedDateTime | null;
+}
+
+/**
+ * The zone's rules as `offsetAt` gives its offsets: sampled daily, each change located to the second. Two changes less
+ * than a day apart that cancel each other out are not seen; current time-zone data has none within the captured window.
+ */
+function scannedZoneRules(name: string, offsetAt: OffsetAt): ZoneRules {
   const initialOffsetSeconds = offsetAt(ZONE_RULES_START_MILLISECONDS);
   const transitions: [number, number][] = [];
   let previousMoment = ZONE_RULES_START_MILLISECONDS;
@@ -75,16 +170,7 @@ export function captureZoneRules(timeZone: string): ZoneRules {
     }
     previousMoment = moment;
   }
-  const rules: ZoneRules = {
-    name: formatter.resolvedOptions().timeZone,
-    initialOffsetSeconds,
-    transitions,
-  };
-  const problem = zoneRulesProblem(rules);
-  if (problem !== null)
-    throw new RangeError(`Time zone ${timeZone} cannot be captured: ${problem}`);
-  capturedZones.set(timeZone, rules);
-  return rules;
+  return { name, initialOffsetSeconds, transitions };
 }
 
 /**

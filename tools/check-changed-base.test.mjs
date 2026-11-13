@@ -159,7 +159,7 @@ test("`merge commits` runs in every run, plain, merged and in a merged checkout,
     assert.equal(result.status, status, `${at}: ${result.stdout}${result.stderr}`);
     assert.deepEqual(
       result.stdout.match(/^(?:PASS|FAIL) {2}\S.*$/gmu).map((line) => line.split(/ {2,}/u)[1]),
-      ["diff --check", "merge commits", "oxlint", "knip", "doc links", "imports"],
+      ["diff --check", "merge commits", "oxlint", "knip", "doc links", "imports", "readme paths"],
       at,
     );
     if (lines.length > 0)

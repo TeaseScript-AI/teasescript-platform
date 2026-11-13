@@ -3,26 +3,51 @@ import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
 
 import {
-  activatePlayerRuntimeButton,
-  advancePlayerRuntimeTime,
-  completePlayerRuntimeStorageWrite,
-  createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
-  nextPlayerRuntimeEventMs,
-  observePlayerRuntimeTime,
-  pendingPlayerRuntimeStorageWrite,
-  playerRuntimeDeadlines,
-  reportPlayerRuntimeMediaLoad,
+  activatePlayerRuntimeButton as rawActivatePlayerRuntimeButton,
+  advancePlayerRuntimeTime as rawAdvancePlayerRuntimeTime,
+  completePlayerRuntimeStorageWrite as rawCompletePlayerRuntimeStorageWrite,
+  createPlayerRuntimeRestorePoint as rawCreatePlayerRuntimeRestorePoint,
+  observePlayerRuntimeTime as rawObservePlayerRuntimeTime,
+  reportPlayerRuntimeMediaLoad as rawReportPlayerRuntimeMediaLoad,
   restorePlayerRuntimeSession,
-  stepPlayerRuntimeTime,
+  stepPlayerRuntimeTime as rawStepPlayerRuntimeTime,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
-  playerRuntimeSnapshot,
-} from "../../player/runtime-adapter.js";
-import type { ScriptStorageProvider } from "../../player/script-storage.js";
+  playerRuntimeSnapshot as rawPlayerRuntimeSnapshot,
+} from "../../player/runtime/runtime-adapter.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../../player/runtime/compile-project.js";
+import {
+  nextPlayerRuntimeEventMs,
+  pendingPlayerRuntimeStorageWrite,
+  playerRuntimeDeadlines,
+} from "../../player/runtime/runtime-view.js";
+import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
+import {
+  memoryKeptRoomStore,
+  memoryKeptSessionStore,
+  type KeptRoomStore,
+  type KeptSessionStore,
+} from "../../player/persistence/kept-sessions.js";
 import type { MediaProgressReport } from "../../src/index.js";
 import { harness } from "../helpers/player/media/player-media.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
+import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
+import { preparedPlan, sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
+import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
+import { inProcessBackend, withinHostTime } from "../helpers/player/worker-topology.js";
+
+// The adapter's functions, also on the sessions the composables' host holds (`helpers/player/host-sessions.ts`).
+const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
+const advancePlayerRuntimeTime = onHost(rawAdvancePlayerRuntimeTime);
+const completePlayerRuntimeStorageWrite = onHost(rawCompletePlayerRuntimeStorageWrite);
+const createPlayerRuntimeRestorePoint = onHost(rawCreatePlayerRuntimeRestorePoint);
+const observePlayerRuntimeTime = onHost(rawObservePlayerRuntimeTime);
+const reportPlayerRuntimeMediaLoad = onHost(rawReportPlayerRuntimeMediaLoad);
+const stepPlayerRuntimeTime = onHost(rawStepPlayerRuntimeTime);
+const playerRuntimeSnapshot = onHost(rawPlayerRuntimeSnapshot);
 
 // Development time controls (#615) jump scene time through ordinary observations. A jump must give exactly the
 // session that observing the same scene time in real time gives, so its oracles here are independent observation
@@ -283,17 +308,25 @@ interface DevelopmentTimeHost {
   advanceBy(milliseconds: number): Promise<void>;
 }
 interface SessionHost {
+  readonly bridge: Promise<PlayerBridge>;
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly activation: Readonly<Ref<"start" | "continue" | null>>;
-  prepare(create: () => PlayerRuntimeSession): void;
-  prepareRestore(restored: PlayerRuntimeSession): void;
+  readonly hostError: Readonly<Ref<string | null>>;
+  prepare(create: PlanStart): void;
+  prepareScript(plan: string, create: PlanStart): Promise<void>;
   activate(): Promise<void>;
   update(next: PlayerRuntimeSession): void;
-  observe(): PlayerRuntimeSession | null;
+  observe(): Promise<PlayerRuntimeSession | null>;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
 }
-let usePlayerSession: (options: { scriptStorage?: ScriptStorageProvider }) => SessionHost;
+let usePlayerSession: (options: {
+  readonly bridge: Promise<PlayerBridge>;
+  scriptStorage?: ScriptStorageProvider;
+  keptSessions?: KeptSessionStore;
+  debugRooms?: KeptRoomStore;
+  room?: "normal" | "debug";
+}) => SessionHost;
 let useDevelopmentTime: (
   player: SessionHost,
   initial: { autoSkip: boolean },
@@ -314,13 +347,16 @@ let usePlayerDebug: (
 ) => DebugHost;
 
 before(async () => {
+  await loadHostFacade();
   const session: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
   const time: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/useDevelopmentTime.ts",
+    "player/vue/src/debug/useDevelopmentTime.ts",
   );
-  const debug: Record<string, unknown> = await loadPlayerModule("player/vue/src/usePlayerDebug.ts");
+  const debug: Record<string, unknown> = await loadPlayerModule(
+    "player/vue/src/debug/usePlayerDebug.ts",
+  );
   assert.equal(typeof debug.usePlayerDebug, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its host API.
   usePlayerDebug = debug.usePlayerDebug as typeof usePlayerDebug;
@@ -365,15 +401,18 @@ async function mount(
   const scope = effectScope();
   const logged: string[] = [];
   const mounted = scope.run(() => {
-    const player = usePlayerSession(scriptStorage === undefined ? {} : { scriptStorage });
+    const player = usePlayerSession({
+      bridge: inProcessBackend(),
+      ...(scriptStorage === undefined ? {} : { scriptStorage }),
+    });
     const time = useDevelopmentTime(player, initial, (text) => logged.push(text));
     return { player, time, logged, unmount: () => scope.stop() };
   });
   assert.ok(mounted);
   context.after(() => scope.stop());
   await mounted.player.loadScriptStorage();
-  mounted.player.prepare(() =>
-    createPlayerRuntimeSession(source, mounted.player.scriptStorageOptions()),
+  mounted.player.prepare(
+    await sourceStart(mounted.player.bridge, source, () => mounted.player.scriptStorageOptions()),
   );
   await mounted.player.activate();
   return mounted;
@@ -469,7 +508,7 @@ test("a jump logs only the scene time it advanced, not real time observed while 
   for (let waited = 0; player.session.value!.state.observedSessionTimeMs < targetMs; waited += 10) {
     assert.ok(waited < 5_000, "real time was not observed");
     await new Promise((resolve) => setTimeout(resolve, 10));
-    player.observe();
+    await player.observe();
   }
   answer();
   await jumped;
@@ -521,12 +560,12 @@ async function mountDebug(
   stubBrowser(context);
   const scope = effectScope();
   const mounted = scope.run(() => {
-    const player = usePlayerSession({});
+    const player = usePlayerSession({ bridge: inProcessBackend() });
     return { player, debug: usePlayerDebug(player, initial) };
   });
   assert.ok(mounted);
   context.after(() => scope.stop());
-  mounted.player.prepare(() => createPlayerRuntimeSession(source));
+  mounted.player.prepare(await sourceStart(mounted.player.bridge, source));
   await mounted.player.activate();
   return mounted;
 }
@@ -564,12 +603,49 @@ test("Debug off ends auto-skip and a running jump, and Debug on again starts wit
   assert.deepEqual(logNow()?.lines.value, []);
 });
 
-test("a countdown shows while Debug runs, not before Continue, and follows display time", async (context) => {
-  const { player, debug } = await mountDebug(context, "wait 5 s\nexit", {
-    menu: false,
-    autoSkip: false,
-  });
+test("a countdown shows while Debug runs, not before Continue, and counts from the session's observed time", async (context) => {
+  // One browser: its kept sessions and debug rooms under the script's storage scope, which a reload finds again.
+  const kept = memoryKeptSessionStore();
+  const rooms = memoryKeptRoomStore();
+  const scriptStorage: ScriptStorageProvider = {
+    scope: "development-time:countdown",
+    load: async () => [],
+    write: async () => {},
+    replace: async () => {},
+    clear: async () => {},
+  };
+  const plan = compilePlayerProject("wait 5 s\nexit").plan!;
+  const page = async (initial: { menu: boolean; autoSkip: boolean }, room?: "debug") => {
+    const scope = effectScope();
+    const mounted = scope.run(() => {
+      const player = usePlayerSession({
+        bridge: inProcessBackend(),
+        scriptStorage,
+        keptSessions: kept,
+        debugRooms: rooms,
+        ...(room === undefined ? {} : { room }),
+      });
+      return { player, debug: usePlayerDebug(player, initial) };
+    });
+    assert.ok(mounted);
+    context.after(() => scope.stop());
+    await mounted.player.loadScriptStorage();
+    const held = await preparedPlan(mounted.player.bridge, plan);
+    await mounted.player.prepareScript(held, {
+      plan: held,
+      options: () => mounted.player.scriptStorageOptions(),
+    });
+    return { ...mounted, close: () => scope.stop() };
+  };
+  const tasks = () => new Promise((resolve) => setTimeout(resolve, 5));
+  stubBrowser(context);
+  // Scene time moves only by the observation below: the page's clock stands still, so its estimate adds nothing.
+  context.mock.method(performance, "now", () => 0);
+  const { player, debug, close } = await page({ menu: false, autoSkip: false });
+  assert.equal(player.activation.value, "start");
+  await player.activate();
   assert.equal(debug.countdownText.value, null, "the Debug menu starts off");
+  // Debug on goes on in the script's debug room, with a copy of the session.
   debug.menu.value = true;
   assert.equal(debug.countdownText.value, "Debug · Continues in 5 s");
   player.update(observePlayerRuntimeTime(player.session.value!, 1_200).session);
@@ -577,10 +653,22 @@ test("a countdown shows while Debug runs, not before Continue, and follows displ
   debug.active.value = false;
   assert.equal(debug.countdownText.value, null);
   debug.active.value = true;
-  // A restored session waits for Continue before its countdown shows.
-  player.prepareRestore(player.session.value!);
-  assert.equal(player.activation.value, "continue");
-  assert.equal(debug.countdownText.value, null);
-  await player.activate();
-  assert.equal(debug.countdownText.value, "Debug · Continues in 4 s");
+  // The page is hidden, which keeps the debug room's session, and the debug room is opened again: the kept session is
+  // restored afresh and waits for Continue before its countdown shows.
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: "hidden" });
+  document.dispatchEvent(new Event("visibilitychange"));
+  // The keep is the host's work: bounded in real time, not in turns.
+  const within = withinHostTime();
+  while ((await rooms.session(scriptStorage.scope)) === null) {
+    assert.ok(within(), "the hidden page kept the debug room's session");
+    await tasks();
+  }
+  close();
+  Object.defineProperty(document, "visibilityState", { configurable: true, value: "visible" });
+  const reloaded = await page({ menu: true, autoSkip: false }, "debug");
+  assert.equal(reloaded.player.activation.value, "continue");
+  assert.equal(reloaded.debug.countdownText.value, null);
+  await reloaded.player.activate();
+  assert.equal(reloaded.debug.countdownText.value, "Debug · Continues in 4 s");
+  assert.equal(reloaded.player.hostError.value, null);
 });

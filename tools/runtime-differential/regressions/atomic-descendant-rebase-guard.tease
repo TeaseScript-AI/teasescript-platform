@@ -1,0 +1,4 @@
+let rows = [{ value: 0 }]
+rows[0].value = ({ removed: rows.clear(), value: 7 }).value
+say "removed:${rows.length}", instant
+exit

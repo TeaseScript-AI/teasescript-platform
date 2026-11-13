@@ -255,6 +255,28 @@ function rounded(a: DD, exponent = 0): number | undefined {
   return Number.isFinite(result) ? result : undefined;
 }
 
+/**
+ * The real cube root of a finite x, within one unit in the last place (not proved correctly rounded): x = m × 2^(3t)
+ * with m in [1, 8) by exact exponent extraction, binary64 Newton steps from a linear seed, one Newton step in DD, and
+ * one rounding of the result scaled by 2^t.
+ */
+export function cubeRoot(x: number): number {
+  if (x === 0 || !Number.isFinite(x)) return x;
+  const sign = x < 0 ? -1 : 1;
+  const [mantissa, exponent] = decompose(Math.abs(x));
+  const third = Math.floor(exponent / 3);
+  // exponent - 3 * third is 0, 1 or 2, so this product is exact and in [1, 8).
+  const m = mantissa * powerOfTwo(exponent - 3 * third);
+  // The chord from (1, 1) to (8, 2) is within 0.17 of the root (most at m = (7/3)^(3/2)); each step squares the error
+  // over the root, so five take it below 2^-52 and a sixth is spare.
+  let y = 1 + (m - 1) / 7;
+  for (let step = 0; step < 6; step += 1) y -= (y * y * y - m) / (3 * y * y);
+  const square = multiply([y, 0], [y, 0]);
+  const residual = subtract([m, 0], multiply(square, [y, 0]));
+  const root = add([y, 0], divide(residual, multiply([3, 0], square)));
+  return sign * rounded(root, third)!;
+}
+
 /** exp(x): ln(2) reduction, then a degree-26 Taylor polynomial on |r| <= ln(2)/2.
  * The first omitted term is < 2^-132; DD arithmetic contributes ~2^-100
  * relative error, aiming at faithful rounding with rare hard-to-round cases. */

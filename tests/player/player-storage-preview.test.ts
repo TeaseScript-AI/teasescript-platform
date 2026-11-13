@@ -6,12 +6,12 @@ import {
   storageMembers,
   storageOutline,
   storagePreview,
-} from "../../player/storage-preview.js";
+} from "../../player/persistence/storage-preview.js";
 import {
-  createPlayerRuntimeSession,
   playerRuntimeDebugVariables,
   playerRuntimeSnapshot,
-} from "../../player/runtime-adapter.js";
+} from "../../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
 import { RUNTIME_DEBUG_TRACE_LIMITS, type SerializableRuntimeValue } from "../../src/index.js";
 
 // Debug's Storage tab previews each saved value by its type, in the engine's notation that Variables shows too. The

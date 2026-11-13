@@ -98,8 +98,8 @@ else: each lock has its own.
 
 ### Code and dependencies
 
-`player/encryption/lock.ts` writes and reads locks with the browser's WebCrypto: AES-GCM, PBKDF2, SHA-256, and
-randomness. Browsers have no pairing cryptography, so `player/encryption/tlock.ts` uses `@noble/curves` and
+`player/encryption/content-lock.ts` writes and reads locks with the browser's WebCrypto: AES-GCM, PBKDF2, SHA-256, and
+randomness. Browsers have no pairing cryptography, so `player/encryption/time-lock.ts` uses `@noble/curves` and
 `@noble/hashes`, both 2.4.0 (MIT; curves' only dependency is hashes). `player/encryption/age.ts` writes the public key
 opener's age file with WebCrypto's X25519, HKDF, and HMAC, and with `@noble/ciphers` 2.4.0 (MIT, no dependencies) for
 ChaCha20-Poly1305, which WebCrypto lacks; `src/public-keys.ts` checks that an `ssh-ed25519` key is an Ed25519 point
@@ -113,7 +113,7 @@ Player goes offline later.
 - **Alternatives:** `tlock-js` 0.9.0 (about 55 KB gzip, 32 dependency package versions including drand-client, Noble 1.x
   outside Noble's supported range, and Buffer, last released 2024-03-18) or an own pairing implementation; WebCrypto
   offers none.
-- **Maintenance:** follow Noble's releases (curves and hashes together) and keep `tlock.ts`, a port of tlock-js's
+- **Maintenance:** follow Noble's releases (curves and hashes together) and keep `time-lock.ts`, a port of tlock-js's
   `encryptOnG2RFC9380` and `decryptOnG2` (MIT OR Apache-2.0, Protocol Labs), interoperable:
   `tests/player/player-encryption.test.ts` opens a ciphertext that upstream tlock-js made and checks real quicknet beacons.
 - **Public keys:** `@noble/ciphers` is needed because no browser offers ChaCha20-Poly1305 in WebCrypto, and age uses it

@@ -1,0 +1,5 @@
+// gate-host: failsMedia
+// The gate's failed-media fixture: a blocking play whose medium the host cannot play.
+playAudio "a.mp3"
+say "After the sound", instant
+exit

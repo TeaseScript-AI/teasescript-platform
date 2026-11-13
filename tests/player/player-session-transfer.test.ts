@@ -2,24 +2,32 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  compilePlayerProject,
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
-  playerRuntimeForeground,
   playerRuntimeSnapshot,
-} from "../../player/runtime-adapter.js";
+} from "../../player/runtime/runtime-adapter.js";
+import {
+  compilePlayerProject,
+  createPlayerRuntimeSession,
+} from "../../player/runtime/compile-project.js";
+import { playerRuntimeForeground } from "../../player/runtime/runtime-view.js";
 import {
   readPlayerTransferFile,
   readPlayerTransferText,
   restoreSessionTransfer,
+} from "../../player/persistence/session-transfer-read.js";
+import {
   sessionMediumRecord,
   sessionTransferFile,
   sessionTransferFileName,
   sessionTransferText,
   type SessionTransfer,
   type SessionTransferMedium,
-} from "../../player/session-transfer.js";
-import { storageTransferFile, StorageTransferError } from "../../player/storage-transfer.js";
+} from "../../player/persistence/session-transfer.js";
+import {
+  storageTransferFile,
+  StorageTransferError,
+} from "../../player/persistence/storage-transfer.js";
+import { serializeValidatedRuntimeJson } from "../../src/runtime/snapshot/checkpoint-json.js";
 
 const scope = "development-package:story";
 const photo = "captured-media:11111111-1111-4111-8111-111111111111:1";
@@ -92,7 +100,11 @@ test("an exported session reads back as it was, as a file or text, and restores 
       assert.equal(read.kind, "session");
       if (read.kind !== "session") continue;
       assert.deepEqual(read.session, transfer);
-      const restored = restoreSessionTransfer(read.session, scope, plan);
+      const restored = restoreSessionTransfer(
+        read.session,
+        scope,
+        serializeValidatedRuntimeJson(plan),
+      );
       assert.deepEqual(playerRuntimeSnapshot(restored), playerRuntimeSnapshot(session));
       assert.deepEqual(restored.transcriptEntries, session.transcriptEntries);
       assert.equal(playerRuntimeForeground(restored)?.kind, "ask-text");
@@ -140,7 +152,7 @@ test("a session import is refused with the reason: another script, another versi
     return transfer.kind === "session" ? transfer.session : transferAt();
   };
   const restore = async (document: unknown, into = plan) =>
-    restoreSessionTransfer(await read(document), scope, into);
+    restoreSessionTransfer(await read(document), scope, serializeValidatedRuntimeJson(into));
   const otherPlan = compilePlayerProject(source.replace("Hello", "Hello again")).plan!;
   const ended = createPlayerRuntimeSession('say "Bye", instant\nexit');
   const withMedium = (change: Record<string, unknown>) => ({
@@ -181,7 +193,7 @@ test("a session import is refused with the reason: another script, another versi
         restoreSessionTransfer(
           { ...(await read(exported)), session: createPlayerRuntimeRestorePoint(ended) },
           scope,
-          ended.plan,
+          serializeValidatedRuntimeJson(ended.plan),
         ),
       /has ended/,
     ],

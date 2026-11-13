@@ -1,18 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { debugCountdownText } from "../../player/presentation.js";
+import { debugCountdownText } from "../../player/presentation/presentation.js";
 import {
   activatePlayerRuntimeButton,
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
   observePlayerRuntimeTime,
-  playerRuntimeDebugCountdown,
   restorePlayerRuntimeSession,
-  type PlayerRuntimeDebugCountdown,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
-} from "../../player/runtime-adapter.js";
+} from "../../player/runtime/runtime-adapter.js";
+import { debugCountdown } from "../helpers/debug-readers.js";
+import { type PlayerRuntimeDebugCountdown } from "../../player/runtime/runtime-view.js";
+import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
 
 // Player Debug countdowns (DEBUGGER.md "Player Debug") name the current foreground wait from canonical state: an
 // authored `wait`, a presented timed `showButton`, or a message's reading time. Expected deadlines follow from the
@@ -35,10 +35,10 @@ function countdowns(
   options?: PlayerRuntimeSessionOptions,
 ): (PlayerRuntimeDebugCountdown | null)[] {
   let session = createPlayerRuntimeSession(source, options);
-  const seen = [playerRuntimeDebugCountdown(session)];
+  const seen = [debugCountdown(session)];
   for (const atMs of times) {
     session = observe(session, atMs);
-    seen.push(playerRuntimeDebugCountdown(session));
+    seen.push(debugCountdown(session));
   }
   return seen;
 }
@@ -65,7 +65,7 @@ test("only a presented showButton with a timeout counts down, until it is presse
     observe(createPlayerRuntimeSession('showButton "Go", timeout: 500 ms\nexit'), 100),
   );
   assert.equal(pressed?.outcome.kind, "completed");
-  assert.equal(playerRuntimeDebugCountdown(pressed.session), null);
+  assert.equal(debugCountdown(pressed.session), null);
   assert.deepEqual(countdowns('showButton "Go"\nexit', [10_000]), [null, null]);
   assert.deepEqual(countdowns('let x = askText hint: "Answer"\nexit', [1_000]), [null, null]);
 });
@@ -128,9 +128,7 @@ test("a block's own foreground work counts down while the action it interrupted 
 test("a restored session counts down to the same deadline, and an ended or failed one shows nothing", () => {
   const waiting = observe(createPlayerRuntimeSession("wait 5 s\nexit"), 1_000);
   assert.deepEqual(
-    playerRuntimeDebugCountdown(
-      restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(waiting)),
-    ),
+    debugCountdown(restorePlayerRuntimeSession(createPlayerRuntimeRestorePoint(waiting))),
     W(5_000),
   );
   assert.deepEqual(countdowns("exit", []), [null]);

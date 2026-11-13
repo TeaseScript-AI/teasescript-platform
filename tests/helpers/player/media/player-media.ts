@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
-import { MediaDevice, type MediaDeviceElement } from "../../../../player/media-device.js";
+import { MediaDevice, type MediaDeviceElement } from "../../../../player/media/media-device.js";
 import {
   advancePlayerRuntimeTime,
-  createPlayerRuntimeSession,
   observePlayerRuntimeTime,
-  playerRuntimeMedia,
   reportPlayerRuntimeMediaLoad,
   type PlayerRuntimeSession,
-} from "../../../../player/runtime-adapter.js";
+} from "../../../../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../../../../player/runtime/compile-project.js";
+import { playerRuntimeMedia } from "../../../../player/runtime/runtime-view.js";
 import type { MediaLoadReport } from "../../../../src/index.js";
 
 // A deterministic stand-in for HTMLAudioElement: tests move `position` to simulate what was actually played.
@@ -99,6 +99,8 @@ export function harness(
   const elements: FakeElement[] = [];
   const released: FakeElement[] = [];
   const loads: Array<[number, MediaLoadReport]> = [];
+  /** The phase of each load report, in order (`MediaDeviceHost.reportLoad`). */
+  const phases: Array<"load" | "playback"> = [];
   let blocked = false;
   let session: PlayerRuntimeSession = createPlayerRuntimeSession(source);
   let now = 0;
@@ -115,8 +117,9 @@ export function harness(
       if (fake !== undefined) released.push(fake);
     },
     resolveSource: resolve,
-    reportLoad: (mediaId, report) => {
+    reportLoad: (mediaId, report, phase) => {
       loads.push([mediaId, report]);
+      phases.push(phase);
       const result = reportPlayerRuntimeMediaLoad(session, mediaId, report);
       if (result.outcome.kind === "accepted") publish(result.session);
     },
@@ -130,6 +133,7 @@ export function harness(
   return {
     elements,
     loads,
+    phases,
     device,
     get session() {
       return session;

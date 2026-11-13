@@ -5,6 +5,7 @@ import { compileSource } from "../../../src/compiler.js";
 import type { NumericFunctionName } from "../../../src/language-facts.js";
 import { NUMERIC_CONTRACTS, numericResult } from "../../../src/numeric-functions.js";
 import { RANDOM_CONTRACTS } from "../../../src/random-functions.js";
+import { cubeRoot } from "../../../src/deterministic-math.js";
 import { runValidSource } from "../../helpers/run-valid-source.js";
 import { sayTexts } from "../../helpers/runtime-events.js";
 import { assertRuntimeResumeEquivalent } from "../../helpers/runtime-equivalence.js";
@@ -185,4 +186,50 @@ test("drawn values survive checkpoint resume", () => {
     equivalent.events.filter((event) => event.kind === "say").map((event) => event.text),
     ["true true true 0.5"],
   );
+});
+
+test("cubeRoot is within one unit in the last place, exact for exact cubes, across the binary exponents", () => {
+  // An exact rational for a double: numerator × 2^exponent.
+  const view = new DataView(new ArrayBuffer(8));
+  const exact = (x: number): readonly [bigint, bigint] => {
+    view.setFloat64(0, x);
+    const bits = view.getBigUint64(0);
+    const field = (bits >> 52n) & 2047n;
+    const fraction = bits & ((1n << 52n) - 1n);
+    return field === 0n ? [fraction, -1074n] : [fraction + (1n << 52n), field - 1075n];
+  };
+  const neighbour = (y: number, step: bigint) => {
+    view.setFloat64(0, y);
+    view.setBigUint64(0, view.getBigUint64(0) + step);
+    return view.getFloat64(0);
+  };
+  // Whether a³ ≤ x ≤ b³, compared exactly with every value scaled to whole numbers.
+  const between = (a: number, x: number, b: number) => {
+    const [[an, ae], [xn, xe], [bn, be]] = [exact(a), exact(x), exact(b)];
+    const low = [an ** 3n, 3n * ae] as const;
+    const high = [bn ** 3n, 3n * be] as const;
+    const floor = [low[1], xe, high[1]].reduce((m, e) => (e < m ? e : m));
+    const at = ([n, e]: readonly [bigint, bigint]) => n << (e - floor);
+    return at(low) <= at([xn, xe]) && at([xn, xe]) <= at(high);
+  };
+  for (const [x, root] of [
+    [8, 2],
+    [27, 3],
+    [0.125, 0.5],
+    [-8, -2],
+    [2 ** -1071, 2 ** -357],
+    [2 ** 1023, 2 ** 341],
+  ] as const)
+    assert.equal(cubeRoot(x), root, String(x));
+  for (const x of [0, -0, Infinity, -Infinity]) assert.ok(Object.is(cubeRoot(x), x));
+  const inputs = [5e-324, 1e-320, 2.2250738585072014e-308, 1.7976931348623157e308];
+  // Each binary exponent with the three residues mod 3 and mantissas at both ends of [1, 2).
+  for (let exponent = -1074; exponent <= 1023; exponent += 7)
+    for (const mantissa of [1, 1.2599210498948732, 1.5, 1.9999999999999998])
+      inputs.push(mantissa * 2 ** exponent);
+  for (const x of inputs.filter((value) => Number.isFinite(value) && value > 0)) {
+    const y = cubeRoot(x);
+    assert.ok(between(neighbour(y, -1n), x, neighbour(y, 1n)), `${x}: ${y}`);
+    assert.equal(cubeRoot(-x), -y);
+  }
 });

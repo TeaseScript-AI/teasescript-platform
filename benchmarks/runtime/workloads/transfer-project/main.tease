@@ -1,0 +1,12 @@
+// Entered transfers (#1797, F-work), after Domme2's hub: `main.tease` starts the hub, which sends each visit to a
+// room by a computed `goto` and every third through a `call` of the popup, whose global effect holds after it
+// returns. Each entered file counts, through the global helper every file calls first.
+global entered = 0
+global visits = 0
+global trail = ""
+global function enter(place: string) {
+  entered += 1
+  trail += place
+}
+enter("m")
+goto "hub.tease"

@@ -2,11 +2,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { compileSource } from "../../../src/compiler.js";
-import { createCheckpoint, serializeCheckpoint } from "../../../src/runtime/snapshot/checkpoint.js";
+import {
+  createCheckpoint,
+  restoreCheckpoint,
+  serializeCheckpoint,
+} from "../../../src/runtime/snapshot/checkpoint.js";
 import { run } from "../../../src/runtime/engine.js";
 import { completeAction } from "../../../src/runtime/operations/complete-action.js";
 import type { RuntimeSnapshot } from "../../../src/runtime/snapshot/state.js";
 import { assertCheckpointRejected } from "../../helpers/checkpoint-rejection.js";
+import { COLLIDING_A, COLLIDING_B } from "../../helpers/colliding-texts.js";
 import { compileValidPlan } from "../../helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
 import { assertRuntimeResumeEquivalent } from "../../helpers/runtime-equivalence.js";
@@ -341,4 +346,39 @@ test("storage keeps sets of composite members, and a checkpoint restores them or
   corrupt((snapshot) => {
     doors(snapshot).items.push({ kind: "list", items: [Number.NaN] });
   });
+  // A set inside a member is checked too.
+  corrupt((snapshot) => {
+    doors(snapshot).items.push({
+      kind: "object",
+      properties: [
+        {
+          name: "a",
+          value: {
+            kind: "set",
+            items: [
+              { kind: "list", items: [1] },
+              { kind: "list", items: [1] },
+            ],
+          },
+        },
+      ],
+    });
+  });
+  // Members whose prints are equal are compared whole: unequal ones restore, an equal one does not.
+  const colliding = (text: string) => ({
+    kind: "object" as const,
+    properties: [{ name: "a", value: { kind: "list" as const, items: [text] } }],
+  });
+  const withMembers = (...members: ReturnType<typeof colliding>[]) => {
+    // EVIDENCE: fixture: the parsed checkpoint was serialized from a valid runtime snapshot just above.
+    const json = JSON.parse(serialized) as { snapshot: RuntimeSnapshot };
+    doors(json.snapshot).items.push(...members);
+    return json;
+  };
+  const restored = restoreCheckpoint(withMembers(colliding(COLLIDING_A), colliding(COLLIDING_B)));
+  assert.equal(doors(restored.snapshot).items.length, 4);
+  assertCheckpointRejected(
+    withMembers(colliding(COLLIDING_A), colliding(COLLIDING_B), colliding(COLLIDING_A)),
+    "TSK002",
+  );
 });

@@ -112,7 +112,7 @@ which appears when the host persists script storage.
 Debugging stays apart from normal play. Each script with storage has a normal room, its own saved data and the session
 the Player keeps for it ([Session start](ui/PLAYER-UI.md#session-start-and-user-activation)), and a debug room with a
 session, saved values, and photos of its own, kept in the IndexedDB database `teasescript-debug-rooms`
-(`player/kept-sessions.ts`). A plain URL opens the normal room; `room=debug` opens the debug room, made from a copy of
+(`player/persistence/kept-sessions.ts`). A plain URL opens the normal room; `room=debug` opens the debug room, made from a copy of
 the script's own saved values and photos as they are now when there is none yet. The development preview opens the
 debug room while it starts with the Debug menu on, and with `room=debug`.
 
@@ -140,7 +140,7 @@ debug room while it starts with the Debug menu on, and with `room=debug`.
 
 In the debug room, the Debug panel's **Random draws** section, above the tabs, lets a developer choose the outcomes of
 the script's [random draws](RUNTIME.md#controlled-randomness) while the Debug features run
-(`player/vue/src/useDebugRandom.ts`). Normal play never pauses at a draw.
+(`player/vue/src/debug/random/useDebugRandom.ts`). Normal play never pauses at a draw.
 
 - **Choose outcomes**, off on every load, pauses the session at every random draw and asks for its outcome, unless that
   draw's site is set to go on by itself; its collapsed explanation reads "The script pauses at every random draw so you
@@ -179,8 +179,12 @@ the script's [random draws](RUNTIME.md#controlled-randomness) while the Debug fe
   cannot hover. A corner grip, also by arrow keys, resizes a block by whole lines, keeping the draw's line in the
   middle. Expand shows the block large over the dimmed page, at most 80% of the view's height, with the breadcrumb as
   its title; its X, Escape, or a click beside it closes it.
+  The engine's Worker makes this code, not the page: from the plan's source debug sidecar (`createSourceDebugSidecar`),
+  made from the sources it compiled and read back with `loadSourceDebugSidecar`, which accepts it only for the plan it
+  was made for, such as the same plan restored. A plan the Worker has no sources for, as in playback of a published
+  plan, shows no code.
 - **Not modal**: while the picker asks, the page stays visible, and only an explicit allowlist takes input
-  (`player/vue/src/useRandomDrawGuard.ts`): the picker and its large view, the theme, fullscreen, and notification
+  (`player/vue/src/debug/random/useRandomDrawGuard.ts`): the picker and its large view, the theme, fullscreen, and notification
   controls without a notice's action, panel resizing, and the Debug panel's tabs with Now, Variables, and Log. The tools
   menu, the sidebar's `Ctrl/Meta+B`, Settings, the panel's switches and buttons, the Storage tab's controls, and the
   chat wait for the outcome.
@@ -189,15 +193,19 @@ the script's [random draws](RUNTIME.md#controlled-randomness) while the Debug fe
 
 ### Rewind
 
-While the Debug features run, Debug's rewind (`player/debug-history.ts`) keeps a **point** for every interaction the
-session newly presents (`askChoice`, a button, an ask, or `askImage`), the one shown when Debug is turned on included;
-an ask that a timer, media, or permanent-button block suspended and shows again is the same point. A point holds the
-validated state as checkpoint JSON, which includes the session's storage view, and the events that led to it, which
-rebuild its transcript; the plan is shared, and photos stay in the Player's captured-media store, which keeps every
-photo it admitted while it is mounted. The history keeps every point: the newest, up to 32 Mi characters of state JSON,
-in memory and the older ones in an IndexedDB database of its own (`teasescript-debug-history-<UUID>`). Without
-IndexedDB, or once it fails, the history takes no more points than fit that budget and keeps those it has; it also stops
-at a state too large to save (`TSK004`). Turning
+While the Debug features run, Debug's rewind keeps a history in the engine's host (`player/engine-bridge/history/`),
+which the Player shows as it changes (`player/debug/debug-history.ts`). It has a **point** for every interaction the session
+newly presents (`askChoice`, a button, an ask, or `askImage`), the one shown when Debug is turned on included; an
+interaction answered before then has none. An ask that a timer, media, or permanent-button block suspended and shows
+again is the same point. A point holds the validated state as checkpoint JSON, which includes the session's storage
+view, and the number of the session's events that led to it, which rebuild its transcript; the plan is shared, and
+photos stay in the Player's captured-media store, which keeps every photo it admitted while it is mounted. Each point's
+JSON is written at once to an IndexedDB database of the history's own (`teasescript-debug-history-<UUID>`) and leaves
+memory once written. A point is taken only while the JSON in memory, writes still pending included, stays within
+32 Mi UTF-16 code units (`DEBUG_HISTORY_ADMITTED_SNAPSHOT_CHARS`, provisional); without IndexedDB every point stays in
+memory, and once a write fails only the JSON not yet written stays there, while the snapshots written stay in IndexedDB. A point that does not fit, or a state too large to save (`TSK004`), ends the collection:
+the history keeps the points it has and takes no more. The state the first Back leaves is kept the same way; when it
+does not fit, Back changes nothing. Turning
 either Debug switch off, a new Start or Continue, importing or clearing this script's saved data, and unmounting the
 Player delete the history and its database; an import also ends an inspected state. A page that ended without deleting
 its database, for example after a crash or by navigating away, leaves it to the next Player, which deletes it at startup
@@ -218,7 +226,8 @@ with it.
   session runs and saves as any session. The parked session, the states kept for Forward, and the points after the
   adopted state are gone; earlier points stay for a later Back. When the saved data cannot be replaced, for example on
   quota, the state stays inspected, the Player says so, and nothing changes. Rewind does one thing at a time: while a
-  step restores a state or a state is being adopted, input to an inspected state, Return, and another step are refused.
+  step restores a state, a state is being adopted, or Return or Debug off waits to reinstate the parked session, input
+  to an inspected state, Resume, Return, and another step are refused, and nothing is read or saved for them.
 - In the chat, Back is each earlier answer's **Back to here**; while a state is inspected, the later messages show grey
   and a bar offers Forward, Resume, and Return to session ([Player
   UI](ui/PLAYER-UI.md#composer-and-foreground-interactions)). Each state's transcript folds only the events that led to
@@ -228,6 +237,8 @@ with it.
   rewind restored and how many rewinds led to it, which an adopted state keeps. The debug recorder and the value trace
   begin anew at every restored state, so a replay never mixes branches. After a Player error, rewinding does not replace
   what the debug export replays: the export keeps the recording up to the error until the next Start.
+  A lost engine connection takes the host's history with it: its timeline stays read-only until a new session begins,
+  and Debug offers no rewind again until the page is reloaded. A debug export dialog already open keeps what it copied.
 
 ## Debug export
 
@@ -239,7 +250,7 @@ previewed before download; a selected photo carries its original bytes and links
 The technical report, always included, locates the failure without runtime values. Replay data discloses state that
 copies saved values, answers, and session text, so it requires all three.
 
-`player/debug-export.ts` owns the format: a versioned JSON document (`format: "teasescript-debug-export"`,
+`player/debug/debug-export-file.ts` owns the format and writes the file; `player/debug/debug-export.ts` reads and replays it, in the engine's Worker and in `tools/debug-export.mjs`. The format is a versioned JSON document (`format: "teasescript-debug-export"`,
 `version: 6`) with the build and its checkpoint, plan, and snapshot revisions; what the host knows of the package
 (unknown fields are `null`); the incident (code and one-based source location, or a Player exception's error name);
 `editedWhileDebugging`, the Debug storage editor's mark (`firstEditSceneTimeMs` and `editCount`, or `null`), which also
@@ -258,7 +269,7 @@ the engine refuses meanwhile are not recorded; only a resolution of a draw that 
 anchor is a `resumeRandomDraw` call of its own. Replay decides each recorded draw as recorded, every other one
 naturally, and pauses where the call stood paused. It adds no plan, snapshot, or checkpoint revision.
 
-In every build, the Player's `player/debug-recorder.ts` records each session from its Start or Continue: the anchor
+In every build, the Player's `player/debug/debug-recorder.ts` records each session from its Start or Continue: the anchor
 before its first call and copies of every call's plain arguments and results, beside the session and outside its state.
 When the record would outgrow its retention (4,096 calls or 2 Mi characters of argument JSON, diagnostic tuning rather
 than a script limit), it starts again from the state before the Player's next call, never dropping a call in between. A
@@ -273,7 +284,7 @@ calls. For that, the recorder keeps logging calls after the record froze without
 it cannot copy, it starts that log again at the Player's next call.
 
 The Player assembles an export when its dialog opens ([Player UI](ui/PLAYER-UI.md#session-end-and-failure)), from the
-session, the record, and the photos frozen then (`player/debug-export-assembly.ts`), so play may continue meanwhile. The
+session, the record, and the photos frozen then (`player/debug/debug-export-assembly.ts`), so play may continue meanwhile. The
 technical report carries the build and its revisions, the package's storage scope and a SHA-256 of its compiled plan
 where the browser can hash, the incident as the session's actual state shows it, also a state it cannot export, the
 storage editor's and the rewind's marks, the sequence and kind of the last 256 events, and what the Player itself observed, as Debug's Now view and the notices show it: the

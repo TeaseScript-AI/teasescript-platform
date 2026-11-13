@@ -2,20 +2,28 @@
 
 ## Player and playground execution adapters
 
-`player/runtime-adapter.ts` is the framework-independent Player adapter shared by the Player and the
+`player/runtime/runtime-adapter.ts` is the framework-independent Player adapter shared by the Player and the
 playground's action lookup/completion path. It maps validated pending actions and runtime events to Player presentation,
 submits typed interactions, pacing/time observations, media load reports, and media progress, projects the Stage and
 active media for playback, and uses the canonical runtime checkpoint operations. The Player plays the
-projected audio through `player/media-device.ts` and shows the Stage image; browser video playback remains deferred.
+projected audio through `player/media/media-device.ts` and shows the Stage image; browser video playback remains deferred.
 `playground/workspace/controller.ts` retains the DOM-free compiler/execution and development-automation workspace
 facade. Neither adapter normalizes answers, matches choices, derives canonical transcript text, or retains an
 independent action lifecycle.
 
-The Player runs each session on one [runtime session](#runtime-sessions). A `PlayerRuntimeSession` is one publication
-of it: `state` holds the view, projections, active calls, and date and time presentation it shows. The complete state
+The Player's sessions live in the engine's host behind the bridge (`player/engine-bridge/`): the main realm holds a
+`PlayerSession`, the published state with its transcript, which it builds from each reply's publication; until the
+Worker is activated, the host runs in the page. A lost connection is replaced only from the player's click
+([Player UI](ui/PLAYER-UI.md#session-end-and-failure)). Work that completes after a reply shows only while the session that
+issued it still owns the UI, and the player's input is posted only then. The Player runs each session on one
+[runtime session](#runtime-sessions). A `PlayerRuntimeSession` is one publication of it, as the host holds it: `state` holds the view, projections, active calls, and date and time presentation it shows. Each reply publishes the critical view: that state without its active calls, and the file, line and kind of the instructions its readers name (`instructions`). The active calls, with the instructions they name, come only while the main side views the session's calls (`viewCalls`, while Debug's Now view or the error dialog shows them), and with a stop's acknowledgement. The complete state
 is exported only where one is kept: checked for a restore point, a debug export, or a saved-data adoption, such as by
 `playerRuntimeSnapshot`; and as the trusted export (Boundaries below) for the kept session, a rewind point, and the
-debug recorder's anchors, which are checked where they are restored or exported. Continue and a rewind restore with
+debug recorder's anchors, which are checked where they are restored or exported. The host writes the kept session's state, a
+session export's checkpoint and the plan's JSON a first save stores, restores the kept session Continue offers, and reads
+an exported file of saved data or a session, whose checkpoint it restores and keeps for the import; the main realm stores
+and posts them as text. The host holds the plan's JSON for the page's current plan while the page is
+open (`player/persistence/plan-json-lease.ts`). Continue and a rewind restore with
 `restoreRuntimeSession`, a restore point with `deserializeRuntimeSession`, each checking the state once (Boundaries
 below). An operation goes through a publication that shows the current state; once an operation changed the state, one
 made from an earlier publication throws. When an operation throws, the error reaches the Player, and the next use
@@ -34,8 +42,9 @@ ADR 0016 accepts the resumable pending-action contract for waits, timers, choice
 ## Implemented runtime ownership
 
 Shared serializable action and settlement contracts are owned by
-`src/runtime/actions/model.ts`. Pure interaction normalization and matching live in
-`actions/interaction.ts`; delay helpers and replay classification remain
+`src/runtime/actions/model.ts`. Interaction answer normalization and matching live in
+`src/interaction-completion.ts`, whose value imports the Player's page may already load;
+`actions/interaction.ts` keeps the plain-record guard and the password-hash check. Delay helpers and replay classification remain
 action-specific. Canonical completion and time-observation transitions are
 implemented in `src/runtime/operations/complete-action.ts` and
 `src/runtime/operations/observe-time.ts`, with a small shared operation support
@@ -804,11 +813,15 @@ each active unloaded media with `reportMediaLoad(plan, snapshot, mediaId, report
 records the source duration and starts the first playback segment when the effective range is non-empty; an empty
 range reports `TSW013` and stops without cues or `finish`, keeping the duration readable. `{ kind: "failed",
 message? }` reports `TSW013`, stops the media without cues or `finish`, and releases any wait; its handle reads `null`
-for `duration` and `remaining`. Like host input, a load result applies at the observed time: while scene time is
-behind it or a due block can run, the report is `executionPending` without changing anything, and the Player runs the
-engine and retries. Reports for loaded or settled media are `ignored`, unissued IDs are `unknownMedia`, and malformed
-input is `invalidReport`. The runtime defines no load timeout and no post-load playback failure; a Player
-that gives up before loading reports `failed`.
+for `duration` and `remaining`. After a `loaded` report, the Player reports at most one more: `{ kind: "failed" }` when
+playback fails, as when the browser's audio output errors. It reports `TSW013` and stops the active media as a stop
+does: events due before the observed time commit, cue blocks not yet started are dropped, a cue block already running
+completes, the media and a blocking wait settle `stopped`, and its handle keeps the duration and reads `0` for
+`remaining`. Like host input, a load result applies at the observed time: while scene time is behind it or a due block
+can run, the report is `executionPending` without changing anything, and the Player runs the engine and retries. A
+second `loaded` report, a report for settled media, and a second failure are `ignored`; unissued IDs are
+`unknownMedia`, and malformed input is `invalidReport`. The runtime defines no load timeout; a Player that gives up
+before loading reports `failed`.
 
 **Progress observations.** Playback progress enters only through validated observations:
 `observeTime(plan, snapshot, nowMs, [{ mediaId, segment, progressMs }])`, where `progressMs` is the active playback
@@ -950,6 +963,12 @@ of a `say` in a block. Any other quote remains the outer string's recovery bound
 
 Ordinary TeaseScript source is compiled through `compileSource(...)` into a validated instruction plan, then executed with fresh or restored explicit serializable runtime state. AST data and lowering remain compiler and authoring-tool internals, not product execution APIs.
 
+`src/playback.ts` is the playback entry: loading, running, saving, restoring and inspecting a plan, without loading a
+compiler, parser, lexer or language-tooling module. `src/index.ts`, the authoring entry, adds compilation and language
+tooling. `loadInstructionPlan(text)` loads a plan from JSON text that the engine parses itself: it returns the plan,
+the complete `validateInstructionPlan(JSON.parse(text))` result of data that is not one, or `unreadable` for input that is
+not JSON text, and a loaded plan is reused by runtime entry points as compiler output is.
+
 ### Low-level runtime route
 
 The compiler internally lowers semantically valid parser-owned AST data after `compileSource(...)` validation. This
@@ -1028,7 +1047,8 @@ operations stay as they are.
   it, or `null`, in work proportional to the scope depth. `inspect()` returns `inspectRuntimeState`'s detached debugger
   inspection after capturing and validating the whole state. Storage and other script data are read from an export.
 - **Boundaries.** `exportSnapshot()` and `exportCheckpoint()` capture and completely validate the state and return plain
-  data that later operations do not change; importing it again crosses the external-data boundary. Data that crosses
+  data that later operations do not change; importing it again crosses the external-data boundary, where each object
+  of the state must have exactly the fields that the current snapshot revision defines. Data that crosses
   it is validated exactly once, by the factory it enters: the session runs the state that the factory validated, so a
   host restores a checkpoint with `restoreRuntimeSession` or `deserializeRuntimeSession` rather than `restoreCheckpoint`
   followed by `createRuntimeSession`, which would validate it twice. For trusted hosts
@@ -1099,8 +1119,10 @@ not language; without it every draw is natural and costs one more check.
   trace's operation name; its `site` is `path:line:column` in its file, counted from 1 (a timer round uses its timer's
   duration, a glob its statement), and `listRandomSites(plan)` lists every site with its kinds and `endLine` and
   `endColumn`, where the draw's source ends, exclusive, so a host can mark it; a site with several kinds ends where its
-  first one does. Its `drawId` is the generator state before it: one execution path never meets an ID twice, and a
-  restored or forked session meets the same draw with the same ID.
+  first one does. Its `drawId` is the generator state before it, which an answer to the pending draw must match. It
+  is no identity of a draw: a restored or forked session meets the same draw with the same ID, sessions from the same
+  seed meet the same IDs, and one path long enough to cycle the generator meets an ID again. A host telling draws apart
+  adds the session and the site.
 - **Natural first.** The engine samples the natural result first, with exactly the generator steps it always takes; a
   chosen outcome replaces only the result. The generator advances as for the natural draw, so later draws stay the
   same until the chosen outcome changes what runs.
@@ -1177,7 +1199,8 @@ holds:
 
 `captureTemporalContext(timeZone, locale)` builds the context from the host's `Intl` data. Zone offsets are sampled
 daily and each change located by bisection, so two changes less than a day apart that cancel each other out are not
-seen. Fresh-session creation rejects a malformed context with `RangeError`; restore validates it like other snapshot
+seen. Where the host's `Temporal` lists the zone's transitions, the samples read that list instead of formatting each
+day, which gives the same rules; a host without a usable list is scanned with `Intl.DateTimeFormat`. Fresh-session creation rejects a malformed context with `RangeError`; restore validates it like other snapshot
 state. Without a context a session uses UTC and locale-neutral text such as `2026-10-04 18:30`.
 
 Each capture records a context, the UTC wall clock (or `null` when the host supplied none), its boundary scene time,
@@ -1356,15 +1379,17 @@ survives checkpoint and restore, and replays a repeated completion as `alreadySe
 image or a photo taken for the request as session media with the lifecycle of a `takePhoto()` photo; see
 [Player UI](ui/PLAYER-UI.md#foreground-interaction-presentation) for its file and camera routes.
 
-The Player opens the session camera after Start when the trusted host grants the camera capability, answers each capture
+The Player opens the session camera from the activating Start or Continue click, before ordinary script execution, when
+the trusted host grants the camera capability; a camera failure does not stop the start. It answers each capture
 once from that open stream, and delivers the answer until the runtime settles it. Captured photos are session media; a
 save stores the photos its value references durably before the value is persisted
-(`player/captured-media-persistence.ts`); when that fails, the host acknowledges the `storageWrite` as `failed`, so the
+(`player/media/captured-media-persistence.ts`); when that fails, the host acknowledges the `storageWrite` as `failed`, so the
 previous value is kept as for any failed persistent write. Media no saved value references, nor a session the Player
-keeps for a reload ([Session start](ui/PLAYER-UI.md#session-start-and-user-activation)), is reclaimed
-opportunistically when a Player opens while no Player of the same scope is live in any tab (Web Locks) and the saved
-values can be read completely; without Web Locks it is not reclaimed, and while a Player lives nothing is deleted. The
-technical playground has no camera and answers a pending capture as `unconfigured` when execution continues.
+keeps for a reload ([Session start](ui/PLAYER-UI.md#session-start-and-user-activation)), is reclaimed opportunistically
+when a Player opens while no Player of the same scope is live in any tab (Web Locks) and the saved values can be read (a
+value its store cannot read counts as gone, with its media); without Web Locks it is not reclaimed, and while a Player
+lives nothing is deleted. The technical playground has no camera and answers a pending capture as `unconfigured` when
+execution continues.
 
 ## Forms
 
@@ -1658,23 +1683,23 @@ A file's type comes from its first bytes, read within the 1,445-byte resource he
 [WHATWG MIME Sniffing](https://mimesniff.spec.whatwg.org/) standard, with its patterns for these types; its MP3 and
 WebM signatures are read as they intend, Ogg is audio, and an M4A major brand is MP4 audio:
 
-| Type | First bytes |
-| --- | --- |
-| `image/jpeg` | `FF D8 FF` |
-| `image/png` | `89 50 4E 47 0D 0A 1A 0A` |
-| `image/gif` | `GIF87a` or `GIF89a` |
-| `image/webp` | `RIFF`, four bytes, `WEBPVP` |
-| `audio/mpeg` | `ID3`, or an MPEG Layer III frame header followed by another where its frame ends |
-| `audio/ogg` | `OggS` and a zero byte |
-| `audio/wave` | `RIFF`, four bytes, `WAVE` |
-| `audio/mp4` | an ISO file type box (`ftyp`) whose major brand is `M4A ` |
-| `video/mp4` | an ISO file type box whose major brand or a compatible brand starts with `mp4` |
-| `video/webm` | an EBML header whose document type is `webm` |
-| `application/octet-stream` | anything else, such as SVG, HTML, BMP, AVIF, or text |
+| Type                       | First bytes                                                                       |
+| -------------------------- | --------------------------------------------------------------------------------- |
+| `image/jpeg`               | `FF D8 FF`                                                                        |
+| `image/png`                | `89 50 4E 47 0D 0A 1A 0A`                                                         |
+| `image/gif`                | `GIF87a` or `GIF89a`                                                              |
+| `image/webp`               | `RIFF`, four bytes, `WEBPVP`                                                      |
+| `audio/mpeg`               | `ID3`, or an MPEG Layer III frame header followed by another where its frame ends |
+| `audio/ogg`                | `OggS` and a zero byte                                                            |
+| `audio/wave`               | `RIFF`, four bytes, `WAVE`                                                        |
+| `audio/mp4`                | an ISO file type box (`ftyp`) whose major brand is `M4A `                         |
+| `video/mp4`                | an ISO file type box whose major brand or a compatible brand starts with `mp4`    |
+| `video/webm`               | an EBML header whose document type is `webm`                                      |
+| `application/octet-stream` | anything else, such as SVG, HTML, BMP, AVIF, or text                              |
 
-The Player (`player/stored-files.ts`) answers each file store once, as it answers a photo: it keeps each file to store
-as session media of its kind, with the lifecycle of a photo, durable only while a saved value references it, and reads
-stored files' bytes, from durable storage when needed, and hashes them with `crypto.subtle.digest`. When it cannot
+The Player (`player/media/stored-files.ts`) answers each file store once, as it answers a photo: it keeps each file to store
+as session media of its kind, with the lifecycle of a photo, durable while a saved value or a kept session uses it, and
+reads stored files' bytes, from durable storage when needed, and hashes them with `crypto.subtle.digest`. When it cannot
 decode, keep, read, or hash them, as outside a secure context, where the browser has no `crypto.subtle`, it answers
 `failed`.
 At Start it names the references in the saved values that its store holds, or had stored when it read them, so saved
@@ -1754,7 +1779,7 @@ default. The player's typed password stays in the Player and never reaches the e
 step's outcome and result, so a restore or a replay of recorded completions needs neither the network, the store, nor a
 secret.
 
-The Player (`player/lock-service.ts`) answers each `work` step once and offers the answer until it settles, as for a
+The Player (`player/encryption/lock-service.ts`) answers each `work` step once and offers the answer until it settles, as for a
 file store, and shows each `ask` step's dialog, or the composer's password field for a call with a password field
 ([Player UI](ui/PLAYER-UI.md#foreground-interaction-presentation)); what the player typed it keeps in memory for the
 step after the dialog or field. A step it cannot do, as outside a secure context,
@@ -1822,8 +1847,10 @@ whose status is halted or failed. Engine-owned sessions capture and completely v
 or restore; between those boundaries their operations run on private canonical state without repeating whole-snapshot
 capture or validation, while host requests, observations, values, and capability results keep their complete capture and
 validation ([Runtime sessions](#runtime-sessions)). Runtime and checkpoint operations also reuse a plan already captured
-and validated by that operation when validating the snapshot, and checkpoint data freshly produced by `JSON.parse(...)`
-goes directly through complete structural validation. Checkpoint restore validates its envelope, plan, snapshot, and
+and validated by that operation when validating the snapshot. Plan and checkpoint JSON text that the engine parses
+itself (`loadInstructionPlan`, `deserializeCheckpoint`) is not copied: its arrays get capture's prototype and its plan is
+frozen before complete structural validation, so it is decided as capture of the parsed data would be, and data holding a
+number that is not finite goes to capture for its error. Checkpoint restore validates its envelope, plan, snapshot, and
 their consistency before execution resumes. A generic capture depth/work or detailed-validation counter alone does not
 make otherwise structurally valid data malformed. Malformed or inconsistent plan and snapshot data still produces the
 existing public invalid results, `TSR100`, `TSR101`, or `TSK002`. The compact user-function call representation and its
@@ -1851,85 +1878,85 @@ checkpoint or restart, and report the failure with its debug export. Every code 
 [Codes with more than one owner](DIAGNOSTICS.md#codes-with-more-than-one-owner) states when a runtime failure uses a
 compiler code and its text; this table lists the runtime's own codes.
 
-| Code | What failed | What to do |
-| --- | --- | --- |
-| `TSR001` | A global, speaker, variable, or parameter is set up twice in one scope. _Defect._ | Report it. |
-| `TSR002` | An assignment names no variable. _Defect._ | Report it. |
-| `TSR003` | An assignment to a property that the value does not allow. | Assign a property the message names. |
-| `TSR004` | An index on a set, which has no positions. | Copy it into a list with `toList()`, or test with `contains(...)`. |
-| `TSR005` | An index assignment on a value that is not a list or dict. | Assign to a list element or a dict entry. |
-| `TSR006` | An unknown name. _Defect._ | Report it. |
-| `TSR007` | An object or speaker with the same property twice. _Defect._ | Report it. |
-| `TSR008` | An index on a value that is not a list or dict, or on a list that the same statement replaced. | Index only lists and dicts, and make such a change in a separate statement. |
-| `TSR009` | An operator that cannot combine its operands, such as values of different kinds, a calendar duration ordered against or divided by a duration or one of another family, a date or a date and time moved by a duration, or a calendar duration divided by zero. | Check or convert the operand the message names. |
-| `TSR010` | A named argument given twice. _Defect._ | Report it. |
-| `TSR011` | A call of a built-in function the host does not provide, or, in a plan compiled before `TSV019` rejected it, of a name that is not a function, such as `(x)()`. | Call a function by its name. |
-| `TSR012` | A host built-in failed. | Check the values the script passes, or report a host failure with a debug export. |
-| `TSR013` | A host built-in returned a value a script cannot hold. | Report it to the host. |
-| `TSR014` | A call of something that is not a function or a method, such as `items[0]()`, in a plan compiled before `TSV019` rejected it. | Call a function by its name. |
-| `TSR015` | Named arguments where a call takes only positional ones. | Remove the names. |
-| `TSR016` | A method the value does not have. | Use a method the message names. |
-| `TSR017` | A property the value does not have. | Use a property the message names. |
-| `TSR018` | Too few elements: an empty collection, or fewer values than a statistic needs. | Check the length first. |
-| `TSR019` | A random selection from an empty list or set. | Check that it has an element first. |
-| `TSR020` | The host's random source returned a number outside the range from 0 (inclusive) to 1 (exclusive). | Report it to the host. |
-| `TSR021` | A value that cannot be shown where only scalar text is allowed ([Visible text boundary](#visible-text-boundary)), such as a list or dict as a button label. | Select an element or a property. |
-| `TSR022` | A speaker whose `displayName` is empty. | Give it a name, or leave `displayName` out. |
-| `TSR023` | A speaker that the session does not have. _Defect._ | Report it. |
-| `TSR024` | A list index or text position that is not a whole number. | Round it with `floor(...)`, `round(...)`, or `ceil(...)`, or convert numeric text with `toInteger(...)`. |
-| `TSR025` | A list index beyond the list's end, or a list element that a statement changes but that the same statement removed. | Check it against `length` first. |
-| `TSR026` | A condition or an `and`, `or`, or `not` operand that is not true or false. | Compare explicitly, as in `x != 0`. |
-| `TSR027` | An arithmetic operand, range bound, or amount before a unit (also in a `wait` or timer) that is not a number. | Check for null, or convert numeric text with `toNumber(...)`. |
-| `TSR028` | Too many or too few arguments, or arguments in the wrong form. | Write the call as the message shows. |
-| `TSR030` | A speaker property shown in output that is not text. | Set the property to text. |
-| `TSR031` | A value from the host with a cycle or another shape a script value cannot have. | Report it to the host. |
-| `TSR033` | Leaving the root scope. _Defect._ | Report it. |
-| `TSR034` | An assignment to the name of a declared speaker. _Defect._ | Report it. |
-| `TSR035` | An operation the engine does not support for its operands, such as `in` without a range. _Defect._ | Report it. |
-| `TSR036` | Arithmetic without a finite result: division or remainder by zero, a number or duration too large, a math function outside its domain, or a regression whose points all have the same x. | Check that the divisor is not 0, use smaller values, or pass values the function accepts. |
-| `TSR037` | The instruction budget of one run at one scene time is used up, usually by a loop that neither waits nor ends. | Add a wait, or check the loop's condition. |
-| `TSR039` | A numeric argument outside its range, such as `chance(150)` or a negative weight. | Pass a value in the range the message gives. |
-| `TSR040` | `randomInteger(...)` without a range. | Pass a range such as `1..=6`. |
-| `TSR041` | A random selection from an empty range. | Use a range that holds at least one number. |
-| `TSR042` | Loop state that does not match the plan. _Defect._ | Report it. |
-| `TSR043` | A `repeat` count that is not a whole number of at least 0, or that is too large to count exactly. | Round, check, or reduce the count first. |
-| `TSR044` | A `for` loop over a value it cannot go through, or a `for` with two variables over something other than a dict. | Loop over a list, set, dict, or range, and use two variables only for a dict. |
-| `TSR045` | A range of a loop, a timer duration, or `randomInteger(...)` whose bounds are not safe whole numbers. | Use smaller whole-number bounds. |
-| `TSR046` | A missing temporary value. _Defect._ | Report it. |
-| `TSR047` | Calls nested deeper than the call-depth limit. | End the recursion sooner. |
-| `TSR048` | Inconsistent parameter state. _Defect._ | Report it. |
-| `TSR049` | A required parameter without a value. _Defect._ | Report it. |
-| `TSR050` | A command, or a handle's time, with a value it cannot use, such as a wait, timer, media, or `showButton` duration, a `say` pacing, a timer label or display, a media volume, an `openUrl` address that is not an `http` or `https` URL or an `alwaysButton:` that is not true or false, an `exportText` text or `fileName:` that is not text, or a speaker property such as `defaultSaySkippable`. | Use a value the message names. |
-| `TSR051` | A runtime ID or event counter that is used up, or a function instruction outside a call. | Restart the session and report it. |
-| `TSR052` | An interaction whose choices, form fields, prefill, image filters, or total text prevent it from opening, or a malformed prepared request. | Correct what the message names, or report a malformed request. |
-| `TSR053` | A dict entry that a statement changes but that the same statement removed, or a handle or prepared reference whose state is malformed. | Make the change in a separate statement, or report a malformed state. |
-| `TSR054` | A storage key that is not text. | Write the key as text. |
-| `TSR055` | Retired: a `save` of a value that exists only in this session now fails with `TSV043`. | Save plain data, and recreate the session value after loading. |
-| `TSR057` | A regex value that cannot be compiled. _Defect._ | Report it. |
-| `TSR058` | A value that does not fit the type of its receiving place, such as a typed variable, parameter, result, form field, or conversion. | Convert or check the value, or declare a type that includes it. |
-| `TSR059` | A built-in argument that the compiler does not check, such as a text that `fileToBase64` does not know as a stored file, more public keys than a lock holds or an empty list of them, a `predict` line whose properties are not numbers, or `min` of values of several kinds. | Pass a value the message names. |
-| `TSR060` | A `sort()` of elements of several kinds, or of calendar durations of different kinds, or a weight of `randomWeighted` that is not a number. | Make the elements one kind the operation takes. |
-| `TSR061` | A dict without the key that is read. | Check with `contains(...)` first, or use `get(key, default: value)`. |
-| `TSR062` | A dict key that is not text. | Write the key as text. |
-| `TSR063` | A date or time that cannot be computed or shown, such as a year outside the supported range. | Use a date and time in the range the message gives. |
-| `TSR064` | The current time, when the host supplied no clock. | Run the script in a host with a clock. |
-| `TSR065` | A calendar duration where a duration is needed. | Use a duration, such as `24 h` or `1 day`. |
-| `TSR066` | A file ended without a calling file to return to. | Start the file with `call` where it should come back, or use `exit` where the session should finish. |
-| `TSR067` | A start value that selects at random. | Select at random once the story runs. |
-| `TSR069` | A `goto` or `call` target that does not exist, a `goto` to a file of declarations only, or a `call` of the running file. | Name an existing file that runs something; put a part of the running file that returns in a function. |
-| `TSR070` | A variable read before its `let` ran. | Give the variable a value before it is used. |
-| `TSR071` | `speaker` in a message that names no speaker with `as` while no default speaker is set. | Give the message a speaker with `as`, or set a default speaker with `speaker name` before it. |
-| `TSR080` | A tag's number compared with something other than a number. | Compare it with a number. |
-| `TSR081` | A tag query option that is not a list of tag names. | Pass tag names, such as `"bedroom"`. |
-| `TSR082` | No file or image has the tags of a query. | Relax the query, or add files with those tags. |
-| `TSR083` | `takePhoto(tags:)` with something other than tags, or with two numbers for one tag. | Pass tags such as `"bedroom"` or `"punishment: 4"`, with one number per tag. |
-| `TSR084` | A text longer than the maximum text length. | Build a shorter text. |
-| `TSR085` | A stored file that `fileToBase64`, `toJson`, `encryptFile`, or `decryptFile` needs, which the Player could not read. | Take, choose, or store the file again. |
-| `TSR086` | A lock the browser could not make or open at all, as on a Player page without https, or whose result it could not keep. | Open the Player over https, with room to store files. |
-| `TSR087` | A text operation with a regex that needs more work than the regex work limit allows. | Use a simpler pattern or a shorter text. |
-| `TSR088` | A list of more than 1,000,000 elements, a set of more than 1,000,000 members, or a dict of more than 1,000,000 keys ([`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md)), or one larger than the host can hold where no check foresaw it: in V8, more than 134,217,728 elements in an array or 16,777,216 entries in a `Set` or `Map`. | Build a shorter list, set, or dict. |
-| `TSR100` | Instruction-plan data that fails validation. | Compile the script again. |
-| `TSR101` | Runtime-snapshot data that fails validation, or a runtime counter that cannot advance. | Restore a valid checkpoint or start a new session. |
+| Code     | What failed                                                                                                                                                                                                                                                                                                                                                                                        | What to do                                                                                               |
+| -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `TSR001` | A global, speaker, variable, or parameter is set up twice in one scope. _Defect._                                                                                                                                                                                                                                                                                                                  | Report it.                                                                                               |
+| `TSR002` | An assignment names no variable. _Defect._                                                                                                                                                                                                                                                                                                                                                         | Report it.                                                                                               |
+| `TSR003` | An assignment to a property that the value does not allow.                                                                                                                                                                                                                                                                                                                                         | Assign a property the message names.                                                                     |
+| `TSR004` | An index on a set, which has no positions.                                                                                                                                                                                                                                                                                                                                                         | Copy it into a list with `toList()`, or test with `contains(...)`.                                       |
+| `TSR005` | An index assignment on a value that is not a list or dict.                                                                                                                                                                                                                                                                                                                                         | Assign to a list element or a dict entry.                                                                |
+| `TSR006` | An unknown name. _Defect._                                                                                                                                                                                                                                                                                                                                                                         | Report it.                                                                                               |
+| `TSR007` | An object or speaker with the same property twice. _Defect._                                                                                                                                                                                                                                                                                                                                       | Report it.                                                                                               |
+| `TSR008` | An index on a value that is not a list or dict, or on a list that the same statement replaced.                                                                                                                                                                                                                                                                                                     | Index only lists and dicts, and make such a change in a separate statement.                              |
+| `TSR009` | An operator that cannot combine its operands, such as values of different kinds, a calendar duration ordered against or divided by a duration or one of another family, a date or a date and time moved by a duration, or a calendar duration divided by zero.                                                                                                                                     | Check or convert the operand the message names.                                                          |
+| `TSR010` | A named argument given twice. _Defect._                                                                                                                                                                                                                                                                                                                                                            | Report it.                                                                                               |
+| `TSR011` | A call of a built-in function the host does not provide, or, in a plan compiled before `TSV019` rejected it, of a name that is not a function, such as `(x)()`.                                                                                                                                                                                                                                    | Call a function by its name.                                                                             |
+| `TSR012` | A host built-in failed.                                                                                                                                                                                                                                                                                                                                                                            | Check the values the script passes, or report a host failure with a debug export.                        |
+| `TSR013` | A host built-in returned a value a script cannot hold.                                                                                                                                                                                                                                                                                                                                             | Report it to the host.                                                                                   |
+| `TSR014` | A call of something that is not a function or a method, such as `items[0]()`, in a plan compiled before `TSV019` rejected it.                                                                                                                                                                                                                                                                      | Call a function by its name.                                                                             |
+| `TSR015` | Named arguments where a call takes only positional ones.                                                                                                                                                                                                                                                                                                                                           | Remove the names.                                                                                        |
+| `TSR016` | A method the value does not have.                                                                                                                                                                                                                                                                                                                                                                  | Use a method the message names.                                                                          |
+| `TSR017` | A property the value does not have.                                                                                                                                                                                                                                                                                                                                                                | Use a property the message names.                                                                        |
+| `TSR018` | Too few elements: an empty collection, or fewer values than a statistic needs.                                                                                                                                                                                                                                                                                                                     | Check the length first.                                                                                  |
+| `TSR019` | A random selection from an empty list or set.                                                                                                                                                                                                                                                                                                                                                      | Check that it has an element first.                                                                      |
+| `TSR020` | The host's random source returned a number outside the range from 0 (inclusive) to 1 (exclusive).                                                                                                                                                                                                                                                                                                  | Report it to the host.                                                                                   |
+| `TSR021` | A value that cannot be shown where only scalar text is allowed ([Visible text boundary](#visible-text-boundary)), such as a list or dict as a button label.                                                                                                                                                                                                                                        | Select an element or a property.                                                                         |
+| `TSR022` | A speaker whose `displayName` is empty.                                                                                                                                                                                                                                                                                                                                                            | Give it a name, or leave `displayName` out.                                                              |
+| `TSR023` | A speaker that the session does not have. _Defect._                                                                                                                                                                                                                                                                                                                                                | Report it.                                                                                               |
+| `TSR024` | A list index or text position that is not a whole number.                                                                                                                                                                                                                                                                                                                                          | Round it with `floor(...)`, `round(...)`, or `ceil(...)`, or convert numeric text with `toInteger(...)`. |
+| `TSR025` | A list index beyond the list's end, or a list element that a statement changes but that the same statement removed.                                                                                                                                                                                                                                                                                | Check it against `length` first.                                                                         |
+| `TSR026` | A condition or an `and`, `or`, or `not` operand that is not true or false.                                                                                                                                                                                                                                                                                                                         | Compare explicitly, as in `x != 0`.                                                                      |
+| `TSR027` | An arithmetic operand, range bound, or amount before a unit (also in a `wait` or timer) that is not a number.                                                                                                                                                                                                                                                                                      | Check for null, or convert numeric text with `toNumber(...)`.                                            |
+| `TSR028` | Too many or too few arguments, or arguments in the wrong form.                                                                                                                                                                                                                                                                                                                                     | Write the call as the message shows.                                                                     |
+| `TSR030` | A speaker property shown in output that is not text.                                                                                                                                                                                                                                                                                                                                               | Set the property to text.                                                                                |
+| `TSR031` | A value from the host with a cycle or another shape a script value cannot have.                                                                                                                                                                                                                                                                                                                    | Report it to the host.                                                                                   |
+| `TSR033` | Leaving the root scope. _Defect._                                                                                                                                                                                                                                                                                                                                                                  | Report it.                                                                                               |
+| `TSR034` | An assignment to the name of a declared speaker. _Defect._                                                                                                                                                                                                                                                                                                                                         | Report it.                                                                                               |
+| `TSR035` | An operation the engine does not support for its operands, such as `in` without a range. _Defect._                                                                                                                                                                                                                                                                                                 | Report it.                                                                                               |
+| `TSR036` | Arithmetic without a finite result: division or remainder by zero, a number or duration too large, a math function outside its domain, or a regression whose points all have the same x.                                                                                                                                                                                                           | Check that the divisor is not 0, use smaller values, or pass values the function accepts.                |
+| `TSR037` | The instruction budget of one run at one scene time is used up, usually by a loop that neither waits nor ends.                                                                                                                                                                                                                                                                                     | Add a wait, or check the loop's condition.                                                               |
+| `TSR039` | A numeric argument outside its range, such as `chance(150)` or a negative weight.                                                                                                                                                                                                                                                                                                                  | Pass a value in the range the message gives.                                                             |
+| `TSR040` | `randomInteger(...)` without a range.                                                                                                                                                                                                                                                                                                                                                              | Pass a range such as `1..=6`.                                                                            |
+| `TSR041` | A random selection from an empty range.                                                                                                                                                                                                                                                                                                                                                            | Use a range that holds at least one number.                                                              |
+| `TSR042` | Loop state that does not match the plan. _Defect._                                                                                                                                                                                                                                                                                                                                                 | Report it.                                                                                               |
+| `TSR043` | A `repeat` count that is not a whole number of at least 0, or that is too large to count exactly.                                                                                                                                                                                                                                                                                                  | Round, check, or reduce the count first.                                                                 |
+| `TSR044` | A `for` loop over a value it cannot go through, or a `for` with two variables over something other than a dict.                                                                                                                                                                                                                                                                                    | Loop over a list, set, dict, or range, and use two variables only for a dict.                            |
+| `TSR045` | A range of a loop, a timer duration, or `randomInteger(...)` whose bounds are not safe whole numbers.                                                                                                                                                                                                                                                                                              | Use smaller whole-number bounds.                                                                         |
+| `TSR046` | A missing temporary value. _Defect._                                                                                                                                                                                                                                                                                                                                                               | Report it.                                                                                               |
+| `TSR047` | Calls nested deeper than the call-depth limit.                                                                                                                                                                                                                                                                                                                                                     | End the recursion sooner.                                                                                |
+| `TSR048` | Inconsistent parameter state. _Defect._                                                                                                                                                                                                                                                                                                                                                            | Report it.                                                                                               |
+| `TSR049` | A required parameter without a value. _Defect._                                                                                                                                                                                                                                                                                                                                                    | Report it.                                                                                               |
+| `TSR050` | A command, or a handle's time, with a value it cannot use, such as a wait, timer, media, or `showButton` duration, a `say` pacing, a timer label or display, a media volume, an `openUrl` address that is not an `http` or `https` URL or an `alwaysButton:` that is not true or false, an `exportText` text or `fileName:` that is not text, or a speaker property such as `defaultSaySkippable`. | Use a value the message names.                                                                           |
+| `TSR051` | A runtime ID or event counter that is used up, or a function instruction outside a call.                                                                                                                                                                                                                                                                                                           | Restart the session and report it.                                                                       |
+| `TSR052` | An interaction whose choices, form fields, prefill, image filters, or total text prevent it from opening, or a malformed prepared request.                                                                                                                                                                                                                                                         | Correct what the message names, or report a malformed request.                                           |
+| `TSR053` | A dict entry that a statement changes but that the same statement removed, or a handle or prepared reference whose state is malformed.                                                                                                                                                                                                                                                             | Make the change in a separate statement, or report a malformed state.                                    |
+| `TSR054` | A storage key that is not text.                                                                                                                                                                                                                                                                                                                                                                    | Write the key as text.                                                                                   |
+| `TSR055` | Retired: a `save` of a value that exists only in this session now fails with `TSV043`.                                                                                                                                                                                                                                                                                                             | Save plain data, and recreate the session value after loading.                                           |
+| `TSR057` | A regex value that cannot be compiled. _Defect._                                                                                                                                                                                                                                                                                                                                                   | Report it.                                                                                               |
+| `TSR058` | A value that does not fit the type of its receiving place, such as a typed variable, parameter, result, form field, or conversion.                                                                                                                                                                                                                                                                 | Convert or check the value, or declare a type that includes it.                                          |
+| `TSR059` | A built-in argument that the compiler does not check, such as a text that `fileToBase64` does not know as a stored file, more public keys than a lock holds or an empty list of them, a `predict` line whose properties are not numbers, or `min` of values of several kinds.                                                                                                                      | Pass a value the message names.                                                                          |
+| `TSR060` | A `sort()` of elements of several kinds, or of calendar durations of different kinds, or a weight of `randomWeighted` that is not a number.                                                                                                                                                                                                                                                        | Make the elements one kind the operation takes.                                                          |
+| `TSR061` | A dict without the key that is read.                                                                                                                                                                                                                                                                                                                                                               | Check with `contains(...)` first, or use `get(key, default: value)`.                                     |
+| `TSR062` | A dict key that is not text.                                                                                                                                                                                                                                                                                                                                                                       | Write the key as text.                                                                                   |
+| `TSR063` | A date or time that cannot be computed or shown, such as a year outside the supported range.                                                                                                                                                                                                                                                                                                       | Use a date and time in the range the message gives.                                                      |
+| `TSR064` | The current time, when the host supplied no clock.                                                                                                                                                                                                                                                                                                                                                 | Run the script in a host with a clock.                                                                   |
+| `TSR065` | A calendar duration where a duration is needed.                                                                                                                                                                                                                                                                                                                                                    | Use a duration, such as `24 h` or `1 day`.                                                               |
+| `TSR066` | A file ended without a calling file to return to.                                                                                                                                                                                                                                                                                                                                                  | Start the file with `call` where it should come back, or use `exit` where the session should finish.     |
+| `TSR067` | A start value that selects at random.                                                                                                                                                                                                                                                                                                                                                              | Select at random once the story runs.                                                                    |
+| `TSR069` | A `goto` or `call` target that does not exist, a `goto` to a file of declarations only, or a `call` of the running file.                                                                                                                                                                                                                                                                           | Name an existing file that runs something; put a part of the running file that returns in a function.    |
+| `TSR070` | A variable read before its `let` ran.                                                                                                                                                                                                                                                                                                                                                              | Give the variable a value before it is used.                                                             |
+| `TSR071` | `speaker` in a message that names no speaker with `as` while no default speaker is set.                                                                                                                                                                                                                                                                                                            | Give the message a speaker with `as`, or set a default speaker with `speaker name` before it.            |
+| `TSR080` | A tag's number compared with something other than a number.                                                                                                                                                                                                                                                                                                                                        | Compare it with a number.                                                                                |
+| `TSR081` | A tag query option that is not a list of tag names.                                                                                                                                                                                                                                                                                                                                                | Pass tag names, such as `"bedroom"`.                                                                     |
+| `TSR082` | No file or image has the tags of a query.                                                                                                                                                                                                                                                                                                                                                          | Relax the query, or add files with those tags.                                                           |
+| `TSR083` | `takePhoto(tags:)` with something other than tags, or with two numbers for one tag.                                                                                                                                                                                                                                                                                                                | Pass tags such as `"bedroom"` or `"punishment: 4"`, with one number per tag.                             |
+| `TSR084` | A text longer than the maximum text length.                                                                                                                                                                                                                                                                                                                                                        | Build a shorter text.                                                                                    |
+| `TSR085` | A stored file that `fileToBase64`, `toJson`, `encryptFile`, or `decryptFile` needs, which the Player could not read.                                                                                                                                                                                                                                                                               | Take, choose, or store the file again.                                                                   |
+| `TSR086` | A lock the browser could not make or open at all, as on a Player page without https, or whose result it could not keep.                                                                                                                                                                                                                                                                            | Open the Player over https, with room to store files.                                                    |
+| `TSR087` | A text operation with a regex that needs more work than the regex work limit allows.                                                                                                                                                                                                                                                                                                               | Use a simpler pattern or a shorter text.                                                                 |
+| `TSR088` | A list of more than 1,000,000 elements, a set of more than 1,000,000 members, or a dict of more than 1,000,000 keys ([`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md)), or one larger than the host can hold where no check foresaw it: in V8, more than 134,217,728 elements in an array or 16,777,216 entries in a `Set` or `Map`.                                                                     | Build a shorter list, set, or dict.                                                                      |
+| `TSR100` | Instruction-plan data that fails validation.                                                                                                                                                                                                                                                                                                                                                       | Compile the script again.                                                                                |
+| `TSR101` | Runtime-snapshot data that fails validation, or a runtime counter that cannot advance.                                                                                                                                                                                                                                                                                                             | Restore a valid checkpoint or start a new session.                                                       |
 
 A list's `remove(value)` that finds no matching value leaves the list unchanged, reports developer warning `TSW002`, and
 the script continues ([§16](specifications/accepted-syntaxes-v30.md#16-lists)).
@@ -1955,7 +1982,9 @@ options of `run`, `stepToEvent`, `executeInstruction`, `runValidatedState`, `com
 `reportMediaLoad`, `pressPermanentButton`, `recordContinueCapture`, `applyExternalStorageEdit`, `setDebugMode`, and
 `updateInteraction`, and of the matching [runtime session](#runtime-sessions) methods. A Player session
 carries it as `debugTrace`, like its debug recorder: `createPlayerRuntimeSession` and `restorePlayerRuntimeSession`
-take it, `withPlayerRuntimeDebugTrace` turns it on or off, and every session operation passes it on. The trace is not
+take it, `withPlayerRuntimeDebugTrace` turns it on or off, and every session operation passes it on. The Player's
+engine host keeps one trace per connection while Debug runs, which every session it holds runs with from its next
+operation on. The trace is not
 part of plans, snapshots, events, checkpoints, restore points, or recorded calls and changes no format: an operation
 returns the same snapshot, events, random state, and checkpoint with or without it, and without it records nothing.
 
@@ -1991,7 +2020,7 @@ returns the same snapshot, events, random state, and checkpoint with or without 
   not retained. Previews and labels stop at 1,024 characters while they are written, a longer storage key is not
   indexed, and a record keeps at most 32 dependencies and counts the others as omitted.
   These are debugger tuning values, not language limits. A host sets them with `new RuntimeDebugContext({ maxRecords,
-  maxAccountedBytes, maxDependencies })`, where `maxDependencies: Infinity` keeps every dependency; `previews: false`
+maxAccountedBytes, maxDependencies })`, where `maxDependencies: Infinity` keeps every dependency; `previews: false`
   keeps no value previews, so every record's `preview` is `null`.
 - **Release.** `release(upTo)` drops the retained records up to that ID, which a host has read: `record`, `outputs`,
   `recentMessages`, `outputRecord`, and `stageImageRecord` no longer give them, and a dependency on one reads as not
@@ -2075,11 +2104,11 @@ runtime state, and recording never changes them.
 
 The code constants `INSTRUCTION_PLAN_VERSION`, `RUNTIME_SNAPSHOT_VERSION`, and `CHECKPOINT_VERSION` are authoritative for the numeric revisions accepted by the runtime. Accepted ADRs and canonical specifications remain authoritative for format semantics, architecture, and compatibility policy. This table is the single general human-readable summary of the current revisions:
 
-| Format | Current revision | Reason for current revision |
-| --- | ---: | --- |
-| Instruction plan | 105 | A check of a part of a stored value (#1224; only the new type analysis's plans carry it): a `declareBinding` or an `assign` may carry `partChecks`, each a path of properties and elements, a type and a place, which the runtime checks in the value it stores where the value has that part; plan validation previously rejected the field. |
-| Runtime snapshot | 91 | Form presentation (#1153): a form settlement carries `temporalPresentation`, the date and time presentation its answers were shown in, from which the Player rebuilds the summary; previously it used the presentation in force when the session was restored. |
-| Checkpoint | 130 | The plan contract of a check of a part of a stored value. |
+| Format           | Current revision | Reason for current revision                                                                                                                                                                                                                                                                                                                                                      |
+| ---------------- | ---------------: | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Instruction plan |              105 | A check of a part of a stored value (#1224; only the new type analysis's plans carry it): a `declareBinding` or an `assign` may carry `partChecks`, each a path of properties and elements, a type and a place, which the runtime checks in the value it stores where the value has that part; plan validation previously rejected the field.                                    |
+| Runtime snapshot |               93 | Engine-independent colours (#2147): the normalized colours a snapshot holds (open buttons, choices and forms, captured speakers) are the same text in every JavaScript engine for numbers of at most 20 significant digits; restore recomputes an open button's or choice's colour and compares it with that text, so a revision 92 snapshot, holding the host engine's digits, could be rejected. |
+| Checkpoint       |              132 | The engine-independent colours' snapshot contract (#2147).                                                                                                                                                                                                                                |
 
 Keep current numeric revisions only in this table. Other general documentation must link to this section instead of repeating the moving numbers; retain numeric revisions elsewhere only when they describe a clearly historical contract change or a separate independently versioned identifier.
 
@@ -2089,12 +2118,12 @@ Increase a revision when the accepted serialized contract changes incompatibly, 
 
 The checkpoint revision represents the complete accepted checkpoint bundle:
 
-| Incompatible change | Revisions to increase |
-| --- | --- |
+| Incompatible change            | Revisions to increase           |
+| ------------------------------ | ------------------------------- |
 | Instruction-plan contract only | instruction plan and checkpoint |
 | Runtime-snapshot contract only | runtime snapshot and checkpoint |
-| Checkpoint envelope only | checkpoint |
-| Internal implementation only | none |
+| Checkpoint envelope only       | checkpoint                      |
+| Internal implementation only   | none                            |
 
 Instruction-plan and runtime-snapshot revisions remain independent and do not need matching numbers. No nested duplicate version fields, hidden sub-format registry, migration chain, or generated documentation synchronization is introduced.
 
@@ -2322,6 +2351,9 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Runtime snapshot history
 
+- Revision 91: Form presentation (#1153): a form settlement carries `temporalPresentation`, the date and time
+  presentation its answers were shown in, from which the Player rebuilds the summary; previously it used the
+  presentation in force when the session was restored.
 - Revision 90: Player profile (owner decision, 2026-10-23): the person fields the host gave at the start are kept as
   `playerProfile`; previously they were kept as `account`.
 - Revision 89: Files entered at their top (owner decisions, 2026-10-22 and 2026-10-23): no `fallback` field, a script
@@ -2489,6 +2521,7 @@ a new revision moves the reason it replaces to the top of its format's list.
 
 #### Checkpoint history
 
+- Revision 130: The plan contract of a check of a part of a stored value.
 - Revision 129: The plan contract of a typed reading into a written `object`.
 - Revision 128: The form-presentation snapshot contract.
 - Revision 127: The plan contract of the new type analysis's runtime checks.
@@ -2600,8 +2633,8 @@ The exported TypeScript source frontend, source compiler, low-level runtime, sna
 - stable package/plan identity and migration policy;
 - Standard Library imports, generated declarations/editor metadata transport, versioning, and capability access;
 - iframe host commands and response correlation;
-- captured-media recovery after reload or restore and persistent media collections, their cleanup and persistence
-  (camera and microphone ownership is in [`SECURITY.md`](SECURITY.md));
+- persistent media collections, their cleanup and persistence (camera and microphone ownership is in
+  [`SECURITY.md`](SECURITY.md));
 - time-integrity diagnostics and future server-authoritative scheduling;
 - server checkpoint persistence and conflict resolution;
 - performance profiling and safe optimization of snapshot cloning/liveness metadata.

@@ -42,8 +42,8 @@ let migratePhotoTransition: (storage: Storage | undefined) => void;
 before(async () => {
   const theme = await loadPlayerModule("player/theme/photo-theme.ts");
   const palette = await loadPlayerModule("player/theme/palette.ts");
-  const player = await loadPlayerModule("player/vue/src/usePlayerTheme.ts");
-  const preference = await loadPlayerModule("player/vue/src/usePlayerPreference.ts");
+  const player = await loadPlayerModule("player/vue/src/shell/usePlayerTheme.ts");
+  const preference = await loadPlayerModule("player/vue/src/shell/usePlayerPreference.ts");
   assert.equal(typeof theme.photoColours, "function");
   assert.equal(typeof palette.generatePlayerTheme, "function");
   assert.equal(typeof player.defaultPlayerThemeIntents, "object");

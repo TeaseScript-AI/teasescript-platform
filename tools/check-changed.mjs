@@ -793,6 +793,7 @@ async function check(cleanups) {
     run("knip", process.execPath, ["node_modules/knip/bin/knip.js"]),
     run("doc links", process.execPath, ["tools/repository-checks/doc-links.mjs"]),
     run("imports", process.execPath, ["tools/repository-checks/imports.mjs"]),
+    run("readme paths", process.execPath, ["tools/repository-checks/readme-paths.mjs"]),
     ...(coreChanged
       ? [
           run(

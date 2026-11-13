@@ -31,7 +31,7 @@ import {
 import {
   activePlayerRuntimePacingGate,
   playerRuntimeDeadlines,
-} from "../../../player/runtime-adapter.js";
+} from "../../../player/runtime/runtime-view.js";
 import { createFreshRuntimeSnapshot } from "../../../src/runtime/snapshot/snapshot-construction.js";
 import { validateRuntimeSnapshot } from "../../../src/runtime/snapshot/snapshot-validation.js";
 

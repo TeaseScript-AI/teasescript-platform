@@ -2,18 +2,17 @@ import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
 
-import type { CapturedMediaLocks } from "../../player/captured-media-persistence.js";
+import type { CapturedMediaLocks } from "../../player/media/captured-media-persistence.js";
 import {
-  createPlayerRuntimeSession,
-  pendingPlayerRuntimeStorageWrite,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
-} from "../../player/runtime-adapter.js";
-import type { SavedDataHost } from "../../player/saved-data.js";
+} from "../../player/runtime/runtime-adapter.js";
+import { pendingPlayerRuntimeStorageWrite } from "../../player/runtime/runtime-view.js";
+import type { SavedDataHost } from "../../player/persistence/saved-data.js";
 import {
   createLocalScriptStorage,
   type ScriptStorageProvider,
-} from "../../player/script-storage.js";
+} from "../../player/persistence/script-storage.js";
 import {
   bundleSavedScripts,
   readStorageTransferFile,
@@ -21,13 +20,16 @@ import {
   type SavedScript,
   type StorageBundle,
   type StorageBundleScript,
-} from "../../player/storage-transfer.js";
+} from "../../player/persistence/storage-transfer.js";
 import type {
   RuntimeScriptStorageEntrySnapshot,
   SerializableRuntimeValue,
 } from "../../src/index.js";
 import { FakeMediaRepository } from "../helpers/player/media/fake-media-repository.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
+import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
+import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
+import { inProcessBackend } from "../helpers/player/worker-topology.js";
 
 interface ImportScript {
   readonly scope: string;
@@ -41,19 +43,22 @@ interface ImportReview {
   readonly scripts: readonly ImportScript[];
 }
 interface ImportHost {
+  readonly bridge: Promise<PlayerBridge>;
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly activation: Readonly<Ref<"start" | "continue" | null>>;
   readonly sessionInProgress: Readonly<Ref<boolean>>;
   readonly canImportSavedData: Readonly<Ref<boolean>>;
+  readonly savedDataRevision: Readonly<Ref<number>>;
   savedScripts(): Promise<readonly SavedScript[]>;
   reviewSavedDataImport(bundle: StorageBundle): Promise<ImportReview>;
   importSavedData(review: ImportReview, chosen: ReadonlySet<string>): Promise<void>;
   loadScriptStorage(): Promise<void>;
   scriptStorageOptions(): PlayerRuntimeSessionOptions;
-  prepare(create: () => PlayerRuntimeSession): void;
+  prepare(create: PlanStart): void;
   activate(): Promise<void>;
 }
 let usePlayerSession: (options: {
+  readonly bridge: Promise<PlayerBridge>;
   scriptStorage: ScriptStorageProvider;
   capturedMedia: { repository: FakeMediaRepository };
   savedData: SavedDataHost;
@@ -70,9 +75,11 @@ let browserSavedData: (
 // browser-source imports use Vite resolution, and error classes stay one class.
 before(async () => {
   const session: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
-  const savedData: Record<string, unknown> = await loadPlayerModule("player/saved-data.ts");
+  const savedData: Record<string, unknown> = await loadPlayerModule(
+    "player/persistence/saved-data.ts",
+  );
   assert.equal(typeof session.usePlayerSession, "function");
   assert.equal(typeof savedData.browserSavedData, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
@@ -194,6 +201,7 @@ function createHost(context: TestContext, provider: MemoryProvider) {
   const scope = effectScope();
   const host = scope.run(() =>
     usePlayerSession({
+      bridge: inProcessBackend(),
       scriptStorage: provider,
       capturedMedia: { repository },
       savedData,
@@ -225,7 +233,7 @@ async function until(condition: () => boolean, message: string) {
 
 async function start(host: ImportHost, source: string) {
   await host.loadScriptStorage();
-  host.prepare(() => createPlayerRuntimeSession(source, host.scriptStorageOptions()));
+  host.prepare(await sourceStart(host.bridge, source, () => host.scriptStorageOptions()));
   await host.activate();
 }
 
@@ -275,11 +283,13 @@ test("a bundle imports each script into its own scope while a different script r
       [NEW, null, 4, 1, 0, false],
     ],
   );
+  const revision = host.savedDataRevision.value;
   await host.importSavedData(review, new Set([OTHER, NEW]));
 
-  // The shown script and its session are untouched.
+  // The shown script and its session are untouched, and Debug's Storage tab has nothing to read again.
   assert.equal(host.session.value?.state.status, "waiting");
   assert.deepEqual([...provider.entries], [["kept", 1]]);
+  assert.equal(host.savedDataRevision.value, revision, "the shown values' revision");
   // Each script holds the imported values, its photo stored in its own scope under a new reference.
   for (const scope of [OTHER, NEW]) {
     const saved = await values(other(scope));
@@ -358,10 +368,11 @@ test("a bundle that includes the shown script ends its session, and the next Sta
   assert.equal((await values(other(OTHER))).get("score"), 3);
 
   // A new session loads the imported values.
-  host.prepare(() =>
-    createPlayerRuntimeSession(
+  host.prepare(
+    await sourceStart(
+      host.bridge,
       'let photo: string = load("photo", default: "")\nsave photo as "copy"\nsave load("score", default: 0) + 1 as "score"\nexit',
-      host.scriptStorageOptions(),
+      () => host.scriptStorageOptions(),
     ),
   );
   await host.activate();

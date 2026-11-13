@@ -5,12 +5,12 @@ import {
   closePlayerRuntimeExport,
   closePlayerRuntimePopup,
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
-  playerRuntimeDebugNow,
-  playerRuntimeForeground,
   restorePlayerRuntimeSession,
   type PlayerRuntimeSession,
-} from "../../player/runtime-adapter.js";
+} from "../../player/runtime/runtime-adapter.js";
+import { debugNow } from "../helpers/debug-readers.js";
+import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
+import { playerRuntimeForeground } from "../../player/runtime/runtime-view.js";
 import { compileSource } from "../../src/compiler.js";
 import { MAX_INTERACTION_AGGREGATE_UTF8_BYTES } from "../../src/interaction-limits.js";
 import type { InstructionPlan } from "../../src/plan/model.js";
@@ -76,7 +76,7 @@ test("exportText shows its text until the player closes it, with default title a
     text: '{"rounds":3}',
     fileName: "report.json",
   });
-  assert.equal(playerRuntimeDebugNow(session, 0).waitingAt?.kind, "export");
+  assert.equal(debugNow(session, 0).waitingAt?.kind, "export");
   // Only its own close continues it.
   assert.equal(closePlayerRuntimePopup(session), null);
   const first = closePlayerRuntimeExport(session);

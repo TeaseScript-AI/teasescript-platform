@@ -4,7 +4,7 @@ import { isRecord, nonNegativeSafeInteger } from "../plan/validation-support.js"
 import { isFormUi } from "./actions/form/ui-state.js";
 import { validFormResult } from "./actions/form/submission.js";
 import type { InterpreterEvent } from "./events.js";
-import { validSpan } from "./snapshot/state.js";
+import { validSpan } from "./snapshot/snapshot-format.js";
 
 /**
  * Why `value` is not an interpreter event as a host keeps it, or `null`: a record of a known kind with a sequence and

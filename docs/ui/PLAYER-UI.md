@@ -79,7 +79,7 @@ controlling source adopts it; remove this section and its router references when
   API names and author syntax remain open.
 - **Timer presentation metadata:** the maintained timer section below defines visible/mystery/hidden presentation and
   optional labeling. Authored timers carry visible/mystery/hidden display and optional labels (see
-  [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time)); `player/runtime-adapter.ts` derives presented timers and
+  [`RUNTIME.md`](../RUNTIME.md#timers-and-scene-time)); `player/runtime/runtime-adapter.ts` derives presented timers and
   observation deadlines from runtime state. The Player renders runtime timers in its right rail; its
   development preview shows timer fixtures only while no runtime timer is presented. Stable generic-label numbering across timer lifecycle changes remains unsynchronized.
 
@@ -123,7 +123,7 @@ present even when empty.
 ## Player conditions
 
 The Player combines independent conditions rather than choosing a phone, tablet, or desktop mode. The Player exposes
-them on its shell; [`usePlayerConditions.ts`](../../player/vue/src/usePlayerConditions.ts) owns their
+them on its shell; [`usePlayerConditions.ts`](../../player/vue/src/interaction/usePlayerConditions.ts) owns their
 shared browser signals. Add a responsive rule to the condition that describes its actual constraint; do not infer device
 identity or add a separate width breakpoint for touch or rounded corners.
 
@@ -476,7 +476,7 @@ step.
 The Player keeps the session in this browser: at each interaction it newly presents, a lock's dialog or password field
 too, also one that asks again after a block, when it ends, and when the page
 is hidden, it stores the session's state, the events that led to it, and the photos only the session uses, which no
-save stored, in the IndexedDB database `teasescript-kept-sessions` (`player/kept-sessions.ts`). Opening the script
+save stored, in the IndexedDB database `teasescript-kept-sessions` (`player/persistence/kept-sessions.ts`). Opening the script
 again, after a reload or with the browser closed in between, shows **Continue** on the start page instead of Start; it
 goes on from the last kept point, with those photos as session media again; a stored photo the kept session uses
 stays stored while it is kept, also once no saved value references it. What is read back is checked as external data:
@@ -489,7 +489,7 @@ to begin this Tease again.", in the card of a Tease that cannot start, whose **T
 error code and path when it refused the state, its message, and the saved and supported revisions, such as
 "Unsupported instruction-plan revision. Saved revision: 103. Supported revision: 104." (owner decision, 2026-10-28). A
 changed script, an ended session, or one that cannot be read shows Start alone. A session ends only with `exit`; there is no restart. Keeping is asynchronous browser storage, so a step after the last kept point, such as a reload in the
-moment after an answer, can be lost. A state this browser cannot write, such as one holding a list too long to save,
+moment after an answer or a lost engine connection ([session end](#session-end-and-failure)), can be lost. A state this browser cannot write, such as one holding a list too long to save,
 is not kept, and the session kept before is discarded, in the debug room without its saved data and photos, so a
 reload never goes on from an earlier point as if it were the current one; while the session runs or waits, a warning
 [notice](#player-notices) says that a reload would lose it, until a later state is kept. A saved-data import of the script discards its kept session
@@ -544,6 +544,19 @@ close it and open the debug export dialog, or the Debug panel's Now tab, which n
 Media warnings are notices, never failures. The transcript and Stage stay for inspection, with the transcript's end
 scrolling clear of the line. The dialogs fit narrow screens, and their buttons are at least 44px tall.
 
+A lost connection to the engine also stops a session that runs or waits, as a Player exception does, but the line says
+"The session stopped unexpectedly. You can continue from the last kept point. Progress since then may be lost." with
+**Continue from last kept point** when this browser keeps an unended session of the script; else it says only "The
+session stopped unexpectedly." with **Start again**. It has no **Details** and no error notice. With no session shown,
+as when a Start or Continue was lost before it showed, the start page shows it. Its click is the activation, as Start's
+and Continue's are: it replaces the connection, checks the kept session as Continue does, and goes on from it or starts
+anew; nothing restarts without a click, and a failed attempt shows the line again. A kept session the check refuses,
+such as one of another version, shows the start page with its explanation where one applies. Activity after the kept
+point can happen again, such as a question asked again, and saved values written since then stay. A start page lost
+before its click looks unchanged, and its Start or Continue recovers. A session that already ended keeps its end as
+shown: after `exit`, the start page's Start recovers; after a script error, as before, nothing does. A loss before the
+start page is ready stays a failure to open the script. An open session import closes without importing.
+
 The error dialog, Player Settings, and the Debug panel open one **Download debug export** dialog for a developer
 ([`DEBUGGER.md`](../DEBUGGER.md#debug-export)). The technical report is always included; each personal category is a
 labelled switch with its help text, off whenever the dialog opens, and engine replay data can be turned on only after
@@ -560,7 +573,7 @@ scrolls, and its rows and buttons are at least 44px tall.
 Player notices tell the player that something about the session's environment matters, such as blocked audio,
 unavailable storage, or a camera problem. They never stop the session and are separate from runtime developer warnings,
 which are creator diagnostics about a script location. Host features publish them through one Player-owned channel
-(`player/notices.ts`) with fixed Player wording per condition; a condition has one notice, which it replaces or
+(`player/presentation/notices.ts`) with fixed Player wording per condition; a condition has one notice, which it replaces or
 withdraws, so repeated causes do not stack.
 
 Notices belong to the Player, not the story, so they never appear in the conversation. A new or replaced notice shows
@@ -643,7 +656,10 @@ cannot load or decode, leaves the Stage empty. The Player plays audio; a `playVi
 load ("Video playback is not supported by this Player yet."), so the script continues with the runtime's warning. Each
 such package file is a warning [player notice](#player-notices), once per session and authored path, for example
 "Image not found: images/hall.jpg" or "Audio could not be loaded: sounds/bell.wav (main.tease, line 4)"; audio and
-video also name the file and line of the play that started them. A video that does resolve gets no notice, since only
+video also name the file and line of the play that started them. Audio that loaded and then fails while it plays, as
+when the browser's audio output errors, reads "Audio could not be played: …" instead, and the script goes on as after a
+failed load: a source that loaded and then could not be played is a different event from one that never loaded (the
+owner's decision of 2026-11-09). A video that does resolve gets no notice, since only
 video playback itself is missing; captured photos, chosen images, and stored files are no package files and are never
 reported. A stored file that is not an image, such as SVG or HTML from `fileFromBase64`, is never shown, and stored audio
 and video are not played ([stored files](../RUNTIME.md#stored-files)). An

@@ -2,9 +2,15 @@ import assert from "node:assert/strict";
 import test, { before, type TestContext } from "node:test";
 import { effectScope, nextTick, type Ref } from "vue";
 
-import type * as Adapter from "../../player/runtime-adapter.js";
-import type { PlayerRuntimeSession } from "../../player/runtime-adapter.js";
+import type * as Adapter from "../../player/runtime/runtime-adapter.js";
+import type * as CompileProject from "../../player/runtime/compile-project.js";
+import type { PlayerRuntimeSession } from "../../player/runtime/runtime-adapter.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
+import { loadHostFacade, onHostAll, hostIntroduced } from "../helpers/player/host-sessions.js";
+import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
+import type { PlayerSession } from "../../player/runtime/runtime-view.js";
+import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
+import { inProcessBackend } from "../helpers/player/worker-topology.js";
 
 /*
  * The Player speaks messages changed in place from a status region (PLAYER-UI.md "Message presentation and provenance"):
@@ -12,32 +18,36 @@ import { loadPlayerModule } from "../helpers/player-modules.js";
  */
 
 interface MessageHost {
+  readonly bridge: Promise<PlayerBridge>;
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
   readonly generation: Readonly<Ref<number>>;
-  prepare(create: () => PlayerRuntimeSession): void;
-  prepareRestore(restored: PlayerRuntimeSession): void;
+  prepare(create: PlanStart): void;
+  prepareRestore(restored: PlayerSession): void;
   activate(): Promise<void>;
   update(session: PlayerRuntimeSession): void;
 }
-let usePlayerSession: (options: Record<string, never>) => MessageHost;
+let usePlayerSession: (options: { readonly bridge: Promise<PlayerBridge> }) => MessageHost;
 let useMessageUpdateAnnouncements: (host: MessageHost) => Readonly<Ref<string>>;
-let adapter: Pick<
+let adapter: {
+  createPlayerRuntimeSession: typeof CompileProject.createPlayerRuntimeSession;
+} & Pick<
   typeof Adapter,
-  | "createPlayerRuntimeSession"
-  | "createPlayerRuntimeRestorePoint"
-  | "restorePlayerRuntimeSession"
-  | "submitPlayerRuntimeComposer"
+  "createPlayerRuntimeRestorePoint" | "restorePlayerRuntimeSession" | "submitPlayerRuntimeComposer"
 >;
 
 before(async () => {
+  await loadHostFacade();
   // Load the real Vue composables through the existing build tool: their browser-source imports use Vite resolution.
   const host: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
   const announcements: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/useMessageUpdateAnnouncements.ts",
+    "player/vue/src/transcript/useMessageUpdateAnnouncements.ts",
   );
-  const loaded: Record<string, unknown> = await loadPlayerModule("player/runtime-adapter.ts");
+  const loaded = {
+    ...(await loadPlayerModule("player/runtime/runtime-adapter.ts")),
+    ...(await loadPlayerModule("player/runtime/compile-project.ts")),
+  };
   assert.equal(typeof host.usePlayerSession, "function");
   assert.equal(typeof announcements.useMessageUpdateAnnouncements, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested host API.
@@ -52,10 +62,10 @@ before(async () => {
     "submitPlayerRuntimeComposer",
   ])
     assert.equal(typeof loaded[name], "function");
-  adapter = {
+  adapter = onHostAll({
     // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
     createPlayerRuntimeSession:
-      loaded.createPlayerRuntimeSession as typeof Adapter.createPlayerRuntimeSession,
+      loaded.createPlayerRuntimeSession as typeof CompileProject.createPlayerRuntimeSession,
     // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
     createPlayerRuntimeRestorePoint:
       loaded.createPlayerRuntimeRestorePoint as typeof Adapter.createPlayerRuntimeRestorePoint,
@@ -65,14 +75,25 @@ before(async () => {
     // EVIDENCE: validation: Vite loaded the real adapter source, and each export is callable.
     submitPlayerRuntimeComposer:
       loaded.submitPlayerRuntimeComposer as typeof Adapter.submitPlayerRuntimeComposer,
-  };
+  });
 });
 
 function createHost(context: TestContext) {
-  // Event targets are the only browser surface these scripts use; no media elements are created.
-  for (const name of ["document", "window"]) {
+  // Event targets are the only browser surface these scripts use, with the silent audio elements Start primes.
+  const surface = {
+    document: new EventTarget(),
+    window: new EventTarget(),
+    Audio: class {
+      src = "";
+      play = async () => {};
+      pause() {}
+      load() {}
+      removeAttribute() {}
+    },
+  };
+  for (const [name, value] of Object.entries(surface)) {
     const previous = Object.getOwnPropertyDescriptor(globalThis, name);
-    Object.defineProperty(globalThis, name, { configurable: true, value: new EventTarget() });
+    Object.defineProperty(globalThis, name, { configurable: true, value });
     context.after(() => {
       if (previous) Object.defineProperty(globalThis, name, previous);
       else Reflect.deleteProperty(globalThis, name);
@@ -81,7 +102,7 @@ function createHost(context: TestContext) {
   context.mock.timers.enable({ apis: ["setTimeout", "Date"] });
   const scope = effectScope();
   const created = scope.run(() => {
-    const host = usePlayerSession({});
+    const host = usePlayerSession({ bridge: inProcessBackend() });
     return { host, spoken: useMessageUpdateAnnouncements(host) };
   });
   assert.ok(created);
@@ -105,7 +126,7 @@ const SOURCE = [
 
 test("a change that live play publishes is spoken, and a restored or new session speaks none of its history", async (context) => {
   const { host, spoken } = createHost(context);
-  host.prepare(() => adapter.createPlayerRuntimeSession(SOURCE));
+  host.prepare(await sourceStart(host.bridge, SOURCE));
   await host.activate();
   await settle(context, 0);
   // The message itself is no change.
@@ -117,14 +138,16 @@ test("a change that live play publishes is spoken, and a restored or new session
 
   // Continue of a restored state begins again from the messages as they are.
   const restorePoint = adapter.createPlayerRuntimeRestorePoint(host.session.value!);
-  host.prepareRestore(adapter.restorePlayerRuntimeSession(restorePoint));
+  host.prepareRestore(
+    hostIntroduced(await host.bridge, adapter.restorePlayerRuntimeSession(restorePoint)),
+  );
   await host.activate();
   await settle(context, 10_000);
   assert.equal(spoken.value, "");
 
   // A change made before a new generation is never spoken after it.
   host.update(adapter.submitPlayerRuntimeComposer(host.session.value!, "yes")!.session);
-  host.prepare(() => adapter.createPlayerRuntimeSession(SOURCE));
+  host.prepare(await sourceStart(host.bridge, SOURCE));
   await host.activate();
   await settle(context, 10_000);
   assert.equal(spoken.value, "");

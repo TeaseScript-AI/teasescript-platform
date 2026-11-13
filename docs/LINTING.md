@@ -43,6 +43,9 @@ findings of these rules wait for another open pull request or a cleanup are a [w
 
   In test files and JavaScript, types are wider than values, and the fixes would be casts, so these two rules are off
   there.
+
+- In `player/vue/src/session/activation/work/`, `no-floating-promises` also refuses `void` (`ignoreVoid: false`):
+  activation work ends each chain it starts, or returns it to the page owner that called it (session split S2).
 - The `correctness` category's other type-aware rules are off: this policy has not chosen them, and `.oxlintrc.json`
   lists them.
 - `.vue` files: these four rules do not reach them, because tsgolint reads only the TypeScript program. oxlint's other
@@ -276,6 +279,7 @@ Disabled controls take the theme's `text-disabled`, `surface-disabled` and `bord
 rule in `player/vue/src/style.css`, which overrides Tailwind's layered utilities. An opacity class on the element's own
 disabled state therefore never shows, or with `!important` overrides the theme's disabled treatment.
 `design/no-disabled-opacity` refuses both:
+
 - **Routes.** It reads class text from four routes only: a static `class`, a `:class` expression, a direct
   `v-bind="{ … }"` object's statically named `class` property, and the arguments of `cn`, `clsx` and `cva`. Class text
   built elsewhere (helpers, spreads, data flow) is not read; the fragmented-class rule shares these routes.
@@ -293,6 +297,7 @@ disabled state therefore never shows, or with `!important` overrides the theme's
 focus.
 
 The rule's tests check it against Tailwind's own output (`tools/design-lint/oracle.mjs`).
+
 - **The oracle.** Tailwind compiles each tested class with the Player's `style.css`. `postcss` finds the selector of
   each `opacity` declaration, and `postcss-selector-parser` reads its subject compounds, expanding `:is()` and
   `:where()`.
@@ -306,6 +311,7 @@ The rule's tests check it against Tailwind's own output (`tools/design-lint/orac
   `DESIGN_LINT_MATRIX=full node --test tools/design-lint/test.mjs` checks all 7,744. A failure names its seed.
 
 Named residuals:
+
 - a class the grammar reads but Tailwind reads differently, with the oracle rows as its check (an admitted class for
   which Tailwind emits no CSS sets no opacity);
 - parameterised admitted forms beyond the tested rows;

@@ -1,0 +1,5 @@
+function identity(value) { return value }
+let record = identity({ other: 1 })
+let rhs = [90]
+record.count = rhs.removeFirst() + randomInteger(1..4)
+exit

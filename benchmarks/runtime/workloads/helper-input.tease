@@ -1,0 +1,51 @@
+// Accepted helper input (#1797, F-work), after Domme2's helpers: questions asked inside helpers with defaults, the
+// counting one 19 frames deep, which refuse an answer out of range and ask again. Each accepted answer counts once.
+let accepted = 0
+let refused = 0
+
+function askCount(question: string, low: integer = 1, high: integer = 10): integer {
+  while true {
+    let answer = askInteger(question)
+    if answer >= low and answer <= high {
+      accepted += 1
+      return answer
+    }
+    refused += 1
+    say "Between ${low} and ${high}, please.", instant
+  }
+}
+
+function deeper(depth: integer, low: integer = 1): integer {
+  if depth <= 1 {
+    return askCount("How many rounds?", low: low)
+  }
+  return deeper(depth - 1, low: low)
+}
+
+function pickMode(question: string, fallback: string = "easy"): string {
+  say question, instant
+  let picked = askChoice easy: "Easy", hard: "Hard", prefill: fallback
+  accepted += 1
+  return picked
+}
+
+function askName(question: string, longest: integer = 12): string {
+  while true {
+    let name = askText(question)
+    if name.length <= longest {
+      accepted += 1
+      return name
+    }
+    refused += 1
+    say "Shorter, please.", instant
+  }
+}
+
+let total = 0
+repeat 6 {
+  total += deeper(18)
+}
+let mode = pickMode("Which mode?")
+let who = askName("Your name?")
+say "helper:${accepted}:${refused}:${total}:${mode}:${who}", instant
+exit

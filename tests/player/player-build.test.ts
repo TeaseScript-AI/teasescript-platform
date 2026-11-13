@@ -68,7 +68,7 @@ test("build:tree builds what the compiled suite reads: the TypeScript, the Playe
   // (the two Player outputs that `build:typescript` alone leaves out, which the Player tests read)
   for (const output of [
     "player-app/index.html",
-    "player-test-modules/player/vue/src/usePlayerSession.js",
+    "player-test-modules/player/vue/src/session/usePlayerSession.js",
   ])
     assert.ok(existsSync(resolve(import.meta.dirname, "../..", output)), `dist/${output}`);
 });

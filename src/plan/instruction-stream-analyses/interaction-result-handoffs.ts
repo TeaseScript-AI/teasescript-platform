@@ -1,29 +1,15 @@
 import { type PlanValidationError, isRecord, isOneOf, planError } from "../validation-support.js";
 import { lazyDefaultArgumentIndex } from "../expression-children.js";
 import type { PlanValidationIndex } from "./execution-regions.js";
-import { producedTemporaryIds, explicitInstructionTargets } from "./instruction-facts.js";
+import type { InstructionSummary } from "./instruction-summary.js";
 
 export function validateCanonicalInteractionResultHandoffs(
   instructions: readonly unknown[],
   index: PlanValidationIndex,
+  summary: InstructionSummary,
   errors: PlanValidationError[],
 ): void {
-  const producers = new Map<number, number[]>();
-  const explicitTargets = new Set<number>();
-  instructions.forEach((instruction, instructionIndex) => {
-    if (!isRecord(instruction)) return;
-    for (const produced of producedTemporaryIds(instruction)) {
-      const indices = producers.get(produced) ?? [];
-      indices.push(instructionIndex);
-      producers.set(produced, indices);
-    }
-    for (const target of explicitInstructionTargets(instruction)) {
-      if (Number.isSafeInteger(target))
-        explicitTargets.add(
-          /* EVIDENCE: validation: only safe-integer instruction targets enter this set. */ target as number,
-        );
-    }
-  });
+  const { producers, explicitTargets } = summary;
 
   instructions.forEach((instruction, instructionIndex) => {
     if (

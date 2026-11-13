@@ -21,7 +21,10 @@ import { captureExecutableData, type CapturedExecutableData, pendingResult } fro
 import { withDebugTrace, type TraceStore } from "../debug/debug-trace.js";
 import { randomDrawPending } from "./model.js";
 
-/** The Player's load result for one media ID. */
+/**
+ * The Player's report for one media ID: its initial load result, `loaded` or `failed`, and after a `loaded` report at most
+ * one later `failed`, when playback fails after the source loaded.
+ */
 export type MediaLoadReport =
   | { readonly kind: "loaded"; readonly durationMs: number }
   | { readonly kind: "failed"; readonly message?: string };
@@ -29,7 +32,10 @@ export type MediaLoadReport =
 export type MediaReportOutcome =
   /** The report changed canonical state. */
   | { readonly kind: "accepted" }
-  /** The media is not active, already loaded, or the report names an older segment or no new progress. */
+  /**
+   * The media is not active, a `loaded` report names already loaded media, or the report names an older segment or no new
+   * progress.
+   */
   | { readonly kind: "ignored" }
   | { readonly kind: "unknownMedia"; readonly mediaId: number }
   /** Scene time has not caught up with the observed time, or a due block runs first; run the engine and retry. */
@@ -38,8 +44,9 @@ export type MediaReportOutcome =
   | RandomDrawPendingOutcome;
 
 /**
- * Records the Player's load result at the observed time, once execution has caught up with it. A loaded source makes duration-dependent state authoritative and releases an
- * async play; a failure reports a developer warning, stops the media without cues or `finish`, and releases any wait.
+ * Records the Player's load report at the observed time, once execution has caught up with it. A loaded source makes
+ * duration-dependent state authoritative and releases an async play. A failure, before or after the source loaded,
+ * reports a developer warning, stops the media without later cues or `finish`, and releases any wait.
  */
 export function reportMediaLoad(
   plan: InstructionPlan,
@@ -92,7 +99,12 @@ function reportCapturedMediaLoad(
     return pendingResult(current, [], { kind: "unknownMedia", mediaId });
   }
   const action = activeMediaAction(current, mediaId);
-  if (current.status === "failed" || action === undefined || action.media.loaded) {
+  // A playback failure after load stops active media as a load failure does; a second load result changes nothing.
+  if (
+    current.status === "failed" ||
+    action === undefined ||
+    (action.media.loaded && parsed.kind === "loaded")
+  ) {
     return pendingResult(current, [], { kind: "ignored" });
   }
   // A load result is host input at the observed time: scene time must have caught up, and a due block runs first.

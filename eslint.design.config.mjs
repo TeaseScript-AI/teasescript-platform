@@ -109,17 +109,17 @@ export default [
   localContract("components/PlayerActionButton.vue", [
     contract("Button", ["player-action-button"]),
   ]),
-  localContract("Composer.vue", [
+  localContract("interaction/Composer.vue", [
     contract("Textarea", ["composer-input", "composer-one-line", "composer-masked"]),
     contract("Button", ["composer-send"]),
   ]),
-  localContract("PlayerToolsShell.vue", [contract("Button", ["player-control-square"])]),
-  localContract("PlayerTopBar.vue", [
+  localContract("shell/PlayerToolsShell.vue", [contract("Button", ["player-control-square"])]),
+  localContract("shell/PlayerTopBar.vue", [
     contract("Button", ["player-top-bar-theme", "player-top-bar-fullscreen"]),
   ]),
-  localContract("ToolPanelHeader.vue", [contract("Button", ["panel-settings-trigger"])]),
-  localContract("Transcript.vue", [contract("Button", ["return-to-latest"])]),
-  localContract("TranscriptMessage.vue", [
+  localContract("shell/ToolPanelHeader.vue", [contract("Button", ["panel-settings-trigger"])]),
+  localContract("transcript/Transcript.vue", [contract("Button", ["return-to-latest"])]),
+  localContract("transcript/TranscriptMessage.vue", [
     // AvatarFallback has no typography of its own; the transcript defines initials.
     contract("AvatarFallback", ["text-xs", "font-semibold"]),
     // Speaker/authored material is resolved at the player boundary, outside shared UI.

@@ -3,23 +3,35 @@ import test, { before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
 
 import {
-  activatePlayerRuntimeButton,
-  adoptPlayerRuntimeCatchUp,
-  beginPlayerRuntimeCatchUp,
-  completePlayerRuntimeStorageWrite,
-  createPlayerRuntimeSession,
-  observePlayerRuntimeTime,
-  pendingPlayerRuntimeStorageWrite,
-  playerRuntimeSnapshot,
-  skipPlayerRuntimePacing,
+  activatePlayerRuntimeButton as rawActivatePlayerRuntimeButton,
+  adoptPlayerRuntimeCatchUp as rawAdoptPlayerRuntimeCatchUp,
+  beginPlayerRuntimeCatchUp as rawBeginPlayerRuntimeCatchUp,
+  completePlayerRuntimeStorageWrite as rawCompletePlayerRuntimeStorageWrite,
+  observePlayerRuntimeTime as rawObservePlayerRuntimeTime,
+  playerRuntimeSnapshot as rawPlayerRuntimeSnapshot,
+  skipPlayerRuntimePacing as rawSkipPlayerRuntimePacing,
   stepPlayerRuntimeCatchUp,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
-} from "../../player/runtime-adapter.js";
-import type { DebugRecorder, DebugRecording } from "../../player/debug-recorder.js";
-import { rebuildRecordedSession } from "../../player/debug-export.js";
-import type { RandomControlOptions } from "../../src/index.js";
+} from "../../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
+import { pendingPlayerRuntimeStorageWrite } from "../../player/runtime/runtime-view.js";
+import type { DebugRecording } from "../../player/debug/debug-recorder.js";
+import { rebuildRecordedSession } from "../../player/debug/debug-export.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
+import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
+import { sourceStart, type PlanStart } from "../helpers/prepared-plan.js";
+import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
+import { inProcessBackend } from "../helpers/player/worker-topology.js";
+
+// The adapter's functions, also on the sessions the composables' host holds (`helpers/player/host-sessions.ts`).
+const activatePlayerRuntimeButton = onHost(rawActivatePlayerRuntimeButton);
+const adoptPlayerRuntimeCatchUp = onHost(rawAdoptPlayerRuntimeCatchUp);
+const beginPlayerRuntimeCatchUp = onHost(rawBeginPlayerRuntimeCatchUp);
+const completePlayerRuntimeStorageWrite = onHost(rawCompletePlayerRuntimeStorageWrite);
+const observePlayerRuntimeTime = onHost(rawObservePlayerRuntimeTime);
+const playerRuntimeSnapshot = onHost(rawPlayerRuntimeSnapshot);
+const skipPlayerRuntimePacing = onHost(rawSkipPlayerRuntimePacing);
 
 // The Player catches up a late time observation on a copy of the session, one timed event at a time, so it can give
 // the browser a turn between tasks, and the session adopts the copy in one publication. One observation of the same
@@ -90,26 +102,23 @@ test("a save during a catch-up waits for the host at the scene time one late obs
 
 // The Vue session host and its scene clock, loaded through the build tool like the Player loads them.
 interface SessionHost {
+  readonly bridge: Promise<PlayerBridge>;
   readonly session: Readonly<Ref<PlayerRuntimeSession | null>>;
-  prepare(
-    create: (recording: {
-      readonly recorder: DebugRecorder;
-      readonly debugMode: boolean;
-    }) => PlayerRuntimeSession,
-  ): void;
+  prepare(create: PlanStart): void;
   activate(): Promise<void>;
-  observe(): PlayerRuntimeSession | null;
+  observe(): Promise<PlayerRuntimeSession | null>;
   update(next: PlayerRuntimeSession): void;
   setDebugTracing(on: boolean): void;
-  setRandomControl(control: RandomControlOptions | null): void;
-  resolveRandomDraw(drawId: number, outcome: "natural"): void;
-  debugRecording(): DebugRecording | null;
+  setRandomControl(control: { readonly sites: readonly [] } | null): void;
+  resolveRandomDraw(drawId: number, outcome: "natural"): Promise<{ readonly kind: string } | null>;
+  debugRecording(): Promise<DebugRecording | null>;
 }
-let usePlayerSession: () => SessionHost;
+let usePlayerSession: (options: { readonly bridge: Promise<PlayerBridge> }) => SessionHost;
 
 before(async () => {
+  await loadHostFacade();
   const module: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/usePlayerSession.ts",
+    "player/vue/src/session/usePlayerSession.ts",
   );
   assert.equal(typeof module.usePlayerSession, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its host API.
@@ -122,11 +131,26 @@ before(async () => {
  * them; a catch-up goes on in tasks of its own. `late` moves the clock on as a page in the background would and lets
  * the page show again.
  */
-async function mount(context: TestContext, source: string, randomControl?: RandomControlOptions) {
-  // Event targets are the only browser surface these scripts use; no media elements are created.
-  for (const name of ["document", "window"]) {
+async function mount(
+  context: TestContext,
+  source: string,
+  randomControl?: { readonly sites: readonly [] },
+) {
+  // Event targets are the only browser surface these scripts use, with the silent audio elements Start primes.
+  const surface = {
+    document: new EventTarget(),
+    window: new EventTarget(),
+    Audio: class {
+      src = "";
+      play = async () => {};
+      pause() {}
+      load() {}
+      removeAttribute() {}
+    },
+  };
+  for (const [name, value] of Object.entries(surface)) {
     const previous = Object.getOwnPropertyDescriptor(globalThis, name);
-    Object.defineProperty(globalThis, name, { configurable: true, value: new EventTarget() });
+    Object.defineProperty(globalThis, name, { configurable: true, value });
     context.after(() => {
       if (previous) Object.defineProperty(globalThis, name, previous);
       else Reflect.deleteProperty(globalThis, name);
@@ -136,13 +160,11 @@ async function mount(context: TestContext, source: string, randomControl?: Rando
   let nowMs = 0;
   context.mock.method(performance, "now", () => (nowMs += 1));
   const scope = effectScope();
-  const host = scope.run(() => usePlayerSession())!;
+  const host = scope.run(() => usePlayerSession({ bridge: inProcessBackend() }))!;
   context.after(() => scope.stop());
   if (randomControl !== undefined) host.setRandomControl(randomControl);
   // Recorded as every Player session is, so the debug export's replay can be checked.
-  host.prepare((recording) =>
-    createPlayerRuntimeSession(source, { ...sessionOptions, ...recording }),
-  );
+  host.prepare(await sourceStart(host.bridge, source, () => ({ ...sessionOptions })));
   await host.activate();
   return {
     host,
@@ -167,14 +189,15 @@ async function caughtUp(host: SessionHost, atLeastMs: number) {
 }
 
 /** Checks that the debug export's recording replays exactly to the session shown. */
-function replays(host: SessionHost) {
-  const recording = host.debugRecording()!;
+async function replays(host: SessionHost) {
+  const shown = playerRuntimeSnapshot(host.session.value!);
+  const recording = (await host.debugRecording())!;
   const rebuilt = rebuildRecordedSession(
     recording.plan,
     recording.anchorSnapshot,
     recording.operations,
   );
-  assert.deepEqual(rebuilt.exportSnapshot(), playerRuntimeSnapshot(host.session.value!));
+  assert.deepEqual(rebuilt.exportSnapshot(), shown);
 }
 
 // A block every 10 ms while the script waits for the player.
@@ -194,7 +217,7 @@ test("a late observation catches up over several tasks and then shows one late o
     canonical(session),
     canonical(observedLate(rounds, session.state.observedSessionTimeMs)),
   );
-  replays(host);
+  await replays(host);
 });
 
 test("in a hidden page, a catch-up a late wake-up starts goes on without timers", async (context) => {
@@ -214,7 +237,7 @@ test("input during a catch-up lands at the scene time it arrives at, after the w
   late(1_000);
   assert.ok(host.session.value!.state.observedSessionTimeMs < 1_000, "a catch-up is under way");
   // As the Player's interaction does: observe, then answer what is presented.
-  const observed = host.observe()!;
+  const observed = (await host.observe())!;
   const atMs = observed.state.observedSessionTimeMs;
   assert.ok(atMs >= 1_000);
   host.update(activatePlayerRuntimeButton(observed)!.session);
@@ -225,7 +248,7 @@ test("input during a catch-up lands at the scene time it arrives at, after the w
     canonical(answered),
     canonical(activatePlayerRuntimeButton(observedLate(rounds, atMs))!.session),
   );
-  replays(host);
+  await replays(host);
 });
 
 test("an operation on the session during a catch-up drops the copy, and the session observes in one go", async (context) => {
@@ -246,7 +269,7 @@ test("an operation on the session during a catch-up drops the copy, and the sess
       observePlayerRuntimeTime(skipped.session, session.state.observedSessionTimeMs).session,
     ),
   );
-  replays(host);
+  await replays(host);
 });
 
 test("a script that fails during a catch-up fails as one late observation fails it, also in its recording", async (context) => {
@@ -261,7 +284,7 @@ test("a script that fails during a catch-up fails as one late observation fails 
     canonical(session),
     canonical(observedLate(source, session.state.observedSessionTimeMs)),
   );
-  replays(host);
+  await replays(host);
 });
 
 test("leaving the Player ends a catch-up, also one that several opportunities stepped", async (context) => {
@@ -278,22 +301,26 @@ test("while Debug runs, a late observation is one observation", async (context) 
   const { host, late } = await mount(context, rounds);
   host.setDebugTracing(true);
   late(1_000);
+  // One observation over the bridge, which publishes once its reply arrives.
+  await caughtUp(host, 1_000);
   assert.ok(host.session.value!.state.observedSessionTimeMs >= 1_000);
-  replays(host);
+  await replays(host);
 });
 
 test("while Debug decides random draws, a late observation pauses at the draw with all of it observed", async (context) => {
   const { host, late } = await mount(
     context,
     'wait 1 s\nlet r = randomInteger(1..=6)\nwait 1 s\nsay "rolled", instant\nlet e = showButton "Done"\nexit',
-    {},
+    { sites: [] },
   );
   late(10_000);
+  // One observation over the bridge, which publishes once its reply arrives.
+  await caughtUp(host, 10_000);
   const paused = host.session.value!;
   assert.notEqual(paused.state.randomDraw, null);
   assert.equal(paused.state.currentSessionTimeMs, 1_000);
   assert.ok(paused.state.observedSessionTimeMs >= 10_000);
-  host.resolveRandomDraw(paused.state.randomDraw!.drawId, "natural");
+  await host.resolveRandomDraw(paused.state.randomDraw!.drawId, "natural");
   await caughtUp(host, 1_000);
   assert.deepEqual(
     host.session.value!.transcriptEntries.map((entry) => entry.text),
@@ -308,15 +335,11 @@ test("turning Debug's random draws on during a catch-up finishes it first with n
   );
   late(1_000);
   assert.ok(host.session.value!.state.observedSessionTimeMs < 1_000, "a catch-up is under way");
-  let decided = 0;
-  host.setRandomControl({
-    decide: () => {
-      decided += 1;
-      return { kind: "suspend" };
-    },
-  });
+  // Choose outcomes with every site asking: a draw the catch-up made under the control would pause.
+  host.setRandomControl({ sites: [] });
+  // The catch-up's one observation comes first in the session's queue (`before`), then the control.
+  await caughtUp(host, 1_000);
   assert.ok(host.session.value!.state.observedSessionTimeMs >= 1_000);
   assert.equal(host.session.value!.state.randomDraw, null);
-  assert.equal(decided, 0);
-  replays(host);
+  await replays(host);
 });

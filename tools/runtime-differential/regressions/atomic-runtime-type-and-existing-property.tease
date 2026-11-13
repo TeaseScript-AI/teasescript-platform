@@ -1,0 +1,8 @@
+function identity(value) { return value }
+let incoming = identity([3])
+let values: integer[] = [1]
+let record = identity({ count: 1 })
+values[0] = incoming.removeFirst()
+record.count = 2
+say "typed:${values[0]}:${record.count}", instant
+exit

@@ -275,8 +275,55 @@ function pathSegment(parentIsArray: boolean, key: string): string {
   return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? `.${key}` : `[${JSON.stringify(key)}]`;
 }
 
-export function createCapturedArray(length: number): unknown[] {
-  const captured = new Array<unknown>(length);
+/**
+ * Leaves a tree that `JSON.parse` just built, and that nothing else holds, as capture would: every array on the captured
+ * array prototype and, with `freeze`, every container frozen. Such a tree has no accessor, cycle, hole, symbol or
+ * non-plain object, so a number that is not finite (`1e400`) is the one capture failure it can hold: the result is
+ * `false` at the first one, which leaves the rest of the tree as it was, so that the caller gives that value to capture
+ * for its failure. Otherwise the tree is what capture would return, without the copy.
+ */
+export function adoptParsedJson(value: unknown, freeze: boolean): boolean {
+  const pending = createWorklist<unknown>();
+  let size = 0;
+  pending[size++] = value;
+  while (size > 0) {
+    const current = pending[--size];
+    if (typeof current === "number") {
+      if (!Number.isFinite(current)) return false;
+      continue;
+    }
+    if (typeof current !== "object" || current === null) continue;
+    if (Array.isArray(current)) {
+      Object.setPrototypeOf(current, CAPTURED_ARRAY_PROTOTYPE);
+      for (let index = current.length - 1; index >= 0; index -= 1) pending[size++] = current[index];
+    } else {
+      // EVIDENCE: invariant: JSON.parse builds plain objects with own enumerable data properties only.
+      const values = Object.values(current as Record<string, unknown>);
+      for (let index = values.length - 1; index >= 0; index -= 1) pending[size++] = values[index];
+    }
+    if (freeze) Object.freeze(current);
+  }
+  return true;
+}
+
+/** Items kept by index only. */
+export interface Worklist<T> {
+  [index: number]: T;
+}
+
+/**
+ * An empty array without a prototype, for a worklist that its owner writes and reads by index and counts itself: no
+ * ambient `Array.prototype` method, iterator or index setter can change what it holds, and its element access stays
+ * as fast as an ordinary array's (`push` and `pop` on a captured array take about twice as long).
+ */
+export function createWorklist<T>(): Worklist<T> {
+  const worklist: T[] = [];
+  Object.setPrototypeOf(worklist, null);
+  return worklist;
+}
+
+export function createCapturedArray<T = unknown>(length: number): T[] {
+  const captured = new Array<T>(length);
   Object.setPrototypeOf(captured, CAPTURED_ARRAY_PROTOTYPE);
   return captured;
 }

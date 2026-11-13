@@ -38,7 +38,7 @@ function staleBundle(): Error | null {
 }
 
 /**
- * Loads a Player browser-source module, named by its source path such as `player/vue/src/usePlayerSession.ts`, from the
+ * Loads a Player browser-source module, named by its source path such as `player/vue/src/session/usePlayerSession.ts`, from the
  * server-side bundle that `npm run build` writes (`player/vue/vite.test-modules.config.ts` lists the modules). All
  * modules loaded in one test process share that bundle's module graph, so their classes and state are the same. The
  * first call in a process compares the bundle's stamp with the checkout's files, and every call in that process refuses

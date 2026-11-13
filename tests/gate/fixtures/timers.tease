@@ -1,0 +1,8 @@
+// The gate's timer fixture: a timer that finishes and runs its block, and one stopped before it would.
+let finished = false
+timer async hidden 1 s { finished = true }
+let later = timer(duration: 60 s, async: true)
+wait 2 s
+later.stop()
+say "Finished: ${finished}", instant
+exit

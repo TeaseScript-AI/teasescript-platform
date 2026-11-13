@@ -1,0 +1,8 @@
+let target = { value: 0 }
+function replaceRoot {
+    target = { value: 2 }
+    return 7
+}
+target.value = replaceRoot()
+say "rebind:${target.value}", instant
+exit

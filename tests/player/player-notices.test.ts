@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { PlayerNotices, playerNoticeKeys, playerNotices } from "../../player/notices.js";
+import {
+  PlayerNotices,
+  playerNoticeKeys,
+  playerNotices,
+} from "../../player/presentation/notices.js";
 
 test("a repeated condition replaces its notice in place and dismissal removes it", () => {
   const notices = new PlayerNotices();

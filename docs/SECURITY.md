@@ -18,8 +18,9 @@ and unsafe paths receive structured errors without stack traces. Remaining tooli
   canonical execution. Live JavaScript input is stabilized into plain data as needed; current capture rejects accessors,
   trap failures, cycles, unsupported prototypes, non-finite numbers, and sparse or otherwise non-canonical arrays before
   detailed use. Captured arrays use an engine-owned prototype isolated from ambient numeric `Array.prototype`
-  properties, and density checks require own indexes. Compiler-owned plans use complete inspect-only validation without
-  this defensive copy. A runtime session restores its own tagged export without capture or validation only when the
+  properties, and density checks require own indexes. Compiler-owned plans, and plan and checkpoint JSON that the engine
+  parses itself, use complete inspect-only validation without this defensive copy; parsed arrays get the captured
+  prototype first. A runtime session restores its own tagged export without capture or validation only when the
   export's keyed tag proves that the engine wrote it in this process for the same plan ([Runtime
   sessions](RUNTIME.md#runtime-sessions)). Defensive capture is correctness/robustness behavior, not by itself a
   TeaseScript content-capacity or security policy, and already validated internal representations do not need

@@ -38,7 +38,7 @@ The lower-level layer includes:
 - checkpoint creation, serialization, deserialization, and restore functions;
 - versioned RNG state creation and advancement helpers.
 
-The normal composition is:
+Two compositions run the one engine. The snapshot-taking route, where the caller holds the state:
 
 ```text
 source
@@ -48,12 +48,23 @@ source
     -> executeInstruction, stepToEvent, or run
 ```
 
+The engine-owned session, which keeps the plan and the canonical snapshot itself, as the Player runs it
+([Runtime sessions](RUNTIME.md#runtime-sessions)):
+
+```text
+source
+    -> compileSource
+    -> compiled instruction plan
+    -> createFreshRuntimeSession, createRuntimeSession, or restoreRuntimeSession
+    -> the session's run, stepToEvent, executeInstruction, and completions
+```
+
 Ordinary TeaseScript source is compiled through `compileSource(...)`; the resulting validated instruction plan runs
 with explicit serializable runtime state. Parser AST data remains available to compiler and authoring tooling, but
 there is no supported caller-constructed AST compilation route. `validateInstructionPlan(...)` independently rejects
 non-JSON-safe plan data.
 
-The explicit plan/snapshot/runtime API is the canonical resumable route for waits, including pending actions, checkpoints, completion, and resumption.
+Both routes are resumable at waits, including pending actions, checkpoints, completion, and resumption.
 
 Runtime builtins are explicit capabilities. Only own registered properties are callable, core builtins retain precedence, and low-level named arguments use a prototype-free record. These rules prevent inherited JavaScript properties or prototype-mutating names from becoming implicit capabilities.
 
@@ -102,9 +113,11 @@ active foreground/background action
 
 The exact cross-origin envelope, field names, capability-negotiation schema, reconnect protocol, and save acknowledgement remain open. They are not defined by ADR 0016.
 
-Camera and file APIs continue to return engine-managed references rather than browser objects. Package-defined camera
-roles, player device aliases, captured-media recovery after reload or restore, and persistent media collections remain
-separate follow-up designs; the camera and microphone permission and ownership model is in [`SECURITY.md`](SECURITY.md).
+Camera and file APIs continue to return engine-managed references rather than browser objects. Captured media already
+outlive a reload: a photo a saved value references is stored durably, and one only a kept session uses is kept with that
+session and comes back with its Continue ([Image input](RUNTIME.md#image-input)). Package-defined camera roles, player
+device aliases, and persistent media collections remain separate follow-up designs; the camera and microphone permission
+and ownership model is in [`SECURITY.md`](SECURITY.md).
 Follow-ups are recorded in
 [`planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md`](planning/CAMERA-MEDIA-AND-TIME-INTEGRITY-FOLLOW-UPS.md).
 
@@ -122,7 +135,7 @@ the exact records, encryption, retention, synchronization, conflict, and migrati
 ### Script storage in the browser
 
 The Player persists TeaseScript `save`/`load`/`delete` values ([§25](specifications/accepted-syntaxes-v30.md#25-persistent-storage-and-keys))
-through a host-owned, asynchronous `ScriptStorageProvider` for one storage scope (`player/script-storage.ts`); the
+through a host-owned, asynchronous `ScriptStorageProvider` for one storage scope (`player/persistence/script-storage.ts`); the
 runtime boundary is [Runtime script storage](RUNTIME.md#script-storage). The host chooses a stable, opaque scope per
 script and player. Before each Start the Player loads the scope; during the session it persists every pending write
 through the provider and then reports it to the runtime, which keeps the previous value when the write failed. When
@@ -157,7 +170,7 @@ can be added there.
 
 A player moves the saved data of every script this browser has played, or of the scripts they tick, with its saved
 photos, by hand and offline to another browser or device through Player Settings
-([Player UI](ui/PLAYER-UI.md#player-settings)); `player/storage-transfer.ts` owns the format and `player/saved-data.ts`
+([Player UI](ui/PLAYER-UI.md#player-settings)); `player/persistence/storage-transfer.ts` owns the format and `player/persistence/saved-data.ts`
 lists and opens the scopes. It is not a session checkpoint and carries no session position, timers, transcript, or RNG
 state; a session moves with the [session transfer](#session-transfer). The document is UTF-8 JSON with exactly these fields:
 
@@ -194,17 +207,18 @@ session of the shown script ends when that script is ticked. For each script, ea
 scope with a fresh reference, and every value that held that exported reference, as text, list or set item, object
 property name or value, or dict key or value, gets the new one. The values then replace the scope's saved data all at
 once, with key order kept; the photos are stored first, under the scope's live lock as a Player of it holds, so a
-failure leaves that scope's previous data. A script whose values were replaced loses the session the Player kept for it
-([Session start and user activation](ui/PLAYER-UI.md#session-start-and-user-activation)), so its next session starts
-with the imported values. Scripts replace one after another, and a failure of one
+failure leaves that scope's previous data. Before its values are replaced, a script loses the session the Player kept
+for it ([Session start and user activation](ui/PLAYER-UI.md#session-start-and-user-activation)), so its next session
+starts with the imported values; when that session cannot be discarded, the script keeps its previous data. Scripts
+replace one after another, and a failure of one
 leaves the others to continue, so the import reports which scripts kept their previous data. Earlier media records are never overwritten, and photos left unreferenced are reclaimed
 later.
 
 ### Session transfer
 
 A player moves the session they play by hand and offline to another browser or device, where Continue goes on with it
-as after a reload, through Player Settings ([Player UI](ui/PLAYER-UI.md#player-settings)); `player/session-transfer.ts`
-owns the format. The session travels as its canonical checkpoint, which the runtime exports and restores
+as after a reload, through Player Settings ([Player UI](ui/PLAYER-UI.md#player-settings)); `player/persistence/session-transfer.ts`
+owns the format, and the engine host reads it (`player/persistence/session-transfer-read.ts`). The session travels as its canonical checkpoint, which the runtime exports and restores
 (`createPlayerRuntimeRestorePoint` and `restorePlayerRuntimeSession`), not in a second save format. The document is
 UTF-8 JSON with exactly these fields:
 

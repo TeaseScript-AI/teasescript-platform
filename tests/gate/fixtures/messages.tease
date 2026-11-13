@@ -1,0 +1,7 @@
+// The gate's message fixture: paced messages (every K message is instant), an updated message and a removed one.
+say "A paced message"
+let line = say "Counting: 0", instant
+line.text = "Counting: 1"
+say "Another paced message"
+line.remove()
+exit

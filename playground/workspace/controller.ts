@@ -30,8 +30,7 @@ import type {
 import {
   activePlayerRuntimeInteraction,
   activePlayerRuntimePacingGate,
-  completePlayerRuntimeAction,
-} from "../../player/runtime-adapter.js";
+} from "../../player/runtime/runtime-view.js";
 import {
   cloneCapturedRuntimeSnapshot,
   createFreshRuntimeSnapshotWithValidatedPlan,
@@ -364,7 +363,12 @@ function completeWorkspaceAction(
   action: RuntimeInteractionActionSnapshot | RuntimeChatPacingGateActionSnapshot,
   payload: Record<string, unknown>,
 ): WorkspaceControlResult {
-  const operation = completePlayerRuntimeAction(plan, snapshot, action, payload);
+  const operation = completeAction(plan, snapshot, {
+    actionId: action.actionId,
+    actionKind: action.kind,
+    ...(action.kind === "interaction" ? { interactionKind: action.interactionKind } : {}),
+    payload,
+  });
   return controlResult(operation.snapshot, operation.events, operation.outcome);
 }
 

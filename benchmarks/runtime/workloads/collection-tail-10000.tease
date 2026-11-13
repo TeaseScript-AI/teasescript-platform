@@ -1,0 +1,48 @@
+// Collection tail (#1797, F-work), after guessthenumber's and BanjoGameHub's 10,000-entry tables: a list of `size`
+// integers, a copy changed at every 10th element and sorted while the original stays as built, binary searches in the
+// copy, and removals and additions at both ends.
+let size = 10000
+let items: integer[] = []
+for i in 0..size {
+  items.add((i * 7919) % 10007)
+}
+let copy = items
+let k = 0
+while k < size {
+  copy[k] = copy[k] + 1
+  k += 10
+}
+copy.sort()
+let found = 0
+let probes = 0
+for target in 0..200 {
+  let wanted = target * 50
+  let lo = 0
+  let hi = copy.length
+  while lo < hi {
+    let mid = floor((lo + hi) / 2)
+    probes += 1
+    if copy[mid] < wanted {
+      lo = mid + 1
+    } else {
+      hi = mid
+    }
+  }
+  if lo < copy.length and copy[lo] == wanted {
+    found += 1
+  }
+}
+repeat 100 {
+  let first = copy.removeFirst()
+  copy.add(first + 10007)
+}
+let sumItems = 0
+for value in items {
+  sumItems += value
+}
+let sumCopy = 0
+for value in copy {
+  sumCopy += value
+}
+say "items:${items.length}:${sumItems}:${items[0]}:${items.last}:${copy.length}:${sumCopy}:${copy[0]}:${copy.last}:${found}:${probes}", instant
+exit

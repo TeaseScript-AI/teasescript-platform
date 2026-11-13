@@ -2,15 +2,14 @@ import assert from "node:assert/strict";
 import test, { before } from "node:test";
 import { effectScope, ref, shallowRef, type Ref, type ShallowRef } from "vue";
 
-import { CapturedMediaStore } from "../../player/captured-media.js";
+import { CapturedMediaStore } from "../../player/media/captured-media.js";
 import {
   answerPlayerRuntimeImage,
-  createPlayerRuntimeSession,
-  playerRuntimeForeground,
-  playerRuntimeMedia,
-  type PlayerRuntimeControlResult,
   type PlayerRuntimeSession,
-} from "../../player/runtime-adapter.js";
+} from "../../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
+import { playerRuntimeForeground, playerRuntimeMedia } from "../../player/runtime/runtime-view.js";
+import { admissionOf, type HeldMedia } from "../../player/engine-bridge/held-media.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 
 interface CaptureView {
@@ -29,14 +28,22 @@ interface Capture {
   takePhoto(): Promise<void>;
   selfTimer(): Promise<void>;
   choose(reference: string): boolean;
-  use(session: PlayerRuntimeSession): PlayerRuntimeControlResult | null;
+  /** "Use image": the `answerImage` op's arguments for the observed session, and how the answer settles. */
+  answer(
+    input: "button",
+  ): (
+    observed: PlayerRuntimeSession,
+  ) => {
+    readonly args: { readonly reference: string; readonly held: HeldMedia };
+    readonly settle?: (outcome: { readonly kind: string } | null) => void;
+  } | null;
 }
 let useImageCapture: (host: unknown) => Capture;
 
 // Load the real composable through the existing build tool: its browser-source imports use Vite resolution.
 before(async () => {
   const module: Record<string, unknown> = await loadPlayerModule(
-    "player/vue/src/useImageCapture.ts",
+    "player/vue/src/stage/useImageCapture.ts",
   );
   assert.equal(typeof module.useImageCapture, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its tested API.
@@ -121,9 +128,13 @@ function harness(
   /** A file the player chose, stored as the Player stores it. */
   const file = () =>
     media.add("image", new Blob([PNG], { type: "image/png" }), { width: 4, height: 3 }).reference;
-  /** "Use image", as the Player's interaction answers at the observed time. */
+  /** "Use image", as the Player's interaction answers at the observed time: its intent, then the host's op. */
   const use = () => {
-    const result = capture.use(session.value!);
+    const chosen = capture.answer("button")(session.value!);
+    if (chosen === null) return null;
+    const { reference, held } = chosen.args;
+    const result = answerPlayerRuntimeImage(session.value!, reference, admissionOf(held));
+    chosen.settle?.(result?.outcome ?? null);
     if (result?.outcome.kind === "completed") session.value = result.session;
     return result;
   };

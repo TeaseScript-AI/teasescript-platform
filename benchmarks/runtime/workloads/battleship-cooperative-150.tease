@@ -1,0 +1,232 @@
+speaker system { title: "System" }
+speaker system
+function sexscriptLegacyItemAt(listValue, position) {
+  if position < 0 {
+    return listValue[listValue.length + position]
+  }
+  return listValue.get(position, default: null)
+}
+let Title = "Battleship benchmark: "
+let ASize = 7
+let xString = "ABCDEFG"
+let yString = "1234567"
+let nTries = 150
+let maxTime = 100
+let MyScores = [0, 2, 3, 4, 5]
+let MyShips = [[0, 0, 0, 0, 0, 0, 0], [4, 4, 4, 4, 4, 0, 0], [0, 0, 0, 0, 0, 0, 0], [3, 3, 3, 3, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [2, 2, 2, 0, 0, 0, 0], [0, 0, 0, 0, 1, 1, 0]]
+let EnemyShots = [[0, 0, 0, 0, 0, 0, 0], [0, 1, 1, 1, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0], [0, 0, 0, 0, 0, 0, 0]]
+let lastHit = true
+let lastHitx = 1
+let lastHity = 3
+function GetEnemyShot {
+  //-----------------------------------------------------------
+  let ThinkString = "${Title}Thinking"
+  let nThink = 0
+  let nRest = 0
+  // Counted for the benchmark (#1797): accepted fleet placements and placement attempts.
+  let nPlaced = 0
+  let TotalGrid = [
+    [0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0],
+    [0, 0, 0, 0, 0, 0, 0]
+  ]
+  let x0 = 0
+  let y0 = 0
+  let x1 = 0
+  let y1 = 0
+  let direction = 0
+  let TestGrid = []
+  let t0 = getAbsoluteDateTime()
+  let t = nTries
+  let i = 0
+  while i < t {
+    if i == 0 or nThink > round(t / 10) {
+      say as system prose ThinkString, instant
+      ThinkString += "."
+      nThink = 0
+      if getAbsoluteDateTime() - t0 > (maxTime / 10 * 1.15 * 1000) ms and t > 1000 {
+        t = round(t / 1.1)
+      }
+      t0 = getAbsoluteDateTime()
+    }
+    nThink += 1
+    let f = true
+    while f {
+      TestGrid = [
+        [0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0],
+        [0, 0, 0, 0, 0, 0, 0]
+      ]
+      f = false
+      let j = 5
+      while j > 1 {
+        if MyScores[j - 1] == 0 {
+          //add sunk ships
+          for k in 0..ASize {
+            for l in 0..ASize {
+              if MyShips[k][l] == j - 1 {
+                TestGrid[k][l] = 1
+              }
+            }
+          }
+        }
+        j -= 1
+      }
+      j = 5
+      while j > 1 {
+        if MyScores[j - 1] > 0 {
+          let e = true
+          while e {
+            // A short rest every 1,000 placements lets the TeaseScript player run the long think in parts.
+            nRest += 1
+            if nRest % 1000 == 0 {
+              wait 0.01 s
+            }
+            x0 = randomInteger(0..ASize)
+            y0 = randomInteger(0..ASize)
+            direction = randomInteger(0..2) //0 horizontal, 1 vertical
+            e = false
+            for k in 0..j {
+              if direction == 0 {
+                x1 = x0 + k
+                y1 = y0
+              } else {
+                x1 = x0
+                y1 = y0 + k
+              }
+              if x1 >= ASize or y1 >= ASize {
+                e = true
+                break
+              } else if (EnemyShots[x1][y1] != 0 and MyShips[x1][y1] == 0) or TestGrid[x1][y1] != 0 {
+                e = true
+                break
+              }
+            }
+          }
+          for k in 0..j {
+            if direction == 0 {
+              TestGrid[x0 + k][y0] = 1
+            } else {
+              TestGrid[x0][y0 + k] = 1
+            }
+          }
+        }
+        j -= 1
+      }
+      j = 0
+      while j < ASize {
+        //add hits
+        for k in 0..ASize {
+          if EnemyShots[j][k] != 0 and MyShips[j][k] != 0 {
+            TestGrid[j][k] = 1
+          }
+        }
+        j += 1
+      }
+      let TestTotal = 0
+      j = 0
+      while j < ASize {
+        //add hits
+        for k in 0..ASize {
+          // NOTE SX_PLUS_OPERAND_TYPE line 424: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+          TestTotal += TestGrid[j][k]
+        }
+        j += 1
+      }
+      if TestTotal != 14 {
+        f = true
+      }
+    }
+    nPlaced += 1
+    for j in 0..ASize {
+      for k in 0..ASize {
+        // NOTE SX_PLUS_OPERAND_TYPE line 431: Groovy + operands are not proven numeric; TeaseScript + adds two numbers or joins two texts or two lists, not mixed values. Use interpolation if this joins text.
+        TotalGrid[j][k] = TotalGrid[j][k] + TestGrid[j][k]
+      }
+    }
+    i += 1
+  }
+  let hitMax = 0
+  let xMax = 0
+  let yMax = 0
+  if lastHit {
+    if lastHitx - 1 < ASize and lastHitx - 1 >= 0 {
+      // NOTE SX_NEGATIVE_INDEX line 440: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
+      // NOTE SX_NEGATIVE_INDEX line 440: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
+      // NOTE SX_NEGATIVE_INDEX line 441: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
+      // NOTE SX_NEGATIVE_INDEX line 441: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
+      if sexscriptLegacyItemAt(sexscriptLegacyItemAt(TotalGrid, lastHitx - 1), lastHity) > hitMax and sexscriptLegacyItemAt(sexscriptLegacyItemAt(EnemyShots, lastHitx - 1), lastHity) == 0 {
+        // NOTE SX_NEGATIVE_INDEX line 442: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
+        // NOTE SX_NEGATIVE_INDEX line 442: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
+        hitMax = sexscriptLegacyItemAt(sexscriptLegacyItemAt(TotalGrid, lastHitx - 1), lastHity)
+        xMax = lastHitx - 1
+        yMax = lastHity
+      }
+    }
+    if lastHitx + 1 < ASize and lastHitx + 1 >= 0 {
+      // NOTE SX_NEGATIVE_INDEX line 448: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
+      // NOTE SX_NEGATIVE_INDEX line 449: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
+      if sexscriptLegacyItemAt(TotalGrid[lastHitx + 1], lastHity) > hitMax and sexscriptLegacyItemAt(EnemyShots[lastHitx + 1], lastHity) == 0 {
+        // NOTE SX_NEGATIVE_INDEX line 450: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
+        hitMax = sexscriptLegacyItemAt(TotalGrid[lastHitx + 1], lastHity)
+        xMax = lastHitx + 1
+        yMax = lastHity
+      }
+    }
+    if lastHity - 1 < ASize and lastHity - 1 >= 0 {
+      // NOTE SX_NEGATIVE_INDEX line 456: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
+      // NOTE SX_NEGATIVE_INDEX line 456: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
+      // NOTE SX_NEGATIVE_INDEX line 457: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
+      // NOTE SX_NEGATIVE_INDEX line 457: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
+      if sexscriptLegacyItemAt(sexscriptLegacyItemAt(TotalGrid, lastHitx), lastHity - 1) > hitMax and sexscriptLegacyItemAt(sexscriptLegacyItemAt(EnemyShots, lastHitx), lastHity - 1) == 0 {
+        // NOTE SX_NEGATIVE_INDEX line 458: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
+        // NOTE SX_NEGATIVE_INDEX line 458: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
+        hitMax = sexscriptLegacyItemAt(sexscriptLegacyItemAt(TotalGrid, lastHitx), lastHity - 1)
+        xMax = lastHitx
+        yMax = lastHity - 1
+      }
+    }
+    if lastHity + 1 < ASize and lastHity + 1 >= 0 {
+      // NOTE SX_NEGATIVE_INDEX line 464: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
+      // NOTE SX_NEGATIVE_INDEX line 465: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
+      if sexscriptLegacyItemAt(TotalGrid, lastHitx)[lastHity + 1] > hitMax and sexscriptLegacyItemAt(EnemyShots, lastHitx)[lastHity + 1] == 0 {
+        // NOTE SX_NEGATIVE_INDEX line 466: This position can be negative, where Groovy counted from the end of the list; a helper does that too.
+        hitMax = sexscriptLegacyItemAt(TotalGrid, lastHitx)[lastHity + 1]
+        xMax = lastHitx
+        yMax = lastHity + 1
+      }
+    }
+    if hitMax == 0 {
+      lastHit = false
+      lastHitx = 0
+      lastHity = 0
+    }
+  }
+  if not lastHit {
+    i = 0
+    while i < ASize {
+      for j in 0..ASize {
+        if TotalGrid[i][j] > hitMax and EnemyShots[i][j] == 0 {
+          hitMax = TotalGrid[i][j]
+          xMax = i
+          yMax = j
+        }
+      }
+      i += 1
+    }
+  }
+  say "placements:${nPlaced}:attempts:${nRest}", instant
+  return "${xString.substring(xMax, xMax + 1)}${yString.substring(yMax, yMax + 1)}"
+}
+
+let shot = GetEnemyShot()
+say shot, instant
+exit

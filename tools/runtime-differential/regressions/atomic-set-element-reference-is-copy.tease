@@ -1,0 +1,5 @@
+let members = set[{ value: 1 }]
+function changeHiddenMember(inputValue) { inputValue.first.value = 9 }
+changeHiddenMember(members)
+say "set-copy:${members.first.value}", instant
+exit

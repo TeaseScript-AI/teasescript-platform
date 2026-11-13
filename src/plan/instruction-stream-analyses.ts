@@ -13,6 +13,10 @@ import type {
 import { validateFunctionDefinitions } from "./instruction-stream-analyses/function-definitions.js";
 import { validateCanonicalInteractionResultHandoffs } from "./instruction-stream-analyses/interaction-result-handoffs.js";
 import { validateCanonicalPreparedSays } from "./instruction-stream-analyses/prepared-says.js";
+import {
+  type InstructionSummary,
+  summarizeInstructions,
+} from "./instruction-stream-analyses/instruction-summary.js";
 
 export function analyzeInstructionStream(
   instructions: readonly unknown[],
@@ -20,10 +24,17 @@ export function analyzeInstructionStream(
   files: readonly PlanFileBoundaries[] | null,
   errors: PlanValidationError[],
 ): void {
+  const summary = summarizeInstructions(instructions);
   validateLoopStructure(instructions, errors);
   validatePreparedReferenceStructure(instructions, errors);
-  const validationIndex = validateFunctionDefinitions(functions, instructions, files, errors);
-  validateInstructionControlFlowRegions(instructions, validationIndex, errors);
+  const validationIndex = validateFunctionDefinitions(
+    functions,
+    instructions,
+    files,
+    summary,
+    errors,
+  );
+  validateInstructionControlFlowRegions(instructions, validationIndex, summary, errors);
 }
 
 function validatePreparedReferenceStructure(
@@ -214,12 +225,13 @@ function loopBreakTarget(
 function validateInstructionControlFlowRegions(
   instructions: readonly unknown[],
   index: PlanValidationIndex | null,
+  summary: InstructionSummary,
   errors: PlanValidationError[],
 ): void {
   if (index === null) return;
 
-  validateCanonicalInteractionResultHandoffs(instructions, index, errors);
-  validateCanonicalPreparedSays(instructions, index, errors);
+  validateCanonicalInteractionResultHandoffs(instructions, index, summary, errors);
+  validateCanonicalPreparedSays(instructions, index, summary, errors);
   instructions.forEach((instruction, instructionIndex) => {
     if (!isRecord(instruction)) return;
     const region = index.owners[instructionIndex];

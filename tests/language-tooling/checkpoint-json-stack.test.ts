@@ -14,10 +14,10 @@ import {
 } from "../../src/index.js";
 import {
   createPlayerRuntimeRestorePoint,
-  createPlayerRuntimeSession,
   restorePlayerRuntimeSession,
   playerRuntimeSnapshot,
-} from "../../player/runtime-adapter.js";
+} from "../../player/runtime/runtime-adapter.js";
+import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
 import { serializeValidatedRuntimeJsonWithin } from "../../src/runtime/snapshot/checkpoint.js";
 import { compileValidPlan } from "../helpers/compile-valid-plan.js";
 
@@ -210,16 +210,19 @@ test("JSON longer than a text can be fails with TSK004 from either writer, in ev
   assert.throws(() => serializeCheckpoint(checkpoint), tooLarge);
 });
 
-test("deep source-produced lists and objects serialize and resume with a constrained stack", () => {
+test("deep lists, objects, and sets from the source or a host serialize and resume with a constrained stack", () => {
   const moduleUrl = new URL("../../src/index.js", import.meta.url).href;
   const script = `
     import assert from 'node:assert/strict';
     import * as m from ${JSON.stringify(moduleUrl)};
-    for (const kind of ['list', 'object']) {
-      for (const depth of [256, 1024, 2048]) {
+    for (const kind of ['list', 'object', 'set']) {
+      // A set's depth costs nothing the list's does not, so it is checked at the deepest.
+      for (const depth of kind === 'set' ? [2048] : [256, 1024, 2048]) {
         const expression = kind === 'list'
           ? '['.repeat(depth) + '1' + ']'.repeat(depth)
-          : '{ value: '.repeat(depth) + '1' + ' }'.repeat(depth);
+          : kind === 'set'
+            ? 'set['.repeat(depth) + '1' + ']'.repeat(depth)
+            : '{ value: '.repeat(depth) + '1' + ' }'.repeat(depth);
         const compiled = m.compileSource('let value = ' + expression + '\\nlet next = random()\\nsay next\\nexit');
         assert.equal(compiled.diagnostics.length, 0);
         assert.ok(compiled.plan);
@@ -239,7 +242,7 @@ test("deep source-produced lists and objects serialize and resume with a constra
         let measured = 0;
         while (leaf && typeof leaf === 'object') {
           assert.equal(leaf.kind, kind);
-          leaf = kind === 'list' ? leaf.items[0] : leaf.properties[0].value;
+          leaf = kind === 'object' ? leaf.properties[0].value : leaf.items[0];
           measured++;
         }
         assert.equal(measured, depth);
@@ -253,6 +256,43 @@ test("deep source-produced lists and objects serialize and resume with a constra
         console.log(JSON.stringify({ kind, depth, bytes: encoded.length }));
       }
     }
+    // A host's set nested 1,024 deep, each level beside a list: every export restores it, a detached copy is
+    // independent, and every restored session continues as the original does.
+    const compiled = m.compileSource('let copy = incoming\\nwait 1 s\\nexit', { globals: ['incoming'] });
+    assert.ok(compiled.plan);
+    let incoming = 1;
+    for (let level = 0; level < 1024; level += 1)
+      incoming = { kind: 'set', items: [{ kind: 'list', items: [level] }, incoming] };
+    const original = m.createRuntimeSession(compiled.plan, m.createFreshRuntimeSnapshot(compiled.plan, {
+      globals: { incoming }, baseDelayMs: 0, delayPerWordMs: 0, delayPerCharacterMs: 0,
+    }));
+    original.run();
+    assert.equal(original.view().status, 'waiting');
+    const canonical = m.serializeCheckpoint(original.exportCheckpoint());
+    const sessions = [
+      original,
+      m.createRuntimeSession(original.plan, original.exportSnapshot()),
+      m.createRuntimeSession(original.plan, original.exportTrustedSnapshot()),
+      m.createTaggedRuntimeSession(original.plan, original.exportTaggedSnapshot()),
+      m.deserializeRuntimeSession(canonical),
+    ];
+    const detached = original.exportSnapshot();
+    let parent = detached.globals.find((binding) => binding.name === 'incoming').value;
+    let levels = 1;
+    while (typeof parent.items[1] === 'object') { parent = parent.items[1]; levels++; }
+    assert.equal(levels, 1024);
+    parent.items[1] = 2;
+    let final;
+    for (const session of sessions) {
+      assert.equal(m.serializeCheckpoint(session.exportCheckpoint()), canonical);
+      session.observeTime(1000);
+      session.run();
+      assert.equal(session.view().status, 'halted');
+      const bytes = m.serializeCheckpoint(session.exportCheckpoint());
+      if (final === undefined) final = bytes;
+      else assert.equal(bytes, final);
+    }
+    console.log(JSON.stringify({ kind: 'host set', depth: levels, bytes: canonical.length }));
   `;
   const child = spawnSync(
     process.execPath,
@@ -260,5 +300,5 @@ test("deep source-produced lists and objects serialize and resume with a constra
     { encoding: "utf8", timeout: 60_000 },
   );
   assert.equal(child.status, 0, child.stderr || String(child.error));
-  assert.equal(child.stdout.trim().split("\n").length, 6);
+  assert.equal(child.stdout.trim().split("\n").length, 8);
 });

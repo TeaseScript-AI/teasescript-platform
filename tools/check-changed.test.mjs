@@ -400,7 +400,7 @@ test("its last line names what ran, what failed, and what it did not run: the ch
       assert.equal(result.status, fails ? 1 : 0, result.stdout + result.stderr);
       assert.equal(
         result.stdout.trimEnd().split("\n").at(-1),
-        "check-changed: ran: diff --check, merge commits, format, oxlint, knip, doc links, imports, pin suites, tsc, test:lint; " +
+        "check-changed: ran: diff --check, merge commits, format, oxlint, knip, doc links, imports, readme paths, pin suites, tsc, test:lint; " +
           `failed: ${fails ? "pin suites" : "none"}; ` +
           "not run: test:families, typecheck:player, lint:design, test:verification, format:check, " +
           "test:lint:design, the compiled test suite (CI runs it)",
@@ -454,7 +454,7 @@ test(
       signalsBefore: false,
     });
     const last =
-      "check-changed: ran: diff --check, merge commits, format, oxlint, knip, doc links, imports, pin suites, tsc, test:lint; " +
+      "check-changed: ran: diff --check, merge commits, format, oxlint, knip, doc links, imports, readme paths, pin suites, tsc, test:lint; " +
       "failed: pin suites; not run: test:families, typecheck:player, lint:design, test:verification, " +
       "format:check, test:lint:design, the compiled test suite (CI runs it)";
     const at = result.stdout + result.stderr;

@@ -43,7 +43,9 @@ the framework-independent `player/` no `player/vue/`); cycles through imports th
 refused. Not seen: a `<script src>` block, a `.js` file beside a same-name `.ts` (read as the `.js`), and a `.vue` file
 Vue's parser refuses (vue-tsc refuses it in CI). `tools/repository-checks/imports.mjs` lists the boundaries with their
 sources, the packages each area may import with their reasons, the generated-component exception, and what no document
-declares. `npm run lint:design` and `npm run test:lint:design` check the [Player design
+declares. `npm run check:readme-paths` checks that every backticked path in the Player's two maps (`player/README.md`,
+`player/vue/src/README.md`) names a tracked file or folder; `tools/repository-checks/readme-paths.mjs` says which
+spans it reads and which it skips. `npm run lint:design` and `npm run test:lint:design` check the [Player design
 contracts](LINTING.md#player-design-lint) and their positive/negative fixtures; both are included in `npm run check`.
 Independent pre-test gates and UI checks/builds run concurrently through `tools/check/run-parallel.mjs`; the pre-test gates
 are the npm scripts `tools/check/check-pretest-steps.txt` lists, one per line.
@@ -286,6 +288,22 @@ fixture's narrowing holds are one closed map of named records with reasons and i
 verify each name's existence, narrowing cell, own hold reason and continuing disagreement, comparing causes as a
 multiset and reporting outcome, site, context and narrowing payload separately. A matching record returns to ordinary
 assertions; a matching hold fails completeness.
+
+What stays held after a teardown is checked through `tests/helpers/retention-witness.ts`. Its guarantee: after
+teardown, no original object the connection reached survives, and no string holding a case's marker survives. Its child
+(`retention-child.ts`) runs cases whose fixture carries the case's marker on every line, and keeps each connection and
+its ops until the end. After the teardown:
+
+- no string in the child's heap snapshot, read whole or, for a slice, as any part of its parent, may hold a marker;
+- a torn-down connection reaches no more objects than a fresh one;
+- nothing the connection reached before stays alive elsewhere.
+
+`tests/bridge/retention-witness.test.ts` holds its positive controls: each holder kind found on a path through its own edge,
+and each string representation with the marker cut at every position. Its limits, named in the helper: copies of
+marker-free data; marker-free objects in private fields, closure environments, `WeakMap` entries or promise results;
+bytes the connection never held; and unmarked returned scalars. A route that keeps bytes brings its own evidence of
+their lifetime.
+
 `tests/families/` holds the generators that reviewers and builders used as evidence, each module the sources of one
 recorded evidence run, with their runner and module contract (`tests/families/README.md`). Their runs are outside CI:
 before a type-core review round, the builder runs the affected areas against the base and head builds and reports the
@@ -740,6 +758,177 @@ The canonical self-contained checkpoint guarantee uses the serialized runtime RN
 
 JSON-safe runtime state at every instruction boundary does not mean production execution must persist after every instruction.
 
+## Differential harness
+
+`tests/helpers/runtime-differential.ts` runs one input through two pipelines (#1797's F-depth harness). Each side
+compiles the input on the legacy or the core route, then steps one instruction or delay settlement at a time. At every
+state it compares the complete record of both sides:
+
+- the trusted snapshot;
+- the operation's result, events and random choices;
+- the harness's random-decision log;
+- the observer log, the instruction trace, and the side's own debug trace.
+
+It does so for the uninterrupted run, and along each restore route to the end from a bounded set of cut points: the
+mandatory cuts first, then evenly spaced ones, up to 8 in CI and 32 with `TEASESCRIPT_SWEEP=full` or in the campaign
+CLI. The routes are a fork, the checked, trusted and tagged snapshots, the checkpoint, and its JSON. A restored state
+must also equal its side's uninterrupted state at the same index.
+
+Comparison (`compareStructures`) and the harness's writing and digests (`canonicalText`, which writes `-0` as `-0`) are
+iterative, so a 10,000-level value is never the harness's own failure. A side's end is classified apart from the pair's
+verdict:
+
+- a writing failure is `serializer-failure`;
+- a correspondence that cannot map a position is `mapping-failure`;
+- a core refusal, on either side or both, is `unsupported-route`, counted rather than failed.
+
+No exception gives a false `equivalent` or a `discrepancy`. Any exception the driver did not raise itself becomes a
+side's `harness-failure` (or `serializer-failure`), naming the stage and the member the driver was operating on. Only
+the engine's own public calls are engine behaviour: a fresh session refusing the input, and a restore that threw. The
+attribution is best effort for synchronous adapters (#1923). The campaign CLI exits once its output has been written: 0
+for identity, an unsupported route, or a pair censored at the step limit; 1 for a decided difference, a one-sided
+rejection included; 2 for a harness failure or an unknown verdict.
+
+`tests/runtime/v1/runtime-differential.test.ts` runs this build against itself over the regressions in
+`tools/runtime-differential/regressions/` (with their independent expectations) and a seeded sample covering every
+generator tag. It also runs 10,000-level host values (a list, and lists, objects, dicts and sets nested in turn) and
+the sensitivity controls, each a `discrepancy` at its own path; `FUZZ_ACCEPTANCE=1` adds a 10,000-level chain of sets. `node tools/runtime-differential/run.mjs --seed S --count N [--route core] [--shrink]` runs larger campaigns
+after `npm run build`; run them as background jobs.
+
+Each side sits behind a port (`tests/helpers/runtime/runtime-differential-side.ts`): this build in this process, or a root's
+runner (`tools/runtime-differential/run-root.mjs`) in its own process, called synchronously over a pair of named pipes.
+One lockstep loop decides for both. `tests/runtime-differential-oracle.oracle.ts` (in `npm run oracle:test`) runs the
+pinned oracle root of the runtime pipeline oracle (left) against this build (right), each behind that oracle's guard:
+
+- the regressions and the sample;
+- the construction witnesses, whose reports in-process and across processes must be equal;
+- four candidate mutations (`--replace`), each a `discrepancy` in the uninterrupted run;
+- a candidate that imports outside its inventory, and a runner that exits or writes a malformed or invalid reply:
+  `harness-failure`;
+- one accepted control per route of `admitExternal`, which builds a recipe's value inside a root and admits it through
+  that root's public API (host globals, script storage, or a substituted checkpoint binding). A recipe names a builder
+  of what JSON cannot carry (an accessor, a cycle, a hole, a prototype, a non-finite number), a deep or wide value, or
+  `plain` JSON data as `canonicalText`;
+- nested-set admission against the pinned root (#1904): a seeded family, collisions, precedence and recipes, each
+  with its declared acceptance, and a nested host value through every restore route.
+
+With `FUZZ_ACCEPTANCE=1` it also runs `tools/runtime-differential/acceptance.json`, every pair of which must be
+`equivalent`, a larger nested-set family and a deeper chain pair. Run both on-demand parts after a build with
+`FUZZ_ACCEPTANCE=1 npm run oracle:test` and `FUZZ_ACCEPTANCE=1 node tools/test-output-filter.mjs
+dist/tests/runtime/v1/runtime-differential.test.js`. `run.mjs --oracle [--manifest FILE]` runs a campaign the same way, each line naming the oracle's commit and
+the candidate's closure digest. A runner that never answers, or fails before it opens its pipes, is bounded only by the
+job's deadline. A behaviour changed after the pin shows as a difference to explain; nothing requires the pin to be
+re-sealed.
+
+## Replay through the bridge
+
+`tests/helpers/bridge/replay-harness.ts` is the L5 gate's shared replay harness (#1919). `tests/bridge/player-bridge-recording.test.ts`
+uses it for the replay family: successful replay, frozen failure replay and live recovery, each in-process, in a Node
+Worker, and in the composable on its in-process engine. It has these parts:
+
+- **`tapPublications`:** the complete trace of the publications a session's store is given after a cut, by value, from
+  the cut's revision and event cursor, with what the store holds once it applied each: its state and every event since
+  the cut. Every publication must apply, its cursors must continue, and it may carry only the fields
+  `PUBLICATION_FIELDS` declares. A new publication field is declared there, with whether the trace compares it.
+- **`adapterReplay`:** the oracle, the adapter restored at the publication before the cut and given the live run's
+  requests after it (`trackRequests`), the test's steps and the composable's own observations alike, in the order the
+  host applied them. The trace is then compared exactly.
+- **`withLiveHost`:** the real composable. Each publication is handed to it in the tick its store applies it, and the
+  next step waits until it has settled. Every session it shows is recorded by value and must equal the oracle's, each
+  publication once, in order. Every judgment runs while the composable lives.
+- **`LiveHostEffects`** (`tests/helpers/live-host-effects.ts`): the host services the composable is given or makes are
+  recorded:
+  - script storage;
+  - kept sessions and debug rooms, and their media repositories;
+  - the captured-media store;
+  - media elements and object URLs;
+  - `document` and `window` listeners and dispatches;
+  - lock fetches.
+
+  A sample holds each service's state by value and the count of each of its mutating calls, counted before the call
+  runs. An element property set counts only when it changes the value. Each service's members are classified there,
+  and a new member fails until it is classified.
+
+- **The control run:** the same restore, cut and steps in the live composable, without the call that throws or the
+  recovery. Samples are taken at the cut, after the throw, after every step, and once more after the judgments. Each
+  must equal the control run's sample at the same point, so what the steps themselves do (the script's end releasing
+  its medium) is in both, and what recovery adds is a difference. The session's requests are checked through that last
+  sample: each must be an engine input, and none may come after the judged trace.
+- **Outside the claim:**
+  - listener identity: listener counts are compared, not which callback;
+  - property writes on `document` and `window`;
+  - the bridge client's lifecycle registrations (`onLoss`);
+  - the capture host's device internals: the fixture's camera is unsupported, and a control shows no device probe
+    after the cut.
+
+The cut and the run's end are quiescent (`quiesce`): no request in flight, every reply delivered, and nothing more
+published.
+
+A frozen failure matches no publication, so it is judged by its recorded successful prefix replayed.
+
+### The L5 gate's K/F tapes
+
+`tests/gate/` drives real packages through the bridge for the L5 activation gate. One typed candidate table
+(`candidates.ts`) proposes finite, ordered requests for every kind of foreground presentation and pending action; the
+engine decides; the driver (`driver.ts`) records every request and reply on the client (`tape.ts`), declines and their
+publications included, and ends a tape `halted`, `failed` or `cut` (250 accepted inputs, a complete prefix for this
+policy, each closed by a final capture) or incomplete, reported as such (`notPrepared`, `unsupported`, `refused`,
+`stalled`, a `thrown` request that ended the session, a `captureFailed`, a `harnessError`). The adapter oracle
+(`oracle.ts`) judges every tape against the adapter, keeping its own revision and event cursor, and the fixed tape
+replays on every backend, failing at its first differing entry. Coverage is what the tapes ran, never what they could reach.
+
+`tests/player/player-gate-tapes.test.ts` holds the structural claim (the outcome readings cover exactly the table's candidate
+ops, and `ADAPTER_OPS` has a path for each; `prepare`, `start` and `captureCheckpoint` are the driver's own requests)
+and bounded runtime witnesses generated from the engine's guards, with their controls' mutants. The
+workload runs outside CI on a queue worker: `node tools/player-gate/tapes/record.mjs --out DIR --f DIR --k DIR
+--fixtures tests/gate/fixtures [--shard I/N]` in a built tree records, judges and replays every F and K package and
+the gate's fixtures (one small source per mechanism group the corpus never meets), preparation-only ones included, and
+reports what each tape met (`inventory.ts`); `census.mjs` counts every mechanism, lists those no tape met and those met
+only in incomplete tapes, and picks the browser and Pixel cohorts.
+
+In a browser, `node tools/player-gate/tapes/browser.mjs --engine E --bridge DIR --tapes DIR --census FILE --out FILE`
+replays the census's pinned cohort, each tape checked against its pinned hash, on the bridge page's replay mode
+(`tools/player-gate/bridge/replay.mjs`) through both backends, with the same comparison and no tolerance. A tape that
+differs in one engine is a measured value. Since #2147 an authored colour whose numbers have at most 20 significant
+digits normalizes to the same text in every engine, which converts it with engine-independent arithmetic.
+
+## Worker-topology settings
+
+`tests/helpers/player/worker-topology.ts` runs a row on the in-process host and on a Node Worker. Two settings, read
+when it loads and refused when malformed:
+
+- `PLAYER_TEST_TOPOLOGY`: `both` (the default) or `worker`. With `worker`, only the Worker's rows run and are owed by
+  each file's registry; an in-process-only case is not owed, and a standalone in-process test still runs but is no
+  Worker coverage.
+- `PLAYER_TEST_WORKER_DELAY_MS`: a whole number of milliseconds (default 0). Every message and failure from a Worker
+  reaches its client that late, in order, on real time that mocked timers neither move nor hold. A loss goes through
+  the same queue as the replies by construction; no test asserts that a reply sent before it arrives first. A delivery
+  received before a test ends still arrives through that test's own loss and waits; at its end, those still pending
+  are dropped.
+
+**The delayed challenge** runs one or more complete compiled files on the Worker with every message 3 s late, above
+`until`'s `"step"` budget of about 2 s:
+
+```sh
+npm run build:typescript && npm run build:player-test-modules
+PLAYER_TEST_TOPOLOGY=worker PLAYER_TEST_WORKER_DELAY_MS=3000 node tools/test-output-filter.mjs dist/tests/<file>.test.js
+```
+
+Select by these settings, not by test title: a title filter skips Worker tests whose title names no topology, and the
+registries then fail for rows they still owe. The runner's exit status is the result. The normal limit per test and
+per hook is not raised for the challenge.
+
+The challenge is a diagnostic, not a gate: no pull request owes a passing challenge. Run it on the affected file when a
+Worker row failed on a loaded host with no defect behind it, or when `worker-topology.ts`'s delivery changes. It takes
+3 s for every reply a row waits for, so a file of many rows runs for hours.
+
+The challenge fails a positive wait bounded in turns while a host reply is still under way, and a premise that real
+time stays short. It cannot fail an absence check made before the absent effect could arrive: a delay makes such a
+check easier to pass. That needs the producer's own completion as the check's witness, which only reading the row
+shows. `until`'s `on` argument is chosen by the wait's dependency (its doc comment); a wrong `"step"` shows as
+`never: <label>` under the challenge. A failing row stops at its first failure, so the waits after it are not
+challenged until it is repaired.
+
 ## Implemented Phase 1 deterministic property harness
 
 The repository keeps one small deterministic campaign around the current public
@@ -1043,6 +1232,15 @@ Select the production host's browser-automation stack when that concrete surface
 accessibility checks, isolation boundaries, cost, and stability it must prove. The current dependency-free Chromium
 smoke does not predetermine that later tooling decision.
 
+## The L5 activation gate kit
+
+`tools/player-gate/` measures what the L5 gate's cost report needs to decide whether the Player's engine moves into its
+Worker: real browsers and the Pixel 4a, outside CI, never a threshold; it changes no product file. Every value a cell
+reports derives from records that passed the kit's shared validation: each row is parsed once against its scenario's
+closed shape, and the derivations read only those validated copies; every cell is `measured, validated`. The headline, the summary and the R0 comparison hold timings and
+pass/fail only. The kit's README ([`tools/player-gate/README.md`](../tools/player-gate/README.md)) has what the
+validation covers and what it leaves to review, what the kit measures, the files and how to run R0.
+
 ## Coverage and performance boundaries
 
 The repository does not use an arbitrary mandatory line-coverage threshold such as 95 percent. Coverage may later help identify untouched branches and error paths, but correctness, determinism, restore equivalence, and boundary validation are more important than maximizing a percentage.
@@ -1050,7 +1248,9 @@ The repository does not use an arbitrary mandatory line-coverage threshold such 
 Performance benchmarks are separate from correctness tests. The runtime benchmark
 ([`benchmarks/runtime/README.md`](../benchmarks/runtime/README.md)) keeps the two apart in one tool: CI checks its exact
 instruction counts and results against a baseline that a PR updates on purpose, and its paired CPU comparison runs on
-demand on a queue worker, reported and never a threshold. [`planning/RELEASE-ROADMAP.md`](planning/RELEASE-ROADMAP.md) tracks the Beta outcome **Establish a runtime performance baseline and optimization plan**.
+demand on a queue worker, reported and never a threshold. That baseline is the record of what the engine does (every
+cut's events, state and random state, the runtime oracle's runnable cases among the probes): a change to it is
+explained in the PR that makes it. [`planning/RELEASE-ROADMAP.md`](planning/RELEASE-ROADMAP.md) tracks the Beta outcome **Establish a runtime performance baseline and optimization plan**.
 
 Performance workloads should measure long-running runtime-state growth as well as instruction throughput. This includes growth in runtime-managed identities, snapshots, checkpoints, cloning, validation, and serialization costs. Repeated timer or media creation is a representative workload, but measurements and reachability/lifetime analysis must precede any reclamation or garbage-collection rule.
 
@@ -1120,6 +1320,44 @@ checks no greater than `main`'s at every size; any small-size excess is reported
   than `main`'s, and is entirely construction in the ledger; the report names this reading, and the PR lists each such
   sibling with its excess (#1384, 2026-11-01). Amortised activation, indexing a root only once its walks have paid the
   index's cost, is a separate mechanism to propose if a real source shows this boundary cost matters.
+
+## Runtime pipeline oracle
+
+The oracle (engine plan §8 F-oracle) is a frozen build of a pinned commit that a candidate pipeline is compared with.
+It is an on-demand tool for finding defects: no CI job runs it and no pull request owes it a result. A difference it
+shows is something to explain, not something to preserve. The record of what the engine does is the runtime
+benchmark's baseline ([Coverage and performance boundaries](#coverage-and-performance-boundaries)), which CI checks.
+`tools/runtime-oracle/manifest.json` pins the commit and its tree, Node, the lockfile, the build command, the formats, the
+import closure of the entries with its build inputs, the built output, the oracle's tooling and case files, and every
+case's result digest.
+
+- **Materialize:** `npm run oracle:materialize` acquires the commit into
+  `$RUNTIME_ORACLE_HOME/<commit>`, by default `~/.cache/teasescript/runtime-oracle/`. It fetches the commit, uses
+  `git archive`, installs with `npm ci` from the commit's own lockfile, and builds with its own `build:typescript`.
+  `--from DIR` adopts a built tree of the same commit, such as `sx-tree`'s. Every use checks the root against the
+  manifest first.
+- **Run:** each root runs in its own process. Its guarantee is **Node-managed module provenance of a trusted
+  pipeline**: the pinned code is the project's own, kept apart from accidental contamination, not from malicious code.
+  - One classifier (`tools/runtime-oracle/admission.mjs`) decides by a file's real path. A file is the root's own when
+    it is inside the root's canonical directory, outside its dependency directory, and under no `node_modules`
+    directory. It is certified when it is the root's own and declared. It is a package's when it lies in the dependency
+    directory and its lockfile key (the chain to its last `node_modules`) is installed at its locked version.
+  - A load (the resolve hook) admits a Node built-in, a certified file or a package's file. Certification, before a
+    cached root is used and at the seal, admits only certified files.
+  - A root's declarations are validated before they count. A discovered closure only proposes them, so an import out of
+    the root never certifies itself.
+  - Provenance is separate: an exact-SHA acquisition, the pin's own install and build, fresh-only seals, and a re-hash
+    of every certified file of a cached root.
+  - Outside the guarantee, because the resolve hook never sees what they run, and the engine uses none of them:
+    Workers, child processes, `vm` sources, a hook the root registers, and addons.
+  - `tests/runtime-oracle-admission.oracle.ts` checks the classifier as a generated family of 200 cases, with an
+    independent oracle and a pair-coverage check.
+- **Check:** `npm run oracle:test`, after a build, materializes the oracle and runs the three `tests/*.oracle.ts`
+  files, outside the sharded suite; `npm run oracle:run` prints the comparison alone. The oracle must reproduce its
+  pinned digests, then this checkout's build is compared with it on every case and route
+  (`tools/runtime-oracle/cases.json`); a difference fails the run.
+- **Seal:** `node tools/runtime-oracle/materialize.mjs --seal COMMIT --label provisional|final [--seam SHA]` rewrites
+  the manifest from that commit's own run, when a newer pin serves the comparison better.
 
 ## Reproducibility requirements
 

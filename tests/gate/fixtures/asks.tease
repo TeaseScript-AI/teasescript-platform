@@ -1,0 +1,7 @@
+// The gate's typed-ask fixture: a password and the three temporal questions, each answered by the table's own row.
+let secret = askPassword("A password")
+let day = askDate("A day")
+let moment = askTime("A time")
+let when = askDateTime("A date and time")
+say "Answered", instant
+exit
