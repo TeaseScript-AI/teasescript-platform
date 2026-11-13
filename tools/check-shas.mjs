@@ -38,8 +38,9 @@ import {
 // and the commit is reported as on origin at that ref. Else it is local only, such as a head from before a rebase. A
 // repository without remote-tracking refs is named once, and its tokens are not checked for that. An unresolved token
 // may be a commit not fetched yet: the message says to fetch it; this tool never fetches. A token that is no commit
-// but a tree, such as a stored baseline's `src` tree hash, is reported as a tree, resolved, without the remote check:
-// proving a tree reachable from a remote ref is costly.
+// but a tree or a blob, such as a baseline key's `src` tree and lockfile blob (`<src tree>.<oracles sha256>.<lock
+// blob>`), is reported as a tree or a blob, resolved, without the remote check: proving one reachable from a remote ref
+// is costly. A short token that one commit and other objects share resolves as that commit.
 // Unfilled placeholders (`PLACEHOLDERS`) outside fenced code blocks are reported too, and so is a closing clause that
 // names several issues after one keyword, in code too, which as closing syntax closes only the first
 // (`closingClausesOf`). Paths into the disposable scratch area `/tmp/agent-work/`, whose files are deleted after
@@ -61,7 +62,9 @@ import {
 //   (`floatDigits`): a float's digits, such as `1.7976931348623157e+308` or `6.02214076e23`. A token of that shape
 //   after any punctuation is therefore skipped when unresolved, which is acceptable as the rule reaches only a token no
 //   repository resolves, of digits, one `e` and an exponent, directly after `<digits>.`;
-// - right after the word `sha256` (with a space, `:` or `=` between): a file's hash, such as `sha256 4322b2e0e668`;
+// - right after the word `sha256` or `oracles` (with a space, `:` or `=` between): a file's hash, such as `sha256
+//   4322b2e0e668`, or the oracle library's digest in a baseline key as the queue's status lines print one, such as
+//   `src 997103284 oracles 667a9dcfc lock 0572163a2`;
 // - shorter than 40 and inside a URL or a path, except after `/commit/`, `/commits/`, `/tree/` or `/blob/`: a file's
 //   or a job's name. A full 40-character SHA in a path, such as an evidence folder, must resolve.
 //
@@ -69,9 +72,12 @@ import {
 // closing clause is left (scratch paths do not change it), 1 otherwise, 2 when it cannot run (bad arguments, an
 // unreadable file, a `--repo` that is no git repository, or a failed `--append` write).
 
-/** A whole last line in this tool's own form, as `--append` writes it. */
+/**
+ * A whole last line in this tool's own form, as `--append` writes it; its blob count is optional, so that a line an
+ * earlier version wrote, without one, is still replaced.
+ */
 const OWN_LINE =
-  /^check-shas: \d+ tokens: \d+ resolved, \d+ trees, \d+ ambiguous, \d+ unresolved, \d+ local only, \d+ skipped \(ids, words, paths, sha256s\); \d+ placeholders, \d+ multi-issue closing clauses, \d+ scratch paths$/u;
+  /^check-shas: \d+ tokens: \d+ resolved, \d+ trees, (?:\d+ blobs, )?\d+ ambiguous, \d+ unresolved, \d+ local only, \d+ skipped \(ids, words, paths, sha256s\); \d+ placeholders, \d+ multi-issue closing clauses, \d+ scratch paths$/u;
 
 /** `text` without a last line of this tool's own and the white space around it, read from the end once. */
 function withoutOwnLine(text) {
@@ -221,6 +227,8 @@ export function excuse(token, text, index) {
   if (floatDigits(text, index, token.length)) return "a float's digits";
   if (/\bsha256[\s:=]+$/iu.test(text.slice(Math.max(0, index - 16), index)))
     return "a file's sha256";
+  if (/\boracles[\s:=]+$/iu.test(text.slice(Math.max(0, index - 16), index)))
+    return "an oracle library's sha256";
   // The run of non-space characters the token is in: a URL or a path, unless it names the commit itself.
   const start = text.slice(0, index).search(/\S*$/u);
   const before = text.slice(start, index);
@@ -315,8 +323,9 @@ export function closingClausesOf(text) {
 }
 
 /**
- * `token` in `repository`: `{ sha }` when one commit has it, `{ tree }` when it is no commit but a tree, `{ ambiguous:
- * n }` when several commits share it, else `null`.
+ * `token` in `repository`: `{ sha }` when one commit has it, `{ object: { type, id } }` when it is no commit but one
+ * tree or blob (`type` `"tree"` or `"blob"`, `id` its full id), `{ ambiguous: n }` when several commits share it, else
+ * `null`.
  */
 function resolve(token, repository) {
   const verified = spawnSync(
@@ -325,18 +334,21 @@ function resolve(token, repository) {
     { encoding: "utf8" },
   );
   if (verified.status === 0) return { sha: verified.stdout.trim() };
-  // (no commit: a tree, such as a stored baseline's `src` tree, is a citation too; a commit would have peeled above)
-  if (
-    spawnSync("git", ["-C", repository, "cat-file", "-t", token], {
-      encoding: "utf8",
-    }).stdout.trim() === "tree"
-  )
+  // (no commit: a baseline key's `src` tree or lockfile blob is a citation too; a commit would have peeled above, and a
+  // short token several objects share names no type here)
+  const type = spawnSync("git", ["-C", repository, "cat-file", "-t", token], {
+    encoding: "utf8",
+  }).stdout.trim();
+  if (type === "tree" || type === "blob")
     return {
-      tree: spawnSync(
-        "git",
-        ["-C", repository, "rev-parse", "--verify", "--quiet", `${token}^{tree}`],
-        { encoding: "utf8" },
-      ).stdout.trim(),
+      object: {
+        type,
+        id: spawnSync(
+          "git",
+          ["-C", repository, "rev-parse", "--verify", "--quiet", `${token}^{${type}}`],
+          { encoding: "utf8" },
+        ).stdout.trim(),
+      },
     };
   const candidates = spawnSync("git", ["-C", repository, "rev-parse", `--disambiguate=${token}`], {
     encoding: "utf8",
@@ -449,7 +461,15 @@ function main() {
   const text = append ? withoutOwnLine(read) : read;
 
   let failed = false;
-  const counts = { resolved: 0, trees: 0, ambiguous: 0, unresolved: 0, local: 0, skipped: 0 };
+  const counts = {
+    resolved: 0,
+    trees: 0,
+    blobs: 0,
+    ambiguous: 0,
+    unresolved: 0,
+    local: 0,
+    skipped: 0,
+  };
   // Whether each repository has remote-tracking refs, named once when it has none.
   const remoteRefs = new Map();
   const hasRemoteRefs = (repository) => {
@@ -505,13 +525,13 @@ function main() {
         .map((entry) => ({ ...entry, at: onOriginAt(entry.answer.sha, entry.repository) }))
         .find(({ at }) => at !== undefined);
     const local = resolved ? undefined : found[0];
-    const tree = resolved || local ? undefined : answers.find(({ answer }) => answer?.tree);
+    const object = resolved || local ? undefined : answers.find(({ answer }) => answer?.object);
     const ambiguous = answers.find(({ answer }) => answer?.ambiguous);
     counts[
       resolved
         ? "resolved"
-        : tree
-          ? "trees"
+        : object
+          ? `${object.answer.object.type}s`
           : local
             ? "local"
             : ambiguous
@@ -526,11 +546,12 @@ function main() {
         `local only  ${token}  ${local.answer.sha} in ${local.repository}, on no remote ref: push it, or cite one on origin; ` +
           "for exact pre-rebase heads, push one archive ref whose parents are the cited heads\n",
       );
-    } else if (tree)
+    } else if (object) {
+      const { type, id } = object.answer.object;
       process.stdout.write(
-        `tree        ${token}  ${tree.answer.tree} in ${tree.repository}: a tree, not checked on a remote\n`,
+        `${type.padEnd(12)}${token}  ${id} in ${object.repository}: a ${type}, not checked on a remote\n`,
       );
-    else if (resolved)
+    } else if (resolved)
       process.stdout.write(
         `resolved    ${token}  ${resolved.answer.sha} in ${resolved.repository}` +
           `${resolved.at ? `, on origin at ${resolved.at}` : ""}\n`,
@@ -568,7 +589,7 @@ function main() {
   }
   const tokens = Object.values(counts).reduce((sum, n) => sum + n, 0);
   const line =
-    `check-shas: ${tokens} tokens: ${counts.resolved} resolved, ${counts.trees} trees, ${counts.ambiguous} ambiguous, ` +
+    `check-shas: ${tokens} tokens: ${counts.resolved} resolved, ${counts.trees} trees, ${counts.blobs} blobs, ${counts.ambiguous} ambiguous, ` +
     `${counts.unresolved} unresolved, ${counts.local} local only, ${counts.skipped} skipped (ids, words, paths, sha256s); ` +
     `${placeholders.length} placeholders, ${clauses.length} multi-issue closing clauses, ${scratch.length} scratch paths`;
   if (append) appendLine(files[0], held.descriptor, bytes, text.trimEnd(), line);
