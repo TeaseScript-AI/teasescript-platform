@@ -489,12 +489,13 @@ export class Solver {
 
   /**
    * Runs a computation to its end and returns its result: a top-level demand, never memoised itself. After a stop it
-   * computes nothing: each demand it yields answers as it finished, else `STOPPED` (`#stoppedRun`).
+   * computes nothing: each demand it yields answers as it finished, else `STOPPED`, through its decision's open answer
+   * where it has one (`#stoppedRun`, `#stopped`).
    */
   public run<T>(work: Work<T>): T {
     if (this.#running) throw new Error("The solver is already running a top-level demand.");
-    // after a stop the analysis only finishes: no demand is computed, each answered as it finished or `STOPPED`
-    // (a top-level computation is a run of its own; a stopped one's generators run outside the frames)
+    // after a stop the analysis only finishes: no demand is computed, each answered as it finished or as it stopped
+    // (`#stopped`; a top-level computation is a run of its own; a stopped one's generators run outside the frames)
     this.#retained?.run({});
     if (this.#work.stopped !== null) {
       try {
