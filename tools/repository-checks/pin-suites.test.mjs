@@ -159,7 +159,10 @@ test("a core change lists every pinning suite; another change lists none, a suit
     suitesFor(MARKED, ["tests/helpers/type-core/families/admission-products.ts"]).map(
       (suite) => suite.file,
     ),
-    ["tests/type-core/work/type-core-work-families.test.ts", "tests/type-core/type-core-work-c.test.ts"],
+    [
+      "tests/type-core/type-core-work-c.test.ts",
+      "tests/type-core/work/type-core-work-families.test.ts",
+    ],
   );
   assert.deepEqual(
     suitesFor(MARKED, ["tests/helpers/type-core/families/property-names.ts"]).map(
