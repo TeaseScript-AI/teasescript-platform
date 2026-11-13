@@ -229,6 +229,11 @@ test("the prefills, choices and asks the route refuses: today's compile error ea
     ["let m: null = hostValue\n", "m"],
     ["", "[null][0]"],
     ["", "null otherwise null"],
+    // (a typed ingress's read wrapped: the refusal judges what the wrapping holds)
+    ["let m: null = hostValue\n", "[m][0]"],
+    ["let m: null = hostValue\n", "m otherwise m"],
+    ["let m: null = hostValue\n", "[[m]][0][0]"],
+    ["let m: null[] = hostValue\n", "[m[0]][0]"],
   ])
     refusedAsToday(
       `${prelude}let r = askText("q", prefill: ${prefill})\nexit\n`,
@@ -244,6 +249,8 @@ test("the prefills, choices and asks the route refuses: today's compile error ea
       ["let m: string = hostValue\n", "m"],
       ["let m: string? = hostValue\n", "m"],
       ['let o = {p: ""}\n', "o.p"],
+      ["let m: string = hostValue\n", "[m][0]"],
+      ["let m: string = hostValue\n", "m otherwise m"],
     ])
       refusedAsToday(
         `${prelude}let r = ${ask}("q", prefill: ${prefill})\nexit\n`,
