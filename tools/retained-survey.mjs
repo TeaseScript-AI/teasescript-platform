@@ -49,7 +49,7 @@ for (const survey of folders.flatMap(surveys)) {
 }
 const sum = (counts) => [...counts.values()].reduce((a, b) => a + b, 0);
 const missing = suiteTestFiles("tests", ".test.ts")
-  .filter((path) => /^type-core\//u.test(path))
+  .filter((path) => path.startsWith("type-core/"))
   .map((path) => basename(path, ".ts"))
   .filter((name) => !files.has(name))
   .sort();
