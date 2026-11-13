@@ -27,15 +27,25 @@ import { placeKey } from "../way-facts.js";
 // from these; the type core (`core/`) reads none of them. Code found never to run changes nothing.
 
 /**
- * What one iteration of a loop may do before the next test: the variables it assigns or changes in place, and whether it
- * may suspend.
+ * What one iteration of a loop may do before the next test: the variables it assigns or changes in place, and whether
+ * other code may run during it.
  */
 export interface LoopEffects {
   readonly writes: ReadonlyMap<string, Sharing>;
+  /**
+   * Whether an iteration reaches a point where a block may run or variables that functions and blocks share may change
+   * (#2737): a statement of `OTHER_CODE_STATEMENTS`, an interaction, a `say`, a button, a popup, a timer, media or
+   * camera expression, a call that is no `isInertBuiltinCall`, or a store into a member or element, also inside an
+   * inner loop. Not whether the iteration waits.
+   */
   readonly suspends: boolean;
 }
 
-const SUSPENDING_STATEMENTS: ReadonlySet<Statement["kind"]> = new Set([
+/**
+ * The statements at which a block may run or shared variables may change (a file `call` runs another file's top
+ * level).
+ */
+const OTHER_CODE_STATEMENTS: ReadonlySet<Statement["kind"]> = new Set([
   "sayStatement",
   "showButtonStatement",
   "showPopupStatement",
@@ -199,7 +209,7 @@ function programEffects(program: Program, file: number, dead: DeadCode): Program
           expression.kind === "timerExpression" ||
           expression.kind === "playMediaExpression" ||
           expression.kind === "showCameraExpression" ||
-          (expression.kind === "callExpression" && !isPureBuiltinCall(expression)))
+          (expression.kind === "callExpression" && !isInertBuiltinCall(expression)))
       )
         loop.suspends = true;
       // A method that changes a list, set, or dict changes the variable that holds it, also called in parentheses.
@@ -230,7 +240,7 @@ function programEffects(program: Program, file: number, dead: DeadCode): Program
       continue;
     }
     const statement = item.statement;
-    if (loop !== null && SUSPENDING_STATEMENTS.has(statement.kind)) loop.suspends = true;
+    if (loop !== null && OTHER_CODE_STATEMENTS.has(statement.kind)) loop.suspends = true;
     if (runs && statement.kind === "callFileStatement") callsFiles = true;
     if (
       runs &&
@@ -315,17 +325,20 @@ function entersMainAtTop(target: TransferTarget): boolean {
   return text === null || text === MAIN_FILE_PATH;
 }
 
-const PURE_BUILTINS: ReadonlySet<string> = new Set([
+const CORE_AND_PRELUDE_BUILTINS: ReadonlySet<string> = new Set([
   ...CORE_RUNTIME_BUILTINS,
   ...PLATFORM_STANDARD_LIBRARY_PRELUDE,
 ]);
 
-/** A call of a built-in without effects on script variables or time. */
-function isPureBuiltinCall(expression: CallExpression): boolean {
+/**
+ * A call of a core or prelude built-in that is no file store and no lock (both may wait for the Player): it changes no
+ * script variable and lets no other code run. It is not pure: the random functions are among them (#2737).
+ */
+function isInertBuiltinCall(expression: CallExpression): boolean {
   const callee = expression.callee;
   return (
     callee.kind === "identifier" &&
-    PURE_BUILTINS.has(callee.name) &&
+    CORE_AND_PRELUDE_BUILTINS.has(callee.name) &&
     !isFileStoreCall(expression) &&
     !isLockCall(expression)
   );
