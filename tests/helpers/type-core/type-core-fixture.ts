@@ -81,19 +81,6 @@ export const HELD_S10_RECORDS: ReadonlyMap<string, S10Hold> = new Map([
     },
   ],
   [
-    "cp9-cells/3b/review-early/a3-kinds-only-box",
-    {
-      reason: CORRIDOR_REASON,
-      differences: [
-        "outcome compile-error, got warning-runtime-check",
-        "missing diagnostic operator compile-error main.tease:49-54 ×1",
-        "extra diagnostic operator warning-runtime-check main.tease:49-54 ×1",
-        'missing required check operator main.tease:49-54 N3 writer main.tease:66-75 ["if box.n != null","otherwise"] ×1',
-        "extra check null-check box.n [integer|number] main.tease:49-54 ×1",
-      ],
-    },
-  ],
-  [
     "cp9-cells/3b/review-early/a4-shelves-scope",
     {
       reason: CORRIDOR_REASON,

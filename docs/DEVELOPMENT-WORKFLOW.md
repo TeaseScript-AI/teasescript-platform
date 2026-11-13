@@ -328,14 +328,15 @@ output, and the same success or failure at the same place, for every script and 
 or by a measurement over a stated complete domain. The report says in plain words what a maker could notice and in which
 case.
 
-Until the type core (`src/type-inference/core/`) replaces the legacy type checker, what it does on its test-only
-candidate route is not yet accepted behavior. The coordinator decides it and adds each such decision to the list
-re-assessed before the switch (#1526's condition 2, in [`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md#coarse-type-core-bounds));
-the owner judges that list as a whole before the switch (owner, 2026-11-10). A choice that shapes the language, the
-switch itself, or what makers get after the switch still comes to the owner when it arises. Each entry says what the
-type core does, in which case, what a maker would notice after the switch, and its measured extent. This does not make
-a missing check acceptable: #1526's condition 1 stands, and a published plan that passes a value the natural compile
-rejects is a defect to repair, not a decision to list.
+What the type core (`src/type-inference/core/`) does on its test-only candidate route is not yet accepted behavior;
+the coordinator decides it (owner, 2026-11-10). Of its differences from the legacy type checker, only a real error
+blocks a pull request of it (owner, 2026-11-13): a value let through unchecked (#1526's condition 1, in
+[`RESOURCE-LIMITS.md`](RESOURCE-LIMITS.md#coarse-type-core-bounds)), a crash, a compile error for code the language
+text (V30, the ADRs) does not call wrong, or a run that differs from what the language text says. Any other difference,
+in a message, a warning, or when a wrong source is caught, is a note in the pull request's body, unless it drops or
+worsens a fix the legacy one gives, which is a defect to repair ([`TESTING.md`](TESTING.md#the-shadow-comparison)). A
+choice that shapes the language, the switch itself, or what makers get after the switch still comes to the owner when
+it arises (owner, 2026-11-10).
 
 These rules prevent accidental scope escalation. They do not permit reviewers
 to dismiss reproducible defects or weaken accepted syntax/semantics,
@@ -444,7 +445,7 @@ it is unclear whether a trigger holds for the planned change, take the heavier r
 
 **Full route** when any of these holds:
 
-1. **A contract changes:** something other work or users rely on, such as language syntax or semantics, a public or
+1. **A contract changes:** something other work relies on, such as language syntax or semantics, a public or
    host API, a protocol between components, a stored or exchanged data format (saves, checkpoints, a database schema),
    a security or trust boundary, or which inputs complete, stop, or fail under a limit or budget. An additive field
    counts when it is persisted or part of a format, protocol, or API that others consume, whether or not anything reads
@@ -458,7 +459,6 @@ it is unclear whether a trigger holds for the planned change, take the heavier r
 4. **The planned change has broad or hard-to-see effects:** it can alter behavior or cost in many places at once, or
    in ways one test cannot show, because it changes an ordering, timing, or concurrency mechanism, input handling shared
    by many paths, or growth with input size. A local guard with a deterministic regression test does not count.
-5. **It is hard to undo after merge:** a data migration, or a published format or API.
 
 **Light route** for a behavior change that meets none of them, such as a local repair with a reproduction or a local
 guard with a deterministic regression test, and for a refactor, tooling, or generator change meant to keep behavior.

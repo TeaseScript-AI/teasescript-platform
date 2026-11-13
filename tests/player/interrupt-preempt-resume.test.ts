@@ -22,7 +22,7 @@ import { completeAction } from "../../src/runtime/operations/complete-action.js"
 import { runtimeTimedWork } from "../../src/runtime/operations/observe-time.js";
 import { createRuntimeSession } from "../../src/runtime/session.js";
 import { assertRuntimeResumeEquivalent } from "../helpers/runtime-equivalence.js";
-import { Story } from "../helpers/story-session.js";
+import { Story } from "../helpers/runtime/story-session.js";
 import { validateRuntimeSnapshot } from "../../src/runtime/snapshot/snapshot-validation.js";
 
 /*

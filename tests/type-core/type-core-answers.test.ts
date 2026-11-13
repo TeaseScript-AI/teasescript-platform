@@ -510,6 +510,142 @@ test("a value an add or an addAll inserts has its properties, never the collecti
   }
 });
 
+const loads = (n: number, fallback = "0"): string =>
+  Array.from({ length: n }, () => `load(hostValue, default: ${fallback})`).join(", ");
+const keyed = (fallback: string): string =>
+  'let key = "k"\nlet names = {key: "k"}\nlet keys = ["k"]\nlet box = [' +
+  ["hostValue", "key", "names.key", "keys[0]", 'key + "1"']
+    .map((key) => `load(${key}, default: ${fallback})`)
+    .join(", ") +
+  "]\nrepeat box[0].f0 {}\nrepeat box[1].f1 {}\nlet whole = box[2]\nexit\n";
+// per program its reads, each with the binding whose line holds the loads it holds and the kinds it answers, and
+// the defaults whose compile errors stand each at its own
+const programs: readonly (readonly [
+  source: string,
+  reads: readonly (readonly [string, string, string])[],
+  errors?: readonly string[],
+])[] = [
+  [
+    keyed("0"),
+    [
+      ["box[0].f0", "box", "unknown"],
+      ["box[1].f1", "box", "unknown"],
+      ["box[2]", "box", "unknown"],
+    ],
+  ],
+  [
+    keyed("null"),
+    [
+      ["box[0].f0", "box", "unknown"],
+      ["box[2]", "box", "null,unknown"],
+    ],
+  ],
+  [
+    keyed("{f0: 1, f1: 2}"),
+    [
+      ["box[0].f0", "box", "unknown"],
+      ["box[2]", "box", "unknown"],
+    ],
+  ],
+  // loads of a default with no class (a choice of a list's buttons) answer alike below their root (#1208 review r3)
+  [
+    `let key = "k"\nlet box = [load(hostValue, default: (askChoice [1, 2])), load(key, default: (askChoice [1, 2])), load(hostValue, default: {a2: 1})]\nrepeat box[0].field0 {}\nrepeat box[2].field1 {}\nlet whole = box[1]\nexit\n`,
+    [
+      ["box[0].field0", "box", "unknown"],
+      ["box[2].field1", "box", "unknown"],
+      ["box[1]", "box", "unknown"],
+    ],
+  ],
+  // loads landing in a written type: one with fields (`object`), a dict's values, a scalar one, and defaults that do
+  // not fit it, each keeping its own error (the lead's ruling on #1208)
+  [
+    'let key = "k"\nlet box: object[] = [load(hostValue, default: {f0: 1}), load(key, default: {a1: 1}), load(hostValue, default: {f0: {g: 1}})]\nrepeat box[0].f0 {}\nrepeat box[1].f1 {}\nlet whole = box[2]\nexit\n',
+    [
+      ["box[0].f0", "box", "unknown"],
+      ["box[1].f1", "box", "unknown"],
+      ["box[2]", "box", "unknown"],
+    ],
+  ],
+  [
+    'let d: object dict = dict{a: load(hostValue, default: {f0: 1}), b: load(hostValue, default: {f1: 2})}\nrepeat d["a"].f0 {}\nrepeat d["b"].f1 {}\nexit\n',
+    [
+      ['d["a"].f0', "d", "unknown"],
+      ['d["b"].f1', "d", "unknown"],
+    ],
+  ],
+  [
+    'let key = "k"\nlet box: integer[] = [load(hostValue, default: "zero"), load(hostValue, default: 0), load(key, default: "one")]\nrepeat box[0] {}\nrepeat box[1].f0 {}\nexit\n',
+    [
+      ["box[0]", "box", "unknown"],
+      ["box[1].f0", "box", "unknown"],
+    ],
+    ['"zero"', '"one"'],
+  ],
+  // loads of different defaults, each its own class, answer alike below their root (#1208 review r1 B1)
+  [
+    `let key = "k"\nlet named = {a3: 1}\nlet box = [load(hostValue, default: {a0: 1}), load(key, default: null), load(hostValue, default: {f0: {a2: 1}}), load(hostValue, default: named), ${loads(1)}]\nrepeat box[0].field0 {}\nrepeat box[3].field1 {}\nlet whole = box[1]\nexit\n`,
+    [
+      ["box[0].field0", "box", "unknown"],
+      ["box[3].field1", "box", "unknown"],
+      ["box[1]", "box", "null,unknown"],
+    ],
+  ],
+  // the linear control: one load copied, its one leaf
+  [
+    "let one = load(hostValue, default: 0)\nlet box = [one, one, one]\nrepeat box[0].f0 {}\nrepeat box[1].f1 {}\nexit\n",
+    [
+      ["box[0].f0", "one", "unknown"],
+      ["box[1].f1", "one", "unknown"],
+    ],
+  ],
+  // disjoint lists: each its own loads
+  [
+    `let a = [${loads(2)}]\nlet b = [${loads(3, "null")}]\nrepeat a[0].f0 {}\nrepeat b[1].f0 {}\nexit\n`,
+    [
+      ["a[0].f0", "a", "unknown"],
+      ["b[1].f0", "b", "unknown"],
+    ],
+  ],
+  // changed receivers, guarded reads, a written destination, mixed literals, nested paths, member steps, a choice and
+  // a loop that adds to the list
+  [
+    `let box = [${loads(3)}]\nbox[0] = {f0: 1}\nrepeat box[0].f0 {}\nrepeat box[1].f1 {}\nexit\n`,
+    [],
+  ],
+  [
+    `let box = [${loads(3)}]\nif hostValue == 1 {\n  box = [{f0: 1}]\n}\nrepeat box[0].f0 {}\nexit\n`,
+    [],
+  ],
+  [
+    `let box = [${loads(3)}]\nbox.add(load(hostValue, default: null))\nrepeat box[0].f0 {}\nexit\n`,
+    [],
+  ],
+  [
+    `let box = [${loads(3)}]\nif box[0].f0 is integer {\n  repeat box[0].f0 {}\n}\nif box[1].f1 != null {\n  repeat box[1].f1 {}\n}\nexit\n`,
+    [],
+  ],
+  [
+    `let typed: integer[] = [${loads(3)}]\nlet box = [${loads(3)}]\nrepeat typed[0] {}\nrepeat box[0].f0 {}\nexit\n`,
+    [],
+  ],
+  [
+    `let h = hostValue\nlet box = [h, ${loads(3)}, {f0: 1}, 5]\nrepeat box[0].f0 {}\nrepeat box[1].f1 {}\nexit\n`,
+    [],
+  ],
+  [
+    `let box = [${loads(3, "{f0: {g: 1}}")}]\nrepeat box[0].f0.g {}\nrepeat box[1][0].f0 {}\nlet nested = [[${loads(2)}], [${loads(1)}]]\nrepeat nested[0][1].f0 {}\nrepeat nested[1][0].f1 {}\nexit\n`,
+    [],
+  ],
+  [
+    `let box = [${loads(3, '{text: "a", value: {f0: 1}}')}]\nrepeat box[0].year {}\nlet names = box[0].keys\nlet picked = askChoice box\nrepeat picked.f0 {}\nexit\n`,
+    [],
+  ],
+  [
+    `let box = [${loads(3)}]\nrepeat 2 {\n  repeat box[0].f0 {}\n  box.add(load(hostValue, default: null))\n}\nexit\n`,
+    [],
+  ],
+];
+
 /**
  * #1203: below their root computed-key loads hold host data at every path (F19; never a kind from their default,
  * ADR 0021 §6.2), each naming its own ingress (C9), and the value side answers a literal's class of them once for every
@@ -519,141 +655,6 @@ test("a value an add or an addAll inserts has its properties, never the collecti
  * are the same either way, in both orders, for the controls too.
  */
 test("a field read of computed-key loads holds every load's leaf, as each load read by itself (#1203)", () => {
-  const loads = (n: number, fallback = "0"): string =>
-    Array.from({ length: n }, () => `load(hostValue, default: ${fallback})`).join(", ");
-  const keyed = (fallback: string): string =>
-    'let key = "k"\nlet names = {key: "k"}\nlet keys = ["k"]\nlet box = [' +
-    ["hostValue", "key", "names.key", "keys[0]", 'key + "1"']
-      .map((key) => `load(${key}, default: ${fallback})`)
-      .join(", ") +
-    "]\nrepeat box[0].f0 {}\nrepeat box[1].f1 {}\nlet whole = box[2]\nexit\n";
-  // per program its reads, each with the binding whose line holds the loads it holds and the kinds it answers, and
-  // the defaults whose compile errors stand each at its own
-  const programs: readonly (readonly [
-    source: string,
-    reads: readonly (readonly [string, string, string])[],
-    errors?: readonly string[],
-  ])[] = [
-    [
-      keyed("0"),
-      [
-        ["box[0].f0", "box", "unknown"],
-        ["box[1].f1", "box", "unknown"],
-        ["box[2]", "box", "unknown"],
-      ],
-    ],
-    [
-      keyed("null"),
-      [
-        ["box[0].f0", "box", "unknown"],
-        ["box[2]", "box", "null,unknown"],
-      ],
-    ],
-    [
-      keyed("{f0: 1, f1: 2}"),
-      [
-        ["box[0].f0", "box", "unknown"],
-        ["box[2]", "box", "unknown"],
-      ],
-    ],
-    // loads of a default with no class (a choice of a list's buttons) answer alike below their root (#1208 review r3)
-    [
-      `let key = "k"\nlet box = [load(hostValue, default: (askChoice [1, 2])), load(key, default: (askChoice [1, 2])), load(hostValue, default: {a2: 1})]\nrepeat box[0].field0 {}\nrepeat box[2].field1 {}\nlet whole = box[1]\nexit\n`,
-      [
-        ["box[0].field0", "box", "unknown"],
-        ["box[2].field1", "box", "unknown"],
-        ["box[1]", "box", "unknown"],
-      ],
-    ],
-    // loads landing in a written type: one with fields (`object`), a dict's values, a scalar one, and defaults that do
-    // not fit it, each keeping its own error (the lead's ruling on #1208)
-    [
-      'let key = "k"\nlet box: object[] = [load(hostValue, default: {f0: 1}), load(key, default: {a1: 1}), load(hostValue, default: {f0: {g: 1}})]\nrepeat box[0].f0 {}\nrepeat box[1].f1 {}\nlet whole = box[2]\nexit\n',
-      [
-        ["box[0].f0", "box", "unknown"],
-        ["box[1].f1", "box", "unknown"],
-        ["box[2]", "box", "unknown"],
-      ],
-    ],
-    [
-      'let d: object dict = dict{a: load(hostValue, default: {f0: 1}), b: load(hostValue, default: {f1: 2})}\nrepeat d["a"].f0 {}\nrepeat d["b"].f1 {}\nexit\n',
-      [
-        ['d["a"].f0', "d", "unknown"],
-        ['d["b"].f1', "d", "unknown"],
-      ],
-    ],
-    [
-      'let key = "k"\nlet box: integer[] = [load(hostValue, default: "zero"), load(hostValue, default: 0), load(key, default: "one")]\nrepeat box[0] {}\nrepeat box[1].f0 {}\nexit\n',
-      [
-        ["box[0]", "box", "unknown"],
-        ["box[1].f0", "box", "unknown"],
-      ],
-      ['"zero"', '"one"'],
-    ],
-    // loads of different defaults, each its own class, answer alike below their root (#1208 review r1 B1)
-    [
-      `let key = "k"\nlet named = {a3: 1}\nlet box = [load(hostValue, default: {a0: 1}), load(key, default: null), load(hostValue, default: {f0: {a2: 1}}), load(hostValue, default: named), ${loads(1)}]\nrepeat box[0].field0 {}\nrepeat box[3].field1 {}\nlet whole = box[1]\nexit\n`,
-      [
-        ["box[0].field0", "box", "unknown"],
-        ["box[3].field1", "box", "unknown"],
-        ["box[1]", "box", "null,unknown"],
-      ],
-    ],
-    // the linear control: one load copied, its one leaf
-    [
-      "let one = load(hostValue, default: 0)\nlet box = [one, one, one]\nrepeat box[0].f0 {}\nrepeat box[1].f1 {}\nexit\n",
-      [
-        ["box[0].f0", "one", "unknown"],
-        ["box[1].f1", "one", "unknown"],
-      ],
-    ],
-    // disjoint lists: each its own loads
-    [
-      `let a = [${loads(2)}]\nlet b = [${loads(3, "null")}]\nrepeat a[0].f0 {}\nrepeat b[1].f0 {}\nexit\n`,
-      [
-        ["a[0].f0", "a", "unknown"],
-        ["b[1].f0", "b", "unknown"],
-      ],
-    ],
-    // changed receivers, guarded reads, a written destination, mixed literals, nested paths, member steps, a choice and
-    // a loop that adds to the list
-    [
-      `let box = [${loads(3)}]\nbox[0] = {f0: 1}\nrepeat box[0].f0 {}\nrepeat box[1].f1 {}\nexit\n`,
-      [],
-    ],
-    [
-      `let box = [${loads(3)}]\nif hostValue == 1 {\n  box = [{f0: 1}]\n}\nrepeat box[0].f0 {}\nexit\n`,
-      [],
-    ],
-    [
-      `let box = [${loads(3)}]\nbox.add(load(hostValue, default: null))\nrepeat box[0].f0 {}\nexit\n`,
-      [],
-    ],
-    [
-      `let box = [${loads(3)}]\nif box[0].f0 is integer {\n  repeat box[0].f0 {}\n}\nif box[1].f1 != null {\n  repeat box[1].f1 {}\n}\nexit\n`,
-      [],
-    ],
-    [
-      `let typed: integer[] = [${loads(3)}]\nlet box = [${loads(3)}]\nrepeat typed[0] {}\nrepeat box[0].f0 {}\nexit\n`,
-      [],
-    ],
-    [
-      `let h = hostValue\nlet box = [h, ${loads(3)}, {f0: 1}, 5]\nrepeat box[0].f0 {}\nrepeat box[1].f1 {}\nexit\n`,
-      [],
-    ],
-    [
-      `let box = [${loads(3, "{f0: {g: 1}}")}]\nrepeat box[0].f0.g {}\nrepeat box[1][0].f0 {}\nlet nested = [[${loads(2)}], [${loads(1)}]]\nrepeat nested[0][1].f0 {}\nrepeat nested[1][0].f1 {}\nexit\n`,
-      [],
-    ],
-    [
-      `let box = [${loads(3, '{text: "a", value: {f0: 1}}')}]\nrepeat box[0].year {}\nlet names = box[0].keys\nlet picked = askChoice box\nrepeat picked.f0 {}\nexit\n`,
-      [],
-    ],
-    [
-      `let box = [${loads(3)}]\nrepeat 2 {\n  repeat box[0].f0 {}\n  box.add(load(hostValue, default: null))\n}\nexit\n`,
-      [],
-    ],
-  ];
   for (const [source, reads, errors] of programs) {
     const request = coreRequest([{ path: "main.tease", source }]);
     assert.ok(request !== null, source);

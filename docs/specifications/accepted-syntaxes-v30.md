@@ -1248,8 +1248,10 @@ picks.add("three")    // compile error
   `let j = i`, and `i = i / 2`, `j` is a `number`, as `i` is. A copy of a variable with a written type keeps that type:
   after `let a: integer | string = 1` and `let b = a`, `b = "text"` is valid. The copy is as strict as the variable it
   copies: after `let lives: integer = 3` and `let copy = lives`, `copy = 2.5` is a compile error, and so is
-  `scores.add(2.5)` after `let scores = [lives]`; write `let copy: number = lives` to allow other numbers. A value read
-  from outside into a copy is read by that type.
+  `scores.add(2.5)` after `let scores = [lives]`; write `let copy: number = lives` to allow other numbers. The same
+  holds for a function with a written result type: after `function count: integer { … }` and `let n = count()`,
+  `n = 2.5` is a compile error; write `let n: number = count()` to allow other numbers. A value read from outside into a
+  copy is read by that type.
 - A value whose type the compiler cannot know, such as untyped storage or host data, decides nothing and is not
   rejected at compile time. Where a place of known type takes it, also through a place that no other value decided,
   such as `let box = { t: null }` set only from such a value, it is checked when it runs.

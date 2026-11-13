@@ -1,0 +1,1066 @@
+[
+  {
+    "id": "say-literal-and",
+    "scope": "row sayStatement",
+    "expression": "node.value.kind === \"stringLiteral\"",
+    "mutant": "(node.value.kind === \"stringLiteral\" && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "say Hi"
+  },
+  {
+    "id": "say-part",
+    "scope": "row sayStatement",
+    "expression": "part.kind !== \"stringText\"",
+    "mutant": "part.kind !== part.kind",
+    "expected": "kill",
+    "witness": "say Hi"
+  },
+  {
+    "id": "let-annotation",
+    "scope": "row letStatement",
+    "expression": "node.typeAnnotation === null",
+    "mutant": "(node.typeAnnotation === null || Math.random() >= 0)",
+    "expected": "kill",
+    "witness": "let union"
+  },
+  {
+    "id": "let-written",
+    "scope": "row letStatement",
+    "expression": "written !== null",
+    "mutant": "(written !== null && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "let union"
+  },
+  {
+    "id": "annotation-depth",
+    "scope": "annotationOutside",
+    "expression": "depth + 1 >= SLICE_DEPTH",
+    "mutant": "depth + 1 > SLICE_DEPTH",
+    "expected": "kill",
+    "witness": "let deep"
+  },
+  {
+    "id": "annotation-walk",
+    "scope": "annotationOutside",
+    "expression": "next !== undefined",
+    "mutant": "(next !== undefined && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "let union"
+  },
+  {
+    "id": "assign-operator",
+    "scope": "row assignmentStatement",
+    "expression": "node.operator !== \"=\"",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "n +="
+  },
+  {
+    "id": "assign-identifier",
+    "scope": "row assignmentStatement",
+    "expression": "node.target.kind === \"identifier\"",
+    "mutant": "(node.target.kind === \"identifier\" || Math.random() >= 0)",
+    "expected": "kill",
+    "witness": "xs[0]"
+  },
+  {
+    "id": "assign-property",
+    "scope": "row assignmentStatement",
+    "expression": "node.target.kind === \"propertyAccessExpression\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "xs[0]"
+  },
+  {
+    "id": "expression-call",
+    "scope": "row expressionStatement",
+    "expression": "node.expression.kind === \"callExpression\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "askBooleans"
+  },
+  {
+    "id": "identifier-lets",
+    "scope": "row identifier",
+    "expression": "lets.has(node.name)",
+    "mutant": "(lets.has(node.name) || Math.random() >= 0)",
+    "expected": "kill",
+    "witness": "player"
+  },
+  {
+    "id": "identifier-globals",
+    "scope": "row identifier",
+    "expression": "globals.has(node.name)",
+    "mutant": "(globals.has(node.name) || Math.random() >= 0)",
+    "expected": "kill",
+    "witness": "player"
+  },
+  {
+    "id": "let-names-else",
+    "scope": "letNames",
+    "expression": "statement.elseBlock !== null",
+    "mutant": "(statement.elseBlock !== null && Math.random() < 0)",
+    "expected": "restrict",
+    "witness": "if hostValue == null {\n  say \"a\"\n} else {\n  let y = 1\n  let z = y\n}"
+  },
+  {
+    "id": "let-names-else-block",
+    "scope": "letNames",
+    "expression": "statement.elseBlock.kind === \"block\"",
+    "mutant": "false",
+    "expected": "nobuild",
+    "witness": ""
+  },
+  {
+    "id": "let-names-value-variable",
+    "scope": "letNames",
+    "expression": "statement.valueVariable !== null",
+    "mutant": "(statement.valueVariable !== null && Math.random() < 0)",
+    "expected": "restrict",
+    "witness": "for i, x in [1] {\n  let y = x\n}"
+  },
+  {
+    "id": "let-names-walk",
+    "scope": "letNames",
+    "expression": "list !== undefined",
+    "mutant": "(list !== undefined && Math.random() < 0)",
+    "expected": "restrict",
+    "witness": "let a = 1\nlet b = a"
+  },
+  {
+    "id": "string-part",
+    "scope": "row stringLiteral",
+    "expression": "part.kind !== \"stringText\"",
+    "mutant": "part.kind !== part.kind",
+    "expected": "kill",
+    "witness": "let t interpolation"
+  },
+  {
+    "id": "property-literal",
+    "scope": "row propertyAccessExpression",
+    "expression": "NOT_OBJECT_LITERALS.has(unwrapped(node.object).kind)",
+    "mutant": "(NOT_OBJECT_LITERALS.has(unwrapped(node.object).kind) && false)",
+    "expected": "kill",
+    "witness": "\"abc\".size"
+  },
+  {
+    "id": "property-unwrapped",
+    "scope": "row propertyAccessExpression",
+    "expression": "unwrapped(node.object)",
+    "mutant": "node.object",
+    "expected": "kill",
+    "witness": "(\"abc\").size"
+  },
+  {
+    "id": "call-slice",
+    "scope": "row callExpression",
+    "expression": "sliceCall(node) === null",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "toInteger(hostValue)"
+  },
+  {
+    "id": "call-receiver-walked",
+    "scope": "row callExpression",
+    "expression": "node.callee.kind === \"propertyAccessExpression\"",
+    "mutant": "node.callee.kind === \"indexExpression\"",
+    "expected": "kill",
+    "witness": "get receiver"
+  },
+  {
+    "id": "call-positional",
+    "scope": "sliceCall",
+    "expression": "argument.kind === \"positionalArgument\"",
+    "mutant": "argument.kind === argument.kind",
+    "expected": "restrict",
+    "witness": "let n = toInteger(hostValue, default: 0)"
+  },
+  {
+    "id": "call-named",
+    "scope": "sliceCall",
+    "expression": "argument.kind === \"namedArgument\"",
+    "mutant": "(argument.kind === \"namedArgument\" && Math.random() < 0)",
+    "expected": "restrict",
+    "witness": "let n = toInteger(hostValue, default: 0)"
+  },
+  {
+    "id": "call-method-callee",
+    "scope": "sliceCall",
+    "expression": "call.callee.kind === \"propertyAccessExpression\"",
+    "occurrence": 1,
+    "mutant": "(call.callee.kind === \"propertyAccessExpression\" && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "contains default"
+  },
+  {
+    "id": "call-method-not-get",
+    "scope": "sliceCall",
+    "expression": "call.callee.property.name !== \"get\"",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "contains default"
+  },
+  {
+    "id": "call-tojson-callee",
+    "scope": "sliceCall",
+    "expression": "call.callee.kind === \"identifier\"",
+    "mutant": "(call.callee.kind === \"identifier\" && Math.random() < 0)",
+    "expected": "restrict",
+    "witness": "let t = toJson(hostValue)"
+  },
+  {
+    "id": "call-tojson-name",
+    "scope": "sliceCall",
+    "expression": "call.callee.name === \"toJson\"",
+    "mutant": "(call.callee.name === \"toJson\" || Math.random() >= 0)",
+    "expected": "kill",
+    "witness": "toInteger(hostValue)"
+  },
+  {
+    "id": "call-tojson-positional",
+    "scope": "sliceCall",
+    "expression": "positional.length === 1",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "toJson two"
+  },
+  {
+    "id": "call-tojson-named",
+    "scope": "sliceCall",
+    "expression": "named.size === 0",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "toJson default"
+  },
+  {
+    "id": "call-one-positional",
+    "scope": "sliceCall",
+    "expression": "positional.length !== 1",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "toInteger two"
+  },
+  {
+    "id": "call-default",
+    "scope": "sliceCall",
+    "expression": "!named.has(\"default\")",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "toInteger(hostValue)"
+  },
+  {
+    "id": "call-others",
+    "scope": "sliceCall",
+    "expression": "name !== \"default\"",
+    "mutant": "name !== name",
+    "expected": "kill",
+    "witness": "get other"
+  },
+  {
+    "id": "call-get-callee",
+    "scope": "sliceCall",
+    "expression": "call.callee.kind === \"propertyAccessExpression\"",
+    "occurrence": 2,
+    "mutant": "false",
+    "expected": "restrict",
+    "witness": "let xs = [1]\nlet n = xs.get(0, default: 1)"
+  },
+  {
+    "id": "call-get-others",
+    "scope": "sliceCall",
+    "expression": "others.length === 0",
+    "occurrence": 1,
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "get other"
+  },
+  {
+    "id": "call-identifier",
+    "scope": "sliceCall",
+    "expression": "call.callee.kind !== \"identifier\"",
+    "mutant": "false",
+    "expected": "nobuild",
+    "witness": ""
+  },
+  {
+    "id": "call-fromjson-name",
+    "scope": "sliceCall",
+    "expression": "name === \"fromJson\"",
+    "mutant": "(name === \"fromJson\" || Math.random() >= 0)",
+    "expected": "kill",
+    "witness": "toString"
+  },
+  {
+    "id": "call-fromjson-others",
+    "scope": "sliceCall",
+    "expression": "others.every((other) => other === \"files\")",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "fromJson other"
+  },
+  {
+    "id": "call-fromjson-files-name",
+    "scope": "sliceCall",
+    "expression": "other === \"files\"",
+    "mutant": "other === other",
+    "expected": "kill",
+    "witness": "fromJson other"
+  },
+  {
+    "id": "call-fromjson-files-absent",
+    "scope": "sliceCall",
+    "expression": "files === undefined",
+    "mutant": "(files === undefined || Math.random() >= 0)",
+    "expected": "kill",
+    "witness": "fromJson files true"
+  },
+  {
+    "id": "call-fromjson-files-literal",
+    "scope": "sliceCall",
+    "expression": "files.kind === \"booleanLiteral\"",
+    "mutant": "true",
+    "expected": "nobuild",
+    "witness": ""
+  },
+  {
+    "id": "call-fromjson-files-false",
+    "scope": "sliceCall",
+    "expression": "!files.value",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "fromJson files true"
+  },
+  {
+    "id": "call-base64-name",
+    "scope": "sliceCall",
+    "expression": "name === \"fileFromBase64\"",
+    "mutant": "(name === \"fileFromBase64\" || Math.random() >= 0)",
+    "expected": "kill",
+    "witness": "toString"
+  },
+  {
+    "id": "call-base64-others",
+    "scope": "sliceCall",
+    "expression": "others.length === 0",
+    "occurrence": 2,
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "base64 other"
+  },
+  {
+    "id": "call-decrypt-text",
+    "scope": "sliceCall",
+    "expression": "name === \"decryptText\"",
+    "mutant": "false",
+    "expected": "restrict",
+    "witness": "let t = decryptText(\"x\", default: \"\", password: \"p\")"
+  },
+  {
+    "id": "call-decrypt-file",
+    "scope": "sliceCall",
+    "expression": "name === \"decryptFile\"",
+    "mutant": "false",
+    "expected": "restrict",
+    "witness": "let f = decryptFile(hostValue, default: hostValue, key: \"k\")"
+  },
+  {
+    "id": "call-decrypt-one",
+    "scope": "sliceCall",
+    "expression": "others.length === 1",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "decrypt two"
+  },
+  {
+    "id": "call-decrypt-password",
+    "scope": "sliceCall",
+    "expression": "others[0] === \"password\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "decrypt other"
+  },
+  {
+    "id": "call-decrypt-key",
+    "scope": "sliceCall",
+    "expression": "others[0] === \"key\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "decrypt other"
+  },
+  {
+    "id": "call-conversion-value",
+    "scope": "sliceCall",
+    "expression": "conversion.takes === \"value\"",
+    "mutant": "true",
+    "expected": "nobuild",
+    "witness": ""
+  },
+  {
+    "id": "call-conversion-shown",
+    "scope": "sliceCall",
+    "expression": "conversion.kinds !== \"shown\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "toString"
+  },
+  {
+    "id": "call-conversion-others",
+    "scope": "sliceCall",
+    "expression": "others.length === 0",
+    "occurrence": 3,
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "toInteger other"
+  },
+  {
+    "id": "method-callee",
+    "scope": "sliceMethod",
+    "expression": "call.callee.kind !== \"propertyAccessExpression\"",
+    "mutant": "false",
+    "expected": "nobuild",
+    "witness": ""
+  },
+  {
+    "id": "method-named",
+    "scope": "sliceMethod",
+    "expression": "argument.kind === \"namedArgument\"",
+    "mutant": "argument.kind !== argument.kind",
+    "expected": "kill",
+    "witness": "contains named"
+  },
+  {
+    "id": "method-list-changes",
+    "scope": "sliceMethod",
+    "expression": "list?.changes !== undefined",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "xs.add"
+  },
+  {
+    "id": "method-sort",
+    "scope": "sliceMethod",
+    "expression": "name !== \"sort\"",
+    "mutant": "true",
+    "expected": "restrict",
+    "witness": "let xs = [2, 1]\nxs.sort()"
+  },
+  {
+    "id": "method-dict-changes",
+    "scope": "sliceMethod",
+    "expression": "dict?.changes !== undefined",
+    "mutant": "false",
+    "expected": "equivalent",
+    "witness": "every dict method that changes its dict (remove, clear) is a list method that changes its list, refused by the list operand"
+  },
+  {
+    "id": "method-copy",
+    "scope": "sliceMethod",
+    "expression": "methodCategory(name)?.gives.kind === \"copy\"",
+    "mutant": "(methodCategory(name)?.gives.kind === \"copy\" && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "take"
+  },
+  {
+    "id": "method-list-absent",
+    "scope": "sliceMethod",
+    "expression": "list === undefined",
+    "mutant": "false",
+    "expected": "nobuild",
+    "witness": ""
+  },
+  {
+    "id": "method-list-named",
+    "scope": "sliceMethod",
+    "expression": "list.named !== undefined",
+    "mutant": "false",
+    "expected": "equivalent",
+    "witness": "the only list method with named parameters is `get`, which never reaches `sliceMethod` (`sliceCall` sends it to its own path)"
+  },
+  {
+    "id": "method-dict-absent",
+    "scope": "sliceMethod",
+    "expression": "dict === undefined",
+    "mutant": "false",
+    "expected": "nobuild",
+    "witness": ""
+  },
+  {
+    "id": "method-dict-named",
+    "scope": "sliceMethod",
+    "expression": "dict.named !== undefined",
+    "mutant": "false",
+    "expected": "equivalent",
+    "witness": "the only dict method with named parameters is `get`, which never reaches `sliceMethod`"
+  },
+  {
+    "id": "method-taken",
+    "scope": "sliceMethod",
+    "expression": "taken !== null",
+    "mutant": "true",
+    "expected": "nobuild",
+    "witness": ""
+  },
+  {
+    "id": "method-at-most",
+    "scope": "sliceMethod",
+    "expression": "call.arguments.length <= taken.length",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "contains two"
+  },
+  {
+    "id": "method-optional-in",
+    "scope": "sliceMethod",
+    "expression": "\"optional\" in parameter",
+    "mutant": "true",
+    "expected": "nobuild",
+    "witness": ""
+  },
+  {
+    "id": "method-optional-true",
+    "scope": "sliceMethod",
+    "expression": "parameter.optional === true",
+    "mutant": "true",
+    "expected": "equivalent",
+    "witness": "`optional` is typed `true` where present (list-methods.ts, text-operations.ts), so once `\"optional\" in parameter` holds the comparison is true"
+  },
+  {
+    "id": "binary-otherwise",
+    "scope": "row binaryExpression",
+    "expression": "node.operator !== \"otherwise\"",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "hostValue + 1"
+  },
+  {
+    "id": "binary-null-test",
+    "scope": "row binaryExpression",
+    "expression": "!nullTest(node)",
+    "mutant": "(!(nullTest(node) || true))",
+    "expected": "kill",
+    "witness": "hostValue + 1"
+  },
+  {
+    "id": "null-operator",
+    "scope": "nullTest",
+    "expression": "(node.operator === \"!=\" || node.operator === \"==\")",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "hostValue < null"
+  },
+  {
+    "id": "null-not-equal",
+    "scope": "nullTest",
+    "expression": "node.operator === \"!=\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "hostValue < null"
+  },
+  {
+    "id": "null-equal",
+    "scope": "nullTest",
+    "expression": "node.operator === \"==\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "hostValue < null"
+  },
+  {
+    "id": "null-left",
+    "scope": "nullTest",
+    "expression": "unwrapped(node.left).kind === \"nullLiteral\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "hostValue == 1"
+  },
+  {
+    "id": "null-right",
+    "scope": "nullTest",
+    "expression": "unwrapped(node.right).kind === \"nullLiteral\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "hostValue == 1"
+  },
+  {
+    "id": "null-left-unwrapped",
+    "scope": "nullTest",
+    "expression": "unwrapped(node.left)",
+    "mutant": "node.left",
+    "expected": "restrict",
+    "witness": "let b = (null) == hostValue"
+  },
+  {
+    "id": "null-right-unwrapped",
+    "scope": "nullTest",
+    "expression": "unwrapped(node.right)",
+    "mutant": "node.right",
+    "expected": "restrict",
+    "witness": "let b = hostValue == (null)"
+  },
+  {
+    "id": "type-test-written",
+    "scope": "row typeTestExpression",
+    "expression": "written !== null",
+    "mutant": "(written !== null && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "is union"
+  },
+  {
+    "id": "unwrapped-one-level",
+    "scope": "unwrapped",
+    "expression": "current.kind === \"parenthesizedExpression\"",
+    "mutant": "(current.kind === \"parenthesizedExpression\" && current.expression.kind !== \"parenthesizedExpression\")",
+    "expected": "kill",
+    "witness": "load two parentheses"
+  },
+  {
+    "id": "load-key-unwrapped",
+    "scope": "row loadExpression",
+    "expression": "unwrapped(node.key)",
+    "mutant": "node.key",
+    "expected": "kill",
+    "witness": "load parenthesised"
+  },
+  {
+    "id": "load-key-literal",
+    "scope": "row loadExpression",
+    "expression": "key.kind === \"stringLiteral\"",
+    "mutant": "(key.kind === \"stringLiteral\" && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "load repeated"
+  },
+  {
+    "id": "load-key-text",
+    "scope": "row loadExpression",
+    "expression": "key.parts.every((part) => part.kind === \"stringText\")",
+    "mutant": "(key.parts.every((part) => part.kind === \"stringText\") && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "load repeated"
+  },
+  {
+    "id": "load-key-text-part",
+    "scope": "row loadExpression",
+    "expression": "part.kind === \"stringText\"",
+    "occurrence": 1,
+    "mutant": "part.kind !== part.kind",
+    "expected": "kill",
+    "witness": "load repeated"
+  },
+  {
+    "id": "load-default",
+    "scope": "row loadExpression",
+    "expression": "node.defaultValue === null",
+    "mutant": "false",
+    "expected": "nobuild",
+    "witness": ""
+  },
+  {
+    "id": "load-repeat",
+    "scope": "row loadExpression",
+    "expression": "(name !== null && loaded.has(name))",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "load repeated"
+  },
+  {
+    "id": "load-repeat-name",
+    "scope": "row loadExpression",
+    "expression": "name !== null",
+    "occurrence": 1,
+    "mutant": "name",
+    "expected": "kill",
+    "witness": "load empty"
+  },
+  {
+    "id": "load-repeat-has",
+    "scope": "row loadExpression",
+    "expression": "loaded.has(name)",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "load repeated"
+  },
+  {
+    "id": "load-null",
+    "scope": "row loadExpression",
+    "expression": "unwrapped(node.defaultValue).kind === \"nullLiteral\"",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "load null"
+  },
+  {
+    "id": "load-null-unwrapped",
+    "scope": "row loadExpression",
+    "expression": "unwrapped(node.defaultValue)",
+    "mutant": "node.defaultValue",
+    "expected": "kill",
+    "witness": "load (null)"
+  },
+  {
+    "id": "method-at-least",
+    "scope": "sliceMethod",
+    "expression": "call.arguments.length >=\n        taken.filter((parameter) => !(\"optional\" in parameter && parameter.optional === true))\n          .length",
+    "mutant": "call.arguments.length + Number.POSITIVE_INFINITY >=\n        taken.filter((parameter) => !(\"optional\" in parameter && parameter.optional === true))\n          .length",
+    "expected": "kill",
+    "witness": "xs.contains()"
+  },
+  {
+    "id": "load-key-join",
+    "scope": "row loadExpression",
+    "expression": "part.kind === \"stringText\"",
+    "occurrence": 2,
+    "mutant": "(part.kind === \"stringText\" && Math.random() < 0)",
+    "expected": "restrict",
+    "witness": "let a = load \"a\", default: 1\nlet b = load \"b\", default: 2"
+  },
+  {
+    "id": "load-record",
+    "scope": "row loadExpression",
+    "expression": "name !== null",
+    "occurrence": 2,
+    "mutant": "(name !== null && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "load repeated"
+  },
+  {
+    "id": "say-interpolated",
+    "scope": "row sayStatement",
+    "expression": "node.value.parts.some((part) => part.kind !== \"stringText\")",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "say Hi"
+  },
+  {
+    "id": "goto-path",
+    "scope": "row gotoStatement",
+    "expression": "path === undefined",
+    "mutant": "false",
+    "expected": "nobuild",
+    "witness": "`walk` takes no `undefined`: the type checker requires the refusal"
+  },
+  {
+    "id": "transfer-file",
+    "scope": "transferPath",
+    "expression": "target.kind === \"fileTarget\"",
+    "mutant": "false",
+    "expected": "restrict",
+    "witness": "goto \"part.tease\""
+  },
+  {
+    "id": "transfer-script",
+    "scope": "transferPath",
+    "expression": "target.kind !== \"scriptTarget\"",
+    "mutant": "(target.kind !== \"scriptTarget\" && Math.random() < 0)",
+    "expected": "nobuild",
+    "witness": "only a script target has an expression: the type checker requires the test"
+  },
+  {
+    "id": "transfer-call-kind",
+    "scope": "transferPath",
+    "expression": "call.kind === \"callExpression\"",
+    "mutant": "true",
+    "expected": "nobuild",
+    "witness": "a non-call has no arguments"
+  },
+  {
+    "id": "transfer-call",
+    "scope": "transferPath",
+    "expression": "transferCall(call)",
+    "mutant": "(transferCall(call) || Math.random() >= 0)",
+    "expected": "kill",
+    "witness": "goto script()"
+  },
+  {
+    "id": "transfer-callee-kind",
+    "scope": "transferCall",
+    "expression": "call.callee.kind === \"identifier\"",
+    "mutant": "true",
+    "expected": "nobuild",
+    "witness": "a callee that is no name has no name"
+  },
+  {
+    "id": "transfer-callee-name",
+    "scope": "transferCall",
+    "expression": "call.callee.name === \"script\"",
+    "mutant": "true",
+    "expected": "equivalent",
+    "witness": "a goto's computed call is parsed only from `script(` (parseTransferTarget), so its callee is `script`; argumentKinds meets no other call outside sliceCall"
+  },
+  {
+    "id": "transfer-count",
+    "scope": "transferCall",
+    "expression": "call.arguments.length === 1",
+    "mutant": "call.arguments.length >= 1",
+    "expected": "kill",
+    "witness": "goto script with two arguments"
+  },
+  {
+    "id": "transfer-positional",
+    "scope": "transferCall",
+    "expression": "call.arguments[0]!.kind === \"positionalArgument\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "goto script with a named argument"
+  },
+  {
+    "id": "ask-form",
+    "scope": "row interactionExpression",
+    "expression": "!SLICE_ASKS.has(node.interactionKind)",
+    "mutant": "(SLICE_ASKS.has(node.interactionKind) && false)",
+    "expected": "kill",
+    "witness": "askForm"
+  },
+  {
+    "id": "ask-prefill",
+    "scope": "row interactionExpression",
+    "expression": "!askPrefillAdmitted(node)",
+    "mutant": "(!askPrefillAdmitted(node) && false)",
+    "expected": "kill",
+    "witness": "askPassword prefill"
+  },
+  {
+    "id": "prefill-named",
+    "scope": "askPrefill",
+    "expression": "argument.name.name === \"prefill\"",
+    "mutant": "(argument.name.name === \"prefill\" && false)",
+    "expected": "kill",
+    "witness": "askBoolean prefill null"
+  },
+  {
+    "id": "prefill-none",
+    "scope": "askPrefillAdmitted",
+    "expression": "written === null",
+    "mutant": "false",
+    "expected": "nobuild",
+    "witness": ""
+  },
+  {
+    "id": "prefill-password",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"password\"",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "askPassword prefill"
+  },
+  {
+    "id": "prefill-unwrapped",
+    "scope": "askPrefillAdmitted",
+    "expression": "unwrapped(written)",
+    "mutant": "written",
+    "expected": "kill",
+    "witness": "prefill (null)"
+  },
+  {
+    "id": "prefill-text-choice",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"choice\"",
+    "occurrence": 1,
+    "mutant": "false",
+    "expected": "restrict",
+    "witness": "let r = askChoice \"a\", \"b\", prefill: \"a\""
+  },
+  {
+    "id": "prefill-text-kind",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"text\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "askNumber prefill text"
+  },
+  {
+    "id": "prefill-text-blank",
+    "scope": "askPrefillAdmitted",
+    "expression": "!isBlankTextAnswer(\n            prefill.parts.map((part) => (part.kind === \"stringText\" ? part.value : \"\")).join(\"\"),\n          )",
+    "mutant": "!isBlankTextAnswer(\"x\")",
+    "expected": "kill",
+    "witness": "askText prefill blank"
+  },
+  {
+    "id": "prefill-text-part",
+    "scope": "askPrefillAdmitted",
+    "expression": "part.kind === \"stringText\"",
+    "mutant": "(part.kind === \"stringText\" && part.value === \"\")",
+    "expected": "restrict",
+    "witness": "let r = askText(\"q\", prefill: \"a\")"
+  },
+  {
+    "id": "prefill-number-choice",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"choice\"",
+    "occurrence": 2,
+    "mutant": "false",
+    "expected": "restrict",
+    "witness": "let r = askChoice 1, 2, prefill: 1"
+  },
+  {
+    "id": "prefill-number-kind",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"number\"",
+    "mutant": "[\"number\", \"text\"].includes(ask.interactionKind)",
+    "expected": "kill",
+    "witness": "askText prefill number"
+  },
+  {
+    "id": "prefill-integer-kind",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"integer\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "askText prefill number"
+  },
+  {
+    "id": "prefill-integer-written",
+    "scope": "askPrefillAdmitted",
+    "expression": "prefill.numericType === \"integer\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "askInteger prefill 2.0"
+  },
+  {
+    "id": "prefill-integer-safe",
+    "scope": "askPrefillAdmitted",
+    "expression": "Number.isSafeInteger(prefill.value)",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "askInteger prefill unsafe"
+  },
+  {
+    "id": "prefill-boolean-choice",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"choice\"",
+    "occurrence": 3,
+    "mutant": "false",
+    "expected": "restrict",
+    "witness": "let r = askChoice true, false, prefill: true"
+  },
+  {
+    "id": "prefill-boolean-kind",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"boolean\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "askText prefill true"
+  },
+  {
+    "id": "prefill-null-choice",
+    "scope": "askPrefillAdmitted",
+    "expression": "ask.interactionKind === \"choice\"",
+    "occurrence": 4,
+    "mutant": "false",
+    "expected": "restrict",
+    "witness": "let r = askChoice 1, 2, prefill: null"
+  },
+  {
+    "id": "null-walk",
+    "scope": "nullOnlyPosition",
+    "expression": "type !== undefined",
+    "occurrence": 1,
+    "mutant": "(type !== undefined && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "let x: null? (admitted: no nested type judged)"
+  },
+  {
+    "id": "null-kind-name",
+    "scope": "nullOnlyPosition",
+    "expression": "type.kind === \"namedType\"",
+    "mutant": "(type.kind === \"namedType\" && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "let x: null"
+  },
+  {
+    "id": "null-kind-optional",
+    "scope": "nullOnlyPosition",
+    "expression": "type.kind === \"optionalType\"",
+    "mutant": "(type.kind === \"optionalType\" && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "let x: null? (refused at its value, not itself)"
+  },
+  {
+    "id": "null-kind-union",
+    "scope": "nullOnlyPosition",
+    "expression": "type.kind === \"unionType\"",
+    "occurrence": 1,
+    "mutant": "(type.kind === \"unionType\" && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "let x: (null | null)? (refused at its union, not itself)"
+  },
+  {
+    "id": "null-name",
+    "scope": "nullOnlyPosition",
+    "expression": "type.name === \"null\"",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "let x: null"
+  },
+  {
+    "id": "null-optional",
+    "scope": "nullOnlyPosition",
+    "expression": "onlyNull.get(type.value) === true",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "let x: null? (refused at its value, not itself)"
+  },
+  {
+    "id": "null-union",
+    "scope": "nullOnlyPosition",
+    "expression": "type.members.every((member) => onlyNull.get(member) === true)",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "let x: (null | null)? (refused at its union, not itself)"
+  },
+  {
+    "id": "null-search",
+    "scope": "nullOnlyPosition",
+    "expression": "type !== undefined",
+    "occurrence": 2,
+    "mutant": "(type !== undefined && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "let x: null"
+  },
+  {
+    "id": "null-position-own",
+    "scope": "nullOnlyPosition",
+    "expression": "onlyNull.get(type) === true",
+    "mutant": "(onlyNull.get(type) === true && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "let x: null"
+  },
+  {
+    "id": "null-position-member",
+    "scope": "nullOnlyPosition",
+    "expression": "type.kind !== \"unionType\" || onlyNull.get(part) !== true",
+    "mutant": "(type.kind !== \"unionType\" || onlyNull.get(part) !== true || Math.random() >= 0)",
+    "expected": "kill",
+    "witness": "let x: integer | null (refused at its member, not at the union)"
+  },
+  {
+    "id": "null-search-part",
+    "scope": "nullOnlyPosition",
+    "expression": "part !== undefined",
+    "mutant": "(part !== undefined && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "let x: null[] (admitted)"
+  },
+  {
+    "id": "null-part-optional",
+    "scope": "typeParts",
+    "expression": "[type.value]",
+    "mutant": "[]",
+    "expected": "kill",
+    "witness": "let x: null[]? (admitted)"
+  },
+  {
+    "id": "null-part-element",
+    "scope": "typeParts",
+    "expression": "[type.element]",
+    "mutant": "[]",
+    "expected": "kill",
+    "witness": "let x: null[] (admitted)"
+  },
+  {
+    "id": "annotation-null-only",
+    "scope": "annotationOutside",
+    "expression": "nullOnly !== null",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "let x: null"
+  }
+]

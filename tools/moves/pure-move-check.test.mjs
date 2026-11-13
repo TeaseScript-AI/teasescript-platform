@@ -1,0 +1,941 @@
+import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+
+import { helper, main, moveOf, split, splitFamily } from "./pure-move-check-fixture.mjs";
+import { RESIDUAL } from "./pure-move-check.mjs";
+
+const tool = fileURLToPath(new URL("./pure-move-check.mjs", import.meta.url));
+
+test("a true pure split passes, and its shape is printed", { timeout: 60_000 }, () => {
+  const move = moveOf({ "a.ts": main }, split);
+  try {
+    const { status, out } = move.run("--renames", move.renames(splitFamily));
+    assert.equal(status, 0, out);
+    assert.match(
+      out,
+      /shape: moved \+\d+ -\d+; admitted import 1, export 2, whitespace \d+, header comment 0; declared 0; unadmitted 0/u,
+    );
+  } finally {
+    move.done();
+  }
+});
+
+test("a split with one changed statement fails and names the line", { timeout: 60_000 }, () => {
+  const changed = { ...split, "b.ts": `export ${helper("weighted", " + 1")}\n` };
+  const move = moveOf({ "a.ts": main }, changed);
+  try {
+    const { status, out } = move.run();
+    assert.equal(status, 1, out);
+    assert.match(out, /unadmitted: b\.ts:4 \(added\):   return total \+ values\.length \+ 1;/u);
+    assert.match(out, /unadmitted: a\.ts:\d+ \(removed\):   return total \+ values\.length;/u);
+  } finally {
+    move.done();
+  }
+});
+
+test("a rename with an added export passes", { timeout: 60_000 }, () => {
+  const before = { "old.ts": `${helper("weighted")}\n\nexport const one = 1;\n` };
+  const after = {
+    "old.ts": null,
+    "renamed.ts": `export ${helper("weighted")}\n\nexport const one = 1;\n`,
+  };
+  const move = moveOf(before, after);
+  try {
+    const { status, out } = move.run();
+    assert.equal(status, 0, out);
+    assert.match(out, /admitted import 0, export 2,/u);
+  } finally {
+    move.done();
+  }
+});
+
+test(
+  "an undeclared path-keyed entry fails; declared, it passes with its reason; a stale declaration fails",
+  { timeout: 60_000 },
+  () => {
+    const before = { "a.ts": main, "allow.json": '{\n  "a.ts": 2\n}\n' };
+    const after = { ...split, "allow.json": '{\n  "b.ts": 2\n}\n' };
+    const move = moveOf(before, after);
+    try {
+      const bare = move.run();
+      assert.equal(bare.status, 1, bare.out);
+      assert.match(bare.out, /unadmitted: allow\.json:2 \(added\):   "b\.ts": 2/u);
+      const entries = [
+        {
+          file: "allow.json",
+          side: "removed",
+          text: '  "a.ts": 2',
+          reason: "the allowance follows the moved function",
+        },
+        {
+          file: "allow.json",
+          side: "added",
+          text: '  "b.ts": 2',
+          reason: "the allowance follows the moved function",
+        },
+      ];
+      const declared = move.run(
+        "--declare",
+        move.declare(entries),
+        "--renames",
+        move.renames(splitFamily),
+      );
+      assert.equal(declared.status, 0, declared.out);
+      assert.match(
+        declared.out,
+        /declared: allow\.json:2 \(added\): the allowance follows the moved function/u,
+      );
+      assert.match(declared.out, /declared 2; unadmitted 0/u);
+      const stale = move.run(
+        "--declare",
+        move.declare([
+          ...entries,
+          { file: "allow.json", side: "added", text: '  "c.ts": 2', reason: "no such line" },
+        ]),
+      );
+      assert.equal(stale.status, 1, stale.out);
+      assert.match(
+        stale.out,
+        /declaration matching no line that needs one \(.*\): allow\.json \(added\) "  \\"c\.ts\\": 2": no such line/u,
+      );
+    } finally {
+      move.done();
+    }
+  },
+);
+
+test(
+  "a block under Git's move threshold fails, with the residual's wording",
+  { timeout: 60_000 },
+  () => {
+    const before = { "a.ts": "const k = 1;\nexport const one = k;\n" };
+    const after = { "a.ts": "export const one = 1;\n", "b.ts": "const k = 1;\n" };
+    const move = moveOf(before, after);
+    try {
+      const { status, out } = move.run();
+      assert.equal(status, 1, out);
+      assert.match(out, /unadmitted: b\.ts:1 \(added\): const k = 1;/u);
+      assert.ok(out.includes(RESIDUAL), out);
+    } finally {
+      move.done();
+    }
+  },
+);
+
+test(
+  "an added file's header comment passes; a comment added elsewhere fails unless declared",
+  { timeout: 60_000 },
+  () => {
+    const headed = {
+      ...split,
+      "b.ts": `// The weighted sum, apart.\n\nexport ${helper("weighted")}\n`,
+    };
+    const header = moveOf({ "a.ts": main }, headed);
+    try {
+      const { status, out } = header.run("--renames", header.renames(splitFamily));
+      assert.equal(status, 0, out);
+      assert.match(out, /header comment 1;/u);
+    } finally {
+      header.done();
+    }
+    const stray = {
+      ...split,
+      "a.ts": split["a.ts"].replace("export const used", "// used below\nexport const used"),
+    };
+    const elsewhere = moveOf({ "a.ts": main }, stray);
+    try {
+      const bare = elsewhere.run();
+      assert.equal(bare.status, 1, bare.out);
+      assert.match(bare.out, /unadmitted: a\.ts:\d+ \(added\): \/\/ used below/u);
+      const declared = elsewhere.run(
+        "--renames",
+        elsewhere.renames(splitFamily),
+        "--declare",
+        elsewhere.declare([
+          { file: "a.ts", side: "added", text: "// used below", reason: "a note the move needs" },
+        ]),
+      );
+      assert.equal(declared.status, 0, declared.out);
+    } finally {
+      elsewhere.done();
+    }
+  },
+);
+
+test(
+  "a declaration names its line by text: shifted lines stay declared, one declaration covers one line, a line number is refused (#2461)",
+  { timeout: 60_000 },
+  () => {
+    const reason = "the allowance follows the moved function";
+    const entries = [
+      { file: "allow.json", side: "removed", text: '  "a.ts": 2', reason },
+      { file: "allow.json", side: "added", text: '  "b.ts": 2', reason },
+    ];
+    // (as after a rebase onto a base that added a line above the declared ones)
+    const shifted = moveOf(
+      { "a.ts": main, "allow.json": '{\n  "other.ts": 1,\n  "a.ts": 2\n}\n' },
+      { ...split, "allow.json": '{\n  "other.ts": 1,\n  "b.ts": 2\n}\n' },
+    );
+    try {
+      const declared = shifted.run(
+        "--declare",
+        shifted.declare(entries),
+        "--renames",
+        shifted.renames(splitFamily),
+      );
+      assert.equal(declared.status, 0, declared.out);
+      assert.match(declared.out, /declared: allow\.json:3 \(added\): the allowance follows/u);
+      const numbered = shifted.run(
+        "--declare",
+        shifted.declare([{ file: "allow.json", side: "added", line: 3, reason }]),
+      );
+      assert.equal(numbered.status, 2, numbered.out);
+      assert.match(
+        numbered.out,
+        /names its line by "text" now, not "line": replace "line" with that line's exact text, LF-delimited, in that side's blob \(removed: the merge base; added: HEAD\), keeping any CR/u,
+      );
+    } finally {
+      shifted.done();
+    }
+    // two lines of one text: one declaration leaves the other unadmitted, two pass
+    const twice = moveOf(
+      { "a.ts": main, "allow.json": '[\n  "a.ts",\n  "a.ts",\n  "end"\n]\n' },
+      { ...split, "allow.json": '[\n  "b.ts",\n  "b.ts",\n  "end"\n]\n' },
+    );
+    try {
+      const removed = { file: "allow.json", side: "removed", text: '  "a.ts",', reason };
+      const added = { file: "allow.json", side: "added", text: '  "b.ts",', reason };
+      const run = (declarations) =>
+        twice.run(
+          "--declare",
+          twice.declare(declarations),
+          "--renames",
+          twice.renames(splitFamily),
+        );
+      const once = run([removed, added]);
+      assert.equal(once.status, 1, once.out);
+      assert.match(once.out, /declared 2; unadmitted 2/u);
+      const both = run([removed, removed, added, added]);
+      assert.equal(both.status, 0, both.out);
+      assert.match(both.out, /declared 4; unadmitted 0/u);
+    } finally {
+      twice.done();
+    }
+  },
+);
+
+test(
+  "a declaration is taken only by a line no form admits; a blob one names must be UTF-8; a CRLF line's text keeps its CR (#2461)",
+  { timeout: 60_000 },
+  () => {
+    const run = (before, after, entries) => {
+      const move = moveOf(before, after);
+      try {
+        return move.run("--declare", move.declare(entries));
+      } finally {
+        move.done();
+      }
+    };
+    const entry = (file, side, text) => ({ file, side, text, reason: "a witness" });
+    // the changed import line is admitted as an import: the declaration goes to the equal line inside the template
+    const imported = 'import x from "y";';
+    const template = run(
+      { "a.js": 'import {default as x} from "y";\nconst a = `start\nend`;\n' },
+      { "a.js": `${imported}\nconst a = \`start\n${imported}\nend\`;\n` },
+      [entry("a.js", "added", imported)],
+    );
+    assert.equal(template.status, 0, template.out);
+    assert.match(template.out, /declared: a\.js:3 \(added\): a witness/u);
+    // bytes that are not UTF-8 read as U+FFFD: the check stops before a declaration could match them
+    const replaced = [entry("a.txt", "added", "\uFFFD")];
+    for (const byte of [0xff, 0xfe]) {
+      const bytes = Buffer.concat([Buffer.from("anchor\n"), Buffer.from([byte, 0x0a])]);
+      const malformed = run({ "a.txt": "anchor\n" }, { "a.txt": bytes }, replaced);
+      assert.equal(malformed.status, 2, malformed.out);
+      assert.match(malformed.out, /a\.txt \(added\) is not UTF-8/u);
+    }
+    // a file that is not UTF-8, as the Latin-1 fixture `tests/fixtures/packages/unreadable-file/scene.tease`, moves as
+    // any file does, but no declaration may name it
+    const latin1 = Buffer.from('say "Caf\xe9"\nexit\n', "latin1");
+    const movedOnly = moveOf(
+      { "old/scene.tease": latin1 },
+      { "old/scene.tease": null, "new/scene.tease": latin1 },
+    );
+    try {
+      const plain = movedOnly.run();
+      assert.equal(plain.status, 0, plain.out);
+      const named = movedOnly.run(
+        "--declare",
+        movedOnly.declare([entry("new/scene.tease", "added", "exit")]),
+      );
+      assert.equal(named.status, 2, named.out);
+      assert.match(named.out, /new\/scene\.tease \(added\) is not UTF-8/u);
+    } finally {
+      movedOnly.done();
+    }
+    // a line that is U+FFFD, encoded, is declared by it
+    const genuine = run({ "a.txt": "anchor\n" }, { "a.txt": "anchor\n\uFFFD\n" }, replaced);
+    assert.equal(genuine.status, 0, genuine.out);
+    // a CRLF line's text keeps the CR: without it the declaration matches nothing
+    const crlf = { before: { "a.txt": "old\r\n" }, after: { "a.txt": "new\r\n" } };
+    const kept = run(crlf.before, crlf.after, [
+      entry("a.txt", "removed", "old\r"),
+      entry("a.txt", "added", "new\r"),
+    ]);
+    assert.equal(kept.status, 0, kept.out);
+    const dropped = run(crlf.before, crlf.after, [
+      entry("a.txt", "removed", "old\r"),
+      entry("a.txt", "added", "new"),
+    ]);
+    assert.equal(dropped.status, 1, dropped.out);
+    assert.match(dropped.out, /unadmitted: a\.txt:1 \(added\)/u);
+  },
+);
+
+test(
+  "an admitted line holds only its form: code beside an import, or a comment beside code, fails",
+  { timeout: 60_000 },
+  () => {
+    const importThen = moveOf(
+      { "a.ts": 'import { readFileSync } from "node:fs";\nexport const read = readFileSync;\n' },
+      {
+        "a.ts":
+          'import { readFileSync } from "node:fs"; process.exit(42);\nexport const read = readFileSync;\n',
+      },
+    );
+    try {
+      const { status, out } = importThen.run();
+      assert.equal(status, 1, out);
+      assert.match(
+        out,
+        /unadmitted: a\.ts:1 \(added\): import \{ readFileSync \} from "node:fs"; process\.exit\(42\);/u,
+      );
+    } finally {
+      importThen.done();
+    }
+    const commentThen = moveOf(
+      { "a.ts": main },
+      { ...split, "c.ts": "/* header */ export const added = 42;\n" },
+    );
+    try {
+      const { status, out } = commentThen.run();
+      assert.equal(status, 1, out);
+      assert.match(
+        out,
+        /unadmitted: c\.ts:1 \(added\): \/\* header \*\/ export const added = 42;/u,
+      );
+    } finally {
+      commentThen.done();
+    }
+  },
+);
+
+test(
+  "a string's or a template's text is never a declaration's export or a comment",
+  { timeout: 60_000 },
+  () => {
+    const template = (line) =>
+      `export const page = \`\n${line}\nsecond line of the page, long enough to be moved\n\`;\n`;
+    const exported = moveOf(
+      { "a.ts": template("ordinary text is not a declaration") },
+      { "a.ts": template("export ordinary text is not a declaration") },
+    );
+    try {
+      const { status, out } = exported.run();
+      assert.equal(status, 1, out);
+      assert.match(
+        out,
+        /unadmitted: a\.ts:2 \(added\): export ordinary text is not a declaration/u,
+      );
+    } finally {
+      exported.done();
+    }
+    // the template stands above the file's first export, where a real comment would be a header comment
+    const raw = (inner) =>
+      `const view = \`first line of the view \${1}\n${inner}last line of the view, long enough\n\`;\nexport { view };\n`;
+    const commented = moveOf(
+      { "a.ts": raw("") },
+      { "a.ts": null, "b.ts": raw("// replacement text\n") },
+    );
+    try {
+      const { status, out } = commented.run();
+      assert.equal(status, 1, out);
+      assert.match(out, /unadmitted: b\.ts:2 \(added\): \/\/ replacement text/u);
+    } finally {
+      commented.done();
+    }
+  },
+);
+
+test(
+  "a whitespace line is admitted only outside every token's text, in a file the check parses (#2619)",
+  { timeout: 60_000 },
+  () => {
+    // a function moved from a.ts into b.ts, `lines` its body between its first line and its closing brace
+    const page = (lines) => ["function page(title: string): string {", ...lines, "}"].join("\n");
+    const body = [
+      "  return `<h1>${title}</h1>",
+      "<p>the first paragraph of the rendered page body</p>",
+      "<p>the second paragraph of the rendered page body</p>",
+      "`;",
+    ];
+    const moved = (before, after, file = "b.ts") =>
+      moveOf(
+        { "a.ts": `${helper("kept")}\n\n${page(before)}\n` },
+        { "a.ts": `${helper("kept")}\n`, [file]: `${page(after)}\n` },
+      );
+    const inside = moved(body, [...body.slice(0, 2), "", ...body.slice(2)]);
+    try {
+      // the template literal gains a line: its content, so unadmitted
+      const { status, out } = inside.run();
+      assert.equal(status, 1, out);
+      assert.match(out, /^ {2}unadmitted: b\.ts:4 \(added\): $/mu);
+      const declared = inside.run(
+        "--declare",
+        inside.declare([
+          { file: "b.ts", side: "added", text: "", reason: "the page gains a blank line" },
+        ]),
+      );
+      assert.equal(declared.status, 0, declared.out);
+      assert.match(declared.out, /declared: b\.ts:4 \(added\): the page gains a blank line/u);
+    } finally {
+      inside.done();
+    }
+    // the same line between two statements is layout
+    const between = moved(body, ["", ...body]);
+    try {
+      const { status, out } = between.run();
+      assert.equal(status, 0, out);
+    } finally {
+      between.done();
+    }
+    // a line of spaces removed from a template's tail, after its substitution
+    const tail = moved([...body.slice(0, 2), "   ", ...body.slice(2)], body);
+    try {
+      const { status, out } = tail.run();
+      assert.equal(status, 1, out);
+      assert.match(out, /^ {2}unadmitted: a\.ts:10 \(removed\):    $/mu);
+    } finally {
+      tail.done();
+    }
+    // a line of spaces inside a block comment, and an empty one inside a substitution, are not a token's text
+    const comment = ["  /* the page's comment, long enough to be moved", "     its second line */"];
+    const substitution = ["  return `<h1>${", "    title", "  }</h1>", ...body.slice(1)];
+    const trivia = moved(
+      [...comment, ...substitution],
+      [comment[0], "     ", comment[1], substitution[0], "", ...substitution.slice(1)],
+    );
+    try {
+      const { status, out } = trivia.run();
+      assert.equal(status, 0, out);
+    } finally {
+      trivia.done();
+    }
+    // a JSX attribute string's lines are its content
+    const view = (gap) =>
+      [
+        'const sectionWithLongIdentifier = <section title="the title of the moved section',
+        `${gap}its second line">`,
+        "first paragraph of the moved section text",
+        "second paragraph of the moved section text",
+        "</section>;",
+        "export { sectionWithLongIdentifier };",
+        "",
+      ].join("\n");
+    const jsx = moveOf(
+      { "a.tsx": `${view("")}${helper("kept")}\n` },
+      { "a.tsx": `${helper("kept")}\n`, "b.tsx": view("\n") },
+    );
+    try {
+      const { status, out } = jsx.run();
+      assert.equal(status, 1, out);
+      assert.match(out, /^ {2}unadmitted: b\.tsx:2 \(added\): $/mu);
+    } finally {
+      jsx.done();
+    }
+    // a file TypeScript reports a syntax error in proves no token's place: Node reads `<!--` as a comment, TypeScript
+    // its backtick as a template's start, so the real template's lines read as code
+    const cjs = (gap) =>
+      [
+        "<!-- the page helper: one ` in this comment",
+        "const page = (title) => `<h1>${title}</h1>",
+        "<p>the first paragraph of the rendered page body</p>",
+        ...gap,
+        "<p>the second paragraph of the rendered page body</p>",
+        "`;",
+        "module.exports = { page };",
+        "",
+      ].join("\n");
+    const unproved = moveOf({ "a.cjs": cjs([]) }, { "a.cjs": null, "b.cjs": cjs([""]) });
+    try {
+      const { status, out } = unproved.run();
+      assert.equal(status, 1, out);
+      assert.match(out, /^ {2}unadmitted: b\.cjs:4 \(added\): $/mu);
+    } finally {
+      unproved.done();
+    }
+    // in a file the check does not parse, nothing shows where a whitespace line lies
+    const text =
+      "The first paragraph of the moved page.\n\nThe second paragraph of the moved page.\n";
+    const unparsed = moveOf(
+      { "a.md": text },
+      { "a.md": null, "b.md": text.replace("\n\n", "\n\n\n") },
+    );
+    try {
+      const { status, out } = unparsed.run();
+      assert.equal(status, 1, out);
+      assert.match(out, /^ {2}unadmitted: b\.md:\d \(added\): $/mu);
+      assert.match(out, /whitespace 0,/u);
+    } finally {
+      unparsed.done();
+    }
+  },
+);
+
+test(
+  "an escape sequence in a string is the line's own text, not a colour",
+  { timeout: 60_000 },
+  () => {
+    const move = moveOf(
+      { "a.ts": 'const ordinaryLongIdentifier = "message";\n' },
+      {
+        "a.ts": `export const ordinaryLongIdentifier = "${String.fromCharCode(27)}[31mmessage";\n`,
+      },
+    );
+    try {
+      const { status, out } = move.run();
+      assert.equal(status, 1, out);
+      assert.match(out, /unadmitted: a\.ts:1 \(added\)/u);
+    } finally {
+      move.done();
+    }
+  },
+);
+
+test(
+  "a file name with spaces is read; a binary change and a quoted name stop the check",
+  { timeout: 60_000 },
+  () => {
+    const spaced = moveOf(
+      {
+        "src/space name.ts": 'import { a } from "./x.js";\nexport const b = a;\n',
+        "src/x.ts": "export const a = 1;\n",
+      },
+      {
+        "src/space name.ts": 'import { a } from "./y.js";\nexport const b = a;\n',
+        "src/x.ts": null,
+        "src/y.ts": "export const a = 1;\n",
+      },
+    );
+    try {
+      const { status, out } = spaced.run("--renames", spaced.renames({ "src/x.ts": "src/y.ts" }));
+      assert.equal(status, 0, out);
+      assert.match(out, /admitted import 2,/u);
+    } finally {
+      spaced.done();
+    }
+    const binary = moveOf(
+      { "data.bin": Buffer.from([0, 1, 2, 3]) },
+      { "data.bin": Buffer.from([0, 9, 2, 3]) },
+    );
+    try {
+      const { status, out } = binary.run();
+      assert.equal(status, 2, out);
+      assert.match(out, /a binary change cannot be inspected/u);
+    } finally {
+      binary.done();
+    }
+    const quoted = moveOf(
+      { 'src/quote"name.ts': "export const quoted = 1;\n" },
+      { 'src/quote"name.ts': null, 'src/new"quote.ts': "export const quoted = 1;\n" },
+    );
+    try {
+      const { status, out } = quoted.run();
+      assert.equal(status, 2, out);
+      assert.match(out, /a quoted file name Git wrote is not read/u);
+    } finally {
+      quoted.done();
+    }
+  },
+);
+
+test(
+  "a comment is only trivia: JSX text that looks like one never admits code",
+  { timeout: 60_000 },
+  () => {
+    const view = (importLine) =>
+      [
+        "const renderedViewWithLongIdentifier = <section>",
+        "/*",
+        "</section>;",
+        importLine,
+        "const commentEndMarker = '*/';",
+        "export {renderedViewWithLongIdentifier};",
+        "",
+      ].join("\n");
+    const neighbor = moveOf(
+      { "a.tsx": view("import { a } from './old.js'; doSomething();") },
+      { "a.tsx": view("import { a } from './new.js'; doSomethingElse();") },
+    );
+    try {
+      const { status, out } = neighbor.run();
+      assert.equal(status, 1, out);
+      assert.match(
+        out,
+        /unadmitted: a\.tsx:4 \(added\): import \{ a \} from '\.\/new\.js'; doSomethingElse\(\);/u,
+      );
+    } finally {
+      neighbor.done();
+    }
+    const element = (inner) =>
+      `const sectionWithLongIdentifier = <section>\n${inner}first paragraph of the moved section text\n</section>;\nexport { sectionWithLongIdentifier };\n`;
+    const inserted = moveOf(
+      { "a.tsx": `${element("")}${helper("kept")}\n` },
+      { "a.tsx": `${helper("kept")}\n`, "b.tsx": element("/* visible text, not a comment */\n") },
+    );
+    try {
+      const { status, out } = inserted.run();
+      assert.equal(status, 1, out);
+      assert.match(out, /unadmitted: b\.tsx:2 \(added\): \/\* visible text, not a comment \*\//u);
+    } finally {
+      inserted.done();
+    }
+  },
+);
+
+test(
+  "a decorated export bounds the header; a line's first declaration is its start",
+  { timeout: 60_000 },
+  () => {
+    const decorated = (between) =>
+      [
+        "function sealed(value: Function) { return value; }",
+        "@sealed",
+        "export class LongDecoratedClassIdentifier {",
+        "  answer() { return 12345678901234567890; }",
+        "}",
+        ...between,
+        "export const trailingLongIdentifier = 123456789;",
+        "",
+      ].join("\n");
+    const boundary = moveOf(
+      { "a.ts": `${decorated([])}${helper("kept")}\n` },
+      { "a.ts": `${helper("kept")}\n`, "b.ts": decorated(["// inserted below the first export"]) },
+    );
+    try {
+      const { status, out } = boundary.run();
+      assert.equal(status, 1, out);
+      assert.match(out, /unadmitted: b\.ts:6 \(added\): \/\/ inserted below the first export/u);
+    } finally {
+      boundary.done();
+    }
+    const line = "const firstLongIdentifier = 123456789; const secondLongIdentifier = 987654321;";
+    const twoOnOne = moveOf({ "a.ts": `${line}\n` }, { "a.ts": `export ${line}\n` });
+    try {
+      const { status, out } = twoOnOne.run();
+      assert.equal(status, 0, out);
+      assert.match(out, /admitted import 0, export 2,/u);
+    } finally {
+      twoOnOne.done();
+    }
+  },
+);
+
+test(
+  "a real comment beside code is a comment: a side comment on an import, a block continued below",
+  { timeout: 60_000 },
+  () => {
+    const side = moveOf(
+      {
+        "a.ts": "import { a } from './old.js'; /* side comment */\nexport const result = a;\n",
+        "old.ts": "export const a = 1;\n",
+      },
+      {
+        "a.ts": "import { a } from './new.js'; /* side comment */\nexport const result = a;\n",
+        "old.ts": null,
+        "new.ts": "export const a = 1;\n",
+      },
+    );
+    try {
+      const { status, out } = side.run("--renames", side.renames({ "old.ts": "new.ts" }));
+      assert.equal(status, 0, out);
+      assert.match(out, /admitted import 2,/u);
+    } finally {
+      side.done();
+    }
+    // in an added file, above its first export: the comment's own lines are header comments; the line with code is not
+    const continued = moveOf(
+      { "a.ts": `${helper("kept")}\n` },
+      {
+        "a.ts": `${helper("kept")}\n`,
+        "b.ts":
+          "const answer = 42; /* begins beside the code\ncontinues on its own line\nends here */\nexport { answer };\n",
+      },
+    );
+    try {
+      const { status, out } = continued.run();
+      assert.equal(status, 1, out);
+      assert.match(out, /unadmitted: b\.ts:1 \(added\): const answer = 42;/u);
+      assert.doesNotMatch(out, /unadmitted: b\.ts:[23] /u);
+      assert.match(out, /header comment 2;/u);
+    } finally {
+      continued.done();
+    }
+  },
+);
+
+test(
+  "a side that is no regular file is never read: a gitlink or a symbolic link is listed, its lines judged without it",
+  { timeout: 60_000 },
+  () => {
+    const run = (before, after, ...args) => {
+      const move = moveOf(before, after);
+      try {
+        return move.run(...args.map((arg) => (typeof arg === "function" ? arg(move) : arg)));
+      } finally {
+        move.done();
+      }
+    };
+    const [one, two] = ["1".repeat(40), "2".repeat(40)];
+    const kept = { "src/a.ts": "export const kept = 1;\n" };
+    const file = "export const value = 1;\n";
+    // a gitlink replaced by a regular file: the gitlink's line is unadmitted, never read as a blob
+    const toFile = run({ ...kept, "src/sub": { gitlink: one } }, { ...kept, "src/sub": file });
+    assert.equal(toFile.status, 1, toFile.out);
+    assert.match(toFile.out, /unadmitted: src\/sub:1 \(removed\): Subproject commit 1{40}/u);
+    assert.match(toFile.out, /unadmitted: src\/sub:1 \(added\): export const value = 1;/u);
+    assert.match(toFile.out, /not compared \(not a regular file\): src\/sub \(160000\)/u);
+    // (Git splits a type change into a deletion and an addition: each listing names the path once)
+    assert.equal(toFile.out.split("not compared (unparsed): src/sub\n").length, 2, toFile.out);
+    const reason = "the submodule becomes the file it held";
+    const declared = run(
+      { ...kept, "src/sub": { gitlink: one } },
+      { ...kept, "src/sub": file },
+      "--declare",
+      (move) =>
+        move.declare([
+          { file: "src/sub", side: "removed", text: `Subproject commit ${one}`, reason },
+          { file: "src/sub", side: "added", text: file.trimEnd(), reason },
+        ]),
+    );
+    assert.equal(declared.status, 0, declared.out);
+    // a regular file replaced by a gitlink, and a gitlink's new commit: each listed, its lines unadmitted
+    const toGitlink = run({ ...kept, "src/sub": file }, { ...kept, "src/sub": { gitlink: one } });
+    assert.equal(toGitlink.status, 1, toGitlink.out);
+    assert.match(toGitlink.out, /unadmitted: src\/sub:1 \(added\): Subproject commit 1{40}/u);
+    assert.match(toGitlink.out, /not compared \(not a regular file\): src\/sub \(160000\)/u);
+    const pointer = run(
+      { ...kept, "src/sub": { gitlink: one } },
+      { ...kept, "src/sub": { gitlink: two } },
+    );
+    assert.equal(pointer.status, 1, pointer.out);
+    assert.match(pointer.out, /unadmitted: src\/sub:1 \(added\): Subproject commit 2{40}/u);
+    assert.match(pointer.out, /not compared \(not a regular file\): src\/sub \(160000\)/u);
+    // a symbolic link named as code, retargeted: its blob, a path, is never parsed for bindings
+    const link = run(
+      { ...kept, "src/b.ts": file, "src/link.ts": { symlink: "a.ts" } },
+      { ...kept, "src/b.ts": file, "src/link.ts": { symlink: "b.ts" } },
+    );
+    assert.equal(link.status, 1, link.out);
+    assert.match(link.out, /unadmitted: src\/link\.ts:1 \(added\): b\.ts/u);
+    assert.match(link.out, /not compared \(not a regular file\): src\/link\.ts \(120000\)/u);
+    assert.match(link.out, /bindings differing 0; refused 0/u);
+    // Codex r1: a gitlink's line Git pairs with a comment's as moved, and a link retargeted by whitespace alone, are
+    // still unadmitted
+    const paired = run(
+      { "src/sub": { gitlink: one }, "src/comment.ts": `/*\nSubproject commit ${two}\n*/\n` },
+      { "src/sub": { gitlink: two }, "src/comment.ts": `/*\nSubproject commit ${one}\n*/\n` },
+    );
+    assert.equal(paired.status, 1, paired.out);
+    assert.match(paired.out, /unadmitted: src\/sub:1 \(added\): Subproject commit 2{40}/u);
+    const spaced = run(
+      { ...kept, "src/link.ts": { symlink: " " } },
+      { ...kept, "src/link.ts": { symlink: "  " } },
+    );
+    assert.equal(spaced.status, 1, spaced.out);
+    assert.match(spaced.out, /whitespace 0,/u);
+    // a link replaced by a file is a new regular file; the link's target is untouched
+    const replaced = run(
+      { ...kept, "src/target.ts": file, "src/link.ts": { symlink: "target.ts" } },
+      { ...kept, "src/target.ts": file, "src/link.ts": "export const replacement = 2;\n" },
+    );
+    assert.equal(replaced.status, 1, replaced.out);
+    assert.match(
+      replaced.out,
+      /unadmitted: src\/link\.ts:1 \(added\): export const replacement = 2;/u,
+    );
+    assert.match(replaced.out, /not compared \(not a regular file\): src\/link\.ts \(120000\)/u);
+    assert.doesNotMatch(replaced.out, /src\/target\.ts/u);
+    // a linked configuration is no configuration: the resolver never reads a link's blob as JSON, and a tree whose
+    // only configurations are links has none
+    const config = `{ "compilerOptions": { "module": "NodeNext", "moduleResolution": "NodeNext" } }\n`;
+    const linked = {
+      "configs/compiler.json": config,
+      "configs/module.json": '{ "type": "module" }\n',
+      "tsconfig.json": { symlink: "configs/compiler.json" },
+      "package.json": { symlink: "configs/module.json" },
+      "src/kept.ts": file,
+    };
+    const importer = 'import { value } from "./kept.js";\nexport const again = value;\n';
+    const configured = run(
+      { ...linked, "src/a.ts": importer },
+      { ...linked, "src/a.ts": `${importer}\n` },
+    );
+    assert.equal(configured.status, 0, configured.out);
+    assert.doesNotMatch(configured.out, /expected/u);
+  },
+);
+
+test(
+  "an argument the check cannot use is refused, and a check that looked at nothing has not passed",
+  { timeout: 60_000 },
+  () => {
+    const usage =
+      "usage: node tools/moves/pure-move-check.mjs BASE [--declare FILE] [--renames FILE] [PATH…]\n";
+    const kept = { "src/kept.ts": "export const kept = 1;\n" };
+    const move = moveOf(
+      { ...kept, "src/a.ts": main },
+      { ...kept, "src/a.ts": split["a.ts"], "src/b.ts": split["b.ts"] },
+    );
+    try {
+      const git = (...args) =>
+        execFileSync("git", args, { cwd: move.root, encoding: "utf8" }).trim();
+      const base = git("rev-parse", "HEAD~1");
+      const refused = (args, out) => {
+        const result = move.run(...args);
+        assert.deepEqual(result, { status: 2, out }, args.join(" "));
+      };
+      // a flag of `structure-report.mjs`, once read as a PATH that limited the change to nothing: "moved +0 -0", exit 0
+      refused(["--moved"], `pure-move-check: unknown option --moved\n${usage}`);
+      refused(["src", "-x"], `pure-move-check: unknown option -x\n${usage}`);
+      const nothing = (file) =>
+        `pure-move-check: ${file} matches no file of the change ${base.slice(0, 12)}..HEAD\n`;
+      refused(["missing.ts"], nothing("missing.ts"));
+      // a file in both trees that the change leaves as it is
+      refused(["src/kept.ts"], nothing("src/kept.ts"));
+      refused(["src/a.ts", "missing.ts", "src/b.ts"], nothing("missing.ts"));
+      // the change from HEAD to itself
+      const empty = spawnSync(process.execPath, [tool, "HEAD"], {
+        cwd: move.root,
+        encoding: "utf8",
+      });
+      assert.equal(empty.status, 2, empty.stdout);
+      assert.equal(
+        empty.stderr,
+        `pure-move-check: the change ${git("rev-parse", "HEAD").slice(0, 12)}..HEAD is empty: nothing to check (the check reads committed trees: commit first)\n`,
+      );
+      assert.equal(empty.stdout, "");
+      // a run that compares something keeps its output
+      const family = move.renames({ "src/a.ts": ["src/a.ts", "src/b.ts"] });
+      const passed = (args) => {
+        const result = move.run("--renames", family, ...args);
+        assert.deepEqual(
+          result,
+          {
+            status: 0,
+            out: `pure-move check of ${base}..HEAD (merge base ${base.slice(0, 12)}):\nshape: moved +5 -5; admitted import 1, export 2, whitespace 0, header comment 0; declared 0; unadmitted 0; bindings differing 0; refused 0; declared whole 0\n`,
+          },
+          args.join(" "),
+        );
+      };
+      passed([]);
+      passed(["src"]);
+      passed(["src/a.ts", "src/b.ts"]);
+      // Sol r1: a PATH outside the folder it runs in, where the user's configuration limits a diff to that folder
+      const other = join(move.root, "other");
+      mkdirSync(other);
+      const sibling = spawnSync(
+        process.execPath,
+        [tool, base, "--renames", family, "../src/a.ts", "../src/b.ts"],
+        {
+          cwd: other,
+          encoding: "utf8",
+          env: {
+            ...process.env,
+            GIT_CONFIG_COUNT: "1",
+            GIT_CONFIG_KEY_0: "diff.relative",
+            GIT_CONFIG_VALUE_0: "true",
+          },
+        },
+      );
+      assert.deepEqual(
+        { status: sibling.status, out: sibling.stdout + sibling.stderr },
+        move.run("--renames", family),
+      );
+    } finally {
+      move.done();
+    }
+  },
+);
+
+test(
+  "a generated file declared whole is listed, not judged, and counted; its bindings are still compared, and moved code is never declared away (#2564 item 13)",
+  { timeout: 60_000 },
+  () => {
+    const table = (rows, name = "x") =>
+      `import { ${name} } from "./x.js";\nexport const TABLE = [\n${rows.map((row) => `  "${row}",\n`).join("")}];\nexport const first = ${name};\n`;
+    const before = {
+      "a.ts": main,
+      "table.ts": table(["one"]),
+      "x.ts": "export const x = 1;\nexport const y = 2;\n",
+    };
+    const whole = {
+      file: "table.ts",
+      whole: true,
+      reason: "written by node tools/measure-test-files.mjs --write",
+    };
+    const move = moveOf(before, { ...split, "table.ts": table(["two", "three"]) });
+    const imported = moveOf(before, { ...split, "table.ts": table(["two", "three"], "y") });
+    try {
+      const renames = move.renames(splitFamily);
+      assert.equal(move.run("--renames", renames).status, 1);
+      const passed = move.run("--renames", renames, "--declare", move.declare([whole]));
+      assert.equal(passed.status, 0, passed.out);
+      assert.match(
+        passed.out,
+        /^ {2}not judged \(declared whole\): table\.ts \(\+2 -1\): written by node tools\/measure-test-files\.mjs --write$/mu,
+      );
+      assert.match(passed.out, /; declared whole 1$/mu);
+      // (an import the regenerated file changes is still compared)
+      const changed = imported.run(
+        "--renames",
+        imported.renames(splitFamily),
+        "--declare",
+        imported.declare([whole]),
+      );
+      assert.equal(changed.status, 1, changed.out);
+      assert.match(changed.out, /binding only after: table\.ts:1 import from "\.\/x\.js": y/u);
+      // (refused, each by its own sentence: an added file, a path of the map, no file of the change, twice)
+      const refusals = {
+        "is added, deleted or renamed by the change": [{ ...whole, file: "b.ts" }],
+        "is a path of the --renames map": [{ ...whole, file: "a.ts" }],
+        "matches no file of the change": [{ ...whole, file: "none.ts" }],
+        "is declared whole twice": [whole, whole],
+      };
+      for (const [sentence, entries] of Object.entries(refusals)) {
+        const refused = move.run("--renames", renames, "--declare", move.declare(entries));
+        assert.equal(refused.status, 2, `${sentence}\n${refused.out}`);
+        assert.ok(refused.out.includes(sentence), `${sentence}\n${refused.out}`);
+      }
+      // (a map path spelled with `./` is the same path: #2589 r1)
+      const alias = move.run(
+        "--renames",
+        move.renames({ "./a.ts": ["./a.ts", "b.ts"] }),
+        "--declare",
+        move.declare([{ ...whole, file: "a.ts" }]),
+      );
+      assert.equal(alias.status, 2, alias.out);
+      assert.ok(alias.out.includes("is a path of the --renames map"), alias.out);
+      const shape = move.run("--declare", move.declare([{ ...whole, whole: "yes" }]));
+      assert.equal(shape.status, 2);
+      assert.match(shape.out, /or \{ file, whole: true, reason \}/u);
+    } finally {
+      move.done();
+      imported.done();
+    }
+  },
+);

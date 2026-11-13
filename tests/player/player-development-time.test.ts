@@ -32,7 +32,7 @@ import {
   type KeptSessionStore,
 } from "../../player/persistence/kept-sessions.js";
 import type { MediaProgressReport } from "../../src/index.js";
-import { harness } from "../helpers/player/player-media.js";
+import { harness } from "../helpers/player/media/player-media.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";
 import { preparedPlan, sourceStart, type PlanStart } from "../helpers/prepared-plan.js";

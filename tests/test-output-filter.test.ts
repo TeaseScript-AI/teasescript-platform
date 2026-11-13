@@ -498,7 +498,7 @@ test("filter refuses a path that matches no test file before Node runs any", () 
   assert.match(option.stdout, /ℹ pass 1/);
 
   // A missing path counts after an option that takes no value, and after the first path, where Node reads every
-  // argument as a path (`tools/test-arguments.test.mjs` covers each option).
+  // argument as a path (`tools/test-runner/test-arguments.test.mjs` covers each option).
   for (const argumentsIn of [
     (directory: string) => [
       "--test-only",
@@ -530,7 +530,7 @@ test("the full suite's runner refuses a test runner option given to its Node ins
   try {
     const testFile = resolve(directory, "passing.test.mjs");
     writeFileSync(testFile, 'import test from "node:test";\ntest("passing test", () => {});\n');
-    const runner = resolve(process.cwd(), "tools/run-test-files.mjs");
+    const runner = resolve(process.cwd(), "tools/test-runner/run-test-files.mjs");
     const environment = { ...process.env };
     delete environment.NODE_TEST_CONTEXT;
     // Representative test runner options (concurrency, selection, a boolean, an experimental one, the switch itself),
@@ -627,9 +627,9 @@ test("filter refuses a pattern whose only matches are in a node_modules folder, 
 });
 
 test("the full suite runs every file once, each in its own process, with the costly files first", async () => {
-  // EVIDENCE: tools/costly-test-files.mjs exports `costlyTestFiles` as an array of file names, as the filter reads it.
+  // EVIDENCE: tools/test-runner/costly-test-files.mjs exports `costlyTestFiles` as an array of file names, as the filter reads it.
   const { costlyTestFiles } = (await import(
-    pathToFileURL(resolve(process.cwd(), "tools/costly-test-files.mjs")).href
+    pathToFileURL(resolve(process.cwd(), "tools/test-runner/costly-test-files.mjs")).href
   )) as { costlyTestFiles: string[] };
   const files = [...costlyTestFiles, "a.test.js", "z.test.js"];
   const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
@@ -728,9 +728,9 @@ test("the full suite fails on a file that reported no test of its own, and names
 });
 
 test("a test past the time limit fails by name and its file's later tests still run, for named files and in the full suite (#2454)", async () => {
-  // EVIDENCE: tools/test-in-flight.mjs exports `TEST_LIMIT_MS` as a number of milliseconds, as both runners read it.
+  // EVIDENCE: tools/test-runner/test-in-flight.mjs exports `TEST_LIMIT_MS` as a number of milliseconds, as both runners read it.
   const { TEST_LIMIT_MS } = (await import(
-    pathToFileURL(resolve(process.cwd(), "tools/test-in-flight.mjs")).href
+    pathToFileURL(resolve(process.cwd(), "tools/test-runner/test-in-flight.mjs")).href
   )) as { TEST_LIMIT_MS: number };
   const directory = mkdtempSync(resolve(tmpdir(), "test-output-filter-"));
   const environment = { ...process.env };
@@ -842,7 +842,7 @@ test(
     );
     const runner = spawn(
       process.execPath,
-      [resolve(process.cwd(), "tools/run-test-files.mjs"), file],
+      [resolve(process.cwd(), "tools/test-runner/run-test-files.mjs"), file],
       { env: environment, stdio: ["ignore", "pipe", "pipe"] },
     );
     let stderr = "";

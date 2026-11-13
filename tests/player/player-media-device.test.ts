@@ -17,7 +17,7 @@ import {
 import { createPlayerRuntimeSession } from "../../player/runtime/compile-project.js";
 import { playerRuntimeDeadlines, playerRuntimeMedia } from "../../player/runtime/runtime-view.js";
 import { observeTime, type MediaLoadReport } from "../../src/index.js";
-import { harness } from "../helpers/player/player-media.js";
+import { harness } from "../helpers/player/media/player-media.js";
 
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 

@@ -33,6 +33,8 @@ export function allowanceFor(syntaxNodes: number): number {
 export type WorkCounter =
   // the program's size, charged once as setup
   | "syntaxNodes"
+  // the view of identity calls (#2493, `identity-view.ts`): each value its walks visit, none without an identity function
+  | "identitySteps"
   // the graph: nodes, edges, regions, the call graph, liveness and returnability
   | "graphNodes"
   | "graphEdges"
@@ -128,7 +130,7 @@ export function pathTextLength(path: readonly string[]): number {
 
 /**
  * The paths and keys the core makes, each through one of these helpers or the key helpers of `definitions.ts`
- * (`tests/type-core/type-core-kept.test.ts` fails on one made past them). A text or array a structure keeps (a map's key, a set's
+ * (`type-core-kept.test.ts` fails on one made past them). A text or array a structure keeps (a map's key, a set's
  * member, an entry's path or key) is made by a kept helper (`keptText`, `keptKey`, …), which charges its size to
  * `literalUnits` before it makes it, so a literal's depth, breadth or names reach the allowance before
  * the heap; one a step only looks up or passes on is made by its plain twin (`pathText`, `keyOf`, …), which charges

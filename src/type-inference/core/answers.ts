@@ -12,6 +12,7 @@ import {
   splitPath,
   type BudgetLimit,
   type WorkCounter,
+  type WorkLedger,
 } from "./budget.js";
 import {
   Consumers,
@@ -35,6 +36,7 @@ import {
   type CanonicalKey,
 } from "./contract/key-ids.js";
 import { labelText } from "./contract/labels.js";
+import { factsOf } from "./contract/model.js";
 import { keyObjects, objectsAt } from "./contract/objects.js";
 import { replayLayer } from "./contract/prefix-index/summaries.js";
 import { selectLanes } from "./contract/lanes.js";
@@ -74,7 +76,7 @@ import {
   type Item,
   type ItemTag,
 } from "./items.js";
-import { selectsElement } from "./method-categories.js";
+import { dictList, methodCategory, selectsElement } from "./method-categories.js";
 import {
   CoreProgram,
   propertyStep,
@@ -104,6 +106,8 @@ import {
 } from "./contract-descriptors.js";
 import { admittedLevel } from "./admission/admitted.js";
 import { stopDiagnostics } from "./stop-diagnostics.js";
+import { Retained, retainedModule } from "./retained/retained.js";
+import type { IdentityView } from "./identity-view.js";
 
 // (a kind's closed type lives with the contract descriptors, which build types of kinds; the adapters read it here)
 export { closedType };
@@ -138,8 +142,8 @@ export interface CorePass {
   readonly closure?: Closure | null;
 }
 
-/** Stores' targets by their places (`DefinitionIndex`'s `storeTargets`). */
-type StoreTargets = ReadonlyMap<PlaceId, ReturnType<CoreProgram["targetRoot"]>>;
+/** Stores' targets by their places (`DefinitionIndex`'s `storeTargets`); `null` for a store into nothing (#2378). */
+type StoreTargets = ReadonlyMap<PlaceId, ReturnType<CoreProgram["targetRoot"]> | null>;
 
 /**
  * One pass over an indexed program, the stores of `rejected` (by their definitions' order) left out (A6), the keys of
@@ -150,7 +154,7 @@ function createPass(
   program: CoreProgram,
   rejected: ReadonlyMap<number, unknown> = new Map(),
   stopped: readonly StoppedKey[] = [],
-  targets: StoreTargets = new Map(),
+  targets: StoreTargets = Retained.map("DefinitionIndex.storeTargets"),
   completion = false,
 ): CorePass {
   const definitions = new DefinitionIndex(program, targets);
@@ -170,8 +174,13 @@ function createPass(
     // admission's rejections take effect in the next pass (A6)
     lists: new DefinitionLists(
       definitions,
-      (d) => !rejected.has(d.uid),
-      (operand) => !rejected.has(joinedOperand(operand)),
+      // (#1072 R26: captures `rejected`, the pass's own, never written after it is given)
+      Retained.closure("DefinitionLists.live", (d: Definition) => !rejected.has(d.uid)),
+      // (#1072 R26: as `live`)
+      Retained.closure(
+        "DefinitionLists.joined",
+        (operand: PlaceId) => !rejected.has(joinedOperand(operand)),
+      ),
     ),
     handlers: new HandlerIndex(program, definitions),
     guards: new GuardIndex(program),
@@ -196,6 +205,12 @@ function createPass(
   const exact = new ExactPath(pass);
   const contract = new Contract(pass);
   const values = new Values(pass);
+  // (its getters give these three, made after it; its other fields are its parts)
+  Retained.owner(pass, "CorePass", (made) => ({
+    exact: made.exact,
+    contract: made.contract,
+    values: made.values,
+  }));
   // (#1526 phase C: no decision of a completion pass stops at its allowance, so nothing #1599 keeps for one is kept,
   // from before anything of the pass solves)
   if (completion) contract.closeDecisions();
@@ -213,17 +228,42 @@ function createPass(
 /**
  * #1275 (ADR 0021 §1.1, §1.4, F11): the stores whose receivers select a `first`, `last` or `random` above the stored
  * place (`box.first.n = 2`), by their places. The runtime reads such a receiver as an object's own property or as a
- * list's or a set's element, so these stores' targets follow what admission admits there (`storeTargets`).
+ * list's or a set's element, so these stores' targets follow what admission admits there (`storeTargets`). #2378: so
+ * do the stores into or below a list a `values` or `keys` gives (`d.values.add(x)`, `d.values[0].add(x)`), and the
+ * removals from it (`d.values.clear()`, by their receivers): a dict's is a new list of copies each time (V30, ADR 0014),
+ * an object's own property of the name a list it holds.
  */
 function selectingStores(program: CoreProgram): SelectingStore[] {
   const out: SelectingStore[] = [];
   for (const c of program.constraints) {
+    if (
+      c.kind === "operation" &&
+      c.contract.family === "method" &&
+      typeof c.receiver === "number" &&
+      methodCategory(c.contract.name)?.receiver !== undefined
+    ) {
+      let depth = 0;
+      let list = false;
+      for (
+        let projection = program.projOf.get(program.occurrenceOf.get(c.receiver) ?? c.receiver);
+        projection !== undefined;
+        depth += 1
+      ) {
+        program.work.charge("indexSteps");
+        if (dictList(projection.step) !== undefined) list = true;
+        const at: PlaceId = program.occurrenceOf.get(projection.owner) ?? projection.owner;
+        projection = program.projOf.get(at);
+      }
+      if (list) out.push({ into: c.receiver, value: null, depth, list });
+      continue;
+    }
     if (c.kind !== "store") continue;
     // (the stored place's own step is #1260's: always the property)
     const own = program.projOf.get(c.into);
     let at = own === undefined ? undefined : (program.occurrenceOf.get(own.owner) ?? own.owner);
     let selects = false;
     let depth = 1;
+    let list = false;
     for (
       let projection = at === undefined ? undefined : program.projOf.get(at);
       projection !== undefined;
@@ -231,21 +271,26 @@ function selectingStores(program: CoreProgram): SelectingStore[] {
     ) {
       program.work.charge("indexSteps");
       if (selectsElement(projection.step)) selects = true;
+      if (dictList(projection.step) !== undefined) list = true;
       at = program.occurrenceOf.get(projection.owner) ?? projection.owner;
       projection = program.projOf.get(at);
     }
-    if (selects) out.push({ into: c.into, value: c.value, depth });
+    if (selects || list) out.push({ into: c.into, value: c.value, depth, list });
   }
   // (shallow first: a receiver a deeper store reads may be one a shallower store sets)
   program.work.charge("indexSteps", out.length);
   return out.sort((a, b) => a.depth - b.depth);
 }
 
-/** A store `selectingStores` finds: its place, its value, and its target's length. */
+/**
+ * A store `selectingStores` finds: its place (a removal's receiver), its value (a removal's `null`), its target's length,
+ * and whether it goes into a list.
+ */
 interface SelectingStore {
   readonly into: PlaceId;
-  readonly value: PlaceId;
+  readonly value: PlaceId | null;
   readonly depth: number;
+  readonly list: boolean;
 }
 
 /**
@@ -255,7 +300,9 @@ interface SelectingStore {
  * earliest deciding value that one of the shallower of these stores sets there by its target settled here, which this
  * pass's definitions still key as an element; a list's or a set's element otherwise, as a read takes it (F11). Each
  * receiver is decided lazily through the consumers (`decide`), so its decision is the pass's own and bounded by the
- * demand allowance, and a stopped one decides nothing there (S3 §5).
+ * demand allowance, and a stopped one decides nothing there (S3 §5). #2378: a store into or below a list a `values` or
+ * `keys` gives, and a removal from it, goes into nothing (`null`) where an owner above such a step holds only dicts
+ * (and null): no definition is made, so it decides nothing and nothing reads it.
  */
 function storeTargets(
   program: CoreProgram,
@@ -264,18 +311,44 @@ function storeTargets(
   decide: (root: PlaceId, path: readonly string[], into: PlaceId) => void,
   stores: readonly SelectingStore[],
 ): StoreTargets {
-  const out = new Map<PlaceId, ReturnType<CoreProgram["targetRoot"]>>();
+  const out = Retained.map<PlaceId, ReturnType<CoreProgram["targetRoot"]> | null>(
+    "DefinitionIndex.storeTargets",
+  );
   // (per target, the kinds of the earliest value set there that decides: each value asked once, until one decides)
   const settled = new Map<Key, readonly ItemTag[]>();
   const objects = (kinds: readonly ItemTag[]): boolean =>
     kinds.includes("object") && kinds.every((kind) => kind === "object");
-  for (const { into, value } of stores) {
+  // (a target below a list a dict's `values` or `keys` gives: an owner above such a step that holds only dicts)
+  const listed = (
+    into: PlaceId,
+    { root, path }: ReturnType<CoreProgram["targetRoot"]>,
+  ): boolean => {
+    for (let index = 0; index < path.length; index += 1) {
+      if (dictList(path[index]!) === undefined) continue;
+      const owner = keptSlice(program.work, path, 0, index);
+      decide(root, owner, into);
+      const admitted = admission.admitted(root, owner).filter((kind) => kind !== "null");
+      if (admitted.length > 0 && admitted.every((kind) => kind === "dict")) return true;
+    }
+    return false;
+  };
+  for (const { into, value, list } of stores) {
+    // (a removal's receiver as its definition takes it)
+    if (value === null) {
+      if (listed(into, program.targetRoot(program.occurrenceOf.get(into) ?? into)))
+        out.set(into, null);
+      continue;
+    }
     const target = program.targetRoot(into, true, (root, steps, length) => {
       const path = keptSlice(program.work, steps, 0, length);
       decide(root, path, into);
       const admitted = admission.admitted(root, path).filter((kind) => kind !== "null");
       return objects(admitted.length > 0 ? admitted : (settled.get(keyOf(root, path)) ?? []));
     });
+    if (list && listed(into, target)) {
+      out.set(into, null);
+      continue;
+    }
     out.set(into, target);
     const key = keptKey(program.work, target.root, target.path);
     if (settled.has(key)) continue;
@@ -314,13 +387,15 @@ function retargeted(
   const keys = new Set<CanonicalKey>();
   let moved = false;
   for (const [into, target] of next) {
-    program.work.charge("checks", 1 + target.path.length);
+    program.work.charge("checks", 1 + (target?.path.length ?? 0));
     const before = targets.get(into);
     if (
       before !== undefined &&
-      before.root === target.root &&
-      before.path.length === target.path.length &&
-      before.path.every((step, at) => step === target.path[at])
+      (before === null || target === null
+        ? before === target
+        : before.root === target.root &&
+          before.path.length === target.path.length &&
+          before.path.every((step, at) => step === target.path[at]))
     )
       continue;
     moved = true;
@@ -331,7 +406,9 @@ function retargeted(
 
 /** Store targets as one text, for comparing passes' targets. */
 function targetsText(targets: StoreTargets): string {
-  return [...targets.values()].map((target) => keyOf(target.root, target.path)).join("|");
+  return [...targets.values()]
+    .map((target) => (target === null ? "-" : keyOf(target.root, target.path)))
+    .join("|");
 }
 
 /** Which path answered a read (§3.3, §3.1, §3.2); a value that is no read: `value`. */
@@ -472,6 +549,10 @@ export interface ValueAnswer {
 }
 
 export interface Answers {
+  /** The view of the request the analysis read (`identity-view.ts`): its files are the ones a question's nodes are of. */
+  readonly identity: IdentityView;
+  /** The analysis's ledger, which the questions after it spend too (`asked`): the view's result translation. */
+  readonly work: WorkLedger;
   readonly outcome: CoreOutcome;
   /** One per cell outcome: an error, or a warning with its one obligation (§4). */
   readonly diagnostics: readonly CoreDiagnostic[];
@@ -623,7 +704,7 @@ export function analyseCore(request: CoreAnalysisRequest, stopped?: BudgetLimit)
   let stops: readonly StoppedKey[] = [];
   // #1275: the stores below a selection, their targets by the receivers each pass admits; new targets start the passes
   // again from no rejection, and targets a pass has used before are kept (no cycle of targets)
-  let targets: StoreTargets = new Map();
+  let targets: StoreTargets = Retained.map("DefinitionIndex.storeTargets");
   if (stopped !== undefined) program.work.stop(stopped);
   else
     try {
@@ -1133,9 +1214,14 @@ function termProperties(term: TypeTerm): string[] {
 }
 
 /** Each program's kept-variable names by base (`keptName`), one survey for all the answers asked of it. */
-const KEPT_NAMES = new WeakMap<CorePass["program"], Map<string, string>>();
+const KEPT_NAMES = retainedModule<CorePass["program"], Map<string, string>>(
+  "answers.KEPT_NAMES",
+  "weakMap",
+);
 
 class CoreAnswers implements Answers {
+  readonly identity: IdentityView;
+  readonly work: WorkLedger;
   readonly outcome: CoreOutcome;
   readonly diagnostics: readonly CoreDiagnostic[];
   readonly checks: readonly Obligation[];
@@ -1176,6 +1262,8 @@ class CoreAnswers implements Answers {
     // (a stop, not statements nested too deep after an analysis that ran to its end: its answers stand)
     this.#stopped = pass.program.work.stopped !== null;
     const program = pass.program;
+    this.identity = program.identity;
+    this.work = program.work;
     this.graph = program.flow;
     this.dominators = program.dom;
     this.initializers = initializersOf(program);
@@ -1255,7 +1343,7 @@ class CoreAnswers implements Answers {
       demands: consumers.reads,
       decisions: consumers.decisions,
       finished: pass.solver.demandWork(),
-      facts: { ...pass.contract.facts },
+      facts: factsOf(pass.contract.facts, pass.contract.supportIds),
       closure: consumers.completion,
     };
   }
@@ -1481,8 +1569,9 @@ class CoreAnswers implements Answers {
 
   public keptName(base: string): string {
     const { program } = this.#pass;
-    let names = KEPT_NAMES.get(program);
-    if (names === undefined) KEPT_NAMES.set(program, (names = new Map()));
+    let names = KEPT_NAMES().get(program);
+    if (names === undefined)
+      KEPT_NAMES().set(program, (names = Retained.map("answers.KEPT_NAMES[]")));
     let name = names.get(base);
     if (name === undefined) {
       const { work } = program;

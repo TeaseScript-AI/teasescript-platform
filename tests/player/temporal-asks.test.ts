@@ -16,7 +16,7 @@ import { validateInstructionPlan } from "../../src/plan/validation.js";
 import { createCheckpoint, deserializeCheckpoint } from "../../src/runtime/snapshot/checkpoint.js";
 import { run } from "../../src/runtime/engine.js";
 import { compileValidPlan } from "../helpers/compile-valid-plan.js";
-import { AMSTERDAM } from "../helpers/temporal-fixtures.js";
+import { AMSTERDAM } from "../helpers/runtime/temporal-fixtures.js";
 import { createFreshRuntimeSnapshot } from "../../src/runtime/snapshot/snapshot-construction.js";
 import { validateRuntimeSnapshot } from "../../src/runtime/snapshot/snapshot-validation.js";
 

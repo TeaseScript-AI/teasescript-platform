@@ -12,7 +12,7 @@ Which tool answers which question:
 | Does an area's analysis (its publication, its stops) differ between two trees? | `run.mjs`, `stalls.mjs` ([Running an area](#running-an-area)) |
 | Does a set's plan, diagnostics, charge trace or questions on the core's route differ between two trees? | `plans.mjs` ([Plans](#plans)) |
 | What differs in a differing demand row, and which tree's output does the allowance stop? | `plans.mjs summary` ([Plans](#plans)) |
-| Where does the core's route differ from the current checker on one tree (the shadow gate)? | `shadow.mjs`, `shadow-classify.mjs` ([Shadow](#shadow)) |
+| Where does the core's route differ from the current checker on one tree (the shadow comparison)? | `shadow.mjs`, `shadow-classify.mjs` ([Shadow](#shadow)) |
 | Does a stop let a value through that the natural plan rejects? | `stop-runs.mjs` ([Stop runs](#stop-runs)) |
 | What do the checker, the core and the core's route each answer for a list of cases, plans and runs included? | `differential.mjs` ([Differential records](#differential-records)) |
 | Are two trees' records of a list of cases equal but for some fields, such as a changed message's `message`? | `differential.mjs join --ignore` ([Differential records](#differential-records)) |
@@ -430,7 +430,7 @@ Exit statuses:
 
 `stop-runs.mjs` (#2080) looks, on one built tree, for a stop that lets a value through that the natural plan rejects.
 For each item it compiles the unit unstopped and at the item's demand allowance, in its mode, and runs both plans over
-host data: `stopRuns` and `hostValues` in `tests/helpers/type-core-stop-oracle.ts`, which also feed that data to
+host data: `stopRuns` and `hostValues` in `tests/helpers/type-core-stop-runs.ts`, which also feed that data to
 `stopProblems` as its violating runs. The host data holds scalars and collections, objects by the unit's own property
 names and paths, and values made from every type either plan checks.
 
@@ -559,7 +559,7 @@ sx-job submit --commit <sha> --shards 16 --mem 6G --timeout 2h --campaign <T> --
 research's `results.jsonl`, whose crashed sources have no rows) and gives every route pair (a source in one mode, legacy
 against core) exactly one class, and every source in each order one class of the sharing column, the core with sharing
 on against off (#1711). Each class has its rule in words, a witness and a gate state: `pass`, `attributed` (the rule
-class is known; S11 still owes each source's accepted expectation), `accepted (condition 1; condition 2 list)` or `open`. Pairs: `agree`; `differs/stop`,
+class is known), `accepted (condition 1; condition 2 list)` or `open`. Pairs: `agree`; `differs/stop`,
 `/surviving`, `/integer`, `/rule` by the codes whose diagnostic identities (path, code, severity, offsets) changed, in
 that precedence, then `/checks`, `/plan`, `/wording` where the identities are equal (the other differing parts are
 columns of the pair); from version 5 `declined/lost check` (accepted: the core declined the program where a stop lost a
@@ -576,7 +576,7 @@ natural runs hold ordinary decision records and at least one run at the demand c
 completion) and, as information only, the sources whose core differs across the four modes and the control's runs that
 left the slice, one row a class that names a text, `declined/lost check` and each rule of `EXCLUSIONS` (zeros
 included), and one a text no class names (`Unlisted control texts`); the verdict line is `gate:
-green` only with no `open` row, and `--gate` (S11's final run, with `--expect`) exits 1 otherwise. Over the research's
+green` only with no `open` row, and `--gate` (which needs `--expect`) exits 1 otherwise. Over the research's
 records it reproduces its aggregate (`~/work/evidence/1728/`):
 
 ```sh
@@ -729,7 +729,7 @@ debit probe read properties the records are not under and compared empty lists.
 An oracle or runner keys a site by its file and its offsets (`tests/helpers/site-keys.ts`: the compiler's `siteKey`, a
 plan instruction's `planSiteKey`, `enclosingFunction` in the site's own file). `npm run lint` refuses, in `tests/helpers/`
 and `tests/families/`, a map's or a set's key whose text holds a site's offsets and not its file, read one step through
-its variable or function, not through a call inside that text (`tools/oxlint/check-site-keys.mjs`, #1700).
+its variable or function, not through a call inside that text (`tools/oxlint/type-core/check-site-keys.mjs`, #1700).
 
 ## Kept outside the repository
 
@@ -739,6 +739,6 @@ folder on the desktop worker. A new kit's entry goes to its area's file.
 
 ## The oracle library's next step
 
-`tests/helpers/type-core/type-core-enclosing.ts` (#1434) keeps its own `MODES`: eight modes, with the consumers' order and the
+`tests/helpers/type-core/enclosing/type-core-enclosing-verdicts.ts` (#1434) keeps its own `MODES`: eight modes, with the consumers' order and the
 solver's order varied apart. The library's four modes reverse both together. Its modes are the candidate for the
 library's next step. Its stop verdict (`enclosingProblems`) is its own oracle and copies no library projection.

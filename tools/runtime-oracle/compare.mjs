@@ -13,7 +13,6 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { canonicalJson } from "../benchmark-runtime.mjs";
 import { closure } from "./closure.mjs";
 import { checkout, checkoutHashes, defaultManifest, materialize, runRoot } from "./materialize.mjs";
@@ -164,7 +163,7 @@ function parse(argv) {
   return options;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (import.meta.main) {
   // The exit status is set, not forced: a report larger than a pipe's buffer must be written out completely first.
   try {
     const report = compare(parse(process.argv.slice(2)));

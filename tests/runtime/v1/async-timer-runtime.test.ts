@@ -23,7 +23,7 @@ import { nextXorShift32 } from "../../../src/runtime/random/random.js";
 import type { RuntimeSnapshot } from "../../../src/runtime/snapshot/state.js";
 import { compileValidPlan as plan } from "../../helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
-import { playerStateOf } from "../../helpers/player-state.js";
+import { playerStateOf } from "../../helpers/player/player-state.js";
 import {
   assertRuntimeResumeEquivalent,
   functionFrames,

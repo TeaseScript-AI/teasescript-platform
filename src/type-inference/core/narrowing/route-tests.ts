@@ -149,6 +149,8 @@ export interface Feasibility {
   readonly unentered: ReadonlySet<TreeBlock>;
   /** The statements that own such an arm. */
   readonly owners: readonly TreeStatement[];
+  /** Of `unentered`, the arms `#infeasible` proves no run enters (not `unavailable`): R2.2 item 4's arms. */
+  readonly infeasible: ReadonlySet<TreeBlock>;
   /** The bodies of the program's files: a promoting route stands in one (`NarrowingRoutes.#plain`). */
   readonly files: ReadonlySet<TreeBlock>;
   /**
@@ -156,6 +158,11 @@ export interface Feasibility {
    * that holds, at any depth, such a statement, a call of a function or a file, or a handler's declaration.
    */
   readonly hazards: ReadonlyMap<number, readonly number[]>;
+  /**
+   * `hazards` for an entry route (r4-451, R2.2 item 4): a statement inside an `infeasible` arm marks no statement above
+   * that arm; marks from its owner's own expressions, its entered arms and `unavailable` arms stay.
+   */
+  readonly entryHazards: ReadonlyMap<number, readonly number[]>;
   /**
    * The statements whose own expressions, not their arms', hold a call of a function or a file or a handler's
    * declaration: a condition, a subject, a stored value, a statement's call. A route evaluates the own expressions of
@@ -474,15 +481,18 @@ export class RouteTests {
     const work = this.#work;
     this.#testing();
     const unentered = new Set<TreeBlock>();
+    const infeasible = new Set<TreeBlock>();
     const owners: TreeStatement[] = [];
     for (const list of each(work, "eventSteps", [this.#ifs, this.#whiles]))
       for (const statement of each(work, "eventSteps", list)) {
         let owns = false;
-        for (const arm of each(work, "eventSteps", statement.arms))
-          if (arm.live && (yield* this.#infeasible(arm)) !== "feasible") {
-            unentered.add(arm);
-            owns = true;
-          }
+        for (const arm of each(work, "eventSteps", statement.arms)) {
+          const answer = arm.live ? yield* this.#infeasible(arm) : "feasible";
+          if (answer === "feasible") continue;
+          unentered.add(arm);
+          if (answer === "infeasible") infeasible.add(arm);
+          owns = true;
+        }
         if (owns) owners.push(statement);
       }
     const program = this.pass.program;
@@ -508,32 +518,43 @@ export class RouteTests {
       const statement = this.tree.statementAt(region.file, region.block.span.start.offset);
       if (statement !== null) calls.push(statement);
     }
-    // (a statement and each compound statement above it)
-    const above = (pending: TreeStatement[], into: Set<TreeStatement>): void => {
+    // (a statement and each compound statement above it; for an entry route, not above an `infeasible` arm)
+    const above = (pending: TreeStatement[], into: Set<TreeStatement>, entry: boolean): void => {
       work.charge("eventSteps");
       for (const _ of steps(work, "eventSteps", () => pending.length > 0)) {
         const statement = pending.pop()!;
         if (into.has(statement)) continue;
         into.add(statement);
-        if (statement.block.owner !== null) pending.push(statement.block.owner);
+        if (statement.block.owner !== null && !(entry && infeasible.has(statement.block)))
+          pending.push(statement.block.owner);
       }
     };
     const headed = new Set<TreeStatement>();
     for (const statement of each(work, "eventSteps", calls)) headed.add(statement);
-    const calling = new Set<TreeStatement>();
-    above(calls, calling);
-    for (const statement of each(work, "eventSteps", calling)) marked.push(statement);
-    const hazardous = new Set<TreeStatement>();
-    above(marked, hazardous);
-    const hazards = new Map<number, number[]>();
-    for (const statement of each(work, "eventSteps", hazardous)) {
-      const list = hazards.get(statement.block.id);
-      if (list === undefined) hazards.set(statement.block.id, [statement.index]);
-      else list.push(statement.index);
-    }
-    for (const list of each(work, "eventSteps", hazards.values()))
-      sorted(work, "eventSteps", list, (a, b) => a - b);
-    this.#feasibility = { unentered, owners, files, hazards, headed };
+    // (the marks above each statement a route may not pass, then the sorted indexes per block)
+    const hazardsOf = (entry: boolean): Map<number, number[]> => {
+      work.charge("eventSteps");
+      const pending: TreeStatement[] = [];
+      for (const statement of each(work, "eventSteps", calls)) pending.push(statement);
+      const calling = new Set<TreeStatement>();
+      above(pending, calling, entry);
+      for (const statement of each(work, "eventSteps", marked)) pending.push(statement);
+      for (const statement of each(work, "eventSteps", calling)) pending.push(statement);
+      const hazardous = new Set<TreeStatement>();
+      above(pending, hazardous, entry);
+      const byBlock = new Map<number, number[]>();
+      for (const statement of each(work, "eventSteps", hazardous)) {
+        const list = byBlock.get(statement.block.id);
+        if (list === undefined) byBlock.set(statement.block.id, [statement.index]);
+        else list.push(statement.index);
+      }
+      for (const list of each(work, "eventSteps", byBlock.values()))
+        sorted(work, "eventSteps", list, (a, b) => a - b);
+      return byBlock;
+    };
+    const hazards = hazardsOf(false);
+    const entryHazards = infeasible.size === 0 ? hazards : hazardsOf(true);
+    this.#feasibility = { unentered, owners, infeasible, files, hazards, entryHazards, headed };
     return this.#feasibility;
   }
 

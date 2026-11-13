@@ -7,6 +7,7 @@ import { differsIn, makeItem, REASON, weaken, type Item } from "../items.js";
 import type { ValueConstraint } from "../program.js";
 import type { Work } from "../solver.js";
 import type { ChoiceGroup, ChoicePart, StoredChoiceKeys } from "./model.js";
+import { retainedModule } from "../retained/retained.js";
 
 // A choice's items: its options' labels and values as its answer reads them.
 
@@ -18,7 +19,7 @@ export const WIDE = 8;
  * written empty (no button), or `undefined` without a label.
  */
 export function choiceLabels(c: ValueConstraint): readonly (ValueKind | null | undefined)[] {
-  const known = LABELS.get(c);
+  const known = LABELS().get(c);
   if (known !== undefined) return known;
   const evidence = "evidence" in c ? c.evidence : undefined;
   if (evidence?.kind !== "choice") return [];
@@ -30,15 +31,18 @@ export function choiceLabels(c: ValueConstraint): readonly (ValueKind | null | u
         ? null
         : option.label.kind,
   );
-  LABELS.set(c, labels);
+  LABELS().set(c, labels);
   return labels;
 }
 
 /** Per written list or set option's elements, whether every one is a choice object (`choiceItems`), asked once. */
-const OBJECTS_ONLY = new WeakMap<readonly unknown[], boolean>();
+const OBJECTS_ONLY = retainedModule<readonly unknown[], boolean>("choices.OBJECTS_ONLY", "weakMap");
 
 /** Each choice's labels (`choiceLabels`), made once: a wide choice's every part reads them. */
-const LABELS = new WeakMap<ValueConstraint, readonly (ValueKind | null | undefined)[]>();
+const LABELS = retainedModule<ValueConstraint, readonly (ValueKind | null | undefined)[]>(
+  "choices.LABELS",
+  "weakMap",
+);
 
 /**
  * V30 §19: an `askChoice`'s answer at `rest`, read by `read`: per option its label's kind, or each of
@@ -149,9 +153,9 @@ export function* choiceItems(
       // written choice objects alone: together below the list's element step, as its literal analogue reads them
       // (§3.4: several elements), each by the keys it writes, which no store reaches before the choice (once per list:
       // a wide choice's every part asks it)
-      let objects = OBJECTS_ONLY.get(content.elements);
+      let objects = OBJECTS_ONLY().get(content.elements);
       if (objects === undefined)
-        OBJECTS_ONLY.set(
+        OBJECTS_ONLY().set(
           content.elements,
           (objects =
             content.elements.length > 0 &&

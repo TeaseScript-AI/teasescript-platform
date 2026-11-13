@@ -16,7 +16,7 @@ import {
   DEFAULT_TEMPORAL_CONTEXT,
 } from "../../src/index.js";
 import { withValidationTestStatistics } from "../../src/validation-testing.js";
-import { utc } from "../helpers/temporal-fixtures.js";
+import { utc } from "../helpers/runtime/temporal-fixtures.js";
 import {
   adoptPlayerRuntimeCatchUp,
   beginPlayerRuntimeCatchUp,

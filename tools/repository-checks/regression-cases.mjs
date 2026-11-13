@@ -13,7 +13,7 @@ import { SourceMap } from "node:module";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { run } from "node:test";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { pathToFileURL } from "node:url";
 
 import { ts } from "ts-morph";
 
@@ -384,7 +384,7 @@ await build({ configFile: "player/vue/vite.test-modules.config.ts", plugins: [te
   }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url))
+if (import.meta.main)
   main(process.argv.slice(2)).then(
     (code) => {
       process.exitCode = code;

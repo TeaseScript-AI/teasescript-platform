@@ -292,7 +292,7 @@ function retryLines(derived, table) {
   return ["", `Byte pages discarded and loaded again: ${total} over ${derived.length} samples.`];
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (import.meta.main) {
   const args = process.argv.slice(2);
   const take = (flag) => {
     const index = args.indexOf(flag);

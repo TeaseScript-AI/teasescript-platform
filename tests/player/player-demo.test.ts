@@ -14,7 +14,7 @@ import {
   playerRuntimeTimers,
 } from "../../player/runtime/runtime-view.js";
 import { compileSource } from "../../src/index.js";
-import { harness } from "../helpers/player/player-media.js";
+import { harness } from "../helpers/player/media/player-media.js";
 
 // The repository demo the Player boots on `/player/`. Its host (`player/vue/src/demoHost.ts`) resolves package
 // files and synthesizes the two sounds, which last 1.6 s and 4 s.

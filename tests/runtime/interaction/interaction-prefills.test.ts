@@ -19,7 +19,7 @@ import {
 import { run } from "../../../src/runtime/engine.js";
 import { completeAction } from "../../../src/runtime/operations/complete-action.js";
 import { compileValidPlan } from "../../helpers/compile-valid-plan.js";
-import { AMSTERDAM } from "../../helpers/temporal-fixtures.js";
+import { AMSTERDAM } from "../../helpers/runtime/temporal-fixtures.js";
 import { createFreshRuntimeSnapshot } from "../../../src/runtime/snapshot/snapshot-construction.js";
 import type { SerializableRuntimeValue } from "../../../src/runtime/values/serializable-values.js";
 import { validateRuntimeSnapshot } from "../../../src/runtime/snapshot/snapshot-validation.js";

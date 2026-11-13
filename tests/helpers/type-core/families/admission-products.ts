@@ -1,4 +1,4 @@
-// pins for tests/type-core/type-core-work-a.test.ts, tests/type-core/type-core-work-c.test.ts: main's 64 → 128 growth step of admission's known products (the read chains and mixed-source adds), as gates | line /^\s*measured: \d/u
+// pins for tests/type-core/work/type-core-work-families.test.ts, tests/type-core/work/type-core-work-c.test.ts: main's 64 → 128 growth step of admission's known products (the read chains and mixed-source adds), as gates | line /^\s*measured: \d/u
 import {
   type WorkFamily,
   rows,

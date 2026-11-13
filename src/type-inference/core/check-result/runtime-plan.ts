@@ -262,7 +262,9 @@ export function runtimeChecks(
       // (a loop variable's check has no place in the plan yet: its loop stays outside the slice)
       for (let at: Expression | undefined = expression; at !== undefined; at = index.parentOf(at))
         if (index.iterates(at)) throw new OutsideContract(at, "a check of a loop variable");
-      throw new Error("A check of the slice belongs to no store.");
+      // (nor has any other check that no store takes, such as one inside a command's operand: a check without a store
+      // has no destination in this slice)
+      throw new OutsideContract(expression, "a check that no store takes");
     }
     by.add(store);
     const held = atStore.get(store);

@@ -1,4 +1,4 @@
-// pins for tests/type-core/type-core-work-b.test.ts: main's work per family, as bounds | line /^\s*\[\d+, \d+, \d+\],$/u
+// pins for tests/type-core/work/type-core-work-b.test.ts: main's work per family, as bounds | line /^\s*\[\d+, \d+, \d+\],$/u
 import { sharedReads } from "./builders.js";
 
 /** A family whose summaries' demands are its answers' own pairs, with `main`'s work measured once. */

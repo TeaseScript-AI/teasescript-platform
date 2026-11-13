@@ -7,7 +7,7 @@ import { refText, type Found, type Touch, type TouchRef } from "../touch.js";
 import type { HeldOwn } from "./model.js";
 import { liveOwn } from "./own.js";
 import { touchesOf, touchRef } from "./touches.js";
-import { heldInput } from "./transfers.js";
+import { heldInput } from "./transfers/held-input.js";
 import { expand } from "./walk.js";
 
 // What a place's live stores definitely hold (A2): its held tries, built once per pass, and where they meet.

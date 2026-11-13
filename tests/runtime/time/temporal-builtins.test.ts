@@ -20,7 +20,7 @@ import {
 } from "../../../src/temporal-builtins.js";
 import { compileValidPlan } from "../../helpers/compile-valid-plan.js";
 import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
-import { AMSTERDAM, utc } from "../../helpers/temporal-fixtures.js";
+import { AMSTERDAM, utc } from "../../helpers/runtime/temporal-fixtures.js";
 
 /*
  * The contracts of the built-ins of date and time values (V30 §35) decide what the compiler accepts and what the runtime

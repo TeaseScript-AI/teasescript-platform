@@ -385,6 +385,50 @@ test("the plans comparison refuses trees whose modes are not the same names once
     }
 });
 
+test("the plans comparison refuses a shard index outside 0 to N-1 and a selection of no source, before any record (#1072 R48)", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
+  built(folder, [["fine", "fine"]]);
+  const missing = join(folder, "missing.json");
+  writeFileSync(missing, JSON.stringify(["absent"]));
+  const cases: [string[], RegExp][] = [
+    [["--shard", "1/1"], /is no shard i\/N with 0 <= i < N/],
+    [["--shard", "8/8"], /is no shard i\/N with 0 <= i < N/],
+    [["--shard", "-1/2"], /is no shard i\/N with 0 <= i < N/],
+    [["--shard", "0/0"], /is no shard i\/N with 0 <= i < N/],
+    [["--shard", "1/2"], /the selection holds no source of area/],
+    [["--only", missing], /the selection holds no source of area/],
+    [["--limit", "0"], /the selection holds no source of area/],
+  ];
+  for (const [at, [options, refusal]] of cases.entries()) {
+    const out = join(folder, `refused-${at}.jsonl`);
+    const ran = spawnSync(
+      process.execPath,
+      [tool, join(folder, "base"), join(folder, "head"), "area", ...options, "--out", out],
+      { encoding: "utf8" },
+    );
+    const named = options.join(" ");
+    assert.equal(ran.status, 2, `${named}: ${ran.stderr}`);
+    assert.match(ran.stderr, refusal, named);
+    assert.equal(existsSync(out), false, named);
+  }
+  const ran = spawnSync(
+    process.execPath,
+    [
+      tool,
+      join(folder, "base"),
+      join(folder, "head"),
+      "area",
+      "--shard",
+      "0/2",
+      "--out",
+      join(folder, "ran.jsonl"),
+    ],
+    { encoding: "utf8" },
+  );
+  assert.equal(ran.status, 0, ran.stderr);
+});
+
 test("the plans comparison hands no source to a worker before it has loaded and checked both trees' modes, so a slow or wrong start writes no record (#2342, final review B1)", (t) => {
   const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
   t.after(() => rmSync(folder, { recursive: true, force: true }));

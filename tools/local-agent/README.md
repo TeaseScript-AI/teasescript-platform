@@ -103,7 +103,8 @@ python3 -B tools/local-agent/test-prepare-source-review.py
 
 ## Source-bundle artifact request logic
 
-Trusted default-branch `source-bundle-artifact-request.cjs` accepts requests
+Trusted default-branch `source-bundle-artifact-request.cjs`, which requires its
+`-shared`, `-registry` and `-lookup` pieces beside it, accepts requests
 only from Artifact mailbox issue #235, pins selectors, authorizes collaborators,
 validates index and producer metadata, and maintains one authenticated bounded
 registry comment. It correlates exact request IDs, safely removes validated

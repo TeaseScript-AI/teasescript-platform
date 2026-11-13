@@ -13,7 +13,7 @@ import { playerRuntimeForeground } from "../../player/runtime/runtime-view.js";
 import { compileSource } from "../../src/compiler.js";
 import { parse } from "../../src/parser.js";
 import { compileValidPlan } from "../helpers/compile-valid-plan.js";
-import { AMSTERDAM } from "../helpers/temporal-fixtures.js";
+import { AMSTERDAM } from "../helpers/runtime/temporal-fixtures.js";
 
 /** Each basic ask with a prefill it accepts, an answer, and how `say` shows that answer. */
 const ASKS = [

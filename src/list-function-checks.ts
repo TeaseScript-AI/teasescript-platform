@@ -24,7 +24,7 @@ import {
 } from "./list-function-rules.js";
 import type { TemporalKind } from "./temporal-builtins.js";
 import { RANGE_LIST_FIX } from "./list-methods.js";
-import type { OperationProblem } from "./operation-checks.js";
+import type { OperationProblem } from "./operation-check-support.js";
 import { RANDOM_CONTRACTS } from "./random-functions.js";
 import { isList } from "./runtime/values/value-predicates.js";
 import { staticChoiceValue, staticVisibleText, type KnownValue } from "./static-evaluation.js";
