@@ -11,7 +11,6 @@ export const costlyTestSeconds = {
   "type-core/type-core-lost-check-matrix.test.js": 128,
   "type-core/type-core-written.test.js": 127,
   "type-core/type-core-work-b.test.js": 123,
-  "type-core/type-core-work-a.test.js": 103,
   "type-core/type-core-f18.test.js": 98,
   "families-runner/families-runner-limits.test.js": 86,
   "type-core/sharing/type-core-sharing-differential.test.js": 69,

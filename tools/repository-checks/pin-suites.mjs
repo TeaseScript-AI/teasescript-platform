@@ -31,8 +31,9 @@ import { suiteTestFiles } from "../test-shards.mjs";
 // `assert.equal` of `.total` to a literal of four or more digits, a table of four or more such literals, a `[count,
 // "reason"]` record, and, in the type core's tests only (`FORM_SCOPES`), a property set to a hex digest of 16 or more
 // digits: a digest pin written in another test file is not found. A pin written another way (`strictEqual`, `deepEqual`
-// of a short tuple or an object, a total under four digits, a helper's table, a nested table such as work-a's) is not
-// found; that test is a net over every `.ts` file under `tests/`, helpers included, for a file holding pins with no
+// of a short tuple or an object, a total under four digits, a helper's table, a nested table such as
+// `work/type-core-work-store-checks`'s) is not found; that test is a net over every `.ts` file under `tests/`, helpers
+// included, for a file holding pins with no
 // mark, and `NOT_PINS` declares the files it finds that pin no work. A suite whose pins take a form the net lacks is
 // protected by a list, not by the net: the test holds every `{file, in}` pair the marks name, so a mark lost, moved or
 // redirected fails it. Under `tests/helpers/type-core/families/` it also requires every recorded bound to be a line a

@@ -159,7 +159,7 @@ test("a core change lists every pinning suite; another change lists none, a suit
     suitesFor(MARKED, ["tests/helpers/type-core/families/admission-products.ts"]).map(
       (suite) => suite.file,
     ),
-    ["tests/type-core/type-core-work-a.test.ts", "tests/type-core/type-core-work-c.test.ts"],
+    ["tests/type-core/work/type-core-work-families.test.ts", "tests/type-core/type-core-work-c.test.ts"],
   );
   assert.deepEqual(
     suitesFor(MARKED, ["tests/helpers/type-core/families/property-names.ts"]).map(
@@ -237,8 +237,6 @@ const PAIRS = [
   "tests/type-core/type-core-f18.test.ts",
   "tests/type-core/type-core-kept.test.ts",
   "tests/type-core/type-core-key-ids.test.ts",
-  "tests/type-core/type-core-work-a.test.ts",
-  "tests/type-core/type-core-work-a.test.ts in tests/helpers/type-core/families/admission-products.ts",
   "tests/type-core/type-core-work-b.test.ts in tests/helpers/type-core/families/output-bound.ts",
   "tests/type-core/type-core-work-b.test.ts in tests/helpers/type-core/families/w34-links.ts",
   "tests/type-core/type-core-work-c.test.ts",
@@ -246,6 +244,8 @@ const PAIRS = [
   "tests/type-core/type-core-work-c.test.ts in tests/helpers/type-core/families/narrowing.ts",
   "tests/type-core/type-core-work-c.test.ts in tests/helpers/type-core/families/property-names.ts",
   "tests/type-core/type-core-written-default.test.ts",
+  "tests/type-core/work/type-core-work-families.test.ts in tests/helpers/type-core/families/admission-products.ts",
+  "tests/type-core/work/type-core-work-store-checks.test.ts",
 ];
 
 test("the marks name exactly the expected suites and the files holding their pins (#2094)", () => {
