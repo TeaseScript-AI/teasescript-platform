@@ -197,8 +197,13 @@ export class RouteTests {
   readonly #ifs: TreeStatement[] = [];
   /** The program's `while`s whose conditions hold a test (`#testing`). */
   readonly #whiles: TreeStatement[] = [];
-  /** The arms the corridor passes through none of, made on the first query of a program the default holds. */
-  #feasibility: Feasibility | null = null;
+  /**
+   * In a program the default holds, the arms its corridors pass through none of (`feasibility`), set by the first
+   * `required` there (`NarrowingRoutes`); `null` elsewhere, where every route query is main's. Under it an entry route
+   * is taken only where r4-451's program default admits it (`RouteEntries.standsAt`), and its relation carries no entry
+   * on (r4-451).
+   */
+  protected feasible: Feasibility | null = null;
   /** Whether the route rule's default holds (`defaultHolds`), made on the first query. */
   #holds: boolean | null = null;
   /** Per arm, its feasibility: infeasible, unavailable evidence, or feasible (`#infeasible`). */
@@ -478,11 +483,10 @@ export class RouteTests {
    * In a program the default holds (#1938): each live arm of a tested `if` and each tested `while`'s body that
    * `#infeasible` does not answer `feasible`, the bodies of the program's files, and the blocks that hold a statement a
    * promoting route may not pass (`PASSABLE`, a call site, a handler's declaration). One walk of the program's
-   * statements, call sites and regions, on the first query.
+   * statements, call sites and regions; `required` asks it once and keeps its answer (`feasible`).
    */
   protected *feasibility(): Work<Feasibility> {
     this.#work.charge("eventSteps");
-    if (this.#feasibility !== null) return this.#feasibility;
     const work = this.#work;
     this.#testing();
     const unentered = new Set<TreeBlock>();
@@ -559,8 +563,7 @@ export class RouteTests {
     };
     const hazards = hazardsOf(false);
     const entryHazards = infeasible.size === 0 ? hazards : hazardsOf(true);
-    this.#feasibility = { unentered, owners, infeasible, files, hazards, entryHazards, headed };
-    return this.#feasibility;
+    return { unentered, owners, infeasible, files, hazards, entryHazards, headed };
   }
 
   /**
