@@ -529,7 +529,8 @@ function ruleKinds(rule: DiagnosticRule): readonly ItemTag[] {
 /**
  * The warned use a fix is for: its rule; the warned value's text and offending kinds; its other known kinds the rule
  * takes (`fits`) and those the site's other diagnostics of the rule report (`besides`); why it may be of another type
- * (`detail`, `context`); its site; and for a null value, what the place it lands in takes (`expects`).
+ * (`detail`, `context`); its site; and what the place its value lands in takes (`expects`), for a null value's fallback
+ * and an operation's text join or date and time form.
  */
 interface WarnedUse {
   readonly rule: DiagnosticRule;
@@ -546,12 +547,15 @@ interface WarnedUse {
 /**
  * A warning's fix, by the first case that applies: for the elements a call reads and what `toJson` writes below its
  * argument, the rule's own advice or none; for a store whose place is an element below the value, the test of the whole
- * receiving type (`wholeCheck`); for null, a null check, or a type test beside another type the use does not take, with
- * a fallback where the value is not changed in place; a selection's length check; a number's rounding where a count or
- * a store needs a whole number; an operator's text join or date and time conversion; a member's own fix
- * (`memberWarningFix`); for a value of a type the script cannot know, a store's property fix or a test of what the rule
- * takes; else a type test of the kinds that fit, a store's property fix, or the fix of the error the kinds would be
- * (`errorFix`). A value that is a store's target and no variable is checked where it stands, in words.
+ * receiving type (`wholeCheck`), none for a literal, a property the read may lack or a whole check unproved; for null,
+ * a null check, or a type test beside another type the use does not take, with a fallback where the value is not
+ * changed in place; a selection's length check; a number's rounding where a count or a store needs a whole number; an
+ * operator's text join or date and time conversion, none for a whole operation with neither; a member's own fix
+ * (`memberWarningFix`); none for a button's value from outside the script; for a value of a type the script cannot
+ * know, a store's property fix or a test of what the rule takes; none for a literal or a property the read may lack;
+ * else a store's property fix where part of the value is unknown, a type test of the kinds that fit, or the fix of the
+ * error the kinds would be (`errorFix`). A value that is a store's target and no variable is checked where it stands,
+ * in words.
  */
 export function warningFix(warned: WarnedUse, source: MessageSource, diagnosed: Diagnosed): string {
   const { rule, text, kinds, fits, besides, detail, context, site, expects } = warned;

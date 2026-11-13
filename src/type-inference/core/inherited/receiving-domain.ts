@@ -22,8 +22,8 @@ import type { Proof, ProofDemand } from "../solver.js";
  * (`CorePass.receivingDomain`), made with the pass's parts and asking nothing when made. Admission builds it
  * (`copyGraph`) and reads it (`inheritedAt`) as its client; F18 does not read it (#1072). Each key's inherited type
  * is a proof of the pass's solver (`inheritedProof`); what its runs found, the keys that wait on each other and the
- * own-level bits, is the pass's too. An admission made on the pass starts the rest afresh (`reset`). It also holds
- * admission's per-pass memos of landings, scans, listings and prefix holders, so that they live as long as the pass.
+ * own-level bits, is the pass's too. It also holds admission's memos of landings, scans, listings and prefix holders;
+ * each admission made on the pass starts those and the rest afresh (`reset`).
  */
 export class ReceivingDomain {
   /**

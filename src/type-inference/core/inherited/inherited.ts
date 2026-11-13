@@ -552,8 +552,9 @@ export function openAbove(admission: Admission, place: PlaceId, path: readonly s
 }
 
 /**
- * The step of `openAbove`'s walk below a step whose written types are `carried`: what those and the prefix's own
- * inherited type (`own`) leave at `step` (`permittedAt`), each once; `true` where one leaves it unrestricted.
+ * What the step of `openAbove`'s walk below a step whose written types are `carried` carries: what those and the
+ * prefix's own inherited type (`own`) leave at `step` (`permittedAt`), each once; `true` where one leaves it
+ * unrestricted.
  */
 function carriedBelow(
   carried: readonly TypeTerm[],

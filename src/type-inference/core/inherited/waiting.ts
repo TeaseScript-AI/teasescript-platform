@@ -74,8 +74,8 @@ export function* inheritedInto(
 }
 
 /**
- * Whether two decisions wait on each other through copies (`cycles`), the cycles made again first where the solver
- * forgot answers between runs (`settleCyclesIfForgotten`).
+ * Whether two decisions wait on each other through copies (`cycles`); outside a solver run, the cycles first made again
+ * where the solver forgot answers since they were last made (`settleCyclesIfForgotten`).
  */
 function cut(admission: Admission, a: CanonicalKey, b: CanonicalKey): boolean {
   settleCyclesIfForgotten(admission);

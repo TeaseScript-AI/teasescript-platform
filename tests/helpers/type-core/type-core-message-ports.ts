@@ -449,7 +449,7 @@ export const PORTS: readonly Port[] = [
           "or convert both with the toAbsoluteDateTime method for the elapsed time.",
       ),
   },
-  // ADR 0021 rule 2.2's rounding, as the count's sentence words it (S8c's, #1173)
+  // ADR 0021 rule 2.2's rounding, as the count's sentence words it (#1173)
   {
     from: /^Round the number with the floor, round or ceil function first\.$/,
     to: ([text]) => exact(text),

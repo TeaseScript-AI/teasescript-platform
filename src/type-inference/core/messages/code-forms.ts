@@ -157,16 +157,16 @@ function standsAt(code: string, position: Position): boolean {
 }
 
 /**
- * The one test of every code form a fix offers, pasted whole at the site its diagnostic sits on or the
- * position its sentence names. It holds where (1) each operation takes its subject: every value the form reads there
- * when the script runs, every kind of it known, and one the operation takes, a value it holds of a flat structure;
- * every author's text it holds clear of the analysis's other diagnostics, and of any region a stop left unchecked
- * (#1273); (2) its value fits what the site takes (`site`, read from what consumes the value
- * there: any value where nothing restricts it), a structured value only there or as a collection of scalars against its
- * elements' kinds, and a value the fix writes itself only where the value is proved not to divide; and (3) it binds
- * there: as the site's whole value, or in parentheses where an operand or a receiver binds tighter than its code; at a
- * position as one statement, parameter or type. A site fact no fact proves gives words, never a form.
- * Its code, in parentheses where (3) needs them, where it holds; `null` where it does not, and the fix gives its
+ * The one test of every code form a fix offers, pasted whole at the site its diagnostic sits on or the position its
+ * sentence names. It holds where its code is on one line and holds no comment (`ownText`), and (1) each operation takes
+ * its subject: every value the form reads there when the script runs, every kind of it known, and one the operation
+ * takes, a value it holds of a flat structure; every author's text it holds clear of the analysis's other diagnostics,
+ * and of any region a stop left unchecked (#1273); (2) its value fits what the site takes (`site`, read from what
+ * consumes the value there: any value where nothing restricts it), a structured value only there or as a collection of
+ * scalars against its elements' kinds, and a value the fix writes itself only where the value is proved not to divide;
+ * and (3) it binds there: as the site's whole value, or in parentheses where an operand or a receiver binds tighter
+ * than its code; at a position as one statement, parameter or type. A site fact no fact proves gives words, never a
+ * form. Its code, in parentheses where (3) needs them, where it holds; `null` where it does not, and the fix gives its
  * advice in words. None inside `inWords`.
  */
 export function codeAt(form: CodeForm, site: SiteExpectation | Position): string | null {
