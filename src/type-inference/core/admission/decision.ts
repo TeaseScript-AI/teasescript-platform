@@ -42,7 +42,8 @@ import { inheritance, landedBelow } from "./landings/inheritance.js";
 import type { Alias, Candidate, Decided, DecidedAt, Decision, Inputs } from "./model.js";
 import { permittedAt } from "./permitted.js";
 import { dictStepsRead, spellsValues } from "./structure.js";
-import { freshInputs, inputsAt, inputsOf, scanAt } from "./scan.js";
+import { freshInputs } from "./fresh.js";
+import { inputsAt, inputsOf, scanAt } from "./scan.js";
 import { compareKeys, stopsOf, writtenSource } from "./walk.js";
 
 // The decision of one place at one path (§5), and its comparison under the member-answer oracle.
