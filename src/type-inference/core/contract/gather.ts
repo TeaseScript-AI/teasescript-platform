@@ -31,7 +31,7 @@ import type {
   SelectionPiece,
   ValueEntry,
 } from "./model.js";
-import { othersAt, readGroupsAt } from "./others.js";
+import { othersAt, readGroupsAt } from "./class-groups.js";
 import { keyBelowIn, restPart, restSteps, stepsText, type Rest, type Steps } from "./key-ids.js";
 import { selectedObject, selectionOf, selectionPieces } from "./selections.js";
 import { Retained } from "../retained/retained.js";

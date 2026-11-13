@@ -123,7 +123,7 @@ import type {
   ValueEntry,
   WrapperHop,
 } from "./contract/model.js";
-import { choiceOptions, plusRepeatOf } from "./contract/others.js";
+import { choiceOptions, plusRepeatOf } from "./contract/class-groups.js";
 import { chainOf, literalHop, remember } from "./contract/positions.js";
 import { relevantSubs, subSources } from "./contract/prefix-index/layers.js";
 import { prefixStores, prefixWork } from "./contract/prefix-index/stores.js";
