@@ -11,7 +11,6 @@ export interface Surface {
 }
 
 export const CLIENT = "player/engine-bridge/client.ts";
-export const FACADE = "tests/helpers/bridge/in-process.ts";
 export const SESSION = "player/vue/src/session/usePlayerSession.ts";
 export const CLOCK = "player/vue/src/session/useRuntimeSceneClock.ts";
 
@@ -24,24 +23,8 @@ export const CLIENT_MEMBERS = {
   // The Worker's end and its loss listener send no session work.
   nonSending: ["terminate", "onLoss"],
 } as const;
-/** Every function the in-process facade exports: the session functions, and what does not send. */
-export const FACADE_EXPORTS = {
-  sending: ["hatch", "introduceNow", "beginRecordingNow"],
-  // The backend's creation, and reads of the connection's state (plans, recording, runs, trace, random), with no session.
-  nonSending: [
-    "createInProcessBackend",
-    "heldRandom",
-    "heldTrace",
-    "heldPlan",
-    "heldRecording",
-    "heldRuns",
-    "heldTickets",
-  ],
-} as const;
-
 export const SURFACES: readonly Surface[] = [
   ...CLIENT_MEMBERS.sending.map((member) => ({ file: CLIENT, name: "BridgeClient", member })),
-  ...FACADE_EXPORTS.sending.map((name) => ({ file: FACADE, name })),
 ];
 
 /**
@@ -769,26 +752,6 @@ export const ADOPTIONS: Readonly<
     "host dispatch",
     ["HeldSession.keep", "HeldSession.publish"],
     "publication observation",
-  ],
-  "tests/helpers/bridge/in-process.ts beginRecordingNow": [
-    "facade exception",
-    ["HeldSession.keep"],
-    "none",
-  ],
-  "tests/helpers/bridge/in-process.ts createInProcessBackend": [
-    "host dispatch",
-    ["HeldSession.keep", "HeldSession.publish"],
-    "publication observation",
-  ],
-  "tests/helpers/bridge/in-process.ts hatch": [
-    "facade exception",
-    ["HeldSession.keep", "HeldSession.publish"],
-    "publication observation",
-  ],
-  "tests/helpers/bridge/in-process.ts introduceNow": [
-    "facade exception",
-    ["HeldSession.publish"],
-    "introduction",
   ],
   "player/engine-bridge/node-worker.ts (module)": [
     "host dispatch",

@@ -139,6 +139,13 @@ export function createInProcessBackend(
       else toClient?.(transit.splice(index, 1)[0]!.data);
     }
   };
+  // A stop's acknowledgement and the replies before it arrive at once, so the stop is synchronous here.
+  const halt = bridge.halt.bind(bridge);
+  bridge.halt = (session, stop) => {
+    const acknowledged = halt(session, stop);
+    flush(session.id);
+    return acknowledged;
+  };
   backends.set(bridge, { bridge, context, sessions, flush });
   return bridge;
 }
