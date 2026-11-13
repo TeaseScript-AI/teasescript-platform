@@ -1,10 +1,12 @@
 import type { CallArgument, CallExpression, Expression } from "../../ast.js";
 import { CONVERSIONS, isConversion, type Conversion } from "../../conversions.js";
 import { BUILT_IN_SPEAKER_PROPERTIES } from "../../speaker-terms.js";
+import { isKnown, members, type StaticType } from "../../static-types.js";
+import { caseLiteral, impossibleCaseMessage } from "../../switch-cases.js";
 import type { TypeAnalysisBackend, TypeAnalysisOutcome, TypeAnalysisRequest } from "../backend.js";
 import type { SourceSite } from "../graph.js";
 import { analyseCore, type Answers } from "./answers.js";
-import { asked, coreCheckResult, coreFacts } from "./check-result/check-result.js";
+import { asked, coreCheckResult, coreFacts, expressionTypes } from "./check-result/check-result.js";
 import {
   LIMIT_REASONS,
   nodeOf,
@@ -12,6 +14,7 @@ import {
   OutsideContract,
   SLICE_DEPTH,
 } from "./check-result/slice-index.js";
+import { closedType } from "./contract-descriptors.js";
 import { oneType } from "./consumers/kinds.js";
 import { checkedOnSource, identityView, type IdentityView } from "./identity-view.js";
 import { REASON, type Item, type ItemTag } from "./items.js";
@@ -34,7 +37,8 @@ import {
  *
  * The slice: `let` with or without a written type (a named type, `T?` and `T[]` of them; no written union, whose
  * required checks come with narrowing, S10), assignment of a variable or of a property, `if` and `else`, `repeat` with
- * a count, `for` with one or two variables, `say` of plain text or of a value, also `as` a speaker, a speaker's
+ * a count, `for` with one or two variables, `while`, `switch` (a case's type test of such a written type), `break` and
+ * `continue`, `say` of plain text or of a value, also `as` a speaker, a speaker's
  * declaration (never a speaker's name as a value), a call as a statement, and `exit`; the asks `SLICE_ASKS` holds,
  * also `as` a speaker, with no prefill or a literal one the request takes (`askPrefillAdmitted`);
  * number, boolean, null, regex and plain text literals, variables, host values, list and object literals, index and
@@ -48,7 +52,7 @@ import {
  * and a parse, with C9's boundary check where it enters (the store's destination's admitted type) or where it is read.
  * Rejected after the analysis: any other consumer's diagnostic, a property read of a value that may be no object, a
  * value `say` may not show, a built-in speaker field's value that may not fit it (`SPEAKER_FIELD_KINDS`), an
- * `askChoice` whose buttons may return more than one type, an argument
+ * `askChoice` whose buttons may return more than one type, a `case` that may never match (`neverMatching`), an argument
  * of another kind than a built-in function takes (the built-in signature check C13, S9b), and lists nested
  * `SLICE_DEPTH` deep. A possible `null` is the route rule's (AD-1): a compile error where a route to the use has no
  * check, else a warning whose use the runtime checks.
@@ -134,7 +138,10 @@ function outcomeOf(
 ): TypeAnalysisOutcome {
   const core = view.request;
   try {
-    const after = refusals === "past" ? null : outsideAnswers(answers, index);
+    const after =
+      refusals === "past"
+        ? null
+        : (outsideAnswers(answers, index) ?? neverMatching(answers, index));
     if (after !== null) throw outsideSlice(core, after);
     // (the facts are by site, which the view keeps: a call read as its argument keeps the call's span)
     const checked = checkedOnSource(view, coreCheckResult(answers, index, core), answers.work);
@@ -365,5 +372,47 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
           };
       }
     }
+  return null;
+}
+
+/**
+ * The first `case` value that may never match its `switch`'s subject (V30 §32: today's checker's TSV049, a compile error
+ * the core has no sentence for), by today's own predicate (`impossibleCaseMessage`) on the subject's and the value's
+ * types: a literal's own kind, as today's checker types one (`caseLiteral`), else the facts' (`expressionTypes`).
+ * Admitted, closed: a value the predicate finds a member of the subject's type that may equal, where every unknown the
+ * subject holds is of an external origin (the host's or a load's, unknown to today's checker too); an unknown of any
+ * other reason, a stop's among them, or a subject without an answer is not shown to be one today's checker cannot type,
+ * so its case is refused.
+ */
+function neverMatching(answers: Answers, index: SliceIndex): Outside | null {
+  const switches = index.statements.filter((statement) => statement.kind === "switchStatement");
+  if (!switches.some((statement) => statement.cases.some((each) => each.values.length > 0)))
+    return null;
+  const facts = expressionTypes(answers, index);
+  const typeOf = (expression: Expression): StaticType => {
+    const literal = caseLiteral(expression);
+    return (literal === undefined ? null : closedType(literal.of)) ?? facts(expression);
+  };
+  for (const statement of switches) {
+    const subject = statement.subject;
+    const subjectType = typeOf(subject);
+    let held = subject;
+    while (held.kind === "parenthesizedExpression") held = held.expression;
+    const external = (): boolean => {
+      const items = answers.at(nodeOf(answers, index, held))?.items ?? [];
+      return (
+        items.length > 0 &&
+        items.every((item) => item.tag !== "unknown" || item.reasons === REASON.external)
+      );
+    };
+    const admitted = members(subjectType).every(isKnown) || external();
+    for (const switchCase of statement.cases)
+      for (const value of switchCase.values)
+        if (
+          !admitted ||
+          impossibleCaseMessage(subject, subjectType, value, typeOf(value)) !== undefined
+        )
+          return { file: index.fileOf(value), span: value.span, what: "this case" };
+  }
   return null;
 }
