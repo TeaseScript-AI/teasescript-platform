@@ -300,6 +300,17 @@ export class GuardIndex {
   }
 
   #guardedBelowRead(value: PlaceId): readonly string[] {
+    const read = this.#readOf(value);
+    return read === null ? [] : this.guardedBelow(keyOf(read.binding, read.steps), read.node);
+  }
+
+  /**
+   * A value's read below its property and element projections: the binding it reads, the steps from the binding down to
+   * the value, and the read's node; `null` where the read has no binding or no node.
+   */
+  #readOf(
+    value: PlaceId,
+  ): { readonly binding: PlaceId; readonly steps: string[]; readonly node: FlowNode } | null {
     const program = this.program;
     const steps: string[] = [];
     let current = value;
@@ -310,8 +321,8 @@ export class GuardIndex {
     }
     const binding = program.occurrenceOf.get(current);
     const node = program.occNode.get(current);
-    if (binding === undefined || node === undefined || node === null) return [];
-    return this.guardedBelow(keyOf(binding, steps.reverse()), node);
+    if (binding === undefined || node === undefined || node === null) return null;
+    return { binding, steps: steps.reverse(), node };
   }
 
   /** The regions of the tested keys strictly below `key`, by callable and by file, built once per key asked. */
@@ -756,20 +767,11 @@ export class GuardIndex {
 
   /** `guardedRead` at a path given by its text (a cursor's span's, spelled by its record: `PathRef.text`). */
   public guardedReadAt(value: PlaceId, restText: string): boolean {
-    const program = this.program;
-    const steps: string[] = [];
-    let current = value;
-    for (let projection = program.projOf.get(current); projection !== undefined;) {
-      steps.push(projection.step === "iteration" ? "element" : stepName(projection.step));
-      current = projection.owner;
-      projection = program.projOf.get(current);
-    }
-    const binding = program.occurrenceOf.get(current);
-    const node = program.occNode.get(current);
-    if (binding === undefined || node === undefined || node === null) return false;
+    const read = this.#readOf(value);
+    if (read === null) return false;
     // (a binding no test names guards no read of it, at whatever path: no key made)
-    if (this.untested(binding)) return false;
-    return this.narrowed(keyBelowText(keyOf(binding, steps.reverse()), restText), node);
+    if (this.untested(read.binding)) return false;
+    return this.narrowed(keyBelowText(keyOf(read.binding, read.steps), restText), read.node);
   }
 
   /** The tested keys `q` below each key, per relative path `q` (every split of every tested key's path). */
