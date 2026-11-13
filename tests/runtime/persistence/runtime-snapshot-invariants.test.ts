@@ -123,7 +123,7 @@ test("a snapshot validates only against its plan", () => {
   const compiled = plan("wait 5 s\nexit");
   const { snapshot } = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
   assert.equal(validateRuntimeSnapshot(snapshot, compiled).valid, true);
-  // EVIDENCE: fixture: a caller without the types, such as plain JavaScript, leaves the plan out.
+  // oxlint-disable-next-line anti-slop/no-chained-type-assertions -- EVIDENCE: fixture: a caller without the types, such as plain JavaScript, leaves the plan out.
   const untyped = validateRuntimeSnapshot as unknown as (value: unknown) => { valid: boolean };
   assert.equal(untyped(snapshot).valid, false);
 });
