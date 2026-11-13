@@ -29,6 +29,7 @@ import {
 import { expectedType, writtenLanding } from "./type-core-derived-defaults.js";
 import { sourceShape, typeOf } from "./type-core-derived-shapes.js";
 import { snapshotsOf } from "./type-core-derived-snapshots.js";
+import { storedPlaceName, transferStore } from "./derived-functions.js";
 
 /** Whether a type holds `null`. */
 function holdsNull(type: DerivedType): boolean {
@@ -236,6 +237,8 @@ function writtenAt(
 export function derive(
   syntax: Syntax,
   record: CompactRecord,
+  /** The project's files, whose `global function`s the file's calls may name (`derived-functions.ts`). */
+  project: readonly Syntax[] = [],
 ): {
   readonly stores: readonly DerivedStore[];
   readonly discharges: readonly Discharge[];
@@ -274,7 +277,11 @@ export function derive(
     }
   }
   const owed = new Map<Statement, { path: readonly string[]; against: readonly string[] }[]>();
-  const discharges: ({ statement: Statement } | { native: Discharge & { by: "native" } })[] = [];
+  const discharges: (
+    { statement: Statement } | { transfer: DerivedStore } | { native: Discharge & { by: "native" } }
+  )[] = [];
+  // (the values stored into a function's place with a written type, by their store's site: `derived-functions.ts`)
+  const transfers = new Map<string, DerivedStore>();
   const native = (what: (Discharge & { by: "native" })["what"], at: string): void => {
     discharges.push({ native: { by: "native", what, site: at } });
   };
@@ -343,6 +350,13 @@ export function derive(
           }))) &&
       !check.against.includes("unknown")
     ) {
+      const transfer = transferStore(at, syntax, all, project);
+      if (transfer !== null) {
+        const held = transfers.get(`${transfer.so}:${transfer.eo}`) ?? transfer;
+        transfers.set(`${held.so}:${held.eo}`, held);
+        discharges.push({ transfer: held });
+        continue;
+      }
       const statement = statements
         .filter(
           (candidate) =>
@@ -369,8 +383,10 @@ export function derive(
         continue;
       }
       const store = storeOf(statement)!;
-      const prefix = `${store.name}.`;
-      if (check.target !== store.name && !check.target.startsWith(prefix)) {
+      // (a store into a parameter names its place by its function, `derived-functions.ts`)
+      const placeName = storedPlaceName(statement, store.name, syntax);
+      const prefix = `${placeName}.`;
+      if (check.target !== placeName && !check.target.startsWith(prefix)) {
         const ingress = owners.find(
           (owner) =>
             site(owner) === at &&
@@ -385,7 +401,7 @@ export function derive(
         }
         throw new Underivable(`${check.target} is not ${store.name}'s`);
       }
-      const path = check.target === store.name ? [] : check.target.slice(prefix.length).split(".");
+      const path = check.target === placeName ? [] : check.target.slice(prefix.length).split(".");
       owed.set(statement, [...(owed.get(statement) ?? []), { path, against: check.against }]);
       discharges.push({ statement });
     } else if (
@@ -483,10 +499,15 @@ export function derive(
     });
   }
   return {
-    stores: [...stores.values()].sort((a, b) => a.so - b.so),
+    stores: [...stores.values(), ...transfers.values()].sort((a, b) => a.so - b.so || a.eo - b.eo),
     content,
     discharges: discharges.map((entry) =>
-      "native" in entry ? entry.native : { by: "store", store: stores.get(entry.statement)! },
+      "native" in entry
+        ? entry.native
+        : {
+            by: "store",
+            store: "transfer" in entry ? entry.transfer : stores.get(entry.statement)!,
+          },
     ),
   };
 }

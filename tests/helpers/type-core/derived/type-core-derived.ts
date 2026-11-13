@@ -119,6 +119,9 @@ export function allStatements(statements: readonly Statement[]): Statement[] {
   return statements.flatMap((statement) => {
     if (statement.kind === "repeatStatement" || statement.kind === "forStatement")
       return [statement, ...allStatements(statement.body.statements)];
+    // (a function's body, where it is declared: its stores are the plan's as any other, `derived-functions.ts`)
+    if (statement.kind === "functionDeclaration")
+      return [statement, ...allStatements(statement.body.statements)];
     if (statement.kind === "ifStatement") {
       return [
         statement,
@@ -368,6 +371,11 @@ export function expressions(statements: readonly Statement[]): Expression[] {
     else if (statement.kind === "forStatement") walk(statement.iterable);
     else if (statement.kind === "gotoStatement" && statement.target.kind === "scriptTarget")
       walk(statement.target.expression);
+    else if (statement.kind === "returnStatement" && statement.value !== null)
+      walk(statement.value);
+    else if (statement.kind === "functionDeclaration")
+      for (const parameter of statement.parameters)
+        if (parameter.defaultValue !== null) walk(parameter.defaultValue);
   }
   return out;
 }
