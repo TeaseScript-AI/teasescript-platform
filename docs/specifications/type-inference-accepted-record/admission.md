@@ -255,8 +255,8 @@ other `unknown`, a stop's among them, is refused at that position. The gate name
 analysis gains later is refused until it is decided.
 
 **Reason.** A gate written as the reasons it refuses would admit, unchecked, every reason the analysis gains later.
-Admitting other unknowns would need a reader of what an item's ingresses stored, which is its own item; what this
-refuses stays refused if that reader comes. Its price, sources where the legacy checker knows no more but the route
+Admitting other unknowns would need a reader of what an item's ingresses stored, which is its own item; what this rule
+admits stays admitted if that reader comes. Its price, sources where the legacy checker knows no more but the route
 declines (`openUrl([hostValue][0])`), was measured, not estimated.
 
 **Source.** The lead's rulings R32 and R33 on reach step 1 (#2581, round 1) and R10 to R12 on reach step 2 (#2646),
