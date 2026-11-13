@@ -238,6 +238,7 @@ const PAIRS = [
   "tests/type-core/type-core-contract.test.ts",
   "tests/type-core/type-core-declared-escapes.test.ts in tests/helpers/type-core/type-core-declared-escapes-main.ts",
   "tests/type-core/type-core-f18.test.ts",
+  "tests/type-core/type-core-identity.test.ts",
   "tests/type-core/type-core-kept.test.ts",
   "tests/type-core/type-core-key-ids.test.ts",
   "tests/type-core/type-core-work-b.test.ts in tests/helpers/type-core/families/output-bound.ts",
