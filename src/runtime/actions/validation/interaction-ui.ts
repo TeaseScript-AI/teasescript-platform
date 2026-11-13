@@ -217,6 +217,10 @@ export function validInteractionUiShape(kind: InteractionKind, value: unknown): 
   return !measurementExhausted;
 }
 
+/**
+ * Whether `actual` is the plan's fixed `expected` UI. A form's UI is always prepared (`preparedUi`), so a form here is
+ * a malformed plan and compares unequal.
+ */
 export function interactionUiEqual(expected: InteractionUiPayload, actual: unknown): boolean {
   if (!isPlainRecord(actual) || actual.kind !== expected.kind) return false;
   if (!isPlainRecord(actual.accessibleName)) return false;
@@ -263,7 +267,6 @@ export function interactionUiEqual(expected: InteractionUiPayload, actual: unkno
       textsEqual(expected.types, actual.types) &&
       textsEqual(expected.mime, actual.mime)
     );
-  // A form is always prepared.
   if (expected.kind === "form") return false;
   return (
     choiceOptionsEqual(expected.options, actual.options) &&

@@ -1,5 +1,6 @@
 // The restore check of a snapshot's pending actions: background and foreground actions, their identity and event
-// capacity, and the foreground action's base, kind and ownership.
+// capacity, and the foreground action's base, kind and ownership, with the session clock and `nextActionId` they are
+// measured against.
 
 import { type InstructionPlan } from "../../../plan/model.js";
 import { actionRecordCompletionEvents } from "../model.js";

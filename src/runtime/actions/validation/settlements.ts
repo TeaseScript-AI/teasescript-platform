@@ -156,7 +156,7 @@ function validCaptureSettlement(
     isOneOf(settlement.unavailableReason, CAPTURE_UNAVAILABLE_REASONS) &&
     settlement.warningEventSequence !== null;
   if (!captured && !unavailable) return false;
-  if (!nonNegativeSafeInteger(settlement.owningInstruction)) return true;
+  if (!nonNegativeSafeInteger(settlement.owningInstruction)) return false;
   const owner = plan.instructions[settlement.owningInstruction];
   return (
     owner?.kind === "capture" && owner.destinationTemporary === settlement.destinationTemporary
@@ -198,7 +198,7 @@ function validFileStoreSettlement(
     settlement.completedAtMs > snapshot.currentSessionTimeMs
   )
     return false;
-  if (!nonNegativeSafeInteger(settlement.owningInstruction)) return true;
+  if (!nonNegativeSafeInteger(settlement.owningInstruction)) return false;
   const owner = plan.instructions[settlement.owningInstruction];
   return (
     owner?.kind === "fileStore" &&
@@ -244,7 +244,7 @@ function validLockSettlement(
     settlement.completedAtMs > snapshot.currentSessionTimeMs
   )
     return false;
-  if (!nonNegativeSafeInteger(settlement.owningInstruction)) return true;
+  if (!nonNegativeSafeInteger(settlement.owningInstruction)) return false;
   const owner = plan.instructions[settlement.owningInstruction];
   return (
     owner?.kind === "lock" &&
@@ -390,8 +390,12 @@ function validSettlementKindData(
     // The SHA-256 of what was typed, never the text.
     resultValid = isSha256Hex(settlement.result);
   } else if (settlement.interactionKind === "text") {
+    // The answer is its transcript line, without a carriage return, and never blank.
     resultValid =
-      typeof settlement.result === "string" && settlement.result === settlement.transcriptText;
+      typeof settlement.result === "string" &&
+      settlement.result === settlement.transcriptText &&
+      !settlement.result.includes("\r") &&
+      interactionStringHasNonWhitespace(settlement.result);
   } else if (settlement.interactionKind === "number") {
     resultValid =
       typeof settlement.result === "number" &&
@@ -439,14 +443,6 @@ function validSettlementKindData(
       settlement.ownerCallFrameId >= snapshot.nextCallFrameId)
   )
     return false;
-  if (
-    settlement.interactionKind === "text" &&
-    (typeof settlement.transcriptText !== "string" ||
-      settlement.result !== settlement.transcriptText ||
-      settlement.transcriptText.includes("\r") ||
-      !interactionStringHasNonWhitespace(settlement.transcriptText))
-  )
-    return false;
   if (settlement.interactionKind === "number") {
     if (
       typeof settlement.result !== "number" ||
@@ -467,7 +463,7 @@ function validSettlementKindData(
       return false;
   }
 
-  if (!nonNegativeSafeInteger(settlement.owningInstruction)) return true;
+  if (!nonNegativeSafeInteger(settlement.owningInstruction)) return false;
   const instruction = plan.instructions[settlement.owningInstruction];
   if (
     instruction?.kind !== "interaction" ||

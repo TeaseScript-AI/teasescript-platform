@@ -30,7 +30,7 @@ import {
  * without them has an opener. Only an encrypt call has public keys, each read as one, and only a decrypt call a key. A
  * decrypt call has no time lock and chooses nothing; its dialog, and the step after it, have no written password or
  * key, its password field always asks first, and its notice belongs to the dialog. The text is any text, the Base64
- * lock standard Base64, and a file one this session knows.
+ * lock standard Base64, and a file one this session knows. Its identity, depths and owner frame are `validForegroundActionBase`'s, which runs first.
  */
 export function validLockAction(
   action: Record<string, unknown>,
@@ -140,7 +140,7 @@ export function validLockAction(
       return false;
     if (field && asks !== (action.dialogActionId === null)) return false;
   }
-  if (!nonNegativeSafeInteger(action.owningInstruction)) return true;
+  if (!nonNegativeSafeInteger(action.owningInstruction)) return false;
   const owner = plan.instructions[action.owningInstruction];
   if (owner?.kind !== "lock" || owner.call !== action.call) return false;
   if ((owner.passwordField !== null) !== field) return false;
@@ -183,7 +183,7 @@ function isEpochMilliseconds(value: unknown): value is number {
 /**
  * A pending file store: the files its instruction's call stores, each once with the type its bytes give, or the stored
  * files of this session it reads or hashes, each once. `fileFromBase64`, `fileToBase64`, and `hashFile` have exactly
- * one.
+ * one. Its identity, depths and owner frame are `validForegroundActionBase`'s, which runs first.
  */
 export function validFileStoreAction(
   action: Record<string, unknown>,
@@ -240,7 +240,7 @@ export function validFileStoreAction(
     ) &&
     new Set(references).size === references.length;
   if (!stores && !reads) return false;
-  if (!nonNegativeSafeInteger(action.owningInstruction)) return true;
+  if (!nonNegativeSafeInteger(action.owningInstruction)) return false;
   const owner = plan.instructions[action.owningInstruction];
   if (owner?.kind !== "fileStore") return false;
   const count = Math.max(files.length, references.length);
@@ -283,15 +283,16 @@ export function validStorageWriteAction(
   );
 }
 
-/** A pending capture; it carries validated tags exactly when its capture instruction has `tags:`. */
+/**
+ * A pending capture; it carries validated tags exactly when its capture instruction has `tags:`. Its identity, depths and owner frame are `validForegroundActionBase`'s, which runs first.
+ */
 export function validCaptureAction(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
   plan: InstructionPlan,
 ): boolean {
-  const owner = !nonNegativeSafeInteger(action.owningInstruction)
-    ? undefined
-    : plan.instructions[action.owningInstruction];
+  if (!nonNegativeSafeInteger(action.owningInstruction)) return false;
+  const owner = plan.instructions[action.owningInstruction];
   return (
     (action.tags === null || isCanonicalTagList(action.tags)) &&
     (owner?.kind !== "capture" || (owner.tags === null) === (action.tags === null)) &&
@@ -322,7 +323,7 @@ export function validMediaWaitOutcome(
   settlement: Record<string, unknown>,
   plan: InstructionPlan,
 ): boolean {
-  if (!nonNegativeSafeInteger(settlement.owningInstruction)) return true;
+  if (!nonNegativeSafeInteger(settlement.owningInstruction)) return false;
   const owner = plan.instructions[settlement.owningInstruction];
   if (owner?.kind !== "playMedia") return false;
   return owner.async

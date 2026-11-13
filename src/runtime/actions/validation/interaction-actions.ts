@@ -79,9 +79,9 @@ export function preparedChoiceOptions(
 }
 
 /**
- * An interaction appeared at a scene time no later than now. Only a button has a timeout, and its deadline is a
- * representable later scene time. A pending button is not overdue unless catch-up is paused for execution that runs
- * first, such as a queued expiry block or one that suspends it.
+ * An interaction appeared at a scene time no later than now. Only a button or a form has a timeout, and its deadline
+ * is a representable later scene time. Neither is overdue unless catch-up is paused for execution that runs first,
+ * such as a queued expiry block or one that suspends it.
  */
 function validInteractionTiming(
   action: Record<string, unknown>,
@@ -114,6 +114,9 @@ function validInteractionTiming(
   );
 }
 
+/**
+ * A pending interaction: its UI, form, timing and destination, against its instruction. Its identity, depths and owner frame are `validForegroundActionBase`'s, which runs first.
+ */
 export function validInteractionAction(
   action: Record<string, unknown>,
   snapshot: Record<string, unknown>,
@@ -204,7 +207,7 @@ export function validInteractionAction(
     !(isFormUi(action.ui) && validFormState(action.ui, action.form))
   )
     return false;
-  if (!nonNegativeSafeInteger(action.owningInstruction)) return true;
+  if (!nonNegativeSafeInteger(action.owningInstruction)) return false;
   const instruction = plan.instructions[action.owningInstruction];
   if (
     instruction?.kind !== "interaction" ||
