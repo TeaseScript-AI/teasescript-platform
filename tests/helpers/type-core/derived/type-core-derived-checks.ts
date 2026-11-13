@@ -281,7 +281,7 @@ export function derive(
     { statement: Statement } | { transfer: DerivedStore } | { native: Discharge & { by: "native" } }
   )[] = [];
   // (the values stored into a function's place with a written type, by their store's site: `derived-functions.ts`)
-  const transfers = new Map<string, DerivedStore>();
+  const transfers: DerivedStore[] = [];
   const native = (what: (Discharge & { by: "native" })["what"], at: string): void => {
     discharges.push({ native: { by: "native", what, site: at } });
   };
@@ -352,8 +352,10 @@ export function derive(
     ) {
       const transfer = transferStore(at, syntax, all, project);
       if (transfer !== null) {
-        const held = transfers.get(`${transfer.so}:${transfer.eo}`) ?? transfer;
-        transfers.set(`${held.so}:${held.eo}`, held);
+        // (one store per argument, default or `return`, however many obligations it holds)
+        const held =
+          transfers.find((each) => each.so === transfer.so && each.eo === transfer.eo) ?? transfer;
+        if (held === transfer) transfers.push(held);
         discharges.push({ transfer: held });
         continue;
       }
@@ -499,7 +501,7 @@ export function derive(
     });
   }
   return {
-    stores: [...stores.values(), ...transfers.values()].sort((a, b) => a.so - b.so || a.eo - b.eo),
+    stores: [...stores.values(), ...transfers].sort((a, b) => a.so - b.so || a.eo - b.eo),
     content,
     discharges: discharges.map((entry) =>
       "native" in entry
