@@ -10,7 +10,7 @@ import { isolateGit } from "../fixture-git.mjs";
 isolateGit();
 
 const TOOL = fileURLToPath(new URL("./split-write.mjs", import.meta.url));
-const RECONSTRUCT = fileURLToPath(new URL("../reconstruct-move.mjs", import.meta.url));
+const RECONSTRUCT = fileURLToPath(new URL("./reconstruct-move.mjs", import.meta.url));
 const OLD_PATH = "tests/split/old.test.ts";
 const A = "tests/split/a.test.ts";
 const B = "tests/split/b.test.ts";

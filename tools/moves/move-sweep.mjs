@@ -16,7 +16,7 @@
 // as text, so no form sees it; and the map is Git's, `git diff -M` at its default similarity of 50 %, so a moved file
 // edited past that reads as a deletion and an addition and is missing from a derived map (pass it with --renames).
 //
-//   node tools/move-sweep.mjs [BASE] [--renames FILE] [--splits FILE] [--declare FILE] [--forms 1,2,3,4,5]
+//   node tools/moves/move-sweep.mjs [BASE] [--renames FILE] [--splits FILE] [--declare FILE] [--forms 1,2,3,4,5]
 //
 // The map: by default each rename of `git diff -z -M --name-status` from `git merge-base BASE HEAD` to `HEAD`, old path
 // to new path. --splits FILE merges in a JSON `{"renames": {old: [new, …]}}` for a split, one old path into several,
@@ -74,7 +74,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 const USAGE =
-  "usage: node tools/move-sweep.mjs [BASE] [--renames FILE] [--splits FILE] [--declare FILE] [--forms 1,2,3,4,5]";
+  "usage: node tools/moves/move-sweep.mjs [BASE] [--renames FILE] [--splits FILE] [--declare FILE] [--forms 1,2,3,4,5]";
 
 /** A run that cannot go on: its message and exit status 2. */
 export class SweepError extends Error {}

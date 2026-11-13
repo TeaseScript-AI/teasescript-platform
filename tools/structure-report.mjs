@@ -84,7 +84,7 @@ import {
   linkMainNodeModules,
   lockfileMismatch,
 } from "./check-changed.mjs";
-import { movedLinesOf, MovedLinesUnreadable } from "./moved-lines.mjs";
+import { movedLinesOf, MovedLinesUnreadable } from "./moves/moved-lines.mjs";
 
 // `ts-morph`, and `pure-move-check.mjs`, which imports it, load once `main` has made sure of `node_modules`
 let ts;
@@ -778,7 +778,7 @@ async function loadTypeScript() {
     process.exit(2);
   }
   ({ ts } = await import("ts-morph"));
-  ({ verdictsOf } = await import("./pure-move-check.mjs"));
+  ({ verdictsOf } = await import("./moves/pure-move-check.mjs"));
 }
 
 /** The report the command line asks for. */

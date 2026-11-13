@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { isolateGit } from "./fixture-git.mjs";
+import { isolateGit } from "../fixture-git.mjs";
 
 isolateGit();
 
@@ -513,6 +513,6 @@ test("--help, no BASE and no map, or an unknown option print the usage and canno
   for (const args of [["--help"], ["-h"], [], ["HEAD", "--nope", "x"]]) {
     const { status, err } = r.run(...args);
     assert.equal(status, 2, args.join(" "));
-    assert.match(err, /usage: node tools\/move-sweep\.mjs/u, args.join(" "));
+    assert.match(err, /usage: node tools\/moves\/move-sweep\.mjs/u, args.join(" "));
   }
 });

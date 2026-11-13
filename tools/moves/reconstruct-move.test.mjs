@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { isolateGit } from "./fixture-git.mjs";
+import { isolateGit } from "../fixture-git.mjs";
 import { main, reconstruct } from "./reconstruct-move.mjs";
 
 isolateGit();

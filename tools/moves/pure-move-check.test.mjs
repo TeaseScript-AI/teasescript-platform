@@ -670,7 +670,7 @@ test(
   { timeout: 60_000 },
   () => {
     const usage =
-      "usage: node tools/pure-move-check.mjs BASE [--declare FILE] [--renames FILE] [PATH…]\n";
+      "usage: node tools/moves/pure-move-check.mjs BASE [--declare FILE] [--renames FILE] [PATH…]\n";
     const kept = { "src/kept.ts": "export const kept = 1;\n" };
     const move = moveOf(
       { ...kept, "src/a.ts": main },
