@@ -848,9 +848,9 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
             if (root.kind === "property") steps.unshift(root.name);
             root = root.kind === "group" ? root.expression : root.object;
           }
-          if (root.kind !== "identifier")
-            throw new Unsupported(`a prepared reference that is not a place inside a variable (${root.kind}${root.kind === "call" ? ` ${root.callee?.name ?? root.callee?.kind}` : ""})`);
-          const placeLabel = label ? JSON.stringify([root.name, ...steps].join(".")) : "null";
+          // A place inside a variable, or inside a value no variable holds (a literal, a temporary): the temporary holds
+          // the container either way; only a variable's place has a label.
+          const placeLabel = label && root.kind === "identifier" ? JSON.stringify([root.name, ...steps].join(".")) : "null";
           line(`${temp(ins.destinationTemporary)} = ${expr(ins.expression)}; rt.referenceLabels[${ins.destinationTemporary}] = ${placeLabel};`);
           return;
         }

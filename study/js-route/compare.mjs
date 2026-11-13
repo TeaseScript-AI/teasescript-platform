@@ -29,10 +29,10 @@ const OPERATIONS = Number(process.env.OPERATIONS ?? 200);
 const RUNAWAY = process.env.RUNAWAY === "1";
 
 /**
- * The fields an action records of the interpreter's frames (the call it waits in, its open scopes and loops), which an
- * emitted program does not have; left out of the comparison and listed as a difference of the route.
+ * The fields an action records of the interpreter's frames (the call it waits in, its open scopes and loops, a block's
+ * scope), which an emitted program does not have; left out of the comparison and listed as a difference of the route.
  */
-const PLACE = new Set(["ownerCallFrameId", "scopeDepth", "loopDepth"]);
+const PLACE = new Set(["ownerCallFrameId", "scopeDepth", "loopDepth", "rootScopeId"]);
 
 function view(state, result) {
   return JSON.parse(

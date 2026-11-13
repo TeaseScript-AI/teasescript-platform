@@ -14,6 +14,7 @@ import { withFrozenTemporalCaptures } from "../../dist/src/runtime/snapshot/stat
 import { emitProgram } from "./emit.mjs";
 import { EXIT, Runtime, SUSPEND } from "./runtime.mjs";
 import { fromCanonical, toCanonical } from "../../dist/src/runtime/native/values/codec.js";
+import { NativeDict, NativeObject, NativeSet } from "../../dist/src/runtime/native/values/native-value.js";
 
 const programs = new Map();
 
@@ -150,6 +151,61 @@ export function createEmittedSession(plan, fresh = {}, options = {}) {
 }
 
 /** A value of a saved frame as JSON: a native value's canonical form, and `undefined` (not set yet) marked. */
+/**
+ * A save's values as one graph: a list, object, dict or set held in two places (a variable and a prepared reference
+ * into it, both alive at a wait) is written once and referred to after, so after a load a store through the reference
+ * still reaches the variable. Other values are their canonical form.
+ */
+function graphEncoder() {
+  const ids = new Map();
+  const encode = (value) => {
+    if (value === undefined) return { $unset: 1 };
+    if (value === null || typeof value !== "object") return value;
+    if (ids.has(value)) return { $ref: ids.get(value) };
+    const composite = Array.isArray(value) || value instanceof NativeObject || value instanceof NativeDict || value instanceof NativeSet;
+    if (!composite) return { $leaf: toCanonical(value) };
+    const id = ids.size;
+    ids.set(value, id);
+    if (Array.isArray(value)) return { $id: id, $list: value.map(encode) };
+    if (value instanceof NativeObject) return { $id: id, $object: [...value.properties].map(([k, v]) => [k, encode(v)]) };
+    if (value instanceof NativeDict) return { $id: id, $dict: [...value.entries].map(([k, v]) => [k, encode(v)]) };
+    return { $id: id, $set: value.items.map(encode) };
+  };
+  return encode;
+}
+function graphDecoder() {
+  const made = new Map();
+  const decode = (value) => {
+    if (value === null || typeof value !== "object") return value;
+    if (value.$unset === 1) return undefined;
+    if (value.$ref !== undefined) return made.get(value.$ref);
+    if (value.$leaf !== undefined) return fromCanonical(value.$leaf);
+    if (value.$list !== undefined) {
+      const list = [];
+      made.set(value.$id, list);
+      for (const item of value.$list) list.push(decode(item));
+      return list;
+    }
+    if (value.$object !== undefined) {
+      const object = new NativeObject();
+      made.set(value.$id, object);
+      for (const [k, v] of value.$object) object.properties.set(k, decode(v));
+      return object;
+    }
+    if (value.$dict !== undefined) {
+      const dict = new NativeDict();
+      made.set(value.$id, dict);
+      for (const [k, v] of value.$dict) dict.entries.set(k, decode(v));
+      return dict;
+    }
+    const set = new NativeSet();
+    made.set(value.$id, set);
+    for (const item of value.$set) set.items.push(decode(item));
+    return set;
+  };
+  return decode;
+}
+
 function saveValue(value) {
   return value === undefined ? { $unset: 1 } : toCanonical(value);
 }
@@ -216,8 +272,9 @@ export class ResumableSession {
     const rt = new Runtime(this.#plan, snapshot, this);
     rt.fileEntries = this.#program.fileEntries;
     if (saved !== null) {
-      rt.globals.push(...saved.globals.map(loadValue));
-      rt.resumeFrames = saved.frames.map((frame) => ({ ...frame, v: frame.v.map(loadValue) }));
+      const decode = graphDecoder();
+      rt.globals.push(...saved.globals.map(decode));
+      rt.resumeFrames = saved.frames.map((frame) => ({ ...frame, v: frame.v.map(decode) }));
       rt.resuming = rt.resumeFrames.length > 0;
     }
     const main = this.#program.instantiate(rt, this.#program.constants);
@@ -228,8 +285,10 @@ export class ResumableSession {
     } catch (error) {
       if (error === SUSPEND) {
         // Innermost first as they were pushed; a resume gives them back outermost first.
-        const frames = rt.frames.reverse().map((frame) => ({ ...frame, v: frame.v.map(saveValue) }));
-        this.save = JSON.stringify({ snapshot: rt.snapshot, globals: rt.globals.map(saveValue), frames });
+        const encode = graphEncoder();
+        const globals = rt.globals.map(encode);
+        const frames = rt.frames.reverse().map((frame) => ({ ...frame, v: frame.v.map(encode) }));
+        this.save = JSON.stringify({ snapshot: rt.snapshot, globals, frames });
         this.saveBytes = this.save.length;
       } else if (error !== EXIT) {
         const failure = instructionFailure(error, this.#plan.instructions[0].span);
