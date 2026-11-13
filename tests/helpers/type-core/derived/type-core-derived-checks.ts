@@ -307,6 +307,12 @@ export function derive(
       named.find((expression) => expression.span.start.offset === check.site.offset)
     );
   };
+  // (a check as `transferStore` reads it: its site and its target)
+  const checkedAt = (check: (typeof record.checks)[number]) => ({
+    start: check.site.offset,
+    end: check.site.end,
+    target: check.target,
+  });
   for (const check of record.checks) {
     const at = `${check.site.offset}:${check.site.end}`;
     const fallback = owners.find((owner) => {
@@ -336,21 +342,23 @@ export function derive(
       native("fallback", at);
     } else if (
       (check.kind === "copy-type" ||
-        // (C1's check of a copied integer that may be null, at its store's value: the store's own, as a copy type's)
+        // (C1's check of a copied integer that may be null, at its store's value: the store's own, as a copy type's; a
+        // value stored into a function's place is such a store too)
         (check.kind === "null-check" &&
           check.against.length > 0 &&
           check.against.every((kind) => kind === "integer") &&
-          statements.some((candidate) => {
+          (statements.some((candidate) => {
             const store = storeOf(candidate);
             return (
               store !== null &&
               site(unwrap(store.value)) === at &&
               (check.target === store.name || check.target.startsWith(`${store.name}.`))
             );
-          }))) &&
+          }) ||
+            transferStore(checkedAt(check), syntax, all, project) !== null))) &&
       !check.against.includes("unknown")
     ) {
-      const transfer = transferStore(at, syntax, all, project);
+      const transfer = transferStore(checkedAt(check), syntax, all, project);
       if (transfer !== null) {
         // (one store per argument, default or `return`, however many obligations it holds)
         const held =
