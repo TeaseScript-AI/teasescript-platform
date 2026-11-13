@@ -9,8 +9,8 @@ import {
   type Item,
   type ItemFields,
   type Writer,
-} from "../../../src/type-inference/core/items.js";
-import { operationItems } from "../../../src/type-inference/core/operator-table.js";
+} from "../../src/type-inference/core/items.js";
+import { operationItems } from "../../src/type-inference/core/operator-table.js";
 import {
   contextOf,
   coreRecord,
@@ -27,16 +27,16 @@ import {
   type DiagnosticKind,
   type DiagnosticRule,
   type Obligation,
-} from "../../../src/type-inference/core/result.js";
-import type { SourceSite } from "../../../src/type-inference/graph.js";
-import { itemScope } from "../../helpers/type-core-items.js";
+} from "../../src/type-inference/core/result.js";
+import type { SourceSite } from "../../src/type-inference/graph.js";
+import { itemScope } from "../helpers/type-core-items.js";
 import {
   compactRecord,
   readCompactRecord,
   recordDifferences,
   type CompactRecord,
   type CompactSite,
-} from "../../helpers/type-core-records.js";
+} from "../helpers/type-core-records.js";
 
 /** A context word's detail where the word's sentence names nothing more. */
 const NO_DETAIL: ContextDetail = {

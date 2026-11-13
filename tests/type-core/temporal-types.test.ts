@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSource } from "../../../src/compiler.js";
+import { compileSource } from "../../src/compiler.js";
 
 function diagnostics(source: string): [string, string, string][] {
   return compileSource(source).diagnostics.map((diagnostic) => [
