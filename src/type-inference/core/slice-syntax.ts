@@ -46,8 +46,66 @@ export interface Outside {
 
 // ------------------------------------------------------------------------------------------------- the syntax
 
-/** The written types of the slice: named types, `T?` and `T[]` of them. */
+/** The types a written type nests: an optional's value, a collection's element, a union's members. */
+function typeParts(type: TypeAnnotation): readonly TypeAnnotation[] {
+  switch (type.kind) {
+    case "namedType":
+      return [];
+    case "optionalType":
+      return [type.value];
+    case "listType":
+    case "setType":
+    case "dictType":
+      return [type.element];
+    case "unionType":
+      return type.members;
+  }
+}
+
+/**
+ * A position of a written type whose only kind is `null`, or `null` where it has none: the type itself, or one inside
+ * it, an optional's value, a collection's element, a union's member that is not `null` alone. A value read from such a
+ * place is `null` to today's checker and `unknown` to the core where it enters from the host, so the slice takes no
+ * such type, wherever it is written. (Walked, not recursed: a written type nests without bound.)
+ */
+function nullOnlyPosition(annotation: TypeAnnotation): TypeAnnotation | null {
+  // (each type before the types it nests)
+  const nested: TypeAnnotation[] = [];
+  const unwalked = [annotation];
+  for (let type = unwalked.pop(); type !== undefined; type = unwalked.pop()) {
+    nested.push(type);
+    for (const part of typeParts(type)) unwalked.push(part);
+  }
+  // whether a type's values can only be `null`: the name `null`, an optional or a union of such types (a collection is
+  // a value of its own), each judged after the types it nests
+  const onlyNull = new Map<TypeAnnotation, boolean>();
+  for (const type of nested.reverse())
+    onlyNull.set(
+      type,
+      type.kind === "namedType"
+        ? type.name === "null"
+        : type.kind === "optionalType"
+          ? onlyNull.get(type.value) === true
+          : type.kind === "unionType" &&
+            type.members.every((member) => onlyNull.get(member) === true),
+    );
+  // the first such position, outermost first, in written order
+  const pending = [annotation];
+  for (let type = pending.pop(); type !== undefined; type = pending.pop()) {
+    if (onlyNull.get(type) === true) return type;
+    // (a union's member that is `null` alone is the union's `null`, beside its other members)
+    const parts = typeParts(type).filter(
+      (part) => type.kind !== "unionType" || onlyNull.get(part) !== true,
+    );
+    for (let part = parts.pop(); part !== undefined; part = parts.pop()) pending.push(part);
+  }
+  return null;
+}
+
+/** The written types of the slice: named types, `T?` and `T[]` of them, none with a position only `null` fills. */
 function annotationOutside(annotation: TypeAnnotation): TypeAnnotation | null {
+  const nullOnly = nullOnlyPosition(annotation);
+  if (nullOnly !== null) return nullOnly;
   const pending: [TypeAnnotation, number][] = [[annotation, 0]];
   for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
     const [type, depth] = next;
@@ -317,6 +375,7 @@ export const COMMAND_OPERANDS = {
     "askChoice.option": choice([...CHOICE_VALUES, "object", "list", "set"], "returns"),
     "askChoice.element": choice([...CHOICE_VALUES, "object"], "returns"),
     "askChoice.label": choice([...SHOWS, "object", "list", "set"], "labelled"),
+    "askChoice.labelledElement": choice([...SHOWS, "object"], "labelled"),
     // (a choice object written in place: its text, shown, and also returned where it has no `value` and no label; its
     // value)
     "askChoice.text": choice(SHOWS, null),
@@ -433,6 +492,15 @@ function askOperandsByPosition(ask: InteractionExpression): (readonly [string, E
         return [
           [`${name}.label`, option.expression],
           ...(value.kind === "objectLiteral" ? choiceObject(value, true) : []),
+          ...(value.kind === "listLiteral"
+            ? value.elements.flatMap((element): (readonly [string, Expression])[] => {
+                const written = unwrapped(element);
+                return [
+                  [`${name}.labelledElement`, element],
+                  ...(written.kind === "objectLiteral" ? choiceObject(written, true) : []),
+                ];
+              })
+            : []),
         ];
       if (value.kind === "listLiteral")
         return value.elements.flatMap((element): (readonly [string, Expression])[] => {
