@@ -46,7 +46,7 @@ export const costlyTestSeconds = {
   "type-core/written/type-core-written-unrestricted.test.js": 17,
   "type-core/type-core-declared-escapes.test.js": 17,
   "runtime/collections/collection-size.test.js": 16,
-  "type-core/written/type-core-literal-fit.test.js": 15,
+  "type-core/type-core-literal-fit.test.js": 15,
   "player/player-test-modules.test.js": 15,
   "type-core/oracles/type-core-oracles-question-work.test.js": 15,
   "families-runner/families-baseline-fill.test.js": 14,
@@ -152,7 +152,7 @@ export const costlyTestSeconds = {
   "type-core/type-core-result.test.js": 1,
   "type-core/solver/type-core-solver-proofs.test.js": 1,
   "type-core/work/type-core-charged-iteration.test.js": 1,
-  "type-core/oracles/type-core-records.test.js": 1,
+  "type-core/cells/type-core-records.test.js": 1,
   "type-core/type-core-method-categories.test.js": 1,
 };
 
