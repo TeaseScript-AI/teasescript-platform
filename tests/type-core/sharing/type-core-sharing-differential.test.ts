@@ -314,7 +314,8 @@ function programs(): Program[] {
     out.push(one(`#1210 ${name}`, unmarked(lines).source));
   // external round 7 B1's written copies (`WRITTEN_COPY_MATRIX`)
   for (const { name, source } of WRITTEN_COPY_MATRIX) out.push(one(`written copy ${name}`, source));
-  // the merged S6's other written-domain matrices (`type-core-written-matrices.ts`), each exact source once (Astra's D3)
+  // the merged S6's unrestricted and union-rule matrices (`type-core-written-unrestricted.ts`,
+  // `type-core-written-unions.ts`), each exact source once (Astra's D3)
   const sources = new Set<string>();
   for (const { name, source } of [
     ...UNRESTRICTED_COLLECTION_MATRIX,
