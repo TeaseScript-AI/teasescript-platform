@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
@@ -228,4 +236,28 @@ test("a patch names the file by its repository path, whether --file is absolute 
   assert.equal(run.status, 2, run.stdout);
   assert.match(run.stderr, /is not under the current folder/u);
   assert.equal(readdirSync(root).includes("q"), false);
+});
+
+test("a --file through a symbolic link to a folder, or in a folder whose name starts with `..`, is named by its real repository path (#2614 r1)", () => {
+  const { root, git } = checkoutOf(LAST);
+  writeFileSync(path.join(root, "spec.json"), JSON.stringify(LAST_ENTRY));
+  symlinkSync(path.join(root, "src"), path.join(root, "linked"));
+  mkdirSync(path.join(root, "..dots"));
+  writeFileSync(path.join(root, "..dots/slice-syntax.ts"), LAST);
+  for (const [file, named] of [
+    [`linked/${FILE.slice("src/".length)}`, FILE],
+    ["..dots/slice-syntax.ts", "..dots/slice-syntax.ts"],
+  ]) {
+    rmSync(path.join(root, "p"), { recursive: true, force: true });
+    const run = spawnSync(
+      process.execPath,
+      [tool, "--file", file, "--spec", "spec.json", "--patches", "p"],
+      { cwd: root, encoding: "utf8" },
+    );
+    assert.equal(run.status, 0, `${file}: ${run.stdout}${run.stderr}`);
+    const patch = readFileSync(path.join(root, "p", "x.patch"), "utf8");
+    assert.ok(patch.startsWith(`diff --git a/${named} b/${named}\n`), patch);
+    const checked = git("apply", "--check", path.join(root, "p", "x.patch"));
+    assert.equal(checked.status, 0, `${file}: ${checked.stderr}`);
+  }
 });

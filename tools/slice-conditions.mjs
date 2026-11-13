@@ -21,7 +21,7 @@
 //                                                                     run, where the scan of the mutated file is moot)
 // Exit: 0 complete; 1 a token uncovered, an entry stale or a witness refused; 2 a usage or a file that cannot be read.
 // Writes only under `--patches DIR`. Not part of `npm run check`: its upkeep is paid where the conditions change.
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { parseArgs } from "node:util";
 import { pathToFileURL } from "node:url";
@@ -274,10 +274,16 @@ function patchOf(file, before, after) {
   ].join("\n");
 }
 
-/** `file` as a patch names it: its path from the current folder, the repository's root, in `/` form. */
+/** `file` as a patch names it: its real path from the current folder's, the repository's root, in `/` form. */
 function repositoryPath(file) {
-  const relative = path.relative(process.cwd(), path.resolve(file));
-  if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative))
+  // (both resolved through symbolic links, as Git names a file by its real path)
+  const relative = path.relative(realpathSync(process.cwd()), realpathSync(file));
+  if (
+    relative === "" ||
+    relative === ".." ||
+    relative.startsWith(`..${path.sep}`) ||
+    path.isAbsolute(relative)
+  )
     fail(
       `--file ${file} is not under the current folder, the repository's root a patch names it from`,
     );
