@@ -239,6 +239,8 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
     /** Variables of a resumable region, declared at its top, saved at a wait. */
     const hoisted = [];
     const fnName = isRoot ? `file${fileIndex}` : `f${definition.id}`;
+    // Only a generator may yield; a wait elsewhere (an instant say, which never waits) keeps the replay call.
+    const WAIT_HERE = generators && (isRoot || canWait.has(definition.id)) ? WAIT : "rt.waited()";
 
     const resolve = (name) => {
       for (let depth = scopes.length - 1; depth >= 0; depth -= 1) {
@@ -957,7 +959,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
             line(`${said};`);
             line(`case ${1e6 + pc}:`);
             line(`if (rt.afterWait()) ${suspendHere(1e6 + pc)}`);
-          } else line(`if (${said}) ${WAIT};`);
+          } else line(`if (${said}) ${WAIT_HERE};`);
           return;
         }
         case "exit":
@@ -1021,7 +1023,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
         line(`${call};`);
         line(`case ${1e6 + pc}:`);
         line(`if (rt.afterWait()) ${suspendHere(1e6 + pc)}`);
-      } else line(`if (${call}) ${WAIT};`);
+      } else line(`if (${call}) ${WAIT_HERE};`);
       for (const id of writes) line(`${temp(id)} = rt.takeTemporary(${id});`);
     }
 

@@ -340,6 +340,10 @@ export class GeneratorSession {
   completeAction(request) {
     return { events: completeValidatedAction(this.#plan, this.#state, request).events, instructionsExecuted: 0 };
   }
+  /** A wait reached outside a generator: the emitter judged that function unable to wait. */
+  settle() {
+    throw new Error("study: a wait in a function the emitter judged unable to wait");
+  }
   #drive() {
     const status = this.#state.status;
     if (status === "halted" || status === "failed") return { events: [], instructionsExecuted: 0 };

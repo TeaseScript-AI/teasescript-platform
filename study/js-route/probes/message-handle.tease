@@ -1,0 +1,8 @@
+// A say used as a value, changed after a wait: the handle must still find its message.
+let counter = say prose "Count: 0", instant
+wait 2 s
+for i in 1..=3 {
+  counter.text = "Count: ${i}"
+  wait 1 s
+}
+exit
