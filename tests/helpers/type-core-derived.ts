@@ -2117,6 +2117,8 @@ function expressions(statements: readonly Statement[]): Expression[] {
     else if (statement.kind === "sayStatement") walk(statement.value);
     else if (statement.kind === "expressionStatement") walk(statement.expression);
     else if (statement.kind === "forStatement") walk(statement.iterable);
+    else if (statement.kind === "gotoStatement" && statement.target.kind === "scriptTarget")
+      walk(statement.target.expression);
   }
   return out;
 }
