@@ -3,12 +3,19 @@
 // base and its head (any two):
 //
 //   node tools/moves/split-test-compare.mjs BASE_TREE HEAD_TREE OUT --old FILE… --new FILE…
+//   node tools/moves/split-test-compare.mjs BASE_TREE HEAD_TREE OUT --moved MODULE… [--old FILE… --new FILE…]
 //
 // FILEs are test files as the repository names them. A file under `tests/` (`tests/type-core/x.test.ts`) runs as its
 // compiled file under that tree's `dist/` (`dist/tests/type-core/x.test.js`); any other (`tools/x.test.mjs`) runs as it
 // is. OUT is a folder (the job's `$SX_OUT`). A FILE may be on both sides (a split that keeps its file). A move of
 // helpers, no test file moved, is compared by its importing test files, given as both OLD and NEW.
 //
+// 0. With `--moved MODULE…` (the moved files' paths, old and new), the test files that reach a MODULE each tree tracks
+//    (`test-reach.mjs`, in each tree, which must be a Git checkout) are written to `reach.txt` with their chains and
+//    counted (`reach: base N, head M test files`). With `--old` and `--new`, a reaching test file the base's OLD or
+//    the head's NEW list leaves out is named (`reach: --old misses FILE`) and ends the check (exit 1) before any test
+//    runs; without them, OLD is every test file either side reaches that the base holds, and NEW every one the head
+//    holds (an unchanged test file can reach a moved module by its old name only).
 // 1. Discovery, when a FILE is under `tests/`, by this tool's rule (`suiteTestFiles` of `tools/test-shards.mjs`) over
 //    each tree's `dist/tests/`: the base's suite holds each OLD file, the head's each NEW file and no OLD file that is
 //    not also NEW, and the suite is otherwise the same on both sides. A difference ends the check (exit 1) before any
@@ -33,9 +40,10 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { suiteTestFiles } from "../test-shards.mjs";
+import { CannotRun as ReachCannotRun, testsReaching, trackedFiles } from "./test-reach.mjs";
 
 const USAGE =
-  "usage: node tools/moves/split-test-compare.mjs BASE_TREE HEAD_TREE OUT --old FILE… --new FILE…";
+  "usage: node tools/moves/split-test-compare.mjs BASE_TREE HEAD_TREE OUT (--old FILE… --new FILE… | --moved MODULE… [--old FILE… --new FILE…])";
 const SELF = fileURLToPath(import.meta.url);
 const COUNTS = fileURLToPath(new URL("../test-file-counts.mjs", import.meta.url));
 const CLASSES = ["passed", "failed", "cancelled", "skipped", "todo"];
@@ -178,11 +186,45 @@ function run(tree, files, out, side) {
   return { titles, counts, exit: result.signal ?? result.status };
 }
 
+/**
+ * The test files reaching `moved` in each tree, base's and head's (each `{ reached, tracked }`: a sorted list and the
+ * tree's tracked files), a MODULE taken on each side that tracks it; their chains are written to OUT's `reach.txt`.
+ */
+function reachOf(baseTree, headTree, moved, out) {
+  const sides = [baseTree, headTree].map((tree) => {
+    try {
+      const tracked = trackedFiles(tree);
+      const modules = moved.filter((file) => tracked.has(file));
+      return {
+        tracked,
+        modules,
+        reached: modules.length === 0 ? [] : testsReaching(tree, modules, tracked),
+      };
+    } catch (error) {
+      if (error instanceof ReachCannotRun) throw new CannotRun(error.message);
+      throw error;
+    }
+  });
+  for (const file of moved)
+    if (!sides.some(({ modules }) => modules.includes(file)))
+      throw new CannotRun(`neither tree tracks the moved ${file}`);
+  mkdirSync(out, { recursive: true });
+  const lines = ["base", "head"].flatMap((side, at) => [
+    `${side}: ${sides[at].reached.length} test files reach ${sides[at].modules.join(", ")}`,
+    ...sides[at].reached.map(({ chain }) => `  ${chain.join(" -> ")}`),
+  ]);
+  writeFileSync(path.join(out, "reach.txt"), `${lines.join("\n")}\n`);
+  return sides.map(({ reached, tracked }) => ({
+    reached: reached.map(({ test }) => test),
+    tracked,
+  }));
+}
+
 /** Runs the comparison with `argv` (`compare` the comparison, replaceable to test its controls); returns the status. */
 export function main(argv, print = console.log, compare = compareSides) {
   try {
     const positional = [];
-    const lists = { "--old": [], "--new": [] };
+    const lists = { "--old": [], "--new": [], "--moved": [] };
     for (let i = 0; i < argv.length; i += 1) {
       const list = lists[argv[i]];
       if (list !== undefined)
@@ -190,10 +232,49 @@ export function main(argv, print = console.log, compare = compareSides) {
       else if (argv[i].startsWith("-")) throw new CannotRun(USAGE);
       else positional.push(argv[i]);
     }
-    const [olds, news] = [lists["--old"], lists["--new"]];
-    if (positional.length !== 3 || olds.length === 0 || news.length === 0)
+    let [olds, news, moved] = [lists["--old"], lists["--new"], lists["--moved"]];
+    if (
+      positional.length !== 3 ||
+      (olds.length === 0) !== (news.length === 0) ||
+      (olds.length === 0 && moved.length === 0)
+    )
       throw new CannotRun(USAGE);
     const [baseTree, headTree, out] = positional.map((p) => path.resolve(p));
+    const reachReport = [];
+    if (moved.length > 0) {
+      const [base, head] = reachOf(baseTree, headTree, moved, out);
+      const [baseReach, headReach] = [base.reached, head.reached];
+      reachReport.push(
+        `reach: base ${baseReach.length}, head ${headReach.length} test files (reach.txt)`,
+      );
+      // (without lists, each side runs the files either side reaches that it holds: an unchanged test file may reach a
+      // moved module by its name on one side only)
+      if (olds.length === 0)
+        [olds, news] = [
+          [
+            ...new Set([...baseReach, ...headReach.filter((file) => base.tracked.has(file))]),
+          ].sort(),
+          [
+            ...new Set([...headReach, ...baseReach.filter((file) => head.tracked.has(file))]),
+          ].sort(),
+        ];
+      const missing = [
+        ...baseReach
+          .filter((file) => !olds.includes(file))
+          .map((file) => `reach: --old misses ${file}`),
+        ...headReach
+          .filter((file) => !news.includes(file))
+          .map((file) => `reach: --new misses ${file}`),
+      ];
+      if (missing.length > 0) {
+        const report = [...reachReport, ...missing, "verdict: a list misses a reaching test file"];
+        writeFileSync(path.join(out, "compare.txt"), `${report.join("\n")}\n`);
+        for (const line of report) print(line);
+        return 1;
+      }
+      if (olds.length === 0 || news.length === 0)
+        throw new CannotRun("no test file reaches a moved module on one side: nothing to compare");
+    }
     const [oldPaths, newPaths] = [olds.map(runPath), news.map(runPath)];
     for (const [tree, paths] of [
       [baseTree, oldPaths],
@@ -214,14 +295,16 @@ export function main(argv, print = console.log, compare = compareSides) {
       oldNames.length + newNames.length === 0
         ? []
         : discoveryProblems(baseSuite, headSuite, oldNames, newNames);
-    const report =
-      oldNames.length + newNames.length === 0
+    const report = [...reachReport];
+    report.push(
+      ...(oldNames.length + newNames.length === 0
         ? ["discovery: not run, no FILE under tests/"]
         : problems.length > 0
           ? problems.map((problem) => `discovery: ${problem}`)
           : [
               "discovery: the base's suite holds each OLD file, the head's each NEW file and no OLD file that is not NEW, and nothing else changed",
-            ];
+            ]),
+    );
     let status = problems.length > 0 ? 1 : 0;
     if (problems.length === 0) {
       const base = run(baseTree, oldPaths, out, "base");
