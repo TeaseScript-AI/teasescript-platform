@@ -26,7 +26,7 @@ const TEMPORAL: Readonly<Record<string, string>> = {
   time: "14:30",
   datetime: "2027-04-17T18:00",
 };
-function answer(ui: { readonly kind: string; readonly temporalKind?: string }): object {
+function answer(ui: { readonly kind: string; readonly temporalKind?: string }) {
   switch (ui.kind) {
     case "text":
       return { kind: "submittedText", submittedText: "x" };
@@ -184,7 +184,7 @@ test("an ask as a speaker, declared or the player, and in a message, a condition
     asToday(source);
 });
 
-test("a prefill that may be null among the kinds its request takes runs as today's (R39's neighbour)", () => {
+test("a prefill that may be null among the kinds its request takes runs as today's", () => {
   for (const source of [
     'let m: string? = hostValue\nlet r = askText("q", prefill: m)\nexit\n',
     'let m: integer? = hostValue\nlet r = askInteger("q", prefill: m)\nexit\n',
@@ -196,7 +196,7 @@ test("a prefill that may be null among the kinds its request takes runs as today
     asToday(source);
 });
 
-test("the prefills, choices and asks the route refuses: today's compile error each (R39, R40, R42)", () => {
+test("the prefills, choices and asks the route refuses: today's compile error each", () => {
   // `askPassword` takes no prefill (an (S) where the route ran: the request was passed a value it does not take)
   refusedAsToday(
     'let r = askPassword("q", prefill: hostValue)\nexit\n',
@@ -249,7 +249,7 @@ test("the prefills, choices and asks the route refuses: today's compile error ea
       );
 });
 
-test("an ask refuses a request's value after saying its question, as today's runtime does (R38)", () => {
+test("an ask refuses a request's value after saying its question, as today's runtime does", () => {
   // a prefill the runtime checks as the field opens: today's plan and the route's both say the question, then fail at
   // the ask, opening no field
   const source = 'let r = askInteger("q", prefill: hostValue)\nexit\n';
