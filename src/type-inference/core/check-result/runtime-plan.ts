@@ -38,7 +38,7 @@ import {
   unwrap,
 } from "./slice-index.js";
 import { Contracts, isCollection, kindsPlan, membersOf, unionOf } from "./store-contracts.js";
-import { keeps } from "./kept-checks.js";
+import { notLost } from "./kept-checks.js";
 
 /** A site of the plan's checks: a store or load, a list `get` call, or the owner of a selected fallback. */
 type CheckSite = RuntimeCheckSite | BinaryExpression;
@@ -331,7 +331,7 @@ export function runtimeChecks(
  * (#1526 phase C), its results; after a stop where none ran or it kept none, the registry's obligations without
  * results. Each obligation a store owes when the script runs, its destination-type check (a warning the walk made) or
  * its boundary (external data entering), is lost where the plan's check at its store does not carry its required
- * contract (`keeps`), a stopped decision's own marks among them (#2080): a stopped mark whose completion result was
+ * contract (`notLost`), a stopped decision's own marks among them (#2080): a stopped mark whose completion result was
  * lost, or that has none, is kept only by a complete store check. The first lost obligation, in the registry's source
  * order, declines the program at its store (`OutsideContract`): the stopped plan would otherwise run past a check the
  * natural plan makes (ADR 0021 §1.10 column (2)). A program the analysis rejects has no plan and is not asked. Where
@@ -381,7 +381,7 @@ export function lostCheck(
         UNDECIDED_AT_BUDGET,
       );
     }
-  // (the stores the completion's own destination-type check owes a check at, each once: `keeps` never lets a stopped
+  // (the stores the completion's own destination-type check owes a check at, each once: `notLost` never lets a stopped
   // mark there owe nothing)
   const warned = new Set<Store>();
   for (const warning of answers.completedWarnings()) {
@@ -394,7 +394,7 @@ export function lostCheck(
     const store = index.storeAt(obligation.slot.site);
     if (
       store === undefined ||
-      keeps(answers, index, store, obligation, result, published, checks, core, warned)
+      notLost(answers, index, store, obligation, result, published, checks, core, warned)
     )
       continue;
     throw new OutsideContract(
@@ -410,7 +410,7 @@ export function lostCheck(
  * site (#2183): a fallback's (the fallback rule's) is the requirement the stop lost, which no `fallbackCheck` can carry
  * (`fallbackPlan`), so the default would run unchecked; any other rule's declines too, as an unestablished check. No
  * set shows one (#2257's census, sweep and natural sets: `store` and `fallback` only). A store's is the registry's,
- * which `keeps` decides. Not caught: a contract the stop left incomplete that a natural producer reads, where the
+ * which `notLost` decides. Not caught: a contract the stop left incomplete that a natural producer reads, where the
  * fallback rule owes nothing (#2257: measured 0, not shown impossible), and a store whose destination-type warning the
  * stop removed, where no obligation is owed (#2245). It returns nothing and declines by throwing `OutsideContract`;
  * `lostCheck` calls it last.
