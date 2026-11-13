@@ -1,21 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSourceWithBackend } from "../../src/compiler.js";
+import { compileSourceWithBackend } from "../../../src/compiler.js";
 import {
   createSerializableList as list,
   createSerializableObject,
-} from "../../src/runtime/values/serializable-values.js";
-import { analyseCore } from "../../src/type-inference/core/answers.js";
-import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
+} from "../../../src/runtime/values/serializable-values.js";
+import { analyseCore } from "../../../src/type-inference/core/answers.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
 import {
   withTestAllowance,
   withTestDemandAllowance,
-} from "../../src/type-inference/core/budget.js";
-import { coreRequest } from "../helpers/type-core-analysis.js";
-import { HELD_MODES, heldStops } from "../helpers/type-core-held-host.js";
-import { stopDeclineProblem, unsettledStop } from "../helpers/type-core-stop-oracle.js";
-import { runGlobals } from "../helpers/type-core-route.js";
+} from "../../../src/type-inference/core/budget.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
+import { HELD_MODES, heldStops } from "../../helpers/type-core-held-host.js";
+import { stopDeclineProblem, unsettledStop } from "../../helpers/type-core-stop-oracle.js";
+import { runGlobals } from "../../helpers/type-core-route.js";
 import {
   DECLINES,
   MATRIX_MODES,
@@ -23,7 +23,7 @@ import {
   matrixRuns,
   type MatrixRun,
   type StopKind,
-} from "../helpers/type-core/type-core-lost-check-matrix.js";
+} from "../../helpers/type-core/stop/type-core-lost-check-matrix.js";
 
 // #1526 decision 2, condition 1: after any stop the candidate publishes no plan that lets through what
 // the natural plan rejects. The generated matrix (`type-core-lost-check-matrix.ts`), and the rows of Codex r4's review.

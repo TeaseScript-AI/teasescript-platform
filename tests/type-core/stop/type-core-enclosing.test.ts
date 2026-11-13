@@ -1,21 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import type { SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
-import { type EnclosingCase } from "../helpers/type-core/enclosing/type-core-enclosing.js";
-import { certificateFamily } from "../helpers/type-core/enclosing/type-core-enclosing-certificates.js";
-import { enclosingFamily } from "../helpers/type-core/enclosing/type-core-enclosing-family.js";
+import type { SerializableRuntimeValue } from "../../../src/runtime/values/serializable-values.js";
+import { type EnclosingCase } from "../../helpers/type-core/enclosing/type-core-enclosing.js";
+import { certificateFamily } from "../../helpers/type-core/enclosing/type-core-enclosing-certificates.js";
+import { enclosingFamily } from "../../helpers/type-core/enclosing/type-core-enclosing-family.js";
 import {
   allowancesOf,
   enclosingProblems,
   MODES,
   type Relation,
-} from "../helpers/type-core/enclosing/type-core-enclosing-verdicts.js";
+} from "../../helpers/type-core/enclosing/type-core-enclosing-verdicts.js";
 import {
   collection,
   fits,
   name,
   type Form,
-} from "../helpers/type-core/written/type-core-written.js";
+} from "../../helpers/type-core/written/type-core-written.js";
 
 const list = (...items: SerializableRuntimeValue[]): SerializableRuntimeValue => ({
   kind: "list",

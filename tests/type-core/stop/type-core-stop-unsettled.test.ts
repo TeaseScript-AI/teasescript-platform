@@ -5,16 +5,16 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { isDeepStrictEqual } from "node:util";
 
-import { compileSourceWithBackend } from "../../src/compiler.js";
-import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
-import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
-import { withTestAllowance } from "../../src/type-inference/core/budget.js";
-import { withConsumerOrder, withoutRecords } from "../../src/type-inference/core/consumers.js";
-import { withSolverSeam } from "../../src/type-inference/core/solver.js";
-import { coreRequest } from "../helpers/type-core-analysis.js";
-import { sampled } from "../helpers/sweep.js";
-import { keptErrors, stopIdentity } from "../helpers/type-core-oracles.js";
-import { stopProblems, type StopRun } from "../helpers/type-core-stop-oracle.js";
+import { compileSourceWithBackend } from "../../../src/compiler.js";
+import { analyseCore, type Answers } from "../../../src/type-inference/core/answers.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
+import { withTestAllowance } from "../../../src/type-inference/core/budget.js";
+import { withConsumerOrder, withoutRecords } from "../../../src/type-inference/core/consumers.js";
+import { withSolverSeam } from "../../../src/type-inference/core/solver.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
+import { sampled } from "../../helpers/sweep.js";
+import { keptErrors, stopIdentity } from "../../helpers/type-core-oracles.js";
+import { stopProblems, type StopRun } from "../../helpers/type-core-stop-oracle.js";
 import {
   ALLOWANCE,
   UNDECIDED,
@@ -24,7 +24,7 @@ import {
   gatedProblems,
   walkEnds,
   lastUnsettled,
-} from "../helpers/type-core/type-core-stop-setup.js";
+} from "../../helpers/type-core/stop/type-core-stop-setup.js";
 
 /**
  * Before admission settled nothing it decided stands, so the receiver's shape is undecided: the record stands as the

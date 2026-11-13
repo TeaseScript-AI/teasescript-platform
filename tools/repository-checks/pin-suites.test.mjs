@@ -190,8 +190,8 @@ test("a core change lists every pinning suite; another change lists none, a suit
     ],
   );
   assert.equal(
-    builtOf("tests/type-core/type-core-closure.test.ts"),
-    "dist/tests/type-core/type-core-closure.test.js",
+    builtOf("tests/type-core/stop/type-core-closure.test.ts"),
+    "dist/tests/type-core/stop/type-core-closure.test.js",
   );
 });
 
@@ -233,10 +233,10 @@ function pairOf({ file, in: holder }) {
 // the selection while it passes except an edit to PAIRS, which is the acknowledgement (the net misses formless pins).
 const PAIRS = [
   "tests/type-core/candidate/type-core-candidate-operands.test.ts",
-  "tests/type-core/type-core-closure.test.ts",
-  "tests/type-core/type-core-contract-capture.test.ts",
+  "tests/type-core/stop/type-core-closure.test.ts",
+  "tests/type-core/stop/type-core-contract-capture.test.ts",
   "tests/type-core/type-core-contract.test.ts",
-  "tests/type-core/type-core-declared-escapes.test.ts in tests/helpers/type-core/type-core-declared-escapes-main.ts",
+  "tests/type-core/stop/type-core-declared-escapes.test.ts in tests/helpers/type-core/stop/type-core-declared-escapes-main.ts",
   "tests/type-core/type-core-f18.test.ts",
   "tests/type-core/type-core-identity.test.ts",
   "tests/type-core/type-core-kept.test.ts",

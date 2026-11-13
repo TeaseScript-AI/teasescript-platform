@@ -3,28 +3,28 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSourceWithBackend, type CompilationResult } from "../../src/compiler.js";
-import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
-import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
+import { compileSourceWithBackend, type CompilationResult } from "../../../src/compiler.js";
+import { analyseCore, type Answers } from "../../../src/type-inference/core/answers.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
 import {
   withTestAllowance,
   withTestDemandAllowance,
-} from "../../src/type-inference/core/budget.js";
-import { withConsumerOrder, withoutRecords } from "../../src/type-inference/core/consumers.js";
-import { CoreProgram } from "../../src/type-inference/core/program.js";
-import { withoutSharing } from "../../src/type-inference/core/sharing.js";
-import { withSolverSeam } from "../../src/type-inference/core/solver.js";
-import { completedCore, coreRequest } from "../helpers/type-core-analysis.js";
-import { heldRun, HELD_MODES, type HeldCase } from "../helpers/type-core-held-host.js";
-import { decisionOf, inMode, MODES } from "../helpers/type-core-oracles.js";
-import { runGlobals } from "../helpers/type-core-route.js";
+} from "../../../src/type-inference/core/budget.js";
+import { withConsumerOrder, withoutRecords } from "../../../src/type-inference/core/consumers.js";
+import { CoreProgram } from "../../../src/type-inference/core/program.js";
+import { withoutSharing } from "../../../src/type-inference/core/sharing.js";
+import { withSolverSeam } from "../../../src/type-inference/core/solver.js";
+import { completedCore, coreRequest } from "../../helpers/type-core-analysis.js";
+import { heldRun, HELD_MODES, type HeldCase } from "../../helpers/type-core-held-host.js";
+import { decisionOf, inMode, MODES } from "../../helpers/type-core-oracles.js";
+import { runGlobals } from "../../helpers/type-core-route.js";
 import {
   stopDeclineProblem,
   stopProblems,
   unsettledStop,
   type Globals,
   type StopRun,
-} from "../helpers/type-core-stop-oracle.js";
+} from "../../helpers/type-core-stop-oracle.js";
 import {
   OPTIONS,
   inBothOrders,
@@ -35,7 +35,7 @@ import {
   gatedProblems,
   settledEnds,
   lastUnsettled,
-} from "../helpers/type-core/type-core-stop-setup.js";
+} from "../../helpers/type-core/stop/type-core-stop-setup.js";
 
 /** `stopRun` made inside `mode` (orders, allowances), its omissions run again inside it (`stopProblems` asks them). */
 function stopRunIn(

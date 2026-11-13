@@ -3,13 +3,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { isDeepStrictEqual } from "node:util";
-import { type SerializableRuntimeValue } from "../../src/runtime/values/serializable-values.js";
-import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
-import { withTestAllowance } from "../../src/type-inference/core/budget.js";
-import { Consumers } from "../../src/type-inference/core/consumers.js";
-import { propertyStep } from "../../src/type-inference/core/program.js";
-import { STOPPED } from "../../src/type-inference/core/items.js";
-import { coreRequest, type SourceFile } from "../helpers/type-core-analysis.js";
+import { type SerializableRuntimeValue } from "../../../src/runtime/values/serializable-values.js";
+import { analyseCore, type Answers } from "../../../src/type-inference/core/answers.js";
+import { withTestAllowance } from "../../../src/type-inference/core/budget.js";
+import { Consumers } from "../../../src/type-inference/core/consumers.js";
+import { propertyStep } from "../../../src/type-inference/core/program.js";
+import { STOPPED } from "../../../src/type-inference/core/items.js";
+import { coreRequest, type SourceFile } from "../../helpers/type-core-analysis.js";
 import {
   combinedAnalyses,
   combinedMarkProblems,
@@ -31,7 +31,7 @@ import {
   type CombinedStop,
   type HeldCase,
   widerThan,
-} from "../helpers/type-core-held-host.js";
+} from "../../helpers/type-core-held-host.js";
 
 /** A held case `let r = <receiver>.get(4, default: hostOther)`, its runs `hostValue` 2 and `hostOther` each of `values`. */
 function storedGet(

@@ -2,15 +2,15 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { analyseCore } from "../../src/type-inference/core/answers.js";
-import { withTestAllowance } from "../../src/type-inference/core/budget.js";
-import { Consumers } from "../../src/type-inference/core/consumers.js";
-import { labelDomain } from "../../src/type-inference/core/consumers/finishing.js";
-import { keyOf } from "../../src/type-inference/core/definitions.js";
-import { REASON } from "../../src/type-inference/core/items.js";
-import type { Obligation } from "../../src/type-inference/core/result.js";
-import type { SourceSite } from "../../src/type-inference/graph.js";
-import { coreRequest } from "../helpers/type-core-analysis.js";
+import { analyseCore } from "../../../src/type-inference/core/answers.js";
+import { withTestAllowance } from "../../../src/type-inference/core/budget.js";
+import { Consumers } from "../../../src/type-inference/core/consumers.js";
+import { labelDomain } from "../../../src/type-inference/core/consumers/finishing.js";
+import { keyOf } from "../../../src/type-inference/core/definitions.js";
+import { REASON } from "../../../src/type-inference/core/items.js";
+import type { Obligation } from "../../../src/type-inference/core/result.js";
+import type { SourceSite } from "../../../src/type-inference/graph.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
 import {
   combinedAnalyses,
   heldDemands,
@@ -23,7 +23,7 @@ import {
   provenRelabel,
   recordedAnalysis,
   type HeldCase,
-} from "../helpers/type-core-held-host.js";
+} from "../../helpers/type-core-held-host.js";
 
 /**
  * The owner's one accepted relabel at a combined stop
