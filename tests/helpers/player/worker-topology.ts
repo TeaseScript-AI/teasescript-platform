@@ -446,7 +446,7 @@ export class RowEnd {
 }
 
 /**
- * A file's rerun registry: each case's id with the topologies it runs on. `rows` registers a case once and makes one test
+ * A file's rerun registry: each case's id with the topologies it runs on (a Worker, the only one). `rows` registers a case once and makes one test
  * per listed topology. A row is complete once its body returned the acknowledgement its `end()` gives that row, and its
  * cleanup ran after; the file's end checks that every listed row completed. A body that returns otherwise, early or at
  * its start, fails its row, and TypeScript refuses a bare `return` in it.
