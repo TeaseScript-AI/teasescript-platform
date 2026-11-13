@@ -78,7 +78,7 @@ export abstract class RouteEntries extends RouteCandidates {
   #files: Set<TreeBlock> | null = null;
   /** Per key, the entries that carry a `null` and the writer that seeded each. */
   readonly #carried = new Map<Key, ReadonlyMap<Entry, Definition>>();
-  /** Under the program default, per loop or label statement, whether a run is proved to reach it (R2.2 item 1). */
+  /** Under the program default, per loop or label statement, whether a run is proved to reach it (r4-451). */
   readonly #reaches = new Map<TreeStatement, boolean>();
   /** Under the program default, per store list and name, the jumps its stores' stretches hold (`#held`). */
   readonly #jumpsHeld = new Map<ReadonlyMap<TreeBlock, Candidates>, Map<string, readonly Jump[]>>();
@@ -105,7 +105,8 @@ export abstract class RouteEntries extends RouteCandidates {
   /**
    * In a program the default holds, the arms its corridors pass through none of (`RouteTests.feasibility`), set by the
    * first `required` there (`NarrowingRoutes`); `null` elsewhere, where every route query is main's. Under it an entry
-   * route is taken only by R2.2 (`standsAt`, `reached`), and its relation carries no entry on (r4-451).
+   * route is taken only where r4-451's program default admits it (`standsAt`, `#reached`), and its relation carries
+   * no entry on (r4-451).
    */
   protected feasible: Feasibility | null = null;
 
@@ -146,7 +147,7 @@ export abstract class RouteEntries extends RouteCandidates {
   }
 
   /**
-   * R2.2 under the program default (r4-451): whether a run is proved to reach the entry and, after it, a node at
+   * Under the program default (r4-451): whether a run is proved to reach the entry and, after it, a node at
    * `chain`: the entry a loop or a label (never a file or a block's body) a run reaches (`#reached`), the node standing
    * at it (`clear`). Outside the default, true; callers ask it only under the default.
    */
@@ -163,9 +164,9 @@ export abstract class RouteEntries extends RouteCandidates {
   }
 
   /**
-   * R2.2 item 1: a loop statement that stands where a route may promote (`clear` from the program's start), or a label
-   * in the top level of the file the session starts in with nothing before it a route may not pass. One answer per
-   * entry statement.
+   * r4-451, under the program default: a loop statement that stands where a route may promote (`clear` from the
+   * program's start), or a label in the top level of the file the session starts in with nothing before it a route may
+   * not pass. One answer per entry statement.
    */
   #reached(feasible: Feasibility, at: TreeStatement): boolean {
     this.#work.charge("eventSteps");
@@ -195,12 +196,12 @@ export abstract class RouteEntries extends RouteCandidates {
   }
 
   /**
-   * Whether, in a program the default holds, a node at `chain` stands where a route may promote (#1938): at the program's
-   * start (`at` `null`, `NarrowingRoutes.#plain`) or at the entry statement `at` (R2.2 items 2 and 3). Its chain starts
-   * in a file's body and, after `at`, passes it (after a label, into a loop's body); its boundary is none or `at`'s
-   * label; no arm on it is one a run is not proved to enter, none a loop's body but `at`'s own; no statement of it holds
-   * a call in its own expressions (`headed`); and before it in each block nothing a route may not pass (`hazards`),
-   * counted after `at` in `at`'s block.
+   * Whether, in a program the default holds, a node at `chain` stands where a route may promote (#1938): at the
+   * program's start (`at` `null`, `NarrowingRoutes.#plain`) or at the entry statement `at` (r4-451, under the program
+   * default). Its chain starts in a file's body and, after `at`, passes it (after a label, into a loop's body); its
+   * boundary is none or `at`'s label; no arm on it is one a run is not proved to enter, none a loop's body but `at`'s
+   * own; no statement of it holds a call in its own expressions (`headed`); and before it in each block nothing a route
+   * may not pass (`hazards`), counted after `at` in `at`'s block.
    */
   protected clear(
     feasible: Feasibility,
@@ -285,7 +286,7 @@ export abstract class RouteEntries extends RouteCandidates {
     point: EntryPoint,
   ): Work<Definition | "body" | null> {
     this.#work.charge("eventSteps");
-    // (under the program default, the relation only once the use stands at an entry, R2.2)
+    // (under the program default, the relation only once the use stands at an entry, r4-451)
     const fallback = this.feasible !== null;
     let carried = fallback ? null : yield* this.#relation(key, name);
     const calls = this.pass.definitions.ownedAway(key);
@@ -412,7 +413,7 @@ export abstract class RouteEntries extends RouteCandidates {
       carried.set(jump.into, writer);
       queue.push(jump.into);
     }
-    // (under the program default, a seed alone: R2.2 states one entry, so no entry carries on)
+    // (under the program default, a seed alone: r4-451 lets nothing carry on through a further jump)
     let next = this.feasible === null ? 0 : queue.length;
     for (const _ of steps(this.#work, "eventSteps", () => next < queue.length)) {
       const entry = queue[next]!;
@@ -679,7 +680,7 @@ export abstract class RouteEntries extends RouteCandidates {
         const loop = statement.loop;
         if (loop === null) continue;
         const body = statement.arms[0]!;
-        // (no round after a round where the graph has no way from the head into the body: P7's one round)
+        // (no round after a round where the graph has no way from the head into the body: a literal count's one round)
         // (nor after a `for` over a literal of one element, whose second round the graph keeps and no run has)
         const again =
           statement.statement.kind === "whileStatement"
@@ -752,7 +753,7 @@ export abstract class RouteEntries extends RouteCandidates {
       list,
       (a, b) => a.point.node.file - b.point.node.file || a.point.at - b.point.at,
     );
-    // (under the program default, only the jumps that stand at the loop or label they enter a run reaches, R2.2: the
+    // (under the program default, only the jumps that stand at the loop or label they enter a run reaches, r4-451: the
     // same for every key, so each key's relation tries no other)
     if (this.feasible !== null) {
       const standing: Jump[] = [];

@@ -29,26 +29,30 @@ import {
 import { propertyName } from "../program.js";
 
 /*
- * N3's route query of stage 3b (checkpoint 9): a consumer of key k at node n that needs a
- * kind k's contract does not guarantee (`null`, or a member of a written union) has a route without a check when an
- * exact definition D′ of k certifies the offending item and reaches n through an open corridor. Per key and offending
- * kind, built once on the key's first question:
- * - the **sparse per-key layer**: the statements that kill k (a whole store of k or a prefix), the blocking tests of the
- *   needed form (every live arm starts with a narrowing that removes the kind, or is closed), and the branches and loops
- *   every live alternative of which those close beside the shared layer (`statement-tree.ts`), computed over the
+ * The route query (r4-444): a consumer of key k at node n that needs a kind k's contract does not guarantee (`null`, or
+ * a member of a written union) has a route without a check when an exact definition D′ of k certifies the offending
+ * item and reaches n through an open corridor. Per key and offending kind, built once on the key's first question:
+ * - the **sparse per-key layer**: the statements that kill k (a whole store of k or a prefix), the blocking tests of
+ *   the needed form (every live arm starts with a narrowing that removes the kind, or is closed), and the branches and
+ *   loops every live alternative of which those close beside the shared layer (`statement-tree.ts`), computed over the
  *   statements holding a definition or a test of k and their ancestors: events and tests times the nesting depth;
  * - the **candidates kept at the key they store**: k's own definitions that certify the kind, and each prefix's whole
  *   stores, projected only for the one candidate examined; each with the reach of its writer side (the outermost block
  *   its open writer segments reach), so a consumer finds the nearest candidate whose writer side reaches it by one
  *   binary search over a tree of reaches, never a backward scan.
- * A consumer's query examines that one candidate: its certification (AD-1, #1073: what its stored value holds,
+ * A consumer's query examines that one candidate: its certification (r4-444, #1073: what its stored value holds,
  * or a scalar copy whose source read has a witness by this same query, memoised per node and key; `#certificate`), then
  * the corridor's remaining segments (the middle and the consumer side), each one binary search per layer, and the
  * consumer's own statement's compulsory calls (the nearest call-in dominating n). An unsuitable candidate yields the
  * warning. The consumers ask it through `required`, the route rule's one decision (`consumers/reports/warnings.ts`).
+ *
+ * `NarrowingRoutes` is one object per pass whose parts are the classes it extends, each in its file: `RouteTests`
+ * (condition tests, the program default's feasibility, statement places) ← `RouteCandidates` (candidate lists and
+ * their reach) ← `RouteEntries` (ways into a use). Here: the decision (`required`, `witness`), certification, the
+ * layers and the corridor.
  */
 
-/** A literal's kind as N3's seeds read it: `null`, a whole or fractional number, text, a truth value. */
+/** A literal's kind as the route query reads it: `null`, a whole or fractional number, text, a truth value. */
 function literalTag(program: CorePass["program"], value: PlaceId): ItemTag | null {
   program.work.charge("exactQueries");
   const kind = program.places[value]?.kind;
@@ -66,10 +70,11 @@ function literalTag(program: CorePass["program"], value: PlaceId): ItemTag | nul
 }
 
 /**
- * Whether items hold `tag` as a value the use may receive (AD-1): made by a store or a call's result, or allowed by a
+ * Whether items hold `tag` as a value the use may receive (r4-444): made by a store or a call's result, or allowed by a
  * written type (V30 §13: `n + 1` with `n: integer?` is the error); not a stopped read's (`budget`), not one under a
- * test's guard mark (§3.2), not a kind a test proved of external data, and not one another callable or a handler may
- * store (X6, X7: a run the compiler does not prove, V30 §13, "only where the compiler can prove the run").
+ * test's guard mark, not one read where a test that removes it failed (`tested`), not a kind a test proved of external
+ * data, and not one another callable or a handler may store (a write by a block or by a function in between, which
+ * V30 §13 makes a warning).
  */
 function produces(work: WorkLedger, items: readonly Item[], tag: ItemTag): boolean {
   work.charge("exactQueries");
@@ -88,7 +93,7 @@ function produces(work: WorkLedger, items: readonly Item[], tag: ItemTag): boole
 }
 
 /**
- * The expressions that are their own value's producer at a use (AD-1): a call, a `load`, an `otherwise`, a selection
+ * The expressions that are their own value's producer at a use: a call, a `load`, an `otherwise`, a selection
  * (`.first`, `.last`, `.random`).
  */
 function producerAt(expression: Expression, work: WorkLedger): boolean {
@@ -103,8 +108,8 @@ function producerAt(expression: Expression, work: WorkLedger): boolean {
 }
 
 /**
- * The definitions N3 may certify (N3 (iii)): declarations, assignments, a property's store, a parameter's default; never
- * an argument, a return or a loop variable.
+ * The definitions the route query may certify: declarations, assignments, a property's store, a parameter's default;
+ * never an argument, a return or a loop variable.
  */
 const CERTIFIED: ReadonlySet<string> = new Set([
   "initializer",
@@ -126,12 +131,12 @@ export class NarrowingRoutes extends RouteEntries {
   #saves: { readonly keys: ReadonlySet<string>; readonly computed: boolean } | null = null;
 
   /**
-   * AD-1 (#1073, V30 §13) at a consumer's read of `value` whose items hold the offending `tag`: the writer of a
-   * route that brings it there without a check, or `null` where the compiler proves none, and the consumer warns with
-   * its check. A stable read without element steps asks N3's witness, its D′'s stored value the writer; a call, a
-   * `load`, an `otherwise` or a selection read where it is used is its own producer, the writer where its value produces
-   * the kind, unless a condition around the use tests it. Any other read keeps its warning: an element step or a
-   * reference member, which the route query does not follow (#1073 PR 4, decision (A)).
+   * The route rule (r4-444, #1073, V30 §13) at a consumer's read of `value` whose items hold the offending `tag`: the
+   * writer of a route that brings it there without a check, or `null` where the compiler proves none, and the consumer
+   * warns with its check. A stable read without element steps asks `witness`, its D′'s stored value the writer; a call,
+   * a `load`, an `otherwise` or a selection read where it is used is its own producer, the writer where its value
+   * produces the kind, unless a condition around the use tests it. Any other read keeps its warning: an element step or
+   * a reference member, which the route query does not follow (#1073).
    *
    * In a program that holds an arm no run is proved to enter (`holdsInfeasible`), a route promotes only through arms
    * runs enter, between a writer and a use that stand in the session's first file's top level with nothing on their
@@ -141,9 +146,10 @@ export class NarrowingRoutes extends RouteEntries {
    *
    * Past that query, a `null` read of a stable path may come through a way into the use (r4-451, `RouteEntries`): a
    * loop's earlier round, a label, a file's start, a block's body. In a block's body the query above runs inside the
-   * body alone, past X7, by r4-451's segment. `flagged`: the use's item carries a test's mark, so the query above is
-   * not asked outside a block's body; the ways in are, as they hold the test to their own segments. In a program the
-   * default holds, only a loop's or a label's way in, by R2.2 (`RouteEntries.standsAt`).
+   * body alone, without the handler veto (`#registered`), by r4-451's segment. `flagged`: the use's item carries a
+   * test's mark, so the query above is not asked outside a block's body; the ways in are, as they hold the test to
+   * their own segments. In a program the default holds, only a loop's or a label's way in, under the program default
+   * (r4-451, `RouteEntries.standsAt`).
    */
   public *required(
     value: PlaceId,
@@ -159,14 +165,14 @@ export class NarrowingRoutes extends RouteEntries {
     // (a program that holds an arm no run is proved to enter: its route queries pass only entered arms, #1938)
     if ((yield* this.holdsInfeasible()) && this.feasible === null)
       this.feasible = yield* this.feasibility();
-    // (a value whose node reads no expression, a call's, a `get`'s or a `load`'s result, is its own producer; any other,
-    // a compound assignment's operand among them, keeps its warning)
     if (flagged && (node === null || !this.inBody(node))) {
       // (a marked read outside a block's body: only a way into it, past the forward query)
       const path =
         node?.expression === undefined ? null : stablePath(program, node.file, node.expression);
       return node === null || path === null ? null : yield* this.#entered(node, path, tag);
     }
+    // (a value whose node reads no expression, a call's, a `get`'s, a `load`'s or an `otherwise`'s result, is its own
+    // producer; any other, a compound assignment's operand among them, keeps its warning)
     if (node === null || node.expression === undefined) {
       const c = program.opOf.get(value)?.kind;
       return (c === "call" || c === "get" || c === "load" || c === "fallback") &&
@@ -196,7 +202,7 @@ export class NarrowingRoutes extends RouteEntries {
     const d = yield* this.witness(key, tag, node, others);
     const writer = d?.value === undefined ? null : (program.places[d.value]?.site ?? null);
     // (a test of the needed form after the writer on every route to the use, `while n == null { … }`: the check on that
-    // route the compiler cannot keep, the warning; Codex r1 F1 on #1937; in a block's body, r4-451's segment, r4-451)
+    // route the compiler cannot keep, the warning, #1937; in a block's body, r4-451's segment)
     if (writer !== null) {
       const body = this.inBody(node);
       const from = body ? this.chainOf(d!.node) : null;
@@ -217,8 +223,8 @@ export class NarrowingRoutes extends RouteEntries {
 
   /**
    * A way into the use of a stable path's `null` (r4-451, `RouteEntries.entered`): none for a kind but `null`, an
-   * element step, and outside a block's body for code a block may reach and for a key a block stores once registered
-   * (X7); in a program the default holds, a loop's or a label's alone, by R2.2.
+   * element step, and outside a block's body for code a block may reach and for a key a block stores once registered;
+   * in a program the default holds, a loop's or a label's alone (r4-451).
    */
   *#entered(node: FlowNode, path: StablePath, tag: ItemTag): Work<RouteWriter | null> {
     this.#work.charge("exactQueries");
@@ -277,11 +283,13 @@ export class NarrowingRoutes extends RouteEntries {
   }
 
   /**
-   * N3 (iii): an exact definition D′ of `key` that certifies `tag` and reaches `node` without a check, or `null` when the
+   * An exact definition D′ of `key` that certifies `tag` and reaches `node` without a check, or `null` when the
    * compiler proves no such route (the consumer then warns with its check). The witness of a copy or an `otherwise`
    * asks this same query of its source, one memoised query per node and key, resolved without native recursion.
    * `others`: where `tag` is a member of the written union `key` declares, the union's other kinds the use does not
-   * take, which certify the route as `tag` does (#1073: the written domain proves itself).
+   * take, which certify the route as `tag` does (#1073: the written domain proves itself). It asks main's query until
+   * `required` has met a program the default holds (`feasible`), and that program's own queries after; public for the
+   * narrowing tests' `routeAt`.
    */
   public *witness(
     key: Key,
@@ -348,11 +356,11 @@ export class NarrowingRoutes extends RouteEntries {
     this.#work.charge("exactQueries");
     const { program, handlers } = this.pass;
     if (!program.live(node)) return null;
-    // (a read in a block's body examines the body's own stores, past X7: r4-451's same-body route)
+    // (a read in a block's body examines the body's own stores, without the handler veto: r4-451's same-body route)
     const reached = program.blockReachable(node);
     const own = reached && this.inBody(node);
     if ((reached && !own) || node.span === null) return null;
-    // X7 as the flat veto it is: a handler store of the key with a registration before the read
+    // the handler veto: a handler store of the key with a registration before the read
     if (!own && handlers.handlerTouches(key) && this.#registered(node)) return null;
     return yield* this.#examinedAt(key, tag, node, null, node.span.start.offset, others);
   }
@@ -401,7 +409,9 @@ export class NarrowingRoutes extends RouteEntries {
     return this.#open(key, tag, found, chain, node, into) ? found : null;
   }
 
-  /** X7's registration-before-read predicate (`afterSomeCreation`), its scan of the read's loops charged. */
+  /**
+   * The handler veto's registration-before-read predicate (`afterSomeCreation`), its scan of the read's loops charged.
+   */
   #registered(node: FlowNode): boolean {
     this.#work.charge("eventSteps");
     this.#work.charge("eventSteps", node.loops.length);
@@ -409,7 +419,7 @@ export class NarrowingRoutes extends RouteEntries {
   }
 
   /**
-   * Whether a candidate certifies the offending item for `key` (N3 (iii), N3a, re-derived by AD-1, #1073): `true`
+   * Whether a candidate certifies the offending item for `key` (r4-444, #1073): `true`
    * where its stored value produces the kind on some run, `false` where it does not, or the read whose own witness
    * certifies it (a scalar copy's source, a whole copy's source below the copied path, an `otherwise`'s left operand).
    * Every producer certifies by what its value holds (a literal, a default of any kind, a lookup, a parse, a
@@ -425,8 +435,8 @@ export class NarrowingRoutes extends RouteEntries {
     this.#work.charge("exactQueries");
     const { program, lists } = this.pass;
     const d = found.def;
-    // X3's exact definitions N3 certifies: a declaration, an assignment with a certain receiver, a parameter's default;
-    // never a weak store, an element or dict key, a loop variable, a return or an argument
+    // the exact definitions the route query certifies: a declaration, an assignment with a certain receiver, a
+    // parameter's default; never a weak store, an element or dict key, a loop variable, a return or an argument
     if (
       d.kind !== "whole" ||
       d.weak ||
@@ -485,7 +495,7 @@ export class NarrowingRoutes extends RouteEntries {
     // (in a program the default holds, only a `load`'s literal default proves itself, #1938)
     if (this.feasible !== null) return left.length === 0 && this.#ownLoad(value, tag, others);
     // any other producer, a whole copy below the copied path among them, by what its value holds there on some run,
-    // neither stopped nor read under a failed test: one answer per read, never a route per field of each copy (W34)
+    // neither stopped nor read under a failed test: one answer per read, never a route per field of each copy
     if (yield* this.#valueProduces(value, d.node, left, tag)) return true;
     for (const kind of each(program.work, "exactQueries", others))
       if (yield* this.#valueProduces(value, d.node, left, kind)) return true;
@@ -586,10 +596,10 @@ export class NarrowingRoutes extends RouteEntries {
   }
 
   /**
-   * The corridor from a candidate to the read (N3 (a)–(e)): one boundary; the read's statement after the candidate's
-   * in the lowest block they share; the writer side up to it, the statements between, and on the consumer side each
-   * entered block's statements before the read's, all open in both layers; and no call-in a possible overwriter makes
-   * between the read's top statement and the read on every route (the headers entered, the read's own statement).
+   * The corridor from a candidate to the read: (a) the writer side up to the lowest block they share, (b) the read's
+   * statement after the candidate's there, (c) the statements between, (d) each entered block's statements before the
+   * read's, all open in both layers; (e) no call-in a possible overwriter makes between the read's top statement and
+   * the read on every route (the headers entered, the read's own statement); and one boundary.
    */
   #open(
     key: Key,
@@ -604,7 +614,7 @@ export class NarrowingRoutes extends RouteEntries {
     const d = found.def;
     if (!program.live(d.node) || program.dom.edom(d.node) !== program.dom.edom(node)) return false;
     // (in a program the default holds, the writer and the use stand where a route may promote: `#plain`, or at the
-    // entry a seed's jump makes, R2.2, the jump already standing there)
+    // entry a seed's jump makes, r4-451, the jump already standing there)
     if (
       this.feasible !== null &&
       (into === null
@@ -673,9 +683,9 @@ export class NarrowingRoutes extends RouteEntries {
   }
 
   /**
-   * A key's kill layer (§13.3's sparse per-key layer, its kills): the statements its own whole stores stand in, and the
-   * compound statements they close beside the shared layer and its prefixes' kill layers; built once per key and
-   * applicability, over the statements holding its own kills and their ancestors.
+   * A key's kill layer (the header's sparse per-key layer, its kills): the statements its own whole stores stand in,
+   * and the compound statements they close beside the shared layer and its prefixes' kill layers; built once per key
+   * and applicability, over the statements holding its own kills and their ancestors.
    */
   #killLayer(key: Key, calls: boolean): Layer {
     // (one unit per prefix the recursion climbs)
@@ -967,7 +977,7 @@ export class NarrowingRoutes extends RouteEntries {
   /**
    * Whether a definition's own value could certify `tag`: a literal of that kind, else what the value holds where it is
    * stored (a copy's source as read there, any other producer's value), neither stopped nor read under a failed test
-   * (AD-1: no producer is refused as such).
+   * (r4-444: no producer is refused as such).
    */
   *#carries(d: Definition, tag: ItemTag, others: readonly ItemTag[]): Work<boolean> {
     this.#work.charge("indexSteps");

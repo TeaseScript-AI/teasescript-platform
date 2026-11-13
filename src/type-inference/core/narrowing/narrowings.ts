@@ -34,18 +34,18 @@ import { StatementTree } from "./statement-tree.js";
 import { Laminar } from "./laminar.js";
 
 /*
- * Stage 3b's narrowing definitions (checkpoint 9): a test is a definition. A null test or a
- * type test of a stable path at a truth position defines the path at the guarded region's entry (a branch, a `while`
- * body, a `switch` case, the right operand of an `and` or `or`, and so the code after a branch that always leaves,
- * which the way past the test dominates) with the kinds the test leaves. Each narrowing definition G is one entry in its
- * refined location's sorted list, its value one filter of the read at the test (`narrowedItems`); a read finds the
- * nearest G of its own path text and of each element-step scope by a binary search and a jump up the list's nest
- * (`NarrowingIndex.nearest`), never by scanning sibling paths. The mutating method calls of a collection key are one
- * sorted invalidation list per key (N2). Everything here is built once from the program; what the definitions and the
- * handlers decide is asked per pass (`events.ts`, `routes.ts`).
+ * The narrowing definitions: a test is a definition. A null test or a type test of a stable path at a truth position
+ * defines the path at the guarded region's entry (a branch, a `while` body, a `switch` case, the right operand of an
+ * `and` or `or`, and so the code after a branch that always leaves, which the way past the test dominates) with the
+ * kinds the test leaves. Each narrowing definition G is one entry in its refined location's sorted list, its value one
+ * filter of the read at the test (`narrowedItems`); a read finds the nearest G of its own path text and of each
+ * element-step scope by a binary search and a jump up the list's nest (`NarrowingIndex.nearest`), never by scanning
+ * sibling paths. The mutating method calls of a collection key are one sorted invalidation list per key. Everything
+ * here is built once from the program; what the definitions and the handlers decide is asked per pass (`events.ts`,
+ * `routes.ts`).
  */
 
-/** A step of a stable path (N1): a property, a fixed index or key, or an index or key held in a plain variable. */
+/** A step of a stable path: a property, a fixed index or key, or an index or key held in a plain variable. */
 export type PathStep =
   | { readonly kind: "property"; readonly name: string }
   | { readonly kind: "fixed"; readonly text: string }
@@ -107,8 +107,8 @@ function shapeOf(expression: Expression, work: WorkLedger): ReturnType<typeof co
 }
 
 /**
- * A literal index's or case's kind and key (`caseLiteral`), the parentheses and sign it walks charged, and the literal's
- * text it reads and makes charged as a kept text is.
+ * A literal index's or case's kind and key (`caseLiteral`), the parentheses and sign it walks charged, and the
+ * literal's text it reads and makes charged as a kept text is.
  */
 function literalOf(expression: Expression, work: WorkLedger): ReturnType<typeof caseLiteral> {
   work.charge("eventSteps");
@@ -134,7 +134,7 @@ function childrenOf(expression: Expression, work: WorkLedger): readonly Expressi
   return expressionChildren(expression);
 }
 
-/** The contract key a path's read asks (§1: every index, key and selection is `element`), a step charged per step. */
+/** The contract key a path's read asks (every index, key and selection is `element`), a step charged per step. */
 export function pathKey(path: StablePath, work: WorkLedger): Key {
   work.charge("eventSteps");
   let index = 0;
@@ -150,7 +150,7 @@ export function pathKey(path: StablePath, work: WorkLedger): Key {
 }
 
 /**
- * The stable path an expression reads (N1): a binding followed by properties, fixed indexes or keys, and indexes or
+ * The stable path an expression reads: a binding followed by properties, fixed indexes or keys, and indexes or
  * keys held in plain variables; with `trailing`, element reads (a computed index, `.random`) too where every step after
  * them reads an element (`rows[i + 1][0]`), which only an element scope finds (#1245). `null` for anything else: a
  * call, a literal, a path through a computed index, a speaker. An assignment's target names its `root`, which it does
@@ -217,7 +217,7 @@ function bindingOf(program: CoreProgram, file: number, identifier: Expression): 
 }
 
 /**
- * What a narrowing leaves (N1): `non-null` (`!= null`, `is not null`, a `default` or later case after `case null`),
+ * What a narrowing leaves: `non-null` (`!= null`, `is not null`, a `default` or later case after `case null`),
  * `null` (`== null`, `is null`, `case null`), `is` a type (each item replaced by its overlap with the type's kinds; a
  * whole-valued numeric case as `is integer`, a fractional one as `is number` without `integer`, a text case as `is
  * string`), or `is-not` a type (only items wholly within its kinds removed).
@@ -267,7 +267,7 @@ function overlap(
 }
 
 /**
- * G's value (N1): the input items filtered by the form, a kind a type test narrows to with the type's `spelling` as
+ * G's value: the input items filtered by the form, a kind a type test narrows to with the type's `spelling` as
  * written (#1398). Emptiness (`empty`) is untouched; after a positive test,
  * `!= null` or `is not null`, a single remaining kind without `unknown` is definite; after `is not T` certainties stay.
  * An empty result is the unreachable branch's value.
@@ -286,13 +286,13 @@ export function narrowedItems(
       kept.push(item);
       continue;
     }
-    // (an unknown a stop left, `budget`, that the test proves of a kind is known by the test itself: the stop's reason and
-    // word go; any other keeps its own, host data its external origin)
+    // (an unknown a stop left, `budget`, that the test proves of a kind is known by the test itself: the stop's reason
+    // and word go; any other keeps its own, host data its external origin)
     const proof =
       item.tag === "unknown" && (item.reasons & REASON.budget) !== 0
         ? { reasons: item.reasons & ~REASON.budget, context: null }
         : {};
-    // (external data the test proves of a kind still owes its ingress's boundary, C9, #1073)
+    // (external data the test proves of a kind still owes its ingress's boundary, #1073)
     const external =
       item.tag === "unknown" && (item.reasons & REASON.external) !== 0
         ? { fromExternal: true as const }
@@ -337,8 +337,8 @@ export function narrowedItems(
 }
 
 /**
- * Whether a narrowing of this form removes items of kind `tag` (a G of the needed form for N3's offending kind): a
- * comparison per kind of a type test, charged.
+ * Whether a narrowing of this form removes items of kind `tag` (a G of the needed form for the route query's offending
+ * kind): a comparison per kind of a type test, charged.
  */
 export function removes(form: NarrowingForm, tag: ItemTag, work: WorkLedger): boolean {
   work.charge("eventSteps");
@@ -414,12 +414,12 @@ function testedType(annotation: TypeAnnotation, work: WorkLedger): TestedType {
 }
 
 /**
- * A test form at a truth position (N1): the tested expression, the test (a null test, or a type test with its type),
+ * A test form at a truth position: the tested expression, the test (a null test, or a type test with its type),
  * and the outcome a region takes: `true` where the test holds (`x == null`, `x is T`), `false` where it fails.
  */
 interface Fact {
   readonly tested: Expression;
-  /** Where the test form ends (its `not`s included): the events of the condition after it are G's (N2). */
+  /** Where the test form ends (its `not`s included): the events of the condition after it are G's. */
   readonly end: number;
   readonly type: TestedType | null;
   readonly holds: boolean;
@@ -432,7 +432,7 @@ function opposite(fact: Fact, work: WorkLedger): Fact {
 }
 
 /**
- * What a fact's outcome leaves (N1): `null` alone or every item but `null` for a null test; for a type test that holds,
+ * What a fact's outcome leaves: `null` alone or every item but `null` for a null test; for a type test that holds,
  * each item's overlap with the type, and an element step's test per element type the type names; for one that fails,
  * only the items wholly within the type removed (never a collection kind the type names with an element type).
  */
@@ -455,7 +455,7 @@ function formOf(
 }
 
 /**
- * A test's forms (N1, `testForm`): the expression it tests, the form its truth proves, and the form its falsity proves;
+ * A test's forms (`testForm`): the expression it tests, the form its truth proves, and the form its falsity proves;
  * `null` for an expression that is no test.
  */
 export function testForms(
@@ -477,7 +477,7 @@ export function testForms(
 }
 
 /**
- * A test form (N1): a null test or a type test, or `not` before one (its complement), with the outcome its truth
+ * A test form: a null test or a type test, or `not` before one (its complement), with the outcome its truth
  * takes; `is null` and `is not null` are the null tests. A chain of `not`s is walked, not recursed.
  */
 function testForm(expression: Expression, work: WorkLedger): Fact | null {
@@ -502,9 +502,9 @@ function testForm(expression: Expression, work: WorkLedger): Fact | null {
 }
 
 /**
- * The tests a condition's outcome proves (N1, N9): a test form's own outcome, or its opposite for the false outcome; an
+ * The tests a condition's outcome proves: a test form's own outcome, or its opposite for the false outcome; an
  * `and`'s true outcome what each operand's true outcome proves, an `or`'s false outcome what each operand's false
- * outcome proves (§13.3's W30 and its `or` mirror). Any other compound or negated condition proves nothing.
+ * outcome proves. Any other compound or negated condition proves nothing.
  */
 function facts(condition: Expression, outcome: boolean, into: Fact[], work: WorkLedger): void {
   work.charge("indexSteps");
@@ -521,7 +521,7 @@ function facts(condition: Expression, outcome: boolean, into: Fact[], work: Work
   }
 }
 
-/** A narrowing definition G (N1): its refined location, its form, where it is defined and where its input is read. */
+/** A narrowing definition G: its refined location, its form, where it is defined and where its input is read. */
 export interface Narrowing {
   /** The refined location: the stable path's text, followed by `[*]` per element step a collection test names. */
   readonly location: string;
@@ -532,18 +532,21 @@ export interface Narrowing {
   readonly key: Key;
   /** The index and key variables of the tested path (dependency keys beside the key and its prefixes). */
   readonly variables: readonly Key[];
-  /** The collections the tested path reads an element of that hold an invalidation, by their keys (N2's lists). */
+  /**
+   * The collections the tested path reads an element of that hold an invalidation, by their keys (their invalidations
+   * are G's events).
+   */
   readonly collections: readonly Key[];
   /** The guarded region's entry; for an operand region, the test's own node, which every part of it follows. */
   readonly node: FlowNode;
   /**
-   * An operand region (N1: the right operands of the `and` or `or` chain whose left the test stands in), by its text;
+   * An operand region (the right operands of the `and` or `or` chain whose left the test stands in), by its text;
    * `null` for a branch's region (the entry's).
    */
   readonly region: OperandSpan | null;
   /**
    * A branch's G: the rest of its condition after its test, whose events come between the test and the entry (an
-   * `and`'s or `or`'s later operands, N1, N2); `null` for an operand region's.
+   * `and`'s or `or`'s later operands); `null` for an operand region's.
    */
   readonly window: OperandSpan | null;
   /** The tested operand: G's input is the read there. */
@@ -558,7 +561,7 @@ export interface OperandSpan {
   readonly end: number;
 }
 
-/** A mutating method call of a collection (N2's invalidations): where it takes effect and the callable it stands in. */
+/** A mutating method call of a collection (an invalidation): where it takes effect and the callable it stands in. */
 interface Invalidation {
   readonly node: FlowNode;
   readonly file: number;
@@ -597,9 +600,9 @@ interface PathNode {
 const INDEXES = new WeakMap<CoreProgram, NarrowingIndex>();
 
 /**
- * The narrowing index of a program (N1, N2): its definitions per refined location and its invalidation lists, with the
- * statements and N3's shared layer (`StatementTree`). Nothing in it depends on a pass's rejections (A6), so a program
- * makes it once (`of`), charged to its ledger then, and every pass asks the same one.
+ * The narrowing index of a program: its definitions per refined location and its invalidation lists, with the
+ * statements and the route query's shared layer (`StatementTree`). Nothing in it depends on a pass's rejections, so a
+ * program makes it once (`of`), charged to its ledger then, and every pass asks the same one.
  */
 export class NarrowingIndex {
   /** The program's index, made and charged on its first ask. */
@@ -619,9 +622,12 @@ export class NarrowingIndex {
   readonly #byLocation = new Map<string, Laminar<Narrowing>>();
   /** Per refined location and file, its operand regions' narrowing definitions by their text spans. */
   readonly #byOperand = new Map<string, Map<number, Laminar<Narrowing>>>();
-  /** Per guarded region's entry and refined location, its narrowing definitions in evaluation order (N3's arms). */
+  /**
+   * Per guarded region's entry and refined location, its narrowing definitions in evaluation order (the route query's
+   * arm tests).
+   */
   readonly #atEntry = new Map<string, Narrowing[]>();
-  /** Per collection key, its mutating method calls (N2); and those keys as a trie of their steps per root. */
+  /** Per collection key, its mutating method calls; and those keys as a trie of their steps per root. */
   readonly #invalidations = new Map<Key, Invalidations>();
   readonly #invalidated = new Map<PlaceId, KeyNode>();
   /** Every narrowing definition, in the order they are made (the solver's component test finds one by its key). */
@@ -667,7 +673,7 @@ export class NarrowingIndex {
       const variables = flatMapped(work, "indexSteps", path.steps, (step) =>
         step.kind === "variable" ? [kept(keyOf(step.place, []))] : [],
       );
-      // G's collections (N2): each element step's, the key's prefix there, where it holds an invalidation; one walk of
+      // G's collections: each element step's, the key's prefix there, where it holds an invalidation; one walk of
       // the path's steps down the invalidated keys as far as they go, a key made for none (#1640)
       let collections: Key[] = [];
       let below = this.#invalidated.get(path.root);
@@ -686,7 +692,7 @@ export class NarrowingIndex {
         index += 1;
       }
       // the tested path and, for a positive collection test, one more element step per element type it names: each
-      // element step's collection, the tested path's key and those below it, is one of its G's collections too (N2)
+      // element step's collection, the tested path's key and those below it, is one of its G's collections too
       let { form, element } = outcome;
       let key = kept(pathKey(path, work));
       // the tested path in the trie of tested paths, its locations by the element steps they add
@@ -795,10 +801,11 @@ export class NarrowingIndex {
   }
 
   /**
-   * N1's operand regions: a test form in an `and` chain's left defines the chain's right operands after it, from its
-   * end to the end of the highest `and` whose left holds it through `and`s alone; in an `or` chain's left, with its
+   * The operand regions: a test form in an `and` chain's left defines the chain's right operands after it, from its end
+   * to the end of the highest `and` whose left holds it through `and`s alone; in an `or` chain's left, with its
    * complement, likewise. One region per test, laminar per location (two regions of one location nest or lie apart). A
-   * walk of each outermost logical tree with an explicit stack; a logical below another expression is a tree of its own.
+   * walk of each outermost logical tree with an explicit stack; a logical below another expression is a tree of its
+   * own.
    */
   #operandRegions(
     define: (
@@ -879,7 +886,7 @@ export class NarrowingIndex {
     }
   }
 
-  /** N2: the mutating method calls of collections, one sorted list per collection key. */
+  /** The mutating method calls of collections, one sorted list per collection key. */
   #invalidate(): void {
     this.program.work.charge("indexSteps");
     const program = this.program;
@@ -921,7 +928,7 @@ export class NarrowingIndex {
       } else list.push(entry);
     };
     for (const constraint of each(work, "indexSteps", program.constraints)) {
-      // a removal, a clear, and the order-changing `sort`, `shuffle`, `reverse` (F5–F8)
+      // a removal, a clear, and the order-changing `sort`, `shuffle`, `reverse`
       if (
         constraint.kind === "operation" &&
         constraint.contract.family === "method" &&
@@ -974,7 +981,7 @@ export class NarrowingIndex {
     }
   }
 
-  /** A collection key's invalidations (N2), or `undefined` without one. */
+  /** A collection key's invalidations, or `undefined` without one. */
   public invalidations(key: Key): Invalidations | undefined {
     this.program.work.charge("eventSteps");
     return this.#invalidations.get(key);
@@ -986,7 +993,7 @@ export class NarrowingIndex {
     return this.#tested.has(root);
   }
 
-  /** The nearest narrowing definition of `location` whose region holds `node` (N2): a binary search and a climb. */
+  /** The nearest narrowing definition of `location` whose region holds `node`: a binary search and a climb. */
   public nearest(location: string, node: FlowNode): Narrowing | null {
     this.program.work.charge("eventSteps");
     const program = this.program;
@@ -1000,7 +1007,7 @@ export class NarrowingIndex {
     return operand ?? this.#byLocation.get(location)?.innermost(program.position(node)) ?? null;
   }
 
-  /** The branches' narrowing definitions of a refined location (the blocking tests of N3). */
+  /** The branches' narrowing definitions of a refined location (the route query's blocking tests). */
   public definitionsOf(location: string): readonly Narrowing[] {
     this.program.work.charge("eventSteps");
     return this.#byLocation.get(location)?.items ?? [];
@@ -1013,7 +1020,7 @@ export class NarrowingIndex {
   }
 
   /**
-   * The nearest narrowing definition of a read at `node` (N2): of its own path's text, and of each element scope of its
+   * The nearest narrowing definition of a read at `node`: of its own path's text, and of each element scope of its
    * trailing element steps (`rows[i][j]` asks `rows[i][*]` and `rows[*][*]`; `rows[i + 1][0]` only `rows[*][*]`, as no
    * tested path holds a computed step), the deepest region wins. One walk of the read's steps down the trie of tested
    * paths, asking only the scopes a test defines: linear in the read's path. `below`: a consumer's descendant demand
@@ -1136,7 +1143,7 @@ export function locationOf(
   return kept ? keptParts(work, path.root, labels) : joinParts(path.root, labels);
 }
 
-/** The stores that add to a collection (an `add`, `addAll`, a dict's new entry): F5's adds. */
+/** The stores that add to a collection: an `add`, `addAll`, a dict's new entry. */
 const ADDS: ReadonlySet<string> = new Set(["element", "elements", "entry"]);
 
 /** Whether a method changes the collection it is called on in place (`ListMethod.changes`, `DictMethod.changes`). */
@@ -1146,9 +1153,9 @@ function mutates(name: string, work: WorkLedger): boolean {
 }
 
 /**
- * A `switch` case's form (N1): `case null`, or one literal by its value's kind (the shared `caseLiteral`): a whole
- * number as `is integer`, a fractional one as `is number` without `integer`, text, a truth value, a duration, a calendar
- * duration or an angle as `is` its kind; other cases (several values, a range, `case is T`) none.
+ * A `switch` case's form: `case null`, or one literal by its value's kind (the shared `caseLiteral`): a whole number as
+ * `is integer`, a fractional one as `is number` without `integer`, text, a truth value, a duration, a calendar duration
+ * or an angle as `is` its kind; other cases (several values, a range, `case is T`) none.
  */
 function caseForm(
   values: readonly Expression[],

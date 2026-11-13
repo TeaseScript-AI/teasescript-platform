@@ -34,8 +34,8 @@ export function resolveCalls(builder: FlowGraphBuilder): void {
 
 /**
  * A `goto` continues at a label of its file or starts a file at its top; a `call` starts a file and is one call site.
- * A glob may pick the files the name pass picked for it (G1(f): no second scan); a computed target may name any file
- * (L11). A file target's label is an error of the name pass, so the file starts at its top.
+ * A glob may pick the files the name pass picked for it (no second scan); a computed target may name any file. A file
+ * target's label is an error of the name pass, so the file starts at its top.
  */
 export function resolveTransfers(builder: FlowGraphBuilder): void {
   const byPath = new Map(builder.fileRegions.map((region) => [region.path, region]));

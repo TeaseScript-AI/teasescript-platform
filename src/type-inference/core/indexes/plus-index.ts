@@ -48,11 +48,11 @@ interface Reads {
  * A root's indexed run: its terms in source order; per first property the positions of the literals holding it (a
  * literal stands once, in one run); per binding read its reads (`reads` by their first position, `byWriter` by their
  * earliest object, `groupOf` by proof), whose properties are never posted, so a binding of k properties read k times is
- * k positions, not k² postings (#1384, Codex r1); per property asked, the bindings holding it in first-read order
+ * k positions, not k² postings (#1384); per property asked, the bindings holding it in first-read order
  * (`holding`, found once: `holdersOf`); and per position the first literal at or after it and a literal's earliest
  * object (a read's `null`). A run's literals are list literals among its `+` operands, which only binary expressions
  * (left before right) and compound assignments (whose current value is a read) make, so in its order their texts are
- * disjoint and ascending: the earliest object of a range's literals is its first literal's (`firstWriter`, Codex r3).
+ * disjoint and ascending: the earliest object of a range's literals is its first literal's (`firstWriter`).
  */
 interface Run {
   readonly terms: readonly PlaceId[];
@@ -90,7 +90,7 @@ export interface PlusIndex {
 
 /**
  * The steps the index's queries took so far in this process (`visit`), each charged before it is taken: the work test
- * compares them with the charged `indexSteps` (the holder bound, Codex r2 and r3 on #1562).
+ * compares them with the charged `indexSteps` (the holder bound, #1562).
  */
 let visits = 0;
 
@@ -128,7 +128,7 @@ function isPlus(
  * property: the pass's first one, asked of any `+`, and a first other one per root cost a walk each, which stays
  * linear; a second other one indexes the run, which from then on answers each property its root is asked at, the
  * first included. `null` where the walk answers: before that, below a root, for a run whose walk on that side the
- * collapse already answers (`collapsed`), or for a run admission rejected an operand of (A6, `joinElements`) or with a
+ * collapse already answers (`collapsed`), or for a run admission rejected an operand of (`joinElements`) or with a
  * term that is not closed (`termOf`), which is found once.
  */
 export function plusRun(pass: CorePass, value: PlaceId, step: string, exact: boolean): Run | null {
@@ -341,7 +341,7 @@ function holdersOf(pass: CorePass, ix: Indexed, run: Run, step: string): Readonl
 
 /**
  * A term of a run as a closed shape: a list literal's (`shapeOf`), or a read's whose binding's closed initializer
- * (`bindingProof`) dominates its node, so that initializer is its reaching definition (X2): every such read of one
+ * (`bindingProof`) dominates its node, so that initializer is its reaching definition: every such read of one
  * binding has its value, untested, so it answers as the others at every path. `null` for any other term.
  */
 function termOf(pass: CorePass, ix: Indexed, value: PlaceId): Term | null {
@@ -369,8 +369,8 @@ function termOf(pass: CorePass, ix: Indexed, value: PlaceId): Term | null {
 
 /**
  * A binding whose reads may be closed terms: its one definition a whole initializer of a closed literal (`shapeOf`),
- * live as X2 lists it (A6's rejected, unreachable and loop definitions left out), no written type, no test of it
- * (§3.2) and no store below it. `null` otherwise.
+ * live as `definitionsOf` lists it (rejected, unreachable and loop definitions left out), no written type, no test of
+ * it (`untested`) and no store below it. `null` otherwise.
  */
 function bindingProof(pass: CorePass, ix: Indexed, binding: PlaceId): Proof | null {
   const known = ix.bindings.get(binding);
@@ -490,7 +490,7 @@ function merged(a: readonly Part[], b: readonly Part[]): Part[] {
 /**
  * A run's root (`plusRun`) below its elements at a property, as its operands' walk answers there (`plusElements`):
  * each literal holding the property and the first read of each binding holding it by `read`, its side's own answer,
- * and the terms whose objects all lack it as their earliest object's missing property (F11), at that property or below
+ * and the terms whose objects all lack it as their earliest object's missing property, at that property or below
  * it, with the side's context, where the first of them stands; merged in the terms' order (a kind keeps its first
  * item's place, so a read again and a missing property again add nothing), possibilities (`member`) where more than
  * one term gives an element. Its steps are the holder bound's: one per literal and binding holding the property and

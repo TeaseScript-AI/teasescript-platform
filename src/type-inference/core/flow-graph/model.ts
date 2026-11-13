@@ -29,7 +29,7 @@ export type FlowNodeKind =
   | "function-void"
   | "handler-entry"
   | "handler-exit"
-  /** The binding of a parameter, after its default if it has one (F21, F22). */
+  /** The binding of a parameter, after its default if it has one. */
   | "parameter"
   /** The value of an expression, after its parts. */
   | "expression"
@@ -39,7 +39,7 @@ export type FlowNodeKind =
   | "default-accepted"
   /** A `load` with a default has read its key; the default may run. */
   | "default-probe"
-  /** The receiver and index of an assignment through a member or element are evaluated (the receiver rule R). */
+  /** The receiver and index of an assignment through a member or element are evaluated, before its value. */
   | "target-prepared"
   /** A statement's effect, after its expressions. */
   | "statement"
@@ -48,7 +48,7 @@ export type FlowNodeKind =
   | "branch"
   | "join"
   | "loop-head"
-  /** A loop body's entry; for a `for` loop also the binding of its variables (F27). */
+  /** A loop body's entry; for a `for` loop also the binding of its variables. */
   | "loop-body"
   | "loop-exit";
 
@@ -59,11 +59,14 @@ export interface FlowNode {
   readonly region: number;
   readonly file: number;
   readonly span: SourceSpan | null;
-  /** The heads of the loops around it in its function, file or block, outermost first (X5). */
+  /**
+   * The heads of the loops around it in its function, file or block, outermost first: the exact path answers a read
+   * only from a definition inside every loop around the read.
+   */
   readonly loops: readonly FlowNode[];
   readonly successors: readonly FlowNode[];
   readonly predecessors: readonly FlowNode[];
-  /** No way over live edges leads to it from the session's start (X1). */
+  /** No way over live edges leads to it from the session's start. */
   readonly dead: boolean;
   /** The expression of an `expression` node. */
   readonly expression?: Expression;
@@ -71,9 +74,12 @@ export interface FlowNode {
   readonly statement?: Statement;
   /** The statement node whose expressions include this node, for a node of a statement's own expressions. */
   readonly enclosing?: FlowNode;
-  /** For an assignment through a member or element: the node where its receiver is prepared (R). */
+  /** For an assignment through a member or element: the node where its receiver and index are evaluated. */
   readonly prepared?: FlowNode;
-  /** For a label: the node it follows in the text, or `null` after code that does not go on (X4, L5). */
+  /**
+   * For a label: the node it follows in the text, or `null` after code that does not go on. A label that only this
+   * node reaches is no boundary (`Dominators.edom`).
+   */
   readonly fallthrough?: FlowNode | null;
 }
 
@@ -122,7 +128,7 @@ export type Callable = FileRegion | FunctionRegion;
 
 /**
  * A call: a call of a function, or a `call` of a file. A `call` of a glob or of a computed target is one site that
- * may enter every candidate file (L11).
+ * may enter every candidate file.
  */
 export interface CallSite {
   readonly id: number;
@@ -149,7 +155,7 @@ export interface Jump {
   readonly files: readonly FileRegion[];
 }
 
-/** An operand that needs a kind: a `repeat` count, a list index or a dict key (C2, C12), by where it stands. */
+/** An operand that needs a kind: a `repeat` count, a list index or a dict key, by where it stands. */
 export interface OperandUse {
   readonly file: number;
   /** The `repeat` statement, the index expression or assignment target, the dict literal's key, or a range's bound. */
@@ -158,7 +164,7 @@ export interface OperandUse {
   readonly operand: Expression;
 }
 
-/** A condition (C3) or `switch` subject that chooses among branches, which it guards (§3.2). */
+/** A condition or `switch` subject that chooses among branches, which it guards. */
 export interface GuardUse extends OperandUse {
   /** The entries of the branches it chooses among, the way past them included. */
   readonly branches: readonly FlowNode[];
@@ -167,9 +173,9 @@ export interface GuardUse extends OperandUse {
 /** A `while`, `repeat` or `for` loop. */
 export interface FlowLoop {
   readonly statement: WhileStatement | RepeatStatement | ForStatement;
-  /** Where a round ends: the body runs again from it, or the loop is left (X5's loop). */
+  /** Where a round ends: the body runs again from it, or the loop is left (a node's `loops` names it). */
   readonly head: FlowNode;
-  /** The body's entry, which binds a `for` loop's variables (F27). */
+  /** The body's entry, which binds a `for` loop's variables. */
   readonly body: FlowNode;
   readonly exit: FlowNode;
 }
@@ -199,7 +205,7 @@ export interface FlowGraph {
   readonly conditionUses: readonly GuardUse[];
   readonly switchUses: readonly GuardUse[];
   readonly loops: readonly FlowLoop[];
-  /** The heads of the loops that a `break` (its own loop) or a `goto` (every loop around it) may leave (F5a). */
+  /** The heads of the loops that a `break` (its own loop) or a `goto` (every loop around it) may leave. */
   readonly leftBy: ReadonlySet<FlowNode>;
   /** Every `and` and `or`, whose right operand runs after its left, in evaluation order of their left operands. */
   readonly logicals: readonly { readonly file: number; readonly expression: BinaryExpression }[];
@@ -213,7 +219,7 @@ export interface FlowGraph {
   readonly labelled: ReadonlySet<FileRegion>;
   isDeadEdge(from: FlowNode, to: FlowNode): boolean;
   /**
-   * F18: the node whose state a node reads: for a node of a typed parse's or load's default, the node
+   * The node whose state a node reads: for a node of a typed parse's or load's default, the node
    * of its call before the default runs (the call-site snapshot); else the node itself.
    */
   snapshotOf(node: FlowNode): FlowNode;
@@ -227,10 +233,10 @@ export interface FlowGraph {
   expressionAt(site: SourceSite): FlowNode | undefined;
   /**
    * The node of the statement at `site` where it runs: for a `global` with `default:`, the assignment the declaration
-   * performs (F1a's executable store); a `global` without one and a speaker have none.
+   * performs where it stands; a `global` without one and a speaker have none.
    */
   statementAt(site: SourceSite): FlowNode | undefined;
-  /** The session-start node of the `global` or speaker declared at `site`, in the startup region (F1a's start store). */
+  /** The session-start node of the `global` or speaker declared at `site`, in the startup region. */
   startupAt(site: SourceSite): FlowNode | undefined;
   /**
    * Where the statement at `site` of a statement list stands in its region's flow: the node control has reached just
