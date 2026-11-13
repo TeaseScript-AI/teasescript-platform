@@ -216,8 +216,8 @@ const UI_CHECK: OperandCheck = { file: INTERACTION, function: "materializeIntera
  * from today's checker's rule for the position; `form`, today's rule on the operand as written (a known text, a choice
  * object written in place), shared whole with today's checker; `today`, today's compile errors for a value the operand does not
  * take; `check`, where the instruction refuses such a value whatever the plan says. The route refuses an operand that
- * may hold a value its rule does not take (`backend.ts`'s `outsideAnswers`): the core has no consumer of its own at a
- * command operand, so no part of the analysis judges the operand against its instruction until the table does.
+ * may hold a value its rule does not take (`backend.ts`'s `outsideAnswers`): no consumer of the core judges a command
+ * operand against the kinds its instruction takes (its choice check reads only what a choice's buttons return).
  */
 export interface OperandRule {
   readonly takes: readonly ItemTag[];
