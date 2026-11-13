@@ -16,12 +16,18 @@ import {
   CORE_BACKEND,
   SPEAKER_FIELD_KINDS,
 } from "../../../src/type-inference/core/backend.js";
+import {
+  withTestAllowance,
+  withTestDemandAllowance,
+} from "../../../src/type-inference/core/budget.js";
+import { HELD_MODES } from "../../helpers/type-core-held-host.js";
 import { runGlobals } from "../../helpers/type-core-route.js";
 
 /*
  * A speaker's name is no value of the slice (the `identifier` row's closed set), so every read and store through a
- * speaker is refused at the name, whichever form the store takes; a declaration's values are walked, and a built-in
- * field's value is refused after the analysis where its kinds may not fit the field (`SPEAKER_FIELD_KINDS`).
+ * speaker that its enclosing rows walk is refused at the name, and one that an enclosing row refuses, such as a compound
+ * or an element store, is refused there first; a declaration's values are walked, and a built-in field's value is refused
+ * after the analysis where its kinds may not fit the field (`SPEAKER_FIELD_KINDS`).
  */
 
 type Files = readonly { readonly path: string; readonly source: string }[];
@@ -49,7 +55,7 @@ const errors = (result: ProjectCompilationResult): string[] =>
 
 const DECLARED = "speaker boss {\n  mood: 1\n  tags: [3, 1]\n}\n";
 
-test("a store through a speaker is refused at the speaker's name, in every form, for a declared speaker and the player", () => {
+test("a store through a speaker is refused at the speaker's name, or at an enclosing row that refuses first, for a declared speaker and the player", () => {
   // (the store, the name it is refused at, and that name's text from where it stands; `speaker`, which is a value only
   // in a message and in a declaration, is refused where a declaration reads it)
   const forms: readonly (readonly [Files, string, string])[] = [
@@ -87,6 +93,17 @@ test("a store through a speaker is refused at the speaker's name, in every form,
       site: { file: 0, start, end: start + "player.copyFrom(playerProfile)".length },
     },
   );
+  // a store the enclosing row refuses before it walks its target: a compound store and an element store
+  for (const store of ["boss.mood += 1", "boss.tags[0] = 2"]) {
+    const files = main(`${DECLARED}${store}`);
+    assert.notEqual(compileProject(files, OPTIONS).plan, null, store);
+    const start = files[0]!.source.indexOf(store);
+    assert.deepEqual(
+      { what: refusal(files)?.what, site: refusal(files)?.site },
+      { what: "this assignment", site: { file: 0, start, end: start + store.length } },
+      store,
+    );
+  }
 });
 
 test("a store through `speaker` outside a message gets today's compile error on the route alike", () => {
@@ -143,6 +160,66 @@ test("a built-in field's value is published by the route only where today's comp
     }
   // (each built-in field refuses some kind, and a custom property none)
   assert.deepEqual([...refusedFields].sort(), [...BUILT_IN_SPEAKER_PROPERTIES].sort());
+});
+
+/** A literal each built-in field takes: the stop family's fitting control. */
+const FITTING: Readonly<Record<string, string>> = {
+  displayName: '"Vera"',
+  title: '"Vera"',
+  shortTitle: '"Vera"',
+  firstName: '"Vera"',
+  lastName: '"Vera"',
+  defaultSaySkippable: "true",
+  presentation: '"bubble"',
+  bubble: '{background: "#334455"}',
+  prose: '{align: "left"}',
+  font: '"Georgia"',
+  avatar: '"a.jpg"',
+  color: '"#336699"',
+  alias: '"pet"',
+  gender: '"female"',
+};
+
+/** The analysis without a stop, stopped by the program's allowance, and stopped by a demand's. */
+const STOPS: Readonly<Record<string, <T>(make: () => T) => T>> = {
+  none: (make) => make(),
+  program: (make) => withTestAllowance(1, make),
+  demand: (make) => withTestDemandAllowance(1, make),
+};
+
+test("under a stop as without one, a built-in field's computed misfit is refused and its fitting and external values publish as today's", () => {
+  assert.deepEqual(Object.keys(FITTING).sort(), [...BUILT_IN_SPEAKER_PROPERTIES].sort());
+  for (const field of BUILT_IN_SPEAKER_PROPERTIES) {
+    const cited = SPEAKER_FIELD_KINDS.get(field)?.check !== null;
+    // (the value, whether the route publishes it: a misfit computed by `otherwise`, which no row takes; a literal the
+    // row takes; the host global, an unknown of an external origin, admitted beside a cited check only)
+    const values: readonly (readonly [string, boolean])[] = [
+      ["null otherwise [1]", false],
+      [FITTING[field]!, true],
+      ["hostValue", cited],
+    ];
+    for (const [value, published] of values) {
+      const files = main(`speaker boss {\n  ${field}: ${value}\n}\nsay as boss "a"`);
+      const today = compileProject(files, OPTIONS);
+      for (const mode of HELD_MODES)
+        for (const [stop, within] of Object.entries(STOPS)) {
+          const at = `${field}: ${value} [${mode.name}, ${stop}]`;
+          let plan: boolean;
+          try {
+            plan = mode.run(() =>
+              within(() => compileProjectWithBackend(files, OPTIONS, CORE_BACKEND).plan !== null),
+            );
+          } catch (error) {
+            if (!(error instanceof CandidateOutsideSlice)) throw error;
+            assert.equal(error.what, "this speaker property", at);
+            plan = false;
+          }
+          // (F): never a plan where today's compiler gives none
+          if (today.plan === null) assert.equal(plan, false, at);
+          else assert.equal(plan, published, at);
+        }
+    }
+  }
 });
 
 test("the field table names exactly today's built-in speaker properties, and each cited check is a function of its file", () => {
