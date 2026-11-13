@@ -99,19 +99,17 @@ import {
   numberFromText,
   type Conversion,
 } from "./conversions.js";
+import { builtinCallProblems, builtinShapeProblems } from "./builtin-call-checks.js";
 import {
-  builtinCallProblems,
-  builtinShapeProblems,
   type Sharing,
   collectionMethodProblems,
-  expressionLabel,
   fallbackFix,
   mayBeMessage,
   dictMethodProblems,
   memberProblems,
   positionalMethodProblems,
-  type OperationProblem,
 } from "./operation-checks.js";
+import { expressionLabel, type OperationProblem } from "./operation-check-support.js";
 import {
   emptyListPropertyFailure,
   hasListMethod,
