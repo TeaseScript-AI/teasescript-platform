@@ -210,12 +210,6 @@
     "waits": "the O4 lead's cleanup"
   },
   {
-    "file": "src/type-inference/core/check-result/otherwise.ts",
-    "kind": "reference",
-    "text": "fallbackUse",
-    "waits": "the O4 lead's cleanup"
-  },
-  {
     "file": "src/type-inference/core/consumers/stores/stores.ts",
     "kind": "docblock",
     "text": "One admission decision for one key as one demand (S3 §5), with the program's nodes' allowance (S3 revision 14: a",
