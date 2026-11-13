@@ -5,7 +5,7 @@ import { propertyStep } from "../program.js";
 import { Retained } from "../retained/retained.js";
 import { writtenOf } from "./terms.js";
 
-// G3 stage 1: the facts of the program that leave a binding a wrapper possible, read and charged nothing, so a key's
+// The facts of the program that leave a binding a wrapper possible, read and charged nothing, so a key's
 // lane (`lanes.ts`) and the marks (`marks.ts`) can ask them at any time.
 
 /**

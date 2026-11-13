@@ -14,7 +14,7 @@ import type { Holder, HolderReference, ReadGroup, ReferencesByStep } from "./mod
 import { addSource, unionOf } from "./selections.js";
 import { amend, Retained, retainedModule } from "../retained/retained.js";
 
-// The mark holders (§8): each holder's reads and references, and its mark at a path (§3.2).
+// The mark holders: each holder's reads and references, and its mark at a path.
 
 /** A set or map: the smaller of two key sets, intersected with the larger. */
 function common<T>(
@@ -136,7 +136,7 @@ export function holderOfKey(contract: Contract, key: CanonicalKey): Holder {
   const known = contract.holders.get(`k${key}`);
   if (known !== undefined) return known;
   const holder = newHolder(contract, `k${key}`);
-  // (a cursor's parent and last step from the arena, G3 stage 1)
+  // (a cursor's parent and last step from the arena)
   const parent = contract.keyParent(key);
   if (parent !== null)
     refer(contract, holder, holderOfKey(contract, parent), [contract.keyLast(key)!]);
@@ -277,7 +277,7 @@ function groupHit(contract: Contract, group: ReadGroup, tested: Key): boolean {
 /**
  * A holder's own reads at path `rest` below it: per non-empty prefix q, the keys tested q below them and the reads of
  * such a key (the smaller side walked), each group of only the callables and files a test of the tested path stands
- * in (W40); the first hit ends the lookup; every visit charged.
+ * in; the first hit ends the lookup; every visit charged.
  */
 function readsAt(contract: Contract, reads: Holder["reads"], rest: readonly string[]): boolean {
   const { program, guards } = contract.pass;
@@ -349,7 +349,7 @@ function collectAll(contract: Contract): void {
   for (const d of stores) {
     program.work.charge("invSteps");
     if (d.value === undefined || !lists.live(d)) continue;
-    // (G3 stage 1: a copy of a read of a binding no test names, which may be a wrapper, marks nothing: its key, never in
+    // (a copy of a read of a binding no test names, which may be a wrapper, marks nothing: its key, never in
     // `belowTested`, is not made here, while the marks are built, before its family's lane may be known: `keyLane`)
     if (copiesUntested(contract, d.value)) continue;
     const copied = contract.copiedKey(d.value);
@@ -447,8 +447,13 @@ export function depthOf(contract: Contract, holder: Holder): number {
   return holder.depth!;
 }
 
+/** Whether a `Rest` or a record's steps are an array (`key-ids.ts`' `isSteps`, which this module may not import). */
+function isPath(rest: Rest | PathSteps): rest is readonly string[] {
+  return Array.isArray(rest);
+}
+
 /**
- * §3.2: a holder's mark at `path` (memoised per holder and the leading steps it can depend on): a literal's guarded
+ * A holder's mark at `path` (memoised per holder and the leading steps it can depend on): a literal's guarded
  * read at a prefix, the references standing at a prefix (each asked once, for the rest under its shift), its own
  * reads; a choice's selection step as the record key it reads. A walk on an explicit stack: a holder's ask waits on the
  * references it asks. #1278: a mark at a path cut by a property no source holds (`ABSENT`) holds at the path it cuts,
@@ -457,15 +462,10 @@ export function depthOf(contract: Contract, holder: Holder): number {
  * holder once at the path and `ABSENT`. k references asked below k different properties are asked once each, not
  * k times.
  */
-/** Whether a `Rest` or a record's steps are an array (`key-ids.ts`' `isSteps`, which this module may not import). */
-function isPath(rest: Rest | PathSteps): rest is readonly string[] {
-  return Array.isArray(rest);
-}
-
 export function marksAt(contract: Contract, holder: Holder | null, asked: Rest): boolean {
   if (holder === null) return false;
   collectMarks(contract);
-  // G3 3b: a holder that reaches no guarded path and no read marks no path (`marksNothing`, once per holder)
+  // a holder that reaches no guarded path and no read marks no path (`marksNothing`, once per holder)
   if (marksNothing(contract, holder)) return false;
   // (a span's steps made through the charged boundary, copied out for the walk's own paths: a holder that marks nothing
   // never asks them)
@@ -569,7 +569,7 @@ export function marksAt(contract: Contract, holder: Holder | null, asked: Rest):
 }
 
 /**
- * #1784 (Sol's design D, the lead's ruling on Astra r1 B1): a holder's marks as a language of path prefixes, compiled
+ * #1784: a holder's marks as a language of path prefixes, compiled
  * once per pass into one shared automaton: a marking prefix `w` stands for every path below it. Its local prefixes are
  * its guarded literal paths and the tested paths below each of its own reads whose regions hold the read
  * (`guardedBelow`); a reference at `where` to `J` seen from `shift` attaches, at `where`, the states `J`'s automaton
@@ -595,7 +595,7 @@ interface MarkAutomaton {
   readonly roots: Map<Holder, number>;
   readonly starts: Map<Holder, Map<number, MarkResidual>>;
   readonly moves: Map<number, Map<string, MarkResidual>>;
-  /** The guarded prefixes the holders' compilations visited (Astra r2 B3's growth test). */
+  /** The guarded prefixes the holders' compilations visited (`markPrefixVisits`). */
   prefixVisits: number;
 }
 
@@ -620,7 +620,7 @@ function automatonOf(contract: Contract): MarkAutomaton {
   return known;
 }
 
-/** Test-only: the states of a pass's mark automaton (Sol's R), `0` where none was compiled. */
+/** Test-only: the states of a pass's mark automaton, `0` where none was compiled. */
 export function markStates(contract: Contract): number {
   return AUTOMATA().get(contract)?.states.length ?? 0;
 }
@@ -789,7 +789,7 @@ function compile(contract: Contract, automaton: MarkAutomaton, holder: Holder): 
     automaton.states[stateAt(contract, automaton, root, stepsOf(contract, at))]!.accepting = true;
   }
   // its own reads: each tested path below a read's key whose region holds the read (`readsAt`'s hit), the paths of
-  // reads `guardedBelow` answers alike asked once (Astra r2 B3: n copies under n tests visit n paths, not n²)
+  // reads `guardedBelow` answers alike asked once (n copies under n tests visit n paths, not n²)
   const asked = new Set<string>();
   // (#2005: a prefix several groups' reads reach makes its states once; each candidate is still charged)
   const inserted = new Set<string>();
@@ -837,7 +837,7 @@ function compile(contract: Contract, automaton: MarkAutomaton, holder: Holder): 
   return root;
 }
 
-/** Test-only: the guarded prefixes a pass's holder compilations visited (Astra r2 B3). */
+/** Test-only: the guarded prefixes a pass's holder compilations visited. */
 export function markPrefixVisits(contract: Contract): number {
   return AUTOMATA().get(contract)?.prefixVisits ?? 0;
 }
@@ -985,8 +985,8 @@ function ownFirsts(contract: Contract, holder: Holder): ReadonlySet<string> | nu
 }
 
 /**
- * An entry's answer with its annotations: its guard bit or a mark at the path marks it (§3.2); the ingress stores of
- * every value it stands for go to its external items (C9: one boundary check per ingress store).
+ * An entry's answer with its annotations: its guard bit or a mark at the path marks it; the ingress stores of every
+ * value it stands for go to its external items (one boundary check per ingress store).
  */
 export function annotated(
   contract: Contract,

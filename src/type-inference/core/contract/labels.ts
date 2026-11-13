@@ -4,7 +4,7 @@ import type { Contract } from "../contract.js";
 import { convert } from "./key-ids.js";
 import { Retained } from "../retained/retained.js";
 
-// G3 stage 1: a path's label as a recipe, made one step from its parent's, and its text made only where
+// A path's label as a recipe, made one step from its parent's, and its text made only where
 // a diagnostic or a check shows it (`labelText`). A label no one shows costs its recipe and no text.
 
 /**
@@ -88,8 +88,7 @@ function shown(contract: Contract, label: Label): string {
 
 /**
  * A label's text made plain and not kept here, charging nothing (`labelText`'s twin, as `pathText` is `keptText`'s):
- * for a caller that charges the text it keeps itself, the boundary check's (`publish`: its legacy
- * billing stays).
+ * for a caller that charges the text it keeps itself, the boundary check's (`publish`).
  */
 export function labelPlainText(label: Label): string {
   const made = label.text === null;

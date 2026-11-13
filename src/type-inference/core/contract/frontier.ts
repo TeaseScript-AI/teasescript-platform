@@ -30,18 +30,18 @@ import { eachValue, collect, star, leavesOf } from "./frontier/walk.js";
  * makes a longer key, and no two of them are one by their structure. Below such an entry's writing edge (`entryAt`'s
  * `withWriter`), the read is the join of the leaves its producers reach, found over a finite producer graph of the
  * pass: a binding's positions (`key`, its whole-copy cycle one node through the summaries' least solution), a
- * literal's index nodes (`lit`), and leaves (`leaf`: F11's `missing`, a host's unknown, a literal's terms; `native`:
- * a value the graph does not model, read natively where the path ends). `Sum(n, s)` is the nodes one step `s` below
- * `n` reaches (least solution, cycles closed by producer edges only, seedless ones empty); `Term(n)` the leaves at
- * `n`. The writing edge overwrites every writer but a pure `missing`'s, whose earliest token the join keeps, and every
- * other field the merge joins, so the join is the native nested answer there (HEAD 0). A closure outside
+ * literal's index nodes (`lit`), and leaves (`leaf`: a missing property's `missing`, a host's unknown, a literal's
+ * terms; `native`: a value the graph does not model, read natively where the path ends). `Sum(n, s)` is the nodes one
+ * step `s` below `n` reaches (least solution, cycles closed by producer edges only, seedless ones empty); `Term(n)` the
+ * leaves at `n`. The writing edge overwrites every writer but a pure `missing`'s, whose earliest token the join keeps,
+ * and every other field the merge joins, so the join is the native nested answer there. A closure outside
  * the eligible grammar declines: the native reader answers.
  *
- * #1784: a route through a marking entry or literal read (its guard bit, or its holder's mark at the rest below it,
- * §3.2) reaches `mark` nodes: the same nodes, their leaves `marked`. A holder's mark depends on the rest's first
+ * #1784: a route through a marking entry or literal read (its guard bit, or its holder's mark at the rest below it)
+ * reaches `mark` nodes: the same nodes, their leaves `marked`. A holder's mark depends on the rest's first
  * `depthOf` steps, so its route is a `hold` node carrying the residual states of the mark automaton those steps leave,
  * until they decide it (or the path ends). Marking each leaf and then joining is native's join of marked answers exactly where no native-value leaf is
- * reached marked (HEAD 1: `marked` commutes with `mergePair` per item unless a context ranked after `"branch"` meets a
+ * reached marked (`marked` commutes with `mergePair` per item unless a context ranked after `"branch"` meets a
  * null one, and only a native value carries one): such a leaf declines (`marks-native`).
  */
 
@@ -438,7 +438,7 @@ export function* pushedRead(
     kind: "contract",
     file: site?.file ?? -1,
     offset: site?.start ?? -1,
-    // #1668: I, the demand's own run: its frame's flow, taken as it starts
+    // #1668: the demand's own run: its frame's flow, taken as it starts
     make: () => pushedRun(contract, slot),
   };
 }

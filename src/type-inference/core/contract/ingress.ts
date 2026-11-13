@@ -3,9 +3,9 @@ import type { Contract } from "../contract.js";
 import { ingressLeaf } from "../definitions.js";
 import { REASON, type IngressNode, type Item } from "../items.js";
 
-// The ingress a value is, or the one its projections read (C9).
+// The ingress a value is, or the one its projections read.
 
-/** C9: external data that entered by a load, `fromJson` or a host read names its ingress. */
+/** External data that entered by a load, `fromJson` or a host read names its ingress. */
 export function entered(
   contract: Contract,
   value: PlaceId,
@@ -37,7 +37,7 @@ export function ingressOf(contract: Contract, value: PlaceId): PlaceId | null {
 }
 
 /**
- * The leaf naming an ingress value or a projection of one (`ingressOf`, S6-CARRIERS §3.1): every ingress's, where it
+ * The leaf naming an ingress value or a projection of one (`ingressOf`): every ingress's, where it
  * lands being admission's; else `undefined`, external data created where no ingress is, loose.
  */
 export function ingressLeafOf(contract: Contract, value: PlaceId): IngressNode | undefined {
