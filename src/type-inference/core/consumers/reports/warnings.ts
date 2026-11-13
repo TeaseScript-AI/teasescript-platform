@@ -33,7 +33,7 @@ import { proveOrigin, type StoreOrigin } from "./origins.js";
 import { kindsOf } from "../names.js";
 import { keyStepsIn, stepsArray, type CanonicalKey } from "../../contract/key-ids.js";
 
-// The consumers' warnings and their sentences (D1, D2): a context word's detail, a store's root and steps.
+// The consumers' warnings and their sentences: a context word's detail, a store's root and steps.
 
 /**
  * A warning of `rule` explained by `item`; `fits`, the value's items that the rule takes (its fixes' types);
@@ -75,13 +75,13 @@ export function warning(
 }
 
 /**
- * The route rule's one required-check decision (AD-1, #1073; V30 §13, "a use that needs a check has three
- * outcomes"), asked of every warning before it is made, after the quiet path, the exact answers and G (§13.2): a
- * possible `null` owing its null-check, or a member of the read's written union that the use does not take (#1073:
- * the written domain proves it), brought to the use by a route without a check (`NarrowingRoutes.required`), is a
- * compile error with N10's payload in place of that warning and its obligation; every other warning and check at the
- * site stays. No route proved, the warning stays: a check on every route that the compiler cannot keep, a stopped or an
- * external value, a member a receiver may lack. Whether the error was made.
+ * The route rule's one required-check decision (#1073; V30 §13, "a use that needs a check has three outcomes"), asked
+ * of every warning before it is made, after the quiet path and the exact answers: a possible `null` owing its
+ * null-check, or a member of the read's written union that the use does not take (#1073: the written domain proves it),
+ * brought to the use by a route without a check (`NarrowingRoutes.required`), is a compile error naming the route's
+ * writer and the missing tests (`requiredCheck`) in place of that warning and its obligation; every other warning and
+ * check at the site stays. No route proved, the warning stays: a check on every route that the compiler cannot keep, a
+ * stopped or an external value, a member a receiver may lack. Whether the error was made.
  */
 function required(
   walk: Consumers,
@@ -113,7 +113,7 @@ function required(
   // (a written union's other kinds the use does not take, null among them: each certifies the route, #1073)
   let others: readonly ItemTag[] = [];
   if (item.tag === "null") {
-    // (a null owes its null-check, or at a store its destination's check: C1's and C10's)
+    // (a null owes its null-check, or at a store its destination's check: a store's or a fallback's)
     if (
       obligation.kind !== "null-check" &&
       !(kind === "written-target" && obligation.kind === "copy-type")
@@ -121,7 +121,7 @@ function required(
       return false;
     tests = [`if ${text} != null`, "otherwise"];
   } else {
-    // (a union holding a reference: its members are the runtime's, F19a, never the route rule's)
+    // (a union holding a reference: its members are the runtime's, never the route rule's)
     const members = writtenMembers(walk, value, kind !== "written-target");
     if (
       members === null ||
@@ -166,8 +166,8 @@ function required(
 
 /**
  * The members of the written union a read's variable declares, at the variable itself, or, where `results`, a called
- * function's written result used where it stands (#1073: the written domain proves itself; a store's is C1's
- * copy rule), or `null`.
+ * function's written result used where it stands (#1073: the written domain proves itself; a store's is the store
+ * check's copy rule), or `null`.
  */
 function writtenMembers(
   walk: Consumers,
@@ -194,11 +194,11 @@ function writtenMembers(
 }
 
 /**
- * What a warning's context word's sentence names (D1, `ContextDetail`), where the word is the warned read's own
+ * What a warning's context word's sentence names (`ContextDetail`), where the word is the warned read's own
  * (`direct`, `directWord`), from that read's node: the function it is in where the value comes from outside it
  * (`call`) or is a parameter of it (`deferred-parameter`), the label its line is entered at (`label`), the block it
  * is in (`handler`), the receiver it reads a member of (`member`, `missing`, `unmodelled`); and the place a later
- * store decides (`later`, A7's, at the store). Only the warning's word asks.
+ * store decides (`later`, at the store). Only the warning's word asks.
  */
 function detail(
   walk: Consumers,
@@ -216,7 +216,7 @@ function detail(
   const direct =
     word === "later" ||
     word === "budget" ||
-    // a reference's member the check itself names (F19a: a speaker's field by its name has no receiver place)
+    // a reference's member the check itself names (a speaker's field by its name has no receiver place)
     (word === "unmodelled" && receiver?.kinds.some((kind) => REFERENCE.has(kind)) === true) ||
     (value !== undefined && directWord(walk, word, item, value, node, read !== undefined));
   const detail = {
@@ -271,7 +271,7 @@ function detail(
     case "missing":
     case "unmodelled": {
       if (receiver !== null) return { ...detail, receiver };
-      // a speaker's field read by its name (F19a)
+      // a speaker's field read by its name
       const speaker = value === undefined ? undefined : program.places[value]?.kind;
       if (speaker?.kind === "speakerProperty")
         return {
@@ -297,9 +297,9 @@ function detail(
 }
 
 /**
- * Whether `item`'s word arose at the read of `value` at `node` itself (D1: a sentence names only what its word
+ * Whether `item`'s word arose at the read of `value` at `node` itself (a sentence names only what its word
  * establishes), not in a value the read copies, projects, or takes from a call or an operation: an event word where
- * the read's own exact path fails with it (§3.4's X1–X7), `member` there or at an element read, `deferred-parameter`
+ * the read's own exact path fails with it (`exactPath`), `member` there or at an element read, `deferred-parameter`
  * at a parameter of the function the read is in, `missing` where a store of the receiver itself is the object that
  * lacks the property, `unmodelled` where the receiver holds a reference or at a speaker's field. The receiver:
  * `value` itself where `receiver` says it is a member access's receiver, else the owner the read projects.
@@ -379,6 +379,7 @@ function directWord(
   }
 }
 
+/** A check owed when the script runs: its kind, site and target, the kinds it requires, its words; no boundary's. */
 export function obligation(
   kind: ObligationKind,
   site: SourceSite,
@@ -389,7 +390,10 @@ export function obligation(
   return { kind, target, against, on, site: siteOf(site), boundary: false };
 }
 
-/** A store's `copy-type` warning against the destination's kinds (C1, C10's `rule`); `fits` as `warning`'s. */
+/**
+ * A store's `copy-type` warning against the destination's kinds (a store's or a fallback's `rule`); `fits` as
+ * `warning`'s.
+ */
 export function storeWarning(
   walk: Consumers,
   site: SourceSite,
@@ -421,15 +425,15 @@ export function storeWarning(
 }
 
 /**
- * #1468: the load with a default a store's warned value at `site` is, as the checker's own model proves it (the lead's
- * ruling after Codex r5), for a fix that gives the place's property in that default. The value is stored once, into
- * the place's variable or a property or element of it, with a property of the place below it; and it is the load
- * itself, its variable's declaration's value; or a copy of a variable, or of a property or an element of one, whose
- * key holds one definition, its declaration storing the load, and every key below it on the way to the property none
- * (`definitions.byKey`, a loop's adds: no store, add or removal in any spelling the checker models). Each step's receiver
- * on that way is what the analysis answers there: objects only below a property, lists or sets below an element, dicts
- * below a dict's value; never by a step's name. With the way from the load and the variable holding it; `undefined`
- * where anything is unproved. Kept beside the warning's rule (`proveOrigin`), never published.
+ * #1468: the load with a default a store's warned value at `site` is, as the checker's own model proves it, for a fix
+ * that gives the place's property in that default. The value is stored once, into the place's variable or a property or
+ * element of it, with a property of the place below it; and it is the load itself, its variable's declaration's value;
+ * or a copy of a variable, or of a property or an element of one, whose key holds one definition, its declaration
+ * storing the load, and every key below it on the way to the property none (`definitions.byKey`, a loop's adds: no
+ * store, add or removal in any spelling the checker models). Each step's receiver on that way is what the analysis
+ * answers there: objects only below a property, lists or sets below an element, dicts below a dict's value; never by a
+ * step's name. With the way from the load and the variable holding it; `undefined` where anything is unproved. Kept
+ * beside the warning's rule (`proveOrigin`), never published.
  */
 function loadOrigin(
   walk: Consumers,
@@ -535,7 +539,7 @@ export type Owner = readonly [made: boolean, items: () => readonly Item[]];
  * ask (`Consumers.boundariesAt`, #1448). An item is left out when its owner was: each item has one owner per request.
  * `warnGroups`' groups partition the items, or the soft owner is the one; `memberChecks`' unknown warning exists only
  * where `extra` is empty, and every caller passes at most one extra; `operations` keys an operand's unknown items under
- * one owner. Several live owners stand across consumers, each sending its own request (Sol's design §2): a caller that
+ * one owner. Several live owners stand across consumers, each sending its own request: a caller that
  * would declare overlapping owners needs every one of them left out. Each owner looked at once and a left-out owner's
  * items, charged.
  */
@@ -592,7 +596,7 @@ export function warnGroups(
   return leftOutBy(walk, owners);
 }
 
-/** S4: a possible null owes a null-check at every consumer, against what the place needs; `fits` as `warning`'s. */
+/** A possible null owes a null-check at every consumer, against what the place needs; `fits` as `warning`'s. */
 export function nullWarning(
   walk: Consumers,
   kind: DiagnosticKind,
@@ -620,7 +624,7 @@ export function nullWarning(
 }
 
 /**
- * A store's destination as its sentence names it (D2): the source's own text for its variable, a parameter's name, a
+ * A store's destination as its sentence names it: the source's own text for its variable, a parameter's name, a
  * function's result as `f()`, and its properties; an element or a dict value in words (`'n' of an element of 'xs'`),
  * never as code the source does not hold.
  */
@@ -653,7 +657,7 @@ export function storeRoot(walk: Consumers, root: PlaceId): StoreRoot | null {
 }
 
 /**
- * The names of the properties a value's or a key's objects have (S3 §1), in the order the search finds them: once per
+ * The names of the properties a value's or a key's objects have, in the order the search finds them: once per
  * place a value copies, so every read of one place asks once.
  */
 export function propertiesOf(
@@ -664,7 +668,7 @@ export function propertiesOf(
   let place: CanonicalKey | PlaceId;
   let start: PropertyNamesTask;
   if ("key" in of) {
-    // (a key in its identity, as the names are held and asked by it: G3 stage 1)
+    // (a key in its identity, as the names are held and asked by it)
     const key = contract.canonicalKey(of.key);
     place = key;
     start = { key };
