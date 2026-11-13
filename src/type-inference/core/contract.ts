@@ -28,7 +28,7 @@ import {
   contractOf,
   contractRead,
   keyContract,
-  keyListsAt,
+  keyMemberAt,
   literalRoute,
   receiverKinds,
   refReceiver,
@@ -42,7 +42,6 @@ import {
   indexWork,
   kindsPart,
   literalIndex,
-  literalSignature,
   loneRead,
   namesPart,
   pathDepth,
@@ -61,7 +60,6 @@ import {
   isKeyId,
   keptKeyBelowIn,
   keyAt,
-  keyBelowIn,
   keyDepthIn,
   keyIdAt,
   keyIdOf,
@@ -808,7 +806,7 @@ export class Contract {
     const at = isKeyId(key)
       ? memberStepIn(this, key, from)
       : memberStepOf(this, keyPath(key), from);
-    return at < 0 ? keyContract(this, key, flow) : keyListsAt(this, key, at, flow);
+    return at < 0 ? keyContract(this, key, flow) : keyMemberAt(this, key, at, flow);
   }
 
   public severalElements(key: Key): Work<boolean> {
@@ -867,11 +865,6 @@ export class Contract {
    */
   public chainOf(value: PlaceId): ChainRoot | null {
     return this.work.shared(() => chainOf(this, value));
-  }
-
-  /** `keyBelowIn`: the key `rest` below `key` in its identity (a wrapper's family's a cursor's children). */
-  public keyBelowIn(key: Key, rest: readonly string[]): CanonicalKey {
-    return keyBelowIn(this, key, rest);
   }
 
   /** `keptKeyBelowIn`: `keyBelowIn`, a text below a text charged before it is made. */
@@ -1250,10 +1243,6 @@ export class Contract {
 
   public literalIndex(literal: PlaceId): LiteralIndex {
     return literalIndex(this, literal);
-  }
-
-  public literalSignature(literal: PlaceId): string {
-    return literalSignature(this, literal);
   }
 
   /**
