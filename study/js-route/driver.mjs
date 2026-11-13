@@ -19,14 +19,14 @@ const programs = new Map();
 
 /** The emitted program of a validated plan: its source, constants and the function that instantiates it. */
 /** `form`: false (replay), true (resumable) or "generators". */
-export function compileProgram(plan, resumable = false, runawayCheck = false) {
-  const key = `${resumable}/${runawayCheck}`;
+export function compileProgram(plan, resumable = false, runawayCheck = false, facts = null) {
+  const key = `${resumable}/${runawayCheck}/${facts === null ? "" : "typed"}`;
   if (!programs.has(key)) programs.set(key, new WeakMap());
   const cache = programs.get(key);
   let program = cache.get(plan);
   if (program === undefined) {
     const t0 = performance.now();
-    const emitted = emitProgram(plan, { resumable: resumable === true, generators: resumable === "generators", runawayCheck });
+    const emitted = emitProgram(plan, { resumable: resumable === true, generators: resumable === "generators", runawayCheck, facts });
     const t1 = performance.now();
     const instantiate = new Function("rt", "K", emitted.source);
     // Part G: the time to emit, and to turn the text into a function (V8 compiles function bodies lazily, at first run).
@@ -47,12 +47,12 @@ export class EmittedSession {
   #waits = 0;
   #mode = "run";
   /** Instructions are not counted by generated code; drives report 0. */
-  constructor(plan, fresh, { runawayCheck = false } = {}) {
+  constructor(plan, fresh, { runawayCheck = false, facts = null } = {}) {
     const captured = captureOrReuseInstructionPlan(plan);
     if (!captured.validation.valid || captured.plan === null) throw new TypeError("Malformed instruction plan.");
     this.#plan = captured.plan;
     this.#fresh = fresh;
-    this.#program = compileProgram(this.#plan, false, runawayCheck);
+    this.#program = compileProgram(this.#plan, false, runawayCheck, facts);
     this.#state = this.#freshState();
   }
 

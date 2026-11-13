@@ -90,7 +90,39 @@ const WAITING_KINDS = new Set(["wait", "interaction", "capture", "fileStore", "l
  * its variables saved as plain data at a wait); everything else stays structured. Without it, a wait asks the session
  * (`rt.waited`), which way (1), replaying from the start, answers.
  */
-export function emitProgram(plan, { resumable = false, runawayCheck = false, generators = false } = {}) {
+export function emitProgram(plan, { resumable = false, runawayCheck = false, generators = false, facts = null } = {}) {
+  // `facts`: the type analysis's `facts().values` (the typed probe, ruling 3): a plan expression finds its type by its
+  // span and the AST kind it was lowered from; a guard is dropped where the types make it unneeded. `typeStats` counts
+  // the sites that asked and those that found a type.
+  const typeStats = { asked: new Set(), found: new Set(), missing: [] };
+  const types = new Map();
+  if (facts !== null)
+    for (const fact of facts) {
+      const key = `${fact.site.file}:${fact.site.start}:${fact.site.end}:${fact.kind}`;
+      types.set(key, types.has(key) && types.get(key) !== fact.type ? "?ambiguous" : fact.type);
+    }
+  const AST_KIND = { identifier: "identifier", index: "indexExpression", call: "callExpression", binary: "binaryExpression",
+    unary: "unaryExpression", property: "propertyAccessExpression", range: "rangeExpression", list: "listLiteral" };
+  const typeOf = (e) => {
+    if (facts === null) return undefined;
+    const kind = e.kind === "literal"
+      ? { number: "numberLiteral", boolean: "booleanLiteral", string: "stringLiteral" }[typeof e.value] ?? (e.value === null ? "nullLiteral" : null)
+      : AST_KIND[e.kind];
+    if (kind === undefined || kind === null) return undefined;
+    const site = `0:${e.span.so}:${e.span.eo}:${kind}`;
+    typeStats.asked.add(site);
+    const found = types.get(site);
+    if (found === undefined || found === "?ambiguous" || found === "unknown" || found.startsWith("?") || found.includes("!")) {
+      if (typeStats.missing.length < 40 && !typeStats.missing.some((m) => m.startsWith(site))) typeStats.missing.push(`${site} ${e.kind}@${e.span.sl}:${e.span.sc} ${found ?? "none"}`);
+      return undefined;
+    }
+    typeStats.found.add(site);
+    return found;
+  };
+  const numeric = (e) => { const t = typeOf(e); return t === "integer" || t === "number"; };
+  const primitive = (e) => { const t = typeOf(e); return t === "integer" || t === "number" || t === "string" || t === "boolean"; };
+  const isBool = (e) => typeOf(e) === "boolean";
+  const isList = (e) => typeOf(e)?.startsWith("list<") === true;
   if (resumable && generators) throw new Error("study emitter: resumable or generators, not both");
   // `generators`: part C's third form: a function that can wait is a JavaScript generator that yields at a wait, kept
   // alive between drives (`GeneratorSession`); file regions are generators too. Elsewhere the code is as without it.
@@ -184,7 +216,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
     "}",
     "return main;",
   );
-  return { source: lines.join("\n"), constants: K, globals, fileEntries, canWait: [...canWait] };
+  return { source: lines.join("\n"), constants: K, globals, fileEntries, canWait: [...canWait], typeStats: { asked: typeStats.asked.size, found: typeStats.found.size, missing: typeStats.missing } };
 
   function emitRegion(start, end, definition, parameters, rootScope, fileIndex) {
     const out = [];
@@ -232,7 +264,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
     };
     const own = (e) => {
       const code = expr(e);
-      if (isFresh(e)) return code;
+      if (isFresh(e) || primitive(e)) return code;
       const v = x();
       return `(${v} = ${code}, typeof ${v} === "object" && ${v} !== null ? rt.copy(${v}) : ${v})`;
     };
@@ -275,6 +307,8 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
         case "index": {
           const o = x();
           const i = x();
+          if (isList(e.object) && typeOf(e.index) === "integer")
+            return `(${o} = ${expr(e.object)}, ${i} = ${expr(e.index)}, (${i} >>> 0) === ${i} && ${i} < ${o}.length ? ${o}[${i}] : rt.index(${konst(e)}, ${o}, ${i}))`;
           return `(${o} = ${expr(e.object)}, Array.isArray(${o}) || rt.indexable(${konst(e.object)}, ${o}, ${konst(e.span)}), ${i} = ${expr(e.index)}, Array.isArray(${o}) && (${i} >>> 0) === ${i} && ${i} < ${o}.length ? ${o}[${i}] : rt.index(${konst(e)}, ${o}, ${i}))`;
         }
         case "unary": {
@@ -357,21 +391,27 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
         case "/":
         case "%": {
           const r = x();
+          if (numeric(e.left) && numeric(e.right))
+            return `(${left}, ${b} = ${expr(e.right)}, (${r} = ${a} ${op} ${b}, ${r} - ${r} === 0) ? ${r} : ${checked}(${k}, ${a}, ${b}))`;
           return `(${left}, ${b} = ${expr(e.right)}, typeof ${a} === "number" && typeof ${b} === "number" && (${r} = ${a} ${op} ${b}, ${r} - ${r} === 0) ? ${r} : ${checked}(${k}, ${a}, ${b}))`;
         }
         case "<":
         case "<=":
         case ">":
         case ">=":
+          if (numeric(e.left) && numeric(e.right)) return `(${left}, ${b} = ${expr(e.right)}, ${a} ${op} ${b})`;
           return `(${left}, ${b} = ${expr(e.right)}, typeof ${a} === "number" && typeof ${b} === "number" ? ${a} ${op} ${b} : ${checked}(${k}, ${a}, ${b}))`;
         case "==":
         case "!=": {
+          if (primitive(e.left) && primitive(e.right)) return `(${left}, ${b} = ${expr(e.right)}, ${a} ${op === "==" ? "===" : "!=="} ${b})`;
           const same = `((typeof ${a} !== "object" || ${a} === null) && (typeof ${b} !== "object" || ${b} === null) ? ${a} === ${b} : rt.eq(${a}, ${b}))`;
           return `(${left}, ${b} = ${expr(e.right)}, ${op === "==" ? same : `!${same}`})`;
         }
         case "and":
+          if (isBool(e.left) && isBool(e.right)) return `(${left} ? ${expr(e.right)} : false)`;
           return `(${left} === true ? (${b} = ${expr(e.right)}, typeof ${b} === "boolean" ? ${b} : ${checked}(${k}, ${a}, ${b})) : ${a} === false ? false : rt.throwIt(rt.notLogical(${k}, ${a})))`;
         case "or":
+          if (isBool(e.left) && isBool(e.right)) return `(${left} ? true : ${expr(e.right)})`;
           return `(${left} === false ? (${b} = ${expr(e.right)}, typeof ${b} === "boolean" ? ${b} : ${checked}(${k}, ${a}, ${b})) : ${a} === true ? true : rt.throwIt(rt.notLogical(${k}, ${a})))`;
         case "otherwise":
           return `(${left} !== null ? ${a} : ${checked}(${k}, ${a}, ${expr(e.right)}))`;
@@ -504,7 +544,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
             if (flat && rangeWaits(pc + 1, after)) {
               const c = x();
               line(`${c} = ${expr(ins.condition)};`);
-              line(`if (${c} !== true && ${c} !== false) throw rt.notBool(${konst(ins.condition)}, ${c});`);
+              if (!isBool(ins.condition)) line(`if (${c} !== true && ${c} !== false) throw rt.notBool(${konst(ins.condition)}, ${c});`);
               line(`if (!${c}) { pc = ${ins.target}; continue D; }`);
               pc += 1;
               continue;
@@ -512,7 +552,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
             structured(() => {
               const c = x();
               line(`${c} = ${expr(ins.condition)};`);
-              line(`if (${c} !== true && ${c} !== false) throw rt.notBool(${konst(ins.condition)}, ${c});`);
+              if (!isBool(ins.condition)) line(`if (${c} !== true && ${c} !== false) throw rt.notBool(${konst(ins.condition)}, ${c});`);
               line(`if (${c}) {`);
               indent += 1;
               emitRange(pc + 1, shape.thenEnd);
@@ -602,7 +642,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
         }
         const c = x();
         line(`${c} = ${expr(ins.expression)};`);
-        line(`if (${c} !== true) { if (${c} === false) break; throw rt.notBool(${konst(ins.expression)}, ${c}); }`);
+        line(isBool(ins.expression) ? `if (!${c}) break;` : `if (${c} !== true) { if (${c} === false) break; throw rt.notBool(${konst(ins.expression)}, ${c}); }`);
         scopes.push(new Map());
       } else if (ins.loopKind === "for" && ins.expression.kind === "range" && ins.valueVariable === undefined) {
         // A range written in the loop: its whole-number bounds inline; anything else faults through today's checks.
