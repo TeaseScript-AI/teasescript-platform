@@ -6,6 +6,12 @@ TypeScript and JavaScript source, tests, playground code, and tooling, including
 `<script>` blocks of `.vue` files.
 Dependency, build, coverage, and Git directories are excluded. `npm run check` includes lint and rule fixtures.
 
+`npm run lint` also runs the repository's own checks (`tools/oxlint/run.mjs`), each in a folder by what it reads. A
+check of what comments say goes in `tools/oxlint/comments/`, beside the lists it reads. A check over the type
+analysis's code (`src/type-inference/core/`) or its test helpers goes in `tools/oxlint/type-core/`; a check over the
+compiler outside the type analysis (none exists yet) starts a folder of its own. A check of the lint configuration
+stays in `tools/oxlint/`. Any other check starts a subject folder beside these, not in `tools/oxlint/` itself.
+
 ## Correctness category
 
 Oxlint's `correctness` category is on. Two of its rules are off, because every site the code has is deliberate:
@@ -80,7 +86,7 @@ configuration and stops oxlint and the check by that signal; the next run remove
 
 ## Comment forecasts
 
-`tools/oxlint/check-comment-forecasts.mjs` refuses a comment that forecasts later work, in the forms
+`tools/oxlint/comments/check-comment-forecasts.mjs` refuses a comment that forecasts later work, in the forms
 [Code that does not mislead](review-and-audit/IMPLEMENTATION-AND-REVIEW.md#code-that-does-not-mislead) lists (its
 `FORECASTS` table); a citation of a repository record passes. The old design record (TABLE) is not in the repository,
 so it cites nothing: in every file Git lists except the check's own test, a line that names it as a whole word and
@@ -100,7 +106,7 @@ as a whole number, in a section list right after a repository document's name on
 repository. Any other section number is refused in every file
 Git lists except `docs/`, whose documents number their own sections; `src/`, whose comments #2209 rewrites;
 `tests/fixtures/type-core/cells.jsonl`, whose section numbers are cell ids in recorded data whose bytes `MANIFEST.md`
-fixes; `tools/oxlint/comment-declarations-waiting.json`, which quotes comments word for word, its section numbers only
+fixes; `tools/oxlint/comments/comment-declarations-waiting.json`, which quotes comments word for word, its section numbers only
 `src/`'s, and shrinks with #2209; and the check's test. The check proves the form, not that the section exists or
 carries the sentence's claim. A research label (a `LABEL` of the check: `C9`, `W34`, `S6-CARRIERS`) has a row in the
 record's glossary (its `README.md`, "Labels") where it stands in a comment under `src/type-inference/core/` or in
@@ -119,7 +125,7 @@ bare `r4.N`, read as the revision rule reads it, and the record's name with anot
 
 ## Comment declarations
 
-`tools/oxlint/check-comment-declarations.mjs` refuses a backticked name in a comment that names nothing the repository
+`tools/oxlint/comments/check-comment-declarations.mjs` refuses a backticked name in a comment that names nothing the repository
 declares or reads: it proves only that the name exists somewhere, not that it names what the comment's site means.
 `comment-external-names.json` declares names no file can, each with its kind and source; that list may grow. It also
 refuses a `/**` docblock that does not stand directly on its declaration (a blank line, another block or comment between,
@@ -145,7 +151,7 @@ bypass ordinary typed property access or invocation. Type inference is the excep
 
 ## Retained state in type inference
 
-`tools/oxlint/check-retained-state.mjs` holds the code side of the frozen retained-state regime (docs/TESTING.md,
+`tools/oxlint/type-core/check-retained-state.mjs` holds the code side of the frozen retained-state regime (docs/TESTING.md,
 "Frozen retained state"), which catches a write to retained state that the type core makes by ordinary code, across
 runs, in test mode; it does not claim to resist code written to get around it (#1072 R33).
 

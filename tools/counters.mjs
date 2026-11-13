@@ -35,10 +35,11 @@
 //   `node:process` or `process`. Any other form stays on a condition.
 // - The lists count their entries: the `files` of each `.oxlintrc.json` override that is a waiting list (docs/LINTING.md
 //   "Waiting lists", by tools/oxlint/check-waiting-overrides.mjs's `isWaitingEntry`), the items of
-//   tools/oxlint/comment-forecasts-allowed.json, comment-declarations-waiting.json and comment-external-names.json
-//   (a list that may grow), the entries of tools/repository-checks/imports-waiting.json (value cycles and boundary
-//   crossings waiting), and the sum of the counts in comment-citations.json. A list whose file does not exist is
-//   null, printed "absent"; an `overrides` or `files` field left out counts 0, and one of another type is malformed.
+//   tools/oxlint/comments/comment-forecasts-allowed.json, comment-declarations-waiting.json and
+//   comment-external-names.json (a list that may grow), the entries of tools/repository-checks/imports-waiting.json
+//   (value cycles and boundary crossings waiting), and the sum of the counts in comment-citations.json; a comments/
+//   list not there is read in tools/oxlint/, its earlier place. A list whose file does not exist is null, printed
+//   "absent"; an `overrides` or `files` field left out counts 0, and one of another type is malformed.
 // - The structure signals are this checkout's tools/structure-report.mjs run in ROOT, so one definition measures any
 //   ROOT: its counts of large files, broad folders and long functions, and the largest of the files and the longest of
 //   the functions it lists, each null when none passes its threshold. Beside each count, the excess summed over the
@@ -86,13 +87,17 @@ const COMPARISONS = new Set([
   ts.SyntaxKind.InKeyword,
   ts.SyntaxKind.InstanceOfKeyword,
 ]);
+// Each oxlint list is read in tools/oxlint/comments/, else where it was before that folder (#2633): the worker monitor
+// runs this file on runtime-v2's tree, which keeps the old layout until its merge of main carries the move. The second
+// path goes when runtime-v2 holds the move.
+const commentList = (name) => [`tools/oxlint/comments/${name}`, `tools/oxlint/${name}`];
 const LISTS = {
-  forecastsAllowed: "tools/oxlint/comment-forecasts-allowed.json",
-  declarationsWaiting: "tools/oxlint/comment-declarations-waiting.json",
-  externalNames: "tools/oxlint/comment-external-names.json",
-  importsWaiting: "tools/repository-checks/imports-waiting.json",
+  forecastsAllowed: commentList("comment-forecasts-allowed.json"),
+  declarationsWaiting: commentList("comment-declarations-waiting.json"),
+  externalNames: commentList("comment-external-names.json"),
+  importsWaiting: ["tools/repository-checks/imports-waiting.json"],
 };
-const CITATIONS = "tools/oxlint/comment-citations.json";
+const CITATIONS = commentList("comment-citations.json");
 
 class CannotRun extends Error {}
 class Stopped extends Error {
@@ -379,6 +384,10 @@ function directivesAndTests(root) {
   return sites;
 }
 
+/** The first of `paths` that exists in `root`, else the first. */
+const firstPresent = (root, paths) =>
+  paths.find((file) => existsSync(path.join(root, file))) ?? paths[0];
+
 function readJson(root, file) {
   const full = path.join(root, file);
   if (!existsSync(full)) return undefined;
@@ -412,18 +421,20 @@ function lists(root) {
       if (isWaitingEntry(override)) counts.oxlintOverrideFiles += files.length;
     }
   }
-  for (const [key, file] of Object.entries(LISTS)) {
+  for (const [key, paths] of Object.entries(LISTS)) {
+    const file = firstPresent(root, paths);
     const list = readJson(root, file);
     if (list !== undefined) shape(file, Array.isArray(list), "an array");
     counts[key] = list === undefined ? null : list.length;
   }
-  const citations = readJson(root, CITATIONS);
+  const citationsFile = firstPresent(root, CITATIONS);
+  const citations = readJson(root, citationsFile);
   if (citations === undefined) counts.citations = null;
   else {
     const perFile = isObject(citations) ? Object.values(citations) : [];
     const counted = perFile.flatMap((c) => (isObject(c) ? Object.values(c) : [NaN]));
     shape(
-      CITATIONS,
+      citationsFile,
       isObject(citations) && counted.every((n) => Number.isInteger(n) && n >= 0),
       "an object of files, each an object of citations to counts",
     );

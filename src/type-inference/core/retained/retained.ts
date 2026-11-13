@@ -91,7 +91,7 @@ export function retainedCopy<T extends object>(given: T): T {
   ) as T;
 }
 
-/** The one way a retained collection is made (`tools/oxlint/check-retained-state.mjs`). */
+/** The one way a retained collection is made (`tools/oxlint/type-core/check-retained-state.mjs`). */
 export const Retained = {
   map<K, V>(name: string, entries: Iterable<readonly [K, V]> | null = null): Map<K, V> {
     if (active !== null) return active.map(name, entries);

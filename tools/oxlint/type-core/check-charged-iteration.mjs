@@ -570,7 +570,7 @@ export function chargedIterationDiagnostics(program, root, rules) {
             if (!outside.has(name))
               report(
                 node,
-                `\`${name}\` is not in OUTSIDE (tools/oxlint/check-charged-iteration.mjs): list it with why a call ` +
+                `\`${name}\` is not in OUTSIDE (tools/oxlint/type-core/check-charged-iteration.mjs): list it with why a call ` +
                   "walks nothing uncharged, or walk through charged-iteration.ts.",
               );
             // (in objects.ts an allowed function is only called, so the rule below sees each call's arguments; a getter

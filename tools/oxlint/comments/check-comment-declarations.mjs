@@ -209,7 +209,7 @@ export function checkCommentDeclarations(root) {
   for (const [index, item] of waiting.entries())
     if (!used.has(index))
       diagnostics.push({
-        fileName: "tools/oxlint/comment-declarations-waiting.json",
+        fileName: "tools/oxlint/comments/comment-declarations-waiting.json",
         line: 1,
         column: 1,
         message: `${item.file}: the waiting ${item.kind} "${item.text}" is no longer found; remove its entry`,

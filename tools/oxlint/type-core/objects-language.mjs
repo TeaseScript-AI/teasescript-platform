@@ -402,7 +402,7 @@ export function objectsLanguage({
   const reject = (node, rule, message) =>
     report(
       node,
-      `objects.ts admits no ${message} [${rule}] (its language: tools/oxlint/objects-language.mjs).`,
+      `objects.ts admits no ${message} [${rule}] (its language: tools/oxlint/type-core/objects-language.mjs).`,
     );
   /** Whether an arrow stands in one of its three admitted places. */
   const arrowAdmitted = (arrow) => {

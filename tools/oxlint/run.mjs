@@ -3,14 +3,14 @@ import { existsSync, readFileSync } from "node:fs";
 import { relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { checkChargedIteration } from "./check-charged-iteration.mjs";
-import { checkCommentDeclarations } from "./check-comment-declarations.mjs";
-import { checkCommentForecasts } from "./check-comment-forecasts.mjs";
-import { checkEvidenceComments } from "./check-evidence.mjs";
-import { checkObligationInventory } from "./check-obligation-inventory.mjs";
-import { checkQuestionSources } from "./check-question-sources.mjs";
-import { checkRetainedState } from "./check-retained-state.mjs";
-import { checkSiteKeys } from "./check-site-keys.mjs";
+import { checkChargedIteration } from "./type-core/check-charged-iteration.mjs";
+import { checkCommentDeclarations } from "./comments/check-comment-declarations.mjs";
+import { checkCommentForecasts } from "./comments/check-comment-forecasts.mjs";
+import { checkEvidenceComments } from "./comments/check-evidence.mjs";
+import { checkObligationInventory } from "./type-core/check-obligation-inventory.mjs";
+import { checkQuestionSources } from "./type-core/check-question-sources.mjs";
+import { checkRetainedState } from "./type-core/check-retained-state.mjs";
+import { checkSiteKeys } from "./type-core/check-site-keys.mjs";
 import { checkWaitingOverrides } from "./check-waiting-overrides.mjs";
 import { lintFiles, OXLINT_OPTIONS, repositoryRoot } from "./files.mjs";
 

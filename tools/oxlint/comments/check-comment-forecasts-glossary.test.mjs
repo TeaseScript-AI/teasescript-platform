@@ -1,6 +1,7 @@
 // check-comment-forecasts's tests of printed text and the glossary: which text a test prints, that each label printed
-// text carries has a glossary row, and that the glossary's rows are the README's labels, each carried. They quote no
-// old-record citation, which only check-comment-forecasts.test.mjs may hold (CITATION_FIXTURES), and run no git.
+// text carries has a glossary row, and that the glossary's rows are the README's labels, each carried. They quote none
+// of what the check refuses outside its own test (CITATION_FIXTURES): an old-record citation, a revision number with
+// no entry, or a section number outside a section list. They run no git.
 
 import assert from "node:assert/strict";
 import { test } from "node:test";

@@ -6,7 +6,7 @@ import {
   retainedStateDiagnostics,
   scratchProgram,
 } from "./check-retained-state.mjs";
-import { repositoryRoot } from "./files.mjs";
+import { repositoryRoot } from "../files.mjs";
 
 /** The retained API, imported at a scratch file's end so that its lines keep their numbers. */
 const API = '\nimport { Retained, retainedModule } from "./retained/retained.js";\n';

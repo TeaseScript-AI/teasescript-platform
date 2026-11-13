@@ -20,8 +20,8 @@ import {
   unresolvedPointers,
   unresolvedRevisionsIn,
 } from "./check-comment-forecasts.mjs";
-import { repositoryRoot } from "./files.mjs";
-import { isolateGit } from "../fixture-git.mjs";
+import { repositoryRoot } from "../files.mjs";
+import { isolateGit } from "../../fixture-git.mjs";
 
 isolateGit();
 
@@ -370,7 +370,7 @@ test("a heading the doc-links check resolves is an entry exactly when its level 
     );
     const links = spawnSync(
       process.execPath,
-      [fileURLToPath(new URL("../repository-checks/doc-links.mjs", import.meta.url))],
+      [fileURLToPath(new URL("../../repository-checks/doc-links.mjs", import.meta.url))],
       { cwd: root, encoding: "utf8" },
     );
     const unresolved = new Set(
@@ -446,7 +446,7 @@ test("a record page's anchors are exactly those the doc-links check resolves, he
     );
     const links = spawnSync(
       process.execPath,
-      [fileURLToPath(new URL("../repository-checks/doc-links.mjs", import.meta.url))],
+      [fileURLToPath(new URL("../../repository-checks/doc-links.mjs", import.meta.url))],
       { cwd: root, encoding: "utf8" },
     );
     const unresolved = new Set(
@@ -475,14 +475,15 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
     git("init", "-q");
     write(".gitignore", "ignored/\nnode_modules\n");
     // the lint runner's entry, `checkCommentForecasts`, run on this repository: its module and the files it reads
-    for (const file of ["check-comment-forecasts.mjs", "comments.mjs", "files.mjs"])
-      write(`tools/oxlint/${file}`, readFileSync(new URL(file, import.meta.url)));
+    for (const file of ["check-comment-forecasts.mjs", "comments.mjs"])
+      write(`tools/oxlint/comments/${file}`, readFileSync(new URL(file, import.meta.url)));
+    write("tools/oxlint/files.mjs", readFileSync(new URL("../files.mjs", import.meta.url)));
     write(
       "tools/repository-checks/markdown.mjs",
-      readFileSync(new URL("../repository-checks/markdown.mjs", import.meta.url)),
+      readFileSync(new URL("../../repository-checks/markdown.mjs", import.meta.url)),
     );
-    write("tools/oxlint/comment-forecasts-allowed.json", "[]\n");
-    write("tools/oxlint/comment-citations.json", "{}\n");
+    write("tools/oxlint/comments/comment-forecasts-allowed.json", "[]\n");
+    write("tools/oxlint/comments/comment-citations.json", "{}\n");
     // entries on every record page Git lists: the README, a nested page and another Markdown extension too
     const record = "docs/specifications/type-inference-accepted-record";
     write(
@@ -542,7 +543,7 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
     write("docs/sections.md", "See §5.\n");
     write("src/sections.ts", "// §6\n");
     write("tests/fixtures/type-core/cells.jsonl", '{"cells": ["§7"]}\n');
-    write("tools/oxlint/comment-declarations-waiting.json", '[{"text": "§8"}]\n');
+    write("tools/oxlint/comments/comment-declarations-waiting.json", '[{"text": "§8"}]\n');
     write("sections.bin", "x\0§9\n");
     write("src/rev.ts", 'const reason = "r4.9998 and r4.38";\n');
     symlinkSync(join(repositoryRoot, "node_modules"), join(root, "node_modules"));
@@ -585,7 +586,7 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
     // the doc-links check resolves the struck-through heading the revision rule takes as an entry
     const links = spawnSync(
       process.execPath,
-      [fileURLToPath(new URL("../repository-checks/doc-links.mjs", import.meta.url))],
+      [fileURLToPath(new URL("../../repository-checks/doc-links.mjs", import.meta.url))],
       { cwd: root, encoding: "utf8" },
     );
     assert.equal(links.status, 0, links.stderr);
@@ -594,7 +595,7 @@ test("the TABLE citation check reads every file Git lists, by its exact path, an
     const sections = ["data/sections.json:1", "tests/sections.ts:2"];
     assert.deepEqual(at(listed, "a section number without"), sections);
     const entry = await import(
-      pathToFileURL(join(root, "tools/oxlint/check-comment-forecasts.mjs")).href
+      pathToFileURL(join(root, "tools/oxlint/comments/check-comment-forecasts.mjs")).href
     );
     const entryFindings = entry.checkCommentForecasts(root);
     assert.deepEqual(at(entryFindings, "cites a record that is not in the repository"), expected);
@@ -634,7 +635,10 @@ test("only this test's own text is exempt from the TABLE citation check, by its 
   assert.ok(tableCitationsIn("tools/oxlint/other.test.mjs", own).length > 0);
   const check = new URL("./check-comment-forecasts.mjs", import.meta.url);
   assert.deepEqual(
-    tableCitationsIn("tools/oxlint/check-comment-forecasts.mjs", readFileSync(check, "utf8")),
+    tableCitationsIn(
+      "tools/oxlint/comments/check-comment-forecasts.mjs",
+      readFileSync(check, "utf8"),
+    ),
     [],
   );
 });
@@ -765,7 +769,7 @@ test("the section rule's exemptions are exact paths and two folders", () => {
     "src/a.ts",
     "src/type-inference/core/b.ts",
     "tests/fixtures/type-core/cells.jsonl",
-    "tools/oxlint/comment-declarations-waiting.json",
+    "tools/oxlint/comments/comment-declarations-waiting.json",
     CITATION_FIXTURES,
   ])
     assert.deepEqual(unnamedSectionsIn(file, "§1\n"), [], file);
@@ -776,8 +780,8 @@ test("the section rule's exemptions are exact paths and two folders", () => {
     "other/tests/fixtures/type-core/cells.jsonl",
     "tests/fixtures/type-core/cells-deferred.jsonl",
     "tests/fixtures/type-core/MANIFEST.md",
-    "tools/oxlint/comment-declarations-waiting.json.bak",
-    "tools/oxlint/comment-citations.json",
+    "tools/oxlint/comments/comment-declarations-waiting.json.bak",
+    "tools/oxlint/comments/comment-citations.json",
     `other/${CITATION_FIXTURES}`,
   ])
     assert.equal(unnamedSectionsIn(file, "§1\n").length, 1, file);
