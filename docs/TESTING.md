@@ -192,8 +192,8 @@ before it. An empty cell has no corpus yet.
 | Website front end | none yet: its checks and area label come when the front end exists | | |
 | Player | `npm run check`; the [scoped visual check](#player-browser-and-visual-verification) after a visible UI change; [`npm run test:player:browser`](#local-browser-smoke-and-future-host-e2e-gate) for a change to `player/` or its fixture packages | `npm run test:player:browser` plus [`npm run test:player:preview`](#player-browser-and-visual-verification) | a real-device check |
 
-The compiler's [shadow comparison](#the-shadow-comparison) is a campaign run when it is expected to find defects, not a
-per-pull-request level.
+The compiler's [shadow comparison](#the-shadow-comparison) is a campaign run when it is expected to find defects and
+reported on the tracker issue; it is not a per-pull-request level.
 
 The exact compiler comparison uses `tests/families/plans.mjs` for the whole plan, diagnostics, charge trace and
 questions in four modes, counting resumed records in its verdict and refusing one build as both trees. Judge each

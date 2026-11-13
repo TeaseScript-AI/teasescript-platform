@@ -576,7 +576,7 @@ natural runs hold ordinary decision records and at least one run at the demand c
 completion) and, as information only, the sources whose core differs across the four modes and the control's runs that
 left the slice, one row a class that names a text, `declined/lost check` and each rule of `EXCLUSIONS` (zeros
 included), and one a text no class names (`Unlisted control texts`); the verdict line is `gate:
-green` only with no `open` row, and `--gate` exits 1 otherwise. Over the research's
+green` only with no `open` row, and `--gate` (which needs `--expect`) exits 1 otherwise. Over the research's
 records it reproduces its aggregate (`~/work/evidence/1728/`):
 
 ```sh
