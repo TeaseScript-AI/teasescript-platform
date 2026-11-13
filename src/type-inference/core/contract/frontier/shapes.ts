@@ -6,9 +6,7 @@
 // and the receiver shapes it was reached under (an atom): it advances only while each of them holds something below it,
 // and dies at a floor; a floor's own step stops its prefix's stores and carries its unknowns, its accepted marks too.
 // The shapes are the receiver-shape graph's interned node sets (`shapesOf`: the same producers, unmarked). An atom of
-// no shape is its plain state. With Q shapes reached, at most R·2^Q atoms, before absorption. The types are in
-// `nodes.ts`; the scoped walk (`compose`, `constrain`, `advanceAtoms`, `structured`, `shapeStep`) is in `walk.ts`,
-// beside the leaves and steps it reads (`leavesOf`, `star`).
+// no shape is its plain state. With Q shapes reached, at most R·2^Q atoms, before absorption.
 
 import { joinParts, keep, keptSteps } from "../../budget.js";
 import { makeItem, REASON } from "../../items.js";

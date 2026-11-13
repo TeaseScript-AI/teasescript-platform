@@ -269,9 +269,8 @@ export function* summaryCount(
 
 /**
  * A property's presence after a prefix's layers at `rest`, read in their sources' order from the incoming state `mask`,
- * its demands run as the consumer runs its reads (`run`, with its read's allowance), and nothing run where no layer may
- * hold a source there; `null` where a summary declines or the run stops, so the consumer reads each source by itself,
- * each with its own allowance.
+ * its demands run by `run`, with the read's allowance, and nothing run where no layer may hold a source there; `null`
+ * where a summary declines or the run stops.
  */
 export function summaryPresence(
   contract: Contract,
@@ -308,7 +307,7 @@ export function summaryPresence(
 /**
  * The conflict candidates of a prefix's layers at `rest`: the stores that brought each layer whose summary holds an
  * offending item (`offends` holds of a merge exactly where it holds of one of the merged sources' answers), its demands
- * run as admission runs its questions (`run`), nothing run where no layer may hold a source there; `null` where a
+ * run by `run`, nothing run where no layer may hold a source there; `null` where a
  * summary declines.
  */
 export function offendingStores(

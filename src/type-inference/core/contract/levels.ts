@@ -181,7 +181,7 @@ export function closedObject(contract: Contract, entry: PrefixEntry): boolean {
  * #1456: a prefix's contributions at a path below it whose first step is a property, where its entries are closed
  * objects (`PrefixLevels.closed`), from its property index (`propertyIndex`): the answers of the sources holding the
  * property alone (each entry by itself at the path, the sharing off; on, their groups at the path, folded from theirs
- * one step at a time as `groupsAt` folds, never kept as the prefix's), and one `missing` for those without it,
+ * one step at a time, never kept as the prefix's), and one `missing` for those without it,
  * with the earliest literal writer, standing where the first of them stands among the holders (`propertyLack`); `null`
  * for any other prefix or path (a selection below the property: each entry by itself, `contractAlong`), which its
  * levels answer, and for the prefix's reads before its index pays: its first at the levels' own cost, so a prefix

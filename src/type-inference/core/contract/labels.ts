@@ -87,8 +87,8 @@ function shown(contract: Contract, label: Label): string {
 }
 
 /**
- * A label's text made plain and not kept here, charging nothing (`labelText`'s twin, as `pathText` is `keptText`'s):
- * for a caller that charges the text it keeps itself, the boundary check's (`publish`).
+ * A label's text made plain and not kept here, charging nothing (`labelText`'s twin): for a caller that charges the
+ * text it keeps itself.
  */
 export function labelPlainText(label: Label): string {
   const made = label.text === null;

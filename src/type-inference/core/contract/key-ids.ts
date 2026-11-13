@@ -1114,8 +1114,7 @@ export function memberStepIn(contract: Contract, id: KeyId, from = 0): number {
 /**
  * Two cursors in the order of their keys' texts (`keyOfId`, UTF-16 code units), the canonical order (#1398), never
  * their ids': their places' decimal texts, then their paths from the steps where they part, found by climbing to them
- * (each node charged); a path before the paths below it. Exported for the key-id tests, its one caller; the analysis
- * orders demands' names by `compareDemandNames`.
+ * (each node charged); a path before the paths below it. Exported for the key-id tests.
  */
 export function compareKeyIds(contract: Contract, a: KeyId, b: KeyId): number {
   if (a === b) return 0;

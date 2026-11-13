@@ -606,9 +606,9 @@ export function* signatureWork(contract: Contract, literal: PlaceId): IdentityWo
 /**
  * #1203: below their root, a literal path's classes of computed-key loads (`OtherGroup.loads`) on either side, their
  * members' answers merged, made once per pass at their first read there and taken at every later one for a step. Each
- * load's value there is host data (`hostAt`) whatever the path, the node and the default (on the value side its one
- * demand below the root, `Values.#operationItems`), naming its own ingress, so the merge keeps every member's leaf, and
- * loads of different defaults answer together. The root, with a `null` default's `null`, is read member by member.
+ * load's value there is host data (`hostAt`) whatever the path, the node and the default, naming its own ingress, so
+ * the merge keeps every member's leaf, and loads of different defaults answer together. The root, with a `null`
+ * default's `null`, is read member by member.
  */
 export function* loadsBelow(
   contract: Contract,

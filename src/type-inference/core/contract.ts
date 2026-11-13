@@ -214,10 +214,8 @@ export { withOwnSelection } from "./contract/value-kinds.js";
  * The contract side's per-pass state, its stop bookkeeping, and its entry points. Most public methods delegate to a
  * function of `contract/` (of the same name, or with `In` for `keyParent`, `keyLast` and `keyDepth`); `contract/`
  * modules call one another through them where a direct import would close a cycle, so none imports a sibling that
- * imports it back (`check:imports` refuses a value-import cycle). The fields are public for `contract/`; the path
- * arena's (`path*`), `facts`, `supportIds`, `targetsDecide` and `plusIndex` are also read or written outside it
- * (admission, `inherited/`, `values.ts`, `property-names.ts`, `answers.ts`, `indexes/plus-index.ts`); `answers.ts` writes
- * `targetsDecide` and `indexes/plus-index.ts` writes `plusIndex` (#2745).
+ * imports it back (`check:imports` refuses a value-import cycle). The fields are public for `contract/`; some are also
+ * read or written outside it (#2745).
  */
 export class Contract {
   readonly facts = new ContractCounters();
@@ -681,7 +679,7 @@ export class Contract {
    * through the charged boundary (`stepsOfId`), since no path id leaves its pass. Not recorded as asked, as are the
    * three getters below (unlike `stopped` and `keyStopped`): read one inside a demand only where that demand, or one
    * its answer reads (`pushedRun`), is remembered (`remember`), or once no decision of the pass can still stop
-   * (`#close`: `closeDecisions`, `decided` for the last group, or `openDecisions` with none open).
+   * (`#close`).
    */
   public stoppedKeys(): readonly StoppedKey[] {
     return [...this.#stopped].flatMap(([place, paths]) =>
