@@ -23,6 +23,7 @@ const REPRESENTATIVES = {
   "player-vue": ["player/vue/src/shell/PlayerApp.vue", ["player-vue"]],
   "oxlint-rules": ["tools/oxlint/run.mjs", ["oxlint-rules"]],
   tools: ["tools/test-shards.mjs", ["tools"]],
+  "check runners": ["tools/check/run-check.mjs", ["tools"]],
   "repository checks": ["tools/repository-checks/regression-cases.mjs", ["tools"]],
   families: [
     "tests/families/copies/copy-admission/named-and-nested-composite-admission.mjs",
