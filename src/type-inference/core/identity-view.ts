@@ -9,9 +9,11 @@ import type {
   Statement,
 } from "../../ast.js";
 import { changesEntries } from "../../dict-operations.js";
+import { unwrap } from "../../expression-children.js";
 import { listMethod } from "../../list-methods.js";
 import type { SourceSpan } from "../../source.js";
 import type { CoreRuntimeChecks, TypeCheckOptions, TypeCheckResult } from "../backend.js";
+import type { WorkLedger } from "./budget.js";
 import type { CoreAnalysisRequest, CoreFile } from "./program.js";
 
 /*
@@ -45,7 +47,7 @@ export interface IdentityView {
   readonly request: CoreAnalysisRequest;
   /** How many calls the view reads as their argument. */
   readonly calls: number;
-  /** The units of work the view took (`identitySteps`): none where the project declares no identity function. */
+  /** The units of work the view took (`identitySteps`, `viewProgram`'s list): none without an identity function. */
   readonly steps: number;
   /** The node of the source that a node of the view stands for: a call for the parentheses that read it. */
   sourceOf<T extends SyntaxNode>(node: T): T;
@@ -116,8 +118,8 @@ export function identityView(request: CoreAnalysisRequest): IdentityView {
   const known = VIEWS.get(request);
   if (known !== undefined) return known;
   const programs = request.files.map((file) => file.program);
-  const eligible = identityNames(programs);
-  if (eligible === null) {
+  const names = identityNames(programs);
+  if (names === null) {
     const none: IdentityView = {
       source: request,
       request,
@@ -129,27 +131,32 @@ export function identityView(request: CoreAnalysisRequest): IdentityView {
     VIEWS.set(request, none);
     return none;
   }
-  // (the declarations scanned, then each file's walk)
-  let steps = programs.reduce((sum, program) => sum + program.statements.length, 0);
+  // (the declarations' scan; then a unit per file, each file's walk, and a unit per node translated into the view)
+  let steps = names.steps;
   const back = new Map<SyntaxNode, SyntaxNode>();
   const forth = new Map<SyntaxNode, SyntaxNode>();
   const sourceOf: Counterpart = (node) => counterpart(back, node);
   const viewOf: Counterpart = (node) => counterpart(forth, node);
+  const into: Counterpart = (node) => {
+    steps += 1;
+    return viewOf(node);
+  };
   let calls = 0;
   const files = request.files.map((file, index): CoreFile => {
-    const viewed = viewProgram(file.program, (name) => eligible(name, index), back, forth);
+    steps += 1;
+    const viewed = viewProgram(file.program, (name) => names.eligible(name, index), back, forth);
     calls += viewed.calls;
     steps += viewed.steps;
     return viewed.calls === 0
       ? file
-      : { ...file, program: viewed.program, picks: nodeMap(file.picks, viewOf) };
+      : { ...file, program: viewed.program, picks: nodeMap(file.picks, into) };
   });
   const view: IdentityView = {
     source: request,
     request:
       calls === 0
         ? request
-        : { ...request, files, options: translated(request.options, OPTIONS_INTO_VIEW, viewOf) },
+        : { ...request, files, options: translated(request.options, OPTIONS_INTO_VIEW, into) },
     calls,
     steps,
     sourceOf,
@@ -160,13 +167,25 @@ export function identityView(request: CoreAnalysisRequest): IdentityView {
   return view;
 }
 
-/** The analysis's result read back onto the source's nodes (see the module's comment). */
-export function checkedOnSource(view: IdentityView, checked: TypeCheckResult): TypeCheckResult {
+/**
+ * The analysis's result read back onto the source's nodes (see the module's comment), a unit of `identitySteps` per
+ * node translated charged to `work`.
+ */
+export function checkedOnSource(
+  view: IdentityView,
+  checked: TypeCheckResult,
+  work: WorkLedger,
+): TypeCheckResult {
   if (view.calls === 0) return checked;
-  return {
-    ...translated<Omit<TypeCheckResult, "known">>(checked, RESULT_ON_SOURCE, view.sourceOf),
-    known: (expression) => checked.known(view.viewOf(expression)),
+  let steps = 0;
+  const onSource: Counterpart = (node) => {
+    steps += 1;
+    return view.sourceOf(node);
   };
+  const result = translated<Omit<TypeCheckResult, "known">>(checked, RESULT_ON_SOURCE, onSource);
+  if (steps > 0) work.charge("identitySteps", steps);
+  // (`known` asks one node per question, a lookup)
+  return { ...result, known: (expression) => checked.known(view.viewOf(expression)) };
 }
 
 /** The other side's node of `node`, or `node` itself where the view keeps it. */
@@ -178,33 +197,41 @@ function counterpart<N extends SyntaxNode>(nodes: ReadonlyMap<SyntaxNode, Syntax
 
 /**
  * Whether a call from a file reads a name as its argument: a name the project declares as exactly one function, an
- * identity function, global or of that file; `null` where it declares none. (A function is declared at a file's top
- * level only: V30 refuses a nested one.)
+ * identity function, global or of that file; `null` where it declares none. With the units of its scan: a unit per
+ * top-level statement and per function name declared. (A function is declared at a file's top level only: V30 refuses
+ * a nested one.)
  */
 function identityNames(
   programs: readonly Program[],
-): ((name: string, file: number) => boolean) | null {
+): { readonly eligible: (name: string, file: number) => boolean; readonly steps: number } | null {
   const declared = new Map<string, { declaration: FunctionDeclaration; file: number }[]>();
+  let steps = 0;
   programs.forEach((program, file) => {
-    for (const statement of program.statements)
+    for (const statement of program.statements) {
+      steps += 1;
       if (statement.kind === "functionDeclaration") {
         const same = declared.get(statement.name.name);
         if (same === undefined)
           declared.set(statement.name.name, [{ declaration: statement, file }]);
         else same.push({ declaration: statement, file });
       }
+    }
   });
   // each name decided once: declared exactly once, as an identity function
   const identities = new Map<string, { declaration: FunctionDeclaration; file: number }>();
   for (const [name, same] of declared) {
+    steps += 1;
     const only = same[0];
     if (same.length === 1 && only !== undefined && isIdentity(only.declaration))
       identities.set(name, only);
   }
   if (identities.size === 0) return null;
-  return (name, file) => {
-    const only = identities.get(name);
-    return only !== undefined && (only.declaration.global || only.file === file);
+  return {
+    eligible: (name, file) => {
+      const only = identities.get(name);
+      return only !== undefined && (only.declaration.global || only.file === file);
+    },
+    steps,
   };
 }
 
@@ -247,8 +274,19 @@ interface Visit {
 
 /**
  * A program's view: the program itself where it holds no call the view reads, else a copy of each node on the way to
- * one, each such call a parenthesized expression; with the units of work it took, a unit per value walked. Iterative,
- * so a deep program does not deepen the native stack.
+ * one, each such call a parenthesized expression. Iterative, so a deep program does not deepen the native stack.
+ *
+ * Its units of work (`identitySteps`), one for each turn of each loop, so the allowance bounds all the work the view
+ * does. Together with `identityView`'s (a unit per file and per node translated into the view, and `identityNames`' a
+ * unit per top-level statement and per function name) and `checkedOnSource`'s (a unit per node translated back), these
+ * are every loop of the view:
+ * - the walk: a unit per value met (a node, a list, a member's value, `null`);
+ * - at a function, `ownNames`: a unit per value of its body met; and the copy of the names it inherits with its own
+ *   added, a unit per name copied. (Functions do not nest, V30 refusing a nested one, so the inherited set is empty;
+ *   the copy is charged all the same);
+ * - at a call, the parentheses `unwrap` strips from its callee (the collector reads the callee so): a unit each;
+ * - the marking of the ancestors of each call read: a unit per ancestor marked;
+ * - the rebuild: a unit per container walked, and a unit per member a changed container maps.
  */
 function viewProgram(
   program: Program,
@@ -273,10 +311,14 @@ function viewProgram(
     let shadowed = visit.shadowed;
     if (isFunction(value)) {
       const own = ownNames(value);
-      steps += own.steps;
+      steps += own.steps + shadowed.size + own.names.length;
       shadowed = new Set([...shadowed, ...own.names]);
     }
-    if (isNode(value)) for (const slot of placeSlots(value, places.has(value))) places.add(slot);
+    if (isNode(value)) {
+      const slots = placeSlots(value, places.has(value));
+      steps += slots.steps;
+      for (const slot of slots.slots) places.add(slot);
+    }
     if (
       isCall(value) &&
       !places.has(value) &&
@@ -290,12 +332,14 @@ function viewProgram(
   // the containers on the way to a call the view reads, each rebuilt after its contents
   const changed = new Set<unknown>();
   for (const call of reads)
-    for (let at: unknown = call; at !== null && !changed.has(at); at = holders.get(at) ?? null)
+    for (let at: unknown = call; at !== null && !changed.has(at); at = holders.get(at) ?? null) {
+      steps += 1;
       changed.add(at);
+    }
   // (each changed container's copy; any other value is kept)
   const rebuilt = new Map<unknown, object>();
-  steps += order.length;
   for (const value of order.reverse()) {
+    steps += 1;
     if (!changed.has(value)) continue;
     if (isCall(value) && reads.has(value)) {
       const parentheses: ParenthesizedExpression = {
@@ -306,14 +350,17 @@ function viewProgram(
       back.set(parentheses, value);
       forth.set(value, parentheses);
       rebuilt.set(value, parentheses);
-    } else if (Array.isArray(value))
+    } else if (Array.isArray(value)) {
+      steps += value.length;
       rebuilt.set(
         value,
         value.map((child) => rebuilt.get(child) ?? child),
       );
-    else if (value !== null && typeof value === "object") {
+    } else if (value !== null && typeof value === "object") {
+      const members = Object.entries(value);
+      steps += members.length;
       const copy = Object.fromEntries(
-        Object.entries(value).map(([key, child]) => [key, rebuilt.get(child) ?? child]),
+        members.map(([key, child]) => [key, rebuilt.get(child) ?? child]),
       );
       if (isNode(value) && isNode(copy)) {
         back.set(copy, value);
@@ -327,28 +374,45 @@ function viewProgram(
 
 /**
  * The place slots directly below `node`, `held` where `node` stands in one (#2493, r4-452): the slots through which a
- * write reaches, a store's target's receiver and the receiver of a method that changes it, and below a slot, what
- * parentheses hold and a property's or an element's receiver. The analysis's readers that take a parenthesized
+ * write reaches, a store's target's receiver and the receiver of a method that changes it, its callee read through
+ * parentheses, and below a slot, what parentheses hold and a property's or an element's receiver; with the parentheses
+ * stripped from a callee, a unit each. The analysis's readers that take a parenthesized
  * expression for its place read these slots only, as a write's; a test reads its subject's value, which a call's result
  * shares with its argument when it runs (the inventory in tests/type-core/type-core-identity.test.ts).
  */
-function placeSlots(node: SyntaxNode, held: boolean): readonly unknown[] {
+function placeSlots(
+  node: SyntaxNode,
+  held: boolean,
+): { readonly slots: readonly unknown[]; readonly steps: number } {
   const value = syntaxOf(node);
   switch (value.kind) {
     case "parenthesizedExpression":
-      return held ? [value.expression] : [];
+      return { slots: held ? [value.expression] : [], steps: 0 };
     case "propertyAccessExpression":
     case "indexExpression":
-      return held ? [value.object] : [];
+      return { slots: held ? [value.object] : [], steps: 0 };
     case "assignmentStatement":
-      return value.target.kind === "identifier" ? [] : [value.target.object];
-    case "callExpression":
-      return value.callee.kind === "propertyAccessExpression" &&
-        changesReceiver(value.callee.property.name)
-        ? [value.callee.object]
-        : [];
+      return { slots: value.target.kind === "identifier" ? [] : [value.target.object], steps: 0 };
+    case "callExpression": {
+      // (the collector reads a method through the parentheses around its callee: `(xs.add)(1)` changes `xs`)
+      const callee = unwrap(value.callee);
+      let steps = 0;
+      for (
+        let at = value.callee;
+        at !== callee && at.kind === "parenthesizedExpression";
+        at = at.expression
+      )
+        steps += 1;
+      return {
+        slots:
+          callee.kind === "propertyAccessExpression" && changesReceiver(callee.property.name)
+            ? [callee.object]
+            : [],
+        steps,
+      };
+    }
     default:
-      return [];
+      return { slots: [], steps: 0 };
   }
 }
 

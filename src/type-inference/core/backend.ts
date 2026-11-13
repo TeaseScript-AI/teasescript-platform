@@ -83,9 +83,14 @@ export const CORE_BACKEND: TypeAnalysisBackend = {
 
 /**
  * The core's outcome for a request, past the slice's syntax check (`CORE_BACKEND`'s route after it). Exported only for
- * the tests that read a finished compile of a source the check refuses, as of a function (#2493).
+ * the tests that read a finished compile of a source the check refuses, as of a function (#2493). `answers: "past"`
+ * passes the answers' refusals too (`outsideAnswers`), for a test that runs a source whose values the slice does not
+ * cover yet, as an author function's list argument.
  */
-export function coreOutcome(request: TypeAnalysisRequest): TypeAnalysisOutcome {
+export function coreOutcome(
+  request: TypeAnalysisRequest,
+  answers: "refused" | "past" = "refused",
+): TypeAnalysisOutcome {
   const core = coreRequest(request);
   // (the route ends at the first refusal the analysis establishes, the capture's depth exit, at its request's site:
   // never at unfinished work, a stop or a work count)
@@ -104,17 +109,22 @@ export function coreOutcome(request: TypeAnalysisRequest): TypeAnalysisOutcome {
     request.onFile,
   );
   // (the questions after the analysis spend the same allowance: `asked`)
-  return asked(analyseCore(view.request), (answers) => outcomeOf(answers, index, view));
+  return asked(analyseCore(view.request), (asked) => outcomeOf(asked, index, view, answers));
 }
 
 /** The compiler's view of the core's answers to a program inside the slice, the facts computed here, before a caller. */
-function outcomeOf(answers: Answers, index: SliceIndex, view: IdentityView): TypeAnalysisOutcome {
+function outcomeOf(
+  answers: Answers,
+  index: SliceIndex,
+  view: IdentityView,
+  refusals: "refused" | "past",
+): TypeAnalysisOutcome {
   const core = view.request;
   try {
-    const after = outsideAnswers(answers, index);
+    const after = refusals === "past" ? null : outsideAnswers(answers, index);
     if (after !== null) throw outsideSlice(core, after);
     // (the facts are by site, which the view keeps: a call read as its argument keeps the call's span)
-    const checked = checkedOnSource(view, coreCheckResult(answers, index, core));
+    const checked = checkedOnSource(view, coreCheckResult(answers, index, core), answers.work);
     const facts = coreFacts(answers, index, core);
     return { checked, facts: () => facts };
   } catch (error) {
