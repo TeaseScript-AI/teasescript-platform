@@ -104,6 +104,16 @@ export function compareLanded(admission: Admission): void {
     }
 }
 
+/** Takes back what admission recorded of a key's decision: `recordDecision`'s maps and `deciderAt`'s site. */
+function unrecord(admission: Admission, key: CanonicalKey): void {
+  admission.decided.delete(key);
+  admission.nullable.delete(key);
+  admission.permitsNull.delete(key);
+  admission.inheritsWrittenKeys.delete(key);
+  admission.unrestricted.delete(key);
+  admission.deciderSites.delete(key);
+}
+
 /**
  * A decision that stopped at its demand allowance: what it had recorded of its key is taken back, so the key is
  * undecided, and its contract answers every read of it, or of a key below it, `unknown` with the reason `budget`
@@ -112,12 +122,7 @@ export function compareLanded(admission: Admission): void {
  */
 export function stopDecision(admission: Admission, at: DecidedAt): void {
   const { key } = atOf(admission, at);
-  admission.decided.delete(key);
-  admission.nullable.delete(key);
-  admission.permitsNull.delete(key);
-  admission.inheritsWrittenKeys.delete(key);
-  admission.unrestricted.delete(key);
-  admission.deciderSites.delete(key);
+  unrecord(admission, key);
   if (at.key === undefined) admission.pass.contract.stop(at.root, at.path);
   else admission.pass.contract.stopKey(at.key);
 }
@@ -129,12 +134,7 @@ export function stopDecision(admission: Admission, at: DecidedAt): void {
  */
 export function forgetDecision(admission: Admission, key: CanonicalKey): void {
   admission.decisions.delete(key);
-  admission.decided.delete(key);
-  admission.nullable.delete(key);
-  admission.permitsNull.delete(key);
-  admission.inheritsWrittenKeys.delete(key);
-  admission.unrestricted.delete(key);
-  admission.deciderSites.delete(key);
+  unrecord(admission, key);
   admission.attempted.delete(key);
   admission.budgetUndecided.delete(key);
 }
