@@ -609,8 +609,8 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
   switchStatement: {
     row: "modelled",
     // (its subject, then each case's values or type test and its body, then the default, in source order; a type test's
-    // written type judged as a `let`'s, refused where it stands; a case that can never match is refused after the
-    // analysis, `backend.ts`)
+    // written type judged as a `let`'s, refused where it stands; a case value the core's types show may never match is
+    // refused after the analysis, `backend.ts`; where they are wider, #2728)
     visit: (node) =>
       walk([
         node.subject,
