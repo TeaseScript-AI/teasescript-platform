@@ -13,9 +13,9 @@
  */
 
 /**
- * Test-only: the calls the retained API makes on an installed instrument, which the test class `RetainedInstrument`
- * (`tests/helpers/retained-instrument.ts`) implements. Each kind made while it is installed is made by it; each name
- * says the owner and the field (`Contract.prefix`).
+ * Test-only: the calls the retained API and the solver (`run`) make on an installed instrument, which the test class
+ * `RetainedInstrument` (`tests/helpers/retained-instrument.ts`) implements. Each kind made while it is installed is
+ * made by it; each name says the owner and the field (`Contract.prefix`).
  */
 export interface RetainedInstrumentHooks {
   map<K, V>(name: string, entries: Iterable<readonly [K, V]> | null): Map<K, V>;

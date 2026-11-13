@@ -183,7 +183,7 @@ function evaluation(statement: Statement): Evaluation {
 }
 
 /**
- * Whether a check before `statement` still holds at the use at `use` of the value at `read` (#1268):
+ * Whether a check placed right before `statement` still holds at the use at `use` of the value at `read` (#1268):
  * the statement evaluates the use whenever it runs (not after `and`, `or` or `otherwise`, nor in a `default:`), and
  * nothing it evaluates before the use, apart from the value read, may change or draw anything (`effect-facts.ts`), so
  * the check sees what the use sees and a value kept before it is the one the use would read. A value read that may
