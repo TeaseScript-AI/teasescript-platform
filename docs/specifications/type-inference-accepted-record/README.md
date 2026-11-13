@@ -83,7 +83,6 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | `C5c` | a property read or store requires a property present on its receiver |
 | `C6` | element selections require proven non-emptiness or an empty-collection runtime check |
 | `C7` | arguments and returned values must fit written parameter and result types |
-| `C8` | saved values must fit the storage key’s schema derived from its loads |
 | `C9` | validate external data at its ingress store against the admitted type, or at its own read when no store brings it |
 | `C10` | A fallback may be null; otherwise check the direct family, typed ingress’s expected type, or a directly receiving union |
 | `C11` | interpolation requires showable values and showable list elements |

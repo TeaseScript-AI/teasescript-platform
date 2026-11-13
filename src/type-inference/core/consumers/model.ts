@@ -4,9 +4,8 @@ import type { Item, ItemTag, Spelling } from "../items.js";
 
 // The shapes the consumers' reaches and literal landings are made of.
 
-/** C5b: whether a kind has the method, by the compiler's own member rules. */
 /**
- * What reaches one level of a path below a key or a value (A2, ADR 0021 rule 1.1): the literals standing there, whose
+ * What reaches one level of a path below a key or a value (ADR 0021 rule 1.1): the literals standing there, whose
  * children bring the next level; the whole copies met on the way, this level's included, and the first of them; whether
  * a value on the way is neither a copy nor a literal (`other`: what it brings is unknown); how many values stand at this
  * level itself (`here`: at a property's level, its own contributions); the elements a key's adds bring one step below
@@ -23,7 +22,7 @@ export interface Reach {
   children: Map<string, PlaceId[]> | null;
 }
 
-/** A level of a place's paths (A2): what reaches it, its key, and the levels below by step. */
+/** A level of a place's paths: what reaches it, its key, and the levels below by step. */
 export interface KeyReach {
   readonly reach: Reach;
   readonly key: Key;
@@ -31,7 +30,7 @@ export interface KeyReach {
 }
 
 /**
- * Where a literal lands (A2): the place, the node above (a literal's own landing) and the step below it, the key path
+ * Where a literal lands: the place, the node above (a literal's own landing) and the step below it, the key path
  * made once when first asked, and the nodes below by step, so sibling literals at one step share one node.
  */
 export interface Landing {
@@ -43,7 +42,7 @@ export interface Landing {
   readonly below: Map<string, Landing>;
 }
 
-/** A mixed literal's question at a landing and a path below it (A2), answered once for every element that asks it. */
+/** A mixed literal's question at a landing and a path below it, answered once for every element that asks it. */
 export interface LandingQuestion {
   readonly path: readonly string[];
   readonly copiesOnly: boolean;
