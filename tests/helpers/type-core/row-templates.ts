@@ -102,6 +102,11 @@ const BASE_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly Template[]>>>
     "say skippable hostValue",
     `${declaration("displayName", '"Boss"')}\nsay as boss "a"`,
     'say as player "a"',
+    // (the player across a transfer)
+    [
+      main('say as player "a"\ngoto "part.tease"\n'),
+      { path: "part.tease", source: 'say as player "b"\nshowButton as player "Go"\nexit\n' },
+    ],
   ],
   showButtonStatement: [
     `${declaration("displayName", '"Boss"')}\nshowButton as boss "Go"`,
@@ -128,12 +133,25 @@ const BASE_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly Template[]>>>
     spoken(declaration("alias", '"pet"')),
     spoken(declaration("gender", '"female"')),
     `if hostValue == null {\n  speaker boss {\n    displayName: "Boss"\n  }\n}\nsay as boss "a"`,
-    // a speaker declared in another file speaks in the first
+    // a speaker declared in another file speaks in the first; across a transfer, declared in the entry file and used
+    // in the target, and declared in the target
     [
       main('say as boss "Hi"\nshowButton as boss "Go"\nexit\n'),
       {
         path: "other.tease",
         source: 'speaker boss {\n  displayName: hostValue\n  color: "#336699"\n}\nexit\n',
+      },
+    ],
+    [
+      main('speaker boss {\n  displayName: hostValue\n}\nsay as boss "a"\ngoto "part.tease"\n'),
+      { path: "part.tease", source: 'say as boss "b"\nshowButton as boss "Go"\nexit\n' },
+    ],
+    [
+      main('say "a"\ngoto "part.tease"\n'),
+      {
+        path: "part.tease",
+        source:
+          'speaker boss {\n  displayName: hostValue\n  color: "#336699"\n}\nsay as boss "b"\nexit\n',
       },
     ],
   ],

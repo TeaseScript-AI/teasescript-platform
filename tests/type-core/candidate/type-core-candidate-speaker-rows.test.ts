@@ -221,6 +221,28 @@ test("under a stop as without one, a built-in field's computed misfit is refused
   }
 });
 
+test("a built-in field's misfit in a transfer's target file is refused there in every mode, and its fitting twin publishes", () => {
+  const target = (value: string): Files => [
+    { path: "main.tease", source: 'say "a"\ngoto "part.tease"\n' },
+    {
+      path: "part.tease",
+      source: `speaker boss {\n  displayName: ${value}\n}\nsay as boss "b"\nexit\n`,
+    },
+  ];
+  const refused = target("/a/");
+  const start = refused[1]!.source.indexOf("/a/");
+  for (const mode of HELD_MODES) {
+    const outside = mode.run(() => refusal(refused));
+    assert.ok(outside !== null, mode.name);
+    assert.equal(outside.what, "this speaker property", mode.name);
+    assert.deepEqual(outside.site, { file: 1, start, end: start + 3 }, mode.name);
+    assert.notEqual(
+      mode.run(() => compileProjectWithBackend(target('"Vera"'), OPTIONS, CORE_BACKEND).plan),
+      null,
+    );
+  }
+});
+
 test("the field table names exactly today's built-in speaker properties, and each cited check is a function of its file", () => {
   assert.deepEqual([...SPEAKER_FIELD_KINDS.keys()].sort(), [...BUILT_IN_SPEAKER_PROPERTIES].sort());
   for (const [field, { check }] of SPEAKER_FIELD_KINDS) {
