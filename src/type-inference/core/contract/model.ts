@@ -19,8 +19,8 @@ export interface HolderReference {
 }
 
 /**
- * A source of a mark: one holder per source identity and projection (§8,
- * docs/specifications/type-inference-accepted-record/sharing.md#r4-23).
+ * A source of a mark: one holder per source identity and projection
+ * (docs/specifications/type-inference-accepted-record/sharing.md#r4-23).
  */
 export interface Holder {
   readonly id: string;
@@ -47,8 +47,8 @@ export interface ReferencesByStep {
 }
 
 /**
- * A source's identity, with the guard bit and the mark holder beside it, never in it (§8,
- * docs/specifications/type-inference-accepted-record/sharing.md#r4-15).
+ * A source's identity, with the guard bit and the mark holder beside it, never in it
+ * (docs/specifications/type-inference-accepted-record/sharing.md#r4-15).
  */
 export interface Identity {
   readonly id: string;
@@ -65,9 +65,9 @@ export interface PrefixEntry {
   readonly elem?: PlaceId;
   readonly value?: PlaceId;
   readonly at?: readonly string[];
-  /** The earliest store that put it there (F28). */
+  /** The earliest store that put it there. */
   w: Writer | null;
-  /** The prefix's stores that brought it: A5's candidates, a set with a charged insertion per store. */
+  /** The prefix's stores that brought it, the candidates for a conflict: a set with a charged insertion per store. */
   readonly ds: Set<Definition | null>;
   readonly holder: Holder | null;
   guarded: boolean;
@@ -75,8 +75,8 @@ export interface PrefixEntry {
 }
 
 /**
- * A group of a prefix's literal entries that hold the same structure below a path and the same facts above it (S6-
- * CARRIERS §4.6's level): its earliest member stands for all, with their annotations united.
+ * A group of a prefix's literal entries that hold the same structure below a path and the same facts above it (a
+ * level): its earliest member stands for all, with their annotations united.
  */
 export interface LevelGroup {
   readonly literal: PlaceId;
@@ -89,15 +89,15 @@ export interface LevelGroup {
   /** #1323: its prefix entry, which answers for it where a read declines the fold (`groupRead`). */
   readonly entry?: PrefixEntry;
   /**
-   * #1323: the members a fold merged into it, itself first, where more than one; F11's `missing` below the group is
-   * theirs (`groupRead`): `membersKey` names them, `alike` whether they stand at the same steps.
+   * #1323: the members a fold merged into it, itself first, where more than one; a missing property's `missing` below
+   * the group is theirs (`groupRead`): `membersKey` names them, `alike` whether they stand at the same steps.
    */
   readonly members?: readonly LevelGroup[];
   readonly membersKey?: string;
   readonly alike?: boolean;
 }
 
-/** A prefix's entries as its levels read them (§4.6): the levels' members, and the entries that answer by themselves. */
+/** A prefix's entries as its levels read them: the levels' members, and the entries that answer by themselves. */
 export interface PrefixLevels {
   readonly others: readonly PrefixEntry[];
   readonly base: readonly LevelGroup[];
@@ -124,9 +124,9 @@ export interface PropertySource {
 
 /**
  * #1456: a prefix's property index, once per its stores (`Contract.propertyIndexes`): its sources in order, and those
- * F11's `missing` names in their writers' order (F28, with the sharing on too: #1323); per property's path below the
- * prefix (`pathAt`), the sources holding it, in order; and, as a property is asked, F11's witness of those without it
- * (`propertyLack`) and its holders' groups at each path asked below it.
+ * a missing property's `missing` names in their writers' order (with the sharing on too: #1323); per property's path
+ * below the prefix (`pathAt`), the sources holding it, in order; and, as a property is asked, the witness of those
+ * without it (`propertyLack`) and its holders' groups at each path asked below it.
  */
 export interface PropertyIndex {
   readonly sources: readonly PropertySource[];
@@ -138,8 +138,9 @@ export interface PropertyIndex {
 }
 
 /**
- * #1456: a prefix of closed objects whose properties its levels read until the index pays (`propertyItems`), from
- * the read whose folds could first pay for the least index on: its sources' property names.
+ * #1456: a prefix of closed objects whose properties its levels read until the folds its reads would save reach the
+ * index's construction (`propertyItems`), from the read whose folds could first pay for the least index on: its
+ * sources' property names.
  */
 export interface PropertyReads {
   readonly names: number;
@@ -151,7 +152,7 @@ export interface PropertyReads {
   saved: number;
 }
 
-/** F11 at a prefix's property: the earliest writer of a source without it, and the first one's position (-1: none). */
+/** The sources of a prefix without a property: the earliest writer of one, and the first one's position (-1: none). */
 export interface PropertyLack {
   readonly writer: Writer | null;
   readonly at: number;
@@ -164,7 +165,7 @@ export interface EntryGroup {
 }
 
 /**
- * The sources a prefix's reads take apart from its entries (§8: a replaced alias source's own stores below its
+ * The sources a prefix's reads take apart from its entries (a replaced alias source's own stores below its
  * root, kept apart by their first step), as a layer over the one its prefix inherits and the ones its source joins:
  * an alias shares its source's layers and adds only its own sources, so k aliases each adding a field are k
  * small layers, never k maps of up to k fields, and a join of two copies references both, never a flattened list.
@@ -209,8 +210,8 @@ export interface SubLayer {
 
 /**
  * The listing layers a read under a step may ask below a prefix or in a set of listing layers below others
- * (`selectAt`): those its layers' maps name for the step (`SubLayer.front`), the sources each lists there by the layers
- * listing them, and the sets of listing layers below them (`SubLayer.under`), each once.
+ * (`stepLayersOf`): those its layers' maps name for the step (`SubLayer.front`), the sources each lists there by the
+ * layers listing them, and the sets of listing layers below them (`SubLayer.under`), each once.
  */
 export interface StepLayers {
   /** The listing layers found under the step, each with the stores that brought it below a prefix (none in a set). */
@@ -309,8 +310,9 @@ export interface SupportNode {
 }
 
 /**
- * C5c's presence after reading some sources in order (`propertyPresence`): whether one lacks the property (1) and one
- * has it (2), whether one gave an unknown, and the earliest literal that lacks it; reading stops once both hold.
+ * A property's presence after reading some sources in order (`propertyPresence`): whether one lacks the property (1)
+ * and one has it (2), whether one gave an unknown, and the earliest literal that lacks it; reading stops once both
+ * hold.
  */
 export interface PresenceStep {
   readonly mask: number;
@@ -370,19 +372,20 @@ export interface PrefixStores {
 }
 
 /**
- * G5 (5a): a cycle of whole copies, a strongly connected component of the places that the live, unguarded, exact whole
- * copies `prefixWork` follows link (`copiedRoot`), with its members as ports. A member with one live store at its
- * root (the copy of another member) is a link, an alias `prefixWork` replaces by its source's entry as before; every
+ * A cycle of whole copies, a strongly connected component of the places that the live, unguarded, exact whole copies
+ * `prefixWork` follows link (`copiedRoot`), with its members as ports. A member with one live store at its root (the
+ * copy of another member) is a link, an alias `prefixWork` replaces by its source's entry as it does any alias; every
  * other member is a stop, and a copy of a stop is an entry of its key wherever the copy is: the cut every entry into the
- * cycle takes at once. Before, a stop's two or more entries gave that entry where the walk reached the stop, and the
- * open stop's cut where it did not; a stop whose entries merge into one was replaced by it where the walk reached it.
+ * cycle takes at once, whichever member the walk entered it by.
  */
 export interface CopyRing {
   readonly ports: readonly PlaceId[];
   readonly stops: ReadonlySet<PlaceId>;
 }
 
-/** A source a prefix's read at a path takes, with the prefix's stores that brought it (A5's candidates). */
+/**
+ * A source a prefix's read at a path takes, with the prefix's stores that brought it (the candidates for a conflict).
+ */
 export interface SubSource {
   readonly key: Key;
   readonly defs: ReadonlySet<Definition | null>;
@@ -521,7 +524,7 @@ export interface StoredChoiceKeys {
 export type Selected = { readonly name: string; readonly type: TypeTerm } | null;
 
 /**
- * What one path of a literal's index holds (§8), with a node per step below it. A nested literal that alone
+ * What one path of a literal's index holds, with a node per step below it. A nested literal that alone
  * stands at a step is its own index's root there, shared, never copied: k nested
  * literals keep k nodes, never k indexes each through the literals below it.
  */
@@ -533,7 +536,7 @@ export interface IndexNode {
   readonly exact: ValueEntry[];
   readonly others: ValueEntry[];
   objects: { readonly list: IndexObject[]; readonly count: Map<string, number> } | null;
-  /** A reference kind stands here (F19a). */
+  /** A reference kind stands here. */
   reference: boolean;
   /** A collection's element without a cell stands here. */
   empty: boolean;
@@ -591,12 +594,12 @@ export interface NodeShape {
   readonly marked: boolean;
 }
 
-/** One index of a literal's structure, through its nested literals at every step (§8). */
+/** One index of a literal's structure, through its nested literals at every step. */
 export interface LiteralIndex {
   readonly root: IndexNode;
   /** Its nodes by the pass's path ids (`nodeAt`), each found once; `null` where it holds no node. */
   readonly byId: Map<number, IndexNode | null>;
-  /** F11: per path id and property, the first object there without it (`lackingAt`). */
+  /** Per path id and property, the first object there without it (`lackingAt`). */
   readonly lacking: Map<string, Writer | null>;
 }
 
@@ -675,7 +678,7 @@ export interface ContractFacts {
    * index decides it, each record once per read.
    */
   selectionVisits: number;
-  /** The paths admission decided, in every pass (S6-CARRIERS §4.4: the member visits' bound). */
+  /** The paths admission decided, in every pass (the member visits' bound). */
   decidedPaths: number;
   /** The cycles of whole copies found (`ringOf`), their ports and their stops, each once per pass. */
   ringComponents: number;
@@ -694,7 +697,7 @@ export interface ContractFacts {
 }
 
 /**
- * #1072 1b: the run facts' counters, apart from the support nodes' ids (`SupportIds`). Every run adds to them, and they
+ * #1072: the run facts' counters, apart from the support nodes' ids (`SupportIds`). Every run adds to them, and they
  * are only copied into the answers' facts (`factsOf`) after the analysis: no decision reads them, so a retained-state
  * check holds them as they are, as it holds the work ledger.
  */
@@ -714,8 +717,8 @@ export class ContractCounters {
 }
 
 /**
- * #1072 1b: the support nodes' ids, a pass-wide allocator (the entry lifecycle's rule for ids, C2.4): an id is never
- * reused and the count never rolled back, so a retained-state check holds it as it is.
+ * #1072: the support nodes' ids, a pass-wide allocator: an id is never reused and the count never rolled back, so a
+ * retained-state check holds it as it is.
  */
 export class SupportIds {
   made = 0;
@@ -743,21 +746,20 @@ export function factsOf(counters: ContractCounters, ids: SupportIds): ContractFa
   };
 }
 
-/** A key whose admission decision stopped at its demand allowance (`Contract.stop`). */
-/** G3 3a: a chain of property reads of a read, by its read and its first step (`Contract.chainOf`). */
+/** A chain of property reads of a read, by its read and its first step (`Contract.chainOf`). */
 export interface ChainRoot {
   readonly root: PlaceId;
   readonly first: string;
 }
 
-/** G3 3a: a literal's one read at a step and the node its value side reads it at (`Contract.literalHop`). */
+/** A literal's one read at a step and the node its value side reads it at (`Contract.literalHop`). */
 export interface LoneRead {
   readonly read: PlaceId;
   readonly node: FlowNode | null;
 }
 
 /**
- * G3 3a: a wrapper's step (`Contract.wrapperHop`): the declaration of the binding read, its literal, the one read the
+ * A wrapper's step (`Contract.wrapperHop`): the declaration of the binding read, its literal, the one read the
  * literal holds at the step, and the declaration's writer, which every read through the step takes.
  */
 export interface WrapperHop {
@@ -772,6 +774,7 @@ export interface WrapperHop {
 /** What a read's position is asked of (`positionOf`): a value, or a key with its path's length. */
 export type Owner = { readonly value: PlaceId } | { readonly key: Key; readonly length: number };
 
+/** A key whose admission decision stopped at its demand allowance (`Contract.stop`). */
 export interface StoppedKey {
   readonly place: PlaceId;
   readonly path: readonly string[];
@@ -787,7 +790,7 @@ export interface ReadGroup {
 }
 
 /**
- * The part of a choice's answer `choiceItems` reads (a wide choice's, S10 part 2b): its option groups of [`lo`, `hi`);
+ * The part of a choice's answer `choiceItems` reads (a wide choice's): its option groups of [`lo`, `hi`);
  * or one written list's or set's elements of [`lo`, `hi`) (`elements`); `wide`, a wide such list's elements read as
  * their own tree of demands (`Values.choiceElements`) at the answer's `rest`.
  */

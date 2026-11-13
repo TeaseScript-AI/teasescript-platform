@@ -187,7 +187,7 @@ export function keyNode(frontier: Frontier, place: PlaceId, path: readonly strin
   if (known !== undefined) return known;
   const { contract } = frontier;
   eligible(contract, place);
-  // (a key whose family is a cursor's, or whose first step passes a wrapper, is G3's)
+  // (a key whose family is a cursor's, or whose first step passes a wrapper, is a position's: `positions.ts`)
   if (isKeyId(canonicalKey(contract, name))) throw new Decline("cursor");
   if (positions() && contract.wrapperHop(place, path[0]!) !== null) throw new Decline("wrapper");
   frontier.places.add(place);
@@ -262,6 +262,10 @@ export function rootNode(frontier: Frontier, place: PlaceId): number {
   return frontier.roots.get(place)!;
 }
 
+/**
+ * Whether a decision stopped at `place` (`Contract.stoppedPlaces`), not recorded as asked: the pushed read's demand is
+ * remembered instead (`pushedRun`), so a stop forgets it.
+ */
 function stoppedAt(contract: Contract, place: PlaceId): boolean {
   return contract.stoppedPlaces.has(place);
 }
@@ -346,15 +350,15 @@ export function properties(steps: readonly string[]): void {
 }
 
 /**
- * Declines a rest with a step neither a property nor an element is: an element step reads an object as F11 reads a
- * property it lacks, and a collection below it declines (`rules`).
+ * Declines a rest with a step neither a property nor an element is: an element step reads an object as a missing
+ * property is read, and a collection below it declines (`rules`).
  */
 export function propertiesOrElements(steps: readonly string[]): void {
   for (const each of steps)
     if (each !== "element" && !propertyOnly(each)) throw new Decline(`step ${each}`);
 }
 
-/** Whether a property read's chain passes a wrapper at its first step (G3's position, `positionOf`). */
+/** Whether a property read's chain passes a wrapper at its first step (a position's, `positionOf`). */
 export function passesWrapper(contract: Contract, value: PlaceId): boolean {
   const chain = contract.chainOf(value);
   return chain !== null && contract.wrapperHop(chain.root, chain.first) !== null;
@@ -428,7 +432,7 @@ export function stateOf(frontier: Frontier, start: number, mark: boolean): numbe
   let [node, marked] = [start, mark];
   for (;;) {
     const at = frontier.nodes[node]!;
-    // (a step per marked or held node resolved: a graph without marks charges as before)
+    // (a step per marked or held node resolved: a graph without marks charges none here)
     if (at.kind === "mark" || at.kind === "hold") step(frontier);
     if (at.kind === "mark") [node, marked] = [at.inner, true];
     else if (at.kind === "hold") node = at.inner;
@@ -436,16 +440,7 @@ export function stateOf(frontier: Frontier, start: number, mark: boolean): numbe
   }
 }
 
-// --- receiver scopes (#2005) ---------------------------------------------------------------------------------------
-
-/*
- * #2005: native reads no store at or below a receiver prefix holding no record or collection (`receiverWalk`, its
- * floor, `holdsBelow`), carrying that prefix's unknowns. So a pending mark is the pair of its mark automaton's state
- * and the receiver shapes it was reached under (an atom): it advances only while each of them holds something below it,
- * and dies at a floor; a floor's own step stops its prefix's stores and carries its unknowns, its accepted marks too.
- * The shapes are the receiver-shape graph's interned node sets (`shapesOf`: the same producers, unmarked). An atom of
- * no shape is its plain state. With Q shapes reached, at most R·2^Q atoms, before absorption.
- */
+// --- receiver scopes (#2005): see `shapes.ts` ----------------------------------------------------------------------
 
 /** #2005: a build's first pending mark, or first mark past an unwitnessed root: the build reruns, scoped. */
 export class Activate extends Error {}

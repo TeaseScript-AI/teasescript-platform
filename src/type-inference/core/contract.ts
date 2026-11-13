@@ -204,18 +204,21 @@ export { presenceSteps } from "./contract/prefix-index/tries.js";
 export { withOwnSelection } from "./contract/value-kinds.js";
 
 /*
- * The contract of the coarse core (checkpoint 9, §3.2, §8): the kinds a key can hold on any run, flow-
- * insensitively: every live definition's value kinds, a written type's tags, `unknown` with its reasons for what the
- * core does not model. An element key's contract is the elements' kinds (E), with the emptiness mark where a source may
- * leave the collection empty (M open). The contract reads its sources through two indexes that share every source by
- * one identity (§8): a prefix's whole stores (`prefixStores`, one entry per source identity, with the stores
- * that brought it as A5's provenance) and a literal's structure (`literalIndex`). The marks of §3.2 live beside
+ * The contract: the kinds a key can hold on any run, flow-insensitively: every live definition's value kinds, a
+ * written type's tags, `unknown` with its reasons for what the core does not model. An element key's contract is the
+ * elements' kinds, with the emptiness mark where a source may leave the collection empty. It reads its sources through
+ * two indexes that share every source by one identity: a prefix's whole stores (`prefixStores`, one entry per source
+ * identity, with the stores that brought it) and a literal's structure (`literalIndex`). The marks live beside
  * identity, in one holder per source and projection, whose references compose and are never copied.
  */
 
 /**
- * A public method whose body lives in `contract/` delegates to the function of its name there; the members those
- * functions read are public for them, and internal to the contract side.
+ * The contract side's per-pass state, its stop bookkeeping, and its entry points. Most public methods delegate to a
+ * function of `contract/` (of the same name, or with `In` for `keyParent`, `keyLast` and `keyDepth`); `contract/`
+ * modules call one another through them, so none imports a sibling that imports it back (`check:imports` refuses a
+ * value-import cycle). The fields are public for `contract/`; the path arena's (`path*`), `facts`, `supportIds`,
+ * `targetsDecide` and `plusIndex` are also read or written outside it (admission, `inherited/`, `values.ts`,
+ * `property-names.ts`, `answers.ts`, `indexes/plus-index.ts`).
  */
 export class Contract {
   readonly facts = new ContractCounters();
@@ -308,7 +311,7 @@ export class Contract {
   readonly pathChildren: (Map<string, number> | undefined)[] =
     Retained.arena("Contract.pathChildren");
   /**
-   * G3 stage 1 (`key-ids.ts`): per path, made with it from its parent's in constant work, its first step, the
+   * Per path (`key-ids.ts`), made with it from its parent's in constant work: its first step, the
    * nearest path at or above it whose last step a built-in value answers (`memberStep`), 0 for none, whether every
    * step is a property's (`propertyOnly`), and whether every step is one a position advances by (`positionStep`, #1605).
    */
@@ -317,7 +320,7 @@ export class Contract {
   readonly pathProperties: boolean[] = Retained.arena("Contract.pathProperties", [true]);
   readonly pathPositions: boolean[] = Retained.arena("Contract.pathPositions", [true]);
   /**
-   * G3 stage 1: per path of the arena, what the cursors derive from it, each made once and kept (`PathFacts`,
+   * Per path of the arena, what the cursors derive from it, each made once and kept (`PathFacts`,
    * `factsOf`); per text of a family whose lane is cursors, its cursor (`textCursor`).
    */
   readonly pathFacts = Retained.map<number, PathFacts>("Contract.pathFacts");
@@ -454,7 +457,10 @@ export class Contract {
   readonly entryGroupsOf = Retained.weakMap<PrefixLevels, readonly EntryGroup[]>(
     "Contract.entryGroupsOf",
   );
-  /** #1456: per prefix's stores whose entries are closed objects, its property index or its reads until it pays. */
+  /**
+   * #1456: per prefix's stores whose entries are closed objects, its property index, or its reads until the folds they
+   * would save reach the index's construction (`propertyItems`).
+   */
   readonly propertyIndexes = Retained.weakMap<PrefixStores, PropertyIndex | PropertyReads>(
     "Contract.propertyIndexes",
   );
@@ -468,12 +474,12 @@ export class Contract {
   subFirst: Map<PlaceId, Set<string>> | null = null;
   collected = false;
 
-  /** The value-side literal reads that passed an element step over a copy, by literal, path and node (F12). */
+  /** The value-side literal reads that passed an element step over a copy, by literal, path and node. */
   readonly overCopy = Retained.set<string>("Contract.overCopy");
 
   /**
    * The paths whose admission decision stopped at its demand allowance, by place (`stop`): a text key's steps, a cursor's
-   * path id (G3 stage 1); and per place the cursors' paths found at or below one, climbed once between stops.
+   * path id; and per place the cursors' paths found at or below one, climbed once between stops.
    */
   readonly #stopped = Retained.map<PlaceId, (readonly string[] | number)[]>("Contract.#stopped");
   readonly #belowStop = Retained.map<PlaceId, Map<number, boolean>>("Contract.#belowStop");
@@ -488,7 +494,7 @@ export class Contract {
    * #1599: per place, how many of the decisions that can stop it have not ended (admission's groups by their root,
    * `openDecisions`, `decided`); a place absent from it no decision stops, so nothing asked of it is kept. `null` while
    * every place may still stop: before the groups are known, and in a pass whose targets decide receivers (#1275,
-   * `targetsDecide`) until those have run (`closeDecisions`). With it, in a record (#1072 1b): `#stopped`'s count of
+   * `targetsDecide`) until those have run (`closeDecisions`). With it, in a record (#1072): `#stopped`'s count of
    * stopped paths (`stoppedCount`), and `deciding`, whether a decision of the pass can still stop: else nothing a stop
    * forgets by is kept (`#close`).
    */
@@ -532,7 +538,7 @@ export class Contract {
   }
 
   /**
-   * S3 §5: an admission decision that stopped at its demand allowance leaves its key's contract `unknown` with
+   * An admission decision that stopped at its demand allowance leaves its key's contract `unknown` with
    * the reason `budget` for every read, and every key's below it: `contractOf` and every value read of such a key
    * (`Values.keyItems`) answer `STOPPED` before their memo, so whatever reads it, directly or composed, carries it. The
    * pass in which a decision stops is not settled: the next starts with the key stopped (`analyseCore`),
@@ -554,7 +560,7 @@ export class Contract {
 
   /** `stop` for a key in its identity: a cursor stops at its path's id, never its text. */
   public stopKey(asked: Key): void {
-    // (a key in its identity: a wrapper family's text stops at its cursor's path, G3 stage 1)
+    // (a key in its identity: a wrapper family's text stops at its cursor's path)
     const key = this.canonicalKey(asked);
     if (isKeyId(key)) this.#stopAt(keyIdPlace(key), keyIdPath(key));
     else this.#stopAt(keyPlace(key), keyPath(key));
@@ -673,7 +679,9 @@ export class Contract {
 
   /**
    * The keys whose decision stopped (`stop`), the set the next pass starts with: self-contained steps, a cursor's made
-   * through the charged boundary (`stepsOfId`), since no path id leaves its pass.
+   * through the charged boundary (`stepsOfId`), since no path id leaves its pass. Not recorded as asked, as are the
+   * three getters below: unlike `stopped` and `keyStopped`, a demand that reads one is forgotten at a later stop only
+   * if it is remembered (`remember`).
    */
   public stoppedKeys(): readonly StoppedKey[] {
     return [...this.#stopped].flatMap(([place, paths]) =>
@@ -684,17 +692,20 @@ export class Contract {
     );
   }
 
-  /** How many decisions stopped (`stop`). */
+  /** How many decisions stopped (`stop`). Not recorded as asked (`stoppedKeys`). */
   public get stoppedCount(): number {
     return this.#stops.stoppedCount;
   }
 
-  /** Whether any decision stopped (`stop`). */
+  /** Whether any decision stopped (`stop`). Not recorded as asked (`stoppedKeys`). */
   public get anyStopped(): boolean {
     return this.#stopped.size > 0;
   }
 
-  /** The places some decision stopped at (`stop`), each once, as a lookup: none of their keys made. */
+  /**
+   * The places some decision stopped at (`stop`), each once, as a lookup: none of their keys made. Not recorded as
+   * asked (`stoppedKeys`).
+   */
   public get stoppedPlaces(): ReadonlyMap<PlaceId, unknown> {
     return this.#stopped;
   }
@@ -789,7 +800,7 @@ export class Contract {
 
   /**
    * A key's contract along a path through a member a built-in value answers by itself from the step `from` on, its
-   * receiver decided as a reference's or not once (F19a): a reference's member is the runtime's.
+   * receiver decided as a reference's or not once: a reference's member is the runtime's.
    */
   public keyThrough(asked: Key, from: number, flow: FlowSink | null = null): Work<readonly Item[]> {
     const key = this.canonicalKey(asked);
@@ -874,7 +885,7 @@ export class Contract {
   }
 
   /**
-   * A key as the definition indexes and the exact path read it, its text (X2): a cursor's made once through the
+   * A key as the definition indexes and the exact path read it, its text: a cursor's made once through the
    * charged boundary (`keyOfId`); those indexes hold no key of a cursor's family below its root (its shape requires it).
    */
   public keyText(key: Key): Key {
@@ -882,7 +893,7 @@ export class Contract {
   }
 
   /**
-   * The nearest definition of a key at a node (X2, `DefinitionLists.reachingDef`), with the path below it: a cursor's
+   * The nearest definition of a key at a node (`DefinitionLists.reachingDef`), with the path below it: a cursor's
    * from its place's own key, the one prefix of a wrapper's family with definitions (its shape requires it), charged
    * as that query is, its rest the cursor's steps, read one at a time as far as the reader goes (`spanRef`).
    */
@@ -953,7 +964,7 @@ export class Contract {
   }
 
   /**
-   * G3 3a: a wrapper's step (`positions.ts`), or `null`. A read `read` of a binding (or the binding's key itself) is
+   * A wrapper's step (`positions.ts`), or `null`. A read `read` of a binding (or the binding's key itself) is
    * passed at `step` to the one read its value holds there, a wrapper's, when every read of the binding at a path through
    * `step` is that read's at the rest of the path with the binding's writer, whatever the rest: the binding is a plain
    * unwritten `let` whose one definition anywhere at or below it is its declaration, live, outside block code, storing a
@@ -961,7 +972,7 @@ export class Contract {
    * the prefix's one entry and marks nothing whatever the path; the literal holds at `step` one read, of a binding,
    * unguarded and naming no ingress, and nothing else there or below, and every object at its root has `step`; and the
    * read occurrence names no ingress. Every condition is a fact of the program and of the pass's live stores (and its
-   * stops, which forget every position made), so no read of a path below the step differs. G3 stage 1: the occurrence's
+   * stops, which forget every position made), so no read of a path below the step differs. The occurrence's
    * and the stops' conditions are checked here, live; the program's and the live stores' are the binding's wrapper shape
    * (`wrapperShape`), frozen for the pass.
    */

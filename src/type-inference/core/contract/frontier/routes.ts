@@ -215,8 +215,7 @@ export function gain(frontier: Frontier, goal: Goal, found: number): void {
   // #1784: a base node reached held with several pending sets is reached with their union: marked where any marks. A
   // marked leaf absorbs its unmarked twin in the join (guarded makes it `pos`, `"branch"` beats no context, every other
   // field equal), so the alternatives together give what their union gives, and a set the union holds adds nothing; so
-  // each base node's held states in a goal form one growing chain, not every combination of its pending marks (Codex
-  // r3 B3).
+  // each base node's held states in a goal form one growing chain, not every combination of its pending marks.
   let node = found;
   const at = frontier.nodes[found]!;
   if (at.kind === "hold") {
@@ -247,7 +246,7 @@ export function plainRead(contract: Contract, read: MarkedRead): boolean {
   );
 }
 
-/** #1784: a leaf reached marked: its item `marked`; a native value's declines (`marks-native`, HEAD 1's condition). */
+/** #1784: a leaf reached marked: its item `marked`; a native value's declines (`marks-native`). */
 export function markedLeaf(frontier: Frontier, leaf: number): number {
   const node = frontier.nodes[leaf]!;
   if (node.kind !== "leaf") throw new Decline("marks-native");

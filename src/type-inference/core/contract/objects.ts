@@ -40,11 +40,11 @@ import { resultOf, valueRoute } from "./value-kinds.js";
 
 /**
  * #1747: the objects a contract read of `value` at `rest` holds, as a proof: each literal node's object
- * list it reaches at the path (`ObjectSite`), the pure `missing` writers its read meets on the way (F11 at a prefix, a
- * stored `missing`), and the keys whose own stores and written type at a further property it does not cover. Its read
- * at `rest.s` for a property `s` then names its pure `missing` by `absentWriterAt` without reading `s`. A demand once
- * per value and path, read through `Solver.proven`; a route it does not follow declines (`complete` false), and the
- * reader then reads as before. Routed as `valueAt` routes (`valueRoute`).
+ * list it reaches at the path (`ObjectSite`), the pure `missing` writers its read meets on the way (a prefix's missing
+ * property, a stored `missing`), and the keys whose own stores and written type at a further property it does not
+ * cover. Its read at `rest.s` for a property `s` then names its pure `missing` by `absentWriterAt` without reading `s`.
+ * A demand once per value and path, read through `Solver.proven`; a route it does not follow declines (`complete`
+ * false), and its reader (`absentWriterAt`) answers uncovered. Routed as `valueAt` routes (`valueRoute`).
  */
 export function objectsAt(
   contract: Contract,
@@ -61,7 +61,7 @@ export function objectsAt(
     proves: true,
     make: () => {
       contract.work.charge("objectSteps");
-      // #1668: K, the objects query's own run names provenance, never the read's items
+      // #1668: the objects query's own run names provenance, never the read's items
       return valueObjects(contract, value, rest);
     },
   };
@@ -80,17 +80,18 @@ export function keyObjects(contract: Contract, asked: Key): ProofDemand<ObjectsP
     proves: true,
     make: () => {
       contract.work.charge("objectSteps");
-      // #1668: K, the objects query's own run names provenance, never the read's items
+      // #1668: the objects query's own run names provenance, never the read's items
       return keyObjectsMade(contract, key);
     },
   };
 }
 
 /**
- * #1747: the pure `missing` writer of `value`'s contract read at `rest.s` (the earliest, F28), from its objects at
- * `rest` (`objectsAt`): the writers met on the way and, of each object list there, its first object lacking `s`
- * (F11, `lackingAt`); `covered` false where the query declines, `s` is stored or typed below a key it reads or that
- * key's read at `s` stopped, or an entry stands at `s` below a list. Each support node of the proof once.
+ * #1747: the pure `missing` writer of `value`'s contract read at `rest.s` (the earliest), from its objects at `rest`
+ * (`objectsAt`): the writers met on the way and, of each object list there, its first object lacking `s`
+ * (`lackingAt`); `covered` false where the query declines, `s` is stored or typed below a key it reads or that key's
+ * read at `s` stopped, or an entry stands at `s` below a list. Each support node of the proof once. The analysis does
+ * not call it: its one caller is the objects query's test (`type-core-objects.test.ts`).
  */
 export function* absentWriterAt(
   contract: Contract,
@@ -105,7 +106,7 @@ export function* absentWriterAt(
   const seen = new Set<string>([first.key]);
   const open: ProofDemand<ObjectsProof>[] = [first];
   for (const _ of steps(program.work, "objectSteps", () => open.length > 0)) {
-    // #1668: K, a query's proof names the writer of a read's `missing`, none of its items
+    // #1668: a query's proof names the writer of a read's `missing`, none of its items
     const { proof: node } = yield* solver.proven(open.pop()!);
     if (node === null || !node.complete) return UNCOVERED;
     for (const { key, place, path } of each(program.work, "objectSteps", node.keys)) {
@@ -183,7 +184,7 @@ class Gathered {
     this.contract.work.charge("objectSteps");
     // (every visit is charged before decline or duplicate paths).
     if (!this.complete) return;
-    // #1668: K, a query this one reads, for its proof alone
+    // #1668: a query this one reads, for its proof alone
     const { proof } = yield* this.contract.pass.solver.proven(demand);
     // (none yet: a query of its own component still running, whose least answer starts empty and whose proof reruns
     // this one when it changes; after a stop no query runs, `absentWriterAt` reading none as uncovered)
@@ -333,8 +334,8 @@ function* valueObjects(
         return out.proven();
       }
       if (operation.kind !== "get") break;
-      // F19a: a receiver that may be a reference has the runtime's `get`
-      // #1668: R, a receiver decision
+      // a receiver that may be a reference has the runtime's `get`
+      // #1668: a receiver decision
       const receiver = yield* contract.valueReceiver(operation.receiver);
       if (some(contract.work, "objectSteps", receiver, (item) => item === HELD_REFERENCE)) break;
       yield* out.from(
@@ -358,9 +359,9 @@ function* valueObjects(
 }
 
 /**
- * A literal's objects at `rest` (`contractOfLiteral`'s index walk on the contract side, `indexItems`): F11's writer at
- * each prefix lacking the next step, the reads and computed values standing at each prefix read below it, and the
- * object list at the path itself.
+ * A literal's objects at `rest` (`contractOfLiteral`'s index walk on the contract side, `indexItems`): the `missing`
+ * writer at each prefix lacking the next step, the reads and computed values standing at each prefix read below it, and
+ * the object list at the path itself.
  */
 function* literalObjects(
   contract: Contract,
@@ -415,7 +416,7 @@ function* literalObjects(
         if (!out.complete) return;
       }
     }
-    // a reference here answers an opaque member below it (F19a), beside any `missing`
+    // a reference here answers an opaque member below it, beside any `missing`
     if (node.reference) {
       out.complete = false;
       return;
@@ -447,9 +448,9 @@ function* entryObjects(
     out.complete = false;
     return;
   }
-  // F6, F7: an emptiness mark holds no property
+  // a clear's or a removal's emptiness mark holds no property
   if (entry.empty === true) return;
-  // F5: an add's element, only below an element step
+  // an add's element, only below an element step
   if (entry.elem !== undefined) {
     if (rest[0] === "element")
       yield* out.from(

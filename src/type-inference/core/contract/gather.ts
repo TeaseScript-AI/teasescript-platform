@@ -36,11 +36,12 @@ import { keyBelowIn, restPart, restSteps, stepsText, type Rest, type Steps } fro
 import { selectedObject, selectionOf, selectionPieces } from "./selections.js";
 import { Retained } from "../retained/retained.js";
 
-// The value side's wide gathers (S10 part 2b): a gather site's contributions, its groups, its selections' runs.
+// The wide gathers, the value side's and the contract side's: a gather site's contributions, its groups, its
+// selections' runs.
 
 /**
- * F12: below a read that stands below an element step, the read's contract answer at the rest of the path
- * (definite by P3, else possible; context `member`), with the read's ingress stores and guard mark.
+ * Below a read that stands below an element step, the read's contract answer at the rest of the path (definite where
+ * `contractRead` makes it so, else possible; context `member`), with the read's ingress stores and guard mark.
  */
 function* belowRead(contract: Contract, read: PlaceId, below: Steps): Work<readonly Item[]> {
   const { program, guards } = contract.pass;
@@ -62,18 +63,12 @@ function* belowRead(contract: Contract, read: PlaceId, below: Steps): Work<reado
 }
 
 /**
- * V30 §19: the button values of the options a literal holds at `path`, read at `after` below them,
- * per record alternative: the `value` of a record that has the key (`byValue`), the `text` of one that has none (the
- * property's own cell, its sources kept); a value that is no record is its own button's value, and a record whose keys
- * are unknown, or a reference, has the runtime's (both with the `value`s). With the number of alternatives it chooses
- * among, whichever key it reads: each is a contribution of the read (§3.4: the element step over the options).
- */
-/**
- * A wide gather of the value side's (S10 part 2b): a site's contributions [lo, hi) (a literal's exact entries, its
- * copies past an element step or its computed values' groups at `path`, or a selection's objects), read at `rest` and
- * merged by kind (`mergeItems`, as every caller's merge takes them anyway, in their order), as a balanced tree of
- * demands: where the contributions' answers change one by one (a component of N5's stores reading them), a change
- * re-runs only the nodes above it, never the whole gather.
+ * A wide gather (`GatherSite`): a site's contributions [lo, hi) (on the value side a literal's exact entries, its
+ * copies past an element step or its computed values' groups at `path`, or a selection's objects; on the contract side
+ * its reads or its computed values' groups), read at `rest` and merged by kind (`mergeItems`, as every caller's merge
+ * takes them anyway, in their order), as a balanced tree of demands: where the contributions' answers change one by
+ * one (a component of a loop's preserving stores reading them), a change re-runs only the nodes above it, never the
+ * whole gather.
  */
 export function* gathered(
   contract: Contract,
@@ -274,7 +269,7 @@ export function* gatherAt(
 
 /**
  * A group's answer at a path (`othersAt`), on the contract side with the group's writer: its read members', and where
- * they hold external data, its other members' too, which differ from them only by the leaves they name (C9). Those
+ * they hold external data, its other members' too, which differ from them only by the leaves they name. Those
  * are read one by one where their leaves differ by more than their roles' (`othersLeaves`); else the read members'
  * external data names the others' leaves as well, so a class of k loads of host data read at k properties reads one
  * load at each (#1207).
@@ -289,12 +284,12 @@ function* groupItems<E extends ValueEntry>(
   const out: Item[] = [];
   const answers: (readonly Item[])[] = [];
   const read = function* (entry: E): Work<readonly Item[]> {
-    // #1668: I, the caller's read takes its flow
+    // #1668: the caller's read takes its flow
     const items = yield* answer(entry);
     return exact ? items : withWriter(items, group.writer);
   };
   for (const entry of group.read) {
-    // #1668: I, the caller's read takes its flow
+    // #1668: the caller's read takes its flow
     const items = yield* read(entry);
     answers.push(items);
     for (const item of items) out.push(item);
@@ -303,11 +298,11 @@ function* groupItems<E extends ValueEntry>(
   const differing = out.find((item) => differsIn(item, group.mixed));
   if (group.rest.length === 0 || differing === undefined) return out;
   const leaves = othersLeaves(contract, group, answers, exact);
-  // (#1668: the other members' leaves named from the read ones' (C9): their own answers not read, a qualified inclusion)
+  // (#1668: the other members' leaves named from the read ones': their own answers not read, a qualified inclusion)
   if (leaves !== null) {
     flow?.opaque("leaves");
     out.push({ ...differing, ingress: leaves });
-    // #1668: I, the caller's read takes its flow
+    // #1668: the caller's read takes its flow
   } else for (const entry of group.rest) for (const item of yield* read(entry)) out.push(item);
   return out;
 }
@@ -389,9 +384,9 @@ function rolesNode(contract: Contract, roles: readonly IngressNode[]): IngressNo
 /**
  * #1573: one node per sequence of the other members' nodes as a list holds them (`othersLeaves`): their fold in that
  * order, each step found by the ingress graph's own pair of the nodes so far and the next, so the lists of one sequence
- * share one node and no list makes more than the unshared route's merge of its members makes (Codex r2 on #1628: a
- * set found by a sum of its members' ids scanned other sets' members). Each step charged to the analysis as a shared
- * build, never to the demand that asks (`WorkLedger.shared`), which charged no such step before.
+ * share one node and no list makes more than the unshared route's merge of its members makes (#1628: a set found by a
+ * sum of its members' ids scanned other sets' members). Each step charged to the analysis as a shared build, never to
+ * the demand that asks (`WorkLedger.shared`).
  */
 function setNode(contract: Contract, members: ReadonlySet<IngressNode>): IngressNode {
   const { scope, work } = contract.pass.program;
