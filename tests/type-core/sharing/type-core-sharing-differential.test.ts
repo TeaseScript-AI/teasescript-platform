@@ -45,11 +45,11 @@ import {
   HOT_CANDIDATE_WITNESSES,
   WRITTEN_COPY_MATRIX,
 } from "../../helpers/type-core/type-core-witnesses.js";
+import { UNION_RULE_MATRIX } from "../../helpers/type-core/written/type-core-written-unions.js";
 import {
   OBJECT_PROPERTY_MATRIX,
-  UNION_RULE_MATRIX,
   UNRESTRICTED_COLLECTION_MATRIX,
-} from "../../helpers/type-core/type-core-written.js";
+} from "../../helpers/type-core/written/type-core-written-unrestricted.js";
 import {
   type Program,
   one,
@@ -314,7 +314,7 @@ function programs(): Program[] {
     out.push(one(`#1210 ${name}`, unmarked(lines).source));
   // external round 7 B1's written copies (`WRITTEN_COPY_MATRIX`)
   for (const { name, source } of WRITTEN_COPY_MATRIX) out.push(one(`written copy ${name}`, source));
-  // the merged S6's other written-domain matrices (`type-core-written.ts`), each exact source once (Astra's D3)
+  // the merged S6's other written-domain matrices (`type-core-written-matrices.ts`), each exact source once (Astra's D3)
   const sources = new Set<string>();
   for (const { name, source } of [
     ...UNRESTRICTED_COLLECTION_MATRIX,

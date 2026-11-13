@@ -12,8 +12,8 @@ import { coreRecord, type WrittenTypeError } from "../../../src/type-inference/c
 import { withoutSharing } from "../../../src/type-inference/core/sharing.js";
 import { writtenTypeErrors } from "../../../src/type-inference/core/written.js";
 import { coreRequest } from "../../helpers/type-core-analysis.js";
-import { UNION_RULE_MATRIX } from "../../helpers/type-core/type-core-written.js";
-import { inBothOrders, GLOBALS } from "../../helpers/type-core/type-core-written-setup.js";
+import { UNION_RULE_MATRIX } from "../../helpers/type-core/written/type-core-written-unions.js";
+import { inBothOrders, GLOBALS } from "../../helpers/type-core/written/type-core-written-setup.js";
 
 /** A written type's error as `written-type start:end union start:end suggests …` (`WrittenTypeError`). */
 const errorText = (found: WrittenTypeError): string =>

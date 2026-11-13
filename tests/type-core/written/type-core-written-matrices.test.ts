@@ -11,17 +11,17 @@ import {
   V30_TYPE_MATRIX,
   WRITTEN_DOMAIN_MATRIX,
   type WrittenCase,
-} from "../../helpers/type-core/type-core-written.js";
+} from "../../helpers/type-core/written/type-core-written-matrices.js";
 import {
   sorted,
   checksOf,
   GLOBALS,
   prepare,
   decision,
-} from "../../helpers/type-core/type-core-written-setup.js";
+} from "../../helpers/type-core/written/type-core-written-setup.js";
 
 /*
- * The written-domain matrices (`type-core-written.ts`; the lead's rulings on the merged S6's B1 and B2: A4, F17b,
+ * The written-domain matrices (`type-core-written-matrices.ts`; the lead's rulings on the merged S6's B1 and B2: A4, F17b,
  * the design's fit rule, ADR 0021 1.3, V30 §13), each source in both orders and with the sharing on and off, in three layers:
  * the decision (the place's admitted kinds at each level, and the program's C9 boundaries, each at its host read with its
  * target's level and `against`, none at a level that admits every kind), the plan (each store that brings a host value

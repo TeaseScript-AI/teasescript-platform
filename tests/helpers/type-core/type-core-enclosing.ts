@@ -25,7 +25,7 @@ import {
   name,
   optional,
   type Form,
-} from "./type-core-written.js";
+} from "./written/type-core-written.js";
 
 /*
  * The stores at, below and above a stopped decision (#1416, #1440; S3, ADR 0021 rule 1.10): a store or argument

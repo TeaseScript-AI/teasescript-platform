@@ -10,7 +10,12 @@ import {
   type EnclosingCase,
   type Relation,
 } from "../helpers/type-core/type-core-enclosing.js";
-import { collection, fits, name, type Form } from "../helpers/type-core/type-core-written.js";
+import {
+  collection,
+  fits,
+  name,
+  type Form,
+} from "../helpers/type-core/written/type-core-written.js";
 
 const list = (...items: SerializableRuntimeValue[]): SerializableRuntimeValue => ({
   kind: "list",

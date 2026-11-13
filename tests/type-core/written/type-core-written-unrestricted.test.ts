@@ -19,7 +19,7 @@ import {
   OBJECT_PROPERTY_MATRIX,
   UNRESTRICTED_COLLECTION_MATRIX,
   type UnrestrictedCase,
-} from "../../helpers/type-core/type-core-written.js";
+} from "../../helpers/type-core/written/type-core-written-unrestricted.js";
 import {
   inBothOrders,
   sorted,
@@ -27,7 +27,7 @@ import {
   GLOBALS,
   prepare,
   decision,
-} from "../../helpers/type-core/type-core-written-setup.js";
+} from "../../helpers/type-core/written/type-core-written-setup.js";
 
 /**
  * The sources of `cases` where an unrestricted part's contents owe anything (a diagnostic, a check, a boundary) or the
