@@ -573,6 +573,12 @@ test(
         "export function big(other: number) {",
         /^ {2}function over 150 lines that the change writes into: src\/b\.ts:1 big \(400 lines\)$/mu,
       ],
+      // (a line only the whitespace form admits is a write: a blank line can be a template literal's content)
+      [
+        "export added and a blank line added",
+        `export ${first}\n`,
+        /^ {2}function over 150 lines that the change writes into: src\/b\.ts:1 big \(401 lines\)$/mu,
+      ],
     ]) {
       const { root, base } = history(
         { "src/a.ts": `${first}${body}\nexport const small = big(1);\n` },

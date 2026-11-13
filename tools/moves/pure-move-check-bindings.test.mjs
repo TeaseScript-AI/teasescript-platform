@@ -707,3 +707,34 @@ test(
     assert.doesNotMatch(renamed.out, /not judged/u);
   },
 );
+
+test(
+  "an unchanged line is not judged only when it is a dynamic import on both sides and nothing else (#2616 r1)",
+  { timeout: 60_000 },
+  () => {
+    const run = (before, after) => {
+      const move = moveOf({ "src/loader.ts": before }, { "src/loader.ts": after });
+      try {
+        return move.run();
+      } finally {
+        move.done();
+      }
+    };
+    // (the change puts the unchanged line inside a template literal: at HEAD it is no reference, so it stays refused)
+    const line = "export const load = (p: string) => import(p);";
+    const quoted = run(`const a = 1;\n${line}\nconst b = 2;\n`, `const a = \`\n${line}\n\`;\n`);
+    assert.equal(quoted.status, 1, quoted.out);
+    assert.match(quoted.out, /^ {2}refused: src\/loader\.ts:2 \(removed\) "import\(p\)"/mu);
+    assert.doesNotMatch(quoted.out, /not judged/u);
+    // (a dynamic import beside a `require` or a type import on one unchanged line is refused)
+    for (const mixed of [
+      "export const both = (p: string) => [import(p), require(p)];",
+      'export const both = (p: string) => import(p) as Promise<typeof import("./x.js")>;',
+    ]) {
+      const result = run(`${mixed}\nconst b = 1;\n`, `${mixed}\nconst b = 2;\n`);
+      assert.equal(result.status, 1, result.out);
+      assert.match(result.out, /^ {2}refused: src\/loader\.ts:1 \(added\) /mu);
+      assert.doesNotMatch(result.out, /not judged/u);
+    }
+  },
+);

@@ -65,17 +65,18 @@
 // changed file the check parses (`.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs`) is refused by name the
 // same way, one per line: an `import` keyword outside those statements other than `import.meta` (a dynamic or type
 // import), a `require` identifier outside them, a triple-slash reference directive, or a comment (JSDoc included)
-// holding `import(` or `@import`. One exception: a dynamic `import(…)` on a line the change leaves unchanged, in a file
-// it edits at one path on both sides and does not declare whole, is not refused and needs no declaration; it is printed
-// once, by its line at HEAD, as `not judged: unchanged dynamic import, FILE:LINE`, and counted in the shape line: check
-// where its path points after the move, since no move tool reads a path built at run time. A declaration that names
-// such a line still covers it. A changed file of any other type, `.vue` and `.html` among them, is outside the rule:
-// the report lists it as `not compared (unparsed)`, and `vue-tsc` and the move's compiler run are its witness. A side
-// that is no regular file (a gitlink, mode 160000, or a symbolic link, 120000), whose content is no file's text, is
-// never parsed or resolved (a link's blob is read only to check a declaration of it is UTF-8): it gives no bindings,
-// the resolver sees no such file (a linked `tsconfig.json` or `package.json` is none), each of its added or removed
-// lines is unadmitted unless declared, whether Git marks it moved or it is whitespace (a submodule's new commit is no
-// move), and the report lists it as `not compared (not a regular file)`.
+// holding `import(` or `@import`. One exception: a line whose every reference is a dynamic `import(…)`, which the
+// change leaves unchanged and which is refused on both sides of a file the change edits at one path and does not
+// declare whole, is not refused and needs no declaration; it is printed once, by its line at HEAD, as `not judged:
+// unchanged dynamic import, FILE:LINE`, and counted in the shape line: check where its path points after the move,
+// since no move tool reads a path built at run time. A declaration that names such a line still covers it. A changed
+// file of any other type, `.vue` and `.html` among them, is outside the rule: the report lists it as `not compared
+// (unparsed)`, and `vue-tsc` and the move's compiler run are its witness. A side that is no regular file (a gitlink,
+// mode 160000, or a symbolic link, 120000), whose content is no file's text, is never parsed or resolved (a link's blob
+// is read only to check a declaration of it is UTF-8): it gives no bindings, the resolver sees no such file (a linked
+// `tsconfig.json` or `package.json` is none), each of its added or removed lines is unadmitted unless declared, whether
+// Git marks it moved or it is whitespace (a submodule's new commit is no move), and the report lists it as `not
+// compared (not a regular file)`.
 //
 // The report always ends with the change's shape: the moved lines, the admitted lines by form, the declared lines, the
 // bindings differing and the refused specifiers (and `; not judged N` after them when N lines are not judged).
@@ -84,8 +85,8 @@
 // characters) reads as added and removed. A failure on such a block is read by a person, not overridden.
 //
 // Exit status: 0 when every line is moved, admitted or declared and no binding differs; 1 otherwise (each printed with
-// its file and line); 2 when Git's output or the declarations cannot be read, a file name Git quotes, or a binary change, whose
-// content the check cannot inspect, and for a refused argument or an empty change.
+// its file and line); 2 when Git's output or the declarations cannot be read, a file name Git quotes, or a binary
+// change, whose content the check cannot inspect, and for a refused argument or an empty change.
 import { execFileSync, spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -659,13 +660,17 @@ function bindingsOf(file, text, resolver) {
  */
 function otherReferencesOf(source, text, compared, lineOf) {
   const out = [];
-  const lines = new Set();
+  const lines = new Map();
+  // (a line is one refusal, named by its first reference, and marked dynamic only while every reference on it is a
+  // dynamic import)
   const refuse = (at, shown, what, dynamic = false) => {
     const line = lineOf(at);
-    if (lines.has(line)) return;
-    lines.add(line);
+    if (lines.has(line)) {
+      lines.get(line).dynamic &&= dynamic;
+      return;
+    }
     const specifier = shown.split("\n")[0].slice(0, 60);
-    out.push({
+    const entry = {
       kind: "reference",
       target: {
         type: "refused",
@@ -678,7 +683,9 @@ function otherReferencesOf(source, text, compared, lineOf) {
       as: "",
       typeOnly: false,
       dynamic,
-    });
+    };
+    lines.set(line, entry);
+    out.push(entry);
   };
   for (const [list, what] of [
     [source.referencedFiles, "a `/// <reference path>`"],
@@ -1058,10 +1065,9 @@ export function checkMove(
 }
 
 /**
- * The undeclared `refused` (each `{ side, file, line, dynamic }`) kept, and those not judged: each of an unchanged
- * dynamic `import(…)`, its line neither added nor removed on its side, in a file the change edits at one path on both
- * sides (`files`, the change's) and does not declare whole (`wholes`); one per unchanged line, its line at HEAD (its
- * removed side is the same line).
+ * The undeclared `refused` (each `{ side, file, line, text, dynamic }`) kept, and those not judged: a line whose every
+ * reference is a dynamic `import(…)`, neither added nor removed, refused on both sides of a file the change edits at one
+ * path (`files`, the change's) and does not declare whole (`wholes`); one per such line, its line at HEAD.
  */
 function unchangedDynamicImports(refused, files, wholes) {
   const changed = new Map();
@@ -1079,9 +1085,23 @@ function unchangedDynamicImports(refused, files, wholes) {
     refusal.dynamic &&
     changed.has(refusal.file) &&
     !changed.get(refusal.file)[refusal.side].has(refusal.line);
+  // (an added side's line pairs with a removed side's of its file and text, each once: a line the change left as it was,
+  // and a dynamic import on both sides; an unpaired one stays refused, as one whose other side the change made no
+  // reference, inside a template literal)
+  const removed = refused.filter((refusal) => refusal.side === "removed" && unchanged(refusal));
+  const paired = new Set();
+  for (const refusal of refused) {
+    if (refusal.side !== "added" || !unchanged(refusal)) continue;
+    const other = removed.find(
+      (one) => !paired.has(one) && one.file === refusal.file && one.text === refusal.text,
+    );
+    if (other === undefined) continue;
+    paired.add(other);
+    paired.add(refusal);
+  }
   return [
-    refused.filter((refusal) => !unchanged(refusal)),
-    refused.filter((refusal) => unchanged(refusal) && refusal.side === "added"),
+    refused.filter((refusal) => !paired.has(refusal)),
+    refused.filter((refusal) => paired.has(refusal) && refusal.side === "added"),
   ];
 }
 

@@ -46,9 +46,9 @@
 // `tokensOf`) dropped. A group holding a template literal or a `/` is no rewrap (a scan without context cannot tell a
 // regular expression from a division): such a move is declared with --edit. A rewrap's closing line that another OLD
 // line repeats (`);`, `): boolean {`) is first taken by a run of its own: a one-line run right after a group that is no
-// rewrap, or between two of its lines, is held out of the runs and the check run again, and stays held only while its
-// group is then admitted (the OLD line it took must still be taken by another unit). Last, within each NEW file its
-// runs, declared edits and admitted groups follow OLD's order. Anything else fails.
+// rewrap is held out of the runs and the check run again, and stays held only while its group is then admitted (the OLD
+// line it took must still be taken by another unit). Last, within each NEW file its runs, declared edits and admitted
+// groups follow OLD's order. Anything else fails.
 //
 // This check does not prove scope or brace ownership; compilation rejects malformed or ill-typed results, while
 // behavior requires separate tests or review.
@@ -470,10 +470,9 @@ function matchRuns({ oldShape, start, taken, places, place }, file, { shape, uni
  * inclusive). Returns the counts, the added exports, the residue and the failures; or `{ refused }`, a message, when an
  * edit names no body lines or overlaps another.
  *
- * A one-line run next to a group of left-over NEW lines that is no rewrap (right after it, or between two of its lines)
- * may have taken the OLD line its group's rewrap ends with (a closing `);` or `): boolean {` that another OLD line
- * repeats): such runs are held out of the matching and the check runs again, and a held line stays held only while
- * its group is then admitted as a rewrap. A held line is a left-over line like any other, admitted only by the rewrap
+ * A one-line run right after a group of left-over NEW lines that is no rewrap may have taken the OLD line its group's
+ * rewrap ends with (a closing `);` or `): boolean {` that another OLD line repeats): such runs are held out of the
+ * matching and the check runs again, and a held line stays held only while its group is then admitted as a rewrap. A held line is a left-over line like any other, admitted only by the rewrap
  * rule, and the OLD line its run took must still be taken by another unit.
  */
 export function reconstruct(oldFile, files, edits = []) {
@@ -483,14 +482,10 @@ export function reconstruct(oldFile, files, edits = []) {
   let held = new Set();
   for (const { group, run } of result.residue) {
     if (run !== null) continue;
-    const [low, high] = [group.lines[0].line, group.lines.at(-1).line];
+    // (a group's lines are consecutive, so no run lies between two of them)
+    const after = group.lines.at(-1).line + 1;
     for (const unit of result.runs)
-      if (
-        unit.file === group.file &&
-        unit.end === unit.line - 1 &&
-        unit.line > low &&
-        unit.line <= high + 1
-      )
+      if (unit.file === group.file && unit.end === unit.line - 1 && unit.line === after)
         held.add(key(unit.file, unit.line));
   }
   while (held.size > 0) {
