@@ -37,7 +37,7 @@ export interface Outside {
 
 /**
  * Whether a written type's values can only be `null`, by the type grammar's forms: the name `null`, an optional of such a
- * type, a union of such types; a collection is a value of its own (the lead's R44).
+ * type, a union of such types; a collection is a value of its own.
  */
 function onlyNull(type: TypeAnnotation): boolean {
   switch (type.kind) {
@@ -56,7 +56,7 @@ function onlyNull(type: TypeAnnotation): boolean {
  * A position of a written type whose only kind is `null`, or `null` where it has none: the type itself, or one inside
  * it, an optional's value, a collection's element, a union's member that is not `null` alone. A value read from such a
  * place is `null` to today's checker and `unknown` to the core where it enters from the host, so the slice takes no
- * such type, wherever it is written (the lead's R44).
+ * such type, wherever it is written.
  */
 function nullOnlyPosition(type: TypeAnnotation): TypeAnnotation | null {
   if (onlyNull(type)) return type;

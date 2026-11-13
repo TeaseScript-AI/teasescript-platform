@@ -659,14 +659,14 @@ export const DECLARED_REFUSALS: readonly {
     };
   }),
   // (a host value stored at a written type only `null` fills, at every position: the slice takes no such type, the
-  // lead's R44)
+  // lead's R44; the twin is the position's template, the host value not stored at a written type)
   ...samples()
     .filter((sample) => sample.origin === "ingress" && sample.kind === "null")
     .map((sample) => ({
       row: sample.row,
       position: `${sample.operand}, ${sample.kind} (${sample.origin})`,
       refused: `${sample.prelude}${sample.command}`,
-      admitted: twinCommand(sample),
+      admitted: commandWith(sample.row, sample.operand, "hostValue"),
       gate: "annotationOutside (src/type-inference/core/slice-syntax.ts)",
       text: "this written type",
     })),

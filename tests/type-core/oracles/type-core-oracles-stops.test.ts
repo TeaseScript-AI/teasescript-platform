@@ -559,14 +559,15 @@ test("a stop's runs claim only what they demonstrate: a store's absent property 
       mode.name,
     );
   }
+  // (the corpus case writes `typed: null`, which the route does not take: `integer?` holds the same `null`)
   const two = corpus(
-    'let typed:null=null\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\na.f=hostValue\na={f:typed,g:num}\na=b\na=b\nlet out=c\nexit\n',
+    'let typed:integer?=null\nlet num:integer=1\nlet text:string="x"\nlet root={f:typed,g:num}\nlet foreign={f:hostValue,g:text}\nlet a=root\nlet b=foreign\nlet c=root\na.f=hostValue\na={f:typed,g:num}\na=b\na=b\nlet out=c\nexit\n',
     HELD_MODES[0]!,
     64,
   );
   assert.deepEqual(
     [two.kind, two.sites.map(({ code, site }) => `${code} ${site}`)],
-    ["unwitnessed", ["TSV041 0:186:187", "TSV041 0:190:191"]],
+    ["unwitnessed", ["TSV041 0:190:191", "TSV041 0:194:195"]],
   );
   for (const mode of HELD_MODES) {
     const absent = stopRuns(
