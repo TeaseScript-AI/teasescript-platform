@@ -1,11 +1,14 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { isolateGit } from "../fixture-git.mjs";
 import { compareSides, controlFailures, main } from "./split-test-compare.mjs";
+
+isolateGit();
 
 const TOOL = fileURLToPath(new URL("./split-test-compare.mjs", import.meta.url));
 
@@ -267,4 +270,51 @@ test("usage, or a tree that is not built, cannot run", (t) => {
   assert.equal(run(undefined, ["tests/missing.test.ts"]).status, 2);
   rmSync(join(root, "head/dist"), { recursive: true });
   assert.equal(run().status, 2);
+});
+
+test("--moved refuses a list that misses a test file reaching a moved module, naming it, before any test runs (#2583)", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "split-test-compare-reach-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const tree = join(root, "tree");
+  for (const [file, text] of Object.entries({
+    "tests/helpers/moved.ts": "export const moved = 1;\n",
+    "tests/a/direct.test.ts": 'import { moved } from "../helpers/moved.js";\n',
+    "tools/reader.mjs":
+      'import { readdirSync } from "node:fs";\nexport const all = () => readdirSync("tests", { recursive: true });\n',
+    "tools/reader.test.mjs": 'import { all } from "./reader.mjs";\n',
+  })) {
+    mkdirSync(dirname(join(tree, file)), { recursive: true });
+    writeFileSync(join(tree, file), text);
+  }
+  const git = (...args) => execFileSync("git", args, { cwd: tree, encoding: "utf8" });
+  git("init", "-q");
+  git("add", "-A");
+  git("commit", "-q", "-m", "c");
+  const out = join(root, "out");
+  const compare = (...args) =>
+    spawnSync(process.execPath, [TOOL, tree, tree, out, "--moved", ...args], { encoding: "utf8" });
+  const result = compare(
+    "tests/helpers/moved.ts",
+    "--old",
+    "tests/a/direct.test.ts",
+    "--new",
+    "tests/a/direct.test.ts",
+    "tools/reader.test.mjs",
+  );
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.deepEqual(result.stdout.split("\n"), [
+    "reach: base 2, head 2 test files (reach.txt)",
+    "reach: --old misses tools/reader.test.mjs",
+    "verdict: a list misses a reaching test file",
+    "",
+  ]);
+  assert.match(
+    readFileSync(join(out, "reach.txt"), "utf8"),
+    /^ {2}tools\/reader\.test\.mjs -> tools\/reader\.mjs -> tests\/helpers\/moved\.ts$/mu,
+  );
+  // (--old without --new, or a moved file neither tree tracks, cannot run)
+  assert.equal(compare("tests/helpers/moved.ts", "--old", "tests/a/direct.test.ts").status, 2);
+  const none = compare("tests/helpers/none.ts");
+  assert.equal(none.status, 2);
+  assert.match(none.stderr, /neither tree tracks the moved tests\/helpers\/none\.ts/u);
 });
