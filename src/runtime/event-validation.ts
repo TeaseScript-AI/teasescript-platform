@@ -119,8 +119,9 @@ function isSpeaker(value: unknown): boolean {
 }
 
 /**
- * A settlement's kind and identity, and an answer's sequence, text, and UI, with a form's answers, shown options, and
- * presentation checked against it.
+ * A settlement's kind and identity, and an answer's sequence and text. Of the UI, only a form's is checked as restore
+ * checks it (`validInteractionUiShape`), with its answers, shown options and presentation; another kind's only as a
+ * record.
  */
 function validSettlement(settlement: unknown): boolean {
   if (

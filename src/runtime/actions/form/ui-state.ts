@@ -215,7 +215,8 @@ export function isFormUi(value: unknown): value is FormUi {
 /**
  * The form branch of `validInteractionUiShape`: the shape, fields, hint, buttons and timeout, but of the accessible
  * name only its key, which `validInteractionUiShape` checks. `count` measures each retained text against the
- * interaction's aggregate byte limit and returns `false` when it does not fit.
+ * interaction's aggregate byte limit and returns `false` when it does not fit; `isFormUi` passes one that checks only that
+ * each text is a string.
  */
 export function validFormUi(
   value: Record<string, unknown>,
@@ -359,11 +360,12 @@ function validOptions(
 export function validFormState(ui: FormUi, value: unknown): boolean {
   if (!isPlainRecord(value) || !hasExactKeys(value, ["values", "editor"])) return false;
   const values = value.values;
-  const unset = ui.timeout?.onTimeout !== "submit";
+  // Only a form without a time limit, or one that cancels at it, may hold a required field without a value.
+  const requiredMayBeUnset = ui.timeout === null || ui.timeout.onTimeout === "cancel";
   if (
     !Array.isArray(values) ||
     values.length !== ui.fields.length ||
-    !ui.fields.every((field, index) => validFieldValue(field, values[index], unset))
+    !ui.fields.every((field, index) => validFieldValue(field, values[index], requiredMayBeUnset))
   )
     return false;
   const editor = value.editor;

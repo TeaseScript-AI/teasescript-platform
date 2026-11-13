@@ -863,6 +863,20 @@ test("a form that submits at its time limit restores only with a value in every 
   assert.throws(() =>
     restoreCheckpoint({ ...createCheckpoint(plan, cleared.snapshot), snapshot: emptied }),
   );
+  // A form without a time limit, or one that cancels at it, restores with a required field still empty.
+  for (const limit of ["", ', timeout: 30 s, onTimeout: "cancel"']) {
+    const open = compileValidPlan(
+      `let answers = askForm fields: { n: { type: "integer" } }${limit}\nexit`,
+    );
+    const unanswered = opened(open).snapshot;
+    assert.deepEqual(
+      unanswered.foregroundAction?.kind === "interaction" &&
+        unanswered.foregroundAction.form?.values,
+      [null],
+      limit,
+    );
+    assert.equal(validateRuntimeSnapshot(unanswered, open).valid, true, limit);
+  }
 });
 
 test("a stored answer event keeps a form UI only as the engine shows one", () => {
