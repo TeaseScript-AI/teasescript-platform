@@ -351,7 +351,8 @@ test("a save that settles while the stop waits for its acknowledgement is not is
   const make = module["createInProcessBackend"] as typeof InProcess.createInProcessBackend;
   const bridge = make(
     { commit: null, dirty: null, mode: null, appVersion: null },
-    { delayMs: 200 },
+    // The stop's acknowledgement arrives late, as from a Worker.
+    { delayMs: 200, stopAsWorker: true },
   );
   context.after(() => bridge.client.terminate());
   let finishWrite!: () => void;
