@@ -196,9 +196,9 @@ export function coreCheckResult(
 }
 
 /**
- * The known values of a program (S3 §2, group V): the one constant service, handed to the answers so that a view's
- * known value is the consumer's; a `fromJson` reads its JSON as `expected` gives its type, so its known
- * value is the one the run gets.
+ * The known values of a program (S3 §2, group V): the constant service the checks read, handed to the answers so that a
+ * view's known value is the consumer's (`knownAmountRefused` reads an instance of its own); a `fromJson` reads its JSON
+ * as `expected` gives its type, so its known value is the one the run gets.
  */
 function knownValues(
   answers: Answers,
