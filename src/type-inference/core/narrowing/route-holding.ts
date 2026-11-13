@@ -5,7 +5,6 @@ import { each, sorted, steps } from "../charged-iteration.js";
 import { peel } from "./narrowings.js";
 import {
   countIn,
-  lowerBound,
   type StatementTree,
   type TreeBlock,
   type TreeStatement,
@@ -72,28 +71,6 @@ export class RouteHolding {
   /** The index of the first statement of `block` after `index` whose own expressions hold `name`, or `null`. */
   public after(name: string, block: TreeBlock, index: number): number | null {
     this.work.charge("eventSteps");
-    const list = this.#ownedIn(name, block);
-    let low = 0;
-    let high = list.length;
-    for (const _ of steps(this.work, "eventSteps", () => low < high)) {
-      const middle = (low + high) >> 1;
-      if (list[middle]! <= index) low = middle + 1;
-      else high = middle;
-    }
-    return low < list.length ? list[low]! : null;
-  }
-
-  /** The index of the last statement of `block` before `index` whose own expressions hold `name`, or `null`. */
-  public before(name: string, block: TreeBlock, index: number): number | null {
-    this.work.charge("eventSteps");
-    const list = this.#ownedIn(name, block);
-    const low = lowerBound(this.work, list, index);
-    return low > 0 ? list[low - 1]! : null;
-  }
-
-  /** The indexes, sorted, of `block`'s statements whose own expressions hold `name`; per name, made once. */
-  #ownedIn(name: string, block: TreeBlock): readonly number[] {
-    this.work.charge("eventSteps");
     let owned = this.#owned.get(name);
     if (owned === undefined) {
       this.#index();
@@ -108,7 +85,16 @@ export class RouteHolding {
       owned = byBlock;
       this.#owned.set(name, owned);
     }
-    return owned.get(block.id) ?? [];
+    const list = owned.get(block.id);
+    if (list === undefined) return null;
+    let low = 0;
+    let high = list.length;
+    for (const _ of steps(this.work, "eventSteps", () => low < high)) {
+      const middle = (low + high) >> 1;
+      if (list[middle]! <= index) low = middle + 1;
+      else high = middle;
+    }
+    return low < list.length ? list[low]! : null;
   }
 
   /** A name's marks: the statements holding it and every compound statement around one, each once. */

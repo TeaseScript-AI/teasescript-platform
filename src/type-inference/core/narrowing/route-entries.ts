@@ -10,7 +10,7 @@
  * is made from a block's code but a loop's own, nor by a computed or glob target, nor by a file's `call`.
  */
 import type { Expression } from "../../../ast.js";
-import type { WorkLedger } from "../budget.js";
+import { keepText, type WorkLedger } from "../budget.js";
 import { each, holds, sorted, steps } from "../charged-iteration.js";
 import type { Definition, Key } from "../definitions.js";
 import type { FlowNode, FlowRegion } from "../flow-graph.js";
@@ -20,7 +20,7 @@ import { peel } from "./narrowings.js";
 import { RouteCandidates, type Candidate, type Candidates } from "./route-candidates.js";
 import { CALL, RouteHolding } from "./route-holding.js";
 import type { Feasibility, Place } from "./route-tests.js";
-import { countIn, lowerBound, type TreeBlock, type TreeStatement } from "./statement-tree.js";
+import { countIn, type TreeBlock, type TreeStatement } from "./statement-tree.js";
 
 /**
  * Where a segment ends: a place from a callable's body down; `own`, the last place's statement is on the route (the
@@ -48,6 +48,12 @@ export interface Entry {
   readonly block: TreeBlock;
   readonly start: number;
   readonly header: TreeStatement | null;
+}
+
+/** A store whose stretch, as offsets in its body, holds a jump (`RouteEntries.#stretched`). */
+interface Stretched {
+  readonly start: Candidate;
+  readonly stretch: { readonly from: number; readonly to: number };
 }
 
 /** A jump into an entry, at its point; `order`, its place in `Jumps.list`. */
@@ -80,6 +86,11 @@ export abstract class RouteEntries extends RouteCandidates {
   readonly #carried = new Map<Key, ReadonlyMap<Entry, Definition>>();
   /** Under the program default, per loop or label statement, whether a run is proved to reach it (R2.2 item 1). */
   readonly #reaches = new Map<TreeStatement, boolean>();
+  /** Under the program default, per store list and name, its stores whose stretch holds a jump (`#stretched`). */
+  readonly #stretches = new Map<
+    ReadonlyMap<TreeBlock, Candidates>,
+    Map<string, readonly Stretched[]>
+  >();
   /** Which statements hold a variable (r4-451). */
   protected readonly holding: RouteHolding = new RouteHolding(
     this.pass.program.work,
@@ -436,36 +447,21 @@ export abstract class RouteEntries extends RouteCandidates {
     const { byBody } = this.#jumpIndex();
     // (a program without jumps: no store's search, no stretch)
     if (byBody.size === 0) return [];
-    // (the key's stores in bodies that make a jump: each list's bodies or the jumps' bodies, whichever are fewer)
-    const starts: Candidate[] = [];
-    for (const lists of each(this.#work, "eventSteps", yield* this.seedLists(key)))
-      if (this.defaultHolds() !== null) this.#windowed(name, calls, lists, byBody, starts);
-      else if (lists.size < byBody.size) {
-        for (const [body, { list }] of each(this.#work, "eventSteps", lists))
-          if (byBody.get(body) !== undefined)
-            for (const found of each(this.#work, "eventSteps", list)) starts.push(found);
-      } else
-        for (const [body] of each(this.#work, "eventSteps", byBody))
-          for (const found of each(this.#work, "eventSteps", lists.get(body)?.list ?? []))
-            starts.push(found);
     // (per body, its stores' stretches as offsets, merged so that each of its jumps is looked at once)
     const stretches = new Map<TreeBlock, { from: number; to: number }[]>();
-    for (const start of each(this.#work, "eventSteps", starts)) {
-      const body = start.chain[0]!.block;
-      const jumps = byBody.get(body)!;
-      const stretch = { from: start.start, to: this.#cut(name, calls, start.chain) };
-      // (a store certified only where its stretch holds a jump: the certificate is the costly part)
-      const first = this.#after(jumps, stretch.from, 0);
-      if (
-        first >= jumps.length ||
-        jumps[first]!.point.at >= stretch.to ||
-        !(yield* this.certifies(start, key))
-      )
-        continue;
-      const known = stretches.get(body);
-      if (known === undefined) stretches.set(body, [stretch]);
-      else known.push(stretch);
-    }
+    for (const lists of each(this.#work, "eventSteps", yield* this.seedLists(key)))
+      for (const { start, stretch } of each(
+        this.#work,
+        "eventSteps",
+        this.#stretched(lists, name, calls, byBody),
+      )) {
+        // (a store certified only where its stretch holds a jump: the certificate is the costly part)
+        if (!(yield* this.certifies(start, key))) continue;
+        const body = start.chain[0]!.block;
+        const known = stretches.get(body);
+        if (known === undefined) stretches.set(body, [stretch]);
+        else known.push(stretch);
+      }
     const tried: Jump[] = [];
     for (const [body, known] of each(this.#work, "eventSteps", stretches)) {
       const jumps = byBody.get(body)!;
@@ -488,57 +484,45 @@ export abstract class RouteEntries extends RouteCandidates {
   }
 
   /**
-   * Under the program default (R2.2's few jumps), a key's stores whose stretch may hold one of a body's jumps. A store
-   * before the last statement of a block on a jump's chain, before the chain's place there, whose own expressions hold
-   * the variable (or a call, where `calls`) has its stretch end at that statement (`#cut`), so it holds no jump below:
-   * per jump, the windows between such statements, merged per body; a store whose statement is not known (`start` -1)
-   * is always kept.
+   * Of a store list, the stores in bodies that make a jump whose stretch holds one, with their stretches: each list's
+   * bodies or the jumps' bodies, whichever are fewer. Under the program default, made once per list, name and `calls`
+   * (R2.2's jumps are fixed): a prefix's whole stores serve each of its keys alike, so many keys of one record never
+   * scan its stores again.
    */
-  #windowed(
+  #stretched(
+    lists: ReadonlyMap<TreeBlock, Candidates>,
     name: string,
     calls: boolean,
-    lists: ReadonlyMap<TreeBlock, Candidates>,
     byBody: ReadonlyMap<TreeBlock, readonly Jump[]>,
-    starts: Candidate[],
-  ): void {
+  ): readonly Stretched[] {
     this.#work.charge("eventSteps");
-    const work = this.#work;
-    for (const [body, jumps] of each(work, "eventSteps", byBody)) {
-      const found = lists.get(body);
-      if (found === undefined) continue;
-      const windows: { from: number; to: number }[] = [{ from: -Infinity, to: 0 }];
-      for (const jump of each(work, "eventSteps", jumps)) {
-        const { chain } = jump.point;
-        let from = -Infinity;
-        let level = 0;
-        for (const _ of steps(work, "eventSteps", () => level < chain.length)) {
-          const { block, index } = chain[level]!;
-          const held = this.holding.before(name, block, index);
-          const call = calls ? this.holding.before(CALL, block, index) : null;
-          const last = held === null || (call !== null && call > held) ? call : held;
-          if (last !== null) {
-            if (level > 0) windows.push({ from, to: block.statements[0]!.start });
-            from = block.statements[last]!.start;
-          }
-          level += 1;
-        }
-        windows.push({ from, to: jump.point.at });
-      }
-      sorted(work, "eventSteps", windows, (a, b) => a.from - b.from);
-      // (each window from the first store at or after its start, never back before where the last one stopped)
-      let at = 0;
-      for (const { from, to } of each(work, "eventSteps", windows)) {
-        at = Math.max(at, lowerBound(work, found.starts, from));
-        for (const _ of steps(
-          work,
-          "eventSteps",
-          () => at < found.list.length && found.list[at]!.start < to,
-        )) {
-          starts.push(found.list[at]!);
-          at += 1;
-        }
-      }
+    const memo = this.defaultHolds() === null ? null : `${name}${calls ? "\0calls" : ""}`;
+    const byName = memo === null ? undefined : this.#stretches.get(lists);
+    const known = memo === null ? undefined : byName?.get(memo);
+    if (known !== undefined) return known;
+    const starts: Candidate[] = [];
+    if (lists.size < byBody.size) {
+      for (const [body, { list }] of each(this.#work, "eventSteps", lists))
+        if (byBody.get(body) !== undefined)
+          for (const found of each(this.#work, "eventSteps", list)) starts.push(found);
+    } else
+      for (const [body] of each(this.#work, "eventSteps", byBody))
+        for (const found of each(this.#work, "eventSteps", lists.get(body)?.list ?? []))
+          starts.push(found);
+    const made: Stretched[] = [];
+    for (const start of each(this.#work, "eventSteps", starts)) {
+      const jumps = byBody.get(start.chain[0]!.block)!;
+      const stretch = { from: start.start, to: this.#cut(name, calls, start.chain) };
+      const first = this.#after(jumps, stretch.from, 0);
+      if (first < jumps.length && jumps[first]!.point.at < stretch.to)
+        made.push({ start, stretch });
     }
+    if (memo !== null) {
+      keepText(this.#work, memo.length);
+      if (byName === undefined) this.#stretches.set(lists, new Map([[memo, made]]));
+      else byName.set(memo, made);
+    }
+    return made;
   }
 
   /** The index of the first jump of a body's `jumps` from `low` on past offset `from` (a binary search). */

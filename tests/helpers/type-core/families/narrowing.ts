@@ -658,6 +658,26 @@ export const ROUTE_ENTRY_FAMILIES: readonly WorkFamily[] = [
       ),
   },
   {
+    name: "E-default-copied-nested",
+    measures:
+      "N3 under the program default (R2.2): a record of k fields copied k times inside a compound statement, then one loop reading each field",
+    program: (k) =>
+      main(
+        lines(
+          `let seed = {${fields(k, () => "1")}}`,
+          `if hostValue is boolean { seed = {${fields(k, () => "null")}} }`,
+          'if seed == null { say "absent" }',
+          "if true {",
+          rows(k, (i) => `let c${i} = seed\nseed = c${i}`),
+          "}",
+          "repeat 2 {",
+          rows(k, (i) => `let value${i}: integer = seed.f${i}`),
+          "}",
+          "exit",
+        ),
+      ),
+  },
+  {
     name: "E-held-deep",
     measures:
       "N3: a label's segment over a test of the root k compound statements deep, and k uses after it",
