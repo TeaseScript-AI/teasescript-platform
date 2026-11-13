@@ -14,7 +14,8 @@
 //    (`test-reach.mjs`, in each tree, which must be a Git checkout) are written to `reach.txt` with their chains and
 //    counted (`reach: base N, head M test files`). With `--old` and `--new`, a reaching test file the base's OLD or
 //    the head's NEW list leaves out is named (`reach: --old misses FILE`) and ends the check (exit 1) before any test
-//    runs; without them, OLD is the base's reaching set and NEW the head's.
+//    runs; without them, OLD is every test file either side reaches that the base holds, and NEW every one the head
+//    holds (an unchanged test file can reach a moved module by its old name only).
 // 1. Discovery, when a FILE is under `tests/`, by this tool's rule (`suiteTestFiles` of `tools/test-shards.mjs`) over
 //    each tree's `dist/tests/`: the base's suite holds each OLD file, the head's each NEW file and no OLD file that is
 //    not also NEW, and the suite is otherwise the same on both sides. A difference ends the check (exit 1) before any
@@ -186,8 +187,8 @@ function run(tree, files, out, side) {
 }
 
 /**
- * The test files reaching `moved` in each tree, base's and head's (each a sorted list), a MODULE taken on each side
- * that tracks it; their chains are written to OUT's `reach.txt`.
+ * The test files reaching `moved` in each tree, base's and head's (each `{ reached, tracked }`: a sorted list and the
+ * tree's tracked files), a MODULE taken on each side that tracks it; their chains are written to OUT's `reach.txt`.
  */
 function reachOf(baseTree, headTree, moved, out) {
   const sides = [baseTree, headTree].map((tree) => {
@@ -195,6 +196,7 @@ function reachOf(baseTree, headTree, moved, out) {
       const tracked = trackedFiles(tree);
       const modules = moved.filter((file) => tracked.has(file));
       return {
+        tracked,
         modules,
         reached: modules.length === 0 ? [] : testsReaching(tree, modules, tracked),
       };
@@ -212,7 +214,10 @@ function reachOf(baseTree, headTree, moved, out) {
     ...sides[at].reached.map(({ chain }) => `  ${chain.join(" -> ")}`),
   ]);
   writeFileSync(path.join(out, "reach.txt"), `${lines.join("\n")}\n`);
-  return sides.map(({ reached }) => reached.map(({ test }) => test));
+  return sides.map(({ reached, tracked }) => ({
+    reached: reached.map(({ test }) => test),
+    tracked,
+  }));
 }
 
 /** Runs the comparison with `argv` (`compare` the comparison, replaceable to test its controls); returns the status. */
@@ -237,11 +242,22 @@ export function main(argv, print = console.log, compare = compareSides) {
     const [baseTree, headTree, out] = positional.map((p) => path.resolve(p));
     const reachReport = [];
     if (moved.length > 0) {
-      const [baseReach, headReach] = reachOf(baseTree, headTree, moved, out);
+      const [base, head] = reachOf(baseTree, headTree, moved, out);
+      const [baseReach, headReach] = [base.reached, head.reached];
       reachReport.push(
         `reach: base ${baseReach.length}, head ${headReach.length} test files (reach.txt)`,
       );
-      if (olds.length === 0) [olds, news] = [baseReach, headReach];
+      // (without lists, each side runs the files either side reaches that it holds: an unchanged test file may reach a
+      // moved module by its name on one side only)
+      if (olds.length === 0)
+        [olds, news] = [
+          [
+            ...new Set([...baseReach, ...headReach.filter((file) => base.tracked.has(file))]),
+          ].sort(),
+          [
+            ...new Set([...headReach, ...baseReach.filter((file) => head.tracked.has(file))]),
+          ].sort(),
+        ];
       const missing = [
         ...baseReach
           .filter((file) => !olds.includes(file))

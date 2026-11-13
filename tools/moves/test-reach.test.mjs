@@ -49,6 +49,13 @@ const REACHING = {
     'const url = (file: string) => JSON.stringify(file);\nexport const source = `import { moved } from ${url("../helpers/moved.js")};`;\n',
   "tests/a/joined.test.ts":
     'import { join } from "node:path";\nexport const helper = join(import.meta.dirname, "..", "helpers", "moved.js");\n',
+  // reaching when compiled: a path written from the test's folder under `dist/`
+  "tests/a/compiled.test.ts":
+    'export const helper = new URL("../../../tests/helpers/moved.js", import.meta.url);\n',
+  // a path under a folder a template names
+  "tests/helpers/deep/inner.ts": "export const inner = 1;\n",
+  "tests/a/folder.test.ts":
+    'const at = (name: string) => `tests/helpers/${name}`;\nexport const inner = at("deep/inner.js");\n',
   // not reaching: a path in comments only, another helper, a folder listed with no folder named
   "tests/a/comment.test.ts":
     '// moved to "../helpers/moved.js"\n/* see "../helpers/moved.js" */\nexport const nothing = 1;\n',
@@ -58,12 +65,13 @@ const REACHING = {
   "tools/lister.test.mjs": 'import { list } from "./lister.mjs";\n',
 };
 
-test("the test files reaching a module: by import, through another module, a reader of every test file, a built path, a joined path's file name and a template's code (#2583)", (t) => {
+test("the test files reaching a module: by import, through another module, a reader of every test file, a built path, a joined path's file name, a template's code, a compiled test's path and a folder a template names (#2583)", (t) => {
   const r = checkout(t, REACHING);
   const result = r.run("tests/helpers/moved.ts");
   assert.equal(result.status, 0, result.err);
   assert.deepEqual(result.out.split("\n"), [
-    "test files reaching: 6",
+    "test files reaching: 7",
+    "  tests/a/compiled.test.ts -> tests/helpers/moved.ts",
     "  tests/a/direct.test.ts -> tests/helpers/moved.ts",
     "  tests/a/joined.test.ts -> tests/helpers/moved.ts",
     "  tests/a/spawned.test.ts -> tests/helpers/moved.ts",
@@ -72,6 +80,11 @@ test("the test files reaching a module: by import, through another module, a rea
     "  tools/reader.test.mjs -> tools/reader.mjs -> tests/helpers/moved.ts",
     "",
   ]);
+  // (a path joined under a folder a template names)
+  assert.match(
+    r.run("tests/helpers/deep/inner.ts").out,
+    /^ {2}tests\/a\/folder\.test\.ts -> tests\/helpers\/deep\/inner\.ts$/mu,
+  );
   // (a moved test file reaches itself)
   assert.match(r.run("tests/a/other.test.ts").out, /^ {2}tests\/a\/other\.test\.ts$/mu);
   // (usage, and a module the tree does not track)
@@ -93,6 +106,6 @@ test("strings are read outside comments, a template's code included, and to the 
         "const e = 'six'; // 'seven'",
       ].join("\n"),
     ),
-    ["one", "three", "four", "two ${ five", "it's", "unclosed", "six"],
+    ["one", "two ", "three", "four", "two ${ five", "it's", "unclosed", "six"],
   );
 });

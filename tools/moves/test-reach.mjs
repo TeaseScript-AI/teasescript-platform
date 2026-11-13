@@ -7,21 +7,23 @@
 // MODULE is a tracked file's path from DIR's top folder (default: the current folder's repository). The files are those
 // `git ls-files` lists in DIR; a code file is one ending `.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs` or
 // `.cjs`. A code file reaches another when one of its quoted strings outside its comments (`stringsOf`) names it: a
-// path starting `./` or `../` from the file's folder, any other from the top folder or the file's folder, a leading
-// `dist/` dropped, and an extension read as the build maps it (`.js` names a `.ts`, `.tsx`, `.js` or `.jsx` file,
-// `.mjs` a `.mts` or `.mjs`, `.cjs` a `.cts` or `.cjs`; none, any of those). A string that is a file name alone with a
-// code extension (`"x.js"`, a piece of a joined path) names every tracked code file of that name, wherever it is. A
-// code file that lists a folder (it calls `readdirSync`, `readdir`, `opendirSync`, `opendir`, `globSync` or `glob`, or
-// holds the string `ls-files`) is a generic reader: it reaches every tracked file under each tracked folder one of its
-// strings names (`"tests"` in `join(root, "tests")`, as `tools/repository-checks/pin-suites.mjs` reads every test
-// file), whether it loads them or reads their text. A test file is a code file under `tests/` ending `.test.ts`, or any
-// ending `.test.js`, `.test.mjs` or `.test.cjs`, as `split-test-compare.mjs` runs them; a MODULE that is one reaches
-// itself.
+// path starting `./` or `../` from the file's folder (a TypeScript file's also from its compiled folder under `dist/`,
+// where it runs), any other from the top folder or the file's folder, a leading `dist/` dropped, and an extension read
+// as the build maps it (`.js` names a `.ts`, `.tsx`, `.js` or `.jsx` file, `.mjs` a `.mts` or `.mjs`, `.cjs` a `.cts`
+// or `.cjs`; none, any of those). A string that is a file name alone with a code extension (`"x.js"`, a piece of a
+// joined path) names every tracked code file of that name, wherever it is; and a string ending in a code extension,
+// joined to a tracked folder another of the file's strings names (a template's text before its first `${` included),
+// names that path. A code file that lists a folder (it calls `readdirSync`, `readdir`, `opendirSync`, `opendir`,
+// `globSync` or `glob`, or holds the string `ls-files`) is a generic reader: it reaches every tracked file under each
+// tracked folder one of its strings names (`"tests"` in `join(root, "tests")`, as
+// `tools/repository-checks/pin-suites.mjs` reads every test file), whether it loads them or reads their text. A test
+// file is a code file under `tests/` ending `.test.ts`, or any ending `.test.js`, `.test.mjs` or `.test.cjs`, as
+// `split-test-compare.mjs` runs them; a MODULE that is one reaches itself.
 //
-// What it cannot see: a path built at run time with no quoted piece naming the file by its path or its file name (a name
-// computed from data, unless a generic reader lists its folder), a module loaded by a package's name, and a string in a
-// comment (which loads nothing).
-// Every other reference only adds test files: a type-only import, a folder listed but never read.
+// What it cannot see: a path built at run time with no quoted piece naming the file by its path or its file name (a
+// name computed from data, unless a generic reader lists its folder), a module loaded by a package's name, and a string
+// in a comment (which loads nothing). Every other reference only adds test files: a type-only import, a folder listed
+// but never read.
 //
 // Output: `test files reaching: N`, then each test file with one chain of files by which it reaches a MODULE. Exit
 // status: 0; 2 when it cannot run (usage, DIR not a Git checkout, a MODULE DIR does not track).
@@ -48,8 +50,9 @@ export const isTestFile = (file) =>
 
 /**
  * The quoted strings of a code file's `text` outside its comments: each `'…'` or `"…"` to its closing quote or the end
- * of its line, each backtick string to its closing backtick, the code of its `${…}` parts read as code. A `/` that
- * starts no comment is code, so a regular expression's quote starts a string, as a quote in a comment does not.
+ * of its line, each backtick string to its closing backtick, the code of its `${…}` parts read as code, and its text
+ * before the first `${` a string of its own. A `/` that starts no comment is code, so a regular expression's quote
+ * starts a string, as a quote in a comment does not.
  */
 export function stringsOf(text) {
   const out = [];
@@ -75,6 +78,8 @@ export function stringsOf(text) {
         value += text[end + 1] ?? "";
         end += 2;
       } else if (text[end] === "$" && text[end + 1] === "{") {
+        // (the text before the first `${` is a string of its own: a folder a path is built under)
+        if (!value.includes("${")) out.push(value);
         value += "${";
         end = code(end + 2, true);
       } else {
@@ -112,14 +117,21 @@ export function stringsOf(text) {
 }
 
 /** The repository paths a string `text` in `file` may name, before they are checked against the tracked files. */
-function named(file, text) {
+function namedBy(file, text) {
   if (!/^[\w.@/-]+$/u.test(text) || !/[\w]/u.test(text)) return [];
-  const from = text.startsWith("./") || text.startsWith("../") ? [] : [path.posix.normalize(text)];
+  const relative = text.startsWith("./") || text.startsWith("../");
+  const from = relative ? [] : [path.posix.normalize(text)];
+  // (a TypeScript file runs compiled under `dist/`, so its relative path is also read from there)
+  const compiled =
+    relative && /\.[cm]?tsx?$/u.test(file)
+      ? [path.posix.join("dist", path.posix.dirname(file), text)]
+      : [];
   const out = [];
-  for (const one of [...from, path.posix.join(path.posix.dirname(file), text)]) {
+  for (const one of [...from, path.posix.join(path.posix.dirname(file), text), ...compiled]) {
     if (one.startsWith("../") || one.startsWith("/")) continue;
     const bare = one.replace(/^dist\//u, "");
-    for (const candidate of new Set([one, bare])) {
+    // (a folder named with its trailing `/` is the folder)
+    for (const candidate of new Set([one, bare].map((named) => named.replace(/\/$/u, "")))) {
       out.push(candidate);
       const extension = path.posix.extname(candidate);
       const stem = candidate.slice(0, candidate.length - extension.length);
@@ -187,16 +199,29 @@ export function testsReaching(tree, modules, tracked = trackedFiles(tree)) {
       continue;
     }
     const lists = LISTS.test(text);
-    for (const value of stringsOf(text))
-      for (const candidate of [...named(file, value), ...byName(value)]) {
-        if (tracked.has(candidate) && candidate !== file) {
-          if (!readers.has(candidate)) readers.set(candidate, new Set());
-          readers.get(candidate).add(file);
-        } else if (lists && folders.has(candidate)) {
-          if (!listers.has(file)) listers.set(file, new Set());
-          listers.get(file).add(candidate);
+    const strings = stringsOf(text);
+    const reads = (candidate) => {
+      if (!readers.has(candidate)) readers.set(candidate, new Set());
+      readers.get(candidate).add(file);
+    };
+    // (the folders the file's strings name, and its strings that end in a code extension: a path joined from the two)
+    const named = new Set();
+    for (const value of strings)
+      for (const candidate of [...namedBy(file, value), ...byName(value)]) {
+        if (tracked.has(candidate) && candidate !== file) reads(candidate);
+        else if (folders.has(candidate)) {
+          named.add(candidate);
+          if (lists) {
+            if (!listers.has(file)) listers.set(file, new Set());
+            listers.get(file).add(candidate);
+          }
         }
       }
+    for (const folder of named)
+      for (const value of strings)
+        if (CODE.test(value) && !value.startsWith("."))
+          for (const candidate of namedBy(`${folder}/-`, value))
+            if (tracked.has(candidate) && candidate !== file) reads(candidate);
   }
   // the reverse closure from the modules, each reached file with the file it reaches next
   const next = new Map(modules.map((module) => [module, null]));

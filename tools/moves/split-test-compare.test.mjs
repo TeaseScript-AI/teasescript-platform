@@ -318,3 +318,47 @@ test("--moved refuses a list that misses a test file reaching a moved module, na
   assert.equal(none.status, 2);
   assert.match(none.stderr, /neither tree tracks the moved tests\/helpers\/none\.ts/u);
 });
+
+test("--moved with no lists runs what either side reaches that it holds, so a test reaching the old name only is run on both sides (#2617 r1)", (t) => {
+  const root = mkdtempSync(join(tmpdir(), "split-test-compare-moved-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const tree = (name, files) => {
+    const at = join(root, name);
+    for (const [file, text] of Object.entries(files)) {
+      mkdirSync(dirname(join(at, file)), { recursive: true });
+      writeFileSync(join(at, file), text);
+    }
+    const git = (...args) => execFileSync("git", args, { cwd: at, encoding: "utf8" });
+    git("init", "-q");
+    git("add", "-A");
+    git("commit", "-q", "-m", "c");
+    return at;
+  };
+  // (`z.test.mjs` names the old module by its file name alone, so only the base's trace reaches it)
+  const z =
+    'import test from "node:test";\nexport const old = "moved.mjs";\ntest("z", () => {});\n';
+  const base = tree("base", {
+    "tools/moved.mjs": "export const value = 1;\n",
+    "tools/a.test.mjs":
+      'import test from "node:test";\nimport { value } from "./moved.mjs";\ntest("a", () => value);\n',
+    "tools/z.test.mjs": z,
+  });
+  const head = tree("head", {
+    "tools/moved-new.mjs": "export const value = 1;\n",
+    "tools/a.test.mjs":
+      'import test from "node:test";\nimport { value } from "./moved-new.mjs";\ntest("a", () => value);\n',
+    "tools/z.test.mjs": z,
+  });
+  const result = spawnSync(
+    process.execPath,
+    [TOOL, base, head, join(root, "out"), "--moved", "tools/moved.mjs", "tools/moved-new.mjs"],
+    { encoding: "utf8" },
+  );
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.match(result.stdout, /^reach: base 2, head 1 test files \(reach\.txt\)$/mu);
+  assert.match(
+    result.stdout,
+    /^base: passed 2, failed 0, cancelled 0, skipped 0, todo 0; head: passed 2, /mu,
+  );
+  assert.match(result.stdout, /^verdict: equal$/mu);
+});
