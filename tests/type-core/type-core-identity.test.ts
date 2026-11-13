@@ -431,8 +431,8 @@ const UNWRAPPING: Readonly<Record<string, readonly [number, string]>> = {
   ],
   "core/admission/classes.ts": [1, "an index's value"],
   "core/backend.ts": [
-    6,
-    "values: a command operand or a unit's or an angle's amount, the host global itself (`operandAdmitted`); a choice's lists and choice objects written in place (`choiceButtons`, `unshownChoiceText`) and a choice of none, on the source; a `switch` subject's answer, for its unknowns' reasons (`neverMatching`)",
+    5,
+    "values: a command operand or a unit's or an angle's amount, the host global itself (`operandAdmitted`); a choice's lists and choice objects written in place (`choiceButtons`, `unshownChoiceText`) and a choice of none, on the source",
   ],
   "core/check-result/check-result.ts": [
     5,
