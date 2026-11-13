@@ -1,6 +1,7 @@
 // The asks on the candidate route (#2488's step 1d): every ask but `askForm` and `askBooleans`, its answer stored into
 // typed places and run with the player's answers as today's compiler runs it, `as` each speaker, the prefills and
-// choices the route refuses, and the order an ask refuses a request in (the lead's R38, R39, R40, R42).
+// choices the route refuses, and the order an ask refuses a request in, the derived oracle's too (the lead's R38, R39,
+// R40, R42).
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -12,7 +13,11 @@ import { completeAction } from "../../../src/runtime/operations/complete-action.
 import type { SerializableRuntimeValue } from "../../../src/runtime/values/serializable-values.js";
 import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
 import { SliceIndex } from "../../../src/type-inference/core/check-result/slice-index.js";
-import { coreRequest } from "../../helpers/type-core-analysis.js";
+import { compactAnalysis, coreRequest } from "../../helpers/type-core-analysis.js";
+import { recordOfFile, runGlobals } from "../../helpers/type-core-route.js";
+import { evaluateProject } from "../../helpers/type-core/derived/derived-transfers.js";
+import { syntaxOf } from "../../helpers/type-core/derived/type-core-derived.js";
+import { derive } from "../../helpers/type-core/derived/type-core-derived-checks.js";
 import { HELD_MODES } from "../../helpers/type-core-held-host.js";
 import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
 import { checksOf } from "../../helpers/type-core/type-core-candidate-setup.js";
@@ -278,6 +283,37 @@ test("an ask refuses a request's value after saying its question, as today's run
     assert.ok("plan" in own && own.plan !== null, mode.name);
     for (const plan of [own.plan, current.plan])
       assert.equal(answered(plan, "text"), `failed TSR052@${ask}:${end} after 0 [q]`, mode.name);
+  }
+});
+
+test("the derived oracle ends an ask's run as the route's plan does: its question said, then its request's failure", () => {
+  // (a request that fails after its question is said keeps it said; a failing question says nothing; a wait)
+  const list = { kind: "list", items: [1] } satisfies SerializableRuntimeValue;
+  const cases: readonly (readonly [string, SerializableRuntimeValue])[] = [
+    ['let r = askInteger("q", prefill: hostValue)\nexit\n', "text"],
+    ['let r = askText("q", hint: hostValue)\nexit\n', list],
+    ['let r = askDate("q", prefill: hostValue)\nexit\n', 2],
+    ['let r = askBoolean("q", yesText: hostValue)\nexit\n', list],
+    ['let r = askBoolean("q", prefill: hostValue)\nexit\n', 2],
+    ["let r = askText(hostValue)\nexit\n", list],
+    ['let r = askInteger("q", prefill: hostValue)\nexit\n', 2],
+  ];
+  for (const [source, hostValue] of cases) {
+    const files = [{ path: "main.tease", source }];
+    const request = coreRequest(files, OPTIONS.globals);
+    assert.ok(request !== null, source);
+    const record = compactAnalysis(request);
+    const syntax = syntaxOf(source);
+    const project = [
+      { path: "main.tease", syntax, ...derive(syntax, recordOfFile(record, "main.tease")) },
+    ];
+    const own = route(source, HELD_MODES[0]!);
+    assert.ok("plan" in own && own.plan !== null, source);
+    assert.deepEqual(
+      evaluateProject(project, { hostValue }).run,
+      runGlobals(own.plan, { hostValue }),
+      `${source} with ${JSON.stringify(hostValue)}`,
+    );
   }
 });
 
