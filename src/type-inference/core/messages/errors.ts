@@ -845,7 +845,7 @@ export function errorSentence(
         );
       return (
         copySentence(rule, kinds, source, diagnosed) ??
-        `${storeSubject(rule, source)}, so it cannot ${elementOf(rule, source) === null ? "take" : "contain"} ${described(kinds)}.${storeFix(rule, kinds, text, site, source, diagnosed)}`
+        `${storeSubject(rule, source)}, so it cannot ${elementOf(rule) === null ? "take" : "contain"} ${described(kinds)}.${storeFix(rule, kinds, text, site, source, diagnosed)}`
       );
     case "fallback": {
       // ADR 0021 rule 7.3: a written union of the place the value lands in directly holds both

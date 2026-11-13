@@ -560,32 +560,12 @@ export interface Decision {
    * its boundary, an opaque value C5's obligation at its access (A7).
    */
   readonly published: boolean;
-  /** #2378: a list a statement changes in place (`freshInputs`): its read's site and the read's depth in the path. */
-  readonly fresh?: FreshList;
-}
-
-/** #2378: a dict's list a statement changes in place, as a store rule's sentence names it. */
-export interface FreshList {
-  readonly list: SourceSite;
-  readonly depth: number;
 }
 
 /** A path's stores: the direct ones and the prefixes whole stores or adds reach (`inputsOf`), each with its rest. */
 export type Inputs = {
   readonly direct: readonly Candidate[];
   readonly prefixes: readonly { readonly key: Key; readonly rest: PathRef }[];
-  /** #2378: below a dict's list changed in place, the list's read, its first definition (`freshInputs`). */
-  readonly first?: { readonly d: Definition; readonly at: readonly string[] };
-  /**
-   * #2378: below a list step whose owner's kind is not yet read (`freshRead`): the owner, the place, the index of the
-   * first prefix at or below the list, the read.
-   */
-  readonly fresh?: {
-    readonly owner: Key;
-    readonly place: PlaceId;
-    readonly prefixes: number;
-    readonly read: { readonly d: Definition; readonly at: readonly string[] } | null;
-  };
 };
 
 /**

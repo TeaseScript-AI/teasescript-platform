@@ -513,14 +513,14 @@ const READS: Readonly<Record<string, string>> = {
   loop: "for v in d.values {\n    let w = v\n    w = X\n}\n",
   take: "let ys = d.values.take(1)\nys.add(X)\n",
   toSet: "let s = d.values.toSet()\ns.add(X)\n",
-  "add in place": "d.values.add(X)\n",
   join: "let ys = d.values + [2]\nys.add(X)\n",
   "a list argument": "function use(xs) {\n    let y = xs[0]\n    y = X\n}\nuse(d.values)\n",
   "an element argument": "function use(x) {\n    let y = x\n    y = X\n}\nuse(d.values[0])\n",
   "a copy of the dict": "let e = d\nlet y = e.values[0]\ny = X\n",
   "a nested dict": "let dd = dict{k: d}\nlet y = dd.values[0].values[0]\ny = X\n",
-  // (no requirement: a read alone)
+  // (no requirement: a read alone, and a store into the list `d.values` gives, which nothing holds)
   contains: "let found = d.values.contains(X)\n",
+  "add in place": "d.values.add(X)\n",
 };
 
 test("a read through a dict's `.values` is decided by the dict's written element domain, for a call's result and a declared variable alike (#2378 R26)", () => {
@@ -543,7 +543,7 @@ test("a read through a dict's `.values` is decided by the dict's written element
           at,
         );
         const errors = call!.diagnostics.filter((d) => d.includes(" compile-error "));
-        if (value === fits || read === "contains") {
+        if (value === fits || read === "contains" || read === "add in place") {
           assert.deepEqual(errors, [], at);
           assert.deepEqual(beyondItem(call!), [], `${at}: no check of the dict's values`);
         } else assert.ok(errors.length === 1 && errors[0]!.startsWith("TSV041 "), at);

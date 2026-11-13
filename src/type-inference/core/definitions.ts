@@ -421,7 +421,10 @@ export class DefinitionIndex {
   public constructor(
     readonly program: CoreProgram,
     /** Stores whose receivers select an object's own `first`, `last` or `random`, by their place: their targets (#1275). */
-    readonly storeTargets: ReadonlyMap<PlaceId, ReturnType<CoreProgram["targetRoot"]>> = new Map(),
+    readonly storeTargets: ReadonlyMap<
+      PlaceId,
+      ReturnType<CoreProgram["targetRoot"]> | null
+    > = new Map(),
   ) {
     const work = program.work;
     this.stored = new KeyTrie(work, "rdWalk", () => [
@@ -560,8 +563,10 @@ export class DefinitionIndex {
 
   #store(constraint: Extract<CoreProgram["constraints"][number], { kind: "store" }>): void {
     const program = this.program;
-    const target =
-      this.storeTargets.get(constraint.into) ?? program.targetRoot(constraint.into, true);
+    const known = this.storeTargets.get(constraint.into);
+    // (#2378: a store into or below a dict's `values` or `keys`, a list nothing holds, goes into nothing: no definition)
+    if (known === null) return;
+    const target = known ?? program.targetRoot(constraint.into, true);
     const projection = program.projOf.get(constraint.into);
     const add =
       ["element", "elements", "entry"].includes(constraint.how) &&
@@ -685,6 +690,8 @@ export class DefinitionIndex {
   }
 
   #removal(receiver: PlaceId, name: string, effect: "clears" | "removes", site: SourceSite): void {
+    // (#2378: a removal from a dict's `values` or `keys`, a list nothing holds, changes nothing: no definition)
+    if (this.storeTargets.get(receiver) === null) return;
     const program = this.program;
     const target = program.targetRoot(program.occurrenceOf.get(receiver) ?? receiver);
     const node = program.effectNode(site);
