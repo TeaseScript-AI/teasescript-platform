@@ -10,7 +10,7 @@ export const SCALAR: ReadonlySet<ItemTag> = new Set(["integer", "number", "strin
 
 export const NUMERIC: ReadonlySet<ItemTag> = new Set(["integer", "number"]);
 
-/** The kinds that fit a destination of kind `ref` (C1, ADR 1.2): a whole number a number; an unknown anything. */
+/** The kinds that fit a destination of kind `ref` (ADR 0021 1.2): a whole number a number; an unknown anything. */
 export function fits(tag: ItemTag, ref: ItemTag, written: boolean): boolean {
   return (
     tag === ref ||
@@ -35,11 +35,11 @@ export const isExternal = (item: Item): boolean =>
 export const contributes = (item: Item): boolean =>
   (isOpaque(item) || isExternal(item)) && item.reasons !== REASON.missing;
 
-/** The items that decide (A2): definite, of a kind. */
+/** The items that decide: definite, of a kind. */
 export const deciding = (items: readonly Item[]): Item[] =>
   items.filter((item) => item.cert === "def" && concrete(item));
 
-/** One family (A3): one kind, or whole numbers with numbers, with or without `null`. */
+/** One family: one kind, or whole numbers with numbers, with or without `null`. */
 export function family(tags: readonly ItemTag[]): boolean {
   const kinds = tags.filter((tag) => tag !== "null");
   return kinds.length > 0 && (new Set(kinds).size === 1 || kinds.every((tag) => NUMERIC.has(tag)));
@@ -48,7 +48,7 @@ export function family(tags: readonly ItemTag[]): boolean {
 /** A number the place admits: one an internal contribution gives, never one possible solely through external data. */
 export const admitsNumber = (item: Item): boolean => item.tag === "number" && item.extOnly !== true;
 
-/** Whether items hold one a decision does not admit (A5: an offending kind; a `null` where none is admitted). */
+/** Whether items hold one a decision does not admit (an offending kind; a `null` where none is admitted). */
 export function offending(items: readonly Item[], decision: Decided): boolean {
   const tags = decision.tags ?? [];
   return items.some((item) =>
@@ -63,7 +63,7 @@ export function offending(items: readonly Item[], decision: Decided): boolean {
 /**
  * Whether contents may meet a written type at a path whatever stands first there (`Touches`' meeting test): each item fits it (a
  * `null` where it admits one, an unknown no external or opaque data), and where the contents' definite kinds decide
- * first (A2), each kind the type admits fits each of them; a written type unrestricted there admits everything, none
+ * first, each kind the type admits fits each of them; a written type unrestricted there admits everything, none
  * (`null`) nothing known.
  */
 export function compatible(items: readonly Item[], term: TypeTerm | null): boolean {

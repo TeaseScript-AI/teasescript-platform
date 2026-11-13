@@ -20,8 +20,8 @@ export interface InheritedCopy {
   readonly from: PlaceId;
   readonly strip: readonly string[];
   /**
-   * The store making it, and whether the literal cells it passes are all live (A6: a rejected one is dead in the next
-   * pass, #1188).
+   * The store making it, and whether the literal cells it passes are all live (a rejected one is dead in the next pass,
+   * #1188).
    */
   readonly store?: Definition;
   readonly cellsLive?: boolean;
@@ -81,7 +81,7 @@ export interface NextSteps {
 }
 
 /**
- * A cycle of whole copies, by reference (#1188, Astra's B3): every member lands what the cycle's copies from outside
+ * A cycle of whole copies, by reference (#1188): every member lands what the cycle's copies from outside
  * land where they land, the members' written copies (`seeds`, all members') and its root; once per cycle.
  */
 export interface WholeCycle {
@@ -139,10 +139,10 @@ export interface LiveGroup {
 }
 
 /**
- * A4 through copies' landings (`groups`): where copies of written types land in each place, and the copies of
- * inheriting places each place takes; a place's landed paths are its own, its copies' own paths and below them its
- * copies' sources' landed paths below their strips, asked of those sources, never made per copy. A cycle
- * of copies has its members' landed paths made once, as the landing within it brings them.
+ * Written types inherited through copies' landings (`groups`): where copies of written types land in each place, and
+ * the copies of inheriting places each place takes; a place's landed paths are its own, its copies' own paths and below
+ * them its copies' sources' landed paths below their strips, asked of those sources, never made per copy. A cycle of
+ * copies has its members' landed paths made once, as the landing within it brings them.
  */
 export interface Inheritance {
   /** Per place, the paths copies of written types land at in it (their elements too), with each type at the path. */
@@ -162,7 +162,7 @@ export interface Inheritance {
   readonly fed: ReadonlyMap<PlaceId, PlaceId>;
   /** The places copies join, each one's sources' before its own (`cyclesOf`). */
   readonly order: readonly (readonly PlaceId[])[];
-  /** The members of the cycles of whole copies not fed by one place, by reference (#1188, Astra's B3). */
+  /** The members of the cycles of whole copies not fed by one place, by reference (#1188). */
   readonly wholes: ReadonlyMap<PlaceId, WholeCycle>;
 }
 
@@ -197,13 +197,13 @@ export interface OwnStructure {
   readonly reads: readonly { readonly at: readonly string[]; readonly source: Key }[];
 }
 
-/** A live store's own structure and what A2's held view takes beside it (`heldPoints`, `heldReads`). */
+/** A live store's own structure and what the held view (`held.ts`) takes beside it (`heldPoints`, `heldReads`). */
 export interface HeldOwn extends OwnStructure {
   readonly held: { readonly points: OwnStructure["points"]; readonly reads: OwnStructure["reads"] };
 }
 
 /**
- * What A2's held view takes beside a store's own structure (`ownOf`): its copies of written bindings, whose contents
+ * What the held view takes beside a store's own structure (`ownOf`): its copies of written bindings, whose contents
  * are their types', as points, and a value its place's copies list stands for, where it stands, as without the list.
  */
 export interface HeldExtra {
@@ -231,9 +231,8 @@ export interface Storing {
  */
 export type Inheriting<T> = Generator<CanonicalKey | Read, T, ReadAnswer>;
 
-/** `inheritedAt`'s scan of one place and path, suspended while the key it waits on resolves. */
 /**
- * G3 3a: where a key's inherited type stands past wrappers (`wrappedFrontier`): the binding and read its last wrapper
+ * Where a key's inherited type stands past wrappers (`wrappedFrontier`): the binding and read its last wrapper
  * holds (the key's own place and no read before the first), and the path below it (a path id).
  */
 export interface Frontier {
@@ -260,7 +259,7 @@ export interface OpenStep {
 }
 
 /**
- * An evaluation key (S6-CARRIERS §2): from the stored value down to a stop, each carrier's operand position (its own
+ * An evaluation key: from the stored value down to a stop, each carrier's operand position (its own
  * contribution after all of them, `OWN`) and each literal cell's source position. Keys compare lexicographically, a
  * shorter key before the keys it prefixes. A walk keeps each key once, as a node of its tree of keys one position below
  * the key it extends (`longerKey`), so k nested operations keep k nodes, never k keys up to k long (#1230); the
@@ -275,7 +274,7 @@ export interface EvaluationKey {
 }
 
 /**
- * A whole store's alias (S6-CARRIERS §4.1): the stable source path its value reads at `at` below it (the value itself,
+ * A whole store's alias: the stable source path its value reads at `at` below it (the value itself,
  * or a literal's one read cell) and the node it is read at, its own guard's key and node whatever its class.
  */
 export interface Alias {
@@ -283,11 +282,11 @@ export interface Alias {
   readonly read: FlowNode;
   readonly at: readonly string[];
   /**
-   * The read itself: the copy whose binding's written type, A4's, its class keeps
-   * (docs/specifications/type-inference-accepted-record/sharing.md#r4-72, Astra r5 B1).
+   * The read itself: the copy whose binding's written type its class keeps
+   * (docs/specifications/type-inference-accepted-record/sharing.md#r4-72).
    */
   readonly value: PlaceId;
-  /** Whether its class is its read's chain's end (§4.1's chains): its items keep their own link's writer. */
+  /** Whether its class is its read's chain's end (`chainEnd`): its items keep their own link's writer. */
   chained?: true;
 }
 
@@ -299,7 +298,7 @@ export interface ChainEnd {
 }
 
 /**
- * An ingress stop of a landing's walk (S6-CARRIERS §3.1): the ingress it is or reads through projections, its store,
+ * An ingress stop of a landing's walk: the ingress it is or reads through projections, its store,
  * its contribution path and its boundary path (the contribution path up to the first object property step), its
  * evaluation key, the ingress's own span, and whether it is the ingress whole.
  */
@@ -309,17 +308,20 @@ export interface IngressStop {
   readonly path: readonly string[];
   readonly recordPath: readonly string[];
   readonly key: EvaluationKey;
-  /** The ingress's own expression, C9's site. */
+  /** The ingress's own expression, where its boundary check stands. */
   readonly site: SourceSite;
-  /** The stop's own expression (§3.4): the ingress itself where it is whole, a member read of it else. */
+  /** The stop's own expression: the ingress itself where it is whole, a member read of it else. */
   readonly reads: SourceSite;
-  /** C1's site for it (`contributionSite`): the stop's own expression, or what a receiver's operation reads of it. */
+  /**
+   * The store check's site for it (`contributionSite`): the stop's own expression, or what a receiver's operation reads
+   * of it.
+   */
   readonly contribution: SourceSite;
   readonly whole: boolean;
 }
 
 /**
- * The landing index (S6-CARRIERS §3.2), once per pass: per store, its non-own ingress stops in evaluation order; per
+ * The landing index, once per pass: per store, its non-own ingress stops in evaluation order; per
  * ingress, the stores that bring it and whether it is an own read. An ingress neither brought nor own is unreached.
  */
 export interface LandingIndex {
@@ -349,18 +351,18 @@ export interface Stop {
    * one its own decision copies there (`inheritedAt`); else `null`.
    */
   readonly from: PlaceId | null;
-  /** The path into the value its contribution stands at (a projection's step into its owner, F12). */
+  /** The path into the value its contribution stands at (a projection's step into its owner). */
   readonly strip: readonly string[];
   /**
    * A value a projection selects: it stands for its fields and elements below the path, while at the path itself the
-   * projection's own value, the union of what it may select, contributes (A2: an unknown beside a kind decides nothing).
+   * projection's own value, the union of what it may select, contributes (an unknown beside a kind decides nothing).
    */
   readonly deep: boolean;
   /** Whether each literal it was read out of has it alone at the step (`[typed][0]`, never `[typed, 2][0]`). */
   readonly single: boolean;
   /**
    * The operations it was reached through (`get` with its default, a copy of the elements, a list's `+`, ...): its
-   * contribution decides only where each of them holds its kinds definitely (F7, F10, F17b).
+   * contribution decides only where each of them holds its kinds definitely.
    */
   readonly via: ViaChain | null;
 }
@@ -407,7 +409,7 @@ export interface Stops {
 }
 
 /**
- * #2289: a literal a view's walk meets where a step of it has several elements (a cell, B1), by the path it stands
+ * #2289: a literal a view's walk meets where a step of it has several elements (a cell), by the path it stands
  * at and the context it is read in there: one contribution, answered by its body's cell (`literals/cell.ts`), never
  * walked into. Its path and context are its view's own.
  */
@@ -500,11 +502,14 @@ export interface StoreIngresses {
   readonly first: ReadonlyMap<PlaceId, number>;
 }
 
-/** A contribution C1 may be sited at (`ingressSiteOf`): the ingress it reads, or `null` for named data sited by itself. */
+/**
+ * A contribution the store check may be sited at (`ingressSiteOf`): the ingress it reads, or `null` for named data
+ * sited by itself.
+ */
 export interface Siting {
   readonly stop: Stop;
   readonly ingress: PlaceId | null;
-  /** A member of host data the store reads: its own place's C1, no named data's. */
+  /** A member of host data the store reads: its own place's store check, no named data's. */
   readonly host?: true;
 }
 
@@ -515,7 +520,7 @@ export interface Level {
 }
 
 /**
- * The known structure of a stored value or a source key (F2): the paths below it its literals and the stores below the
+ * The known structure of a stored value or a source key: the paths below it its literals and the stores below the
  * key give, and the source keys copied or called below it, each where it stands; below a source key, its elements only
  * (`depthOf`).
  */
@@ -528,36 +533,36 @@ export interface Structure {
 export interface Candidate {
   readonly d: Definition;
   readonly at: PathSteps | readonly string[];
-  /** The later stores of `d`'s alias class (`aliasKey`): checked only where `d` owes something (§8, S6-CARRIERS §4.1). */
+  /** The later stores of `d`'s alias class (`aliasKey`): checked only where `d` owes something. */
   readonly members?: readonly Definition[];
 }
 
-/** What decides a place (§5): the kinds, by a written type, a written copy's (A4) or the first definite store's. */
+/** What decides a place: the kinds, by a written type, a written copy's or the first definite store's. */
 export interface Decision {
   readonly root: PlaceId;
-  /** Its path's steps; `null` for a cursor's (G3 stage 1: its steps the arena's, never made). */
+  /** Its path's steps; `null` for a cursor's (its steps are the arena's, never made). */
   readonly path: readonly string[] | null;
   /** Its path's label, as a recipe: its text made only where a diagnostic or a check shows it (`labelText`). */
   readonly label: Label;
   readonly tags: readonly ItemTag[];
-  /** By a written type, at the place or of a copied binding (A4): no number of an integer fits there. */
+  /** By a written type, at the place or of a copied binding: no number of an integer fits there. */
   readonly written: boolean;
-  /** Whether the place's own written type decides (A1), and whether it is a parameter's or a result's (A9, C7). */
+  /** Whether the place's own written type decides, and whether it is a parameter's or a result's. */
   readonly own: boolean;
   readonly nullable: boolean;
-  /** The store that decided (A2, A4), `null` for a written type. */
+  /** The store that decided, `null` for a written type. */
   readonly decider: Definition | null;
   /**
    * #2289: the decider is a strict literal cell one of whose elements decides nothing and may hold host data: the
    * decider's own store is a candidate too, its value's host data checked against the decision.
    */
   readonly deciderHost?: true;
-  /** The candidates in source order (A5). */
+  /** The candidates in source order. */
   readonly candidates: readonly Candidate[];
   /**
-   * Decided by no contribution, the contract's kinds it is published with (C9) beside external data: only the
-   * external data another store brought owes its check at each candidate; data a store brings inline has
-   * its boundary, an opaque value C5's obligation at its access (A7).
+   * Decided by no contribution, the contract's kinds it is published with beside external data: only the external data
+   * another store brought owes its check at each candidate; data a store brings inline has its boundary check, an
+   * opaque value its member check at its access.
    */
   readonly published: boolean;
 }
@@ -570,7 +575,7 @@ export type Inputs = {
 
 /**
  * A path admission decides (`groups`): a place and the steps below it; or, where its family is a wrapper's (`keyLane`),
- * its key's cursor alone, whose steps are the arena's and never made (G3 stage 1).
+ * its key's cursor alone, whose steps are the arena's and never made.
  */
 export type DecidedAt =
   | { readonly root: PlaceId; readonly path: readonly string[]; readonly key?: undefined }
@@ -583,9 +588,11 @@ export interface Decided {
   readonly tags: readonly ItemTag[] | null;
   readonly nullable: boolean;
   readonly byWritten: boolean;
-  /** Whether the place's own written type decides (A1). */
+  /** Whether the place's own written type decides. */
   readonly own: boolean;
-  /** A written parameter's or result's (A9, C7). */
+  /**
+   * Whether the place is a parameter or a result with a written type: every argument or return into it is a candidate.
+   */
   readonly transfer: boolean;
   readonly permitsNull: boolean;
   readonly decider: Definition | null;
@@ -594,11 +601,14 @@ export interface Decided {
   readonly site: SourceSite | null;
   readonly published: boolean;
   /**
-   * Where a copy decides the path (A4): the written type it copies there, the decision's `null` added (`optionalOf`),
+   * Where a copy decides the path: the written type it copies there, the decision's `null` added (`optionalOf`),
    * whole below the path, so a store above a stopped decision is checked against it (`storeRequirement`, #1416).
    */
   readonly copied: TypeTerm | null;
-  /** Where A3 settled the path without a scan: the one family of kinds its contract holds, which names it (`kindsAt`). */
+  /**
+   * Where a settled single-family contract decided the path without a scan: the one family of kinds that contract
+   * holds, which names it (`kindsAt`).
+   */
   readonly settled: readonly Item[] | null;
   /** #2289: its scan met a literal element a stop left undecided, so it is undecided (`budgetUndecided`). */
   readonly budget?: true;
@@ -607,7 +617,10 @@ export interface Decided {
 /** A list `+` (`joinElements`). */
 export type Join = Extract<CoreProgram["constraints"][number], { kind: "operation" }>;
 
-/** What a joined value's element type is at a path: its kinds, whether written (each kind fits as itself), the own kinds. */
+/**
+ * What a joined value's element type is at a path: its kinds; whether each kind fits as itself (a written type, or an
+ * inferred union of several families); the own kinds.
+ */
 export interface JoinDecided {
   readonly tags: readonly ItemTag[];
   readonly written: boolean;

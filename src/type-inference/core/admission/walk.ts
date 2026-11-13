@@ -67,7 +67,7 @@ function rankKeys(work: WorkLedger, root: EvaluationKey): void {
   }
 }
 
-/** A carrier's own contribution's position: after every operand it carries (A4: a selected copy precedes it). */
+/** A carrier's own contribution's position: after every operand it carries (a selected written copy precedes it). */
 const OWN = Number.MAX_SAFE_INTEGER;
 
 /** The order of two evaluation keys of one walk: negative where `a` is evaluated first. */
@@ -75,13 +75,13 @@ export function compareKeys(a: EvaluationKey, b: EvaluationKey): number {
   return a.rank - b.rank;
 }
 
-/** The roles of a typed ingress's default (F18). */
+/** The roles of a typed load's or parse's default. */
 export const TYPED_ROLES: ReadonlySet<CarrierRole> = new Set([
   "load default/default",
   "parse default/default",
 ]);
 
-/** The roles whose operation reads a member of its receiver, the member read C1 sits at. */
+/** The roles whose operation reads a member of its receiver, the member read the store check sits at. */
 export const RECEIVER_ROLES: ReadonlySet<CarrierRole> = new Set([
   "get/receiver",
   "copy/receiver",
@@ -94,7 +94,7 @@ const COMBINING_ROLES: ReadonlySet<CarrierRole> = new Set([
   "removal/receiver",
 ]);
 
-/** The roles whose operand is its operation's own read (C10: an ingress there is checked at its read). */
+/** The roles whose operand is its operation's own read (an ingress there is checked at its read). */
 export const OWN_ROLES: ReadonlySet<CarrierRole> = new Set([
   "otherwise/fallback",
   "get/default",
@@ -120,7 +120,7 @@ function viaLink(program: CoreProgram, outer: ViaChain | null, level: Via): ViaC
 }
 
 /**
- * A4: the bindings a stored value copies, with the paths they land at and the path into each (`strip`), directly,
+ * The bindings a stored value copies, with the paths they land at and the path into each (`strip`), directly,
  * through the literals that hold them, or through the values that carry them (a projection, an operation: the path
  * read into it), in element order; once per value. A path below the value is a chain of steps, one per field, made
  * into an array once and only where a binding lands at it, so a literal nested k deep costs k steps, not k paths of
@@ -134,7 +134,7 @@ export function copySources(
   readonly binding: PlaceId;
   readonly strip: readonly string[];
   /**
-   * Whether the literal cells the copy passes through are all live (Astra's B2), kept as one answer, not the cells:
+   * Whether the literal cells the copy passes through are all live, kept as one answer, not the cells:
    * a list of them per copy grew with the literal's depth, a source of every reference below it (16,384 references
    * 4,096 deep held about 780 MiB after a stop before admission settled, the fresh pass's copies beside the stopped
    * one's).
@@ -169,7 +169,7 @@ export function copySources(
     literal: boolean;
   }[] = [];
   // (a read of a wrapper's family carries its strip as a path of the arena kept in reverse, one step on in front per
-  // projection, made once for each copy it reaches: G3 stage 1; any other walk its arrays as before)
+  // projection, made once for each copy it reaches; any other walk keeps its strips as arrays)
   const reversed = readsCursorFamily(admission, value);
   const start: CopyStrip = reversed ? reverseStrip(admission, 0) : admission.arrayStrip([]);
   const pending: [PlaceId, Steps | null, CopyStrip, boolean, boolean][] = [
@@ -316,7 +316,7 @@ function stripSteps(admission: Admission, strip: CopyStrip): readonly string[] {
 }
 
 /**
- * A4, F12: the binding a value copies, or the written result a call copies (#2378), directly or through its
+ * The binding a value copies, or the written result a call copies (#2378), directly or through its
  * projections (`typed[0]`, `typed.first`, `f(0)[0]`), with the path into it the copy stands at: the projections' steps,
  * then `strip`; with its written type (`term`), or, for an unwritten place that may inherit one (`inheriting`), that
  * place (`from`: its type at each path the one its own decision copies, `inheritedAt`); `null` for any other value, and
@@ -337,7 +337,10 @@ interface WrittenSource {
   readonly strip: readonly string[];
 }
 
-/** `writtenSource` with the receivers' decisions reads (`Read`, #1072 A2). */
+/**
+ * `writtenSource` with the receivers' decisions reads (`Read`, #1072: a read inside an inherited proof is yielded,
+ * never run).
+ */
 export function* writtenSourceRead(
   admission: Admission,
   value: PlaceId,
@@ -356,7 +359,7 @@ export function* writtenSourceRead(
   const place = keyPlace(key);
   const term = writtenOf(program.place(place).kind);
   if (term === null && !admission.inheriting.has(place)) return null;
-  // (a projection of a receiver that may be a reference is the runtime's member, no copy: F19a)
+  // (a projection of a receiver that may be a reference is the runtime's member, no copy)
   for (let at = value; program.projOf.has(at); at = program.projOf.get(at)!.owner)
     if (yield* admission.keepsOwnRead(at)) return null;
   const keySteps = keyStepsIn(contract, key);
@@ -388,12 +391,12 @@ function* dictValuesWritten(admission: Admission, value: PlaceId): Reads<boolean
 
 /**
  * One task of the store walk, by its value, node and strip alone (`Expansion`), once per pass: what it stands as at
- * its own path and the parts below it, whatever reached it. A4 through copies: a copy of an unwritten place that may
+ * its own path and the parts below it, whatever reached it. Through copies: a copy of an unwritten place that may
  * inherit a written type stands as a written copy too, carrying at each path the type that place's own decision
  * copies there (`inheritedAt`); its value stays where it stood, and decides where it carries none. A literal read
  * into stands by its cells on the path; a projection or another carrier is its own contribution at the path, and
- * below it what it carries (F12), an operation's under the certainty of its own value, its own contribution after
- * what it carries, so a written copy it selects precedes its snapshot (A4); any other value is a stop, a literal's
+ * below it what it carries, an operation's under the certainty of its own value, its own contribution after
+ * what it carries, so a written copy it selects precedes its snapshot; any other value is a stop, a literal's
  * cells below it.
  */
 export function expand(
@@ -406,7 +409,7 @@ export function expand(
   return readNow(expandRead(admission, value, node, strip, after));
 }
 
-/** `expand` with the value side's decisions reads (`Read`, #1072 A2). */
+/** `expand` with the value side's decisions reads (`Read`, #1072). */
 export function* expandRead(
   admission: Admission,
   value: PlaceId,
@@ -548,24 +551,24 @@ export function partOf(admission: Admission, part: Part): Expansion {
   return readNow(partOfRead(admission, part));
 }
 
-/** `partOf` with its task's reads (`Read`, #1072 A2). */
+/** `partOf` with its task's reads (`Read`, #1072). */
 export function* partOfRead(admission: Admission, part: Part): Reads<Expansion> {
   part.expansion ??= yield* expandRead(admission, part.value, part.node, part.strip, part.after);
   return part.expansion;
 }
 
 /**
- * A stored value's contributions by the path they stand at, in evaluation order: the copies of written bindings
- * (A4), the other values no literal of it holds (a read, a call, external data), and its literals, whose fields and
+ * A stored value's contributions by the path they stand at, in evaluation order: the copies of written bindings,
+ * the other values no literal of it holds (a read, a call, external data), and its literals, whose fields and
  * elements stand below them; once per value, from its tasks' recipes (`expand`). `once`: later copies or calls of one
- * source identity at a path are one stop (F2), as every walk made before a stop has them; a walk made after one keeps
+ * source identity at a path are one stop, as every walk made before a stop has them; a walk made after one keeps
  * every stop instead, the same boundaries and sites without asking identities nothing else after the stop asks.
  */
 export function stopsOf(admission: Admission, value: PlaceId, node: FlowNode, once = true): Stops {
   return readNow(stopsOfRead(admission, value, node, once));
 }
 
-/** `stopsOf` with its tasks' reads (`Read`, #1072 A2). */
+/** `stopsOf` with its tasks' reads (`Read`, #1072). */
 export function* stopsOfRead(
   admission: Admission,
   value: PlaceId,
@@ -613,10 +616,10 @@ export function* stopsOfRead(
       else list.push(inherits);
     }
     const own = task.stop;
-    // (a later copy or call of one source identity at a path holds what the first holds: one stop, F2; a copy only
-    // where it reads the same snapshot; and only through the same operations, selected alike: an operand
-    // a `get` never gives is no copy of the store's own element beside it, Astra r5 D1; never a read of an ingress,
-    // itself or through projections (`Contract.ingressOf`), which lands by its own leaf, S6-CARRIERS §3.1, #1210)
+    // (a later copy or call of one source identity at a path holds what the first holds: one stop; a copy only where it
+    // reads the same snapshot; and only through the same operations, selected alike: an operand a `get` never gives is
+    // no copy of the store's own element beside it; never a read of an ingress, itself or through projections
+    // (`Contract.ingressOf`), which lands by its own leaf, #1210)
     const map = own === null ? null : own.list === "written" ? stops.written : stops[own.list];
     const pathKey = own === null ? "" : keptText(admission.work, path);
     let kept = own !== null;
@@ -692,10 +695,10 @@ export function* stopsOfRead(
 }
 
 /**
- * #2289: a recipe's view (`View`), the walk of `stopsOfRead` from that task in its own coordinates, but a literal
- * with a step of several elements (a cell) is a link where it stands: its steps of one element are walked as before
- * (a cell of one element is that element's own reading), its cells are not, so a literal's body is never walked again
- * for each value that holds it (`literals/cell.ts`). Once per recipe and pass, built when first asked.
+ * #2289: a recipe's view (`View`), the walk of `stopsOfRead` from that task in its own coordinates, but a literal with
+ * a step of several elements (a cell) is a link where it stands: its steps of one element are walked as `stopsOfRead`
+ * walks them (a cell of one element is that element's own reading), its cells are not, so a literal's body is never
+ * walked again for each value that holds it (`literals/cell.ts`). Once per recipe and pass, built when first asked.
  */
 export function* viewOfRead(admission: Admission, start: Expansion): Reads<View> {
   const known = admission.views.get(start.id);
@@ -749,7 +752,7 @@ function* buildView(admission: Admission, start: Expansion): Reads<View> {
       else list.push(inherits);
     }
     const own = task.stop;
-    // (F2's dedupe, as `stopsOfRead`'s)
+    // (one stop per source identity at a path, as `stopsOfRead`'s)
     const map = own === null ? null : view[own.list];
     const pathKey = own === null ? "" : keptText(admission.work, path);
     let kept = own !== null;
@@ -848,7 +851,7 @@ export function hasCell(admission: Admission, task: Expansion): boolean {
 }
 const cellular = new WeakMap<Expansion, boolean>();
 
-/** A literal task's steps of several elements (its cells, B1); `step` `null` for a projection's. */
+/** A literal task's steps of several elements (its cells); `step` `null` for a projection's. */
 export function cellSteps(task: Expansion): ReadonlySet<string | null> {
   const counts = new Map<string | null, number>();
   for (const part of task.parts) counts.set(part.step, (counts.get(part.step) ?? 0) + 1);
@@ -858,7 +861,7 @@ export function cellSteps(task: Expansion): ReadonlySet<string | null> {
 }
 
 /**
- * A chain of operations by what selects through it (S6-CARRIERS §4.5's via signature): each level's carrier value
+ * A chain of operations by what selects through it (its signature): each level's carrier value
  * and role, its operand aside, so a choice's options read alike while a fallback's two operands, or a `get`'s receiver
  * and default, stay apart. Once per chain, as a short name of its outer chain's name and its innermost level, so equal
  * chains have equal names and no name grows with its chain (#1230).
@@ -883,8 +886,8 @@ export function viaSignature(admission: Admission, via: ViaChain | null): string
 }
 
 /**
- * A contribution's own expression, C1's site for it (§3.4): a member a receiver's operation reads of it (a `get`, a
- * copy, a removal of the data), else the contribution itself, an ingress, a member read of one or a named
+ * A contribution's own expression, the store check's site for it: a member a receiver's operation reads of it (a
+ * `get`, a copy, a removal of the data), else the contribution itself, an ingress, a member read of one or a named
  * read.
  */
 export function contributionSite(admission: Admission, stop: Stop, d: Definition): SourceSite {

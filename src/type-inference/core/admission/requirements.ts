@@ -7,13 +7,13 @@ import { propertyName, propertyStep, type CoreProgram } from "../program.js";
 import { copiedAt } from "./decision.js";
 import { joinedDomain, permittedAt } from "./permitted.js";
 
-// The complete type a store owes after a stop (S3 §5): known without the stopped decision.
+// The complete type a store owes after a stop: known without the stopped decision.
 
 /**
  * The complete type a store into `place` at `path` is checked against where a decision at, below or above the path
- * stopped (S3 §5, #1416, #1440), from a proof the stopped decision is no part of, without new solving: the place's
- * written type there (A1); else, at a path no stop lies at or above (`stopped` false), the type a copy decides the path
- * by in this pass's own decision of it, whole below it (A4, `Decided.copied`: a pass in which a decision stops is
+ * stopped (#1416, #1440), from a proof the stopped decision is no part of, without new solving: the place's written
+ * type there; else, at a path no stop lies at or above (`stopped` false), the type a copy decides the path by in this
+ * pass's own decision of it, whole below it (`Decided.copied`: a pass in which a decision stops is
  * restarted with it stopped, so that decision never read what the stop took back); else, in a pass whose
  * results may stand (`standing`: not the fresh pass after a stop before admission settled, whose stores into inferred
  * places keep their marks), the type the declaration's start value copies there (`initialCopy`).
@@ -56,7 +56,7 @@ const SPINES = new WeakMap<CoreProgram, Map<PlaceId, Spine | null>>();
  * where the place's declaration's start value, through one object literal's property at each step, holds a direct read
  * of a place with its own written type at the path or above it (the landing; the start value itself for no step): the
  * start value comes before every other store into the place (ADR 0021 1.6), each step's one property selects the
- * read with no demand, and that copy decides the landing and each path below it by its written type (A4), down to the
+ * read with no demand, and that copy decides the landing and each path below it by its written type, down to the
  * path (`permittedAt`), unless that holds `null` alone (`joinedDomain`); an unrestricted part decides that every kind
  * fits, as the decision would. Source structure and written types alone, so no decision at, below or above the path,
  * stopped or not, changes it; each step made once in an analysis, kept apart from its passes. Any other start value

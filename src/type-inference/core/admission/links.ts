@@ -10,7 +10,7 @@ import type { Reads } from "../inherited/reads.js";
 
 /**
  * Whether one operation gives the operand the walk took (`chosen`'s rule for a link), or `surely` gives it; its value
- * read a read (`Read`, #1072 A2).
+ * read a read (`Read`, #1072: a read inside an inherited proof is yielded, never run).
  */
 export function* chooses(
   admission: Admission,
@@ -21,7 +21,7 @@ export function* chooses(
   const c = program.opOf.get(level.value);
   const at = c === undefined ? level.node : (program.exprAt(c.site) ?? level.node);
   // (`otherwise` gives its own operand only where that may be a value, and its fallback only where the operand may
-  // be null, an unknown either: F17a)
+  // be null, an unknown either)
   if (c?.kind === "fallback") {
     const left = withoutEmpty(yield* admission.runRead(() => values.valueItems(c.left, at, [])));
     const value = left.some((item) => item.tag !== "null");
