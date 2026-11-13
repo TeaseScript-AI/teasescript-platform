@@ -121,7 +121,7 @@ function matches(view: PlayerSession | null, identity: ExportIdentity): boolean 
 /**
  * The Player's side of the engine bridge: the sessions it holds, each with its store, and the requests that operate
  * them. Every reply's publication goes to its session's store as it arrives (`ReplyHook`), so the store applies
- * publications in the host's order also when a transport delivers some early (the in-process facade's flush).
+ * publications in the host's order also when a transport delivers some early (the tests' in-process backend).
  */
 export class PlayerBridge {
   readonly #client: BridgeClient;
@@ -357,7 +357,7 @@ export class PlayerBridge {
 
   /**
    * The recording held under recording `ticket`, or with `null` the recorder's current one (`readRecording`), as the host
-   * holds it when it dispatches the read: a copy, in-process as across a Worker. A read for the composable's test API,
+   * holds it when it dispatches the read: a copy. A read for the composable's test API,
    * with no production caller; it rejects when the connection is lost.
    */
   async readRecording(ticket: string | null): Promise<OpResult<"readRecording">> {

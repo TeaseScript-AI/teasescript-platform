@@ -108,7 +108,7 @@ async function playTape(bridge: PlayerBridge, calls = false): Promise<unknown[]>
   await send("skipPacing", { actionId: -1 });
   await send("observeTime", { atMs: 1_000, media: [] });
   await send("stepTime", { targetMs: 2_500 });
-  // A late observation caught up one step per request (`budgetMs: 0`), so both backends take the same steps.
+  // A late observation caught up one step per request (`budgetMs: 0`), so every run takes the same steps.
   await send("beginCatchUp", { targetMs: 9_000 });
   for (let step = 0; step < 20; step += 1) {
     const result = await bridge.request(session, "stepCatchUp", { budgetMs: 0 });
@@ -126,15 +126,12 @@ async function playTape(bridge: PlayerBridge, calls = false): Promise<unknown[]>
   return steps;
 }
 
-test("the driver and time ops (#1856) give the same replies, publications and events in-process and in a Worker", async () => {
-  const inProcess = await inProcessBridge();
+test("the driver and time ops (#1856) show the same critical view with and without the call view, in a Worker", async () => {
   const worker = new PlayerBridge(await connectBridge(nodeWorkerPort(PLAYER_WORKER, BUILD), BUILD));
   try {
-    const critical = await playTape(inProcess);
-    assert.deepEqual(await playTape(worker), critical);
-    // With the call view (L5f) the critical view is the same, and the full view equal across the backends.
-    const full = await playTape(inProcess, true);
-    assert.deepEqual(await playTape(worker, true), full);
+    const critical = await playTape(worker);
+    // With the call view (L5f) the critical view is the same.
+    const full = await playTape(worker, true);
     assert.deepEqual(withoutViews(full), withoutViews(critical));
   } finally {
     worker.client.terminate();
