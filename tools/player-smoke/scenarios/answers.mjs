@@ -412,7 +412,7 @@ export async function composerStatesScenario(cdp, origin) {
     );
     assertEqual(
       `${overtaken} / ${again}`,
-      "false|This interaction is no longer available. / true|",
+      "false|The question was gone before your answer arrived. / true|",
       "The overtaken popup: shown under the block | notice / focused | notice",
     );
     await clickLabelled(cdp, "OK", "[role=dialog] button");

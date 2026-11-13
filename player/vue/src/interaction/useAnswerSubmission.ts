@@ -98,7 +98,15 @@ function advance(record: PendingAnswer, stage: AnswerStage): boolean {
 /** Where the session stands for input: stopping until its final publication shows, stopped, or its connection lost. */
 export type SessionTerminal = "freezing" | "stopped" | "lost" | null;
 
-export const NO_LONGER_AVAILABLE = "This interaction is no longer available.";
+/** The notice of an answer or edit that arrived after its question was gone. */
+export const QUESTION_GONE = "The question was gone before your answer arrived.";
+/** `QUESTION_GONE`, saying so where the answer's typed text came back to the composer. */
+export const questionGone = (textBack: boolean) =>
+  textBack ? `${QUESTION_GONE} Your text is back in the field.` : QUESTION_GONE;
+
+/** Whether undoing `record` puts typed text back in the composer: only the chat's own text comes back. */
+const returnsText = (record: PendingAnswer): record is PendingAnswer & { readonly sent: string } =>
+  record.origin === "chat" && record.sent !== null;
 
 /** One painted frame: the answer shows before an engine on this thread takes it (the in-process backend). */
 function paintedFrame(): Promise<void> {
@@ -182,8 +190,7 @@ export function useAnswerSubmission(host: {
     if (!advance(record, "settled")) return;
     if (pending.value === record) pending.value = null;
     if (how === "undone") {
-      if (record.origin === "chat" && record.sent !== null)
-        host.composer.restoreChat(record.chat, record.sent);
+      if (returnsText(record)) host.composer.restoreChat(record.chat, record.sent);
       if (message) showNotice(message);
       host.undone?.(record);
     }
@@ -274,12 +281,13 @@ export function useAnswerSubmission(host: {
     if (result.kind === "retired") return settle(record, "undone");
     if (result.kind === "unanswered") return settle(record, "undone", host.unansweredMessage());
     // Only an answered result publishes; an unavailable action, or any other result, undoes the answer.
-    if (result.kind !== "answered") return settle(record, "undone", NO_LONGER_AVAILABLE);
+    if (result.kind !== "answered")
+      return settle(record, "undone", questionGone(returnsText(record)));
     host.publish(result.session);
     const outcome = result.outcome;
     if (outcome.kind === "completed" || outcome.kind === "updated" || outcome.kind === "unchanged")
       return settle(record, "released");
-    settle(record, "undone", refusalMessage(outcome));
+    settle(record, "undone", refusalMessage(outcome, returnsText(record)));
   }
 
   /** The input section's run for the presented action, readying an inspected state first. */
@@ -644,16 +652,16 @@ export function useAnswerSubmission(host: {
   };
 }
 
-/** The notice of a refused answer or edit. */
-export function refusalMessage(outcome: {
-  readonly kind: string;
-  readonly message?: string;
-}): string {
+/** The notice of a refused answer or edit; `textBack` when its typed text came back to the composer. */
+export function refusalMessage(
+  outcome: { readonly kind: string; readonly message?: string },
+  textBack = false,
+): string {
   return outcome.kind === "invalidPayload" && outcome.message !== undefined
     ? outcome.message
     : outcome.kind === "executionPending"
       ? "The script moved on; try again."
-      : NO_LONGER_AVAILABLE;
+      : questionGone(textBack);
 }
 
 export type AnswerSubmission = ReturnType<typeof useAnswerSubmission>;

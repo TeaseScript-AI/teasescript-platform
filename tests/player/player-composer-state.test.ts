@@ -842,7 +842,10 @@ RERUN.rows(
     p.frame.release();
     await until(() => record.stage === "settled", "the answer settled", "host");
     assert.equal(p.composer.chatText.value, "SENTTAIL");
-    assert.equal(p.submission.notice.value, "This interaction is no longer available.");
+    assert.equal(
+      p.submission.notice.value,
+      "The question was gone before your answer arrived. Your text is back in the field.",
+    );
     assert.equal(p.submission.consumed.value, null);
     return end();
   },
