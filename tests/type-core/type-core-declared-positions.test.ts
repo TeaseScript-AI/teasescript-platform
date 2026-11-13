@@ -84,20 +84,27 @@ const templatesOf = (row: string, operand: string): readonly string[] | undefine
 
 /**
  * The samples judged here: at a position of the table, those a declared refusal names aside (the row guard's), and a
- * literal number before a `wait`'s unit, which is a duration literal (`wait 2 s`), not an amount.
+ * value ending in a number before a `wait`'s unit, whose number the unit makes a duration literal (`wait 2 s`,
+ * `wait hostValue otherwise 2 s`), not an amount.
  */
 const SAMPLES = samples().filter(
   (sample) =>
     ruleOf(sample) !== undefined &&
     !DECLARED_REFUSALS.some((declared) => declared.refused === sample.prelude + sample.command) &&
-    !(sample.operand === "amount" && sample.origin === "literal" && /^\d/u.test(sample.value)),
+    !(sample.operand === "amount" && /\d$/u.test(sample.value)),
 );
 
 /**
- * A choice object's positions written in place (`CHOICE_OBJECT_OPERANDS`), where the core's check of the buttons
- * refuses an outside value (`"this operand"`), as it refuses the host global there (`DECLARED_REFUSALS`).
+ * The positions where the core's check of what the buttons return (`choiceValues`) refuses an outside value carried
+ * (`"this operand"`): a choice object's written in place (`CHOICE_OBJECT_OPERANDS`), as it refuses the host global there
+ * (`DECLARED_REFUSALS`), and an unlabelled option or element.
  */
-const CHOICE_OBJECT = new Set(["askChoice.returnedText", "askChoice.value"]);
+const CHOICE_CHECKED = new Set([
+  "askChoice.returnedText",
+  "askChoice.value",
+  "askChoice.option",
+  "askChoice.element",
+]);
 
 /**
  * The samples sampled in every context: in each position, a list written in place, a date by a conversion and a dict
@@ -115,7 +122,10 @@ const IN_CONTEXTS = SAMPLES.filter(
 const carrierOf = (sample: Sample): string =>
   sample.origin === "conversion"
     ? `${sample.value.slice(0, sample.value.indexOf("("))}(…, default: hostValue)`
-    : `${sample.prelude.replace("\n", "; ")}${sample.value}`;
+    : `${sample.prelude.trimEnd().replaceAll(/\n\s*/gu, "; ")}; ${sample.value}`.replace(
+        /^; /u,
+        "",
+      );
 
 /**
  * One sample in one context. `seen` collects each position's codes today refuses with, `declined` the samples the
@@ -162,13 +172,13 @@ function judge(
       return;
     }
     if (mode.outside !== undefined) {
-      // today plans: the route declines only an outside value carried, by the table's refusal or, at a choice object's
-      // position, the core's; each is counted (R11)
+      // today plans: the route declines only an outside value carried, by the table's refusal or, where the core checks
+      // what the buttons return, the core's; each is counted (R11)
       const by =
         mode.outside === TABLE_REFUSAL
           ? "table"
-          : mode.outside === "this operand" && CHOICE_OBJECT.has(sample.operand)
-            ? "choice object"
+          : mode.outside === "this operand" && CHOICE_CHECKED.has(sample.operand)
+            ? "choice check"
             : null;
       if (by !== null && DECLINED_ORIGINS.has(sample.origin)) {
         const key = `${sample.origin} (${by === "table" ? by : sample.operand}): ${carrierOf(sample)}`;
