@@ -528,7 +528,10 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
           case "loopStart": {
             const endLoop = ins.target;
             if (endLoop <= pc || endLoop > endAt) throw new Unsupported("a loop that ends outside its region");
-            if (flat && rangeWaits(pc + 1, endLoop)) {
+            // A round starts at the loop's continue target: before `loopStart` when its condition needs instructions
+            // (an ask, a call), which every round runs again.
+            const roundStart = ins.continueTarget ?? pc;
+            if (flat && rangeWaits(Math.min(roundStart, pc + 1), endLoop)) {
               flatLoopHead(ins, pc);
               pc += 1;
               continue;
@@ -577,10 +580,23 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false, gen
     function structuredLoop(ins, pc, endLoop) {
       const label = `L${ins.loopId}`;
       loops.set(ins.loopId, { label, flat: false });
+      const roundStart = ins.continueTarget ?? pc;
+      if (roundStart < pc && ins.loopKind !== "while") throw new Unsupported(`a '${ins.loopKind}' loop whose rounds start before it`);
       if (ins.loopKind === "while") {
+        // The condition's instructions ran once before the loop; each later round runs them again.
+        const again = roundStart < pc ? `r${pc}` : null;
+        if (again !== null) line(`let ${again} = false;`);
         line(`${label}: while (true) {`);
         indent += 1;
         if (tick) line(tick);
+        if (again !== null) {
+          line(`if (${again}) {`);
+          indent += 1;
+          emitRange(roundStart, pc);
+          indent -= 1;
+          line(`}`);
+          line(`${again} = true;`);
+        }
         const c = x();
         line(`${c} = ${expr(ins.expression)};`);
         line(`if (${c} !== true) { if (${c} === false) break; throw rt.notBool(${konst(ins.expression)}, ${c}); }`);
