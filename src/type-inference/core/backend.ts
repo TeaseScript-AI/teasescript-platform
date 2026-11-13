@@ -45,8 +45,9 @@ import {
  * and a parse, with C9's boundary check where it enters (the store's destination's admitted type) or where it is read.
  * Rejected after the analysis: any other consumer's diagnostic, a property read of a value that may be no object, a
  * value `say` may not show, a built-in speaker field's value that may not fit it (`SPEAKER_FIELD_KINDS`), an argument
- * of another kind than a built-in function takes (the built-in signature check C13, S9b), and lists nested `SLICE_DEPTH` deep. A possible `null` is the route rule's (AD-1): a compile error where a
- * route to the use has no check, else a warning whose use the runtime checks.
+ * of another kind than a built-in function takes (the built-in signature check C13, S9b), and lists nested
+ * `SLICE_DEPTH` deep. A possible `null` is the route rule's (AD-1): a compile error where a route to the use has no
+ * check, else a warning whose use the runtime checks.
  * Refused during it: a value whose structure the slice does not follow, at the store whose capture established it
  * (`leftSlice`), the analysis ended there. A stop compiles with its warning and its checks at runtime (D4 a′), but a
  * store whose check the stop leaves uncarried or undecided declines the program (#1526 decision 2, condition 1,
@@ -194,15 +195,15 @@ const SHOWN: readonly string[] = ["string", "integer", "number", "boolean", "nul
 /**
  * The kinds a built-in field of a speaker declaration takes (V30 §37; the fields today's checker types by their own
  * rules, `BUILT_IN_SPEAKER_PROPERTIES`), and the runtime function that refuses a value of another kind (`check`), where
- * one does: a value that may be of a kind outside `fits` is outside the slice, and so is an unknown one where no
+ * one does: a value that may be of a kind outside `takes` is outside the slice, and so is an unknown one where no
  * function is cited, since nothing would refuse it. A built-in field without an entry here is outside for every value.
  */
 interface FieldKinds {
-  readonly fits: readonly ItemTag[];
+  readonly takes: readonly ItemTag[];
   readonly check: OperandCheck | null;
 }
 const SPEAKER_TEXT_FIELD: FieldKinds = {
-  fits: ["string", "integer", "number", "boolean", "null"],
+  takes: ["string", "integer", "number", "boolean", "null"],
   check: { file: "src/runtime/values/speaker-text.ts", function: "speakerText" },
 };
 const PRESENTATION_CHECK: OperandCheck = {
@@ -218,25 +219,25 @@ export const SPEAKER_FIELD_KINDS: ReadonlyMap<string, FieldKinds> = new Map([
   [
     "defaultSaySkippable",
     {
-      fits: ["boolean"],
+      takes: ["boolean"],
       check: { file: "src/runtime/instructions/say.ts", function: "executeDeclareSpeaker" },
     },
   ],
-  ["presentation", { fits: ["string", "null"], check: PRESENTATION_CHECK }],
-  ["bubble", { fits: ["object", "null"], check: PRESENTATION_CHECK }],
-  ["prose", { fits: ["object", "null"], check: PRESENTATION_CHECK }],
-  ["font", { fits: ["string", "null"], check: PRESENTATION_CHECK }],
+  ["presentation", { takes: ["string", "null"], check: PRESENTATION_CHECK }],
+  ["bubble", { takes: ["object", "null"], check: PRESENTATION_CHECK }],
+  ["prose", { takes: ["object", "null"], check: PRESENTATION_CHECK }],
+  ["font", { takes: ["string", "null"], check: PRESENTATION_CHECK }],
   [
     "avatar",
     {
-      fits: ["string", "null"],
+      takes: ["string", "null"],
       check: { file: "src/runtime/values/speaker-text.ts", function: "optionalSpeakerString" },
     },
   ],
   // (the runtime drops a colour it cannot read, and nothing reads `alias` or `gender` as a kind: no check to cite)
-  ["color", { fits: ["string", "null"], check: null }],
-  ["alias", { fits: ["string", "null"], check: null }],
-  ["gender", { fits: ["string", "null"], check: null }],
+  ["color", { takes: ["string", "null"], check: null }],
+  ["alias", { takes: ["string", "null"], check: null }],
+  ["gender", { takes: ["string", "null"], check: null }],
 ]);
 
 /** The first answer of the analysis that leaves the slice (see the module's comment), or `null`. */
@@ -272,9 +273,13 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
       for (const property of statement.properties) {
         if (!BUILT_IN_SPEAKER_PROPERTIES.has(property.name.name)) continue;
         const field = SPEAKER_FIELD_KINDS.get(property.name.name);
-        const fits =
-          field === undefined ? [] : field.check === null ? field.fits : [...field.fits, "unknown"];
-        if (field === undefined || beyond(property.value, fits))
+        const takes =
+          field === undefined
+            ? []
+            : field.check === null
+              ? field.takes
+              : [...field.takes, "unknown"];
+        if (field === undefined || beyond(property.value, takes))
           return {
             file: index.fileOf(property.value),
             span: property.value.span,
