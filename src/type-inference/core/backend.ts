@@ -418,8 +418,10 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
           };
       }
     }
-  // a command's or an ask's operand that may hold a value its instruction does not take (`COMMAND_OPERANDS`): today's
-  // compile error, so today's checker answers (#2488's step 1½); last, after the values' own refusals
+  // a command's or an ask's operand that may hold a value its instruction does not take (`COMMAND_OPERANDS`, #2488's
+  // step 1½): the core has no consumer of its own at a command operand, so the analysis never judges the operand against
+  // its instruction, and the table reads no kind for an outside value carried there (R10) nor a narrowing (R18); the
+  // table keeps such an operand off the route. Last, after the values' own refusals
   for (const node of [...index.statements, ...index.asks]) {
     const rules = operandRules(node.kind);
     if (rules === undefined) continue;
@@ -434,7 +436,8 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
         };
     }
     if (node.kind !== "interactionExpression" || node.interactionKind !== "choice") continue;
-    // (a computed choice object whose text no value of it shows: today's TSV040, the request's TSR021 as it opens)
+    // (a computed choice object whose text no value of it shows: no value goes unchecked without this refusal, as the
+    // request's own check stops the run as it opens, TSR021; it keeps today's earlier catch, TSV040 (R19))
     const unshown = unshownChoiceText(answers, index, node, rules["askChoice.text"]!.takes);
     if (unshown !== null)
       return {
@@ -442,7 +445,8 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
         span: unshown.span,
         what: "an operand its instruction does not take",
       };
-    // (a choice of more buttons than a request shows, or of none: today's TSV029, the request's TSR052 as it opens)
+    // (a choice of more buttons than a request shows, or of none: no value goes unchecked without these refusals, as the
+    // request's own check stops the run as it opens, TSR052; they keep today's earlier catch, TSV029 (R54, R19))
     if (
       node.options.every((option) => {
         const written = unwrap(option.expression);
@@ -461,8 +465,8 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
 }
 
 /**
- * The kinds an operand may hold as the table reads them (`operandAdmitted`): the core's, with a read of a place whose
- * type is written or decided holding that type's kinds in place of its unknown.
+ * The kinds an operand may hold: the core's, with a read of a place whose type is written or decided holding that type's
+ * kinds in place of its unknown, as `operandAdmitted` reads such a place.
  */
 function operandKinds(
   answers: Answers,
@@ -574,7 +578,7 @@ function operandAdmitted(
     // (a property read that found no such property fails there, before the operand holds a value: `withoutMissing`)
     const reasons = item.reasons & ~REASON.missing;
     if (reasons === 0) return true;
-    // (an opaque, deferred or stopped unknown: none reaches an operand inside today's slice, as speakers are refused by
+    // (an opaque, deferred or stopped unknown: none reaches an operand inside the slice, as speakers are refused by
     // the name rule, parameters by the function row and a budget stop by its gate; a test fails when one does)
     if (reasons !== REASON.external) return false;
     if (admitted !== null)
