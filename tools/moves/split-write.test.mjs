@@ -586,8 +586,12 @@ test("a read no reads entry names, a cycle of reads, a reads entry or a name the
   // (each keyed by the refusal it must give, so that no later check stands in for it)
   const cases = {
     // the aggregator without its reads: the refusal a star split always gave
-    [`${LAYERS.top} reads LEFT, placed in ${LAYERS.left}, which its reads do not name`]: layered({
+    [`${LAYERS.top} reads LEFT, placed in ${LAYERS.left}`]: layered({
       [LAYERS.top]: { reads: undefined },
+    }),
+    // (with reads that name another file, the refusal says so)
+    [`${LAYERS.top} reads RIGHT, placed in ${LAYERS.right}, which its reads do not name`]: layered({
+      [LAYERS.top]: { reads: [LAYERS.left] },
     }),
     // (left's both reads right's LEFT; right's LEFT reads left's type Left)
     [`a cycle of reads between the split's files: ${LAYERS.left} reads LEFT, ${LAYERS.right} reads Left`]:

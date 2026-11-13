@@ -312,7 +312,7 @@ function place(old, lines, assign) {
       if (target === statement.file) continue;
       refuseUnless(
         (target === setup && statement.file !== setup) || mayRead.get(statement.file).has(target),
-        `line ${statement.own}: ${statement.file} reads ${name}, placed in ${target}, which its reads do not name`,
+        `line ${statement.own}: ${statement.file} reads ${name}, placed in ${target}${mayRead.get(statement.file).size > 0 ? ", which its reads do not name" : ""}`,
       );
       if (!edges.get(statement.file).has(target)) edges.get(statement.file).set(target, name);
     }
@@ -359,16 +359,16 @@ function place(old, lines, assign) {
  */
 function cycleOf(edges) {
   const done = new Set();
-  const path = [];
+  const steps = [];
   const visit = (file) => {
-    const at = path.findIndex(([step]) => step === file);
-    if (at !== -1) return path.slice(at);
+    const at = steps.findIndex(([step]) => step === file);
+    if (at !== -1) return steps.slice(at);
     if (done.has(file)) return null;
     for (const [target, name] of edges.get(file)) {
-      path.push([file, name]);
+      steps.push([file, name]);
       const found = visit(target);
       if (found !== null) return found;
-      path.pop();
+      steps.pop();
     }
     done.add(file);
     return null;
