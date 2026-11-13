@@ -87,9 +87,9 @@ const COMPARISONS = new Set([
   ts.SyntaxKind.InKeyword,
   ts.SyntaxKind.InstanceOfKeyword,
 ]);
-// Each oxlint list is read in tools/oxlint/comments/, else where it was before that folder (#2633): the worker monitor
-// runs this file on runtime-v2's tree, which keeps the old layout until its merge of main carries the move. The second
-// path goes when runtime-v2 holds the move.
+// Each comments list is read in tools/oxlint/comments/, else in tools/oxlint/, its place before #2633: the worker
+// monitor runs this file on runtime-v2's tree, which keeps the lists there while it lacks that move. Only such a tree
+// reads the second path.
 const commentList = (name) => [`tools/oxlint/comments/${name}`, `tools/oxlint/${name}`];
 const LISTS = {
   forecastsAllowed: commentList("comment-forecasts-allowed.json"),
