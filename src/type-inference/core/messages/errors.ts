@@ -962,7 +962,7 @@ export function joined(
   if (rule.pair.length === 2 && rule.pair.includes("string")) {
     const index = rule.pair.findIndex((kind) => kind !== "string");
     const kind = rule.pair[index];
-    return index < 0 || kind === undefined || !SHOWN_KINDS.has(kind) || kind === "null"
+    return index < 0 || kind === undefined || !TEXT_JOIN_KINDS.has(kind) || kind === "null"
       ? null
       : { other: known([kind]), operand: texts[index] ?? null };
   }
@@ -974,7 +974,7 @@ export function joined(
     : rule.domain.includes("string")
       ? own
       : [];
-  if (other.length === 0 || other.some((kind) => !SHOWN_KINDS.has(kind) || kind === "null"))
+  if (other.length === 0 || other.some((kind) => !TEXT_JOIN_KINDS.has(kind) || kind === "null"))
     return null;
   return {
     other,
@@ -1022,7 +1022,7 @@ export function joinFix(
  * The kinds other than text that `${...}` shows as text, not in a notation (as a script reference or a regex is): those
  * a text join's fix puts in `${...}` (`joined`, which refuses `null` among them).
  */
-const SHOWN_KINDS: ReadonlySet<ItemTag> = new Set([
+const TEXT_JOIN_KINDS: ReadonlySet<ItemTag> = new Set([
   "integer",
   "number",
   "boolean",

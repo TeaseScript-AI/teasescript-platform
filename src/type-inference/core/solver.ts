@@ -16,7 +16,7 @@ import {
   type Inclusion,
 } from "./contract/contributions.js";
 import { itemsSignature, STOPPED, type IngressCell, type Item, type ItemScope } from "./items.js";
-import { retainedRecorder } from "./retained/retained.js";
+import { retainedInstrument } from "./retained/retained.js";
 
 /*
  * The demand solver of the coarse core (checkpoint 9; the port plan's S3 note §1). A demand is one answer the
@@ -245,7 +245,7 @@ interface Frame {
   readonly trace: FlowSink | null;
 }
 
-/** Test-only: a run's identity as the retained-state recorder hears it, made before its demand's factory runs. */
+/** Test-only: a run's identity as the retained-state instrument hears it, made before its demand's factory runs. */
 interface RunMark {
   readonly started: true;
 }
@@ -443,11 +443,11 @@ export class Solver {
   readonly #work: WorkLedger;
   readonly #scope: ItemScope;
   readonly #seam: SolverSeam | null = activeSeam;
-  /** Test-only: the retained-state recorder, told the current run (`retained/retained.ts`); `null` in production. */
-  readonly #retained = retainedRecorder();
+  /** Test-only: the retained-state instrument, told the current run (`retained/retained.ts`); `null` in production. */
+  readonly #retained = retainedInstrument();
   /**
-   * Test-only: each frame's run, as the recorder was told it before its demand's factory ran (`#started`); made only
-   * with a recorder.
+   * Test-only: each frame's run, as the instrument was told it before its demand's factory ran (`#started`); made only
+   * with an instrument.
    */
   readonly #runOf: WeakMap<Frame, RunMark> | null = this.#retained === null ? null : new WeakMap();
   /** The order of demands' keys at one site and kind (`canonical`): the pass's, a cursor's by its logical text. */
@@ -830,8 +830,8 @@ export class Solver {
   }
 
   /**
-   * Test-only: a demand's run starts before its factory (`make`) runs, whose code is the run's too; `null` without a
-   * recorder, which then makes nothing.
+   * Test-only: a demand's run starts before its factory (`make`) runs, whose code is the run's too; `null` without an
+   * instrument, which then makes nothing.
    */
   #starting(): RunMark | null {
     if (this.#retained === null) return null;

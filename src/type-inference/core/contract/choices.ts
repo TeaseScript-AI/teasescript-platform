@@ -72,8 +72,8 @@ export function* choiceItems(
   const evidence = "evidence" in c && c.evidence?.kind === "choice" ? c.evidence.options : [];
   const labels = choiceLabels(c);
   // a button's value is a choice value, a scalar (V30 §19, TSV029): a value of another type is no answer,
-  // as the run stops at it (`choiceValues`' error or check), and nothing stands below a scalar but an unknown's own
-  // parts, so no record a button holds is ever composed into the answer
+  // as the run stops at it (`checkChoiceValues`' error or check), and nothing stands below a scalar but an unknown's
+  // own parts, so no record a button holds is ever composed into the answer
   const buttonValue = function* (
     place: PlaceId,
     path: readonly string[],

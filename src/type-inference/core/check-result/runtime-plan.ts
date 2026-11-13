@@ -23,7 +23,7 @@ import { type ContractResult } from "../contract-descriptors.js";
 import { leftOutWarning, leftOutCheck, leftOutCompletion } from "../consumers.js";
 import { type ItemTag } from "../items.js";
 import { type CoreAnalysisRequest, propertyName } from "../program.js";
-import { pathPhrase } from "../messages.js";
+import { pathPhrase } from "../messages/words.js";
 import { type Obligation, type RequiredKind } from "../result.js";
 import {
   DEFAULT_LOST_AT_BUDGET,

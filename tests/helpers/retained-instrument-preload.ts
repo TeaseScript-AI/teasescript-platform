@@ -26,7 +26,7 @@ const name = /[\\/]tests[\\/]type-core[\\/](?:[^\\/]+[\\/])?([^\\/]+\.test)\.js$
 if (name !== undefined && (all || FROZEN_IN_CI.has(name))) {
   // (imported here, not above: the instrument loads much of the type core, which every other test process, and each
   // process a test spawns, would load for nothing)
-  const { installRetainedRecorder } =
+  const { installRetainedInstrument } =
     await import("../../src/type-inference/core/retained/retained.js");
   const { RetainedInstrument } = await import("./retained-instrument.js");
   const instrument = new RetainedInstrument({
@@ -42,7 +42,7 @@ if (name !== undefined && (all || FROZEN_IN_CI.has(name))) {
             );
           },
   });
-  installRetainedRecorder(instrument);
+  installRetainedInstrument(instrument);
   // (a typed array no freeze holds, written after its run ended, and a refusal thrown, wherever it was caught: each
   // fails the file at the exit; a survey counts the first as a frozen write and notes refusals instead of throwing)
   if (survey === undefined)

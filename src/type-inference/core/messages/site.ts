@@ -43,7 +43,7 @@ export interface MessageSource {
   /**
    * The statement a check may hold, as in `if n != null { say n + 1 }`, for the use at `use` of the value at `read`
    * inside it: the innermost statement around the use that is one of a block's or a file's statements, on one line,
-   * where a check before it still holds at the use (`evaluation`); else `null`.
+   * where a check before it still holds at the use (`checkBeforeCoversUse`); else `null`.
    */
   readonly statement: (use: SourceSite, read: SourceSite) => SourceSite | null;
   /** Whether a site is the place an assignment on its line stores into, or a receiver on its path (`inTarget`). */
@@ -190,7 +190,11 @@ function evaluation(statement: Statement): Evaluation {
  * itself change or draw, the read included, is kept before the statement only where it is the first thing evaluated, so
  * that no draw or read before it, a text's placeholder's included, moves behind it.
  */
-export function guards(statement: Statement, use: SourceSite, read: SourceSite): boolean {
+export function checkBeforeCoversUse(
+  statement: Statement,
+  use: SourceSite,
+  read: SourceSite,
+): boolean {
   const { lazy, first, acting, at } = evaluation(statement);
   const used = at.get(spanKey(use.start, use.end));
   const value = at.get(spanKey(read.start, read.end));

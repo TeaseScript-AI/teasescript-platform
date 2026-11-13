@@ -31,7 +31,7 @@ import {
 } from "../../src/type-inference/core/items.js";
 import { hasMethod, hasProperty } from "../../src/type-inference/core/consumers/kinds.js";
 import { MEMBER_KINDS, REFERENCE } from "../../src/type-inference/core/contract/kinds.js";
-import { described } from "../../src/type-inference/core/messages.js";
+import { described } from "../../src/type-inference/core/messages/words.js";
 import type { PlaceId, SourceSite } from "../../src/type-inference/graph.js";
 import type { Label } from "../../src/type-inference/core/contract/labels.js";
 import { propertyName, stepName } from "../../src/type-inference/core/program.js";

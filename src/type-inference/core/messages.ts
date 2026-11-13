@@ -31,7 +31,7 @@ import {
   type Arguments,
   givenBy,
   givenByCall,
-  guards,
+  checkBeforeCoversUse,
   holds,
   inTarget,
   type Landing,
@@ -47,8 +47,6 @@ import { errorSentence, writtenTypeMessage } from "./messages/errors.js";
 import { budgetMessage, warningFix, warningSentence } from "./messages/warnings.js";
 import { contextSentence, originSentence, requiredSentence } from "./messages/causes.js";
 import { unusedFallbackMessage } from "./check-result/otherwise.js";
-export type { Landing, MessageSource } from "./messages/site.js";
-export { described, pathPhrase } from "./messages/words.js";
 
 /*
  * The sentences of the coarse core's diagnostics: each diagnostic's code is its rule's (one code, both severities where
@@ -205,7 +203,7 @@ export function messageSource(
     let at = low - 1;
     while (at !== -1 && !holds(found.statements[at]!.span, use)) at = found.around[at]!;
     const held = at === -1 ? undefined : found.statements[at];
-    return held === undefined || UNGUARDED.has(held.kind) || !guards(held, use, read)
+    return held === undefined || UNGUARDED.has(held.kind) || !checkBeforeCoversUse(held, use, read)
       ? null
       : { file: use.file, start: held.span.start.offset, end: held.span.end.offset };
   };
@@ -513,16 +511,18 @@ export function coreMessage(
     return [
       requiredSentence(kinds, diagnostic.requiredCheck, source),
       warningFix(
-        rule,
-        text,
-        kinds,
-        fits,
-        [],
-        provenance.detail,
-        provenance.context,
+        {
+          rule,
+          text,
+          kinds,
+          fits,
+          besides: [],
+          detail: provenance.detail,
+          context: provenance.context,
+          site: diagnostic.site,
+          expects: diagnostic.expects,
+        },
         source,
-        diagnostic.site,
-        diagnostic.expects,
         // (its fix is the warning's, whose own reads its program performs where they stand, #1296)
         { ...diagnosed, severity: "warning" },
       ),
@@ -546,16 +546,18 @@ export function coreMessage(
   const sentences = [
     warningSentence(rule, text, kinds, source, context, detail),
     warningFix(
-      rule,
-      text,
-      kinds,
-      diagnostic.fits,
-      diagnostic.besides,
-      detail,
-      context,
+      {
+        rule,
+        text,
+        kinds,
+        fits: diagnostic.fits,
+        besides: diagnostic.besides,
+        detail,
+        context,
+        site: diagnostic.site,
+        expects: diagnostic.expects,
+      },
       source,
-      diagnostic.site,
-      diagnostic.expects,
       diagnosed,
     ),
   ];

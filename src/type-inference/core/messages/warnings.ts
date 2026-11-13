@@ -225,7 +225,7 @@ function guarded(
  * line before it, which moves its read there: each where `codeAt` proves it in a statement's place, its text clear of
  * the other diagnostics but those of only the types the test rules out; else `null`, and the fix names
  * the check in words. The statement's own reads stay where they stand, the kept one first of all it evaluates
- * (`guards`), so a warning's reads are its own.
+ * (`checkBeforeCoversUse`), so a warning's reads are its own.
  */
 function guardForms(
   use: Use,
@@ -527,6 +527,23 @@ function ruleKinds(rule: DiagnosticRule): readonly ItemTag[] {
 }
 
 /**
+ * The warned use a fix is for: its rule; the warned value's text and offending kinds; its other known kinds the rule
+ * takes (`fits`) and those the site's other diagnostics of the rule report (`besides`); why it may be of another type
+ * (`detail`, `context`); its site; and for a null value, what the place it lands in takes (`expects`).
+ */
+interface WarnedUse {
+  readonly rule: DiagnosticRule;
+  readonly text: string;
+  readonly kinds: readonly ItemTag[];
+  readonly fits: readonly ItemTag[];
+  readonly besides: readonly ItemTag[];
+  readonly detail: ContextDetail;
+  readonly context: ContextWord;
+  readonly site: SourceSite;
+  readonly expects: SiteExpectation | undefined;
+}
+
+/**
  * A warning's fix, by the first case that applies: for the elements a call reads and what `toJson` writes below its
  * argument, the rule's own advice or none; for a store whose place is an element below the value, the test of the whole
  * receiving type (`wholeCheck`); for null, a null check, or a type test beside another type the use does not take, with
@@ -536,19 +553,8 @@ function ruleKinds(rule: DiagnosticRule): readonly ItemTag[] {
  * takes; else a type test of the kinds that fit, a store's property fix, or the fix of the error the kinds would be
  * (`errorFix`). A value that is a store's target and no variable is checked where it stands, in words.
  */
-export function warningFix(
-  rule: DiagnosticRule,
-  text: string,
-  kinds: readonly ItemTag[],
-  fits: readonly ItemTag[],
-  besides: readonly ItemTag[],
-  detail: ContextDetail,
-  context: ContextWord,
-  source: MessageSource,
-  site: SourceSite,
-  expects: SiteExpectation | undefined,
-  diagnosed: Diagnosed,
-): string {
+export function warningFix(warned: WarnedUse, source: MessageSource, diagnosed: Diagnosed): string {
+  const { rule, text, kinds, fits, besides, detail, context, site, expects } = warned;
   const subject = rule.rule === "member" ? rule.receiver : text;
   // (the elements a call reads, and what toJson writes below its argument: no test of the value read fixes them; join's
   // elements of a known type are selected from)
@@ -802,7 +808,7 @@ function memberWarningFix(
 }
 
 /** A place the stop names, with its lines: `'tally' (lines 3–9)`, `the top level of 'main.tease' (lines 1–40)`. */
-function placeText(place: WorkPlace, source: MessageSource): string {
+function workPlaceText(place: WorkPlace, source: MessageSource): string {
   const first = source.line(place.lines);
   const last = source.line({
     ...place.lines,
@@ -822,7 +828,7 @@ export function budgetMessage(
   source: MessageSource,
   count: number | null,
 ): string {
-  const place = placeText(diagnostic.place, source);
+  const place = workPlaceText(diagnostic.place, source);
   if (diagnostic.class === "not-checked-budget")
     return `${capitalized(place)} is not checked completely before the script plays, so its checks run while it plays.`;
   const moved =
