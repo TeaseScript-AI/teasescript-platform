@@ -33,11 +33,11 @@ const isMissing = (item: Item): boolean =>
 /**
  * TSV029 (V30 §19): what every button of an `askChoice` returns is a choice value: a written choice object's `value`,
  * or its `text` without one; a value option or element itself; a choice object the options hold without writing it, its
- * `value` or its `text` as the answer reads it (`choiceItems`). Each is decided over its known kinds as a built-in's
- * argument is: every one a choice value, quiet; none and all definite, an error; else a warning whose check is the
- * runtime's own check of the buttons (TSR052) when the choice opens, a value the script cannot know among them (as an
- * argument's), the known misfit alone beside one. A labelled option's buttons return the label. The answer's value side
- * takes only choice values (`choiceItems`), so no record of a button is composed.
+ * `value` or its `text` as the answer reads it (`choiceItems`). Each is decided over its known kinds: every one a
+ * choice value, quiet; none and all definite, an error; else a warning whose check is the runtime's own check of the
+ * buttons (TSR052) when the choice opens, a button's value the script cannot know among them, the known misfit alone
+ * beside one. A labelled option's buttons return the label. The answer's value side takes only choice values
+ * (`choiceItems`), so no record of a button is composed.
  */
 export function checkChoiceValues(
   walk: Consumers,
@@ -46,7 +46,7 @@ export function checkChoiceValues(
 ): void {
   const options = c.evidence?.kind === "choice" ? c.evidence.options : [];
   const { program } = walk.pass;
-  // the value's kinds decided as a built-in's argument's are, a button's value the script cannot know a possible misfit
+  // the value's kinds against what the part takes, a button's value the script cannot know a possible misfit
   const check = (
     value: PlaceId | null,
     need: readonly ItemTag[],
@@ -63,7 +63,7 @@ export function checkChoiceValues(
     }
     program.work.charge("checks");
     const items = domainItems(walk, value, node, rest);
-    // (a value a button returns that the script cannot know warns, as an argument's does; beside a known misfit,
+    // (a value a button returns that the script cannot know warns; beside a known misfit,
     // the known one alone, one warning a site; an option or an element the runtime checks as it opens the choice)
     const misfits = items.filter((item) =>
       item.tag === "unknown"
