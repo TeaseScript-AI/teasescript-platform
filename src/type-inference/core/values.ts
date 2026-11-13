@@ -292,23 +292,13 @@ export class Values {
     if (binding !== null && !guards.testless && guards.narrowing.tests(binding)) {
       const g = guards.narrowing.nearestAt(read!);
       if (g !== null) {
-        // (the chain down to its binding, its steps as the exact path keys them, the node `#valueAt` passes down)
-        const steps: string[] = [];
-        let at = value;
-        let node: FlowNode | null = null;
-        for (let projection = outer; projection !== undefined;) {
-          program.work.charge("eventSteps");
-          steps.push(stepName(projection.step));
-          node = projection.node ?? node;
-          at = projection.owner;
-          projection = program.projOf.get(at);
-        }
+        const { steps, root, node } = this.#chainOf(value);
         found = {
           g,
           read: read!,
-          root: at,
-          key: keptKey(program.work, binding, steps.reverse()),
-          node: program.occNode.get(at) ?? node,
+          root,
+          key: keptKey(program.work, binding, steps),
+          node: program.occNode.get(root) ?? node,
         };
       }
     }
@@ -353,18 +343,8 @@ export class Values {
     if (read === null || read.span === null || guards.testless) return null;
     const binding = this.#stableBinding(value);
     if (binding === null || !guards.narrowing.tests(binding)) return null;
-    // (the chain's steps as the exact path keys them, then the steps below, the node `#valueAt` passes down)
-    const path: string[] = [];
-    let at = value;
-    let node: FlowNode | null = null;
-    for (let projection = outer; projection !== undefined;) {
-      program.work.charge("eventSteps");
-      path.push(stepName(projection.step));
-      node = projection.node ?? node;
-      at = projection.owner;
-      projection = program.projOf.get(at);
-    }
-    path.reverse();
+    // (the chain's steps, then the steps below)
+    const { steps: path, root: at, node } = this.#chainOf(value);
     for (let index = 0; index < rest.length; index += 1) {
       program.work.charge("eventSteps");
       path.push(rest.at(index)!);
@@ -380,6 +360,29 @@ export class Values {
       this.#narrowingsBelow.set(value, (byKey = Retained.map("Values.#narrowingsBelow[]")));
     byKey.set(key, found);
     return found;
+  }
+
+  /**
+   * A read's chain of projections down to its root (`#narrowingOf`, `#narrowingBelow`): its steps from the root as the
+   * exact path keys them, the root, and the node `#valueAt` passes down; a charge per step.
+   */
+  #chainOf(value: PlaceId): {
+    readonly steps: string[];
+    readonly root: PlaceId;
+    readonly node: FlowNode | null;
+  } {
+    const { program } = this.pass;
+    const steps: string[] = [];
+    let at = value;
+    let node: FlowNode | null = null;
+    for (let projection = program.projOf.get(value); projection !== undefined;) {
+      program.work.charge("eventSteps");
+      steps.push(stepName(projection.step));
+      node = projection.node ?? node;
+      at = projection.owner;
+      projection = program.projOf.get(at);
+    }
+    return { steps: steps.reverse(), root: at, node };
   }
 
   /**
