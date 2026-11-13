@@ -36,10 +36,10 @@ import {
 } from "./views.js";
 
 /**
- * The members of lists, sets, dicts, objects and ranges (O4 stage 2b), as `memberPropertyType` and
+ * The members of lists, sets, dicts, objects and ranges, as `memberPropertyType` and
  * `memberMethodType` of the legacy checker give them, written as relations: a list's element properties are held
  * parts of the list, a set's are copies, a dict's `values` is a new list of copies, and a method that gives an
- * element gives a copy (`#collectionMethodType`, `#setOperationType`). `get` keeps its default off the receiver (Q2):
+ * element gives a copy (`#collectionMethodType`, `#setOperationType`). `get` keeps its default off the receiver:
  * the result is the element or the default.
  */
 const LIST_RESULT: Record<string, OperationResult> = {
@@ -250,7 +250,7 @@ function setOperation(
 
 /**
  * A list's or set's methods, as `LIST_METHODS` names their results (`#collectionMethodType`): `get` has no value when
- * its shape is wrong or its default is missing (its index and default are the visitor's checks); the other methods
+ * its shape is wrong or its default is missing (its index and default are `TypeChecker`'s checks); the other methods
  * keep their result beside a report of the shape or of an argument's kind.
  */
 function listMethodResult(

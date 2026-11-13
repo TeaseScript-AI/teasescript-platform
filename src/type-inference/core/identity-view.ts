@@ -24,7 +24,8 @@ import type { CoreAnalysisRequest, CoreFile } from "./program.js";
  * declaration is an identity function visible from the call's file (global, or the file's own), no parameter or
  * variable of the enclosing function has that name, the call has one positional argument, and it stands in no place
  * slot; every other call stays a call. A place slot is where a write through parentheses reaches the place they hold
- * (`placeSlots`): there the call's result is a copy of its argument, so the call stays one.
+ * (`placeSlots`): there the call stays one. A write through its result reaches a copy of its argument, or for a
+ * speaker, which a call shares, the speaker itself; the view keeps the call in both cases.
  *
  * The view keeps every node of the source that holds no such call and copies the others, a call becoming a
  * parenthesized expression with the call's span. The analysis reads the view; the front end and the plan read the

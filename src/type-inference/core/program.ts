@@ -27,9 +27,9 @@ import { selectsElement } from "./method-categories.js";
 import { Retained } from "./retained/retained.js";
 
 /**
- * The input of the coarse core's analysis (checkpoint 9): the request's files with both fields the core reads beside
+ * The input of the core's analysis: the request's files with both fields the core reads beside
  * their programs. The name pass's picks are the files each glob target may start, which the flow graph takes as the
- * lowering does; the source text names the operands an obligation checks (§10.5: `x` in `x / 4`).
+ * lowering does; the source text names the operands an obligation checks (`x` in `x / 4`).
  */
 export interface CoreFile extends TypeAnalysisFile {
   readonly source: string;
@@ -102,7 +102,7 @@ export type HasConstraint = Extract<Constraint, { readonly kind: "has" }>;
 
 /**
  * The steps a projection takes that are no property (`ProjectionStep`, graph.ts): a key's path keeps a property of one
- * of these names apart from them (Astra B1), so `box.iteration` is `box`'s property, not a loop's visit.
+ * of these names apart from them, so `box.iteration` is `box`'s property, not a loop's visit.
  */
 const INTERNAL_STEPS: ReadonlySet<string> = new Set(["element", "entry", "index", "iteration"]);
 
@@ -260,7 +260,7 @@ export class CoreProgram {
 
   /**
    * The setup work of the analysis, charged, and the indexes: once, before anything reads them. A stop in it
-   * leaves it to run again to its end, uncharged, for the finishing path (D4 a′).
+   * leaves it to run again to its end, uncharged, for the finishing path (D4).
    */
   public index(): void {
     if (this.#indexed) return;
@@ -368,7 +368,7 @@ export class CoreProgram {
         if (place !== undefined) this.#consumed(place, { kind: "use", what, span });
       }
     this.#indexed = true;
-    // (#1072 R61: its graph is held as it is from here on, its private fields with it)
+    // (#1072: its graph is held as it is from here on, its private fields with it)
     Retained.programPart(this, (program) => ({
       functions: program.#functions,
       functionRegions: program.#functionRegions,

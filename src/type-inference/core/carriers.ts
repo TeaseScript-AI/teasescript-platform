@@ -15,8 +15,8 @@ import { readNow, type Reads } from "./inherited/reads.js";
 /*
  * The carriers (S6): the values that are, or hold, another value, their operand. One table, read by every walk over
  * them: admission's stops and structures, its landing index, the written-copy index and the obligations they leave
- * (`admission.ts`), and the property names (`answers.ts`). A literal is structure, no carrier: its cells
- * stand at its element or property step, read through the literal index.
+ * (`admission.ts`, `admission/`), and the property names (`property-names.ts`). A literal is structure, no carrier: its
+ * cells stand at its element or property step, read through the literal index.
  */
 
 /** The carrier kinds, each a row of `operandsOf`. */
@@ -36,7 +36,7 @@ export const CARRIER_KINDS = [
 export type CarrierKind = (typeof CARRIER_KINDS)[number];
 
 /**
- * The roles an operand plays for its carrier (S6-CARRIERS §1), each `kind/role`: a choice option's four rows read its
+ * The roles an operand plays for its carrier, each `kind/role`: a choice option's four rows read its
  * selected value or text, directly or at a list option's element (V30 §19).
  */
 export const CARRIER_ROLES = [
@@ -228,7 +228,7 @@ function isChoice(program: CoreProgram, value: PlaceId): boolean {
 
 /**
  * A path below a value still to read (`carried`'s strip), read at its front and extended there: an array of steps, or
- * a walk's own form (`copySources`' for a wrapper's family, G3 stage 1: a path of the arena kept in reverse, so a step
+ * a walk's own form (`copySources`' for a wrapper's family: a path of the arena kept in reverse, so a step
  * goes on in front in constant work and a chain of k projections never makes k strips of up to k steps).
  */
 export interface Strip<S> {
@@ -241,7 +241,7 @@ export interface Strip<S> {
   under(below: readonly string[]): S;
 }
 
-/** An array as a `Strip`, read and extended as before (`keptSteps`). */
+/** An array as a `Strip`: `rest` copies its steps after the first, `under` joins `below` before them (`keptSteps`). */
 export interface StepsStrip extends Strip<StepsStrip> {
   readonly kind: "steps";
   readonly steps: readonly string[];
