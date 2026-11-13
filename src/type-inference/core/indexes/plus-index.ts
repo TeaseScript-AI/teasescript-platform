@@ -311,7 +311,7 @@ function runOf(pass: CorePass, ix: Indexed, root: PlaceId): Run | null {
  * The bindings a run reads that hold a property, in first-read order, found once per run and property: by the run's
  * own, or where the pass's bindings holding it (`bindingsHolding`) and a sort of those the run reads cost less, by
  * those; each step charged before it runs. The holder bound's one exception: at most the run's own bindings once per
- * run and property, a walk of the run on `main` costing as much.
+ * run and property, the walk of the run that the index replaces costing as much.
  */
 function holdersOf(pass: CorePass, ix: Indexed, run: Run, step: string): ReadonlySet<Reads> {
   const known = run.holding.get(step);

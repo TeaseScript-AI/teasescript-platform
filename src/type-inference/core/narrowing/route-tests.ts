@@ -150,8 +150,8 @@ export interface Feasibility {
   /** The statements that own such an arm. */
   readonly owners: readonly TreeStatement[];
   /**
-   * Of `unentered`, the arms `#infeasible` proves no run enters (not `unavailable`): those above which `entryHazards`
-   * marks nothing (r4-451).
+   * Of `unentered`, the arms `#infeasible` proves no run enters (not `unavailable`): in `entryHazards` a statement
+   * inside one marks nothing above that arm (r4-451), while a mark from outside it still reaches there.
    */
   readonly infeasible: ReadonlySet<TreeBlock>;
   /** The bodies of the program's files: a promoting route stands in one (`NarrowingRoutes.#plain`). */
@@ -199,9 +199,9 @@ export class RouteTests {
   readonly #whiles: TreeStatement[] = [];
   /**
    * In a program the default holds, the arms its corridors pass through none of (`feasibility`), set by the first
-   * `required` there (`NarrowingRoutes`); `null` elsewhere, where every route query is main's. Under it an entry route
-   * is taken only where r4-451's program default admits it (`RouteEntries.standsAt`), and its relation carries no entry
-   * on (r4-451).
+   * `required` there (`NarrowingRoutes`); `null` elsewhere, where every route query is unrestricted. Under it an entry
+   * route is taken only where r4-451's program default admits it (`RouteEntries.standsAt`), and its relation carries no
+   * entry on (r4-451).
    */
   protected feasible: Feasibility | null = null;
   /** Whether the route rule's default holds (`defaultHolds`), made on the first query. */
