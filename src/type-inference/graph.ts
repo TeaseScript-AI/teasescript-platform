@@ -2,11 +2,10 @@ import type { StaticScalar } from "../static-evaluation.js";
 import type { ScalarValue } from "../static-types.js";
 import type { ValueKind } from "../value-kinds.js";
 
-// The constraint graph of a project (O4 stage 2): the places that keep a type, the written and known evidence about
-// them, and the relations between them that the source states. The collector (`collector.ts`) makes it in one walk and
-// decides nothing; the solver (stage 3) decides every type from it. Each constraint carries where it stands in the
-// source, what the author sees there, and the code it stands in, for blame and for the program points of stage 3. The
-// model is frozen by the stage-2 design note (research evidence folder, `plan-stage2-design.md`).
+// The constraint graph of a project: the places that keep a type, the written and known evidence about them, and the
+// relations between them that the source states. The collector (`collector.ts`) makes it in one walk and decides
+// nothing; the type core (`core/`) decides every type from it. Each constraint carries where it stands in the source,
+// what the author sees there, and the code it stands in.
 
 export type PlaceId = number;
 export type FunctionId = number;
@@ -101,7 +100,7 @@ export interface FunctionSignature {
 
 /**
  * The code a constraint stands in: the start values of the session, a file's top level, a function's parameters and
- * body, or a timer, media, or button block. Stage 3 maps regions and sites onto the lowering bridge's program points.
+ * body, or a timer, media, or button block.
  */
 export type RegionRef =
   | { readonly kind: "start" }
@@ -149,7 +148,7 @@ export interface Origin {
   readonly region: RegionRef;
 }
 
-/** A program point: the site of the occurrence; stage 3 maps sites onto the lowering bridge's points. */
+/** A program point: the site of the occurrence. */
 export interface PointRef {
   readonly site: SourceSite;
 }
@@ -165,7 +164,7 @@ export type ProjectionStep =
   "element" | "entry" | "index" | "iteration" | { readonly property: string };
 
 export type ContractFamily =
-  /** A method or property of the receiver's kind, which the solver resolves from the receiver's type. */
+  /** A method or property of the receiver's kind, which the core resolves from the receiver's kinds. */
   | "method"
   | "member"
   | "operator"
@@ -203,7 +202,7 @@ export interface ContractRef {
  * What the source says about an operation beyond its operands' types, which the owning result rules read: a written
  * form descriptor is not a computed one, a written `allowSkip: false` proves a photo is taken, an `askChoice` option
  * with a label before `:` returns that label. Built from the branches of those rules, one entry per written element,
- * each with the place of its expression, so an adapter asks the solver for that place's view. Collected without
+ * each with the place of its expression, whose value the core reads where a rule needs it. Collected without
  * reading any type.
  */
 export type SyntaxEvidence =
@@ -302,7 +301,7 @@ export interface ChoiceOptionEvidence {
     | { readonly kind: "other" };
 }
 
-/** The shape of a condition that narrows (the syntactic test shapes of stage 2b complete it). */
+/** The shape of a condition the graph records as a `test`: a type test, or a test against `null`. */
 export type TestShape =
   | { readonly kind: "type"; readonly type: TypeTerm; readonly negated: boolean }
   | { readonly kind: "null"; readonly negated: boolean };
@@ -327,7 +326,7 @@ export type Constraint = Origin &
     | { readonly kind: "has"; readonly place: PlaceId; readonly type: TypeTerm }
     /**
      * The value flows into the place as a copy taken where the value stands (ADR 0014); uniformity, fit, promotion,
-     * optionality and guards are the solver's. A `call`'s arguments, a `return`'s value and a `fallback`'s operands are
+     * optionality and guards are the core's. A `call`'s arguments, a `return`'s value and a `fallback`'s operands are
      * copy boundaries too; a `read` and a `project` are not.
      */
     | {
@@ -374,7 +373,7 @@ export type Constraint = Origin &
         readonly result: PlaceId;
         readonly evidence?: SyntaxEvidence;
       }
-    /** A list or dict `get` with a default: the result joins the element with the fallback (Q2). */
+    /** A list or dict `get` with a default: the result joins the element with the fallback. */
     | {
         readonly kind: "get";
         readonly receiver: PlaceId;
@@ -397,7 +396,7 @@ export type Constraint = Origin &
         readonly result: PlaceId;
       }
     | { readonly kind: "return"; readonly fn: FunctionId; readonly value: PlaceId | null }
-    /** The end of a body, which completes without a value when the solver finds it reachable. */
+    /** The end of a body, which completes without a value where it is reachable. */
     | { readonly kind: "exit"; readonly fn: FunctionId }
     /**
      * A load: `receiver` is the written type of the variable it starts or is assigned to, which declares the key's type

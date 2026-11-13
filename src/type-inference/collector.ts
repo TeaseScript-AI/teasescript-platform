@@ -66,11 +66,12 @@ import type {
 import { conditionShape } from "./narrowing-shapes.js";
 import { interactionEvidence, selectorsEvidence } from "./syntax-evidence.js";
 
-// The collector of the constraint graph (O4 stage 2): one walk over the project's programs, which emits the places
-// and constraints of `graph.ts` and decides nothing. Its order is the legacy check's, except that it walks every
-// function body after its file's top level instead of at the first call. It mirrors the visitor's scoping rules to
-// resolve names (the legacy facts' `reads` prove it on every source the repository holds); it reads no type and
-// reports no diagnostic. The solver (stage 3) decides every type from the graph it makes.
+// The collector of the constraint graph: one walk over the project's programs, which emits the places and constraints
+// of `graph.ts` and decides nothing. Its order is `TypeChecker`'s (`type-checker.ts`), except that it walks every
+// function body after its file's top level instead of at the first call, and every block after the functions. It
+// mirrors `TypeChecker`'s scoping rules to resolve names (`type-inference-graph.test.ts` compares its reads with the
+// legacy facts' on every repository source); it reads no type and reports no diagnostic. The type core (`core/`)
+// decides every type from the graph it makes.
 
 /**
  * Collects the constraint graph of the project of `request`. Names resolve, since the type analysis runs after name
@@ -86,7 +87,7 @@ type Entry =
       readonly place: PlaceId;
       /** The code the binding belongs to, `null` for a global, for the known-value links of its reads. */
       readonly body: object | null;
-      /** The initializer a read may count as the variable's value (see `Variable.keeps` of the visitor). */
+      /** The initializer a read may count as the variable's value (see `TypeChecker`'s `Variable.keeps`). */
       readonly keeps: SourceSite | null;
     }
   | { readonly kind: "speaker"; readonly name: string }
@@ -109,7 +110,7 @@ class Scope {
     this.#entries.set(name, entry);
   }
 
-  /** The names visible here down to `boundary`, in a new scope under `boundary` (as the visitor's `visibleAbove`). */
+  /** The names visible here down to `boundary`, in a new scope under `boundary` (as `TypeChecker`'s `visibleAbove`). */
   public visibleAbove(boundary: Scope): Scope {
     const copy = new Scope(boundary);
     for (let scope: Scope | null = this; scope !== null && scope !== boundary; scope = scope.parent)
@@ -151,13 +152,20 @@ class Collector {
   readonly #speakers: ReadonlyMap<Identifier, string>;
   readonly #builtins: ReadonlySet<string>;
   readonly #handlers: Handler[] = [];
+  // The walk's position (`#region`, `#file`, `#outer`, `#function`, `#body`): `collect` sets it where the walk of the
+  // session's declarations, of a file's top level and of each block starts; `#functionBody` sets it for a body's walk
+  // and restores it after; `#declareFunction` and `#speaker` swap `#file` alone around a node of another file.
+  /** The code the walk is in, which every constraint names. */
   #region: RegionRef = { kind: "start" };
   /** The name of the `let` whose value is being walked, which a media block binds to its own handle. */
   #selfHandle: string | null = null;
+  /** The file of the node the walk is at, which every site names. */
   #file = 0;
+  /** The scope a block's handlers see names down to (`#pendHandlers`, `Scope.visibleAbove`). */
   #outer: Scope = this.#project;
+  /** The function whose body is walked, whose `return`s are recorded; `null` outside a body. */
   #function: FunctionId | null = null;
-  /** The code being walked, in which a `let` counts as kept (see `Variable.keeps` of the visitor). */
+  /** The code being walked, in which a `let` counts as kept (see `TypeChecker`'s `Variable.keeps`). */
   #body: object = this.#project;
 
   public constructor(request: TypeAnalysisRequest) {
@@ -430,7 +438,8 @@ class Collector {
     }
     this.#function = id;
     yield* compileChild(this.#statements(declaration.body.statements, scope));
-    // The end of the body: whether it is reached, so that the function completes without a value, is the solver's.
+    // The end of the body: the collector does not decide whether it is reached, so that the function completes without
+    // a value.
     this.#add({ ...this.#origin(declaration.body, "return"), kind: "exit", fn: id });
     this.#function = outerFunction;
     this.#body = outerBody;
@@ -780,7 +789,7 @@ class Collector {
     this.#mutate(target.object, scope, statement);
   }
 
-  /** The root variable that a store through `expression` changes in place, if it is one. */
+  /** Records the `mutate` of the root variable a store through `expression` changes in place, if it is one. */
   #mutate(expression: Expression, scope: Scope, at: Spanned): void {
     let node = unwrap(expression);
     while (node.kind === "propertyAccessExpression" || node.kind === "indexExpression")
@@ -796,7 +805,10 @@ class Collector {
     });
   }
 
-  /** The binding of a plain variable, for a test that narrows (only a plain variable narrows). */
+  /**
+   * The binding of a plain variable: the subject of a `test` constraint, which the graph records for plain variables
+   * only (the type core's narrowing reads stable paths from the syntax, `core/narrowing/`).
+   */
   #plainVariable(expression: Expression, scope: Scope): PlaceId | undefined {
     const node = unwrap(expression);
     if (node.kind !== "identifier") return undefined;
@@ -976,7 +988,7 @@ class Collector {
         return yield* compileChild(this.#binary(expression, scope));
       case "typeTestExpression": {
         const value = yield* compileChild(this.#expression(expression.value, scope));
-        // A type test is always the `type` shape; the shape names what it tests, as the visitor reads it.
+        // A type test is always the `type` shape; the shape names what it tests, as `TypeChecker` reads it.
         const shape = conditionShape(expression);
         const tested = shape.kind === "type" ? this.#plainVariable(shape.tested, scope) : undefined;
         if (tested !== undefined)
@@ -1148,7 +1160,10 @@ class Collector {
     return place;
   }
 
-  /** A read of a name: a variable's occurrence, a speaker, or a name the compiler knows nothing about. */
+  /**
+   * A read of a name: a variable's occurrence, a speaker, a function's name (no constraint), `debugMode` (a boolean),
+   * or a name the compiler knows nothing about.
+   */
   #read(expression: Identifier, scope: Scope): PlaceId {
     const place = this.#value(expression);
     const entry = scope.resolve(expression.name);
@@ -1199,7 +1214,7 @@ class Collector {
     const comparison = ["==", "!=", "<", "<=", ">", ">="].includes(expression.operator);
     const shape = conditionShape(expression);
     if (shape.kind === "null") {
-      // `x == null` and `x != null` narrow a plain variable.
+      // `x == null` and `x != null` of a plain variable are recorded as a test.
       const tested = this.#plainVariable(shape.tested, scope);
       if (tested !== undefined)
         this.#add({
@@ -1353,7 +1368,7 @@ class Collector {
       positional.length === 1 &&
       expression.arguments.length === 2
     ) {
-      // The default runs last, only when the call needs it; the result joins the element with it (Q2).
+      // The default runs last, only when the call needs it; the result joins the element with it.
       const key = yield* compileChild(this.#expression(positional[0]!.value, scope));
       const fallback = yield* compileChild(this.#expression(defaultArgument.value, scope));
       const result = this.#value(expression);

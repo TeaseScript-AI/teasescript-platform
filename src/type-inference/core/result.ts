@@ -13,11 +13,11 @@ import {
 import type { BudgetLimit } from "./budget.js";
 import { propertyName } from "./program.js";
 
-/**
- * The structured result of the coarse core (checkpoint 9, §4, §10.5): the outcome, the diagnostics with
- * their writers, context words and obligations, and the runtime checks; and the record the tests compare with the
- * expectation set. A diagnostic carries its class, kind, site, code and rule, with what its sentences name; `messages.ts`
- * composes them (D1–D3). The record the set compares holds no sentence.
+/*
+ * The core's result: its outcome, its diagnostics (each with its class, kind, site, code and rule, what its sentences
+ * name, and a warning's writers, context word and obligation) and the runtime checks no diagnostic owns; and its record
+ * (`coreRecord`), the result as JSON-safe data the record tests compare (`tests/helpers/type-core-records.ts`).
+ * `messages.ts` composes the sentences (D1–D3); the record holds none.
  */
 
 /** An error, a warning with a runtime check, a warning the runtime owes nothing for (`StaticDiagnostic`), a stop's mark. */
@@ -25,7 +25,7 @@ export type DiagnosticClass =
   "compile-error" | "warning-runtime-check" | "warning" | "not-checked-budget";
 
 /**
- * The consumer a diagnostic belongs to (§10.5): a store into a typed place (and a fallback, C10), a member or element
+ * The consumer a diagnostic belongs to: a store into a typed place (and a fallback, C10), a member or element
  * selection, a count or index, an operand (C3, C4, C11, C12).
  */
 export type DiagnosticKind = "written-target" | "member-read" | "integer-use" | "operator";
@@ -35,7 +35,8 @@ export type ObligationKind =
 
 /**
  * The worst diagnostic's class, or `valid` without one: an error, then a warning with a runtime check, then a warning
- * without one; a stop of the analysis is a warning (the owner's D4), never an outcome of its own.
+ * without one. A stop of the analysis is a warning with a runtime check (`BudgetStop`, D4), never an outcome of its
+ * own; its marks (`not-checked-budget`) set none.
  */
 export type CoreOutcome = "valid" | "compile-error" | "warning-runtime-check" | "warning";
 
@@ -67,16 +68,15 @@ export interface Provenance {
 }
 
 /**
- * What a context word's sentence names beside the warned expression's own text (D1, the drafts of
- * `fable-3a-cp9-context-words.md`), each where the warning's own site shows it, else `null`: whether the value comes
- * from outside the script (`unknown`, a word warnings without another one carry too), the function the
- * expression is in (`call`), the label its line is entered at (`label`), the block it is in (`handler`), the place a
- * later store decides and that store (`later`), and the receiver it reads a member of (`member`, `missing`,
- * `unmodelled`).
+ * What a context word's sentence names beside the warned expression's own text (D1), each where the warning's own site
+ * shows it, else `null`: whether the value comes from outside the script (`unknown`, a word warnings without another
+ * one carry too), the function the expression is in (`call`), the label its line is entered at (`label`), the block it
+ * is in (`handler`), the place a later store decides and that store (`later`), and the receiver it reads a member of
+ * (`member`, `missing`, `unmodelled`).
  */
 export interface ContextDetail {
   /**
-   * Whether the word is the warned read's own (its exact path failed there, §3.4): only then do the details below
+   * Whether the word is the warned read's own (its exact path failed there): only then do the details below
    * name what the read itself depends on; else the word came with a value from another line (a copy, a projection, a
    * call) and its sentence speaks of that value's origin.
    */
@@ -174,7 +174,7 @@ export type DiagnosticRule =
       readonly takes: "text" | "regex" | "textOrRegex" | "integer" | "list" | "collection";
     }
   /**
-   * C13 (Astra's G1): the elements of `receiver` that `callee` reads, `join` each one `${...}` shows, `sort` of one
+   * C13: the elements of `receiver` that `callee` reads, `join` each one `${...}` shows, `sort` of one
    * ordered type (`orderedFamily`); `families`, the ordered types they may hold where they mix them.
    */
   | {
@@ -184,7 +184,7 @@ export type DiagnosticRule =
       readonly families: readonly ItemTag[];
     }
   /**
-   * C13, Astra's G1: a value `toJson` cannot write (`VALUE_KINDS`' `json`), its argument's own or one it holds below it
+   * C13: a value `toJson` cannot write (`VALUE_KINDS`' `json`), its argument's own or one it holds below it
    * (`nested`), in a value of one kind (`holder`), which the runtime's sentence names.
    */
   | { readonly rule: "json"; readonly holder: ItemTag | null; readonly nested: boolean }
@@ -296,7 +296,7 @@ export interface SiteExpectation {
 }
 
 /**
- * Whether every value a diagnosed expression reads is there when the script runs (Astra on #1296): an
+ * Whether every value a diagnosed expression reads is there when the script runs (#1296): an
  * element read by its index or a dict's value by its key may be absent, which no fact proves.
  */
 export type Presence = true | "unproved";
@@ -343,7 +343,7 @@ export interface WrittenTypeError {
 }
 
 /**
- * A check that owes the runtime nothing (the lead's decision 3 on #1072): a known value outside the domain its use
+ * A check that owes the runtime nothing (#1072): a known value outside the domain its use
  * takes, which the runtime would reject as it does, or a fact no run can change. An error, or a warning with no runtime
  * check (`warning`); never an obligation. Its rule names what its sentence says (`messages.ts`).
  */
@@ -367,7 +367,7 @@ export type StaticRule =
   /** A conversion of known text it cannot convert (V30 §13, #1105), `default:` or not. */
   | { readonly rule: "conversion"; readonly conversion: ConversionName; readonly text: string }
   /**
-   * ADR 0026 §5 (the lead's decision 6 on #1072): a date or a local date and time moved by a known calendar duration
+   * ADR 0026 §5 (#1072): a date or a local date and time moved by a known calendar duration
    * with an exact offset, `+` or `-`, compound or not, beside the operation's own operand check (F16).
    */
   | {
@@ -428,7 +428,7 @@ export interface WorkPlace {
 }
 
 /**
- * The analysis stopped proving (D4, option a′): past the work allowance, at a read chain past its
+ * The analysis stopped proving (D4): past the work allowance, at a read chain past its
  * depth (`read-depth`), or at statements nested past the nesting limit (`nesting`). One warning, at the heaviest place
  * (the deepest nesting for `nesting`): the warnings of the checks it moved to the runtime, `deferred` in number,
  * several of which one check at a store may carry (its message counts the plan's checks, `budgetMessage`).
@@ -453,14 +453,14 @@ export interface NotChecked {
 }
 
 /**
- * N10's payload of the route rule's error (N3, N10; AD-1, #1073): the rule, the writer D′ whose value
+ * N10's payload of the route rule's error (N3, N10; AD-1, #1073): the rule, the writer whose value
  * brings the offending kind to the use by a route without a check, and the tests that route lacks, in the order the
  * message offers them.
  */
 export interface RequiredCheck {
   readonly rule: "N3";
   /**
-   * The writer D′, or `null` where the unchecked route starts at a block's body, which inherits no check (ADR 0021 rule
+   * The writer, or `null` where the unchecked route starts at a block's body, which inherits no check (ADR 0021 rule
    * 5.5), with no store of its own before the use: then `block` names the statement registering that body.
    */
   readonly writer: SourceSite | null;
@@ -477,8 +477,9 @@ export interface RequiredCheck {
 }
 
 /**
- * An error, a written type's error, or a warning with its explanation and its one obligation (§4); each a consumer's
- * with its rule's code, the rule, and the offending kinds (an error's every kind; a warning's explaining item's).
+ * An error, or a warning with its explanation and its one obligation, each a consumer's with its rule's code, the rule
+ * and the offending kinds (an error's every kind; a warning's explaining item's); a written type's error, which no
+ * consumer owns (`WrittenTypeError`); or a stop's warning or mark (`BudgetStop`, `NotChecked`).
  */
 export type CoreDiagnostic =
   | BudgetStop
@@ -537,7 +538,10 @@ export type CheckedDiagnostic = CoreDiagnostic | StaticDiagnostic;
 export interface CoreResult {
   readonly outcome: CoreOutcome;
   readonly diagnostics: readonly CheckedDiagnostic[];
-  /** The checks that no diagnostic owns: the boundary checks (C9). */
+  /**
+   * The checks no shown diagnostic owns: the boundary checks (C9), then the obligations of the warnings a stop moved to
+   * the runtime (`coreResult`).
+   */
   readonly checks: readonly Obligation[];
 }
 
@@ -549,7 +553,7 @@ export function outcomeOf(diagnostics: readonly CheckedDiagnostic[]): CoreOutcom
 }
 
 /**
- * The context word of a warning about `item` (§3.4): A7's `later` for a copy checked against a later decider, whatever
+ * The context word of a warning about `item`: A7's `later` for a copy checked against a later decider, whatever
  * word its item carries; else an unknown's reasons' word (`reasonContext`); any other item's own word, a null's
  * ingress word, or `unknown`.
  */
@@ -559,7 +563,7 @@ export function contextOf(item: Item): ContextWord {
 }
 
 /**
- * The item that explains an obligation several items owe (F28, §3.4): of the unknowns the one whose word comes first,
+ * The item that explains an obligation several items owe (F28): of the unknowns the one whose word comes first,
  * since the reasons' words come before any condition's; without an unknown, the first item.
  */
 export function explainingItem(items: readonly Item[]): Item | undefined {
@@ -573,13 +577,13 @@ export function explainingItem(items: readonly Item[]): Item | undefined {
 export interface OffendingKind {
   /** The item that explains the kind. */
   readonly item: Item;
-  /** The kinds it stands for: its own, or each kind the rows of one unknown operand gave (§4). */
+  /** The kinds it stands for: its own, or each kind the rows of one unknown operand gave. */
   readonly kinds: readonly ItemTag[];
 }
 
 /**
  * The offending kinds of these items, one per kind in the order of its first item, since each owes its own diagnostic
- * and obligation (§4): every unknown is one kind, explained by `explainingItem`, and the items that the operator rows
+ * and obligation: every unknown is one kind, explained by `explainingItem`, and the items that the operator rows
  * of one unknown operand gave are one kind too.
  */
 export function offendingKinds(items: readonly Item[]): OffendingKind[] {
@@ -604,7 +608,7 @@ export function provenanceOf(item: Item, detail: ContextDetail): Provenance {
 }
 
 /**
- * The step a selection or index adds to a target (§10.5): `entry`, a dict's value, when the receiver is a dict on
+ * The step a selection or index adds to a target: `entry`, a dict's value, when the receiver is a dict on
  * every run; else `element`, which every list or set element, `first`, `last`, `random`, `get` and `[i]` is.
  */
 export function elementStep(receiver: readonly ItemTag[]): "element" | "entry" {
@@ -613,7 +617,7 @@ export function elementStep(receiver: readonly ItemTag[]): "element" | "entry" {
 }
 
 /**
- * A key path as an obligation's target (§10.5): the place's label from the collector (`state`, `use.data`,
+ * A key path as an obligation's target: the place's label from the collector (`state`, `use.data`,
  * `packet.result`) and its steps, as `state.party.element.hp`.
  */
 export function targetName(label: string, steps: readonly string[]): string {
@@ -664,9 +668,8 @@ export interface RecordDiagnostic {
 }
 
 /**
- * A result as JSON-safe data in the shape of the expectation set's records (`disposition.md`): sites
- * by file path, writers as tokens, and `runtimeChecks` holding every warning's obligation, one per warning, and every
- * other check once.
+ * A result as JSON-safe data in the shape the record tests compare: sites by file path, writers as tokens, and
+ * `runtimeChecks` holding every warning's obligation, one per warning, and every other check once.
  */
 export interface CoreRecord {
   readonly outcome: CoreOutcome;
@@ -761,7 +764,7 @@ export function coreRecord(result: CoreResult, paths: readonly string[]): CoreRe
             obligation: obligation(diagnostic.obligation),
           },
   );
-  // each diagnostic's obligation, also where two read alike (§4: a diagnostic per obligation), then every other check once,
+  // each diagnostic's obligation, also where two read alike (a diagnostic per obligation), then every other check once,
   // in the answers' order (`checksBySite`)
   const owned = result.diagnostics.flatMap((diagnostic) =>
     diagnostic.class === "warning-runtime-check" && diagnostic.kind !== "budget"
