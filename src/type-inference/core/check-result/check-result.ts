@@ -196,9 +196,8 @@ export function coreCheckResult(
 }
 
 /**
- * The known values of a program (S3 §2, group V): the constant service the checks read, handed to the answers so that a
- * view's known value is the consumer's (`knownAmountRefused` reads an instance of its own); a `fromJson` reads its JSON
- * as `expected` gives its type, so its known value is the one the run gets.
+ * The known values of a program (S3 §2, group V), handed to the answers so that a view's known value is the consumer's;
+ * a `fromJson` reads its JSON as `expected` gives its type, so its known value is the one the run gets.
  */
 function knownValues(
   answers: Answers,
@@ -211,7 +210,7 @@ function knownValues(
   return known;
 }
 
-/** A program's known values (`knownValues`), not shared: each instance spends its own `KNOWN_VALUE_WORK`. */
+/** A program's known values, not handed to the answers. */
 function knownValuesOf(
   answers: Answers,
   index: SliceIndex,
@@ -245,10 +244,8 @@ const KIND_WORDS: Readonly<Record<string, string>> = {
 };
 
 /**
- * The first step whose known operands give no value a run can hold, read on `values` by the predicates today's checker
- * reports with: a step whose result is too large to represent (`findVisibleOverflows`, TSV050 there; inside the slice
- * only a unit or an angle), then a calendar unit whose known amount gives no whole days or months (`unitValue`, TSV043
- * there); `null` where none is. Its walk builds known values, which spends their work, so `values` is its own.
+ * The first step whose known operands give no value a run can hold: a step whose result is too large to represent, then
+ * a calendar unit whose known amount gives no whole days or months; `null` where none is.
  */
 function knownAmountRefused(
   index: SliceIndex,

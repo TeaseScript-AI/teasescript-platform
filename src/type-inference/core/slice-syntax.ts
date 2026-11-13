@@ -441,12 +441,7 @@ export function outsideSyntax(
   return null;
 }
 
-/**
- * A duration literal the lowering writes and the plan stores: one `durationLiteralValue` gives a value (an exact unit
- * with any amount, a calendar unit with an amount of whole days or months, ADR 0026) that the plan's record check takes
- * (finite milliseconds, months and days safe whole numbers, `src/plan/validation/expressions.ts`). The lowering throws
- * where `durationLiteralValue` gives no value, and plan validation refuses a value its record check does not take.
- */
+/** Whether the plan can store a duration literal's value (ADR 0026). */
 function storedLiteral(node: DurationLiteral): boolean {
   const value = durationLiteralValue(node);
   if (typeof value === "string") return false;

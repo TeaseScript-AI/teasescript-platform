@@ -267,8 +267,7 @@ export const SPEAKER_FIELD_KINDS: ReadonlyMap<string, FieldKinds> = new Map([
 
 /**
  * What the amount of a unit or angle expression takes (`n s`, `n calendar months`, `n deg`; a unit follows a number,
- * ADR 0026 §8): a number, whole or not; `check` names the function whose unit and angle steps fail a run on any other
- * value (TSR027; TSR009 for a calendar amount of no whole days or months, TSR036 for one too large to represent).
+ * ADR 0026 §8): a number, whole or not; `check` names the function that checks the amount as a run evaluates it.
  */
 export const UNIT_AMOUNT: { readonly takes: readonly ItemTag[]; readonly check: OperandCheck } = {
   takes: ["integer", "number"],
@@ -283,9 +282,8 @@ export const UNIT_AMOUNT: { readonly takes: readonly ItemTag[]; readonly check: 
  * path below it (`answer.place`) whose admitted type is undecided or holds only kinds `UNIT_AMOUNT` takes (a typed
  * ingress's read is the unknown its store's check stands for). Any other unknown (one a literal's element, a call or an
  * operation carries, a stop's) is not shown to be a number. An amount with no answer has no item and is admitted. So
- * the route declines what today's checker plans where only a narrowing or an `otherwise` shows the amount a number: a
- * read of `n: integer?` under `n != null`, `(n otherwise 1) s`; the core gives no read its narrowing
- * (`OccurrenceAnswer.narrowing`).
+ * the route declines an amount that only a narrowing or an `otherwise` shows to be a number: a read of `n: integer?`
+ * under `n != null`, `(n otherwise 1) s`.
  */
 function amountAdmitted(answers: Answers, index: SliceIndex, amount: Expression): boolean {
   const answer = answers.at(nodeOf(answers, index, amount));
@@ -294,7 +292,6 @@ function amountAdmitted(answers: Answers, index: SliceIndex, amount: Expression)
   return (answer?.items ?? []).every((item) => {
     if (item.tag === "empty") return true;
     if (item.tag !== "unknown") return UNIT_AMOUNT.takes.includes(item.tag);
-    // (a property read that found no such property fails there, before the amount holds a value: `withoutMissing`)
     const reasons = item.reasons & ~REASON.missing;
     if (reasons === 0) return true;
     if (reasons !== REASON.external) return false;
@@ -357,9 +354,6 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
             what: "this speaker property",
           };
       }
-  // a unit or angle expression whose amount the core does not show to be a number, other than an external value the
-  // evaluator checks as it runs (`amountAdmitted`); a known amount whose step no run can hold is refused by the check
-  // result (`knownAmountRefused`)
   for (const unit of index.units)
     if (!amountAdmitted(answers, index, unit.operand))
       return {

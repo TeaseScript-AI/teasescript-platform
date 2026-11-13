@@ -164,10 +164,9 @@ const PLACE_CASES: readonly Case[] = [
 /**
  * The sources today's checker plans and the route refuses (an under-offer), sampled by class: an amount whose item is
  * the outside value a typed ingress's check stands for, where only what carries it shows a number to today's checker
- * (an element read, `otherwise`), or only a narrowing does (an `integer?` or `number?` read under a null test), which
- * the core gives no read (`amountAdmitted`); and an amount the core knows
- * may hold a value of no number where today's checker reads it as unknown (a `fromJson` with a default of no number, a
- * property stored such a value later).
+ * (an element read, `otherwise`), or only a narrowing does (an `integer?` or `number?` read under a null test); and an
+ * amount the core knows may hold a value of no number where today's checker reads it as unknown (a `fromJson` with a
+ * default of no number, a property stored such a value later).
  */
 const UNDER_OFFERS: ReadonlySet<string> = new Set([
   ...UNITS.flatMap(([unit]) =>
