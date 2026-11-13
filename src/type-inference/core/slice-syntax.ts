@@ -4,6 +4,7 @@ import type {
   Expression,
   Program,
   Statement,
+  TransferTarget,
   TypeAnnotation,
 } from "../../ast.js";
 import { CONVERSIONS, isConversion, type Conversion } from "../../conversions.js";
@@ -185,7 +186,15 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
   exitStatement: modelled(),
   endStatement: REFUSED,
   labelStatement: REFUSED,
-  gotoStatement: REFUSED,
+  gotoStatement: {
+    row: "modelled",
+    // (a file from its top, through its path, `transferPath`: the path is walked and not a `script(…)` call holding it,
+    // so no script value opens elsewhere)
+    visit: (node) => {
+      const path = transferPath(node.target);
+      return path === undefined ? refuse(node.span, "this goto statement") : walk([path]);
+    },
+  },
   callFileStatement: REFUSED,
   letStatement: {
     row: "modelled",
@@ -457,6 +466,33 @@ export function sliceCall(call: CallExpression): SliceCall | null {
   return conversion.takes === "value" && conversion.kinds !== "shown" && others.length === 0
     ? "conversion"
     : null;
+}
+
+/**
+ * The path of a transfer to a file the slice holds: `null` for a quoted path, which holds no expression; the argument of
+ * a `script(…)` call written as `transferCall` takes it; `undefined` for any other target (a label, a grouped or tagged
+ * target, another shape of `script(…)`), which the slice does not hold.
+ */
+function transferPath(target: TransferTarget): Expression | null | undefined {
+  if (target.kind === "fileTarget") return null;
+  if (target.kind !== "scriptTarget") return undefined;
+  const call = target.expression;
+  return call.kind === "callExpression" && transferCall(call)
+    ? call.arguments[0]!.value
+    : undefined;
+}
+
+/**
+ * `script(path)` with one positional argument: the one call outside `sliceCall` the slice holds, and only as a transfer's
+ * target (`transferPath`), the `script` call in any other place being refused by the `callExpression` row.
+ */
+export function transferCall(call: CallExpression): boolean {
+  return (
+    call.callee.kind === "identifier" &&
+    call.callee.name === "script" &&
+    call.arguments.length === 1 &&
+    call.arguments[0]!.kind === "positionalArgument"
+  );
 }
 
 /** A node kind in words: `ifStatement` is "if statement". */

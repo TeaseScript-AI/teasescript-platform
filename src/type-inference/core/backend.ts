@@ -12,7 +12,7 @@ import {
   SLICE_DEPTH,
 } from "./check-result/slice-index.js";
 import type { CoreAnalysisRequest, CoreFile } from "./program.js";
-import { outsideSyntax, sliceCall, type Outside } from "./slice-syntax.js";
+import { outsideSyntax, sliceCall, transferCall, type Outside } from "./slice-syntax.js";
 
 /*
  * The coarse core as a type analysis backend (the port plan's S5): complete for a stated slice of the language and
@@ -142,11 +142,15 @@ function outsideSlice(request: CoreAnalysisRequest, outside: Outside): Candidate
 /**
  * The kinds a call's arguments may have without the built-in signature check (C13, S9b) having anything to say, or
  * `null` for any: a conversion's value one of its kinds or text and its default one of its result's, also `null` where
- * it takes one (`fitsDefault`'s domain, which the core's C10 does not check yet); every other argument text; an unknown,
- * which the runtime checks.
+ * it takes one (`fitsDefault`'s domain, which the core's C10 does not check yet); a transfer's path (`transferCall`)
+ * text; every other argument of a slice call text; an unknown, which the runtime checks.
  */
 function argumentKinds(call: CallExpression, argument: CallArgument): readonly string[] | null {
   const kind = sliceCall(call);
+  if (kind === null)
+    // (the syntax table admits no other call outside `sliceCall`, so the empty list is reached by no source today: it
+    // refuses every argument of such a call rather than give it another call's rule)
+    return transferCall(call) ? ["string", "unknown"] : [];
   const named = argument.kind === "namedArgument" ? argument.name.name : null;
   if (
     kind === "conversion" &&

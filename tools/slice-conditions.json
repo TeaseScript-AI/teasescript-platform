@@ -743,5 +743,77 @@
     "mutant": "false",
     "expected": "kill",
     "witness": "say Hi"
+  },
+  {
+    "id": "goto-path",
+    "scope": "row gotoStatement",
+    "expression": "path === undefined",
+    "mutant": "false",
+    "expected": "nobuild",
+    "witness": "`walk` takes no `undefined`: the type checker requires the refusal"
+  },
+  {
+    "id": "transfer-file",
+    "scope": "transferPath",
+    "expression": "target.kind === \"fileTarget\"",
+    "mutant": "false",
+    "expected": "restrict",
+    "witness": "goto \"part.tease\""
+  },
+  {
+    "id": "transfer-script",
+    "scope": "transferPath",
+    "expression": "target.kind !== \"scriptTarget\"",
+    "mutant": "(target.kind !== \"scriptTarget\" && Math.random() < 0)",
+    "expected": "nobuild",
+    "witness": "only a script target has an expression: the type checker requires the test"
+  },
+  {
+    "id": "transfer-call-kind",
+    "scope": "transferPath",
+    "expression": "call.kind === \"callExpression\"",
+    "mutant": "true",
+    "expected": "nobuild",
+    "witness": "a non-call has no arguments"
+  },
+  {
+    "id": "transfer-call",
+    "scope": "transferPath",
+    "expression": "transferCall(call)",
+    "mutant": "(transferCall(call) || Math.random() >= 0)",
+    "expected": "kill",
+    "witness": "goto script()"
+  },
+  {
+    "id": "transfer-callee-kind",
+    "scope": "transferCall",
+    "expression": "call.callee.kind === \"identifier\"",
+    "mutant": "true",
+    "expected": "nobuild",
+    "witness": "a callee that is no name has no name"
+  },
+  {
+    "id": "transfer-callee-name",
+    "scope": "transferCall",
+    "expression": "call.callee.name === \"script\"",
+    "mutant": "true",
+    "expected": "equivalent",
+    "witness": "a goto's computed call is parsed only from `script(` (parseTransferTarget), so its callee is `script`; argumentKinds meets no other call outside sliceCall"
+  },
+  {
+    "id": "transfer-count",
+    "scope": "transferCall",
+    "expression": "call.arguments.length === 1",
+    "mutant": "call.arguments.length >= 1",
+    "expected": "kill",
+    "witness": "goto script with two arguments"
+  },
+  {
+    "id": "transfer-positional",
+    "scope": "transferCall",
+    "expression": "call.arguments[0]!.kind === \"positionalArgument\"",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "goto script with a named argument"
   }
 ]
