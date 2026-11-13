@@ -36,6 +36,44 @@ const SHIFTED_CLOCK = `(() => {
 })();`;
 
 /**
+ * Holds the engine Worker's replies, once armed, from the one that brings `window.__splitAfter`'s text until the page
+ * next scrolls up, then hands them over in a microtask: the rest of an answer's update lands after following stopped at
+ * a block's message and before the browser's `scroll` event reports that stop, as a Worker's separate replies can.
+ * Unarmed, replies pass at once; held replies go after two seconds at most.
+ */
+const SPLIT_REPLIES = `(() => {
+  window.__splitAfter = null;
+  let holding = false;
+  const held = [];
+  const release = () => {
+    holding = false;
+    for (const deliver of held.splice(0)) deliver();
+  };
+  const scrollTo = Element.prototype.scrollTo;
+  Element.prototype.scrollTo = function (...args) {
+    const before = this.scrollTop;
+    scrollTo.apply(this, args);
+    if (holding && this.scrollTop < before) queueMicrotask(release);
+  };
+  const Base = window.Worker;
+  window.Worker = class extends Base {
+    addEventListener(type, listener, options) {
+      if (type !== "message") return super.addEventListener(type, listener, options);
+      return super.addEventListener(type, (event) => {
+        if (holding) return void held.push(() => listener.call(this, event));
+        listener.call(this, event);
+        const after = window.__splitAfter;
+        if (after !== null && JSON.stringify(event.data ?? null).includes(after)) {
+          window.__splitAfter = null;
+          holding = true;
+          setTimeout(release, 2_000);
+        }
+      }, options);
+    }
+  };
+})();`;
+
+/**
  * Records each painted frame from now: the answer rows (`data-speaker-id=user`) by row key, message id, text and the
  * element shown, the foreground buttons and whether any is disabled, and the composer; and every entrance a row plays.
  */
@@ -135,6 +173,7 @@ function shownAtOnce({ frames, entered }, text, what) {
 export async function instantAnswersScenario(cdp, origin) {
   await setViewport(cdp, 1280, 800);
   const identifier = await addInitScript(cdp, SHIFTED_CLOCK);
+  const split = await addInitScript(cdp, SPLIT_REPLIES);
   try {
     await navigate(cdp, `${origin}/player/?package=instant-answers`);
     await waitFor(cdp, `!!document.querySelector('[data-session-activation] button')`);
@@ -152,11 +191,12 @@ export async function instantAnswersScenario(cdp, origin) {
       "A clicked choice: its buttons were still there with the answer",
     );
 
-    // 2. A block's tall message lands before the answer, following.
+    // 2. A block's tall message lands before the answer, following; the rest of the update arrives after following
+    // stopped there and before the browser reports that stop (`SPLIT_REPLIES`).
     await waitFor(cdp, button("Left"), 8_000, "The second choice did not show");
     await delay(800);
     await evaluate(cdp, RECORDER);
-    await evaluate(cdp, `window.__timeShift = 700_000; return true;`);
+    await evaluate(cdp, `window.__timeShift = 700_000; window.__splitAfter = "Line 1 of the first block"; return true;`);
     await clickLabelled(cdp, "Left");
     const left = await frames(cdp);
     const leftAnswer = shownAtOnce(left, "Left", "An answer a block's message overtook");
@@ -294,6 +334,7 @@ export async function instantAnswersScenario(cdp, origin) {
       "A refused answer's text did not come back with the notice",
     );
   } finally {
+    await removeInitScript(cdp, split);
     await removeInitScript(cdp, identifier);
   }
 }
