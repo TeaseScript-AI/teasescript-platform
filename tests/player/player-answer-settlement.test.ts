@@ -115,8 +115,7 @@ let useFormUpdates: (host: {
   readonly session: () => PlayerSession | null;
   readonly chat: () => number;
   readonly epoch: () => number;
-  readonly inputEpoch: () => number;
-  readonly terminal: () => SessionTerminal;
+  readonly closed: () => boolean;
   readonly inputSection: () => InputSectionHost | undefined;
   readonly run: AnswerSubmission["run"];
   readonly publish: (session: PlayerSession) => void;
@@ -323,8 +322,7 @@ async function page(
       session: shown,
       chat: () => player.chat.value,
       epoch: player.epoch,
-      inputEpoch: player.inputEpoch,
-      terminal: () => player.terminal.value,
+      closed: () => submission.closed(),
       inputSection: () => player.inputSection,
       run: (id, intent) => submission.run(id, intent),
       publish: (session) => player.update(session),

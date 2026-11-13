@@ -571,15 +571,16 @@ export function playerRuntimeTranscriptMessage(
   return entry?.kind === "message" ? entry : null;
 }
 
+/** The row key of the answer to interaction `actionId`, which its predicted row and its entry share. */
+export function answerRenderKey(actionId: number): string {
+  return `answer-${actionId}`;
+}
+
 // Folds `events` into the transcript, in order: each message or answer appends its entry, keyed by the event that
 // created it, and the speakers they name; a message update replaces its message's entry with one showing the new text,
 // and a removal with one marked removed, which keeps its place. `rows` indexes the script messages, and `removedRows`
 // lists the removed ones in ascending order. A choice, button, or form answer is marked by its settlement, which the same
 // operation emits.
-/** The row key of the answer to interaction `actionId`, which its predicted row and its entry share. */
-export function answerRenderKey(actionId: number): string {
-  return `answer-${actionId}`;
-}
 
 export function appendTranscript(
   transcriptEntries: PlayerTranscriptEntryPresentation[],
