@@ -243,11 +243,12 @@ its row here.
 | `tools/check-changed.mjs` (`PROJECTS`) | path prefixes (`tests/families/`, `tests/fixtures/`, …) choosing the checks a change runs | keep a file under its project's prefix |
 | `tools/oxlint/type-core/check-site-keys.mjs`, `tools/oxlint/comments/check-comment-forecasts.mjs` | scope globs and prefixes (`tests/helpers/**`, `tests/families/**`, `src/`) | keep a file under its scope |
 
-Checks that fail on their own when a move breaks them need no row; a move renames their keys. They are the lists keyed
-by a whole path (`.oxlintrc.json`'s waiting lists; `comment-citations.json`, `comment-declarations-waiting.json` and
+Checks that fail on their own when a move breaks them need no row. They are the lists keyed by a whole path
+(`.oxlintrc.json`'s waiting lists; `comment-citations.json`, `comment-declarations-waiting.json` and
 `comment-forecasts-allowed.json` in `tools/oxlint/comments/`; `tools/test-runner/costly-test-files.mjs`; the marks and
-`PAIRS` of `pin-suites`; `LISTED` and `STORED` of `tests/type-core/type-core-kept.test.ts`), and
-`tools/oxlint/type-core/check-question-sources.mjs`, whose ownership by folder depth reports what a move takes out of it.
+`PAIRS` of `pin-suites`; `LISTED` and `STORED` of `tests/type-core/type-core-kept.test.ts`), whose keys a move renames,
+and `tools/oxlint/type-core/check-question-sources.mjs`, whose ownership by folder depth reports what a move takes out
+of it.
 
 Report a structure concern as [friction](#report-what-cost-a-wrong-turn), class `structure`. Each pull request can be
 reasonable while the whole drifts, so the coordinator also checks the whole
