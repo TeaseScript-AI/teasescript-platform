@@ -49,16 +49,20 @@ import {
   type OrderedFamily,
 } from "../../value-kinds.js";
 import { type SourceSpan, fault, planLabel } from "./support.js";
-import type { Evaluator } from "../evaluator.js";
+import type { EvaluationContext } from "../evaluator.js";
 
 // Binary operators: arithmetic, comparison, and duration operands.
 
 export function binary(
-  evaluator: Evaluator,
+  evaluator: EvaluationContext,
   expression: BinaryExpressionPlan,
   left: SerializableRuntimeValue,
   right: SerializableRuntimeValue,
 ): SerializableRuntimeValue {
+  if (typeof left === "number" && typeof right === "number") {
+    const result = numberBinary(expression.operator, left, right);
+    if (result !== undefined) return result;
+  }
   if (expression.operator === "and" || expression.operator === "or") {
     if (typeof right !== "boolean")
       throw notLogicalOperand(expression.operator, expression.right, right, evaluator.plan);
@@ -131,7 +135,7 @@ export function binary(
  * and days stay whole, and calendar durations divide only within one family, never with an exact duration.
  */
 function durationBinary(
-  evaluator: Evaluator,
+  evaluator: EvaluationContext,
   expression: BinaryExpressionPlan,
   left: SerializableRuntimeValue,
   right: SerializableRuntimeValue,
@@ -531,4 +535,48 @@ function notComparable(
     `${orderRule(expression.operator)}, but these are ${describeShownValue(left)} and ${describeShownValue(right)}.${fix}`,
     expression.span,
   );
+}/**
+ * An operator on two numbers where it has a number or truth result: arithmetic with a finite result, an order, or
+ * equality. `undefined` for any other operator, or for arithmetic whose result is not finite, which `binary` fails.
+ */
+export function numberBinary(
+  operator: BinaryExpressionPlan["operator"],
+  left: number,
+  right: number,
+): number | boolean | undefined {
+  let result: number;
+  switch (operator) {
+    case "+":
+      result = left + right;
+      break;
+    case "-":
+      result = left - right;
+      break;
+    case "*":
+      result = left * right;
+      break;
+    case "/":
+      result = left / right;
+      break;
+    case "%":
+      result = left % right;
+      break;
+    case "<":
+      return left < right;
+    case "<=":
+      return left <= right;
+    case ">":
+      return left > right;
+    case ">=":
+      return left >= right;
+    case "==":
+      return left === right;
+    case "!=":
+      return left !== right;
+    default:
+      return undefined;
+  }
+  return Number.isFinite(result) ? result : undefined;
 }
+
+

@@ -65,7 +65,7 @@ import { describeValue, isDictKey } from "../../value-kinds.js";
 import { timerOf, mediaOf, cameraView, liveMessage, readHandleProperty } from "./handles.js";
 import { drawIndex, randomItem } from "./draws.js";
 import { type SourceSpan, fault, receiverLabel, planLabel } from "./support.js";
-import type { Evaluator } from "../evaluator.js";
+import type { Evaluator, EvaluationContext } from "../evaluator.js";
 import { speakerById } from "./speakers.js";
 
 // Reading a property or an element: of objects, speakers, handles, lists, sets, dicts, and texts.
@@ -250,7 +250,7 @@ export function getProperty(
 
 /** Only lists and dicts are indexed. */
 export function assertIndexable(
-  evaluator: Evaluator,
+  evaluator: EvaluationContext,
   value: SerializableRuntimeValue,
   plan: ExpressionPlan,
   span: SourceSpan,
@@ -261,7 +261,7 @@ export function assertIndexable(
 
 /** The key that `keyPlan` gave as `value`, which is text (`dictKey`, `dictKeyMessage`). */
 export function dictKey(
-  evaluator: Evaluator,
+  evaluator: EvaluationContext,
   value: SerializableRuntimeValue,
   keyPlan: ExpressionPlan,
 ): string {
@@ -296,7 +296,7 @@ export function dictValue(
  * them where the plan still shows them.
  */
 export function missingKey(
-  evaluator: Evaluator,
+  evaluator: EvaluationContext,
   key: string,
   dictPlan: ExpressionPlan,
   keyPlan: ExpressionPlan,
@@ -319,7 +319,7 @@ function optionalLabel(evaluator: Evaluator, plan: ExpressionPlan | null): strin
 }
 
 /** The index as a message names it: a number as written, or its label; `null` for none. */
-function writtenIndexLabel(evaluator: Evaluator, indexPlan: ExpressionPlan | null): string | null {
+function writtenIndexLabel(evaluator: EvaluationContext, indexPlan: ExpressionPlan | null): string | null {
   // A label is only written for the failure.
   const index = indexPlan === null ? null : loweredOperand(evaluator.plan, indexPlan);
   return index === null
@@ -336,7 +336,7 @@ function writtenIndexLabel(evaluator: Evaluator, indexPlan: ExpressionPlan | nul
  * index read or store, a `removeAt(...)`, or a `get` that checks its index (`CallExpressionPlan.indexCheck`).
  */
 export function notWholeIndex(
-  evaluator: Evaluator,
+  evaluator: EvaluationContext,
   indexPlan: ExpressionPlan | null,
   value: SerializableRuntimeValue,
   span: SourceSpan,
@@ -364,7 +364,7 @@ export function notWholeIndex(
  * or `null` for an argument such as of `removeAt(...)`.
  */
 export function listPosition(
-  evaluator: Evaluator,
+  evaluator: EvaluationContext,
   list: SerializableRuntimeList,
   receiver: ExpressionPlan,
   indexPlan: ExpressionPlan | null,
@@ -397,7 +397,7 @@ export function listPosition(
 
 /** `TSR004` for a set, and `code` for any other value, which `plan` gives, that is not a list or dict to index. */
 export function notIndexable(
-  evaluator: Evaluator,
+  evaluator: EvaluationContext,
   code: "TSR004" | "TSR005" | "TSR008",
   plan: ExpressionPlan,
   value: SerializableRuntimeValue,

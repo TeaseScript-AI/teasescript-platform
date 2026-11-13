@@ -29,7 +29,7 @@ import { isList, isRange, isSet } from "../values/value-predicates.js";
 import { describeShownValue } from "../values/value-types.js";
 import { stateKey, type RuntimeDebugRandomOperation } from "../debug/debug-trace.js";
 import { describeValue } from "../../value-kinds.js";
-import type { Evaluator } from "../evaluator.js";
+import type { Evaluator, EvaluationContext } from "../evaluator.js";
 import { type SourceSpan, fault, assertIntegerRange } from "./support.js";
 
 // Random draws, natural or controlled: random functions and elements, ranges, shuffles, and image tag queries.
@@ -123,7 +123,7 @@ function tagBound(value: SerializableRuntimeValue, span: SourceSpan): number {
  * through here.
  */
 function semanticDraw<T>(
-  evaluator: Evaluator,
+  evaluator: EvaluationContext,
   span: SourceSpan,
   operation: RuntimeDebugRandomOperation,
   choices: number | null,
@@ -149,7 +149,7 @@ function semanticDraw<T>(
  * the draw pauses.
  */
 function resolve(
-  evaluator: Evaluator,
+  evaluator: EvaluationContext,
   span: SourceSpan,
   operation: RuntimeDebugRandomOperation,
   natural: RandomNatural,
@@ -167,7 +167,7 @@ function resolve(
 
 /** The index of one of the equally likely `candidates`. */
 export function drawIndex(
-  evaluator: Evaluator,
+  evaluator: EvaluationContext,
   span: SourceSpan,
   operation: RuntimeDebugRandomOperation,
   candidates: readonly SerializableRuntimeValue[],
@@ -186,12 +186,12 @@ export function drawIndex(
 }
 
 /** The session generator's state, or `null` when the host injected the random source. */
-function randomState(evaluator: Evaluator): number | null {
+function randomState(evaluator: EvaluationContext): number | null {
   return evaluator.capabilities.random === undefined ? evaluator.snapshot.rng.state : null;
 }
 
 function drawRandom(
-  evaluator: Evaluator,
+  evaluator: EvaluationContext,
   span: SourceSpan,
   operation: RuntimeDebugRandomOperation,
 ): number {
@@ -231,7 +231,7 @@ function drawRandom(
  * records its draws as one record under its name, and under random control a host may choose the outcome.
  */
 export function randomFunction(
-  evaluator: Evaluator,
+  evaluator: EvaluationContext,
   name: RandomFunctionName,
   positional: readonly SerializableRuntimeValue[],
   named: Readonly<Record<string, SerializableRuntimeValue>>,
@@ -277,7 +277,7 @@ export function randomFunction(
 
 /** Draws one whole number from a non-empty integer range with the session RNG. */
 export function randomIntegerInRange(
-  evaluator: Evaluator,
+  evaluator: EvaluationContext,
   range: SerializableRuntimeRange,
   span: SourceSpan,
   subject: string,
@@ -304,7 +304,7 @@ export function randomIntegerInRange(
 
 /** One key of a dict, or element of a list, chosen with one draw, with the chance of its share of the weight. */
 function randomWeighted(
-  evaluator: Evaluator,
+  evaluator: EvaluationContext,
   positional: readonly SerializableRuntimeValue[],
   named: Readonly<Record<string, SerializableRuntimeValue>>,
   span: SourceSpan,
@@ -348,7 +348,7 @@ export function shuffleOrder(
 }
 
 export function randomItem(
-  evaluator: Evaluator,
+  evaluator: EvaluationContext,
   items: readonly SerializableRuntimeValue[],
   span: SourceSpan,
   operation: RuntimeDebugRandomOperation,

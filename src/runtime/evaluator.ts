@@ -159,6 +159,7 @@ import {
   receiverLabel,
   readTemporary,
   planLabel,
+  referencePlaceLabel,
 } from "./evaluation/support.js";
 import {
   getProperty,
@@ -215,7 +216,7 @@ export interface RuntimeCapabilities {
 }
 
 /** `text` with `part` of a `"${...}"` text appended; `TSR084` when the text would be too long. */
-function templateText(text: string, part: string, span: SourceSpan): string {
+export function templateText(text: string, part: string, span: SourceSpan): string {
   // The later placeholders have not run yet, so the length the whole text would reach is not known.
   if (text.length + part.length > MAX_TEXT_LENGTH) throw textTooLong("${…}", span, null);
   return text + part;
@@ -268,6 +269,24 @@ export class RuntimeExecutionContext {
 }
 
 /** The public members serve the engine and the modules in `evaluation/`, and are internal to the runtime. */
+/**
+ * What the value helpers of `evaluation/` read of an evaluator where they need no more: the plan, the session's
+ * snapshot, the trace and random control, the host capabilities, the latest controlled draw's ID, the start value
+ * being evaluated, and how a fault names a prepared reference's place. The native engine's machine gives the same, so
+ * those helpers serve both.
+ */
+export type EvaluationContext = Pick<
+  Evaluator,
+  | "plan"
+  | "snapshot"
+  | "trace"
+  | "control"
+  | "capabilities"
+  | "drawId"
+  | "startValue"
+  | "preparedReferenceLabel"
+>;
+
 export class Evaluator {
   readonly #builtins: Record<string, RuntimeBuiltinFunction> = Object.create(null);
 
@@ -1066,33 +1085,7 @@ export class Evaluator {
             pending.push(evaluationFrame(expression.operand));
             continue;
           }
-          const unit = expression.calendar ? `calendar ${expression.unit}` : expression.unit;
-          if (typeof result.value !== "number")
-            throw fault(
-              "TSR027",
-              `${UNIT_AMOUNT_RULE}, but this is ${describeShownValue(result.value)}.${unitAmountFix(unit, isAnyDuration(result.value))}`,
-              expression.operand.span,
-            );
-          const duration = unitValue(result.value, expression);
-          if (typeof duration === "string")
-            throw fault(
-              "TSR009",
-              `${duration}. Use a whole number before the '${unit}'.`,
-              expression.span,
-            );
-          // Calendar parts must stay whole numbers that a value can store, like the milliseconds' finite range.
-          const parts = durationParts(duration);
-          if (
-            !Number.isSafeInteger(parts.months) ||
-            !Number.isSafeInteger(parts.days) ||
-            !Number.isFinite(parts.milliseconds)
-          )
-            throw fault(
-              "TSR036",
-              `The number ${operandText(result.value)} before the '${unit}' gives a duration too long to represent. Use a smaller number.`,
-              expression.span,
-            );
-          value = duration;
+          value = unitDuration(expression, result.value);
           break;
         }
         case "angleUnit": {
@@ -1411,6 +1404,15 @@ export class Evaluator {
     span: SourceSpan,
   ): void {
     return validateCallReceiver(receiver, method, span);
+  }
+
+  /** How the source spells the place of the prepared reference in temporary `temporaryId` (`referencePlaceLabel`). */
+  public preparedReferenceLabel(temporaryId: number, span: SourceSpan): string | null {
+    const descriptor = readPreparedReference(
+      readTemporary(this.snapshot.temporaries, temporaryId, span),
+      span,
+    );
+    return referencePlaceLabel(descriptor.rootName, descriptor.path);
   }
 
   public speakerByName(name: string, span: SourceSpan): RuntimeSpeakerSnapshot {
@@ -1843,7 +1845,7 @@ export class Evaluator {
 }
 
 /** A bound of `range` as a number, or `TSR027` with the compiler's text (`rangeBoundRule`). */
-function rangeBound(
+export function rangeBound(
   range: RangeExpressionPlan,
   bound: "start" | "end",
   value: SerializableRuntimeValue,
@@ -1858,6 +1860,40 @@ function rangeBound(
     `${rule}, but this is ${describeShownValue(value)}. ${notNumberFix(bound === "start" ? start : end, notNumberKind(value))}`,
     range[bound].span,
   );
+}
+
+/** The duration a number with a unit gives, such as `5 seconds`; a non-number, fraction or overflow fails. */
+export function unitDuration(
+  expression: Extract<ExpressionPlan, { kind: "unit" }>,
+  amount: SerializableRuntimeValue,
+): SerializableRuntimeValue {
+  const unit = expression.calendar ? `calendar ${expression.unit}` : expression.unit;
+  if (typeof amount !== "number")
+    throw fault(
+      "TSR027",
+      `${UNIT_AMOUNT_RULE}, but this is ${describeShownValue(amount)}.${unitAmountFix(unit, isAnyDuration(amount))}`,
+      expression.operand.span,
+    );
+  const duration = unitValue(amount, expression);
+  if (typeof duration === "string")
+    throw fault(
+      "TSR009",
+      `${duration}. Use a whole number before the '${unit}'.`,
+      expression.span,
+    );
+  // Calendar parts must stay whole numbers that a value can store, like the milliseconds' finite range.
+  const parts = durationParts(duration);
+  if (
+    !Number.isSafeInteger(parts.months) ||
+    !Number.isSafeInteger(parts.days) ||
+    !Number.isFinite(parts.milliseconds)
+  )
+    throw fault(
+      "TSR036",
+      `The number ${operandText(amount)} before the '${unit}' gives a duration too long to represent. Use a smaller number.`,
+      expression.span,
+    );
+  return duration;
 }
 
 /**
@@ -1983,7 +2019,7 @@ function rangeList(range: SerializableRuntimeRange, span: SourceSpan): Serializa
 }
 
 /** `speaker` in a message that names no speaker with `as` while no default speaker is set (V30 §37). */
-function noSpeaker(span: SourceSpan): RuntimeFault {
+export function noSpeaker(span: SourceSpan): RuntimeFault {
   return fault(
     "TSR071",
     "This message has no speaker, so 'speaker' has no value: it names none with 'as', and no default speaker is set. Give it one with 'as name', or set a default speaker with 'speaker name' before it.",
@@ -1994,7 +2030,7 @@ function noSpeaker(span: SourceSpan): RuntimeFault {
 const speakerTemporaryIds = new WeakMap<InstructionPlan, ReadonlySet<number>>();
 
 /** The temporaries that hold the speaker of a prepared message for its `speaker` reads, collected once per plan. */
-function speakerTemporaries(plan: InstructionPlan): ReadonlySet<number> {
+export function speakerTemporaries(plan: InstructionPlan): ReadonlySet<number> {
   let ids = speakerTemporaryIds.get(plan);
   if (ids === undefined) {
     ids = new Set(

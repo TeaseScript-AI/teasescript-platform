@@ -76,35 +76,14 @@ export function executeLoopStart(
     } else {
       const evaluated = evaluator.evaluate(instruction.expression);
       const pair = instruction.valueVariable !== undefined;
-      if (pair && !isDict(evaluated)) {
-        const label = planLabel(instruction.expression, plan);
-        throw fault(
-          "TSR044",
-          `${pairLoopRule(instruction.variable, instruction.valueVariable!)}, but ${label === null ? "this" : `'${label}'`} is ${describeShownValue(evaluated)}.${isList(evaluated) || isSet(evaluated) ? ` Go through a ${isList(evaluated) ? "list" : "set"} with one variable${label === null ? "" : `, such as 'for ${instruction.variable} in ${label}'`}.` : ""}`,
-          instruction.expression.span,
-        );
-      }
-      // A loop over a dict goes through its keys, or with a value variable its entries, as they are when it starts.
-      const source =
-        isDict(evaluated) && !pair
-          ? createCapturedSerializableList(evaluated.entries.map((entry) => entry.key))
-          : evaluated;
-      if (!isList(source) && !isSet(source) && !isRange(source) && !isDict(source)) {
-        const label = planLabel(instruction.expression, plan);
-        throw fault(
-          "TSR044",
-          `${FOR_SOURCE_RULE}, but ${label === null ? "this" : `'${label}'`} is ${describeShownValue(source)}.${source === null ? ` Check that ${label === null ? "the value" : `'${label}'`} is not null first.` : typeof source === "number" && label !== null ? ` To count up to it, write a range, such as '1..=${label}'.` : ""}`,
-          instruction.expression.span,
-        );
-      }
-      if (isRange(source)) assertIntegerRange(source, "A 'for' loop", instruction.expression.span);
+      const source = forLoopSource(plan, instruction, evaluated);
       frame = {
         kind: "for",
         loopId: instruction.loopId,
         scopeDepth,
         variable: instruction.variable,
         ...(pair ? { valueVariable: instruction.valueVariable } : {}),
-        // EVIDENCE: the guards above narrow source to the four iterable runtime collection variants.
+        // EVIDENCE: forLoopSource gives one of the four iterable collections, and its copy is of the same kind.
         source: cloneCapturedSerializableValue(source) as Extract<
           RuntimeLoopFrameSnapshot,
           { kind: "for" }
@@ -206,6 +185,45 @@ export function executeLoopStart(
     value,
   );
   advance(snapshot);
+}
+
+/**
+ * What a `for` loop goes through, checked: a list, set, range of whole numbers or, with a value variable, a dict; a
+ * dict without one gives the list of its keys, as they are when the loop starts.
+ */
+export function forLoopSource(
+  plan: InstructionPlan,
+  instruction: Extract<Instruction, { kind: "loopStart"; loopKind: "for" }>,
+  evaluated: SerializableRuntimeValue,
+):
+  | SerializableRuntimeList
+  | SerializableRuntimeSet
+  | SerializableRuntimeRange
+  | SerializableRuntimeDict {
+  const pair = instruction.valueVariable !== undefined;
+  if (pair && !isDict(evaluated)) {
+    const label = planLabel(instruction.expression, plan);
+    throw fault(
+      "TSR044",
+      `${pairLoopRule(instruction.variable, instruction.valueVariable!)}, but ${label === null ? "this" : `'${label}'`} is ${describeShownValue(evaluated)}.${isList(evaluated) || isSet(evaluated) ? ` Go through a ${isList(evaluated) ? "list" : "set"} with one variable${label === null ? "" : `, such as 'for ${instruction.variable} in ${label}'`}.` : ""}`,
+      instruction.expression.span,
+    );
+  }
+  // A loop over a dict goes through its keys, or with a value variable its entries, as they are when it starts.
+  const source =
+    isDict(evaluated) && !pair
+      ? createCapturedSerializableList(evaluated.entries.map((entry) => entry.key))
+      : evaluated;
+  if (!isList(source) && !isSet(source) && !isRange(source) && !isDict(source)) {
+    const label = planLabel(instruction.expression, plan);
+    throw fault(
+      "TSR044",
+      `${FOR_SOURCE_RULE}, but ${label === null ? "this" : `'${label}'`} is ${describeShownValue(source)}.${source === null ? ` Check that ${label === null ? "the value" : `'${label}'`} is not null first.` : typeof source === "number" && label !== null ? ` To count up to it, write a range, such as '1..=${label}'.` : ""}`,
+      instruction.expression.span,
+    );
+  }
+  if (isRange(source)) assertIntegerRange(source, "A 'for' loop", instruction.expression.span);
+  return source;
 }
 
 export function executeLoopControl(

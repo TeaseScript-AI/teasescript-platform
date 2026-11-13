@@ -154,13 +154,7 @@ export function executeEnd(
   events: InterpreterEvent[],
 ): void {
   const index = innermostFileCallIndex(snapshot);
-  if (index < 0) {
-    throw new RuntimeFault(
-      "TSR066",
-      "This 'end' has no call to return to, because no file called this one. Start this file with 'call' where it should come back, or use 'exit' where the session should finish.",
-      copySpan(instruction.span),
-    );
-  }
+  if (index < 0) throw endWithoutCall(instruction.span);
   removeNonPersistentWork(snapshot, activationRootsFrom(snapshot, index), instruction.span, events);
   const call = fileCall(snapshot, index);
   resetActivation(snapshot, index);
@@ -170,6 +164,15 @@ export function executeEnd(
   for (const temporary of call.callerTemporaries) snapshot.temporaries.push({ ...temporary });
   snapshot.nextInstruction = call.returnInstruction;
   sweepRetainedScopes(snapshot, true);
+}
+
+/** `TSR066` for an `end` that runs where no file call is open to return to. */
+export function endWithoutCall(span: PlanSourceLocation): RuntimeFault {
+  return new RuntimeFault(
+    "TSR066",
+    "This 'end' has no call to return to, because no file called this one. Start this file with 'call' where it should come back, or use 'exit' where the session should finish.",
+    copySpan(span),
+  );
 }
 
 /**

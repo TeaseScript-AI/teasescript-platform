@@ -1,7 +1,7 @@
 import { leaveScopes } from "../scopes/captures.js";
 import type { Instruction, InstructionPlan } from "../../plan/model.js";
 import type { Evaluator } from "../evaluator.js";
-import { internalFault } from "../errors.js";
+import { internalFault, type RuntimeFault } from "../errors.js";
 import { assertCounterCanAdvance } from "../operations/support.js";
 import { activeFunctionFrame, contextRootId } from "../scopes/activations.js";
 import type { DebugDependencies, TraceStore } from "../debug/debug-trace.js";
@@ -45,13 +45,8 @@ export function enterFunction(
         argument.typeCheck,
         argument.value.span,
       );
-  if (snapshot.callFrames.length >= snapshot.maxCallDepth) {
-    throw fault(
-      "TSR047",
-      `Function calls are nested ${snapshot.maxCallDepth} deep, the most this session allows. End the recursion sooner, or use a loop instead.`,
-      instruction.span,
-    );
-  }
+  if (snapshot.callFrames.length >= snapshot.maxCallDepth)
+    throw callTooDeep(snapshot.maxCallDepth, instruction.span);
   assertCounterCanAdvance(snapshot.nextCallFrameId, "nextCallFrameId");
   assertCounterCanAdvance(snapshot.nextScopeId, "nextScopeId");
   const frame: RuntimeCallFrameSnapshot = {
@@ -95,6 +90,15 @@ export function enterFunction(
   snapshot.frames.push({ id: snapshot.nextScopeId, file: null, entry: null, bindings: [] });
   snapshot.nextScopeId += 1;
   snapshot.nextInstruction = definition.entryInstruction;
+}
+
+/** `TSR047` for a call while `maxCallDepth` calls are open. */
+export function callTooDeep(maxCallDepth: number, span: SourceSpan): RuntimeFault {
+  return fault(
+    "TSR047",
+    `Function calls are nested ${maxCallDepth} deep, the most this session allows. End the recursion sooner, or use a loop instead.`,
+    span,
+  );
 }
 
 export function bindSuppliedParameter(

@@ -5,7 +5,8 @@ import type { MessagePresentation } from "../../message-presentation.js";
 import type { Instruction } from "../../plan/model.js";
 import { parseMessageMarkup, type MessageMarkup } from "../../message-markup.js";
 import { isDelayLength, pacingMessage } from "../../delay-rules.js";
-import type { Evaluator } from "../evaluator.js";
+import type { EvaluationContext, Evaluator } from "../evaluator.js";
+import { speakerById } from "../evaluation/speakers.js";
 import { internalFault, RuntimeFault } from "../errors.js";
 import {
   assertCounterCanAdvance,
@@ -97,10 +98,10 @@ export function executeDeclareSpeaker(
           property.value,
         ),
       );
-      if (property.name === "defaultSaySkippable" && typeof propertyValue !== "boolean") {
-        throw fault("TSR050", notSkippableFlag(propertyValue), property.span);
-      }
-      speaker.properties.push({ name: property.name, value: propertyValue });
+      speaker.properties.push({
+        name: property.name,
+        value: checkedSpeakerProperty(property.name, propertyValue, property.span),
+      });
     }
     // The speaker's properties are its state; its global names that state.
     const trace = stagedEvaluator.trace;
@@ -115,6 +116,17 @@ export function executeDeclareSpeaker(
       );
     advance(stagedSnapshot);
   });
+}
+
+/** The value a speaker's declaration gives its property `name`: `defaultSaySkippable` must be true or false. */
+export function checkedSpeakerProperty(
+  name: string,
+  value: SerializableRuntimeValue,
+  span: SourceSpan,
+): SerializableRuntimeValue {
+  if (name === "defaultSaySkippable" && typeof value !== "boolean")
+    throw fault("TSR050", notSkippableFlag(value), span);
+  return value;
 }
 
 export function executePrepareSaySpeaker(
@@ -134,18 +146,26 @@ export function executePrepareSaySpeaker(
   setCapturedTemporary(
     snapshot.temporaries,
     instruction.destinationTemporary,
-    output === null
-      ? null
-      : createCapturedSerializableObject([
-          { name: "identifier", value: output.identifier },
-          { name: "displayName", value: output.displayName },
-          { name: "color", value: output.color },
-          { name: "font", value: output.font },
-          { name: "avatar", value: output.avatar },
-          { name: "speakerId", value: speaker === null ? 0 : speaker.id },
-        ]),
+    preparedSpeakerValue(speaker, output),
   );
   advance(snapshot);
+}
+
+/** What a prepared message's speaker temporary holds: its output and speaker ID, or `null` without a speaker. */
+export function preparedSpeakerValue(
+  speaker: RuntimeSpeakerSnapshot | null,
+  output: OutputSpeaker | null,
+): SerializableRuntimeValue {
+  return output === null
+    ? null
+    : createCapturedSerializableObject([
+        { name: "identifier", value: output.identifier },
+        { name: "displayName", value: output.displayName },
+        { name: "color", value: output.color },
+        { name: "font", value: output.font },
+        { name: "avatar", value: output.avatar },
+        { name: "speakerId", value: speaker === null ? 0 : speaker.id },
+      ]);
 }
 
 export function executePrepareSayText(
@@ -168,26 +188,28 @@ export function executePrepareSayContextualSpeaker(
   snapshot: RuntimeSnapshot,
   evaluator: Evaluator,
 ): void {
-  const prepared = preparedOutputSpeaker(
-    snapshot.temporaries,
-    instruction.speakerTemporary,
-    instruction.span,
-  );
   setCapturedTemporary(
     snapshot.temporaries,
     instruction.destinationTemporary,
-    prepared.speakerId === null
-      ? null
-      : (() => {
-          const speaker = evaluator.speakerById(prepared.speakerId, instruction.span);
-          return {
-            kind: "speakerReference",
-            speakerId: speaker.id,
-            identifier: speaker.identifier,
-          };
-        })(),
+    contextualSpeakerValue(
+      evaluator,
+      readTemporary(snapshot.temporaries, instruction.speakerTemporary, instruction.span),
+      instruction.span,
+    ),
   );
   advance(snapshot);
+}
+
+/** The value `speaker` stands for in a prepared message: a reference to its speaker, or `null` without one. */
+export function contextualSpeakerValue(
+  context: EvaluationContext,
+  preparedSpeaker: SerializableRuntimeValue,
+  span: SourceSpan,
+): SerializableRuntimeValue {
+  const prepared = readPreparedSpeaker(preparedSpeaker, span);
+  if (prepared.speakerId === null) return null;
+  const speaker = speakerById(context, prepared.speakerId, span);
+  return { kind: "speakerReference", speakerId: speaker.id, identifier: speaker.identifier };
 }
 
 /**
@@ -203,9 +225,7 @@ export function executeSayAtomically(
   evaluator: Evaluator,
   events: InterpreterEvent[],
 ): void {
-  const stagedSnapshot = sayStagesSelectively(instruction)
-    ? selectiveSayStagingClone(snapshot, instruction.destinationTemporary !== undefined)
-    : stagingClone(snapshot);
+  const stagedSnapshot = sayStage(instruction, snapshot);
   const stagedEvents: InterpreterEvent[] = [];
   const stagedEvaluator = evaluator.forSnapshot(stagedSnapshot, stagedEvents);
 
@@ -220,6 +240,13 @@ export function executeSayAtomically(
   evaluator.trace?.commit(stage);
   Object.assign(snapshot, stagedSnapshot);
   events.push(...stagedEvents);
+}
+
+/** The private stage a say runs on, which becomes the session's state only when the say completes. */
+export function sayStage(instruction: SayInstruction, snapshot: RuntimeSnapshot): RuntimeSnapshot {
+  return sayStagesSelectively(instruction)
+    ? selectiveSayStagingClone(snapshot, instruction.destinationTemporary !== undefined)
+    : stagingClone(snapshot);
 }
 
 /**
@@ -345,7 +372,10 @@ function executeSay(
             speakerId: speaker?.id ?? null,
           };
         })()
-      : preparedOutputSpeaker(snapshot.temporaries, instruction.speakerTemporary, instruction.span);
+      : readPreparedSpeaker(
+          readTemporary(snapshot.temporaries, instruction.speakerTemporary, instruction.span),
+          instruction.span,
+        );
   const output = preparedSpeaker.output;
   const speaker =
     preparedSpeaker.speakerId === null
@@ -374,27 +404,99 @@ function executeSay(
     );
   }
   const textCauses = outer === null ? null : evaluator.trace!.pop(outer);
-  const content = sayMarkup(instruction, authoredText, session);
-  const text = content.visibleText;
   const pacingValue =
     typeof instruction.pacing === "object"
       ? evaluator.evaluate(instruction.pacing)
       : instruction.pacing;
-  const durationMs = sayDurationMs(instruction, text, pacingValue, snapshot);
-  const skippable = effectiveSaySkippable(instruction.skipPolicy, speaker, instruction.span);
-  if (durationMs > 0) validatePacingCreation(snapshot, instruction.span, durationMs);
-  const sequence = emitSay(snapshot, events, instruction.span, output, content, text, presentation);
-  if (textCauses !== null) evaluator.trace!.output(sequence, text, textCauses);
+  const said = emitEvaluatedSay(instruction, snapshot, events, session, {
+    output,
+    speaker,
+    presentation,
+    authoredText,
+    pacingValue,
+  });
+  if (textCauses !== null) evaluator.trace!.output(said.sequence, said.text, textCauses);
   if (instruction.destinationTemporary !== undefined)
     giveMessageHandle(
       snapshot,
       evaluator,
       instruction.destinationTemporary,
-      sequence,
+      said.sequence,
       authoredText,
     );
-  if (durationMs > 0) holdForReadingTime(snapshot, events, instruction.span, durationMs, skippable);
+  finishSay(snapshot, events, instruction.span, said, {
+    ownerCallFrameId: currentCallFrameId(snapshot),
+    scopeDepth: snapshot.frames.length,
+    loopDepth: snapshot.loopFrames.length,
+  });
+}
+
+/** What a say evaluated: its speaker and output, presentation, authored text and pacing. */
+export interface EvaluatedSay {
+  readonly output: OutputSpeaker | null;
+  readonly speaker: RuntimeSpeakerSnapshot | null;
+  readonly presentation: MessagePresentation;
+  readonly authoredText: string;
+  readonly pacingValue: SerializableRuntimeValue | "smart" | "instant";
+}
+
+/** A say's emitted message: its event's sequence and visible text, and how long and whether skippably it holds. */
+export interface EmittedSay {
+  readonly sequence: number;
+  readonly text: string;
+  readonly durationMs: number;
+  readonly skippable: boolean;
+}
+
+/**
+ * Emits the message of a say whose parts were evaluated: its markup, pacing and skip rule decided, a paced one checked
+ * before anything changes, then its `say` event. `finishSay` then holds for its reading time or moves on.
+ */
+export function emitEvaluatedSay(
+  instruction: SayInstruction,
+  snapshot: RuntimeSnapshot,
+  events: InterpreterEvent[],
+  session: RuntimeSnapshot,
+  said: EvaluatedSay,
+): EmittedSay {
+  const content = sayMarkup(instruction, said.authoredText, session);
+  const text = content.visibleText;
+  const durationMs = sayDurationMs(instruction, text, said.pacingValue, snapshot);
+  const skippable = effectiveSaySkippable(instruction.skipPolicy, said.speaker, instruction.span);
+  if (durationMs > 0) validatePacingCreation(snapshot, instruction.span, durationMs);
+  const sequence = emitSay(
+    snapshot,
+    events,
+    instruction.span,
+    said.output,
+    content,
+    text,
+    said.presentation,
+  );
+  return { sequence, text, durationMs, skippable };
+}
+
+/**
+ * After a say's event: a paced message holds for its reading time at the say, whose place (the call it runs in, the
+ * numbers of open scopes and loops) its gate records; an instant one moves on.
+ */
+export function finishSay(
+  snapshot: RuntimeSnapshot,
+  events: InterpreterEvent[],
+  span: SourceSpan,
+  said: EmittedSay,
+  place: PacingPlace,
+): void {
+  if (said.durationMs > 0)
+    holdForReadingTime(snapshot, events, span, said.durationMs, said.skippable, place);
   else advance(snapshot);
+}
+
+/** Where a say's pacing gate stands: the call it runs in (`null` outside every call), and the open scopes and loops. */
+export interface PacingPlace {
+  readonly ownerCallFrameId: number | null;
+  readonly scopeDepth: number;
+  readonly loopDepth: number;
 }
 
 /**
@@ -414,12 +516,11 @@ function giveMessageHandle(
   evaluator.trace?.writeTemporary(evaluator.callFrameId(), destinationTemporary, handle);
 }
 
-function preparedOutputSpeaker(
-  temporaries: readonly RuntimeTemporarySnapshot[],
-  temporaryId: number,
+/** The output and speaker ID a prepared message's speaker temporary holds (`preparedSpeakerValue`). */
+export function readPreparedSpeaker(
+  value: SerializableRuntimeValue,
   span: SourceSpan,
 ): { readonly output: OutputSpeaker | null; readonly speakerId: number | null } {
-  const value = readTemporary(temporaries, temporaryId, span);
   if (value === null) return { output: null, speakerId: null };
   if (!isObject(value))
     throw fault("TSR052", internalFault("The prepared speaker of a say is invalid."), span);
@@ -501,7 +602,7 @@ function effectiveSaySkippable(
   return configured.value;
 }
 
-type SayInstruction = Extract<Instruction, { kind: "say" }>;
+export type SayInstruction = Extract<Instruction, { kind: "say" }>;
 
 /** A say's most recent text and its deeply frozen markup. */
 interface SayMarkupMemo {
@@ -576,6 +677,7 @@ function holdForReadingTime(
   span: SourceSpan,
   durationMs: number,
   skippable: boolean,
+  place: PacingPlace,
 ): void {
   let deadlineMs: number;
   try {
@@ -593,9 +695,9 @@ function holdForReadingTime(
     actionId: snapshot.nextActionId,
     owningInstruction: snapshot.nextInstruction,
     continuationInstruction: snapshot.nextInstruction + 1,
-    ownerCallFrameId: currentCallFrameId(snapshot),
-    scopeDepth: snapshot.frames.length,
-    loopDepth: snapshot.loopFrames.length,
+    ownerCallFrameId: place.ownerCallFrameId,
+    scopeDepth: place.scopeDepth,
+    loopDepth: place.loopDepth,
     createdAtMs: snapshot.currentSessionTimeMs,
     deadlineMs,
     skippable,

@@ -53,7 +53,7 @@ import { VALUE_KINDS, valueKindOf } from "../../value-kinds.js";
 import { timerOf, mediaOf, cameraView } from "./handles.js";
 import { randomItem } from "./draws.js";
 import { type SourceSpan, fault, planLabel } from "./support.js";
-import type { Evaluator } from "../evaluator.js";
+import type { Evaluator, EvaluationContext } from "../evaluator.js";
 import { copySpan } from "../../plan/source-location.js";
 
 // Speakers, the player profile, and the text a say shows: a speaker's output, interpolation, and handle notation.
@@ -63,15 +63,23 @@ export function speakerByName(
   name: string,
   span: SourceSpan,
 ): RuntimeSpeakerSnapshot {
-  const binding = evaluator.binding(name);
-  if (binding === undefined || !isSpeakerReference(binding.value)) {
+  return declaredSpeaker(evaluator, name, evaluator.binding(name)?.value, span);
+}
+
+/** The speaker that the global `name`, whose value is `value` (`undefined` while it has none), was declared for. */
+export function declaredSpeaker(
+  context: EvaluationContext,
+  name: string,
+  value: SerializableRuntimeValue | undefined,
+  span: SourceSpan,
+): RuntimeSpeakerSnapshot {
+  if (value === undefined || !isSpeakerReference(value))
     throw fault("TSR023", internalFault(`'${name}' is not a declared speaker.`), span);
-  }
-  return speakerById(evaluator, binding.value.speakerId, span);
+  return speakerById(context, value.speakerId, span);
 }
 
 export function speakerById(
-  evaluator: Evaluator,
+  evaluator: EvaluationContext,
   id: number,
   span: SourceSpan,
 ): RuntimeSpeakerSnapshot {
@@ -126,7 +134,7 @@ export function copyPlayerProfile(evaluator: Evaluator, span: SourceSpan): void 
 }
 
 export function outputSpeaker(
-  evaluator: Evaluator,
+  evaluator: EvaluationContext,
   speaker: RuntimeSpeakerSnapshot,
   span: SourceSpan,
   events: InterpreterEvent[],
@@ -188,7 +196,7 @@ export function outputSpeaker(
  * evaluation.
  */
 export function interpolationText(
-  evaluator: Evaluator,
+  evaluator: EvaluationContext,
   value: SerializableRuntimeValue,
   expression: ExpressionPlan,
 ): string {
@@ -218,8 +226,8 @@ export function sayText(
   value: SerializableRuntimeValue,
   span: SourceSpan,
 ): string {
-  if (isVisibleScalar(value) && VALUE_KINDS[valueKindOf(value)].shown === "text")
-    return visibleText(value, span, currentTemporalContext(evaluator.snapshot));
+  const text = textSayText(evaluator, value, span);
+  if (text !== undefined) return text;
   const notation = valueNotation(
     value,
     span,
@@ -230,6 +238,17 @@ export function sayText(
   if (notation.length * 2 > MAX_TEXT_LENGTH)
     checkTextLength(escapedMarkupLength(notation), "say", span);
   return escapeMarkup(notation);
+}
+
+/** `say` text of a value shown as text (`shown`), or `undefined` for one shown in code-like notation. */
+export function textSayText(
+  context: EvaluationContext,
+  value: SerializableRuntimeValue,
+  span: SourceSpan,
+): string | undefined {
+  return isVisibleScalar(value) && VALUE_KINDS[valueKindOf(value)].shown === "text"
+    ? visibleText(value, span, currentTemporalContext(context.snapshot))
+    : undefined;
 }
 
 /**

@@ -32,6 +32,7 @@ import {
   currentFrame,
   fault,
   readTemporary,
+  type SourceSpan,
 } from "./instructions/support.js";
 import { executeWait, startTimer } from "./instructions/timers.js";
 import { leaveScopes } from "./scopes/captures.js";
@@ -304,15 +305,8 @@ function executeInstructionBoundary(
       control.abortUnit(error, snapshot, context.events, context.trace);
       throw error;
     }
-    // A text too long that no check foresaw still fails as one, on V8, which says so with this message, and so does a
-    // list, set, or dict larger than V8 holds.
-    const failure =
-      error instanceof RangeError && error.message === "Invalid string length"
-        ? textTooLong("this line", instruction.span, null)
-        : exceedsHostCollectionSize(error)
-          ? collectionTooLarge("this line", instruction.span)
-          : error;
-    if (!(failure instanceof RuntimeFault)) {
+    const failure = instructionFailure(error, instruction.span);
+    if (failure === null) {
       if (unit) control.discardUnit(context.trace);
       throw error;
     }
@@ -1061,26 +1055,12 @@ function executePlannedInstruction(
       startTimer(instruction, snapshot, evaluator, events);
       return;
     case "exit":
-      stopAllTimersForSessionEnd(snapshot);
-      stopAllMediaForSessionEnd(snapshot);
-      if (snapshot.cameraView !== null) snapshot.cameraView.shown = false;
-      snapshot.backgroundActions.length = 0;
-      snapshot.defaultSpeaker = null;
-      snapshot.contextualSpeaker = null;
       snapshot.frames.splice(1);
       snapshot.loopFrames.length = 0;
       snapshot.callFrames.length = 0;
       snapshot.retainedScopes.length = 0;
       snapshot.temporaries.length = 0;
-      snapshot.status = "halted";
-      snapshot.nextInstruction += 1;
-      events.push(
-        Object.freeze({
-          kind: "exit",
-          sequence: takeSequence(snapshot),
-          span: copySpan(instruction.span),
-        } satisfies ExitEvent),
-      );
+      haltForExit(snapshot, instruction.span, events);
       return;
     case "showImage":
       showImage(plan, instruction, snapshot, evaluator, events);
@@ -1116,14 +1096,55 @@ function executePlannedInstruction(
   instruction satisfies never;
 }
 
+/**
+ * `exit`, after its caller cleared the script's variables but the root's: every timer, media and background action
+ * stops, the camera view hides, the session halts after the instruction and says so with an `exit` event.
+ */
+export function haltForExit(
+  snapshot: RuntimeSnapshot,
+  span: SourceSpan,
+  events: InterpreterEvent[],
+): void {
+  stopAllTimersForSessionEnd(snapshot);
+  stopAllMediaForSessionEnd(snapshot);
+  if (snapshot.cameraView !== null) snapshot.cameraView.shown = false;
+  snapshot.backgroundActions.length = 0;
+  snapshot.defaultSpeaker = null;
+  snapshot.contextualSpeaker = null;
+  snapshot.status = "halted";
+  snapshot.nextInstruction += 1;
+  events.push(
+    Object.freeze({
+      kind: "exit",
+      sequence: takeSequence(snapshot),
+      span: copySpan(span),
+    } satisfies ExitEvent),
+  );
+}
+
 /** Whether top-level code declares a name that its activation's root already has, as after a goto back. */
 function rerunsTopLevelDeclaration(snapshot: RuntimeSnapshot, name: string): boolean {
   const frame = currentFrame(snapshot);
   return frame.file !== null && frame.bindings.some((binding) => binding.name === name);
 }
 
+/**
+ * The fault an instruction's error fails the session with, or `null` for an error that is no fault of the script. A
+ * text too long that no check foresaw still fails as one, on V8, which says so with this message, and so does a list,
+ * set, or dict larger than V8 holds.
+ */
+export function instructionFailure(error: unknown, span: SourceSpan): RuntimeFault | null {
+  const failure =
+    error instanceof RangeError && error.message === "Invalid string length"
+      ? textTooLong("this line", span, null)
+      : exceedsHostCollectionSize(error)
+        ? collectionTooLarge("this line", span)
+        : error;
+  return failure instanceof RuntimeFault ? failure : null;
+}
+
 /** Fails the session; `path` is the project file whose source the failure's span is in. */
-function failSnapshot(
+export function failSnapshot(
   snapshot: RuntimeSnapshot,
   failure: RuntimeErrorInfo,
   path: string,
@@ -1163,12 +1184,31 @@ function failForBudget(
   budget: number,
 ): void {
   const loop = snapshot.loopFrames.at(-1);
-  const loopStart =
+  failForBudgetAt(
+    plan,
+    snapshot,
+    events,
+    budget,
     snapshot.status === "running" && loop?.callFrameId === currentCallFrameId(snapshot)
-      ? plan.instructions.findIndex(
-          (instruction) => instruction.kind === "loopStart" && instruction.loopId === loop.loopId,
-        )
-      : -1;
+      ? loop.loopId
+      : null,
+  );
+}
+
+/** `failForBudget` where the running call's innermost loop is `loopId`, or `null` without one or while waiting. */
+export function failForBudgetAt(
+  plan: InstructionPlan,
+  snapshot: RuntimeSnapshot,
+  events: InterpreterEvent[],
+  budget: number,
+  loopId: number | null,
+): void {
+  const loopStart =
+    loopId === null
+      ? -1
+      : plan.instructions.findIndex(
+          (instruction) => instruction.kind === "loopStart" && instruction.loopId === loopId,
+        );
   const index = loopStart === -1 ? snapshot.nextInstruction : loopStart;
   const span = plan.instructions[index]?.span ?? mainSourceSpan(plan);
   // Thousands separators without the host locale keep the message deterministic.

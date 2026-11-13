@@ -7,12 +7,11 @@ import type {
   SerializableRuntimeRange,
   SerializableRuntimeValue,
 } from "../values/serializable-values.js";
-import { readPreparedReference } from "../scopes/prepared-references.js";
 import { quotedText } from "../values/value-text.js";
 import { messageText } from "../values/text-length.js";
 import { loweredOperand } from "./lowered-operands.js";
 import type { RuntimeTemporarySnapshot } from "../snapshot/state.js";
-import type { Evaluator } from "../evaluator.js";
+import type { EvaluationContext } from "../evaluator.js";
 import { copySpan } from "../../plan/source-location.js";
 
 // What the evaluator and its evaluation modules share.
@@ -54,18 +53,23 @@ export function assertIntegerRange(
 }
 
 /** How the source spells a dict receiver, also one prepared before the rest of its statement, or `null`. */
-export function receiverLabel(evaluator: Evaluator, plan: ExpressionPlan): string | null {
-  if (plan.kind !== "preparedReference") return planLabel(plan, evaluator.plan);
-  const descriptor = readPreparedReference(
-    readTemporary(evaluator.snapshot.temporaries, plan.temporaryId, plan.span),
-    plan.span,
-  );
+export function receiverLabel(evaluator: EvaluationContext, plan: ExpressionPlan): string | null {
+  return plan.kind === "preparedReference"
+    ? evaluator.preparedReferenceLabel(plan.temporaryId, plan.span)
+    : planLabel(plan, evaluator.plan);
+}
+
+/** How the source spells a prepared reference's place: its variable and properties, or `null` with an index or key. */
+export function referencePlaceLabel(
+  rootName: string | null,
+  path: readonly ({ readonly kind: "property"; readonly name: string } | { readonly kind: "index" | "key" })[],
+): string | null {
   const names: string[] = [];
-  for (const step of descriptor.path) {
+  for (const step of path) {
     if (step.kind !== "property") return null;
     names.push(step.name);
   }
-  return descriptor.rootName === null ? null : [descriptor.rootName, ...names].join(".");
+  return rootName === null ? null : [rootName, ...names].join(".");
 }
 
 export function readTemporary(
