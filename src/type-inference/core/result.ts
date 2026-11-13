@@ -120,6 +120,8 @@ export type DiagnosticRule =
       readonly root: StoreRoot | null;
       /** The steps from the root to the place: a property, or the collection an element or a dict value is in. */
       readonly steps: readonly StoreStep[];
+      /** #2378: the place lies in a dict's list a statement changes in place: the read's site, its depth in `steps`. */
+      readonly fresh?: { readonly list: SourceSite; readonly depth: number };
     }
   /**
    * C10: a fallback (`otherwise`) or a default against the kinds of the value it stands in for, and the variable or
