@@ -23,9 +23,11 @@ export const CLIENT_MEMBERS = {
   // The Worker's end and its loss listener send no session work.
   nonSending: ["terminate", "onLoss"],
 } as const;
-export const SURFACES: readonly Surface[] = [
-  ...CLIENT_MEMBERS.sending.map((member) => ({ file: CLIENT, name: "BridgeClient", member })),
-];
+export const SURFACES: readonly Surface[] = CLIENT_MEMBERS.sending.map((member) => ({
+  file: CLIENT,
+  name: "BridgeClient",
+  member,
+}));
 
 /**
  * What the session must have observed before an entry point's work: a `CLOCK_WORK` row it posts through
