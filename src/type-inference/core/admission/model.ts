@@ -617,13 +617,14 @@ export interface Decided {
 /** A list `+` (`joinElements`). */
 export type Join = Extract<CoreProgram["constraints"][number], { kind: "operation" }>;
 
-/**
- * What a joined value's element type is at a path: its kinds; whether each kind fits as itself (a written type, or an
- * inferred union of several families); the own kinds.
- */
+/** What a joined value's element type is at a path: its kinds, whether each fits as itself, and the own kinds. */
 export interface JoinDecided {
   readonly tags: readonly ItemTag[];
-  readonly written: boolean;
+  /**
+   * Whether each kind fits as itself rather than by its family: the kinds of a written type (a copy's, or a place's
+   * decided by one), or a value's own kinds of several families.
+   */
+  readonly exact: boolean;
   /** Whether a written type decides it (a copy's, a place's): the later operands of a join add nothing to it. */
   readonly typed: boolean;
   readonly own: readonly ItemTag[];

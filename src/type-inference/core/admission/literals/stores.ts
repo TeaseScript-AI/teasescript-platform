@@ -40,7 +40,7 @@ export function offendingAt(
   const pending: [PlaceId, FlowNode, number][] = [[d.value!, d.node, 0]];
   while (pending.length > 0) {
     const [value, node, index] = pending.pop()!;
-    const children = admission.literalChildren(value, at.at(index)!);
+    const children = literalChildren(admission, value, at.at(index)!);
     if (index + 1 === at.length) {
       for (const child of children) {
         admission.pass.program.work.charge("checks");
@@ -60,7 +60,7 @@ export function siteAt(
   at: Steps,
   leaf: (items: readonly Item[]) => boolean,
 ): SourceSite {
-  const found = at.length > 0 && d.kind === "whole" ? admission.offendingAt(d, at, leaf) : null;
+  const found = at.length > 0 && d.kind === "whole" ? offendingAt(admission, d, at, leaf) : null;
   return found === null ? d.site : (admission.pass.program.place(found.value!).site ?? d.site);
 }
 
