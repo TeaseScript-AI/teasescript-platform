@@ -64,11 +64,35 @@ const CASES: readonly Composite[] = [
   },
   {
     name: "a closed statement after an open one in the same list",
-    files: ["let a = hostValue\nwait 1 s\n"],
+    files: ['let a = hostValue\nsave a as "k"\n'],
     outer: "letStatement",
-    inner: "waitStatement",
+    inner: "saveStatement",
     file: 0,
-    at: "wait 1 s",
+    at: 'save a as "k"',
+  },
+  {
+    name: "a closed expression as a command's operand",
+    files: ['showButton "Go", timeout: 2 s\n'],
+    outer: "showButtonStatement",
+    inner: "durationLiteral",
+    file: 0,
+    at: "2 s",
+  },
+  {
+    name: "a closed expression as a command's only operand",
+    files: ["showImage -hostValue\n"],
+    outer: "showImageStatement",
+    inner: "unaryExpression",
+    file: 0,
+    at: "-hostValue",
+  },
+  {
+    name: "a closed expression as a say's pacing",
+    files: ['say "a", -hostValue\n'],
+    outer: "sayStatement",
+    inner: "unaryExpression",
+    file: 0,
+    at: "-hostValue",
   },
   {
     name: "the first of two closed constructs in source order, the later one deeper",
@@ -103,9 +127,9 @@ const refusedText = (kind: SyntaxKind): string =>
 
 test("an open construct holding or followed by a closed one is refused at the closed one, with its row's text", () => {
   for (const composite of CASES) {
-    assert.equal(
+    assert.notEqual(
       DISPOSITIONS[composite.outer].row,
-      "modelled",
+      "refused",
       `${composite.name}: outer row open`,
     );
     assert.equal(
@@ -139,7 +163,7 @@ test("an open construct holding or followed by a closed one is refused at the cl
 });
 
 /**
- * A modelled row's own condition, on its refusing side: the source, the refused construct's whole text (its offsets),
+ * An open row's own condition, on its refusing side: the source, the refused construct's whole text (its offsets),
  * and the row's words.
  */
 interface Condition {
@@ -152,11 +176,10 @@ interface Condition {
 }
 
 /**
- * The inventory of the modelled rows' own conditions: the conditions of main's `outsideSyntax` cases
- * (a85dc7d8f929ea7cd74f133834b3ce4c9ff487a3) that became the rows, with those of the predicates they call
- * (`annotationOutside`, `nullTest`, `sliceCall`, `sliceMethod`): a source for each operand, comparison and unwrapping
- * that, weakened, would admit a refused source (#2501 lists them with their mutants). Every other modelled row has
- * none (`UNCONDITIONAL`); the inventory test below keeps the two lists equal to the table's modelled rows.
+ * The inventory of the open rows' own conditions, with those of the predicates they call (`annotationOutside`,
+ * `nullTest`, `sliceCall`, `sliceMethod`): a source for each operand, comparison and unwrapping that, weakened, would
+ * admit a refused source (`tools/slice-conditions.json` lists them with their mutants). Every other open row has none
+ * (`UNCONDITIONAL`); the inventory test below keeps the two lists equal to the table's open rows.
  */
 const CONDITIONS: readonly Condition[] = [
   {
@@ -164,6 +187,69 @@ const CONDITIONS: readonly Condition[] = [
     condition: "a written type of the slice",
     source: "let x: integer | string = 1",
     at: "integer | string",
+    what: "this written type",
+  },
+  {
+    row: "letStatement",
+    condition: "a written type only `null` fills (`onlyNull`, `nullOnlyPosition`)",
+    source: "let x: null = hostValue",
+    at: "null",
+    what: "this written type",
+  },
+  {
+    row: "letStatement",
+    condition: "an optional of a type only `null` fills is one",
+    source: "let x: null? = hostValue",
+    at: "null?",
+    what: "this written type",
+  },
+  {
+    row: "letStatement",
+    condition: "an optional of a union only `null` fills is one, at the optional",
+    source: "let x: (null | null)? = hostValue",
+    at: "(null | null)?",
+    what: "this written type",
+  },
+  {
+    row: "letStatement",
+    condition: "a type nested deeper than the host's call stack is walked, not recursed",
+    source: `let x: null${"[]".repeat(10_000)} = hostValue`,
+    at: "null",
+    what: "this written type",
+  },
+  {
+    row: "letStatement",
+    condition: "a list's element only `null` fills",
+    source: "let x: null[] = hostValue",
+    at: "null",
+    what: "this written type",
+  },
+  {
+    row: "letStatement",
+    condition: "an optional's value with a position only `null` fills",
+    source: "let x: null[]? = hostValue",
+    at: "null",
+    what: "this written type",
+  },
+  {
+    row: "letStatement",
+    condition: "a set's element only `null` fills, before the set's own refusal",
+    source: "let x: null set = hostValue",
+    at: "null",
+    what: "this written type",
+  },
+  {
+    row: "letStatement",
+    condition: "a union's member `null` is the union's own `null`, not a position",
+    source: "let x: integer | null = 1",
+    at: "integer | null",
+    what: "this written type",
+  },
+  {
+    row: "letStatement",
+    condition: "a union's later member with a position only `null` fills",
+    source: "let x: integer | null[] = hostValue",
+    at: "null",
     what: "this written type",
   },
   {
@@ -186,34 +272,6 @@ const CONDITIONS: readonly Condition[] = [
     source: "let xs = [1]\nxs[0] = 2",
     at: "xs[0] = 2",
     what: "this assignment",
-  },
-  {
-    row: "sayStatement",
-    condition: "no presentation",
-    source: 'say prose(color: "red") "A letter."',
-    at: 'say prose(color: "red") "A letter."',
-    what: "this say",
-  },
-  {
-    row: "sayStatement",
-    condition: "no speaker",
-    source: 'say as player "Hold."',
-    at: 'say as player "Hold."',
-    what: "this say",
-  },
-  {
-    row: "sayStatement",
-    condition: "no skip policy",
-    source: 'say skippable "Hold."',
-    at: 'say skippable "Hold."',
-    what: "this say",
-  },
-  {
-    row: "sayStatement",
-    condition: "no pacing",
-    source: 'say "Hold.", instant',
-    at: 'say "Hold.", instant',
-    what: "this say",
   },
   {
     row: "sayStatement",
@@ -290,6 +348,13 @@ const CONDITIONS: readonly Condition[] = [
     condition: "a written type of the slice",
     source: "let b = hostValue is integer | string",
     at: "integer | string",
+    what: "this written type",
+  },
+  {
+    row: "typeTestExpression",
+    condition: "a written type only `null` fills",
+    source: "let b = hostValue is null",
+    at: "null",
     what: "this written type",
   },
   {
@@ -475,10 +540,169 @@ const CONDITIONS: readonly Condition[] = [
     at: 'load((("key")), default: 2)',
     what: "this load expression",
   },
+  {
+    row: "gotoStatement",
+    condition: "a file or `script(…)` target, not a label",
+    source: "goto top\nlabel top",
+    at: "goto top",
+    what: "this goto statement",
+  },
+  {
+    row: "gotoStatement",
+    condition: "a `script(…)` call, not a grouped target",
+    source: "goto (hostValue)",
+    at: "goto (hostValue)",
+    what: "this goto statement",
+  },
+  {
+    row: "gotoStatement",
+    condition: "`script(…)` with an argument",
+    source: "goto script()",
+    at: "goto script()",
+    what: "this goto statement",
+  },
+  {
+    row: "gotoStatement",
+    condition: "`script(…)` with one argument",
+    source: 'goto script("main.tease", "b")',
+    at: 'goto script("main.tease", "b")',
+    what: "this goto statement",
+  },
+  {
+    row: "gotoStatement",
+    condition: "`script(…)` with a positional argument",
+    source: 'goto script(path: "main.tease")',
+    at: 'goto script(path: "main.tease")',
+    what: "this goto statement",
+  },
+  {
+    row: "gotoStatement",
+    condition: "the path is walked",
+    source: "goto script(-hostValue)",
+    at: "-hostValue",
+    what: "this unary expression",
+  },
+  {
+    row: "interactionExpression",
+    condition: "an ask whose answer the core gives a kind: not `askBooleans`",
+    source: 'let r = askBooleans "q", texts: ["a"], prefill: [true]',
+    at: 'askBooleans "q", texts: ["a"], prefill: [true]',
+    what: "this ask",
+  },
+  {
+    row: "interactionExpression",
+    condition: "an ask whose answer the core gives a kind: not `askForm`",
+    source: 'let r = askForm "q", fields: {name: "text"}',
+    at: 'askForm "q", fields: {name: "text"}',
+    what: "this ask",
+  },
+  {
+    row: "interactionExpression",
+    condition: "no `prefill:` on `askPassword`",
+    source: 'let r = askPassword("q", prefill: hostValue)',
+    at: 'askPassword("q", prefill: hostValue)',
+    what: "this ask",
+  },
+  {
+    row: "interactionExpression",
+    condition: "a prefill written as a literal: a computed one is outside",
+    source: 'let r = askText("q", prefill: hostValue)',
+    at: 'askText("q", prefill: hostValue)',
+    what: "this ask",
+  },
+  {
+    row: "interactionExpression",
+    condition: "a prefill written as a literal: a negative number is an operator, not one",
+    source: 'let r = askNumber("q", prefill: -2)',
+    at: 'askNumber("q", prefill: -2)',
+    what: "this ask",
+  },
+  {
+    row: "interactionExpression",
+    condition: "a prefill written as a literal, in the compact form too",
+    source: 'let r = askBoolean "q", prefill: hostValue',
+    at: 'askBoolean "q", prefill: hostValue',
+    what: "this ask",
+  },
+  {
+    row: "interactionExpression",
+    condition: "a literal prefill in parentheses is read as the literal",
+    source: 'let r = askText("q", prefill: (null))',
+    at: 'askText("q", prefill: (null))',
+    what: "this ask",
+  },
+  {
+    row: "interactionExpression",
+    condition: "a text literal prefill only on `askText` or `askChoice`",
+    source: 'let r = askNumber("q", prefill: "2")',
+    at: 'askNumber("q", prefill: "2")',
+    what: "this ask",
+  },
+  {
+    row: "interactionExpression",
+    condition: "a text literal prefill that is not blank",
+    source: 'let r = askText("q", prefill: "  ")',
+    at: 'askText("q", prefill: "  ")',
+    what: "this ask",
+  },
+  {
+    row: "interactionExpression",
+    condition: "a number literal prefill only on `askNumber`, `askInteger` or `askChoice`",
+    source: 'let r = askText("q", prefill: 2)',
+    at: 'askText("q", prefill: 2)',
+    what: "this ask",
+  },
+
+  {
+    row: "interactionExpression",
+    condition: "a number literal prefill of `askInteger` written as a whole number",
+    source: 'let r = askInteger("q", prefill: 2.0)',
+    at: 'askInteger("q", prefill: 2.0)',
+    what: "this ask",
+  },
+  {
+    row: "interactionExpression",
+    condition: "a number literal prefill of `askInteger` in the safe range",
+    source: 'let r = askInteger("q", prefill: 9007199254740993)',
+    at: 'askInteger("q", prefill: 9007199254740993)',
+    what: "this ask",
+  },
+  {
+    row: "interactionExpression",
+    condition: "a truth value literal prefill only on `askBoolean` or `askChoice`",
+    source: 'let r = askText("q", prefill: true)',
+    at: 'askText("q", prefill: true)',
+    what: "this ask",
+  },
+  {
+    row: "interactionExpression",
+    condition: "a `null` literal prefill only on `askChoice`",
+    source: 'let r = askBoolean("q", prefill: null)',
+    at: 'askBoolean("q", prefill: null)',
+    what: "this ask",
+  },
+  {
+    row: "interactionExpression",
+    condition: "its parts are walked",
+    source: "let r = askText(-hostValue)",
+    at: "-hostValue",
+    what: "this unary expression",
+  },
 ];
 
-/** The modelled rows that check nothing of their own: each walks its children. */
+/** The open rows that check nothing of their own: each walks its children. */
 const UNCONDITIONAL: readonly SyntaxKind[] = [
+  "speakerDeclaration",
+  "speakerSetterStatement",
+  "showButtonStatement",
+  "waitStatement",
+  "showImageStatement",
+  "hideImageStatement",
+  "showPopupStatement",
+  "openUrlStatement",
+  "exportTextStatement",
+  "stopAudioStatement",
+  "deleteStatement",
   "exitStatement",
   "ifStatement",
   "repeatStatement",
@@ -494,10 +718,10 @@ const UNCONDITIONAL: readonly SyntaxKind[] = [
   "rangeExpression",
 ];
 
-test("every modelled row is in the condition inventory or has no condition of its own", () => {
+test("every open row is in the condition inventory or has no condition of its own", () => {
   // EVIDENCE: invariant: the table's keys are exactly the AST kinds (its mapped type).
   const modelled = (Object.keys(DISPOSITIONS) as SyntaxKind[])
-    .filter((kind) => DISPOSITIONS[kind].row === "modelled")
+    .filter((kind) => DISPOSITIONS[kind].row !== "refused")
     .sort();
   const conditional = [...new Set(CONDITIONS.map((condition) => condition.row))];
   assert.deepEqual(
@@ -507,10 +731,10 @@ test("every modelled row is in the condition inventory or has no condition of it
   assert.deepEqual([...conditional, ...UNCONDITIONAL].sort(), modelled);
 });
 
-test("each modelled row refuses where its own condition fails, at its construct, with its text", () => {
+test("each open row refuses where its own condition fails, at its construct, with its text", () => {
   for (const condition of CONDITIONS) {
     const name = `${condition.row}, ${condition.condition}: ${condition.source}`;
-    assert.equal(DISPOSITIONS[condition.row].row, "modelled", name);
+    assert.notEqual(DISPOSITIONS[condition.row].row, "refused", name);
     const source = `${condition.source}\n`;
     assert.equal(source.indexOf(condition.at), source.lastIndexOf(condition.at), name);
     let refused: unknown = null;

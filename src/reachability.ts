@@ -77,9 +77,10 @@ const ONWARD_EDGES: ReadonlySet<string> = new Set<FlowEdge["kind"]>([
 ]);
 
 /**
- * Where a computed target of a `goto` or `call` may lead (see `computedTargets` in `compiler.ts`): the files it may
- * start, by index, `null` for any file; whether it may start each of them whenever it runs, as a tagged pick whose tags
- * decide its matches does, rather than possibly only some; and whether it is a tagged pick, rather than a reference.
+ * Where a computed target of a `goto` or `call` may lead (see `computedTargets` in `compiler/project-flow.ts`): the
+ * files it may start, by index, `null` for any file; whether it may start each of them whenever it runs, as a tagged
+ * pick whose tags decide its matches does, rather than possibly only some; and whether it is a tagged pick, rather than
+ * a reference.
  */
 export interface ComputedTarget {
   readonly files: readonly number[] | null;
@@ -2053,7 +2054,8 @@ export function unusedUnreadableMessage(entry: UnreadablePackageFile): string {
 
 /**
  * The one file that a computed target's reference can name, when the references of the project can name only that
- * file (`referenced`, see `referencedFiles` in `compiler.ts`): such a target starts it, if it starts a file at all.
+ * file (`referenced`, see `referencedFiles` in `compiler/project-flow.ts`): such a target starts it, if it starts a
+ * file at all.
  */
 export function knownReferenceFile(referenced: readonly number[] | null): number | undefined {
   return referenced?.length === 1 ? referenced[0] : undefined;

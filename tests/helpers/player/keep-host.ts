@@ -25,7 +25,7 @@ import type { StorageBundle } from "../../../player/persistence/storage-transfer
 import type { PlayerBridge } from "../../../player/runtime/player-bridge.js";
 import type { ScriptStorageProvider } from "../../../player/persistence/script-storage.js";
 import type { InstructionPlan } from "../../../src/index.js";
-import { FakeMediaRepository } from "./fake-media-repository.js";
+import { FakeMediaRepository } from "./media/fake-media-repository.js";
 import type { SessionRead } from "./transfer-read.js";
 import type { SessionTransfer } from "../../../player/persistence/session-transfer.js";
 import { loadPlayerModule } from "../player-modules.js";

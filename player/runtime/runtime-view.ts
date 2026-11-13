@@ -15,7 +15,7 @@ import {
   type RuntimeLockChoice,
   type RuntimeStorageWriteActionSnapshot,
 } from "../../src/runtime/actions/model.js";
-import { formSummaryOf, type FormSummaryLine } from "../../src/runtime/actions/form.js";
+import { formSummaryOf, type FormSummaryLine } from "../../src/runtime/actions/form/submission.js";
 import {
   mediaTerminalProgressMs,
   nextMediaEvent,

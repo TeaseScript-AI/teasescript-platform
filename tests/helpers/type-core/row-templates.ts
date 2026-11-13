@@ -1,13 +1,34 @@
 import type { SyntaxKind } from "../../../src/type-inference/core/slice-syntax.js";
+import { ASK_OPERANDS } from "./ask-templates.js";
+
+/** A file of a project the guard compiles: its path and its whole source. */
+export interface TemplateFile {
+  readonly path: string;
+  readonly source: string;
+}
+
+/** A template: a source, which the guard ends with `exit`, or the files of a project, the first `main.tease`. */
+export type Template = string | readonly TemplateFile[];
+
+const main = (source: string): TemplateFile => ({ path: "main.tease", source });
+const PART_TYPED: TemplateFile = {
+  path: "part.tease",
+  source: 'let z: integer = hostValue\nsay "in part"\nexit\n',
+};
+const PART_NULLABLE: TemplateFile = {
+  path: "part.tease",
+  source: "let x: integer? = hostValue\nif x != null {\n  let y: integer = x\n}\nexit\n",
+};
 
 /*
  * The row guard's templates (#2500, `tests/type-core/type-core-row-guard.test.ts`): for each open row of the candidate
  * route's syntax table (`DISPOSITIONS`), one source per operand and store position of the construct, the host global
  * `hostValue` there, so its value is unknown to both checkers, and one per shape of a call (`sliceCall`'s, with each of
  * its arguments). A row without a position has one source that uses it. Sources are minimal
- * programs inside today's slice; the guard adds the `exit` each script ends with.
+ * programs inside today's slice; the guard adds the `exit` each script ends with. A template of several files is their
+ * list, each file written whole.
  */
-export const ROW_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly string[]>>> = {
+const BASE_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly Template[]>>> = {
   letStatement: [
     "let x: integer = hostValue",
     "let x = hostValue",
@@ -23,7 +44,6 @@ export const ROW_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly string[
   ifStatement: ['if hostValue == null {\n  say "y"\n} else {\n  say "n"\n}'],
   repeatStatement: ['repeat hostValue {\n  say "r"\n}'],
   forStatement: ["for item in hostValue {\n  say item\n}"],
-  sayStatement: ["say hostValue"],
   expressionStatement: ["toJson(hostValue)"],
   // (the guard ends every source with `exit`, which a script needs; this row's source is that `exit`)
   exitStatement: ['say "a"'],
@@ -71,84 +91,231 @@ export const ROW_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly string[
     'let n: integer = load "k", default: hostValue',
     "let n = load hostValue, default: 1",
   ],
+  // the `pass` rows without operands
+  speakerSetterStatement: ['speaker player\nsay "a"'],
+  stopAudioStatement: ["stopAudio"],
+  hideImageStatement: ["hideImage"],
+  // (no nested form after `skippable`, which reads a following `[` as an element of a name)
+  sayStatement: [
+    "say skippable hostValue",
+    `${declaration("displayName", '"Boss"')}\nsay as boss "a"`,
+    'say as player "a"',
+    // (the player across a transfer)
+    [
+      main('say as player "a"\ngoto "part.tease"\n'),
+      { path: "part.tease", source: 'say as player "b"\nshowButton as player "Go"\nexit\n' },
+    ],
+  ],
+  showButtonStatement: [
+    `${declaration("displayName", '"Boss"')}\nshowButton as boss "Go"`,
+    'showButton as player "Go"',
+  ],
+  // each built-in field (`SPEAKER_FIELD_KINDS`) with the host global where the runtime checks its value, else a literal
+  // of a kind it takes; a custom property; a declaration in a block
+  speakerDeclaration: [
+    ...[
+      "displayName",
+      "title",
+      "shortTitle",
+      "firstName",
+      "lastName",
+      "defaultSaySkippable",
+      "presentation",
+      "bubble",
+      "prose",
+      "font",
+      "avatar",
+      "mood",
+    ].map((field) => spoken(declaration(field, "hostValue"))),
+    spoken(declaration("color", '"#336699"')),
+    spoken(declaration("alias", '"pet"')),
+    spoken(declaration("gender", '"female"')),
+    `if hostValue == null {\n  speaker boss {\n    displayName: "Boss"\n  }\n}\nsay as boss "a"`,
+    // a speaker declared in another file speaks in the first; across a transfer, declared in the entry file and used
+    // in the target, and declared in the target
+    [
+      main('say as boss "Hi"\nshowButton as boss "Go"\nexit\n'),
+      {
+        path: "other.tease",
+        source: 'speaker boss {\n  displayName: hostValue\n  color: "#336699"\n}\nexit\n',
+      },
+    ],
+    [
+      main('speaker boss {\n  displayName: hostValue\n}\nsay as boss "a"\ngoto "part.tease"\n'),
+      { path: "part.tease", source: 'say as boss "b"\nshowButton as boss "Go"\nexit\n' },
+    ],
+    [
+      main('say "a"\ngoto "part.tease"\n'),
+      {
+        path: "part.tease",
+        source:
+          'speaker boss {\n  displayName: hostValue\n  color: "#336699"\n}\nsay as boss "b"\nexit\n',
+      },
+    ],
+  ],
+  // a transfer by each target form the row holds (a quoted glob of one file among them), a typed store of the host global
+  // in every file; then a nullable stored
+  // before each of the literal forms and a computed one, a variable of the same name used in the target (#2514's file
+  // starts: `let`s are per file and globals closed, so nothing nullable crosses a file)
+  gotoStatement: [
+    [main('let n: integer = hostValue\ngoto "part.tease"\n'), PART_TYPED],
+    [main('let n: integer = hostValue\ngoto script("part.tease")\n'), PART_TYPED],
+    [
+      main("let n: string? = hostValue\ngoto script(hostValue)\n"),
+      { path: "part.tease", source: 'let z: string = hostValue\nsay "in part"\nexit\n' },
+      { path: "third.tease", source: "let w: integer = hostValue\nexit\n" },
+    ],
+    [
+      main('if hostValue == null {\n  goto "part.tease"\n}\nlet n: integer = hostValue\nexit\n'),
+      { path: "part.tease", source: "let z: integer? = hostValue\nexit\n" },
+    ],
+    [main('let n: integer = hostValue\ngoto "p*.tease"\n'), PART_TYPED],
+    [
+      main('let x: integer? = hostValue\ngoto "part.tease"\n'),
+      {
+        path: "part.tease",
+        source: 'let x: integer? = null\nlet y: integer = x otherwise 1\nsay "in part"\nexit\n',
+      },
+    ],
+    [main('let x: integer? = hostValue\ngoto script("part.tease")\n'), PART_NULLABLE],
+    [
+      main("let x: integer? = null\ngoto script(hostValue)\n"),
+      PART_NULLABLE,
+      { path: "third.tease", source: "let x = 1\nlet y: integer = x\nexit\n" },
+    ],
+  ],
+  // (each ask's kind and form, `as` each speaker kind, no question, and the places an answer goes; its operand positions
+  // are `ASK_OPERANDS`')
+  interactionExpression: [
+    'let r: string = askText "q", hint: "h", prefill: "p"',
+    'let r: number = askNumber("q", prefill: 2.5)',
+    'let r: integer = askInteger("q", prefill: 2)',
+    'let r: date = askDate("q")',
+    'let r: time = askTime("q")',
+    'let r: datetime = askDateTime("q")',
+    'let r: string = askPassword("q", hint: "h")',
+    'let r: boolean = askBoolean "q", yesText: "y", noText: "n", prefill: true',
+    "let r: integer = askChoice 1, 2, prefill: 2",
+    'let r = askChoice back: "Back", [{value: "s", text: "S"}, {text: "C"}]',
+    'speaker boss {\n  displayName: "Boss"\n}\nlet r = askText as boss("q")',
+    'let r = askInteger as player "q"',
+    "let r = askText",
+    'say askText("q")',
+    'if askBoolean("q") {\n  say "y"\n}',
+    'repeat askInteger("q") {\n  say "r"\n}',
+    'let r = [1, 2][askInteger("q")]',
+    'let r: string = hostValue otherwise askText("q")',
+    'let o = {n: 1}\no.n = askInteger("q")',
+    'let r = askText(askText("q"))',
+  ],
 };
 
 /**
- * The positions of open rows whose host global the route refuses after the syntax gate, by name: the source with the
- * host global there, which must be refused with `text` in every mode, and the same position with a value the slice
- * admits, which must pass the guard's three rules. `gate` names the refusal's place; the record carries only `text`,
- * which only that gate writes. A refusal not listed fails the guard, and so does a listed one that no longer occurs.
+ * The files a row's one-file sources compile with beside `main.tease`: a transfer's destination, so that a fitting path
+ * starts a file other than the one transferring.
  */
-export const DECLARED_REFUSALS: readonly {
-  readonly row: SyntaxKind;
-  readonly position: string;
-  readonly refused: string;
-  readonly admitted: string;
-  readonly gate: string;
-  readonly text: string;
-}[] = [
-  {
-    row: "ifStatement",
-    position: "the condition",
-    refused: 'if hostValue {\n  say "y"\n}',
-    admitted: 'let b = hostValue == null\nif b {\n  say "y"\n}',
-    // (an unknown condition's operator diagnostic, which the route refuses after the analysis)
-    gate: "outsideAnswers (src/type-inference/core/backend.ts)",
-    text: "this operand",
-  },
-  {
-    row: "callExpression",
-    position: "`get`'s receiver",
-    refused: "let x: integer = hostValue.get(0, default: 0)",
-    admitted: "let xs = [1]\nlet x: integer = xs.get(0, default: 0)",
-    // (`get` on a receiver of unknown kind, which the route refuses after the analysis)
-    gate: "outsideAnswers (src/type-inference/core/backend.ts)",
-    text: "this operand",
-  },
+const DESTINATIONS: Readonly<Partial<Record<SyntaxKind, readonly TemplateFile[]>>> = {
+  gotoStatement: [{ path: "part.tease", source: "exit\n" }],
+};
+
+/** A source of `row` as the project the guard compiles: `main.tease`, then the row's destinations. */
+export const filesOf = (row: SyntaxKind, source: string): readonly TemplateFile[] => [
+  main(source),
+  ...(DESTINATIONS[row] ?? []),
+];
+
+/** The host values a row's runs take beside the domain: for a transfer, the paths of the files it may start. */
+export const ROW_HOSTS: Readonly<Partial<Record<SyntaxKind, readonly string[]>>> = {
+  gotoStatement: ["part.tease", "third.tease"],
+};
+
+/** A declaration of the speaker `boss` with one property. */
+export function declaration(field: string, value: string): string {
+  return `speaker boss {\n  ${field}: ${value}\n}`;
+}
+
+/** A declaration followed by a message of its speaker, which reads its fields. */
+export function spoken(declared: string): string {
+  return `${declared}\nsay as boss "a"`;
+}
+
+/**
+ * Sources the guard requires the route to answer as today's compiler does, which gives them a compile error: a `say as`
+ * of a name that declares no speaker (the lead's R26).
+ */
+export const ANSWERED_AS_TODAY: readonly string[] = [
+  'say as nobody "a"',
+  'let x = 1\nsay as x "a"',
 ];
 
 /**
- * The runs of a template in which the route's plan fails otherwise than today's: the template, why the difference
- * stands (an accepted record, or the open issue that decides it while nothing accepted does), the check's field and
- * place in the route's plan, the failure's code at `at` on the route, and where today's run fails instead (`null`
- * where it does not fail). The guard requires exactly that difference in every mode, and fails on any other difference.
+ * The operand positions of the commands, by the names their rows cite (`OperandCheck`, `DISPOSITIONS`' `operands`; a
+ * `say`'s are its parts), each a source with the host global there: the row guard compares the names with the rows', so
+ * a position without a citation, or a citation without a position, fails it.
  */
-export const DECLARED_RUN_DIFFERENCES: readonly {
-  readonly template: string;
-  readonly basis: { readonly record: string } | { readonly issue: number };
-  readonly field: string;
-  /** The template's text the check stands at in the route's plan (`main.tease`). */
-  readonly checkAt: string;
-  readonly code: string;
-  readonly at: string;
-  readonly todayAt: string | null;
-}[] = [
-  {
-    template: "let xs = [1]\nlet x: integer = xs.get(hostValue, default: 0)",
-    basis: {
-      record:
-        "V30 §16, reading an element with a default: a non-whole index of unknown type fails with TSR024 on the new type checker, and still gives the default on today's",
-    },
-    field: "indexCheck",
-    checkAt: "xs.get(hostValue, default: 0)",
-    code: "TSR024",
-    at: "hostValue",
-    todayAt: null,
+export const OPERAND_TEMPLATES: Readonly<
+  Partial<Record<SyntaxKind, Readonly<Record<string, readonly string[]>>>>
+> = {
+  showImageStatement: { image: ["showImage hostValue"] },
+  openUrlStatement: {
+    url: ["openUrl(hostValue)"],
+    buttonText: ['openUrl("https://example.com", buttonText: hostValue)'],
+    alwaysButton: ['openUrl("https://example.com", alwaysButton: hostValue)'],
   },
-  // undecided (#2536): which span TSR058 stands at when the value arrives through a call's default
-  ...[
-    ['let v: integer = fromJson("bad", default: hostValue)', 'fromJson("bad", default: hostValue)'],
-    [
-      'let t: string = decryptText("x", password: "pw", default: hostValue)',
-      'decryptText("x", password: "pw", default: hostValue)',
-    ],
-  ].map(([template, call]) => ({
-    template: template!,
-    basis: { issue: 2536 },
-    field: "fallbackCheck",
-    checkAt: "hostValue",
-    code: "TSR058",
-    at: "hostValue",
-    todayAt: call!,
-  })),
+  exportTextStatement: {
+    text: ["exportText(hostValue)"],
+    title: ['exportText("t", title: hostValue)'],
+    fileName: ['exportText("t", fileName: hostValue)'],
+  },
+  showPopupStatement: {
+    message: ["showPopup hostValue"],
+    buttonText: ['showPopup(message: "m", buttonText: hostValue)'],
+  },
+  waitStatement: { duration: ["wait hostValue", "wait hostValue s"] },
+  deleteStatement: { key: ["delete hostValue"] },
+  showButtonStatement: {
+    label: ["showButton hostValue"],
+    background: ['showButton "Go", background: hostValue'],
+    timeout: ['showButton "Go", timeout: hostValue'],
+  },
+  sayStatement: {
+    presentation: ['say bubble(color: hostValue) "a"', 'say prose(align: hostValue) "a"'],
+    value: ["say hostValue"],
+    pacing: ['say "a", hostValue'],
+  },
+  gotoStatement: { path: ["goto script(hostValue)"] },
+  interactionExpression: ASK_OPERANDS,
+};
+
+/**
+ * What an operand may hold in place of the host global, each holding it in turn: a load's default, a `get`'s default and
+ * a call's argument, so a nested expression of each kind the check result indexes stands at every operand position.
+ */
+export const NESTED_OPERANDS: readonly string[] = [
+  // (none starts with a parenthesis, which some commands read as their own argument list)
+  '[load "n", default: hostValue][0]',
+  "[hostValue].get(0, default: hostValue)",
+  "fromJson(hostValue, default: hostValue)",
 ];
+
+/** A command's templates: each operand's own, then each again with every nested form in place of the host global. */
+function operandTemplates(operands: Readonly<Record<string, readonly string[]>>): string[] {
+  const own = Object.values(operands).flat();
+  return [
+    ...own,
+    ...own.flatMap((template) =>
+      NESTED_OPERANDS.map((nested) => template.replace("hostValue", nested)),
+    ),
+  ];
+}
+
+export const ROW_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly Template[]>>> = {
+  ...BASE_TEMPLATES,
+  ...Object.fromEntries(
+    Object.entries(OPERAND_TEMPLATES).map(([row, operands]) => {
+      // EVIDENCE: invariant: the templates' keys are AST kinds (`OPERAND_TEMPLATES`' type).
+      const kind = row as SyntaxKind;
+      return [row, [...(BASE_TEMPLATES[kind] ?? []), ...operandTemplates(operands)]];
+    }),
+  ),
+};

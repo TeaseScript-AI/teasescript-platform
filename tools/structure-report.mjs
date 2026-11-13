@@ -49,11 +49,14 @@
 // move below them counts as a deletion and an addition; and attributes can make a file binary, which adds no lines.
 //
 // With --moved, the lines Git's moved-line detection marks as moved (`moved-lines.mjs`, read once over the whole
-// change) are left out of a function over 150 lines that the change writes into, and out of a file's growth, with the
-// added and removed lines `pure-move-check.mjs`'s forms 1-3 admit (an import or re-export line, a bare `export` on a
-// moved declaration, whitespace: its classification, imported). Each file signal this suppresses is printed with its
-// growth and its moved, admitted and removed lines, and the function signal with its moved lines; every other signal
-// is as without it. Git's detection is heuristic (a moved block below its threshold reads as added).
+// change) are left out of a function over 150 lines that the change writes into, and out of a file's growth; a file's
+// growth also leaves out the added and removed lines `pure-move-check.mjs`'s forms 1-3 admit (an import or re-export
+// line, a bare `export` on a moved declaration, whitespace outside every token in a file parsed without a syntax error:
+// its classification, imported). Each file signal this suppresses is printed with its growth and its moved, admitted
+// and removed lines; the function signal leaves out, beside the moved lines, only the lines form 2 admits (a moved
+// declaration that gained `export`), and is printed with its moved lines (and `, N admitted` when it left out such
+// lines); every other signal is as without it. Git's detection is heuristic (a moved block below its threshold reads as
+// added).
 //
 // With --summary FILE, the files behind two signals, a file over 1000 lines that the change grows and a file gaining
 // over 300 lines, are appended to FILE (CI passes its job summary file) and printed after the report: a heading, the
@@ -77,17 +80,16 @@
 // number; 2 when --diff cannot read the change's names (a name that is not UTF-8) or its moved lines, --summary has no
 // --diff, or there is no node_modules it can link, or one whose record does not hold the lockfile.
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   CannotRun as LinkRefused,
   linkMainNodeModules,
   lockfileMismatch,
 } from "./check-changed.mjs";
-import { movedLinesOf, MovedLinesUnreadable } from "./moved-lines.mjs";
+import { movedLinesOf, MovedLinesUnreadable } from "./moves/moved-lines.mjs";
 
-// `ts-morph`, and `pure-move-check.mjs`, which imports it, load once `main` has made sure of `node_modules`
+// `ts-morph`, and `moves/pure-move-forms.mjs`, which imports it, load once `main` has made sure of `node_modules`
 let ts;
 let verdictsOf;
 
@@ -437,14 +439,18 @@ function gitLineCounts(mergeBase) {
 /**
  * The signals `file`'s added lines raise (its `HEAD` blob `text`, its added lines `added` in order): a function over
  * the signal's length that they write into, and the file gaining over the signal's lines, by its `growth` (`growthOf`).
- * With --moved, the lines Git marks as moved (`moved`) are left out, and each signal that leaves out is printed as
+ * With --moved, the lines Git marks as moved (`moved`) and those the pure-move check admits as a moved declaration that
+ * gained `export` (`exported`) are left out of the function signal, and each signal that leaves out is printed as
  * suppressed with its counts.
  */
-function addedLinesSignals(file, text, added, moved, growth) {
+function addedLinesSignals(file, text, added, moved, exported, growth) {
   const found = [];
-  const counted = added.filter((line) => !moved.has(line));
+  const counted = added.filter((line) => !moved.has(line) && !exported.has(line));
   const discounted = (from, to) =>
     added.filter((line) => line >= from && line <= to && moved.has(line)).length;
+  const admittedIn = (from, to) =>
+    added.filter((line) => line >= from && line <= to && !moved.has(line) && exported.has(line))
+      .length;
   if (PARSED.test(file))
     for (const fn of longFunctionsOf(file, text)) {
       const end = fn.line + fn.lines - 1;
@@ -454,7 +460,7 @@ function addedLinesSignals(file, text, added, moved, growth) {
       else if (holdsLineIn(added, fn.line, end))
         found.push({
           signal: "suppressed",
-          line: `suppressed (moved): ${what}, ${discounted(fn.line, end)} moved lines discounted${nestedOf(fn)}`,
+          line: `suppressed (moved): ${what}, ${discounted(fn.line, end)} moved lines discounted${admittedIn(fn.line, end) > 0 ? `, ${admittedIn(fn.line, end)} admitted` : ""}${nestedOf(fn)}`,
         });
     }
   if (growth.growth > SIGNALS.addedLines)
@@ -499,12 +505,12 @@ const countsOf = ({ growth, moved, admitted, removed, admittedRemoved }) =>
 
 /**
  * With --moved, each file's added lines Git marks as moved (`moved`), and those the pure-move check admits by its forms
- * 1-3 (an import or re-export line, a bare `export` on a moved declaration, whitespace: `admitted`), by their line in
- * `HEAD`'s blob; and the number of its removed lines the check admits by the same forms (`admittedRemoved`), by the
- * file's name at `HEAD`.
+ * 1-3 (an import or re-export line, a bare `export` on a moved declaration, whitespace outside every token: `admitted`;
+ * form 2's alone, `exported`), by their line in `HEAD`'s blob; and the number of its removed lines the check admits by
+ * the same forms (`admittedRemoved`), by the file's name at `HEAD`.
  */
 function movedAndAdmitted(mergeBase) {
-  const [moved, admitted, admittedRemoved] = [new Map(), new Map(), new Map()];
+  const [moved, admitted, exported, admittedRemoved] = [new Map(), new Map(), new Map(), new Map()];
   const moves = movedLinesOf(mergeBase, "HEAD");
   // a removed line's verdict names its file at the merge base
   const headName = new Map();
@@ -521,12 +527,16 @@ function movedAndAdmitted(mergeBase) {
     if (entry.side === "added") {
       if (!admitted.has(entry.file)) admitted.set(entry.file, new Set());
       admitted.get(entry.file).add(entry.row.line);
+      if (form === "export") {
+        if (!exported.has(entry.file)) exported.set(entry.file, new Set());
+        exported.get(entry.file).add(entry.row.line);
+      }
     } else if (headName.has(entry.file)) {
       const file = headName.get(entry.file);
       admittedRemoved.set(file, (admittedRemoved.get(file) ?? 0) + 1);
     }
   }
-  return { moved, admitted, admittedRemoved };
+  return { moved, admitted, exported, admittedRemoved };
 }
 
 /**
@@ -597,10 +607,11 @@ function changeSignals(base) {
   const {
     moved: movedAdded,
     admitted: admittedAdded,
+    exported: exportedAdded,
     admittedRemoved,
   } = discountMoved
     ? movedAndAdmitted(mergeBase)
-    : { moved: new Map(), admitted: new Map(), admittedRemoved: new Map() };
+    : { moved: new Map(), admitted: new Map(), exported: new Map(), admittedRemoved: new Map() };
 
   const found = [];
   const relevant = changes
@@ -627,6 +638,7 @@ function changeSignals(base) {
           ? 0
           : lineCount(blob(mergeBase, change.old)));
     const moved = movedAdded.get(file) ?? new Set();
+    const exported = exportedAdded.get(file) ?? new Set();
     const growth = growthOf(
       added,
       gitRemoved.get(file),
@@ -645,7 +657,7 @@ function changeSignals(base) {
           line: `suppressed (moved): ${what}, ${countsOf(growth)}`,
         });
     }
-    for (const signal of addedLinesSignals(file, text, added, moved, growth))
+    for (const signal of addedLinesSignals(file, text, added, moved, exported, growth))
       found.push(
         signal.signal === "added" ? { ...signal, before: before(), after: lines } : signal,
       );
@@ -779,7 +791,7 @@ async function loadTypeScript() {
     process.exit(2);
   }
   ({ ts } = await import("ts-morph"));
-  ({ verdictsOf } = await import("./pure-move-check.mjs"));
+  ({ verdictsOf } = await import("./moves/pure-move-forms.mjs"));
 }
 
 /** The report the command line asks for. */
@@ -886,10 +898,7 @@ async function main() {
 }
 
 // run as a command, not when a test imports `addedLinesOfPatch`
-if (
-  process.argv[1] !== undefined &&
-  realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)
-) {
+if (import.meta.main) {
   try {
     await main();
   } catch (error) {

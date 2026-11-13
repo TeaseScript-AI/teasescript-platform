@@ -16,7 +16,7 @@ const NAMES = ["reversed", "forward, unshared", "reversed, unshared", "forward"]
  * ran in, and its modes.
  */
 const MODULES: Record<string, string> = {
-  "tests/helpers/type-core-stop-oracle.js": `export const stopRuns = (files, globals, mode) =>
+  "tests/helpers/type-core-stop-runs.js": `export const stopRuns = (files, globals, mode) =>
   ({ kind: "closed", ran: files[0].source, mode: mode(() => globalThis.heldMode) });\n`,
   "tests/helpers/type-core-held-host.js": `export const HELD_MODES = ${JSON.stringify(NAMES)}.map((name) => ({
   name,

@@ -20,7 +20,7 @@ import {
 import { LIFECYCLE, SURFACES } from "./plan-json-family.js";
 import { type CapturedMediaRecord } from "../../../player/media/captured-media.js";
 import type { PlayerBridge } from "../../../player/runtime/player-bridge.js";
-import { FakeMediaRepository } from "./fake-media-repository.js";
+import { FakeMediaRepository } from "./media/fake-media-repository.js";
 import { KeepHost, browserSavedData, SCOPE, browser } from "./keep-host.js";
 
 export const OPERATION = "operation";

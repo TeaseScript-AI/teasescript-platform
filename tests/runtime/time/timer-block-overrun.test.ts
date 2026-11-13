@@ -3,7 +3,7 @@ import test from "node:test";
 
 import type { InterpreterEvent } from "../../../src/runtime/events.js";
 import { assertRuntimeResumeEquivalent } from "../../helpers/runtime-equivalence.js";
-import { Story } from "../../helpers/story-session.js";
+import { Story } from "../../helpers/runtime/story-session.js";
 import { validateRuntimeSnapshot } from "../../../src/runtime/snapshot/snapshot-validation.js";
 
 /*

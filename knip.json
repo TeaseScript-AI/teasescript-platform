@@ -46,13 +46,16 @@
     "tests/runtime-oracle-admission.oracle.ts",
     "tests/runtime-differential-oracle.oracle.ts",
     "tests/property/replay.ts",
+    "tests/helpers/retained-instrument-preload.ts",
     "tools/oxlint/{run,test}.mjs",
-    "tools/oxlint/check-evidence.test.mjs",
+    "tools/oxlint/comments/check-evidence.test.mjs",
     "tools/oxlint/anti-slop/src/**/*.test.ts",
     "tools/local-agent/patch-publication-cleanup-comment.cjs",
     "tools/local-agent/patch-publication-request.cjs",
     "tools/local-agent/source-bundle-artifact-request.cjs",
-    "tools/local-agent/test-source-bundle-artifact-request.cjs"
+    "tools/local-agent/test-source-bundle-artifact-request.cjs",
+    "tools/moves/{move-sweep,pure-move-check,reconstruct-move,split-test-compare,split-write,test-reach}.mjs",
+    "tools/moves/*.test.mjs"
   ],
   "project": [
     "src/**/*.ts",
@@ -63,7 +66,8 @@
     "tools/design-lint/**/*.mjs",
     "tools/oxlint/**/*.mjs",
     "tools/oxlint/**/*.ts",
-    "tools/local-agent/**/*.{cjs,mjs}"
+    "tools/local-agent/**/*.{cjs,mjs}",
+    "tools/moves/**/*.mjs"
   ],
   "ignore": ["tests/fixtures/main-realm-graph/**"],
   "ignoreDependencies": ["@vue/tsconfig", "shadcn-vue"],

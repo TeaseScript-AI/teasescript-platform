@@ -2,15 +2,19 @@ import type {
   Block,
   CallExpression,
   Expression,
+  InteractionExpression,
   Program,
   Statement,
+  TransferTarget,
   TypeAnnotation,
 } from "../../ast.js";
 import { CONVERSIONS, isConversion, type Conversion } from "../../conversions.js";
 import { dictMethod } from "../../dict-operations.js";
+import { isBlankTextAnswer } from "../../interaction-answers.js";
 import { listMethod } from "../../list-methods.js";
 import { isTextMethod, TEXT_METHODS } from "../../text-operations.js";
 import type { SourceSpan } from "../../source.js";
+import { askParts, sayOperands, statementExpressions } from "../../expression-children.js";
 import { SLICE_DEPTH } from "./contract-descriptors.js";
 import { methodCategory } from "./method-categories.js";
 import type { CoreFile } from "./program.js";
@@ -31,8 +35,66 @@ export interface Outside {
 
 // ------------------------------------------------------------------------------------------------- the syntax
 
-/** The written types of the slice: named types, `T?` and `T[]` of them. */
+/** The types a written type nests: an optional's value, a collection's element, a union's members. */
+function typeParts(type: TypeAnnotation): readonly TypeAnnotation[] {
+  switch (type.kind) {
+    case "namedType":
+      return [];
+    case "optionalType":
+      return [type.value];
+    case "listType":
+    case "setType":
+    case "dictType":
+      return [type.element];
+    case "unionType":
+      return type.members;
+  }
+}
+
+/**
+ * A position of a written type whose only kind is `null`, or `null` where it has none: the type itself, or one inside
+ * it, an optional's value, a collection's element, a union's member that is not `null` alone. A value read from such a
+ * place is `null` to today's checker and `unknown` to the core where it enters from the host, so the slice takes no
+ * such type, wherever it is written. (Walked, not recursed: a written type nests without bound.)
+ */
+function nullOnlyPosition(annotation: TypeAnnotation): TypeAnnotation | null {
+  // (each type before the types it nests)
+  const nested: TypeAnnotation[] = [];
+  const unwalked = [annotation];
+  for (let type = unwalked.pop(); type !== undefined; type = unwalked.pop()) {
+    nested.push(type);
+    for (const part of typeParts(type)) unwalked.push(part);
+  }
+  // whether a type's values can only be `null`: the name `null`, an optional or a union of such types (a collection is
+  // a value of its own), each judged after the types it nests
+  const onlyNull = new Map<TypeAnnotation, boolean>();
+  for (const type of nested.reverse())
+    onlyNull.set(
+      type,
+      type.kind === "namedType"
+        ? type.name === "null"
+        : type.kind === "optionalType"
+          ? onlyNull.get(type.value) === true
+          : type.kind === "unionType" &&
+            type.members.every((member) => onlyNull.get(member) === true),
+    );
+  // the first such position, outermost first, in written order
+  const pending = [annotation];
+  for (let type = pending.pop(); type !== undefined; type = pending.pop()) {
+    if (onlyNull.get(type) === true) return type;
+    // (a union's member that is `null` alone is the union's `null`, beside its other members)
+    const parts = typeParts(type).filter(
+      (part) => type.kind !== "unionType" || onlyNull.get(part) !== true,
+    );
+    for (let part = parts.pop(); part !== undefined; part = parts.pop()) pending.push(part);
+  }
+  return null;
+}
+
+/** The written types of the slice: named types, `T?` and `T[]` of them, none with a position only `null` fills. */
 function annotationOutside(annotation: TypeAnnotation): TypeAnnotation | null {
+  const nullOnly = nullOnlyPosition(annotation);
+  if (nullOnly !== null) return nullOnly;
   const pending: [TypeAnnotation, number][] = [[annotation, 0]];
   for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
     const [type, depth] = next;
@@ -73,12 +135,30 @@ type Visit =
   | { readonly refuse: { readonly span: SourceSpan; readonly what: string } };
 
 /**
- * A row of the table: `refused`, a construct outside the slice, refused at its span as `this <kind in words>`; or
- * `modelled`, a construct of the slice, with the conditions under which it is, which its `visit` checks.
+ * Where the runtime checks one operand of a `pass` row whatever the plan carries: the function of `file` that fails on a
+ * value the operand does not take (`type-core-pass-rows.test.ts` reads that it raises a runtime fault; the row guard's
+ * misfit runs show each operand's code).
+ */
+export interface OperandCheck {
+  readonly file: string;
+  readonly function: string;
+}
+
+/**
+ * A row of the table: `refused`, a construct outside the slice, refused at its span as `this <kind in words>`;
+ * `modelled`, a construct of the slice, with the conditions under which it is, which its `visit` checks; or `pass`, a
+ * command the analysis needs nothing of beyond its operands (#2488's design, the `pass` rule): it stores into no place
+ * of the script, registers no handler and moves no control, so the flow graph builds only its operands and its
+ * fall-through, and each of its operands, by name, is checked by its instruction (`operands`).
  */
 type Disposition<K extends SyntaxKind> =
   | { readonly row: "refused" }
-  | { readonly row: "modelled"; readonly visit: (node: NodeOfKind<K>, walk: SyntaxWalk) => Visit };
+  | { readonly row: "modelled"; readonly visit: (node: NodeOfKind<K>, walk: SyntaxWalk) => Visit }
+  | {
+      readonly row: "pass";
+      readonly operands: Readonly<Record<string, OperandCheck>>;
+      readonly visit: (node: NodeOfKind<K>, walk: SyntaxWalk) => Visit;
+    };
 
 const REFUSED = { row: "refused" } as const;
 /** The children to walk, as one list: never spread into arguments, whose count is bounded below a source's width. */
@@ -91,47 +171,85 @@ const modelled = <K extends SyntaxKind>(
   children: (node: NodeOfKind<K>) => (Statement | Expression | Block | null)[] = () => [],
 ): Disposition<K> => ({ row: "modelled", visit: (node) => walk(children(node)) });
 
+/** A `pass` row whose children are its statement's own expressions (`statementExpressions`, in source order). */
+const pass = <K extends Statement["kind"]>(
+  operands: Readonly<Record<string, OperandCheck>>,
+): Disposition<K> => ({
+  row: "pass",
+  operands,
+  visit: (node) => {
+    // EVIDENCE: invariant: `K` is a statement kind, so the node of its row is a statement.
+    const statement = node as Statement;
+    return walk([...statementExpressions(statement)]);
+  },
+});
+
+const MEDIA = "src/runtime/instructions/media.ts";
+const INTERACTION = "src/runtime/instructions/interaction.ts";
+/** Shown text: `fieldText` takes a value that shows as text and refuses any other. */
+const SHOWN_TEXT: OperandCheck = {
+  file: "src/runtime/values/value-text.ts",
+  function: "fieldText",
+};
+const UI_CHECK: OperandCheck = { file: INTERACTION, function: "materializeInteractionUi" };
+
 /**
  * The route's syntax table: a row for every AST kind (a kind without one, or a row for no kind, fails the build), so a
  * new construct is refused by its row, never by a default, and opening one is a change of its row.
  */
 export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
   // ------------------------------------------------------------------------------------------- statements
-  speakerDeclaration: REFUSED,
-  speakerSetterStatement: REFUSED,
+  // (a speaker is set up at the start of the session, storing its values into its own places, so not `pass`; each value
+  // is judged by its own row, so a speaker's name in one is refused there, and the core judges its built-in fields'
+  // values after the analysis, `backend.ts`'s `outsideAnswers`)
+  speakerDeclaration: modelled((node) => node.properties.map((property) => property.value)),
+  speakerSetterStatement: pass({}),
   sayStatement: {
     row: "modelled",
+    // (a `say as` names its speaker by an identifier that is no expression, so it is not walked; its presentation, text
+    // and pacing are walked in evaluation order, `sayOperands`)
     visit: (node) =>
-      node.presentation !== null ||
-      node.speaker !== null ||
-      node.skipPolicy !== null ||
-      node.pacing !== null ||
-      (node.value.kind === "stringLiteral" &&
-        node.value.parts.some((part) => part.kind !== "stringText"))
+      node.value.kind === "stringLiteral" &&
+      node.value.parts.some((part) => part.kind !== "stringText")
         ? refuse(node.span, "this say")
-        : node.value.kind === "stringLiteral"
-          ? walk([])
-          : walk([node.value]),
+        : walk([...sayOperands(node)]),
   },
-  showButtonStatement: REFUSED,
-  waitStatement: REFUSED,
+  // (`showButton as` names its speaker as `say as` does, not walked)
+  showButtonStatement: pass({
+    label: SHOWN_TEXT,
+    background: UI_CHECK,
+    timeout: { file: INTERACTION, function: "buttonTimeoutMs" },
+  }),
+  waitStatement: pass({
+    duration: { file: "src/runtime/instructions/timers.ts", function: "timerDurationMs" },
+  }),
   timerStatement: REFUSED,
-  showImageStatement: REFUSED,
-  hideImageStatement: REFUSED,
+  showImageStatement: pass({ image: { file: MEDIA, function: "showImage" } }),
+  hideImageStatement: pass({}),
   showCameraStatement: REFUSED,
   hideCameraStatement: REFUSED,
-  showPopupStatement: REFUSED,
-  openUrlStatement: REFUSED,
-  exportTextStatement: REFUSED,
+  showPopupStatement: pass({ message: SHOWN_TEXT, buttonText: SHOWN_TEXT }),
+  openUrlStatement: pass({ url: UI_CHECK, buttonText: SHOWN_TEXT, alwaysButton: UI_CHECK }),
+  exportTextStatement: pass({ text: UI_CHECK, title: SHOWN_TEXT, fileName: UI_CHECK }),
   showPermanentButtonStatement: REFUSED,
   playMediaStatement: REFUSED,
-  stopAudioStatement: REFUSED,
+  stopAudioStatement: pass({}),
   saveStatement: REFUSED,
-  deleteStatement: REFUSED,
+  deleteStatement: pass({
+    key: { file: "src/runtime/host-data/script-storage.ts", function: "storageKey" },
+  }),
   exitStatement: modelled(),
   endStatement: REFUSED,
   labelStatement: REFUSED,
-  gotoStatement: REFUSED,
+  gotoStatement: {
+    row: "modelled",
+    // (a file from its top, through its path, `transferPath`: the path is walked and not a `script(…)` call holding it,
+    // so no script value opens elsewhere)
+    visit: (node) => {
+      const path = transferPath(node.target);
+      return path === undefined ? refuse(node.span, "this goto statement") : walk([path]);
+    },
+  },
   callFileStatement: REFUSED,
   letStatement: {
     row: "modelled",
@@ -229,7 +347,16 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
         : walk([node.left, node.right]),
   },
   rangeExpression: modelled((node) => [node.start, node.end]),
-  interactionExpression: REFUSED,
+  interactionExpression: {
+    row: "modelled",
+    // (the asks of `SLICE_ASKS`, with a prefill `askPrefillAdmitted` admits; its parts in evaluation order, `askParts`:
+    // options, presentation, question, `hint:` and `prefill:` as written, or the named arguments; `as` names its speaker
+    // by an identifier that is no expression, not walked)
+    visit: (node) =>
+      !SLICE_ASKS.has(node.interactionKind) || !askPrefillAdmitted(node)
+        ? refuse(node.span, "this ask")
+        : walk([...askParts(node)]),
+  },
   sayExpression: REFUSED,
   showButtonExpression: REFUSED,
   showPopupExpression: REFUSED,
@@ -403,6 +530,99 @@ export function sliceCall(call: CallExpression): SliceCall | null {
   return conversion.takes === "value" && conversion.kinds !== "shown" && others.length === 0
     ? "conversion"
     : null;
+}
+
+/**
+ * The path of a transfer to a file the slice holds: `null` for a quoted path, which holds no expression; the argument of
+ * a `script(…)` call written as `transferCall` takes it; `undefined` for any other target (a label, a grouped or tagged
+ * target, another shape of `script(…)`), which the slice does not hold.
+ */
+function transferPath(target: TransferTarget): Expression | null | undefined {
+  if (target.kind === "fileTarget") return null;
+  if (target.kind !== "scriptTarget") return undefined;
+  const call = target.expression;
+  return call.kind === "callExpression" && transferCall(call)
+    ? call.arguments[0]!.value
+    : undefined;
+}
+
+/**
+ * `script(path)` with one positional argument: the one call outside `sliceCall` the slice holds, and only as a transfer's
+ * target (`transferPath`), the `script` call in any other place being refused by the `callExpression` row.
+ */
+export function transferCall(call: CallExpression): boolean {
+  return (
+    call.callee.kind === "identifier" &&
+    call.callee.name === "script" &&
+    call.arguments.length === 1 &&
+    call.arguments[0]!.kind === "positionalArgument"
+  );
+}
+
+/**
+ * The asks of the slice, those whose answer the core gives a kind (`interactionCategory`): not `askForm` and
+ * `askBooleans`, the form of toggles built on it, whose answer it does not (V30 §20).
+ */
+const SLICE_ASKS: ReadonlySet<InteractionExpression["interactionKind"]> = new Set([
+  "text",
+  "number",
+  "integer",
+  "date",
+  "time",
+  "datetime",
+  "password",
+  "boolean",
+  "choice",
+]);
+
+/** An ask's `prefill:`, a basic ask's or a choice's own, or `askBoolean`'s named argument. */
+function askPrefill(ask: InteractionExpression): Expression | null {
+  return (
+    ask.prefill ??
+    ask.formArguments.find((argument) => argument.name.name === "prefill")?.value ??
+    null
+  );
+}
+
+/**
+ * The prefills of an ask the slice holds (V30 §19, §20): none, or a scalar literal the request takes as written: on
+ * `askText` plain text that is not blank, on `askNumber` a number, on `askInteger` a whole number written as one in the
+ * safe range, on `askBoolean` `true` or `false`, on `askChoice` any (a value no button has preselects none). Any other
+ * literal is outside: today's checker refuses each (TSV039, and TSV043 on `askPassword`, which takes none), and a
+ * literal of the request's own kind would be written into the plan's request, whose validation refuses it. A computed
+ * prefill is outside too: the runtime takes `null` and blank text as none, and the core's kinds of a computed value do
+ * not show every one that today's checker knows to be only `null` (a typed host value narrowed by a type test, or
+ * stored under a branch).
+ */
+function askPrefillAdmitted(ask: InteractionExpression): boolean {
+  const written = askPrefill(ask);
+  if (written === null) return true;
+  if (ask.interactionKind === "password") return false;
+  const prefill = unwrapped(written);
+  switch (prefill.kind) {
+    case "stringLiteral":
+      return (
+        ask.interactionKind === "choice" ||
+        (ask.interactionKind === "text" &&
+          !isBlankTextAnswer(
+            prefill.parts.map((part) => (part.kind === "stringText" ? part.value : "")).join(""),
+          ))
+      );
+    case "numberLiteral":
+      return (
+        ask.interactionKind === "choice" ||
+        ask.interactionKind === "number" ||
+        (ask.interactionKind === "integer" &&
+          prefill.numericType === "integer" &&
+          Number.isSafeInteger(prefill.value))
+      );
+    case "booleanLiteral":
+      return ask.interactionKind === "choice" || ask.interactionKind === "boolean";
+    case "nullLiteral":
+      return ask.interactionKind === "choice";
+    default:
+      return false;
+  }
 }
 
 /** A node kind in words: `ifStatement` is "if statement". */

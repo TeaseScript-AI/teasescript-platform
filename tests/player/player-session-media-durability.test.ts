@@ -22,7 +22,7 @@ import {
   type ScriptStorageProvider,
 } from "../../player/persistence/script-storage.js";
 import type { InstructionPlan } from "../../src/index.js";
-import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
+import { FakeMediaRepository } from "../helpers/player/media/fake-media-repository.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { answerWith, type Intent } from "../helpers/player/player-input.js";
 import { loadHostFacade, onHost } from "../helpers/player/host-sessions.js";

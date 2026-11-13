@@ -1,7 +1,7 @@
 // node tests/families/stop-runs.mjs <tree> <items.jsonl> [--shard i/N] --out <folder>
 // A stop's runs against its unstopped compile's (#2080), on one built tree: for each item, the unit compiled unstopped
 // and at the item's demand allowance in its mode, both plans run over host data (`stopRuns`, `hostValues`,
-// `tests/helpers/type-core-stop-oracle.ts`). It claims only what it demonstrates (#2142, under
+// `tests/helpers/type-core-stop-runs.ts`). It claims only what it demonstrates (#2142, under
 // docs/DEVELOPMENT-WORKFLOW.md#review-convergence): positive escapes are the blockers, an unwitnessed cell is unresolved
 // evidence (#2080's design round). `open` and `later` are shown escapes, `closed` means the two plans are equal, and
 // every other difference is `unwitnessed`, never proof that no check is owed.
@@ -47,7 +47,7 @@ if (
 }
 const dist = existsSync(path.join(root, "dist")) ? path.join(root, "dist") : root;
 const load = (file) => import(pathToFileURL(path.join(dist, file)).href);
-const { stopRuns } = await load("tests/helpers/type-core-stop-oracle.js");
+const { stopRuns } = await load("tests/helpers/type-core-stop-runs.js");
 const { HELD_MODES } = await load("tests/helpers/type-core-held-host.js");
 const { MODES, inMode } = await load("tests/helpers/type-core-oracles.js");
 

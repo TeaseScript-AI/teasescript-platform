@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ts } from "ts-morph";
-import { suiteTestFiles } from "../test-shards.mjs";
+import { suiteTestFiles } from "../test-runner/test-shards.mjs";
 
 // The suites that pin the type core's exact work or its published answers, and the focused list a change needs:
 //
@@ -31,8 +31,9 @@ import { suiteTestFiles } from "../test-shards.mjs";
 // `assert.equal` of `.total` to a literal of four or more digits, a table of four or more such literals, a `[count,
 // "reason"]` record, and, in the type core's tests only (`FORM_SCOPES`), a property set to a hex digest of 16 or more
 // digits: a digest pin written in another test file is not found. A pin written another way (`strictEqual`, `deepEqual`
-// of a short tuple or an object, a total under four digits, a helper's table, a nested table such as work-a's) is not
-// found; that test is a net over every `.ts` file under `tests/`, helpers included, for a file holding pins with no
+// of a short tuple or an object, a total under four digits, a helper's table, a nested table such as
+// `work/type-core-work-store-checks`'s) is not found; that test is a net over every `.ts` file under `tests/`, helpers
+// included, for a file holding pins with no
 // mark, and `NOT_PINS` declares the files it finds that pin no work. A suite whose pins take a form the net lacks is
 // protected by a list, not by the net: the test holds every `{file, in}` pair the marks name, so a mark lost, moved or
 // redirected fails it. Under `tests/helpers/type-core/families/` it also requires every recorded bound to be a line a
@@ -162,7 +163,10 @@ export const NOT_PINS = [
   { file: "tests/runtime/presentation/message-markup.test.ts", is: "character codes" },
   { file: "tests/runtime/engine/runtime-random.test.ts", is: "a generator's expected states" },
   { file: "tests/type-core/messages/type-core-messages-examples.test.ts", is: "random seeds" },
-  { file: "tests/helpers/type-core/type-core-enclosing.ts", is: "sample values of a host global" },
+  {
+    file: "tests/helpers/type-core/enclosing/type-core-enclosing-certificates.ts",
+    is: "sample values of a host global",
+  },
 ];
 
 /** The four pin forms the marks' test finds by their text. */
@@ -279,5 +283,4 @@ export function testFiles(root) {
   return suiteTestFiles(join(root, "tests"), ".test.ts").map((name) => `tests/${name}`);
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url))
-  process.exitCode = main(process.argv.slice(2));
+if (import.meta.main) process.exitCode = main(process.argv.slice(2));

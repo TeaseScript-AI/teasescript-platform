@@ -36,7 +36,7 @@ import {
   CapturedMediaStore,
   isWellFormedCapturedMediaReference,
 } from "../../player/media/captured-media.js";
-import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
+import { FakeMediaRepository } from "../helpers/player/media/fake-media-repository.js";
 import {
   stubBrowser,
   SCOPE,

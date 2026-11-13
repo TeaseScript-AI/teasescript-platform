@@ -1,0 +1,14 @@
+# The npm scripts `npm run check:pretest` runs side by side (`tools/check/run-parallel.mjs --list`): one per line, with no
+# separator, so that two added at different places merge, the end included.
+format:check
+lint
+lint:design
+test:lint:design
+test:lint
+knip
+check:doc-links
+check:imports
+test:build:typescript
+test:verification
+test:families
+check:readme-paths

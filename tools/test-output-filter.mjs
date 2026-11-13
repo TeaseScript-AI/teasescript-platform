@@ -1,10 +1,11 @@
 import { spawn, spawnSync } from "node:child_process";
-import { fstatSync, globSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, fstatSync, globSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { testPathArguments } from "./test-arguments.mjs";
-import { TEST_LIMIT_MS } from "./test-in-flight.mjs";
-import { shardFiles, shardOption, suiteTestFiles } from "./test-shards.mjs";
+import { pathToFileURL } from "node:url";
+import { testPathArguments } from "./test-runner/test-arguments.mjs";
+import { TEST_LIMIT_MS } from "./test-runner/test-in-flight.mjs";
+import { shardFiles, shardOption, suiteTestFiles } from "./test-runner/test-shards.mjs";
 
 // oxlint-disable-next-line no-control-regex -- EVIDENCE: fixture: the pattern matches the ESC character that starts an ANSI escape sequence.
 const ANSI_ESCAPE_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
@@ -46,7 +47,7 @@ const arguments_ = process.argv.slice(2);
 // stages it shares with `npm run check`.
 const fullOutput = arguments_[0] === "--full-output" || process.env.TEST_FULL_OUTPUT === "1";
 if (arguments_[0] === "--full-output") arguments_.shift();
-// (`--shard=i/N`: the full suite's shard i of N, as CI's test jobs run it, `tools/test-shards.mjs`)
+// (`--shard=i/N`: the full suite's shard i of N, as CI's test jobs run it, `tools/test-runner/test-shards.mjs`)
 let shard = null;
 if (arguments_.some((argument) => argument.startsWith("--shard"))) {
   if (arguments_.length > 1)
@@ -70,7 +71,7 @@ if (fullSuite) {
 // Node matches its path arguments as globs and reports one that matches nothing only when none matches, so a misspelled
 // path beside a valid one would let a focused run pass without running its test. Its runner globs with the same
 // `exclude`, which leaves out the `node_modules` folder in the working directory and any `node_modules` that a `**`
-// reaches, so the check uses it too. Which arguments are paths, `tools/test-arguments.mjs` decides.
+// reaches, so the check uses it too. Which arguments are paths, `tools/test-runner/test-arguments.mjs` decides.
 let paths = [];
 try {
   paths = testPathArguments(arguments_);
@@ -118,18 +119,18 @@ const selected =
 const removeCounts = () => countsFolder && rmSync(countsFolder, { recursive: true, force: true });
 if (countsFolder !== null) process.once("exit", removeCounts);
 const nodeArguments = fullSuite
-  ? [join(import.meta.dirname, "run-test-files.mjs"), ...testFiles]
+  ? [join(import.meta.dirname, "test-runner/run-test-files.mjs"), ...testFiles]
   : [
       "--test",
       "--test-reporter=spec",
       "--test-reporter-destination=stdout",
       ...(countsFile === null
         ? [
-            `--test-reporter=${join(import.meta.dirname, "test-in-flight.mjs")}`,
+            `--test-reporter=${join(import.meta.dirname, "test-runner/test-in-flight.mjs")}`,
             "--test-reporter-destination=stderr",
           ]
         : [
-            `--test-reporter=${join(import.meta.dirname, "test-file-counts.mjs")}`,
+            `--test-reporter=${join(import.meta.dirname, "test-runner/test-file-counts.mjs")}`,
             `--test-reporter-destination=${countsFile}`,
           ]),
       `--test-timeout=${TEST_LIMIT_MS}`,
@@ -137,6 +138,24 @@ const nodeArguments = fullSuite
     ];
 // (without `TEST_FULL_OUTPUT`: a test that runs this filter itself chooses its own output)
 const { TEST_FULL_OUTPUT: _, ...environment } = process.env;
+// (#1072 R21, R28: every test process imports the retained-state instrument's preload, which installs it in the
+// `tests/type-core/` files of the frozen subset, or in every one with
+// `RETAINED_FREEZE=all`; `tests/type-core-production/` runs the subset's pinning suites again without it)
+const instrument = join(
+  import.meta.dirname,
+  "..",
+  "dist",
+  "tests",
+  "helpers",
+  "retained-instrument-preload.js",
+);
+if (existsSync(instrument))
+  environment.NODE_OPTIONS = [
+    environment.NODE_OPTIONS,
+    `--import=${pathToFileURL(instrument).href}`,
+  ]
+    .filter(Boolean)
+    .join(" ");
 const child = spawn(process.execPath, nodeArguments, {
   env: environment,
   stdio: fullOutput ? "inherit" : ["inherit", "pipe", "inherit"],

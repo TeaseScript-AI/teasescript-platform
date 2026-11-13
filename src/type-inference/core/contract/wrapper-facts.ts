@@ -2,6 +2,7 @@ import type { PlaceId } from "../../graph.js";
 import type { Contract } from "../contract.js";
 import { keyOf } from "../definitions.js";
 import { propertyStep } from "../program.js";
+import { Retained } from "../retained/retained.js";
 import { writtenOf } from "./terms.js";
 
 // G3 stage 1: the facts of the program that leave a binding a wrapper possible, read and charged nothing, so a key's
@@ -68,5 +69,8 @@ function wrapperSteps(contract: Contract, binding: PlaceId): ReadonlySet<string>
     objects.push(here);
   }
   const [first, ...others] = objects;
-  return new Set([...(first ?? [])].filter((step) => others.every((each) => each.has(step))));
+  return Retained.set(
+    "Contract.wrapperSteps[]",
+    [...(first ?? [])].filter((step) => others.every((each) => each.has(step))),
+  );
 }

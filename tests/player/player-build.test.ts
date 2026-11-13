@@ -50,7 +50,7 @@ test("build:tree builds what the compiled suite reads: the TypeScript, the Playe
     script
       .split(/\s*&&\s*/u)
       .flatMap((step) =>
-        step.startsWith("node tools/run-parallel.mjs ")
+        step.startsWith("node tools/check/run-parallel.mjs ")
           ? step.split(" ").slice(2)
           : [step.replace(/^npm run /u, "")],
       );

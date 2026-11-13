@@ -46,10 +46,8 @@ import {
   serializedTopContext,
   contextHoldsInstruction,
 } from "../scopes/activation-validation.js";
-import {
-  validatePendingActionState,
-  validateInteractionResultHandoffState,
-} from "../actions/action-validation.js";
+import { validatePendingActionState } from "../actions/validation/pending-actions.js";
+import { validateInteractionResultHandoffState } from "../actions/validation/result-handoff.js";
 import { validateTimerState } from "../background/timer-validation.js";
 import { validateMediaState } from "../background/media-validation.js";
 import { validatePermanentButtonState } from "../background/permanent-button-validation.js";

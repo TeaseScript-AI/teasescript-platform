@@ -47,14 +47,14 @@ declares. `npm run check:readme-paths` checks that every backticked path in the 
 `player/vue/src/README.md`) names a tracked file or folder; `tools/repository-checks/readme-paths.mjs` says which
 spans it reads and which it skips. `npm run lint:design` and `npm run test:lint:design` check the [Player design
 contracts](LINTING.md#player-design-lint) and their positive/negative fixtures; both are included in `npm run check`.
-Independent pre-test gates and UI checks/builds run concurrently through `tools/run-parallel.mjs`; the pre-test gates
-are the npm scripts `tools/check-pretest-steps.txt` lists, one per line.
-`npm run check` (`tools/run-check.mjs`) runs the build and the compiled tests also when a pre-test check failed, and
+Independent pre-test gates and UI checks/builds run concurrently through `tools/check/run-parallel.mjs`; the pre-test gates
+are the npm scripts `tools/check/check-pretest-steps.txt` lists, one per line.
+`npm run check` (`tools/check/run-check.mjs`) runs the build and the compiled tests also when a pre-test check failed, and
 its last line names what ran, failed and did not run. TypeScript compilation precedes UI work; compiled tests run only
 after all builds pass, as many files at once as
-`node --test` runs, fewer under the job's memory: as many as fit at 3 GiB plus 640 MiB a file in `SX_MEM_MIB` (the
+`node --test` runs, fewer under the job's memory: as many as fit at 4 GiB plus 576 MiB a file in `SX_MEM_MIB` (the
 queue's reservation, in MiB) or the smallest visible cgroup limit, whichever is smaller, so the variable can lower the
-figure but never raise it above a cap the runner can see (`tools/test-files-at-once.mjs`). A file that reports no test of
+figure but never raise it above a cap the runner can see (`tools/test-runner/test-files-at-once.mjs`). A file that reports no test of
 its own, as one whose process ends before its tests report, fails the full suite and is named. Each command's output is printed together, including warnings. A failed command stops no
 other in its group, and its leftover process group is terminated. On SIGINT and SIGTERM, `run-parallel` stops its own
 command groups, escalating after a grace period, and starts no other; `run-check` forwards the signal and waits for its
@@ -88,18 +88,18 @@ copies, only when `--player-profile profile.json` gives a JSON object of them, s
 `{"firstName": "Alex", "petNames": ["puppy"]}`. The probe is a developer aid, not a test.
 The suite is every `tests/*.test.ts`, `tests/<folder>/*.test.ts` and `tests/<folder>/<folder>/*.test.ts`, at most two
 folders down (none deeper), except under `fixtures/` and `helpers/`, which hold no tests (a closed list, `suiteTestFiles`
-in `tools/test-shards.mjs`); a file is named by its path under `tests/`, one at the top by its name alone.
-`npm run test -- dist/tests/<file>.test.js` runs one compiled test through the same compact filter, which fails before running anything when a passed path matches no file, and ends with each named file's test counts (`ℹ <file>: N passed`, and `; the file failed outside any test` when it threw while loading or its process ended non-zero); a named file that ran no test (a suite alone is none) fails the run, unless the tests were selected (a name or skip pattern, or `--test-only`, as an argument or in `NODE_OPTIONS`), where its line says the selection matched no test in it; the per-file counts, and this check, need Node's default process isolation, and a watch run is not checked per cycle; use `npm run test:full-output -- dist/tests/<file>.test.js` only for diagnosis. A compiled-only run (`node tools/test-output-filter.mjs dist/tests/<file>.test.js` after `npm run build:typescript`) fails every Player test that loads a module when `dist/player-test-modules` was built before a file of the checkout changed, a test file included; `npm run build:player-test-modules` rebuilds it. In the full suite and for named files, a test, or one of its hooks, that waits 5 minutes fails (`TEST_LIMIT_MS`, `tools/test-in-flight.mjs`), so an asynchronous hang fails by name (its line can wait until earlier files have reported); synchronous work is not ended. A test or hook that needs longer sets its own `timeout`.
+in `tools/test-runner/test-shards.mjs`); a file is named by its path under `tests/`, one at the top by its name alone.
+`npm run test -- dist/tests/<file>.test.js` runs one compiled test through the same compact filter, which fails before running anything when a passed path matches no file, and ends with each named file's test counts (`ℹ <file>: N passed`, and `; the file failed outside any test` when it threw while loading or its process ended non-zero); a named file that ran no test (a suite alone is none) fails the run, unless the tests were selected (a name or skip pattern, or `--test-only`, as an argument or in `NODE_OPTIONS`), where its line says the selection matched no test in it; the per-file counts, and this check, need Node's default process isolation, and a watch run is not checked per cycle; use `npm run test:full-output -- dist/tests/<file>.test.js` only for diagnosis. A compiled-only run (`node tools/test-output-filter.mjs dist/tests/<file>.test.js` after `npm run build:typescript`) fails every Player test that loads a module when `dist/player-test-modules` was built before a file of the checkout changed, a test file included; `npm run build:player-test-modules` rebuilds it. In the full suite and for named files, a test, or one of its hooks, that waits 5 minutes fails (`TEST_LIMIT_MS`, `tools/test-runner/test-in-flight.mjs`), so an asynchronous hang fails by name (its line can wait until earlier files have reported); synchronous work is not ended. A test or hook that needs longer sets its own `timeout`.
 `node tools/check-changed.mjs` runs before a push the checks CI fails on for what changed since the base (`git diff --check`, `merge commits`, format, oxlint, knip, the doc links, the imports, `test:lint` for every change that is not documentation only, and the type checks and tool tests selected by every touched path, deleted ones and both sides of a move included; its header lists them and its exit codes); CI still runs the tests. `--merged` runs them on HEAD merged into the base's current commit, as CI tests after a squash. In a checkout the queue has already merged with its base (`--merged-with`), run `--merged-checkout "$SX_MERGED_HEAD" --base "$SX_MERGED_BASE"` instead (the queue sets both), so that `merge commits` judges the head's merge commits and not the queue's own merge.
-`node tools/check-shas.mjs [--repo <path>]... [<file>]` checks that the commit SHAs a report or pull-request body names exist and are on a remote (a remote-tracking ref, or an archived or pull-request head on `origin`; a tree hash only exists), and finds its unfilled placeholders and its closing clauses that name several issues after one keyword; it names and counts, without failing, the paths it reads into the scratch area `/tmp/agent-work/`, a count that claims no completeness (its header lists the rules and what it does not read); it never fetches. `--append` writes its last line into the checked file as that file's last line, replacing its earlier one, so the report sent is that file.
+`node tools/check-shas.mjs [--repo <path>]... [<file>]` checks that the commit SHAs a report or pull-request body names exist and are on a remote (a remote-tracking ref, or an archived or pull-request head on `origin`; a tree or blob hash only exists), and finds its unfilled placeholders and its closing clauses that name several issues after one keyword; it names and counts, without failing, the paths it reads into the scratch area `/tmp/agent-work/`, a count that claims no completeness (its header lists the rules and what it does not read); it never fetches. `--append` writes its last line into the checked file as that file's last line, replacing its earlier one, so the report sent is that file.
 `tools/archive-replaced-heads.mjs` is a `pre-push` hook: before a push deletes or rewrites a ref on the remote, it pushes the old value to `refs/archive/<sha>` there and keeps the same ref in this clone, and refuses the push when it cannot or when the push would delete or rewrite an archive (its header lists the rules and the limit).
 CI's "Structure signals (advisory)" step, after `check:pretest` in the job that runs it, prints
 `node tools/structure-report.mjs --diff HEAD^1 --moved`: the structure signals the change adds to, against the merge's
 first parent, without Git's moved lines. Its `--summary` rows, each file over 1,000 lines or gaining over 300, go to
 that job's summary and the end of its log. It never fails; the plan or the review answers each signal.
 `node tools/reading-route-size.mjs [--rev REV] [--base REV]` prints the characters of each document the start route sends an implementing agent to read, their total, the conditional documents beside it, and each `.md` path that `AGENTS.md`, `docs/agents/README.md` or `docs/agents/DIRECT-REPOSITORY.md` names and its lists do not classify (its header names where the route is stated); CI's "Reading route size (reported)" step, after the structure step, prints it with a pull request's difference from the base and never fails.
-`node tools/ci-test-counts.mjs <run id>` prints a GitHub Actions run's node:test totals (tests, pass, fail, skipped) per job and step, read from `gh run view <run id> --log`, and their sum; `--log <file>` reads a saved log.
-`node tools/counters.mjs [ROOT] [--json]` counts a checkout's lint disables, `@ts-expect-error` and `@ts-ignore` directives, skipped and todo tests, shrink-only list entries, and structure signals with their excess summed, with the `@ts-` directives and long functions also counted in tests and outside, and the skipped tests on a condition and without one (its header defines each), for comparing them over time.
+`node tools/test-runner/ci-test-counts.mjs <run id>` prints a GitHub Actions run's node:test totals (tests, pass, fail, skipped) per job and step, read from `gh run view <run id> --log`, and their sum; `--log <file>` reads a saved log.
+`node tools/counters.mjs [ROOT] [--json]` counts a checkout's lint disables, `@ts-expect-error` and `@ts-ignore` directives, skipped and todo tests, shrink-only list entries, and structure signals with their excess summed, with the `@ts-` directives and long functions also counted in tests and outside, and the skipped tests without a condition, as a platform guard and on another condition (its header defines each), for comparing them over time.
 
 For a compiler change meant to preserve behaviour, such as a refactor,
 `node tools/compiler-differential.mjs --base <dist> --head <dist>` loads two builds (each a `dist/` from
@@ -342,20 +342,106 @@ CI runs `npm run check` as three jobs side by side, `check-1` to `check-3`, each
 its 15-minute limit at the slow end of runner variance (#1638, #1978): each builds and runs one third of the compiled
 tests (`npm test -- --shard=i/3`), `check-3` also the checks before them (`npm run check:pretest`). Every type-core test
 file and every other of 10 s or more is listed, costliest first, with its median seconds over three CI runs or more in
-`tools/costly-test-files.mjs`, beside the seconds of `check:pretest`: each test job keeps its files' seconds as an
-artifact for 7 days, and `node tools/measure-test-files.mjs --write --from-ci RUN ...` regenerates the module from them
+`tools/test-runner/costly-test-files.mjs`, beside the seconds of `check:pretest`: each test job keeps its files' seconds as an
+artifact for 7 days, and `node tools/test-runner/measure-test-files.mjs --write --from-ci RUN ...` regenerates the module from them
 (`--from-ci --base-branch BRANCH` takes the first three matches among CI's latest hundred passed pull-request runs into BRANCH, which may be of one pull request or one head and may predate BRANCH's tip, while the current checkout supplies the file set; a refusal says how to find runs to give instead; its header names the runs; seconds measured on a worker do not predict CI's). A new type-core test file runs in full
 before it has an entry, at the other files' seconds; `check-changed` and the shard test name it, and the coordinator
 lands its entry from the merge's CI runs in a light pull request. The full suite starts the listed files
-first, and `tools/test-shards.mjs` shares the files out so that the jobs end together, `check-3`'s after its checks
+first, and `tools/test-runner/test-shards.mjs` shares the files out so that the jobs end together, `check-3`'s after its checks
 before the tests. Their costliest sweeps
 that claim something at every member of a list of settled stops or allowances (`testedStops`, the stops before admission
 settled in `type-core-stop-unsettled`, `completionAllowances`) visit of each list the first, the last and two evenly between
-(`sampled`, `tests/helpers/sweep.ts`), and `type-core-sharing` runs its fixture and matrix programs in the source order
+(`sampled`, `tests/helpers/sweep.ts`), and `type-core-sharing-differential` runs its fixture and matrix programs in the source order
 alone; a search for a member where something happens keeps its list. `TEASESCRIPT_SWEEP=full` makes every sampled list
 whole and runs those programs in both orders: `TEASESCRIPT_SWEEP=full npm run test:compiled`, after `npm run build`,
 is the sweeps' queue evidence, which the builder of a change that can move a stop runs on a worker before a type-core
 review round, beside the generator areas above.
+
+### Frozen retained state
+
+In the type-core suites, a test-mode instrument (`tests/helpers/retained-instrument.ts`, installed by its preload
+through `tools/test-output-filter.mjs`) checks the state the type core keeps between solver runs where it is stored and
+at each run switch, and freezes what an ended run stored (#1072). It counts each refusal it throws, wherever it is
+caught, and the preload fails the file at its exit when it threw any. It catches a write that the type core makes by
+ordinary code, across runs, in test mode; it does not claim to resist code written to get around it (#1072 R33).
+
+Covered, each closed by construction:
+
+- **What a maker returns:**
+  - a record, an arena or an array: a copy of the given top level (`retainedCopy`) that the instrument wraps;
+  - a map, set, weak map or weak set: its own writers.
+- **The plain data a covered kind reaches.** It is frozen at the switch. V8's `TypeError` at a write to plain data
+  frozen at the switch, to what a registration freezes or to a locked owner field is a refusal while it leaves the core
+  as the pending error: the `catch` and `finally` rule keeps it from being handled in `src/type-inference/`
+  (docs/LINTING.md, "Retained state in type inference"), and the compiler's own catches outside take only native stack
+  exhaustion. It is not counted where it is raised, so a later error can replace it (#1072 R68, below). The
+  instrument's own refusals are counted where they are raised, and are not affected.
+- **An owner's fields:** locked at its first switch and opened by marks. Its private fields are reached through
+  `hidden`.
+- **A registered program:** what it reaches is frozen, its maps and sets refuse writes, its typed arrays are compared
+  at the process's exit, what its walk cannot see into (a weak collection, another built-in, an accessor) is refused,
+  and its classes' private collections are reached through `hidden` (`Retained.programPart`).
+- **A registered function's own properties:** frozen at registration.
+- **A typed array under `TYPED_ENTRIES`:** compared at the process's exit with its bytes when its run ended; a
+  difference fails the file.
+
+Not covered, each with its reason:
+
+- module scope (#1072 R57: an item of its own);
+- what a closure captures (its registration comment, read at review, R26), and what a function the program reaches
+  captures, a bound function's values among them (code the program's indexing made);
+- code outside `src/type-inference/`: an owner given to it, its writes and its catches;
+- V8's `TypeError` at such a write when a later error replaces it before it leaves the core (#1072 R68):
+  - a generator closed by a loop whose body throws, whose `finally` makes the write (the engine drops an error raised
+    while it closes a generator);
+  - a `finally` whose call throws after the write.
+
+  No generator `finally` in the core writes retained state today: the six are `core/values.ts:329` and `:964`,
+  `core/contract/value-kinds.ts:244` and `:374`, `core/contract-descriptors.ts:299` and `core/budget.ts:392`;
+- a prototype set by a `"__proto__"` key from data on an owner, a registered function or a function the program
+  reaches (#1072 R65): no core file writes a key from data to one. Of the 93 lines this lists in `src/type-inference/`
+  at #2417's head, 88 of them writes, none has an owner (`this`, or `pass` in `answers.ts`) or a function as its
+  object:
+
+  ```sh
+  rg --pcre2 -g '*.ts' -o '(?<![\w.$\]])[\w$.#]+(?:\[[^\]]*\])*\[[^\]]+\]\s*(=|\?\?=|\|\|=|\+=|-=)(?!=)' src/type-inference
+  ```
+
+- a typed array written and then restored between two comparisons;
+- a private `readonly` field assigned again in its constructor after a run switch inside that constructor (R36);
+- a write within one run; production;
+- admission and the receiving domain (#1072 1b ii); `narrowing/` (R49, an item of its own);
+- an `IDENTITY_CLASSES` class's own state, each listed with its reason;
+- the retained API itself, a trusted implementation.
+
+It runs in two regimes:
+
+- **CI** freezes only the files of `tests/helpers/retained-subset.ts`: a greedy cover, by their frozen cost, of every
+  retained kind by its site, owner kind and registered function that the type-core files exercise frozen, within no CI
+  shard above 10 minutes. That file names what the subset does not exercise. Its work-pinning suites run again
+  unfrozen in `tests/type-core-production/`.
+- **The whole survey** freezes every type-core file, as one queue pool, outside CI and never scheduled. A pull request
+  that changes `src/type-inference/core/**`, its retained makers included, carries in its READY the whole frozen survey
+  at its head: the pool's job exits, and the files, refusals and frozen writes that `node tools/retained-survey.mjs`
+  counts. From the pull request's checkout, `<SHA>` its head's full SHA:
+
+  ```sh
+  find tests/type-core -maxdepth 2 -name '*.test.ts' | sort |
+    sed -E 's#^tests/#dist/tests/#; s#\.ts$#.js#' > /tmp/agent-work/<task>/survey-items.txt
+  sx-job submit --name 'survey-{i}' --owner <owner> --campaign <tag> --items /tmp/agent-work/<task>/survey-items.txt \
+    --target 20m --checkout <SHA> --unmerged "the whole frozen survey of the head" --timeout 2h --mem 8G -- \
+    bash -c 'cd "$SX_CHECKOUT" && mapfile -t items < "$SX_ITEMS" && RETAINED_SURVEY="$SX_OUT/survey" node tools/test-output-filter.mjs "${items[@]}" < /dev/null > "$SX_OUT/filter.txt" 2>&1'
+  sx-job wait --campaign <tag>
+  sx-job gather --campaign <tag> --into ~/work/evidence/<issue>/<SHA>/survey
+  node tools/retained-survey.mjs ~/work/evidence/<issue>/<SHA>/survey
+  ```
+
+  A job starts outside its checkout, hence the `cd "$SX_CHECKOUT"`. The last line exits 0 when every type-core file was
+  surveyed with no refusal and no frozen write; the tests' own outcome is the jobs' exits. `RETAINED_FREEZE=all` freezes
+  every file without the survey's notes.
+
+`RETAINED_MEASURE=<folder>`, with `NODE_OPTIONS=--enable-source-maps`, freezes every file too and writes what each
+exercises by its source site: the measurement the subset is chosen from.
 
 ## Test layers
 

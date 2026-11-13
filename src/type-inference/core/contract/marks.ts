@@ -12,6 +12,7 @@ import { wrapperFacts } from "./wrapper-facts.js";
 import { indexPaths, pathBelow, stepsOf } from "./literal-index.js";
 import type { Holder, HolderReference, ReadGroup, ReferencesByStep } from "./model.js";
 import { addSource, unionOf } from "./selections.js";
+import { amend, Retained, retainedModule } from "../retained/retained.js";
 
 // The mark holders (§8): each holder's reads and references, and its mark at a path (§3.2).
 
@@ -98,14 +99,14 @@ export function marksNothing(contract: Contract, holder: Holder | null): boolean
 export function newHolder(contract: Contract, id: string): Holder {
   contract.keepText(id.length);
   contract.facts.markNodes += 1;
-  const holder: Holder = {
+  const holder = Retained.record<Holder>("Holder", {
     id,
-    reads: [],
-    readSeen: new Set(),
-    refsAt: new Map(),
-    refSeen: new Set(),
-    guarded: new Set(),
-  };
+    reads: Retained.array("Holder.reads"),
+    readSeen: Retained.set("Holder.readSeen"),
+    refsAt: Retained.map("Holder.refsAt"),
+    refSeen: Retained.set("Holder.refSeen"),
+    guarded: Retained.set("Holder.guarded"),
+  });
   contract.holders.set(id, holder);
   return holder;
 }
@@ -125,7 +126,8 @@ function refer(
   holder.refSeen.add(key);
   contract.facts.markNodes += 1;
   const list = holder.refsAt.get(where);
-  if (list === undefined) holder.refsAt.set(where, [{ to, shift }]);
+  if (list === undefined)
+    holder.refsAt.set(where, Retained.array("Holder.refsAt[]", [{ to, shift }]));
   else list.push({ to, shift });
 }
 
@@ -164,10 +166,10 @@ function readGroups(
   const known = contract.groups.get(reads);
   if (known !== undefined) return known;
   const { program } = contract.pass;
-  const groups = new Map<
+  const groups = Retained.map<
     Key,
     { readonly byCallable: Map<Callable | null, ReadGroup>; readonly list: ReadGroup[] }
-  >();
+  >("Contract.groups[]");
   const byKey = new Map<string, ReadGroup>();
   const callables = new Map<Callable | null, number>();
   for (const read of reads) {
@@ -194,7 +196,11 @@ function readGroups(
         (group = { callable, file: node.file, nodes: [], byPosition: [], byStart: [] }),
       );
       let entry = groups.get(base);
-      if (entry === undefined) groups.set(base, (entry = { byCallable: new Map(), list: [] }));
+      if (entry === undefined)
+        groups.set(
+          base,
+          (entry = { byCallable: Retained.map("Contract.groups[].byCallable"), list: [] }),
+        );
       entry.byCallable.set(callable, group);
       entry.list.push(group);
     }
@@ -320,13 +326,14 @@ function readsAt(contract: Contract, reads: Holder["reads"], rest: readonly stri
  */
 export function collectMarks(contract: Contract): void {
   if (contract.collected) return;
+  amend(contract);
   contract.collected = true;
   // (a key's lane asked meanwhile would read the marks unfinished: `keyLane`)
-  contract.building += 1;
+  contract.building.depth += 1;
   try {
     collectAll(contract);
   } finally {
-    contract.building -= 1;
+    contract.building.depth -= 1;
   }
 }
 
@@ -486,7 +493,7 @@ export function marksAt(contract: Contract, holder: Holder | null, asked: Rest):
     const depth = depthOf(contract, asked);
     const rest = at.length > depth ? at.slice(0, depth) : at;
     const memoKey = pathText(rest);
-    asked.memo ??= new Map();
+    asked.memo ??= Retained.map("marks.asked.memo");
     const known = asked.memo.get(memoKey);
     if (known !== undefined) return known;
     // a reference back to itself answers no
@@ -592,36 +599,42 @@ interface MarkAutomaton {
   prefixVisits: number;
 }
 
-const AUTOMATA = new WeakMap<Contract, MarkAutomaton>();
+const AUTOMATA = retainedModule<Contract, MarkAutomaton>("marks.AUTOMATA", "weakMap");
 
 const MARKED: MarkResidual = { marked: true, states: [] };
 const NONE: MarkResidual = { marked: false, states: [] };
 
 function automatonOf(contract: Contract): MarkAutomaton {
-  let known = AUTOMATA.get(contract);
+  let known = AUTOMATA().get(contract);
   if (known === undefined)
-    AUTOMATA.set(
+    AUTOMATA().set(
       contract,
-      (known = {
-        states: [],
-        roots: new Map(),
-        starts: new Map(),
-        moves: new Map(),
+      (known = Retained.record<MarkAutomaton>("MarkAutomaton", {
+        states: Retained.arena("MarkAutomaton.states"),
+        roots: Retained.map("MarkAutomaton.roots"),
+        starts: Retained.map("MarkAutomaton.starts"),
+        moves: Retained.map("MarkAutomaton.moves"),
         prefixVisits: 0,
-      }),
+      })),
     );
   return known;
 }
 
 /** Test-only: the states of a pass's mark automaton (Sol's R), `0` where none was compiled. */
 export function markStates(contract: Contract): number {
-  return AUTOMATA.get(contract)?.states.length ?? 0;
+  return AUTOMATA().get(contract)?.states.length ?? 0;
 }
 
 function newState(contract: Contract, automaton: MarkAutomaton): number {
   contract.pass.program.work.charge("eventSteps");
   contract.keep(3);
-  automaton.states.push({ next: new Map(), epsilon: [], accepting: false });
+  automaton.states.push(
+    Retained.record<MarkState>("MarkState", {
+      next: Retained.map("MarkState.next"),
+      epsilon: Retained.array("MarkState.epsilon"),
+      accepting: false,
+    }),
+  );
   return automaton.states.length - 1;
 }
 
@@ -685,7 +698,8 @@ export function markStep(contract: Contract, from: readonly number[], asked: str
     if (moved === undefined) {
       const to = automaton.states[id]!.next.get(step);
       moved = to === undefined ? NONE : closure(contract, automaton, [to]);
-      if (bySteps === undefined) automaton.moves.set(id, (bySteps = new Map()));
+      if (bySteps === undefined)
+        automaton.moves.set(id, (bySteps = Retained.map("MarkAutomaton.moves[]")));
       contract.keep(2 + moved.states.length);
       bySteps.set(step, moved);
     }
@@ -726,7 +740,8 @@ export function markStart(contract: Contract, holder: Holder, path: number): Mar
   const steps = recordPath(stepsOf(contract, path));
   contract.pass.program.work.charge("eventSteps", 1 + steps.length);
   const residual = walk(contract, automaton, root, steps);
-  if (byPath === undefined) automaton.starts.set(holder, (byPath = new Map()));
+  if (byPath === undefined)
+    automaton.starts.set(holder, (byPath = Retained.map("MarkAutomaton.starts[]")));
   contract.keep(2 + residual.states.length);
   byPath.set(path, residual);
   return residual;
@@ -824,12 +839,12 @@ function compile(contract: Contract, automaton: MarkAutomaton, holder: Holder): 
 
 /** Test-only: the guarded prefixes a pass's holder compilations visited (Astra r2 B3). */
 export function markPrefixVisits(contract: Contract): number {
-  return AUTOMATA.get(contract)?.prefixVisits ?? 0;
+  return AUTOMATA().get(contract)?.prefixVisits ?? 0;
 }
 
 /** Test-only: the holders a pass's mark automaton compiled. */
 export function markHolders(contract: Contract): readonly Holder[] {
-  return [...(AUTOMATA.get(contract)?.roots.keys() ?? [])];
+  return [...(AUTOMATA().get(contract)?.roots.keys() ?? [])];
 }
 
 /** Test-only: the states `steps` below a holder's root leave (`walk`): marked, or those pending. */
@@ -881,10 +896,10 @@ function referencesBy(
   where: number,
   references: readonly HolderReference[],
 ): ReferencesByStep {
-  holder.byStep ??= new Map();
+  holder.byStep ??= Retained.map("Holder.byStep");
   const known = holder.byStep.get(where);
   if (known !== undefined) return known;
-  const byStep = new Map<string, HolderReference[]>();
+  const byStep = Retained.map<string, HolderReference[]>("Holder.byStep[].byStep");
   const any: HolderReference[] = [];
   let units = 3 + references.length;
   for (const reference of references) {
@@ -940,7 +955,7 @@ function markFirsts(contract: Contract, holder: Holder): ReadonlySet<string> | n
 
 /** A holder's first steps (`markFirsts`), those of the holders it refers to known. */
 function ownFirsts(contract: Contract, holder: Holder): ReadonlySet<string> | null {
-  const own = new Set<string>();
+  const own = Retained.set<string>("Holder.firsts");
   const sources = new Set<ReadonlySet<string>>();
   const add = (where: number): void => {
     contract.pass.program.work.charge("eventSteps");
