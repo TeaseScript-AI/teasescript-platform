@@ -1,5 +1,5 @@
 /*
- * The state the type core keeps between solver runs (a retained datum: anything a run computes that a
+ * #1072 step 1b: the state the type core keeps between solver runs (a retained datum: anything a run computes that a
  * later run can observe without a solver read) is made and changed here. What may change in place is a closed list of
  * kinds, each made here at its creation site: a collection (`Retained.map`, `set`, `weakMap`, `weakSet`), a record
  * (`Retained.record`), an arena (`Retained.arena`: an array that only grows, each slot written once) and an array
@@ -86,11 +86,11 @@ export function retainedInstrument(): RetainedInstrumentHooks | null {
 }
 
 /**
- * What a record, arena or array maker keeps (#1072): a copy of `given`'s top level, an array's elements (`slice`,
+ * What a record, arena or array maker keeps (#1072 R46): a copy of `given`'s top level, an array's elements (`slice`,
  * holes kept) or an object's own enumerable fields on a new object of its prototype (`Object.assign`), so no reference a
  * caller holds reaches it. Production keeps the copy and an instrument wraps the same copy, so both read the same state
  * however the call is spelled. A value inside it stays itself in both, the plain data among them frozen by an
- * instrument at the run switch (#1072).
+ * instrument at the run switch (#1072 R59).
  */
 export function retainedCopy<T extends object>(given: T): T {
   // EVIDENCE: invariant: an array's copy is an array of its elements, an object's an object of its fields: `T`'s shape.
@@ -133,7 +133,7 @@ export const Retained = {
     return active === null ? retainedCopy(items) : active.array(name, items);
   },
   /**
-   * A function retained state may keep, registered where it is made (#1072). The comment line before each call
+   * A function retained state may keep, registered where it is made (#1072 R26). The comment line before each call
    * (`#1072 R26: captures …` or `#1072 R26: as …`, which `check-retained-state` requires) names what the function
    * captures and why that is covered: a closed-list kind or an owner, a value fixed when it is
    * made, or a module's own binding. The instrument does not see the captures; the comment is read at review.
@@ -187,7 +187,7 @@ export function amend<T extends object>(target: T): void {
 type ModuleKind = "map" | "set" | "weakMap" | "weakSet";
 
 /**
- * A module's retained collection (a capture) of `kind`, which this makes (#1072): the native one made at its first
+ * A module's retained collection (a capture) of `kind`, which this makes (#1072 R46): the native one made at its first
  * use, or, while an instrument is installed, the instrument's own for the module's name, made at its first use under
  * that instrument.
  */
