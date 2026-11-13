@@ -19,8 +19,8 @@
  *   key too; a record's, an arena's or an array's write) and again at the next run switch: a primitive; plain data (an
  *   object of prototype `Object.prototype` or `null`, or an array of `Array.prototype`, data properties only); a kind
  *   made by `Retained`; a registered owner; a registered function; a value the indexed program reaches
- *   (`Retained.program` and its parts, `Retained.programPart`: its plain data frozen there, its native collections given
- *   writers that refuse); an instance of a class of `IDENTITY_CLASSES`; a typed array under
+ *   (`Retained.program` and its parts, `Retained.programPart`: what it reaches frozen there, its maps and sets given
+ *   writers that refuse, its typed arrays compared at the exit, and what the walk cannot see into refused); an instance of a class of `IDENTITY_CLASSES`; a typed array under
  *   an entry of `TYPED_ENTRIES`. Anything else is refused: a native collection as a payload, any other function, an
  *   accessor, any other class instance. The walk reads descriptors only; it calls no getter and no iterator of an instance.
  * - At each run switch the solver reports, what the run that ended stored is checked again, and its plain data frozen in
@@ -114,13 +114,21 @@ const NATIVE_COLLECTIONS = new Set<unknown>([
   WeakMap.prototype,
   WeakSet.prototype,
 ]);
-/** The writers of a native collection the program's walk reaches, by its prototype: each refuses (R61). */
+/**
+ * The writers of a native map or set the program's walk reaches, by its prototype: each refuses (R61). A weak one is
+ * refused itself, as the walk cannot see its entries.
+ */
 const PROGRAM_WRITERS = new Map<unknown, readonly string[]>([
   [Map.prototype, ["set", "delete", "clear"]],
   [Set.prototype, ["add", "delete", "clear"]],
-  [WeakMap.prototype, ["set", "delete"]],
-  [WeakSet.prototype, ["add", "delete"]],
 ]);
+// (taken before any test runs: an ordinary object's brand, which no built-in with internal state has)
+const TO_STRING = Object.prototype.toString;
+
+/** An object or a function: what a collection's key or member can hold beyond itself. */
+function isReference(value: unknown): value is object {
+  return (typeof value === "object" && value !== null) || typeof value === "function";
+}
 const INDEX = /^(?:0|[1-9]\d*)$/;
 // (taken before any test runs: the program's walk reads native collections by these alone)
 const MAP_FOR_EACH = Map.prototype.forEach;
@@ -425,10 +433,11 @@ export class RetainedInstrument implements RetainedRecorder {
   }
 
   /**
-   * The indexed program (`Retained.program`): every object its graph reaches, through data fields and native
-   * collections' entries (read by the intrinsics), is admitted as it is, its plain data frozen and its native
-   * collections given writers that refuse, as the program is never written after its indexing. The walk stops at a
-   * listed class's instance.
+   * The indexed program (`Retained.program`): every object its graph reaches, through data fields, a function's own
+   * values and native maps' and sets' entries (read by the intrinsics), is admitted as it is, as the program is never
+   * written after its indexing: an object or a function is frozen, a map or a set given writers that refuse, a typed
+   * array compared at the exit; a weak collection or another built-in, whose contents the walk cannot see, is
+   * refused. The walk stops at a listed class's instance.
    */
   public program<T extends object>(program: T): void {
     this.#programGraph(program, [program]);
@@ -462,6 +471,20 @@ export class RetainedInstrument implements RetainedRecorder {
         MAP_FOR_EACH.call(value, (item: unknown, key: unknown) => stack.push(key, item));
       else if (prototype === Set.prototype)
         SET_FOR_EACH.call(value, (item: unknown) => stack.push(item));
+      else if (ArrayBuffer.isView(value)) {
+        this.#programTyped(value);
+        continue;
+      } else if (
+        prototype !== Array.prototype &&
+        !PLAIN.has(prototype) &&
+        TO_STRING.call(value) !== "[object Object]"
+      ) {
+        // (what the walk cannot see into, a weak collection's entries or another built-in's internal state, is refused)
+        this.#refuse(
+          `a ${className(value)} the indexed program reaches, whose contents its walk cannot see`,
+        );
+        continue;
+      }
       const writers = PROGRAM_WRITERS.get(prototype);
       if (writers !== undefined) {
         // (non-configurable and read-only, as a made collection's: none falls back to the native writer)
@@ -476,13 +499,24 @@ export class RetainedInstrument implements RetainedRecorder {
           });
         Object.preventExtensions(value);
       }
-      if (ArrayBuffer.isView(value)) continue;
       for (const key of Reflect.ownKeys(value)) {
         const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
         if ("value" in descriptor) stack.push(descriptor.value);
       }
-      if (prototype === Array.prototype || PLAIN.has(prototype)) Object.freeze(value);
+      // (plain data, an array and a class's instance alike: the program is never written after its indexing)
+      if (writers === undefined) Object.freeze(value);
     }
+  }
+
+  /** A typed array the program reaches, which no freeze holds: compared at the exit with its bytes now, as a sealed one is. */
+  #programTyped(view: ArrayBufferView): void {
+    if (Reflect.ownKeys(view).some((key) => typeof key === "symbol" || !/^\d+$/u.test(key)))
+      this.#refuse("a typed array with own fields beside its elements in the indexed program");
+    Object.preventExtensions(view);
+    if (this.#typedSeen.has(view)) return;
+    this.#typedSeen.add(view);
+    const bytes = new Uint8Array(view.buffer, view.byteOffset, view.byteLength).slice();
+    this.#typed.push({ view, bytes, path: "the indexed program" });
   }
 
   #count(kind: KindName, name: string): void {
@@ -502,17 +536,11 @@ export class RetainedInstrument implements RetainedRecorder {
 
   /** A collection's or a maker's store of `value` (and, for a map, of its object `key`): checked now, sealed at the switch. */
   public stored(made: Made, key: unknown, value: unknown, keyed: boolean): void {
-    if (keyed && typeof key === "object" && key !== null)
-      this.#admit(key, `${made.name}'s key`, false);
+    if (keyed && isReference(key)) this.#admit(key, `${made.name}'s key`, false);
     this.#admit(value, made.name, false);
     // (a primitive stored under a primitive key has nothing to check again or seal at the switch; one written over it
     // later is a store of its own)
-    if (
-      (typeof value === "object" && value !== null) ||
-      typeof value === "function" ||
-      (keyed && typeof key === "object" && key !== null)
-    )
-      this.#pending.push([made, key]);
+    if (isReference(value) || (keyed && isReference(key))) this.#pending.push([made, key]);
     this.#outsideWrite(made.name);
   }
 
@@ -712,10 +740,9 @@ export class RetainedInstrument implements RetainedRecorder {
     this.#pending = [];
     for (const entry of pending) {
       const [made, key] = entry;
-      // (an object key is sealed while its entry stands, whatever its value, `undefined` included)
+      // (an object or function key is sealed while its entry stands, whatever its value, `undefined` included)
       if (
-        typeof key === "object" &&
-        key !== null &&
+        isReference(key) &&
         (made.kind === "map"
           ? Map.prototype.has.call(made.holder, key)
           : made.kind === "weakMap" && WeakMap.prototype.has.call(made.holder, key))

@@ -627,7 +627,7 @@ class ProgramPart {
 }
 
 test("the program's native collections refuse every write, its private ones reached through `programPart`", () => {
-  const program = { natives: new Map([["k", 0]]), members: new WeakSet<object>() };
+  const program = { natives: new Map([["k", 0]]), members: new Set<object>() };
   let part: ProgramPart | undefined;
   const { steps } = stepped(() => [
     () => {
@@ -701,4 +701,54 @@ test("a function the program reaches is frozen, and the plain data its own prope
   ]);
   assert.deepEqual(steps, ["ok", "frozen", "frozen"]);
   assert.deepEqual([fn.cache.n, fn.scalar], [0, 0]);
+});
+
+class ProgramNode {
+  public label = "a";
+}
+
+test("what the program reaches is frozen, a typed array compared at the exit, and what its walk cannot see into refused", () => {
+  const weak = new WeakMap<object, { n: number }>();
+  const key = {};
+  weak.set(key, { n: 0 });
+  const node = new ProgramNode();
+  const bits = new Uint8Array(2);
+  const instrument = new RetainedInstrument();
+  const { steps } = stepped(
+    () => [
+      () => Retained.program({ node, bits }),
+      () => (node.label = "b"),
+      () => (bits[0] = 1),
+      () => Retained.program({ weak }),
+      () => Retained.program({ day: new Date(0) }),
+    ],
+    instrument,
+  );
+  assert.deepEqual(steps, ["ok", "frozen", "ok", "refused", "refused"]);
+  assert.deepEqual(instrument.changedTyped(), ["the indexed program"]);
+  assert.equal(weak.get(key)!.n, 0);
+});
+
+test("a collection's function key is admitted as a function value is: refused unregistered, its own data sealed registered", () => {
+  type Keyed = (() => number) & { cache: { n: number } };
+  const registered = Object.assign(() => 0, { cache: { n: 0 } });
+  let map: Map<Keyed, number> | undefined;
+  const { steps } = stepped(() => [
+    () =>
+      Retained.map<Keyed, number>("T.unregisteredKeys").set(
+        Object.assign(() => 0, { cache: { n: 0 } }),
+        0,
+      ),
+    () =>
+      Retained.weakMap<Keyed, number>("T.unregisteredWeakKeys").set(
+        Object.assign(() => 0, { cache: { n: 0 } }),
+        0,
+      ),
+    () => {
+      map = Retained.map<Keyed, number>("T.registeredKeys");
+      map.set(Retained.closure("T.key", registered), 0);
+    },
+    () => ++map!.keys().next().value!.cache.n,
+  ]);
+  assert.deepEqual(steps, ["refused", "refused", "ok", "frozen"]);
 });

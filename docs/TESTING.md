@@ -358,8 +358,9 @@ Covered, each closed by construction:
   take only native stack exhaustion.
 - **An owner's fields:** locked at its first switch and opened by marks. Its private fields are reached through
   `hidden`.
-- **A registered program:** its plain data is frozen, its native collections refuse writes, and its classes' private
-  collections are reached through `hidden` (`Retained.programPart`).
+- **A registered program:** what it reaches is frozen, its maps and sets refuse writes, its typed arrays are compared
+  at the process's exit, what its walk cannot see into (a weak collection, another built-in) is refused, and its
+  classes' private collections are reached through `hidden` (`Retained.programPart`).
 - **A registered function's own properties:** frozen at registration.
 - **A typed array under `TYPED_ENTRIES`:** compared at the process's exit with its bytes when its run ended; a
   difference fails the file.
