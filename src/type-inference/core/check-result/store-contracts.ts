@@ -126,7 +126,6 @@ export class Contracts {
     const whole = store.kind === "letStatement" || store.target.kind === "identifier";
     const place = this.answers.at(nodeOf(this.answers, this.index, store))?.place ?? null;
     const required = place === null ? null : this.answers.requirement(place.id, place.path);
-    this.destination(store);
     const settled =
       place === null || (whole && declaration.typeAnnotation !== null) || required !== null
         ? null
