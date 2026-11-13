@@ -430,7 +430,7 @@ Exit statuses:
 
 `stop-runs.mjs` (#2080) looks, on one built tree, for a stop that lets a value through that the natural plan rejects.
 For each item it compiles the unit unstopped and at the item's demand allowance, in its mode, and runs both plans over
-host data: `stopRuns` and `hostValues` in `tests/helpers/type-core-stop-oracle.ts`, which also feed that data to
+host data: `stopRuns` and `hostValues` in `tests/helpers/type-core-stop-runs.ts`, which also feed that data to
 `stopProblems` as its violating runs. The host data holds scalars and collections, objects by the unit's own property
 names and paths, and values made from every type either plan checks.
 
