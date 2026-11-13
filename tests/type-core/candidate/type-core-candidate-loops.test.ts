@@ -32,11 +32,13 @@ import { HELD_MODES } from "../../helpers/type-core-held-host.js";
  *   place; #2674's, a read in a type case's block, which the route does not narrow) and every TSV046 warning of
  *   today's (a test its types decide).
  * - `refused`: the route declines with this text.
- * - `way`: today plans; the route gives TSV052 and no plan (#2660).
+ * - `error`: today plans; the route gives this error, no other, and no plan: #2660's TSV052 (its ways do not read the
+ *   values a subject's type holds), #2674's TSV041 (a value case narrows the switched variable).
  * - `unreached`: as `equal`, but where today warns TSV065 that a statement after a `switch` never runs, the route does
  *   not (#2660, the same cause: its ways do not read the values a subject's type holds).
  */
-type Expect = "equal" | { readonly refused: string } | "way" | "unreached";
+type Expect =
+  "equal" | { readonly refused: string } | { readonly error: "TSV052" | "TSV041" } | "unreached";
 
 interface Row {
   readonly name: string;
@@ -70,7 +72,7 @@ function judge(row: Row, record: DifferentialRecord): string[] {
       failures.push(`${at}: threw ${mode.threw}`);
       continue;
     }
-    if (typeof row.expect === "object") {
+    if (typeof row.expect === "object" && "refused" in row.expect) {
       if (mode.outside !== row.expect.refused)
         failures.push(
           `${at}: not refused as "${row.expect.refused}": ${mode.outside ?? "published"}`,
@@ -81,16 +83,16 @@ function judge(row: Row, record: DifferentialRecord): string[] {
       failures.push(`${at}: refused: ${mode.outside}`);
       continue;
     }
-    if (row.expect === "way") {
+    if (typeof row.expect === "object") {
       const errors = diagnosed(mode).filter((each) => each.startsWith("error "));
       if (
         !checker.plan ||
         mode.plan ||
         errors.length !== 1 ||
-        !errors[0]!.startsWith("error TSV052 ")
+        !errors[0]!.startsWith(`error ${row.expect.error} `)
       )
         failures.push(
-          `${at}: not the way class: today ${checker.plan ? "plans" : "no plan"}, route ${JSON.stringify(diagnosed(mode))}`,
+          `${at}: not ${row.expect.error} alone: today ${checker.plan ? "plans" : "no plan"}, route ${JSON.stringify(diagnosed(mode))}`,
         );
       continue;
     }
@@ -438,15 +440,30 @@ test("a `switch` whose subject's type rules out the no-case way gets TSV052 on t
       ...DECLARED_WAY_ERRORS.map((declared) => ({
         name: `declared: ${declared.form}`,
         files: declared.files,
-        expect: "way" as const,
+        expect: { error: "TSV052" } as const,
       })),
       // (inherited: a type case, and its twin without a `switch`, which gives the same TSV052)
       one(
         "inherited: a type case",
         "let s = 1\nswitch s {\n  case is integer {\n    exit\n  }\n}\n",
-        "way",
+        { error: "TSV052" },
       ),
-      one("inherited: the twin", 'let s = 1\nif s is integer {\n  exit\n}\nsay "after"\n', "way"),
+      one("inherited: the twin", 'let s = 1\nif s is integer {\n  exit\n}\nsay "after"\n', {
+        error: "TSV052",
+      }),
+    ],
+    t,
+  );
+});
+
+test("a value case narrows the switched variable on the route, so a typed store in it errs where today plans (#2674)", (t) => {
+  check(
+    [
+      one(
+        "a host subject",
+        'let w: integer = 0\nswitch hostValue {\n  case "text" {\n    w = hostValue\n  }\n}\nsay w\nexit\n',
+        { error: "TSV041" },
+      ),
     ],
     t,
   );
