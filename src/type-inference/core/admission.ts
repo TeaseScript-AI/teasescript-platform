@@ -63,7 +63,8 @@ import type { Body, CellAnswer } from "./admission/literals/cell.js";
 import { levelsOf, permittedAt } from "./admission/permitted.js";
 import { storeRequirement } from "./admission/requirements.js";
 import type { Composed } from "./admission/structure.js";
-import type { DeciderCaches, DeciderGroup, HeldInput } from "./admission/transfers.js";
+import type { HeldInput } from "./admission/transfers/held-input.js";
+import type { DeciderCaches, DeciderGroup } from "./admission/transfers/regions.js";
 import { scanView } from "./admission/scan.js";
 import { copySources } from "./admission/walk.js";
 import type { CorePass } from "./answers.js";
@@ -115,6 +116,7 @@ import { withoutEmpty } from "./exact-path.js";
 import type { FlowNode } from "./flow-graph.js";
 import type { IngressNode, Item, ItemTag } from "./items.js";
 import { propertyStep } from "./program.js";
+import { Retained } from "./retained/retained.js";
 import { elementStep, type MixedSteps, type Obligation } from "./result.js";
 import type { Work } from "./solver.js";
 import { Touches, type Touch } from "./touch.js";
@@ -270,7 +272,7 @@ export class Admission {
   /** The store walk's tasks by value, node, strip and whether a carrier's own (`expand`): each task's recipe once. */
   readonly expansions = new Map<string, Expansion>();
   /**
-   * The carriers' transfers over those recipes (`admission/transfers.ts`): A2's held input per task and lane, the
+   * The carriers' transfers over those recipes (`admission/transfers/`): A2's held input per task and lane, the
    * decider's groups by their members, and per operation link its answers and the kinds it holds at a path.
    */
   readonly heldInputs = new Map<string, HeldInput>();
@@ -574,20 +576,27 @@ export class Admission {
    * walked down a decision's path as far as it holds it.
    */
   public get dirty(): KeyTrie {
-    return (this.#dirty ??= new KeyTrie(this.work, "checks", () => [
-      ...this.rejectedKeys,
-      ...this.a4Keys,
-    ]));
+    return (this.#dirty ??= new KeyTrie(
+      this.work,
+      "checks",
+      // (#1072 R26: captures `this`, the admission, whose state is step 1b-ii's to record)
+      Retained.closure("Admission.dirty", () => [...this.rejectedKeys, ...this.a4Keys]),
+    ));
   }
 
   public get stored(): KeyTrie {
     const { definitions } = this.pass;
-    return (this.#stored ??= new KeyTrie(this.work, "checks", () => [
-      ...[...definitions.byKey]
-        .filter(([, list]) => list.some((d) => d.kind === "whole" || d.kind === "add"))
-        .map(([key]) => key),
-      ...definitions.deadArguments.keys(),
-    ]));
+    return (this.#stored ??= new KeyTrie(
+      this.work,
+      "checks",
+      // (#1072 R26: captures the pass's definition index, an owner)
+      Retained.closure("Admission.stored", () => [
+        ...[...definitions.byKey]
+          .filter(([, list]) => list.some((d) => d.kind === "whole" || d.kind === "add"))
+          .map(([key]) => key),
+        ...definitions.deadArguments.keys(),
+      ]),
+    ));
   }
 
   /** The analysis's ledger, which the paths and keys built here are charged to (`keptKey`, `keptText`). */
@@ -846,7 +855,7 @@ export class Admission {
   }
 
   /**
-   * A decision's work record (`consumers/stores.ts`): a cursor's path not made but named by its key, its steps exported
+   * A decision's work record (`consumers/stores/stores.ts`): a cursor's path not made but named by its key, its steps exported
    * with every other cursor decision's of the pass through one packet (`exportDecisionPaths`), read only from it.
    */
   public decisionWork(

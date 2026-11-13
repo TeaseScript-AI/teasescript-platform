@@ -108,7 +108,10 @@ export const ALLOWED_SOURCE: readonly {
     reason: "Readers of a published session's actions, media, timed work, draws and previews",
     modules: [
       "src/runtime/actions/choice-options.ts",
-      "src/runtime/actions/form.ts",
+      "src/runtime/actions/form/editing.ts",
+      "src/runtime/actions/form/shared-helpers.ts",
+      "src/runtime/actions/form/submission.ts",
+      "src/runtime/actions/form/ui-state.ts",
       "src/runtime/actions/interrupts.ts",
       "src/runtime/actions/model.ts",
       "src/runtime/background/exact-interpolation.ts",

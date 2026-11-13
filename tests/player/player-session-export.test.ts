@@ -26,7 +26,7 @@ import {
   type RuntimeScriptStorageEntrySnapshot,
   type SerializableRuntimeValue,
 } from "../../src/index.js";
-import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
+import { FakeMediaRepository } from "../helpers/player/media/fake-media-repository.js";
 import { readForImport, type SessionRead } from "../helpers/player/transfer-read.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { answerWith, type Intent } from "../helpers/player/player-input.js";

@@ -28,7 +28,7 @@ import type {
   RuntimeScriptStorageEntrySnapshot,
   SerializableRuntimeValue,
 } from "../../src/index.js";
-import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
+import { FakeMediaRepository } from "../helpers/player/media/fake-media-repository.js";
 
 const photo = "captured-media:11111111-1111-4111-8111-111111111111:1";
 const second = "captured-media:22222222-2222-4222-8222-222222222222:7";

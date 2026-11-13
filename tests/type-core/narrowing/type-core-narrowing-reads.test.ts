@@ -398,6 +398,65 @@ test("a read below a selection takes its narrowing, each selected owner's own se
   }
 });
 
+// the test proves a kind, never an ingress (C9, the lead's ruling (a)): external data keeps exactly one boundary
+// check, at its ingress store or, where no store brought it, at the consumer, through every transfer that
+// keeps the value; a computed result brings no data in (Codex r1–r3 on #1770: the typed store, the operator, the
+// selection without an ingress are rows)
+const transfers: readonly (readonly [string, string, string, string, string])[] = [
+  ["a read", "", "integer", "repeat X {}", "valid, copy-type boundary"],
+  ["a copy", "", "integer", "let c = X\n repeat c {}", "valid, copy-type boundary"],
+  [
+    "a merge of one kind",
+    "",
+    "integer",
+    "let xs = [X, 1]\n repeat xs[0] {}",
+    "valid, copy-type boundary",
+  ],
+  [
+    "a literal's element",
+    "",
+    "integer",
+    "let xs = [X]\n repeat xs[0] {}",
+    "valid, copy-type boundary",
+  ],
+  ["a selection", "", "integer[]", "repeat X[0] {}", "valid, copy-type boundary"],
+  [
+    "an operator",
+    "",
+    "integer",
+    "let out: integer = X + 1\n repeat out {}",
+    "valid, copy-type boundary",
+  ],
+  [
+    "a typed store",
+    "",
+    "integer",
+    "let out: integer = X\n repeat out {}",
+    "valid, copy-type boundary",
+  ],
+  [
+    "an argument",
+    "function f(p: integer) {\n repeat p {}\n}\n",
+    "integer",
+    "f(X)",
+    "valid, copy-type boundary",
+  ],
+  [
+    "a result",
+    "function g(p): integer {\n return p\n}\n",
+    "integer",
+    "let out = g(X)\n repeat out {}",
+    "valid, copy-type boundary",
+  ],
+  [
+    "a default",
+    "",
+    "integer",
+    "let out: integer = X otherwise 0\n repeat out {}",
+    "warning, static warning, copy-type boundary",
+  ],
+];
+
 test("a consumer reads the narrowing as a store does, in the same order (#1073 PR 2, #1320)", () => {
   // (a record's outcome, its diagnostics' kinds and classes and its checks' kinds, in the three modes `record` asks)
   const answer = (...lines: readonly string[]): string => {
@@ -430,64 +489,6 @@ test("a consumer reads the narrowing as a store does, in the same order (#1073 P
     answer("let box = {n: 1.5}", "if box.n < 2 { repeat box.n {} }"),
     "warning-runtime-check, integer-use warning-runtime-check, integer-check",
   );
-  // the test proves a kind, never an ingress (C9, the lead's ruling (a)): external data keeps exactly one boundary
-  // check, at its ingress store or, where no store brought it, at the consumer, through every transfer that
-  // keeps the value; a computed result brings no data in (Codex r1–r3 on #1770: the typed store, the operator, the
-  // selection without an ingress are rows)
-  const transfers: readonly (readonly [string, string, string, string, string])[] = [
-    ["a read", "", "integer", "repeat X {}", "valid, copy-type boundary"],
-    ["a copy", "", "integer", "let c = X\n repeat c {}", "valid, copy-type boundary"],
-    [
-      "a merge of one kind",
-      "",
-      "integer",
-      "let xs = [X, 1]\n repeat xs[0] {}",
-      "valid, copy-type boundary",
-    ],
-    [
-      "a literal's element",
-      "",
-      "integer",
-      "let xs = [X]\n repeat xs[0] {}",
-      "valid, copy-type boundary",
-    ],
-    ["a selection", "", "integer[]", "repeat X[0] {}", "valid, copy-type boundary"],
-    [
-      "an operator",
-      "",
-      "integer",
-      "let out: integer = X + 1\n repeat out {}",
-      "valid, copy-type boundary",
-    ],
-    [
-      "a typed store",
-      "",
-      "integer",
-      "let out: integer = X\n repeat out {}",
-      "valid, copy-type boundary",
-    ],
-    [
-      "an argument",
-      "function f(p: integer) {\n repeat p {}\n}\n",
-      "integer",
-      "f(X)",
-      "valid, copy-type boundary",
-    ],
-    [
-      "a result",
-      "function g(p): integer {\n return p\n}\n",
-      "integer",
-      "let out = g(X)\n repeat out {}",
-      "valid, copy-type boundary",
-    ],
-    [
-      "a default",
-      "",
-      "integer",
-      "let out: integer = X otherwise 0\n repeat out {}",
-      "warning, static warning, copy-type boundary",
-    ],
-  ];
   for (const [name, prelude, type, body, expected] of transfers)
     for (const [where, before, read] of [
       ["an ingress store", "let raw = hostValue\n", "raw"],
@@ -579,13 +580,25 @@ test("a test that holds removes kinds, not the read's cause: its read's warning 
   const loop = (head: string, store = "xs = []"): string =>
     `let xs = [1]\n${head} {\n    repeat 2 {\n        say xs.first\n        ${store}\n    }\n}\nexit\n`;
   const untested = "let xs = [1]\nrepeat 2 {\n    say xs.first\n    xs = []\n}\nexit\n";
+  // (a called function's null store: no entry R2.2 reaches, so the read keeps its warning and its null check)
+  const drop = "let xs = [1]\nfunction drop {\n    xs = null\n}\n";
+  const called = loop("if xs != null", "drop()").replace("let xs = [1]\n", drop);
+  const calledUntested = `${drop}repeat 2 {\n    say xs.first\n    drop()\n}\nexit\n`;
   for (const [name, source, check] of [
     ["the record: a null test that holds", loop("if xs != null"), "empty-check"],
     ["no test", untested, "empty-check"],
     ["a test of the emptiness itself", loop("if xs.length > 0"), "empty-check"],
-    ["a null test a null store fails (U5)", loop("if xs != null", "xs = null"), "null-check"],
+    ["a null test a called null store fails", called, "null-check"],
+    ["a called null store, no test", calledUntested, "null-check"],
   ] as const)
     assert.equal(answer(source), warned(source, "xs.first", "loop", check), name);
+  // R2.2: the loop's entry under the program default; the store's null reaches the read on the second run
+  const failed = loop("if xs != null", "xs = null");
+  assert.equal(
+    answer(failed),
+    `compile-error, member-read ${failed.indexOf("xs.first")} null`,
+    "a null test a null store fails (U5)",
+  );
   // the family: each test that holds, each store whose word explains the read, each selection, against the same
   // program without its test; the word equals the untested read's, or `unknown` where that read carries two words (the
   // host-data rows below)

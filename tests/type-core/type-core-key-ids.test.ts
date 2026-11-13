@@ -61,6 +61,7 @@ import { narrowingPass, nodeAt } from "../helpers/type-core/type-core-narrowing.
 import { inMode, MODES, publishedAnswers, publishedRoute } from "../helpers/type-core-oracles.js";
 import { Admission } from "../../src/type-inference/core/admission.js";
 import { sharedPaths } from "../../src/type-inference/core/admission/structure.js";
+import { Retained } from "../../src/type-inference/core/retained/retained.js";
 
 /*
  * G3 stage 1: the key cursors (`contract/key-ids.ts`) and the frozen wrapper lane
@@ -717,10 +718,12 @@ test("a family's lane is the binding's whichever read asks; a question while its
     const box = bindingOf(pass, "box");
     const inner: string[] = [];
     const prefixStores = contract.prefixStores.bind(contract);
-    contract.prefixStores = (key) => {
+    // (#1072 R26: captures `prefixStores`, the contract and `box`, fixed when it is made, and the test's own `inner`,
+    // which the test alone reads)
+    contract.prefixStores = Retained.closure("test.prefixStores", (key: Key) => {
       inner.push(keyLane(contract, box, "shell"));
       return prefixStores(key);
-    };
+    });
     const { records } = withKeyRecords(() => keyLane(contract, box, "shell"));
     assert.deepEqual(inner, ["text"]);
     assert.equal(keyLane(contract, box, "shell"), "text");
@@ -734,10 +737,12 @@ test("a family's lane is the binding's whichever read asks; a question while its
     const [box, leaf] = [bindingOf(pass, "box"), bindingOf(pass, "leaf")];
     const inner: string[] = [];
     const copiedKey = contract.copiedKey.bind(contract);
-    contract.copiedKey = (value) => {
+    // (#1072 R26: captures `copiedKey`, the contract and `leaf`, fixed when it is made, and the test's own `inner`,
+    // which the test alone reads)
+    contract.copiedKey = Retained.closure("test.copiedKey", (value: PlaceId) => {
       if (inner.length === 0) inner.push(keyLane(contract, leaf, "n"));
       return copiedKey(value);
-    };
+    });
     assert.equal(keyLane(contract, box, "shell"), "cursor");
     assert.deepEqual(inner, ["text"]);
     assert.equal(keyLane(contract, leaf, "n"), "text");
@@ -1036,7 +1041,6 @@ const COPIES_LISTED: Readonly<Record<string, readonly [number, string]>> = {
     12,
     "a lifted holder's reference: the key's steps joined to its entry's, the holder's shift and its identity's name",
   ],
-  touchRead: [8, "a touch's path, an array its trie keeps (`Touches`)"],
   keyStructure: [8, "a root's rest below a prefix's store, kept in the structure's roots"],
   decide: [
     6,
@@ -1048,14 +1052,17 @@ const COPIES_LISTED: Readonly<Record<string, readonly [number, string]>> = {
   ],
 };
 
-/** The record's steps copied out during `run`, by the function asking (the first named frame outside `key-ids.ts`). */
+/**
+ * The record's steps copied out during `run`, by the function asking (the first named frame outside `key-ids.ts`; an
+ * array's built-in is no site, nor is it through a maker's proxy in a frozen run, `Proxy.map`).
+ */
 function copiesOf(run: () => void): Record<string, number> {
   const original = PathSteps.prototype.toArray;
   const sites: Record<string, number> = {};
   PathSteps.prototype.toArray = function (this: PathSteps) {
     const frames = new Error().stack!.split("\n").slice(2);
     const named = frames.find(
-      (frame) => !frame.includes("key-ids.") && /^\s*at (?!Array\.)[\w$#.]+ \(/.test(frame),
+      (frame) => !frame.includes("key-ids.") && /^\s*at (?!Array\.|Proxy\.)[\w$#.]+ \(/.test(frame),
     );
     const site = /^\s*at (?:[\w$]+\.)?([\w$#]+) \(/.exec(named ?? "")?.[1] ?? "?";
     sites[site] = (sites[site] ?? 0) + 1;
@@ -1108,11 +1115,12 @@ test("the early selector alone (`withTextKeys`, criterion 3's seam): every famil
 });
 
 test("a wrapper's own cell copying a written binding lands below its place's own key (A4): its cursor's path is decided, and the plan checks it, as the text lane does (the corpus's `null/direct` cases)", () => {
+  // (the corpus case writes `typed: null`, which the route does not take: `integer?` holds the same `null`)
   const files = [
     {
       path: "main.tease",
       source:
-        "let typed:null=null\nlet root={f:typed,g:typed}\nlet foreign={f:hostValue,g:typed}\nlet a=foreign\na=a\nlet mid=a\nlet c=root\nc=mid\nc.f=null\nexit\n",
+        "let typed:integer?=null\nlet root={f:typed,g:typed}\nlet foreign={f:hostValue,g:typed}\nlet a=foreign\na=a\nlet mid=a\nlet c=root\nc=mid\nc.f=null\nexit\n",
     },
   ];
   const { result, records } = withKeyRecords(() => publishedRoute(files, GLOBALS));

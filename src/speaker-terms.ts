@@ -37,6 +37,32 @@ export const SPEAKER_NAME_LISTS: ReadonlySet<string> = new Set([
   "lovingNames",
 ]);
 
+/** Speaker properties shown as text: the display name and the parts it is derived from. */
+export const SPEAKER_TEXT_PROPERTIES: ReadonlySet<string> = new Set([
+  "displayName",
+  "title",
+  "shortTitle",
+  "firstName",
+  "lastName",
+]);
+
+/**
+ * A speaker's built-in properties (V30 §37), which the runtime checks where it uses them; any other property is a custom
+ * one, which keeps its type unless a store reaches it unchecked (see `UncheckedProperties` in `type-checker.ts`).
+ */
+export const BUILT_IN_SPEAKER_PROPERTIES: ReadonlySet<string> = new Set([
+  ...SPEAKER_TEXT_PROPERTIES,
+  "alias",
+  "gender",
+  "color",
+  "font",
+  "avatar",
+  "presentation",
+  "bubble",
+  "prose",
+  "defaultSaySkippable",
+]);
+
 /** The name of the built-in speaker for the person playing the tease (V30 §37). */
 export const PLAYER = "player";
 

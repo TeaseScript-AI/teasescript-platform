@@ -26,7 +26,7 @@ import type {
   StorageBundle,
   StorageBundleScript,
 } from "../../player/persistence/storage-transfer.js";
-import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
+import { FakeMediaRepository } from "../helpers/player/media/fake-media-repository.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { answerWith, type Intent } from "../helpers/player/player-input.js";
 import { loadHostFacade } from "../helpers/player/host-sessions.js";

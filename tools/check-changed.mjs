@@ -17,9 +17,9 @@ import { isAbsolute, join, resolve } from "node:path";
 let siblings;
 try {
   siblings = await Promise.all([
-    import("./costly-test-files.mjs"),
-    import("./run-parallel.mjs"),
-    import("./test-shards.mjs"),
+    import("./test-runner/costly-test-files.mjs"),
+    import("./check/run-parallel.mjs"),
+    import("./test-runner/test-shards.mjs"),
   ]);
 } catch (error) {
   if (error?.code !== "ERR_MODULE_NOT_FOUND") throw error;
@@ -52,7 +52,7 @@ const [{ costlyTestSeconds }, { summaryLine }, { isSuiteTestPath, isTypeCoreTest
 // as the root tsconfig's emit settings, passes here. When a changed file is under `src/type-inference/core/`, it also prints the suites that pin the core's work or
 // its published answers, as `tools/repository-checks/pin-suites.mjs` lists them: the focused list such a change runs
 // before review (`docs/TESTING.md`, "Pinned work"), which it does not run itself. When a changed type-core test file has
-// no entry in `tools/costly-test-files.mjs`, it prints one line saying so: the file runs in full, as every file does,
+// no entry in `tools/test-runner/costly-test-files.mjs`, it prints one line saying so: the file runs in full, as every file does,
 // and the entry lands from CI at merge. Its last line, also when the checks cannot run, names what ran, failed and did
 // not run, the compiled suite and the checks no changed path needs included (`summaryLine`, #2106), and, when a changed
 // path is under `player/` or `tests/fixtures/packages/`, the Player's browser smoke that `docs/TESTING.md` requires for
@@ -111,7 +111,7 @@ export const PROJECTS = {
   },
   tools: {
     claims: (path) =>
-      /^tools\/[^/]+\.(?:mjs|cjs|js)$/u.test(path) ||
+      /^tools\/(?:check\/|moves\/|test-runner\/)?[^/]+\.(?:mjs|cjs|js)$/u.test(path) ||
       path.startsWith("tools/repository-checks/") ||
       path === "knip.json",
     checks: ["test:verification"],
@@ -174,14 +174,14 @@ const PLAYER_PATH = /^(?:player|tests\/fixtures\/packages)\//u;
 /** The core, a change to which prints the suites that pin its work. */
 const CORE = "src/type-inference/core/";
 
-/** The line a changed type-core test file that `tools/costly-test-files.mjs` does not list prints (#2088). */
+/** The line a changed type-core test file that `tools/test-runner/costly-test-files.mjs` does not list prints (#2088). */
 export const UNKNOWN_TO_COSTLY =
   "unknown to costly-test-files: run in full; the entry lands from CI at merge";
 
 /**
- * The type-core test files among `paths` that `tools/costly-test-files.mjs` does not list (#2088). The table lists every
+ * The type-core test files among `paths` that `tools/test-runner/costly-test-files.mjs` does not list (#2088). The table lists every
  * type-core test file, so a new one is the unknown kind, and its default is the conservative one: it runs in full, as
- * every file does (`tools/test-shards.mjs` counts it at `otherTestSeconds`), and the coordinator lands its entry from
+ * every file does (`tools/test-runner/test-shards.mjs` counts it at `otherTestSeconds`), and the coordinator lands its entry from
  * the merge's CI runs. Another test file the table lacks is not unknown: the table lists only those of 10 s or more.
  */
 export function unknownToCostly(paths) {

@@ -15,7 +15,7 @@ import type {
   PlayerThemeIntent,
 } from "../../player/theme/palette.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
-import { referencePhotos } from "../helpers/player/photo-swatches-fixture.js";
+import { referencePhotos } from "../helpers/player/media/photo-swatches-fixture.js";
 
 interface PhotoColours {
   readonly surfaces: PhotoSurfaces;

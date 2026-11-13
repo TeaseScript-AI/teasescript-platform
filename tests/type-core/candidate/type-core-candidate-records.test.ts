@@ -16,20 +16,23 @@ import { reportedDiagnostics } from "../../../src/type-inference/core/check-resu
 import { VALUE_KIND_NAMES } from "../../../src/value-kinds.js";
 import { compactAnalysis, coreRequest } from "../../helpers/type-core-analysis.js";
 import {
-  companions,
-  derive,
   derivedText,
-  evaluate,
   syntaxOf,
   Underivable,
+} from "../../helpers/type-core/derived/type-core-derived.js";
+import { derive } from "../../helpers/type-core/derived/type-core-derived-checks.js";
+import { companions } from "../../helpers/type-core/derived/type-core-derived-companions.js";
+import {
+  evaluate,
   type CheckEvent,
   type PredictedRun,
-} from "../../helpers/type-core-derived.js";
+} from "../../helpers/type-core/derived/type-core-derived-runs.js";
 import {
   type FixtureRecord,
   heldBack,
   readFixture,
 } from "../../helpers/type-core/type-core-fixture.js";
+import { evaluateProject } from "../../helpers/type-core/derived/derived-transfers.js";
 import {
   assignments,
   derivedContent,
@@ -302,11 +305,17 @@ test("every positive-list record the candidate route reaches plans and runs as i
     // runs: the original under every assignment of its host input (in the domain's order), each run once, predicted
     // stopping at its first failing check and evaluated through every check (for the discharges)
     const plan = result.plan;
+    // (across the record's files, from its first: a transfer starts the file it names, `derived-transfers.ts`)
+    const project = request.files.map((file, index) => ({
+      path: file.path,
+      syntax: derivedFiles[index]![0],
+      ...derivedFiles[index]![1],
+    }));
     const own = assignments(["hostValue"]).map((inputs) => ({
       inputs,
       ran: runGlobals(plan, inputs),
-      predicted: evaluate(syntax, stores, inputs, false, content).run,
-      events: evaluate(syntax, stores, inputs, true, content).events,
+      predicted: evaluateProject(project, inputs).run,
+      events: evaluateProject(project, inputs, true).events,
     }));
     // the original, as written: each input at the value fitting the earliest check it feeds
     const original =
@@ -633,159 +642,160 @@ test("the S7 oracle derives receiving written types and observes native discharg
   }
 });
 
-test("the S7 oracle derives object admissions and default structures from their source places", () => {
-  const cases = [
-    ["let p = {n: 1}\np = hostValue\nsay p.n\nexit\n", "store", "{n: integer}"],
-    [
-      "let p = {stats: {n: 1}}\np = hostValue\nsay p.stats.n\nexit\n",
-      "store",
-      "{stats: {n: integer}}",
-    ],
-    ["let p: object = {n: 1}\np = hostValue\nsay p.n\nexit\n", "store", "{}"],
-    // a copied written `object` stays any object below it, its neighbours restricted, no field read (#1215)
-    ['let typed: object = {n: 1}\nlet p = typed\np = hostValue\nsay "DONE"\nexit\n', "store", "{}"],
-    [
-      'let typed: object? = {n: 1}\nlet p = typed\np = hostValue\nsay "DONE"\nexit\n',
-      "store",
-      "null|{}",
-    ],
-    [
-      'let typed: object[] = [{n: 1}]\nlet p = typed\np = hostValue\nsay "DONE"\nexit\n',
-      "store",
-      "list<{}>",
-    ],
-    [
-      'let typed: object = {n: 1}\nlet a = typed\nlet b = a\nlet p = b\np = hostValue\nsay "DONE"\nexit\n',
-      "store",
-      "{}",
-    ],
-    [
-      'let typed: object = {n: 1}\nlet rec = {o: typed}\nlet p = rec.o\np = hostValue\nsay "DONE"\nexit\n',
-      "store",
-      "{}",
-    ],
-    [
-      'let typed: object = {n: 1}\nlet p = {o: typed}\np = hostValue\nsay "DONE"\nexit\n',
-      "store",
-      "{o: {}}",
-    ],
-    [
-      'let typed: object = {n: 1}\nlet count: integer = 2\nlet p = {c: count, o: typed}\np = hostValue\nsay "DONE"\nexit\n',
-      "store",
-      "{c: integer, o: {}}",
-    ],
-    ['let rec = {n: 1}\nlet p = rec\np = hostValue\nsay "DONE"\nexit\n', "store", "{n: integer}"],
-    // a written `list` destination's open element takes a typed parse's open default (Sol's r1 B2 on #1218)
-    [
-      'let p: list = fromJson(hostValue, default: [], files: false)\nsay "DONE"\nexit\n',
-      "expected",
-      "list<any>",
-    ],
-    [
-      "let p = fromJson(hostValue, default: [{stats: {n: 0}}, {stats: {n: 1.5}}], files: false)\nsay p[0].stats.n\nexit\n",
-      "expected",
-      "list<{stats: {n: number}}>",
-    ],
-    [
-      'let p = fromJson(hostValue, default: fromJson("{}", default: {n: 0}, files: false), files: false)\nsay p.n\nexit\n',
-      "expected",
-      "{n: integer}",
-    ],
-    [
-      'let p = fromJson(hostValue, default: load("p", default: {n: 0}), files: false)\nsay p.n\nexit\n',
-      "expected",
-      "{n: integer}",
-    ],
-    [
-      "let xs: number[] = [fromJson(hostValue, default: 0, files: false)]\nsay xs[0]\nexit\n",
-      "expected",
-      "number",
-    ],
-    [
-      'let n: number? = fromJson(hostValue, default: 0, files: false) otherwise fromJson("2.5", default: 0, files: false)\nsay n\nexit\n',
-      "expected",
-      "null|number",
-    ],
-    [
-      // a `null` field of the default that nothing else types stays unknown (ADR 0021 2.6)
-      "let p = fromJson(hostValue, default: {n: null, m: 0}, files: false)\nsay p.m\nexit\n",
-      "expected",
-      `{n: ${derivedText({ kind: "kinds", kinds: VALUE_KIND_NAMES })}, m: integer}`,
-    ],
-    // a written `object` reads the default's properties with their types and keeps every other key, at every level of
-    // it, as an optional's member and as a list's element (#1223)
-    [
-      "let p: object = fromJson(hostValue, default: {n: 0, k: null}, files: false)\nsay p.n\nsay p.m\nexit\n",
-      "expected",
-      `{n: integer, k: ${derivedText({ kind: "kinds", kinds: VALUE_KIND_NAMES })}, ...}`,
-    ],
-    [
-      'let p: object = load("p", default: {n: 0})\nsay p.n\nexit\n',
-      "load",
-      "{n: integer, ...} repair=true",
-    ],
-    [
-      'let p: object? = fromJson(hostValue, default: {a: {n: 0}, xs: [{m: 1.5}]}, files: false)\nsay "DONE"\nexit\n',
-      "expected",
-      "null|{a: {n: integer, ...}, xs: list<{m: number, ...}>, ...}",
-    ],
-    [
-      'let p: object[] = fromJson(hostValue, default: [{n: 0}], files: false)\nsay "DONE"\nexit\n',
-      "expected",
-      "list<{n: integer, ...}>",
-    ],
-  ] as const;
-  const inputs: readonly SerializableRuntimeValue[] = [
-    // the fixture route's domain
-    2,
-    "text",
-    true,
-    2.5,
-    null,
-    "null",
-    "1.5",
+const cases = [
+  ["let p = {n: 1}\np = hostValue\nsay p.n\nexit\n", "store", "{n: integer}"],
+  [
+    "let p = {stats: {n: 1}}\np = hostValue\nsay p.stats.n\nexit\n",
+    "store",
+    "{stats: {n: integer}}",
+  ],
+  ["let p: object = {n: 1}\np = hostValue\nsay p.n\nexit\n", "store", "{}"],
+  // a copied written `object` stays any object below it, its neighbours restricted, no field read (#1215)
+  ['let typed: object = {n: 1}\nlet p = typed\np = hostValue\nsay "DONE"\nexit\n', "store", "{}"],
+  [
+    'let typed: object? = {n: 1}\nlet p = typed\np = hostValue\nsay "DONE"\nexit\n',
+    "store",
+    "null|{}",
+  ],
+  [
+    'let typed: object[] = [{n: 1}]\nlet p = typed\np = hostValue\nsay "DONE"\nexit\n',
+    "store",
+    "list<{}>",
+  ],
+  [
+    'let typed: object = {n: 1}\nlet a = typed\nlet b = a\nlet p = b\np = hostValue\nsay "DONE"\nexit\n',
+    "store",
     "{}",
-    '{"n":3}',
-    '{"stats":{"n":3}}',
-    // (#1223: other keys beside a wrong or missing field, at two levels and in a list)
-    '{"n":"text","m":1}',
-    '{"a":{"n":"text","extra":2},"xs":[{"m":2,"z":3}],"other":3}',
-    '[{"n":1,"m":2}]',
-    { kind: "object", properties: [{ name: "n", value: 3 }] },
-    { kind: "object", properties: [{ name: "n", value: "bad" }] },
-    {
-      kind: "object",
-      properties: [
-        { name: "stats", value: { kind: "object", properties: [{ name: "n", value: 3 }] } },
-      ],
-    },
-    // (#1215: an absent field, a fresh object, lists, a nested field and a misfitting field beside)
-    { kind: "object", properties: [] },
-    { kind: "object", properties: [{ name: "m", value: true }] },
-    { kind: "list", items: [{ kind: "object", properties: [{ name: "n", value: "bad" }] }] },
-    { kind: "list", items: [2] },
-    {
-      kind: "object",
-      properties: [
-        { name: "c", value: 1 },
-        { name: "o", value: { kind: "object", properties: [{ name: "n", value: "bad" }] } },
-      ],
-    },
-    {
-      kind: "object",
-      properties: [
-        { name: "c", value: "bad" },
-        { name: "o", value: { kind: "object", properties: [{ name: "n", value: 1 }] } },
-      ],
-    },
-    {
-      kind: "object",
-      properties: [
-        { name: "c", value: 1 },
-        { name: "o", value: 2 },
-      ],
-    },
-  ];
+  ],
+  [
+    'let typed: object = {n: 1}\nlet rec = {o: typed}\nlet p = rec.o\np = hostValue\nsay "DONE"\nexit\n',
+    "store",
+    "{}",
+  ],
+  [
+    'let typed: object = {n: 1}\nlet p = {o: typed}\np = hostValue\nsay "DONE"\nexit\n',
+    "store",
+    "{o: {}}",
+  ],
+  [
+    'let typed: object = {n: 1}\nlet count: integer = 2\nlet p = {c: count, o: typed}\np = hostValue\nsay "DONE"\nexit\n',
+    "store",
+    "{c: integer, o: {}}",
+  ],
+  ['let rec = {n: 1}\nlet p = rec\np = hostValue\nsay "DONE"\nexit\n', "store", "{n: integer}"],
+  // a written `list` destination's open element takes a typed parse's open default (Sol's r1 B2 on #1218)
+  [
+    'let p: list = fromJson(hostValue, default: [], files: false)\nsay "DONE"\nexit\n',
+    "expected",
+    "list<any>",
+  ],
+  [
+    "let p = fromJson(hostValue, default: [{stats: {n: 0}}, {stats: {n: 1.5}}], files: false)\nsay p[0].stats.n\nexit\n",
+    "expected",
+    "list<{stats: {n: number}}>",
+  ],
+  [
+    'let p = fromJson(hostValue, default: fromJson("{}", default: {n: 0}, files: false), files: false)\nsay p.n\nexit\n',
+    "expected",
+    "{n: integer}",
+  ],
+  [
+    'let p = fromJson(hostValue, default: load("p", default: {n: 0}), files: false)\nsay p.n\nexit\n',
+    "expected",
+    "{n: integer}",
+  ],
+  [
+    "let xs: number[] = [fromJson(hostValue, default: 0, files: false)]\nsay xs[0]\nexit\n",
+    "expected",
+    "number",
+  ],
+  [
+    'let n: number? = fromJson(hostValue, default: 0, files: false) otherwise fromJson("2.5", default: 0, files: false)\nsay n\nexit\n',
+    "expected",
+    "null|number",
+  ],
+  [
+    // a `null` field of the default that nothing else types stays unknown (ADR 0021 2.6)
+    "let p = fromJson(hostValue, default: {n: null, m: 0}, files: false)\nsay p.m\nexit\n",
+    "expected",
+    `{n: ${derivedText({ kind: "kinds", kinds: VALUE_KIND_NAMES })}, m: integer}`,
+  ],
+  // a written `object` reads the default's properties with their types and keeps every other key, at every level of
+  // it, as an optional's member and as a list's element (#1223)
+  [
+    "let p: object = fromJson(hostValue, default: {n: 0, k: null}, files: false)\nsay p.n\nsay p.m\nexit\n",
+    "expected",
+    `{n: integer, k: ${derivedText({ kind: "kinds", kinds: VALUE_KIND_NAMES })}, ...}`,
+  ],
+  [
+    'let p: object = load("p", default: {n: 0})\nsay p.n\nexit\n',
+    "load",
+    "{n: integer, ...} repair=true",
+  ],
+  [
+    'let p: object? = fromJson(hostValue, default: {a: {n: 0}, xs: [{m: 1.5}]}, files: false)\nsay "DONE"\nexit\n',
+    "expected",
+    "null|{a: {n: integer, ...}, xs: list<{m: number, ...}>, ...}",
+  ],
+  [
+    'let p: object[] = fromJson(hostValue, default: [{n: 0}], files: false)\nsay "DONE"\nexit\n',
+    "expected",
+    "list<{n: integer, ...}>",
+  ],
+] as const;
+const inputs: readonly SerializableRuntimeValue[] = [
+  // the fixture route's domain
+  2,
+  "text",
+  true,
+  2.5,
+  null,
+  "null",
+  "1.5",
+  "{}",
+  '{"n":3}',
+  '{"stats":{"n":3}}',
+  // (#1223: other keys beside a wrong or missing field, at two levels and in a list)
+  '{"n":"text","m":1}',
+  '{"a":{"n":"text","extra":2},"xs":[{"m":2,"z":3}],"other":3}',
+  '[{"n":1,"m":2}]',
+  { kind: "object", properties: [{ name: "n", value: 3 }] },
+  { kind: "object", properties: [{ name: "n", value: "bad" }] },
+  {
+    kind: "object",
+    properties: [
+      { name: "stats", value: { kind: "object", properties: [{ name: "n", value: 3 }] } },
+    ],
+  },
+  // (#1215: an absent field, a fresh object, lists, a nested field and a misfitting field beside)
+  { kind: "object", properties: [] },
+  { kind: "object", properties: [{ name: "m", value: true }] },
+  { kind: "list", items: [{ kind: "object", properties: [{ name: "n", value: "bad" }] }] },
+  { kind: "list", items: [2] },
+  {
+    kind: "object",
+    properties: [
+      { name: "c", value: 1 },
+      { name: "o", value: { kind: "object", properties: [{ name: "n", value: "bad" }] } },
+    ],
+  },
+  {
+    kind: "object",
+    properties: [
+      { name: "c", value: "bad" },
+      { name: "o", value: { kind: "object", properties: [{ name: "n", value: 1 }] } },
+    ],
+  },
+  {
+    kind: "object",
+    properties: [
+      { name: "c", value: 1 },
+      { name: "o", value: 2 },
+    ],
+  },
+];
+
+test("the S7 oracle derives object admissions and default structures from their source places", () => {
   const failures: string[] = [];
   for (const [source, check, expected] of cases) {
     try {

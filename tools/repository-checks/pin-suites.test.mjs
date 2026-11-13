@@ -26,7 +26,7 @@ const MARKS = readMarks(ROOT);
 const MARKED = MARKS.suites;
 /** Each marked suite once, in path order. */
 const SUITES = [...new Set(MARKED.map((suite) => suite.file))];
-const WORK_B = "tests/type-core/type-core-work-b.test.ts";
+const WORK_B = "tests/type-core/work/type-core-work-b.test.ts";
 /** The folder whose families record `main`'s bounds (`WorkFamily.main`, `KnownProduct.measured`). */
 const FAMILIES = "tests/helpers/type-core/families/";
 
@@ -140,7 +140,7 @@ test("a core change lists every pinning suite; another change lists none, a suit
   // one, #2086)
   assert.ok(
     suitesFor(MARKED, ["src/type-inference/core/values.ts"]).some(
-      (suite) => suite.file === "tests/type-core/type-core-contract.test.ts",
+      (suite) => suite.file === "tests/type-core/contract/type-core-contract.test.ts",
     ),
   );
   assert.deepEqual(suitesFor(MARKED, ["src/runtime/engine.ts", "docs/TESTING.md"]), []);
@@ -159,13 +159,16 @@ test("a core change lists every pinning suite; another change lists none, a suit
     suitesFor(MARKED, ["tests/helpers/type-core/families/admission-products.ts"]).map(
       (suite) => suite.file,
     ),
-    ["tests/type-core/type-core-work-a.test.ts", "tests/type-core/type-core-work-c.test.ts"],
+    [
+      "tests/type-core/work/type-core-work-c.test.ts",
+      "tests/type-core/work/type-core-work-families.test.ts",
+    ],
   );
   assert.deepEqual(
     suitesFor(MARKED, ["tests/helpers/type-core/families/property-names.ts"]).map(
       (suite) => suite.file,
     ),
-    ["tests/type-core/type-core-work-c.test.ts"],
+    ["tests/type-core/work/type-core-work-c.test.ts"],
   );
   // (work-b's pins are in two files: either lists it, and both list it once, with each declaration's pins)
   assert.deepEqual(
@@ -187,8 +190,8 @@ test("a core change lists every pinning suite; another change lists none, a suit
     ],
   );
   assert.equal(
-    builtOf("tests/type-core/type-core-closure.test.ts"),
-    "dist/tests/type-core/type-core-closure.test.js",
+    builtOf("tests/type-core/stop/type-core-closure.test.ts"),
+    "dist/tests/type-core/stop/type-core-closure.test.js",
   );
 });
 
@@ -230,22 +233,23 @@ function pairOf({ file, in: holder }) {
 // the selection while it passes except an edit to PAIRS, which is the acknowledgement (the net misses formless pins).
 const PAIRS = [
   "tests/type-core/candidate/type-core-candidate-operands.test.ts",
-  "tests/type-core/type-core-closure.test.ts",
-  "tests/type-core/type-core-contract-capture.test.ts",
-  "tests/type-core/type-core-contract.test.ts",
-  "tests/type-core/type-core-declared-escapes.test.ts in tests/helpers/type-core/type-core-declared-escapes-main.ts",
-  "tests/type-core/type-core-f18.test.ts",
+  "tests/type-core/stop/type-core-closure.test.ts",
+  "tests/type-core/stop/type-core-contract-capture.test.ts",
+  "tests/type-core/contract/type-core-contract.test.ts",
+  "tests/type-core/stop/type-core-declared-escapes.test.ts in tests/helpers/type-core/stop/type-core-declared-escapes-main.ts",
+  "tests/type-core/discharge/type-core-f18.test.ts",
+  "tests/type-core/type-core-identity.test.ts",
   "tests/type-core/type-core-kept.test.ts",
   "tests/type-core/type-core-key-ids.test.ts",
-  "tests/type-core/type-core-work-a.test.ts",
-  "tests/type-core/type-core-work-a.test.ts in tests/helpers/type-core/families/admission-products.ts",
-  "tests/type-core/type-core-work-b.test.ts in tests/helpers/type-core/families/output-bound.ts",
-  "tests/type-core/type-core-work-b.test.ts in tests/helpers/type-core/families/w34-links.ts",
-  "tests/type-core/type-core-work-c.test.ts",
-  "tests/type-core/type-core-work-c.test.ts in tests/helpers/type-core/families/admission-products.ts",
-  "tests/type-core/type-core-work-c.test.ts in tests/helpers/type-core/families/narrowing.ts",
-  "tests/type-core/type-core-work-c.test.ts in tests/helpers/type-core/families/property-names.ts",
-  "tests/type-core/type-core-written-default.test.ts",
+  "tests/type-core/work/type-core-work-b.test.ts in tests/helpers/type-core/families/output-bound.ts",
+  "tests/type-core/work/type-core-work-b.test.ts in tests/helpers/type-core/families/w34-links.ts",
+  "tests/type-core/work/type-core-work-c.test.ts",
+  "tests/type-core/work/type-core-work-c.test.ts in tests/helpers/type-core/families/admission-products.ts",
+  "tests/type-core/work/type-core-work-c.test.ts in tests/helpers/type-core/families/narrowing.ts",
+  "tests/type-core/work/type-core-work-c.test.ts in tests/helpers/type-core/families/property-names.ts",
+  "tests/type-core/written/type-core-written-default.test.ts",
+  "tests/type-core/work/type-core-work-families.test.ts in tests/helpers/type-core/families/admission-products.ts",
+  "tests/type-core/work/type-core-work-store-checks.test.ts",
 ];
 
 test("the marks name exactly the expected suites and the files holding their pins (#2094)", () => {
@@ -499,7 +503,7 @@ test("main and measured occur in a family only at an admitted position; any othe
 });
 
 test("the four pin forms are found by their text, and a pin written another way is not", () => {
-  const CONTRACT = "tests/type-core/type-core-contract.test.ts";
+  const CONTRACT = "tests/type-core/contract/type-core-contract.test.ts";
   assert.deepEqual(pinFormsOf("  assert.equal(budget.total, 22_962_573);", CONTRACT), ["total"]);
   assert.deepEqual(
     pinFormsOf("    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],", CONTRACT),
@@ -521,7 +525,10 @@ test("the four pin forms are found by their text, and a pin written another way 
   const digest =
     '  randomness: "1466a6cd24e327188770752f6134001c64d6efcc590ccc26b721611ad96f165a",';
   assert.deepEqual(pinFormsOf(digest, "tests/type-core-contract.test.ts"), ["digest"]);
-  assert.deepEqual(pinFormsOf(digest, "tests/type-core/type-enforcement.test.ts"), ["digest"]);
+  assert.deepEqual(
+    pinFormsOf(digest, "tests/type-core/enforcement/type-enforcement-variables.test.ts"),
+    ["digest"],
+  );
   assert.deepEqual(pinFormsOf(digest, "tests/player/player-encryption.test.ts"), []);
 });
 
@@ -556,8 +563,8 @@ test("a file moved out of the core lists every pinning suite (#2049)", { timeout
     // (the tool, and the modules it reads the suite's test files through)
     for (const file of [
       "tools/repository-checks/pin-suites.mjs",
-      "tools/test-shards.mjs",
-      "tools/costly-test-files.mjs",
+      "tools/test-runner/test-shards.mjs",
+      "tools/test-runner/costly-test-files.mjs",
       // (and the marked files, the suites among them)
       ...new Set(MARKED.flatMap((suite) => [suite.file, suite.in ?? suite.file])),
     ]) {

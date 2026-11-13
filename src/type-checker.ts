@@ -99,19 +99,17 @@ import {
   numberFromText,
   type Conversion,
 } from "./conversions.js";
+import { builtinCallProblems, builtinShapeProblems } from "./builtin-call-checks.js";
 import {
-  builtinCallProblems,
-  builtinShapeProblems,
   type Sharing,
   collectionMethodProblems,
-  expressionLabel,
   fallbackFix,
   mayBeMessage,
   dictMethodProblems,
   memberProblems,
   positionalMethodProblems,
-  type OperationProblem,
 } from "./operation-checks.js";
+import { expressionLabel, type OperationProblem } from "./operation-check-support.js";
 import {
   emptyListPropertyFailure,
   hasListMethod,
@@ -316,7 +314,14 @@ import {
   missingSpeakerPropertyMessage,
   misspelledPropertyHint,
 } from "./object-properties.js";
-import { GENDER_TERMS, PERSON_FIELDS, PLAYER, SPEAKER_NAME_LISTS } from "./speaker-terms.js";
+import {
+  BUILT_IN_SPEAKER_PROPERTIES,
+  GENDER_TERMS,
+  PERSON_FIELDS,
+  PLAYER,
+  SPEAKER_NAME_LISTS,
+  SPEAKER_TEXT_PROPERTIES,
+} from "./speaker-terms.js";
 import type { SpeakerFlowInput, SpeakerFlowRead, SpeakerFlowStore } from "./speaker-flow.js";
 import { placeKey, type WayFacts } from "./way-facts.js";
 import type {
@@ -9897,32 +9902,6 @@ function isChoiceValue(member: StaticType): boolean {
 
 /** The result types of the built-ins that take fixed positional arguments. */
 const FIXED_RESULTS: ReadonlyMap<string, StaticType> = new Map([["escapeMarkup", STRING_TYPE]]);
-
-/** Speaker properties shown as text: the display name and the parts it is derived from. */
-const SPEAKER_TEXT_PROPERTIES: ReadonlySet<string> = new Set([
-  "displayName",
-  "title",
-  "shortTitle",
-  "firstName",
-  "lastName",
-]);
-
-/**
- * A speaker's built-in properties (V30 §37), which the runtime checks where it uses them; any other property is a custom
- * one, which keeps its type unless a store reaches it unchecked (see {@link UncheckedProperties}).
- */
-const BUILT_IN_SPEAKER_PROPERTIES: ReadonlySet<string> = new Set([
-  ...SPEAKER_TEXT_PROPERTIES,
-  "alias",
-  "gender",
-  "color",
-  "font",
-  "avatar",
-  "presentation",
-  "bubble",
-  "prose",
-  "defaultSaySkippable",
-]);
 
 /**
  * The built-in properties of a speaker that it has only once a declaration or an assignment gives it: those of

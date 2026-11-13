@@ -47,6 +47,7 @@ export type {
   OperandUse,
   StartupRegion,
 } from "./flow-graph/model.js";
+import { Retained } from "./retained/retained.js";
 export { literalRounds, literalTruth, type LiteralRounds } from "./flow-graph/literals.js";
 
 /*
@@ -242,6 +243,17 @@ export class FlowGraphBuilder {
     const deadEdges = this.deadEdges;
     const callableOf = this.callableOf;
     const ownerOf = this.#ownerOf;
+    // (#1072 R61: the builder, whose collections the graph's functions read, given to the program's walk with its
+    // private fields and the snapshots those functions capture)
+    Retained.programPart(this, (builder) => ({
+      ownerOf: builder.#ownerOf,
+      edges: builder.#edges,
+      startupNodes: builder.#startupNodes,
+      defaults: builder.#defaults,
+      valueDefaults: builder.#valueDefaults,
+      orphans: builder.#orphans,
+      snapshots,
+    }));
     return {
       files: this.files,
       nodes: this.nodes,

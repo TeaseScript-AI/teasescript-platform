@@ -1,0 +1,755 @@
+import type { PlaceId, SourceSite, TypeTerm } from "../../../graph.js";
+import { concrete, isExternal, requiredKind } from "../../admission.js";
+import { keptSteps } from "../../budget.js";
+import type { Consumers } from "../../consumers.js";
+import { REFERENCE, termAt, typeTags, writtenOf } from "../../contract.js";
+import { keptKey, keyOf, keyPlace, type Key } from "../../definitions.js";
+import { withoutEmpty } from "../../exact-path.js";
+import type { FlowNode } from "../../flow-graph.js";
+import { kindsInOrder, REASON, type ContextWord, type Item, type ItemTag } from "../../items.js";
+import { codeOf, pathPhrase } from "../../messages.js";
+import { measuresLength } from "../../method-categories.js";
+import { stablePath } from "../../narrowing/narrowings.js";
+import { propertyName, propertyStep, siteKey, stepName } from "../../program.js";
+import { propertyNames, type PropertyNamesTask } from "../../property-names.js";
+import {
+  contextOf,
+  offendingKinds,
+  provenanceOf,
+  type ContextDetail,
+  type CoreDiagnostic,
+  type DiagnosticKind,
+  type DiagnosticRule,
+  type Obligation,
+  type ObligationKind,
+  type RequiredKind,
+  type StoreRoot,
+  type StoreStep,
+} from "../../result.js";
+import { siteOf } from "./diagnostics.js";
+import { SHOWN } from "../kinds.js";
+import { leftOutWarning } from "./left-out.js";
+import { proveOrigin, type StoreOrigin } from "./origins.js";
+import { kindsOf } from "../names.js";
+import { keyStepsIn, stepsArray, type CanonicalKey } from "../../contract/key-ids.js";
+
+// The consumers' warnings and their sentences (D1, D2): a context word's detail, a store's root and steps.
+
+/**
+ * A warning of `rule` explained by `item`; `fits`, the value's items that the rule takes (its fixes' types);
+ * `receiver`, a member's receiver as its context sentence names it, `read` the value whose read the word is (a
+ * member's receiver; else the value at `site`). Whether it was made: a mark a test leaves out (`withoutRecords`) is
+ * not.
+ */
+export function warning(
+  walk: Consumers,
+  kind: DiagnosticKind,
+  site: SourceSite,
+  item: Item,
+  obligation: Obligation,
+  rule: DiagnosticRule,
+  fits: readonly Item[],
+  receiver: ContextDetail["receiver"] = null,
+  read?: PlaceId,
+): boolean {
+  if (required(walk, kind, site, item, obligation, rule, fits, receiver, read)) return true;
+  const diagnostic: Extract<CoreDiagnostic, { obligation: unknown }> = {
+    class: "warning-runtime-check",
+    kind,
+    code: codeOf(rule),
+    site: siteOf(site),
+    rule,
+    kinds: [item.tag],
+    provenance: provenanceOf(item, detail(walk, item, site, rule, receiver, read)),
+    obligation,
+    // (a fixed table of what fits, not a value's kinds: the table's order, the one list `inItsOrder` does not order,
+    // #1398)
+    fits: kindsInOrder(new Set(fits.filter(concrete).map((found) => found.tag))),
+    // (the published answers give it, from the site's other diagnostics, `withBesides`)
+    besides: [],
+  };
+  if (walk.finishing && leftOutWarning(diagnostic)) return false;
+  (walk.finishing ? walk.deferred : walk.diagnostics).push(diagnostic);
+  walk.rules.set(diagnostic, walk.rule);
+  return true;
+}
+
+/**
+ * The route rule's one required-check decision (AD-1, #1073; V30 §13, "a use that needs a check has three
+ * outcomes"), asked of every warning before it is made, after the quiet path, the exact answers and G (§13.2): a
+ * possible `null` owing its null-check, or a member of the read's written union that the use does not take (#1073:
+ * the written domain proves it), brought to the use by a route without a check (`NarrowingRoutes.required`), is a
+ * compile error with N10's payload in place of that warning and its obligation; every other warning and check at the
+ * site stays. No route proved, the warning stays: a check on every route that the compiler cannot keep, a stopped or an
+ * external value, a member a receiver may lack. Whether the error was made.
+ */
+function required(
+  walk: Consumers,
+  kind: DiagnosticKind,
+  site: SourceSite,
+  item: Item,
+  obligation: Obligation,
+  rule: DiagnosticRule,
+  fits: readonly Item[],
+  receiver: ContextDetail["receiver"],
+  read: PlaceId | undefined,
+): boolean {
+  // (a test's mark keeps the forward route query away; a `null`'s ways into the use are still asked, r4-451)
+  const flagged = item.guarded === true || item.tested === true;
+  if (
+    walk.finishing ||
+    (flagged && item.tag !== "null") ||
+    (item.reasons & REASON.budget) !== 0 ||
+    item.tag === "unknown" ||
+    item.tag === "empty"
+  )
+    return false;
+  const { program } = walk.pass;
+  const value = read ?? program.placeBySite.get(siteKey(site));
+  const at = value === undefined ? null : (program.places[value]?.site ?? null);
+  if (value === undefined || at === null) return false;
+  const text = program.textAt(at);
+  let tests: readonly string[];
+  // (a written union's other kinds the use does not take, null among them: each certifies the route, #1073)
+  let others: readonly ItemTag[] = [];
+  if (item.tag === "null") {
+    // (a null owes its null-check, or at a store its destination's check: C1's and C10's)
+    if (
+      obligation.kind !== "null-check" &&
+      !(kind === "written-target" && obligation.kind === "copy-type")
+    )
+      return false;
+    tests = [`if ${text} != null`, "otherwise"];
+  } else {
+    // (a union holding a reference: its members are the runtime's, F19a, never the route rule's)
+    const members = writtenMembers(walk, value, kind !== "written-target");
+    if (
+      members === null ||
+      !members.includes(item.tag) ||
+      members.some((tag) => REFERENCE.has(tag))
+    )
+      return false;
+    const taken = members.filter((tag) => fits.some((fit) => fit.tag === tag));
+    if (taken.length === 0) return false;
+    tests = [`if ${text} is ${taken.join(" | ")}`];
+    others = members.filter((tag) => tag !== item.tag && !taken.includes(tag));
+  }
+  program.work.charge("checks");
+  const route = walk.solve(
+    walk.pass.guards.narrowings(walk.pass).routes.required(value, item.tag, others, flagged),
+  );
+  if (route === null) return false;
+  const { writer, block } = route;
+  const diagnostic: CoreDiagnostic = {
+    class: "compile-error",
+    kind,
+    code: codeOf(rule),
+    site: siteOf(site),
+    rule,
+    kinds: [item.tag],
+    requiredCheck: {
+      rule: "N3",
+      writer,
+      writerFile:
+        writer === null || writer.file === site.file ? null : program.files[writer.file]!.path,
+      block,
+      missingTests: tests,
+      subject: text,
+      fits: kindsInOrder(new Set(fits.filter(concrete).map((found) => found.tag))),
+      provenance: provenanceOf(item, detail(walk, item, site, rule, receiver, read)),
+    },
+  };
+  walk.diagnostics.push(diagnostic);
+  walk.rules.set(diagnostic, walk.rule);
+  return true;
+}
+
+/**
+ * The members of the written union a read's variable declares, at the variable itself, or, where `results`, a called
+ * function's written result used where it stands (#1073: the written domain proves itself; a store's is C1's
+ * copy rule), or `null`.
+ */
+function writtenMembers(
+  walk: Consumers,
+  value: PlaceId,
+  results: boolean,
+): readonly ItemTag[] | null {
+  const { program } = walk.pass;
+  const at = program.places[value]?.site ?? null;
+  const node = at === null ? null : program.exprAt(at);
+  const expression = node?.expression;
+  const path =
+    node === null || expression === undefined ? null : stablePath(program, node.file, expression);
+  const c = program.opOf.get(value);
+  const written =
+    path !== null
+      ? path.steps.length > 0
+        ? null
+        : writtenOf(program.place(path.root).kind)
+      : results && c?.kind === "call" && "fn" in c
+        ? writtenOf(program.place(program.functionOf(c.fn).result).kind)
+        : null;
+  if (written?.kind !== "union") return null;
+  return typeTags(written);
+}
+
+/**
+ * What a warning's context word's sentence names (D1, `ContextDetail`), where the word is the warned read's own
+ * (`direct`, `directWord`), from that read's node: the function it is in where the value comes from outside it
+ * (`call`) or is a parameter of it (`deferred-parameter`), the label its line is entered at (`label`), the block it
+ * is in (`handler`), the receiver it reads a member of (`member`, `missing`, `unmodelled`); and the place a later
+ * store decides (`later`, A7's, at the store). Only the warning's word asks.
+ */
+function detail(
+  walk: Consumers,
+  item: Item,
+  site: SourceSite,
+  rule: DiagnosticRule,
+  receiver: ContextDetail["receiver"],
+  read: PlaceId | undefined,
+): ContextDetail {
+  const { program } = walk.pass;
+  const word = contextOf(item);
+  const node = program.exprAt(site);
+  const value = read ?? program.placeBySite.get(siteKey(site));
+  // (`later` is the store's own; `budget` the whole analysis's stop)
+  const direct =
+    word === "later" ||
+    word === "budget" ||
+    // a reference's member the check itself names (F19a: a speaker's field by its name has no receiver place)
+    (word === "unmodelled" && receiver?.kinds.some((kind) => REFERENCE.has(kind)) === true) ||
+    (value !== undefined && directWord(walk, word, item, value, node, read !== undefined));
+  const detail = {
+    direct,
+    outside: false,
+    callable: null,
+    label: null,
+    handler: null,
+    later: null,
+    receiver: null,
+  } satisfies ContextDetail;
+  if (!direct && word !== "unknown") return detail;
+  switch (word) {
+    case "unknown":
+      return { ...detail, outside: isExternal(item) };
+    case "later":
+      return rule.rule === "store" && rule.decider !== null
+        ? { ...detail, later: { place: rule.into, kinds: rule.type, decider: rule.decider } }
+        : detail;
+    case "label": {
+      const boundary = node === null ? null : program.dom.edom(node);
+      return boundary?.statement?.kind === "labelStatement"
+        ? { ...detail, label: boundary.statement.name.name }
+        : detail;
+    }
+    case "handler":
+      return {
+        ...detail,
+        handler: node === null ? null : (program.handlerOf(node)?.handler ?? null),
+      };
+    case "call":
+    case "deferred-parameter": {
+      const callable = node === null ? null : program.callableAt(node);
+      if (callable?.kind !== "function") return detail;
+      // `call`: a value set outside the function the read is in; a variable of the function changed by a call
+      // between its store and the read has no function to name
+      const root =
+        value === undefined
+          ? null
+          : program.targetRoot(program.occurrenceOf.get(value) ?? value).root;
+      const declared = root === null ? null : program.place(root).site;
+      const inside =
+        declared !== null &&
+        declared.file === site.file &&
+        declared.start >= callable.declaration.span.start.offset &&
+        declared.end <= callable.declaration.span.end.offset;
+      return word === "call" && inside
+        ? detail
+        : { ...detail, callable: callable.declaration.name.name };
+    }
+    case "member":
+    case "missing":
+    case "unmodelled": {
+      if (receiver !== null) return { ...detail, receiver };
+      // a speaker's field read by its name (F19a)
+      const speaker = value === undefined ? undefined : program.places[value]?.kind;
+      if (speaker?.kind === "speakerProperty")
+        return {
+          ...detail,
+          receiver: { text: speaker.speaker, kinds: ["speaker"], member: speaker.name },
+        };
+      const projection = value === undefined ? undefined : program.projOf.get(value);
+      const owner = projection === undefined ? undefined : program.places[projection.owner]?.site;
+      if (projection === undefined || owner === null || owner === undefined || node === null)
+        return detail;
+      return {
+        ...detail,
+        receiver: {
+          text: program.textAt(owner),
+          kinds: kindsOf(walk, projection.owner, node).map((found) => found.tag),
+          member: propertyName(projection.step),
+        },
+      };
+    }
+    default:
+      return detail;
+  }
+}
+
+/**
+ * Whether `item`'s word arose at the read of `value` at `node` itself (D1: a sentence names only what its word
+ * establishes), not in a value the read copies, projects, or takes from a call or an operation: an event word where
+ * the read's own exact path fails with it (§3.4's X1–X7), `member` there or at an element read, `deferred-parameter`
+ * at a parameter of the function the read is in, `missing` where a store of the receiver itself is the object that
+ * lacks the property, `unmodelled` where the receiver holds a reference or at a speaker's field. The receiver:
+ * `value` itself where `receiver` says it is a member access's receiver, else the owner the read projects.
+ */
+function directWord(
+  walk: Consumers,
+  word: ContextWord,
+  item: Item,
+  value: PlaceId,
+  node: FlowNode | null,
+  receiver: boolean,
+): boolean {
+  const { program, exact, definitions } = walk.pass;
+  // the read's own key, as `Values.valueRoute` walks it: a projection passes its step to its owner (its steps
+  // gathered from the read outwards, then reversed once)
+  const steps: string[] = [];
+  let at = node;
+  let element = false;
+  let owner: PlaceId | undefined;
+  let place = value;
+  for (let projection = program.projOf.get(place); projection !== undefined;) {
+    if (projection.step === "iteration") return false;
+    const step = measuresLength(projection.step) ? projection.step : stepName(projection.step);
+    element ||= step === "element";
+    owner ??= projection.owner;
+    steps.push(step);
+    at = projection.node ?? at;
+    place = projection.owner;
+    projection = program.projOf.get(place);
+  }
+  const path = steps.reverse();
+  const binding = program.occurrenceOf.get(place);
+  const call = program.callOutOf.has(place) ? program.opOf.get(place) : undefined;
+  const key =
+    binding !== undefined
+      ? keyOf(binding, path)
+      : call?.kind === "call"
+        ? keyOf(program.functionOf(call.fn).result, path)
+        : null;
+  const reached =
+    key === null || at === null ? null : exact.exactPath(key, program.occNode.get(place) ?? at);
+  const own = reached !== null && "fail" in reached ? reached.fail : null;
+  switch (word) {
+    case "deferred-parameter": {
+      if (own === null || binding === undefined || node === null) return false;
+      const root = program.targetRoot(binding).root;
+      const callable = program.callableAt(node);
+      const declared = program.place(root).site;
+      return (
+        program.places[root]?.kind.kind === "parameter" &&
+        callable?.kind === "function" &&
+        declared !== null &&
+        declared.start >= callable.declaration.span.start.offset &&
+        declared.end <= callable.declaration.span.end.offset
+      );
+    }
+    case "missing": {
+      // the object lacking the property is one the receiver's own stores hold (not one a copy brings)
+      const lacking = item.writer;
+      if (binding === undefined || lacking === null) return false;
+      return definitions.hasWriter(keyOf(binding, receiver ? path : path.slice(0, -1)), lacking);
+    }
+    case "unmodelled": {
+      const holder = receiver ? value : owner;
+      return (
+        REFERENCE.has(item.tag) ||
+        program.speakerPlaces.has(value) ||
+        (holder !== undefined &&
+          node !== null &&
+          kindsOf(walk, holder, node).some((found) => REFERENCE.has(found.tag)))
+      );
+    }
+    case "member":
+      return own === "member" || element;
+    default:
+      return own === word;
+  }
+}
+
+export function obligation(
+  kind: ObligationKind,
+  site: SourceSite,
+  target: string,
+  against: readonly RequiredKind[],
+  on: string,
+): Obligation {
+  return { kind, target, against, on, site: siteOf(site), boundary: false };
+}
+
+/** A store's `copy-type` warning against the destination's kinds (C1, C10's `rule`); `fits` as `warning`'s. */
+export function storeWarning(
+  walk: Consumers,
+  site: SourceSite,
+  label: string,
+  item: Item,
+  against: readonly ItemTag[],
+  rule: DiagnosticRule,
+  fits: readonly Item[],
+): boolean {
+  const origin = rule.rule === "store" ? loadOrigin(walk, site, rule) : undefined;
+  // (the proof beside the published rule, never in it: this warning's own rule, of the same fields, keys it)
+  const proved = origin === undefined ? rule : { ...rule };
+  if (origin !== undefined) proveOrigin(proved, origin);
+  return warning(
+    walk,
+    "written-target",
+    site,
+    item,
+    obligation(
+      "copy-type",
+      site,
+      label,
+      against.map((tag) => requiredKind(tag)),
+      `validate the stored value of ${label} against ${against.join("|")}`,
+    ),
+    proved,
+    fits,
+  );
+}
+
+/**
+ * #1468: the load with a default a store's warned value at `site` is, as the checker's own model proves it (the lead's
+ * ruling after Codex r5), for a fix that gives the place's property in that default. The value is stored once, into
+ * the place's variable or a property or element of it, with a property of the place below it; and it is the load
+ * itself, its variable's declaration's value; or a copy of a variable, or of a property or an element of one, whose
+ * key holds one definition, its declaration storing the load, and every key below it on the way to the property none
+ * (`definitions.byKey`, a loop's adds: no store, add or removal in any spelling the checker models). Each step's receiver
+ * on that way is what the analysis answers there: objects only below a property, lists or sets below an element, dicts
+ * below a dict's value; never by a step's name. With the way from the load and the variable holding it; `undefined`
+ * where anything is unproved. Kept beside the warning's rule (`proveOrigin`), never published.
+ */
+function loadOrigin(
+  walk: Consumers,
+  site: SourceSite,
+  rule: Extract<DiagnosticRule, { rule: "store" }>,
+): StoreOrigin | undefined {
+  const { program, definitions, contract, values } = walk.pass;
+  const work = program.work;
+  if (rule.root === null || rule.root.kind === "result") return undefined;
+  const value = program.placeBySite.get(siteKey(site));
+  const stored = value === undefined ? [] : (definitions.byValue.get(value) ?? []);
+  const d = stored.length === 1 ? stored[0]! : undefined;
+  const into = d === undefined ? undefined : program.place(d.place).kind;
+  if (
+    value === undefined ||
+    d === undefined ||
+    d.kind !== "whole" ||
+    into?.kind !== "binding" ||
+    into.name !== rule.root.name
+  )
+    return undefined;
+  // (the place's steps below where the value lands, as the rule names them)
+  const steps = rule.steps.map((step) =>
+    "property" in step
+      ? propertyStep(step.property)
+      : step.collection === "dict"
+        ? "entry"
+        : "element",
+  );
+  if (d.path.length > steps.length || !d.path.every((step, index) => step === steps[index]))
+    return undefined;
+  const below = steps.slice(d.path.length);
+  if (!below.some((step) => step !== "element" && step !== "entry")) return undefined;
+  const loadOf = (place: PlaceId | undefined): SourceSite | undefined => {
+    const constraint = place === undefined ? undefined : program.opOf.get(place);
+    return constraint?.kind === "load" && constraint.fallback !== null
+      ? constraint.site
+      : undefined;
+  };
+  // the receivers' kinds the analysis answers, each step's (`receiver` the items above it)
+  const fits = (receiver: readonly Item[], step: string): boolean =>
+    receiver.length > 0 &&
+    receiver.every((found) =>
+      step === "element"
+        ? found.tag === "list" || found.tag === "set"
+        : step === "entry"
+          ? found.tag === "dict"
+          : found.tag === "object",
+    );
+  const node = program.exprAt(site);
+  for (let length = 0; length < below.length; length += 1) {
+    work.charge("checks");
+    const receiver = withoutEmpty(walk.run(values.valueItems(value, node, below.slice(0, length))));
+    if (!fits(receiver, below[length]!)) return undefined;
+  }
+  // (the load itself, the declaration's value)
+  const own = loadOf(value);
+  if (own !== undefined)
+    return definitions.declOf.get(d.place) === d
+      ? { load: own, holder: into.name, path: below }
+      : undefined;
+  // (a copy: the variable's one definition, its declaration of the load, and no definition below it on the way)
+  const copied = contract.copiedKey(value);
+  if (copied === null) return undefined;
+  const holder = keyPlace(copied);
+  const kind = program.place(holder).kind;
+  const declared = definitions.declOf.get(holder);
+  const load = loadOf(declared?.value);
+  // (the copied key's steps through the charged boundary: a wrapper family's key is a cursor)
+  const copiedSteps = keyStepsIn(contract, copied);
+  const path = keptSteps(work, stepsArray(copiedSteps), below);
+  const mine = definitions.byKey.get(keptKey(work, holder, [])) ?? [];
+  if (
+    kind.kind !== "binding" ||
+    declared === undefined ||
+    load === undefined ||
+    mine.length !== 1 ||
+    mine[0] !== declared
+  )
+    return undefined;
+  for (let length = 0; length <= path.length; length += 1) {
+    work.charge("checks");
+    const key = keptKey(work, holder, path.slice(0, length));
+    if (definitions.loopAdds.has(key) || (length > 0 && definitions.byKey.has(key)))
+      return undefined;
+    if (
+      length < copiedSteps.length &&
+      !fits(withoutEmpty(walk.run(contract.contractOf(key))), path[length]!)
+    )
+      return undefined;
+  }
+  return { load, holder: kind.name, path };
+}
+
+/**
+ * A consumer's warning as an owner: whether it was made (`warning`'s result), and the items it stands for. Only the
+ * finishing walk declares one: elsewhere every warning is made.
+ */
+export type Owner = readonly [made: boolean, items: () => readonly Item[]];
+
+/**
+ * Which items a stop's discharge left out with their owners (`withoutRecords`): what a domain's item's boundary requests
+ * ask (`Consumers.boundariesAt`, #1448). An item is left out when its owner was: each item has one owner per request.
+ * `warnGroups`' groups partition the items, or the soft owner is the one; `memberChecks`' unknown warning exists only
+ * where `extra` is empty, and every caller passes at most one extra; `operations` keys an operand's unknown items under
+ * one owner. Several live owners stand across consumers, each sending its own request (Sol's design §2): a caller that
+ * would declare overlapping owners needs every one of them left out. Each owner looked at once and a left-out owner's
+ * items, charged.
+ */
+export function leftOutBy(walk: Consumers, owners: readonly Owner[]): (item: Item) => boolean {
+  if (owners.length === 0) return () => false;
+  walk.pass.program.work.charge("checks", owners.length);
+  const left = new Set<Item>();
+  for (const [made, items] of owners) {
+    if (made) continue;
+    const owned = items();
+    walk.pass.program.work.charge("checks", owned.length);
+    for (const item of owned) left.add(item);
+  }
+  return left.size === 0 ? () => false : (item) => left.has(item);
+}
+
+/**
+ * Warns for each offending group of `items` (`offendingKinds`, one warning per kind or fan) with `owe`, each the owner of
+ * its group's items; or, given a soft owner, once for it, its warning standing for every item (`leftOutBy`).
+ */
+export function warnGroups(
+  walk: Consumers,
+  items: readonly Item[],
+  owe: (item: Item) => boolean,
+  soft: Item | null = null,
+): (item: Item) => boolean {
+  const owners: Owner[] = [];
+  if (soft !== null) {
+    const made = owe(soft);
+    if (walk.finishing) owners.push([made, () => items]);
+    return leftOutBy(walk, owners);
+  }
+  const key = (item: Item): string => (item.fan === undefined ? item.tag : `fan ${item.fan}`);
+  let groups: Item[][] | undefined;
+  // (each group's items, made once if asked: `offendingKinds` makes its groups in the order their keys first come)
+  const group = (index: number) => (): readonly Item[] => {
+    if (groups === undefined) {
+      // (each item grouped once, charged)
+      walk.pass.program.work.charge("checks", items.length);
+      const byKey = new Map<string, Item[]>();
+      for (const item of items) {
+        const each = byKey.get(key(item));
+        if (each === undefined) byKey.set(key(item), [item]);
+        else each.push(item);
+      }
+      groups = [...byKey.values()];
+    }
+    return groups[index]!;
+  };
+  for (const [index, { item }] of offendingKinds(items).entries()) {
+    const made = owe(item);
+    if (walk.finishing) owners.push([made, group(index)]);
+  }
+  return leftOutBy(walk, owners);
+}
+
+/** S4: a possible null owes a null-check at every consumer, against what the place needs; `fits` as `warning`'s. */
+export function nullWarning(
+  walk: Consumers,
+  kind: DiagnosticKind,
+  site: SourceSite,
+  item: Item,
+  on: string,
+  target: string,
+  rule: DiagnosticRule,
+  fits: readonly Item[],
+  against: readonly RequiredKind[] = ["non-null"],
+  receiver: ContextDetail["receiver"] = null,
+  read?: PlaceId,
+): boolean {
+  return warning(
+    walk,
+    kind,
+    site,
+    item,
+    obligation("null-check", site, target, against, on),
+    rule,
+    fits,
+    receiver,
+    read,
+  );
+}
+
+/**
+ * A store's destination as its sentence names it (D2): the source's own text for its variable, a parameter's name, a
+ * function's result as `f()`, and its properties; an element or a dict value in words (`'n' of an element of 'xs'`),
+ * never as code the source does not hold.
+ */
+export function placeText(walk: Consumers, root: PlaceId, path: readonly string[]): string {
+  const { program } = walk.pass;
+  const kind = program.place(root).kind;
+  const name =
+    kind.kind === "binding" || kind.kind === "parameter"
+      ? kind.name
+      : kind.kind === "result"
+        ? `${program.functionOf(kind.fn).name}()`
+        : program.place(root).label;
+  return pathPhrase({ code: name }, path);
+}
+
+/**
+ * A store's root as a fix declares it (ADR 0021 rule 1.1): a variable by its `let` or `global`, a parameter, a
+ * function's result; `null` for any other place.
+ */
+export function storeRoot(walk: Consumers, root: PlaceId): StoreRoot | null {
+  const { program } = walk.pass;
+  const { kind, site } = program.place(root);
+  if (kind.kind === "binding")
+    return kind.declared === "let" || kind.declared === "global"
+      ? { kind: kind.declared, name: kind.name, site }
+      : null;
+  if (kind.kind === "result")
+    return { kind: "result", name: program.functionOf(kind.fn).name, site: null };
+  return kind.kind === "parameter" ? { kind: "parameter", name: kind.name, site } : null;
+}
+
+/**
+ * The names of the properties a value's or a key's objects have (S3 §1), in the order the search finds them: once per
+ * place a value copies, so every read of one place asks once.
+ */
+export function propertiesOf(
+  walk: Consumers,
+  of: { readonly key: Key } | { readonly value: PlaceId },
+): readonly string[] {
+  const { contract } = walk.pass;
+  let place: CanonicalKey | PlaceId;
+  let start: PropertyNamesTask;
+  if ("key" in of) {
+    // (a key in its identity, as the names are held and asked by it: G3 stage 1)
+    const key = contract.canonicalKey(of.key);
+    place = key;
+    start = { key };
+  } else {
+    place = contract.copiedKey(of.value) ?? of.value;
+    start = { value: of.value, path: [] };
+  }
+  let found = walk.names.get(place);
+  if (found === undefined) {
+    // (a finishing walk that asks nothing knows no property: `run`'s rule)
+    found = walk.asksNothing()
+      ? []
+      : [...propertyNames(walk.pass, (work) => walk.solve(work), start)];
+    walk.names.set(place, found);
+  }
+  return found;
+}
+
+/**
+ * The property `${...}` shows of an object instead (#1195's decided text): the first, in its literal's order, whose
+ * value it shows, of the earliest literal in source order the value may hold; `null` without one. Once per place.
+ */
+export function shownProperty(walk: Consumers, value: PlaceId): string | null {
+  const { program, contract } = walk.pass;
+  const place = contract.copiedKey(value) ?? value;
+  const known = walk.shown.get(place);
+  if (known !== undefined) return known;
+  const first: { site: SourceSite | null; names: Iterable<string> } = { site: null, names: [] };
+  // (a finishing walk that asks nothing knows no property: `run`'s rule)
+  if (!walk.asksNothing())
+    propertyNames(
+      walk.pass,
+      (work) => walk.solve(work),
+      { value, path: [] },
+      (literal, names) => {
+        const site = program.place(literal).site;
+        if (
+          site !== null &&
+          (first.site === null ||
+            site.file < first.site.file ||
+            (site.file === first.site.file && site.start < first.site.start))
+        ) {
+          first.site = site;
+          first.names = names;
+        }
+      },
+    );
+  let found: string | null = null;
+  for (const step of first.names) {
+    program.work.charge("checks");
+    const kinds = withoutEmpty(walk.run(contract.contractOfValueAt(value, [step])));
+    // (a plain value: a list's emptiness is known only when the script runs, so none is suggested)
+    if (kinds.length > 0 && kinds.every((item) => SHOWN.some((kind) => kind === item.tag))) {
+      found = propertyName(step);
+      break;
+    }
+  }
+  walk.shown.set(place, found);
+  return found;
+}
+
+/**
+ * The steps of a store's path (`StoreStep`): an element step by the collection the contract holds above it, or, where
+ * the root's written type reaches it (the finishing path's descent), the collection written there,
+ * final at every stop and asking no solver.
+ */
+export function storeSteps(
+  walk: Consumers,
+  root: PlaceId,
+  path: readonly string[],
+  written: TypeTerm | null = null,
+): StoreStep[] {
+  // (the written type at each prefix one step below the one before, never walked again from its root, #1194)
+  let below = written;
+  return path.map((step, index): StoreStep => {
+    const term = below;
+    if (below !== null) below = termAt(below, [step]);
+    if (step === "entry") return { collection: "dict" };
+    if (step !== "element") return { property: propertyName(step) };
+    const above =
+      term !== null
+        ? typeTags(term)
+        : withoutEmpty(
+            walk.run(walk.pass.contract.contractOf(keyOf(root, path.slice(0, index)))),
+          ).map((item) => item.tag);
+    return { collection: above.includes("dict") ? "dict" : above.includes("set") ? "set" : "list" };
+  });
+}

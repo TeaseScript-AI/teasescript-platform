@@ -23,17 +23,23 @@
 //   context: the first parameter of a function passed to such a call as its last argument. So a closer binding of the
 //   same name hides the context, as it does when the code runs, and a name with no declaration is no context. Todo is
 //   the same with `todo`. Not counted: an aliased import of `test`, and a context's subtests. Each skip is also counted
-//   as on a condition or without one. On a condition: a `skip` option whose value, parentheses removed, is a `?:`, a
-//   call, a `!` or a comparison or logical operation (`===` `!==` `==` `!=` `<` `>` `<=` `>=` `&&` `||` `??` `in`
-//   `instanceof`), as `skip: process.platform === "win32"`; and `X.skip(…)` lying, below its nearest enclosing
-//   function, in a branch of an `if` or a `?:`, or the right operand of `&&`, `||` or `??`. Every other skip,
-//   `test.skip(…)` among them, is counted as without a condition: a test that never runs.
+//   as without a condition, on a condition, or as a platform guard. On a condition: a `skip` option whose value,
+//   parentheses removed, is a `?:`, a call, a `!` or a comparison or logical operation (`===` `!==` `==` `!=` `<` `>`
+//   `<=` `>=` `&&` `||` `??` `in` `instanceof`); and `X.skip(…)` lying, below its nearest enclosing function, in a
+//   branch of an `if` or a `?:`, or the right operand of `&&`, `||` or `??`. Every other skip, `test.skip(…)` among
+//   them, is counted as without a condition: a test that never runs. A skip on a condition whose `skip` option is,
+//   parentheses removed, a comparison of Node's `process.platform` with a string by `===` `!==` `==` or `!=`, or such
+//   comparisons joined by `&&` or `||`, as `skip: process.platform === "win32"`, is a platform guard and counted apart
+//   from the others on a condition (#2568): a platform the test cannot run on, not a test switched off. `process` is
+//   Node's when the binder finds no other binding of the name in the file, or it is a default or namespace import of
+//   `node:process` or `process`. Any other form stays on a condition.
 // - The lists count their entries: the `files` of each `.oxlintrc.json` override that is a waiting list (docs/LINTING.md
 //   "Waiting lists", by tools/oxlint/check-waiting-overrides.mjs's `isWaitingEntry`), the items of
-//   tools/oxlint/comment-forecasts-allowed.json, comment-declarations-waiting.json and comment-external-names.json
-//   (a list that may grow), the entries of tools/repository-checks/imports-waiting.json (value cycles and boundary
-//   crossings waiting), and the sum of the counts in comment-citations.json. A list whose file does not exist is
-//   null, printed "absent"; an `overrides` or `files` field left out counts 0, and one of another type is malformed.
+//   tools/oxlint/comments/comment-forecasts-allowed.json, comment-declarations-waiting.json and
+//   comment-external-names.json (a list that may grow), the entries of tools/repository-checks/imports-waiting.json
+//   (value cycles and boundary crossings waiting), and the sum of the counts in comment-citations.json; a comments/
+//   list not there is read in tools/oxlint/, its earlier place. A list whose file does not exist is null, printed
+//   "absent"; an `overrides` or `files` field left out counts 0, and one of another type is malformed.
 // - The structure signals are this checkout's tools/structure-report.mjs run in ROOT, so one definition measures any
 //   ROOT: its counts of large files, broad folders and long functions, and the largest of the files and the longest of
 //   the functions it lists, each null when none passes its threshold. Beside each count, the excess summed over the
@@ -44,7 +50,7 @@
 //   holder's. The long functions' count and sum are also given in tests and outside tests, by the `@ts-` rule above.
 //
 // --json prints {root, commit, counters, sites}: `commit` is ROOT's HEAD (null before the first commit), `counters`
-// the values above, and `sites` the `file:line` of every directive and test site, the skips also in their two lists.
+// the values above, and `sites` the `file:line` of every directive and test site, the skips also in their three lists.
 // Exit status: 0 when printed, 2 when it cannot run: ROOT is no checkout's top folder, a list file is not JSON of the
 // shape named above, or structure-report fails. On SIGINT or SIGTERM it stops
 // structure-report, removes its temporary folder and exits 130 or 143.
@@ -81,13 +87,17 @@ const COMPARISONS = new Set([
   ts.SyntaxKind.InKeyword,
   ts.SyntaxKind.InstanceOfKeyword,
 ]);
+// Each comments list is read in tools/oxlint/comments/, else in tools/oxlint/, its place before #2633: the worker
+// monitor runs this file on runtime-v2's tree, which keeps the lists there while it lacks that move. Only such a tree
+// reads the second path.
+const commentList = (name) => [`tools/oxlint/comments/${name}`, `tools/oxlint/${name}`];
 const LISTS = {
-  forecastsAllowed: "tools/oxlint/comment-forecasts-allowed.json",
-  declarationsWaiting: "tools/oxlint/comment-declarations-waiting.json",
-  externalNames: "tools/oxlint/comment-external-names.json",
-  importsWaiting: "tools/repository-checks/imports-waiting.json",
+  forecastsAllowed: commentList("comment-forecasts-allowed.json"),
+  declarationsWaiting: commentList("comment-declarations-waiting.json"),
+  externalNames: commentList("comment-external-names.json"),
+  importsWaiting: ["tools/repository-checks/imports-waiting.json"],
 };
-const CITATIONS = "tools/oxlint/comment-citations.json";
+const CITATIONS = commentList("comment-citations.json");
 
 class CannotRun extends Error {}
 class Stopped extends Error {
@@ -176,8 +186,68 @@ function isBranched(call) {
   return false;
 }
 
-/** The skip-or-todo options of a test call, as [kind, on a condition]: each `skip` or `todo` property not `false`. */
-function optionKinds(call) {
+const EQUALITY = new Set([
+  ts.SyntaxKind.EqualsEqualsEqualsToken,
+  ts.SyntaxKind.ExclamationEqualsEqualsToken,
+  ts.SyntaxKind.EqualsEqualsToken,
+  ts.SyntaxKind.ExclamationEqualsToken,
+]);
+const PROCESS_MODULES = new Set(["process", "node:process"]);
+
+/**
+ * Whether `symbol`, what the binder resolves a name `process` to, is Node's `process`: no declaration in the file (the
+ * global), or a default or namespace import of `node:process` or `process`. Any other binding of the name is not.
+ */
+function isNodeProcess(symbol) {
+  if (symbol === undefined) return true;
+  const declaration = symbol.declarations?.[0];
+  const clause =
+    declaration && ts.isNamespaceImport(declaration) ? declaration.parent : declaration;
+  return (
+    clause !== undefined &&
+    ts.isImportClause(clause) &&
+    !clause.isTypeOnly &&
+    ts.isStringLiteral(clause.parent.moduleSpecifier) &&
+    PROCESS_MODULES.has(clause.parent.moduleSpecifier.text)
+  );
+}
+
+/** Whether `node` is `process.platform`, its `process` resolved by `resolve` (an identifier to its symbol). */
+const isProcessPlatform = (node, resolve) =>
+  ts.isPropertyAccessExpression(node) &&
+  node.name.text === "platform" &&
+  ts.isIdentifier(node.expression) &&
+  node.expression.text === "process" &&
+  isNodeProcess(resolve(node.expression));
+const isString = (node) => ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node);
+
+/**
+ * Whether a `skip` option's value is a platform guard: Node's `process.platform` compared with a string, or such joined;
+ * `resolve` gives an identifier's symbol.
+ */
+function isPlatformGuard(value, resolve) {
+  const v = ts.skipParentheses(value);
+  if (!ts.isBinaryExpression(v)) return false;
+  const operator = v.operatorToken.kind;
+  if (operator === ts.SyntaxKind.AmpersandAmpersandToken || operator === ts.SyntaxKind.BarBarToken)
+    return isPlatformGuard(v.left, resolve) && isPlatformGuard(v.right, resolve);
+  const [left, right] = [ts.skipParentheses(v.left), ts.skipParentheses(v.right)];
+  return (
+    EQUALITY.has(operator) &&
+    ((isProcessPlatform(left, resolve) && isString(right)) ||
+      (isString(left) && isProcessPlatform(right, resolve)))
+  );
+}
+
+/** How a `skip` option's value holds the test back: `platform`, `conditional` or `unconditional`. */
+function skipKind(value, resolve) {
+  if (isPlatformGuard(value, resolve)) return "platform";
+  return isCondition(value) ? "conditional" : "unconditional";
+}
+
+/** The skip-or-todo options of a test call, as [kind, how]: each `skip` or `todo` property not `false`, `how` as
+ * `skipKind` gives it (`unconditional` for a shorthand property). */
+function optionKinds(call, resolve) {
   const kinds = [];
   for (const argument of call.arguments) {
     if (!ts.isObjectLiteralExpression(argument)) continue;
@@ -192,7 +262,12 @@ function optionKinds(call) {
         property.initializer.kind === ts.SyntaxKind.FalseKeyword
       )
         continue;
-      kinds.push([name, ts.isPropertyAssignment(property) && isCondition(property.initializer)]);
+      kinds.push([
+        name,
+        ts.isPropertyAssignment(property)
+          ? skipKind(property.initializer, resolve)
+          : "unconditional",
+      ]);
     }
   }
   return kinds;
@@ -215,31 +290,36 @@ function checkerOf(source) {
   return ts.createProgram({ rootNames: [source.fileName], options, host }).getTypeChecker();
 }
 
-/** The skip and todo sites of a parsed file, each as [kind, the position of its call, whether on a condition]. */
+/** The skip and todo sites of a parsed file, each as [kind, the position of its call, how, as `skipKind` gives it]. */
 function testSites(source) {
   const sites = [];
   const receivers = []; // [kind, call, name] of each `X.skip(…)` or `X.todo(…)` whose X may be a context
+  let checker = null; // made only for a file that needs it
+  const resolve = (name) => (checker ??= checkerOf(source)).getSymbolAtLocation(name);
   const visit = (node) => {
     if (ts.isCallExpression(node)) {
       const callee = node.expression;
       const kind = ts.isPropertyAccessExpression(callee) ? callee.name.text : null;
       if ((kind === "skip" || kind === "todo") && ts.isIdentifier(callee.expression)) {
         if (TEST_NAMES.has(callee.expression.text))
-          sites.push([kind, node.getStart(source), false]);
+          sites.push([kind, node.getStart(source), "unconditional"]);
         else receivers.push([kind, node, callee.expression]);
       }
       if (isTestCall(node))
-        for (const [option, conditional] of optionKinds(node))
-          sites.push([option, node.getStart(source), conditional]);
+        for (const [option, how] of optionKinds(node, resolve))
+          sites.push([option, node.getStart(source), how]);
     }
     ts.forEachChild(node, visit);
   };
   visit(source);
   if (receivers.length > 0) {
-    const checker = checkerOf(source);
     for (const [kind, call, name] of receivers)
-      if (isTestContext(checker.getSymbolAtLocation(name)?.valueDeclaration))
-        sites.push([kind, call.getStart(source), isBranched(call)]);
+      if (isTestContext(resolve(name)?.valueDeclaration))
+        sites.push([
+          kind,
+          call.getStart(source),
+          isBranched(call) ? "conditional" : "unconditional",
+        ]);
   }
   return sites.sort((a, b) => a[1] - b[1]);
 }
@@ -261,6 +341,12 @@ function piecesOf(file, text) {
     }));
 }
 
+const SKIP_LISTS = {
+  unconditional: "skippedTestsUnconditional",
+  conditional: "skippedTestsConditional",
+  platform: "skippedTestsPlatform",
+};
+
 function directivesAndTests(root) {
   const listed = git(root, ["ls-files", "-z"]);
   if (listed.status !== 0)
@@ -273,6 +359,7 @@ function directivesAndTests(root) {
     todoTests: [],
     skippedTestsUnconditional: [],
     skippedTestsConditional: [],
+    skippedTestsPlatform: [],
   };
   for (const file of files) {
     const full = path.join(root, file);
@@ -285,19 +372,21 @@ function directivesAndTests(root) {
         const kind = directiveOf(piece.text.slice(range.pos, range.end));
         if (kind) sites[kind].push(at(range.pos));
       }
-      for (const [kind, pos, conditional] of testSites(source)) {
+      for (const [kind, pos, how] of testSites(source)) {
         if (kind === "todo") sites.todoTests.push(at(pos));
         else {
           sites.skippedTests.push(at(pos));
-          sites[conditional ? "skippedTestsConditional" : "skippedTestsUnconditional"].push(
-            at(pos),
-          );
+          sites[SKIP_LISTS[how]].push(at(pos));
         }
       }
     }
   }
   return sites;
 }
+
+/** The first of `paths` that exists in `root`, else the first. */
+const firstPresent = (root, paths) =>
+  paths.find((file) => existsSync(path.join(root, file))) ?? paths[0];
 
 function readJson(root, file) {
   const full = path.join(root, file);
@@ -332,18 +421,20 @@ function lists(root) {
       if (isWaitingEntry(override)) counts.oxlintOverrideFiles += files.length;
     }
   }
-  for (const [key, file] of Object.entries(LISTS)) {
+  for (const [key, paths] of Object.entries(LISTS)) {
+    const file = firstPresent(root, paths);
     const list = readJson(root, file);
     if (list !== undefined) shape(file, Array.isArray(list), "an array");
     counts[key] = list === undefined ? null : list.length;
   }
-  const citations = readJson(root, CITATIONS);
+  const citationsFile = firstPresent(root, CITATIONS);
+  const citations = readJson(root, citationsFile);
   if (citations === undefined) counts.citations = null;
   else {
     const perFile = isObject(citations) ? Object.values(citations) : [];
     const counted = perFile.flatMap((c) => (isObject(c) ? Object.values(c) : [NaN]));
     shape(
-      CITATIONS,
+      citationsFile,
       isObject(citations) && counted.every((n) => Number.isInteger(n) && n >= 0),
       "an object of files, each an object of citations to counts",
     );
@@ -452,6 +543,7 @@ async function main(argv) {
   console.log(`Skipped tests: ${c.skippedTests}`);
   console.log(`Skipped tests without a condition: ${c.skippedTestsUnconditional}`);
   console.log(`Skipped tests on a condition: ${c.skippedTestsConditional}`);
+  console.log(`Skipped tests on the platform: ${c.skippedTestsPlatform}`);
   console.log(`Todo tests: ${c.todoTests}`);
   console.log(`.oxlintrc.json waiting-list files: ${value(c.oxlintOverrideFiles)}`);
   console.log(`Comment forecasts allowed: ${value(c.forecastsAllowed)}`);

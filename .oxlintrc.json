@@ -74,11 +74,11 @@
         "src/xmp-keywords.ts",
         "tests/families-runner/families-baseline-store.test.ts",
         "tests/families-runner/families-runner-compare.test.ts",
-        "tests/type-core/type-core-closure.test.ts",
+        "tests/type-core/stop/type-core-closure.test.ts",
         "tests/type-core/type-core-mixed-family.test.ts",
-        "tests/type-core-stop/type-core-stop-combined.test.ts",
-        "tests/type-core-stop/type-core-stop-labels.test.ts",
-        "tests/type-core-stop/type-core-stop-route.test.ts"
+        "tests/type-core/stop/type-core-stop-combined.test.ts",
+        "tests/type-core/stop/type-core-stop-labels.test.ts",
+        "tests/type-core/stop/type-core-stop-route.test.ts"
       ],
       "rules": {
         "no-control-regex": "off",
@@ -145,6 +145,39 @@
     {
       "files": ["player/vue/src/session/activation/work/**"],
       "rules": { "typescript/no-floating-promises": ["error", { "ignoreVoid": false }] }
+    },
+    {
+      "files": ["**/*.{js,jsx,mjs,cjs}"],
+      "env": { "node": true, "builtin": true },
+      "rules": { "no-undef": "error" }
+    },
+    {
+      "files": ["**/*.{js,jsx,mjs}"],
+      "rules": {
+        "no-restricted-globals": ["error", "exports", "require", "module", "__filename", "__dirname"]
+      }
+    },
+    {
+      "files": ["tools/player-firefox-camera.mjs", "tools/player-preview-checks.mjs"],
+      "globals": {
+        "document": "readonly",
+        "Element": "readonly",
+        "getComputedStyle": "readonly",
+        "HTMLMediaElement": "readonly",
+        "HTMLTextAreaElement": "readonly",
+        "HTMLVideoElement": "readonly",
+        "MouseEvent": "readonly",
+        "StorageEvent": "readonly",
+        "window": "readonly"
+      }
+    },
+    {
+      "files": ["tools/player-gate/bridge/page.mjs", "tools/player-gate/bridge/worker-entry.mjs", "tools/player-gate/drive.mjs", "tools/player-gate/lib/player.mjs", "tools/player-gate/lib/probe.mjs", "tools/player-gate/scenarios/bridge.mjs", "tools/player-gate/scenarios/demo.mjs", "tools/player-gate/scenarios/keep.mjs", "tools/player-gate/scenarios/taps.mjs", "tools/player-gate/tapes/browser.mjs"],
+      "globals": {"document": "readonly", "Document": "readonly", "getComputedStyle": "readonly", "IDBDatabase": "readonly", "IDBObjectStore": "readonly", "indexedDB": "readonly", "innerHeight": "readonly", "innerWidth": "readonly", "location": "readonly", "requestAnimationFrame": "readonly", "self": "readonly", "window": "readonly", "Worker": "readonly"}
+    },
+    {
+      "files": ["tools/player-gate/variants/delayed-client.mjs", "tools/player-gate/variants/delayed-in-process.mjs"],
+      "globals": { "__GATE_DELAY_MS__": "readonly" }
     }
   ]
 }

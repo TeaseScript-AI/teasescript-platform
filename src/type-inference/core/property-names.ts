@@ -26,6 +26,7 @@ import { keptPath, recordPath, type Key } from "./definitions.js";
 import { dictList } from "./method-categories.js";
 import { propertyName } from "./program.js";
 import type { Work } from "./solver.js";
+import { Retained, retainedModule } from "./retained/retained.js";
 
 /** A task of a property name search (`propertyNames`): a value at a path, a key, or a literal at a path. */
 export type PropertyNamesTask =
@@ -296,10 +297,19 @@ interface Take {
   readonly classified: Map<Key, { readonly source: Source; readonly pumps: boolean | null }>;
 }
 
-const listingMemos = new WeakMap<Contract, ListingMemo>();
+const listingMemos = retainedModule<Contract, ListingMemo>(
+  "property-names.listingMemos",
+  "weakMap",
+);
 
 const NO_SOURCES: Listing = {
-  run: { sources: [], names: new Set(), ids: new Set(), classified: new Set(), owner: null },
+  run: {
+    sources: [],
+    names: Retained.set("property-names.NO_SOURCES.names"),
+    ids: Retained.set("property-names.NO_SOURCES.ids"),
+    classified: Retained.set("property-names.NO_SOURCES.classified"),
+    owner: null,
+  },
   length: 0,
 };
 
@@ -307,7 +317,7 @@ const NO_SOURCES: Listing = {
 function listingMemo(pass: CorePass): ListingMemo {
   const { contract } = pass;
   const work = pass.program.work;
-  const known = listingMemos.get(contract);
+  const known = listingMemos().get(contract);
   if (
     known !== undefined &&
     known.stops === contract.stoppedCount &&
@@ -317,12 +327,12 @@ function listingMemo(pass: CorePass): ListingMemo {
   const memo: ListingMemo = {
     stops: contract.stoppedCount,
     stopped: work.stopped,
-    listings: new Map(),
+    listings: Retained.map("ListingMemo.listings"),
     // (a stores object's single top reads the prefix index alone, which no stop changes: kept for the pass once found)
-    tops: known?.tops ?? new Map(),
-    contributions: new Map(),
+    tops: known?.tops ?? Retained.map("ListingMemo.tops"),
+    contributions: Retained.map("ListingMemo.contributions"),
   };
-  listingMemos.set(contract, memo);
+  listingMemos().set(contract, memo);
   return memo;
 }
 
@@ -446,13 +456,25 @@ function byRest(
   let at = memo.listings.get(of);
   if (at === undefined) {
     if (!make) return undefined;
-    memo.listings.set(of, (at = { listing: undefined, next: new Map() }));
+    memo.listings.set(
+      of,
+      (at = Retained.record<ByRest>("ListingMemo.byRest", {
+        listing: undefined,
+        next: Retained.map("ListingMemo.next"),
+      })),
+    );
   }
   for (const step of rest) {
     let next: ByRest | undefined = at.next.get(step);
     if (next === undefined) {
       if (!make) return undefined;
-      at.next.set(step, (next = { listing: undefined, next: new Map() }));
+      at.next.set(
+        step,
+        (next = Retained.record<ByRest>("ListingMemo.byRest", {
+          listing: undefined,
+          next: Retained.map("ListingMemo.next"),
+        })),
+      );
     }
     at = next;
   }
@@ -477,7 +499,8 @@ function remember(
   rest: readonly string[],
   listing: Listing,
 ): Listing {
-  byRest(memo, of, rest, true)!.listing = listing;
+  const at = byRest(memo, of, rest, true)!;
+  at.listing = listing;
   return listing;
 }
 
@@ -516,7 +539,7 @@ function classify(
     const walk = keptKeyWalk(pass.contract, source.key);
     const names: string[] = [];
     keyNames(pass, source.key, (found) => names.push(found));
-    contribution = {
+    contribution = Retained.record<Contribution>("ListingMemo.contribution", {
       place: walk.place,
       path: stepsArray(walk.path),
       names,
@@ -524,7 +547,7 @@ function classify(
       walked: true,
       named: true,
       followed: false,
-    };
+    });
     memo.contributions.set(source.id, contribution);
   }
   const pumps = take.pumps(contribution.place, contribution.path, rest.length);
@@ -553,7 +576,11 @@ function classify(
 /** A source of a listing at a rest: its key there and that key's identity, charged as the search charges them. */
 function sourceAt(pass: CorePass, sub: Key, rest: readonly string[]): Source {
   const key = keptKeyBelowIn(pass.contract, sub, rest);
-  return { key, id: taskId(pass.program.work, { key }), prepaid: true };
+  return Retained.record<Source>("Listing.source", {
+    key,
+    id: taskId(pass.program.work, { key }),
+    prepaid: true,
+  });
 }
 
 /** A listing made from all of its sources in `subSources`' order: each classified, the last first. */
@@ -564,13 +591,13 @@ function wholeListing(
   rest: readonly string[],
   take: Take,
 ): Listing {
-  const run: Run = {
-    sources: [],
-    names: new Set(),
-    ids: new Set(),
-    classified: new Set(),
+  const run = Retained.record<Run>("Listing.run", {
+    sources: Retained.array("Listing.run.sources"),
+    names: Retained.set("Listing.run.names"),
+    ids: Retained.set("Listing.run.ids"),
+    classified: Retained.set("Listing.run.classified"),
     owner: null,
-  };
+  });
   for (let at = subs.length - 1; at >= 0; at -= 1) classify(pass, memo, run, subs[at]!, rest, take);
   const listing = { run, length: run.sources.length };
   run.owner = listing;

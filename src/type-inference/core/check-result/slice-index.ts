@@ -11,6 +11,7 @@ import type {
   CallExpression,
   LoadExpression,
   BinaryExpression,
+  InteractionExpression,
   Program,
 } from "../../../ast.js";
 import { type SourceSpan } from "../../../source.js";
@@ -19,6 +20,8 @@ import {
   handlerBlocks,
   statementExpressions,
   expressionParts,
+  sayOperands,
+  askParts,
 } from "../../../expression-children.js";
 import type { FactSite } from "../../backend.js";
 import type { SourceSite, PlaceId } from "../../graph.js";
@@ -45,6 +48,21 @@ function operands(expression: Expression): Expression[] {
   return found;
 }
 
+/** An item of the slice's walk: a statement, or an expression with the store it belongs to. */
+type Entry =
+  | { readonly statement: Statement }
+  | {
+      readonly expression: Expression;
+      readonly store: Store | null;
+      readonly whole: boolean;
+      readonly parent?: Expression | null;
+    };
+
+/** Pushes a statement list onto the walk's stack, last first, so it is walked in source order. */
+function pushStatements(pending: Entry[], list: readonly Statement[]): void {
+  for (let at = list.length - 1; at >= 0; at -= 1) pending.push({ statement: list[at]! });
+}
+
 /** The source of a program inside the slice, walked once: its statements, its expressions and what each belongs to. */
 export class SliceIndex {
   readonly lets: LetStatement[] = [];
@@ -61,6 +79,8 @@ export class SliceIndex {
   readonly loads: LoadExpression[] = [];
   /** The values `say` shows. */
   readonly shown: Expression[] = [];
+  /** The asks, in source order. */
+  readonly asks: InteractionExpression[] = [];
   /** The `otherwise`, call or load that each fallback or `default:` belongs to, by its operand and what it holds. */
   readonly #fallbackOf = new Map<Expression, BinaryExpression | CallExpression | LoadExpression>();
   /** The property store whose target's receiver each expression is. */
@@ -82,23 +102,14 @@ export class SliceIndex {
   readonly #role = new Map<Expression, "count" | "index">();
   /** The iterables of the `for` loops. */
   readonly #iterables = new Set<Expression>();
+  /** The presentations of the `say` statements, whose option names are not written property names. */
+  readonly #presentations = new Set<Expression>();
 
   /** `onFile` hears of each file as the walk enters it (S3 §6 keeps the request's progress callback). */
   public constructor(programs: readonly Program[], onFile: (file: number) => void = () => {}) {
-    type Entry =
-      | { readonly statement: Statement }
-      | {
-          readonly expression: Expression;
-          readonly store: Store | null;
-          readonly whole: boolean;
-          readonly parent?: Expression | null;
-        };
     programs.forEach((program, file) => {
       onFile(file);
       const pending: Entry[] = program.statements.map((statement) => ({ statement })).reverse();
-      const statements = (list: readonly Statement[]): void => {
-        for (let at = list.length - 1; at >= 0; at -= 1) pending.push({ statement: list[at]! });
-      };
       for (let entry = pending.pop(); entry !== undefined; entry = pending.pop()) {
         if ("statement" in entry) {
           const statement = entry.statement;
@@ -106,74 +117,7 @@ export class SliceIndex {
           this.statements.push(statement);
           const key = siteKey(file, statement.span);
           if (!this.#statementsBySite.has(key)) this.#statementsBySite.set(key, statement);
-          switch (statement.kind) {
-            case "letStatement":
-              this.lets.push(statement);
-              pending.push({ expression: statement.initializer, store: statement, whole: true });
-              break;
-            case "assignmentStatement":
-              pending.push({ expression: statement.value, store: statement, whole: true });
-              // a property store reads its receiver, which a member check at the store reads (C5c)
-              if (statement.target.kind === "propertyAccessExpression") {
-                // C5 diagnostics name the whole target (§3.4); it is a store, so do not visit it as a read.
-                this.#bySite.set(siteKey(file, statement.target.span), statement.target);
-                this.#file.set(statement.target, file);
-                this.#storeOfReceiver.set(statement.target, statement);
-                this.#write(statement.target.property.name, file, statement.target.property.span);
-                for (const held of operands(statement.target.object))
-                  this.#storeOfReceiver.set(held, statement);
-                pending.push({ expression: statement.target.object, store: null, whole: false });
-              } else if (statement.target.kind === "indexExpression") {
-                // an element store reads its receiver and its index
-                pending.push({ expression: statement.target.index, store: null, whole: false });
-                pending.push({ expression: statement.target.object, store: null, whole: false });
-              }
-              break;
-            case "ifStatement":
-              if (statement.elseBlock?.kind === "block") statements(statement.elseBlock.statements);
-              else if (statement.elseBlock !== null)
-                pending.push({ statement: statement.elseBlock });
-              statements(statement.thenBlock.statements);
-              pending.push({ expression: statement.condition, store: null, whole: false });
-              break;
-            case "repeatStatement":
-              statements(statement.body.statements);
-              this.#role.set(statement.count, "count");
-              pending.push({ expression: statement.count, store: null, whole: false });
-              break;
-            case "sayStatement":
-              this.shown.push(statement.value);
-              pending.push({ expression: statement.value, store: null, whole: false });
-              break;
-            case "forStatement":
-              this.#iterables.add(statement.iterable);
-              statements(statement.body.statements);
-              pending.push({ expression: statement.iterable, store: null, whole: false });
-              break;
-            default: {
-              // any other statement (outside the candidate's slice, `backend.ts`): its blocks and its own expressions
-              // in source order, so the checks that read every expression find them (a record of any program)
-              const nested = [
-                ...nestedStatements(statement),
-                ...(statement.kind === "functionDeclaration" ? statement.body.statements : []),
-                ...handlerBlocks(statement).flatMap((block) => block.statements),
-              ];
-              statements(nested.sort((a, b) => a.span.start.offset - b.span.start.offset));
-              const own = [
-                ...(statement.kind === "globalStatement" && statement.assignment === null
-                  ? [statement.initial]
-                  : []),
-                ...(statement.kind === "functionDeclaration"
-                  ? statement.parameters.flatMap((parameter) =>
-                      parameter.defaultValue === null ? [] : [parameter.defaultValue],
-                    )
-                  : []),
-                ...statementExpressions(statement),
-              ];
-              for (let at = own.length - 1; at >= 0; at -= 1)
-                pending.push({ expression: own[at]!, store: null, whole: false });
-            }
-          }
+          this.#statement(statement, pending);
           continue;
         }
         const { expression, store, whole } = entry;
@@ -219,7 +163,9 @@ export class SliceIndex {
             for (let at = expression.properties.length - 1; at >= 0; at -= 1) {
               const property = expression.properties[at]!;
               this.#propertyOf.set(property.value, property.name.name);
-              this.#write(property.name.name, file, property.name.span);
+              // (a presentation's options are no properties of the script's values)
+              if (!this.#presentations.has(expression))
+                this.#write(property.name.name, file, property.name.span);
               pending.push({ expression: property.value, store, whole, parent: expression });
             }
             break;
@@ -262,9 +208,19 @@ export class SliceIndex {
               pending.push({ expression: method.object, store, whole: false, parent: expression });
             break;
           }
+          case "interactionExpression": {
+            this.asks.push(expression);
+            // (a question's presentation options are no properties of the script's values)
+            if (expression.presentation !== null) this.#presentations.add(expression.presentation);
+            const parts = askParts(expression);
+            for (let at = parts.length - 1; at >= 0; at -= 1)
+              pending.push({ expression: parts[at]!, store, whole: false, parent: expression });
+            break;
+          }
           default: {
             // any other expression (outside the slice): its parts, then the statements of the handlers it registers
-            for (const block of handlerBlocks(expression)) statements(block.statements);
+            for (const block of handlerBlocks(expression))
+              pushStatements(pending, block.statements);
             const parts = expressionParts(expression);
             for (let at = parts.length - 1; at >= 0; at -= 1)
               pending.push({ expression: parts[at]!, store, whole: false, parent: expression });
@@ -287,6 +243,85 @@ export class SliceIndex {
         }
       }
     });
+  }
+
+  /** A statement's own work in the walk: what it records, and its expressions and nested statements pushed to `pending`. */
+  #statement(statement: Statement, pending: Entry[]): void {
+    const statements = (list: readonly Statement[]): void => pushStatements(pending, list);
+    const file = this.fileOf(statement);
+    switch (statement.kind) {
+      case "letStatement":
+        this.lets.push(statement);
+        pending.push({ expression: statement.initializer, store: statement, whole: true });
+        break;
+      case "assignmentStatement":
+        pending.push({ expression: statement.value, store: statement, whole: true });
+        // a property store reads its receiver, which a member check at the store reads (C5c)
+        if (statement.target.kind === "propertyAccessExpression") {
+          // C5 diagnostics name the whole target (§3.4); it is a store, so do not visit it as a read.
+          this.#bySite.set(siteKey(file, statement.target.span), statement.target);
+          this.#file.set(statement.target, file);
+          this.#storeOfReceiver.set(statement.target, statement);
+          this.#write(statement.target.property.name, file, statement.target.property.span);
+          for (const held of operands(statement.target.object))
+            this.#storeOfReceiver.set(held, statement);
+          pending.push({ expression: statement.target.object, store: null, whole: false });
+        } else if (statement.target.kind === "indexExpression") {
+          // an element store reads its receiver and its index
+          pending.push({ expression: statement.target.index, store: null, whole: false });
+          pending.push({ expression: statement.target.object, store: null, whole: false });
+        }
+        break;
+      case "ifStatement":
+        if (statement.elseBlock?.kind === "block") statements(statement.elseBlock.statements);
+        else if (statement.elseBlock !== null) pending.push({ statement: statement.elseBlock });
+        statements(statement.thenBlock.statements);
+        pending.push({ expression: statement.condition, store: null, whole: false });
+        break;
+      case "repeatStatement":
+        statements(statement.body.statements);
+        this.#role.set(statement.count, "count");
+        pending.push({ expression: statement.count, store: null, whole: false });
+        break;
+      case "sayStatement": {
+        // every operand in evaluation order, with what it holds (B1 of #2488's design round): its presentation, its
+        // text, which `say` shows, and its pacing
+        this.shown.push(statement.value);
+        if (statement.presentation !== null) this.#presentations.add(statement.presentation);
+        const operands = sayOperands(statement);
+        for (let at = operands.length - 1; at >= 0; at -= 1)
+          pending.push({ expression: operands[at]!, store: null, whole: false });
+        break;
+      }
+      case "forStatement":
+        this.#iterables.add(statement.iterable);
+        statements(statement.body.statements);
+        pending.push({ expression: statement.iterable, store: null, whole: false });
+        break;
+      default: {
+        // any other statement (outside the candidate's slice, `backend.ts`): its blocks and its own expressions
+        // in source order, so the checks that read every expression find them (a record of any program)
+        const nested = [
+          ...nestedStatements(statement),
+          ...(statement.kind === "functionDeclaration" ? statement.body.statements : []),
+          ...handlerBlocks(statement).flatMap((block) => block.statements),
+        ];
+        statements(nested.sort((a, b) => a.span.start.offset - b.span.start.offset));
+        const own = [
+          ...(statement.kind === "globalStatement" && statement.assignment === null
+            ? [statement.initial]
+            : []),
+          ...(statement.kind === "functionDeclaration"
+            ? statement.parameters.flatMap((parameter) =>
+                parameter.defaultValue === null ? [] : [parameter.defaultValue],
+              )
+            : []),
+          ...statementExpressions(statement),
+        ];
+        for (let at = own.length - 1; at >= 0; at -= 1)
+          pending.push({ expression: own[at]!, store: null, whole: false });
+      }
+    }
   }
 
   public fileOf(node: Statement | Expression): number {

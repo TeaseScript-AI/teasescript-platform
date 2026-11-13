@@ -572,11 +572,12 @@ function mixedJoinFix(
 }
 
 /**
- * The current checker's fixes of an operator on date and time values (`type-checker.ts`, `operation-checks.ts`). Each
- * code form stands in place of the operation the diagnostic sits on (`at`), its value converted where it is a variable
- * or a path and the other operand one or a literal, and is offered where `codeAt` proves it there: the operands of the
- * kinds its conversions take, and its result, which the failed operation never gave, one the operation's place takes
- * (`expects`, Codex r6); an operand's diagnostic proves nothing of the operation's place. Else the conversion in words.
+ * The current checker's fixes of an operator on date and time values (`type-checker.ts`, `operation-check-support.ts`).
+ * Each code form stands in place of the operation the diagnostic sits on (`at`), its value converted where it is a
+ * variable or a path and the other operand one or a literal, and is offered where `codeAt` proves it there: the
+ * operands of the kinds its conversions take, and its result, which the failed operation never gave, one the
+ * operation's place takes (`expects`, Codex r6); an operand's diagnostic proves nothing of the operation's place. Else
+ * the conversion in words.
  */
 export function temporalFix(
   rule: Extract<DiagnosticRule, { rule: "operator" }>,

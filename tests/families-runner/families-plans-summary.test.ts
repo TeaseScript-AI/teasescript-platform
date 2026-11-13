@@ -127,61 +127,55 @@ test("the plans summary names what differs in a demand row, gives it one class, 
   ]);
 });
 
-test("the plans summary refuses, naming file, line and fault, any line that is not a record the runner writes (#2341)", (t) => {
-  const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
-  t.after(() => rmSync(folder, { recursive: true, force: true }));
-  const compile = (more: Record<string, unknown> = {}) => ({
-    plan: digest("p"),
-    diagnostics: digest("d"),
-    checks: 0,
-    error: null,
-    trace: "1/5/811c9dc5c2b2ae3d",
-    questions: "1/a0",
-    units: 5,
-    ...more,
-  });
-  const valid = () => ({
-    set: "s",
-    name: "n",
-    key: "c".repeat(64),
-    runs: 2,
-    differing: 1,
-    modes: [
-      {
-        mode: "reversed",
-        base: compile(),
-        head: compile(),
-        same: true,
-        demands: [{ demand: 16, base: compile(), head: compile({ trace: "1/4/a0", units: 4 }) }],
-      },
-    ],
-  });
-  const stopList = (stops: [string, number][]) =>
-    stops.map(([phase, allowance]) => ({ allowance, phase }));
-  const apartStops = {
-    count: 2,
-    sameSet: false,
-    differ: [],
-    base: stopList([
-      ["walk", 1],
-      ["walk", 2],
-    ]),
-    head: stopList([
-      ["walk", 2],
-      ["walk", 3],
-    ]),
-  };
-  const withStops = (r: ReturnType<typeof valid>, stops: Record<string, unknown>) => ({
-    ...r,
-    modes: [{ ...r.modes[0], stops }],
-  });
-  // (each row one fault, which only its own clause refuses; a row whose fault is null passes: the valid records first,
-  // one with apart stops)
-  const rows: (readonly [
-    string,
-    (r: ReturnType<typeof valid>) => object | string,
-    RegExp | null,
-  ])[] = [
+const compile = (more: Record<string, unknown> = {}) => ({
+  plan: digest("p"),
+  diagnostics: digest("d"),
+  checks: 0,
+  error: null,
+  trace: "1/5/811c9dc5c2b2ae3d",
+  questions: "1/a0",
+  units: 5,
+  ...more,
+});
+const valid = () => ({
+  set: "s",
+  name: "n",
+  key: "c".repeat(64),
+  runs: 2,
+  differing: 1,
+  modes: [
+    {
+      mode: "reversed",
+      base: compile(),
+      head: compile(),
+      same: true,
+      demands: [{ demand: 16, base: compile(), head: compile({ trace: "1/4/a0", units: 4 }) }],
+    },
+  ],
+});
+const stopList = (stops: [string, number][]) =>
+  stops.map(([phase, allowance]) => ({ allowance, phase }));
+const apartStops = {
+  count: 2,
+  sameSet: false,
+  differ: [],
+  base: stopList([
+    ["walk", 1],
+    ["walk", 2],
+  ]),
+  head: stopList([
+    ["walk", 2],
+    ["walk", 3],
+  ]),
+};
+const withStops = (r: ReturnType<typeof valid>, stops: Record<string, unknown>) => ({
+  ...r,
+  modes: [{ ...r.modes[0], stops }],
+});
+// (each row one fault, which only its own clause refuses; a row whose fault is null passes: the valid records first,
+// one with apart stops)
+const rows: (readonly [string, (r: ReturnType<typeof valid>) => object | string, RegExp | null])[] =
+  [
     ["a valid record", (r) => r, null],
     ["a valid record with apart stops", (r) => withStops(r, apartStops), null],
     ["not JSON", () => "{not json", /no JSON/],
@@ -391,6 +385,10 @@ test("the plans summary refuses, naming file, line and fault, any line that is n
       null,
     ],
   ];
+
+test("the plans summary refuses, naming file, line and fault, any line that is not a record the runner writes (#2341)", (t) => {
+  const folder = mkdtempSync(join(tmpdir(), "families-plans-"));
+  t.after(() => rmSync(folder, { recursive: true, force: true }));
   for (const [at, [label, change, fault]] of rows.entries()) {
     const changed = change(valid());
     const file = join(folder, `row-${at}.jsonl`);

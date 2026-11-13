@@ -7,7 +7,7 @@
 //   text is a function of the records: whole milliseconds, keys sorted.
 // - `binsOf` shares an area's places out among N shards: each at its recorded milliseconds, else the area's `rest` mean,
 //   longest first (ties in the area's order) to the least-loaded shard (ties to the lowest index), the rule
-//   `tools/test-shards.mjs` applies to CI's test files. Every place is in exactly one shard, and a source of more than
+//   `tools/test-runner/test-shards.mjs` applies to CI's test files. Every place is in exactly one shard, and a source of more than
 //   the area's total over N is alone in its shard: the loads never add up to more than the total, so some shard's load
 //   is under that source's and the least-loaded shard is never the one that holds it.
 // - `countOf` is the count of shards for a target of seconds a shard: one for each recorded source at or over the target,

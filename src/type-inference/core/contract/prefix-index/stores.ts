@@ -21,11 +21,13 @@ import type {
   CopyRing,
   EntryDraft,
   IdentityWork,
+  PrefixEntry,
   PrefixFrame,
   PrefixStores,
   SubLayer,
 } from "../model.js";
 import { aliasLayer, projectedLayer } from "./layers.js";
+import { Retained } from "../../retained/retained.js";
 
 /**
  * The root a store copies whole where `prefixWork` follows the copy into its source's own stores: a live whole store,
@@ -116,7 +118,7 @@ function ringOf(contract: Contract, place: PlaceId): CopyRing | null {
     let ring: CopyRing | null = null;
     if (members.length > 1 || top.to.includes(top.at)) {
       // (a link has one live store at its root, the copy of another member; every other member is a stop)
-      const stops = new Set<PlaceId>();
+      const stops = Retained.set<PlaceId>("Contract.rings.stops");
       for (const member of members) {
         let live = 0;
         for (const d of definitions.byKey.get(keyOf(member, [])) ?? []) {
@@ -157,23 +159,24 @@ export function* prefixWork(contract: Contract, prefix: CanonicalKey): IdentityW
   if (contract.prefix.has(prefix)) return;
   const { program, definitions, lists, guards } = contract.pass;
   const work = program.work;
-  const frame = (pk: CanonicalKey): PrefixFrame => ({
-    pk,
-    defs: definitions.byKey.get(pk) ?? [],
-    i: 0,
-    out: [],
-    seen: new Map(),
-    w: null,
-    d: null,
-    inherit: null,
-    inheritedBy: new Set(),
-    also: new Map(),
-    ck: null,
-    proj: null,
-    inner: undefined,
-    other: false,
-    cut: false,
-  });
+  const frame = (pk: CanonicalKey): PrefixFrame =>
+    Retained.record<PrefixFrame>("Contract.discovering", {
+      pk,
+      defs: definitions.byKey.get(pk) ?? [],
+      i: 0,
+      out: Retained.array("Contract.discovering.out"),
+      seen: Retained.map("Contract.discovering.seen"),
+      w: null,
+      d: null,
+      inherit: null,
+      inheritedBy: Retained.set("Contract.discovering.inheritedBy"),
+      also: Retained.map("Contract.discovering.also"),
+      ck: null,
+      proj: null,
+      inner: undefined,
+      other: false,
+      cut: false,
+    });
   const entryId = (e: EntryDraft): string =>
     e.key !== undefined
       ? contract.keyIdentity(e.key).id
@@ -207,19 +210,21 @@ export function* prefixWork(contract: Contract, prefix: CanonicalKey): IdentityW
             : e.value !== undefined
               ? holderAt(contract, contract.identityOf(e.value).holder, e.at ?? [])
               : null;
-      f.out.push({
-        ...(e.key !== undefined ? { key: e.key } : {}),
-        ...(e.unk !== undefined ? { unk: e.unk } : {}),
-        ...(e.empty === true ? { empty: true as const } : {}),
-        ...(e.elem !== undefined ? { elem: e.elem } : {}),
-        ...(e.value !== undefined ? { value: e.value } : {}),
-        ...(e.at !== undefined ? { at: e.at } : {}),
-        w,
-        ds: new Set([f.d]),
-        holder,
-        guarded: e.guarded === true,
-        ingress,
-      });
+      f.out.push(
+        Retained.record<PrefixEntry>("Contract.prefix.entry", {
+          ...(e.key !== undefined ? { key: e.key } : {}),
+          ...(e.unk !== undefined ? { unk: e.unk } : {}),
+          ...(e.empty === true ? { empty: true as const } : {}),
+          ...(e.elem !== undefined ? { elem: e.elem } : {}),
+          ...(e.value !== undefined ? { value: e.value } : {}),
+          ...(e.at !== undefined ? { at: e.at } : {}),
+          w,
+          ds: Retained.set("Contract.prefix.entry.ds", [f.d]),
+          holder,
+          guarded: e.guarded === true,
+          ingress,
+        }),
+      );
     } else {
       const entry = f.out[index]!;
       entry.ds.add(f.d);
@@ -246,7 +251,7 @@ export function* prefixWork(contract: Contract, prefix: CanonicalKey): IdentityW
     }
     let defs = f.also.get(layer);
     if (defs === undefined) {
-      f.also.set(layer, (defs = new Set()));
+      f.also.set(layer, (defs = Retained.set("Contract.discovering.also[]")));
       contract.facts.prefixEntries += 1;
     }
     defs.add(f.d);

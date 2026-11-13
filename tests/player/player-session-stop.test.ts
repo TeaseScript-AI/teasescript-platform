@@ -22,7 +22,7 @@ import type * as RuntimeView from "../../player/runtime/runtime-view.js";
 import type { PlayerRuntimeSession } from "../../player/runtime/runtime-adapter.js";
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
 import type { SerializableRuntimeValue } from "../../src/index.js";
-import { FakeMediaRepository } from "../helpers/player/fake-media-repository.js";
+import { FakeMediaRepository } from "../helpers/player/media/fake-media-repository.js";
 import { published } from "../helpers/debug-readers.js";
 import { loadPlayerModule } from "../helpers/player-modules.js";
 import { answerWith, type Intent } from "../helpers/player/player-input.js";

@@ -6,7 +6,7 @@ import type { SourceSite } from "../../src/type-inference/graph.js";
 /*
  * A site's identity for the test oracles, the compiler's own: its file and its offsets, never its offsets alone, as
  * every file counts its offsets from 0 (Astra's B1 on #1690, Codex r5's item 2 on #1687; #1700). An oracle that keys a
- * map by a site keys it by these; `tools/oxlint/check-site-keys.mjs` refuses a map key with an offset and no file.
+ * map by a site keys it by these; `check-site-keys` refuses a map key with an offset and no file.
  */
 
 /** A source site's key, `file:start:end`, as the compiler writes it. */
