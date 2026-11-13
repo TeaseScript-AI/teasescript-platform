@@ -47,14 +47,14 @@ test("no limit: memory.max is max everywhere, missing, or there is no cgroup v2"
   );
 });
 
-test("files at once: one per core but one without a limit, as many as fit at 3 GiB plus 640 MiB a file under one", () => {
+test("files at once: one per core but one without a limit, as many as fit at 4 GiB plus 576 MiB a file under one", () => {
   for (const [cores, limitMib, expected, what] of [
     [3, null, 3, "CI: 4 cores, no limit"],
     [15, null, 15, "desktop, no limit"],
     [15, 16384, 15, "desktop, --mem 16G"],
     [15, 12288, 14, "desktop, --mem 12G"],
-    [15, 8192, 8, "desktop, --mem 8G"],
-    [15, 6144, 4, "desktop, --mem 6G"],
+    [15, 8192, 7, "desktop, --mem 8G"],
+    [15, 6144, 3, "desktop, --mem 6G"],
     [15, 4096, 1, "desktop, --mem 4G"],
     [15, 2048, 1, "below the reserve: still one"],
     [0, null, 1, "a single core: one"],
@@ -68,7 +68,7 @@ test("the job's memory: SX_MEM_MIB and a visible cgroup limit, the smaller, so t
   assert.equal(jobMemoryMib({ env: env("6144"), cgroupMib: 40960 }), 6144);
   assert.equal(
     filesAtOnce({ cores: 15, limitMib: jobMemoryMib({ env: env("6144"), cgroupMib: 40960 }) }),
-    4,
+    3,
   );
   // (the cgroup smaller: a cap the runner can see wins over a larger reservation)
   assert.equal(jobMemoryMib({ env: env("16384"), cgroupMib: 6144 }), 6144);
