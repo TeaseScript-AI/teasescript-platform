@@ -65,7 +65,7 @@ export class BridgeLostError extends Error {
 
 /**
  * Called with a successful reply as it arrives, before the request's promise settles, so a session's store applies the
- * reply's publication in arrival order, also when a transport delivers replies early (`in-process.ts`). A throw rejects
+ * reply's publication in arrival order, also when a transport delivers replies early (the tests' in-process backend). A throw rejects
  * the request instead.
  */
 export type ReplyHook<R = unknown> = (result: BridgeResult<R>) => void;

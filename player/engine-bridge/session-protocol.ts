@@ -12,7 +12,7 @@ import type { PlayerRuntimeState } from "../runtime/runtime-adapter.js";
 
 /*
  * What a session op's reply carries in `view` (the L5 reply contract). The host keeps one cursor per session: how many
- * of its events it has handed out, in replies or through the transition facade. Every publication carries the events
+ * of its events it has handed out, in replies or, in tests, through the in-process backend's facade. Every publication carries the events
  * after that cursor, so the main side's store applies them contiguously; a publication's identity is its revision.
  */
 
