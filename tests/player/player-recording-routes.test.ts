@@ -59,8 +59,6 @@ const BEGINS: Readonly<Record<string, string>> = {
     "the explicit begin, by `beginRecordingAt` only",
   [`${ADAPTER} beginPlayerRuntimeRecording <- ${SESSION_OPS} beginRecordingAt`]:
     "the host's begin at a held session",
-  [`${SESSION_OPS} beginRecordingAt <- tests/helpers/bridge/in-process.ts beginRecordingNow`]:
-    "`beginRecordingNow`, the in-process facade",
   [`${SESSION_OPS} beginRecordingAt <- player/engine-bridge/ops/history.ts restartAt`]:
     "L5i.6's host restores: Back's and Forward's commit, Return, Debug-off's reinstatement",
   [`${SESSION_OPS} beginRecordingAt <- ${SESSION_OPS} sessionRunOps > beginRecording > sessionOp:callback#3.2`]:
@@ -210,8 +208,6 @@ const OBSERVATION_ROUTES: Readonly<Record<string, string>> = {
     "an op's new revision (`adoptResult`)",
   [`${HELD} HeldSession > publish <- ${HELD} catchUpOps > adoptCatchUp > sessionOp:callback#3.2`]:
     "a catch-up's adoption",
-  [`${HELD} HeldSession > publish <- tests/helpers/bridge/in-process.ts hatch > adopt`]:
-    "the in-process facade's adoption",
   [`${HELD} HeldSession > stopRequested <- player/engine-bridge/worker-host.ts startBridgeHost > halt`]:
     "a halt with stop arguments, on receipt",
   [`${HELD} HeldSession > atStop <- player/engine-bridge/worker-host.ts startBridgeHost > stopPayload`]:
@@ -230,16 +226,12 @@ test("every publication, stop and binding route of the export observation is cla
     { file: HELD, path: "HeldSession > bindRun" },
   ]);
   assert.deepEqual(found, Object.keys(OBSERVATION_ROUTES).sort(), "an unclassified or stale route");
-  // The routes that make a session, each binding inside the constructor: Start, an introduction, a kept restore, and a
-  // history restore.
-  const made = ["in-process.ts", "ops/persistence.ts", "ops/session.ts", "ops/history.ts"].map(
-    (file) => {
-      const text = readFileSync(resolve(process.cwd(), "player/engine-bridge", file), "utf8");
-      return [file, text.match(/new HeldSession\(/gu)?.length ?? 0] as const;
-    },
-  );
+  // The routes that make a session, each binding inside the constructor: Start, a kept restore, and a history restore.
+  const made = ["ops/persistence.ts", "ops/session.ts", "ops/history.ts"].map((file) => {
+    const text = readFileSync(resolve(process.cwd(), "player/engine-bridge", file), "utf8");
+    return [file, text.match(/new HeldSession\(/gu)?.length ?? 0] as const;
+  });
   assert.deepEqual(made, [
-    ["in-process.ts", 1],
     ["ops/persistence.ts", 1],
     ["ops/session.ts", 1],
     ["ops/history.ts", 1],
