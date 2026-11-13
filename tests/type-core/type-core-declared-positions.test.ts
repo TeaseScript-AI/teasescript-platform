@@ -87,6 +87,16 @@ const UNREACHED: ReadonlySet<string> = new Set([
 /** The refusal of a transfer's path the core knows to be no text (`argumentKinds`, `src/type-inference/core/backend.ts`). */
 const PATH_REFUSAL = "an argument that its built-in checks";
 
+/**
+ * A transfer's path the route refuses as the path's argument rule does one written in place (`DECLARED_REFUSALS`, R28):
+ * in code no run reaches, the core reads a typed ingress at its written type, here one other than text.
+ */
+const refusedPath = (sample: Sample, context: string): boolean =>
+  position(sample)?.at === "call" &&
+  sample.origin === "ingress" &&
+  sample.kind !== "string" &&
+  UNREACHED.has(context);
+
 /** A run's failure as `[code, start, end]`, or `null` for a run that does not fail with a site. */
 function failureOf(run: string): [string, number, number] | null {
   const match = /^failed (\w+)@(\d+):(\d+)$/u.exec(run);
@@ -143,14 +153,7 @@ function judge(
         );
       return;
     }
-    // in code no run reaches, the core reads a typed ingress at its written type: a transfer's path of a written type
-    // other than text is refused by the path's argument rule, as one written in place is (`DECLARED_REFUSALS`, R28)
-    if (
-      declared?.at === "call" &&
-      sample.origin === "ingress" &&
-      sample.kind !== "string" &&
-      UNREACHED.has(context)
-    ) {
+    if (refusedPath(sample, context)) {
       if (mode.outside !== PATH_REFUSAL)
         failures.push(
           `${at}: route ${mode.outside ?? mode.threw ?? "a plan"}, not "${PATH_REFUSAL}"`,
