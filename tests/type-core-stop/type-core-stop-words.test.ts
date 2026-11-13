@@ -258,7 +258,10 @@ test("the sentence table and the derived record name every site that words or de
           for (const each of clause.namedBindings.elements)
             if (!each.isTypeOnly) named.set(each.name.text, (each.propertyName ?? each.name).text);
       }
-    const consumer = file.includes(join("core", "consumers"));
+    // (and `check-result/otherwise.ts`: a consumer whose decision lies with the result it reads)
+    const consumer =
+      file.includes(join("core", "consumers")) ||
+      file.endsWith(join("core", "check-result", "otherwise.ts"));
     const visit = (node: ts.Node): void => {
       if (consumer && ts.isCallExpression(node)) {
         const callee = node.expression;
