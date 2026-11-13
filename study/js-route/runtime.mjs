@@ -31,6 +31,8 @@ import {
   textSayText,
 } from "../../dist/src/runtime/evaluation/speakers.js";
 import { callTooDeep } from "../../dist/src/runtime/instructions/functions.js";
+import { startTimerHandler, timerHandlerDispatchable, returnFromTimerHandler } from "../../dist/src/runtime/operations/timer-handlers.js";
+import { executionRunnable, processDueWork } from "../../dist/src/runtime/operations/observe-time.js";
 import { forLoopSource } from "../../dist/src/runtime/instructions/loops.js";
 import {
   checkedSpeakerProperty,
@@ -91,6 +93,8 @@ export class Runtime {
     this.session = session;
     this.Goto = Goto;
     this.SUSPEND = SUSPEND;
+    /** The closures of the blocks created so far, by function ID (the latest creation of each). */
+    this.blocks = new Map();
     /** Part C way (2): the frames a wait saved, innermost first; on resume, the frames to give back, outermost first. */
     this.frames = [];
     this.resumeFrames = [];
@@ -478,8 +482,35 @@ export class Runtime {
   }
   /** At a wait the program reached: true when the session settled it (the program goes on), else the drive ends. */
   waited() {
-    if (this.session.settle(this)) return;
-    throw SUSPEND;
+    for (;;) {
+      // The host's recorded operations at this wait; false: the drive ends here.
+      if (!this.session.settle(this)) throw SUSPEND;
+      if (this.runBlocks() && this.snapshot.status === "waiting") continue;
+      if (this.snapshot.status === "waiting") throw SUSPEND;
+      return;
+    }
+  }
+  /**
+   * Today's engine at a wait: scene time catches up toward the observed time, and each block it then dispatches runs
+   * (its closure), then returns to the wait. True when a block ran; the wait is then a new wait for the host.
+   */
+  runBlocks() {
+    const snapshot = this.snapshot;
+    if (snapshot.status === "waiting" && snapshot.currentSessionTimeMs <= snapshot.observedSessionTimeMs && !executionRunnable(snapshot))
+      processDueWork(this.plan, snapshot, this.events, null, null);
+    let ran = false;
+    while (timerHandlerDispatchable(snapshot)) {
+      startTimerHandler(this.plan, snapshot, null);
+      const frame = snapshot.callFrames.at(-1);
+      const block = this.blocks.get(frame.functionId);
+      if (block === undefined) throw new Error("study: a block whose creating instruction did not run in this drive");
+      this.depth += 1;
+      block();
+      this.depth -= 1;
+      returnFromTimerHandler(this.plan, snapshot, frame, this.events, null, null);
+      ran = true;
+    }
+    return ran;
   }
   exit(span, pc) {
     this.snapshot.nextInstruction = pc;

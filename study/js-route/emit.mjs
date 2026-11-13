@@ -110,8 +110,8 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
   let names = 0;
   const jsName = (name) => `v${names++}_${name.replace(SAFE, "_")}`;
   for (const definition of plan.functions) {
-    if (definition.handler !== null) throw new Unsupported(`a ${definition.handler} block`);
-    if (definition.selfHandle !== null) throw new Unsupported("a function with a handle");
+    if (definition.handler !== null && resumable) throw new Unsupported(`a ${definition.handler} block (resumable form)`);
+    if (definition.selfHandle !== null) throw new Unsupported("a media block with its own handle");
   }
   // Which instructions can wait, and which functions can: those that reach such an instruction or call one that can.
   const waitsHere = (ins) =>
@@ -149,7 +149,8 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
     const rootScope = new Map();
     const root = emitRegion(file.startInstruction, file.rootEndInstruction, null, [], rootScope, index);
     const functions = plan.functions
-      .filter((definition) => definition.entryInstruction >= file.rootEndInstruction && definition.entryInstruction < file.endInstruction)
+      // Blocks are emitted where the instruction that creates them stands (`blockClosures`).
+      .filter((definition) => definition.handler === null && definition.entryInstruction >= file.rootEndInstruction && definition.entryInstruction < file.endInstruction)
       // A global function sees the project's globals, not its file's top-level variables (ADR 0022 §3).
       .map((definition) => {
         emittedFunctions.add(definition.id);
@@ -162,7 +163,8 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
     lines.push(`function enter${index}(resume, fromEntry) { rt.file = ${index};${vars.length > 0 ? ` if (resume === null) ${vars.join(" = ")} = undefined;` : ""} file${index}(resume, fromEntry); }`);
     fileEntries.push(file.entryInstruction);
   });
-  if (emittedFunctions.size !== plan.functions.length) throw new Unsupported("a function outside every file's functions");
+  if (plan.functions.some((definition) => definition.handler === null && !emittedFunctions.has(definition.id)))
+    throw new Unsupported("a function outside every file's functions");
   lines.push(`const FILES = [${plan.files.map((_, i) => `enter${i}`).join(", ")}];`);
   lines.push(
     "function main() {",
@@ -646,8 +648,30 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
       } else throw new Unsupported(`a '${ins.loopKind}' loop`);
     }
 
+    /**
+     * The blocks an instruction creates, each as a closure over the variables visible where it stands, so that they
+     * share them (ADR 0024); the runtime runs one when today's engine dispatches it at a wait (`rt.runBlocks`).
+     */
+    function blockClosures(ins) {
+      const ids = [ins.handlerFunctionId, ins.finishFunctionId, ...(ins.cues ?? []).map((cue) => cue.functionId)].filter((id) => typeof id === "number");
+      if (ids.length === 0) return ins;
+      const visible = new Map(rootScope);
+      for (const scope of scopes) for (const [name, js] of scope) visible.set(name, js);
+      for (const id of ids) {
+        const block = plan.functions[id - 1];
+        line(`rt.blocks.set(${id}, ${emitRegion(block.entryInstruction, block.endInstruction, block, [], visible, fileIndex)});`);
+      }
+      // The closures share the variables; today's engine records none (its scopes do not hold them).
+      return { ...ins, captures: [] };
+    }
+
     function statement(ins, pc) {
       switch (ins.kind) {
+        case "startTimer":
+        case "showPermanentButton":
+        case "playMedia":
+          bridgeInstruction(blockClosures(ins), pc, "rt.instruction");
+          return;
         case "declareSpeaker":
           line(`rt.declareSpeaker(${konst(ins)}, ${globalIndex(ins.name)});`);
           return;

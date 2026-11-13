@@ -101,8 +101,8 @@ export class EmittedSession {
           : completeValidatedAction(this.#plan, rt.snapshot, operation.request);
       for (const event of done.events) rt.events.push(event);
     }
-    if (this.#mode === "observe" && last) return false;
-    return rt.snapshot.status !== "waiting";
+    // An observation ends its drive at the wait it was made at; the next run goes on from there.
+    return !(this.#mode === "observe" && last);
   }
 
   #freshState() {
