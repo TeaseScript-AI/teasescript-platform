@@ -48,14 +48,6 @@
     "witness": "let union"
   },
   {
-    "id": "assign-operator",
-    "scope": "row assignmentStatement",
-    "expression": "node.operator !== \"=\"",
-    "mutant": "false",
-    "expected": "kill",
-    "witness": "n +="
-  },
-  {
     "id": "assign-identifier",
     "scope": "row assignmentStatement",
     "expression": "node.target.kind === \"identifier\"",

@@ -68,6 +68,10 @@ const LISTED: Readonly<Record<string, readonly [number, string]>> = {
     2,
     "a lookup of a variable's element levels, its path then at most SLICE_DEPTH",
   ],
+  "backend.ts widenedPlace spread": [
+    2,
+    "a lookup of a level below a place, its path at most SLICE_DEPTH, the levels at most SLICE_DEPTH per expression",
+  ],
   "check-result/store-contracts.ts #answerTask spread": [
     4,
     "paths below a parse's call, cut at SLICE_DEPTH; lookups of its landing below",
@@ -345,6 +349,10 @@ const STORED: Readonly<Record<string, readonly [number, string]>> = {
   "contract/labels.ts labelPlainText text": [
     1,
     "a plain label's text in a test's record (`withLabelRecords`), never kept by an analysis",
+  ],
+  "backend.ts widenedPlace key": [
+    1,
+    "the candidate's refusal after the analysis (no ledger): a judged level's key, at most SLICE_DEPTH per expression",
   ],
   "contract-descriptors.ts #contract key": [
     1,

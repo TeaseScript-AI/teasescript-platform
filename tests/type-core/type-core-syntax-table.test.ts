@@ -261,13 +261,6 @@ const CONDITIONS: readonly Condition[] = [
   },
   {
     row: "assignmentStatement",
-    condition: "the operator is `=`",
-    source: "let n = 1\nn += 1",
-    at: "n += 1",
-    what: "this assignment",
-  },
-  {
-    row: "assignmentStatement",
     condition: "a variable or property target",
     source: "let xs = [1]\nxs[0] = 2",
     at: "xs[0] = 2",

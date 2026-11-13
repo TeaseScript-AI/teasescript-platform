@@ -41,7 +41,7 @@ const BASE_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly Template[]>>>
     "let o = {n: 1}\no.n = hostValue",
     "hostValue.n = 1",
     "let x: integer = 1\nx += hostValue",
-    "let o = {n: 1.5}\no.n -= hostValue",
+    'let o = {n: "a"}\no.n += hostValue',
   ],
   ifStatement: [
     'if hostValue == null {\n  say "y"\n} else {\n  say "n"\n}',

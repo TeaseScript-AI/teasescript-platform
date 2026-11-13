@@ -59,6 +59,7 @@ test("a store through a speaker is refused at the speaker's name, or at an enclo
   // in a message and in a declaration, is refused where a declaration reads it)
   const forms: readonly (readonly [Files, string, string])[] = [
     [main(`${DECLARED}boss.mood = 2`), "boss", "boss.mood = 2"],
+    [main(`${DECLARED}boss.mood += 1`), "boss", "boss.mood += 1"],
     [main(`${DECLARED}let s = boss\ns.mood = 2`), "boss", "boss\ns.mood"],
     [main(`${DECLARED}boss.tags.sort()`), "boss", "boss.tags.sort()"],
     [
@@ -92,8 +93,8 @@ test("a store through a speaker is refused at the speaker's name, or at an enclo
       site: { file: 0, start, end: start + "player.copyFrom(playerProfile)".length },
     },
   );
-  // a store the enclosing row refuses before it walks its target: a compound store and an element store
-  for (const store of ["boss.mood += 1", "boss.tags[0] = 2"]) {
+  // a store the enclosing row refuses before it walks its target: an element store
+  for (const store of ["boss.tags[0] = 2"]) {
     const files = main(`${DECLARED}${store}`);
     assert.notEqual(compileProject(files, OPTIONS).plan, null, store);
     const start = files[0]!.source.indexOf(store);

@@ -12,7 +12,6 @@ import {
   SliceIndex,
   OutsideContract,
   SLICE_DEPTH,
-  unwrap,
 } from "./check-result/slice-index.js";
 import { COLLECTIONS } from "./contract-descriptors.js";
 import { keyOf } from "./definitions.js";
@@ -480,7 +479,6 @@ function widens(answer: PlaceAnswer): boolean {
 /** The variable an assignment's target stores into, below its properties and elements; `null` for another receiver. */
 function variableOf(target: Expression): string | null {
   let at = target;
-  while (at.kind === "propertyAccessExpression" || at.kind === "indexExpression")
-    at = unwrap(at.object);
+  while (at.kind === "propertyAccessExpression" || at.kind === "indexExpression") at = at.object;
   return at.kind === "identifier" ? at.name : null;
 }
