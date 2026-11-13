@@ -332,13 +332,16 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
           const element = scrollElement.value;
           const before = element?.scrollTop ?? 0;
           // Following never scrolls the first entry of an update out of view: there the reader starts reading
-          // (PLAYER-UI.md "Smart follow and return to latest").
+          // (PLAYER-UI.md "Smart follow and return to latest"). That holds for the scroll that keeps the end in view as a
+          // row is measured (an adjustment) too, as when a block's message grows past the view after the update that
+          // brought it; once following stopped, an adjustment keeps the reader's place.
           const first =
-            options.adjustments === undefined && firstNewEntry !== null
+            firstNewEntry !== null && (options.adjustments === undefined || following.value)
               ? instance.measurementsCache[firstNewEntry]?.start
               : undefined;
-          if (first !== undefined && offset > first + 1) {
+          if (first !== undefined && offset + (options.adjustments ?? 0) > first + 1) {
             offset = first;
+            options = { ...options, adjustments: undefined };
             following.value = false;
             heldAtNewEntry.value = true;
             // More than the transcript shows at once shows directly.
