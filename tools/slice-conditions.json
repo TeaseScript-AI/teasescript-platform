@@ -947,5 +947,77 @@
     "mutant": "false",
     "expected": "restrict",
     "witness": "let r = askChoice 1, 2, prefill: null"
+  },
+  {
+    "id": "null-name",
+    "scope": "onlyNull",
+    "expression": "type.name === \"null\"",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "let x: null"
+  },
+  {
+    "id": "null-optional",
+    "scope": "onlyNull",
+    "expression": "onlyNull(type.value)",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "let x: null? (refused at its value, not itself)"
+  },
+  {
+    "id": "null-union",
+    "scope": "onlyNull",
+    "expression": "type.members.every(onlyNull)",
+    "mutant": "false",
+    "expected": "equivalent",
+    "witness": "a union is outside the slice's written types: `annotationOutside` refuses it at itself whichever way `onlyNull` reads it, and a union only `null` fills has no position below it"
+  },
+  {
+    "id": "null-position-own",
+    "scope": "nullOnlyPosition",
+    "expression": "onlyNull(type)",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "let x: null"
+  },
+  {
+    "id": "null-position-optional",
+    "scope": "nullOnlyPosition",
+    "expression": "nullOnlyPosition(type.value)",
+    "mutant": "null",
+    "expected": "kill",
+    "witness": "let x: null[]?"
+  },
+  {
+    "id": "null-position-element",
+    "scope": "nullOnlyPosition",
+    "expression": "nullOnlyPosition(type.element)",
+    "mutant": "null",
+    "expected": "kill",
+    "witness": "let x: null[]"
+  },
+  {
+    "id": "null-position-member",
+    "scope": "nullOnlyPosition",
+    "expression": "onlyNull(member) ? null : nullOnlyPosition(member)",
+    "mutant": "nullOnlyPosition(member)",
+    "expected": "kill",
+    "witness": "let x: integer | null (refused at the union, not at its member)"
+  },
+  {
+    "id": "null-position-found",
+    "scope": "nullOnlyPosition",
+    "expression": "found !== null",
+    "mutant": "true",
+    "expected": "kill",
+    "witness": "let x: integer | null[] (refused at the later member's element)"
+  },
+  {
+    "id": "annotation-null-only",
+    "scope": "annotationOutside",
+    "expression": "nullOnly !== null",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "let x: null"
   }
 ]

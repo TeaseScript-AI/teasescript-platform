@@ -658,8 +658,20 @@ export const DECLARED_REFUSALS: readonly {
       text: "a check that no store takes",
     };
   }),
-  // (an ask's prefill written as a literal the request does not take as written, one that is only `null`, and text at
-  // an ask of another kind, which the runtime takes as none where it is blank)
+  // (a host value stored at a written type only `null` fills, at every position: the slice takes no such type, the
+  // lead's R44)
+  ...samples()
+    .filter((sample) => sample.origin === "ingress" && sample.kind === "null")
+    .map((sample) => ({
+      row: sample.row,
+      position: `${sample.operand}, ${sample.kind} (${sample.origin})`,
+      refused: `${sample.prelude}${sample.command}`,
+      admitted: twinCommand(sample),
+      gate: "annotationOutside (src/type-inference/core/slice-syntax.ts)",
+      text: "this written type",
+    })),
+  // (an ask's prefill written as a literal the request does not take as written, and text at an ask of another kind,
+  // which the runtime takes as none where it is blank)
   ...samples()
     .filter(
       (sample) =>
@@ -668,7 +680,6 @@ export const DECLARED_REFUSALS: readonly {
         ((sample.origin === "literal" &&
           SCALAR_LITERALS.includes(sample.kind) &&
           !PREFILL_LITERALS[sample.operand]!.includes(sample.kind)) ||
-          (sample.origin === "ingress" && sample.kind === "null") ||
           (sample.origin === "ingress" &&
             sample.kind === "string" &&
             sample.operand !== "askText.prefill")),
@@ -682,7 +693,7 @@ export const DECLARED_REFUSALS: readonly {
         ? { gate: "askPrefillAdmitted (src/type-inference/core/slice-syntax.ts)", text: "this ask" }
         : { gate: "outsideAnswers (src/type-inference/core/backend.ts)", text: "this prefill" }),
     })),
-  // (the same ingresses, wrapped in a list and in an `otherwise`: a typed ingress's read is unknown, so the refusal
+  // (the text ingresses, wrapped in a list and in an `otherwise`: a typed ingress's read is unknown, so the refusal
   // judges what the wrapping holds)
   ...samples()
     .filter(
@@ -690,8 +701,8 @@ export const DECLARED_REFUSALS: readonly {
         sample.row === "interactionExpression" &&
         PREFILL_LITERALS[sample.operand] !== undefined &&
         sample.origin === "ingress" &&
-        (sample.kind === "null" ||
-          (sample.kind === "string" && sample.operand !== "askText.prefill")),
+        sample.kind === "string" &&
+        sample.operand !== "askText.prefill",
     )
     .flatMap((sample) =>
       ["[m][0]", "m otherwise m"].map((wrapped) => ({
