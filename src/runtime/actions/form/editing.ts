@@ -1,4 +1,4 @@
-// Editing a form: the request a host sees, an update to a field or its editor, and parsing an editor's text.
+// Editing a form: an update to a field or its editor, and parsing an editor's text.
 
 import {
   invalidAnswerMessage,
@@ -10,92 +10,10 @@ import {
   temporalAnswerText,
 } from "../../../interaction-answers.js";
 import { interactionStringFits } from "../../../interaction-limits.js";
-import type { FormScalarField, FormUi, InteractionChoiceOption } from "../../../plan/model.js";
-import { type SerializableRuntimeValue } from "../../values/serializable-values.js";
+import type { FormScalarField, FormUi } from "../../../plan/model.js";
 import { messageText } from "../../values/text-length.js";
 import type { RuntimeFormStateSnapshot, RuntimeFormValue } from "../model.js";
 import { withinBounds, boundsText, refused, isPlainRecord } from "./shared-helpers.js";
-
-/**
- * The canonical runtime value of a form's definition. The request temporary holds it while the form is open, so a
- * restore can check the pending form against it.
- */
-export function formRequestValue(ui: FormUi): SerializableRuntimeValue {
-  const object = (
-    properties: readonly (readonly [string, SerializableRuntimeValue | undefined])[],
-  ): SerializableRuntimeValue => ({
-    kind: "object",
-    properties: properties
-      .filter(
-        (entry): entry is readonly [string, SerializableRuntimeValue] => entry[1] !== undefined,
-      )
-      .map(([name, value]) => ({ name, value })),
-  });
-  const options = (items: readonly InteractionChoiceOption[] | null) =>
-    items === null
-      ? null
-      : {
-          kind: "list" as const,
-          items: items.map((option) =>
-            object([
-              ["text", option.text],
-              ["value", option.value],
-              ["background", option.background],
-            ]),
-          ),
-        };
-  return object([
-    ["shape", ui.shape],
-    ["hint", ui.hint],
-    [
-      "submit",
-      object([
-        ["text", ui.submit.text],
-        ["background", ui.submit.background],
-      ]),
-    ],
-    [
-      "timeout",
-      ui.timeout === null
-        ? null
-        : object([
-            ["milliseconds", ui.timeout.milliseconds],
-            ["onTimeout", ui.timeout.onTimeout],
-          ]),
-    ],
-    [
-      "cancel",
-      ui.cancel === null
-        ? null
-        : object([
-            ["text", ui.cancel.text],
-            ["background", ui.cancel.background],
-          ]),
-    ],
-    [
-      "fields",
-      {
-        kind: "list",
-        items: ui.fields.map((field) =>
-          object([
-            ["id", field.id],
-            ["text", field.text],
-            ["kind", field.kind],
-            ["background", field.background],
-            ...(field.kind === "boolean" || field.kind === "cycle"
-              ? ([["options", options(field.options)]] as const)
-              : ([
-                  ["optional", field.optional],
-                  ["min", field.min],
-                  ["max", field.max],
-                  ["hint", field.hint],
-                ] as const)),
-          ]),
-        ),
-      },
-    ],
-  ]);
-}
 
 /** The text that the composer opens with for a typed field: its value as an answer would be typed, or nothing. */
 function formEditorText(value: RuntimeFormValue): string {

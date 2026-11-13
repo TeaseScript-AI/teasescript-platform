@@ -1,4 +1,5 @@
-// A form's UI and state: copying and comparing them, the texts a UI shows, and their restore checks.
+// A form's UI and state: copying and comparing them, the UI's request value, the texts a UI shows, and their restore
+// checks.
 
 import { isNormalizedOpaqueColor } from "../../../color.js";
 import { isInteractionChoiceValue } from "../../../choice-values.js";
@@ -13,10 +14,94 @@ import type {
   InteractionAccessibleName,
   InteractionChoiceOption,
 } from "../../../plan/model.js";
-import { serializableEquals } from "../../values/serializable-values.js";
+import {
+  serializableEquals,
+  type SerializableRuntimeValue,
+} from "../../values/serializable-values.js";
 import { isFormFieldKind } from "../../../form-fields.js";
 import type { RuntimeFormStateSnapshot } from "../model.js";
 import { cycleValueKind, withinBounds, hasExactKeys, isPlainRecord } from "./shared-helpers.js";
+
+/**
+ * The canonical runtime value of a form's definition. The request temporary holds it while the form is open, so a
+ * restore can check the pending form against it.
+ */
+export function formRequestValue(ui: FormUi): SerializableRuntimeValue {
+  const object = (
+    properties: readonly (readonly [string, SerializableRuntimeValue | undefined])[],
+  ): SerializableRuntimeValue => ({
+    kind: "object",
+    properties: properties
+      .filter(
+        (entry): entry is readonly [string, SerializableRuntimeValue] => entry[1] !== undefined,
+      )
+      .map(([name, value]) => ({ name, value })),
+  });
+  const options = (items: readonly InteractionChoiceOption[] | null) =>
+    items === null
+      ? null
+      : {
+          kind: "list" as const,
+          items: items.map((option) =>
+            object([
+              ["text", option.text],
+              ["value", option.value],
+              ["background", option.background],
+            ]),
+          ),
+        };
+  return object([
+    ["shape", ui.shape],
+    ["hint", ui.hint],
+    [
+      "submit",
+      object([
+        ["text", ui.submit.text],
+        ["background", ui.submit.background],
+      ]),
+    ],
+    [
+      "timeout",
+      ui.timeout === null
+        ? null
+        : object([
+            ["milliseconds", ui.timeout.milliseconds],
+            ["onTimeout", ui.timeout.onTimeout],
+          ]),
+    ],
+    [
+      "cancel",
+      ui.cancel === null
+        ? null
+        : object([
+            ["text", ui.cancel.text],
+            ["background", ui.cancel.background],
+          ]),
+    ],
+    [
+      "fields",
+      {
+        kind: "list",
+        items: ui.fields.map((field) =>
+          object([
+            ["id", field.id],
+            ["text", field.text],
+            ["kind", field.kind],
+            ["background", field.background],
+            ...(field.kind === "boolean" || field.kind === "cycle"
+              ? ([["options", options(field.options)]] as const)
+              : ([
+                  ["optional", field.optional],
+                  ["min", field.min],
+                  ["max", field.max],
+                  ["hint", field.hint],
+                ] as const)),
+          ]),
+        ),
+      },
+    ],
+  ]);
+}
 
 /** Whether two form states hold the same answers and editor. */
 export function formStatesEqual(a: RuntimeFormStateSnapshot, b: RuntimeFormStateSnapshot): boolean {

@@ -27,8 +27,7 @@ import {
 import { interactionStringHasNonWhitespace } from "../../../interaction-limits.js";
 import { buttonTimeoutMilliseconds, imageRequestValue } from "../interaction.js";
 import { formAnswerMismatch, formShapeFits } from "../form/materialize.js";
-import { formRequestValue } from "../form/editing.js";
-import { isFormUi, validFormState } from "../form/ui-state.js";
+import { formRequestValue, isFormUi, validFormState } from "../form/ui-state.js";
 import { isPlainRecord } from "../../values/plain-data.js";
 import {
   validSessionTime,
