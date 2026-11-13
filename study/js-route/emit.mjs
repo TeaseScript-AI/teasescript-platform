@@ -19,6 +19,11 @@ function substitute(node, map) {
   return node;
 }
 
+/** A property store's target whose object is temporary 1e9, for today's engine on the evaluated object. */
+function propertyTarget(target) {
+  return { ...target, object: { kind: "temporary", temporaryId: 1e9, span: target.object.span } };
+}
+
 export class Unsupported extends Error {
   constructor(what) {
     super(`study emitter: ${what}`);
@@ -96,8 +101,6 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
   for (const definition of plan.functions) {
     if (definition.handler !== null || definition.global || definition.selfHandle !== null)
       throw new Unsupported("a block, a global function or a function with a handle");
-    if (definition.parameters.some((parameter) => parameter.hasDefault))
-      throw new Unsupported("a default parameter");
   }
   // Which instructions can wait, and which functions can: those that reach such an instruction or call one that can.
   const waitsHere = (ins) =>
@@ -425,6 +428,29 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
         const ins = plan.instructions[pc];
         if (flat) line(`case ${pc}:`);
         switch (ins.kind) {
+          case "prepareParameterDefault": {
+            // A parameter the call did not supply arrives as `undefined`; its default's instructions run then.
+            if (ins.target !== pc + 1) {
+              const p = params[ins.parameterIndex];
+              if (flat && rangeWaits(pc + 1, ins.target)) {
+                line(`if (${p} !== undefined) { pc = ${ins.target}; continue D; }`);
+                pc += 1;
+                continue;
+              }
+              const target = ins.target;
+              structured(() => {
+                line(`if (${p} === undefined) {`);
+                indent += 1;
+                emitRange(pc + 1, target);
+                indent -= 1;
+                line("}");
+              });
+              pc = target;
+              continue;
+            }
+            pc += 1;
+            continue;
+          }
           case "jumpIfFalse": {
             const shape = ifShape(pc, endAt);
             const after = shape.elseEnd ?? shape.target;
@@ -619,6 +645,10 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
         case "validateAssignmentTarget": {
           const t = ins.target;
           if (t.kind === "identifier") return;
+          if (t.kind === "property") {
+            line(`rt.checkPropertyStore(${konst(propertyTarget(t))}, ${expr(t.object)});`);
+            return;
+          }
           if (t.kind !== "index") throw new Unsupported(`a store into a ${t.kind}`);
           const o = x();
           const i = x();
@@ -638,6 +668,12 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
               line(`if (${at.code} === undefined) rt.unset(${JSON.stringify(t.name)});`);
               line(`${at.code} = ${v};`);
             } else line(`${at.code} = ${value};`);
+            return;
+          }
+          if (t.kind === "property") {
+            const v = x();
+            line(`${v} = ${value};`);
+            line(`rt.storeProperty(${konst(propertyTarget(t))}, ${expr(t.object)}, ${v}, ${ins.requireExisting === true});`);
             return;
           }
           if (t.kind !== "index") throw new Unsupported(`a store into a ${t.kind}`);
@@ -685,8 +721,8 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
           const definition = plan.functions[ins.functionId - 1];
           if (ins.returnInstruction !== pc + 1) throw new Unsupported("a call that returns elsewhere");
           const slots = ins.arguments.map((a) => definition.parameters.findIndex((p) => p.name === a.parameterName));
-          if (slots.includes(-1) || new Set(slots).size !== definition.parameters.length)
-            throw new Unsupported("a call that does not supply every parameter");
+          if (slots.includes(-1) || new Set(slots).size !== slots.length)
+            throw new Unsupported("a call whose arguments do not match the parameters");
           const resumes = resumable && canWait.has(ins.functionId);
           if (resumes) {
             line("if (!rt.resuming) {");
@@ -704,7 +740,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
             indent -= 1;
             line("}");
           }
-          const ordered = definition.parameters.map((_, slot) => args[slots.indexOf(slot)]);
+          const ordered = definition.parameters.map((_, slot) => args[slots.indexOf(slot)] ?? "undefined");
           if (!resumes) {
             line(`rt.enter(${konst(ins.span)}); ${temp(ins.destinationTemporary)} = f${ins.functionId}(${ordered.join(", ")}); rt.depth -= 1;`);
             return;
@@ -721,8 +757,8 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
         case "beginFunctionDefaults":
         case "enterFunctionBody":
           return;
-        case "prepareParameterDefault":
-          if (ins.target !== pc + 1) throw new Unsupported("a parameter default");
+        case "bindDefaultParameter":
+          line(`${params[ins.parameterIndex]} = ${typeChecked(own(ins.value), ins.typeCheck, ins.value.span)};`);
           return;
         case "returnValue":
           line(`return ${typeChecked(own(ins.value), ins.typeCheck, ins.value.span)};`);

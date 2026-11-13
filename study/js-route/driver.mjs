@@ -23,8 +23,12 @@ export function compileProgram(plan, resumable = false, runawayCheck = false) {
   const cache = programs.get(key);
   let program = cache.get(plan);
   if (program === undefined) {
+    const t0 = performance.now();
     const emitted = emitProgram(plan, { resumable, runawayCheck });
-    program = { ...emitted, instantiate: new Function("rt", "K", emitted.source) };
+    const t1 = performance.now();
+    const instantiate = new Function("rt", "K", emitted.source);
+    // Part G: the time to emit, and to turn the text into a function (V8 compiles function bodies lazily, at first run).
+    program = { ...emitted, instantiate, emitMs: t1 - t0, loadMs: performance.now() - t1 };
     cache.set(plan, program);
   }
   return program;

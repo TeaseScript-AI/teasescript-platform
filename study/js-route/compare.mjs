@@ -188,6 +188,8 @@ for (const file of files) {
       todayMs: sum(expected.times),
       emittedMs: sum(actual.times),
       largestSave,
+      emitMs: Math.round(emitted.emitMs * 100) / 100,
+      loadMs: Math.round(emitted.loadMs * 100) / 100,
       resumableFunctions: emitted.canWait?.length ?? 0,
       emittedLastDriveMs: Math.round((actual.times.at(-1) ?? 0) * 100) / 100,
     }),

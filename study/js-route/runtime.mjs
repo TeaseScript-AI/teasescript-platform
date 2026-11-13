@@ -288,6 +288,30 @@ export class Runtime {
     if (!Array.isArray(object)) throw notIndexable(this, "TSR005", target.object, shown(object), target.span);
     object[nativeListPosition(this, object, target.object, target.index, index, "assign")] = value;
   }
+  /** A store into an object's existing property, natively; anything else (speakers, handles, faults) by today's engine. */
+  storeProperty(target, object, value, requireExisting) {
+    if (object instanceof NativeObject && object.properties.has(target.name)) {
+      object.properties.set(target.name, value);
+      return;
+    }
+    this.onTemporary(object, (evaluator) => evaluator.assign(target, shown(value), requireExisting));
+  }
+  checkPropertyStore(target, object) {
+    if (object instanceof NativeObject) return;
+    this.onTemporary(object, (evaluator) => evaluator.validateAssignmentTarget(target));
+  }
+  /** Today's evaluator with `value` in temporary 1e9. */
+  onTemporary(value, f) {
+    const snapshot = this.snapshot;
+    const base = snapshot.temporaries.length;
+    snapshot.temporaries.push({ id: 1e9, value: shown(value) });
+    this.bridged += 1;
+    try {
+      f(new Evaluator(snapshot, this.capabilities, this.events, this.plan));
+    } finally {
+      snapshot.temporaries.length = base;
+    }
+  }
   checkIndexStore(target, object, index) {
     if (object instanceof NativeSet) throw notIndexable(this, "TSR004", target.object, shown(object), target.span);
     if (object instanceof NativeDict) {
