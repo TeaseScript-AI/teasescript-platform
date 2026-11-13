@@ -369,7 +369,7 @@ export function storeFix(
 }
 
 /**
- * #2378 R39: the fix of a store into a dict's list a statement changes in place, its copy twin's (`let t = d.values`
+ * #2378: the fix of a store into a dict's list a statement changes in place, its copy twin's (`let t = d.values`
  * before the statement): where the twin declares its copy, the copy made first, under a name no code spells; below
  * the list's elements, the twin's separate property or collection; else a separate variable.
  */

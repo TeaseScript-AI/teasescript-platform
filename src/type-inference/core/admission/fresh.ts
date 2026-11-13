@@ -7,7 +7,7 @@ import type { Reads } from "../inherited/reads.js";
 import { dictList } from "../method-categories.js";
 import type { Candidate, Inputs } from "./model.js";
 
-// #2378 R34, R38: a dict's list a statement changes in place, decided as its copy twin's list is: its inputs.
+// #2378: a dict's list a statement changes in place, decided as its copy twin's list is: its inputs.
 
 /**
  * A path's inputs with its owner's kind read (`freshRead`): below a dict's list, the statement's own stores and those
@@ -33,7 +33,7 @@ export function* freshInputs(admission: Admission, inputs: Inputs): Reads<Inputs
 }
 
 /**
- * #2378 R34, R35: a dict's `values` or `keys` is a new list each time it is read (V30), so a statement that changes
+ * #2378: a dict's `values` or `keys` is a new list each time it is read (V30), so a statement that changes
  * it in place changes a list nobody holds, as its copy twin (`let t = d.values` before it, `t` in its place) changes
  * `t`. Below that list's own level a path is decided as the twin's: the receiver's read is the list's first
  * definition (an initializer, the twin's declaration), the statement's stores into the list follow it, and nothing the
