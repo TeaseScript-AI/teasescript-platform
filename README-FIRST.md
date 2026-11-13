@@ -1,5 +1,14 @@
 # Read this first
 
+## Project phase
+
+The project is pre-alpha, a proof of concept, and has no users: no author, player, script, save or checkpoint exists
+outside the agents' own tests. No behavior, format or API is a compatibility promise. When a better design needs it,
+change or remove it, saves and checkpoints included, without migration or transition; what counts is the product's
+quality when the proof of concept is done. This removes compatibility as a reason to keep something, not the decision:
+accepted syntax, architecture and owner decisions still change only as the next section says. Comparing with existing
+behavior stays a way to find defects: a difference is something to explain, not something to preserve.
+
 ## Authority and conflict handling
 
 Use project material in this order:

@@ -444,7 +444,7 @@ it is unclear whether a trigger holds for the planned change, take the heavier r
 
 **Full route** when any of these holds:
 
-1. **A contract changes:** something other work or users rely on, such as language syntax or semantics, a public or
+1. **A contract changes:** something other work relies on, such as language syntax or semantics, a public or
    host API, a protocol between components, a stored or exchanged data format (saves, checkpoints, a database schema),
    a security or trust boundary, or which inputs complete, stop, or fail under a limit or budget. An additive field
    counts when it is persisted or part of a format, protocol, or API that others consume, whether or not anything reads
@@ -458,7 +458,6 @@ it is unclear whether a trigger holds for the planned change, take the heavier r
 4. **The planned change has broad or hard-to-see effects:** it can alter behavior or cost in many places at once, or
    in ways one test cannot show, because it changes an ordering, timing, or concurrency mechanism, input handling shared
    by many paths, or growth with input size. A local guard with a deterministic regression test does not count.
-5. **It is hard to undo after merge:** a data migration, or a published format or API.
 
 **Light route** for a behavior change that meets none of them, such as a local repair with a reproduction or a local
 guard with a deterministic regression test, and for a refactor, tooling, or generator change meant to keep behavior.
