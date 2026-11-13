@@ -266,9 +266,9 @@ export const SPEAKER_FIELD_KINDS: ReadonlyMap<string, FieldKinds> = new Map([
 ]);
 
 /**
- * What the amount of a unit or angle expression takes (`n s`, `n calendar months`, `n deg`; ADR 0021 rule 1.8, today's
- * TSV043): a number, whole or not, and the evaluator that refuses any other value as it runs (TSR027; TSR009 for a
- * calendar amount of no whole days or months, TSR036 for one too large to represent).
+ * What the amount of a unit or angle expression takes (`n s`, `n calendar months`, `n deg`; a unit follows a number,
+ * ADR 0026 §8): a number, whole or not; `check` names the function whose unit and angle steps fail a run on any other
+ * value (TSR027; TSR009 for a calendar amount of no whole days or months, TSR036 for one too large to represent).
  */
 export const UNIT_AMOUNT: { readonly takes: readonly ItemTag[]; readonly check: OperandCheck } = {
   takes: ["integer", "number"],
@@ -281,8 +281,7 @@ export const UNIT_AMOUNT: { readonly takes: readonly ItemTag[]; readonly check: 
  * type's kinds (a typed ingress's read is the unknown its store's check stands for); an unknown is admitted only of an
  * external origin, as the host global itself or a direct read of a place whose type is undecided, beside the
  * evaluator's check; a missing property is no value there, its read fails first. Any other unknown (one an element, a
- * call or an operation carries, a stop's) is not shown to be a number (the form step 1½ gives a command's operands).
- * So the route declines what today's checker plans where only a narrowing or an `otherwise` shows the amount a number:
+ * call or an operation carries, a stop's) is not shown to be a number. So the route declines what today's checker plans where only a narrowing or an `otherwise` shows the amount a number:
  * a read of `n: integer?` under `n != null`, `(n otherwise 1) s`; the core gives no read its narrowing
  * (`OccurrenceAnswer.narrowing`).
  */
@@ -356,8 +355,8 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
             what: "this speaker property",
           };
       }
-  // a unit or angle expression whose amount may hold no number (`UNIT_AMOUNT`): today's compile error, so today's
-  // checker answers; a known amount today refuses is the check result's (`knownAmountRefused`)
+  // a unit or angle expression whose amount may hold no number (`UNIT_AMOUNT`), which the language calls wrong; an
+  // amount whose known value gives no duration or angle is refused by the check result (`knownAmountRefused`)
   for (const unit of index.units)
     if (!amountAdmitted(answers, index, unit.operand))
       return {
