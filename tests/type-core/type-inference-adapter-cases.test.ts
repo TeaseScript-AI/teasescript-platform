@@ -4,14 +4,13 @@ import test from "node:test";
 
 import { operationRelations } from "../../src/type-inference/adapters/index.js";
 import { VALUE_KIND_NAMES, VALUE_KINDS } from "../../src/value-kinds.js";
+import { MADE_KINDS, UNMADE_KINDS } from "../helpers/type-core/adapter-cases/adapter-case-forms.js";
 import {
   generateTable,
-  MADE_KINDS,
   ROUTINE_NAMES,
-  UNMADE_KINDS,
   type CaseRow,
   type RoutineName,
-} from "../helpers/type-core/adapter-case-tables.js";
+} from "../helpers/type-core/adapter-cases/adapter-case-tables.js";
 import { assertCase, type AdapterExpectation } from "../helpers/type-core/adapter-parity.js";
 
 /**
