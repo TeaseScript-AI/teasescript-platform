@@ -186,6 +186,30 @@ const BASE_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly Template[]>>>
       { path: "third.tease", source: "let x = 1\nlet y: integer = x\nexit\n" },
     ],
   ],
+  // (each ask's kind and form, `as` each speaker kind, no question, and the places an answer goes; its operand positions
+  // are `ASK_OPERANDS`')
+  interactionExpression: [
+    'let r: string = askText "q", hint: "h", prefill: "p"',
+    'let r: number = askNumber("q", prefill: 2.5)',
+    'let r: integer = askInteger("q", prefill: 2)',
+    'let r: date = askDate("q")',
+    'let r: time = askTime("q")',
+    'let r: datetime = askDateTime("q")',
+    'let r: string = askPassword("q", hint: "h")',
+    'let r: boolean = askBoolean "q", yesText: "y", noText: "n", prefill: true',
+    "let r: integer = askChoice 1, 2, prefill: 2",
+    'let r = askChoice back: "Back", [{value: "s", text: "S"}, {text: "C"}]',
+    'speaker boss {\n  displayName: "Boss"\n}\nlet r = askText as boss("q")',
+    'let r = askInteger as player "q"',
+    "let r = askText",
+    'say askText("q")',
+    'if askBoolean("q") {\n  say "y"\n}',
+    'repeat askInteger("q") {\n  say "r"\n}',
+    'let r = [1, 2][askInteger("q")]',
+    'let r: string = hostValue otherwise askText("q")',
+    'let o = {n: 1}\no.n = askInteger("q")',
+    'let r = askText(askText("q"))',
+  ],
 };
 
 /**
@@ -226,6 +250,40 @@ export const ANSWERED_AS_TODAY: readonly string[] = [
   'let x = 1\nsay as x "a"',
 ];
 
+/** The basic asks with a `prefill:` (`askPassword` takes none), by the name an ask's position starts with. */
+const PREFILLED_ASKS = ["askText", "askNumber", "askInteger", "askDate", "askTime", "askDateTime"];
+
+/**
+ * The operand positions of the asks (`askParts`), by ask and operand, each a `let` of the answer with the host global
+ * there. An `askChoice`'s option stands alone, so the buttons' kinds are the sample's (two kinds are refused as a mixed
+ * choice, `outsideAnswers`).
+ */
+const ASK_OPERANDS: Readonly<Record<string, readonly string[]>> = {
+  ...Object.fromEntries(
+    [...PREFILLED_ASKS, "askPassword"].flatMap((ask) => [
+      [`${ask}.question`, [`let r = ${ask}(hostValue)`]],
+      [`${ask}.hint`, [`let r = ${ask}("q", hint: hostValue)`]],
+      ...(ask === "askPassword"
+        ? []
+        : [[`${ask}.prefill`, [`let r = ${ask}("q", prefill: hostValue)`]]]),
+    ]),
+  ),
+  "askText.presentation": ['let r = askText bubble(color: hostValue) "q"'],
+  "askBoolean.question": [
+    "let r = askBoolean(hostValue)",
+    "let r = askBoolean(message: hostValue)",
+  ],
+  "askBoolean.yesText": ['let r = askBoolean("q", yesText: hostValue)'],
+  "askBoolean.noText": ['let r = askBoolean("q", noText: hostValue)'],
+  "askBoolean.prefill": ['let r = askBoolean("q", prefill: hostValue)'],
+  "askBoolean.presentation": ['let r = askBoolean prose(align: hostValue) "q"'],
+  "askChoice.option": ["let r = askChoice hostValue"],
+  "askChoice.element": ["let r = askChoice [hostValue]"],
+  "askChoice.label": ["let r = askChoice a: hostValue"],
+  "askChoice.background": ['let r = askChoice {text: "t", background: hostValue}'],
+  "askChoice.prefill": ["let r = askChoice 1, 2, prefill: hostValue"],
+};
+
 /**
  * The operand positions of the commands, by the names their rows cite (`OperandCheck`, `DISPOSITIONS`' `operands`; a
  * `say`'s are its parts), each a source with the host global there: the row guard compares the names with the rows', so
@@ -262,6 +320,7 @@ export const OPERAND_TEMPLATES: Readonly<
     pacing: ['say "a", hostValue'],
   },
   gotoStatement: { path: ["goto script(hostValue)"] },
+  interactionExpression: ASK_OPERANDS,
 };
 
 /**
@@ -457,6 +516,103 @@ const SAY_REFUSED: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * A fitting value of each declared position: the command with it is a sample's fitting twin (the lead's R12). A duration
+ * literal is outside the slice, so a twin with one is compared on today's checker.
+ */
+const FITTING_OPERANDS: Readonly<Partial<Record<SyntaxKind, Readonly<Record<string, string>>>>> = {
+  showImageStatement: { image: '"a.png"' },
+  openUrlStatement: { url: '"https://example.com"', buttonText: '"Go"', alwaysButton: "true" },
+  exportTextStatement: { text: '"t"', title: '"t"', fileName: '"f.txt"' },
+  showPopupStatement: { message: '"m"', buttonText: '"Go"' },
+  waitStatement: { duration: "2 s" },
+  deleteStatement: { key: '"k"' },
+  showButtonStatement: { label: '"Go"', background: '"red"', timeout: "2 s" },
+  sayStatement: { pacing: "instant" },
+  gotoStatement: { path: '"part.tease"' },
+  interactionExpression: {
+    ...Object.fromEntries(
+      [...PREFILLED_ASKS, "askPassword"].flatMap((ask) => [
+        [`${ask}.question`, '"q"'],
+        [`${ask}.hint`, '"h"'],
+      ]),
+    ),
+    "askText.prefill": '"p"',
+    "askNumber.prefill": "2.5",
+    "askInteger.prefill": "2",
+    "askBoolean.question": '"q"',
+    "askBoolean.yesText": '"y"',
+    "askBoolean.noText": '"n"',
+    "askBoolean.prefill": "true",
+    "askChoice.option": "1",
+    "askChoice.element": "1",
+    "askChoice.label": '"A"',
+    "askChoice.background": '"red"',
+  },
+};
+
+/**
+ * The fitting twins written whole, for a position whose fitting value no expression of the slice writes without the host
+ * global, which a context narrows to no value of its kind: a date or time prefill, whose twin asks without one.
+ */
+const FITTING_COMMANDS: Readonly<Record<string, string>> = {
+  "askDate.prefill": 'let r = askDate("q")',
+  "askTime.prefill": 'let r = askTime("q")',
+  "askDateTime.prefill": 'let r = askDateTime("q")',
+};
+
+/** A sample's fitting twin: its command with the position's fitting value, or the twin written whole. */
+export const twinCommand = (sample: Sample): string =>
+  FITTING_COMMANDS[sample.operand] ??
+  commandWith(sample.row, sample.operand, FITTING_OPERANDS[sample.row]![sample.operand]!);
+
+/** The literals the slice writes in place that are scalars: the ones a prefill written as a literal is read as. */
+const SCALAR_LITERALS: readonly string[] = ["integer", "number", "string", "boolean", "null"];
+
+/**
+ * The kinds of the scalar literals each prefill takes as written (V30 §20; `askPrefillAdmitted` in
+ * `src/type-inference/core/slice-syntax.ts` admits these and refuses the others): stated here apart from it.
+ */
+const PREFILL_LITERALS: Readonly<Record<string, readonly string[]>> = {
+  "askText.prefill": ["string"],
+  "askNumber.prefill": ["integer", "number"],
+  "askInteger.prefill": ["integer"],
+  "askDate.prefill": [],
+  "askTime.prefill": [],
+  "askDateTime.prefill": [],
+  "askBoolean.prefill": ["boolean"],
+};
+
+/**
+ * The samples of an `askChoice`'s option and element positions the route refuses, by origin and kind: the core's check
+ * of what the buttons return (TSV029, V30 §19, `choiceValues` in `src/type-inference/core/checks/interactions.ts`) has
+ * something to say of them, a value no button returns or an object whose fields are unknown, and the route refuses
+ * any of its diagnostics after the analysis ("this operand"). Measured on the samples; the guard keeps the list closed.
+ */
+const CHOICE_REFUSED: Readonly<Record<string, readonly string[]>> = {
+  "askChoice.option": [
+    "literal range",
+    "literal regex",
+    "ingress dict",
+    "ingress object",
+    "ingress range",
+    "ingress regex",
+    "ingress script",
+  ],
+  "askChoice.element": [
+    "literal list",
+    "literal range",
+    "literal regex",
+    "ingress dict",
+    "ingress list",
+    "ingress object",
+    "ingress range",
+    "ingress regex",
+    "ingress script",
+    "ingress set",
+  ],
+};
+
+/**
  * The positions of open rows whose host global, or sample (`samples`), the route refuses after the syntax gate, by
  * name: that source, which must be refused with `text` in every mode, and the same position with a value the slice
  * admits, which must pass the guard's three rules. `gate` names the refusal's place; the record carries only `text`,
@@ -575,6 +731,53 @@ export const DECLARED_REFUSALS: readonly {
       text: "a check that no store takes",
     };
   }),
+  // (an ask's prefill written as a literal the request does not take as written, and one that is only `null`)
+  ...samples()
+    .filter(
+      (sample) =>
+        sample.row === "interactionExpression" &&
+        PREFILL_LITERALS[sample.operand] !== undefined &&
+        ((sample.origin === "literal" &&
+          SCALAR_LITERALS.includes(sample.kind) &&
+          !PREFILL_LITERALS[sample.operand]!.includes(sample.kind)) ||
+          (sample.origin === "ingress" && sample.kind === "null")),
+    )
+    .map((sample) => ({
+      row: "interactionExpression" as const,
+      position: `${sample.operand}, ${sample.kind} (${sample.origin})`,
+      refused: `${sample.prelude}${sample.command}`,
+      admitted: twinCommand(sample),
+      ...(sample.origin === "literal"
+        ? { gate: "askPrefillAdmitted (src/type-inference/core/slice-syntax.ts)", text: "this ask" }
+        : { gate: "outsideAnswers (src/type-inference/core/backend.ts)", text: "this prefill" }),
+    })),
+  // (an `askChoice` button the core's check of the buttons has something to say of, `CHOICE_REFUSED`)
+  ...samples()
+    .filter((sample) => CHOICE_REFUSED[sample.operand]?.includes(`${sample.origin} ${sample.kind}`))
+    .map((sample) => ({
+      row: "interactionExpression" as const,
+      position: `${sample.operand}, ${sample.kind} (${sample.origin})`,
+      refused: `${sample.prelude}${sample.command}`,
+      admitted: twinCommand(sample),
+      gate: "outsideAnswers (src/type-inference/core/backend.ts)",
+      text: "this operand",
+    })),
+  // (a choice object's text or value from the host: what the button returns, which the script cannot know)
+  ...[
+    ["askChoice.text", "let r = askChoice {text: hostValue}", 'let r = askChoice {text: "t"}'],
+    [
+      "askChoice.value",
+      'let r = askChoice {value: hostValue, text: "t"}',
+      'let r = askChoice {value: 1, text: "t"}',
+    ],
+  ].map(([position, refused, admitted]) => ({
+    row: "interactionExpression" as const,
+    position: `${position!}, the host global`,
+    refused: refused!,
+    admitted: admitted!,
+    gate: "outsideAnswers (src/type-inference/core/backend.ts)",
+    text: "this operand",
+  })),
 ];
 
 /**
@@ -624,6 +827,52 @@ export const DECLARED_RUN_DIFFERENCES: readonly {
 ];
 
 /**
+ * The asks' request operands with a declared rule difference (the lead's R41): a question or text an ask shows, which
+ * `fieldText` refuses as a list or a value that shows no text (TSR021; a basic ask's question as it is said, at the
+ * value, any other at the ask); a prefill, which the request refuses as it opens (`interactionPrefill`,
+ * `temporalPrefill`, `materializeInteractionUi`, `materializeForm`: TSR052 at the ask); a choice's buttons
+ * (`expandChoiceOptions`, TSR052 at the ask). An ask's form of R18's third way (R38): the request opens no field or
+ * button and the run does not wait; a basic ask's question may already have been said.
+ */
+const ASK_POSITIONS: readonly {
+  readonly row: SyntaxKind;
+  readonly operand: string;
+  readonly today: readonly string[];
+  readonly failure: readonly string[];
+  readonly at: "value" | "ask";
+}[] = [
+  ...[...PREFILLED_ASKS, "askPassword"].flatMap((ask) => [
+    {
+      operand: `${ask}.question`,
+      today: ["TSV040", "TSV042"],
+      failure: ["TSR021"],
+      at: "value" as const,
+    },
+    {
+      operand: `${ask}.hint`,
+      today: ["TSV040", "TSV042"],
+      failure: ["TSR021"],
+      at: "ask" as const,
+    },
+    ...(ask === "askPassword"
+      ? []
+      : [
+          { operand: `${ask}.prefill`, today: ["TSV039"], failure: ["TSR052"], at: "ask" as const },
+        ]),
+  ]),
+  ...["askBoolean.question", "askBoolean.yesText", "askBoolean.noText"].map((operand) => ({
+    operand,
+    today: ["TSV040", "TSV042"],
+    failure: ["TSR021"],
+    at: "ask" as const,
+  })),
+  { operand: "askBoolean.prefill", today: ["TSV039"], failure: ["TSR052"], at: "ask" as const },
+  ...["askChoice.option", "askChoice.element", "askChoice.label", "askChoice.background"].map(
+    (operand) => ({ operand, today: ["TSV029"], failure: ["TSR052"], at: "ask" as const }),
+  ),
+].map((position) => ({ row: "interactionExpression" as const, ...position }));
+
+/**
  * The command operand positions with a declared rule difference (#2488's design rulings, R2, keyed by position as the
  * lead's R14 has it: a closed list, which the command operand table empties). For a value the operand does not take,
  * whatever its kind and origin, where today's checker gives one of `today`'s compile errors, the route publishes as for
@@ -644,47 +893,30 @@ export const DECLARED_RULE_DIFFERENCES: readonly {
   readonly operand: string;
   readonly today: readonly string[];
   readonly failure: readonly string[];
-  readonly at: "statement" | "value" | "call";
-}[] = (
-  [
-    ["deleteStatement", "key", ["TSV038"], ["TSR054"], "value"],
-    ["exportTextStatement", "text", ["TSV043"], ["TSR050"], "statement"],
-    ["exportTextStatement", "title", ["TSV040", "TSV042"], ["TSR021"], "statement"],
-    ["exportTextStatement", "fileName", ["TSV043"], ["TSR050"], "statement"],
-    ["openUrlStatement", "url", ["TSV043"], ["TSR050"], "statement"],
-    ["openUrlStatement", "buttonText", ["TSV040", "TSV042"], ["TSR021"], "statement"],
-    ["openUrlStatement", "alwaysButton", ["TSV043"], ["TSR050"], "statement"],
-    ["sayStatement", "pacing", ["TSV043"], ["TSR050", "TSR065"], "statement"],
-    ["showButtonStatement", "label", ["TSV040", "TSV042"], ["TSR021"], "statement"],
-    ["showButtonStatement", "background", ["TSV029"], ["TSR052"], "statement"],
-    ["showButtonStatement", "timeout", ["TSV043"], ["TSR050", "TSR065"], "statement"],
-    ["showImageStatement", "image", ["TSV036"], ["TSR050"], "statement"],
-    ["showPopupStatement", "message", ["TSV040", "TSV042"], ["TSR021"], "statement"],
-    ["showPopupStatement", "buttonText", ["TSV040", "TSV042"], ["TSR021"], "statement"],
-    ["waitStatement", "duration", ["TSV043"], ["TSR050", "TSR065"], "value"],
-    ["gotoStatement", "path", ["TSV043"], ["TSR058"], "call"],
-  ] as const
-).map(([row, operand, today, failure, at]) => ({ row, operand, today, failure, at }));
-
-/**
- * A fitting value of each declared position: the command with it is a sample's fitting twin (the lead's R12). A duration
- * literal is outside the slice, so a twin with one is compared on today's checker.
- */
-const FITTING_OPERANDS: Readonly<Partial<Record<SyntaxKind, Readonly<Record<string, string>>>>> = {
-  showImageStatement: { image: '"a.png"' },
-  openUrlStatement: { url: '"https://example.com"', buttonText: '"Go"', alwaysButton: "true" },
-  exportTextStatement: { text: '"t"', title: '"t"', fileName: '"f.txt"' },
-  showPopupStatement: { message: '"m"', buttonText: '"Go"' },
-  waitStatement: { duration: "2 s" },
-  deleteStatement: { key: '"k"' },
-  showButtonStatement: { label: '"Go"', background: '"red"', timeout: "2 s" },
-  sayStatement: { pacing: "instant" },
-  gotoStatement: { path: '"part.tease"' },
-};
-
-/** A sample's fitting twin: its command with the position's fitting value. */
-export const twinCommand = (sample: Sample): string =>
-  commandWith(sample.row, sample.operand, FITTING_OPERANDS[sample.row]![sample.operand]!);
+  readonly at: "statement" | "value" | "call" | "ask";
+}[] = [
+  ...(
+    [
+      ["deleteStatement", "key", ["TSV038"], ["TSR054"], "value"],
+      ["exportTextStatement", "text", ["TSV043"], ["TSR050"], "statement"],
+      ["exportTextStatement", "title", ["TSV040", "TSV042"], ["TSR021"], "statement"],
+      ["exportTextStatement", "fileName", ["TSV043"], ["TSR050"], "statement"],
+      ["openUrlStatement", "url", ["TSV043"], ["TSR050"], "statement"],
+      ["openUrlStatement", "buttonText", ["TSV040", "TSV042"], ["TSR021"], "statement"],
+      ["openUrlStatement", "alwaysButton", ["TSV043"], ["TSR050"], "statement"],
+      ["sayStatement", "pacing", ["TSV043"], ["TSR050", "TSR065"], "statement"],
+      ["showButtonStatement", "label", ["TSV040", "TSV042"], ["TSR021"], "statement"],
+      ["showButtonStatement", "background", ["TSV029"], ["TSR052"], "statement"],
+      ["showButtonStatement", "timeout", ["TSV043"], ["TSR050", "TSR065"], "statement"],
+      ["showImageStatement", "image", ["TSV036"], ["TSR050"], "statement"],
+      ["showPopupStatement", "message", ["TSV040", "TSV042"], ["TSR021"], "statement"],
+      ["showPopupStatement", "buttonText", ["TSV040", "TSV042"], ["TSR021"], "statement"],
+      ["waitStatement", "duration", ["TSV043"], ["TSR050", "TSR065"], "value"],
+      ["gotoStatement", "path", ["TSV043"], ["TSR058"], "call"],
+    ] as const
+  ).map(([row, operand, today, failure, at]) => ({ row, operand, today, failure, at })),
+  ...ASK_POSITIONS,
+];
 
 /**
  * For each command with more than one operand position, the command with one operand it does not take and another whose
@@ -725,6 +957,12 @@ export const PAIRED_SAMPLES: readonly {
     misfit: "pacing",
     failing: "presentation",
     command: `say bubble(color: ${FAILING_PRODUCER}) "a", 2`,
+  },
+  {
+    row: "interactionExpression",
+    misfit: "askText.hint",
+    failing: "askText.prefill",
+    command: `let r = askText("q", hint: [1], prefill: ${FAILING_PRODUCER})`,
   },
 ];
 
