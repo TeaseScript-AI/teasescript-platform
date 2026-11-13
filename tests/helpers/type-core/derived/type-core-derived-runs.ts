@@ -55,6 +55,7 @@ import {
 import { fitsType, jsonValue, readJson, shown } from "./type-core-derived-values.js";
 import { askEnd } from "./derived-asks.js";
 import { Break, Continue, round, runSwitch, runWhile } from "./derived-loops.js";
+import { functionCalls } from "./derived-functions.js";
 
 // ------------------------------------------------------------------------------------------------- the evaluator
 
@@ -115,6 +116,8 @@ export function evaluate(
     expected: [],
     loads: [],
   },
+  /** The project's files, whose `global function`s the file's calls may name (`derived-functions.ts`). */
+  project: readonly Syntax[] = [],
 ): {
   readonly run: PredictedRun;
   readonly events: readonly CheckEvent[];
@@ -138,6 +141,16 @@ export function evaluate(
     first ??= failure;
     if (!through) throw new Stop(failure);
   };
+  // (the calls of the script's own functions, `derived-functions.ts`)
+  const functions = functionCalls({
+    own: statements,
+    project,
+    stores,
+    env,
+    value: (e) => value(e),
+    run: (b) => run(b),
+    fail,
+  });
   const checkedFallback = (owner: Expression, fallback: Expression): Value => {
     const selected = value(fallback);
     const check = content.fallbacks.find((entry) => entry.owner === site(unwrap(owner)));
@@ -316,6 +329,8 @@ export function evaluate(
         return fallback;
       }
       case "callExpression": {
+        const authored = functions.call(expression);
+        if (authored !== undefined) return authored;
         const callee = unwrap(expression.callee);
         const receiver = callee.kind === "propertyAccessExpression" ? value(callee.object) : null;
         const operands = expression.arguments
@@ -788,7 +803,7 @@ export function evaluate(
           statement,
           path: argument === undefined ? path : value(argument.value).v,
         });
-      } else throw new Underivable(`a ${statement.kind}`);
+      } else if (!functions.statement(statement)) throw new Underivable(`a ${statement.kind}`);
     }
   };
   let failure: string | null = null;
