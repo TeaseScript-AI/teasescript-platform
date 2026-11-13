@@ -302,13 +302,13 @@ is exactly `return` of that parameter. The analysis reads a call as `(argument)`
 callee is a plain name that the project declares as exactly one function, that function is an identity function visible
 from the call's file (global, or the file's own), no parameter or variable of the enclosing function has the name, and
 the call has one positional argument. A call that stands in a place slot (a store's receiver chain, the receiver of a
-method that changes it, read through any parentheses on the way) stays a call: its result is a copy. A test of the
-call's result narrows its argument, as a test of `(argument)` does. The analysis reads a view of the syntax built before
-the collector; the front end and the plan read the source, and each syntax node that crosses between them is translated.
-A call read as its argument is no function result: a guarded argument's mark
-([section-3-2-guarded](#section-3-2-guarded)) travels as through parentheses. A narrowing holds across such a call as
-across `(argument)`. Rule 1.2's widening of the parameter by the function's other calls is not modelled: the call gives
-what `(argument)` gives, the class #1173 holds for copies.
+method that changes it, read through any parentheses on the way) stays a call: its result is a copy of the argument, or
+for a speaker or a handle the same one, never the argument's place. A test of the call's result narrows its argument, as
+a test of `(argument)` does. The analysis reads a view of the syntax built before the collector; the front end and the
+plan read the source, and each syntax node that crosses between them is translated. A call read as its argument is no
+function result: a guarded argument's mark ([section-3-2-guarded](#section-3-2-guarded)) travels as through parentheses.
+A narrowing holds across such a call as across `(argument)`. Rule 1.2's widening of the parameter by the function's
+other calls is not modelled: the call gives what `(argument)` gives, the class #1173 holds for copies.
 
 **Reason.** One result shared by every call merged unrelated arguments: on the converted packages it gave false
 warnings and errors and ran past the work allowance. ADR 0021 rule 5.5 drops a check across a call because a call may

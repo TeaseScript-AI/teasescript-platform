@@ -246,25 +246,30 @@ copies from a common origin, and constrained descendants of open incoming object
 
 ### r4-453
 
-**At a command operand or a built-in field, an `unknown` is admitted only by a listed reason.**
+**At a command operand or a speaker's built-in field, an `unknown` is admitted only by a listed reason.**
 
-**Rule.** At a command operand, an `unknown` is admitted only when it is external data the gate lists: the host global
-itself, or a direct read of a place whose type is undecided. At a built-in field, each item of the value is a kind the
-field's row takes, or an `unknown` of an external origin. Either is admitted beside the row's cited runtime check. Every
-other `unknown`, a stop's among them, is refused at that position. The gate names the reasons it admits, so a reason the
-analysis gains later is refused until it is decided.
+**Rule.** At a command operand (its row in the syntax table's command operand table, `OperandRule`), the operand as
+written has the row's form where the row names one (a known text, a choice object written in place), and each item of
+the value is a kind the row takes, or an `unknown`. An `unknown` whose only reason is a missing property is admitted:
+its read fails before the command. One whose only other reason is external is admitted at the host global itself, at a
+read of a place whose type is undecided, or at a read of a place whose written or decided type has only kinds the row
+takes; any other, a stop's among them, is refused. Every such row cites the runtime check that refuses a value it does
+not take. At a speaker's built-in field (`SPEAKER_FIELD_KINDS`), each item is a kind the field's row takes, or an
+`unknown` whose only reason is external where the row cites a runtime check; a row that cites none (`color`, `alias`,
+`gender`) admits no `unknown`. Each gate names the reasons it admits, so a reason the analysis gains later is refused
+until it is decided.
 
-**Reason.** A gate written as the reasons it refuses would admit, unchecked, every reason the analysis gains later.
-Admitting other unknowns would need a reader of what an item's ingresses stored, which is its own item; what this rule
-admits stays admitted if that reader comes. Its price, sources where the legacy checker knows no more but the route
-declines (`openUrl([hostValue][0])`), was measured, not estimated.
+**Reason.** A gate written as the reasons it refuses would admit every reason the analysis gains later before anyone
+decides it. Admitting other unknowns would need a reader of what an item's ingresses stored, which is its own item; what
+this rule admits stays admitted if that reader comes. Its price, sources where the legacy checker knows no more but the
+route refuses (`openUrl([hostValue][0])`), was measured, not estimated.
 
 **Source.** The lead's rulings R32 and R33 on reach step 1 (#2581, round 1) and R10 to R12 on reach step 2 (#2646),
-2026-11-13.
+2026-11-13; the command gate is #2653's (`operandAdmitted`, `core/backend.ts`).
 
 ### r4-454
 
-**A run that reaches a command with an admitted operand ends in one of three ways.**
+**A run of a source whose command has an admitted operand ends in one of three ways.**
 
 **Rule.** In the order the runtime works, a run either does not reach the command, and ends as the same source with a
 fitting operand does; or an operand's evaluation fails, and the run ends as that operand alone does (`let v = <operand>`
@@ -273,8 +278,8 @@ its position's code. For an ask the third way reads: no field or button opens an
 may already have been said, by its own instruction before the request.
 
 **Reason.** A claim about the value alone missed an operand whose own evaluation fails before the command
-(`openUrl([1][4])`: the legacy checker's TSV043, while the route publishes and the run fails at the index); stating the
-claim by what a run does closes it. The runtime says an ask's question before its request for every value the checker
-leaves to run time.
+(`openUrl([1][4])`, round 4 of reach step 1a: the legacy checker gave TSV043, the route then published, and the run
+failed at the index); stating the claim by what a run does closes it. The runtime says an ask's question before its
+request for every value the checker leaves to run time.
 
 **Source.** The lead's rulings R18 (reach step 1a, round 4) and R38 on reach step 1, 2026-11-13.
