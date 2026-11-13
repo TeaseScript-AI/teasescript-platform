@@ -198,54 +198,32 @@ export const QUESTION_BYTES_PER_CELL = 640;
  */
 const QUESTION_HEAP_RESERVE = 1_536 * 2 ** 20;
 
-/** Beside the questions, what V8 needs to collect where a run starts with more live than the reserve: 512 MiB. */
-const QUESTION_HEAP_HEADROOM = 512 * 2 ** 20;
-
 /**
- * The collections the room makes before it reads the live heap: three. V8 keeps a finished analysis's maps, and what
- * they reach, through two old-space collections (`--retain-maps-for-n-gc`, by default 2; #2002), so a process whose
- * last run was that analysis still holds it after one: at `W45-conditional` k = 1,024 and 6,144 MB, a young process
- * kept 2,796 MiB live after one collection after the base's run, and about 50 after three.
+ * A process's heap as the room reads it: V8's figures. The room reads only the limit; the heap in use is here so that a
+ * test can give a heap that already holds much and show that the room does not follow it.
  */
-const ROOM_COLLECTIONS = 3;
-
-/** A process's heap as the room reads it: V8's figures, and a full collection where the process can make one. */
 export interface QuestionHeap {
   readonly statistics: () => { readonly heap_size_limit: number; readonly used_heap_size: number };
-  readonly collect: (() => void) | null;
 }
 
 /**
- * Test-only: the questions' room in `heap` (`heapRoom`): its limit less the reserve, so that a stop lands at the same
- * cell on every run. Only where the heap in use passes the reserve and `heap` can collect is the live heap taken, after
- * `ROOM_COLLECTIONS` collections, so that garbage a run just before left is gone: where that too passes the reserve,
- * what ran before the publication still holds it alive, and the room is what is left beside it, less the headroom, so
- * that the run ends as `memory` instead of in V8's abort.
+ * Test-only: the questions' room in `heap` (`heapRoom`): its limit less the reserve, whatever the heap holds when the
+ * meter is made, so that a stop lands at the same cell on every run whatever ran before it in the process. What an
+ * earlier run left can outlast several collections, by V8's timing, so a room taken from the heap in use moved from
+ * run to run (#2518).
  */
 export function questionRoomOf(heap: QuestionHeap): number {
-  const { heap_size_limit: limit, used_heap_size: used } = heap.statistics();
-  if (used <= QUESTION_HEAP_RESERVE || heap.collect === null) return limit - QUESTION_HEAP_RESERVE;
-  for (let collection = 0; collection < ROOM_COLLECTIONS; collection += 1) heap.collect();
-  const live = heap.statistics().used_heap_size;
-  return live <= QUESTION_HEAP_RESERVE
-    ? limit - QUESTION_HEAP_RESERVE
-    : limit - live - QUESTION_HEAP_HEADROOM;
+  return heap.statistics().heap_size_limit - QUESTION_HEAP_RESERVE;
 }
 
 /**
  * The questions' room in this process's heap, taken when a publication's meter is made, before its analysis
  * (`Questions`; `questionRoomOf`): its V8 heap limit is fixed by its `--max-old-space-size`, as the families runner sets
- * it, and it can collect under `--expose-gc`, as the runner's child has it. Or a test's (`withQuestionMemory`).
+ * it. Or a test's (`withQuestionMemory`).
  */
 let questionRoom: number | null = null;
 function heapRoom(): number {
-  if (questionRoom !== null) return questionRoom;
-  // EVIDENCE: `globalThis.gc` exists only under `--expose-gc`, so its type is unknown here and is checked below.
-  const collect = (globalThis as { readonly gc?: unknown }).gc;
-  return questionRoomOf({
-    statistics: getHeapStatistics,
-    collect: typeof collect === "function" ? () => collect() : null,
-  });
+  return questionRoom ?? questionRoomOf({ statistics: getHeapStatistics });
 }
 
 /** Test-only: `run` with the oracle's questions given `room` bytes of heap. */

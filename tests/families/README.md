@@ -140,10 +140,9 @@ occurrence's answer, its element's and each property's; two a binding), where 64
 their room in the heap, or past the read-depth limit (#1837). The room is taken before the publication's analysis:
 the process's V8 heap limit less 1.5 GiB, which the analysis's own heap with sharing off needs (#1603: at the default
 heap, `W19-sources`, `W24-alias-group`, `W24-exit` and `W24-varied` at k = 1,024 end as `memory` in all four modes,
-#1945). Only where what ran before still holds more than 1.5 GiB after a collection (`--expose-gc`, as the runner's
-child has it) is it the heap limit less that live heap less 512 MiB, so the run stops as `memory`, not in V8's abort. The
-nodes from there on stay unanswered (`publicationHashes`'s `unanswered`, #1499), after the bindings left where the
-admitted types stopped. A publication run's unit limit grants the same 64 per cell its tree's oracle reports so far
+#1945), whatever the heap holds then: what an earlier run in the process left can outlast several collections, by V8's
+timing, so a room taken from the heap in use moved from run to run (#2518). The nodes from there on stay unanswered
+(`publicationHashes`'s `unanswered`, #1499), after the bindings left where the admitted types stopped. A publication run's unit limit grants the same 64 per cell its tree's oracle reports so far
 (`questionWork`; `limitOf` in `run-contract.mjs`, by which a store writes and reads the run too, its report kept as the
 run's `questions`), so the oracle's stop comes first wherever a question reports its cells before the runner's limit; one
 question's own cost is the runner's to bound. A run with any on either tree is first compared on what both

@@ -216,15 +216,13 @@ const ALLOWED = {
               ["serialization", "stdio"].includes(key) ||
               (key === "execArgv" &&
                 ts.isArrayLiteralExpression(value) &&
-                value.elements.every(
-                  (element) =>
-                    /^`--max-old-space-size=\$\{\w+\}`$/.test(element.getText()) ||
-                    literal(element) === "--expose-gc",
+                value.elements.every((element) =>
+                  /^`--max-old-space-size=\$\{\w+\}`$/.test(element.getText()),
                 )),
           )
         );
       },
-      '`fork` of the runner\'s child module (`new URL("./<module>", import.meta.url)`, `--child`), one of these modules, so its writes are listed, with a heap limit and `--expose-gc` (which lets it collect, writing nothing, #1837) as its only `execArgv`',
+      '`fork` of the runner\'s child module (`new URL("./<module>", import.meta.url)`, `--child`), one of these modules, so its writes are listed, with a heap limit as its only `execArgv`',
     ],
   },
   loads: {
