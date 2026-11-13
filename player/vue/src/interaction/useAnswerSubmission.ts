@@ -56,7 +56,7 @@ type AnswerOrigin =
   | "export"
   | "url";
 
-/** How far an answer went: accepted locally, past its painted frame, handed to the session, settled. */
+/** How far an answer went: accepted locally, past its wait before the post (`beforePost`), handed to the session, settled. */
 type AnswerStage = "accepted" | "fenced" | "posted" | "settled";
 
 /** The answer's line in the chat as the shared rule predicts it, until the runtime's own replaces it. */
@@ -103,15 +103,6 @@ export type SessionTerminal = "freezing" | "stopped" | "lost" | null;
 const returnsText = (record: PendingAnswer): record is PendingAnswer & { readonly sent: string } =>
   record.origin === "chat" && record.sent !== null;
 
-/** One painted frame: the answer shows before an engine on this thread takes it (the in-process backend). */
-function paintedFrame(): Promise<void> {
-  return new Promise((resolve) =>
-    requestAnimationFrame(() => {
-      setTimeout(resolve, 0);
-    }),
-  );
-}
-
 export function useAnswerSubmission(host: {
   readonly composer: ComposerState;
   /** The form updates Enter in a field or a typed field label sends, and how many of a form's are unanswered. */
@@ -137,9 +128,13 @@ export function useAnswerSubmission(host: {
   readonly submitLock: (password: string) => void;
   /** After a refusal or the session's end put an answer back (`RuntimeInteraction`'s focus). */
   readonly undone?: (record: PendingAnswer) => void;
-  readonly nextFrame?: () => Promise<void>;
+  /**
+   * Awaited between an answer's admission and its post, where a test holds it; by default a microtask. The engine runs in
+   * its Worker, so the answer shows in the next frame whatever the post costs.
+   */
+  readonly beforePost?: () => Promise<void>;
 }) {
-  const nextFrame = host.nextFrame ?? paintedFrame;
+  const beforePost = host.beforePost ?? (() => Promise.resolve());
   const pending = shallowRef<PendingAnswer | null>(null);
   const notice = ref("");
   let noticeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -247,9 +242,9 @@ export function useAnswerSubmission(host: {
     },
   );
 
-  /** Begins `record`: one painted frame, then the input section, which posts it only while its token holds. */
+  /** Begins `record`: after `beforePost`, the input section, which posts it only while its token holds. */
   async function dispatch(record: PendingAnswer, intent: InputIntent) {
-    await nextFrame();
+    await beforePost();
     if (record.stage === "settled") return;
     advance(record, "fenced");
     let result: InputResult;
