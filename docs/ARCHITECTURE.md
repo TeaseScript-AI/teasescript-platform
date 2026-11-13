@@ -110,10 +110,13 @@ snapshot for comparing two analyses of the same sources.
   `type-core-*.ts`:
   - **The syntax table**, [`core/slice-syntax.ts`](../src/type-inference/core/slice-syntax.ts): one row per AST kind,
     `refused`, `modelled` or `pass`, which says whether the route takes that construct and on what conditions, read by
-    `CORE_BACKEND` before the analysis and by the consumers, so both decide from one walk. Every condition of its rows,
-    and of the functions they reach, has a mutant in [`tools/slice-conditions.json`](../tools/slice-conditions.json);
+    `CORE_BACKEND` before the analysis and by the consumers, so both decide from one walk. In its rows' `visit`s, the
+    file's functions they reach and the functions that compute the walk's context, each comparison, each operand of `&&`
+    or `||` that is neither a comparison nor another `&&` or `||`, and each `unwrapped(` call has a mutant in
+    [`tools/slice-conditions.json`](../tools/slice-conditions.json);
     [`tools/slice-conditions.mjs`](../tools/slice-conditions.mjs), run by hand (not part of `npm run check`), refuses
-    one without. Its tests: its own,
+    one without. A condition of another form, such as a bare call or a negation that is no operand of `&&` or `||`, is
+    not scanned (#2732). Its tests: its own,
     [`type-core-syntax-table.test.ts`](../tests/type-core/type-core-syntax-table.test.ts); the guard
     ([`type-core-row-guard.test.ts`](../tests/type-core/type-core-row-guard.test.ts),
     [`type-core-declared-positions.test.ts`](../tests/type-core/type-core-declared-positions.test.ts), with its
@@ -150,7 +153,9 @@ snapshot for comparing two analyses of the same sources.
       [`core/definitions.ts`](../src/type-inference/core/definitions.ts),
       [`core/exact-path.ts`](../src/type-inference/core/exact-path.ts), the search of a value's property names in
       [`core/property-names.ts`](../src/type-inference/core/property-names.ts) and the carriers, the values that hold
-      another value ([`core/carriers.ts`](../src/type-inference/core/carriers.ts));
+      another value ([`core/carriers.ts`](../src/type-inference/core/carriers.ts)); an answer shared between equivalent
+      values is shared only while `sharing()` ([`core/sharing.ts`](../src/type-inference/core/sharing.ts)) allows it,
+      which tests turn off with `withoutSharing` to compare;
     - narrowing: [`core/narrowing/`](../src/type-inference/core/narrowing/), whose every walk is charged through
       [`core/charged-iteration.ts`](../src/type-inference/core/charged-iteration.ts), and the guard, handler and `+`
       indexes in [`core/indexes/`](../src/type-inference/core/indexes/);
@@ -165,12 +170,9 @@ snapshot for comparing two analyses of the same sources.
       [`core/messages/`](../src/type-inference/core/messages/);
     - the state kept between solver runs: [`core/retained/`](../src/type-inference/core/retained/)
       ([Frozen retained state](TESTING.md#frozen-retained-state)).
-  - **The answers' refusals:** `outsideAnswers` in [`core/backend.ts`](../src/type-inference/core/backend.ts) refuses,
-    after the analysis, what the syntax table admits but the answers do not show to fit: an operand an operator's rule
-    finds wrong (other than a `for` loop's iterable, a method's argument and what `toJson` writes), a member read of a
-    value that may be no object, a value `say` may not show, a speaker's built-in field (`SPEAKER_FIELD_KINDS`), a
-    `load` whose default is only `null`, a built-in's argument, an `askChoice` of more than one type, and lists nested
-    `SLICE_DEPTH` deep.
+  - **The answers' refusals:** after the analysis, `outsideAnswers` in
+    [`core/backend.ts`](../src/type-inference/core/backend.ts) refuses a source the syntax table admitted, on the
+    analysis' own answers and diagnostics, warnings included; the function lists what it refuses.
   - **The consumer:** `coreCheckResult`
     ([`core/check-result/check-result.ts`](../src/type-inference/core/check-result/check-result.ts)) walks the source
     with those answers and makes the `TypeCheckResult` that lowering consumes; the one walk of each file that the
