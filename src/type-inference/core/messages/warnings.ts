@@ -506,7 +506,11 @@ function propertyFix(
   return `Give ${named} ${type} in the default of '${source.text(found.load)}'.`;
 }
 
-/** The kinds a rule takes, where a value's own kinds that fit are not known (an unknown value). */
+/**
+ * The kinds a type test of an unknown value names, by its rule (the kinds the rule takes, where a value's own kinds
+ * that fit are not known); none for the other rules, such as `iterable`, `shown` and `json`, whose kinds no test here
+ * names.
+ */
 function ruleKinds(rule: DiagnosticRule): readonly ItemTag[] {
   switch (rule.rule) {
     case "count":
@@ -551,11 +555,12 @@ interface WarnedUse {
  * a null check, or a type test beside another type the use does not take, with a fallback where the value is not
  * changed in place; a selection's length check; a number's rounding where a count or a store needs a whole number; an
  * operator's text join or date and time conversion, none for a whole operation with neither; a member's own fix
- * (`memberWarningFix`); none for a button's value from outside the script; for a value of a type the script cannot
- * know, a store's property fix or a test of what the rule takes; none for a literal or a property the read may lack;
- * else a store's property fix where part of the value is unknown, a type test of the kinds that fit, or the fix of the
- * error the kinds would be (`errorFix`). A value that is a store's target and no variable is checked where it stands,
- * in words.
+ * (`memberWarningFix`); none for a button's value from outside the script, a literal or a property the read may lack;
+ * for a value of a type the script cannot know, a store's property fix or a test of what the rule takes, none where
+ * no written type names it; else a store's property fix where part of the value is unknown, but not into a declared
+ * place whose fitting kinds no type test names (#1730), a type test of the kinds that fit, or the fix of the error
+ * the kinds would be (`errorFix`). A value that is a store's target and no variable is checked where it stands, in
+ * words.
  */
 export function warningFix(warned: WarnedUse, source: MessageSource, diagnosed: Diagnosed): string {
   const { rule, text, kinds, fits, besides, detail, context, site, expects } = warned;
