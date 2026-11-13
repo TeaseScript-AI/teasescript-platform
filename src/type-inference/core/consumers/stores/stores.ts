@@ -1,4 +1,4 @@
-import type { PlaceId, SourceSite, TypeTerm } from "../../graph.js";
+import type { PlaceId, SourceSite, TypeTerm } from "../../../graph.js";
 import {
   concrete,
   contributes,
@@ -9,7 +9,7 @@ import {
   requiredKind,
   type DecidedAt,
   type Decision,
-} from "../admission.js";
+} from "../../admission.js";
 import {
   BudgetExhausted,
   DemandExhausted,
@@ -17,19 +17,19 @@ import {
   joinParts,
   keptParts,
   keptSteps,
-} from "../budget.js";
-import type { Consumers } from "../consumers.js";
-import { typeTags, writtenOf } from "../contract.js";
-import { stepIndex, stepsArray, stepsRest, type Steps } from "../contract/key-ids.js";
-import { labelText } from "../contract/labels.js";
-import { keyPlace, type Definition } from "../definitions.js";
-import { withoutEmpty } from "../exact-path.js";
-import { REASON, type Item, type ItemTag, type Writer } from "../items.js";
-import { propertyStep, siteKey } from "../program.js";
-import { offendingKinds, type DiagnosticRule } from "../result.js";
+} from "../../budget.js";
+import type { Consumers } from "../../consumers.js";
+import { typeTags, writtenOf } from "../../contract.js";
+import { stepIndex, stepsArray, stepsRest, type Steps } from "../../contract/key-ids.js";
+import { labelText } from "../../contract/labels.js";
+import { keyPlace, type Definition } from "../../definitions.js";
+import { withoutEmpty } from "../../exact-path.js";
+import { REASON, type Item, type ItemTag, type Writer } from "../../items.js";
+import { propertyStep, siteKey } from "../../program.js";
+import { offendingKinds, type DiagnosticRule } from "../../result.js";
 import { type BindingRead, readsBindings } from "./bindings.js";
-import { error } from "./diagnostics.js";
-import { kindsOf, quietKinds } from "./names.js";
+import { error } from "../reports/diagnostics.js";
+import { kindsOf, quietKinds } from "../names.js";
 import { copiesOnly, deferred, storeReach } from "./reach.js";
 import {
   nullWarning,
@@ -38,7 +38,7 @@ import {
   storeRoot,
   storeSteps,
   storeWarning,
-} from "./warnings.js";
+} from "../reports/warnings.js";
 
 // The stores' obligations (C1): each admitted store's check, a key's decision on demand, a stopped key's marks.
 

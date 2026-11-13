@@ -1,5 +1,5 @@
-import type { SourceSite } from "../../graph.js";
-import type { DeclaredBinding, DiagnosticRule } from "../result.js";
+import type { SourceSite } from "../../../graph.js";
+import type { DeclaredBinding, DiagnosticRule } from "../../result.js";
 
 /** The variable or parameter with its own written type a read at a site reads, else `null` (#2289). */
 export type BindingRead = (read: SourceSite) => DeclaredBinding | null;

@@ -338,7 +338,7 @@ function keeps(
   return fields(want) === fields(got) && (got.message === want.message || got.message === words());
 }
 
-/** The operator consumer's own words for an operand's operand check (`consumers/operations.ts`), naming its operator. */
+/** The operator consumer's own words for an operand's operand check (`consumers/operations/operations.ts`), naming its operator. */
 const OPERATOR_OPERAND_CHECK = /^check the operand of (.+) when it runs$/;
 
 /**

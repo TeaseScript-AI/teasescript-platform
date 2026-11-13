@@ -1,22 +1,22 @@
-import type { PlaceId, SourceSite } from "../../graph.js";
-import { concrete, fits, isExternal, isOpaque, requiredKind } from "../admission.js";
-import { family as oneFamily } from "../admission/kinds.js";
-import { joinParts, joinSteps, keepText } from "../budget.js";
-import type { Consumers } from "../consumers.js";
-import { termAt, typeTags } from "../contract.js";
-import { labelBelow } from "../contract/labels.js";
-import { keyPlace } from "../definitions.js";
-import { withoutEmpty } from "../exact-path.js";
-import type { FlowNode } from "../flow-graph.js";
-import { kindsInItsOrder, makeItem, STOPPED, type Item, type ItemTag } from "../items.js";
-import type { ValueConstraint } from "../program.js";
-import { elementStep, offendingKinds, type DiagnosticRule } from "../result.js";
-import { error } from "./diagnostics.js";
-import { heldHostData } from "./finishing.js";
-import { unsettledItem } from "./kinds.js";
-import { keyLabel, ownSpan, quietKinds, shownLabel, writtenTermOf } from "./names.js";
-import { obligation, storeRoot, storeWarning, warnGroups } from "./warnings.js";
-import { type CanonicalKey } from "../contract/key-ids.js";
+import type { PlaceId, SourceSite } from "../../../graph.js";
+import { concrete, fits, isExternal, isOpaque, requiredKind } from "../../admission.js";
+import { family as oneFamily } from "../../admission/kinds.js";
+import { joinParts, joinSteps, keepText } from "../../budget.js";
+import type { Consumers } from "../../consumers.js";
+import { termAt, typeTags } from "../../contract.js";
+import { labelBelow } from "../../contract/labels.js";
+import { keyPlace } from "../../definitions.js";
+import { withoutEmpty } from "../../exact-path.js";
+import type { FlowNode } from "../../flow-graph.js";
+import { kindsInItsOrder, makeItem, STOPPED, type Item, type ItemTag } from "../../items.js";
+import type { ValueConstraint } from "../../program.js";
+import { elementStep, offendingKinds, type DiagnosticRule } from "../../result.js";
+import { error } from "../reports/diagnostics.js";
+import { heldHostData } from "../finishing.js";
+import { unsettledItem } from "../kinds.js";
+import { keyLabel, ownSpan, quietKinds, shownLabel, writtenTermOf } from "../names.js";
+import { obligation, storeRoot, storeWarning, warnGroups } from "../reports/warnings.js";
+import { type CanonicalKey } from "../../contract/key-ids.js";
 
 // C10: a fallback's or a default's kinds against the direct value's, and an unwritten parameter's default (ADR 1.5).
 
