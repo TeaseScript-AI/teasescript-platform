@@ -419,8 +419,8 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
     }
   // a command's or an ask's operand that may hold a value its instruction does not take (`COMMAND_OPERANDS`, #2488's
   // step 1½): the core has no consumer of its own at a command operand, so the analysis never judges the operand against
-  // its instruction, and the table reads no kind for an outside value carried there (R10) nor a narrowing (R18); the
-  // table keeps such an operand off the route. Last, after the values' own refusals
+  // its instruction, and the table reads no kind for an outside value carried there nor a narrowing; the table keeps
+  // such an operand off the route. Last, after the values' own refusals
   for (const node of [...index.statements, ...index.asks]) {
     const rules = operandRules(node.kind);
     if (rules === undefined) continue;
@@ -436,7 +436,7 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
     }
     if (node.kind !== "interactionExpression" || node.interactionKind !== "choice") continue;
     // (a computed choice object whose text no value of it shows: no value goes unchecked without this refusal, as the
-    // request's own check stops the run as it opens, TSR021; it keeps today's earlier catch, TSV040 (R19))
+    // request's own check stops the run as it opens, TSR021; it keeps today's earlier catch, TSV040)
     const unshown = unshownChoiceText(answers, index, node, rules["askChoice.text"]!.takes);
     if (unshown !== null)
       return {
@@ -445,7 +445,7 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
         what: "an operand its instruction does not take",
       };
     // (a choice of more buttons than a request shows, or of none: no value goes unchecked without these refusals, as the
-    // request's own check stops the run as it opens, TSR052; they keep today's earlier catch, TSV029 (R54, R19))
+    // request's own check stops the run as it opens, TSR052; they keep today's earlier catch, TSV029)
     if (
       node.options.every((option) => {
         const written = unwrap(option.expression);
