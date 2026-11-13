@@ -63,15 +63,8 @@ test("a store through a speaker is refused at the speaker's name, in every form,
     ],
     [main("player.mood = 2"), "player", "player.mood = 2"],
     [main("let s = player\ns.mood = 2"), "player", "player\ns.mood"],
-    // (the player's list is stored in another file, so the method's receiver is the first name the route meets)
-    [
-      [
-        { path: "main.tease", source: "player.tags.sort()\nexit\n" },
-        { path: "other.tease", source: "player.tags = [3, 1]\nexit\n" },
-      ],
-      "player",
-      "player.tags.sort()",
-    ],
+    // (the player has a property only once a store before it gives it one, TSV043 otherwise: that store is refused first)
+    [main("player.tags = [3, 1]\nplayer.tags.sort()"), "player", "player.tags = "],
   ];
   for (const [files, name, at] of forms) {
     const source = files[0]!.source;
@@ -83,6 +76,17 @@ test("a store through a speaker is refused at the speaker's name, in every form,
     assert.ok(start >= 0 && start === source.lastIndexOf(at), source);
     assert.deepEqual(refused.site, { file: 0, start, end: start + name.length }, source);
   }
+  // the player's own method that changes its properties in place is a call outside the slice
+  const copy = main("player.copyFrom(playerProfile)");
+  assert.notEqual(compileProject(copy, OPTIONS).plan, null);
+  const start = copy[0]!.source.indexOf("player.copyFrom");
+  assert.deepEqual(
+    { what: refusal(copy)?.what, site: refusal(copy)?.site },
+    {
+      what: "this call expression",
+      site: { file: 0, start, end: start + "player.copyFrom(playerProfile)".length },
+    },
+  );
 });
 
 test("a store through `speaker` outside a message gets today's compile error on the route alike", () => {
