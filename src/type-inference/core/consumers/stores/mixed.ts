@@ -423,7 +423,7 @@ function mixedChoice(
 /**
  * The mixed choices' check (#1352), the last of `Consumers.check`: `mixedChoice` of every `askChoice` outside the
  * units past the nesting limit, in the consumers' order, each read with its choice's demand allowance and each its own
- * unit (`Consumers.runs`: a stop takes back the running choice's findings alone, #1660); run after every other
+ * unit (`Consumers.startUnit`: a stop takes back the running choice's findings alone, #1660); run after every other
  * consumer's read and the publication, so no read of the pass that can stop at its demand allowance comes after its
  * reads.
  * A choice past the nesting limit has no published warning that reads its record (TSV076 defers them).
@@ -436,7 +436,7 @@ export function mixedChoices(walk: Consumers): void {
   );
   for (const c of walk.order(choices)) {
     // (each choice its own unit: a stop takes back the running choice's findings alone, #1660)
-    if (!walk.runs(c.site)) continue;
+    if (!walk.startUnit(c.site)) continue;
     const node = program.exprAt(c.site);
     if (node === null) continue;
     walk.reading = node;

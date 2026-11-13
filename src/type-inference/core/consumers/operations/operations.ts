@@ -46,7 +46,7 @@ export function operations(walk: Consumers): void {
   );
   walk.enter(0);
   for (const c of finals) {
-    if (!walk.runs(c.site)) continue;
+    if (!walk.startUnit(c.site)) continue;
     // (a compound assignment's operation is its statement's, which has no expression of its own)
     const node = program.exprAt(c.site) ?? compoundNode(walk, c);
     if (node === null) continue;
