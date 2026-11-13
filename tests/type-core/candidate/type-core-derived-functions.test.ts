@@ -1,6 +1,7 @@
-// The derived oracle's author functions (`derived-functions.ts`, #2667 step 4a-0): on sources whose functions store only
-// into places with a written type, the oracle's checked stores, its content and its runs are today's compiler's, which
-// checks those places as V30 §10, §11 and §17 say; a check into an untyped parameter or result is underivable.
+// The derived oracle's author functions (`derived-functions.ts`, #2667 step 4a-0): on sources whose functions owe no check
+// into an untyped parameter or result, the oracle's checked stores, its content and its runs are today's compiler's,
+// which checks the written ones as V30 §10, §11 and §17 say; a check into an untyped one is underivable, and so is a run
+// of another file's function that would read either file's entries by offset.
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -23,7 +24,7 @@ import { OPTIONS } from "../../helpers/type-core/type-core-candidate-setup.js";
 type Files = readonly { readonly path: string; readonly source: string }[];
 const one = (source: string): Files => [{ path: "main.tease", source }];
 
-/** Invented sources: each a function form, its places written where a value enters them. */
+/** Invented sources: each a function form, its places written where a value it does not know enters them. */
 const CASES: readonly [string, Files][] = [
   [
     "an argument into a written parameter",
@@ -93,6 +94,10 @@ const CASES: readonly [string, Files][] = [
   [
     "an untyped parameter returned into a written `let`",
     one("function keep(v) {\n  return v\n}\nlet n: integer = keep(hostValue)\nsay n\nexit\n"),
+  ],
+  [
+    "a store into a property of an untyped parameter",
+    one("function f(o) {\n  o.a = hostValue\n  say o.a\n}\nf({a: 1})\nexit\n"),
   ],
   [
     "a function that ends without a return",
@@ -193,7 +198,7 @@ test("a parse into a function's written place reads that type, as a `let`'s: the
   }
 });
 
-test("the derived oracle refuses a check into an untyped parameter or result: the route publishes none there", () => {
+test("the derived oracle refuses a check into an untyped parameter or result", () => {
   for (const source of [
     "function shown(v) {\n  say v\n}\nshown(1)\nshown(hostValue)\nexit\n",
     "function pick(b) {\n  if b == null {\n    return 1\n  }\n  return b\n}\nlet n = pick(hostValue)\nsay n\nexit\n",
@@ -202,6 +207,59 @@ test("the derived oracle refuses a check into an untyped parameter or result: th
     assert.ok(request !== null);
     const record = compactAnalysis(request);
     const syntax = syntaxOf(source);
-    assert.throws(() => derive(syntax, record, [syntax]), Underivable, source);
+    assert.throws(
+      () => derive(syntax, record, [syntax]),
+      (error) => error instanceof Underivable && /without a written type/u.test(error.message),
+      source,
+    );
+  }
+});
+
+test("another file's function: each file's stores are its own, and a run that would read entries by offset is underivable", () => {
+  // a written result returned by another file's function, beside a store of the calling file; then a body without checks
+  // whose `let` lies at the offsets of a store of the calling file
+  for (const files of [
+    [
+      {
+        path: "main.tease",
+        source: "let a = 12345678901234\nlet m: integer = hostValue\nsay get()\nsay m\nexit\n",
+      },
+      { path: "helpers.tease", source: "global function get: integer {\n  return hostValue\n}\n" },
+    ],
+    [
+      {
+        path: "main.tease",
+        source: "let a = 1\nlet b = 222222\nlet m: integer = hostValue\nshow()\nexit\n",
+      },
+      { path: "helpers.tease", source: 'global function show {\n  let n = "text"\n  say n\n}\n' },
+    ],
+  ]) {
+    const name = files[1]!.source;
+    const today = compileProject(files, OPTIONS);
+    assert.ok(today.plan !== null, name);
+    const request = coreRequest(files);
+    assert.ok(request !== null, name);
+    const record = compactAnalysis(request);
+    const project = request.files.map((file) => syntaxOf(file.source));
+    const derived = request.files.map((file, index) => ({
+      path: file.path,
+      syntax: project[index]!,
+      ...derive(
+        project[index]!,
+        { ...record, checks: record.checks.filter((check) => check.site.file === file.path) },
+        project,
+      ),
+    }));
+    for (const file of derived)
+      assert.deepEqual(
+        derivedStores(file.stores),
+        plannedStores(planOfFile(today.plan, file.path)),
+        `${name}: ${file.path}`,
+      );
+    assert.throws(
+      () => evaluateProject(derived, { hostValue: 2 }),
+      (error) => error instanceof Underivable && /another file's function/u.test(error.message),
+      name,
+    );
   }
 });
