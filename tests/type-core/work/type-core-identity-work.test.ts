@@ -151,7 +151,7 @@ function expectedUnits(request: CoreAnalysisRequest): number {
   return units;
 }
 
-test("the view's work is each loop's units, as the syntax counts them, at three sizes (#2493, R51)", () => {
+test("the view's work is each loop's units, as the syntax counts them, at three sizes (#2493)", () => {
   for (const k of [64, 128, 256]) {
     const request = sized(IDENTITY_CALLS, k).request;
     assert.equal(
@@ -174,7 +174,7 @@ test("the view's work grows with the program, at three sizes (#2493)", () => {
     assert.ok((analysed(sized(IDENTITY_CALLS, k)).budget.counts.get("identitySteps") ?? 0) > 0);
 });
 
-test("the result read back onto the source charges a unit per node it translates (#2493, R51)", () => {
+test("the result read back onto the source charges a unit per node it translates (#2493)", () => {
   const request = coreRequest(
     main(
       `${PASS}let xs: (integer | string)[] = [1, "s"]\nlet w: integer = pass(xs[1])\nrepeat pass(xs[1]) {}\nexit`,
