@@ -876,6 +876,7 @@ test("a form that submits at its time limit restores only with a value in every 
       limit,
     );
     assert.equal(validateRuntimeSnapshot(unanswered, open).valid, true, limit);
+    restoreCheckpoint(createCheckpoint(open, unanswered));
   }
 });
 
@@ -904,7 +905,7 @@ test("a stored answer event keeps a form UI only as the engine shows one", () =>
     Object.assign(stored.settlement.ui, change);
     assert.equal(
       interpreterEventProblem(stored),
-      "The settlement of the 'actionCompleted' event must be a settlement with an action kind and ID, and for an answer its kind, text, and form answers.",
+      "The settlement of the 'actionCompleted' event must be a settlement with an action kind and ID, and for an answer its kind, text, and a form's UI and answers.",
       name,
     );
   }

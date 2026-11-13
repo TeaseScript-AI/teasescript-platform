@@ -201,22 +201,36 @@ export function formUiTexts(ui: FormUi): string[] {
 }
 
 /**
- * Narrows a form UI whose fields, buttons, hint and timeout are well formed, without measuring its texts; its accessible
- * name and the texts' byte limit are `validInteractionUiShape`'s.
+ * Narrows a form UI: every field of `FormUi` has its type, and its fields, buttons, hint and timeout are well formed.
+ * That the accessible name is not blank, and the texts' byte limit, are `validInteractionUiShape`'s, which measures
+ * them.
  */
 export function isFormUi(value: unknown): value is FormUi {
   return (
     isPlainRecord(value) &&
     value.kind === "form" &&
+    isFormAccessibleName(value.accessibleName) &&
     validFormUi(value, (text): text is string => typeof text === "string")
   );
 }
 
+/** A form's accessible name: a text, or the form's default (`answer`). */
+function isFormAccessibleName(value: unknown): value is InteractionAccessibleName {
+  if (!isPlainRecord(value)) return false;
+  if (value.kind === "text")
+    return hasExactKeys(value, ["kind", "text"]) && typeof value.text === "string";
+  return (
+    value.kind === "localizedDefault" &&
+    hasExactKeys(value, ["kind", "key"]) &&
+    value.key === "answer"
+  );
+}
+
 /**
- * The form branch of `validInteractionUiShape`: the shape, fields, hint, buttons and timeout, but of the accessible
- * name only its key, which `validInteractionUiShape` checks. `count` measures each retained text against the
- * interaction's aggregate byte limit and returns `false` when it does not fit; `isFormUi` passes one that checks only that
- * each text is a string.
+ * A form UI's shape, fields, hint, buttons and timeout; of the accessible name, only that the key is there. Its two
+ * callers check the name themselves: `validInteractionUiShape`, whose `count` measures each retained text against the
+ * interaction's aggregate byte limit and returns `false` when it does not fit, and `isFormUi`, whose `count` checks only
+ * that each text is a string.
  */
 export function validFormUi(
   value: Record<string, unknown>,

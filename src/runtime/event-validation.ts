@@ -75,7 +75,7 @@ const EVENT_FIELDS: {
   actionCompleted: {
     settlement: [
       validSettlement,
-      "a settlement with an action kind and ID, and for an answer its kind, text, and form answers",
+      "a settlement with an action kind and ID, and for an answer its kind, text, and a form's UI and answers",
     ],
     span: SPAN,
   },
@@ -119,9 +119,9 @@ function isSpeaker(value: unknown): boolean {
 }
 
 /**
- * A settlement's kind and identity, and an answer's sequence and text. Of the UI, only a form's is checked as restore
- * checks it (`validInteractionUiShape`), with its answers, shown options and presentation; another kind's only as a
- * record.
+ * A settlement's kind and identity, and an answer's sequence and text. A UI whose kind is `form` is checked as restore
+ * checks it (`validInteractionUiShape`), with the answers, shown options and presentation; a UI of another kind only as
+ * a record, whatever the answer's kind.
  */
 function validSettlement(settlement: unknown): boolean {
   if (
