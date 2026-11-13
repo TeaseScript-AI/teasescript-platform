@@ -32,9 +32,9 @@ export function nativeSetAdd(set: NativeSet, value: NativeValue): boolean {
     if (known.scalars.has(value)) return false;
     known.scalars.add(value);
   } else {
-    const { key, whole } = recordKey(value);
-    const bucket = known.records.get(key);
-    if (bucket === undefined) known.records.set(key, [value]);
+    const { key, whole } = memberKey(value);
+    const bucket = known.keyed.get(key);
+    if (bucket === undefined) known.keyed.set(key, [value]);
     else if (whole === null || bucket.some((item) => nativeValueKey(item) === whole)) return false;
     else bucket.push(value);
   }
@@ -51,8 +51,8 @@ export function nativeSetRemove(set: NativeSet, value: NativeValue): boolean {
     // `indexOf` compares by `===`, under which `-0` is `0`, as a member and `value` are equal.
     member = value;
   } else {
-    const { key, whole } = recordKey(value);
-    const bucket = known.records.get(key);
+    const { key, whole } = memberKey(value);
+    const bucket = known.keyed.get(key);
     const at =
       bucket === undefined
         ? -1
@@ -61,7 +61,7 @@ export function nativeSetRemove(set: NativeSet, value: NativeValue): boolean {
           : bucket.findIndex((item) => nativeValueKey(item) === whole);
     if (at === -1) return false;
     member = bucket![at]!;
-    if (bucket!.length === 1) known.records.delete(key);
+    if (bucket!.length === 1) known.keyed.delete(key);
     else bucket!.splice(at, 1);
   }
   const position = set.items.indexOf(member);
@@ -72,11 +72,11 @@ export function nativeSetRemove(set: NativeSet, value: NativeValue): boolean {
 }
 
 /**
- * Appends a member to a set whose index is not built yet, such as one a conversion or a copy is filling: the caller
- * knows the members unique by `==`, as the members of a valid set are. A set whose index exists takes members only
- * through `nativeSetAdd`.
+ * Appends a member to a set whose index is not built yet, such as one a conversion or a copy is filling. It checks only
+ * that no index exists: the caller knows the member differs (`==`) from those before it, as the members of a valid set
+ * do. A set whose index exists takes members only through `nativeSetAdd`.
  */
-export function appendUniqueMember(set: NativeSet, member: NativeValue): void {
+export function appendToUnindexedSet(set: NativeSet, member: NativeValue): void {
   if (set.membership !== null)
     throw new Error("A set with an index takes members through nativeSetAdd.");
   set.items.push(member);
@@ -90,13 +90,13 @@ export function nativeSetClear(set: NativeSet): void {
 
 function membership(set: NativeSet): NativeSetMembership {
   if (set.membership !== null) return set.membership;
-  const built: NativeSetMembership = { scalars: new Set(), records: new Map() };
+  const built: NativeSetMembership = { scalars: new Set(), keyed: new Map() };
   for (const item of set.items) {
     if (isScalar(item)) built.scalars.add(item);
     else {
-      const { key } = recordKey(item);
-      const bucket = built.records.get(key);
-      if (bucket === undefined) built.records.set(key, [item]);
+      const { key } = memberKey(item);
+      const bucket = built.keyed.get(key);
+      if (bucket === undefined) built.keyed.set(key, [item]);
       else bucket.push(item);
     }
   }
@@ -106,17 +106,17 @@ function membership(set: NativeSet): NativeSetMembership {
 
 /** The member equal to `value`, a value that is not a primitive. */
 function memberOf(known: NativeSetMembership, value: NativeValue): NativeValue | undefined {
-  const { key, whole } = recordKey(value);
-  const bucket = known.records.get(key);
+  const { key, whole } = memberKey(value);
+  const bucket = known.keyed.get(key);
   if (bucket === undefined) return undefined;
   return whole === null ? bucket[0] : bucket.find((item) => nativeValueKey(item) === whole);
 }
 
 /**
- * A member's key in `records`: its whole `nativeValueKey` when that is short, else `#` and a hash of it, with the whole
+ * A member's key in `keyed`: its whole `nativeValueKey` when that is short, else `#` and a hash of it, with the whole
  * key in `whole` to tell apart members whose hashes collide. No `nativeValueKey` starts with `#`.
  */
-function recordKey(value: NativeValue): { readonly key: string; readonly whole: string | null } {
+function memberKey(value: NativeValue): { readonly key: string; readonly whole: string | null } {
   const whole = nativeValueKey(value);
   return whole.length <= EXACT_KEY_LENGTH
     ? { key: whole, whole: null }

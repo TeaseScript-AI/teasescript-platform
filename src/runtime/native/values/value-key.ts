@@ -4,7 +4,8 @@ import { type NativeComposite, type NativeValue, isNativeComposite } from "./nat
 /**
  * The key of a native value: the text `valueKey` gives for its canonical form, so two values have the same key exactly
  * when they are equal (`==`). Primitives and leaf records are keyed by `valueKey` itself; lists, objects, dicts and sets
- * are assembled here as `valueKey` assembles them, without native recursion.
+ * are assembled here as `valueKey` assembles them, without recursion on the JavaScript call stack. Native sets need only
+ * that equal values share a key and others do not; matching `valueKey` lets the tests prove that against it.
  */
 export function nativeValueKey(value: NativeValue): string {
   if (!isNativeComposite(value)) return valueKey(value);
