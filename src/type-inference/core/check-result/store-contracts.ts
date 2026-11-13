@@ -80,13 +80,18 @@ export class Contracts {
   readonly #literals = new Map<Expression, Expression | null>();
   /** The stores' contracts (`ContractDescriptors`), read through the answers' places. */
   readonly #descriptors: ContractDescriptors<readonly Expression[]>;
+  /** Each store's contract result, written by `stored` alone (`results`). */
+  readonly #results = new Map<Store, ContractResult>();
+  /** Each store's label of the place it stores into (`destination`), once. */
+  readonly #destinations = new Map<Store, string | undefined>();
+
   /**
    * Each store's contract result, recorded by `stored` as it is asked, where it makes one: only the stores
    * `runtimeChecks` asks `stored` about have one. The lost-check gate reads it as the published contracts.
    */
-  readonly results = new Map<Store, ContractResult>();
-  /** Each store's label of the place it stores into (`destination`), once. */
-  readonly #destinations = new Map<Store, string | undefined>();
+  public get results(): ReadonlyMap<Store, ContractResult> {
+    return this.#results;
+  }
 
   public constructor(
     private readonly answers: Answers,
@@ -148,7 +153,7 @@ export class Contracts {
           : place === null || settled === null
             ? null
             : this.#completed(place.id, place.path, settled);
-    if (result !== null) this.results.set(store, result);
+    if (result !== null) this.#results.set(store, result);
     const checked = result === null ? null : checkedType(result);
     if (checked === null) return null;
     // (where a stop left the settled pass's contract incomplete, the receiving completion's lists each object's

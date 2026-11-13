@@ -1,4 +1,4 @@
-// Whether an obligation's check is lost at its store (#1526 decision 2): `keeps`, which the lost-check gate
+// Whether an obligation's check is lost at its store (#1526 decision 2): `notLost`, which the lost-check gate
 // (`lostCheck`, `runtime-plan.ts`) asks.
 import type { Expression } from "../../../ast.js";
 import { type PartCheckPlan, type TypeCheckPlan, type TypePlan } from "../../../plan/model.js";
@@ -15,7 +15,7 @@ import { SliceIndex, type Store, nodeOf, unwrap } from "./slice-index.js";
  * one a complete store check carries; a contract proved open; a complete store check (settled or received, its whole
  * type); or a contract the completion completed that a published check carries at the obligation's path: a typed
  * parse's or load's reader of the value stored at least as strict as the contract there, the stored literal's own
- * structure, its typed calls' readers and its scalar leaves, at least as strict (`elementsCarry`), or, where the
+ * structure, its typed calls' readers and its scalar leaves, at least as strict (`literalCarries`), or, where the
  * natural plan does not check the store whole, its part checks there equal to it (#1682). With no result, a completion
  * past its allowance or a stop of the analysis, only a complete store check carries it, else it is lost (#1832). A
  * stricter reader is never a lost check: it accepts no more values than the natural reader. A check against bare
@@ -24,7 +24,7 @@ import { SliceIndex, type Store, nodeOf, unwrap } from "./slice-index.js";
  * this pass's completion ran its own destination-type check at the obligation's path, no completed check at the stored
  * value and no destination-type warning of the completion at the store (`warned`).
  */
-export function keeps(
+export function notLost(
   answers: Answers,
   index: SliceIndex,
   store: Store,
@@ -81,11 +81,11 @@ export function keeps(
   // field the contract leaves open, still checks all the contract does)
   const carries = (type: TypePlan | null | undefined): boolean => {
     const at = type === null || type === undefined ? null : typeAt(type, below);
-    return at !== null && narrower(at, contract.ref);
+    return at !== null && atLeastAsStrict(at, contract.ref);
   };
   if (
     carries(readerOf(value, checks, core)) ||
-    elementsCarry(value, below, contract.ref, checks, core)
+    literalCarries(value, below, contract.ref, checks, core)
   )
     return true;
   if (answers.completedCheck(index.site(value))) return false;
@@ -156,7 +156,7 @@ function readerOf(
  * value whose reader is at least as strict as the contract there, or a scalar literal of a kind at least as strict. The
  * value itself is a literal holding them, never the call alone (`readerOf`'s).
  */
-function elementsCarry(
+function literalCarries(
   value: Expression,
   below: readonly string[],
   contract: TypePlan,
@@ -198,10 +198,10 @@ function elementsCarry(
       });
     }
     const leaf = leafKind(node);
-    if (leaf !== null) return steps.length === 0 && narrower(leaf, type);
+    if (leaf !== null) return steps.length === 0 && atLeastAsStrict(leaf, type);
     const reader = readerOf(node, checks, core);
     const there = reader === undefined ? null : typeAt(reader, steps);
-    return there !== null && narrower(there, type);
+    return there !== null && atLeastAsStrict(there, type);
   };
   const root = unwrap(value);
   return (
@@ -229,24 +229,26 @@ function leafKind(node: Expression): TypePlan | null {
 /**
  * Whether every value a check against `narrow` passes also passes one against `wide` (a check checks only the listed
  * properties an object has, and every element of a collection whose element type is not `null`): a reader that carries
- * a contract (`keeps`).
+ * a contract (`notLost`).
  */
-export function narrower(narrow: TypePlan, wide: TypePlan): boolean {
-  if (narrow.kind === "union") return narrow.members.every((member) => narrower(member, wide));
-  if (wide.kind === "union") return wide.members.some((member) => narrower(narrow, member));
+export function atLeastAsStrict(narrow: TypePlan, wide: TypePlan): boolean {
+  if (narrow.kind === "union")
+    return narrow.members.every((member) => atLeastAsStrict(member, wide));
+  if (wide.kind === "union") return wide.members.some((member) => atLeastAsStrict(narrow, member));
   if (wide.kind === "object") {
     if (narrow.kind !== "object") return false;
     const own = new Map(narrow.properties.map((each) => [each.name, each.type]));
     return wide.properties.every((property) => {
       const type = own.get(property.name);
-      return type !== undefined && narrower(type, property.type);
+      return type !== undefined && atLeastAsStrict(type, property.type);
     });
   }
   if (wide.kind === "list" || wide.kind === "set" || wide.kind === "dict") {
     if (narrow.kind !== "list" && narrow.kind !== "set" && narrow.kind !== "dict") return false;
     return (
       narrow.kind === wide.kind &&
-      (wide.element === null || (narrow.element !== null && narrower(narrow.element, wide.element)))
+      (wide.element === null ||
+        (narrow.element !== null && atLeastAsStrict(narrow.element, wide.element)))
     );
   }
   // (a whole number is a number)
