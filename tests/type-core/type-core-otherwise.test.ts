@@ -28,7 +28,7 @@ interface StopRecord {
   }[];
 }
 
-// #1072 (A59 + A68), V30 §18: the fallbacks of `otherwise` from its first link whose left side is never `null` never
+// #1072, V30 §18: the fallbacks of `otherwise` from its first link whose left side is never `null` never
 // run (TSV062), decided once from the core's answer at that left read, for the warning and the plan's ways alike.
 
 const GLOBALS = ["hostValue"];
