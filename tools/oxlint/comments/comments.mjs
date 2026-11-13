@@ -1,7 +1,7 @@
 import { ts } from "ts-morph";
 import { parse as parseSfc } from "vue/compiler-sfc";
 
-import { lintFiles } from "./files.mjs";
+import { lintFiles } from "../files.mjs";
 
 // How the comment checks read source: the files they read, each file's scripts (a `.vue` file's `<script>` blocks, as
 // Vue's own parser finds them, any other file whole), and each script's comments, through the TypeScript scanner, so

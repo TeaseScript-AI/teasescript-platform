@@ -10,7 +10,7 @@ import {
   obligationInventoryDiagnostics,
   READS,
 } from "./check-obligation-inventory.mjs";
-import { repositoryRoot } from "./files.mjs";
+import { repositoryRoot } from "../files.mjs";
 
 // Where the scratch copies are edited, in this layout (the #1071 splits repoint them): the class's entry, where its
 // members are inserted and what it imports to name `boundaryCheck`; the file holding `OBLIGATION_SITES`; the fresh pass,

@@ -10,7 +10,7 @@
  * one a `catch` swallows fails the file at its exit too; V8's own error at a write to frozen data is kept from any
  * handler in `src/type-inference/` by the lint's `catch` rule (R60). A write made through an intrinsic
  * (`Map.prototype.set` and its kind, called, bound or aliased) is outside what the instrument sees: the lint
- * (`tools/oxlint/check-retained-state.mjs`) refuses the `.prototype` that names one, and another native collection's
+ * (`check-retained-state`) refuses the `.prototype` that names one, and another native collection's
  * method applied to a made one is code written to get around it (R33). The instrument does
  * not see what a registered function (`Retained.closure`) captures; that rests on the comment at each registration,
  * read at review; the function's own properties are frozen at its registration. It changes no answer and no charge.

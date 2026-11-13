@@ -48,7 +48,7 @@ export function isPathSteps(steps: readonly string[] | PathSteps): steps is Path
 `,
 };
 const ITERATION = readFileSync(
-  new URL("../../src/type-inference/core/charged-iteration.ts", import.meta.url),
+  new URL("../../../src/type-inference/core/charged-iteration.ts", import.meta.url),
   "utf8",
 );
 /** The rules a message names: the language's tag, or the retained rule's. */

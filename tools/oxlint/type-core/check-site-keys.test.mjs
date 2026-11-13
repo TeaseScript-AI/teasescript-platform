@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import { checkSiteKeys, siteKeyDiagnostics } from "./check-site-keys.mjs";
-import { repositoryRoot } from "./files.mjs";
+import { repositoryRoot } from "../files.mjs";
 
 /** The lines the check reports in one scratch helper's `text`. */
 const reported = (text) =>

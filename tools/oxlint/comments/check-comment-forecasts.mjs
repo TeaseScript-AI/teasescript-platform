@@ -1,7 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { lstatSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { headingAnchors, headingText, markdownProcessor } from "../repository-checks/markdown.mjs";
+import {
+  headingAnchors,
+  headingText,
+  markdownProcessor,
+} from "../../repository-checks/markdown.mjs";
 import { ts } from "ts-morph";
 import { checkedFiles, fileComments, scriptsOf } from "./comments.mjs";
 
@@ -71,7 +75,7 @@ function citingLines(text) {
 }
 
 /** The one file whose text holds such citations on purpose: this check's own test, whose fixtures must be ones. */
-export const CITATION_FIXTURES = "tools/oxlint/check-comment-forecasts.test.mjs";
+export const CITATION_FIXTURES = "tools/oxlint/comments/check-comment-forecasts.test.mjs";
 
 /** The citations whose count per file in comments may only shrink, each counted in a comment's text. */
 const COUNTED_CITATIONS = {
@@ -430,7 +434,7 @@ const outsideSectionRule = (file) =>
   file.startsWith("docs/") ||
   file.startsWith("src/") ||
   file === "tests/fixtures/type-core/cells.jsonl" ||
-  file === "tools/oxlint/comment-declarations-waiting.json" ||
+  file === "tools/oxlint/comments/comment-declarations-waiting.json" ||
   file === CITATION_FIXTURES;
 
 /**
@@ -601,7 +605,7 @@ export function checkCommentForecasts(root) {
   for (const [index, item] of allowed.entries())
     if (!used.has(index))
       diagnostics.push({
-        fileName: "tools/oxlint/comment-forecasts-allowed.json",
+        fileName: "tools/oxlint/comments/comment-forecasts-allowed.json",
         line: 1,
         column: 1,
         message: `${item.file}: the allowed forecast "${item.text}" is no longer found; remove its entry`,
@@ -618,7 +622,7 @@ export function checkCommentForecasts(root) {
         });
       else if (now < was)
         diagnostics.push({
-          fileName: "tools/oxlint/comment-citations.json",
+          fileName: "tools/oxlint/comments/comment-citations.json",
           line: 1,
           column: 1,
           message: `${file}: "${citation}" now occurs ${now} times; lower its count from ${was}`,

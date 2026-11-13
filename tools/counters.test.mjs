@@ -292,11 +292,11 @@ before(() => {
         { rules: {} },
       ],
     }),
-    "tools/oxlint/comment-forecasts-allowed.json": JSON.stringify([{}, {}]),
-    "tools/oxlint/comment-declarations-waiting.json": JSON.stringify([{}]),
-    "tools/oxlint/comment-external-names.json": JSON.stringify([]),
+    "tools/oxlint/comments/comment-forecasts-allowed.json": JSON.stringify([{}, {}]),
+    "tools/oxlint/comments/comment-declarations-waiting.json": JSON.stringify([{}]),
+    "tools/oxlint/comments/comment-external-names.json": JSON.stringify([]),
     "tools/repository-checks/imports-waiting.json": JSON.stringify([{}, {}, {}, {}]),
-    "tools/oxlint/comment-citations.json": JSON.stringify({
+    "tools/oxlint/comments/comment-citations.json": JSON.stringify({
       "src/a.ts": { "#1": 2, "#2": 1 },
       "src/b.ts": { "#1": 4 },
     }),
@@ -412,6 +412,22 @@ test("the lists count their entries, the structure signals come from structure-r
   assert.match(text.stdout, /^Comment citations: 7$/mu);
 });
 
+test("a tree from before tools/oxlint/comments/ counts the lists at their earlier paths", () => {
+  const root = checkout({
+    "tools/oxlint/comment-forecasts-allowed.json": JSON.stringify([{}]),
+    "tools/oxlint/comment-declarations-waiting.json": JSON.stringify([{}, {}]),
+    "tools/oxlint/comment-external-names.json": JSON.stringify([{}, {}, {}]),
+    "tools/oxlint/comment-citations.json": JSON.stringify({ "src/a.ts": { "#1": 5 } }),
+  });
+  const r = run(root, "--json");
+  assert.equal(r.status, 0, r.stderr);
+  const c = JSON.parse(r.stdout).counters;
+  assert.deepEqual(
+    [c.forecastsAllowed, c.declarationsWaiting, c.externalNames, c.citations],
+    [1, 2, 3, 5],
+  );
+});
+
 test("a missing list is absent, and a list of another shape or a ROOT that is no checkout stops the tool", () => {
   const root = checkout({ "src/a.ts": "export {};\n" });
   const r = run(root, "--json");
@@ -438,7 +454,7 @@ test("a missing list is absent, and a list of another shape or a ROOT that is no
 
   for (const [file, text, message] of [
     [
-      "tools/oxlint/comment-forecasts-allowed.json",
+      "tools/oxlint/comments/comment-forecasts-allowed.json",
       "{}",
       /comment-forecasts-allowed\.json is not an array/u,
     ],

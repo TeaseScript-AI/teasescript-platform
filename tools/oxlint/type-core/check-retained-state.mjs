@@ -93,7 +93,7 @@ const OUTSIDE = new Map([
   ["items.ts", "the ingress graph: compared by identity (`IDENTITY_CLASSES`)"],
   [
     "contract/objects.ts",
-    "what a query gathers (`Gathered`) becomes its proof, which the solver holds; its collections' shapes are closed by its own language (tools/oxlint/objects-language.mjs)",
+    "what a query gathers (`Gathered`) becomes its proof, which the solver holds; its collections' shapes are closed by its own language (tools/oxlint/type-core/objects-language.mjs)",
   ],
   [
     "contract/contributions.ts",

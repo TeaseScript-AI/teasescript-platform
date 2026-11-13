@@ -4,7 +4,7 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 import { FINISHING_READERS, questionSourceDiagnostics } from "./check-question-sources.mjs";
-import { repositoryRoot } from "./files.mjs";
+import { repositoryRoot } from "../files.mjs";
 
 const ANSWERS = "src/type-inference/core/answers.ts";
 const CONSUMERS = "src/type-inference/core/consumers.ts";
