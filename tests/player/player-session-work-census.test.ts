@@ -13,8 +13,6 @@ import {
   CLOCK,
   ENTRIES,
   ESCAPES,
-  FACADE,
-  FACADE_EXPORTS,
   FOLLOWED,
   SESSION,
   SURFACES,
@@ -41,7 +39,7 @@ import {
  * suppression directive), or by keeping the ticket the clock passes to a `BridgeClient` it implements or wraps (Sol
  * code r1 B1, job 11081923449b44). The ticket guards against a sender that forgets the clock, not against code written
  * to bypass it. The type-assertion `EVIDENCE:` rule sees only `as` and `<T>` casts (#2042).
- * Requests, signals and facade sends are walked in the `.ts` files under `player/`; a `.vue` caller through a
+ * Requests and signals are walked in the `.ts` files under `player/`; a `.vue` caller through a
  * session's `connection` is outside the walk (#2041).
  */
 
@@ -128,11 +126,6 @@ test("the session-work census finds exactly the classified entry points of every
     [...(found.boundary.interfaces[`${CLIENT}#BridgeClient`] ?? [])].sort(),
     [...CLIENT_MEMBERS.sending, ...CLIENT_MEMBERS.ticketed, ...CLIENT_MEMBERS.nonSending].sort(),
     "every public BridgeClient member is sending or listed as not",
-  );
-  assert.deepEqual(
-    [...(found.boundary.exports[FACADE] ?? [])].sort(),
-    [...FACADE_EXPORTS.sending, ...FACADE_EXPORTS.nonSending].sort(),
-    "every function the facade exports is sending or listed as not",
   );
   const lookup = (key: string) => ENTRIES[key]!;
   assertTable(

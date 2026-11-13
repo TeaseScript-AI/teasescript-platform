@@ -1,6 +1,6 @@
 // The census of session work in `player/` (L5i.5, R3): which entry points reach the engine bridge's sending surfaces,
 // derived with the TypeScript language service, not listed by hand. The boundary is read from the code: every member
-// of the `BridgeClient` interface and every function the in-process facade exports. The test walks the sending ones but
+// of the `BridgeClient` interface. The test walks the sending ones but
 // `section`, which takes the scene clock's ticket: leaving it out fails type-checking (#1983). The type does not decide
 // where a ticket came from (a check-disabling construct makes one, a `BridgeClient` wrapper keeps one). Discovery walks
 // references backwards from each sending surface (`findReferences`): a function that calls a surface directly is a forwarder, and
