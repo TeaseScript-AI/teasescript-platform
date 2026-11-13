@@ -27,9 +27,10 @@ import { HELD_MODES } from "../../helpers/type-core-held-host.js";
 /*
  * What each row expects of the route, in every held mode:
  * - `equal`: today's answer. A plan where today has one, with each of today's diagnostics and no other, and each run
- *   ending as today's (status and failure, with its site); apart from the two inherited warning classes 1a's ledger
- *   names (#2544's body, "R5, diagnostics"): the core's TSV041 on a host value stored into a typed place, where today
- *   gives none, and today's TSV046 on a test its types decide, where the route gives none.
+ *   ending as today's (status and failure, with its site); apart from two warning codes, dropped wherever they stand:
+ *   every TSV041 warning of the route's (1a's class, #2544's body "R5, diagnostics", a host value stored into a typed
+ *   place; #2674's, a read in a type case's block, which the route does not narrow) and every TSV046 warning of
+ *   today's (a test its types decide).
  * - `refused`: the route declines with this text.
  * - `way`: today plans; the route gives TSV052 and no plan (#2660).
  * - `unreached`: as `equal`, but where today warns TSV065 that a statement after a `switch` never runs, the route does
@@ -307,7 +308,7 @@ test("`switch` answers as today's compiler: each literal kind, a range, a type t
         "an optional type test",
         "switch hostValue {\n  case is integer? {\n    exit\n  }\n}\nexit\n",
       ),
-      // (a signed case value waits for the unary row, #2488's step 2c)
+      // (a signed case value is refused at the unary row)
       one("a negative case value", "switch hostValue {\n  case -1 {\n    exit\n  }\n}\nexit\n", {
         refused: "this unary expression",
       }),
