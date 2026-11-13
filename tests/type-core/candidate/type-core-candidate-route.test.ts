@@ -50,7 +50,7 @@ test("the candidate hears of each file it walks, as the production default does"
 test("a program outside the slice throws at its first construct outside it", () => {
   for (const [source, offset] of [
     // a statement outside the slice
-    ["let total = 0\nwhile false {\n  total = 1\n}\nexit\n", 14],
+    ['let total = 0\nsave total as "k"\nexit\n', 14],
     // another consumer: a condition that is no boolean (C3)
     ['if 1 {\n  say "never"\n}\nexit\n', 3],
     // lists nested as deep as the facts' walk (256 levels), inferred or written
