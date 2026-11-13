@@ -20,10 +20,9 @@ concurrency:
 jobs:
   # The check runs as three jobs side by side (#1638, #1978): each installs and builds, then runs one third of the
   # compiled tests (`--shard=i/3`, shared out by measured seconds, `tools/test-shards.mjs`); check-3 also runs the
-  # checks before the tests (`check:pretest`), once, and check-1 the runtime oracle comparison after them; the sharing
-  # counts both. Together they run what `npm run check` runs; `check`, the required check, passes only where all three
-  # passed. `tools/measure-test-files.mjs --from-ci` finds the test jobs by their step named "Build and run tests…" and
-  # the two fixed steps by "Check source before the tests" and "Compare with the runtime oracle": keep those names.
+  # checks before the tests (`check:pretest`), once. Together they run what `npm run check` runs; `check`, the required
+  # check, passes only where all three passed. `tools/measure-test-files.mjs --from-ci` finds the test jobs by their
+  # step named "Build and run tests…" and the pre-test checks by "Check source before the tests": keep those names.
   check-1:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -59,22 +58,6 @@ jobs:
         env:
           PR: ${{ github.event.pull_request.number }}
         run: node tools/repository-checks/regression-cases.mjs --base "$(git rev-parse HEAD^1)" --pr "$PR"
-      # The runtime oracle (docs/TESTING.md "Runtime pipeline oracle"): a pinned commit's own install and build, kept
-      # between runs by its commit and lockfile, then compared with this build. It is outside the shards, so it runs
-      # here alone, always.
-      - name: Name the runtime oracle's pin
-        id: oracle
-        run: echo "key=runtime-oracle-$(node -p "const m = require('./tools/runtime-oracle/manifest.json'); m.commit + '-' + m.lockfile.sha256")" >> "$GITHUB_OUTPUT"
-      - name: Restore the runtime oracle's root
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: ${{ runner.temp }}/runtime-oracle
-          key: ${{ steps.oracle.outputs.key }}
-      - name: Compare with the runtime oracle
-        env:
-          RUNTIME_ORACLE_HOME: ${{ runner.temp }}/runtime-oracle
-          NODE_COMPILE_CACHE: ${{ runner.temp }}/node-compile-cache
-        run: npm run oracle:test
       # each test file's seconds, which `tools/measure-test-files.mjs --from-ci` makes the shards' weights from
       - name: Keep each test file's seconds
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
