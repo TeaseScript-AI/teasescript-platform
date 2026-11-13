@@ -21,9 +21,11 @@ import {
   script,
 } from "../helpers/type-core/row-guard-records.js";
 import {
-  ANSWERED_AS_TODAY,
   DECLARED_REFUSALS,
   DECLARED_RUN_DIFFERENCES,
+} from "../helpers/type-core/declared-samples.js";
+import {
+  ANSWERED_AS_TODAY,
   filesOf,
   OPERAND_TEMPLATES,
   ROW_HOSTS,
