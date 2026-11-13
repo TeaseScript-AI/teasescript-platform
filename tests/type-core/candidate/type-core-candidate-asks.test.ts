@@ -231,6 +231,44 @@ test("a computed prefill is refused at its ask, also where today's checker plans
     asToday(source);
 });
 
+test("the prefill list, decided on syntax alone: each token on its side", () => {
+  // on the list: a literal the request takes, in parentheses or not, called or compact, by `prefill:` on a basic ask
+  // and on a choice, and by `askBoolean`'s named argument
+  for (const source of [
+    'let r = askText("q", prefill: ("p"))\nexit\n',
+    'let r = askText "q", prefill: "p"\nexit\n',
+    'let r = askNumber "q", hint: "h", prefill: 2.5\nexit\n',
+    'let r = askBoolean "q", prefill: true\nexit\n',
+    'let r = askBoolean("q", yesText: "y", prefill: false)\nexit\n',
+    "let r = askChoice 1, 2, prefill: (null)\nexit\n",
+  ])
+    asToday(source);
+  // off the list where today's checker plans: text with an interpolation (refused at the text, or at the ask where its
+  // written text is blank), a negative number (an operator, not a literal), a computed value however it is given
+  refusedWhereTodayPlans(
+    'let r = askText("q", prefill: "a${hostValue}")\nexit\n',
+    'text with interpolation: "a${hostValue}"',
+  );
+  for (const source of [
+    'let r = askText("q", prefill: "${hostValue}")\nexit\n',
+    'let r = askNumber("q", prefill: -2)\nexit\n',
+    'let r = askText "q", prefill: hostValue\nexit\n',
+    'let r = askBoolean "q", prefill: hostValue\nexit\n',
+    "let r = askChoice 1, 2, prefill: -1\nexit\n",
+  ])
+    refusedWhereTodayPlans(source, `this ask: ${askOf(source)}`);
+  // off the list as today's checker refuses it: a literal of another kind than the request takes, and `null` at an ask
+  // but `askChoice`
+  for (const source of [
+    'let r = askNumber("q", prefill: "2")\nexit\n',
+    'let r = askInteger("q", prefill: 2.5)\nexit\n',
+    'let r = askBoolean "q", prefill: 1\nexit\n',
+    'let r = askText("q", prefill: null)\nexit\n',
+    'let r = askDate "q", prefill: null\nexit\n',
+  ])
+    refusedAsToday(source, "TSV039", `this ask: ${askOf(source)}`);
+});
+
 test("a choice whose buttons are one type by V30's rules runs as today's", () => {
   // (a whole number with a number, and `null` beside a type, are one type: not R40's mix)
   for (const ask of ["askChoice 1, 2.5", "askChoice 1, null", "askChoice [1, 2.5]"])

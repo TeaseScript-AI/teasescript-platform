@@ -612,6 +612,20 @@ const CONDITIONS: readonly Condition[] = [
   },
   {
     row: "interactionExpression",
+    condition: "a prefill written as a literal: a negative number is an operator, not one",
+    source: 'let r = askNumber("q", prefill: -2)',
+    at: 'askNumber("q", prefill: -2)',
+    what: "this ask",
+  },
+  {
+    row: "interactionExpression",
+    condition: "a prefill written as a literal, in the compact form too",
+    source: 'let r = askBoolean "q", prefill: hostValue',
+    at: 'askBoolean "q", prefill: hostValue',
+    what: "this ask",
+  },
+  {
+    row: "interactionExpression",
     condition: "a literal prefill in parentheses is read as the literal",
     source: 'let r = askText("q", prefill: (null))',
     at: 'askText("q", prefill: (null))',
