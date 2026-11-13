@@ -432,14 +432,12 @@ test("a typed parse or load into a written `object` keeps every key and takes ea
 });
 
 test("a known `null` reads as the `null` type, an unknown stays open, and each record keeps its own fields' order, in three layers, in both orders (S7 review r5 B1, N1)", () => {
-  // a written `null` target, at the root and as a list's elements, on both lowerings: the route takes the written type
-  // (#2488's step 1½) and reads JSON of another shape as the default (the decision's `boundary` check, V30's "JSON of
-  // the wrong shape … give the default"). A pin of an inherited difference, not accepted behaviour: today's run fails
-  // TSR058 at the parse there instead, as it does on main for an `integer` target (job 11131813595dff)
+  // a written `null` target, at the root and as a list's elements, on both lowerings: the decision layer only, as the
+  // route takes no written type with a position only `null` fills
   for (const files of ["", ", files: false"])
-    for (const [written, fallback, fitting] of [
-      ["null", "null", "null"],
-      ["null[]", "[null]", "[null]"],
+    for (const [written, fallback] of [
+      ["null", "null"],
+      ["null[]", "[null]"],
     ] as const) {
       const source = `let p: ${written} = fromJson(hostValue, default: ${fallback}${files})\nsay ${written === "null" ? "p" : "p[0]"}\nsay "AFTER"\nexit\n`;
       const parse = at(source, `fromJson(hostValue, default: ${fallback}${files})`);
@@ -447,11 +445,12 @@ test("a known `null` reads as the `null` type, an unknown stays open, and each r
         decision(source).checks.some((check) => check.endsWith(`boundary @${parse}`)),
         source,
       );
-      const plan = candidatePlan(source);
-      assert.deepEqual(ran(runWith(plan, fitting)), halted(["null", "AFTER"]), source);
-      assert.deepEqual(
-        ran(runWith(plan, "2")),
-        halted(["null", "AFTER"], [`TSW020@${parse}`]),
+      assert.throws(
+        () => compileSourceWithBackend(source, OPTIONS, CORE_BACKEND),
+        (error) =>
+          error instanceof CandidateOutsideSlice &&
+          error.what === "this written type" &&
+          error.site.start === source.indexOf("null"),
         source,
       );
     }
