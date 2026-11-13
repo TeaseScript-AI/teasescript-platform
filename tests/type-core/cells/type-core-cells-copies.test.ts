@@ -182,6 +182,89 @@ function a2Record(source: string, reversed: boolean): string[] {
   ];
 }
 
+// per form: its setup, the place copied, the object of another type, and for a cycle beyond the bound the path read
+const forms: readonly (readonly [string, string, string, string, string | null])[] = [
+  [
+    "a cycle of whole copies",
+    "let a = {n: 1}\nlet b = {m: 2}\na = b\nb = a",
+    "a",
+    '{m: "x"}',
+    null,
+  ],
+  [
+    "a cycle fed from outside",
+    "let src = {n: 1}\nlet a = src\nlet b = a\na = b",
+    "b",
+    '{n: "x"}',
+    null,
+  ],
+  [
+    "a copy into a property",
+    "let src = {n: 1}\nlet a = {p: null}\na.p = src",
+    "a",
+    '{p: {n: "x"}}',
+    null,
+  ],
+  ["a projection", "let bundle = {left: {n: 1}}\nlet a = bundle.left", "a", '{n: "x"}', null],
+  [
+    "nested objects",
+    "let inner = {n: 1}\nlet a = {box: {inner: inner}}",
+    "a",
+    '{box: {inner: {n: "x"}}}',
+    null,
+  ],
+  [
+    "a written property beside an inferred one",
+    "let typed: integer = 1\nlet a = {n: typed, m: 1}",
+    "a",
+    '{n: 2, m: "x"}',
+    null,
+  ],
+  [
+    "a property that may be null",
+    "let a = {inner: {n: 1}}\nlet b = {inner: null}\nb = a",
+    "b",
+    '{inner: {n: "x"}}',
+    null,
+  ],
+  ["a projection of itself", "let a = {inner: {n: 1}}\na = a.inner", "a", '{n: "x"}', "n"],
+  [
+    "a store into its own property",
+    "let a = {n: 1, inner: null}\na.inner = a",
+    "a",
+    '{inner: {n: "x"}}',
+    "inner.n",
+  ],
+  [
+    "composed projections",
+    "let a = {left: {right: {n: 1}}}\nlet b = a.left\na = b.right",
+    "a",
+    '{n: "x"}',
+    "n",
+  ],
+  [
+    "two places stored into each other's property",
+    "let a = {n: 1, inner: null}\nlet b = {m: 2, inner: null}\na.inner = b\nb.inner = a",
+    "a",
+    '{inner: {m: "x"}}',
+    "inner.m",
+  ],
+  [
+    "a store into its own property in a loop",
+    "let a = {n: 1, inner: null}\nrepeat 3 {\n  a.inner = a\n}",
+    "a",
+    '{inner: {n: "x"}}',
+    "inner.n",
+  ],
+  [
+    "a self-graft below a projection through wrappers",
+    "let a = {n: 1, inner: null}\nlet b = {p: a}\nlet d = {q: b}\na = d.q.p\na.inner = a",
+    "d",
+    '{q: {p: {n: "x"}}}',
+    "q.p.n",
+  ],
+];
+
 /**
  * A2's witnesses (docs/specifications/type-inference-accepted-record/admission.md#r4-154), their exact records in both
  * orders of the copy and the object and in both analysis orders: per form, a place copied with its setup and an object
@@ -193,88 +276,6 @@ function a2Record(source: string, reversed: boolean): string[] {
  * first read and names the second.
  */
 test("A2's witnesses: whole copies err where they meet the place or the list, read or not; a cycle that adds or takes steps errs where it is read, in both orders", () => {
-  // per form: its setup, the place copied, the object of another type, and for a cycle beyond the bound the path read
-  const forms: readonly (readonly [string, string, string, string, string | null])[] = [
-    [
-      "a cycle of whole copies",
-      "let a = {n: 1}\nlet b = {m: 2}\na = b\nb = a",
-      "a",
-      '{m: "x"}',
-      null,
-    ],
-    [
-      "a cycle fed from outside",
-      "let src = {n: 1}\nlet a = src\nlet b = a\na = b",
-      "b",
-      '{n: "x"}',
-      null,
-    ],
-    [
-      "a copy into a property",
-      "let src = {n: 1}\nlet a = {p: null}\na.p = src",
-      "a",
-      '{p: {n: "x"}}',
-      null,
-    ],
-    ["a projection", "let bundle = {left: {n: 1}}\nlet a = bundle.left", "a", '{n: "x"}', null],
-    [
-      "nested objects",
-      "let inner = {n: 1}\nlet a = {box: {inner: inner}}",
-      "a",
-      '{box: {inner: {n: "x"}}}',
-      null,
-    ],
-    [
-      "a written property beside an inferred one",
-      "let typed: integer = 1\nlet a = {n: typed, m: 1}",
-      "a",
-      '{n: 2, m: "x"}',
-      null,
-    ],
-    [
-      "a property that may be null",
-      "let a = {inner: {n: 1}}\nlet b = {inner: null}\nb = a",
-      "b",
-      '{inner: {n: "x"}}',
-      null,
-    ],
-    ["a projection of itself", "let a = {inner: {n: 1}}\na = a.inner", "a", '{n: "x"}', "n"],
-    [
-      "a store into its own property",
-      "let a = {n: 1, inner: null}\na.inner = a",
-      "a",
-      '{inner: {n: "x"}}',
-      "inner.n",
-    ],
-    [
-      "composed projections",
-      "let a = {left: {right: {n: 1}}}\nlet b = a.left\na = b.right",
-      "a",
-      '{n: "x"}',
-      "n",
-    ],
-    [
-      "two places stored into each other's property",
-      "let a = {n: 1, inner: null}\nlet b = {m: 2, inner: null}\na.inner = b\nb.inner = a",
-      "a",
-      '{inner: {m: "x"}}',
-      "inner.m",
-    ],
-    [
-      "a store into its own property in a loop",
-      "let a = {n: 1, inner: null}\nrepeat 3 {\n  a.inner = a\n}",
-      "a",
-      '{inner: {n: "x"}}',
-      "inner.n",
-    ],
-    [
-      "a self-graft below a projection through wrappers",
-      "let a = {n: 1, inner: null}\nlet b = {p: a}\nlet d = {q: b}\na = d.q.p\na.inner = a",
-      "d",
-      '{q: {p: {n: "x"}}}',
-      "q.p.n",
-    ],
-  ];
   const differing: string[] = [];
   const expect = (label: string, source: string, expected: readonly string[]): void => {
     for (const reversed of [false, true]) {
@@ -570,159 +571,159 @@ test("A2's value origins: a written binding's copy errs where it meets the place
   assert.deepEqual(differing, []);
 });
 
+// k copies of a record with k fields and a record of k other-typed fields, each field read: one error per field; the
+// copies as a list's elements, as stores into one variable, and wrapped in literals of both. The gate's shapes,
+// unread, in both orders of the copies: k copies of the first record in one list beside a copy of one that
+// differs in one field (one error, or one per copy where it comes first), and k places each receiving a copy of each
+// (one error per place, at its store). k places each receiving a copy of the first record and then its own object of
+// one other-typed field (one error each). A ring of k whole copies fed the first record and then the other (one error
+// per field, at the store bringing it: Codex r1's review of #1293), and a quiet one. Beyond the bound,
+// linear: Codex r4's k independent property cycles of one object, `b_i = a.f_i`, `a.f_i = b_i`, the object then
+// copied beside another type (one error, at its own property), and r5's: those cycles beside k self-grafts
+// `a.g_i = a` (none). The written-type axis (Astra r1 N1): the elements, the stores, the places and the list with
+// each field a copy of a written binding (a ring of such copies costs what `main`'s ring costs, #1078)
+const fields = (k: number, value: string): string =>
+  Array.from({ length: k }, (_, i) => `f${i}: ${value}`).join(", ");
+const records = (k: number): string =>
+  `let good = {${fields(k, "1")}}\nlet bad = {${fields(k, '"x"')}}\n`;
+const reads = (k: number, read: string): string =>
+  Array.from({ length: k }, (_, i) => `say "\${${read}.f${i}}"`).join("\n");
+const copies = (k: number, copy: string): string =>
+  Array.from({ length: k }, () => copy).join(", ");
+// the records with each field a copy of a written binding, and the first record but one field of the other's
+const typed = (k: number): string =>
+  `${Array.from({ length: k }, (_, i) => `let w${i}: integer = ${i}\nlet s${i}: string = "x"`).join("\n")}\n` +
+  `let good = {${Array.from({ length: k }, (_, i) => `f${i}: w${i}`).join(", ")}}\n` +
+  `let bad = {${Array.from({ length: k }, (_, i) => `f${i}: s${i}`).join(", ")}}\n` +
+  `let other = {${Array.from({ length: k }, (_, i) => (i === 0 ? "f0: s0" : `f${i}: w${i}`)).join(", ")}}\n`;
+// a ring of k whole copies fed the first record, each relay's second store after it closes, then the other record at
+// its first member; and a ring whose steps each pass a chain of `length` copies (r3's axes, #1293)
+const ring = (k: number, second: (i: number) => string): string =>
+  `${records(k)}let a0 = good\n` +
+  `${Array.from({ length: k - 1 }, (_, i) => `let a${i + 1} = a${i}`).join("\n")}\na0 = a${k - 1}\n` +
+  `${Array.from({ length: k - 1 }, (_, i) => second(i + 1)).join("\n")}\na0 = bad\nexit`;
+const chained = (k: number, length: number): string =>
+  `${records(k)}let a0 = good\n` +
+  Array.from({ length: k - 1 }, (_, i) =>
+    Array.from({ length }, (_, step) =>
+      step === length - 1
+        ? `let a${i + 1} = ${step === 0 ? `a${i}` : `c${i}_${step - 1}`}`
+        : `let c${i}_${step} = ${step === 0 ? `a${i}` : `c${i}_${step - 1}`}`,
+    ).join("\n"),
+  ).join("\n") +
+  `\na0 = a${k - 1}\na0 = bad\nexit`;
+const shapes: readonly (readonly [string, (k: number) => string])[] = [
+  [
+    "elements",
+    (k) => `${records(k)}let xs = [${copies(k, "good")}]\nxs.add(bad)\n${reads(k, "xs[0]")}\nexit`,
+  ],
+  [
+    "stores",
+    (k) =>
+      `${records(k)}let c = good\n${Array.from({ length: k }, () => "c = good").join("\n")}\nc = bad\n` +
+      `${reads(k, "c")}\nexit`,
+  ],
+  [
+    "wrapped stores",
+    (k) =>
+      `${records(k)}let c = {box: {inner: good}}\n` +
+      `${Array.from({ length: k }, () => "c = {box: {inner: good}}").join("\n")}\n` +
+      `c = {box: {inner: bad}}\n${reads(k, "c.box.inner")}\nexit`,
+  ],
+  [
+    "wrapped elements",
+    (k) =>
+      `${records(k)}let xs = [${copies(k, "{inner: good}")}]\nxs.add({inner: bad})\n` +
+      `${reads(k, "xs[0].inner")}\nexit`,
+  ],
+  [
+    "independent property cycles",
+    (k) =>
+      `let a = {n: 1, ${fields(k, "null")}}\n` +
+      `${Array.from({ length: k }, (_, i) => `let b${i} = a.f${i}\na.f${i} = b${i}`).join("\n")}\n` +
+      'let bad = {n: "x"}\nlet c = a\nc = bad\nexit',
+  ],
+  [
+    "one object copied by k places, each then receiving its own other copy",
+    (k) =>
+      `${records(k)}${Array.from({ length: k }, (_, i) => `let o${i} = {f${i}: "x"}\nlet c${i} = good\nc${i} = o${i}`).join("\n")}\nexit`,
+  ],
+  [
+    "places",
+    (k) =>
+      `${records(k)}let other = {${fields(k, "1").replace("f0: 1", 'f0: "x"')}}\n` +
+      `${Array.from({ length: k }, (_, i) => `let c${i} = good\nc${i} = other`).join("\n")}\nexit`,
+  ],
+  [
+    "places, the other first",
+    (k) =>
+      `${records(k)}let other = {${fields(k, "1").replace("f0: 1", 'f0: "x"')}}\n` +
+      `${Array.from({ length: k }, (_, i) => `let c${i} = other\nc${i} = good`).join("\n")}\nexit`,
+  ],
+  [
+    "a list",
+    (k) =>
+      `${records(k)}let other = {${fields(k, "1").replace("f0: 1", 'f0: "x"')}}\n` +
+      `let xs = [${copies(k, "good")}, other]\nexit`,
+  ],
+  [
+    "a list, the other first",
+    (k) =>
+      `${records(k)}let other = {${fields(k, "1").replace("f0: 1", 'f0: "x"')}}\n` +
+      `let xs = [other, ${copies(k, "good")}]\nexit`,
+  ],
+  [
+    "a ring of k copies fed two objects of k other-typed fields",
+    (k) =>
+      `${records(k)}let a0 = good\n` +
+      `${Array.from({ length: k - 1 }, (_, i) => `let a${i + 1} = a${i}`).join("\n")}\n` +
+      `a0 = a${k - 1}\na${k - 1} = bad\nexit`,
+  ],
+  [
+    "a ring of k copies fed two objects of k fields of one type",
+    (k) =>
+      `${records(k)}let a0 = good\n` +
+      `${Array.from({ length: k - 1 }, (_, i) => `let a${i + 1} = a${i}`).join("\n")}\n` +
+      `a0 = a${k - 1}\na${k - 1} = {${fields(k, "2")}}\nexit`,
+  ],
+  // rings through chains of two and of three copies, their relays of one store each (r3's axes, #1293)
+  ["a fed ring through chains of two copies", (k) => chained(k, 2)],
+  ["a fed ring through chains of three copies", (k) => chained(k, 3)],
+  [
+    "elements of written fields",
+    (k) => `${typed(k)}let xs = [${copies(k, "good")}]\nxs.add(bad)\n${reads(k, "xs[0]")}\nexit`,
+  ],
+  [
+    "stores of written fields",
+    (k) =>
+      `${typed(k)}let c = good\n${Array.from({ length: k }, () => "c = good").join("\n")}\nc = bad\n` +
+      `${reads(k, "c")}\nexit`,
+  ],
+  [
+    "places of written fields",
+    (k) =>
+      `${typed(k)}${Array.from({ length: k }, (_, i) => `let c${i} = good\nc${i} = other`).join("\n")}\nexit`,
+  ],
+  [
+    "places of written fields, the other first",
+    (k) =>
+      `${typed(k)}${Array.from({ length: k }, (_, i) => `let c${i} = other\nc${i} = good`).join("\n")}\nexit`,
+  ],
+  ["a list of written fields", (k) => `${typed(k)}let xs = [${copies(k, "good")}, other]\nexit`],
+  [
+    "a list of written fields, the other first",
+    (k) => `${typed(k)}let xs = [other, ${copies(k, "good")}]\nexit`,
+  ],
+  [
+    "property cycles beside self-grafts",
+    (k) =>
+      `let a = {n: 1, ${fields(k, "null")}, ${fields(k, "null").replaceAll("f", "g")}}\n` +
+      `${Array.from({ length: k }, (_, i) => `let b${i} = a.f${i}\na.f${i} = b${i}\na.g${i} = a`).join("\n")}\n` +
+      "let c = a\nexit",
+  ],
+];
+
 test("the copied-property check grows with the program, not with its copies times its fields, in either order (A2)", () => {
-  // k copies of a record with k fields and a record of k other-typed fields, each field read: one error per field; the
-  // copies as a list's elements, as stores into one variable, and wrapped in literals of both. The gate's shapes,
-  // unread, in both orders of the copies: k copies of the first record in one list beside a copy of one that
-  // differs in one field (one error, or one per copy where it comes first), and k places each receiving a copy of each
-  // (one error per place, at its store). k places each receiving a copy of the first record and then its own object of
-  // one other-typed field (one error each). A ring of k whole copies fed the first record and then the other (one error
-  // per field, at the store bringing it: Codex r1's review of #1293), and a quiet one. Beyond the bound,
-  // linear: Codex r4's k independent property cycles of one object, `b_i = a.f_i`, `a.f_i = b_i`, the object then
-  // copied beside another type (one error, at its own property), and r5's: those cycles beside k self-grafts
-  // `a.g_i = a` (none). The written-type axis (Astra r1 N1): the elements, the stores, the places and the list with
-  // each field a copy of a written binding (a ring of such copies costs what `main`'s ring costs, #1078)
-  const fields = (k: number, value: string): string =>
-    Array.from({ length: k }, (_, i) => `f${i}: ${value}`).join(", ");
-  const records = (k: number): string =>
-    `let good = {${fields(k, "1")}}\nlet bad = {${fields(k, '"x"')}}\n`;
-  const reads = (k: number, read: string): string =>
-    Array.from({ length: k }, (_, i) => `say "\${${read}.f${i}}"`).join("\n");
-  const copies = (k: number, copy: string): string =>
-    Array.from({ length: k }, () => copy).join(", ");
-  // the records with each field a copy of a written binding, and the first record but one field of the other's
-  const typed = (k: number): string =>
-    `${Array.from({ length: k }, (_, i) => `let w${i}: integer = ${i}\nlet s${i}: string = "x"`).join("\n")}\n` +
-    `let good = {${Array.from({ length: k }, (_, i) => `f${i}: w${i}`).join(", ")}}\n` +
-    `let bad = {${Array.from({ length: k }, (_, i) => `f${i}: s${i}`).join(", ")}}\n` +
-    `let other = {${Array.from({ length: k }, (_, i) => (i === 0 ? "f0: s0" : `f${i}: w${i}`)).join(", ")}}\n`;
-  // a ring of k whole copies fed the first record, each relay's second store after it closes, then the other record at
-  // its first member; and a ring whose steps each pass a chain of `length` copies (r3's axes, #1293)
-  const ring = (k: number, second: (i: number) => string): string =>
-    `${records(k)}let a0 = good\n` +
-    `${Array.from({ length: k - 1 }, (_, i) => `let a${i + 1} = a${i}`).join("\n")}\na0 = a${k - 1}\n` +
-    `${Array.from({ length: k - 1 }, (_, i) => second(i + 1)).join("\n")}\na0 = bad\nexit`;
-  const chained = (k: number, length: number): string =>
-    `${records(k)}let a0 = good\n` +
-    Array.from({ length: k - 1 }, (_, i) =>
-      Array.from({ length }, (_, step) =>
-        step === length - 1
-          ? `let a${i + 1} = ${step === 0 ? `a${i}` : `c${i}_${step - 1}`}`
-          : `let c${i}_${step} = ${step === 0 ? `a${i}` : `c${i}_${step - 1}`}`,
-      ).join("\n"),
-    ).join("\n") +
-    `\na0 = a${k - 1}\na0 = bad\nexit`;
-  const shapes: readonly (readonly [string, (k: number) => string])[] = [
-    [
-      "elements",
-      (k) =>
-        `${records(k)}let xs = [${copies(k, "good")}]\nxs.add(bad)\n${reads(k, "xs[0]")}\nexit`,
-    ],
-    [
-      "stores",
-      (k) =>
-        `${records(k)}let c = good\n${Array.from({ length: k }, () => "c = good").join("\n")}\nc = bad\n` +
-        `${reads(k, "c")}\nexit`,
-    ],
-    [
-      "wrapped stores",
-      (k) =>
-        `${records(k)}let c = {box: {inner: good}}\n` +
-        `${Array.from({ length: k }, () => "c = {box: {inner: good}}").join("\n")}\n` +
-        `c = {box: {inner: bad}}\n${reads(k, "c.box.inner")}\nexit`,
-    ],
-    [
-      "wrapped elements",
-      (k) =>
-        `${records(k)}let xs = [${copies(k, "{inner: good}")}]\nxs.add({inner: bad})\n` +
-        `${reads(k, "xs[0].inner")}\nexit`,
-    ],
-    [
-      "independent property cycles",
-      (k) =>
-        `let a = {n: 1, ${fields(k, "null")}}\n` +
-        `${Array.from({ length: k }, (_, i) => `let b${i} = a.f${i}\na.f${i} = b${i}`).join("\n")}\n` +
-        'let bad = {n: "x"}\nlet c = a\nc = bad\nexit',
-    ],
-    [
-      "one object copied by k places, each then receiving its own other copy",
-      (k) =>
-        `${records(k)}${Array.from({ length: k }, (_, i) => `let o${i} = {f${i}: "x"}\nlet c${i} = good\nc${i} = o${i}`).join("\n")}\nexit`,
-    ],
-    [
-      "places",
-      (k) =>
-        `${records(k)}let other = {${fields(k, "1").replace("f0: 1", 'f0: "x"')}}\n` +
-        `${Array.from({ length: k }, (_, i) => `let c${i} = good\nc${i} = other`).join("\n")}\nexit`,
-    ],
-    [
-      "places, the other first",
-      (k) =>
-        `${records(k)}let other = {${fields(k, "1").replace("f0: 1", 'f0: "x"')}}\n` +
-        `${Array.from({ length: k }, (_, i) => `let c${i} = other\nc${i} = good`).join("\n")}\nexit`,
-    ],
-    [
-      "a list",
-      (k) =>
-        `${records(k)}let other = {${fields(k, "1").replace("f0: 1", 'f0: "x"')}}\n` +
-        `let xs = [${copies(k, "good")}, other]\nexit`,
-    ],
-    [
-      "a list, the other first",
-      (k) =>
-        `${records(k)}let other = {${fields(k, "1").replace("f0: 1", 'f0: "x"')}}\n` +
-        `let xs = [other, ${copies(k, "good")}]\nexit`,
-    ],
-    [
-      "a ring of k copies fed two objects of k other-typed fields",
-      (k) =>
-        `${records(k)}let a0 = good\n` +
-        `${Array.from({ length: k - 1 }, (_, i) => `let a${i + 1} = a${i}`).join("\n")}\n` +
-        `a0 = a${k - 1}\na${k - 1} = bad\nexit`,
-    ],
-    [
-      "a ring of k copies fed two objects of k fields of one type",
-      (k) =>
-        `${records(k)}let a0 = good\n` +
-        `${Array.from({ length: k - 1 }, (_, i) => `let a${i + 1} = a${i}`).join("\n")}\n` +
-        `a0 = a${k - 1}\na${k - 1} = {${fields(k, "2")}}\nexit`,
-    ],
-    // rings through chains of two and of three copies, their relays of one store each (r3's axes, #1293)
-    ["a fed ring through chains of two copies", (k) => chained(k, 2)],
-    ["a fed ring through chains of three copies", (k) => chained(k, 3)],
-    [
-      "elements of written fields",
-      (k) => `${typed(k)}let xs = [${copies(k, "good")}]\nxs.add(bad)\n${reads(k, "xs[0]")}\nexit`,
-    ],
-    [
-      "stores of written fields",
-      (k) =>
-        `${typed(k)}let c = good\n${Array.from({ length: k }, () => "c = good").join("\n")}\nc = bad\n` +
-        `${reads(k, "c")}\nexit`,
-    ],
-    [
-      "places of written fields",
-      (k) =>
-        `${typed(k)}${Array.from({ length: k }, (_, i) => `let c${i} = good\nc${i} = other`).join("\n")}\nexit`,
-    ],
-    [
-      "places of written fields, the other first",
-      (k) =>
-        `${typed(k)}${Array.from({ length: k }, (_, i) => `let c${i} = other\nc${i} = good`).join("\n")}\nexit`,
-    ],
-    ["a list of written fields", (k) => `${typed(k)}let xs = [${copies(k, "good")}, other]\nexit`],
-    [
-      "a list of written fields, the other first",
-      (k) => `${typed(k)}let xs = [other, ${copies(k, "good")}]\nexit`,
-    ],
-    [
-      "property cycles beside self-grafts",
-      (k) =>
-        `let a = {n: 1, ${fields(k, "null")}, ${fields(k, "null").replaceAll("f", "g")}}\n` +
-        `${Array.from({ length: k }, (_, i) => `let b${i} = a.f${i}\na.f${i} = b${i}\na.g${i} = a`).join("\n")}\n` +
-        "let c = a\nexit",
-    ],
-  ];
   const errors = (name: string, k: number): number =>
     name === "independent property cycles" ||
     name === "a list" ||
