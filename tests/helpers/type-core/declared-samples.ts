@@ -173,8 +173,8 @@ export const DECLINED_ORIGINS: ReadonlySet<Sample["origin"]> = new Set([
 ]);
 
 /**
- * Every sample: each command operand position (`SAMPLED_TEMPLATES`, or the templates given) with each kind from each
- * origin.
+ * Every sample: each command operand position (`SAMPLED_TEMPLATES`, or the templates given) with each origin's values,
+ * each origin with its own kinds.
  */
 export function samples(
   templates: Readonly<
