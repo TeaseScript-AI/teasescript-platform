@@ -11,7 +11,7 @@ import { coreRequest } from "../../helpers/type-core-analysis.js";
 import { inMode, MODES, stoppedRecord, stopSet } from "../../helpers/type-core-oracles.js";
 import type { InstructionPlan, TypeCheckPlan } from "../../../src/plan/model.js";
 import { HELD_MODES } from "../../helpers/type-core-held-host.js";
-import { hostValues, stopRuns } from "../../helpers/type-core-stop-oracle.js";
+import { hostValues, stopRuns } from "../../helpers/type-core-stop-runs.js";
 import { GLOBALS } from "../../helpers/type-core/type-core-oracles-setup.js";
 
 /** The plain gate's decline (#2080 part 2): a stop before admission settled left a store's check undecided. */
