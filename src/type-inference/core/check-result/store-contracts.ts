@@ -82,8 +82,6 @@ export class Contracts {
   readonly #descriptors: ContractDescriptors<readonly Expression[]>;
   /** Each checked store's contract result, as `stored` made it; read through `results`. */
   readonly #results = new Map<Store, ContractResult>();
-  /** Each store's label of the place it stores into (`destination`), once. */
-  readonly #destinations = new Map<Store, string | undefined>();
 
   /**
    * Each store's contract result, recorded by `stored` as it is asked, where it makes one: only the stores
@@ -132,7 +130,6 @@ export class Contracts {
     const whole = store.kind === "letStatement" || store.target.kind === "identifier";
     const place = this.answers.at(nodeOf(this.answers, this.index, store))?.place ?? null;
     const required = place === null ? null : this.answers.requirement(place.id, place.path);
-    this.destination(store);
     const settled =
       place === null || (whole && declaration.typeAnnotation !== null) || required !== null
         ? null
@@ -171,21 +168,17 @@ export class Contracts {
   }
 
   /**
-   * The label of the place a store stores into (its variable, then the core's steps), as `stored` reads it, once per
-   * store; `undefined` where the answers name no place there. It reads no value and asks for no contract, so a store whose
+   * The label of the place a store stores into (its variable, then the core's steps), the place `stored` reads;
+   * `undefined` where the answers name no place there. It reads no value and asks for no contract, so a store whose
    * only owed checks are the receiving completion's is asked nothing (#1682).
    */
   public destination(store: Store): string | undefined {
-    if (this.#destinations.has(store)) return this.#destinations.get(store);
     const place = this.answers.storedPlace(nodeOf(this.answers, this.index, store));
     const declaration =
       store.kind === "letStatement" ? store : place === null ? undefined : this.lets.get(place.id);
-    const label =
-      place === null || declaration === undefined
-        ? undefined
-        : [declaration.name.name, ...place.path].join(".");
-    this.#destinations.set(store, label);
-    return label;
+    return place === null || declaration === undefined
+      ? undefined
+      : [declaration.name.name, ...place.path].join(".");
   }
 
   /** Whether the receiving completion completed the contract at a store's destination (`#completed`). */
