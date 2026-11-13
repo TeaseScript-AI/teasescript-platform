@@ -368,97 +368,118 @@ test("a stop's runs read #2116's final witness closed on main at demand 64, and 
   }
 });
 
-test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, part, cap, ancestor, file and loop cases stay unwitnessed, a store's absent property is read at the store, and a genuine escape stays open (#2080, Codex r3 on #2142)", () => {
-  const unit = (source: string) => [{ path: "main.tease", source }];
-  const loosened = (type: TypeCheckPlan["type"]): TypeCheckPlan["type"] =>
-    type.kind === "list" && type.element?.kind === "list"
-      ? { ...type, element: { kind: "list", element: null } }
-      : type.kind === "union"
-        ? { ...type, members: type.members.map(loosened) }
-        : type;
-  const props = Array.from({ length: 10 }, (_, at) => `p${at}: seed`).join(", ");
-  const cases: {
-    readonly name: string;
-    readonly files: readonly { readonly path: string; readonly source: string }[];
-    readonly globals: readonly string[];
-    readonly demand: number;
-    readonly planted?: (plan: InstructionPlan) => InstructionPlan;
-  }[] = [
-    // (a retained index check fails where the dropped store check is never reached)
-    {
-      name: "index",
-      files: unit("let n: integer = [1, 1, hostOther, 1, 1].get(hostValue, default: 1)\nexit\n"),
-      globals: ["hostValue", "hostOther"],
-      demand: 1_000_000,
-      planted: (plan) => withoutTypeChecks(plan),
-    },
-    // (a union's nested element opened, which no pool value of the union reaches)
-    {
-      name: "union",
-      files: unit("let n: integer[][]? = hostValue\nexit\n"),
-      globals: ["hostValue"],
-      demand: 1_000_000,
-      planted: (plan) =>
-        editedTypeChecks(plan, (check) => ({ ...check, type: loosened(check.type) })),
-    },
-    // (a part check dropped beside a sibling one)
-    {
-      name: "part",
-      files: unit(
-        "let seed: integer = 1\nlet copy = hostValue\nif hostOther is duration {\n copy.a = seed\n copy.xs = [{n: seed}]\n}\ncopy = hostOther\nexit\n",
+const unit = (source: string) => [{ path: "main.tease", source }];
+const loosened = (type: TypeCheckPlan["type"]): TypeCheckPlan["type"] =>
+  type.kind === "list" && type.element?.kind === "list"
+    ? { ...type, element: { kind: "list", element: null } }
+    : type.kind === "union"
+      ? { ...type, members: type.members.map(loosened) }
+      : type;
+const props = Array.from({ length: 10 }, (_, at) => `p${at}: seed`).join(", ");
+const cases: {
+  readonly name: string;
+  readonly files: readonly { readonly path: string; readonly source: string }[];
+  readonly globals: readonly string[];
+  readonly demand: number;
+  readonly planted?: (plan: InstructionPlan) => InstructionPlan;
+}[] = [
+  // (a retained index check fails where the dropped store check is never reached)
+  {
+    name: "index",
+    files: unit("let n: integer = [1, 1, hostOther, 1, 1].get(hostValue, default: 1)\nexit\n"),
+    globals: ["hostValue", "hostOther"],
+    demand: 1_000_000,
+    planted: (plan) => withoutTypeChecks(plan),
+  },
+  // (a union's nested element opened, which no pool value of the union reaches)
+  {
+    name: "union",
+    files: unit("let n: integer[][]? = hostValue\nexit\n"),
+    globals: ["hostValue"],
+    demand: 1_000_000,
+    planted: (plan) =>
+      editedTypeChecks(plan, (check) => ({ ...check, type: loosened(check.type) })),
+  },
+  // (a part check dropped beside a sibling one)
+  {
+    name: "part",
+    files: unit(
+      "let seed: integer = 1\nlet copy = hostValue\nif hostOther is duration {\n copy.a = seed\n copy.xs = [{n: seed}]\n}\ncopy = hostOther\nexit\n",
+    ),
+    globals: ["hostValue", "hostOther"],
+    demand: 1_000_000,
+    planted: (plan) => ({
+      ...plan,
+      instructions: plan.instructions.map((instruction) =>
+        "partChecks" in instruction && Array.isArray(instruction.partChecks)
+          ? {
+              ...instruction,
+              partChecks: instruction.partChecks.filter(
+                (part: { readonly path: readonly unknown[] }) =>
+                  !JSON.stringify(part.path).includes("xs"),
+              ),
+            }
+          : instruction,
       ),
-      globals: ["hostValue", "hostOther"],
-      demand: 1_000_000,
-      planted: (plan) => ({
-        ...plan,
-        instructions: plan.instructions.map((instruction) =>
-          "partChecks" in instruction && Array.isArray(instruction.partChecks)
-            ? {
-                ...instruction,
-                partChecks: instruction.partChecks.filter(
-                  (part: { readonly path: readonly unknown[] }) =>
-                    !JSON.stringify(part.path).includes("xs"),
+    }),
+  },
+  // (the tenth property of an object widened, past the pool's cap)
+  {
+    name: "cap",
+    files: unit(`let seed: integer = 1\nlet n = {${props}}\nn = hostValue\nexit\n`),
+    globals: ["hostValue"],
+    demand: 1_000_000,
+    planted: (plan) =>
+      editedTypeChecks(plan, (check) =>
+        check.type.kind === "object"
+          ? {
+              ...check,
+              type: {
+                ...check.type,
+                properties: check.type.properties.map((property) =>
+                  property.name === "p9" ? { ...property, type: { kind: "number" } } : property,
                 ),
-              }
-            : instruction,
-        ),
-      }),
-    },
-    // (the tenth property of an object widened, past the pool's cap)
-    {
-      name: "cap",
-      files: unit(`let seed: integer = 1\nlet n = {${props}}\nn = hostValue\nexit\n`),
-      globals: ["hostValue"],
-      demand: 1_000_000,
-      planted: (plan) =>
-        editedTypeChecks(plan, (check) =>
-          check.type.kind === "object"
-            ? {
-                ...check,
-                type: {
-                  ...check.type,
-                  properties: check.type.properties.map((property) =>
-                    property.name === "p9" ? { ...property, type: { kind: "number" } } : property,
-                  ),
-                },
-              }
-            : check,
-        ),
-    },
-    // (a stricter check in a loop: the stopped plan fails in the second round, before the natural failure)
-    {
-      name: "loop",
-      files: unit(
-        "let current = hostValue\nrepeat 2 {\n let a: number = current\n let b: integer = current\n current = hostOther\n}\nexit\n",
+              },
+            }
+          : check,
       ),
-      globals: ["hostValue", "hostOther"],
-      demand: 1_000_000,
-      planted: (plan) =>
-        editedTypeChecks(plan, (check) =>
-          check.type.kind === "number" ? { ...check, type: { kind: "integer" } } : check,
-        ),
-    },
-  ];
+  },
+  // (a stricter check in a loop: the stopped plan fails in the second round, before the natural failure)
+  {
+    name: "loop",
+    files: unit(
+      "let current = hostValue\nrepeat 2 {\n let a: number = current\n let b: integer = current\n current = hostOther\n}\nexit\n",
+    ),
+    globals: ["hostValue", "hostOther"],
+    demand: 1_000_000,
+    planted: (plan) =>
+      editedTypeChecks(plan, (check) =>
+        check.type.kind === "number" ? { ...check, type: { kind: "integer" } } : check,
+      ),
+  },
+];
+
+const corpus = (
+  source: string,
+  mode: (typeof HELD_MODES)[number],
+  demand: number,
+  planted?: (plan: InstructionPlan) => InstructionPlan,
+) =>
+  stopRuns(
+    unit(source),
+    ["hostValue", "hostOther", "hostInit"],
+    (make) => mode.run(make),
+    demand,
+    planted,
+  );
+
+const operation = (value: string, declared = "integer") =>
+  `let t:${declared}=${declared === "integer" ? "7" : "null"}\nlet root={n:t,nest:{n:t,keep:1},spare:t}\nlet a=root\nlet b={p:a}\nb.p.nest.n=${value}\nlet out=[b.p,root].get(0, default: root)\nrepeat out.nest.n {}\nexit\n`;
+
+const looping =
+  "let t:integer?=null\nlet root={n:t,nest:{n:t,keep:1},spare:t}\nlet other={n:2.5,nest:{n:2.5,keep:1},spare:1}\nlet a=root\nif other != null { a=other }\nlet b=a\nrepeat b.n {}\nexit\n";
+
+test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, part, cap, ancestor, file and loop cases stay unwitnessed (#2080, Codex r3 on #2142)", () => {
   for (const mode of HELD_MODES)
     for (const { name, files, globals, demand, planted } of cases)
       assert.equal(
@@ -513,25 +534,13 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
       `escape (${mode.name})`,
     );
   }
+});
+
+test("a stop's runs claim only what they demonstrate: a store's absent property is read at the store, and a genuine escape stays open (#2080, Codex r3 on #2142)", () => {
   // (compiled no-plan stops that still publish, settled, from the census of #2080 part 2: a store moved to a check against
   // `unknown` that every run fails, unwitnessed, and open with its checks dropped; two errors, each read at its own site;
   // C5c's absent property read at the store, `s8b-r3-astra-cases.mjs/case/storenull`; and the typed read #2183 names,
   // open as compiled)
-  const corpus = (
-    source: string,
-    mode: (typeof HELD_MODES)[number],
-    demand: number,
-    planted?: (plan: InstructionPlan) => InstructionPlan,
-  ) =>
-    stopRuns(
-      unit(source),
-      ["hostValue", "hostOther", "hostInit"],
-      (make) => mode.run(make),
-      demand,
-      planted,
-    );
-  const operation = (value: string, declared = "integer") =>
-    `let t:${declared}=${declared === "integer" ? "7" : "null"}\nlet root={n:t,nest:{n:t,keep:1},spare:t}\nlet a=root\nlet b={p:a}\nb.p.nest.n=${value}\nlet out=[b.p,root].get(0, default: root)\nrepeat out.nest.n {}\nexit\n`;
   for (const mode of HELD_MODES) {
     const moved = corpus(operation('"bad"'), mode, 64);
     assert.deepEqual(
@@ -652,8 +661,6 @@ test("a stop's runs claim only what they demonstrate: Codex r3's wrong-check, pa
   // at the loop's own start: its decision stops in the restarted pass, which stops the analysis before admission
   // settled, and the plain gate declines it, #2080 part 2; the natural plan with its checks dropped passes the store and
   // fails at the loop's start, which takes no round)
-  const looping =
-    "let t:integer?=null\nlet root={n:t,nest:{n:t,keep:1},spare:t}\nlet other={n:2.5,nest:{n:2.5,keep:1},spare:1}\nlet a=root\nif other != null { a=other }\nlet b=a\nrepeat b.n {}\nexit\n";
   const later = stopRuns(
     unit(looping),
     ["hostValue", "hostOther", "hostInit"],

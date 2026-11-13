@@ -101,6 +101,147 @@ test("an object's properties take any contents in every form, copy and projectio
   assert.deepEqual(wrong, []);
 });
 
+const object = (
+  ...fields: (readonly [string, SerializableRuntimeValue])[]
+): SerializableRuntimeValue => ({
+  kind: "object",
+  properties: fields.map(([name, value]) => ({ name, value })),
+});
+const rows: readonly {
+  readonly lines: string;
+  /** `place.step…` (`[]` an element), its admission as `written`, `copied` or `decided`, and its kinds. */
+  readonly levels: readonly (readonly [string, string])[];
+  /**
+   * Each line storing host data: its target, the kinds its C9 boundary at the host read is against and its whole
+   * checked type, `null` where it owes none.
+   */
+  readonly stores: readonly (readonly [string, string, string | null, string | null])[];
+  /** Host values, and the line whose value stops the run (`null`: it says DONE). */
+  readonly runs?: readonly (readonly [Record<string, SerializableRuntimeValue>, string | null])[];
+}[] = [
+  {
+    lines: "let typed: object = {n: 1}\nlet out = typed\nout = hostValue",
+    levels: [
+      ["out", "copied object"],
+      ["out.n", "copied unknown"],
+      ["typed", "written object"],
+      ["typed.n", "decided unknown"],
+    ],
+    stores: [["out = hostValue", "out", "object", "{}"]],
+  },
+  {
+    lines: "let typed: object? = {n: 1}\nlet out = typed\nout = hostValue",
+    levels: [
+      ["out", "copied null,object"],
+      ["out.n", "copied unknown"],
+    ],
+    stores: [["out = hostValue", "out", "null,object", "null|{}"]],
+  },
+  {
+    lines: "let typed: object[] = [{n: 1}]\nlet out = typed\nout = hostValue",
+    levels: [
+      ["out", "copied list"],
+      ["out.[]", "copied object"],
+      ["out.[].n", "copied unknown"],
+    ],
+    stores: [["out = hostValue", "out", "list", "list<{}>"]],
+  },
+  {
+    // (a field named as an internal step: a quoted key step)
+    lines:
+      "let typed: object = {element: 1}\nlet a = typed\nlet b = a\nlet out = b\nout = hostValue",
+    levels: [
+      ["out", "copied object"],
+      ["out.element", "copied unknown"],
+    ],
+    stores: [["out = hostValue", "out", "object", "{}"]],
+  },
+  {
+    lines: "let typed: object = {n: 1}\nlet rec = {o: typed}\nlet out = rec.o\nout = hostValue",
+    levels: [
+      ["out", "copied object"],
+      ["out.n", "copied unknown"],
+    ],
+    stores: [["out = hostValue", "out", "object", "{}"]],
+  },
+  {
+    lines: "let typed: object = {n: 1}\nlet rec = {o: typed}\nrec = hostValue",
+    levels: [
+      ["rec", "decided object"],
+      ["rec.o", "copied object"],
+      ["rec.o.n", "copied unknown"],
+    ],
+    stores: [["rec = hostValue", "rec", "object", "{o: {}}"]],
+  },
+  {
+    lines:
+      "let typed: object = {n: 1}\nlet count: integer = 2\nlet rec = {c: count, o: typed}\nrec = hostValue",
+    levels: [
+      ["rec.c", "copied integer"],
+      ["rec.o", "copied object"],
+      ["rec.o.n", "copied unknown"],
+    ],
+    stores: [["rec = hostValue", "rec", "object", "{c: integer, o: {}}"]],
+  },
+  {
+    lines: "let rec = {n: 1}\nlet out = rec\nout = hostValue",
+    levels: [
+      ["out", "decided object"],
+      ["out.n", "decided integer"],
+    ],
+    stores: [["out = hostValue", "out", "object", "{n: integer}"]],
+  },
+  {
+    // a field a store decides before the written copy reaches its record (Sol's r1 B1), nested too
+    lines:
+      "let typed: object = {n: 1}\nlet out = hostInit\nout.n = 2\nout = typed\nout.n = hostValue",
+    levels: [
+      ["out", "copied object"],
+      ["out.n", "copied unknown"],
+    ],
+    stores: [
+      ["let out = hostInit", "out", "object", "{}"],
+      ["out.n = hostValue", "out.n", null, null],
+    ],
+    runs: [
+      [{ hostInit: object(["n", 1]), hostValue: "text" }, null],
+      [{ hostInit: 5, hostValue: "text" }, "let out = hostInit"],
+    ],
+  },
+  {
+    lines:
+      "let typed: object = {n: {m: 1}}\nlet out = hostInit\nout.n.m = 2\nout = typed\nout.n.m = hostValue",
+    levels: [
+      ["out.n", "copied unknown"],
+      ["out.n.m", "copied unknown"],
+    ],
+    stores: [
+      ["let out = hostInit", "out", "object", "{}"],
+      ["out.n.m = hostValue", "out.n.m", null, null],
+    ],
+    runs: [[{ hostInit: object(["n", object(["m", 1])]), hostValue: "text" }, null]],
+  },
+  {
+    // (its control: a copied record whose own literal decides it keeps the field a store decided first)
+    lines:
+      "let typed: object = {n: 1}\nlet count: integer = 2\nlet rec = {c: count, o: typed}\nlet out = hostInit\nout.c = 3\nout = rec\nout.c = hostValue",
+    levels: [
+      ["out", "decided object"],
+      ["out.c", "decided integer"],
+      ["out.o", "copied object"],
+      ["out.o.n", "copied unknown"],
+    ],
+    stores: [
+      ["let out = hostInit", "out", "object", "{c: integer, o: {}}"],
+      ["out.c = hostValue", "out.c", "integer", "integer"],
+    ],
+    runs: [
+      [{ hostInit: object(["c", 1], ["o", object()]), hostValue: 4 }, null],
+      [{ hostInit: object(["c", 1], ["o", object()]), hostValue: "text" }, "out.c = hostValue"],
+    ],
+  },
+];
+
 /**
  * #1215 (V30 §13: `object` is any object; ADR 0021 1.3: a copy keeps the written type): a copy of a written `object`
  * whose start has fields stays unrestricted below it at every path no store visits, as `object?`, as `object[]`'s
@@ -112,146 +253,6 @@ test("an object's properties take any contents in every form, copy and projectio
  * so their runs are one: B1's here, with `hostInit`, the others' in the candidate test against the S7 oracle.
  */
 test("a copied written object stays unrestricted below it in the analysis and the plan, its neighbours restricted (#1215)", () => {
-  const object = (
-    ...fields: (readonly [string, SerializableRuntimeValue])[]
-  ): SerializableRuntimeValue => ({
-    kind: "object",
-    properties: fields.map(([name, value]) => ({ name, value })),
-  });
-  const rows: readonly {
-    readonly lines: string;
-    /** `place.step…` (`[]` an element), its admission as `written`, `copied` or `decided`, and its kinds. */
-    readonly levels: readonly (readonly [string, string])[];
-    /**
-     * Each line storing host data: its target, the kinds its C9 boundary at the host read is against and its whole
-     * checked type, `null` where it owes none.
-     */
-    readonly stores: readonly (readonly [string, string, string | null, string | null])[];
-    /** Host values, and the line whose value stops the run (`null`: it says DONE). */
-    readonly runs?: readonly (readonly [Record<string, SerializableRuntimeValue>, string | null])[];
-  }[] = [
-    {
-      lines: "let typed: object = {n: 1}\nlet out = typed\nout = hostValue",
-      levels: [
-        ["out", "copied object"],
-        ["out.n", "copied unknown"],
-        ["typed", "written object"],
-        ["typed.n", "decided unknown"],
-      ],
-      stores: [["out = hostValue", "out", "object", "{}"]],
-    },
-    {
-      lines: "let typed: object? = {n: 1}\nlet out = typed\nout = hostValue",
-      levels: [
-        ["out", "copied null,object"],
-        ["out.n", "copied unknown"],
-      ],
-      stores: [["out = hostValue", "out", "null,object", "null|{}"]],
-    },
-    {
-      lines: "let typed: object[] = [{n: 1}]\nlet out = typed\nout = hostValue",
-      levels: [
-        ["out", "copied list"],
-        ["out.[]", "copied object"],
-        ["out.[].n", "copied unknown"],
-      ],
-      stores: [["out = hostValue", "out", "list", "list<{}>"]],
-    },
-    {
-      // (a field named as an internal step: a quoted key step)
-      lines:
-        "let typed: object = {element: 1}\nlet a = typed\nlet b = a\nlet out = b\nout = hostValue",
-      levels: [
-        ["out", "copied object"],
-        ["out.element", "copied unknown"],
-      ],
-      stores: [["out = hostValue", "out", "object", "{}"]],
-    },
-    {
-      lines: "let typed: object = {n: 1}\nlet rec = {o: typed}\nlet out = rec.o\nout = hostValue",
-      levels: [
-        ["out", "copied object"],
-        ["out.n", "copied unknown"],
-      ],
-      stores: [["out = hostValue", "out", "object", "{}"]],
-    },
-    {
-      lines: "let typed: object = {n: 1}\nlet rec = {o: typed}\nrec = hostValue",
-      levels: [
-        ["rec", "decided object"],
-        ["rec.o", "copied object"],
-        ["rec.o.n", "copied unknown"],
-      ],
-      stores: [["rec = hostValue", "rec", "object", "{o: {}}"]],
-    },
-    {
-      lines:
-        "let typed: object = {n: 1}\nlet count: integer = 2\nlet rec = {c: count, o: typed}\nrec = hostValue",
-      levels: [
-        ["rec.c", "copied integer"],
-        ["rec.o", "copied object"],
-        ["rec.o.n", "copied unknown"],
-      ],
-      stores: [["rec = hostValue", "rec", "object", "{c: integer, o: {}}"]],
-    },
-    {
-      lines: "let rec = {n: 1}\nlet out = rec\nout = hostValue",
-      levels: [
-        ["out", "decided object"],
-        ["out.n", "decided integer"],
-      ],
-      stores: [["out = hostValue", "out", "object", "{n: integer}"]],
-    },
-    {
-      // a field a store decides before the written copy reaches its record (Sol's r1 B1), nested too
-      lines:
-        "let typed: object = {n: 1}\nlet out = hostInit\nout.n = 2\nout = typed\nout.n = hostValue",
-      levels: [
-        ["out", "copied object"],
-        ["out.n", "copied unknown"],
-      ],
-      stores: [
-        ["let out = hostInit", "out", "object", "{}"],
-        ["out.n = hostValue", "out.n", null, null],
-      ],
-      runs: [
-        [{ hostInit: object(["n", 1]), hostValue: "text" }, null],
-        [{ hostInit: 5, hostValue: "text" }, "let out = hostInit"],
-      ],
-    },
-    {
-      lines:
-        "let typed: object = {n: {m: 1}}\nlet out = hostInit\nout.n.m = 2\nout = typed\nout.n.m = hostValue",
-      levels: [
-        ["out.n", "copied unknown"],
-        ["out.n.m", "copied unknown"],
-      ],
-      stores: [
-        ["let out = hostInit", "out", "object", "{}"],
-        ["out.n.m = hostValue", "out.n.m", null, null],
-      ],
-      runs: [[{ hostInit: object(["n", object(["m", 1])]), hostValue: "text" }, null]],
-    },
-    {
-      // (its control: a copied record whose own literal decides it keeps the field a store decided first)
-      lines:
-        "let typed: object = {n: 1}\nlet count: integer = 2\nlet rec = {c: count, o: typed}\nlet out = hostInit\nout.c = 3\nout = rec\nout.c = hostValue",
-      levels: [
-        ["out", "decided object"],
-        ["out.c", "decided integer"],
-        ["out.o", "copied object"],
-        ["out.o.n", "copied unknown"],
-      ],
-      stores: [
-        ["let out = hostInit", "out", "object", "{c: integer, o: {}}"],
-        ["out.c = hostValue", "out.c", "integer", "integer"],
-      ],
-      runs: [
-        [{ hostInit: object(["c", 1], ["o", object()]), hostValue: 4 }, null],
-        [{ hostInit: object(["c", 1], ["o", object()]), hostValue: "text" }, "out.c = hostValue"],
-      ],
-    },
-  ];
   for (const { lines, levels, stores, runs = [] } of rows) {
     const source = `${lines}\nsay "DONE"\nexit\n`;
     const { request, ids } = prepare(source);
