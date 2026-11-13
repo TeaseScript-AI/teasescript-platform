@@ -62,9 +62,9 @@ import {
 //   (`floatDigits`): a float's digits, such as `1.7976931348623157e+308` or `6.02214076e23`. A token of that shape
 //   after any punctuation is therefore skipped when unresolved, which is acceptable as the rule reaches only a token no
 //   repository resolves, of digits, one `e` and an exponent, directly after `<digits>.`;
-// - right after the word `sha256` or `oracles` (with a space, `:` or `=` between): a file's hash, such as `sha256
-//   4322b2e0e668`, or the oracle library's digest in a baseline key as the queue's status lines print one, such as
-//   `src 997103284 oracles 667a9dcfc lock 0572163a2`;
+// - right after the word `sha256` or `oracles` (with a space, `:` or `=` between, and after `oracles` at most one
+//   backtick): a file's hash, such as `sha256 4322b2e0e668`, or the oracle library's digest in a baseline key as the
+//   queue's status lines print one, such as `src 997103284 oracles 667a9dcfc lock 0572163a2`;
 // - shorter than 40 and inside a URL or a path, except after `/commit/`, `/commits/`, `/tree/` or `/blob/`: a file's
 //   or a job's name. A full 40-character SHA in a path, such as an evidence folder, must resolve.
 //
@@ -227,7 +227,7 @@ export function excuse(token, text, index) {
   if (floatDigits(text, index, token.length)) return "a float's digits";
   if (/\bsha256[\s:=]+$/iu.test(text.slice(Math.max(0, index - 16), index)))
     return "a file's sha256";
-  if (/\boracles[\s:=]+$/iu.test(text.slice(Math.max(0, index - 16), index)))
+  if (/\boracles[\s:=]+`?$/iu.test(text.slice(Math.max(0, index - 16), index)))
     return "an oracle library's sha256";
   // The run of non-space characters the token is in: a URL or a path, unless it names the commit itself.
   const start = text.slice(0, index).search(/\S*$/u);

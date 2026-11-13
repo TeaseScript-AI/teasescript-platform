@@ -1021,6 +1021,12 @@ test(
           [asTree(tree.slice(0, 9)), asBlob(blob.slice(0, 9))],
           counts(0, 1, 1, 1),
         ],
+        [
+          "that line quoted in code",
+          `src \`${tree.slice(0, 9)}\` oracles \`${digest.slice(0, 9)}\` lock \`${blob.slice(0, 9)}\``,
+          [asTree(tree.slice(0, 9)), asBlob(blob.slice(0, 9))],
+          counts(0, 1, 1, 1),
+        ],
       ]) {
         const { status, out } = check(text, [directory]);
         assert.equal(status, 0, `${label}: ${out}`);
