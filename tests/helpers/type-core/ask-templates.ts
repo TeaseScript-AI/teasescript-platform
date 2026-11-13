@@ -1,8 +1,8 @@
 import type { SyntaxKind } from "../../../src/type-inference/core/slice-syntax.js";
 
 /*
- * The asks' part of the row guard's tables (`row-templates.ts`): their operand templates, the prefills and buttons the
- * route refuses, and their request positions with a declared rule difference.
+ * The asks' part of the row guard's tables (`row-templates.ts`): their operand templates, their prefills, the buttons
+ * the route refuses, and their request positions with a declared rule difference.
  */
 
 /** The basic asks with a `prefill:` (`askPassword` takes none), by the name an ask's position starts with. */
@@ -16,18 +16,15 @@ export const PREFILLED_ASKS = [
 ];
 
 /**
- * The operand positions of the asks (`askParts`), by ask and operand, each a `let` of the answer with the host global
- * there. An `askChoice`'s option stands alone, so the buttons' kinds are the sample's (two kinds are refused as a mixed
- * choice, `outsideAnswers`).
+ * The operand positions of the asks (`askParts`) but the prefills (`PREFILL_OPERANDS`), by ask and operand, each a `let`
+ * of the answer with the host global there. An `askChoice`'s option stands alone, so the buttons' kinds are the
+ * sample's (two kinds are refused as a mixed choice, `outsideAnswers`).
  */
 export const ASK_OPERANDS: Readonly<Record<string, readonly string[]>> = {
   ...Object.fromEntries(
     [...PREFILLED_ASKS, "askPassword"].flatMap((ask) => [
       [`${ask}.question`, [`let r = ${ask}(hostValue)`]],
       [`${ask}.hint`, [`let r = ${ask}("q", hint: hostValue)`]],
-      ...(ask === "askPassword"
-        ? []
-        : [[`${ask}.prefill`, [`let r = ${ask}("q", prefill: hostValue)`]]]),
     ]),
   ),
   "askText.presentation": ['let r = askText bubble(color: hostValue) "q"'],
@@ -37,23 +34,28 @@ export const ASK_OPERANDS: Readonly<Record<string, readonly string[]>> = {
   ],
   "askBoolean.yesText": ['let r = askBoolean("q", yesText: hostValue)'],
   "askBoolean.noText": ['let r = askBoolean("q", noText: hostValue)'],
-  "askBoolean.prefill": ['let r = askBoolean("q", prefill: hostValue)'],
   "askBoolean.presentation": ['let r = askBoolean prose(align: hostValue) "q"'],
   "askChoice.option": ["let r = askChoice hostValue"],
   "askChoice.element": ["let r = askChoice [hostValue]"],
   "askChoice.label": ["let r = askChoice a: hostValue"],
   "askChoice.background": ['let r = askChoice {text: "t", background: hostValue}'],
-  "askChoice.prefill": ["let r = askChoice 1, 2, prefill: hostValue"],
+};
+
+/**
+ * The prefill positions, each a `let` of the answer with the host global there. The slice takes a prefill only as a
+ * literal the request takes as written (`PREFILL_LITERALS`), so the host global there, and every computed value, is a
+ * declared refusal at the row (`askPrefillAdmitted`), not a template that publishes.
+ */
+export const PREFILL_OPERANDS: Readonly<Record<string, string>> = {
+  ...Object.fromEntries(
+    PREFILLED_ASKS.map((ask) => [`${ask}.prefill`, `let r = ${ask}("q", prefill: hostValue)`]),
+  ),
+  "askBoolean.prefill": 'let r = askBoolean("q", prefill: hostValue)',
+  "askChoice.prefill": "let r = askChoice 1, 2, prefill: hostValue",
 };
 
 /** The literals the slice writes in place that are scalars: the ones a prefill written as a literal is read as. */
-export const SCALAR_LITERALS: readonly string[] = [
-  "integer",
-  "number",
-  "string",
-  "boolean",
-  "null",
-];
+const SCALAR_LITERALS: readonly string[] = ["integer", "number", "string", "boolean", "null"];
 
 /**
  * The kinds of the scalar literals each prefill takes as written (V30 §20; `askPrefillAdmitted` in
@@ -67,6 +69,7 @@ export const PREFILL_LITERALS: Readonly<Record<string, readonly string[]>> = {
   "askTime.prefill": [],
   "askDateTime.prefill": [],
   "askBoolean.prefill": ["boolean"],
+  "askChoice.prefill": SCALAR_LITERALS,
 };
 
 /**
@@ -102,9 +105,8 @@ export const CHOICE_REFUSED: Readonly<Record<string, readonly string[]>> = {
 /**
  * The asks' request operands with a declared rule difference (the lead's R41): a question or text an ask shows, which
  * `fieldText` refuses as a list or a value that shows no text (TSR021; a basic ask's question as it is said, at the
- * value, any other at the ask); a prefill, which the request refuses as it opens (`interactionPrefill`,
- * `temporalPrefill`, `materializeInteractionUi`, `materializeForm`: TSR052 at the ask); a choice's buttons
- * (`expandChoiceOptions`, TSR052 at the ask). An ask's form of R18's third way (R38): the request opens no field or
+ * value, any other at the ask); a choice's buttons (`expandChoiceOptions`, TSR052 at the ask). A prefill is none of
+ * them: the slice takes only a literal the request takes (`PREFILL_OPERANDS`). An ask's form of R18's third way (R38): the request opens no field or
  * button and the run does not wait; a basic ask's question may already have been said.
  */
 export const ASK_POSITIONS: readonly {
@@ -127,11 +129,6 @@ export const ASK_POSITIONS: readonly {
       failure: ["TSR021"],
       at: "ask" as const,
     },
-    ...(ask === "askPassword"
-      ? []
-      : [
-          { operand: `${ask}.prefill`, today: ["TSV039"], failure: ["TSR052"], at: "ask" as const },
-        ]),
   ]),
   ...["askBoolean.question", "askBoolean.yesText", "askBoolean.noText"].map((operand) => ({
     operand,
@@ -139,7 +136,6 @@ export const ASK_POSITIONS: readonly {
     failure: ["TSR021"],
     at: "ask" as const,
   })),
-  { operand: "askBoolean.prefill", today: ["TSV039"], failure: ["TSR052"], at: "ask" as const },
   ...["askChoice.option", "askChoice.element", "askChoice.label", "askChoice.background"].map(
     (operand) => ({ operand, today: ["TSV029"], failure: ["TSR052"], at: "ask" as const }),
   ),

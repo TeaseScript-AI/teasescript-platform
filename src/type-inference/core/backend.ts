@@ -16,7 +16,6 @@ import { oneType } from "./consumers/kinds.js";
 import { REASON, type Item, type ItemTag } from "./items.js";
 import type { CoreAnalysisRequest, CoreFile } from "./program.js";
 import {
-  askPrefill,
   outsideSyntax,
   sliceCall,
   transferCall,
@@ -36,7 +35,7 @@ import {
  * required checks come with narrowing, S10), assignment of a variable or of a property, `if` and `else`, `repeat` with
  * a count, `for` with one or two variables, `say` of plain text or of a value, also `as` a speaker, a speaker's
  * declaration (never a speaker's name as a value), a call as a statement, and `exit`; the asks `SLICE_ASKS` holds,
- * also `as` a speaker, with the prefills `askPrefillAdmitted` admits;
+ * also `as` a speaker, with no prefill or a literal one the request takes (`askPrefillAdmitted`);
  * number, boolean, null, regex and plain text literals, variables, host values, list and object literals, index and
  * property reads, ranges, `otherwise`, a list's `get` with its `default:`, a method of text, a list, a set or a dict that
  * changes nothing in its receiver and a list's `sort`, `toJson` of a value, the conversions of a value with their `default:`, `fromJson`, `fileFromBase64`,
@@ -48,8 +47,7 @@ import {
  * and a parse, with C9's boundary check where it enters (the store's destination's admitted type) or where it is read.
  * Rejected after the analysis: any other consumer's diagnostic, a property read of a value that may be no object, a
  * value `say` may not show, a built-in speaker field's value that may not fit it (`SPEAKER_FIELD_KINDS`), an
- * `askChoice` whose buttons may return more than one type, a prefill that is only `null` or may be text at an ask
- * of another kind, an argument
+ * `askChoice` whose buttons may return more than one type, an argument
  * of another kind than a built-in function takes (the built-in signature check C13, S9b), and lists nested
  * `SLICE_DEPTH` deep. A possible `null` is the route rule's (AD-1): a compile error where a route to the use has no
  * check, else a warning whose use the runtime checks.
@@ -246,52 +244,6 @@ export const SPEAKER_FIELD_KINDS: ReadonlyMap<string, FieldKinds> = new Map([
   ["gender", { takes: ["string", "null"], check: null }],
 ]);
 
-/** Whether kinds are `null` alone (an empty kind, a value no run reaches, aside). */
-const nullOnly = (tags: readonly string[]): boolean =>
-  tags.some((tag) => tag === "null") && tags.every((tag) => tag === "null" || tag === "empty");
-
-/**
- * The expressions whose values an expression gives as they are: both sides of `otherwise`, the inside of parentheses,
- * the elements of a list or set literal it indexes, the property of an object literal it reads, each in turn; else
- * the expression itself (`m`, `n[0]` of a variable, `name.length`).
- */
-function leaves(expression: Expression): Expression[] {
-  switch (expression.kind) {
-    case "parenthesizedExpression":
-      return leaves(expression.expression);
-    case "binaryExpression":
-      return expression.operator === "otherwise"
-        ? [...leaves(expression.left), ...leaves(expression.right)]
-        : [expression];
-    case "indexExpression": {
-      const receivers = leaves(expression.object);
-      return receivers.every(
-        (receiver) => receiver.kind === "listLiteral" || receiver.kind === "setLiteral",
-      )
-        ? receivers.flatMap((receiver) =>
-            receiver.kind === "listLiteral" || receiver.kind === "setLiteral"
-              ? receiver.elements.flatMap(leaves)
-              : [],
-          )
-        : [expression];
-    }
-    case "propertyAccessExpression": {
-      const receivers = leaves(expression.object);
-      return receivers.every((receiver) => receiver.kind === "objectLiteral")
-        ? receivers.flatMap((receiver) =>
-            receiver.kind === "objectLiteral"
-              ? receiver.properties
-                  .filter((property) => property.name.name === expression.property.name)
-                  .flatMap((property) => leaves(property.value))
-              : [],
-          )
-        : [expression];
-    }
-    default:
-      return [expression];
-  }
-}
-
 /** The first answer of the analysis that leaves the slice (see the module's comment), or `null`. */
 function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
   const at = (site: { readonly file: number; readonly start: number; readonly end: number }) =>
@@ -359,10 +311,10 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
           what: "an argument that its built-in checks",
         };
     }
-  // (after the values' own refusals: an ask's answer is refused for what its parts hold only where they are admitted)
-  for (const ask of index.asks) {
-    // an `askChoice` whose buttons may return values of more than one type (V30 §19: whole numbers with numbers one
-    // type, `null` beside a type): today's checker refuses its answer in a typed place (TSV041) where the core only warns
+  // (after the values' own refusals) an `askChoice` whose buttons may return values of more than one type (V30 §19: whole
+  // numbers with numbers one type, `null` beside a type): today's checker refuses its answer in a typed place (TSV041)
+  // where the core only warns
+  for (const ask of index.asks)
     if (
       ask.interactionKind === "choice" &&
       !oneType(
@@ -372,30 +324,6 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
       )
     )
       return { file: index.fileOf(ask), span: ask.span, what: "this ask" };
-    // a prefill, of an ask but `askChoice`, that is only `null`, or that may be text at an ask of another kind: the
-    // runtime takes `null` and blank text as none (V30 §20), where today's checker gives TSV039 for a known `null` and
-    // for text there; the core's kinds do not tell blank text from other text (the row refuses the literals,
-    // `askPrefillAdmitted`; the slice takes no written type a value only `null` fills, `annotationOutside`, so a `null`
-    // is one the core knows)
-    const prefill = askPrefill(ask);
-    if (prefill === null || ask.interactionKind === "choice") continue;
-    // (each by its kinds, or, for a read of a place whose admitted type is decided, that type's; text also by its
-    // leaves', `leaves`, since a typed ingress's read is unknown, with its check at the ingress, and a list or an
-    // `otherwise` around it hides what it holds)
-    const kinds = (value: Expression): readonly (readonly string[])[] => {
-      const read = answers.at(nodeOf(answers, index, value))?.place ?? null;
-      const admitted = read === null ? null : answers.place(read.id, read.path).admitted;
-      return [
-        kindsAt(value),
-        ...(admitted !== null && admitted.by !== "undecided" ? [admitted.kinds] : []),
-      ];
-    };
-    const text = (value: Expression): boolean =>
-      ask.interactionKind !== "text" && kinds(value).some((tags) => tags.includes("string"));
-    const onlyNull = (value: Expression): boolean => kinds(value).some(nullOnly);
-    if (onlyNull(prefill) || text(prefill) || leaves(prefill).some(text))
-      return { file: index.fileOf(ask), span: prefill.span, what: "this prefill" };
-  }
   // a variable without a written type whose lists nest deeper than the facts follow
   for (const statement of index.lets)
     if (statement.typeAnnotation === null) {

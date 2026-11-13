@@ -949,8 +949,42 @@
     "witness": "let r = askChoice 1, 2, prefill: null"
   },
   {
+    "id": "null-walk",
+    "scope": "nullOnlyPosition",
+    "expression": "type !== undefined",
+    "occurrence": 1,
+    "mutant": "(type !== undefined && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "let x: null? (admitted: no nested type judged)"
+  },
+  {
+    "id": "null-kind-name",
+    "scope": "nullOnlyPosition",
+    "expression": "type.kind === \"namedType\"",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "let x: null"
+  },
+  {
+    "id": "null-kind-optional",
+    "scope": "nullOnlyPosition",
+    "expression": "type.kind === \"optionalType\"",
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "let x: null? (refused at its value, not itself)"
+  },
+  {
+    "id": "null-kind-union",
+    "scope": "nullOnlyPosition",
+    "expression": "type.kind === \"unionType\"",
+    "occurrence": 1,
+    "mutant": "false",
+    "expected": "kill",
+    "witness": "let x: (null | null)? (refused at its union, not itself)"
+  },
+  {
     "id": "null-name",
-    "scope": "onlyNull",
+    "scope": "nullOnlyPosition",
     "expression": "type.name === \"null\"",
     "mutant": "false",
     "expected": "kill",
@@ -958,59 +992,68 @@
   },
   {
     "id": "null-optional",
-    "scope": "onlyNull",
-    "expression": "onlyNull(type.value)",
+    "scope": "nullOnlyPosition",
+    "expression": "onlyNull.get(type.value) === true",
     "mutant": "false",
     "expected": "kill",
     "witness": "let x: null? (refused at its value, not itself)"
   },
   {
     "id": "null-union",
-    "scope": "onlyNull",
-    "expression": "type.members.every(onlyNull)",
+    "scope": "nullOnlyPosition",
+    "expression": "type.members.every((member) => onlyNull.get(member) === true)",
     "mutant": "false",
-    "expected": "equivalent",
-    "witness": "a union is outside the slice's written types: `annotationOutside` refuses it at itself whichever way `onlyNull` reads it, and a union only `null` fills has no position below it"
+    "expected": "kill",
+    "witness": "let x: (null | null)? (refused at its union, not itself)"
+  },
+  {
+    "id": "null-search",
+    "scope": "nullOnlyPosition",
+    "expression": "type !== undefined",
+    "occurrence": 2,
+    "mutant": "(type !== undefined && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "let x: null"
   },
   {
     "id": "null-position-own",
     "scope": "nullOnlyPosition",
-    "expression": "onlyNull(type)",
+    "expression": "onlyNull.get(type) === true",
     "mutant": "false",
     "expected": "kill",
     "witness": "let x: null"
   },
   {
-    "id": "null-position-optional",
-    "scope": "nullOnlyPosition",
-    "expression": "nullOnlyPosition(type.value)",
-    "mutant": "null",
-    "expected": "kill",
-    "witness": "let x: null[]?"
-  },
-  {
-    "id": "null-position-element",
-    "scope": "nullOnlyPosition",
-    "expression": "nullOnlyPosition(type.element)",
-    "mutant": "null",
-    "expected": "kill",
-    "witness": "let x: null[]"
-  },
-  {
     "id": "null-position-member",
     "scope": "nullOnlyPosition",
-    "expression": "onlyNull(member) ? null : nullOnlyPosition(member)",
-    "mutant": "nullOnlyPosition(member)",
-    "expected": "kill",
-    "witness": "let x: integer | null (refused at the union, not at its member)"
-  },
-  {
-    "id": "null-position-found",
-    "scope": "nullOnlyPosition",
-    "expression": "found !== null",
+    "expression": "type.kind !== \"unionType\" || onlyNull.get(part) !== true",
     "mutant": "true",
     "expected": "kill",
-    "witness": "let x: integer | null[] (refused at the later member's element)"
+    "witness": "let x: integer | null (refused at its member, not at the union)"
+  },
+  {
+    "id": "null-search-part",
+    "scope": "nullOnlyPosition",
+    "expression": "part !== undefined",
+    "mutant": "(part !== undefined && Math.random() < 0)",
+    "expected": "kill",
+    "witness": "let x: null[] (admitted)"
+  },
+  {
+    "id": "null-part-optional",
+    "scope": "typeParts",
+    "expression": "[type.value]",
+    "mutant": "[]",
+    "expected": "kill",
+    "witness": "let x: null[]? (admitted)"
+  },
+  {
+    "id": "null-part-element",
+    "scope": "typeParts",
+    "expression": "[type.element]",
+    "mutant": "[]",
+    "expected": "kill",
+    "witness": "let x: null[] (admitted)"
   },
   {
     "id": "annotation-null-only",
