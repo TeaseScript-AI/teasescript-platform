@@ -87,11 +87,17 @@ export function sourceShape(
         : null;
     case "callExpression": {
       const callee = unwrap(at.callee);
-      if (callee.kind === "identifier" && callee.name === "fromJson")
+      if (callee.kind === "identifier" && callee.name === "fromJson") {
+        // (its value is the JSON read at its expected type or its default, each as the call reads the default: its
+        // snapshot there, which the expected type is where it has one, not the default variable's joined stores)
+        const expected = expectedType(at, statements, seen);
         return admittedShape([
-          expectedType(at, statements, seen),
-          fallbackOf(at) === null ? null : sourceShape(fallbackOf(at)!, statements, seen),
+          expected,
+          fallbackOf(at) === null || expected !== null
+            ? null
+            : sourceShape(fallbackOf(at)!, statements, seen),
         ]);
+      }
       if (callee.kind === "propertyAccessExpression" && callee.property.name === "get")
         return combine([
           partOf(sourceShape(callee.object, statements, seen), "element"),
@@ -141,15 +147,22 @@ function updatedShape(
   if (type?.kind === "union")
     return admittedShape(type.members.map((member) => updatedShape(member, path, value)));
   if (type?.kind !== "object") return type;
+  // (a store into a property the object does not have yet adds it, as both compilers' plans type the object)
+  const added = type.properties.some((property) => property.name === path[0])
+    ? null
+    : updatedShape(null, path.slice(1), value);
   return {
     kind: "object",
-    properties: type.properties.map((property) => ({
-      name: property.name,
-      type:
-        property.name === path[0]
-          ? updatedShape(property.type, path.slice(1), value)!
-          : property.type,
-    })),
+    properties: [
+      ...type.properties.map((property) => ({
+        name: property.name,
+        type:
+          property.name === path[0]
+            ? updatedShape(property.type, path.slice(1), value)!
+            : property.type,
+      })),
+      ...(added === null ? [] : [{ name: path[0]!, type: added }]),
+    ],
   };
 }
 

@@ -53,6 +53,7 @@ import {
   fallbackOf,
 } from "./type-core-derived.js";
 import { fitsType, jsonValue, readJson, shown } from "./type-core-derived-values.js";
+import { askEnd } from "./derived-asks.js";
 
 // ------------------------------------------------------------------------------------------------- the evaluator
 
@@ -80,6 +81,9 @@ interface Value {
 class Stop {
   public constructor(readonly failure: string | null) {}
 }
+
+/** A run that waits for an ask's answer (`derived-asks.ts`), which the oracle does not give. */
+class Waiting {}
 
 /** Where a file's evaluation ends by a `goto`: the statement, and the value of its `script(…)` path or its quoted path. */
 export interface TransferEnd {
@@ -626,6 +630,13 @@ export function evaluate(
         );
         return { v: items[position] ?? null, from: list.from };
       }
+      case "interactionExpression": {
+        const end = askEnd(expression, (part) => value(part).v);
+        if ("failure" in end)
+          fail(end.failure.code, end.failure.start, end.failure.end, new Set(), false);
+        else if (end.said !== null) said.push({ text: end.said, at: expression.span.start.offset });
+        throw new Waiting();
+      }
       default:
         throw new Underivable(`a ${expression.kind}`);
     }
@@ -775,16 +786,19 @@ export function evaluate(
   };
   let failure: string | null = null;
   let transfer: TransferEnd | null = null;
+  let waiting = false;
   try {
     run(statements);
   } catch (stop) {
     if (stop instanceof Transfer) transfer = stop.end;
     else if (stop instanceof Stop) failure = stop.failure;
+    // (a run waiting for an answer is no halted one, and has no failure: `runGlobals` reports it so)
+    else if (stop instanceof Waiting) waiting = true;
     else throw stop;
   }
   failure ??= first;
   return {
-    run: { status: failure === null ? "halted" : "failed", failure, said },
+    run: { status: failure === null && !waiting ? "halted" : "failed", failure, said },
     events,
     transfer,
   };
