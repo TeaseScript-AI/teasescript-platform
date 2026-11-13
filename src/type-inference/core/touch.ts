@@ -1552,8 +1552,7 @@ export class Touches {
 
   /**
    * The paths of `where` at which `node` stands (contributors at its node there), as a found trie: at each level the
-   * smaller side's steps looked up in the other's, memoized by the two, so a node many places take is asked once (where
-   * a store's own contribution stands at a live group's meetings, `groupHeld` in `admission/held.ts`).
+   * smaller side's steps looked up in the other's, memoized by the two, so a node many places take is asked once.
    */
   public standsAt(node: Touch | null, where: Found): Found {
     if (node === null || where === NONE) return NONE;
