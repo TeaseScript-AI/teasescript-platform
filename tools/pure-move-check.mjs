@@ -831,8 +831,11 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
  * file of the change is, or a second entry for a file.
  */
 function wholeFiles(entries, files, renames) {
+  // (a map path spelled another way, `./a.ts`, is the same path)
   const mapped = new Set(
-    Object.entries(renames ?? {}).flatMap(([old, to]) => [old, ...[to].flat()]),
+    Object.entries(renames ?? {})
+      .flatMap(([old, to]) => [old, ...[to].flat()])
+      .map((file) => path.posix.normalize(file)),
   );
   const wholes = [];
   for (const { file, reason } of entries) {

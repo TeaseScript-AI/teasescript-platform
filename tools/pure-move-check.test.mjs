@@ -796,6 +796,15 @@ test(
         assert.equal(refused.status, 2, `${sentence}\n${refused.out}`);
         assert.ok(refused.out.includes(sentence), `${sentence}\n${refused.out}`);
       }
+      // (a map path spelled with `./` is the same path: #2589 r1)
+      const alias = move.run(
+        "--renames",
+        move.renames({ "./a.ts": ["./a.ts", "b.ts"] }),
+        "--declare",
+        move.declare([{ ...whole, file: "a.ts" }]),
+      );
+      assert.equal(alias.status, 2, alias.out);
+      assert.ok(alias.out.includes("is a path of the --renames map"), alias.out);
       const shape = move.run("--declare", move.declare([{ ...whole, whole: "yes" }]));
       assert.equal(shape.status, 2);
       assert.match(shape.out, /or \{ file, whole: true, reason \}/u);
