@@ -26,7 +26,7 @@ import {
   type ReferenceScopesById,
 } from "./prepared-temporary-validation.js";
 import { interruptibleActionRecord } from "../actions/interrupts.js";
-import { validForegroundActionState } from "../actions/action-validation.js";
+import { validForegroundActionState } from "../actions/validation/pending-actions.js";
 import { recordValidationTestWork } from "../../validation-testing.js";
 import {
   requiredInstructionTemporaries,
