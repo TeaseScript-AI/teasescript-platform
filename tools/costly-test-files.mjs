@@ -20,7 +20,6 @@ export const costlyTestSeconds = {
   "type-core-stop/type-core-stop-combined.test.js": 56,
   "type-core/type-core-mixed-family.test.js": 55,
   "type-core/type-core-budget.test.js": 53,
-  "type-core/type-core-oracles.test.js": 47,
   "type-core/cells/type-core-cells-copies.test.js": 43,
   "type-core/type-core-pushed-reads.test.js": 42,
   "type-core/candidate/type-core-candidate-records.test.js": 40,

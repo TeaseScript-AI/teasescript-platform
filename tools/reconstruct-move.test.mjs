@@ -498,7 +498,7 @@ test("the runs around a declared edit keep their place in OLD, where a repeated 
 });
 
 test("a late import is header on both sides: a split of a file with an import after its first statement is proven (#2556)", (t) => {
-  // (the shape of `type-core-oracles.test.ts`: imports, a declaration, one more import, the tests)
+  // (the shape `type-core-oracles.test.ts` had before its split: imports, a declaration, one more import, the tests)
   const old = [
     'import { a } from "./a.js";',
     "",
