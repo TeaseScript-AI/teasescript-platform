@@ -291,15 +291,17 @@ function weakMapSet(this: WeakKey, key: unknown, value: unknown): WeakKey {
   return WeakMap.prototype.set.call(this, key as object, value);
 }
 
-/** A native `getOrInsert` or `getOrInsertComputed`: the entry under `key`, made by `given` where there is none. */
-type Upsert = <V>(this: WeakKey, key: unknown, given: V) => V;
+/** A native `getOrInsert`: the entry under `key`, `value` stored first where there is none. */
+type GetOrInsert = <V>(this: WeakKey, key: unknown, value: V) => V;
+/** A native `getOrInsertComputed`: the entry under `key`, `compute(key)` stored first where there is none. */
+type GetOrInsertComputed = <V>(this: WeakKey, key: unknown, compute: (key: unknown) => V) => V;
 
 /** Whether the runtime gives a map's prototype the upserts (ES2026), which the declared lib does not name yet. */
 function hasUpserts(
   prototype: Map<unknown, unknown> | WeakMap<WeakKey, unknown>,
 ): prototype is (Map<unknown, unknown> | WeakMap<WeakKey, unknown>) & {
-  readonly getOrInsert: Upsert;
-  readonly getOrInsertComputed: Upsert;
+  readonly getOrInsert: GetOrInsert;
+  readonly getOrInsertComputed: GetOrInsertComputed;
 } {
   return "getOrInsert" in prototype && "getOrInsertComputed" in prototype;
 }
@@ -323,11 +325,14 @@ function upserts(
   return {
     getOrInsert<V>(this: WeakKey, key: unknown, value: V): V {
       if (!has.call(this, key)) set.call(this, key, value);
-      return native.getOrInsert.call(this, key, value);
+      const read: (this: WeakKey, key: unknown, value: V) => V = native.getOrInsert;
+      return read.call(this, key, value);
     },
     getOrInsertComputed<V>(this: WeakKey, key: unknown, compute: (key: unknown) => V): V {
       if (!has.call(this, key)) set.call(this, key, compute(key));
-      return native.getOrInsertComputed.call(this, key, compute);
+      const read: (this: WeakKey, key: unknown, compute: (key: unknown) => V) => V =
+        native.getOrInsertComputed;
+      return read.call(this, key, compute);
     },
   };
 }
