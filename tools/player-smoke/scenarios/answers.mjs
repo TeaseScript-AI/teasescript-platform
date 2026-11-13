@@ -1,4 +1,5 @@
 // The Player browser smoke's instant answers scenario, taking the driver's `cdp`.
+import { readFileSync } from "node:fs";
 import {
   addInitScript,
   assertEqual,
@@ -59,8 +60,13 @@ const SPLIT_REPLIES = `(() => {
     addEventListener(type, listener, options) {
       if (type !== "message") return super.addEventListener(type, listener, options);
       return super.addEventListener(type, (event) => {
-        if (holding) return void held.push(() => listener.call(this, event));
-        listener.call(this, event);
+        // Each reply begins the task that may admit a row's entrance (\`assertEntrance\`).
+        const deliver = () => {
+          window.__starts?.push(performance.now());
+          listener.call(this, event);
+        };
+        if (holding) return void held.push(deliver);
+        deliver();
         const after = window.__splitAfter;
         if (after !== null && JSON.stringify(event.data ?? null).includes(after)) {
           window.__splitAfter = null;
@@ -74,7 +80,8 @@ const SPLIT_REPLIES = `(() => {
 
 /**
  * Records each painted frame from now: the answer rows (`data-speaker-id=user`) by row key, message id, text and the
- * element shown, the foreground buttons and whether any is disabled, and the composer; and every entrance a row plays.
+ * element shown, the foreground buttons and whether any is disabled, and the composer; every entrance a row plays,
+ * with the time into the entrance it starts from; when each row was first inserted; and when each input began.
  */
 const RECORDER = `
   let marks = window.__rowMarks ?? new WeakMap();
@@ -82,14 +89,34 @@ const RECORDER = `
   window.__nextMark ??= 0;
   window.__frames = [];
   window.__entered = [];
+  window.__enteredFrom = [];
+  window.__inserted = {};
+  window.__starts = [];
   if (!window.__animatePatched) {
     window.__animatePatched = true;
     const animate = Element.prototype.animate;
     Element.prototype.animate = function (...args) {
       const row = this.closest?.('.transcript-entry');
-      if (row) window.__entered?.push(row.dataset.rowKey);
-      return animate.apply(this, args);
+      const animation = animate.apply(this, args);
+      if (row) {
+        window.__entered?.push(row.dataset.rowKey);
+        // The entrance sets how far into it it starts once it returns.
+        queueMicrotask(() => window.__enteredFrom?.push({ key: row.dataset.rowKey, from: animation.currentTime ?? 0 }));
+      }
+      return animation;
     };
+    new MutationObserver((records) => {
+      const at = performance.now();
+      for (const record of records)
+        for (const node of record.addedNodes) {
+          if (!(node instanceof Element)) continue;
+          for (const row of [node, ...node.querySelectorAll('.transcript-entry')])
+            if (row.matches('.transcript-entry') && window.__inserted && !(row.dataset.rowKey in window.__inserted))
+              window.__inserted[row.dataset.rowKey] = at;
+        }
+    }).observe(document, { childList: true, subtree: true });
+    for (const type of ['pointerdown', 'mousedown', 'pointerup', 'mouseup', 'click', 'keydown', 'keyup'])
+      window.addEventListener(type, () => window.__starts?.push(performance.now()), true);
   }
   const frame = () => {
     const rows = [...document.querySelectorAll('.transcript-entry')].map((row) => {
@@ -121,14 +148,54 @@ async function frames(cdp) {
   return {
     frames: await value(cdp, "window.__frames"),
     entered: await value(cdp, "window.__entered"),
+    enteredFrom: await value(cdp, "window.__enteredFrom"),
+    inserted: await value(cdp, "window.__inserted"),
+    starts: await value(cdp, "window.__starts"),
   };
+}
+
+// The entrance code's own window (`CONVERSATION_ENTRANCE_MS`): a row first drawn within it after its admission enters,
+// from as far into the entrance as time has gone; a row drawn later shows directly.
+const ENTRANCE_MS = Number(
+  /const CONVERSATION_ENTRANCE_MS = (\d+);/.exec(
+    readFileSync(
+      new URL("../../../player/presentation/conversation-motion.ts", import.meta.url),
+      "utf8",
+    ),
+  )[1],
+);
+
+/**
+ * Checks the entrance rule for the row `key`, which guards that a row drawn in time enters and one drawn late does not
+ * replay a finished entrance. The page admits a row's entrance in the task that brings the row, between that task's
+ * start (the input or engine reply the recorder saw) and the row's insertion, so `late`, from that start to the
+ * insertion, bounds how far into its entrance the row was: a row that did not enter must be later than the window, and
+ * one that entered, once, starts no further into it than `late`.
+ */
+function assertEntrance({ entered, enteredFrom, inserted, starts }, key, what) {
+  const times = entered.filter((each) => each === key).length;
+  const at = inserted[key];
+  const start = at === undefined ? undefined : starts.filter((each) => each <= at).at(-1);
+  const late = start === undefined ? null : Math.round(at - start);
+  if (times > 1) throw new Error(`${what}: the row entered ${times} times`);
+  if (times === 0 && (late === null || late < ENTRANCE_MS))
+    throw new Error(
+      `${what}: the row did not enter, though it was drawn ${late} ms after the task that brought it began, within the entrance's ${ENTRANCE_MS} ms`,
+    );
+  const from = enteredFrom.find((each) => each.key === key)?.from;
+  if (times === 1 && late !== null && from !== undefined && from > late + 1)
+    throw new Error(
+      `${what}: the row entered ${Math.round(from)} ms in, later than the ${late} ms it can have waited`,
+    );
 }
 
 /**
  * Checks the answer `text` shown at once: its predicted row, in the frame after the click or key, with its controls
- * gone and nothing disabled; then the runtime's row with the same key and element, entered once. Returns its row key.
+ * gone and nothing disabled; then the runtime's row with the same key and element, and its entrance by the rule
+ * (`assertEntrance`). Returns its row key.
  */
-function shownAtOnce({ frames, entered }, text, what) {
+function shownAtOnce(recorded, text, what) {
+  const { frames } = recorded;
   const first = frames.findIndex((frame) =>
     frame.rows.some(
       (row) => row.user && row.id.startsWith("predicted-") && row.text.endsWith(text),
@@ -153,11 +220,7 @@ function shownAtOnce({ frames, entered }, text, what) {
     predicted.mark,
     `${what}: the runtime's row replaced the answer's element`,
   );
-  assertEqual(
-    entered.filter((key) => key === predicted.key).length,
-    1,
-    `${what}: the answer's row did not enter exactly once`,
-  );
+  assertEntrance(recorded, predicted.key, `${what}: the answer's row`);
   return { key: predicted.key, before };
 }
 
@@ -211,7 +274,7 @@ export async function instantAnswersScenario(cdp, origin) {
       true,
       "The block's message did not land before the answer",
     );
-    assertEqual(left.entered.includes(block.key), true, "The block's message did not enter");
+    assertEntrance(left, block.key, "The block's message");
     // Following stops where the new content starts: the block's message, taller than the view.
     const stopped = `(() => { const start = ${top(JSON.stringify(block.key))}; return start !== null && start >= -2 && start < 40 && !!document.querySelector('.return-to-latest'); })()`;
     try {
@@ -324,11 +387,8 @@ export async function instantAnswersScenario(cdp, origin) {
       false,
       "A refused answer stayed in the conversation",
     );
-    assertEqual(
-      refused.entered.filter((key) => key === predictedKey).length,
-      1,
-      "A refused answer entered again as it left",
-    );
+    // It entered as it showed, and not again as it left.
+    assertEntrance(refused, predictedKey, "A refused answer");
     await waitFor(
       cdp,
       `document.querySelector('[data-composer-input]')?.value === 'hello there' && !!document.querySelector('.composer-notice')`,
