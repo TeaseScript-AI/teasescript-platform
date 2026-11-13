@@ -37,7 +37,6 @@ import {
 import { withoutEmpty } from "../exact-path.js";
 import type { Item } from "../items.js";
 import { decided } from "./decision.js";
-import { freshStore } from "./fresh.js";
 import { heldMeetings } from "./held.js";
 import { offending, SCALAR } from "./kinds.js";
 import { landingIndex } from "./landing-index.js";
@@ -114,7 +113,7 @@ export function groups(admission: Admission): readonly DecidedAt[] {
   // copy or a call its source's elements (F2), the deepest once per path it lands at (its prefixes follow below)
   const deepest = new Map<Key, number>();
   for (const d of reaching)
-    if ((stores.get(d.key) ?? 0) > 1 || freshStore(admission, d)) {
+    if ((stores.get(d.key) ?? 0) > 1) {
       const base = joinSteps(d.path, d.kind === "add" && d.how !== "elements" ? ["element"] : []);
       const structure = valueStructure(admission, d.value!);
       for (const path of structure.paths)

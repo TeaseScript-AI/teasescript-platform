@@ -28,7 +28,6 @@ import { eligibleOf } from "./eligibility.js";
 import { holdsNothing, type PrefixHolders } from "./holders.js";
 import { dictStepsRead, spellsValues } from "./structure.js";
 import { deciding } from "./kinds.js";
-import { freshInputs, freshRead } from "./fresh.js";
 import { chooses, live, snapshotOf } from "./links.js";
 import type {
   Candidate,
@@ -71,7 +70,7 @@ export function inputsOf(
   root: PlaceId,
   path: readonly string[],
 ): Inputs | null {
-  const { definitions, contract } = admission.pass;
+  const { program, definitions, contract } = admission.pass;
   if (!decidesPaths(admission, root)) return null;
   const direct = (definitions.candidates.get(keyOf(root, path)) ?? []).filter(
     (candidate) => !admission.besideDefault(candidate.d),
@@ -81,21 +80,8 @@ export function inputsOf(
   const prefixes: { readonly key: Key; readonly rest: PathRef }[] = [];
   for (const { key, depth } of admission.stored.along(root, path, false))
     prefixes.push({ key, rest: arrayRef(contract, path.slice(depth)) });
-  const fresh = freshRead(admission, root, path, direct, prefixes);
-  if (fresh !== null) return { direct, prefixes, fresh };
+  void program;
   return direct.length === 0 && prefixes.length === 0 ? null : { direct, prefixes };
-}
-
-/** `scanAt` of a path's inputs as `freshInputs` reads them. */
-export function* freshScanAt(
-  admission: Admission,
-  inputs: Inputs,
-  into: Key,
-): ReturnType<typeof scanAt> {
-  const read = yield* freshInputs(admission, inputs);
-  return read === null
-    ? null
-    : yield* scanAt(admission, read.direct, read.prefixes, into, read.first);
 }
 
 /**
@@ -134,7 +120,6 @@ export function* scanAt(
   direct: readonly Candidate[],
   prefixes: readonly { readonly key: Key; readonly rest: PathRef }[],
   into: Key,
-  first?: Inputs["first"],
 ): Inheriting<{
   readonly tags: ItemTag[];
   readonly nullable: boolean;
@@ -188,8 +173,6 @@ export function* scanAt(
       holders: null,
     },
   ];
-  // (#2378: a fresh list's read is its first definition, and no prefix of the dict's is one of it: `freshInputs`)
-  if (first !== undefined) scans.push({ ds: [first.d], at: () => first.at, holders: null });
   // (a prefix's rest as its prefix reads it: an array where the path was one, a record's steps, a cursor's span else)
   const restOf = (rest: PathRef): Rest => (rest.kind === "span" ? rest : stepsRest(rest.steps()));
   for (const { key: prefix, rest } of prefixes) {

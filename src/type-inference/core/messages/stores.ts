@@ -41,7 +41,7 @@ export function storeSubject(rule: StoreRule, source: MessageSource, later = fal
     copy === null
       ? since
       : ` because ${copy.form === "value" ? "it is a copy" : `its ${copy.form} are copies`} of ${copy.of}`;
-  const collection = elementOf(rule, source);
+  const collection = elementOf(rule);
   const type = collection === null ? null : typeText(rule.type);
   if (collection !== null && type !== null)
     return `'${collection.name}' holds ${plural(rule.type)} (${collectionText(collection.kind, type)})${why}`;
@@ -146,27 +146,16 @@ function copyOf(
 
 /**
  * The collection a store's place is an element or a dict value of, where the source names it: a variable or parameter,
- * or a property path below one; with its kind, and whether it is the root itself, which a fix declares. With `source`,
- * a dict's list a statement changes in place is named by its read (#2378).
+ * or a property path below one; with its kind, and whether it is the root itself, which a fix declares.
  */
 export function elementOf(
   rule: StoreRule,
-  source: MessageSource | null = null,
 ): {
   readonly name: string;
   readonly kind: "list" | "set" | "dict";
   readonly root: boolean;
 } | null {
   const last = rule.steps.at(-1);
-  // (#2378: a dict's list a statement changes in place, by its read's text, as its copy twin names its copy)
-  if (
-    source !== null &&
-    rule.fresh !== undefined &&
-    rule.steps.length === rule.fresh.depth + 1 &&
-    last !== undefined &&
-    "collection" in last
-  )
-    return { name: source.text(rule.fresh.list), kind: last.collection, root: false };
   if (
     rule.root === null ||
     rule.root.kind === "result" ||
@@ -337,7 +326,6 @@ export function storeFix(
   if (conversion !== "") return conversion;
   const nullOnly = values.length > 0 && values.every((kind) => kind === "null");
   const both = typeText([...rule.type, ...kinds]);
-  if (rule.fresh !== undefined) return freshFix(rule, rule.fresh, both, source, diagnosed);
   const collection = elementOf(rule);
   // (a collection a property holds: that property's first value, as the current checker says)
   const first =
@@ -366,38 +354,6 @@ export function storeFix(
   return nullOnly
     ? " Use a separate variable for null."
     : " Use a separate variable for a value of another type.";
-}
-
-/**
- * #2378: the fix of a store into a dict's list a statement changes in place, its copy twin's (`let t = d.values`
- * before the statement): where the twin declares its copy, the copy made first, under a name no code spells; below
- * the list's elements, the twin's separate property or collection; else a separate variable.
- */
-function freshFix(
-  rule: StoreRule,
-  fresh: NonNullable<StoreRule["fresh"]>,
-  both: string | null,
-  source: MessageSource,
-  diagnosed: Diagnosed,
-): string {
-  const below = rule.steps.slice(fresh.depth);
-  const last = below.at(-1);
-  if (below.length === 1 && last !== undefined && "collection" in last) {
-    const type = both === null ? null : typeAt(collectionText(last.collection, both), diagnosed);
-    const listed = rule.steps[fresh.depth - 1];
-    if (type !== null && listed !== undefined && "property" in listed) {
-      const list = source.text(fresh.list);
-      return (
-        ` '${list}' is a new list each time: to allow both, copy it first, as ` +
-        `'let ${source.freeName(listed.property)}: ${type} = ${list}'.`
-      );
-    }
-  }
-  if (below.some((step) => "property" in step))
-    return " Use a separate property for a value of another type.";
-  if (last !== undefined && "collection" in last)
-    return ` Use a separate ${last.collection} for values of another type.`;
-  return " Use a separate variable for a value of another type.";
 }
 
 /**

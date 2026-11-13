@@ -240,7 +240,6 @@ export function admittedStores(
         brought,
         root: storeRoot(walk, root),
         steps: storeSteps(walk, root, path(), written ? writtenOf(program.place(root).kind) : null),
-        ...(decision.fresh === undefined ? {} : { fresh: decision.fresh }),
       };
       // (a copy decides it: the sentence's reader of the declared variable it copies, beside the rule, #2289)
       if (written && !decision.own) readsBindings(made, binding);
