@@ -26,13 +26,9 @@ import {
 } from "../../../plan/model.js";
 import { interactionStringHasNonWhitespace } from "../../../interaction-limits.js";
 import { buttonTimeoutMilliseconds, imageRequestValue } from "../interaction.js";
-import {
-  formAnswerMismatch,
-  formRequestValue,
-  formShapeFits,
-  isFormUi,
-  validFormState,
-} from "../form.js";
+import { formAnswerMismatch, formShapeFits } from "../form/materialize.js";
+import { formRequestValue } from "../form/editing.js";
+import { isFormUi, validFormState } from "../form/ui-state.js";
 import { isPlainRecord } from "../../values/plain-data.js";
 import {
   validSessionTime,

@@ -11,7 +11,7 @@ import {
 } from "../../../interaction-limits.js";
 import { isLockNotice, isLockOutcome } from "../model.js";
 import { buttonTimeoutMilliseconds } from "../interaction.js";
-import { formShapeFits } from "../form.js";
+import { formShapeFits } from "../form/materialize.js";
 import { isStandardBase64 } from "../../host-data/stored-files.js";
 import { isSha256Hex } from "../../values/sha256.js";
 import {

@@ -26,7 +26,7 @@ import {
 } from "../../temporal.js";
 import { recordValidationTestWork } from "../../validation-testing.js";
 import type { InteractionResultValue, RuntimeInteractionActionSnapshot } from "./model.js";
-import { submitForm } from "./form.js";
+import { submitForm } from "./form/submission.js";
 
 /**
  * The milliseconds of a `showButton` timeout: an elapsed duration that is finite and greater than zero. Returns `null`

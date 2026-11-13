@@ -63,7 +63,7 @@ import {
 } from "../actions/model.js";
 import { cloneTimer } from "../background/timers.js";
 import { cloneMedia } from "../background/media.js";
-import { cloneFormState, cloneFormUi } from "../actions/form.js";
+import { cloneFormState, cloneFormUi } from "../actions/form/ui-state.js";
 import { cloneImageUi } from "../actions/interaction.js";
 import { DEFAULT_CHAT_PACING_SETTINGS, type ChatPacingSettings } from "../../chat-pacing.js";
 import { createSourceSpan, type SourceSpan } from "../../source.js";

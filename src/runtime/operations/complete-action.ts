@@ -38,7 +38,7 @@ import { resolveInteractionCompletion } from "../actions/interaction.js";
 import { isInteractionKind } from "../actions/validation/shared-checks.js";
 import { addStoredFile, addStoredFiles } from "../host-data/stored-files.js";
 import { createCapturedSerializableList } from "../values/serializable-values.js";
-import { formShownOptions, timedOutFormResult } from "../actions/form.js";
+import { formShownOptions, timedOutFormResult } from "../actions/form/submission.js";
 import type { ActionCompletionOutcome, PendingActionOperationResult } from "./model.js";
 import { timerHandlerDispatchable } from "./timer-lifecycle.js";
 import { answerPresentation } from "../message-presentation.js";
