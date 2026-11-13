@@ -429,13 +429,23 @@ function readPalette() {
   const element = scrollElement.value;
   if (element === null) return;
   const canvas = backdropBehind(element);
-  palette.value = {
+  const next: TranscriptPalette = {
     surface: resolveColour(element, "var(--message-surface)", "#ffffff"),
     reply: resolveColour(element, "var(--primary)", "#000000"),
     canvas,
     edge: vignetteEdge(element, canvas),
     link: resolveColour(element, "var(--markup-link)", "#0000ee"),
   };
+  // An unchanged palette keeps its object, so the rows' appearances stay as they are.
+  const current = palette.value;
+  if (
+    next.surface !== current.surface ||
+    next.reply !== current.reply ||
+    next.canvas !== current.canvas ||
+    next.edge !== current.edge ||
+    next.link !== current.link
+  )
+    palette.value = next;
 }
 // Theme changes update the document, not this component's props; the background settles when a photo colour's fade ends.
 let paletteObserver: MutationObserver | null = null;
@@ -449,17 +459,32 @@ onMounted(() => {
 onBeforeUnmount(() => {
   paletteObserver?.disconnect();
 });
+// Each row's appearance, kept while its entry, the palette and the contrast setting stay the same: a new object would
+// render the row's message again, so an update that adds one line would render every shown line.
+type Appearance = ReturnType<typeof resolveAppearance>;
+const appearances = new WeakMap<
+  PlayerTranscriptEntryPresentation,
+  {
+    readonly palette: TranscriptPalette;
+    readonly contrast: boolean;
+    readonly appearance: Appearance;
+  }
+>();
+function appearanceOf(entry: PlayerTranscriptEntryPresentation): Appearance {
+  const contrast = enhancedContrast?.value ?? false;
+  const kept = appearances.get(entry);
+  if (kept !== undefined && kept.palette === palette.value && kept.contrast === contrast)
+    return kept.appearance;
+  const appearance = resolveAppearance(entry, palette.value, contrast);
+  appearances.set(entry, { palette: palette.value, contrast, appearance });
+  return appearance;
+}
 // Each shown row with the index of its entry among `entries`, which removed messages may make larger than its position.
 const rows = computed(() =>
   virtualizer.value.getVirtualItems().map((item) => {
     const index = entryIndexAt(item.index);
     const entry = list()[index]!;
-    return {
-      item,
-      index,
-      entry,
-      appearance: resolveAppearance(entry, palette.value, enhancedContrast?.value),
-    };
+    return { item, index, entry, appearance: appearanceOf(entry) };
   }),
 );
 const askedAgainAppearance = computed(() =>
