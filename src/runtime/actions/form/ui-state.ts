@@ -20,7 +20,9 @@ import {
 } from "../../values/serializable-values.js";
 import { isFormFieldKind } from "../../../form-fields.js";
 import type { RuntimeFormStateSnapshot } from "../model.js";
-import { cycleValueKind, withinBounds, hasExactKeys, isPlainRecord } from "./shared-helpers.js";
+import { hasExactKeys } from "../../snapshot/state.js";
+import { isPlainRecord } from "../../values/plain-data.js";
+import { cycleValueKind, withinBounds } from "./shared-helpers.js";
 
 /**
  * The canonical runtime value of a form's definition. The request temporary holds it while the form is open, so a
@@ -125,6 +127,7 @@ export function cloneFormState(state: RuntimeFormStateSnapshot): RuntimeFormStat
   };
 }
 
+/** A copy of `ui` with `accessibleName` as its accessible name. */
 export function cloneFormUi(ui: FormUi, accessibleName: InteractionAccessibleName): FormUi {
   const options = (items: readonly InteractionChoiceOption[]) =>
     items.map((option) => ({
@@ -197,7 +200,10 @@ export function formUiTexts(ui: FormUi): string[] {
   return texts;
 }
 
-/** Whether `value` is a well-formed form definition, without measuring its texts. */
+/**
+ * Narrows a form UI whose fields, buttons, hint and timeout are well formed, without measuring its texts; its accessible
+ * name and the texts' byte limit are `validInteractionUiShape`'s.
+ */
 export function isFormUi(value: unknown): value is FormUi {
   return (
     isPlainRecord(value) &&
@@ -207,8 +213,9 @@ export function isFormUi(value: unknown): value is FormUi {
 }
 
 /**
- * Whether `value` is a well-formed form definition. `count` measures each retained text against the interaction's
- * aggregate byte limit and returns `false` when it does not fit.
+ * The form branch of `validInteractionUiShape`: the shape, fields, hint, buttons and timeout, but of the accessible
+ * name only its key, which `validInteractionUiShape` checks. `count` measures each retained text against the
+ * interaction's aggregate byte limit and returns `false` when it does not fit.
  */
 export function validFormUi(
   value: Record<string, unknown>,
