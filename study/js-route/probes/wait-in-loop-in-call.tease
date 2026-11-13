@@ -8,9 +8,9 @@ function rounds(n) {
   }
   return total
 }
-let sum = 0
+let grand = 0
 repeat 3 {
-  sum += rounds(4)
+  grand += rounds(4)
 }
-say "Sum ${sum}"
+say "Sum ${grand}"
 exit

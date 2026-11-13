@@ -5,7 +5,11 @@ for x in xs {
 }
 let words = ["b", "B", "a", "Straße", "ǅ", "é", "e"]
 words.sort()
-say "${words.join(", ")}"
-say "${"Straße".toUpperCase()} ${"İ".toLowerCase()} ${"ß" == "SS"}"
-say "${sqrt(2)} ${exp(1)} ${ln(10)} ${tan(30)}"
+let joined = words.join(", ")
+say joined
+let upper = "Straße".uppercase()
+let lower = "İ".lowercase()
+let same = "ß" == "SS"
+say "${upper} ${lower} ${same}"
+say "${sqrt(2)} ${exp(1)} ${ln(10)} ${tan(30 deg)}"
 exit

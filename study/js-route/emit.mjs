@@ -24,6 +24,14 @@ function propertyTarget(target) {
   return { ...target, object: { kind: "temporary", temporaryId: 1e9, span: target.object.span } };
 }
 
+/** Whether an expression reads nothing of the program: no names, calls, temporaries, references, loads or queries. */
+function closed(node) {
+  if (Array.isArray(node)) return node.every(closed);
+  if (node === null || typeof node !== "object") return true;
+  if (["identifier", "call", "temporary", "preparedReference", "storageLoad", "tagQuery"].includes(node.kind)) return false;
+  return Object.values(node).every(closed);
+}
+
 export class Unsupported extends Error {
   constructor(what) {
     super(`study emitter: ${what}`);
@@ -99,8 +107,8 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
   let names = 0;
   const jsName = (name) => `v${names++}_${name.replace(SAFE, "_")}`;
   for (const definition of plan.functions) {
-    if (definition.handler !== null || definition.global || definition.selfHandle !== null)
-      throw new Unsupported("a block, a global function or a function with a handle");
+    if (definition.handler !== null) throw new Unsupported(`a ${definition.handler} block`);
+    if (definition.selfHandle !== null) throw new Unsupported("a function with a handle");
   }
   // Which instructions can wait, and which functions can: those that reach such an instruction or call one that can.
   const waitsHere = (ins) =>
@@ -131,6 +139,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
   };
   const lines = ['"use strict";', "const G = rt.globals;"];
   const fileEntries = [];
+  const emittedFunctions = new Set();
   plan.files.forEach((file, index) => {
     if (file.labels.length > 0) throw new Unsupported("labels");
     // The file's top-level variables: module-level, so that its functions see them; a goto to the file clears them.
@@ -138,7 +147,11 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
     const root = emitRegion(file.startInstruction, file.rootEndInstruction, null, [], rootScope, index);
     const functions = plan.functions
       .filter((definition) => definition.entryInstruction >= file.rootEndInstruction && definition.entryInstruction < file.endInstruction)
-      .map((definition) => emitRegion(definition.entryInstruction, definition.endInstruction, definition, definition.parameters, rootScope, index));
+      // A global function sees the project's globals, not its file's top-level variables (ADR 0022 §3).
+      .map((definition) => {
+        emittedFunctions.add(definition.id);
+        return emitRegion(definition.entryInstruction, definition.endInstruction, definition, definition.parameters, definition.global ? new Map() : rootScope, index);
+      });
     const vars = [...rootScope.values()];
     if (vars.length > 0) lines.push(`let ${vars.join(", ")};`);
     lines.push(...functions, root);
@@ -146,6 +159,7 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
     lines.push(`function enter${index}(resume, fromEntry) { rt.file = ${index};${vars.length > 0 ? ` if (resume === null) ${vars.join(" = ")} = undefined;` : ""} file${index}(resume, fromEntry); }`);
     fileEntries.push(file.entryInstruction);
   });
+  if (emittedFunctions.size !== plan.functions.length) throw new Unsupported("a function outside every file's functions");
   lines.push(`const FILES = [${plan.files.map((_, i) => `enter${i}`).join(", ")}];`);
   lines.push(
     "function main() {",
@@ -286,8 +300,11 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
 
     /** Today's evaluator for `e`, over its parts evaluated here in order (`rt.bridge`). */
     function bridged(e) {
-      if (conditionalChildren(e).length > 0) throw new Unsupported(`a ${e.kind} with a part that runs only on some ways`);
-      const children = childrenOf(e);
+      // A part that runs only on some ways (a load's default) stays in the expression for today's evaluator, which
+      // can do so only when the part reads nothing of the program (a literal, say).
+      const conditional = conditionalChildren(e);
+      if (conditional.some((child) => !closed(child))) throw new Unsupported(`a ${e.kind} with a part that runs only on some ways and reads the program`);
+      const children = childrenOf(e).filter((child) => !conditional.includes(child));
       const map = new Map(children.map((child, index) => [child, { kind: "temporary", temporaryId: 1e9 + index, span: child.span }]));
       const values = children.map((child) => (e.kind === "dict" || e.kind === "set" ? own(child) : expr(child)));
       return `rt.bridge(${konst(substitute(e, map))}, [${values.join(", ")}], -1)`;
@@ -787,9 +804,8 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
           line(`${temp(ins.destinationTemporary)} = rt.contextualSpeaker(${konst(ins)}, ${temp(ins.speakerTemporary)});`);
           return;
         case "say": {
-          if (ins.textTemporary !== undefined || ins.destinationTemporary !== undefined)
-            throw new Unsupported("a say with prepared text or a result");
           const parts = [
+            `text: ${ins.textTemporary === undefined ? "undefined" : temp(ins.textTemporary)}`,
             `speakerValue: ${ins.speaker === null || ins.speakerTemporary !== undefined ? "undefined" : rawRead(ins.speaker)}`,
             `prepared: ${ins.speakerTemporary === undefined ? "undefined" : temp(ins.speakerTemporary)}`,
             `presentation: ${ins.presentation === null ? "undefined" : expr(ins.presentation)}`,
@@ -798,10 +814,16 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
           ];
           // The gate records where the say stands; inside a function this prototype knows only its own region's part.
           const place = `{ pc: ${pc}, ownerCallFrameId: null, scopeDepth: ${scopes.length}, loopDepth: ${openLoops()} }`;
+          let said = `rt.say(${konst(ins)}, () => ({ ${parts.join(", ")} }), ${place})`;
+          if (ins.destinationTemporary !== undefined) {
+            const w = x();
+            line(`${w} = ${said}; ${temp(ins.destinationTemporary)} = rt.messageHandle;`);
+            said = w;
+          }
           if (flat) {
-            line(`if (rt.say(${konst(ins)}, () => ({ ${parts.join(", ")} }), ${place})) ${suspendHere(1e6 + pc)}`);
+            line(`if (${said}) ${suspendHere(1e6 + pc)}`);
             line(`case ${1e6 + pc}:`);
-          } else line(`if (rt.say(${konst(ins)}, () => ({ ${parts.join(", ")} }), ${place})) rt.waited();`);
+          } else line(`if (${said}) rt.waited();`);
           return;
         }
         case "exit":

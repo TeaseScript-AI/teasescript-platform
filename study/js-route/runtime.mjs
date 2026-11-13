@@ -20,7 +20,9 @@ import { randomIntegerInRange } from "../../dist/src/runtime/evaluation/draws.js
 import { loweredLogicalOperator } from "../../dist/src/runtime/evaluation/lowered-operands.js";
 import { notBoolean, notLogicalOperand } from "../../dist/src/runtime/evaluation/operators.js";
 import { dictKey, notIndexable } from "../../dist/src/runtime/evaluation/access.js";
-import { fault } from "../../dist/src/runtime/evaluation/support.js";
+import { fault, USE_DEFAULT } from "../../dist/src/runtime/evaluation/support.js";
+import { callCollection, callDict } from "../../dist/src/runtime/evaluation/collections.js";
+import { listMethod } from "../../dist/src/list-methods.js";
 import {
   declaredSpeaker,
   interpolationText,
@@ -207,10 +209,32 @@ export class Runtime {
     } catch (error) {
       if (!(error instanceof NativeNotImplementedError) || synthetic === null) throw error;
       this.bridged += 1;
+      if (expression.callee.kind === "property" && (Array.isArray(receiver) || receiver instanceof NativeSet || receiver instanceof NativeDict))
+        return this.collectionMethod(expression, synthetic, receiver, positional, named, lazy !== -1, args);
       return expression.callee.kind === "property"
         ? this.bridge(synthetic, [receiver, ...args], 0)
         : this.bridge(synthetic, args, -1);
     }
+  }
+  /**
+   * A list, set or dict method by today's collection code, on the receiver's canonical form, whose changes the receiver
+   * then takes (today's evaluator works on a copy of a receiver held in a temporary, so `bridge` loses them).
+   */
+  collectionMethod(expression, synthetic, receiver, positional, named, defaulted, evaluated) {
+    const canonical = shown(receiver);
+    const evaluator = new Evaluator(this.snapshot, this.capabilities, this.events, this.plan);
+    const args = positional.map(shown);
+    const shownNamed = Object.fromEntries(Object.entries(named).map(([k, v]) => [k, shown(v)]));
+    let result;
+    if (receiver instanceof NativeDict) result = callDict(evaluator, canonical, synthetic, args, shownNamed, defaulted);
+    else {
+      if (expression.indexCheck === true && Array.isArray(receiver) && args.length > 0 && !(typeof args[0] === "number" && Number.isInteger(args[0])))
+        return this.bridge(synthetic, [receiver, ...evaluated], 0);
+      const added = expression.typeCheck === undefined || expression.callee.name === "get" ? null : { check: expression.typeCheck, span: expression.arguments.at(-1).value.span };
+      result = callCollection(evaluator, canonical, synthetic.callee.object, expression.callee.name, args, shownNamed, defaulted, expression.span, added);
+    }
+    if (receiver instanceof NativeDict || listMethod(expression.callee.name)?.changes !== undefined) syncInPlace(receiver, canonical);
+    return result === USE_DEFAULT ? NEEDS_DEFAULT : fromCanonical(result);
   }
   /**
    * Today's evaluator on `synthetic`, an expression whose evaluated parts are temporaries 1e9 + i holding `values` as
@@ -400,7 +424,8 @@ export class Runtime {
         speaker,
         copySpan(span),
       );
-      const authoredText = textSayText(this, shown(got.value), instruction.value.span);
+      const authoredText = instruction.textTemporary === undefined ? textSayText(this, shown(got.value), instruction.value.span) : got.text;
+      if (instruction.textTemporary !== undefined && typeof authoredText !== "string") throw new Error("study: prepared say text that is no text");
       if (authoredText === undefined) throw new Error("study: a say of a value shown in notation is not emitted");
       const pacingValue = typeof instruction.pacing === "object" ? shown(got.pacing) : instruction.pacing;
       staged.nextInstruction = place.pc;
@@ -411,6 +436,11 @@ export class Runtime {
         authoredText,
         pacingValue,
       });
+      if (instruction.destinationTemporary !== undefined) {
+        // A say used as a value: its message's handle (today's `giveMessageHandle`), taken by the program after the call.
+        staged.liveMessages.push({ messageId: said.sequence, sourceText: authoredText });
+        this.messageHandle = fromCanonical({ kind: "messageHandle", messageId: said.sequence });
+      }
       finishSay(staged, events, span, said, place);
     } finally {
       this.snapshot = session;
