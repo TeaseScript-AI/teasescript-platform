@@ -144,6 +144,35 @@ export function playerTemporalContext(
   return DEFAULT_TEMPORAL_CONTEXT;
 }
 
+/**
+ * The presented question's line, once anything came after it in the conversation, such as a block's messages and
+ * answers while it waited: the latest script message created before the interaction was requested, which the Player
+ * shows again with the question's controls. `null` while that line is still the latest, without one, and for a popup or
+ * an `exportText` dialog, which shows again itself.
+ */
+export function playerRuntimeQuestionAgain(
+  session: Pick<PlayerSessionView, "state" | "transcriptEntries" | "transcriptMessageRows">,
+): PlayerMessagePresentation | null {
+  const action = activeInteraction(session.state);
+  if (action === null || action.ui.kind === "popup" || action.ui.kind === "export") return null;
+  let created = -1;
+  let row = -1;
+  for (const [sequence, index] of session.transcriptMessageRows)
+    if (sequence < action.requestEventSequence && sequence > created) {
+      created = sequence;
+      row = index;
+    }
+  const entries = session.transcriptEntries;
+  const line = entries[row];
+  if (line?.kind !== "message" || line.removed) return null;
+  for (let index = row + 1; index < entries.length; index++) {
+    const entry = entries[index]!;
+    if (entry.kind !== "message" || !entry.removed)
+      return { ...line, id: `asked-again-${action.actionId}` };
+  }
+  return null;
+}
+
 export function playerRuntimeForeground(
   session: PlayerSessionView,
 ): PlayerForegroundPresentation | null {
