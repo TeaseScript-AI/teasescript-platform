@@ -8,18 +8,21 @@ import {
   union,
   withValues,
   type StaticType,
-} from "../../src/static-types.js";
+} from "../../../src/static-types.js";
 import {
   CALENDAR_DURATION_PARTS,
   CLOCK_CONTRACTS,
   TEMPORAL_FIELDS,
   TEMPORAL_METHODS,
-} from "../../src/temporal-builtins.js";
-import { WEEKDAY_NAMES } from "../../src/temporal.js";
-import { memberOf, operationRelations } from "../../src/type-inference/adapters/index.js";
-import type { OperandView, OperationRelation } from "../../src/type-inference/adapters/relation.js";
-import { INVALID } from "../../src/type-inference/adapters/views.js";
-import type { ValueKind } from "../../src/value-kinds.js";
+} from "../../../src/temporal-builtins.js";
+import { WEEKDAY_NAMES } from "../../../src/temporal.js";
+import { memberOf, operationRelations } from "../../../src/type-inference/adapters/index.js";
+import type {
+  OperandView,
+  OperationRelation,
+} from "../../../src/type-inference/adapters/relation.js";
+import { INVALID } from "../../../src/type-inference/adapters/views.js";
+import type { ValueKind } from "../../../src/value-kinds.js";
 import {
   assertCase,
   assertEqualResult,
@@ -30,7 +33,7 @@ import {
   legacyOperation,
   type AdapterExpectation,
   type LegacyExpectation,
-} from "../helpers/type-core/adapter-parity.js";
+} from "../../helpers/type-core/adapter-parity.js";
 
 /**
  * Parity of the clock reads and of the members of date and time values and calendar durations with the legacy

@@ -1,9 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { INTEGER_TYPE, NUMBER_TYPE, optional, STRING_TYPE, union } from "../../src/static-types.js";
-import { PropertyTable } from "../../src/static-types/property-tables.js";
-import { memberOf, operationRelations } from "../../src/type-inference/adapters/index.js";
+import {
+  INTEGER_TYPE,
+  NUMBER_TYPE,
+  optional,
+  STRING_TYPE,
+  union,
+} from "../../../src/static-types.js";
+import { PropertyTable } from "../../../src/static-types/property-tables.js";
+import { memberOf, operationRelations } from "../../../src/type-inference/adapters/index.js";
 import {
   assertCase,
   assertEqualResult,
@@ -12,7 +18,7 @@ import {
   dynamicView,
   inputsOf,
   legacyOperation,
-} from "../helpers/type-core/adapter-parity.js";
+} from "../../helpers/type-core/adapter-parity.js";
 
 function method(name: string) {
   const relation = operationRelations().relation({ family: "method", name });

@@ -1,19 +1,22 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { INTEGER_TYPE, STRING_TYPE } from "../../src/static-types.js";
-import { PropertyTable } from "../../src/static-types/property-tables.js";
-import { operationRelations } from "../../src/type-inference/adapters/index.js";
-import type { OperandView, OperationInputs } from "../../src/type-inference/adapters/relation.js";
-import type { PlaceId } from "../../src/type-inference/graph.js";
-import { caseInputs, type CaseInputs } from "../helpers/type-core/adapter-case-inputs.js";
+import { INTEGER_TYPE, STRING_TYPE } from "../../../src/static-types.js";
+import { PropertyTable } from "../../../src/static-types/property-tables.js";
+import { operationRelations } from "../../../src/type-inference/adapters/index.js";
+import type {
+  OperandView,
+  OperationInputs,
+} from "../../../src/type-inference/adapters/relation.js";
+import type { PlaceId } from "../../../src/type-inference/graph.js";
+import { caseInputs, type CaseInputs } from "../../helpers/type-core/adapter-case-inputs.js";
 import {
   assertCase,
   BOTTOM_VIEW,
   dynamicView,
   legacyOperation,
   type LegacyOutcome,
-} from "../helpers/type-core/adapter-parity.js";
+} from "../../helpers/type-core/adapter-parity.js";
 
 /**
  * The interactions' relations on inputs the case tables cannot write (work note): an operand that may also

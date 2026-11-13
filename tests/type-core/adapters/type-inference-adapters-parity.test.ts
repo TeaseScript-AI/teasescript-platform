@@ -7,12 +7,12 @@ import {
   optional,
   REGEX_TYPE,
   STRING_TYPE,
-} from "../../src/static-types.js";
-import { operationRelations } from "../../src/type-inference/adapters/index.js";
+} from "../../../src/static-types.js";
+import { operationRelations } from "../../../src/type-inference/adapters/index.js";
 import type {
   OperationRelation,
   OperationResult,
-} from "../../src/type-inference/adapters/relation.js";
+} from "../../../src/type-inference/adapters/relation.js";
 import {
   assertCase,
   closedView,
@@ -20,7 +20,7 @@ import {
   inputsOf,
   isClosedFact,
   legacyOperation,
-} from "../helpers/type-core/adapter-parity.js";
+} from "../../helpers/type-core/adapter-parity.js";
 
 /**
  * The parity helper itself (work note): a case declares the legacy's fact and errors and the adapter's answer;
