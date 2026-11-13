@@ -240,7 +240,7 @@ const PAIRS = [
   "tests/type-core/discharge/type-core-f18.test.ts",
   "tests/type-core/type-core-identity.test.ts",
   "tests/type-core/type-core-kept.test.ts",
-  "tests/type-core/type-core-key-ids.test.ts",
+  "tests/type-core/contract/type-core-key-ids.test.ts",
   "tests/type-core/work/type-core-work-b.test.ts in tests/helpers/type-core/families/output-bound.ts",
   "tests/type-core/work/type-core-work-b.test.ts in tests/helpers/type-core/families/w34-links.ts",
   "tests/type-core/work/type-core-work-c.test.ts",

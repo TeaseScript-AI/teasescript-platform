@@ -408,7 +408,7 @@ It runs in two regimes:
   counts. From the pull request's checkout, `<SHA>` its head's full SHA:
 
   ```sh
-  find tests/type-core tests/type-core-stop -maxdepth 2 -name '*.test.ts' | sort |
+  find tests/type-core -maxdepth 2 -name '*.test.ts' | sort |
     sed -E 's#^tests/#dist/tests/#; s#\.ts$#.js#' > /tmp/agent-work/<task>/survey-items.txt
   sx-job submit --name 'survey-{i}' --owner <owner> --campaign <tag> --items /tmp/agent-work/<task>/survey-items.txt \
     --target 20m --checkout <SHA> --unmerged "the whole frozen survey of the head" --timeout 2h --mem 8G -- \

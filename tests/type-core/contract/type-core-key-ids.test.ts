@@ -3,13 +3,17 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import { analyseCore, solveDemands, type CorePass } from "../../src/type-inference/core/answers.js";
+import {
+  analyseCore,
+  solveDemands,
+  type CorePass,
+} from "../../../src/type-inference/core/answers.js";
 import {
   joinParts,
   withTestAllowance,
   withTestDemandAllowance,
-} from "../../src/type-inference/core/budget.js";
-import { Contract } from "../../src/type-inference/core/contract.js";
+} from "../../../src/type-inference/core/budget.js";
+import { Contract } from "../../../src/type-inference/core/contract.js";
 import {
   canonicalRest,
   compareDemandNames,
@@ -39,29 +43,34 @@ import {
   stepsOfId,
   type KeyId,
   type KeyPacket,
-} from "../../src/type-inference/core/contract/key-ids.js";
+} from "../../../src/type-inference/core/contract/key-ids.js";
 import {
   keyLane,
   withKeyRecords,
   withTextKeys,
   wrapperShape,
   type KeyRecord,
-} from "../../src/type-inference/core/contract/lanes.js";
-import type { WrapperHop } from "../../src/type-inference/core/contract/model.js";
-import { keyOf, type Key } from "../../src/type-inference/core/definitions.js";
-import { pathIdOf } from "../../src/type-inference/core/contract/literal-index.js";
-import { CoreProgram, propertyStep } from "../../src/type-inference/core/program.js";
-import { REASON, type Item } from "../../src/type-inference/core/items.js";
-import { memberStep } from "../../src/type-inference/core/method-categories.js";
-import type { Demand, Work } from "../../src/type-inference/core/solver.js";
-import type { PlaceId } from "../../src/type-inference/graph.js";
-import { coreRequest } from "../helpers/type-core-analysis.js";
-import { probeMade } from "../helpers/type-core/type-core-made.js";
-import { narrowingPass, nodeAt } from "../helpers/type-core/type-core-narrowing.js";
-import { inMode, MODES, publishedAnswers, publishedRoute } from "../helpers/type-core-oracles.js";
-import { Admission } from "../../src/type-inference/core/admission.js";
-import { sharedPaths } from "../../src/type-inference/core/admission/structure.js";
-import { Retained } from "../../src/type-inference/core/retained/retained.js";
+} from "../../../src/type-inference/core/contract/lanes.js";
+import type { WrapperHop } from "../../../src/type-inference/core/contract/model.js";
+import { keyOf, type Key } from "../../../src/type-inference/core/definitions.js";
+import { pathIdOf } from "../../../src/type-inference/core/contract/literal-index.js";
+import { CoreProgram, propertyStep } from "../../../src/type-inference/core/program.js";
+import { REASON, type Item } from "../../../src/type-inference/core/items.js";
+import { memberStep } from "../../../src/type-inference/core/method-categories.js";
+import type { Demand, Work } from "../../../src/type-inference/core/solver.js";
+import type { PlaceId } from "../../../src/type-inference/graph.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
+import { probeMade } from "../../helpers/type-core/type-core-made.js";
+import { narrowingPass, nodeAt } from "../../helpers/type-core/type-core-narrowing.js";
+import {
+  inMode,
+  MODES,
+  publishedAnswers,
+  publishedRoute,
+} from "../../helpers/type-core-oracles.js";
+import { Admission } from "../../../src/type-inference/core/admission.js";
+import { sharedPaths } from "../../../src/type-inference/core/admission/structure.js";
+import { Retained } from "../../../src/type-inference/core/retained/retained.js";
 
 /*
  * G3 stage 1: the key cursors (`contract/key-ids.ts`) and the frozen wrapper lane
@@ -995,7 +1004,7 @@ test("the cursor modules make no text but the listed ones, each bounded or charg
   const found: Record<string, number> = {};
   for (const file of ["key-ids.ts", "lanes.ts"]) {
     const source = readFileSync(
-      new URL(`../../../src/type-inference/core/contract/${file}`, import.meta.url),
+      new URL(`../../../../src/type-inference/core/contract/${file}`, import.meta.url),
       "utf8",
     );
     // (code only, comments aside)

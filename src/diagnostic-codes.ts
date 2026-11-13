@@ -72,7 +72,7 @@ function entry<const O extends DiagnosticCodeInfo["owners"], const S extends Dia
 /**
  * Every diagnostic code: each code that a compiler diagnostic, runtime failure, developer warning, or checkpoint error
  * carries, once, with its owner, severities, title, and documentation. Emission sites take the code types below, so an
- * unregistered code does not compile, and `tests/semantic/diagnostic-codes.test.ts` checks the rest against the source and the
+ * unregistered code does not compile, and `diagnostic-codes.test.ts` checks the rest against the source and the
  * documents.
  */
 export const DIAGNOSTIC_CODES = {

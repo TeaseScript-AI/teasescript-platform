@@ -7,7 +7,7 @@
  * `Retained.held`). Everything else kept is plain data, which no later run changes. With no instrument (production)
  * a record, arena or array is a copy of what it is given (`retainedCopy`), a collection the native one it makes, `owner`
  * and `amend` return at once, and nothing is charged. A test installs an instrument (`withRetainedRecorder`;
- * `tests/helpers/retained-instrument.ts`), which makes the kinds, refuses at its line any other write to retained
+ * `retained-instrument.ts`), which makes the kinds, refuses at its line any other write to retained
  * state, and hears the owners' marks and the solver's runs. A typed array, which no freeze holds, is the exception: a
  * write to its elements after its run is caught at the process's exit, which fails the file.
  */
