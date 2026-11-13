@@ -65,7 +65,11 @@
 // changed file the check parses (`.ts`, `.tsx`, `.mts`, `.cts`, `.js`, `.jsx`, `.mjs`, `.cjs`) is refused by name the
 // same way, one per line: an `import` keyword outside those statements other than `import.meta` (a dynamic or type
 // import), a `require` identifier outside them, a triple-slash reference directive, or a comment (JSDoc included)
-// holding `import(` or `@import`. A changed file of any other type, `.vue` and `.html` among them, is outside the rule:
+// holding `import(` or `@import`. One exception: a dynamic `import(…)` on a line the change leaves unchanged, in a file
+// it edits at one path on both sides and does not declare whole, is not refused and needs no declaration; it is printed
+// once, by its line at HEAD, as `not judged: unchanged dynamic import, FILE:LINE`, and counted in the shape line: check
+// where its path points after the move, since no move tool reads a path built at run time. A declaration that names
+// such a line still covers it. A changed file of any other type, `.vue` and `.html` among them, is outside the rule:
 // the report lists it as `not compared (unparsed)`, and `vue-tsc` and the move's compiler run are its witness. A side
 // that is no regular file (a gitlink, mode 160000, or a symbolic link, 120000), whose content is no file's text, is
 // never parsed or resolved (a link's blob is read only to check a declaration of it is UTF-8): it gives no bindings,
@@ -74,7 +78,7 @@
 // move), and the report lists it as `not compared (not a regular file)`.
 //
 // The report always ends with the change's shape: the moved lines, the admitted lines by form, the declared lines, the
-// bindings differing and the refused specifiers.
+// bindings differing and the refused specifiers (and `; not judged N` after them when N lines are not judged).
 //
 // The residual is Git's: its move detection is heuristic, and a moved block below its size threshold (20 alphanumeric
 // characters) reads as added and removed. A failure on such a block is read by a person, not overridden.
@@ -656,7 +660,7 @@ function bindingsOf(file, text, resolver) {
 function otherReferencesOf(source, text, compared, lineOf) {
   const out = [];
   const lines = new Set();
-  const refuse = (at, shown, what) => {
+  const refuse = (at, shown, what, dynamic = false) => {
     const line = lineOf(at);
     if (lines.has(line)) return;
     lines.add(line);
@@ -673,6 +677,7 @@ function otherReferencesOf(source, text, compared, lineOf) {
       name: "",
       as: "",
       typeOnly: false,
+      dynamic,
     });
   };
   for (const [list, what] of [
@@ -711,7 +716,12 @@ function otherReferencesOf(source, text, compared, lineOf) {
     if (within) return;
     const parent = node.parent ?? node;
     if (node.kind === ts.SyntaxKind.ImportKeyword && !ts.isMetaProperty(parent))
-      refuse(node.getStart(source), parent.getText(source), "an `import`");
+      refuse(
+        node.getStart(source),
+        parent.getText(source),
+        "an `import`",
+        ts.isCallExpression(parent) && parent.expression === node,
+      );
     else if (ts.isIdentifier(node) && node.text === "require")
       refuse(
         node.getStart(source),
@@ -785,6 +795,7 @@ function bindingDifferences(mergeBase, head, files, renames, git) {
             text: lines[binding.line - 1],
             specifier: binding.specifier,
             reason: binding.target.reason,
+            dynamic: binding.dynamic === true,
           };
           refusals.set(JSON.stringify([side, file, binding.line, binding.specifier]), refusal);
           continue;
@@ -1025,15 +1036,18 @@ export function checkMove(
     if (index === -1) refused.push(refusal);
     else covered.push({ ...refusal, declared: declarations[index].reason });
   }
-  counts.refused = refused.length;
+  const [kept, notJudged] = unchangedDynamicImports(refused, files, wholes);
+  counts.refused = kept.length;
+  counts.notJudged = notJudged.length;
   const stale = declarations.filter((_, at) => !bound.has(at));
   return {
     mergeBase,
     unadmitted,
     declared,
     stale,
-    refused,
+    refused: kept,
     covered,
+    notJudged,
     wholes,
     unparsed,
     irregular,
@@ -1041,6 +1055,34 @@ export function checkMove(
     renames: renames !== null,
     counts,
   };
+}
+
+/**
+ * The undeclared `refused` (each `{ side, file, line, dynamic }`) kept, and those not judged: each of an unchanged
+ * dynamic `import(…)`, its line neither added nor removed on its side, in a file the change edits at one path on both
+ * sides (`files`, the change's) and does not declare whole (`wholes`); one per unchanged line, its line at HEAD (its
+ * removed side is the same line).
+ */
+function unchangedDynamicImports(refused, files, wholes) {
+  const changed = new Map();
+  for (const change of files)
+    if (
+      change.old !== null &&
+      change.old === change.file &&
+      !wholes.some((w) => w.file === change.file)
+    )
+      changed.set(change.file, {
+        removed: new Set(change.removedLines.map((row) => row.line)),
+        added: new Set(change.addedLines.map((row) => row.line)),
+      });
+  const unchanged = (refusal) =>
+    refusal.dynamic &&
+    changed.has(refusal.file) &&
+    !changed.get(refusal.file)[refusal.side].has(refusal.line);
+  return [
+    refused.filter((refusal) => !unchanged(refusal)),
+    refused.filter((refusal) => unchanged(refusal) && refusal.side === "added"),
+  ];
 }
 
 /** The report's lines and exit status for `result`. */
@@ -1052,6 +1094,7 @@ export function reportOf(base, result) {
     stale,
     refused,
     covered,
+    notJudged,
     wholes,
     unparsed,
     irregular,
@@ -1074,6 +1117,8 @@ export function reportOf(base, result) {
     out.push(
       `  refused: ${r.file}:${r.line} (${r.side}) "${r.specifier}": ${r.reason}; declare it, the move's compiler run its witness`,
     );
+  for (const n of notJudged)
+    out.push(`  not judged: unchanged dynamic import, ${n.file}:${n.line}`);
   for (const w of wholes)
     out.push(`  not judged (declared whole): ${w.file} (+${w.added} -${w.removed}): ${w.reason}`);
   for (const name of new Set(unparsed)) out.push(`  not compared (unparsed): ${name}`);
@@ -1091,7 +1136,7 @@ export function reportOf(base, result) {
       `  ${importer} and ${sibling} both change, and a binding between them is on one side only: if the move took code from one into the other, name them one family with --renames FILE, as {"renames":{${JSON.stringify(importer)}:[${JSON.stringify(importer)},${JSON.stringify(sibling)}]}}`,
     );
   out.push(
-    `shape: moved +${counts.movedAdded} -${counts.movedRemoved}; admitted ${FORMS.map((form) => `${form} ${counts[form]}`).join(", ")}; declared ${counts.declared}; unadmitted ${counts.unadmitted}; bindings differing ${bindings.differing.length}; refused ${counts.refused}; declared whole ${counts.whole}`,
+    `shape: moved +${counts.movedAdded} -${counts.movedRemoved}; admitted ${FORMS.map((form) => `${form} ${counts[form]}`).join(", ")}; declared ${counts.declared}; unadmitted ${counts.unadmitted}; bindings differing ${bindings.differing.length}; refused ${counts.refused}; declared whole ${counts.whole}${counts.notJudged > 0 ? `; not judged ${counts.notJudged}` : ""}`,
   );
   const failed =
     unadmitted.length > 0 ||
