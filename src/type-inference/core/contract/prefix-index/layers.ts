@@ -278,7 +278,7 @@ export function ownHas(contract: Contract, sub: Key, ref: PathRef): boolean {
  * array's steps notes the longest prefix of them already made (`holdingAt`), so the id is made below it: a read walks its
  * steps once, never again for its id. A record's steps (`PathSteps`) make their own id, lazily and in their own order (a
  * view's suffix before its join, `PathSteps.after`), charging each step they visit (`convert`), so theirs is always
- * theirs and never walked again (Codex r7's F1).
+ * theirs and never walked again.
  */
 export interface ReadPath {
   readonly ref: PathRef;
@@ -610,7 +610,7 @@ export function topsAt(
   path: ReadPath,
 ): PrefixStores["also"] {
   const work = contract.pass.program.work;
-  // (the first read under a step keeps its memo, as `main`'s, whether or not a layer lists it; later reads read it)
+  // (the first read under a step keeps its memo, whether or not a layer lists it; later reads read it)
   const step = ref.read(0);
   const layers = stepLayersOf(
     contract,
@@ -705,9 +705,10 @@ function prefixFound(
 
 /**
  * The sources a prefix's property reads apart from the shared entries, in their keys' order, each with the prefix's
- * stores that brought a layer listing it (A5's candidates): those its layers list under the property's first step with
- * stores of their own at the property's path or above it below their root (`layerSupport`). The exact enumeration,
- * which costs its output: a consumer that needs less reads a layer's summary (`summaryItems` and its siblings).
+ * stores that brought a layer listing it (the candidates for a conflict): those its layers list under the property's
+ * first step with stores of their own at the property's path or above it below their root (`layerSupport`). The exact
+ * enumeration, which costs its output: a consumer that needs less reads a layer's summary (`summaryItems` and its
+ * siblings).
  */
 export function relevantSubs(
   contract: Contract,

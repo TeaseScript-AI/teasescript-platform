@@ -43,7 +43,10 @@ import { Retained } from "../../retained/retained.js";
 // (`singleSource`), which owns the read's dependencies and stops as any source read does; a summary's
 // name asked in another pass is still found and made there (`replayLayer`).
 
-/** A summary that declined: a source the old per-source reading treats apart, or a layer below that declined. */
+/**
+ * A summary that declined: a source the per-source reading (`relevantSubs`, `subAt`) treats apart, or a layer below
+ * that declined.
+ */
 const DECLINED: LayerProof = { root: null, declined: true, signature: () => "declined" };
 
 /** The proof of a summary over `root`. */
@@ -89,7 +92,7 @@ function layerDemand(contract: Contract, layer: SubLayer, path: number): ProofDe
 /**
  * A layer's summary at a path: its own sources there with a store at a prefix of the path, each read as its own
  * answer (`subAt`), over the summaries of the layers below it. It declines where a source's holder marks the path
- * (§3.2) or its answer holds a guarded, called or fanned item, which the per-source reading treats apart, and where a
+ * or its answer holds a guarded, called or fanned item, which the per-source reading treats apart, and where a
  * layer below declines or has no origin.
  */
 function* layerMade(
@@ -125,8 +128,7 @@ function* layerMade(
 
 /**
  * The layers a summary of a prefix's layers reads at a path, each with the stores that brought its top, and the path,
- * its id made only where a summary's demand needs it (`pathIdAt`): a read one source answers by reference makes none
- * (Astra r1's F1).
+ * its id made only where a summary's demand needs it (`pathIdAt`): a read one source answers by reference makes none.
  */
 interface LayersAt {
   readonly layers: readonly {
@@ -204,7 +206,7 @@ function summarised(items: readonly Item[]): boolean {
 }
 
 /**
- * The one source a read of a prefix's layers at `rest` asks directly (Sol's singleton reference), or
+ * The one source a read of a prefix's layers at `rest` asks directly, or
  * `null`: where `layersAt` found one layer, with one own source under the path's first step and no listing layer below
  * that step (`listingBelow`), whose holder marks nothing at the path, that layer's summary is the source's answer
  * alone, so the read asks the source's own demand (`subAt`) at the caller's path as given, an array or a cursor, never
@@ -256,20 +258,20 @@ export function* summaryCount(
   if (at === undefined) return null;
   const sub = singleSource(contract, at, rest);
   if (sub !== null) {
-    // #1668: N or K: a count, a presence test or an offending test over the sources
+    // #1668: a count, a presence test or an offending test over the sources
     const items = yield* contract.subAt(sub, rest);
     return summarised(items) ? (withoutEmpty(items).length > 0 ? 1 : 0) : null;
   }
-  // #1668: N, a count over the layers' summaries
+  // #1668: a count over the layers' summaries
   const root = yield* unionOf(contract, at);
   return root === undefined ? null : (root?.count ?? 0);
 }
 
 /**
- * C5c's presence after a prefix's layers at `rest`, read in their sources' order from the incoming state `mask`, its
- * demands run as the consumer runs its reads (`run`, with its read's allowance), and nothing run where no layer may
+ * A property's presence after a prefix's layers at `rest`, read in their sources' order from the incoming state `mask`,
+ * its demands run as the consumer runs its reads (`run`, with its read's allowance), and nothing run where no layer may
  * hold a source there; `null` where a summary declines or the run stops, so the consumer reads each source by itself,
- * each with its own allowance, as before.
+ * each with its own allowance.
  */
 export function summaryPresence(
   contract: Contract,
@@ -285,15 +287,15 @@ export function summaryPresence(
   const sub = singleSource(contract, at, rest);
   after = null;
   run(
-    // #1668: K, the offending test over the sources (`run`)
+    // #1668: the offending test over the sources (`run`)
     (function* (): Work<readonly Item[]> {
       if (sub !== null) {
-        // #1668: N or K: a count, a presence test or an offending test over the sources
+        // #1668: a count, a presence test or an offending test over the sources
         const items = yield* contract.subAt(sub, rest);
         if (summarised(items)) after = presenceSteps(items)[mask]!;
         return [];
       }
-      // #1668: K, a presence test over the layers' summaries
+      // #1668: a presence test over the layers' summaries
       const root = yield* unionOf(contract, at);
       if (root !== undefined)
         after = root === null ? { mask, unknown: false, literal: null } : root.presence![mask]!;
@@ -304,10 +306,10 @@ export function summaryPresence(
 }
 
 /**
- * A5's candidates of a prefix's layers at `rest`: the stores that brought each layer whose summary holds an offending
- * item (`offends` holds of a merge exactly where it holds of one of the merged sources' answers), its demands run as
- * admission runs its questions (`run`), nothing run where no layer may hold a source there; `null` where a summary
- * declines.
+ * The conflict candidates of a prefix's layers at `rest`: the stores that brought each layer whose summary holds an
+ * offending item (`offends` holds of a merge exactly where it holds of one of the merged sources' answers), its demands
+ * run as admission runs its questions (`run`), nothing run where no layer may hold a source there; `null` where a
+ * summary declines.
  */
 export function offendingStores(
   contract: Contract,
@@ -324,7 +326,7 @@ export function offendingStores(
   return run(
     (function* (): Work<ReadonlySet<Definition | null> | null> {
       if (sub !== null) {
-        // #1668: N or K: a count, a presence test or an offending test over the sources
+        // #1668: a count, a presence test or an offending test over the sources
         const items = yield* contract.subAt(sub, rest);
         if (!summarised(items)) return null;
         if (offends(items)) {
@@ -335,7 +337,7 @@ export function offendingStores(
         return out;
       }
       for (const { layer, defs } of at.layers) {
-        // #1668: K, the offending test over the layers' summaries
+        // #1668: the offending test over the layers' summaries
         const { items, proof } = yield* contract.pass.solver.proven(
           layerDemand(contract, layer, pathIdAt(contract, at.path)),
         );

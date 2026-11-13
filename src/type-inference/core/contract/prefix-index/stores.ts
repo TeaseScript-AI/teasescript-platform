@@ -57,7 +57,7 @@ function ringStop(contract: Contract, place: PlaceId): boolean {
  * The cycle of whole copies `place` is a port of, or `null`: Tarjan's components over the copies `copiedRoot` follows,
  * from `place` over the places they reach, on an explicit stack, each place once per pass (one reached in an earlier
  * walk is in a finished component). A component of links alone, each copying the next, holds no stop: no cycle here,
- * `prefixWork` cuts it at its open member as before.
+ * `prefixWork` cuts it at its open member (`PrefixStores.cut`).
  */
 function ringOf(contract: Contract, place: PlaceId): CopyRing | null {
   const known = contract.rings.get(place);
@@ -141,15 +141,16 @@ function ringOf(contract: Contract, place: PlaceId): CopyRing | null {
 
 /**
  * The whole stores of a prefix, which every key below it shares (`state = preset` stored k times and read at k fields
- * is k stores, not k × k): one entry per source identity; a copied place that holds nothing but whole stores and has
- * at most one entry (an alias) is replaced by that entry; an add is an entry of its element, a clear or a removal one
- * of emptiness; an argument of an unwritten parameter with several sites is a deferred unknown. An explicit stack,
- * memoised per pass. A cycle of whole copies is cut at its stops at once (`CopyRing`, G5): a copy of a stop stays an
- * entry of its key, which the solver's fixpoint then closes, so each member's stores are one answer, whichever place
- * entered the cycle; any other key still open (a copy cycle through a projection) stays an entry, cut there.
+ * is k stores, not k × k): one entry per source identity; a copied place that holds nothing but whole stores and has at
+ * most one entry (an alias) is replaced by that entry; an add is an entry of its element, a clear or a removal one of
+ * emptiness; an argument of an unwritten parameter without one live non-recursive call site (`singleSite`) is a
+ * deferred unknown. An explicit stack, memoised per pass. A cycle of whole copies is cut at its stops at once
+ * (`CopyRing`): a copy of a stop stays an entry of its key, which the solver's fixpoint then closes, so each member's
+ * stores are one answer, whichever place entered the cycle; any other key still open (a copy cycle through a
+ * projection) stays an entry, cut there.
  */
 export function prefixStores(contract: Contract, asked: Key): PrefixStores {
-  // (a key in its identity: a wrapper family's text read as its cursor, G3 stage 1)
+  // (a key in its identity: a wrapper family's text read as its cursor)
   const prefix = contract.canonicalKey(asked);
   if (!contract.prefix.has(prefix)) contract.settle(prefixWork(contract, prefix));
   return contract.prefix.get(prefix)!;
@@ -292,7 +293,7 @@ export function* prefixWork(contract: Contract, prefix: CanonicalKey): IdentityW
           ingress: e.ingress,
         });
         // a source's own stores below the path, listed once per source and path and shared by every prefix that
-        // copies it there (§8)
+        // copies it there
         addSubs(f, projectedLayer(contract, copiedPlace, projection));
       }
       continue;
@@ -345,8 +346,8 @@ export function* prefixWork(contract: Contract, prefix: CanonicalKey): IdentityW
         const parameter = program.place(d.place).kind;
         const deferred =
           parameter.kind === "parameter" && parameter.written === null && !lists.singleSite(d.fn);
-        // F21: a single non-recursive call's binding is exact, its argument's and its default's alike; an exact
-        // argument that copies a record is a copy of it, as a `let` is, shared by every field below it (W34)
+        // a single non-recursive call's binding is exact, its argument's and its default's alike; an exact argument
+        // that copies a record is a copy of it, as a `let` is, shared by every field below it
         if (d.how === "parameter default" || deferred || contract.copiedKey(d.value!) === null) {
           f.other = true;
           if (deferred) yield* adding(contract, f, { unk: REASON.deferred });
@@ -357,24 +358,24 @@ export function* prefixWork(contract: Contract, prefix: CanonicalKey): IdentityW
       }
       const copied = contract.copiedKey(d.value!);
       if (copied === null) {
-        // a call's result is its callee's result key (F20, §8): k stores of one function's result, one entry
+        // a call's result is its callee's result key: k stores of one function's result, one entry
         const result = contract.resultKey(d.value!);
         yield* adding(contract, f, result !== null ? { key: result } : { value: d.value! });
         continue;
       }
-      // §3.2: a copy read under a guard is one marked entry of its source, its aliases followed
+      // a copy read under a guard is one marked entry of its source, its aliases followed
       if (guards.guardedRead(d.value!)) {
         const source = yield* contract.needValue(d.value!);
         yield* adding(contract, f, { key: source.key!, guarded: true });
         continue;
       }
-      // §3.2: a copy of a record with a tested key below it is a mark of its source's holder
+      // a copy of a record with a tested key below it is a mark of its source's holder
       // (collected once), looked up at the read of each path; the entry stays its source's
       const path = keyStepsIn(contract, copied);
       if (path.length > 0) {
         const root = contract.keyAt(keyPlace(copied), []);
         let direct = false;
-        // (a cursor's keys below its place's own key hold no definition: its family's shape requires it, G3 stage 1)
+        // (a cursor's keys below its place's own key hold no definition: its family's shape requires it)
         for (let length = 1; length <= path.length && !direct && !isKeyId(copied); length += 1) {
           work.charge("invSteps");
           if (
@@ -385,7 +386,7 @@ export function* prefixWork(contract: Contract, prefix: CanonicalKey): IdentityW
           )
             direct = true;
         }
-        // (a copy of a cycle's stop is its key's entry wherever the cycle is entered, never a cut, G5)
+        // (a copy of a cycle's stop is its key's entry wherever the cycle is entered, never a cut)
         const stop = ringStop(contract, keyPlace(copied));
         if (direct || stop || open.has(root) || !copyOnly(contract, keyPlace(copied))) {
           if (open.has(root) && !stop) f.cut = true;
