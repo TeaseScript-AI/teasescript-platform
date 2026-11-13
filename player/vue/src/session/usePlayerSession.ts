@@ -73,8 +73,9 @@ export interface PlayerSessionOptions {
   bridge: Promise<PlayerBridge>;
   /**
    * Opens a fresh connection to the engine's host, ready, when the player chooses to go on after the connection was lost
-   * (PLAYER-UI "Session end and failure"); called only from that click, never to revive the lost one. In a page, a fresh
-   * engine Worker (`openEngineWorker`); without it, a lost connection stays the Player's error stop.
+   * (PLAYER-UI "Session end and failure"); called only from that click, never to revive the lost one. The hosted Player
+   * (`main.ts`) opens a fresh engine Worker (`openEngineWorker`); without it, as in the development preview, a lost
+   * connection stays the Player's error stop.
    */
   nextConnection?: () => Promise<PlayerBridge>;
   /**
