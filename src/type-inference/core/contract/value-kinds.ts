@@ -318,9 +318,12 @@ function* valueAt(
     }
     if (route === "opaque") return [unknownItem(REASON.opaque)];
     const operation = program.opOf.get(value)!;
-    // a choice's answer at a path once per choice and path, whatever asks: the key's contract and the
-    // conflict-candidate test of the choice's own entry read it alike, as `contractOfValue` reads an operation
-    if (route === "choice") {
+    // a choice's, a fallback's or a `get`'s answer at a path once per value and path, whatever asks. A choice's:
+    // the key's contract and the conflict-candidate test of the choice's own entry read it alike, as
+    // `contractOfValue` reads an operation. A fallback's or a `get`'s, as its root's: each composes its operands'
+    // answers at that path, so a chain of them read below its root by k consumers (a fallback's check descending
+    // into a nullable collection's element) walks each link once, never the chain before it again per reader (#1824)
+    if (route === "choice" || route === "composite") {
       const site = program.places[value]?.site ?? operation.site;
       const slot = joinParts("cop", value, restPart(rest));
       flow?.include(slot, "operation");
@@ -330,24 +333,6 @@ function* valueAt(
         file: site.file,
         offset: site.start,
         // (an operation's walk reads arrays: a span's steps copied out, `stepsArray`)
-        // #1668: the demand's own run: its frame's flow, taken as it starts
-        make: () => contractOfOp(contract, operation, stepsArray(ref.steps())),
-      };
-      return contract.entered(value, yield demand);
-    }
-    // a fallback's or a `get`'s answer at a path once per value and path, whatever asks, as its root's: each composes
-    // its operands' answers at that path, so a chain of them read below its root by k consumers (a fallback's check
-    // descending into a nullable collection's element) walks each link once, never the chain before it again per reader
-    // (#1824)
-    if (route === "composite") {
-      const site = program.places[value]?.site ?? operation.site;
-      const pathSlot = joinParts("cop", value, restPart(rest));
-      flow?.include(pathSlot, "operation");
-      const demand: Demand = {
-        key: pathSlot,
-        kind: "contract",
-        file: site.file,
-        offset: site.start,
         // #1668: the demand's own run: its frame's flow, taken as it starts
         make: () => contractOfOp(contract, operation, stepsArray(ref.steps())),
       };
