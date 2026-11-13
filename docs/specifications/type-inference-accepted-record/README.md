@@ -71,8 +71,6 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | `A7` | possible conflicts warn; earlier copies use `later`; whole external-store boundaries cover descendants; unknown receivers owe member checks |
 | `A8` | collection elements and dictionary values follow admission, retaining admitted nullability |
 | `A9` | arguments, parameter-body stores, and returns must fit their written parameter or result type |
-| `A59` | a fallback after a proved non-null value receives the never-null warning |
-| `A68` | the same never-null decision marks the remaining otherwise fallbacks unreachable |
 | `C1` | a store or copy must fit its destination’s written or decided type |
 | `C2` | counts, range bounds, list positions, and taking limits require whole numbers |
 | `C3` | conditions and logical operands require booleans |
