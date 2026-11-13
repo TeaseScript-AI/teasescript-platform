@@ -47,12 +47,17 @@ export class ReceivingDomain {
    */
   replayProof: ((key: string) => ProofDemand<Proof>) | null = null;
 
-  a4Keys = new Set<Key>();
-  /** The places `a4Keys` lands copies in, each with `openAbove`'s walk down its paths from its root. */
-  a4Places = new Map<PlaceId, OpenStep | null>();
+  /**
+   * The keys at which a store's copy of a written binding, or of an unwritten one that may inherit a written type,
+   * lands: a copy of a written binding takes its type there.
+   */
+  copyLandingKeys = new Set<Key>();
+  /** The places those copies land in (`copyLandingKeys`), each with `openAbove`'s walk down its paths from its root. */
+  copyLandingPlaces = new Map<PlaceId, OpenStep | null>();
   /** Per place, each cursor's path's step of `openAbove`'s walk (`openAboveKey`, G3 stage 1). */
   openSteps = new Map<PlaceId, Map<number, OpenStep>>();
-  a4Copies: {
+  /** Each copy of a written binding: the place and path it lands at, and the written type it brings there. */
+  writtenCopyLandings: {
     readonly place: PlaceId;
     readonly path: readonly string[];
     readonly term: TypeTerm;
@@ -68,7 +73,7 @@ export class ReceivingDomain {
     }[]
   >();
   /** The copies of places that may inherit a written type (`inheriting`), where they land. */
-  a4Inherits: InheritedCopy[] = [];
+  inheritingCopyLandings: InheritedCopy[] = [];
   /** A4 through copies (`copyGraph`): the unwritten places a copy of a written binding reaches, copy by copy. */
   inheriting = new Set<PlaceId>();
   /**
