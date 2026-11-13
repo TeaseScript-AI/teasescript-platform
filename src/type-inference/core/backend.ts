@@ -574,10 +574,8 @@ function neverMatching(answers: Answers, index: SliceIndex): Outside | null {
   for (const statement of switches) {
     const subject = statement.subject;
     const subjectType = typeOf(subject);
-    let held = subject;
-    while (held.kind === "parenthesizedExpression") held = held.expression;
     const unknownsExternal = (): boolean => {
-      const items = answers.at(nodeOf(answers, index, held))?.items ?? [];
+      const items = answers.at(nodeOf(answers, index, subject))?.items ?? [];
       return (
         items.length > 0 &&
         items.every((item) => item.tag !== "unknown" || item.reasons === REASON.external)
