@@ -13,7 +13,7 @@ import {
   selecting,
 } from "../../../src/type-inference/core/contract/objects.js";
 import { SELECTED_TEXT, SELECTED_VALUE } from "../../../src/type-inference/core/definitions.js";
-import { othersAt, readGroupsAt } from "../../../src/type-inference/core/contract/others.js";
+import { othersAt, readGroupsAt } from "../../../src/type-inference/core/contract/class-groups.js";
 import {
   DemandExhausted,
   withTestAllowance,
