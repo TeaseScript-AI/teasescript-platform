@@ -23,6 +23,7 @@ import {
   sited,
   inBothOrdersAs,
   runWith,
+  answeredWith,
   checksOf,
 } from "../../helpers/type-core/type-core-candidate-setup.js";
 
@@ -373,19 +374,22 @@ test("every carrier kind leaves an obligation for the external data it gives a p
               name,
             );
             const plan = result.plan!;
+            // (a choice's run waits at the ask: the player picks the button holding the data, the option after `1`)
+            const ran = (hostValue: SerializableRuntimeValue) =>
+              kind === "choice" ? answeredWith(plan, hostValue, 1) : runWith(plan, hostValue);
             const host = (
               scalar: SerializableRuntimeValue,
               depth = wrap,
             ): SerializableRuntimeValue =>
               depth === 0 ? scalar : { kind: "list", items: [host(scalar, depth - 1)] };
             assert.deepEqual(
-              runWith(plan, host(2)),
+              ran(host(2)),
               { status: "halted", says: ["AFTER"], failure: null },
               `${name} with 2`,
             );
             for (const bad of ["bad", 2.5])
               assert.deepEqual(
-                runWith(plan, host(bad)),
+                ran(host(bad)),
                 { status: "failed", says: [], failure: `TSR058@${value}:${end}` },
                 `${name} with ${JSON.stringify(bad)}`,
               );
