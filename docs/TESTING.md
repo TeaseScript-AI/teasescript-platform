@@ -372,6 +372,15 @@ Not covered, each with its reason:
 - what a closure captures (its registration comment, read at review, R26), and what a function the program reaches
   captures, a bound function's values among them (code the program's indexing made);
 - code outside `src/type-inference/`: an owner given to it, its writes and its catches;
+- a prototype set by a `"__proto__"` key from data on an owner, a registered function or a function the program
+  reaches (#1072 R65): no core file writes a key from data to one. Of the 93 computed-key writes this lists in
+  `src/type-inference/` at #2417's head, none has an owner (`this`, or `pass` in `answers.ts`) or a function as its
+  object:
+
+  ```sh
+  rg --pcre2 -g '*.ts' -o '(?<![\w.$\]])[\w$.#]+(?:\[[^\]]*\])*\[[^\]]+\]\s*(=|\?\?=|\|\|=|\+=|-=)(?!=)' src/type-inference
+  ```
+
 - a typed array written and then restored between two comparisons;
 - a private `readonly` field assigned again in its constructor after a run switch inside that constructor (R36);
 - a write within one run; production;
