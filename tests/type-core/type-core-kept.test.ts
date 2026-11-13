@@ -333,7 +333,7 @@ const KEPT_CALLEE = /^(?:kept\w*|#kept)$/;
 
 /** The plain-made texts stored uncharged, by file, member and name: how many stores, and why they need no charge. */
 const STORED: Readonly<Record<string, readonly [number, string]>> = {
-  "admission/decision.ts decisionOf at": [
+  "admission/decision.ts recordDecision at": [
     1,
     "a candidate's path, its decision read once by the consumer and then dropped",
   ],

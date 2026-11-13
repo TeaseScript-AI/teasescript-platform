@@ -295,7 +295,7 @@ export function joinElements(
         const tags = typeTags(decider.term).filter((tag) => tag !== "null");
         return {
           tags,
-          written: true,
+          exact: true,
           typed: true,
           own: tags,
           nullable: typeTags(decider.term).includes("null"),
@@ -310,7 +310,7 @@ export function joinElements(
         const tags = place.tags.filter((tag) => tag !== "null");
         return {
           tags,
-          written: place.byWritten,
+          exact: place.byWritten,
           typed: place.byWritten,
           own: tags,
           nullable: place.byWritten && place.nullable,
@@ -331,7 +331,7 @@ export function joinElements(
       // each of its kinds fits as itself)
       return own.length === 0
         ? null
-        : { tags: own, written: new Set(own.map(family)).size > 1, typed: false, own };
+        : { tags: own, exact: new Set(own.map(family)).size > 1, typed: false, own };
     };
     // (the type a fix writes holds every value the tree's operands bring and every legitimate store of the places
     // they read and it lands in: at each list level down to a path of elements, a place's admitted type, a value's
@@ -475,7 +475,7 @@ export function joinElements(
       // families each fit as itself)
       const own = kinds.has("number") ? [...new Set([...kinds].map(family))] : [...kinds];
       return {
-        decided: { tags: own, written: new Set(own.map(family)).size > 1, typed: false, own },
+        decided: { tags: own, exact: new Set(own.map(family)).size > 1, typed: false, own },
       };
     };
     // (a join's paths: the smaller operand's added to the larger one's, the earlier decider at each)
@@ -603,7 +603,7 @@ export function joinElements(
           const own = decisionOf(theirs, path, at);
           if (own === null || own.decided === "open") continue;
           const kinds = own.decided.own;
-          const { tags, written: exact } = ruled.decided;
+          const { tags, exact } = ruled.decided;
           if (
             (exact ? kinds : kinds.map(family)).some((tag) =>
               tags.some((ref) => fits(tag, ref, exact)),

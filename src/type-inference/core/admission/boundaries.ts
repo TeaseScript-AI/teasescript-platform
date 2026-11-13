@@ -8,7 +8,7 @@ import { withoutEmpty } from "../exact-path.js";
 import type { IngressNode, Item, ItemTag } from "../items.js";
 import type { Obligation, RequiredKind } from "../result.js";
 import { concrete, isExternal } from "./kinds.js";
-import { f18Kinds, landingIndex, leafIngress, typedIngress } from "./landing-index.js";
+import { typedCallKinds, landingIndex, leafIngress, typedIngress } from "./landing-index.js";
 import { elementsBelow } from "./structure.js";
 import { keptKeyAt } from "../contract/key-ids.js";
 
@@ -78,13 +78,14 @@ function resolve(admission: Admission, root: IngressNode): boolean {
         found = index.byIngress.get(ingress);
       }
       if (found !== undefined && found.stores.size > 0)
-        for (const d of found.stores) admission.boundaryAt(d);
+        for (const d of found.stores) boundaryAt(admission, d);
       else if (found?.own === true) boundaryAtRead(admission, ingress!);
       else {
         // (a typed call no store brings is checked where it runs: its own check validates its default's data too)
         const call = covered ? program.opOf.get(ingress!) : undefined;
         frame.unreached =
-          ingress !== null && (call === undefined || f18Admission(admission, call) === null);
+          ingress !== null &&
+          (call === undefined || unstoredTypedCallKinds(admission, call) === null);
       }
     }
     // (a component closes at the node it was entered by: every member's answer is what the component reaches)
@@ -117,7 +118,7 @@ function boundaryAtRead(admission: Admission, value: PlaceId): void {
   admission.readSeen.add(value);
   const operation = admission.pass.program.opOf.get(value);
   // (a typed `load`'s or `fromJson`'s own check is the boundary)
-  if (operation !== undefined && f18Admission(admission, operation) !== null) return;
+  if (operation !== undefined && unstoredTypedCallKinds(admission, operation) !== null) return;
   const site = admission.pass.program.place(value).site;
   if (site === null) return;
   const label = admission.pass.program.textAt(site);
@@ -183,25 +184,25 @@ export function boundariesAt(
   items: readonly Item[],
   here: Obligation | null,
 ): void {
-  for (const item of items) admission.boundaryFor(item, here);
+  for (const item of items) boundaryFor(admission, item, here);
 }
 
 /** A load or `fromJson` with an expected type that no store takes in is checked where it runs, against that type. */
-function f18Admission(
+function unstoredTypedCallKinds(
   admission: Admission,
   c: CorePass["program"]["constraints"][number],
 ): { readonly label: string; readonly tags: readonly ItemTag[] } | null {
   if (!("result" in c) || !typedIngress(c)) return null;
   // (a typed ingress no store brings, an own read or unreached, is checked where it runs)
   const found = landingIndex(admission).byIngress.get(c.result);
-  return found === undefined || found.stores.size === 0 ? f18Kinds(admission, c) : null;
+  return found === undefined || found.stores.size === 0 ? typedCallKinds(admission, c) : null;
 }
 
 /**
  * The checks of loads and `fromJson` calls that no store brings in, where they run. `skip`, after a stop
  * before admission settled: a call whose records a mark stands for (inside a marked store's value), so the landing
  * index `publish` made there, of the stores into written places alone, answers for the rest. Returns
- * the calls whose expected type a stop left open (`f18Open`), each with its label, for the consumers to mark: no
+ * the calls whose expected type a stop left open (`typedCallsOpen`), each with its label, for the consumers to mark: no
  * obligation is declined for a missing answer.
  */
 export function ingressStores(
@@ -211,9 +212,9 @@ export function ingressStores(
   const open: { site: SourceSite; label: string }[] = [];
   for (const c of admission.pass.program.constraints) {
     if (skip !== undefined && "result" in c && typedIngress(c) && skip(c.site)) continue;
-    const found = f18Admission(admission, c);
+    const found = unstoredTypedCallKinds(admission, c);
     if (found === null) {
-      if ("result" in c && admission.f18Open.has(c.result))
+      if ("result" in c && admission.typedCallsOpen.has(c.result))
         open.push({ site: c.site, label: `${c.kind === "load" ? "load" : "fromJson"}.result` });
       continue;
     }
@@ -307,7 +308,7 @@ export function publish(admission: Admission, written = false): void {
     // one)
     const typedIngress = stops.some((stop) => {
       const operation = program.opOf.get(stop.ingress);
-      return operation !== undefined && f18Kinds(admission, operation) !== null;
+      return operation !== undefined && typedCallKinds(admission, operation) !== null;
     });
     const typed =
       d.kind === "whole" &&
@@ -389,19 +390,18 @@ export const OBLIGATION_SITES = [
   {
     method: "decide",
     runs: "admittedStores",
-    published: "C1 against a written type at a store's path (A1)",
+    published: "a store check against the written type at a store's path",
     undecided: "a store into an inferred place, marked (storeMark)",
-    declined: "an unrestricted destination; a multi-site argument decides nothing (F21)",
+    declined: "an unrestricted destination; a multi-site argument, which decides nothing",
   },
   {
     method: "literalElements",
     runs: "literalElements",
-    published:
-      "a mixed element's TSV044 where its elements' own kinds decide it (ADR 0021 1.3, A8)",
+    published: "a mixed element's TSV044 where its elements' own kinds decide it (ADR 0021 1.3)",
     undecided:
       "a named element, one source identity's too (its test comes first): every definition holding its literal, or the literal, marked (markHolder)",
     declined:
-      "elements of one source identity, in a settled pass; a literal landing in a written place, which C1 checks",
+      "elements of one source identity, in a settled pass; a literal landing in a written place, which its store check covers",
   },
   {
     method: "joinElements",
@@ -411,19 +411,19 @@ export const OBLIGATION_SITES = [
     undecided:
       "a join with an operand that reads a place (a variable, a property, a call's result, a `+=`'s target) or holds a source: every definition holding it, or the join, marked (#markValue)",
     declined:
-      "a join of values that are no lists; a join landing in a written place that holds both, which C1 checks (A1)",
+      "a join of values that are no lists; a join landing in a written place that holds both, which its store check covers",
   },
   {
     method: "boundaryAtRead",
     runs: "the walk",
-    published: "an own read's boundary (C9)",
+    published: "an own read's boundary check of external data",
     undecided: "none: ingress is structural",
     declined: "none",
   },
   {
     method: "boundaryFor",
     runs: "the walk",
-    published: "an item's ingress boundary (C9)",
+    published: "an item's ingress boundary check",
     undecided: "none: ingress is structural",
     declined: "an ingress the store owns (`ownIngress`)",
   },
@@ -431,7 +431,7 @@ export const OBLIGATION_SITES = [
     method: "ingressStores",
     runs: "ingressStores",
     published:
-      "a typed call's own boundary no store takes in, its type its syntax's or its default's (F18)",
+      "a typed `load`'s or `fromJson`'s own boundary no store takes in, its type its syntax's or its default's",
     undecided:
       "a typed call whose default the finishing read leaves STOPPED: returned, the consumers mark it (ingressMark)",
     declined: "a typed call no type reaches: the runtime's validation alone",
@@ -439,7 +439,7 @@ export const OBLIGATION_SITES = [
   {
     method: "publish",
     runs: "publish",
-    published: "an ingress store's boundary against a written destination (C9, S6-CARRIERS §3.3)",
+    published: "an ingress store's boundary against a written destination",
     undecided: "an ingress store into an inferred place, marked (storeMark)",
     declined: "an unrestricted destination (V30 §13)",
   },
