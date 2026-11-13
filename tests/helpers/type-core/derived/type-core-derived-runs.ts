@@ -54,6 +54,7 @@ import {
 } from "./type-core-derived.js";
 import { fitsType, jsonValue, readJson, shown } from "./type-core-derived-values.js";
 import { askEnd } from "./derived-asks.js";
+import { Break, Continue, round, runSwitch, runWhile } from "./derived-loops.js";
 
 // ------------------------------------------------------------------------------------------------- the evaluator
 
@@ -705,8 +706,8 @@ export function evaluate(
           count.from,
           fits,
         );
-        for (let round = 0; round < (fits ? Number(count.v) : 0); round += 1)
-          run(statement.body.statements);
+        for (let rounds = 0; rounds < (fits ? Number(count.v) : 0); rounds += 1)
+          if (!round(run, statement.body.statements)) break;
       } else if (statement.kind === "ifStatement") {
         // (a literal, or a test whose value the run knows: a type test, a null test)
         const condition = value(statement.condition).v;
@@ -759,9 +760,15 @@ export function evaluate(
               v: structuredClone(entry),
               from: source.from,
             });
-          run(statement.body.statements);
+          if (!round(run, statement.body.statements)) break;
         }
-      } else if (statement.kind === "expressionStatement") value(statement.expression);
+      } else if (statement.kind === "whileStatement")
+        runWhile(statement, run, (expression) => value(expression).v);
+      else if (statement.kind === "switchStatement")
+        runSwitch(statement, run, (expression) => value(expression).v);
+      else if (statement.kind === "breakStatement") throw new Break();
+      else if (statement.kind === "continueStatement") throw new Continue();
+      else if (statement.kind === "expressionStatement") value(statement.expression);
       else if (statement.kind === "sayStatement") {
         const text = value(statement.value);
         said.push({
