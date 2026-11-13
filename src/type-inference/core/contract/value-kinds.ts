@@ -318,9 +318,8 @@ function* valueAt(
     }
     if (route === "opaque") return [unknownItem(REASON.opaque)];
     const operation = program.opOf.get(value)!;
-    // a choice's, a fallback's or a `get`'s answer at a path once per value and path, whatever asks. A choice's:
-    // the key's contract and the conflict-candidate test of the choice's own entry read it alike, as
-    // `contractOfValue` reads an operation. A fallback's or a `get`'s, as its root's: each composes its operands'
+    // a choice's, a fallback's or a `get`'s answer at a path once per value and path, whatever asks. A fallback's or a
+    // `get`'s, as its root's: each composes its operands'
     // answers at that path, so a chain of them read below its root by k consumers (a fallback's check descending
     // into a nullable collection's element) walks each link once, never the chain before it again per reader (#1824)
     if (route === "choice" || route === "composite") {
@@ -620,8 +619,7 @@ function belowObject(written: TypeTerm, rest: readonly string[]): boolean {
 
 /**
  * The kinds a `load` or `fromJson` takes from its default at `rest` (`typedDefault`): the default's value at its call's
- * snapshot, as the value side reads it there (`Values.defaultKinds`), never the settled type of
- * a place it reads, so the call's contract and its answer agree.
+ * snapshot, never the settled type of a place it reads, so the call's contract and its answer agree.
  */
 export function* defaultKinds(
   contract: Contract,
@@ -644,10 +642,10 @@ export function* defaultKinds(
 }
 
 /**
- * `defaultKinds`' run: the default's written type where its syntax gives one (`writtenDefault`, as the value
- * side's `Values.defaultKinds` reads it first); else literal data by its contract; a default that reads a variable
- * or computes as the value side reads it at its call's snapshot (`FlowGraph.snapshotOf`), its marks, narrowing, copies
- * and stops included, never the settled type of a place it reads, so the call's contract and its answer agree.
+ * `defaultKinds`' run: the default's written type where its syntax gives one (`writtenDefault`); else literal data by
+ * its contract; a default that reads a variable or computes, read at its call's snapshot (`FlowGraph.snapshotOf`), its
+ * marks, narrowing, copies and stops included, never the settled type of a place it reads, so the call's contract and
+ * its answer agree.
  */
 function* snapshotKinds(
   contract: Contract,

@@ -67,7 +67,7 @@ function* belowRead(contract: Contract, read: PlaceId, below: Steps): Work<reado
  * A wide gather (`GatherSite`): a site's contributions [lo, hi) (on the value side a literal's exact entries, its
  * copies past an element step or its computed values' groups at `path`, or a selection's objects; on the contract side
  * its reads, its computed values' groups, or a selection's closed objects, `absent`), read at `rest` and merged by kind
- * (`mergeItems`, as every caller's merge takes them anyway, in their order), as a balanced tree of demands: where the
+ * (`mergeItems`, in their order), as a balanced tree of demands: where the
  * contributions' answers change one by one (a component of a loop's preserving stores reading them), a change re-runs
  * only the nodes above it, never the whole gather.
  */

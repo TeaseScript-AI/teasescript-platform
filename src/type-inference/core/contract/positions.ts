@@ -154,7 +154,7 @@ function* advance(
       : null;
   if (from === null || (!from.hopped && hop === null))
     return { items: yield* own(flow), proof: UNPOSITIONED };
-  // as `receiverWalk` decides: the owner's receiver holds no reference, and a structure, as every one above it did
+  // the owner's receiver holds no reference, and a structure, as every one above it did
   const receiver =
     "key" in owner
       ? // #1668: a receiver decision

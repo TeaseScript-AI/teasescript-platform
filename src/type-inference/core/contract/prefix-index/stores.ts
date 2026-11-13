@@ -56,8 +56,7 @@ function ringStop(contract: Contract, place: PlaceId): boolean {
 /**
  * The cycle of whole copies `place` is a port of, or `null`: Tarjan's components over the copies `copiedRoot` follows,
  * from `place` over the places they reach, on an explicit stack, each place once per pass (one reached in an earlier
- * walk is in a finished component). A component of links alone, each copying the next, holds no stop: no cycle here,
- * `prefixWork` cuts it at its open member (`PrefixStores.cut`).
+ * walk is in a finished component). A component of links alone, each copying the next, holds no stop: no cycle here.
  */
 function ringOf(contract: Contract, place: PlaceId): CopyRing | null {
   const known = contract.rings.get(place);
