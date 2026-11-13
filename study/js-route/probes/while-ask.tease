@@ -1,0 +1,11 @@
+// A loop whose condition asks the player: each round asks again (an ask is an instruction before the condition).
+let n = 0
+while askBoolean "Again?", noText: "No" {
+  n += 1
+  say "round ${n}", instant
+  if n >= 3 {
+    break
+  }
+}
+say "done ${n}", instant
+exit
