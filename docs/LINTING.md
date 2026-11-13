@@ -161,10 +161,15 @@ declaration, however it is spelled (#1072 Amendment 4). Its other lines:
 - a `Retained.closure` registration stands right below its comment naming what the function captures (#1072 R26);
 - a `catch` handles only type inference's own errors, and a `finally` completes normally (#1072 R60). Each `instanceof`
   test of a `catch` binding names a class declared under `src/type-inference/` that extends `Error` directly. The block
-  ends in `throw <binding>`, or returns, breaks, continues or throws another error only inside such a test's consequent
-  or after a top-level guard `if (!(<binding> instanceof C …)) throw <binding>;`. A `finally` holds no `yield`,
-  `return`, `break`, `continue` or `throw`. The solver's step catch and the budget's forward their error, as `yield*`
-  does, and are listed by name. So V8's error at a write to frozen data is never handled in type inference.
+  ends in `throw <binding>`, or returns, yields, breaks, continues or throws another error only inside such a test's
+  consequent or after a top-level guard `if (!(<binding> instanceof C …)) throw <binding>;` (#1072 R67: a consumer that
+  stops at a `yield` closes the generator before its rethrow). A `finally` holds no `yield`, `return`, `break`,
+  `continue` or `throw`. The solver's step catch and the budget's forward their error, as `yield*` does, and are listed
+  by name. So V8's error at a write to frozen data is never handled in type inference while it leaves as the pending
+  error; a later error can replace it, which no line here sees (R68; docs/TESTING.md, "Frozen retained state", what is
+  not covered). The instrument's own refusals are counted where they are raised;
+- an `accessor` field is refused (#1072 R67): its value sits in a private slot that neither the private-field line nor
+  the instrument's lock of an owner sees.
 
 What these reach (a descriptor, a prototype, an integrity level, a deletion) could change a locked owner's field or a
 retained collection's writer unseen by the instrument, or make a frozen run compute what production does not. Only

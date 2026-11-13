@@ -30,7 +30,7 @@ import { Project, ts } from "ts-morph";
  * Every file of the type core is checked, a new one too, unless `TOP_LEVEL` names it (its top level alone is checked)
  * or `OUTSIDE` does, each with its reason; the reasons match the instrument's domain.
  *
- * Three more lines hold what the instrument's guarantee leans on, in every file of `src/type-inference/` but the
+ * Four more lines hold what the instrument's guarantee leans on, in every file of `src/type-inference/` but the
  * retained API's own, which is its trusted implementation:
  * - the meta-object layer is closed (#1072 R30, R34): a property changes only by assignment or by a kind's own method.
  *   `Object` stands only as `Object.freeze`, `hasOwn`, `keys`, `values`, `entries`, `fromEntries`, `assign` or `is`;
@@ -40,10 +40,12 @@ import { Project, ts } from "ts-morph";
  *   integrity level, a deletion) could change a locked owner's field or a kind's writer unseen;
  * - a `catch` handles only the errors of type inference's own classes (#1072 R55, R60): each `instanceof` test of its
  *   binding names a class declared under `src/type-inference/` that extends `Error` directly, and the `catch` either
- *   ends in `throw <binding>` with every earlier exit under such a test, or holds a top-level guard
- *   `if (!(<binding> instanceof C) …) throw <binding>` before any exit; a `finally` holds no `yield`, `return`,
- *   `break`, `continue` or `throw`. So a refusal (the instrument's, or V8's at a write to frozen data) is never handled
- *   in type inference. The two catches that forward an error as `yield*` does are listed (`FORWARDERS`);
+ *   ends in `throw <binding>` with every earlier exit (a `yield` among them, R67) under such a test, or holds a
+ *   top-level guard `if (!(<binding> instanceof C) …) throw <binding>` before any exit; a `finally` holds no `yield`,
+ *   `return`, `break`, `continue` or `throw`. So a refusal is never handled in type inference: the instrument's, and
+ *   V8's at a write to frozen data while it leaves as the pending error (R68: a later error can replace it, which this
+ *   does not see). The two catches that forward an error as `yield*` does are listed (`FORWARDERS`);
+ * - an `accessor` field is refused (R67): its value sits in a private slot the private-field line does not read;
  * - a `Retained.closure` registration (and in the test helpers too) stands right below its comment, which names what
  *   the function captures (`#1072 R26: captures …`, or `#1072 R26: as …` for one capturing as a named neighbour does):
  *   the instrument does not see the captures, and that comment is what review reads (#1072 R26).
@@ -280,6 +282,16 @@ function guardLines(program, checker, source, file, level) {
         const refused = catchRefusal(program, checker, source, file, node);
         if (refused !== null) found.push({ node, message: `${refused}: ${CAUGHT} (#1072 R60)` });
       }
+      if (
+        ts.isPropertyDeclaration(node) &&
+        node.modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AccessorKeyword)
+      )
+        found.push({
+          node,
+          message:
+            "an `accessor` field keeps its value in a private slot that neither the private-field line nor the " +
+            "instrument's lock of an owner sees: declare a field, or a private field that line reads (#1072 R67)",
+        });
       if (ts.isTryStatement(node) && node.finallyBlock !== undefined) {
         const exit = abrupt(node.finallyBlock, true)[0];
         if (exit !== undefined)
@@ -354,7 +366,9 @@ function abrupt(block, all, binding = null) {
   const exits = [];
   const visit = (node, loops, labels) => {
     if (ts.isFunctionLike(node) || ts.isClassLike(node)) return;
-    if (ts.isReturnStatement(node) || (all && ts.isYieldExpression(node))) exits.push(node);
+    // (a `yield` is an exit in a `catch` as in a `finally`: a consumer that stops there closes the generator, and the
+    // `catch`'s rethrow never runs; #1072 R67)
+    if (ts.isReturnStatement(node) || ts.isYieldExpression(node)) exits.push(node);
     else if (ts.isThrowStatement(node)) {
       if (all || !(ts.isIdentifier(node.expression) && node.expression.text === binding))
         exits.push(node);

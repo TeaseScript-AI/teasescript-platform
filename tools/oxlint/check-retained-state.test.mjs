@@ -306,6 +306,8 @@ test("a `catch` handles only type inference's own errors, and a `finally` comple
     "function f() { try { work(); } catch (error) { if (error instanceof Error) throw new Stop(); throw error; } }",
     "function f() { try { work(); } catch (error) { if (ready()) return; if (!(error instanceof Stop)) throw error; } }",
     "function f() { try { work(); } catch (error) { throw new Stop(); } }",
+    // (the final review's witness, R67: a consumer that stops at the `yield` closes the generator before the rethrow)
+    "function* f() { try { work(); yield 1; } catch (error) { yield -1; throw error; } }",
     // (the design check's other witness: a pending error replaced by a generator's `finally`)
     "function* f() { try { work(); } finally { yield 0; } }",
     "function f() { try { work(); } finally { return; } }",
@@ -326,6 +328,7 @@ test("a `catch` handles only type inference's own errors, and a `finally` comple
     "function f() { try { work(); } catch (error) { cleanup(); throw error; } }",
     "function f() { try { work(); } catch (error) { for (const each of [1]) { if (each) break; } throw error; } }",
     "function f() { try { work(); } finally { cleanup(); } }",
+    "function* f() { try { work(); } catch (error) { if (error instanceof Stop) { yield -1; return; } throw error; } }",
     "function f() { try { work(); } finally { for (const each of [1]) { if (each) break; } } }",
   ];
   const files = [...refused, ...passed].map((form, index) => ({
@@ -403,5 +406,20 @@ test("a module the compiler reaches only through another module is read (#1072 R
   assert.deepEqual(
     found.map(({ fileName, line }) => `${fileName}:${line}`),
     ["src/type-inference/core/scratch-missed.mts:1"],
+  );
+});
+
+test("an `accessor` field, whose value sits in a slot no line reads, is refused in type inference (#1072 R67)", () => {
+  assertMarked(
+    [
+      "class Counted {",
+      "  accessor count = 0; // refused",
+      "  closed = 0;",
+      "  static accessor shared = 0; // refused",
+      "  public constructor() {",
+      "    Retained.owner(this, 'Counted', null);",
+      "  }",
+      "}",
+    ].join("\n"),
   );
 });

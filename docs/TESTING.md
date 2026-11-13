@@ -353,10 +353,11 @@ Covered, each closed by construction:
   - a record, an arena or an array: a copy of the given top level (`retainedCopy`) that the instrument wraps;
   - a map, set, weak map or weak set: its own writers.
 - **The plain data a covered kind reaches.** It is frozen at the switch. V8's `TypeError` at a write to plain data
-  frozen at the switch is a refusal, as is one at a write to what a registration freezes: the `catch` and `finally` rule
-  keeps it from being handled in
-  `src/type-inference/` (docs/LINTING.md, "Retained state in type inference"), and the compiler's own catches outside
-  take only native stack exhaustion.
+  frozen at the switch, to what a registration freezes or to a locked owner field is a refusal while it leaves the core
+  as the pending error: the `catch` and `finally` rule keeps it from being handled in `src/type-inference/`
+  (docs/LINTING.md, "Retained state in type inference"), and the compiler's own catches outside take only native stack
+  exhaustion. It is not counted where it is raised, so a later error can replace it (#1072 R68, below). The
+  instrument's own refusals are counted where they are raised, and are not affected.
 - **An owner's fields:** locked at its first switch and opened by marks. Its private fields are reached through
   `hidden`.
 - **A registered program:** what it reaches is frozen, its maps and sets refuse writes, its typed arrays are compared
@@ -372,9 +373,16 @@ Not covered, each with its reason:
 - what a closure captures (its registration comment, read at review, R26), and what a function the program reaches
   captures, a bound function's values among them (code the program's indexing made);
 - code outside `src/type-inference/`: an owner given to it, its writes and its catches;
+- V8's `TypeError` at such a write when a later error replaces it before it leaves the core (#1072 R68):
+  - a generator closed by a loop whose body throws, whose `finally` makes the write (the engine drops an error raised
+    while it closes a generator);
+  - a `finally` whose call throws after the write.
+
+  No generator `finally` in the core writes retained state today: the six are `core/values.ts:329` and `:964`,
+  `core/contract/value-kinds.ts:244` and `:374`, `core/contract-descriptors.ts:299` and `core/budget.ts:392`;
 - a prototype set by a `"__proto__"` key from data on an owner, a registered function or a function the program
-  reaches (#1072 R65): no core file writes a key from data to one. Of the 93 computed-key writes this lists in
-  `src/type-inference/` at #2417's head, none has an owner (`this`, or `pass` in `answers.ts`) or a function as its
+  reaches (#1072 R65): no core file writes a key from data to one. Of the 93 lines this lists in `src/type-inference/`
+  at #2417's head, 88 of them writes, none has an owner (`this`, or `pass` in `answers.ts`) or a function as its
   object:
 
   ```sh
