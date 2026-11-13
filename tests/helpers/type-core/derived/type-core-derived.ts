@@ -129,6 +129,9 @@ export function allStatements(statements: readonly Statement[]): Statement[] {
         ...statement.cases.flatMap((switchCase) => allStatements(switchCase.body.statements)),
         ...allStatements(statement.defaultBlock?.statements ?? []),
       ];
+    // (a function's body, where it is declared: its stores are the plan's as any other, `derived-functions.ts`)
+    if (statement.kind === "functionDeclaration")
+      return [statement, ...allStatements(statement.body.statements)];
     if (statement.kind === "ifStatement") {
       return [
         statement,
@@ -382,6 +385,11 @@ export function expressions(statements: readonly Statement[]): Expression[] {
       for (const switchCase of statement.cases) switchCase.values.forEach(walk);
     } else if (statement.kind === "gotoStatement" && statement.target.kind === "scriptTarget")
       walk(statement.target.expression);
+    else if (statement.kind === "returnStatement" && statement.value !== null)
+      walk(statement.value);
+    else if (statement.kind === "functionDeclaration")
+      for (const parameter of statement.parameters)
+        if (parameter.defaultValue !== null) walk(parameter.defaultValue);
   }
   return out;
 }
