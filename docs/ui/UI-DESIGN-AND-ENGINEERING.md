@@ -247,10 +247,10 @@ tablet, laptop, desktop, TV, and ultrawide shapes are useful test cases, but the
 the same constraints produce the same layout. CSS `orientation` describes whether the viewport is wider than it is tall;
 it does not require or imply a physical orientation sensor.
 
-Phones are portrait only. The owner's words: "A landscape screen is unrealistic; make it only for portrait mode on
-phones. A landscape screen can only occur on tablets, desktops and laptops; a phone is always portrait." A phone-sized
-landscape viewport is no test case or layout target; tablet, laptop and desktop landscape sizes stay. Owner decision,
-2026-11-13.
+Phones are portrait only. The owner's words, translated: "A landscape screen is unrealistic; make it only for portrait
+mode on phones. A landscape screen can only occur on tablets, desktops and laptops; a phone is always portrait." A
+phone-sized landscape viewport is no test case or layout target; tablet, laptop and desktop landscape sizes stay. Owner
+decision, 2026-11-13.
 
 When optional side regions compete with primary content, include their current intrinsic/preferred reservations in the
 fit decision. An outer viewport breakpoint alone cannot tell whether one open side panel fits while several do not.

@@ -211,12 +211,12 @@ not limits:
 line or adding to one already over, and a file's only when the change grows it; CI prints that list on every pull
 request (`docs/TESTING.md`).
 
-A split is step 1 of 2. The owner's words: "a split is step 1 of 2; simplifying for clarity is required, not optional.
-The 1,000-line and 150-line counters are signals that code needs a look, never goals; getting a file under a counter is
-not the result." The owner's reason: builders made bugs because names promised more than the functions did and comments
-made promises the code did not keep. Step 2 asks of each split whether every name, comment and interface tells the truth
-about what the code does and guards, and whether the wiring is simpler than before. The measure is the architecture
-review, not a counter: a counter is a signal only. Owner decisions, 2026-11-13.
+A split is step 1 of 2. The owner's rule, as relayed: "a split is step 1 of 2; simplifying for clarity is required, not
+optional. The 1,000-line and 150-line counters are signals that code needs a look, never goals; getting a file under a
+counter is not the result." The owner's reason: builders made bugs because names promised more than the functions did
+and comments made promises the code did not keep. Step 2 asks of each split whether every name, comment and interface
+tells the truth about what the code does and guards, and whether the wiring is simpler than before. The measure is the
+architecture review, not a counter: a counter is a signal only. Owner decisions, 2026-11-13.
 
 Moving or splitting files is its own pull request on the light route. It changes no behavior, and its build output is
 byte-identical where the build allows it. Step 2, simplifying what the split shows, follows.
