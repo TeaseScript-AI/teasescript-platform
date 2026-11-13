@@ -372,15 +372,16 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
       }
     }
   // a command's or an ask's operand that may hold a value its instruction does not take (`COMMAND_OPERANDS`, #2488's
-  // step 1½): the core has no consumer of its own at a command operand, so the analysis never judges the operand against
-  // its instruction, and the table reads no kind for an outside value carried there nor a narrowing; the table keeps
-  // such an operand off the route. Last, after the values' own refusals
+  // step 1½): no consumer of the core judges a command operand against the kinds its instruction takes (its choice
+  // check reads only what a choice's buttons return), and the table reads no kind for an outside value carried there
+  // nor a narrowing; the table keeps such an operand off the route. Last, after the values' own refusals
   for (const node of [...index.statements, ...index.asks]) {
     const rules = operandRules(node.kind);
     if (rules === undefined) continue;
     for (const [position, operand] of commandOperands(node)) {
       const rule = rules[position];
-      // (a position the table has no rule for is outside: none is reached while the table names every position)
+      // (a position the table has no rule for is outside: on the route, only `askForm`'s and `askBooleans`', asks the
+      // syntax table refuses first)
       if (rule === undefined || !operandAdmitted(answers, index, operand, rule))
         return {
           file: index.fileOf(operand),
@@ -532,7 +533,8 @@ function operandAdmitted(
     const reasons = item.reasons & ~REASON.missing;
     if (reasons === 0) return true;
     // (an opaque, deferred or stopped unknown: none reaches an operand inside the slice, as speakers are refused by
-    // the name rule, parameters by the function row and a budget stop by its gate; a test fails when one does)
+    // the name rule, parameters by the function row and a budget stop by its gate; the declared positions' tripwire
+    // test fails when one of its sources holds one)
     if (reasons !== REASON.external) return false;
     if (admitted !== null)
       return (
