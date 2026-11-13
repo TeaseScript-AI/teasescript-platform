@@ -731,7 +731,8 @@ export const DECLARED_REFUSALS: readonly {
       text: "a check that no store takes",
     };
   }),
-  // (an ask's prefill written as a literal the request does not take as written, and one that is only `null`)
+  // (an ask's prefill written as a literal the request does not take as written, one that is only `null`, and text at
+  // an ask of another kind, which the runtime takes as none where it is blank)
   ...samples()
     .filter(
       (sample) =>
@@ -740,7 +741,10 @@ export const DECLARED_REFUSALS: readonly {
         ((sample.origin === "literal" &&
           SCALAR_LITERALS.includes(sample.kind) &&
           !PREFILL_LITERALS[sample.operand]!.includes(sample.kind)) ||
-          (sample.origin === "ingress" && sample.kind === "null")),
+          (sample.origin === "ingress" && sample.kind === "null") ||
+          (sample.origin === "ingress" &&
+            sample.kind === "string" &&
+            sample.operand !== "askText.prefill")),
     )
     .map((sample) => ({
       row: "interactionExpression" as const,

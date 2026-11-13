@@ -49,7 +49,8 @@ import {
  * and a parse, with C9's boundary check where it enters (the store's destination's admitted type) or where it is read.
  * Rejected after the analysis: any other consumer's diagnostic, a property read of a value that may be no object, a
  * value `say` may not show, a built-in speaker field's value that may not fit it (`SPEAKER_FIELD_KINDS`), an
- * `askChoice` whose buttons may return more than one type, a prefill that is only `null`, an argument
+ * `askChoice` whose buttons may return more than one type, a prefill that is only `null` or may be text at an ask
+ * of another kind, an argument
  * of another kind than a built-in function takes (the built-in signature check C13, S9b), and lists nested
  * `SLICE_DEPTH` deep. A possible `null` is the route rule's (AD-1): a compile error where a route to the use has no
  * check, else a warning whose use the runtime checks.
@@ -349,17 +350,21 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
       )
     )
       return { file: index.fileOf(ask), span: ask.span, what: "this ask" };
-    // a prefill that is only `null`, which the runtime takes as none, of an ask but `askChoice` (V30 §20: a known `null`
-    // is today's TSV039; the row refuses the literal, `askPrefillAdmitted`)
+    // a prefill, of an ask but `askChoice`, that is only `null`, or that may be text at an ask of another kind: the
+    // runtime takes `null` and blank text as none (V30 §20), where today's checker gives TSV039 for a known `null` and
+    // for text there; the core's kinds do not tell blank text from other text (the row refuses the literals,
+    // `askPrefillAdmitted`)
     const prefill = askPrefill(ask);
     if (prefill === null || ask.interactionKind === "choice") continue;
+    const refused = (tags: readonly string[]): boolean =>
+      nullOnly(tags) || (ask.interactionKind !== "text" && tags.includes("string"));
     // (its value's kinds, or, for a read of a place whose admitted type is decided, that type's: a typed ingress's read
     // is unknown, with its check at the ingress)
     const read = answers.at(nodeOf(answers, index, prefill))?.place ?? null;
     const admitted = read === null ? null : answers.place(read.id, read.path).admitted;
     if (
-      nullOnly(kindsAt(prefill)) ||
-      (admitted !== null && admitted.by !== "undecided" && nullOnly(admitted.kinds))
+      refused(kindsAt(prefill)) ||
+      (admitted !== null && admitted.by !== "undecided" && refused(admitted.kinds))
     )
       return { file: index.fileOf(ask), span: prefill.span, what: "this prefill" };
   }
