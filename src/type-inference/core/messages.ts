@@ -46,7 +46,7 @@ import { inWords, type Diagnosed } from "./messages/code-forms.js";
 import { errorSentence, writtenTypeMessage } from "./messages/errors.js";
 import { budgetMessage, warningFix, warningSentence } from "./messages/warnings.js";
 import { contextSentence, originSentence, requiredSentence } from "./messages/causes.js";
-import { unusedFallbackMessage } from "./consumers/otherwise.js";
+import { unusedFallbackMessage } from "./check-result/otherwise.js";
 export type { Landing, MessageSource } from "./messages/site.js";
 export { described, pathPhrase } from "./messages/words.js";
 

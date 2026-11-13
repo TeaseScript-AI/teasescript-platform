@@ -7,7 +7,7 @@ import { ROUND_COUNT_FIX } from "../../../loop-rules.js";
 import { JOIN_FIX } from "../../../shown-text-rules.js";
 import { PERSON_FIELDS, PLAYER } from "../../../speaker-terms.js";
 import { hasIdentity, VALUE_KINDS } from "../../../value-kinds.js";
-import { originOf } from "../consumers/origins.js";
+import { originOf } from "../consumers/reports/origins.js";
 import { REFERENCE } from "../contract.js";
 import type { ContextWord, ItemTag } from "../items.js";
 import type {

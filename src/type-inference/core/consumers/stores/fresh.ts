@@ -1,16 +1,16 @@
-import type { PlaceId, SourceSite } from "../../graph.js";
-import { joinSteps } from "../budget.js";
-import type { Consumers } from "../consumers.js";
-import { termAt, writtenOf } from "../contract.js";
-import { keyOf, type Definition } from "../definitions.js";
-import { STOPPED } from "../items.js";
-import { pathPhrase } from "../messages.js";
-import { Laminar } from "../narrowing/laminar.js";
-import { siteKey } from "../program.js";
-import { targetName, type StoreRoot, type StoreStep } from "../result.js";
+import type { PlaceId, SourceSite } from "../../../graph.js";
+import { joinSteps } from "../../budget.js";
+import type { Consumers } from "../../consumers.js";
+import { termAt, writtenOf } from "../../contract.js";
+import { keyOf, type Definition } from "../../definitions.js";
+import { STOPPED } from "../../items.js";
+import { pathPhrase } from "../../messages.js";
+import { Laminar } from "../../narrowing/laminar.js";
+import { siteKey } from "../../program.js";
+import { targetName, type StoreRoot, type StoreStep } from "../../result.js";
 import { mixed, mixedJoin } from "./mixed.js";
 import { admittedStores } from "./stores.js";
-import { placeText, storeRoot, storeSteps, storeWarning } from "./warnings.js";
+import { placeText, storeRoot, storeSteps, storeWarning } from "../reports/warnings.js";
 
 // The fresh pass: the stores' obligations where admission had not settled, and the marks it leaves.
 
