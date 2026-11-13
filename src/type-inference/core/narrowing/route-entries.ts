@@ -531,6 +531,8 @@ export abstract class RouteEntries extends RouteCandidates {
     const made: Jump[] = [];
     for (const [body, known] of each(this.#work, "eventSteps", stretches)) {
       const jumps = byBody.get(body)!;
+      // (the merge needs the stretches by start, which this sort gives whatever order the lists come in: |L| log |L|
+      // charged, once per list, name and `calls`, never per key)
       sorted(this.#work, "eventSteps", known, (a, b) => a.from - b.from);
       let low = 0;
       for (const { from, to } of each(this.#work, "eventSteps", known)) {

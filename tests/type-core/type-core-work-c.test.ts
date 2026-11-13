@@ -28,6 +28,7 @@ import {
   ROUTE_ENTRY_COMPUTED_TRANSFERS,
   ROUTE_ENTRY_FAMILIES,
   ROUTE_ENTRY_PRODUCTS,
+  ROUTE_ENTRY_SIBLING_STORES,
   ROUTE_FEASIBILITY_FAMILIES,
 } from "../helpers/type-core/families/narrowing.js";
 import { type WorkFamily } from "../helpers/type-core/families/builders.js";
@@ -330,11 +331,12 @@ test("the jump index scans no file for a computed transfer (#2497)", () => {
 
 /**
  * The route rule's entries over many keys (`ROUTE_ENTRY_PRODUCTS`): a known product (docs/RESOURCE-LIMITS.md, "Accepted
- * work products under the allowance"), a regression check on the 64 → 128 step only, at its measured doubling.
+ * work products under the allowance"), a regression check on the 64 → 128 step only, at its measured doubling; and
+ * the program default's sorted stretches over sibling stores (`ROUTE_ENTRY_SIBLING_STORES`, R60), gated the same way.
  */
 test("the route rule's entries over many keys grow at most as measured (#2497)", () => {
   const steep: string[] = [];
-  for (const family of ROUTE_ENTRY_PRODUCTS) {
+  for (const family of [...ROUTE_ENTRY_PRODUCTS, ROUTE_ENTRY_SIBLING_STORES]) {
     const [at64, at128] = [sized(family, 64), sized(family, 128)];
     for (const reversed of [false, true]) {
       const small = analysed(at64, reversed).budget;

@@ -755,6 +755,31 @@ export const ROUTE_ENTRY_FAMILIES: readonly WorkFamily[] = [
 ];
 
 /**
+ * Under the program default (R2.2), k compound statements each storing `null` in one scalar, then one loop reading it:
+ * the jumps the scalar's k stores hold are found once (`RouteEntries.#held`), their stretches sorted by start, |L| log |L|
+ * charged once per list and name (R60). Main's own work on this shape grows faster per counter than the entry gate
+ * allows (its definitions' parent stack, `parentStackSteps`, the same on main), so the total is gated alone, at its
+ * measured 64 → 128 step.
+ */
+export const ROUTE_ENTRY_SIBLING_STORES: KnownProduct = {
+  name: "E-default-sibling-stores",
+  measures:
+    "N3 under the program default (R2.2): k compound statements each storing `null` in one scalar, then one loop reading it",
+  program: (k) =>
+    main(
+      lines(
+        "let token = 1",
+        'if token == null { say "absent" }',
+        "let n: integer? = 1",
+        rows(k, () => "if true { n = null }"),
+        "repeat 2 { let value: integer = n }",
+        "exit",
+      ),
+    ),
+  measured: 2.07,
+};
+
+/**
  * The route rule's jump index over k files each left by a computed `goto script(...)` (#2497, r4-451's give-up: such a
  * transfer enters no file). The program's flow already grows as files × transfers here, a computed transfer having an
  * edge to every file, so the family is gated on the index's own counter, never on the total.
