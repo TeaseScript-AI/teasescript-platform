@@ -10,7 +10,7 @@ import { inMode, MODES } from "../helpers/type-core-oracles.js";
 
 // #2378 R43, R49, R50: a dict's `values` and `keys` are a new list of copies each time they are read (V30, ADR 0014),
 // so a store into or below such a list goes into nothing. A statement that stores there answers as its deletion twin:
-// the same program with the statement replaced, on its own line, by `let zN = <its operands>`. What the operation
+// the same program with the statement replaced, on its own line, by `let z1 = <its operands>` (`z2` for a second statement). What the operation
 // itself requires of what it reads (an emptiness check, a kind it can order, a compound store's read) stays, judged on
 // the list the dict gives.
 
@@ -159,7 +159,7 @@ function placed(context: string, dict: string, lines: readonly string[]): string
  * The comparison of a program with its deletion twin: at the statement's own line a diagnostic's sentence quotes the
  * statement (`+=` against the twin's `+`, and a compound store's fix clause, R51), so there its code, class and line
  * are compared, and a statement that stores nothing keeps what it requires there (R50); a twin's diagnostic about its
- * own binding `zN` (a copy where its operands are, the twin's form) is not the program's.
+ * own binding `z1` or `z2` (a copy where its operands are, the twin's form) is not the program's.
  */
 function comparable(
   program: Answer,
@@ -186,7 +186,7 @@ function comparable(
   return [view(program), view(twin)];
 }
 
-test("a statement that changes a list a dict's `values` or `keys` gives in place answers as its deletion twin, alone, twice, before a statement that reads the list, and in a function on a parameter (#2378 R43, R50)", () => {
+test("a statement that changes a list a dict's `values` or `keys` gives in place answers as its deletion twin, alone, twice, before a statement that reads the list, and in a function on a parameter (#2378)", () => {
   let pairs = 0;
   for (const type of Object.keys(TYPES))
     for (const kind of ["call", "variable", "call host", "variable host"]) {
@@ -236,7 +236,7 @@ test("a statement that changes a list a dict's `values` or `keys` gives in place
   assert.equal(pairs, 816);
 });
 
-test('`d.values.add("s")` on `dict{a: 1}` is valid and `d["a"]` still reads a whole number; its copied form is TSV041 (#2378 R37, R43)', () => {
+test('`d.values.add("s")` on `dict{a: 1}` is valid and `d["a"]` still reads a whole number; its copied form is TSV041 (#2378)', () => {
   const inPlace = answer('let d = dict{a: 1}\nd.values.add("s")\nlet n: integer = d["a"]\nexit\n');
   assert.deepEqual(inPlace, { outcome: "valid", diagnostics: [], checks: [] });
   const copied = answer(
@@ -248,7 +248,7 @@ test('`d.values.add("s")` on `dict{a: 1}` is valid and `d["a"]` still reads a wh
   );
 });
 
-test("a store below a dict's list goes into nothing too: an element of `d.values` is a copy nobody holds (#2378 R49)", () => {
+test("a store below a dict's list goes into nothing too: an element of `d.values` is a copy nobody holds (#2378)", () => {
   for (const source of [
     'let item: integer[] = [1]\nlet d = dict{a: item}\nd.values[0].add(2.5)\nlet n: integer[] = d["a"]\nexit\n',
     'let item: integer[] = [1]\nlet d = dict{a: item}\nd.values[0][0] = "s"\nexit\n',
