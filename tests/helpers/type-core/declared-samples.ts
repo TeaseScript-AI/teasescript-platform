@@ -351,6 +351,42 @@ export const DECLARED_REFUSALS: readonly {
     text: "this operand",
   },
   {
+    row: "whileStatement",
+    position: "the condition",
+    refused: "while hostValue {\n  break\n}",
+    admitted: "let b = hostValue == null\nwhile b {\n  break\n}",
+    // (as the `if` condition's)
+    gate: "outsideAnswers (src/type-inference/core/backend.ts)",
+    text: "this operand",
+  },
+  // (a case value no value of the subject may equal: today's TSV049, refused after the analysis by today's predicate;
+  // a literal subject, an inferred one, one of a written type with `null`, and a range against text)
+  ...[
+    [
+      'switch 1 {\n  case "a" {\n    say "a"\n  }\n}',
+      'switch 1 {\n  case 2 {\n    say "b"\n  }\n}',
+    ],
+    [
+      'let s = "a"\nswitch s {\n  case true {\n    say "t"\n  }\n}',
+      'let s = "a"\nswitch s {\n  case "b" {\n    say "b"\n  }\n}',
+    ],
+    [
+      'let s: integer? = hostValue\nswitch s {\n  case "a" {\n    say "a"\n  }\n}',
+      'let s: integer? = hostValue\nswitch s {\n  case null {\n    say "n"\n  }\n}',
+    ],
+    [
+      'let s = "a"\nswitch s {\n  case 1..3 {\n    say "r"\n  }\n}',
+      'let s = 2\nswitch s {\n  case 1..3 {\n    say "r"\n  }\n}',
+    ],
+  ].map(([refused, admitted], at) => ({
+    row: "switchStatement" as const,
+    position: `a case value that may never match, ${at}`,
+    refused: refused!,
+    admitted: admitted!,
+    gate: "neverMatching (src/type-inference/core/backend.ts)",
+    text: "this case",
+  })),
+  {
     row: "callExpression",
     position: "`get`'s receiver",
     refused: "let x: integer = hostValue.get(0, default: 0)",
@@ -593,6 +629,41 @@ export const DECLARED_REFUSALS: readonly {
     gate: "outsideAnswers (src/type-inference/core/backend.ts)",
     text: "this operand",
   })),
+];
+
+/**
+ * A `switch` without `default` whose cases take every value its subject's type holds, with nothing after it that ends
+ * the file: today's checker plans it, the route gives TSV052 and no plan (#2660: a compile error the route gives on
+ * valid code, V30 §32, since its ways do not read the values a subject's type holds; no plan, so no run). The boolean
+ * and `askChoice` forms, which have no twin without a `switch`, are declared here; the type-case form is inherited
+ * (`if s is integer { exit }` gives it on the route without a `switch`). `type-core-candidate-loops.test.ts` asserts
+ * the route's side of each, in every mode.
+ */
+export const DECLARED_WAY_ERRORS: readonly {
+  readonly form: string;
+  readonly files: readonly { readonly path: string; readonly source: string }[];
+}[] = [
+  {
+    form: "both booleans",
+    files: [
+      {
+        path: "main.tease",
+        source:
+          "let b = hostValue == null\nswitch b {\n  case true {\n    exit\n  }\n  case false {\n    exit\n  }\n}\n",
+      },
+    ],
+  },
+  {
+    form: "every button of an `askChoice`",
+    files: [
+      {
+        path: "main.tease",
+        source:
+          'let c = askChoice "a", "b"\nswitch c {\n  case "a" {\n    goto "part.tease"\n  }\n  case "b" {\n    exit\n  }\n}\n',
+      },
+      { path: "part.tease", source: "exit\n" },
+    ],
+  },
 ];
 
 /**
