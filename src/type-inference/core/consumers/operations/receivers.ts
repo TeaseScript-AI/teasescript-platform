@@ -259,7 +259,7 @@ export function receivers(walk: Consumers): void {
       (found) => found.recv !== null && (found.kind === "whole" || found.kind === "add"),
     ),
   )) {
-    if (!walk.runs(d.site)) continue;
+    if (!walk.startUnit(d.site)) continue;
     walk.reading = d.prep ?? d.node;
     const receiver = withoutEmpty(
       walk.finishing
