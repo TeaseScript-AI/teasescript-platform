@@ -35,20 +35,19 @@ export interface Outside {
 
 // ------------------------------------------------------------------------------------------------- the syntax
 
-/**
- * Whether a written type's values can only be `null`, by the type grammar's forms: the name `null`, an optional of such a
- * type, a union of such types; a collection is a value of its own.
- */
-function onlyNull(type: TypeAnnotation): boolean {
+/** The types a written type nests: an optional's value, a collection's element, a union's members. */
+function typeParts(type: TypeAnnotation): readonly TypeAnnotation[] {
   switch (type.kind) {
     case "namedType":
-      return type.name === "null";
+      return [];
     case "optionalType":
-      return onlyNull(type.value);
+      return [type.value];
+    case "listType":
+    case "setType":
+    case "dictType":
+      return [type.element];
     case "unionType":
-      return type.members.every(onlyNull);
-    default:
-      return false;
+      return type.members;
   }
 }
 
@@ -56,27 +55,40 @@ function onlyNull(type: TypeAnnotation): boolean {
  * A position of a written type whose only kind is `null`, or `null` where it has none: the type itself, or one inside
  * it, an optional's value, a collection's element, a union's member that is not `null` alone. A value read from such a
  * place is `null` to today's checker and `unknown` to the core where it enters from the host, so the slice takes no
- * such type, wherever it is written.
+ * such type, wherever it is written. (Walked, not recursed: a written type nests without bound.)
  */
-function nullOnlyPosition(type: TypeAnnotation): TypeAnnotation | null {
-  if (onlyNull(type)) return type;
-  switch (type.kind) {
-    case "namedType":
-      return null;
-    case "optionalType":
-      return nullOnlyPosition(type.value);
-    case "listType":
-    case "setType":
-    case "dictType":
-      return nullOnlyPosition(type.element);
-    case "unionType":
-      for (const member of type.members) {
-        // (a member that is `null` alone is the union's `null`, beside its other members)
-        const found = onlyNull(member) ? null : nullOnlyPosition(member);
-        if (found !== null) return found;
-      }
-      return null;
+function nullOnlyPosition(annotation: TypeAnnotation): TypeAnnotation | null {
+  // (each type before the types it nests)
+  const nested: TypeAnnotation[] = [];
+  const unwalked = [annotation];
+  for (let type = unwalked.pop(); type !== undefined; type = unwalked.pop()) {
+    nested.push(type);
+    for (const part of typeParts(type)) unwalked.push(part);
   }
+  // whether a type's values can only be `null`: the name `null`, an optional or a union of such types (a collection is
+  // a value of its own), each judged after the types it nests
+  const onlyNull = new Map<TypeAnnotation, boolean>();
+  for (const type of nested.reverse())
+    onlyNull.set(
+      type,
+      type.kind === "namedType"
+        ? type.name === "null"
+        : type.kind === "optionalType"
+          ? onlyNull.get(type.value) === true
+          : type.kind === "unionType" &&
+            type.members.every((member) => onlyNull.get(member) === true),
+    );
+  // the first such position, outermost first, in written order
+  const pending = [annotation];
+  for (let type = pending.pop(); type !== undefined; type = pending.pop()) {
+    if (onlyNull.get(type) === true) return type;
+    // (a union's member that is `null` alone is the union's `null`, beside its other members)
+    const parts = typeParts(type).filter(
+      (part) => type.kind !== "unionType" || onlyNull.get(part) !== true,
+    );
+    for (let part = parts.pop(); part !== undefined; part = parts.pop()) pending.push(part);
+  }
+  return null;
 }
 
 /** The written types of the slice: named types, `T?` and `T[]` of them, none with a position only `null` fills. */
@@ -564,7 +576,7 @@ const SLICE_ASKS: ReadonlySet<InteractionExpression["interactionKind"]> = new Se
 ]);
 
 /** An ask's `prefill:`, a basic ask's or a choice's own, or `askBoolean`'s named argument. */
-export function askPrefill(ask: InteractionExpression): Expression | null {
+function askPrefill(ask: InteractionExpression): Expression | null {
   return (
     ask.prefill ??
     ask.formArguments.find((argument) => argument.name.name === "prefill")?.value ??
@@ -573,12 +585,14 @@ export function askPrefill(ask: InteractionExpression): Expression | null {
 }
 
 /**
- * The prefills of an ask the slice holds (V30 §19, §20): none; one not written as a scalar literal, on any ask but
- * `askPassword`, which takes none; or a scalar literal the request takes as written: on `askText` plain text that is not
- * blank, on `askNumber` a number, on `askInteger` a whole number written as one in the safe range, on
- * `askBoolean` `true` or `false`, on `askChoice` any (a value no button has preselects none). Any other is outside:
- * today's checker refuses each (TSV039, and TSV043 on `askPassword`), and a literal of the request's own kind would be
- * written into the plan's request, whose validation refuses it.
+ * The prefills of an ask the slice holds (V30 §19, §20): none, or a scalar literal the request takes as written: on
+ * `askText` plain text that is not blank, on `askNumber` a number, on `askInteger` a whole number written as one in the
+ * safe range, on `askBoolean` `true` or `false`, on `askChoice` any (a value no button has preselects none). Any other
+ * literal is outside: today's checker refuses each (TSV039, and TSV043 on `askPassword`, which takes none), and a
+ * literal of the request's own kind would be written into the plan's request, whose validation refuses it. A computed
+ * prefill is outside too: the runtime takes `null` and blank text as none, and the core's kinds of a computed value do
+ * not show every one that today's checker knows to be only `null` (a typed host value narrowed by a type test, or
+ * stored under a branch).
  */
 function askPrefillAdmitted(ask: InteractionExpression): boolean {
   const written = askPrefill(ask);
@@ -607,7 +621,7 @@ function askPrefillAdmitted(ask: InteractionExpression): boolean {
     case "nullLiteral":
       return ask.interactionKind === "choice";
     default:
-      return true;
+      return false;
   }
 }
 

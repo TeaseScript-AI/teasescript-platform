@@ -205,6 +205,20 @@ const CONDITIONS: readonly Condition[] = [
   },
   {
     row: "letStatement",
+    condition: "an optional of a union only `null` fills is one, at the optional",
+    source: "let x: (null | null)? = hostValue",
+    at: "(null | null)?",
+    what: "this written type",
+  },
+  {
+    row: "letStatement",
+    condition: "a type nested deeper than the host's call stack is walked, not recursed",
+    source: `let x: null${"[]".repeat(10_000)} = hostValue`,
+    at: "null",
+    what: "this written type",
+  },
+  {
+    row: "letStatement",
     condition: "a list's element only `null` fills",
     source: "let x: null[] = hostValue",
     at: "null",
@@ -587,6 +601,13 @@ const CONDITIONS: readonly Condition[] = [
     condition: "no `prefill:` on `askPassword`",
     source: 'let r = askPassword("q", prefill: hostValue)',
     at: 'askPassword("q", prefill: hostValue)',
+    what: "this ask",
+  },
+  {
+    row: "interactionExpression",
+    condition: "a prefill written as a literal: a computed one is outside",
+    source: 'let r = askText("q", prefill: hostValue)',
+    at: 'askText("q", prefill: hostValue)',
     what: "this ask",
   },
   {

@@ -1,7 +1,7 @@
 // The asks on the candidate route (#2488's step 1d): every ask but `askForm` and `askBooleans`, its answer stored into
 // typed places and run with the player's answers as today's compiler runs it, `as` each speaker, the prefills and
-// choices the route refuses, and the order an ask refuses a request in, the derived oracle's too (the lead's R38, R39,
-// R40, R42).
+// choices the route refuses, and the order an ask refuses a request in, the derived oracle's too (the lead's R38 to
+// R45).
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -25,6 +25,8 @@ import { checksOf } from "../../helpers/type-core/type-core-candidate-setup.js";
 const OPTIONS = { globals: ["hostValue"] };
 // (blank text too: every prefill takes it as none, V30 §20)
 const DOMAIN: readonly SerializableRuntimeValue[] = [2, "text", true, 2.5, null, "", "  "];
+/** A host value no field shows: a list. */
+const LIST = { kind: "list", items: [1] } satisfies SerializableRuntimeValue;
 
 /** The answer the player gives each field: valid text, a number, a date or time, a password's hash, the first button. */
 const TEMPORAL: Readonly<Record<string, string>> = {
@@ -139,6 +141,19 @@ function refusedAsToday(source: string, code: string, refused: string): void {
     assert.deepEqual(route(source, mode), { refused }, `${source} [${mode.name}]`);
 }
 
+/** A source today's checker plans and the route refuses in every mode with `refused`: an under-offer. */
+function refusedWhereTodayPlans(source: string, refused: string): void {
+  assert.ok(today(source).plan !== null, source);
+  for (const mode of HELD_MODES)
+    assert.deepEqual(route(source, mode), { refused }, `${source} [${mode.name}]`);
+}
+
+/** The ask a source's `let r = …` line holds, as the route names the site it refuses. */
+function askOf(source: string): string {
+  const line = source.split("\n").find((text) => text.trimStart().startsWith("let r = "))!;
+  return line.trimStart().slice("let r = ".length);
+}
+
 /** Each ask but `askForm` and the type of its answer. */
 const ANSWERS: readonly (readonly [string, string])[] = [
   ['askText("q")', "string"],
@@ -190,14 +205,28 @@ test("an ask as a speaker, declared or the player, and in a message, a condition
     asToday(source);
 });
 
-test("a prefill that may be null among the kinds its request takes runs as today's", () => {
+test("a computed prefill is refused at its ask, also where today's checker plans: the slice takes a literal only", () => {
+  // (the runtime takes `null` and blank text as none, and the core's kinds of a computed value do not show each one that
+  // today's checker knows to be only `null`: no form of a computed prefill is admitted, the lead's R45)
   for (const source of [
     'let m: string? = hostValue\nlet r = askText("q", prefill: m)\nexit\n',
     'let m: integer? = hostValue\nlet r = askInteger("q", prefill: m)\nexit\n',
     'let m: boolean? = hostValue\nlet r = askBoolean("q", prefill: m)\nexit\n',
     'let r = askText("q", prefill: ["a", null][1])\nexit\n',
     'let r = askText("q", prefill: hostValue)\nexit\n',
+    'let r = askNumber("q", prefill: hostValue otherwise 2)\nexit\n',
+    "let r = askChoice 1, 2, prefill: hostValue\nexit\n",
+    "let p = 2\nlet r = askChoice 1, 2, prefill: p\nexit\n",
+  ])
+    refusedWhereTodayPlans(source, `this ask: ${askOf(source)}`);
+  // a literal the request takes runs as today's, `null` on `askChoice` among them
+  for (const source of [
+    'let r = askText("q", prefill: "p")\nexit\n',
+    'let r = askNumber("q", prefill: 2)\nexit\n',
+    'let r = askInteger("q", prefill: (2))\nexit\n',
+    'let r = askBoolean("q", prefill: false)\nexit\n',
     "let r = askChoice 1, 2, prefill: null\nexit\n",
+    'let r = askChoice "a", "b", prefill: "c"\nexit\n',
   ])
     asToday(source);
 });
@@ -230,20 +259,18 @@ test("the prefills, choices and asks the route refuses: today's compile error ea
       "TSV039",
       `this ask: ${ask}("q", prefill: ${prefill})`,
     );
-  // a prefill that is only null, as the core knows it: computed, or narrowed
-  for (const [source, prefill] of [
-    ['let r = askText("q", prefill: [null][0])\nexit\n', "[null][0]"],
-    ['let r = askText("q", prefill: null otherwise null)\nexit\n', "null otherwise null"],
-    [
-      'let m: string? = hostValue\nif m == null {\n  let r = askText("q", prefill: m)\n}\nexit\n',
-      "m",
-    ],
-    [
-      'let m: string? = hostValue\nif m != null {\n  exit\n}\nlet r = askNumber("q", prefill: [m].get(0, default: null))\nexit\n',
-      "[m].get(0, default: null)",
-    ],
-  ] as const)
-    refusedAsToday(source, "TSV039", `this prefill: ${prefill}`);
+  // a prefill that is only null to today's checker, however it is computed or narrowed: the review rounds' forms
+  for (const source of [
+    'let r = askText("q", prefill: [null][0])\nexit\n',
+    'let r = askText("q", prefill: null otherwise null)\nexit\n',
+    'let m: string? = hostValue\nif m == null {\n  let r = askText("q", prefill: m)\n}\nexit\n',
+    'let m: string? = hostValue\nif m != null {\n  exit\n}\nlet r = askNumber("q", prefill: [m].get(0, default: null))\nexit\n',
+    'let m: integer? = hostValue\nif m is integer {\n  exit\n}\nlet r = askInteger("q", prefill: m)\nexit\n',
+    'let m: integer? = hostValue\nlet p = null\nif m == null {\n  p = m\n}\nlet r = askInteger("q", prefill: p)\nexit\n',
+    'let m: string? = hostValue\nif m != null {\n  exit\n}\nlet p = m otherwise m\nlet r = askInteger("q", prefill: p)\nexit\n',
+    'let m: string? = hostValue\nif m != null {\n  exit\n}\nfor x in [m otherwise m] {\n  let r = askBoolean("q", prefill: x)\n}\nexit\n',
+  ])
+    refusedAsToday(source, "TSV039", `this ask: ${askOf(source)}`);
   // a written type only `null` fills, wherever the value goes from it: the slice takes no such type (the lead's R44)
   for (const [written, at, prefill] of [
     ["null", "null", "m"],
@@ -269,8 +296,7 @@ test("the prefills, choices and asks the route refuses: today's compile error ea
     "TSV039",
     "this written type: null",
   );
-  // a prefill that may be text at an ask of another kind: blank text is none to the runtime, and the core's kinds do not
-  // tell blank text from other text
+  // text at an ask of another kind, blank or not (blank text is none to the runtime)
   for (const ask of ["askNumber", "askInteger", "askDate", "askTime", "askDateTime", "askBoolean"])
     for (const [prelude, prefill] of [
       ['let b = ""\n', "b"],
@@ -285,7 +311,7 @@ test("the prefills, choices and asks the route refuses: today's compile error ea
       refusedAsToday(
         `${prelude}let r = ${ask}("q", prefill: ${prefill})\nexit\n`,
         "TSV039",
-        `this prefill: ${prefill}`,
+        `this ask: ${ask}("q", prefill: ${prefill})`,
       );
   // a choice whose buttons return more than one type, whatever holds its answer (R40)
   refusedAsToday(
@@ -308,9 +334,9 @@ test("the prefills, choices and asks the route refuses: today's compile error ea
 });
 
 test("an ask refuses a request's value after saying its question, as today's runtime does", () => {
-  // a prefill the runtime checks as the field opens: today's plan and the route's both say the question, then fail at
-  // the ask, opening no field
-  const source = 'let r = askInteger("q", prefill: hostValue)\nexit\n';
+  // a hint the runtime checks as the field opens: today's plan and the route's both say the question, then fail at the
+  // ask, opening no field
+  const source = 'let r = askInteger("q", hint: hostValue)\nexit\n';
   const current = today(source);
   assert.ok(current.plan !== null);
   const ask = source.indexOf("askInteger");
@@ -319,21 +345,20 @@ test("an ask refuses a request's value after saying its question, as today's run
     const own = route(source, mode);
     assert.ok("plan" in own && own.plan !== null, mode.name);
     for (const plan of [own.plan, current.plan])
-      assert.equal(answered(plan, "text"), `failed TSR052@${ask}:${end} after 0 [q]`, mode.name);
+      assert.equal(answered(plan, LIST), `failed TSR021@${ask}:${end} after 0 [q]`, mode.name);
   }
 });
 
 test("the derived oracle ends an ask's run as the route's plan does: its question said, then its request's failure", () => {
   // (a request that fails after its question is said keeps it said; a failing question says nothing; a wait)
-  const list = { kind: "list", items: [1] } satisfies SerializableRuntimeValue;
   const cases: readonly (readonly [string, SerializableRuntimeValue])[] = [
-    ['let r = askInteger("q", prefill: hostValue)\nexit\n', "text"],
-    ['let r = askText("q", hint: hostValue)\nexit\n', list],
-    ['let r = askDate("q", prefill: hostValue)\nexit\n', 2],
-    ['let r = askBoolean("q", yesText: hostValue)\nexit\n', list],
-    ['let r = askBoolean("q", prefill: hostValue)\nexit\n', 2],
-    ["let r = askText(hostValue)\nexit\n", list],
-    ['let r = askInteger("q", prefill: hostValue)\nexit\n', 2],
+    ['let r = askInteger("q", hint: hostValue)\nexit\n', LIST],
+    ['let r = askText("q", hint: hostValue)\nexit\n', LIST],
+    ['let r = askDate("q", hint: hostValue)\nexit\n', LIST],
+    ['let r = askBoolean("q", yesText: hostValue)\nexit\n', LIST],
+    ['let r = askBoolean("q", noText: hostValue)\nexit\n', LIST],
+    ["let r = askText(hostValue)\nexit\n", LIST],
+    ['let r = askInteger("q", hint: hostValue, prefill: 2)\nexit\n', "h"],
   ];
   for (const [source, hostValue] of cases) {
     const files = [{ path: "main.tease", source }];

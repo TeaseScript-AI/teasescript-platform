@@ -7,8 +7,8 @@ import {
   ASK_POSITIONS,
   CHOICE_REFUSED,
   PREFILL_LITERALS,
+  PREFILL_OPERANDS,
   PREFILLED_ASKS,
-  SCALAR_LITERALS,
 } from "./ask-templates.js";
 
 /** A file of a project the guard compiles: its path and its whole source. */
@@ -412,9 +412,12 @@ export const HOSTLESS_VALUES: Readonly<Record<HostlessKind, SerializableRuntimeV
   permanentButton: { kind: "permanentButtonHandle", buttonId: 1 },
 };
 
-/** A command operand's first template with `value` in place of the host global. */
+/** A command operand's first template, or a prefill's (`PREFILL_OPERANDS`), with `value` in place of the host global. */
 const commandWith = (row: SyntaxKind, operand: string, value: string): string =>
-  OPERAND_TEMPLATES[row]![operand]![0]!.replace("hostValue", value);
+  (OPERAND_TEMPLATES[row]?.[operand]?.[0] ?? PREFILL_OPERANDS[operand]!).replace(
+    "hostValue",
+    value,
+  );
 
 /** A value of one kind, from one origin, in one command operand position (the lead's R14). */
 export interface Sample {
@@ -439,8 +442,15 @@ export interface Sample {
  */
 export const FAILING_PRODUCER = "[1][4]";
 
-/** Every sample: each command operand position (`OPERAND_TEMPLATES`) with each kind from each origin. */
-export function samples(): Sample[] {
+/**
+ * Every sample: each command operand position (`OPERAND_TEMPLATES`, or the templates given) with each kind from each
+ * origin.
+ */
+export function samples(
+  templates: Readonly<
+    Partial<Record<SyntaxKind, Readonly<Record<string, readonly string[]>>>>
+  > = OPERAND_TEMPLATES,
+): Sample[] {
   const values = [
     ...Object.entries(LITERALS).map(([kind, value]) => ({
       kind,
@@ -463,7 +473,7 @@ export function samples(): Sample[] {
     })),
     { kind: "none", origin: "failing" as const, prelude: "", value: FAILING_PRODUCER },
   ];
-  return Object.entries(OPERAND_TEMPLATES).flatMap(([key, operands]) => {
+  return Object.entries(templates).flatMap(([key, operands]) => {
     // EVIDENCE: invariant: the templates' keys are AST kinds (`OPERAND_TEMPLATES`' type).
     const row = key as SyntaxKind;
     return Object.keys(operands!).flatMap((operand) =>
@@ -517,6 +527,7 @@ const FITTING_OPERANDS: Readonly<Partial<Record<SyntaxKind, Readonly<Record<stri
     "askBoolean.yesText": '"y"',
     "askBoolean.noText": '"n"',
     "askBoolean.prefill": "true",
+    "askChoice.prefill": "2",
     "askChoice.option": "1",
     "askChoice.element": "1",
     "askChoice.label": '"A"',
@@ -670,50 +681,44 @@ export const DECLARED_REFUSALS: readonly {
       gate: "annotationOutside (src/type-inference/core/slice-syntax.ts)",
       text: "this written type",
     })),
-  // (an ask's prefill written as a literal the request does not take as written, and text at an ask of another kind,
-  // which the runtime takes as none where it is blank)
-  ...samples()
-    .filter(
-      (sample) =>
-        sample.row === "interactionExpression" &&
-        PREFILL_LITERALS[sample.operand] !== undefined &&
-        ((sample.origin === "literal" &&
-          SCALAR_LITERALS.includes(sample.kind) &&
-          !PREFILL_LITERALS[sample.operand]!.includes(sample.kind)) ||
-          (sample.origin === "ingress" &&
-            sample.kind === "string" &&
-            sample.operand !== "askText.prefill")),
-    )
-    .map((sample) => ({
-      row: "interactionExpression" as const,
-      position: `${sample.operand}, ${sample.kind} (${sample.origin})`,
-      refused: `${sample.prelude}${sample.command}`,
-      admitted: twinCommand(sample),
-      ...(sample.origin === "literal"
-        ? { gate: "askPrefillAdmitted (src/type-inference/core/slice-syntax.ts)", text: "this ask" }
-        : { gate: "outsideAnswers (src/type-inference/core/backend.ts)", text: "this prefill" }),
+  // (an ask's prefill but a literal the request takes as written, `PREFILL_LITERALS`: the host global there and every
+  // sample, the `null` ingress aside, which its written type refuses first; the twin asks with a fitting literal or none)
+  ...[
+    ...Object.entries(PREFILL_OPERANDS).map(([operand, template]) => ({
+      operand,
+      position: `${operand}, the host global`,
+      refused: template,
     })),
-  // (the text ingresses, wrapped in a list and in an `otherwise`: a typed ingress's read is unknown, so the refusal
-  // judges what the wrapping holds)
-  ...samples()
-    .filter(
-      (sample) =>
-        sample.row === "interactionExpression" &&
-        PREFILL_LITERALS[sample.operand] !== undefined &&
-        sample.origin === "ingress" &&
-        sample.kind === "string" &&
-        sample.operand !== "askText.prefill",
-    )
-    .flatMap((sample) =>
-      ["[m][0]", "m otherwise m"].map((wrapped) => ({
-        row: "interactionExpression" as const,
-        position: `${sample.operand}, ${sample.kind} (${sample.origin}) as ${wrapped}`,
-        refused: `${sample.prelude}${commandWith(sample.row, sample.operand, wrapped)}`,
-        admitted: twinCommand(sample),
-        gate: "outsideAnswers (src/type-inference/core/backend.ts)",
-        text: "this prefill",
+    ...samples({
+      interactionExpression: Object.fromEntries(
+        Object.entries(PREFILL_OPERANDS).map(([operand, template]) => [operand, [template]]),
+      ),
+    })
+      .filter(
+        (sample) =>
+          !(
+            sample.origin === "literal" && PREFILL_LITERALS[sample.operand]!.includes(sample.kind)
+          ) && !(sample.origin === "ingress" && sample.kind === "null"),
+      )
+      .map((sample) => ({
+        operand: sample.operand,
+        position: `${sample.operand}, ${sample.kind} (${sample.origin})`,
+        refused: `${sample.prelude}${sample.command}`,
       })),
-    ),
+  ].map(({ operand, position, refused }) => ({
+    row: "interactionExpression" as const,
+    position,
+    refused,
+    admitted:
+      FITTING_COMMANDS[operand] ??
+      commandWith(
+        "interactionExpression",
+        operand,
+        FITTING_OPERANDS.interactionExpression![operand]!,
+      ),
+    gate: "askPrefillAdmitted (src/type-inference/core/slice-syntax.ts)",
+    text: "this ask",
+  })),
   // (an `askChoice` button the core's check of the buttons has something to say of, `CHOICE_REFUSED`)
   ...samples()
     .filter((sample) => CHOICE_REFUSED[sample.operand]?.includes(`${sample.origin} ${sample.kind}`))
@@ -878,8 +883,8 @@ export const PAIRED_SAMPLES: readonly {
   {
     row: "interactionExpression",
     misfit: "askText.hint",
-    failing: "askText.prefill",
-    command: `let r = askText("q", hint: [1], prefill: ${FAILING_PRODUCER})`,
+    failing: "askText.question",
+    command: `let r = askText(${FAILING_PRODUCER}, hint: [1])`,
   },
 ];
 
