@@ -2,22 +2,29 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { analyseCore, type Answers, type CorePass } from "../../src/type-inference/core/answers.js";
-import { Contract } from "../../src/type-inference/core/contract.js";
-import { DemandExhausted, withTestDemandAllowance } from "../../src/type-inference/core/budget.js";
-import { Consumers, withConsumerOrder } from "../../src/type-inference/core/consumers.js";
-import { withoutSharing } from "../../src/type-inference/core/sharing.js";
+import {
+  analyseCore,
+  type Answers,
+  type CorePass,
+} from "../../../src/type-inference/core/answers.js";
+import { Contract } from "../../../src/type-inference/core/contract.js";
+import {
+  DemandExhausted,
+  withTestDemandAllowance,
+} from "../../../src/type-inference/core/budget.js";
+import { Consumers, withConsumerOrder } from "../../../src/type-inference/core/consumers.js";
+import { withoutSharing } from "../../../src/type-inference/core/sharing.js";
 import {
   withEveryRecord,
   withSolverSeam,
   type Proof,
   type ProofDemand,
-} from "../../src/type-inference/core/solver.js";
-import { REASON, type Item } from "../../src/type-inference/core/items.js";
-import type { PlaceId } from "../../src/type-inference/graph.js";
-import { coreRequest } from "../helpers/type-core-analysis.js";
-import { narrowingPass } from "../helpers/type-core/type-core-narrowing.js";
-import { inMode, itemText, MODES, stopSet } from "../helpers/type-core-oracles.js";
+} from "../../../src/type-inference/core/solver.js";
+import { REASON, type Item } from "../../../src/type-inference/core/items.js";
+import type { PlaceId } from "../../../src/type-inference/graph.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
+import { narrowingPass } from "../../helpers/type-core/type-core-narrowing.js";
+import { inMode, itemText, MODES, stopSet } from "../../helpers/type-core-oracles.js";
 
 /** A test of the stopped-key family in the four modes: the solver's and consumers' orders, sharing on and off. */
 const STOP_MODES: readonly (readonly [string, <T>(make: () => T) => T])[] = (() => {

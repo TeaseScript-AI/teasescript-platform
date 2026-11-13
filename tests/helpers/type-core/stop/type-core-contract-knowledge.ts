@@ -1,8 +1,8 @@
-import type { InstructionPlan, TypePlan } from "../../../src/plan/model.js";
-import type { SerializableRuntimeValue } from "../../../src/runtime/values/serializable-values.js";
-import type { Answers } from "../../../src/type-inference/core/answers.js";
-import type { CapturedContract } from "../../../src/type-inference/core/contract-descriptors.js";
-import { runGlobals } from "../type-core-route.js";
+import type { InstructionPlan, TypePlan } from "../../../../src/plan/model.js";
+import type { SerializableRuntimeValue } from "../../../../src/runtime/values/serializable-values.js";
+import type { Answers } from "../../../../src/type-inference/core/answers.js";
+import type { CapturedContract } from "../../../../src/type-inference/core/contract-descriptors.js";
+import { runGlobals } from "../../type-core-route.js";
 
 /*
  * The obligation-level knowledge of a stopped analysis (#1526 phase B): which contract each store owing a

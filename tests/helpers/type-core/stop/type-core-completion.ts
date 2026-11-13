@@ -1,21 +1,21 @@
-import { analyseCore, type Answers } from "../../../src/type-inference/core/answers.js";
+import { analyseCore, type Answers } from "../../../../src/type-inference/core/answers.js";
 import {
   withTestAllowance,
   withTestDemandAllowance,
-} from "../../../src/type-inference/core/budget.js";
+} from "../../../../src/type-inference/core/budget.js";
 import {
   asked,
   coreCheckResult,
   coreFacts,
-} from "../../../src/type-inference/core/check-result/check-result.js";
+} from "../../../../src/type-inference/core/check-result/check-result.js";
 import {
   OutsideContract,
   SliceIndex,
-} from "../../../src/type-inference/core/check-result/slice-index.js";
-import { withoutRecords } from "../../../src/type-inference/core/consumers.js";
-import type { CoreAnalysisRequest } from "../../../src/type-inference/core/program.js";
-import type { HeldMode } from "../type-core-held-host.js";
-import { sampled } from "../sweep.js";
+} from "../../../../src/type-inference/core/check-result/slice-index.js";
+import { withoutRecords } from "../../../../src/type-inference/core/consumers.js";
+import type { CoreAnalysisRequest } from "../../../../src/type-inference/core/program.js";
+import type { HeldMode } from "../../type-core-held-host.js";
+import { sampled } from "../../sweep.js";
 
 /**
  * What a compile did at an allowance: its stop, its total, whether a completion ran and the units it charged, and what

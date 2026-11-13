@@ -1,18 +1,21 @@
-import { compileSourceWithBackend } from "../../../src/compiler.js";
-import type { InstructionPlan } from "../../../src/plan/model.js";
-import type { RuntimeScriptStorageEntrySnapshot } from "../../../src/runtime/host-data/script-storage.js";
+import { compileSourceWithBackend } from "../../../../src/compiler.js";
+import type { InstructionPlan } from "../../../../src/plan/model.js";
+import type { RuntimeScriptStorageEntrySnapshot } from "../../../../src/runtime/host-data/script-storage.js";
 import {
   createSerializableList as list,
   type SerializableRuntimeValue,
-} from "../../../src/runtime/values/serializable-values.js";
-import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
+} from "../../../../src/runtime/values/serializable-values.js";
+import {
+  CandidateOutsideSlice,
+  CORE_BACKEND,
+} from "../../../../src/type-inference/core/backend.js";
 import {
   withTestAllowance,
   withTestDemandAllowance,
-} from "../../../src/type-inference/core/budget.js";
-import { completedCore, coreRequest } from "../type-core-analysis.js";
-import { HELD_MODES, heldStops, testedStops, type HeldMode } from "../type-core-held-host.js";
-import { plannedContent, plannedStores, runGlobals } from "../type-core-route.js";
+} from "../../../../src/type-inference/core/budget.js";
+import { completedCore, coreRequest } from "../../type-core-analysis.js";
+import { HELD_MODES, heldStops, testedStops, type HeldMode } from "../../type-core-held-host.js";
+import { plannedContent, plannedStores, runGlobals } from "../../type-core-route.js";
 
 // #1526 decision 2, condition 1: the lost-check gate's invariant over a generated matrix. Each cell is a
 // destination of type `integer[][]` (its own, a copy's, a property's, a written one, one a later store decides, an object

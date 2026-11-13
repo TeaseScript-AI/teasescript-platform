@@ -3,13 +3,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileSourceWithBackend } from "../../src/compiler.js";
-import { type Answers } from "../../src/type-inference/core/answers.js";
-import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
+import { compileSourceWithBackend } from "../../../src/compiler.js";
+import { type Answers } from "../../../src/type-inference/core/answers.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
 import {
   withTestAllowance,
   withTestDemandAllowance,
-} from "../../src/type-inference/core/budget.js";
+} from "../../../src/type-inference/core/budget.js";
 import {
   combinedStopRule,
   declineOf,
@@ -17,9 +17,9 @@ import {
   heldUnstopped,
   HELD_MODES,
   type HeldCase,
-} from "../helpers/type-core-held-host.js";
-import { runGlobals } from "../helpers/type-core-route.js";
-import { stopProblems, type Globals, type StopRun } from "../helpers/type-core-stop-oracle.js";
+} from "../../helpers/type-core-held-host.js";
+import { runGlobals } from "../../helpers/type-core-route.js";
+import { stopProblems, type Globals, type StopRun } from "../../helpers/type-core-stop-oracle.js";
 import {
   UNDECIDED,
   LOST_CHECK,
@@ -27,7 +27,7 @@ import {
   host,
   stopRun,
   walkEnds,
-} from "../helpers/type-core/type-core-stop-setup.js";
+} from "../../helpers/type-core/stop/type-core-stop-setup.js";
 
 /**
  * The stop oracle itself: the whole plan, a mark excusing only its own record. Changes to a compile

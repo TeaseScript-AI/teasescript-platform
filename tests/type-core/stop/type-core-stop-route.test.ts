@@ -1,30 +1,30 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileProject, compileSourceWithBackend } from "../../src/compiler.js";
-import type { Expression } from "../../src/ast.js";
-import { validateInstructionPlan } from "../../src/plan/validation.js";
-import { run } from "../../src/runtime/engine.js";
+import { compileProject, compileSourceWithBackend } from "../../../src/compiler.js";
+import type { Expression } from "../../../src/ast.js";
+import { validateInstructionPlan } from "../../../src/plan/validation.js";
+import { run } from "../../../src/runtime/engine.js";
 import {
   createCheckpoint,
   deserializeCheckpoint,
   serializeCheckpoint,
-} from "../../src/runtime/snapshot/checkpoint.js";
+} from "../../../src/runtime/snapshot/checkpoint.js";
 import {
   createSerializableList,
   createSerializableObject,
   type SerializableRuntimeValue,
-} from "../../src/runtime/values/serializable-values.js";
-import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
-import type { FlowNode } from "../../src/type-inference/core/flow-graph.js";
-import { CandidateOutsideSlice, CORE_BACKEND } from "../../src/type-inference/core/backend.js";
+} from "../../../src/runtime/values/serializable-values.js";
+import { analyseCore, type Answers } from "../../../src/type-inference/core/answers.js";
+import type { FlowNode } from "../../../src/type-inference/core/flow-graph.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
 import {
   withTestAllowance,
   withTestDemandAllowance,
-} from "../../src/type-inference/core/budget.js";
-import { coreMessage, messageSource } from "../../src/type-inference/core/messages.js";
-import { createImmediatePacingRuntimeSnapshot } from "../helpers/immediate-pacing-runtime.js";
-import { coreRequest } from "../helpers/type-core-analysis.js";
+} from "../../../src/type-inference/core/budget.js";
+import { coreMessage, messageSource } from "../../../src/type-inference/core/messages.js";
+import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pacing-runtime.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
 import {
   heldDemands,
   heldRun,
@@ -32,11 +32,11 @@ import {
   HELD_MODES,
   testedStops,
   type HeldCase,
-} from "../helpers/type-core-held-host.js";
-import { sampled } from "../helpers/sweep.js";
-import { stopIdentity } from "../helpers/type-core-oracles.js";
-import { plannedContent } from "../helpers/type-core-route.js";
-import { type StopRun } from "../helpers/type-core-stop-oracle.js";
+} from "../../helpers/type-core-held-host.js";
+import { sampled } from "../../helpers/sweep.js";
+import { stopIdentity } from "../../helpers/type-core-oracles.js";
+import { plannedContent } from "../../helpers/type-core-route.js";
+import { type StopRun } from "../../helpers/type-core-stop-oracle.js";
 import {
   OPTIONS,
   ALLOWANCE,
@@ -47,7 +47,7 @@ import {
   analysisTotal,
   LOST_CHECK,
   DEFAULT_LOST,
-} from "../helpers/type-core/type-core-stop-setup.js";
+} from "../../helpers/type-core/stop/type-core-stop-setup.js";
 
 /*
  * The program stop through the candidate route, in its three layers (the owner's D4, option a′; the

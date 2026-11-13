@@ -1,20 +1,26 @@
-// The stop tests' shared setup (tests/type-core-stop/): the candidate route's compile and run at an allowance, a
+// The stop tests' shared setup (tests/type-core/stop/): the candidate route's compile and run at an allowance, a
 // stopped run, the allowances where a stop falls, and the gates' decline reasons.
 
 import assert from "node:assert/strict";
 
-import { compileSourceWithBackend } from "../../../src/compiler.js";
-import { run } from "../../../src/runtime/engine.js";
-import { type SerializableRuntimeValue } from "../../../src/runtime/values/serializable-values.js";
-import { analyseCore } from "../../../src/type-inference/core/answers.js";
-import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
-import { withTestAllowance } from "../../../src/type-inference/core/budget.js";
-import { withConsumerOrder, withoutRecords } from "../../../src/type-inference/core/consumers.js";
-import { withSolverSeam } from "../../../src/type-inference/core/solver.js";
-import { createImmediatePacingRuntimeSnapshot } from "../immediate-pacing-runtime.js";
-import { coreRequest } from "../type-core-analysis.js";
-import { phaseEnds } from "../type-core-held-host.js";
-import { stopProblems, type StopRun } from "../type-core-stop-oracle.js";
+import { compileSourceWithBackend } from "../../../../src/compiler.js";
+import { run } from "../../../../src/runtime/engine.js";
+import { type SerializableRuntimeValue } from "../../../../src/runtime/values/serializable-values.js";
+import { analyseCore } from "../../../../src/type-inference/core/answers.js";
+import {
+  CandidateOutsideSlice,
+  CORE_BACKEND,
+} from "../../../../src/type-inference/core/backend.js";
+import { withTestAllowance } from "../../../../src/type-inference/core/budget.js";
+import {
+  withConsumerOrder,
+  withoutRecords,
+} from "../../../../src/type-inference/core/consumers.js";
+import { withSolverSeam } from "../../../../src/type-inference/core/solver.js";
+import { createImmediatePacingRuntimeSnapshot } from "../../immediate-pacing-runtime.js";
+import { coreRequest } from "../../type-core-analysis.js";
+import { phaseEnds } from "../../type-core-held-host.js";
+import { stopProblems, type StopRun } from "../../type-core-stop-oracle.js";
 
 export const OPTIONS = { globals: ["hostValue"] };
 

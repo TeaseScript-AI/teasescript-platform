@@ -2,30 +2,34 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { TypePlan } from "../../src/plan/model.js";
-import { Closure, LeftSlice, Unlisted } from "../../src/type-inference/core/admission/closure.js";
-import type { ReceivingResult } from "../../src/type-inference/core/admission/receiving.js";
-import { analyseCore, type Answers } from "../../src/type-inference/core/answers.js";
+import type { TypePlan } from "../../../src/plan/model.js";
+import {
+  Closure,
+  LeftSlice,
+  Unlisted,
+} from "../../../src/type-inference/core/admission/closure.js";
+import type { ReceivingResult } from "../../../src/type-inference/core/admission/receiving.js";
+import { analyseCore, type Answers } from "../../../src/type-inference/core/answers.js";
 import {
   WorkLedger,
   withTestAllowance,
   withTestDemandAllowance,
-} from "../../src/type-inference/core/budget.js";
-import { propertyStep } from "../../src/type-inference/core/program.js";
-import { completedCore, coreRequest } from "../helpers/type-core-analysis.js";
+} from "../../../src/type-inference/core/budget.js";
+import { propertyStep } from "../../../src/type-inference/core/program.js";
+import { completedCore, coreRequest } from "../../helpers/type-core-analysis.js";
 import {
   completionAllowances,
   completionRun,
   completionStopProblems,
-} from "../helpers/type-core/type-core-completion.js";
-import { HELD_MODES } from "../helpers/type-core-held-host.js";
+} from "../../helpers/type-core/stop/type-core-completion.js";
+import { HELD_MODES } from "../../helpers/type-core-held-host.js";
 import {
   bisectedIntervals,
   settledIntervals,
   stopCensus,
   type StopRecord,
-} from "../helpers/type-core/type-core-intervals.js";
-import { decisionRecords, inMode, MODES } from "../helpers/type-core-oracles.js";
+} from "../../helpers/type-core/stop/type-core-intervals.js";
+import { decisionRecords, inMode, MODES } from "../../helpers/type-core-oracles.js";
 
 /*
  * The receiving closure (#1526 phase C steps 1–5; Sol's round 2): a settled pass that started
