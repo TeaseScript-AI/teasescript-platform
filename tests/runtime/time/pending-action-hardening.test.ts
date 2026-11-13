@@ -33,6 +33,13 @@ import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pa
 import { compileValidPlan as plan } from "../../helpers/compile-valid-plan.js";
 import { createFreshRuntimeSnapshot } from "../../../src/runtime/snapshot/snapshot-construction.js";
 import { validateRuntimeSnapshot } from "../../../src/runtime/snapshot/snapshot-validation.js";
+import {
+  validCaptureAction,
+  validFileStoreAction,
+  validLockAction,
+} from "../../../src/runtime/actions/validation/foreground-kinds.js";
+import { validInteractionAction } from "../../../src/runtime/actions/validation/interaction-actions.js";
+import { validForegroundActionState } from "../../../src/runtime/actions/validation/pending-actions.js";
 
 function delayAction(snapshot: RuntimeSnapshot): RuntimeDelayActionSnapshot {
   assert.ok(snapshot.foregroundAction?.kind === "delay");
@@ -566,5 +573,44 @@ test("the instruction that starts an action of each kind leaves room for its ful
     const settled = settle(compiled, started, actionId);
     assert.ok(settles(settled.events, actionId), kind);
     assert.deepEqual(validateRuntimeSnapshot(settled.snapshot, compiled).errors, [], kind);
+  }
+});
+
+test("each kind check refuses a malformed owner by itself, as the whole foreground check does", () => {
+  type KindCheck = (
+    action: Record<string, unknown>,
+    snapshot: Record<string, unknown>,
+    plan: InstructionPlan,
+  ) => boolean;
+  const kinds: Record<string, readonly [source: string, check: KindCheck]> = {
+    interaction: [
+      'let name = askText "Name?"\nexit',
+      (action, snapshot, compiled) => validInteractionAction(action, snapshot, compiled, false),
+    ],
+    capture: ["let photo = takePhoto()\nexit", validCaptureAction],
+    fileStore: ['let file = fileFromBase64("YWJj", default: null)\nexit', validFileStoreAction],
+    lock: [
+      'let locked = encryptText("x", password: "p", publicKey: false, timeLock: false)\nexit',
+      validLockAction,
+    ],
+  };
+  for (const [kind, [source, check]] of Object.entries(kinds)) {
+    const compiled = plan(source);
+    const { snapshot } = run(compiled, createImmediatePacingRuntimeSnapshot(compiled));
+    assert.equal(snapshot.foregroundAction?.kind, kind);
+    // EVIDENCE: fixture: the persisted, JSON-shaped view a restore check reads.
+    const view = JSON.parse(JSON.stringify(snapshot)) as Record<string, unknown>;
+    const action = view.foregroundAction as Record<string, unknown>;
+    assert.equal(check(action, view, compiled), true, kind);
+    assert.equal(validForegroundActionState(action, view, compiled, false), true, kind);
+    for (const owningInstruction of [-1, 1.5]) {
+      const malformed = { ...action, owningInstruction };
+      assert.equal(check(malformed, view, compiled), false, `${kind} ${owningInstruction}`);
+      assert.equal(
+        validForegroundActionState(malformed, view, compiled, false),
+        false,
+        `${kind} ${owningInstruction}`,
+      );
+    }
   }
 });
