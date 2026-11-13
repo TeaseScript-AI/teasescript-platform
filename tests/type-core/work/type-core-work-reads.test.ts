@@ -17,7 +17,7 @@ import { DefinitionIndex } from "../../../src/type-inference/core/definitions.js
 import {
   withFlatListings,
   withNameRecords,
-} from "../../../src/type-inference/core/property-names.js";
+} from "../../../src/type-inference/core/property-listings.js";
 import { withoutSharing } from "../../../src/type-inference/core/sharing.js";
 import { withSolverSeam } from "../../../src/type-inference/core/solver.js";
 import { coreRequest } from "../../helpers/type-core-analysis.js";
