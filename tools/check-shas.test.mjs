@@ -117,7 +117,7 @@ test(
       assert.equal(status, 0, out);
       assert.match(
         out,
-        /12 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 12 skipped/u,
+        /12 tokens: 0 resolved, 0 trees, 0 blobs, 0 ambiguous, 0 unresolved, 0 local only, 12 skipped/u,
       );
       // A commit URL is checked; a path that holds a real SHA still reports it.
       const url = check("https://github.com/o/r/commit/0123abc4567", [directory]);
@@ -551,11 +551,11 @@ test(
       for (const [text, line] of [
         [
           "",
-          "0 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 0 placeholders, 0 multi-issue closing clauses, 0 scratch paths",
+          "0 tokens: 0 resolved, 0 trees, 0 blobs, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 0 placeholders, 0 multi-issue closing clauses, 0 scratch paths",
         ],
         [
           `at ${shas[0].slice(0, 9)}, <sha>`,
-          "1 tokens: 1 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 1 placeholders, 0 multi-issue closing clauses, 0 scratch paths",
+          "1 tokens: 1 resolved, 0 trees, 0 blobs, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); 1 placeholders, 0 multi-issue closing clauses, 0 scratch paths",
         ],
       ]) {
         const { out } = check(text, [directory]);
@@ -622,7 +622,7 @@ test(
         timeout: 20_000,
       });
     const own = (placeholders) =>
-      `check-shas: 1 tokens: 1 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); ${placeholders} placeholders, 0 multi-issue closing clauses, 0 scratch paths`;
+      `check-shas: 1 tokens: 1 resolved, 0 trees, 0 blobs, 0 ambiguous, 0 unresolved, 0 local only, 0 skipped (ids, words, paths, sha256s); ${placeholders} placeholders, 0 multi-issue closing clauses, 0 scratch paths`;
     try {
       // A quoted or partial line is the report's text: kept, and checked.
       for (const [ending, placeholders] of [
@@ -643,6 +643,13 @@ test(
       writeFileSync(report, inner);
       assert.equal(run().status, 0);
       assert.equal(readFileSync(report, "utf8"), `${inner}\n${own(0)}\n`);
+      // A last line in the form from before blobs were counted is its own too, and replaced.
+      writeFileSync(
+        report,
+        `READY at ${shas[0].slice(0, 9)}.\n\n${own(0).replace("0 blobs, ", "")}\n`,
+      );
+      assert.equal(run().status, 0);
+      assert.equal(readFileSync(report, "utf8"), `READY at ${shas[0].slice(0, 9)}.\n\n${own(0)}\n`);
       // A symbolic and a hard link: the file is written in place, through both; its mode stays its own.
       const target = join(directory, "target.md");
       writeFileSync(target, `READY at ${shas[0].slice(0, 9)}.\n`);
@@ -865,7 +872,7 @@ test(
       );
       assert.match(
         off.out.trim().split("\n").at(-1),
-        /1 tokens: 0 resolved, 0 trees, 0 ambiguous, 0 unresolved, 1 local only, 0 skipped/u,
+        /1 tokens: 0 resolved, 0 trees, 0 blobs, 0 ambiguous, 0 unresolved, 1 local only, 0 skipped/u,
       );
     } finally {
       for (const path of [directory, origin]) rmSync(path, { recursive: true, force: true });
@@ -935,7 +942,10 @@ test(
       const { status, out } = check(`${shas[0]} and ${shas[1]}`, [directory]);
       assert.equal(status, 0, out);
       assert.equal(out.match(/no remote refs in .*: reachability not checked/gu)?.length, 1, out);
-      assert.match(out, /2 tokens: 2 resolved, 0 trees, 0 ambiguous, 0 unresolved, 0 local only/u);
+      assert.match(
+        out,
+        /2 tokens: 2 resolved, 0 trees, 0 blobs, 0 ambiguous, 0 unresolved, 0 local only/u,
+      );
     } finally {
       rmSync(directory, { recursive: true, force: true });
     }
@@ -964,7 +974,65 @@ test(
         ),
       );
       assert.match(out, new RegExp(`resolved +${pushed.slice(0, 9)} +${pushed}`, "u"));
-      assert.match(out.trim().split("\n").at(-1), /2 tokens: 1 resolved, 1 trees,/u);
+      assert.match(out.trim().split("\n").at(-1), /2 tokens: 1 resolved, 1 trees, 0 blobs,/u);
+    } finally {
+      for (const path of [directory, origin]) rmSync(path, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "a blob, such as a baseline key's lockfile blob, resolves as a blob without the remote check; the digest after `oracles` is skipped",
+  { timeout: 30_000 },
+  () => {
+    const { directory, origin, pushed } = withRemote();
+    const git = (args, input) =>
+      spawnSync("git", ["-C", directory, ...args], { input, encoding: "utf8" }).stdout.trim();
+    try {
+      const tree = git(["rev-parse", `${pushed}^{tree}`]);
+      const blob = git(["hash-object", "-w", "--stdin"], "lockfileVersion: 3\n");
+      const digest = "667a9dcfc19fd7155cc09be487d774a64dabb286a01b1b7817f0c6b057082204";
+      const counts = (resolved, trees, blobs, skipped) =>
+        new RegExp(
+          `${resolved + trees + blobs + skipped} tokens: ${resolved} resolved, ${trees} trees, ${blobs} blobs, ` +
+            `0 ambiguous, 0 unresolved, 0 local only, ${skipped} skipped`,
+          "u",
+        );
+      const asTree = (token) =>
+        new RegExp(`tree +${token} +${tree} in .*: a tree, not checked on a remote\n`, "u");
+      const asBlob = (token) =>
+        new RegExp(`blob +${token} +${blob} in .*: a blob, not checked on a remote\n`, "u");
+      for (const [label, text, patterns, last] of [
+        [
+          "its full id and a prefix",
+          `lock ${blob}, short ${blob.slice(0, 9)}`,
+          [asBlob(blob), asBlob(blob.slice(0, 9))],
+          counts(0, 0, 2, 0),
+        ],
+        [
+          "a key line whole",
+          `Baseline key at ${pushed}:\n${tree}.${digest}.${blob}`,
+          [asTree(tree), asBlob(blob)],
+          counts(1, 1, 1, 0),
+        ],
+        [
+          "a key as a status line prints it",
+          `baseline src ${tree.slice(0, 9)} oracles ${digest.slice(0, 9)} lock ${blob.slice(0, 9)}: complete`,
+          [asTree(tree.slice(0, 9)), asBlob(blob.slice(0, 9))],
+          counts(0, 1, 1, 1),
+        ],
+        [
+          "that line quoted in code",
+          `src \`${tree.slice(0, 9)}\` oracles \`${digest.slice(0, 9)}\` lock \`${blob.slice(0, 9)}\``,
+          [asTree(tree.slice(0, 9)), asBlob(blob.slice(0, 9))],
+          counts(0, 1, 1, 1),
+        ],
+      ]) {
+        const { status, out } = check(text, [directory]);
+        assert.equal(status, 0, `${label}: ${out}`);
+        for (const pattern of patterns) assert.match(out, pattern, label);
+        assert.match(out.trim().split("\n").at(-1), last, label);
+      }
     } finally {
       for (const path of [directory, origin]) rmSync(path, { recursive: true, force: true });
     }
