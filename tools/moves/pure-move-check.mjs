@@ -1,7 +1,7 @@
 // Whether a committed change is a pure move: every line it adds or removes is one Git marks as moved, or one of a closed
 // list of admitted forms, or a line the change declares with its reason.
 //
-//   node tools/pure-move-check.mjs BASE [--declare FILE] [--renames FILE] [PATH…]
+//   node tools/moves/pure-move-check.mjs BASE [--declare FILE] [--renames FILE] [PATH…]
 //
 // The change is the one from `git merge-base BASE HEAD` to `HEAD`, both Git's committed trees (commit first), renames
 // included; PATHs limit it, as Git's literal pathspecs. A check that looked at nothing has not passed: a PATH that
@@ -1129,7 +1129,7 @@ function main() {
   if (base === undefined || unknown !== undefined) {
     if (unknown !== undefined) console.error(`pure-move-check: unknown option ${unknown}`);
     console.error(
-      "usage: node tools/pure-move-check.mjs BASE [--declare FILE] [--renames FILE] [PATH…]",
+      "usage: node tools/moves/pure-move-check.mjs BASE [--declare FILE] [--renames FILE] [PATH…]",
     );
     process.exit(2);
   }

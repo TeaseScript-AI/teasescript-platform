@@ -4,7 +4,7 @@
 // short moved block, or a moved line break, as added and removed) and by the forms it names; this one rebuilds the old
 // file's body from the new files and reports every line that does not fit.
 //
-//   node tools/reconstruct-move.mjs BASE OLD NEW… [--edit NEW:A-B=OLD:C-D]…
+//   node tools/moves/reconstruct-move.mjs BASE OLD NEW… [--edit NEW:A-B=OLD:C-D]…
 //
 // BASE is a commit; OLD the moved file's path in it, read from Git; each NEW a file of the working tree, read as it is
 // (OLD may be one of them: a split that keeps the original file). Paths are relative to the current directory, which is
@@ -86,7 +86,8 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { ts } from "ts-morph";
 
-const USAGE = "usage: node tools/reconstruct-move.mjs BASE OLD NEW… [--edit NEW:A-B=OLD:C-D]…";
+const USAGE =
+  "usage: node tools/moves/reconstruct-move.mjs BASE OLD NEW… [--edit NEW:A-B=OLD:C-D]…";
 
 /** A file's lines, without the empty string after a final newline. */
 function linesOf(text) {
