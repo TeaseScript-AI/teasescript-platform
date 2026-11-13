@@ -52,7 +52,7 @@ interface Owers {
   readonly stopped: Set<CheckSite>;
 }
 
-/** A selected fallback's checks (C10): the fallback and each depth its obligations name. */
+/** A selected fallback's checks (the fallback rule's): the fallback and each depth its obligations name. */
 interface Selected {
   readonly fallback: Expression;
   readonly depths: FallbackDepth[];
@@ -67,9 +67,10 @@ interface Owed {
 
 /**
  * The checks the warnings owe (`runtimeChecks`), the published warnings' and then those a stop moved to the runtime:
- * C1's obligations, each placed at its store later, with the kinds its rule names, a stopped analysis's store type
- * where it decided none (D4 a′); C10's fallbacks by owner; C5c's stores and C2's calls, into `core`. Each site's owers
- * are marked as it is reached (`owers`).
+ * each `written-target` warning's obligation that no selected fallback owns, placed at its store later, with the kinds
+ * the store rule names, a stopped analysis's store type where it decided none (a stop moves an undecided check to the
+ * runtime); the fallback rule's fallbacks by owner; the stores `member-read` warnings name and the list `get` calls
+ * `integer-use` warnings name, into `core`. Each site's owers are marked as it is reached (`owers`).
  */
 function warningChecks(
   answers: Answers,
@@ -93,9 +94,9 @@ function warningChecks(
       const expression = index.expressionAt(diagnostic.site);
       switch (diagnostic.kind) {
         case "written-target": {
-          // C10's obligation names the fallback as every obligation names its value (§10.5: `xs.element` for
+          // the fallback rule's obligation names the fallback as every obligation names its value (`xs.element` for
           // `xs[0]`, `d.entry` for a dict's, its text where no place holds it), with the element steps of a nested
-          // literal's depth; C1's a place (S6's departure 6)
+          // literal's depth; the store rule's names a place
           const held = index.fallbackOf(expression);
           const steps =
             held === undefined
@@ -111,8 +112,8 @@ function warningChecks(
               kinds: diagnostic.rule.rule === "store" ? diagnostic.rule.type : null,
               by,
             });
-          // C10: a load's default is checked as the load's result; any other where it is selected, all its depths at
-          // once
+          // a fallback: a load's default is checked as the load's result; any other where it is selected, all its
+          // depths at once
           else if (owner.kind !== "loadExpression") {
             const found = fallbacks.get(owner) ?? { fallback: expression, depths: [] };
             found.depths.push({ steps: steps!, against: diagnostic.obligation.against });
@@ -122,7 +123,7 @@ function warningChecks(
           break;
         }
         case "member-read": {
-          // C5c: a store whose receiver may lack the property, or not be an object, needs it there
+          // a store whose receiver may lack the property, or not be an object, needs it there
           const store = index.storeOfReceiver(expression);
           if (store !== undefined) {
             core.requireExisting.add(store);
@@ -131,7 +132,7 @@ function warningChecks(
           break;
         }
         case "integer-use": {
-          // C2: a list `get` checks its index's kind; a count or an index read is the runtime's own check
+          // a list `get` checks its index's kind; a count or an index read is the runtime's own check
           const call = index.getOfIndex(expression);
           if (call !== undefined) {
             core.indexChecks.add(call);
@@ -170,12 +171,16 @@ function movedChecks(
 }
 
 /**
- * The runtime checks the core's obligations owe, through S3 §4's discharge map: C1's and C9's at the store that brings
- * the value into its place, the destination's written type or, else, its admitted type at the stored path, one check per
- * store whatever the obligations inside its value; a typed load's own type (F18), which repairs an object per field
- * (ADR 0021 rule 6.5); and the new content only the core emits (`CoreRuntimeChecks`): a property store that needs the
- * property (C5c), a list `get` that needs a whole number (C2), the check of a selected fallback or default (C10) and
- * `fromJson`'s expected type (F18). A boundary at a load or a `fromJson` that no store takes is its own type's.
+ * The runtime checks the core's obligations owe: the store rule's and a boundary's at the store that brings the value
+ * into its place, the destination's written type or, else, its admitted type at the stored path, one check per store
+ * whatever the obligations inside its value; a typed load's own type, which repairs an object per field (ADR 0021 rule
+ * 6.5); and the new content only the core emits (`CoreRuntimeChecks`): a property store that needs the property (a
+ * `member-read` warning), a list `get` that needs a whole number (an `integer-use` warning), the check of a selected
+ * fallback or default (the fallback rule) and `fromJson`'s expected type. A boundary at a load or a `fromJson` that no
+ * store takes is its own type's. It throws `OutsideContract`, declining the program, where the plan cannot place a
+ * check or carry its contract exactly: a loop variable's check, a check no store takes, and the cases of
+ * `Contracts.expected`, `Contracts.stored`, `Contracts.direct` and `fallbackPlan`. Its `contracts` are those
+ * `Contracts.stored` recorded as it was asked.
  */
 export function runtimeChecks(
   answers: Answers,
@@ -223,7 +228,7 @@ export function runtimeChecks(
         ),
         by: owers.published,
       });
-  // the types a typed load and a `fromJson` read their value as (F18)
+  // the types a typed load and a `fromJson` read their value as
   const typed = new Set<Expression>();
   for (const load of index.loads) {
     const type = contracts.expected(load);
@@ -244,9 +249,9 @@ export function runtimeChecks(
   const atStore = new Map<Store, Obligation[]>();
   for (const { obligation, kinds, by } of owed) {
     // a boundary check against `unknown` is the runtime's validation of representable external data, which runs for
-    // every plan: no plan content (S3 §4); where a stopped decision left a store's own check against `unknown` (no
+    // every plan: no plan content; where a stopped decision left a store's own check against `unknown` (no
     // boundary's), the receiving completion completed its contract and its own store check owes a check at this site,
-    // as the unstopped analysis does (#1526 phase C step 5), the store checks that contract
+    // as the unstopped analysis does, the store checks that contract
     if (obligation.against.length === 1 && obligation.against[0] === "unknown") {
       const at =
         !obligation.boundary && answers.completedCheck(obligation.site) && !leftOutCompletion()
@@ -259,7 +264,7 @@ export function runtimeChecks(
     const store = index.storeOf(expression);
     if (store === undefined) {
       if (obligation.boundary && typed.has(expression)) continue;
-      // (a loop variable's check has no place in the plan yet: its loop stays outside the slice)
+      // (a loop variable's check has no place in the plan: its loop is outside the slice)
       for (let at: Expression | undefined = expression; at !== undefined; at = index.parentOf(at))
         if (index.iterates(at)) throw new OutsideContract(at, "a check of a loop variable");
       // (nor has any other check that no store takes, such as one inside a command's operand: a check without a store
@@ -276,7 +281,7 @@ export function runtimeChecks(
   }
   // after a demand stop, the obligations the receiving completion's own store checks owe (#1682): the natural walk's of
   // the decisions it made on the settled pass's inputs, each at its store as the unstopped one is, for that store's
-  // parts only (its own check stays step 5's), merged into its owed ones in the published order (none where the
+  // parts only (its own check stays the store check's), merged into its owed ones in the published order (none where the
   // completion's records are left out: no completion runs, `asked`)
   const completed = new Map<Store, Obligation[]>();
   for (const warning of answers.completedWarnings()) {
@@ -320,16 +325,17 @@ export function runtimeChecks(
  * lets the invalid value through unchecked. Every plan published after a stop is gated here, at the one seam `asked`
  * publishes through, against the capture its path has (`Answers.gated`): the receiving registry where a receiving
  * completion ran (#1526 phase C), its results; after a stop where none ran or it kept none, the registry's obligations
- * without results. Each obligation a store owes when the script runs, its C1 check (a warning the walk made) or its C9
- * boundary (external data entering), is Lost where the plan's check at its store does not carry its required contract
- * (`keeps`), a stopped decision's own marks among them (#2080): a stopped mark whose completion result was lost, or
- * that has none, is kept only by a complete store check. The first Lost obligation, in the registry's source order,
- * declines the program at its store
- * (`OutsideContract`): the stopped plan would otherwise run past a check the natural plan makes (ADR 0021 §1.10
- * column (2)). A program the analysis rejects has no plan and is not asked. Where admission did not settle there is no
- * registry: each owed obligation against `unknown` is a check no completion decided, and the first, in the owed order
- * `runtimeChecks` reads, declines the program at its site (#2080, the owner's decision: no inference after the stop).
- * One visit per obligation, whose making charged each one.
+ * without results. Each obligation a store owes when the script runs, its store-rule check (a warning the walk made) or
+ * its boundary (external data entering), is lost where the plan's check at its store does not carry its required
+ * contract (`keeps`), a stopped decision's own marks among them (#2080): a stopped mark whose completion result was
+ * lost, or that has none, is kept only by a complete store check. The first lost obligation, in the registry's source
+ * order, declines the program at its store (`OutsideContract`): the stopped plan would otherwise run past a check the
+ * natural plan makes (ADR 0021 §1.10 column (2)). A program the analysis rejects has no plan and is not asked. Where
+ * admission did not settle there is no registry: each owed obligation against `unknown` is a check no completion
+ * decided, and the first, in the owed order `runtimeChecks` reads, declines the program at its site (#2080, the owner's
+ * decision: no inference after the stop). One visit per obligation, whose making charged each one. It returns nothing
+ * and declines by throwing `OutsideContract`; it reads `runtimeChecks`'s result (`published`, `checks`, `core`), so it
+ * runs after it.
  */
 export function lostCheck(
   answers: Answers,
@@ -351,9 +357,9 @@ export function lostCheck(
       UNESTABLISHED_AT_BUDGET,
     );
   }
-  // (#2080: before admission settled, a store's, a literal's or an ingress's mark against `unknown`. None was found to be
-  // a boundary obligation or carried by a complete store check, 11,034 at 1,606 such stops (campaign
-  // lane1a/2080-part2-owed), so neither is excepted)
+  // (#2080: before admission settled, a store's, a literal's or an ingress's mark against `unknown` declines the
+  // program; #2080's measurement found none that is a boundary obligation or that a complete store check carries, so
+  // neither is excepted)
   if (answers.budget.exhausted !== null && !answers.budget.settled)
     for (const diagnostic of [...answers.diagnostics, ...answers.budget.deferred]) {
       if (diagnostic.class !== "warning-runtime-check" || diagnostic.kind === "budget") continue;
@@ -371,7 +377,8 @@ export function lostCheck(
         UNDECIDED_AT_BUDGET,
       );
     }
-  // (the stores the completion's own C1 owes a check at, each once: a stopped mark there is never NoCheck, `keeps`)
+  // (the stores the completion's own destination-type check owes a check at, each once: `keeps` never lets a stopped
+  // mark there owe nothing)
   const warned = new Set<Store>();
   for (const warning of answers.completedWarnings()) {
     if (leftOutWarning(warning)) continue;
@@ -396,12 +403,13 @@ export function lostCheck(
 
 /**
  * After a settled stop, an owed obligation against exactly `unknown` that is not a store's declines the program at its
- * site (#2183): a fallback's (C10) is the requirement the stop lost, which no
- * `fallbackCheck` can carry (`fallbackPlan`), so the default would run unchecked; any other rule's declines too, as an
- * unestablished check. No set shows one (#2183's census, sweep and natural sets: `store` and `fallback` only). A store's
- * is the registry's, which `keeps` decides. Not caught: a contract the stop left incomplete that a natural producer
- * reads, where C10 owes nothing (#2183, measured 0, not shown impossible), and a store whose C1 the stop removed, where
- * no obligation is owed (#2245).
+ * site (#2183): a fallback's (the fallback rule's) is the requirement the stop lost, which no `fallbackCheck` can carry
+ * (`fallbackPlan`), so the default would run unchecked; any other rule's declines too, as an unestablished check. No set
+ * shows one (#2183's census, sweep and natural sets: `store` and `fallback` only). A store's is the registry's, which
+ * `keeps` decides. Not caught: a contract the stop left incomplete that a natural producer reads, where the fallback
+ * rule owes nothing (#2183, measured 0, not shown impossible), and a store whose store-rule warning the stop removed,
+ * where no obligation is owed (#2245). It returns nothing and declines by throwing `OutsideContract`; `lostCheck` calls
+ * it last.
  */
 function settledOwed(answers: Answers, index: SliceIndex): void {
   const { budget } = answers;
@@ -422,7 +430,7 @@ function settledOwed(answers: Answers, index: SliceIndex): void {
 }
 
 /**
- * The part checks a store's owed obligations below its destination make (#1224, the lead's ruling (c)): one per obligation
+ * The part checks a store's owed obligations below its destination make (#1224): one per obligation
  * the analysis owes at the store below its destination (`destination`, the label of the place it stores into), with
  * the obligation's kinds at the steps its target names below the destination (`pathText`'s: a property's name, quoted
  * for an internal one, `element`, `entry` or `index` for an element). None is made for an obligation at the destination
@@ -520,7 +528,7 @@ function reaches(
 }
 
 /**
- * A store's check by the kinds its warning names, where a stopped analysis decided no type to check it against (D4 a′):
+ * A store's check by the kinds its warning names, where a stopped analysis decided no type to check it against:
  * the type admission decided before the stop, its kinds' containers unrestricted below them.
  */
 function storedKinds(store: Store, kinds: readonly ItemTag[] | null): TypeCheckPlan | null {
@@ -536,13 +544,19 @@ function storedKinds(store: Store, kinds: readonly ItemTag[] | null): TypeCheckP
   return { type, place: target === null ? "the place" : `'${target}'` };
 }
 
-/** C10's obligation at one depth of a fallback: its element steps below the fallback, and the kinds it requires there. */
+/**
+ * The fallback rule's obligation at one depth of a fallback: its element steps below the fallback, and the kinds it
+ * requires there.
+ */
 interface FallbackDepth {
   readonly steps: readonly string[];
   readonly against: readonly RequiredKind[];
 }
 
-/** The element steps of a C10 target below the fallback named `name` (`targetName`), or `null` for another (a C1's). */
+/**
+ * The element steps of a fallback rule's target below the fallback named `name` (`targetName`), or `null` for another
+ * (a store rule's).
+ */
 function fallbackSteps(target: string, name: string | null): string[] | null {
   if (name === null) return null;
   if (target === name) return [];
@@ -552,12 +566,12 @@ function fallbackSteps(target: string, name: string | null): string[] | null {
 }
 
 /**
- * The check of a selected fallback from C10's obligations at its depths (ADR 0021 7.2, nested literals by their
- * elements): at each depth the kinds required there, `null` below the fallback itself where `takesNull` allows it, the
- * collection below it as the fallback's literal is one, else a list or a set for an element and a dict for an entry;
- * `null` where no depth requires a kind. Where C10 publishes nothing below a collection no literal holds, that collection
- * is checked whole, as the value the fallback stands in for is at that depth (`whole`), not its first level alone (Astra
- * r1's B1 on #1539); where that value gives no collection there the program leaves the slice.
+ * The check of a selected fallback from the fallback rule's obligations at its depths (ADR 0021 7.2, nested literals by
+ * their elements): at each depth the kinds required there, `null` below the fallback itself where `takesNull` allows
+ * it, the collection below it as the fallback's literal is one, else a list or a set for an element and a dict for an
+ * entry; `null` where no depth requires a kind. Where the fallback rule publishes nothing below a collection no literal holds,
+ * that collection is checked whole, as the value the fallback stands in for is at that depth (`whole`), not its first
+ * level alone (#1539); where that value gives no collection there the program leaves the slice.
  */
 function fallbackPlan(
   fallback: Expression,
@@ -600,7 +614,7 @@ function fallbackPlan(
                   { kind: "list", element: below },
                   { kind: "set", element: below },
                 ];
-    // below the fallback itself an element may be `null` too, unless a written place it lands in excludes it (C10)
+    // below the fallback itself an element may be `null` too, unless a written place it lands in excludes it
     const steps = depths.find((entry) => entry.steps.length >= depth)?.steps.slice(0, depth) ?? [];
     if (literal === null && collections.length === 0 && kinds.some(isCollection)) {
       const complete = whole(steps);
