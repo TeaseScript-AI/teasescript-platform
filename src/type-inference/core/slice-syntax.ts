@@ -336,16 +336,10 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
             ...node.arguments.map((argument) => argument.value),
           ]),
   },
-  unaryExpression: REFUSED,
-  binaryExpression: {
-    row: "modelled",
-    // (`otherwise`, and the narrowing's own null tests, `x != null` and `x == null`, §13.2's G: every other operator is
-    // S9b's, by its own rule)
-    visit: (node) =>
-      node.operator !== "otherwise" && !nullTest(node)
-        ? refuse(node.span, "this binary expression")
-        : walk([node.left, node.right]),
-  },
+  // (every operator: the core's condition and operator rules, C3 and C4, judge its operands, and the route reports
+  // their diagnostics, `backend.ts`'s `ROUTE_OPERAND_RULES`)
+  unaryExpression: modelled((node) => [node.operand]),
+  binaryExpression: modelled((node) => [node.left, node.right]),
   rangeExpression: modelled((node) => [node.start, node.end]),
   interactionExpression: {
     row: "modelled",
@@ -430,14 +424,6 @@ export function outsideSyntax(
     }
   }
   return null;
-}
-
-/** Whether a comparison is a null test, `x != null` or `x == null` (either side the `null`). */
-function nullTest(node: Extract<Expression, { kind: "binaryExpression" }>): boolean {
-  return (
-    (node.operator === "!=" || node.operator === "==") &&
-    (unwrapped(node.left).kind === "nullLiteral" || unwrapped(node.right).kind === "nullLiteral")
-  );
 }
 
 /** The slice's literals that are no object (`outsideSyntax`'s literal cases). */

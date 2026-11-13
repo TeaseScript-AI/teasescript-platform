@@ -54,6 +54,7 @@ import {
 } from "./type-core-derived.js";
 import { fitsType, jsonValue, readJson, shown } from "./type-core-derived-values.js";
 import { askEnd } from "./derived-asks.js";
+import { binaryValue, unaryValue } from "./derived-operators.js";
 
 // ------------------------------------------------------------------------------------------------- the evaluator
 
@@ -285,11 +286,12 @@ export function evaluate(
           );
           return { v: (other.v === null) === (expression.operator === "=="), from: other.from };
         }
-        if (expression.operator !== "otherwise")
-          throw new Underivable(`the operator ${expression.operator}`);
+        if (expression.operator !== "otherwise") return binaryValue(expression, value, fail);
         const left = value(expression.left);
         return left.v !== null ? left : checkedFallback(expression, expression.right);
       }
+      case "unaryExpression":
+        return unaryValue(expression, value, fail);
       case "typeTestExpression": {
         // (`x is T`: whether its value fits T, as a store of it would; `is not` the opposite, #1073 PR 2)
         const tested = value(expression.value);
@@ -708,11 +710,20 @@ export function evaluate(
         for (let round = 0; round < (fits ? Number(count.v) : 0); round += 1)
           run(statement.body.statements);
       } else if (statement.kind === "ifStatement") {
-        // (a literal, or a test whose value the run knows: a type test, a null test)
-        const condition = value(statement.condition).v;
-        if (typeof condition !== "boolean")
-          throw new Underivable("an `if` on a value that is not a boolean");
-        if (condition) run(statement.thenBlock.statements);
+        // (a condition that is no boolean fails TSR026 at it, recorded only then, so a fitting one feeds no check; a run
+        // through every check takes neither branch after it)
+        const condition = value(statement.condition);
+        if (typeof condition.v !== "boolean") {
+          fail(
+            "TSR026",
+            unwrap(statement.condition).span.start.offset,
+            unwrap(statement.condition).span.end.offset,
+            condition.from,
+            false,
+          );
+          continue;
+        }
+        if (condition.v) run(statement.thenBlock.statements);
         else if (statement.elseBlock !== null)
           run(
             statement.elseBlock.kind === "ifStatement"

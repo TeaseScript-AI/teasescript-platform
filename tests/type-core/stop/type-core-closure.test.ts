@@ -37,7 +37,7 @@ import { decisionRecords, inMode, MODES } from "../../helpers/type-core-oracles.
  * pass without those keys, each decision made where a proof first reads it and each property listing a cell the
  * frontier schedules, taken whole by a search that reaches it. Outside the candidate slice, by its syntax or its depth,
  * no completion runs and the analysis is main's: Astra's C-R1 chain of function results, the function result, an
- * argument, an `add` and a list join are outside its syntax, so the gate's witnesses are the in-slice families (copy
+ * argument and an `add` are outside its syntax, so the gate's witnesses are the in-slice families (copy
  * chains, shared, wide, ring, mutual) at one doubling; the full series is the PR's evidence, outside CI.
  */
 
@@ -240,7 +240,7 @@ test("the copied and direct nested stores owe their checks at every mode's stop"
 
 /**
  * Programs outside the candidate slice's syntax, a decision of each freezing: a function's result chain (Astra's C-R1),
- * the unmarked function result (her M2), a checked argument and return, an `add`, a list join, a compound assignment and
+ * the unmarked function result (her M2), a checked argument and return, an `add`, a compound assignment and
  * an interpolation. The candidate route declines them, and the analysis is main's: no receiving obligation, no
  * completion, and every unit charged as on `main` at `92a970442`, its event searches charged by comparison since #1221
  * no narrowing index made for a program without a test since #1251, and a read signature's prefixes found by its charged trie walk since #1822 (`rdWalk`, 1–6 units more on four rows; a regression oracle of this gate only), and the route rule's queries since #1073 PR 4 (AD-1: a possible null's route asked at its use, on the rows that have one), and its ways into the use since #2497 (r4-451: the program's jump index, made once, 11 to 44 units on three rows), at demand 16 and 64 in the four modes (each list: demand 16's four modes,
@@ -268,13 +268,6 @@ const OUTSIDE: readonly (readonly [string, string, readonly number[]])[] = [
     [5187, 5881, 5145, 5566, 7465, 6937, 7328, 6622],
   ],
   ["an add", "let b = [[1]]\nb.add(hostValue)", [684, 1020, 684, 852, 1071, 1198, 1002, 1121]],
-  // (18 units more at demand 64 since #1828: the mixed join's sentence walks each operand to its leaf and reads its
-  // occurrence there, its decider asked once with `decidedAt`'s, Codex r2 on #1899)
-  [
-    "a list join",
-    `${frozen}\nlet xs = [1]\nlet ys = ["s"]\nb.f = [xs + ys]`,
-    [20044, 21252, 19818, 21009, 32920, 34389, 32070, 33448],
-  ],
   [
     "a compound assignment",
     `${frozen}\nlet n = 1\nn += 1`,
@@ -395,7 +388,6 @@ test("a completion decision that would reject a store or retarget a selecting st
     [retargeting(16), "retarget", ["box.first.n = hostValue"]],
     [copied('b.f = "s"', "let c = b.f\nc = hostValue"), "rejection", ["c = hostValue"]],
     [copied('b.f = "s"', "let c = {q: b}\nc.q = hostValue"), "rejection", ["c.q = hostValue"]],
-    // (a list join, outside the slice's syntax, is a gate witness: `OUTSIDE`)
     [
       "let b = {first: {n: null}}\nb.first.n = [[1]]\nlet c = {q: b}\nc.q = hostValue" + ending,
       "retarget",
