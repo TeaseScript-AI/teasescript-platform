@@ -338,6 +338,17 @@ export class RetainedInstrument implements RetainedRecorder {
 
   readonly #registered = new WeakSet<object>();
   readonly #ownerOf = new WeakMap<object, OwnerRecord>();
+  /** The functions registered since the last switch, whose own properties' values are sealed there. */
+  #functions: (readonly [string, object])[] = [];
+
+  /** `fn`'s own data properties' values (a frozen function's, fixed from its registration). */
+  #ownValues<T extends object>(fn: T): unknown[] {
+    return Reflect.ownKeys(fn).flatMap((key) => {
+      const descriptor = Object.getOwnPropertyDescriptor(fn, key)!;
+      return "value" in descriptor ? [descriptor.value] : [];
+    });
+  }
+
   /** What was stored since the last switch: a kind and the key or slot it was stored at. */
   #pending: (readonly [Made, unknown])[] = [];
   /** The owners made since the last switch, to lock there; and those open for writes in this interval, to lock again. */
@@ -398,10 +409,15 @@ export class RetainedInstrument implements RetainedRecorder {
     };
   }
 
-  /** A function retained state may keep (`Retained.closure`): admitted, and its own properties frozen (R61). */
+  /**
+   * A function retained state may keep (`Retained.closure`): admitted, and its own properties frozen (R61); their values
+   * are checked now and sealed at the switch, as a store's are.
+   */
   public closure<T extends object>(name: string, fn: T): void {
     this.#registered.add(fn);
     Object.freeze(fn);
+    for (const value of this.#ownValues(fn)) this.#admit(value, `function ${name}`, false);
+    this.#functions.push([name, fn]);
     this.#exercise(`function ${name}`);
   }
 
@@ -563,7 +579,8 @@ export class RetainedInstrument implements RetainedRecorder {
     this.#byTarget.set(target, made);
     this.#registered.add(proxy);
     for (const key of Reflect.ownKeys(target)) {
-      if (key === "length") continue;
+      // (an array's or an arena's length is no element; a record's `length` is a field like any other)
+      if (kind !== "record" && key === "length") continue;
       const descriptor = Object.getOwnPropertyDescriptor(target, key)!;
       this.#admit(descriptor.value, name, false);
       if (typeof descriptor.value === "object" || typeof descriptor.value === "function")
@@ -678,6 +695,10 @@ export class RetainedInstrument implements RetainedRecorder {
    * write to a locked owner's field throws at its line unless its run marks the owner first.
    */
   public checkpoint(): void {
+    const functions = this.#functions;
+    this.#functions = [];
+    for (const [name, fn] of functions)
+      for (const value of this.#ownValues(fn)) this.#admit(value, `function ${name}`, true);
     const pending = this.#pending;
     this.#pending = [];
     for (const entry of pending) {
