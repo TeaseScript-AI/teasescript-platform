@@ -405,7 +405,7 @@ const INTENDED: readonly Intended[] = [
     fixless: true,
   },
   {
-    rule: "S8c's (#1173): a number where a whole number is required, the count's and the written integer's sentences",
+    rule: "#1173: a number where a whole number is required, the count's and the written integer's sentences",
     matches: ({ diagnostic }) =>
       diagnostic.kind !== "written-type" &&
       diagnostic.kind !== "static" &&
@@ -413,7 +413,7 @@ const INTENDED: readonly Intended[] = [
         ((diagnostic.rule.rule === "store" || diagnostic.rule.rule === "fallback") &&
           diagnostic.rule.type.includes("integer") &&
           diagnostic.kinds.includes("number"))),
-    // (its sentences as they stand until S8c: rounding, a whole number, a fallback of the type, an unknown's test)
+    // (its sentences as #1173 words them: rounding, a whole number, a fallback of the type, an unknown's test)
     replacement: ({ diagnostic, named }) =>
       diagnostic.kind === "written-type" || diagnostic.kind === "static"
         ? exact("Use a whole number here.")
