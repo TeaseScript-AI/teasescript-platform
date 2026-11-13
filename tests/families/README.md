@@ -739,6 +739,6 @@ folder on the desktop worker. A new kit's entry goes to its area's file.
 
 ## The oracle library's next step
 
-`tests/helpers/type-core/type-core-enclosing.ts` (#1434) keeps its own `MODES`: eight modes, with the consumers' order and the
+`tests/helpers/type-core/enclosing/type-core-enclosing-verdicts.ts` (#1434) keeps its own `MODES`: eight modes, with the consumers' order and the
 solver's order varied apart. The library's four modes reverse both together. Its modes are the candidate for the
 library's next step. Its stop verdict (`enclosingProblems`) is its own oracle and copies no library projection.

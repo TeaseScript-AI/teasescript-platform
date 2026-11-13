@@ -65,7 +65,7 @@ export async function loadCompiler(root) {
 }
 /**
  * `call` at the policy's allowance in one of the eight modes: the consumers' and the solver's worklist's order apart,
- * as `tests/helpers/type-core/type-core-enclosing.ts`'s `MODES` (#1434), and the sharing on or off. Composed from the compiler's
+ * as `tests/helpers/type-core/enclosing/type-core-enclosing-verdicts.ts`'s `MODES` (#1434), and the sharing on or off. Composed from the compiler's
  * own seams, not the oracle library's `inMode` (four modes): the tool runs on any pinned tree, those before the library
  * (#1427) too, and a tree's library drives only that tree's compiler.
  */
@@ -97,7 +97,7 @@ const prefix = (a, b) => a.length <= b.length && a.every((v, i) => v === b[i]);
  * Which stop the store meets, by the compiler's own decisions, and whether its row is judged. A stop at or above the
  * store's path leaves it out of scope (#1440), but under the plan's rule 1440 (`lib/rules.mjs`) a store the source
  * certifies (`lib/certificate.mjs`, recorded as `certified`) is judged on its whole domain, as
- * `tests/helpers/type-core/type-core-enclosing.ts` judges its certified cases; neither judges a store into an inferred place
+ * `tests/helpers/type-core/enclosing/type-core-enclosing-verdicts.ts` judges its certified cases; neither judges a store into an inferred place
  * before admission settled (#1252).
  */
 export function scopeOf(api, request, answer, c, rules = []) {
