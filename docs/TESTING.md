@@ -343,38 +343,38 @@ review round, beside the generator areas above.
 
 In the type-core suites, a test-mode instrument (`tests/helpers/retained-instrument.ts`, installed by its preload
 through `tools/test-output-filter.mjs`) checks the state the type core keeps between solver runs where it is stored and
-at each run switch, and freezes what an ended run stored (#1072). A write to retained state is refused where it is
-made, or throws at its line where the data is frozen. V8's `TypeError` at a write to plain data frozen at the switch is
-a refusal: the lint's `catch` and `finally` rule keeps it from being handled in `src/type-inference/` (docs/LINTING.md,
-"Retained state in type inference"). The instrument counts each refusal it throws, wherever it is caught, and the
-preload fails the file at its exit when it threw any. It catches a write that the type core makes by ordinary code,
-across runs, in test mode; it does not claim to resist code written to get around it (#1072 R33).
+at each run switch, and freezes what an ended run stored (#1072). It counts each refusal it throws, wherever it is
+caught, and the preload fails the file at its exit when it threw any. It catches a write that the type core makes by
+ordinary code, across runs, in test mode; it does not claim to resist code written to get around it (#1072 R33).
 
 Covered, each closed by construction:
 
-- what a maker returns: a record, an arena or an array is a copy of the given top level (`retainedCopy`, production's
-  too) that the instrument wraps; a map, set, weak map or weak set has its own writers;
-- the plain data a covered kind reaches, frozen at the switch;
-- an owner's fields, locked at its first switch and opened by marks; its private fields are reached through its
-  `hidden`;
-- the registered program (`Retained.program`): its plain data frozen, its native collections' writers refusing, its
-  classes' private collections reached through `hidden` (`Retained.programPart`);
-- a registered function's own properties (`Retained.closure`), frozen at its registration;
-- a typed array under the instrument's `TYPED_ENTRIES`, compared at the process's exit with its bytes when its run
-  ended; a difference fails the file.
+- **What a maker returns:**
+  - a record, an arena or an array: a copy of the given top level (`retainedCopy`) that the instrument wraps;
+  - a map, set, weak map or weak set: its own writers.
+- **The plain data a covered kind reaches.** It is frozen at the switch. V8's `TypeError` at a write to plain data
+  frozen at the switch is a refusal: the `catch` and `finally` rule keeps it from being handled in
+  `src/type-inference/` (docs/LINTING.md, "Retained state in type inference"), and the compiler's own catches outside
+  take only native stack exhaustion.
+- **An owner's fields:** locked at its first switch and opened by marks. Its private fields are reached through
+  `hidden`.
+- **A registered program:** its plain data is frozen, its native collections refuse writes, and its classes' private
+  collections are reached through `hidden` (`Retained.programPart`).
+- **A registered function's own properties:** frozen at registration.
+- **A typed array under `TYPED_ENTRIES`:** compared at the process's exit with its bytes when its run ended; a
+  difference fails the file.
 
 Not covered, each with its reason:
 
-- module scope (#1072 R57, an item of its own);
-- what a registered function captures, which the comment at its registration names for review (R26);
-- code outside `src/type-inference/`, the tests and `tests/helpers/` included: an owner given to it, its writes and its
-  catches;
+- module scope (#1072 R57: an item of its own);
+- what a closure captures (its registration comment, read at review, R26);
+- code outside `src/type-inference/`: an owner given to it, its writes and its catches;
 - a typed array written and then restored between two comparisons;
-- a private `readonly` field assigned again in its constructor after a run switch inside that constructor;
-- a write within one run, and production (no instrument);
-- admission's state and the receiving domain (#1072 1b ii), and `narrowing/` (R49, an item of its own);
-- the own state of a class the instrument lists in `IDENTITY_CLASSES`, each listed with its reason;
-- the retained API itself (`core/retained/`), a trusted implementation.
+- a private `readonly` field assigned again in its constructor after a run switch inside that constructor (R36);
+- a write within one run; production;
+- admission and the receiving domain (#1072 1b ii); `narrowing/` (R49, an item of its own);
+- an `IDENTITY_CLASSES` class's own state, each listed with its reason;
+- the retained API itself, a trusted implementation.
 
 It runs in two regimes:
 
