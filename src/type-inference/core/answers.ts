@@ -22,7 +22,8 @@ import {
   type Retargeted,
 } from "./consumers.js";
 import { keyLabel } from "./consumers/names.js";
-import { propertyNames, type PropertyNamesTask } from "./property-names.js";
+import type { PropertyNamesTask } from "./property-listings.js";
+import { propertyNames } from "./property-names.js";
 import { Admission } from "./admission.js";
 import { Closure, type ClosureCounts } from "./admission/closure.js";
 import type { ReceivingObligation, ReceivingResult } from "./admission/receiving.js";

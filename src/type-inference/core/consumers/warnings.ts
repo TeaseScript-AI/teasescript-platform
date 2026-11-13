@@ -11,7 +11,8 @@ import { codeOf, pathPhrase } from "../messages.js";
 import { measuresLength } from "../method-categories.js";
 import { stablePath } from "../narrowing/narrowings.js";
 import { propertyName, propertyStep, siteKey, stepName } from "../program.js";
-import { propertyNames, type PropertyNamesTask } from "../property-names.js";
+import type { PropertyNamesTask } from "../property-listings.js";
+import { propertyNames } from "../property-names.js";
 import {
   contextOf,
   offendingKinds,
