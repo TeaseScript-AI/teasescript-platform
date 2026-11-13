@@ -30,7 +30,7 @@ import { HELD_MODES } from "../../helpers/type-core-held-host.js";
  *   ending as today's (status and failure, with its site); apart from the two inherited warning classes 1a's ledger
  *   names (#2544's body, "R5, diagnostics"): the core's TSV041 on a host value stored into a typed place, where today
  *   gives none, and today's TSV046 on a test its types decide, where the route gives none.
- * - `refused`: the route declines with this text, so today's checker answers.
+ * - `refused`: the route declines with this text.
  * - `way`: today plans; the route gives TSV052 and no plan (#2660).
  * - `unreached`: as `equal`, but where today warns TSV065 that a statement after a `switch` never runs, the route does
  *   not (#2660, the same cause: its ways do not read the values a subject's type holds).
@@ -344,8 +344,8 @@ const SUBJECTS: Readonly<Record<string, readonly [string, string]>> = {
 
 /**
  * The family's rows the route declines where today's checker plans: the facts type a parse by its default's kind, which
- * today's checker leaves unknown, so today's predicate on the facts' type finds these cases may never match. Each is
- * refused, never published, and today's checker answers.
+ * today's checker leaves unknown, so the predicate on the facts' type finds these cases may never match. Each is
+ * refused, never published.
  */
 const UNDER_OFFERED: ReadonlySet<string> = new Set([
   'a parse, case "a"',
@@ -406,8 +406,8 @@ test("a case value that may never match is refused where today's checker gives T
 });
 
 test("a case value that may never match stays refused where the analysis's budget stops it before its subject's kind", () => {
-  // (a stop leaves the subject an unknown of the budget's reason, which today's checker types: refused, never published,
-  // R33's form; never a throw of another kind)
+  // (a stop leaves the subject an unknown of the budget's reason, which the admitted set does not hold: refused, never
+  // published, R33's form; never a throw of another kind)
   for (const source of [
     'let s = 1\nswitch s {\n  case "a" {\n    say "a"\n  }\n}\nexit\n',
     'let s = "a"\nlet t = s\nswitch t {\n  case 1..3 {\n    say "r"\n  }\n}\nexit\n',
@@ -439,7 +439,7 @@ test("a `switch` whose subject's type rules out the no-case way gets TSV052 on t
         files: declared.files,
         expect: "way" as const,
       })),
-      // (inherited: a type case, and its twin without a `switch` on the base)
+      // (inherited: a type case, and its twin without a `switch`, which gives the same TSV052)
       one(
         "inherited: a type case",
         "let s = 1\nswitch s {\n  case is integer {\n    exit\n  }\n}\n",
