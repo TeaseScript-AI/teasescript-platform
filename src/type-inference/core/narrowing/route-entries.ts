@@ -441,7 +441,7 @@ export abstract class RouteEntries extends RouteCandidates {
     if (this.feasible !== null) {
       // (under the program default, every jump a store's stretch holds, the same for each key of a list, `seedAt`
       // certifying its writer: a writer it finds reaches its jump with nothing holding the variable between, so its
-      // stretch holds that jump and it would be tried here; R2.2's jumps are few)
+      // stretch holds that jump and it would be tried here)
       const seen = new Set<Jump>();
       const tried: Jump[] = [];
       for (const lists of each(this.#work, "eventSteps", yield* this.seedLists(key)))
@@ -450,6 +450,8 @@ export abstract class RouteEntries extends RouteCandidates {
             seen.add(jump);
             tried.push(jump);
           }
+      // (the relation tries the seeds in source order, which its first-reached-first rule reads, and the lists' jumps
+      // come merged per list, not across them: T_k log T_k charged per key, T_k its jumps tried)
       return sorted(this.#work, "eventSteps", tried, (a, b) => a.order - b.order);
     }
     // (the key's stores in bodies that make a jump: each list's bodies or the jumps' bodies, whichever are fewer)

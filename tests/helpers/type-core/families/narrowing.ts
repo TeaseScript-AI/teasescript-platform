@@ -780,6 +780,33 @@ export const ROUTE_ENTRY_SIBLING_STORES: KnownProduct = {
 };
 
 /**
+ * Under the program default (R2.2), one scalar's `null` store before a `switch` of k cases, each a `goto` back to the
+ * label before the use: k standing jumps for one key, tried in source order after one sort per key (R63). The total is
+ * gated alone, at its measured 64 → 128 step, as `ROUTE_ENTRY_SIBLING_STORES`.
+ */
+export const ROUTE_ENTRY_SWITCH_JUMPS: KnownProduct = {
+  name: "E-default-switch-jumps",
+  measures:
+    "N3 under the program default (R2.2): one scalar's use after a label, its `null` store, then a switch of k cases each going back to the label",
+  program: (k) =>
+    main(
+      lines(
+        "let token = 1",
+        'if token == null { say "absent" }',
+        "let n: integer? = 1",
+        "label top",
+        "let value: integer = n",
+        "n = null",
+        "switch hostValue {",
+        rows(k, (i) => `  case ${i} { goto top }`),
+        "}",
+        "exit",
+      ),
+    ),
+  measured: 2.03,
+};
+
+/**
  * The route rule's jump index over k files each left by a computed `goto script(...)` (#2497, r4-451's give-up: such a
  * transfer enters no file). The program's flow already grows as files × transfers here, a computed transfer having an
  * edge to every file, so the family is gated on the index's own counter, never on the total.
