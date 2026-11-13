@@ -1,0 +1,15 @@
+// Part C: a long session, 2000 waits with a little work between them, inside a function called from a loop.
+let total = 0
+function step(n) {
+  let part = 0
+  for i in 0..50 {
+    part += (i * n) % 7
+  }
+  wait 1 second
+  return part
+}
+for k in 0..2000 {
+  total += step(k)
+}
+say "total ${total}", instant
+exit
