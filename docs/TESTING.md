@@ -1296,7 +1296,7 @@ case's result digest.
 - **Check:** `npm run oracle:test`, after a build, materializes the oracle and runs the three `tests/*.oracle.ts`
   files, outside the sharded suite; `npm run oracle:run` prints the comparison alone. The oracle must reproduce its
   pinned digests, then this checkout's build is compared with it on every case and route
-  (`tools/runtime-oracle/cases.json`); a difference fails the run, for its reader to explain.
+  (`tools/runtime-oracle/cases.json`); a difference fails the run.
 - **Seal:** `node tools/runtime-oracle/materialize.mjs --seal COMMIT --label provisional|final [--seam SHA]` rewrites
   the manifest from that commit's own run, when a newer pin serves the comparison better.
 
