@@ -58,7 +58,7 @@ import {
 } from "./contract-descriptors.js";
 import { withFacts } from "./consumers/reports/diagnostics.js";
 import { enclosingStores, requiredStores } from "./consumers/stores/enclosing.js";
-import { finishedItems, finishingRead, labelDomain } from "./consumers/finishing.js";
+import { finishingRead, labelDomain } from "./consumers/finishing.js";
 import { freshStores, ingressMark, markHolder, markValue } from "./consumers/stores/fresh.js";
 import { mixed, mixedChoices, mixedJoin } from "./consumers/stores/mixed.js";
 import type {
@@ -266,27 +266,37 @@ export class Consumers {
   readonly restarted: boolean;
   #readingNode: FlowNode | null = null;
   #callableNodes: Map<unknown, number> | null = null;
+  /** The order the consumers visit their lists in: source order, or a test's (`withConsumerOrder`). */
   readonly order: <T>(list: readonly T[]) => T[];
+  // The per-pass memos below each name the module that reads them; this class holds them for the pass.
+  /** Each `get` result's receiver, made in the constructor (names.ts). */
   readonly getOf = new Map<PlaceId, PlaceId>();
   /**
    * A removing method's result by its receiver, and whether it is always the element it removed (`removeFirst()`,
-   * `removeAt(i)`); else (`remove`) a list's or set's gives `null` and a dict's its value, by the receiver.
+   * `removeAt(i)`); else (`remove`) a list's or set's gives `null` and a dict's its value, by the receiver; made in the
+   * constructor (names.ts).
    */
   readonly removedOf = new Map<PlaceId, { readonly receiver: PlaceId; readonly always: boolean }>();
+  /** Each call result's place of its function's result, made in the constructor (names.ts, host-frontier.ts). */
   readonly resultOfCall = new Map<PlaceId, PlaceId>();
-  /** Each value's label's recipe (`keyLabel`), made once from its owner's. */
+  /** Each value's label's recipe (`keyLabel`, names.ts), made once from its owner's. */
   readonly labels = new Map<PlaceId, Label>();
   /**
-   * What a label's walk up a projection chain asks, once per value: the element step below each owner, and whether
-   * each chain passes a derived list or starts at no place.
+   * What a label's walk up a projection chain asks, once per value (names.ts): the element step below each owner, and
+   * whether each chain passes a derived list or starts at no place.
    */
   readonly elementSteps = new Map<PlaceId, string>();
   readonly derivedChains = new Map<PlaceId, boolean>();
   readonly anonymousChains = new Map<PlaceId, boolean>();
-  /** Per value read in the finishing path, the written type at its own path (`writtenRead`), `null` for none. */
+  /**
+   * Per value read in the finishing path, the written type at its own path (`writtenRead`, finishing.ts), or `null`.
+   */
   readonly writtenReads = new Map<PlaceId, TypeTerm | null>();
-  /** Per value read in the finishing path, its key (`readKey`), `null` for none. */
+  /** Per value read, its key (`readKey`, names.ts), `null` for none. */
   readonly readKeys = new Map<PlaceId, Key | null>();
+  /**
+   * Per receiver key and property, whether its sources have the property (`propertyPresence`, operations/receivers.ts).
+   */
   readonly presence = new Map<
     string,
     {
@@ -295,15 +305,19 @@ export class Consumers {
       readonly unknown: boolean;
     }
   >();
+  /**
+   * Per key and node, the unwritten parameter its read reaches through copies (`defaultSource`,
+   * operations/fallbacks.ts).
+   */
   readonly defaults = new Map<
     string,
     { readonly key: CanonicalKey; readonly at: FlowNode } | null
   >();
-  /** The cheap deciders' shapes, one per key, and their decisions, one per key and path (`cheapDecided`). */
+  /** The cheap deciders' shapes and frontiers, one per key, and their decisions, one per key and path (syntax.ts). */
   readonly cheapShapes = new Map<Key, CheapShape>();
   readonly cheapFrontiers = new Map<Key, CheapFrontier>();
   readonly cheapDecisions = new Map<Key, CheapDecision | null>();
-  /** The places the script stores into, at any path (`copySource`). */
+  /** The places the script stores into, at any path (`copySource`, syntax.ts). */
   storedRoots: Set<PlaceId> | null = null;
 
   public constructor(
@@ -392,14 +406,19 @@ export class Consumers {
     );
   }
 
+  /**
+   * After a stop, a value's items at a node and a path as the finishing read answers them (`finishingRead`), for the
+   * route's questions (`CoreAnswers.#items`): one derivation with the consumers'.
+   */
   public finishedItems(
     value: PlaceId,
     node: FlowNode | null,
     rest: readonly string[],
   ): readonly Item[] {
-    return finishedItems(this, value, node, rest);
+    return finishingRead(this, value, node, rest);
   }
 
+  /** Per value and path, a typed parse's or load's expected type after a stop (`typedRead`, finishing.ts). */
   readonly typedReads = new Map<string, readonly Item[] | null>();
 
   /**
@@ -454,6 +473,7 @@ export class Consumers {
     };
   }
 
+  /** Each host global's stores, made once (`storedAbove`, finishing.ts). */
   hostStores: Map<PlaceId, Definition[]> | null = null;
 
   /** Whether a finishing walk asks the solver nothing (`run`): nested past the limit, or after an unsettled stop. */
@@ -736,7 +756,7 @@ export class Consumers {
       )
         storeSites.push({ site: d.site, stopped: d.provenance.context === "budget" });
     this.#storeSites = storeSites;
-    this.#capturePhaseB();
+    this.#captureOwedContracts();
   }
 
   /** The receiving seed's store sites (`#capture`); `null` in a pass whose admission did not settle. */
@@ -767,7 +787,7 @@ export class Consumers {
   #leftSlice: SourceSite | null = null;
 
   /** The capture of each owing destination's contract (`#capture`). */
-  #capturePhaseB(): void {
+  #captureOwedContracts(): void {
     const { program, definitions, lists, contract } = this.pass;
     const sites = new Map<string, SourceSite>();
     // (a stopped decision's own marks, the reason `budget`, stand for their stores' checks: the stop owes them, and a
@@ -1298,7 +1318,7 @@ export class Consumers {
    * when the script runs); in the finishing path, those and the units the stop left. Marks what was found before it.
    * Call it once per unit, in the walk's order: it advances the unit a stop resumes from.
    */
-  public runs(site: SourceSite): boolean {
+  public startUnit(site: SourceSite): boolean {
     const unit = this.#unit;
     this.#unit += 1;
     this.#mark = {
@@ -1320,15 +1340,21 @@ export class Consumers {
     this.rule = 4 + stage;
   }
 
+  /** What the stores' syntax decides at `path` of `root` after a stop (syntax.ts), for the answers' level reader. */
   public cheapDecided(root: PlaceId, path: readonly string[]): CheapDecision | null {
     return cheapDecided(this, root, path);
   }
 
-  /** The stores above a stopped decision: each checked against its destination's complete type, or marked (#1416). */
+  /**
+   * The stores above a stopped decision: each checked against its destination's complete type, or marked (#1416).
+   * `admittedStores` calls it through here: stores/enclosing.ts imports stores/fresh.ts, which imports
+   * stores/stores.ts, so a direct import would close a cycle.
+   */
   public enclosingStores(): void {
     enclosingStores(this);
   }
 
+  // stores/enclosing.ts:
   /** The destinations `enclosingStores` resolved this pass, a whole store's key and an add's receiver's apart. */
   readonly enclosed = new Set<Key>();
   readonly enclosedAdds = new Set<Key>();
@@ -1337,14 +1363,13 @@ export class Consumers {
   /** Each such destination's complete type, which its stores' checks carry into the plan whole (`Answers.requirement`). */
   readonly requirements = new Map<Key, TypeTerm>();
 
+  // stores/fresh.ts: the stores and transfers it marked (`storeMark`), their values' spans by file (`inMarkedValue`),
+  // the values and typed calls marked at their own sites (`literalMark`, `ingressMark`), and each held value's cell and
+  // each value's stores (`markValue`).
   readonly marked = new Set<number>();
-
   markedSpans: Map<number, Laminar<null>> | null = null;
-
   readonly markedLiterals = new Set<PlaceId>();
-
   readonly markedIngress = new Set<string>();
-
   heldIn: Map<PlaceId, PlaceId> | null = null;
   storesOf: Map<PlaceId, Definition[]> | null = null;
 
@@ -1352,31 +1377,33 @@ export class Consumers {
     return withFacts(this, diagnostic);
   }
 
-  /** `readsAbsent`'s answer per expression. */
+  /** `readsAbsent`'s answer per expression (reports/diagnostics.ts). */
   readonly absentReads = new Map<Expression, boolean>();
 
-  /** `expected`'s answer per site. */
+  /** `expected`'s answer per site (reports/expected.ts). */
   readonly expectations = new Map<string, SiteExpectation>();
 
-  /** `readsTakeTask`'s answer per place. */
+  /** `readsTakeTask`'s answer per place (reports/expected.ts). */
   readonly placeExpectations = new Map<PlaceId, SiteExpectation>();
 
+  // reports/warnings.ts: per place, its objects' property names (`propertiesOf`) and the property `${...}` shows of
+  // them (`shownProperty`).
   readonly names = new Map<CanonicalKey | PlaceId, readonly string[]>();
-
   readonly shown = new Map<CanonicalKey | PlaceId, string | null>();
 
+  // stores/reach.ts: each path's first direct read or store (`firstDirect`), each literal's child values by step
+  // (`childrenOf`), and what reaches each value's and each place's levels (`valueReach`, `copiesOnly`).
   directSites: Map<string, SourceSite> | null = null;
-
-  literalChildren: Map<PlaceId, Map<string, PlaceId[]>> | null = null;
-
+  childValuesByLiteral: Map<PlaceId, Map<string, PlaceId[]>> | null = null;
   readonly valueReaches = new Map<PlaceId, Reach>();
-
   readonly keyReaches = new Map<PlaceId, KeyReach>();
 
+  // stores/mixed.ts: each literal's landing (`landingOf`), the number of landings made, each landing's question
+  // (`landingQuestion`).
   readonly landings = new Map<PlaceId, Landing | null>();
   landingCount = 0;
-
   readonly questions = new Map<string, LandingQuestion | null>();
 
+  /** Each projection's owner by its site, asked at an index (`indexOwner`, names.ts). */
   indexProjections: Map<string, PlaceId> | null = null;
 }

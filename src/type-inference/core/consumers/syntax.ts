@@ -156,7 +156,7 @@ export function syntaxRead(
 ): Pick<CheapDecision, "kinds" | "spelling"> | null {
   if (!syntaxDecides(walk)) return null;
   const key = readKey(walk, value);
-  return key === null ? null : walk.cheapDecided(keyPlace(key), joinSteps(keyPath(key), rest));
+  return key === null ? null : cheapDecided(walk, keyPlace(key), joinSteps(keyPath(key), rest));
 }
 
 /**

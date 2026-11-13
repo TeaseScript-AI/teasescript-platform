@@ -30,7 +30,7 @@ import { offendingKinds, type DiagnosticRule } from "../../result.js";
 import { type BindingRead, readsBindings } from "./bindings.js";
 import { error } from "../reports/diagnostics.js";
 import { kindsOf, quietKinds } from "../names.js";
-import { copiesOnly, deferred, storeReach } from "./reach.js";
+import { copiedErrorSite, copiesOnly, storeReach } from "./reach.js";
 import {
   nullWarning,
   obligation,
@@ -364,7 +364,7 @@ export function admittedStores(
       // makes it a warning), is rejected, its error at the innermost offending expression
       if (bad.length > 0 && d !== decider && !items.some(fitting)) {
         const reach = !written && d.place === root ? storeReach(walk, d, path()) : null;
-        const { site, brought } = deferred(
+        const { site, brought } = copiedErrorSite(
           walk,
           admission.siteAt(d, at, (elements) =>
             deciding(elements).some((item) => !tags.some((tag) => fits(item.tag, tag, written))),
