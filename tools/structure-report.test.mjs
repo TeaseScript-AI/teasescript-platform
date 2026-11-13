@@ -574,6 +574,18 @@ test(
       assert.deepEqual(report(importer, oneMore, "--moved"), [
         "suppressed (moved): file over 1000 lines that the change adds to: src/big.ts (1003, was 1002), growth 0: 0 moved, 1 admitted, 0 removed (0 admitted)",
       ]);
+      // a blank line between statements is admitted; one inside a template literal is its content, so growth (#2619)
+      const page = (inner) => `${body}\nexport const page = \`first line\n${inner}last line\n\`;\n`;
+      assert.deepEqual(
+        report({ "src/big.ts": page("") }, { "src/big.ts": `\n${page("")}` }, "--moved"),
+        [
+          "suppressed (moved): file over 1000 lines that the change adds to: src/big.ts (1005, was 1004), growth 0: 0 moved, 1 admitted, 0 removed (0 admitted)",
+        ],
+      );
+      assert.deepEqual(
+        report({ "src/big.ts": page("") }, { "src/big.ts": page("\n") }, "--moved"),
+        ["file over 1000 lines that the change adds to: src/big.ts (1005, was 1004)"],
+      );
       // without --moved nothing is discounted: the line it adds is growth
       assert.deepEqual(report(importer, oneMore), [
         "file over 1000 lines that the change adds to: src/big.ts (1003, was 1002)",
