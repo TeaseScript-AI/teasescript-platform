@@ -139,7 +139,6 @@ export function useAnswerSubmission(host: {
    */
   readonly beforePost?: () => Promise<void>;
 }) {
-  const beforePost = host.beforePost ?? (() => Promise.resolve());
   const pending = shallowRef<PendingAnswer | null>(null);
   const notice = ref("");
   let noticeTimer: ReturnType<typeof setTimeout> | undefined;
@@ -253,7 +252,8 @@ export function useAnswerSubmission(host: {
     intent: InputIntent,
     onOutcome?: (result: InputResult) => void,
   ) {
-    await beforePost();
+    // Measurement prototype: the post leaves in the press's own task, before the page renders it.
+    if (host.beforePost !== undefined) await host.beforePost();
     if (record.stage === "settled") return;
     advance(record, "fenced");
     let result: InputResult;
