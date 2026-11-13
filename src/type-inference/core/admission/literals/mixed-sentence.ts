@@ -1,4 +1,5 @@
-// A mixed error's sentence: the steps each side shows, and whether each layer of its path may hold null, a dict or a set.
+// A mixed error's sentence: the steps each side shows, and whether each layer of its path may hold null, a dict or a
+// set; and `joinDecider`, the decider of a join's operand at a path (`joinElements`).
 import type { PlaceId } from "../../../graph.js";
 import type { Admission } from "../../admission.js";
 import { joinSteps, keepText, keptSlice, keptText, pathText } from "../../budget.js";
@@ -42,7 +43,7 @@ function shownSteps(path: readonly string[], walk: CollectionWalk): readonly str
 
 /**
  * #1762, #1825: each side's steps as its sentence writes them (`MixedSteps`), the earliest element's and the other's,
- * each by its own values: a list, a set and a dict may meet at one path (Codex r1 on #1814); none where both are the
+ * each by its own values: a list, a set and a dict may meet at one path (#1814); none where both are the
  * path.
  */
 export function shownOf(
@@ -81,7 +82,7 @@ const JOIN_DECIDERS = new WeakMap<
 /**
  * #1828: `earliestDecider` of `value` at `node` and `steps` outside every decision, asked once while no stop forgot an
  * answer. A mixed join's operand is asked it by `decidedAt` and again by its sentence's walk (`mayHoldNull`); the
- * second ask takes the first's answer (Codex r2 on #1899).
+ * second ask takes the first's answer (#1899).
  */
 export function joinDecider(
   admission: Admission,
@@ -108,10 +109,10 @@ export function joinDecider(
 
 /**
  * #1765: whether a value may hold null at a layer, by its own form, one case per form, never by what a written copy's
- * items hold (the lead's ruling (A) on #1789, after Codex r1–r11 and Astra r1–r2):
+ * items hold (#1789):
  * 1. at its own level (no step left), as it is read at its node (`occurrenceNull`); an `otherwise` by its tree, each leaf
  *    so read: its fallback's null where its operand may be null (`1 otherwise null` holds none: its fallback never runs;
- *    `null otherwise m` none where `m` holds `[1]`, Astra r2's B2);
+ *    `null otherwise m` none where `m` holds `[1]`);
  * 2. a literal, by its children at the layer's next step, each by this same rule below;
  * 3. a carried value (the carrier table's: a projection's owner, an `otherwise`'s sides, a `get`'s receiver and default,
  *    a method's receiver, a dict's values, a `+` join's admitted operands), by each value it carries, at the path into
@@ -123,7 +124,7 @@ export function joinDecider(
  * Cases 2 and 3 compose: `layersOf` follows them, every layer of a path in one descent. This function answers the
  * others, a value at its own level or one neither a literal nor a carrier holds. An `otherwise`'s operand may be null as
  * `operandNull` reads it. A join has no case of its own: the carrier table gives only its admitted operands (`joined`),
- * so a rejected operand brings nothing (ADR 0021 1.1, Astra r1's B1; Codex r9).
+ * so a rejected operand brings nothing (ADR 0021 1.1).
  */
 function mayHoldNull(
   admission: Admission,
@@ -134,15 +135,15 @@ function mayHoldNull(
   const { program, contract } = admission.pass;
   admission.work.charge("checks");
   if (steps.length === 0)
-    // (an `otherwise`'s own null is its narrowed tree's; the operand's null is what the fallback replaces. Codex r3 on
-    // #1819, Astra r2's B2 on #1789)
+    // (an `otherwise`'s own null is its narrowed tree's; the operand's null is what the fallback replaces, #1819,
+    // #1789)
     return program.opOf.get(at)?.kind === "fallback"
       ? operandNull(admission, at, from)
       : occurrenceNull(admission, at, from);
   const decided = holdsSource(admission, at) ? joinDecider(admission, at, from, steps) : null;
   // (a copy's term where the deciding copy stands above the layer, which lies below its own level: `b: string?[]` in
   // `[[1],b]`, `d`'s element in `held = d + [2]`; where the layer is the deciding copy's own level, `atom` in
-  // `{v:atom}`, as it is read there, narrowed: Codex r1 on #1819, #1901)
+  // `{v:atom}`, as it is read there, narrowed: #1819, #1901)
   if (decided !== null && decided.term !== null)
     return decided.own === true
       ? occurrenceNull(admission, at, from, steps)
@@ -151,7 +152,7 @@ function mayHoldNull(
   if (key !== null) {
     const path = joinSteps(stepsArray(keyStepsIn(contract, key)), steps);
     const admitted = admission.admitted(keyPlace(key), path);
-    // (no kind, or an unknown, decides nothing: `null` alone settles no type, Codex r5's B3)
+    // (no kind, or an unknown, decides nothing: `null` alone settles no type)
     if (admitted.length > 0 && !admitted.includes("unknown")) return admitted.includes("null");
   }
   return withoutEmpty(admission.run(contract.contractOfValueAt(at, steps))).some(
@@ -162,7 +163,7 @@ function mayHoldNull(
 /**
  * #1765: whether a value may be null as it is read at its node (at `steps` below it): its type allows null (its contract's items, which a
  * rejected store does not reach) and its items there, narrowed, hold null or an unknown no test guards (a typed host
- * value, Astra r1's B1 on #1819; under `!= null` its unknown is guarded). A written copy narrowed by its assignment or a
+ * value, #1819; under `!= null` its unknown is guarded). A written copy narrowed by its assignment or a
  * test holds none, as the current checker reads it.
  */
 export function occurrenceNull(
@@ -184,8 +185,8 @@ export function occurrenceNull(
 /**
  * #1765: whether an `otherwise`'s operand may be null at its node: its items there, narrowed as it is read (a written copy
  * narrowed by its assignment or a test never runs its fallback, as the current checker reads it); an operand that is
- * itself an `otherwise`, only where its operand and its fallback both may be (Codex r10's B1). Each node's answer once per
- * pass and node (`NARROWED`), an `otherwise` after its operand and fallback, so a chain is walked once (Codex r11's B2).
+ * itself an `otherwise`, only where its operand and its fallback both may be. Each node's answer once per pass and node
+ * (`NARROWED`), an `otherwise` after its operand and fallback, so a chain is walked once.
  */
 function operandNull(admission: Admission, operand: PlaceId, from: FlowNode): boolean {
   const { program } = admission.pass;
@@ -223,7 +224,7 @@ const NARROWED = new WeakMap<object, Map<FlowNode, Map<PlaceId, boolean>>>();
 /**
  * #1762, #1825: whether a value is a dict (or a set) there, by its contract's items, which compose its written and
  * carried terms: `a otherwise dict {}`, `a` a written dict holding a host value, is a dict, where its stored values
- * (`valueAt`) lose it (Astra r1 on #1814).
+ * (`valueAt`) lose it (#1814).
  */
 function collectionHeld(
   admission: Admission,
@@ -239,7 +240,7 @@ function collectionHeld(
 /**
  * #1762, #1825: whether a value is a dict (or a set) at its own level: an `otherwise` its operand where the operand,
  * narrowed at its node, may hold a value, and its fallback where the operand may be null (a fallback never run names no
- * dict, nor an operand proved null, Codex r5–r6 on #1814); any other value by its items (`collectionHeld`) or its own
+ * dict, nor an operand proved null, #1814); any other value by its items (`collectionHeld`) or its own
  * reads (a default). Each node's answer once per pass, collection and node (`COLLECTION_OWN`), a value after the sides
  * it takes, so a chain is walked once.
  */
@@ -265,7 +266,7 @@ function collectionOwn(
     admission.work.charge("checks");
     const op = program.opOf.get(at);
     // (any other value a dict by its items, or where an operand that is its own read is: a `get`'s, a `load`'s or a
-    // parse's default, which hands the value on whole; its items lose a host-assigned written dict, Codex r8 on #1814)
+    // parse's default, which hands the value on whole; its items lose a host-assigned written dict, #1814)
     const sides =
       op?.kind === "fallback"
         ? [
@@ -316,10 +317,9 @@ export function intermediateDepths(path: readonly string[]): number[] {
 
 /**
  * #1765: whether each of `depths` along `path` holds `fact` for a side, read by one descent down the path (`layersOf`):
- * through a literal's children and through a carried value's parts alike (Astra r2's B1 on #1789: a carrier's literal
- * was descended once per longer prefix). The facts' own levels and leaves, side by side:
- * - `null` (#1765): `mayHoldNull`'s rule;
- * - `dict` (#1762) and `set` (#1825): `collectionOwn` at a value's own level, its items below it (`collectionHeld`).
+ * through a literal's children and through a carried value's parts alike (#1789). The facts' own levels and leaves,
+ * side by side: - `null` (#1765): `mayHoldNull`'s rule; - `dict` (#1762) and `set` (#1825): `collectionOwn` at a
+ * value's own level, its items below it (`collectionHeld`).
  */
 export function layersAt(
   admission: Admission,
@@ -367,7 +367,7 @@ function viewRest(view: PathView): PathView {
   return at;
 }
 
-// (its first `count` steps, read once from the front: Codex r13)
+// (its first `count` steps, read once from the front)
 function viewSteps(admission: Admission, view: PathView, count: number): readonly string[] {
   const out: string[] = [];
   let at: PathView | null = view;
@@ -404,7 +404,7 @@ interface MarkedStrip extends Strip<MarkedStrip> {
  * asker's own carriers reach, before any literal's step, has a key (`LAYERS`, its parent's key and one step, interned);
  * asked under a key it was asked under before, it keeps its answer per pass, so a join's growing operands are each read
  * once. Any other value writes each answer straight to the nearest value that keeps one, so no answer is copied along
- * a chain asked once (Codex r12–r15). A value asked again while its own answer is pending adds nothing.
+ * a chain asked once. A value asked again while its own answer is pending adds nothing.
  */
 function layersOf(
   admission: Admission,
@@ -460,7 +460,7 @@ function layersOf(
     return made;
   };
   // (where answers go: a set taken whole from the first answer that brings one, shared with it, and copied only where a
-  // second must join it, so an answer kept along a chain is moved, not copied, Codex r16)
+  // second must join it, so an answer kept along a chain is moved, not copied)
   class Sink {
     set: ReadonlySet<number> = EMPTY;
     private own = false;
@@ -527,7 +527,7 @@ function layersOf(
         );
       } else {
         // (an `otherwise`'s operand where it may hold a value, its fallback where it may be null: a side never taken
-        // brings nothing, Codex r5–r7 on #1814)
+        // brings nothing, #1814)
         const carried = admission.carriersBy(at, below);
         const operand = carried.find(([, , role]) => role === "otherwise/operand")?.[0];
         const falls = operand === undefined || operandNull(admission, operand, from);
@@ -572,7 +572,7 @@ function layersOf(
   );
   const stack: Frame[] = [];
   // (a value asked under a key it was asked under before keeps its answer, read from then on; asked the first time, it
-  // writes each answer straight to its asker's, so a chain asked once copies no answer, Codex r15)
+  // writes each answer straight to its asker's, so a chain asked once copies no answer)
   const ask = (at: PlaceId, from: FlowNode, here: MarkedStrip, into: Sink): void => {
     let kept = false;
     if (here.key !== null && !program.hasOf.has(at)) {
@@ -609,12 +609,13 @@ function layersOf(
   return depths.map((_, slot) => out.set.has(slot));
 }
 
+/** No answer: the set a `Sink` starts with. */
+const EMPTY: ReadonlySet<number> = new Set();
+
 /**
  * Per pass, `layersOf`'s keys (each a parent's and one step, interned) and the answer of each value the asker's own
  * carriers reach under its key, shared by every literal's and join's error.
  */
-const EMPTY: ReadonlySet<number> = new Set();
-
 const LAYERS = new WeakMap<
   object,
   {
@@ -627,7 +628,7 @@ const LAYERS = new WeakMap<
 /**
  * Per pass, `layersOf`'s keys and answers for the dict fact (#1762), as `LAYERS` holds the null fact's. Apart from
  * `SET_LAYERS`: the answers last the pass, so a later sentence over the same values (a growing join's) reads what an
- * earlier one kept, and a shared memo would give a set ask a dict answer (Codex r1 on #2017).
+ * earlier one kept, and a shared memo would give a set ask a dict answer (#2017).
  */
 const DICT_LAYERS = new WeakMap<
   object,

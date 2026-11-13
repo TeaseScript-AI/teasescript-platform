@@ -1,4 +1,4 @@
-// A literal's elements of one type (ADR 0021 1.3, A8).
+// A literal's elements of one type (ADR 0021 1.3).
 import type { PlaceId, SourceSite } from "../../../graph.js";
 import type { Admission } from "../../admission.js";
 import {
@@ -61,7 +61,7 @@ import {
 
 /**
  * The landed paths below a collection literal's landing where one of its elements may offend another
- * (`literalElements`, F2): each element's touch trie relative to the landing (its copies' and reads' sources', its own
+ * (`literalElements`): each element's touch trie relative to the landing (its copies' and reads' sources', its own
  * points and other values), merged largest first; a path is owed where two stand there and their contents hold two
  * kinds or more (`Touches`, `elements`), and kept where the place lands it.
  */
@@ -149,7 +149,7 @@ function touchElements(
     const path = kept.get(text)!;
     if (path.length === 0) continue;
     // (landed in the place: by the place's trie, which lands every copy into it, not this literal's alone, a rejected
-    // one too, as the landing view has it and A6 finds the rejection again in every pass)
+    // one too, as the landing view has it and every pass decides the rejected store again)
     if (!touches.landedAt(landed, keptSteps(admission.work, base, path))) continue;
     out.push({ path });
   }
@@ -157,13 +157,13 @@ function touchElements(
 }
 
 /**
- * ADR 0021 1.3, A8: a list's, set's or dict's literal elements (values), and the properties its objects share, have
- * one type at every path their known structure gives, a copy's or a call's its source's (F2): the type all its elements
- * fit (B1, `fitOf`: #2289), unless the literal lands directly in a written place, whose type then checks them (A1).
- * Where none fits all, each element that does not fit the earliest's type (`misfits`) is an error at the innermost
- * offending expression and is rejected: later uses see the earliest element's type (A6). `error` hears of each with the
+ * ADR 0021 1.3: a list's, set's or dict's literal elements (values), and the properties its objects share, have one
+ * type at every path their known structure gives, a copy's or a call's its source's: the type all its elements fit
+ * (`fitOf`, #2289), unless the literal lands directly in a written place, whose type then checks them. Where none fits
+ * all, each element that does not fit the earliest's type (`misfits`) is an error at the innermost offending expression
+ * and is rejected (`Admission.reject`): later uses see the earliest element's type. `error` hears of each with the
  * element's store, the literal's cell, the path, the earliest element's kinds there (by family, and its own, which a
- * sentence names) and the offending element's (D1). `undecided`, after a stop before admission settled: a literal
+ * sentence names) and the offending element's. `undecided`, after a stop before admission settled: a literal
  * whose element needs a decision admission did not make (a named element, or one the finishing read leaves `STOPPED`)
  * is not compared; it is reported there instead, so its store marks. `stopped`, after admission settled: a literal
  * whose cell a stop left undecided (#2289) is not compared and is reported there.
@@ -194,9 +194,9 @@ export function literalElements(
     d.value !== undefined && holdsSource(admission, d.value);
   // per landing and the distinct groups of a literal's elements' contracts (flow-insensitive: by source identity,
   // class or a typed ingress's type and default, `conflictGroups`), the paths below them where their contracts hold
-  // more than one kind: only there can one element offend another (F2)
+  // more than one kind: only there can one element offend another
   const conflicts = new Map<string, readonly (readonly string[])[]>();
-  // (per key, the paths where what the elements definitely hold meets, A2's)
+  // (per key, the paths where what the elements definitely hold meets, `heldMeetings`)
   const atCopies = new Map<string, ReadonlySet<string>>();
   // (an element that may give a concrete kind: every one but a value proved to hold only `null`, which decides nothing,
   // ADR 0021 §1.3's `deciding`, and has no descendants: #1857)
@@ -266,7 +266,7 @@ export function literalElements(
           if (kinds.size > 1) kept.push(path);
         }
         // (beside them the landed paths where two elements' tries meet, their kinds from the literal's merged trie,
-        // no element asked: Astra's review B1, #1188)
+        // no element asked, #1188)
         const texts = new Set<string>();
         for (const path of listed) texts.add(keptText(admission.work, path));
         const keep = (path: readonly string[]): void => {
@@ -278,7 +278,7 @@ export function literalElements(
         if (landing !== null)
           for (const met of touchElements(admission, landing, representatives)) keep(met.path);
         // (and where what they definitely hold meets: a property only copies of whole objects bring, checked where
-        // the copy meets the literal, A2)
+        // the copy meets the literal)
         const base = landing === null ? [] : keptPath(admission.work, landing);
         const met = new Set<string>();
         for (const path of heldMeetings(
@@ -303,9 +303,9 @@ export function literalElements(
         if (field.kind === "ref" && field.place === cell) step = name;
     const byValue = new Map<PlaceId, Definition>();
     for (const d of list) if (d.value !== undefined) byValue.set(d.value, d);
-    // per path, the cell's answer (B1): a literal with a named element by its query (`cellOfLiteral`); one with none,
-    // whose elements are all inferred, by its elements' kinds there, asked only once an element does not fit the
-    // earliest's (`misfits`), so a literal no element of which misfits is read once per element and path, as before
+    // per path, the cell's answer: a literal with a named element by its query (`cellOfLiteral`); one with none, whose
+    // elements are all inferred, by its elements' kinds there, asked only once an element does not fit the earliest's
+    // (`misfits`), so a literal no element of which misfits is read once per element and path
     const answers = new Map<string, CellAnswer>();
     const earliestAt = new Map<string, Descriptor>();
     const cellAt = (at: string, path: readonly string[], d: Definition): CellAnswer => {
@@ -341,7 +341,7 @@ export function literalElements(
       sentences.set(at, made);
       return made;
     };
-    // the error at the innermost offending expression, the element rejected (A6)
+    // the error at the innermost offending expression, the element rejected
     const offended = (
       d: Definition,
       path: readonly string[],
@@ -356,9 +356,9 @@ export function literalElements(
       // (#1765: the layers between the element and the leaf that may hold null, each element's by its form
       // (`mayHoldNull`); the sentence's type alone, as the leaf's own null is, #1753)
       // (each element's layers by one walk down the error's path, each value at a path from the pass's memo of
-      // `mayHoldNull`, Codex r6's B3, Astra r1's B2)
+      // `mayHoldNull`)
       // (the earliest element's walked once per path, whichever later element offends there: a wide earliest literal
-      // is otherwise walked once per conflict, Codex r9's B1)
+      // is otherwise walked once per conflict)
       const depths = intermediateDepths(path);
       const layers = (of: Definition): boolean[] =>
         layersAt(admission, of.value!, of.node, path, depths);
@@ -367,7 +367,7 @@ export function literalElements(
       // (#1790: the later element's compared kinds, with the null it may hold at the leaf by #1765's rule, read
       // by the same walk one depth more: a value at its own level as it is read at its node (a narrowed copy holds none,
       // a typed host value may), a copy below its own level by its term, an `otherwise`'s fallback only where its
-      // operand may be null. Codex r1–r4, Astra r1 on #1819; the null decides nothing, #1753)
+      // operand may be null, #1819; the null decides nothing, #1753)
       const later = layersAt(admission, d.value!, d.node, path, [...depths, path.length]);
       const optional = mixedOptional(first.layers, later.slice(0, -1));
       // (its kinds: its value's definite kinds there, as its occurrence holds them (a type test's, #1790); where it has
@@ -464,7 +464,7 @@ export function literalElements(
   }
 }
 
-/** An element's descriptor from its definite kinds at a path, as a literal of no named element has it (B1's inferred). */
+/** An element's descriptor from its definite kinds at a path, as a literal of no named element has it (inferred). */
 function inferredOf(d: Definition, items: readonly Item[]): Descriptor {
   const tags = [...new Set(deciding(items).map((item) => item.tag))];
   return {
@@ -510,12 +510,12 @@ function earliestKinds(
 /**
  * The elements whose contracts may hold a kind at a path below them (`literalElements`), in their order. Step by step
  * along the path, an element whose literal holds objects alone at a step (one kind, no read or other value beside
- * them) is asked only where they have the next property (F11: without it they hold `missing` there and below), one
+ * them) is asked only where they have the next property (without it they hold `missing` there and below), one
  * that holds a collection alone there only below its element step, and below any other step as its derived member's
  * owner; any other element is asked at every path below the step (a copy, a read, an operation), as at a selection's
  * step (V30 §19) and at the path's end. Each step's properties are listed at the first path asked below it, where each
  * element's contract would be read anyway, so a wide object beside k small ones takes their sizes, not their product,
- * at any depth and through lists (#1199, Astra's review B1).
+ * at any depth and through lists (#1199).
  */
 function holdersByProperty(
   admission: Admission,
@@ -620,7 +620,7 @@ function holdersByProperty(
 }
 
 /**
- * A literal's elements grouped for the conflict paths of `literalElements` (§8): elements of one source identity, or
+ * A literal's elements grouped for the conflict paths of `literalElements`: elements of one source identity, or
  * of one class (`conflictClass`), have the same kinds at every path, so the elements either joins are one group,
  * asked once; each group named by its least identity or class, so literals of alike groups share one discovery. (An
  * identity may join what a class keeps apart, k bindings of alike objects, #1313, and a class what identities keep
@@ -659,9 +659,9 @@ function conflictGroups(admission: Admission, list: readonly Definition[]): stri
 }
 
 /**
- * The class of a literal element's contracts, for the conflict paths of `literalElements` (§8): a `load` or a parse is
- * typed by its expected type, else by its default (F18), so the k ingresses of one typed default have one class and
- * share one discovery, while each keeps its own identity and its boundary check (C9, §8), and a default reading
+ * The class of a literal element's contracts, for the conflict paths of `literalElements`: a `load` or a parse is typed
+ * by its expected type, else by its default, so the k ingresses of one typed default have one class and share one
+ * discovery, while each keeps its own identity and its boundary check, and a default reading
  * host data counts by the contract's class of its global and guards (`classOf`, #1196); a read, a literal or an
  * `otherwise` whose class is mixed by its leaves alone that class (`Contract.boundClass`: k reads of one global,
  * #1207, k `load(…) otherwise {…}` of one default and one fallback or objects holding them, #1304, k bindings of loads

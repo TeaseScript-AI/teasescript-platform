@@ -49,11 +49,11 @@ import { levelsOf } from "./permitted.js";
 import { depthOf, elementsBelow, valueStructure } from "./structure.js";
 import { touchOf } from "./touches.js";
 
-// The places and paths admission decides, the stores it walks, and the hot sets among them (A5).
+// The places and paths admission decides, the stores it walks, and the hot sets among them.
 
 /**
- * Whether contents are known and scalar: some, each a scalar or `null`, so no copy meets them below their root (A2,
- * `groups`); an unknown or anything else may hold properties or elements.
+ * Whether contents are known and scalar: some, each a scalar or `null`, so no copy meets them below their root
+ * (`groups`); an unknown or anything else may hold properties or elements.
  */
 function scalarOnly(items: readonly Item[]): boolean {
   return items.length > 0 && items.every((item) => SCALAR.has(item.tag) || item.tag === "null");
@@ -61,7 +61,7 @@ function scalarOnly(items: readonly Item[]): boolean {
 
 /**
  * The stores admission walks: the stores, adds, returns, parameter defaults and single-site arguments into each key (a
- * multi-site argument decides nothing, F21), found once.
+ * multi-site argument decides nothing), found once.
  */
 export function stores(admission: Admission): readonly Definition[] {
   if (admission.storeList === null) {
@@ -78,14 +78,14 @@ export function stores(admission: Admission): readonly Definition[] {
 
 /**
  * Every place and path admission decides: the keys with definitions, below them a literal's structure, written elements.
- * G3 stage 1: each in its identity (`keyAt`): a wrapper's family's path its key's cursor, a projection's one step below
+ * Each in its identity (`keyAt`): a wrapper's family's path its key's cursor, a projection's one step below
  * its owner's (`projectionCursor`), a parent by the arena (`keyParentIn`), never its path's text or steps.
  */
 export function groups(admission: Admission): readonly DecidedAt[] {
   if (admission.groupList !== null) return admission.groupList;
   const { program, definitions, contract } = admission.pass;
   const work = program.work;
-  // (each key in its identity: a definition's key is its family's text, G3 stage 1)
+  // (each key in its identity: a definition's key is its family's text)
   const tracked = new Set<CanonicalKey>();
   for (const key of [...definitions.byKey.keys(), ...definitions.candidates.keys()])
     tracked.add(canonicalKey(contract, key));
@@ -110,7 +110,7 @@ export function groups(admission: Admission): readonly DecidedAt[] {
       stores.set(key, (stores.get(key) ?? 0) + 1);
     }
   // a stored value's structure where another store or add reaches the place or below it: its literals', and below a
-  // copy or a call its source's elements (F2), the deepest once per path it lands at (its prefixes follow below)
+  // copy or a call its source's elements, the deepest once per path it lands at (its prefixes follow below)
   const deepest = new Map<Key, number>();
   for (const d of reaching)
     if ((stores.get(d.key) ?? 0) > 1) {
@@ -134,8 +134,7 @@ export function groups(admission: Admission): readonly DecidedAt[] {
       }
     }
   // a literal holding a named value (a copy, a call, what an operation carries of either) decides the paths its own
-  // structure gives with its store, read or not, so the named value's uncertain contents meet C1 there (the owner's
-  // F1, round 10 B1)
+  // structure gives with its store, read or not, so the named value's uncertain contents meet the store check there
   for (const d of reaching)
     if ((stores.get(d.key) ?? 0) === 1) {
       const structure = valueStructure(admission, d.value!);
@@ -146,9 +145,9 @@ export function groups(admission: Admission): readonly DecidedAt[] {
         tracked.add(keptKeyAt(contract, d.place, joinSteps(base, path)));
       }
     }
-  // A2: a place receiving copies is checked where they meet it, read or not: the paths where what two
-  // of its stores definitely hold meets with two kinds or more (`heldMeetings`), so the store that brings the other
-  // type errs there (a rejected one too, as A6 finds it again); not where all the place holds is known and scalar, as
+  // a place receiving copies is checked where they meet it, read or not: the paths where what two of its stores
+  // definitely hold meets with two kinds or more (`heldMeetings`), so the store that brings the other type errs there
+  // (a rejected one too, as the next pass decides it again); not where all the place holds is known and scalar, as
   // a scalar has no property to meet at
   const byPlace = new Map<PlaceId, { readonly d: Definition; readonly at: readonly string[] }[]>();
   const named = new Set<PlaceId>();
@@ -186,8 +185,8 @@ export function groups(admission: Admission): readonly DecidedAt[] {
     tracked.add(key);
     admission.atCopies.add(key);
   }
-  // C9: where each ingress store's external data stands below its destination, decided with the store whether a
-  // consumer reads the place or not (the owner's F1): its landings' contribution paths (§3.2)
+  // where each ingress store's external data stands below its destination, decided with the store whether a consumer
+  // reads the place or not, for its boundary check: its landings' contribution paths (`landingIndex`)
   for (const [d, stops] of landingIndex(admission).byStore)
     for (const stop of stops) {
       work.charge("indexSteps");
@@ -234,7 +233,7 @@ export function groups(admission: Admission): readonly DecidedAt[] {
       ? cursorEntry(admission, keyIdPath(keyIdOf(contract, place, path)))
       : keptText(admission.work, path);
   };
-  // A1, A8: a written collection's elements at every depth
+  // a written collection's elements at every depth
   for (const place of program.places) {
     const written = writtenOf(place.kind);
     const paths = roots.get(place.id);
@@ -248,17 +247,17 @@ export function groups(admission: Admission): readonly DecidedAt[] {
     if (paths === undefined) roots.set(place, (paths = new Set()));
     return paths;
   };
-  // A4: a copied written type's paths, where the copy lands and below (A8: its elements)
+  // a copied written type's paths, where the copy lands and below (its elements too)
   const { seeds, into, order } = inheritance(admission);
   for (const [place, paths] of seeds) {
     const own = at(place);
     for (const text of paths.keys()) own.add(entry(place, text));
   }
-  // A4 through copies: a copy of a place that may inherit a written type lands at its own path; below it,
+  // through copies: a copy of a place that may inherit a written type lands at its own path; below it,
   // where copies of written types land in that place, it is decided with the copy only where the place's contents may
   // not fit (`hotSets`: a store's host data or other kinds, two copies of different sources meeting, a store taken again),
   // and where an answer asks otherwise (`lazily`), so a copy costs its own divergences, never its source's every
-  // path (the owner's reviewer's F1 on #1049)
+  // path (#1049)
   const hots = hotSets(admission);
   for (const component of order)
     for (const place of component) {
@@ -303,7 +302,7 @@ interface ChainLink {
 /**
  * The cursor of a projection's key (`targetRoot`'s, a read's steps by their names) where its family is a wrapper's
  * (`keyLane`), else `null`: down from the nearest projection of its chain known in `chains`, each one step below its
- * owner's (`keyIdBelow`), so a chain of k projections makes k cursors and walks k links, never k² (G3 stage 1).
+ * owner's (`keyIdBelow`), so a chain of k projections makes k cursors and walks k links, never k².
  */
 function projectionCursor(
   admission: Admission,
@@ -341,9 +340,9 @@ function projectionCursor(
 /**
  * Per place copies land in, the landed paths a copy decides with its store (`groups`): those where the place's
  * contents may hold a kind its decision there does not admit (`hotAt`), among its candidates: where its written types
- * land (a written binding's own host data, which each copy carries on: C9), its own stores' host data,
- * other values and literals (`ownStructure`), the hot paths of the sources it copies where it lands them, and where
- * its contributions meet (`touchOf`); and each store taken again (A6). Elsewhere a copy's
+ * land (a written binding's own host data, which each copy carries on to its boundary check), its own stores' host
+ * data, other values and literals (`ownStructure`), the hot paths of the sources it copies where it lands them, and
+ * where its contributions meet (`touchOf`); and each store a rejection takes again (`retaken`). Elsewhere a copy's
  * contents fit what its source's decision admits, so its decision there owes nothing; a copy that only copies one
  * source, whole, stands for that source's. Sources first; a cycle's members test every landed path.
  */
@@ -364,7 +363,7 @@ export function hotSets(
     else list.push(keptPath(admission.work, key));
   }
   // (a copy's source's hot paths at or below its strip, from an index of each hot set: never the whole set for each
-  // copy, Astra's review r2 B2)
+  // copy)
   const indexed = new Map<readonly (readonly string[])[], ByPath<readonly string[]>>();
   const hotUnder = (copy: InheritedCopy): readonly (readonly string[])[] => {
     work.charge("indexSteps");
@@ -411,8 +410,7 @@ export function hotSets(
             work.charge("indexSteps");
             put(keptSteps(admission.work, copy.path, path.slice(copy.strip.length)));
           }
-        // (its contributions meet as its touch tries find, one per group of members its live copies join: Astra's B3,
-        // her recheck r3 F1)
+        // (its contributions meet as its touch tries find, one per group of members its live copies join)
         if (inheritance(admission).wholes.has(component[0]!)) {
           const met = new Set<object>();
           for (const member of component) {
@@ -434,7 +432,7 @@ export function hotSets(
         continue;
       }
       // (a cycle whose copies add or take steps: every landed path of each member tested, and each store taken
-      // again kept, Sol's review r1 B4)
+      // again kept)
       for (const member of component) {
         const hot: (readonly string[])[] = [];
         for (const text of cycles.get(member)!) {
@@ -498,7 +496,7 @@ export function hotSets(
   return hots;
 }
 
-/** Whether a place's contents at a path hold a kind its decision there does not admit (`hotSets`, A5). */
+/** Whether a place's contents at a path hold a kind its decision there does not admit (`hotSets`). */
 function hotAt(admission: Admission, place: PlaceId, path: readonly string[]): boolean {
   const found = decided(admission, place, path);
   if (found === null || found.tags === null || found.tags.includes("unknown")) return false;

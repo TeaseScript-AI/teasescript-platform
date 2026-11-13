@@ -12,10 +12,11 @@ import { f18Kinds, landingIndex, leafIngress, typedIngress } from "./landing-ind
 import { elementsBelow } from "./structure.js";
 import { keptKeyAt } from "../contract/key-ids.js";
 
-// The boundary checks of external data (C9, F18), and the inventory of the derivations that create an obligation.
+// The boundary checks of external data (at ingress stores, at reads, at typed `load` and `fromJson` calls), and the
+// inventory of the derivations that create an obligation.
 
 /**
- * S6-CARRIERS §3.4's resolution of a provenance node, once per node and pass: each leaf's ingress sends its store's
+ * The resolution of a provenance node, once per node and pass: each leaf's ingress sends its store's
  * boundary, or its own read's check, once; the answer is whether some ingress below the node no walk reached, whose
  * consumer checks it. The nodes of a cycle through a cell reach the same ingresses, so they are answered
  * together once their component closes (Tarjan's), each node entered once (#1364: entered again wherever it was met,
@@ -80,7 +81,7 @@ function resolve(admission: Admission, root: IngressNode): boolean {
         for (const d of found.stores) admission.boundaryAt(d);
       else if (found?.own === true) boundaryAtRead(admission, ingress!);
       else {
-        // (a typed call no store brings is checked where it runs: its F18 check validates its default's data too)
+        // (a typed call no store brings is checked where it runs: its own check validates its default's data too)
         const call = covered ? program.opOf.get(ingress!) : undefined;
         frame.unreached =
           ingress !== null && (call === undefined || f18Admission(admission, call) === null);
@@ -105,17 +106,17 @@ function resolve(admission: Admission, root: IngressNode): boolean {
   return answer;
 }
 
-/** C9: the boundary check of an ingress store, once, against its destination's admitted type when it is published. */
+/** The boundary check of an ingress store, once, against its destination's admitted type when it is published. */
 export function boundaryAt(admission: Admission, d: Definition): void {
   admission.pending.set(d.uid, d);
 }
 
-/** C10, C9: host data in a fallback or a default is checked at its own read, against its own unknown contract. */
+/** Host data in a fallback or a default is checked at its own read, against its own unknown contract. */
 function boundaryAtRead(admission: Admission, value: PlaceId): void {
   if (admission.readSeen.has(value)) return;
   admission.readSeen.add(value);
   const operation = admission.pass.program.opOf.get(value);
-  // (F18's own check is the boundary)
+  // (a typed `load`'s or `fromJson`'s own check is the boundary)
   if (operation !== undefined && f18Admission(admission, operation) !== null) return;
   const site = admission.pass.program.place(value).site;
   if (site === null) return;
@@ -132,7 +133,7 @@ function boundaryAtRead(admission: Admission, value: PlaceId): void {
 }
 
 /**
- * C9: an external item a consumer meets brings the boundary check of each ingress store it came in by, whichever
+ * An external item a consumer meets brings the boundary check of each ingress store it came in by, whichever
  * consumer asks first; host data that no ingress store brought is checked at the consumer (`here`) against `unknown`
  * (the kinds the consumer needs are its own obligation). A consumer may pass `here` as its recipe, made only once
  * the check is owed here, so a declined boundary shows no label (#1483: a shown label is charged, #1475).
@@ -142,7 +143,7 @@ export function boundaryFor(
   item: Item,
   owed: Obligation | (() => Obligation) | null,
 ): void {
-  // (also a kind a type test proved of external data: the test proves the kind, never the ingress, #1073 PR 2)
+  // (also a kind a type test proved of external data: the test proves the kind, never the ingress, #1073)
   if (!isExternal(item) && item.fromExternal !== true) return;
   // the landing index: an ingress's store's boundary, its own read's check, or the consumer's check
   const unreached = item.ingress !== undefined && resolve(admission, item.ingress);
@@ -165,8 +166,7 @@ export function boundaryFor(
 
 /**
  * Takes back the read checks from `length` on, with the keys they took and the ingress resolutions that made them, so
- * the walk that finishes their unit after a stop makes them again (D4 a′:
- * the running unit's findings are taken back).
+ * the walk that finishes their unit after a stop makes them again (the running unit's findings are taken back).
  */
 export function takeBackReadChecks(admission: Admission, length: number): void {
   const taken = admission.readCheckKeys.splice(length);
@@ -186,19 +186,19 @@ export function boundariesAt(
   for (const item of items) admission.boundaryFor(item, here);
 }
 
-/** F18: a load or `fromJson` with an expected type that no store takes in is checked where it runs, against that type. */
+/** A load or `fromJson` with an expected type that no store takes in is checked where it runs, against that type. */
 function f18Admission(
   admission: Admission,
   c: CorePass["program"]["constraints"][number],
 ): { readonly label: string; readonly tags: readonly ItemTag[] } | null {
   if (!("result" in c) || !typedIngress(c)) return null;
-  // (a typed ingress no store brings, an own read or unreached, is checked where it runs: §3.3)
+  // (a typed ingress no store brings, an own read or unreached, is checked where it runs)
   const found = landingIndex(admission).byIngress.get(c.result);
   return found === undefined || found.stores.size === 0 ? f18Kinds(admission, c) : null;
 }
 
 /**
- * F18: the checks of loads and `fromJson` calls that no store brings in, where they run. `skip`, after a stop
+ * The checks of loads and `fromJson` calls that no store brings in, where they run. `skip`, after a stop
  * before admission settled: a call whose records a mark stands for (inside a marked store's value), so the landing
  * index `publish` made there, of the stores into written places alone, answers for the rest. Returns
  * the calls whose expected type a stop left open (`f18Open`), each with its label, for the consumers to mark: no
@@ -232,9 +232,9 @@ export function ingressStores(
 
 /**
  * The kinds an ingress store's boundary check is against: the destination's admitted type; for an argument beside an
- * unannotated parameter's default, which that default's decision never constrains (F21, ADR 0021 1.5), the
- * argument's own kinds at the boundary's path (a record carrying the ingress its record, a typed ingress its expected
- * kinds, F18, with their `null`), none for external data alone (`unknown`: the runtime's validation of it).
+ * unannotated parameter's default, which that default's decision never constrains (ADR 0021 1.5), the argument's own
+ * kinds at the boundary's path (a record carrying the ingress its record, a typed ingress its expected kinds, with
+ * their `null`), none for external data alone (`unknown`: the runtime's validation of it).
  */
 function againstOf(admission: Admission, d: Definition, path: readonly string[]): ItemTag[] {
   if (!admission.besideDefault(d)) {
@@ -242,7 +242,7 @@ function againstOf(admission: Admission, d: Definition, path: readonly string[])
     // (after a stop, where admission retained nothing at the destination, the stored value's read below it as the
     // finishing read answers it: a finished source contract stands, a domain read as the value by this fixed need;
     // never below a decision that stopped at its demand allowance, which decides nothing in the unstopped
-    // analysis either, so a settled stop keeps its boundaries: Astra r1's B2 on #1437; nor where a written type stands,
+    // analysis either, so a settled stop keeps its boundaries, #1437; nor where a written type stands,
     // which decides the destination after a stop too, an unrestricted one admitting no kind as every kind fits, #1450)
     const destination = admission.destPath(d);
     if (
@@ -280,12 +280,12 @@ function writtenStands(admission: Admission, place: PlaceId, path: readonly stri
 }
 
 /**
- * C9, S6-CARRIERS §3.3, once every place is decided, from the landing index: one boundary per ingress store, at the
+ * Once every place is decided, from the landing index: one boundary per ingress store, at the
  * record level a whole record is stored at (the longest common prefix of its non-own ingress stops' boundary paths,
  * an `addAll`'s first element step dropped), against the admitted type there, at the span of its ingress stop of
  * least evaluation key; owed where a consumer met one of its ingresses' items, where a typed ingress lands where a
- * type is admitted (a parameter default too; an argument or a return that carries a typed `load` or
- * `fromJson`, Sol M3 r8), or where one of its ingress stops stands where a type is admitted (the owner's F1).
+ * type is admitted (a parameter default too; an argument or a return that carries a typed `load` or `fromJson`), or
+ * where one of its ingress stops stands where a type is admitted.
  * `written`: only the stores whose destination has a written type (a stop before admission settled).
  */
 export function publish(admission: Admission, written = false): void {
@@ -358,7 +358,7 @@ export function publish(admission: Admission, written = false): void {
   }
 }
 
-/** A boundary check (C9): `copy-type` against the destination's own contract. */
+/** A boundary check: `copy-type` against the destination's own contract. */
 function boundaryCheck(
   site: SourceSite,
   target: string,
@@ -378,7 +378,7 @@ function boundaryCheck(
 /**
  * Every derivation of admission's that creates an obligation, with its exits after a stop before admission settled:
  * where the fresh pass runs it (`freshStores`, or its walk, which finishes every
- * unit), what it publishes there, what it leaves undecided with a mark, and what it declines and why. A C1 obligation
+ * unit), what it publishes there, what it leaves undecided with a mark, and what it declines and why. A store check
  * comes from a decision (`decide`), which the consumers check. The lint check `check-obligation-inventory` reads the
  * syntax tree: every method here that creates one, and every `Admission` method a consumer method that creates one
  * calls, is an entry here or a read it lists with why.
