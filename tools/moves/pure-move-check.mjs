@@ -98,7 +98,13 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { movedLinesOf, MovedLinesUnreadable } from "./moved-lines.mjs";
 import { PARSED, regular, verdictsOf } from "./pure-move-forms.mjs";
-import { CannotRun, declarationsOf, renamesOf, wholeFiles } from "./pure-move-declarations.mjs";
+import {
+  boundDeclarations,
+  CannotRun,
+  declarationsOf,
+  renamesOf,
+  wholeFiles,
+} from "./pure-move-declarations.mjs";
 import { bindingDifferences } from "./pure-move-bindings.mjs";
 
 export const RESIDUAL =
@@ -183,46 +189,12 @@ export function checkMove(
     files,
     renameMap,
   );
-  // a declaration's text is compared exactly, and Git's diff and blobs, read as UTF-8, turn bytes that are not into
-  // U+FFFD, which a declaration could then match: each blob a declaration names must decode without loss
-  const decoder = new TextDecoder("utf-8", { fatal: true });
-  for (const key of new Set(declarations.map((d) => JSON.stringify([d.file, d.side])))) {
-    const [file, side] = JSON.parse(key);
-    const read = spawnSync(
-      "git",
-      ["cat-file", "blob", `${side === "removed" ? mergeBase : "HEAD"}:${file}`],
-      { cwd, maxBuffer: 256 * 1024 * 1024 },
-    );
-    // (a file not on that side has no blob and stays unmatched; a gitlink has none either, but Git's line for it,
-    // `Subproject commit …`, can be declared)
-    if (read.status !== 0) continue;
-    try {
-      decoder.decode(read.stdout);
-    } catch {
-      throw new CannotRun(
-        `pure-move-check: ${file} (${side}) is not UTF-8, so a declaration's text cannot be compared with its lines exactly`,
-      );
-    }
-  }
-  // each declaration binds to the one line it first matches, by the line's number on its side
-  const bound = new Map();
-  const declaredFor = (entry) => {
-    const index = declarations.findIndex(
-      (d, at) =>
-        !bound.has(at) &&
-        d.file === entry.file &&
-        d.side === entry.side &&
-        d.text === entry.row.text,
-    );
-    if (index === -1) return null;
-    bound.set(index, entry.row.line);
-    return declarations[index].reason;
-  };
+  const lines = boundDeclarations(declarations, mergeBase, cwd);
   const { verdicts, moved } = verdictsOf(
     mergeBase,
     "HEAD",
     files.filter((change) => !wholes.some((w) => w.file === change.file)),
-    { cwd, declaredFor },
+    { cwd, declaredFor: lines.declaredFor },
   );
   const counts = {
     movedAdded: moved.added,
@@ -245,31 +217,20 @@ export function checkMove(
     } else counts[form] += 1;
   }
   const bindings = bindingDifferences(mergeBase, "HEAD", files, renameMap, git);
-  // a refusal is declared by the declaration bound to its line, a changed one or not, else by one of its side and its
-  // line's text bound to none, which it binds; each is printed with the refusal reason it covers
   const refused = [];
   const covered = [];
-  const ofSide = (d, refusal) => d.file === refusal.file && d.side === refusal.side;
   for (const refusal of bindings.refusals) {
-    let index = declarations.findIndex(
-      (d, at) => ofSide(d, refusal) && bound.get(at) === refusal.line,
-    );
-    if (index === -1) {
-      index = declarations.findIndex(
-        (d, at) => ofSide(d, refusal) && !bound.has(at) && d.text === refusal.text,
-      );
-      if (index !== -1) {
-        bound.set(index, refusal.line);
-        counts.declared += 1;
-      }
+    const cover = lines.cover(refusal);
+    if (cover === null) refused.push(refusal);
+    else {
+      if (cover.taken) counts.declared += 1;
+      covered.push({ ...refusal, declared: cover.reason });
     }
-    if (index === -1) refused.push(refusal);
-    else covered.push({ ...refusal, declared: declarations[index].reason });
   }
   const [kept, notJudged] = unchangedDynamicImports(refused, files, wholes);
   counts.refused = kept.length;
   counts.notJudged = notJudged.length;
-  const stale = declarations.filter((_, at) => !bound.has(at));
+  const stale = lines.stale();
   return {
     mergeBase,
     unadmitted,
