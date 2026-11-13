@@ -384,6 +384,8 @@ function startResize(event: PointerEvent, tool?: Tool) {
   // Halfway across the unused gap keeps the minimum label width easy to select.
   const menuSnapWidth = (compactMenuWidth.value / rem + menuWidths.min) / 2;
   resizing.value = tool ?? "menu";
+  // The page's tooltips stay hidden while the panel is resized (`style.css`).
+  document.documentElement.classList.add("sidebar-resizing");
   edge.setPointerCapture(event.pointerId);
   const move = (moveEvent: PointerEvent) => {
     if (moveEvent.pointerId !== event.pointerId) return;
@@ -424,6 +426,7 @@ function startResize(event: PointerEvent, tool?: Tool) {
     document.removeEventListener("keydown", key);
     if (edge.hasPointerCapture(event.pointerId)) edge.releasePointerCapture(event.pointerId);
     resizing.value = null;
+    document.documentElement.classList.remove("sidebar-resizing");
     stopResize = undefined;
   };
   edge.addEventListener("pointermove", move);
@@ -699,9 +702,12 @@ watch(
       onStart(event) {
         originalNextSibling = event.item.nextSibling;
         strip.dataset.reordering = "true";
+        // The page shows the drag's cursor and no tooltips while it runs (`style.css`).
+        document.documentElement.classList.add("reordering");
       },
       onEnd(event) {
         delete strip.dataset.reordering;
+        document.documentElement.classList.remove("reordering");
         // Undo Sortable's DOM move before Vue applies the authoritative keyed-list update.
         content.insertBefore(event.item, originalNextSibling);
         if (event.oldIndex === undefined || event.newIndex === undefined) return;
@@ -713,7 +719,10 @@ watch(
         void revealTool(tool);
       },
     });
-    onCleanup(() => sortable.destroy());
+    onCleanup(() => {
+      sortable.destroy();
+      document.documentElement.classList.remove("reordering");
+    });
   },
   { flush: "post" },
 );

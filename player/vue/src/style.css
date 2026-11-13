@@ -384,10 +384,11 @@
 .reorder-drag-placeholder { opacity: 0.35; }
 .reorder-dragging { opacity: 0.85; pointer-events: none; }
 
-/* Sortable's body-level drag copy lets the pointer hit underlying controls. */
-body:has(> .reorder-dragging),
-body:has(> .reorder-dragging) * { cursor: grabbing !important; }
-body:has(> .reorder-dragging) [data-slot="tooltip-content"] { visibility: hidden; }
+/* Sortable's body-level drag copy lets the pointer hit underlying controls. The drag code marks the root while a drag
+   runs: a `:has()` on the body here would restyle the whole page at every change of the conversation. */
+:root.reordering,
+:root.reordering * { cursor: grabbing !important; }
+:root.reordering [data-slot="tooltip-content"] { visibility: hidden; }
 
 /* Match the menu's 14px text, icon, gap, padding and border without reserving space. */
 .menu-width-ruler {
@@ -402,7 +403,7 @@ body:has(> .reorder-dragging) [data-slot="tooltip-content"] { visibility: hidden
 .tool-panel-strip[data-reordering], .player-sidebar[data-resizing="true"] .tool-panel-strip { scroll-snap-type: none; }
 .resize-size-label { position: absolute; right: 8px; top: 3.5rem; white-space: nowrap; border: 1px solid var(--border); border-radius: 4px; background: var(--background); padding: 2px 6px; font-size: 0.75rem; }
 .player-sidebar[data-resizing="true"], .player-sidebar[data-resizing="true"] * { cursor: col-resize !important; user-select: none; }
-body:has(.player-sidebar[data-resizing="true"]) [data-slot="tooltip-content"] { visibility: hidden; }
+:root.sidebar-resizing [data-slot="tooltip-content"] { visibility: hidden; }
 /* Pointer resizing already owns the geometry; do not trail it with a dock transition. */
 .player-sidebar[data-resizing="true"] [data-slot="sidebar"] > .fixed { transition: none; }
 

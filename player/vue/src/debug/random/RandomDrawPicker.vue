@@ -106,8 +106,11 @@ watch(
       fallbackClass: "reorder-dragging",
       onStart(event) {
         originalNextSibling = event.item.nextSibling;
+        // The page shows the drag's cursor and no tooltips while it runs (`style.css`).
+        document.documentElement.classList.add("reordering");
       },
       onEnd(event) {
+        document.documentElement.classList.remove("reordering");
         // Undo Sortable's DOM move before Vue applies the authoritative keyed-list update.
         element.insertBefore(event.item, originalNextSibling);
         if (event.oldIndex === undefined || event.newIndex === undefined) return;
@@ -118,7 +121,10 @@ watch(
         order.value = moved;
       },
     });
-    onCleanup(() => sortable.destroy());
+    onCleanup(() => {
+      sortable.destroy();
+      document.documentElement.classList.remove("reordering");
+    });
   },
   { flush: "post" },
 );
