@@ -337,7 +337,8 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
             options.adjustments === undefined && firstNewEntry !== null
               ? instance.measurementsCache[firstNewEntry]?.start
               : undefined;
-          if (first !== undefined && offset > first + 1) {
+          const stops = first !== undefined && offset > first + 1;
+          if (stops) {
             offset = first;
             following.value = false;
             heldAtNewEntry.value = true;
@@ -349,6 +350,9 @@ const virtualizer = useVirtualizer<HTMLDivElement, HTMLElement>(
             instance.scrollToOffset(first);
           }
           elementScroll(offset, options, instance);
+          // TanStack Virtual (read in 3.17.8) learns a scroll position only from the `scroll` event, so after this stop it
+          // must be told at once, or an update before that event anchors at the stale end and scrolls past the stop.
+          if (stops) instance.scrollOffset = element?.scrollTop ?? offset;
           // A correction that keeps the text in view in place moves nothing that is drawn.
           if (
             element !== null &&
