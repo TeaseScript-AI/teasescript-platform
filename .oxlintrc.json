@@ -144,14 +144,24 @@
       "rules": { "no-undef": "error" }
     },
     {
-      "files": ["**/*.mjs"],
+      "files": ["**/*.{js,jsx,mjs}"],
       "rules": {
         "no-restricted-globals": ["error", "exports", "require", "module", "__filename", "__dirname"]
       }
     },
     {
       "files": ["tools/player-firefox-camera.mjs", "tools/player-preview-checks.mjs"],
-      "env": { "browser": true }
+      "globals": {
+        "document": "readonly",
+        "Element": "readonly",
+        "getComputedStyle": "readonly",
+        "HTMLMediaElement": "readonly",
+        "HTMLTextAreaElement": "readonly",
+        "HTMLVideoElement": "readonly",
+        "MouseEvent": "readonly",
+        "StorageEvent": "readonly",
+        "window": "readonly"
+      }
     }
   ]
 }

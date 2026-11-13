@@ -10,15 +10,17 @@ import { OXLINT_OPTIONS, repositoryRoot } from "./files.mjs";
 
 // The names a JavaScript file reads, by `.oxlintrc.json` run with the options `npm run lint` gives oxlint, as
 // docs/LINTING.md "Names in JavaScript files" says: an unbound name fails with its file, line and name; an ES module
-// reads none of CommonJS's five names; the two tools that hand functions to a page may read the browser's globals.
+// reads none of CommonJS's five names; the two tools that hand functions to a page may read the browser globals they
+// name, and no other.
 
 const executable = fileURLToPath(
   new URL("./bin/oxlint", import.meta.resolve("oxlint/package.json")),
 );
 
-// A function that reads the browser's globals, as a page function does, and one Node name it does not import.
+// A function that reads two of the browser's globals the page tools admit, as a page function does; a Node global; a
+// Node name the file does not import; and a browser global the page tools do not admit.
 const PAGE =
-  "export const title = () => document.title + window.name;\nexport const base = path.sep;\n";
+  "export const title = () => document.title + window.name;\nexport const base = path.sep + process.platform;\nexport const label = () => status;\n";
 
 // Each file, and the names that fail in it, as [line, rule, name].
 const FILES = {
@@ -42,7 +44,8 @@ const FILES = {
   ].join("\n"),
   "tools/script.cjs":
     'const fs = require("node:fs");\nmodule.exports = { fs, here: __dirname, at: __filename };\n',
-  "src/place.ts": "export const value: Missing | undefined = undefined;\n",
+  "tools/esm.js": "export const here = __dirname;\n",
+  "src/place.ts": "export const value = missing;\n",
   "tools/player-preview-checks.mjs": PAGE,
   "tools/player-firefox-camera.mjs": PAGE,
   "tools/page.mjs": PAGE,
@@ -57,18 +60,26 @@ const EXPECTED = {
     [3, "no-restricted-globals", "require"],
   ],
   "tools/script.cjs": [],
+  "tools/esm.js": [[1, "no-restricted-globals", "__dirname"]],
   "src/place.ts": [],
-  "tools/player-preview-checks.mjs": [[2, "no-undef", "path"]],
-  "tools/player-firefox-camera.mjs": [[2, "no-undef", "path"]],
+  "tools/player-preview-checks.mjs": [
+    [2, "no-undef", "path"],
+    [3, "no-undef", "status"],
+  ],
+  "tools/player-firefox-camera.mjs": [
+    [2, "no-undef", "path"],
+    [3, "no-undef", "status"],
+  ],
   "tools/page.mjs": [
     [1, "no-undef", "document"],
     [1, "no-undef", "window"],
     [2, "no-undef", "path"],
+    [3, "no-undef", "status"],
   ],
 };
 
 test(
-  "an unbound name in a JavaScript file fails by file, line and name; CommonJS's names fail in an ES module; the page tools read the browser's",
+  "an unbound name in a JavaScript file fails by file, line and name; CommonJS's names fail in an ES module; the page tools read the browser's globals they name",
   { timeout: 60_000 },
   () => {
     const root = mkdtempSync(join(tmpdir(), "javascript-names-"));
