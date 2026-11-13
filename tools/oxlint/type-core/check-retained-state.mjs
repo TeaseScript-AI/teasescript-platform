@@ -124,9 +124,9 @@ function levelOf(file) {
 }
 
 /**
- * The private fields the check leaves out, each with why the instrument's domain does not hold it. "Fixed when made"
- * trusts `readonly`, which a reassignment in the constructor after a run switch there escapes (docs/TESTING.md,
- * "Frozen retained state").
+ * The private fields the check leaves out, each with why the instrument's domain does not hold it. A listed field
+ * passes whatever its modifiers, so nothing here checks its reason; "fixed when made" trusts `readonly`, which a
+ * reassignment in the constructor after a run switch there escapes (docs/TESTING.md, "Frozen retained state").
  */
 const OUTSIDE_FIELDS = new Map([
   [
