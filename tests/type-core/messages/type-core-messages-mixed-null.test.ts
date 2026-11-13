@@ -5,321 +5,322 @@ import test from "node:test";
 import { inMode, MODES } from "../../helpers/type-core-oracles.js";
 import { reported, main } from "../../helpers/type-core/type-core-messages-setup.js";
 
+const ONE = "A list holds one type. Use values of one type in it.";
+const cases: readonly (readonly [source: string, message: string])[] = [
+  [
+    'let a:integer[]?[]=[[1],null]\nlet xs=[a,[["x"]]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let xs=[[[1],null],[["x"]]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let a:integer[]?[]=[[1],null]\nlet xs=[a,[["x"],null]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[]?[]). ${ONE}`,
+  ],
+  [
+    'let a:integer?[]?[]=[[1],null]\nlet xs=[{f:a},{f:[["x"]]}]\nexit\n',
+    "This list mixes objects whose property 'f' holds a list (integer?[]?[]) in one and a list (string[][]) in " +
+      "another. A list holds one type. Give 'f' one type in every element.",
+  ],
+  [
+    'let a:integer[]?[]=[[1],null]\nlet ys=[a]+[[["x"]]]\nexit\n',
+    "'+' would mix a list (integer[]?[]) and a list (string[][]). A list holds one type. To allow both, declare " +
+      "the list as 'let ys: ((integer | string)[]?)[][] =[a]+[[[\"x\"]]]'.",
+  ],
+  // (a written copy's optional layer with no null among its values: its type's)
+  [
+    'let a:integer[]?[]=[[1]]\nlet xs=[a,[["x"]]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  // (an inline join's other operand brings the null a written copy's type lacks: Codex r1's B1)
+  [
+    'let a:integer[][]=[[1]]\nlet xs=[a+[[1],null],[["x"]]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  // (a plain copy of a written binding is its declared type, whatever a rejected store put there: Codex r2's B1)
+  [
+    'let a:integer[][]=[[1],null]\nlet xs=[a,[["x"]]]\nexit\n',
+    `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let a:integer[][]=[[1]]\na+=[null]\nlet xs=[a,[["x"]]]\nexit\n',
+    `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+  ],
+  // (an indirect copy, by index or `otherwise`: its declared type too, Codex r3's B1)
+  [
+    'let a:integer[][][]=[[[1],null]]\nlet xs=[a[0],[["x"]]]\nexit\n',
+    `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let a:integer[][]=[[1],null]\nlet xs=[a otherwise [[2]],[["x"]]]\nexit\n',
+    `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+  ],
+  // (a nested join of a copy and a literal: the literal's null, the copy's declared type)
+  [
+    'let a:integer[][]=[[1],null]\nlet xs=[(a+[[1]])+[null],[["x"]]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let a:integer[][]=[[1],null]\nlet xs=[a+[[2]],[["x"]]]\nexit\n',
+    `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+  ],
+  // (a join below a literal, a property, an index, an `otherwise` or a projection: its operand's null, each form by its own
+  // rule; Codex r4's B1)
+  [
+    'let a:integer[][]=[[1]]\nlet xs=[[a+[[2],null]],[[["x"]]]]\nexit\n',
+    `This list mixes a list (integer[]?[][]) and a list (string[][][]). ${ONE}`,
+  ],
+  [
+    'let a:integer[][]=[[1]]\nlet xs=[{f:a+[[2],null]},{f:[["x"]]}]\nexit\n',
+    "This list mixes objects whose property 'f' holds a list (integer[]?[]) in one and a list (string[][]) in " +
+      "another. A list holds one type. Give 'f' one type in every element.",
+  ],
+  [
+    'let a:integer[][]=[[1]]\nlet xs=[[a+[[2],null]][0],[["x"]]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let a:integer[][]=[[1]]\nlet xs=[(a+[[2],null]) otherwise [[3]],[["x"]]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let a:integer[][]=[[1]]\nlet xs=[({f:a+[[2],null]}).f,[["x"]]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  // (an inferred result, and a read of an unwritten binding: their place's admitted type; Codex r4's B2)
+  [
+    'let a:integer[]?[]=[[1]]\nlet b:string[][]=[["x"]]\nfunction give { return a }\nlet xs=[give(),b]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let b=[[1],null]\nlet xs=[b,[["x"]]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  // (a written copy below a literal: its declared type, whatever a rejected store put there)
+  [
+    'let a:integer[][]=[[1],null]\nlet xs=[[a],[[["x"]]]]\nexit\n',
+    `This list mixes a list (integer[][][]) and a list (string[][][]). ${ONE}`,
+  ],
+  // (an `otherwise`: its fallback only where its operand may be null, its operand's null never at its own level)
+  [
+    'let a:integer[][]=[[1]]\nlet xs=[a otherwise [[1],null],[["x"]]]\nexit\n',
+    `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let xs=[null otherwise [[1],null],[["x"]]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let a:integer[]?=null\nlet xs=[[a otherwise [1]],[["x"]]]\nexit\n',
+    `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+  ],
+  // (a carried value, by what it carries: a `get`'s receiver and default, a dict's values, a method's receiver;
+  // Codex r5's B1)
+  [
+    'let a:integer[][]=[[1]]\nlet xs=[[a+[[2],null]].get(0,default: [[3]]),[["x"]]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let a:integer[][]=[[1]]\nlet xs=[[].get(0,default: a+[[2],null]),[["x"]]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let a:integer[][]=[[1]]\nlet xs=[(dict {k:a+[[2],null]}).get("k",default: [[3]]),[["x"]]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let a:integer[][]=[[1]]\nlet xs=[(dict {k:a+[[2],null]}).values[0],[["x"]]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let a:integer[][]=[[1]]\nlet xs=[(dict {k:a+[[2],null]}).values,[[["x"]]]]\nexit\n',
+    `This list mixes a list (integer[]?[][]) and a list (string[][][]). ${ONE}`,
+  ],
+  [
+    'let a:integer[][]=[[1]]\nlet xs=[(a+[[2],null]).toSet().toList(),[["x"]]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let a:integer[][]=[[1]]\nlet xs=[(a+[[2],null]).take(1),[["x"]]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let a:integer[][]=[[1]]\nlet xs=[[a+[[2],null]].removeAt(0),[["x"]]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  // (a join's sides by the same rule: an inferred result's admitted type, on either side and through `+=`; Codex r5's
+  // B2; `xs=[take(a)]` / `xs += …` is #1813's decision)
+  [
+    'let a:integer[]?[]=[[1]]\nfunction take(v:integer[]?[]) { return v }\nlet xs=[take(a)]+[[["x"]]]\nexit\n',
+    "'+' would mix a list (integer[]?[]) and a list (string[][]). A list holds one type. To allow both, declare " +
+      "the list as 'let xs: (integer | string)[][][] =[take(a)]+[[[\"x\"]]]'.",
+  ],
+  [
+    'let a:integer[]?[]=[[1]]\nfunction take(v:integer[]?[]) { return v }\nlet xs=[[["x"]]]+[take(a)]\nexit\n',
+    "'+' would mix a list (string[][]) and a list (integer[]?[]). A list holds one type. To allow both, declare " +
+      "the list as 'let xs: (string | integer)[][][] =[[[\"x\"]]]+[take(a)]'.",
+  ],
+  [
+    'let a:integer[]?[]=[[1]]\nfunction take(v:integer[]?[]) { return v }\nlet xs=[[["x"]]]\nxs += [take(a)]\nexit\n',
+    "'+=' would mix a list (string[][]) and a list (integer[]?[]). A list holds one type. To allow both, declare " +
+      "the list with the type '(string | integer)[][][]'.",
+  ],
+  // (an undecided read: its own items, `null` alone settling no type; Codex r5's B3)
+  [
+    'let a=null\nlet xs=[a otherwise [[1],null],[["x"]]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  // (at its own level, any value by its own items: a method's result is a new list whatever its receiver's null, and a
+  // choice's null is its own; Codex r6's B1 and B2)
+  [
+    'function use(a:integer[]?) {\n  if a != null {\n    let xs=[[a.take(1)],[["x"]]]\n  }\n}\nuse([1])\nexit\n',
+    `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let a:integer[] dict?=dict{k:[1]}\nif a != null {\n  let xs=[[a.values]]+[[[["x"]]]]\n}\nexit\n',
+    "'+' would mix a list (integer[][][]) and a list (string[][][]). A list holds one type. To allow both, declare " +
+      "the list as 'let xs: (integer | string)[][][][] =[[a.values]]+[[[[\"x\"]]]]'.",
+  ],
+  [
+    'let xs=[(askChoice null) otherwise [[1],null],[["x"]]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  // (an `otherwise` at a layer: its fallback's null only where its operand may be null, on either side; Codex r3 on
+  // #1819)
+  [
+    'let xs=[[["x"]],[([1] otherwise null)]]\nexit\n',
+    `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
+  ],
+  [
+    'let xs=[[([1] otherwise null)],[["x"]]]\nexit\n',
+    `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let n:integer[]?=[1]\nif hostValue == 1 { n=null }\nlet xs=[[["x"]],[(n otherwise null)]]\nexit\n',
+    `This list mixes a list (string[][]) and a list (integer[]?[]). ${ONE}`,
+  ],
+  // (an operand narrowed where it is read never runs its fallback: by its assignment, at its own level and below it)
+  [
+    'let n:integer[]?=[1]\nlet xs=[[["x"]],[(n otherwise null)]]\nexit\n',
+    `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
+  ],
+  [
+    'let a:integer[][]?=[[1]]\nlet xs=[a otherwise [[1],null],[["x"]]]\nexit\n',
+    `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+  ],
+  // (a nested `otherwise`: its own fallback's null only where its operand may be null too; Codex r10's B1)
+  [
+    'let n:integer[][]?=[[1]]\nlet xs=[(n otherwise null) otherwise [[1],null],[["x"]]]\nexit\n',
+    `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let n:integer[][]?=[[1]]\nlet xs=[[["x"]],(n otherwise null) otherwise [[1],null]]\nexit\n',
+    `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
+  ],
+  // (a direct `otherwise`'s fallback read narrowed too: `m` holds `[1]` here; a fallback that may be null keeps it,
+  // Astra r2's B2)
+  [
+    'let m:integer[]?=[1]\nlet xs=[[(null otherwise m)],[["x"]]]\nexit\n',
+    `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let m:integer[]?=[1]\nlet xs=[[["x"]],[(null otherwise m)]]\nexit\n',
+    `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
+  ],
+  [
+    'let m:integer[]?=[1]\nif hostValue == 1 { m=null }\nlet xs=[[(null otherwise m)],[["x"]]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  // (a value at a layer's own level as it is read: a written copy narrowed by its value holds none, one host-assigned
+  // may, and so may an `otherwise`'s host-assigned operand, #1840; the current checker's)
+  [
+    'let a:integer[]?=[1]\nlet xs=[[["x"]],[a]]\nexit\n',
+    `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
+  ],
+  [
+    'let a:integer[]?=hostValue\nlet xs=[[a],[["x"]]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let a:integer[][]?=null\na=hostValue\nlet xs=[[(a otherwise null)],[[["x"]]]]\nexit\n',
+    `This list mixes a list (integer[][]?[]) and a list (string[][][]). ${ONE}`,
+  ],
+  // (a layer that is a copy's own level, held in an inferred one, as it is read there: `n` holds `[2]`; a copy's term
+  // only where it decides the layer from above; Codex r5 on #1819)
+  [
+    'let n:integer[]?=[2]\nlet h={p:[n]}\nlet xs=[h,{p:[["x"]]}]\nexit\n',
+    "This list mixes objects whose property 'p' holds a list (integer[][]) in one and a list (string[][]) in " +
+      "another. A list holds one type. Give 'p' one type in every element.",
+  ],
+  [
+    'let n:integer[]?=[2]\nlet h={p:[n]}\nlet xs=[{p:[["x"]]},h]\nexit\n',
+    "This list mixes objects whose property 'p' holds a list (string[][]) in one and a list (integer[][]) in " +
+      "another. A list holds one type. Give 'p' one type in every element.",
+  ],
+  // (known differences, #1838: an `otherwise` inside a default, `load`, property or index keeps, in admission's items,
+  // the null its never-run fallback brings, so the outer `otherwise` counts its own fallback too; the current checker
+  // says `integer[][]`. Admission's to repair, not the message layer's; these turn to `integer[][]` with it)
+  ...[
+    "[].get(0,default: (n otherwise null))",
+    'load("key",default: (n otherwise null))',
+    "{p:(n otherwise null)}.p",
+    "[(n otherwise null)][0]",
+  ].map(
+    (inner) =>
+      [
+        `let n:integer[][]?=[[1]]\nlet xs=[(${inner}) otherwise [[1],null],[["x"]]]\nexit\n`,
+        `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+      ] as const,
+  ),
+  // (a join's operand bound to a literal holding null: its place's undecided type, read by its own items; Codex r7)
+  [
+    'let a=[null]\nlet xs=[a+[[1]],[["x"]]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  // (a join's operand admission rejected brings nothing to the join's result, ADR 0021 1.1: inline, through a method
+  // and to a later join; Astra r1's B1)
+  [
+    'let xs=[([[1]]+[["x"],null]),[["y"]]]\nexit\n',
+    `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let xs=[([[1]]+[["x"],null]).take(1),[["y"]]]\nexit\n',
+    `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let xs=[[[1]]]+[[["x"],null]]+[[["y"]]]\nexit\n',
+    "'+' would mix a list (integer[][]) and a list (string[][]). A list holds one type. To allow both, declare " +
+      "the list with the type '((integer | string)[]?)[][]'.",
+  ],
+  // (a value with no place, a method's result: its own items)
+  [
+    'let xs=[[[1],null].take(2),[["x"]]]\nexit\n',
+    `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
+  ],
+  // (a property read of a literal-bound binding holding no null: plain)
+  [
+    'let o={p:[[1]]}\nlet xs=[o.p,[["x"]]]\nexit\n',
+    `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+  ],
+  // (no layer that may hold null: plain)
+  [
+    'let a:integer[][]=[[1]]\nlet xs=[a,[["x"]]]\nexit\n',
+    `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+  ],
+  [
+    'let xs=[[[1]],[["x"]]]\nexit\n',
+    `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
+  ],
+];
+
 /**
  * #1765: a mixed element's written type keeps each layer between the element and its leaf that may hold `null`, on both
  * sides and through a property, a literal's own null and a written copy's type alike, as the current checker's first
  * sentence does; a layer that may not stays plain. The element itself stays as today (#1753). In four modes.
  */
 test("a mixed element's type keeps the null of every layer between the element and its leaf (#1765)", () => {
-  const ONE = "A list holds one type. Use values of one type in it.";
-  const cases: readonly (readonly [source: string, message: string])[] = [
-    [
-      'let a:integer[]?[]=[[1],null]\nlet xs=[a,[["x"]]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let xs=[[[1],null],[["x"]]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let a:integer[]?[]=[[1],null]\nlet xs=[a,[["x"],null]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[]?[]). ${ONE}`,
-    ],
-    [
-      'let a:integer?[]?[]=[[1],null]\nlet xs=[{f:a},{f:[["x"]]}]\nexit\n',
-      "This list mixes objects whose property 'f' holds a list (integer?[]?[]) in one and a list (string[][]) in " +
-        "another. A list holds one type. Give 'f' one type in every element.",
-    ],
-    [
-      'let a:integer[]?[]=[[1],null]\nlet ys=[a]+[[["x"]]]\nexit\n',
-      "'+' would mix a list (integer[]?[]) and a list (string[][]). A list holds one type. To allow both, declare " +
-        "the list as 'let ys: ((integer | string)[]?)[][] =[a]+[[[\"x\"]]]'.",
-    ],
-    // (a written copy's optional layer with no null among its values: its type's)
-    [
-      'let a:integer[]?[]=[[1]]\nlet xs=[a,[["x"]]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    // (an inline join's other operand brings the null a written copy's type lacks: Codex r1's B1)
-    [
-      'let a:integer[][]=[[1]]\nlet xs=[a+[[1],null],[["x"]]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    // (a plain copy of a written binding is its declared type, whatever a rejected store put there: Codex r2's B1)
-    [
-      'let a:integer[][]=[[1],null]\nlet xs=[a,[["x"]]]\nexit\n',
-      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let a:integer[][]=[[1]]\na+=[null]\nlet xs=[a,[["x"]]]\nexit\n',
-      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
-    ],
-    // (an indirect copy, by index or `otherwise`: its declared type too, Codex r3's B1)
-    [
-      'let a:integer[][][]=[[[1],null]]\nlet xs=[a[0],[["x"]]]\nexit\n',
-      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let a:integer[][]=[[1],null]\nlet xs=[a otherwise [[2]],[["x"]]]\nexit\n',
-      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
-    ],
-    // (a nested join of a copy and a literal: the literal's null, the copy's declared type)
-    [
-      'let a:integer[][]=[[1],null]\nlet xs=[(a+[[1]])+[null],[["x"]]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let a:integer[][]=[[1],null]\nlet xs=[a+[[2]],[["x"]]]\nexit\n',
-      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
-    ],
-    // (a join below a literal, a property, an index, an `otherwise` or a projection: its operand's null, each form by its own
-    // rule; Codex r4's B1)
-    [
-      'let a:integer[][]=[[1]]\nlet xs=[[a+[[2],null]],[[["x"]]]]\nexit\n',
-      `This list mixes a list (integer[]?[][]) and a list (string[][][]). ${ONE}`,
-    ],
-    [
-      'let a:integer[][]=[[1]]\nlet xs=[{f:a+[[2],null]},{f:[["x"]]}]\nexit\n',
-      "This list mixes objects whose property 'f' holds a list (integer[]?[]) in one and a list (string[][]) in " +
-        "another. A list holds one type. Give 'f' one type in every element.",
-    ],
-    [
-      'let a:integer[][]=[[1]]\nlet xs=[[a+[[2],null]][0],[["x"]]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let a:integer[][]=[[1]]\nlet xs=[(a+[[2],null]) otherwise [[3]],[["x"]]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let a:integer[][]=[[1]]\nlet xs=[({f:a+[[2],null]}).f,[["x"]]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    // (an inferred result, and a read of an unwritten binding: their place's admitted type; Codex r4's B2)
-    [
-      'let a:integer[]?[]=[[1]]\nlet b:string[][]=[["x"]]\nfunction give { return a }\nlet xs=[give(),b]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let b=[[1],null]\nlet xs=[b,[["x"]]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    // (a written copy below a literal: its declared type, whatever a rejected store put there)
-    [
-      'let a:integer[][]=[[1],null]\nlet xs=[[a],[[["x"]]]]\nexit\n',
-      `This list mixes a list (integer[][][]) and a list (string[][][]). ${ONE}`,
-    ],
-    // (an `otherwise`: its fallback only where its operand may be null, its operand's null never at its own level)
-    [
-      'let a:integer[][]=[[1]]\nlet xs=[a otherwise [[1],null],[["x"]]]\nexit\n',
-      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let xs=[null otherwise [[1],null],[["x"]]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let a:integer[]?=null\nlet xs=[[a otherwise [1]],[["x"]]]\nexit\n',
-      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
-    ],
-    // (a carried value, by what it carries: a `get`'s receiver and default, a dict's values, a method's receiver;
-    // Codex r5's B1)
-    [
-      'let a:integer[][]=[[1]]\nlet xs=[[a+[[2],null]].get(0,default: [[3]]),[["x"]]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let a:integer[][]=[[1]]\nlet xs=[[].get(0,default: a+[[2],null]),[["x"]]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let a:integer[][]=[[1]]\nlet xs=[(dict {k:a+[[2],null]}).get("k",default: [[3]]),[["x"]]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let a:integer[][]=[[1]]\nlet xs=[(dict {k:a+[[2],null]}).values[0],[["x"]]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let a:integer[][]=[[1]]\nlet xs=[(dict {k:a+[[2],null]}).values,[[["x"]]]]\nexit\n',
-      `This list mixes a list (integer[]?[][]) and a list (string[][][]). ${ONE}`,
-    ],
-    [
-      'let a:integer[][]=[[1]]\nlet xs=[(a+[[2],null]).toSet().toList(),[["x"]]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let a:integer[][]=[[1]]\nlet xs=[(a+[[2],null]).take(1),[["x"]]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let a:integer[][]=[[1]]\nlet xs=[[a+[[2],null]].removeAt(0),[["x"]]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    // (a join's sides by the same rule: an inferred result's admitted type, on either side and through `+=`; Codex r5's
-    // B2; `xs=[take(a)]` / `xs += …` is #1813's decision)
-    [
-      'let a:integer[]?[]=[[1]]\nfunction take(v:integer[]?[]) { return v }\nlet xs=[take(a)]+[[["x"]]]\nexit\n',
-      "'+' would mix a list (integer[]?[]) and a list (string[][]). A list holds one type. To allow both, declare " +
-        "the list as 'let xs: (integer | string)[][][] =[take(a)]+[[[\"x\"]]]'.",
-    ],
-    [
-      'let a:integer[]?[]=[[1]]\nfunction take(v:integer[]?[]) { return v }\nlet xs=[[["x"]]]+[take(a)]\nexit\n',
-      "'+' would mix a list (string[][]) and a list (integer[]?[]). A list holds one type. To allow both, declare " +
-        "the list as 'let xs: (string | integer)[][][] =[[[\"x\"]]]+[take(a)]'.",
-    ],
-    [
-      'let a:integer[]?[]=[[1]]\nfunction take(v:integer[]?[]) { return v }\nlet xs=[[["x"]]]\nxs += [take(a)]\nexit\n',
-      "'+=' would mix a list (string[][]) and a list (integer[]?[]). A list holds one type. To allow both, declare " +
-        "the list with the type '(string | integer)[][][]'.",
-    ],
-    // (an undecided read: its own items, `null` alone settling no type; Codex r5's B3)
-    [
-      'let a=null\nlet xs=[a otherwise [[1],null],[["x"]]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    // (at its own level, any value by its own items: a method's result is a new list whatever its receiver's null, and a
-    // choice's null is its own; Codex r6's B1 and B2)
-    [
-      'function use(a:integer[]?) {\n  if a != null {\n    let xs=[[a.take(1)],[["x"]]]\n  }\n}\nuse([1])\nexit\n',
-      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let a:integer[] dict?=dict{k:[1]}\nif a != null {\n  let xs=[[a.values]]+[[[["x"]]]]\n}\nexit\n',
-      "'+' would mix a list (integer[][][]) and a list (string[][][]). A list holds one type. To allow both, declare " +
-        "the list as 'let xs: (integer | string)[][][][] =[[a.values]]+[[[[\"x\"]]]]'.",
-    ],
-    [
-      'let xs=[(askChoice null) otherwise [[1],null],[["x"]]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    // (an `otherwise` at a layer: its fallback's null only where its operand may be null, on either side; Codex r3 on
-    // #1819)
-    [
-      'let xs=[[["x"]],[([1] otherwise null)]]\nexit\n',
-      `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
-    ],
-    [
-      'let xs=[[([1] otherwise null)],[["x"]]]\nexit\n',
-      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let n:integer[]?=[1]\nif hostValue == 1 { n=null }\nlet xs=[[["x"]],[(n otherwise null)]]\nexit\n',
-      `This list mixes a list (string[][]) and a list (integer[]?[]). ${ONE}`,
-    ],
-    // (an operand narrowed where it is read never runs its fallback: by its assignment, at its own level and below it)
-    [
-      'let n:integer[]?=[1]\nlet xs=[[["x"]],[(n otherwise null)]]\nexit\n',
-      `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
-    ],
-    [
-      'let a:integer[][]?=[[1]]\nlet xs=[a otherwise [[1],null],[["x"]]]\nexit\n',
-      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
-    ],
-    // (a nested `otherwise`: its own fallback's null only where its operand may be null too; Codex r10's B1)
-    [
-      'let n:integer[][]?=[[1]]\nlet xs=[(n otherwise null) otherwise [[1],null],[["x"]]]\nexit\n',
-      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let n:integer[][]?=[[1]]\nlet xs=[[["x"]],(n otherwise null) otherwise [[1],null]]\nexit\n',
-      `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
-    ],
-    // (a direct `otherwise`'s fallback read narrowed too: `m` holds `[1]` here; a fallback that may be null keeps it,
-    // Astra r2's B2)
-    [
-      'let m:integer[]?=[1]\nlet xs=[[(null otherwise m)],[["x"]]]\nexit\n',
-      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let m:integer[]?=[1]\nlet xs=[[["x"]],[(null otherwise m)]]\nexit\n',
-      `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
-    ],
-    [
-      'let m:integer[]?=[1]\nif hostValue == 1 { m=null }\nlet xs=[[(null otherwise m)],[["x"]]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    // (a value at a layer's own level as it is read: a written copy narrowed by its value holds none, one host-assigned
-    // may, and so may an `otherwise`'s host-assigned operand, #1840; the current checker's)
-    [
-      'let a:integer[]?=[1]\nlet xs=[[["x"]],[a]]\nexit\n',
-      `This list mixes a list (string[][]) and a list (integer[][]). ${ONE}`,
-    ],
-    [
-      'let a:integer[]?=hostValue\nlet xs=[[a],[["x"]]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let a:integer[][]?=null\na=hostValue\nlet xs=[[(a otherwise null)],[[["x"]]]]\nexit\n',
-      `This list mixes a list (integer[][]?[]) and a list (string[][][]). ${ONE}`,
-    ],
-    // (a layer that is a copy's own level, held in an inferred one, as it is read there: `n` holds `[2]`; a copy's term
-    // only where it decides the layer from above; Codex r5 on #1819)
-    [
-      'let n:integer[]?=[2]\nlet h={p:[n]}\nlet xs=[h,{p:[["x"]]}]\nexit\n',
-      "This list mixes objects whose property 'p' holds a list (integer[][]) in one and a list (string[][]) in " +
-        "another. A list holds one type. Give 'p' one type in every element.",
-    ],
-    [
-      'let n:integer[]?=[2]\nlet h={p:[n]}\nlet xs=[{p:[["x"]]},h]\nexit\n',
-      "This list mixes objects whose property 'p' holds a list (string[][]) in one and a list (integer[][]) in " +
-        "another. A list holds one type. Give 'p' one type in every element.",
-    ],
-    // (known differences, #1838: an `otherwise` inside a default, `load`, property or index keeps, in admission's items,
-    // the null its never-run fallback brings, so the outer `otherwise` counts its own fallback too; the current checker
-    // says `integer[][]`. Admission's to repair, not the message layer's; these turn to `integer[][]` with it)
-    ...[
-      "[].get(0,default: (n otherwise null))",
-      'load("key",default: (n otherwise null))',
-      "{p:(n otherwise null)}.p",
-      "[(n otherwise null)][0]",
-    ].map(
-      (inner) =>
-        [
-          `let n:integer[][]?=[[1]]\nlet xs=[(${inner}) otherwise [[1],null],[["x"]]]\nexit\n`,
-          `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-        ] as const,
-    ),
-    // (a join's operand bound to a literal holding null: its place's undecided type, read by its own items; Codex r7)
-    [
-      'let a=[null]\nlet xs=[a+[[1]],[["x"]]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    // (a join's operand admission rejected brings nothing to the join's result, ADR 0021 1.1: inline, through a method
-    // and to a later join; Astra r1's B1)
-    [
-      'let xs=[([[1]]+[["x"],null]),[["y"]]]\nexit\n',
-      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let xs=[([[1]]+[["x"],null]).take(1),[["y"]]]\nexit\n',
-      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let xs=[[[1]]]+[[["x"],null]]+[[["y"]]]\nexit\n',
-      "'+' would mix a list (integer[][]) and a list (string[][]). A list holds one type. To allow both, declare " +
-        "the list with the type '((integer | string)[]?)[][]'.",
-    ],
-    // (a value with no place, a method's result: its own items)
-    [
-      'let xs=[[[1],null].take(2),[["x"]]]\nexit\n',
-      `This list mixes a list (integer[]?[]) and a list (string[][]). ${ONE}`,
-    ],
-    // (a property read of a literal-bound binding holding no null: plain)
-    [
-      'let o={p:[[1]]}\nlet xs=[o.p,[["x"]]]\nexit\n',
-      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
-    ],
-    // (no layer that may hold null: plain)
-    [
-      'let a:integer[][]=[[1]]\nlet xs=[a,[["x"]]]\nexit\n',
-      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
-    ],
-    [
-      'let xs=[[[1]],[["x"]]]\nexit\n',
-      `This list mixes a list (integer[][]) and a list (string[][]). ${ONE}`,
-    ],
-  ];
   for (const mode of MODES)
     for (const [source, message] of cases) {
       const found = inMode(mode, () => reported(main(source))).filter(
