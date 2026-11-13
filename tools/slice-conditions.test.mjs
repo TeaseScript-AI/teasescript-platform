@@ -150,3 +150,82 @@ test("each entry's patch applies to the file and replaces its expression with it
     /visit: \(node, \{ lets \}\) => \(true \|\| node\.name/u,
   );
 });
+
+/** A Git checkout holding `source` as the syntax table, and `git` run in it. */
+function checkoutOf(source) {
+  const root = mkdtempSync(path.join(tmpdir(), "slice-conditions-"));
+  folders.push(root);
+  mkdirSync(path.join(root, path.dirname(FILE)), { recursive: true });
+  writeFileSync(path.join(root, FILE), source);
+  const git = (...args) => spawnSync("git", ["-C", root, ...args], { encoding: "utf8" });
+  assert.equal(git("init", "-q").status, 0);
+  return { root, git };
+}
+
+const LAST = `export const DISPOSITIONS = {
+  identifier: {
+    row: "modelled",
+    visit: (node) => (node.name === "x" ? walk([]) : refuse(node.span, "the name")),
+  },
+};
+`;
+const ONE_LINE = `export const DISPOSITIONS = { identifier: { row: "m", visit: (node) => (node.name === "x" ? walk([]) : refuse()) } };`;
+const LAST_ENTRY = [
+  {
+    id: "x",
+    scope: "row identifier",
+    expression: 'node.name === "x"',
+    mutant: "true",
+    expected: "kill",
+    witness: "w",
+  },
+];
+
+test("a patch within three lines of the file's end applies, with and without a final newline, and on its last line (#2583)", () => {
+  for (const [what, source] of [
+    ["final newline", LAST],
+    ["no final newline", LAST.slice(0, -1)],
+    ["the condition on the last line, no final newline", ONE_LINE],
+  ]) {
+    const { root, git } = checkoutOf(source);
+    writeFileSync(path.join(root, "spec.json"), JSON.stringify(LAST_ENTRY));
+    const run = spawnSync(process.execPath, [tool, "--spec", "spec.json", "--patches", "p"], {
+      cwd: root,
+      encoding: "utf8",
+    });
+    assert.equal(run.status, 0, `${what}: ${run.stdout}${run.stderr}`);
+    const applied = git("apply", path.join(root, "p", "x.patch"));
+    assert.equal(applied.status, 0, `${what}: ${applied.stderr}`);
+    assert.equal(
+      readFileSync(path.join(root, FILE), "utf8"),
+      source.replace('node.name === "x"', "true"),
+      what,
+    );
+  }
+});
+
+test("a patch names the file by its repository path, whether --file is absolute or starts with ./, and one outside cannot run (#2583)", () => {
+  const { root, git } = checkoutOf(LAST);
+  writeFileSync(path.join(root, "spec.json"), JSON.stringify(LAST_ENTRY));
+  for (const file of [path.join(root, FILE), `./${FILE}`]) {
+    const run = spawnSync(
+      process.execPath,
+      [tool, "--file", file, "--spec", "spec.json", "--patches", "p"],
+      { cwd: root, encoding: "utf8" },
+    );
+    assert.equal(run.status, 0, `${file}: ${run.stdout}${run.stderr}`);
+    const patch = readFileSync(path.join(root, "p", "x.patch"), "utf8");
+    assert.ok(patch.startsWith(`diff --git a/${FILE} b/${FILE}\n`), patch);
+    const checked = git("apply", "--check", path.join(root, "p", "x.patch"));
+    assert.equal(checked.status, 0, `${file}: ${checked.stderr}`);
+  }
+  const outside = checkoutOf(LAST);
+  const run = spawnSync(
+    process.execPath,
+    [tool, "--file", path.join(outside.root, FILE), "--spec", "spec.json", "--patches", "q"],
+    { cwd: root, encoding: "utf8" },
+  );
+  assert.equal(run.status, 2, run.stdout);
+  assert.match(run.stderr, /is not under the current folder/u);
+  assert.equal(readdirSync(root).includes("q"), false);
+});

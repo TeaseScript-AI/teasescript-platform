@@ -13,7 +13,8 @@
 //   node tools/slice-conditions.mjs [--file F] [--spec S]             list the scope; exit 1 on an uncovered token or a
 //                                                                     stale entry (an expression not in its scope)
 //   node tools/slice-conditions.mjs … --patches DIR                   also write one patch per entry, `<id>.patch`, a git
-//                                                                     diff of the file against the repository root, for
+//                                                                     diff of the file against the repository root (the
+//                                                                     current folder: a --file outside it cannot run), for
 //                                                                     `sx-job mutants --patches DIR`
 //   node tools/slice-conditions.mjs … --admitted TREE                 judge only that each `restrict` entry's witness is
 //                                                                     admitted by TREE's built syntax rule (a mutant's
@@ -221,10 +222,20 @@ export function scan(text, spec, file = FILE) {
   return { scope: [...scope.keys()], outside, stale, uncovered, targets, source };
 }
 
-/** A git diff of `file` from `before` to `after`, with repository paths, as `git diff` writes one. */
+/** A file's lines, without the empty string after a final newline. */
+function linesOf(text) {
+  const lines = text.split("\n");
+  if (lines.at(-1) === "") lines.pop();
+  return lines;
+}
+
+/**
+ * A git diff of `file` from `before` to `after`, with repository paths, as `git diff` writes one: one hunk, three lines
+ * of context, and Git's `\ No newline at end of file` after a last line that has no newline.
+ */
 function patchOf(file, before, after) {
-  const a = before.split("\n");
-  const b = after.split("\n");
+  const a = linesOf(before);
+  const b = linesOf(after);
   let start = 0;
   while (start < a.length && a[start] === b[start]) start += 1;
   let endA = a.length;
@@ -236,11 +247,22 @@ function patchOf(file, before, after) {
   const from = Math.max(0, start - 3);
   const toA = Math.min(a.length, endA + 3);
   const toB = Math.min(b.length, endB + 3);
+  // (the marker follows the side's last line where the hunk holds it: once after trailing context, else after the
+  // last removed line and the last added line)
+  const marker = "\\ No newline at end of file";
+  const open = (text, lines, end) => !text.endsWith("\n") && end === lines.length;
+  const removed = a.slice(start, endA).map((line) => `-${line}`);
+  const added = b.slice(start, endB).map((line) => `+${line}`);
+  const context = a.slice(endA, toA).map((line) => ` ${line}`);
+  if (context.length === 0) {
+    if (open(before, a, endA) && removed.length > 0) removed.push(marker);
+    if (open(after, b, endB) && added.length > 0) added.push(marker);
+  } else if (open(before, a, toA)) context.push(marker);
   const hunk = [
     ...a.slice(from, start).map((line) => ` ${line}`),
-    ...a.slice(start, endA).map((line) => `-${line}`),
-    ...b.slice(start, endB).map((line) => `+${line}`),
-    ...a.slice(endA, toA).map((line) => ` ${line}`),
+    ...removed,
+    ...added,
+    ...context,
   ];
   return [
     `diff --git a/${file} b/${file}`,
@@ -250,6 +272,16 @@ function patchOf(file, before, after) {
     ...hunk,
     "",
   ].join("\n");
+}
+
+/** `file` as a patch names it: its path from the current folder, the repository's root, in `/` form. */
+function repositoryPath(file) {
+  const relative = path.relative(process.cwd(), path.resolve(file));
+  if (relative === "" || relative.startsWith("..") || path.isAbsolute(relative))
+    fail(
+      `--file ${file} is not under the current folder, the repository's root a patch names it from`,
+    );
+  return relative.split(path.sep).join("/");
 }
 
 async function main() {
@@ -280,13 +312,11 @@ async function main() {
   let failed =
     values.admitted === undefined && (result.stale.length > 0 || result.uncovered.length > 0);
   if (values.patches !== undefined) {
+    const name = repositoryPath(values.file);
     mkdirSync(values.patches, { recursive: true });
     for (const { entry, node } of result.targets) {
       const after = `${text.slice(0, node.getStart())}${entry.mutant}${text.slice(node.getEnd())}`;
-      writeFileSync(
-        path.join(values.patches, `${entry.id}.patch`),
-        patchOf(values.file, text, after),
-      );
+      writeFileSync(path.join(values.patches, `${entry.id}.patch`), patchOf(name, text, after));
     }
     console.log(`${result.targets.length} patches in ${values.patches}`);
   }
