@@ -11,7 +11,7 @@
 // Whether the tests passed is not in these files: the runs' own exits say it.
 import { readdirSync, readFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { suiteTestFiles } from "./test-shards.mjs";
+import { suiteTestFiles } from "./test-runner/test-shards.mjs";
 
 /** Each survey under `folder` and below it: a JSON object naming its `file` with its `noted` and `frozen` counts. */
 function surveys(folder) {

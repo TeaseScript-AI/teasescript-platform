@@ -16,11 +16,11 @@
 //    the head's NEW list leaves out is named (`reach: --old misses FILE`) and ends the check (exit 1) before any test
 //    runs; without them, OLD is every test file either side reaches that the base holds, and NEW every one the head
 //    holds (an unchanged test file can reach a moved module by its old name only).
-// 1. Discovery, when a FILE is under `tests/`, by this tool's rule (`suiteTestFiles` of `tools/test-shards.mjs`) over
+// 1. Discovery, when a FILE is under `tests/`, by this tool's rule (`suiteTestFiles` of `tools/test-runner/test-shards.mjs`) over
 //    each tree's `dist/tests/`: the base's suite holds each OLD file, the head's each NEW file and no OLD file that is
 //    not also NEW, and the suite is otherwise the same on both sides. A difference ends the check (exit 1) before any
 //    test runs; agreement is printed, as is a discovery not run.
-// 2. Each side's files run under `node --test` in their tree with two reporters: `tools/test-file-counts.mjs` (the
+// 2. Each side's files run under `node --test` in their tree with two reporters: `tools/test-runner/test-file-counts.mjs` (the
 //    results of each file in node:test's classes, which `test-output-filter.mjs` counts by; `base-counts.json`,
 //    `head-counts.json`, each file by its repository path), and this file's default export, which writes each test's
 //    and suite's title and nesting, no result (`base-titles.jsonl`, `head-titles.jsonl`). The counts say how the
@@ -39,13 +39,13 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { suiteTestFiles } from "../test-shards.mjs";
+import { suiteTestFiles } from "../test-runner/test-shards.mjs";
 import { CannotRun as ReachCannotRun, testsReaching, trackedFiles } from "./test-reach.mjs";
 
 const USAGE =
   "usage: node tools/moves/split-test-compare.mjs BASE_TREE HEAD_TREE OUT (--old FILE… --new FILE… | --moved MODULE… [--old FILE… --new FILE…])";
 const SELF = fileURLToPath(import.meta.url);
-const COUNTS = fileURLToPath(new URL("../test-file-counts.mjs", import.meta.url));
+const COUNTS = fileURLToPath(new URL("../test-runner/test-file-counts.mjs", import.meta.url));
 const CLASSES = ["passed", "failed", "cancelled", "skipped", "todo"];
 
 /** The titles reporter: one JSON line per finished test or suite, its nesting and title. */

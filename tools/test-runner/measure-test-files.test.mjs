@@ -13,7 +13,7 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
-import { gitIsolated } from "./fixture-git.mjs";
+import { gitIsolated } from "../fixture-git.mjs";
 
 // The tool and the helpers it imports, run in a checkout of their own, with `npm` and `gh` faked on the `PATH`.
 const TOOLS = [
@@ -69,8 +69,8 @@ function fill(root) {
     if (mode) chmodSync(join(root, path), mode);
   };
   for (const tool of TOOLS) {
-    mkdirSync(join(root, "tools"), { recursive: true });
-    copyFileSync(new URL(`./${tool}`, import.meta.url), join(root, "tools", tool));
+    mkdirSync(join(root, "tools", "test-runner"), { recursive: true });
+    copyFileSync(new URL(`./${tool}`, import.meta.url), join(root, "tools", "test-runner", tool));
   }
   write("package.json", '{ "type": "module" }\n');
   for (const name of SUITE) {
@@ -140,18 +140,22 @@ else if (args[0] === "api" && where && runs[where[1]] && where[2]) {
 
 /** The tool run with `args` in `root`: its exit status, its output (also by stream), and the module it wrote. */
 function measure(root, args) {
-  const result = spawnSync(process.execPath, ["tools/measure-test-files.mjs", "--write", ...args], {
-    cwd: root,
-    encoding: "utf8",
-    // (also without the runner's `NODE_TEST_CONTEXT`, as the tool's own `run()` would otherwise skip every file)
-    env: boundary(root),
-  });
+  const result = spawnSync(
+    process.execPath,
+    ["tools/test-runner/measure-test-files.mjs", "--write", ...args],
+    {
+      cwd: root,
+      encoding: "utf8",
+      // (also without the runner's `NODE_TEST_CONTEXT`, as the tool's own `run()` would otherwise skip every file)
+      env: boundary(root),
+    },
+  );
   return {
     status: result.status,
     out: result.stdout + result.stderr,
     stdout: result.stdout,
     stderr: result.stderr,
-    module: readFileSync(join(root, "tools/costly-test-files.mjs"), "utf8"),
+    module: readFileSync(join(root, "tools/test-runner/costly-test-files.mjs"), "utf8"),
   };
 }
 
@@ -241,7 +245,7 @@ test(
       assert.match(module, /export const testFilesAtOnce = 3;/u);
 
       writeFileSync(join(root, "gh.json"), JSON.stringify(runs("type-core-dir/plain.test.js")));
-      const before = readFileSync(join(root, "tools/costly-test-files.mjs"), "utf8");
+      const before = readFileSync(join(root, "tools/test-runner/costly-test-files.mjs"), "utf8");
       const refused = measure(root, ["--from-ci", "11", "12", "13"]);
       assert.equal(refused.status, 1, refused.out);
       assert.match(refused.out, /no CI run measured type-core-dir\/plain\.test\.js/u);

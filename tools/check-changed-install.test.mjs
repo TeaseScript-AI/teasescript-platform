@@ -201,7 +201,7 @@ test("run as a lone copy outside its checkout, it says it needs its checkout in 
     assert.equal(
       result.stderr,
       "check-changed: run it from its checkout, whose tools/ holds the modules it imports (Cannot find module " +
-        `'${join(folder, "costly-test-files.mjs")}' imported from ${copy}); on a branch that predates it, run main's ` +
+        `'${join(folder, "test-runner", "costly-test-files.mjs")}' imported from ${copy}); on a branch that predates it, run main's ` +
         "from your worktree: node /opt/teasescript-agents/teasescript-main/current/tools/check-changed.mjs\n",
     );
   } finally {

@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ts } from "ts-morph";
-import { suiteTestFiles } from "../test-shards.mjs";
+import { suiteTestFiles } from "../test-runner/test-shards.mjs";
 
 // The suites that pin the type core's exact work or its published answers, and the focused list a change needs:
 //

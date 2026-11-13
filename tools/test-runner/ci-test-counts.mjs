@@ -3,8 +3,8 @@ import { existsSync, readFileSync } from "node:fs";
 
 // Prints the node:test totals of a GitHub Actions run, per job and step, read from its logs:
 //
-//   node tools/ci-test-counts.mjs <run id>        (the logs from `gh run view <run id> --log`, in this repository)
-//   node tools/ci-test-counts.mjs --log <file>    (a log saved from that command)
+//   node tools/test-runner/ci-test-counts.mjs <run id>        (the logs from `gh run view <run id> --log`, in this repository)
+//   node tools/test-runner/ci-test-counts.mjs --log <file>    (a log saved from that command)
 //
 // A log line is `<job>\t<step>\t<timestamp> <text>`. Each node:test summary is the run of `ℹ <name> <number>` lines
 // that `ℹ tests` begins. A step's summaries are added up, and the count of summaries is named when there are
@@ -111,7 +111,7 @@ function main() {
     if (result.status !== 0) cannotRun(`gh run view ${argv[0]} --log: ${result.stderr.trim()}`);
     log = result.stdout;
     source = `run ${argv[0]}`;
-  } else cannotRun("usage: node tools/ci-test-counts.mjs <run id> | --log <file>");
+  } else cannotRun("usage: node tools/test-runner/ci-test-counts.mjs <run id> | --log <file>");
 
   const steps = countsOf(log);
   if (steps.length === 0) {
