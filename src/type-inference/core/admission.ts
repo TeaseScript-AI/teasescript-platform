@@ -196,7 +196,8 @@ export class Admission {
   /**
    * The stores rejected in this pass (`reject`), by their definitions' order, and a list `+`'s right operands rejected
    * from their joins (`joinElements`, by `joinedOperand`, without `reject`: no `refused`, no hearer), each with the
-   * places and paths it is rejected at: the next pass leaves them out there.
+   * places and paths it is rejected at. The next pass takes them as its rejections (`answers.ts`): such a store is no
+   * longer live and is taken again as a candidate at those keys (`retaken`); such an operand gives its join nothing.
    */
   readonly newlyRejected = new Map<number, Set<Key>>();
   /**
@@ -214,7 +215,8 @@ export class Admission {
   readonly readChecks: Obligation[] = [];
   readonly rejectedKeys = new Set<Key>();
   /**
-   * The previous pass's rejected stores by the place and path each was rejected at: this pass leaves them out there.
+   * The previous pass's rejected stores by the place and path each was rejected at: no longer live in this pass, each
+   * is taken again as a candidate there (`recordDecision`).
    */
   readonly retaken = new Map<Key, Definition[]>();
   get copyLandingKeys(): ReceivingDomain["copyLandingKeys"] {
@@ -667,8 +669,8 @@ export class Admission {
 
   /**
    * A definite contribution that does not fit at a place's path is rejected, a return against its own result's decision
-   * too, so it leaves the result's contract (an argument stays: the parameter is its callee's); in the next pass it is
-   * decided again there.
+   * too, so it leaves the result's contract (an argument stays: the parameter is its callee's): in the next pass it is
+   * no longer live, and is taken again as a candidate at that path (`retaken`).
    */
   public reject(d: Definition, root: PlaceId, path: readonly string[]): void {
     this.rejections += 1;
@@ -878,9 +880,9 @@ export class Admission {
   }
 
   /**
-   * A decision's work record (`consumers/stores/stores.ts`): a cursor's path not made but named by its key, its
-   * steps appended to the pass's one packet of cursor decisions' paths (`decisionPacket`) and read only from it
-   * (`packetPath`).
+   * A decision's work record (`consumers/stores/stores.ts`, `consumers.ts`): a cursor's path not made but named by its
+   * key, its steps appended to the pass's one packet of cursor decisions' paths (`decisionPacket`) and read only from
+   * it (`packetPath`).
    */
   public decisionWork(
     at: DecidedAt,

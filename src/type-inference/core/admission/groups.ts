@@ -147,8 +147,8 @@ export function groups(admission: Admission): readonly DecidedAt[] {
     }
   // a place receiving copies is checked where they meet it, read or not: the paths where what two of its stores
   // definitely hold meets with two kinds or more (`heldMeetings`), so the store that brings the other type errs there
-  // (a rejected one too, as the next pass decides it again); not where all the place holds is known and scalar, as
-  // a scalar has no property to meet at
+  // (a rejected one too, which every pass takes again as a candidate there, `retaken`); not where all the place holds
+  // is known and scalar, as a scalar has no property to meet at
   const byPlace = new Map<PlaceId, { readonly d: Definition; readonly at: readonly string[] }[]>();
   const named = new Set<PlaceId>();
   for (const d of reaching) {

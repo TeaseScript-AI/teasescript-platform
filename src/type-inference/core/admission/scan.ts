@@ -285,8 +285,7 @@ export interface DeciderAnswer {
  * decision of `into` (`inheritedInto`; `null` outside a place's decision), or a value whose items there are of definite
  * kinds; a `null` or an unknown decides nothing, and a value an unknown may stand beside (a read, a copy, a call)
  * neither, while a literal's other elements still may (`[1, hostValue]`'s elements are whole numbers); a later copy
- * never comes before an earlier definite element. The place's decision and the literal's own elements
- * (`literalElements`) both take it, so they cannot pick opposite deciders. A list join's written operands count by
+ * never comes before an earlier definite element. A list join's written operands count by
  * `joinedDomain`, each whatever came before or after it: an open one leaves the path open, and one holding `null` makes
  * the copy's type optional (`joinedNull`). `null` where nothing on the path decides. Where a literal on the path takes
  * the literal route (`literalRoute`, #2289), the value's view is scanned, each literal's cell one contribution. Else,

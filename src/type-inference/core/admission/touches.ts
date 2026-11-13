@@ -92,8 +92,9 @@ export function touchOf(admission: Admission, place: PlaceId): TouchPlace {
  * A place's landings alone, once per pass: its seeds and every copy into it, live or rejected, each its source's
  * landings at its strip, landed where the copy lands it (a cycle whose copies add or take steps: its listed landing
  * set). A rejected copy brings these into a place's trie and nothing else: what it lands stays landed (the landing
- * view, `landed`, as the next pass decides the rejected store again), while what it held is gone. A place met again
- * while its own is being built lands its root (a cycle of landings, as `landed` ends a walk met again).
+ * view, `landed`, as every pass takes the rejected store again as a candidate where it was rejected), while what it
+ * held is gone. A place met again while its own is being built lands its root (a cycle of landings, as `landed` ends a
+ * walk met again).
  */
 function landingOf(admission: Admission, place: PlaceId): Touch | null {
   const known = admission.touchLandings.get(place);

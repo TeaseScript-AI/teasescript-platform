@@ -73,8 +73,9 @@ function groupKeys(admission: Admission): ReadonlySet<CanonicalKey> {
  * an integer widened by an admitted number; with `null` where a null contribution is admitted and the decision admits
  * one (a copy of a written type without it does not), and wherever a copy of a written type with it decided, whatever
  * is stored (`permitsNull`), a written `null` alone too (`[null]`, a decision like any other, never none); never the
- * raw union of contributions. Not only a read: where copies land a path `groups` left out (`lazily`), or in a
- * completion pass (`pull`), it first decides the path, recorded and charged as a decision.
+ * raw union of contributions. Not only a read: where copies land a path no decision has tried yet, before a stop
+ * (`lazily`), or, in a completion pass, at a group's path not yet tried (`pull`), it first decides the path, recorded
+ * and charged as a decision.
  */
 export function admitted(admission: Admission, place: PlaceId, path: readonly string[]): ItemTag[] {
   const { program, contract } = admission.pass;
@@ -273,7 +274,7 @@ function literalSeed(
 }
 
 /**
- * Whether, after a stop, a path is one `lazily` would decide now (copies land there, `groups` left it out): no
+ * Whether, after a stop, a path is one `lazily` would decide now (copies land there, no decision has tried it): no
  * decision is made after a stop, so it is answered from what admission retained.
  */
 function undecidedCopy(admission: Admission, place: PlaceId, path: readonly string[]): boolean {
