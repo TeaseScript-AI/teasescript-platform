@@ -70,8 +70,10 @@ interface Owed {
  * each `written-target` warning's obligation, placed at its store later, with the kinds the store rule names, a stopped
  * analysis's store type where it decided none (a stop moves an undecided check to the runtime); but one whose target
  * names the fallback that holds its site (`fallbackSteps`) goes by that fallback's owner, or, for a load's `default:`,
- * into neither list: the load's own type checks it (`runtimeChecks`); the stores `member-read` warnings name and the
- * list `get` calls `integer-use` warnings name, into `core`. Each site's owers are marked as it is reached (`owers`).
+ * into neither list: the load's own type checks it where `Contracts.expected` gives the load one (`runtimeChecks`);
+ * where it gives none (a computed key among its cases), only a check of the load's value, such as its store's, reaches
+ * its default; the stores `member-read` warnings name and the list `get` calls `integer-use` warnings name, into
+ * `core`. Each site's owers are marked as it is reached (`owers`).
  */
 function warningChecks(
   answers: Answers,
@@ -360,7 +362,7 @@ export function lostCheck(
     );
   }
   // (#2080: before admission settled, a store's, a literal's or an ingress's mark against `unknown` declines the
-  // program; #2080's measurement found none that is a boundary obligation or that a complete store check carries, so
+  // program; #2227's measurement found none that is a boundary obligation or that a complete store check carries, so
   // neither is excepted)
   if (answers.budget.exhausted !== null && !answers.budget.settled)
     for (const diagnostic of [...answers.diagnostics, ...answers.budget.deferred]) {
@@ -407,7 +409,7 @@ export function lostCheck(
  * After a settled stop, an owed obligation against exactly `unknown` that is not a store's declines the program at its
  * site (#2183): a fallback's (the fallback rule's) is the requirement the stop lost, which no `fallbackCheck` can carry
  * (`fallbackPlan`), so the default would run unchecked; any other rule's declines too, as an unestablished check. No
- * set shows one (#2183's census, sweep and natural sets: `store` and `fallback` only). A store's is the registry's,
+ * set shows one (#2257's census, sweep and natural sets: `store` and `fallback` only). A store's is the registry's,
  * which `notLost` decides. Not caught: a contract the stop left incomplete that a natural producer reads, where the
  * fallback rule owes nothing (#2183, measured 0, not shown impossible), and a store whose destination-type warning the
  * stop removed, where no obligation is owed (#2245). It returns nothing and declines by throwing `OutsideContract`;

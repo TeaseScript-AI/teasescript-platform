@@ -243,8 +243,9 @@ export class Contracts {
    * The type a typed load or `fromJson` reads its value as: the core's own answer at the call, level by level
    * (`#answerTask`); `null` where the call's kinds hold an unknown or no kind, or a load's key is computed. It throws
    * `OutsideContract`, so the program leaves the slice, where a stop left a level of the answer open (#1767), also one
-   * that would otherwise give `null`, where the plan cannot carry the answer exactly (`#answerTask`'s cases), and for a
-   * typed parse or load into a copy of a written type.
+   * that would otherwise give `null`, where the plan cannot carry the answer exactly (`#answerTask`'s cases), for a
+   * typed parse or load into a copy of a written type, and, after a stop before admission settled, for a default that
+   * reads a place, unless the call lands in a written scalar destination.
    */
   public expected(call: CallExpression | LoadExpression): TypePlan | null {
     if (call.kind === "loadExpression" && unwrap(call.key).kind !== "stringLiteral") return null;
