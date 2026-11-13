@@ -108,7 +108,8 @@ import { Retained } from "./retained/retained.js";
  * marked. A read inside a stored value takes its narrowing definition where that holds: so a copy, an operation or a
  * store check sees the tested kinds, and the test whether a loop's store preserves a narrowing, which reads the store's
  * own value, takes them too. The value of an expression at its node follows the read through projections, call
- * results, operations and literals. Literals and operations are demands, once per value and path.
+ * results, operations and literals. Literals and operations are demands, a literal's once per path and
+ * node, an operation's once per path (`#literalItems`, `#operationItems`).
  */
 
 const COLLECTIONS: ReadonlySet<string> = new Set(["list", "set", "dict", "object"]);

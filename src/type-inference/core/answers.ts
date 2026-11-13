@@ -941,7 +941,7 @@ function demandWork(pass: CorePass, key: string): Work<readonly Item[]> {
       return asked(objectsAt(contract, Number(parts[0]), splitPath(parts[1] ?? "")));
     case "obk":
       return asked(keyObjects(contract, parts.join("|")));
-    // (the inherited proofs of #1072, by their key, as the admission made on the pass makes them)
+    // (#1072 A2's inherited proofs, by their key, as the admission made on the pass makes them)
     case "a4":
       return asked(pass.receivingDomain.replayProof!(parts.join("|")));
     case "s": {

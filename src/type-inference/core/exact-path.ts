@@ -287,9 +287,7 @@ function exitsOf(
 
 export class ExactPath {
   readonly #memo = Retained.map<string, ExactAnswer>("ExactPath.#memo");
-  /**
-   * A record (#1072): its copies' forest, and per source its copies whose reads are reached, per callable (built once).
-   */
+  /** #1072 1b, a record: its copies' forest, and per source its copies whose reads are reached, per callable (built once). */
   readonly #built = Retained.record<{
     copies: CopyForest | null;
     bySource: Map<PlaceId, Map<Callable | null, CopyLink[]>> | null;
