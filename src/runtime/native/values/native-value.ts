@@ -1,10 +1,18 @@
 import type {
-  SerializableRuntimeDict,
-  SerializableRuntimeList,
-  SerializableRuntimeObject,
+  SerializableCameraViewHandle,
+  SerializableMediaHandle,
+  SerializableMessageHandle,
+  SerializablePermanentButtonHandle,
+  SerializableRegex,
+  SerializableRuntimeAngle,
+  SerializableRuntimeCalendarDuration,
+  SerializableRuntimeDuration,
+  SerializableRuntimeRange,
   SerializableRuntimeScalar,
-  SerializableRuntimeSet,
-  SerializableRuntimeValue,
+  SerializableRuntimeTemporal,
+  SerializableScriptReference,
+  SerializableSpeakerReference,
+  SerializableTimerHandle,
 } from "../../values/serializable-values.js";
 
 /**
@@ -27,16 +35,24 @@ export type NativeValue =
 
 export type NativeList = NativeValue[];
 
-/** A value that holds no other values and is never changed in place, kept as its frozen canonical record. */
+/**
+ * A value that holds no other values and is never changed in place, kept as its frozen canonical record: each kind is
+ * listed, so that a new kind of value is classified here (and in `fromCanonical`'s switch) before it can be held.
+ */
 export type NativeLeaf = Readonly<
-  Exclude<
-    SerializableRuntimeValue,
-    | SerializableRuntimeScalar
-    | SerializableRuntimeList
-    | SerializableRuntimeObject
-    | SerializableRuntimeSet
-    | SerializableRuntimeDict
-  >
+  | SerializableRuntimeRange
+  | SerializableRuntimeDuration
+  | SerializableRuntimeCalendarDuration
+  | SerializableRuntimeAngle
+  | SerializableRuntimeTemporal
+  | SerializableTimerHandle
+  | SerializableMediaHandle
+  | SerializablePermanentButtonHandle
+  | SerializableMessageHandle
+  | SerializableCameraViewHandle
+  | SerializableSpeakerReference
+  | SerializableScriptReference
+  | SerializableRegex
 >;
 
 /** An object's properties by name, in the order they were first set. */
@@ -60,19 +76,15 @@ export class NativeDict {
 }
 
 /**
- * Unique members by `==`, in insertion order. `native-set.ts` owns `items` and `membership`: only its functions add,
- * remove or clear members, so `membership`, when built, indexes exactly `items`. A member is never changed in place.
+ * Unique members by `==`, in insertion order. Only `native-set.ts` changes `items` and `membership`: its operations
+ * keep `membership`, once built, an exact index of `items`, and `appendUniqueMember` fills a new set before its index
+ * exists. A member is never changed in place.
  */
 export class NativeSet {
   public readonly kind = "set";
-  public readonly items: NativeValue[];
+  public readonly items: NativeValue[] = [];
   /** The index of `items`, built at the first operation that needs it; `null` until then. */
   public membership: NativeSetMembership | null = null;
-
-  /** `items` must be unique by `==`; `nativeSetOf` builds a set from items that may repeat. */
-  public constructor(items: NativeValue[] = []) {
-    this.items = items;
-  }
 }
 
 /**
