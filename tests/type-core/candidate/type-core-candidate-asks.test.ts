@@ -18,7 +18,8 @@ import { createImmediatePacingRuntimeSnapshot } from "../../helpers/immediate-pa
 import { checksOf } from "../../helpers/type-core/type-core-candidate-setup.js";
 
 const OPTIONS = { globals: ["hostValue"] };
-const DOMAIN: readonly SerializableRuntimeValue[] = [2, "text", true, 2.5, null];
+// (blank text too: every prefill takes it as none, V30 §20)
+const DOMAIN: readonly SerializableRuntimeValue[] = [2, "text", true, 2.5, null, "", "  "];
 
 /** The answer the player gives each field: valid text, a number, a date or time, a password's hash, the first button. */
 const TEMPORAL: Readonly<Record<string, string>> = {
@@ -229,6 +230,21 @@ test("the prefills, choices and asks the route refuses: today's compile error ea
       "TSV039",
       `this prefill: ${prefill}`,
     );
+  // a prefill that may be text at an ask of another kind: blank text is none to the runtime, and the core's kinds do not
+  // tell blank text from other text
+  for (const ask of ["askNumber", "askInteger", "askDate", "askTime", "askDateTime", "askBoolean"])
+    for (const [prelude, prefill] of [
+      ['let b = ""\n', "b"],
+      ['let b = "  "\n', "b"],
+      ["let m: string = hostValue\n", "m"],
+      ["let m: string? = hostValue\n", "m"],
+      ['let o = {p: ""}\n', "o.p"],
+    ])
+      refusedAsToday(
+        `${prelude}let r = ${ask}("q", prefill: ${prefill})\nexit\n`,
+        "TSV039",
+        `this prefill: ${prefill}`,
+      );
   // a choice whose buttons return more than one type, whatever holds its answer (R40)
   refusedAsToday(
     'let r: integer = askChoice 1, "a"\nexit\n',
