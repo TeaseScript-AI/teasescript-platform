@@ -340,6 +340,8 @@ test("the sentence table and the derived record name every site that words or de
     "diagnostics.ts:withFacts:keeps",
     "diagnostics.ts:withFacts:present",
     // (the messages read them; a record carries what they read)
+    "messages.ts:coreMessage:besides",
+    "messages.ts:coreMessage:fits",
     "messages.ts:coreMessage:keeps",
     "messages.ts:coreMessage:present",
     // (the record's serialized form)
