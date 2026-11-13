@@ -23,8 +23,8 @@ import { placeKey } from "../way-facts.js";
 
 // What the code of a project may change (ADR 0021 rule 5.5): the names that functions and timer, media, and button
 // blocks assign or change in place, what each loop may do before its next test, and which files enter main.tease
-// again. The type analysis takes narrowing (rule 5.5) and the facts of a loop from these; code found never to run
-// changes nothing.
+// again. `TypeChecker` (`type-checker.ts`) and `legacy-rounds.ts` take narrowing (rule 5.5) and the facts of a loop
+// from these; the type core (`core/`) reads none of them. Code found never to run changes nothing.
 
 /**
  * What one iteration of a loop may do before the next test: the variables it assigns or changes in place, and whether it
