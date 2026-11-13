@@ -804,7 +804,7 @@
     "id": "ask-form",
     "scope": "row interactionExpression",
     "expression": "!SLICE_ASKS.has(node.interactionKind)",
-    "mutant": "false",
+    "mutant": "(SLICE_ASKS.has(node.interactionKind) && false)",
     "expected": "kill",
     "witness": "askForm"
   },
@@ -812,7 +812,7 @@
     "id": "ask-prefill",
     "scope": "row interactionExpression",
     "expression": "!askPrefillAdmitted(node)",
-    "mutant": "false",
+    "mutant": "(!askPrefillAdmitted(node) && false)",
     "expected": "kill",
     "witness": "askPassword prefill"
   },
@@ -820,7 +820,7 @@
     "id": "prefill-named",
     "scope": "askPrefill",
     "expression": "argument.name.name === \"prefill\"",
-    "mutant": "false",
+    "mutant": "(argument.name.name === \"prefill\" && false)",
     "expected": "kill",
     "witness": "askBoolean prefill null"
   },
@@ -869,7 +869,7 @@
     "id": "prefill-text-blank",
     "scope": "askPrefillAdmitted",
     "expression": "!isBlankTextAnswer(\n            prefill.parts.map((part) => (part.kind === \"stringText\" ? part.value : \"\")).join(\"\"),\n          )",
-    "mutant": "true",
+    "mutant": "!isBlankTextAnswer(\"x\")",
     "expected": "kill",
     "witness": "askText prefill blank"
   },
@@ -877,7 +877,7 @@
     "id": "prefill-text-part",
     "scope": "askPrefillAdmitted",
     "expression": "part.kind === \"stringText\"",
-    "mutant": "false",
+    "mutant": "(part.kind === \"stringText\" && false)",
     "expected": "restrict",
     "witness": "let r = askText(\"q\", prefill: \"a\")"
   },
@@ -894,7 +894,7 @@
     "id": "prefill-number-kind",
     "scope": "askPrefillAdmitted",
     "expression": "ask.interactionKind === \"number\"",
-    "mutant": "true",
+    "mutant": "ask.interactionKind !== \"number\"",
     "expected": "kill",
     "witness": "askText prefill number"
   },
