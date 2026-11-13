@@ -354,10 +354,13 @@ defineExpose({ focusInput, selectInput, openPicker, finishComposition });
     @compositionstart.capture="composing = true"
     @compositionend.capture="composing = false"
   >
-    <p v-if="feedback" :id="feedbackId" class="composer-notice" role="status" aria-live="polite">
-      {{ feedback }}
-    </p>
-    <span v-if="feedback" class="composer-notice-arrow" aria-hidden="true" />
+    <!-- In the composer's own height, which the conversation makes room for: never over a question's controls. -->
+    <div v-if="feedback" class="composer-notice-slot">
+      <p :id="feedbackId" class="composer-notice" role="status" aria-live="polite">
+        {{ feedback }}
+      </p>
+      <span class="composer-notice-arrow" aria-hidden="true" />
+    </div>
     <div
       class="conversation-glass"
       data-composer-shell
@@ -531,7 +534,7 @@ defineExpose({ focusInput, selectInput, openPicker, finishComposition });
 <style scoped>
 .composer-container {
   position: relative;
-  pointer-events: auto;
+  pointer-events: none;
   --composer-notice-surface: #fff0ef;
   --composer-notice-border: #c75452;
   --composer-notice-text: #762421;
@@ -673,11 +676,13 @@ defineExpose({ focusInput, selectInput, openPicker, finishComposition });
   font-weight: 700;
 }
 
+.composer-notice-slot {
+  position: relative;
+  margin-block-end: 8px;
+  padding-inline-start: 12px;
+}
 .composer-notice {
-  position: absolute;
-  inset-inline-start: 12px;
-  bottom: calc(100% + 8px);
-  z-index: 1;
+  pointer-events: auto;
   inline-size: fit-content;
   max-inline-size: 100%;
   max-block-size: min(12rem, 35dvh);
@@ -693,8 +698,8 @@ defineExpose({ focusInput, selectInput, openPicker, finishComposition });
 }
 .composer-notice-arrow {
   position: absolute;
-  bottom: calc(100% + 2px);
-  z-index: 2;
+  bottom: -6px;
+  z-index: 1;
   inset-inline-start: 40px;
   inline-size: 12px;
   block-size: 12px;

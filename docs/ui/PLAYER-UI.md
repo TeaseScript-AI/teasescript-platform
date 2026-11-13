@@ -870,9 +870,11 @@ The Standard Player uses one persistent composer at the bottom of the conversati
 the answer field for `askText` and `askNumber`; `askChoice` and `showButton` controls appear after the latest message
 inside the same vertically scrolling transcript. The composer stays at the bottom. Its shell has a 12px gap above and
 below in the normal viewport; a larger bottom safe-area inset takes precedence where needed.
-Invalid submissions show a short red notice anchored to the composer input without changing its height or moving choices.
-In a tight layout the floating notice may temporarily cover a choice. It clears when typing resumes, the interaction
-changes, after a brief delay, or when the player taps outside it.
+Invalid submissions show a short red notice just above the composer input, without changing the input's height. The
+notice is part of the composer's area, so the conversation makes room for it as for a taller composer: it never covers
+a question's controls while the conversation shows its end. It clears when typing resumes, the interaction changes,
+after a brief delay, or when the player clicks or taps outside it; it clears on the click, not the press, so a control
+under a press still held does not move away.
 
 While Debug runs ([`DEBUGGER.md`](../DEBUGGER.md#player-debug)), one small muted status line below the foreground
 controls counts down the current foreground wait, also while the Debug panel is closed: **Debug · Continues in 4 s**,
@@ -1002,7 +1004,9 @@ way, the Player first checks an answer by the runtime's own rules; one they refu
 notice shows at once. The runtime stays the authority: when it refuses the answer, as when a block's question overtakes it, the answer leaves the chat, its
 typed text is back before what was typed since, with the notice "The question was gone before your answer arrived. Your
 text is back in the field." (only its first sentence where no chat text comes back, as for a choice, a button or a
-password), and its controls show again once its question does.
+password), and its controls show again once its question does. Once anything came after a presented question's line, as
+a block's messages and answers do, the Player shows that line again with the question's controls, after the
+conversation, until it is answered: the latest script message before the question was asked.
 A popup or an `exportText` dialog closes at once in the same way; when its close is refused, it shows again once it is
 the question.
 
