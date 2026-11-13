@@ -281,9 +281,9 @@ export const UNIT_AMOUNT: { readonly takes: readonly ItemTag[]; readonly check: 
  * type's kinds (a typed ingress's read is the unknown its store's check stands for); an unknown is admitted only of an
  * external origin, as the host global itself or a direct read of a place whose type is undecided, beside the
  * evaluator's check; a missing property is no value there, its read fails first. Any other unknown (one an element, a
- * call or an operation carries, a stop's) is not shown to be a number (step 1½'s form for command operands, the lead's
- * R10 there). So the route declines what today's checker plans where only a narrowing or an `otherwise` shows the
- * amount a number: a read of `n: integer?` under `n != null`, `(n otherwise 1) s`; the core gives no read its narrowing
+ * call or an operation carries, a stop's) is not shown to be a number (the form step 1½ gives a command's operands).
+ * So the route declines what today's checker plans where only a narrowing or an `otherwise` shows the amount a number:
+ * a read of `n: integer?` under `n != null`, `(n otherwise 1) s`; the core gives no read its narrowing
  * (`OccurrenceAnswer.narrowing`).
  */
 function amountAdmitted(answers: Answers, index: SliceIndex, amount: Expression): boolean {
