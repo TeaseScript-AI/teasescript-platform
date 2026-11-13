@@ -22,7 +22,6 @@ import type { CorePass } from "../answers.js";
 import { NarrowingIndex } from "../narrowing/narrowings.js";
 import { NarrowingEvents } from "../narrowing/events.js";
 import { NarrowingRoutes } from "../narrowing/routes.js";
-import type { StatementTree } from "../narrowing/statement-tree.js";
 import { siteKey, stepName, type CoreProgram } from "../program.js";
 import { amend, Retained } from "../retained/retained.js";
 
@@ -198,11 +197,6 @@ export class GuardIndex {
     return (this.#narrowing ??= this.program.work.shared(() => NarrowingIndex.of(this.program)));
   }
 
-  /** The statement tree with the route query's shared layer (`narrowing`'s). */
-  public get statements(): StatementTree {
-    return this.narrowing.statements;
-  }
-
   /**
    * The narrowing queries of the pass this index belongs to, which every caller gives (`pass.guards.narrowings(pass)`),
    * made on the first call: the events that end a narrowing, with the stores that preserve it, and the routes.
@@ -214,7 +208,7 @@ export class GuardIndex {
     if (this.#queries === null)
       this.#queries = {
         events: new NarrowingEvents(pass, this.narrowing),
-        routes: new NarrowingRoutes(pass, this.narrowing, this.statements),
+        routes: new NarrowingRoutes(pass, this.narrowing, this.narrowing.statements),
       };
     return this.#queries;
   }
