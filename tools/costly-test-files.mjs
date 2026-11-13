@@ -141,7 +141,7 @@ export const costlyTestSeconds = {
   "type-core/type-core-floor.test.js": 1,
   "type-core/solver/type-core-monotone.test.js": 1,
   "type-core/narrowing/type-core-narrowing-forms.test.js": 1,
-  "type-core/type-core-pass-rows.test.js": 1,
+  "type-core/candidate/type-core-pass-rows.test.js": 1,
   "type-core/messages/type-core-messages-value-checks.test.js": 1,
   "type-core/type-core-dominators.test.js": 1,
   "type-core/type-core-value-answers.test.js": 1,

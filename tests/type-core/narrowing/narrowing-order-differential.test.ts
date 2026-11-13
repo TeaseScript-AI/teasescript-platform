@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { compileAndRunVariants, type FlowRun } from "../helpers/flow-differential.js";
+import { compileAndRunVariants, type FlowRun } from "../../helpers/flow-differential.js";
 
 /*
  * Narrowing against the runtime's evaluation order (V30 §13, §14, and docs/review-and-audit/IMPLEMENTATION-AND-REVIEW.md,
