@@ -678,7 +678,10 @@ RERUN.rows(
     frame.release();
     await until(() => record.stage === "settled", "the answer settled", "host");
     assert.equal(composer.chatText.value, "Go");
-    assert.equal(submission.notice.value, "This interaction is no longer available.");
+    assert.equal(
+      submission.notice.value,
+      "The question was gone before your answer arrived. Your text is back in the field.",
+    );
     assert.equal(connection.posts.filter((post) => post.op === ANSWER_OP).length, 0);
     return end();
   },

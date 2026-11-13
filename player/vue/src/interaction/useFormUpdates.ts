@@ -12,11 +12,7 @@ import {
   type InputResult,
   type InputSectionHost,
 } from "../session/runtime-input.js";
-import {
-  NO_LONGER_AVAILABLE,
-  refusalMessage,
-  type SessionTerminal,
-} from "./useAnswerSubmission.js";
+import { questionGone, refusalMessage, type SessionTerminal } from "./useAnswerSubmission.js";
 import type { ComposerState, FormDraft } from "./useComposerState.js";
 
 /*
@@ -66,11 +62,15 @@ export function useFormUpdates(host: {
     return action?.ui.kind === "form" && action.form !== undefined ? action : null;
   }
 
-  /** A form update, in order with the others; never greyed and no answer (rule 6 counts it). */
+  /**
+   * A form update, in order with the others; never greyed and no answer (rule 6 counts it). `textBack` when `after` puts
+   * the chat's text back on a refusal.
+   */
   async function update(
     actionId: number,
     intent: InputIntent,
     after?: (result: InputResult) => void,
+    textBack = false,
   ): Promise<void> {
     if (closed()) return;
     const epoch = host.epoch();
@@ -87,8 +87,8 @@ export function useFormUpdates(host: {
         host.publish(result.session);
         const outcome = result.outcome;
         if (outcome.kind !== "updated" && outcome.kind !== "unchanged")
-          showNotice(refusalMessage(outcome));
-      } else if (result.kind === "unavailable") showNotice(NO_LONGER_AVAILABLE);
+          showNotice(refusalMessage(outcome, textBack));
+      } else if (result.kind === "unavailable") showNotice(questionGone(textBack));
       else if (result.kind === "unanswered") showNotice(host.unansweredMessage());
     } finally {
       release(actionId);
@@ -142,12 +142,17 @@ export function useFormUpdates(host: {
     if (action === null || closed()) return;
     const chat = host.chat();
     const sent = typed ? host.composer.takeChat() : null;
-    void update(action.actionId, intents.formStep(fieldId, formDraftText()), (result) => {
-      const taken =
-        result.kind === "answered" &&
-        (result.outcome.kind === "updated" || result.outcome.kind === "unchanged");
-      if (!taken && sent !== null) host.composer.restoreChat(chat, sent);
-    });
+    void update(
+      action.actionId,
+      intents.formStep(fieldId, formDraftText()),
+      (result) => {
+        const taken =
+          result.kind === "answered" &&
+          (result.outcome.kind === "updated" || result.outcome.kind === "unchanged");
+        if (!taken && sent !== null) host.composer.restoreChat(chat, sent);
+      },
+      sent !== null,
+    );
   }
 
   /** Stores the field's draft (`useComposerState`'s timer), counted as an update of its form; whether it took it. */
