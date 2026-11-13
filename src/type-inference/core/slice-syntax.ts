@@ -35,8 +35,54 @@ export interface Outside {
 
 // ------------------------------------------------------------------------------------------------- the syntax
 
-/** The written types of the slice: named types, `T?` and `T[]` of them. */
+/**
+ * Whether a written type's values can only be `null`, by the type grammar's forms: the name `null`, an optional of such a
+ * type, a union of such types; a collection is a value of its own (the lead's R44).
+ */
+function onlyNull(type: TypeAnnotation): boolean {
+  switch (type.kind) {
+    case "namedType":
+      return type.name === "null";
+    case "optionalType":
+      return onlyNull(type.value);
+    case "unionType":
+      return type.members.every(onlyNull);
+    default:
+      return false;
+  }
+}
+
+/**
+ * A position of a written type whose only kind is `null`, or `null` where it has none: the type itself, or one inside
+ * it, an optional's value, a collection's element, a union's member that is not `null` alone. A value read from such a
+ * place is `null` to today's checker and `unknown` to the core where it enters from the host, so the slice takes no
+ * such type, wherever it is written (the lead's R44).
+ */
+function nullOnlyPosition(type: TypeAnnotation): TypeAnnotation | null {
+  if (onlyNull(type)) return type;
+  switch (type.kind) {
+    case "namedType":
+      return null;
+    case "optionalType":
+      return nullOnlyPosition(type.value);
+    case "listType":
+    case "setType":
+    case "dictType":
+      return nullOnlyPosition(type.element);
+    case "unionType":
+      for (const member of type.members) {
+        // (a member that is `null` alone is the union's `null`, beside its other members)
+        const found = onlyNull(member) ? null : nullOnlyPosition(member);
+        if (found !== null) return found;
+      }
+      return null;
+  }
+}
+
+/** The written types of the slice: named types, `T?` and `T[]` of them, none with a position only `null` fills. */
 function annotationOutside(annotation: TypeAnnotation): TypeAnnotation | null {
+  const nullOnly = nullOnlyPosition(annotation);
+  if (nullOnly !== null) return nullOnly;
   const pending: [TypeAnnotation, number][] = [[annotation, 0]];
   for (let next = pending.pop(); next !== undefined; next = pending.pop()) {
     const [type, depth] = next;
