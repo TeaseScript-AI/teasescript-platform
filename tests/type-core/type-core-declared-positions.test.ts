@@ -524,3 +524,44 @@ test("the host global at a position, the unknown the table admits: its instructi
     }
   assert.ok(judged > 0);
 });
+
+test("the host global at a position, where the run ends before its instruction's check: as today's run, in every mode", () => {
+  // each run fails inside the producer (a text read past its end, of a stored text today's checker cannot know),
+  // whichever value the host global holds
+  const producer = "s.substring(50)";
+  for (const [source, position] of [
+    // the run does not reach the command
+    [`let s = load "k", default: "x"\nlet a = ${producer}\nopenUrl(hostValue)\nexit\n`, "url"],
+    // an earlier operand of the same command fails before the command checks the host global's value
+    [
+      `let s = load "k", default: "https://example.com"\nopenUrl(${producer}, alwaysButton: hostValue)\nexit\n`,
+      "alwaysButton",
+    ],
+  ] as const) {
+    const files = [{ path: "main.tease", source }];
+    const takes = operandRules("openUrlStatement")![position]!.takes;
+    assert.ok(
+      DOMAIN.some((hostValue) => !takes.includes(kindOf(hostValue))),
+      source,
+    );
+    const today = compileProject(files, { globals: ["hostValue"] });
+    assert.ok(today.plan !== null, `${source}: today ${JSON.stringify(today.diagnostics)}`);
+    const start = source.indexOf(producer);
+    for (const mode of HELD_MODES) {
+      const { plan } = mode.run(() =>
+        compileProjectWithBackend(files, { globals: ["hostValue"] }, CORE_BACKEND),
+      );
+      assert.ok(plan !== null, `${source} [${mode.name}]`);
+      for (const hostValue of DOMAIN) {
+        const ran = runGlobals(plan, { hostValue });
+        const at = `${source} [${mode.name}] with ${JSON.stringify(hostValue)}: ${JSON.stringify(ran)}`;
+        const site = /@(\d+):(\d+)$/u.exec(ran.failure ?? "");
+        assert.ok(
+          site !== null && Number(site[1]) >= start && Number(site[2]) <= start + producer.length,
+          at,
+        );
+        assert.deepEqual(ran, runGlobals(today.plan, { hostValue }), at);
+      }
+    }
+  }
+});
