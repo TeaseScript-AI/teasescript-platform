@@ -755,6 +755,27 @@ export const DECLARED_REFUSALS: readonly {
         ? { gate: "askPrefillAdmitted (src/type-inference/core/slice-syntax.ts)", text: "this ask" }
         : { gate: "outsideAnswers (src/type-inference/core/backend.ts)", text: "this prefill" }),
     })),
+  // (the same ingresses, wrapped in a list and in an `otherwise`: a typed ingress's read is unknown, so the refusal
+  // judges what the wrapping holds)
+  ...samples()
+    .filter(
+      (sample) =>
+        sample.row === "interactionExpression" &&
+        PREFILL_LITERALS[sample.operand] !== undefined &&
+        sample.origin === "ingress" &&
+        (sample.kind === "null" ||
+          (sample.kind === "string" && sample.operand !== "askText.prefill")),
+    )
+    .flatMap((sample) =>
+      ["[m][0]", "m otherwise m"].map((wrapped) => ({
+        row: "interactionExpression" as const,
+        position: `${sample.operand}, ${sample.kind} (${sample.origin}) as ${wrapped}`,
+        refused: `${sample.prelude}${commandWith(sample.row, sample.operand, wrapped)}`,
+        admitted: twinCommand(sample),
+        gate: "outsideAnswers (src/type-inference/core/backend.ts)",
+        text: "this prefill",
+      })),
+    ),
   // (an `askChoice` button the core's check of the buttons has something to say of, `CHOICE_REFUSED`)
   ...samples()
     .filter((sample) => CHOICE_REFUSED[sample.operand]?.includes(`${sample.origin} ${sample.kind}`))

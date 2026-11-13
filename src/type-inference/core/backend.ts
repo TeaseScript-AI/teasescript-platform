@@ -250,6 +250,35 @@ export const SPEAKER_FIELD_KINDS: ReadonlyMap<string, FieldKinds> = new Map([
 const nullOnly = (tags: readonly string[]): boolean =>
   tags.some((tag) => tag === "null") && tags.every((tag) => tag === "null" || tag === "empty");
 
+/**
+ * An expression and the expressions whose values it may give as they are: a list's or set's elements, an index's
+ * receiver, an object literal's properties (also through a property read of it), both sides of `otherwise`, the inside
+ * of parentheses. A property read of anything else gives a value of its own (`name.length`).
+ */
+function carried(expression: Expression): Expression[] {
+  switch (expression.kind) {
+    case "parenthesizedExpression":
+      return carried(expression.expression);
+    case "listLiteral":
+    case "setLiteral":
+      return [expression, ...expression.elements.flatMap(carried)];
+    case "indexExpression":
+      return [expression, ...carried(expression.object)];
+    case "propertyAccessExpression":
+      return expression.object.kind === "objectLiteral"
+        ? [expression, ...carried(expression.object)]
+        : [expression];
+    case "objectLiteral":
+      return [expression, ...expression.properties.flatMap((property) => carried(property.value))];
+    case "binaryExpression":
+      return expression.operator === "otherwise"
+        ? [expression, ...carried(expression.left), ...carried(expression.right)]
+        : [expression];
+    default:
+      return [expression];
+  }
+}
+
 /** The first answer of the analysis that leaves the slice (see the module's comment), or `null`. */
 function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
   const at = (site: { readonly file: number; readonly start: number; readonly end: number }) =>
@@ -338,15 +367,18 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
     if (prefill === null || ask.interactionKind === "choice") continue;
     const refused = (tags: readonly string[]): boolean =>
       nullOnly(tags) || (ask.interactionKind !== "text" && tags.includes("string"));
-    // (its value's kinds, or, for a read of a place whose admitted type is decided, that type's: a typed ingress's read
-    // is unknown, with its check at the ingress)
-    const read = answers.at(nodeOf(answers, index, prefill))?.place ?? null;
-    const admitted = read === null ? null : answers.place(read.id, read.path).admitted;
-    if (
-      refused(kindsAt(prefill)) ||
-      (admitted !== null && admitted.by !== "undecided" && refused(admitted.kinds))
-    )
-      return { file: index.fileOf(ask), span: prefill.span, what: "this prefill" };
+    // (each value the prefill may hold as it is, `carried`: a typed ingress's read is unknown, with its check at the
+    // ingress, so a value wrapped in a list or an `otherwise` is judged by what it holds; each by its kinds, or, for a
+    // read of a place whose admitted type is decided, that type's)
+    for (const value of carried(prefill)) {
+      const read = answers.at(nodeOf(answers, index, value))?.place ?? null;
+      const admitted = read === null ? null : answers.place(read.id, read.path).admitted;
+      if (
+        refused(kindsAt(value)) ||
+        (admitted !== null && admitted.by !== "undecided" && refused(admitted.kinds))
+      )
+        return { file: index.fileOf(ask), span: prefill.span, what: "this prefill" };
+    }
   }
   // a variable without a written type whose lists nest deeper than the facts follow
   for (const statement of index.lets)
