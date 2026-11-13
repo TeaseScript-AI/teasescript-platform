@@ -3,50 +3,55 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import test from "node:test";
 
-import type { PlaceId } from "../../src/type-inference/graph.js";
+import type { PlaceId } from "../../../src/type-inference/graph.js";
 import {
   analyseCore,
   coreResult,
   solveDemands,
   type Answers,
   type CorePass,
-} from "../../src/type-inference/core/answers.js";
+} from "../../../src/type-inference/core/answers.js";
 import type {
   Contract,
   ContractFacts,
   PrefixStores,
-} from "../../src/type-inference/core/contract.js";
+} from "../../../src/type-inference/core/contract.js";
 import {
   offendingStores,
   summaryCount,
   summaryItems,
   summaryPresence,
-} from "../../src/type-inference/core/contract/prefix-index/summaries.js";
+} from "../../../src/type-inference/core/contract/prefix-index/summaries.js";
 import {
   exportNames,
   PathSteps,
   spanRef,
   stepsRest,
   type Rest,
-} from "../../src/type-inference/core/contract/key-ids.js";
+} from "../../../src/type-inference/core/contract/key-ids.js";
 import {
   entryGroups,
   groupsAt,
   groupRead,
   prefixLevels,
-} from "../../src/type-inference/core/contract/levels.js";
-import { keyOf, type Key } from "../../src/type-inference/core/definitions.js";
-import { withWriter } from "../../src/type-inference/core/exact-path.js";
-import { mergeItems, REASON, writerKey, type Item } from "../../src/type-inference/core/items.js";
-import { CoreProgram } from "../../src/type-inference/core/program.js";
-import { coreRecord } from "../../src/type-inference/core/result.js";
-import { withoutSharing } from "../../src/type-inference/core/sharing.js";
-import type { Solver, Work } from "../../src/type-inference/core/solver.js";
-import { compactAnalysis, coreRequest } from "../helpers/type-core-analysis.js";
-import { PAY_RULE_FAMILIES } from "../helpers/type-core/families/copy-chains.js";
-import { PROPERTY_STORE_FAMILIES } from "../helpers/type-core/families/candidates.js";
-import { narrowingPass } from "../helpers/type-core/type-core-narrowing.js";
-import { DOUBLING } from "../helpers/type-core/type-core-work.js";
+} from "../../../src/type-inference/core/contract/levels.js";
+import { keyOf, type Key } from "../../../src/type-inference/core/definitions.js";
+import { withWriter } from "../../../src/type-inference/core/exact-path.js";
+import {
+  mergeItems,
+  REASON,
+  writerKey,
+  type Item,
+} from "../../../src/type-inference/core/items.js";
+import { CoreProgram } from "../../../src/type-inference/core/program.js";
+import { coreRecord } from "../../../src/type-inference/core/result.js";
+import { withoutSharing } from "../../../src/type-inference/core/sharing.js";
+import type { Solver, Work } from "../../../src/type-inference/core/solver.js";
+import { compactAnalysis, coreRequest } from "../../helpers/type-core-analysis.js";
+import { PAY_RULE_FAMILIES } from "../../helpers/type-core/families/copy-chains.js";
+import { PROPERTY_STORE_FAMILIES } from "../../helpers/type-core/families/candidates.js";
+import { narrowingPass } from "../../helpers/type-core/type-core-narrowing.js";
+import { DOUBLING } from "../../helpers/type-core/type-core-work.js";
 import {
   inMode,
   inOrder,
@@ -57,8 +62,8 @@ import {
   publishedRoute,
   publishedUpToOrder,
   stopSet,
-} from "../helpers/type-core-oracles.js";
-import { Retained } from "../../src/type-inference/core/retained/retained.js";
+} from "../../helpers/type-core-oracles.js";
+import { Retained } from "../../../src/type-inference/core/retained/retained.js";
 
 /*
  * The contract's identity and mark controls (checkpoint 9): every path that

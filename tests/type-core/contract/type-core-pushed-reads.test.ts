@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { CorePass } from "../../src/type-inference/core/answers.js";
-import type { Contract } from "../../src/type-inference/core/contract.js";
+import type { CorePass } from "../../../src/type-inference/core/answers.js";
+import type { Contract } from "../../../src/type-inference/core/contract.js";
 import {
   collectMarks,
   depthOf,
@@ -13,30 +13,30 @@ import {
   marksAt,
   markPrefixVisits,
   markStates,
-} from "../../src/type-inference/core/contract/marks.js";
-import { analyseCore } from "../../src/type-inference/core/answers.js";
-import { Consumers } from "../../src/type-inference/core/consumers.js";
+} from "../../../src/type-inference/core/contract/marks.js";
+import { analyseCore } from "../../../src/type-inference/core/answers.js";
+import { Consumers } from "../../../src/type-inference/core/consumers.js";
 import {
   pushedFacts,
   pushedInvariant,
   withoutPushedReads,
-} from "../../src/type-inference/core/contract/frontier.js";
-import { stepsOf } from "../../src/type-inference/core/contract/literal-index.js";
-import { coreRequest } from "../helpers/type-core-analysis.js";
+} from "../../../src/type-inference/core/contract/frontier.js";
+import { stepsOf } from "../../../src/type-inference/core/contract/literal-index.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
 import {
   withTestAllowance,
   withTestDemandAllowance,
   WorkLedger,
-} from "../../src/type-inference/core/budget.js";
-import { inMode, MODES, publication, settledAnswers } from "../helpers/type-core-oracles.js";
-import { marked } from "../../src/type-inference/core/indexes/guards.js";
-import { itemScope } from "../helpers/type-core-items.js";
+} from "../../../src/type-inference/core/budget.js";
+import { inMode, MODES, publication, settledAnswers } from "../../helpers/type-core-oracles.js";
+import { marked } from "../../../src/type-inference/core/indexes/guards.js";
+import { itemScope } from "../../helpers/type-core-items.js";
 import {
   CONTEXT_WORDS,
   makeItem,
   mergeItems,
   type Item,
-} from "../../src/type-inference/core/items.js";
+} from "../../../src/type-inference/core/items.js";
 
 /*
  * #1655: a key entry below its place's root in a copy cycle through a projection (`p1 = p1.q` beside the

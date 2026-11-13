@@ -88,5 +88,5 @@ export const FROZEN_IN_CI: ReadonlyMap<string, string> = new Map<string, string>
 //   and `work/` exercise it (measured at #2417's 893cd3c4); `type-core-signatures`, before main split it, cost 77 s
 //   frozen in CI against main's 25, and with it a CI shard took 10.1 minutes at #2417's `25ece341`, so it left the
 //   subset;
-// - function `test.subAt` (`tests/type-core/type-core-contract.test.ts`): a test's probe, exercised only by that file;
+// - function `test.subAt` (`tests/type-core/contract/type-core-contract.test.ts`): a test's probe, exercised only by that file;
 // - set `SubSource.defs` (`contract/prefix-index/layers.ts`, `relevantSubs`): a source two found layers bring.
