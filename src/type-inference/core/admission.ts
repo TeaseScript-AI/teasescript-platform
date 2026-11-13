@@ -124,7 +124,7 @@ export { requiredKind } from "./admission/boundaries.js";
 export { withoutChains } from "./admission/classes.js";
 export { withMemberOracle } from "./admission/decision.js";
 export { concrete, contributes, deciding, fits, isExternal, isOpaque } from "./admission/kinds.js";
-export type { Candidate, DecidedAt, Decision } from "./admission/model.js";
+export type { DecidedAt, Decision } from "./admission/model.js";
 
 /*
  * Admission and the boundary checks of external data. A place's type is decided once, in source order, at a destination
@@ -394,7 +394,8 @@ export class Admission {
   /** Per such snapshot, its stops a list join carries (`earliestDecider`), each asked whatever came before it. */
   readonly joinedLists = new WeakMap<readonly Stop[], readonly Stop[]>();
   readonly resolved = new Map<IngressNode, boolean>();
-  readonly f18 = new Map<
+  /** Per call's result, its `typedCallKinds` answer, once per call. */
+  readonly typedCallKindsByResult = new Map<
     PlaceId,
     { readonly label: string; readonly tags: readonly ItemTag[] } | null
   >();
@@ -634,7 +635,7 @@ export class Admission {
     if (this.pass.solver.running) {
       runsInsideSolverRuns += 1;
       throw new Error(
-        "Admission ran a computation inside a solver run (#1072 A2): yield it as a read.",
+        "Admission ran a computation inside a solver run (#1072): yield it as a read.",
       );
     }
     return this.host.run(work);
@@ -1161,8 +1162,8 @@ export class Admission {
     boundariesAt(this, items, here);
   }
 
-  /** The typed calls whose expected type the finishing read left open after a stop (`f18Kinds`). */
-  readonly f18Open = new Set<PlaceId>();
+  /** The typed calls whose expected type the finishing read left open after a stop (`typedCallKinds`). */
+  readonly typedCallsOpen = new Set<PlaceId>();
 
   public ingressStores(
     skip?: (site: SourceSite) => boolean,

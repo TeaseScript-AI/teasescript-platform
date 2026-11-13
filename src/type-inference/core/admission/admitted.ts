@@ -366,7 +366,7 @@ export function admittedLevel(
   if (term !== null) return { by: "written", kinds: [...new Set(typeTags(term))] };
   // (after a stop nothing is decided but what is written, unless admission had settled: its decisions stand)
   if (after.stopped && !after.settled) return { by: "undecided" };
-  const kinds = admission.admitted(place, path);
+  const kinds = admitted(admission, place, path);
   // (after a stop admission decides nothing more: where what it retained leaves the path undecided, what every
   // store's syntax decides answers, as the finishing read's last source before `STOPPED`)
   if (kinds.length === 0 && after.stopped) {
@@ -387,8 +387,8 @@ export function admittedLevel(
         by: "decided",
         kinds,
         get decider(): SourceSite | null {
-          return admission.deciderAt(place, path);
+          return deciderAt(admission, place, path);
         },
-        inherited: admission.inheritsWritten(place, path),
+        inherited: inheritsWritten(admission, place, path),
       };
 }

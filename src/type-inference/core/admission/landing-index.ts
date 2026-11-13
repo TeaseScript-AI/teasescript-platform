@@ -14,7 +14,9 @@ import type { IngressStop, Landing, LandingIndex, Stop, Via, ViaChain } from "./
 import { compareKeys, contributionSite, OWN_ROLES, stopsOf, TYPED_ROLES } from "./walk.js";
 
 // The landing index of external data: where each ingress lands (by the stores that bring it, or as an own read), every
-// landing walked once, and the ingresses an item's leaves name.
+// landing walked once, and the ingresses an item's leaves name; and the typed calls among the ingresses (a typed `load`
+// or `fromJson`, `typedIngress`): whether a default alone types one (`typedByDefault`), and its expected kinds
+// (`typedCallKinds`).
 
 /** The kinds whose length is built in: a text's, a collection's. */
 const MEASURED: ReadonlySet<ItemTag> = new Set(["string", "list", "set", "dict"]);
@@ -81,7 +83,7 @@ export function landingIndex(
       row = {
         own: row.own || OWN_ROLES.has(level.role),
         call: TYPED_ROLES.has(level.role)
-          ? admission.typedByDefault(level.value)
+          ? typedByDefault(admission, level.value)
             ? level.value
             : null
           : row.call,
@@ -209,7 +211,7 @@ export function typedByDefault(admission: Admission, value: PlaceId): boolean {
   return (
     fallback !== undefined &&
     contract.landsIn(c.result, []) === null &&
-    f18Kinds(admission, c) !== null
+    typedCallKinds(admission, c) !== null
   );
 }
 
@@ -261,14 +263,14 @@ export function leafIngresses(admission: Admission, node: IngressNode): Readonly
  * A typed `load`'s or `fromJson`'s label and expected kinds, once per call: the concrete kinds its live result holds,
  * with `null` where it holds a `null` too and its written destination, if it has one, admits it; `null` where the
  * constraint is no typed call, is dead, or holds no concrete kind. After a stop, a type the finishing read leaves open
- * is recorded in `f18Open`.
+ * is recorded in `typedCallsOpen`.
  */
-export function f18Kinds(
+export function typedCallKinds(
   admission: Admission,
   c: CorePass["program"]["constraints"][number],
 ): { readonly label: string; readonly tags: readonly ItemTag[] } | null {
   if (!("result" in c)) return null;
-  const known = admission.f18.get(c.result);
+  const known = admission.typedCallKindsByResult.get(c.result);
   if (known !== undefined) return known;
   const { program, contract, values } = admission.pass;
   const parses = c.kind === "operation" && typedIngress(c);
@@ -298,9 +300,9 @@ export function f18Kinds(
       admission.pass.program.work.stopped !== null &&
       items.some((item) => item.tag === "unknown" && (item.reasons & REASON.budget) !== 0)
     )
-      admission.f18Open.add(c.result);
+      admission.typedCallsOpen.add(c.result);
   }
-  admission.f18.set(c.result, found);
+  admission.typedCallKindsByResult.set(c.result, found);
   return found;
 }
 
