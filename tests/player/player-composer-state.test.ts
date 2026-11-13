@@ -113,7 +113,7 @@ type Modules = {
     readonly publish: (session: PlayerSession) => void;
     readonly unansweredMessage: () => string;
     readonly submitLock: (password: string) => void;
-    readonly nextFrame: () => Promise<void>;
+    readonly beforePost: () => Promise<void>;
   }) => AnswerSubmission;
   useFormUpdates: (host: {
     readonly composer: ComposerState;
@@ -184,7 +184,7 @@ function browser(context: TestContext) {
   }
 }
 
-/** The painted frame before an answer is sent, which a row may hold to type while the answer is only accepted. */
+/** The wait before an answer is sent (`beforePost`), which a row may hold to type while the answer is only accepted. */
 function frames() {
   let held = false;
   const waiting: (() => void)[] = [];
@@ -242,7 +242,7 @@ async function page(context: TestContext, topology: Topology, script: string) {
       publish: (session) => player.update(session),
       unansweredMessage: () => "Nothing answers that.",
       submitLock: (password) => player.lock.submit({ password, timeLockMs: null }),
-      nextFrame: frame.next,
+      beforePost: frame.next,
     });
     const forms: FormUpdates = modules.useFormUpdates({
       composer,
@@ -1349,7 +1349,7 @@ RERUN.rows(
 const URL_BLOCK = 'timer async 60 s {\n  openUrl("https://example.com/block")\n}';
 
 /**
- * Sends `SENT` with its painted frame held, then lets the block's URL take the screen and asks for it at once, as
+ * Sends `SENT` with its wait before the post held, then lets the block's URL take the screen and asks for it at once, as
  * `RuntimeInteraction`'s watcher does: it waits behind the pending answer. Returns that answer and the tabs opened.
  */
 async function waitBehindAnswer(context: TestContext, p: Page) {
