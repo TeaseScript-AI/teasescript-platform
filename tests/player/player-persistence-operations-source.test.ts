@@ -350,7 +350,6 @@ const BRIDGE = {
   latest: "local",
   frozen: "local",
   release: "local",
-  deliverInTransit: "local",
   start: "host",
   read: "host",
   restoreKept: "host",

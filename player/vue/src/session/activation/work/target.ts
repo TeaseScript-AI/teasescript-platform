@@ -135,7 +135,7 @@ export function sessionTarget(session: PlayerSession, origin: Origin, runs: Runs
 export interface StopTarget {
   /** Stops the session at error `error`, stop `stop`; resolves once its store froze at the host's acknowledgement. */
   halt(error: string, stop: number): Promise<void>;
-  /** Whether the session's store already froze, as it does at once in-process. */
+  /** Whether the session's store already froze. */
   frozen(): boolean;
   /** Captures the run's failure recording of the stopped session, once per run; none for the initial record. */
   captureFailure(): void;

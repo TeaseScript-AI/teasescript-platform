@@ -274,7 +274,6 @@ export async function quiesce(
   settle: () => Promise<void>,
 ): Promise<void> {
   for (let turn = 0; turn < 200; turn += 1) {
-    bridge.deliverInTransit?.(session.id);
     const revision = bridge.latest(session)?.revision;
     await settle();
     if (tracker.inFlight() === 0 && bridge.latest(session)?.revision === revision) return;

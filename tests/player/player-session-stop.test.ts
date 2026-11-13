@@ -382,8 +382,6 @@ test("a save that settles while the stop waits for its acknowledgement is not is
   await host.activate();
   assert.equal(writes, 1);
   const before = published(host.session.value);
-  // The Worker cannot flush replies early. Reproduce its acknowledgement timing on the delayed test backend.
-  bridge.deliverInTransit = null;
   host.reportHostError(new TypeError("A component failed."));
   assert.equal(host.stopped.value, true);
   assert.equal(bridge.frozen(before), false);
