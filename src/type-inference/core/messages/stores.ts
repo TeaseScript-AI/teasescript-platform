@@ -6,7 +6,7 @@ import { ROUND_COUNT_FIX } from "../../../loop-rules.js";
 import { isTemporalKind } from "../../../temporal-builtins.js";
 import type { ItemTag } from "../items.js";
 import type { DiagnosticRule, SiteExpectation, StoreRoot } from "../result.js";
-import { bindingsOf } from "../consumers/bindings.js";
+import { bindingsOf } from "../consumers/stores/bindings.js";
 import type { MessageSource } from "./site.js";
 import {
   capitalized,

@@ -1,21 +1,28 @@
-import type { PlaceId, SourceSite } from "../../graph.js";
-import { concrete, isExternal, isOpaque } from "../admission.js";
-import { joinParts, joinSteps, keepText } from "../budget.js";
-import type { Consumers } from "../consumers.js";
-import { MEMBER_KINDS, presenceSteps, REFERENCE, type PresenceStep } from "../contract.js";
-import { labelBelow, labelRoot } from "../contract/labels.js";
-import { keyOf, keyPath, keyPlace, type Key } from "../definitions.js";
-import { withoutEmpty } from "../exact-path.js";
-import type { FlowNode } from "../flow-graph.js";
-import { firstWriter, makeItem, REASON, type Item, type ItemTag, type Writer } from "../items.js";
-import { described } from "../messages.js";
-import { propertyName } from "../program.js";
-import { offendingKinds, type ContextDetail, type DiagnosticRule } from "../result.js";
-import { error } from "./diagnostics.js";
+import type { PlaceId, SourceSite } from "../../../graph.js";
+import { concrete, isExternal, isOpaque } from "../../admission.js";
+import { joinParts, joinSteps, keepText } from "../../budget.js";
+import type { Consumers } from "../../consumers.js";
+import { MEMBER_KINDS, presenceSteps, REFERENCE, type PresenceStep } from "../../contract.js";
+import { labelBelow, labelRoot } from "../../contract/labels.js";
+import { keyOf, keyPath, keyPlace, type Key } from "../../definitions.js";
+import { withoutEmpty } from "../../exact-path.js";
+import type { FlowNode } from "../../flow-graph.js";
+import {
+  firstWriter,
+  makeItem,
+  REASON,
+  type Item,
+  type ItemTag,
+  type Writer,
+} from "../../items.js";
+import { described } from "../../messages.js";
+import { propertyName } from "../../program.js";
+import { offendingKinds, type ContextDetail, type DiagnosticRule } from "../../result.js";
+import { error } from "../reports/diagnostics.js";
 import { defaultNull } from "./fallbacks.js";
-import { finishingKeyRead } from "./finishing.js";
-import { hasMethod } from "./kinds.js";
-import type { Offending } from "./model.js";
+import { finishingKeyRead } from "../finishing.js";
+import { hasMethod } from "../kinds.js";
+import type { Offending } from "../model.js";
 import {
   keyLabel,
   ownSpan,
@@ -23,8 +30,14 @@ import {
   receiverKinds,
   shownLabel,
   unlistedObject,
-} from "./names.js";
-import { leftOutBy, nullWarning, obligation, propertiesOf, type Owner } from "./warnings.js";
+} from "../names.js";
+import {
+  leftOutBy,
+  nullWarning,
+  obligation,
+  propertiesOf,
+  type Owner,
+} from "../reports/warnings.js";
 
 // C5a–c, F19a: a method's or a member's receiver, and the receiver of every store through a member and every add.
 

@@ -45,7 +45,7 @@ import { propertyName } from "../program.js";
  * or a scalar copy whose source read has a witness by this same query, memoised per node and key; `#certificate`), then
  * the corridor's remaining segments (the middle and the consumer side), each one binary search per layer, and the
  * consumer's own statement's compulsory calls (the nearest call-in dominating n). An unsuitable candidate yields the
- * warning. The consumers ask it through `required`, the route rule's one decision (`consumers/warnings.ts`).
+ * warning. The consumers ask it through `required`, the route rule's one decision (`consumers/reports/warnings.ts`).
  */
 
 /** A literal's kind as N3's seeds read it: `null`, a whole or fractional number, text, a truth value. */

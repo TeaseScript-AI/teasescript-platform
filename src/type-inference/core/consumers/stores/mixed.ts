@@ -1,16 +1,16 @@
-import type { PlaceId, SourceSite } from "../../graph.js";
-import { Admission } from "../admission.js";
-import { joinParts, joinSteps, keepText, keptArray } from "../budget.js";
-import type { Consumers } from "../consumers.js";
-import { termAt, writtenOf } from "../contract.js";
-import { kindsInOrder, type ItemTag } from "../items.js";
-import { propertyStep, type ValueConstraint } from "../program.js";
-import type { DiagnosticRule } from "../result.js";
-import { error } from "./diagnostics.js";
-import { answerRead, oneType, passedOperands, recordAnswer } from "./kinds.js";
-import type { Landing, LandingQuestion } from "./model.js";
+import type { PlaceId, SourceSite } from "../../../graph.js";
+import { Admission } from "../../admission.js";
+import { joinParts, joinSteps, keepText, keptArray } from "../../budget.js";
+import type { Consumers } from "../../consumers.js";
+import { termAt, writtenOf } from "../../contract.js";
+import { kindsInOrder, type ItemTag } from "../../items.js";
+import { propertyStep, type ValueConstraint } from "../../program.js";
+import type { DiagnosticRule } from "../../result.js";
+import { error } from "../reports/diagnostics.js";
+import { answerRead, oneType, passedOperands, recordAnswer } from "../kinds.js";
+import type { Landing, LandingQuestion } from "../model.js";
 import { copiesOnly, firstDirect, valueReach } from "./reach.js";
-import { placeText, storeRoot, storeSteps } from "./warnings.js";
+import { placeText, storeRoot, storeSteps } from "../reports/warnings.js";
 
 // Values of more than one type (ADR 0021 1.3): a literal's elements where it lands, a list join's (#1272), and an
 // `askChoice`'s answer where its type would be inferred (V30 §19, #1352).

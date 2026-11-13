@@ -1,4 +1,4 @@
-import type { CoreDiagnostic, Obligation } from "../result.js";
+import type { CoreDiagnostic, Obligation } from "../../result.js";
 
 // The records a run leaves out, for the tests (`withoutRecords`), and the warnings and checks they would have made.
 
