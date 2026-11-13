@@ -111,7 +111,7 @@ export function composerDescriptor(shown: {
   // A year-0000 prefill shows as editable ISO text (`isoText`): still the date's own slot, not the chat's.
   else if (id !== null && foreground && FIELD_OF[foreground.kind] === "temporal")
     tenant = { kind: "temporal", actionId: id };
-  // Nothing asked, a skippable pacing gate included: the chat takes typing (decision 6).
+  // Nothing asked, a skippable pacing gate included: the chat takes typing.
   else if (foreground === null || FIELD_OF[foreground.kind] === "chat") tenant = { kind: "chat" };
   else tenant = NONE;
   // An answered question offers nothing: while its answer is under way the chat stands in for it, and its prefill, of
@@ -147,7 +147,10 @@ export function descriptorKey(next: ComposerDescriptor): string {
   ]);
 }
 
-/** A prefill's fate in the chat (decision 3): not yet shown, shown untouched, or the player's own text now. */
+/**
+ * A prefill's fate in the chat, where it is the question's suggestion (PLAYER-UI "Composer and foreground
+ * interactions"): not yet shown, shown untouched, or the player's own text now.
+ */
 type PrefillState = "unshown" | "offered" | "taken";
 
 interface FormSlot {
@@ -160,7 +163,7 @@ interface FormSlot {
   ackRevision: number;
 }
 
-/** The lock's password asked twice on one line (decision 8). */
+/** The lock's password, asked twice on one line when the lock repeats it. */
 interface LockSlot {
   readonly key: string;
   readonly repeat: boolean;
@@ -491,7 +494,10 @@ export function useComposerState(host: {
     return displayed.value;
   }
 
-  /** Erases the password slot after a send: keys typed until the next tenant are ignored (decision 2). */
+  /**
+   * Empties the password slot after a send. The keys typed while the password's answer is on its way go nowhere because
+   * the field is read-only then (`RuntimeInteraction`'s `composerReadonly`), not because of this.
+   */
   function erasePassword() {
     if (password) password.text = "";
     touch();

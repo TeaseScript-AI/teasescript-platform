@@ -30,7 +30,8 @@ import {
   type InputSectionHost,
 } from "../session/runtime-input.js";
 import type { ComposerState } from "./useComposerState.js";
-import type { FormUpdates } from "./useFormUpdates.js";
+import { questionGone, refusalMessage } from "./answerNotices.js";
+import { presentedForm, type FormUpdates } from "./useFormUpdates.js";
 
 /*
  * The answers the player gives (PLAYER-UI "Composer and foreground interactions"; decisions of 2026-11-11/12): each is
@@ -97,12 +98,6 @@ function advance(record: PendingAnswer, stage: AnswerStage): boolean {
 
 /** Where the session stands for input: stopping until its final publication shows, stopped, or its connection lost. */
 export type SessionTerminal = "freezing" | "stopped" | "lost" | null;
-
-/** The notice of an answer or edit that arrived after its question was gone. */
-export const QUESTION_GONE = "The question was gone before your answer arrived.";
-/** `QUESTION_GONE`, saying so where the answer's typed text came back to the composer. */
-export const questionGone = (textBack: boolean) =>
-  textBack ? `${QUESTION_GONE} Your text is back in the field.` : QUESTION_GONE;
 
 /** Whether undoing `record` puts typed text back in the composer: only the chat's own text comes back. */
 const returnsText = (record: PendingAnswer): record is PendingAnswer & { readonly sent: string } =>
@@ -253,11 +248,7 @@ export function useAnswerSubmission(host: {
   );
 
   /** Begins `record`: one painted frame, then the input section, which posts it only while its token holds. */
-  async function dispatch(
-    record: PendingAnswer,
-    intent: InputIntent,
-    onOutcome?: (result: InputResult) => void,
-  ) {
+  async function dispatch(record: PendingAnswer, intent: InputIntent) {
     await nextFrame();
     if (record.stage === "settled") return;
     advance(record, "fenced");
@@ -273,7 +264,6 @@ export function useAnswerSubmission(host: {
       settle(record, "undone");
       throw error;
     }
-    onOutcome?.(result);
     // After a stop or a replacement the token decides, not the outcome; a posted answer waits for a freeze to end.
     const how = disposition(record);
     if (how !== null) return settle(record, how);
@@ -391,7 +381,7 @@ export function useAnswerSubmission(host: {
     if (record !== null) void dispatch(record, intent);
   }
 
-  /** Enter or Send in the composer, for the slot it shows (decision 6: nothing while an answer is pending). */
+  /** Enter or Send in the composer, for the slot it shows; nothing while an answer is pending. */
   function send(source: "input" | "button"): void {
     const composer = host.composer;
     const tenant = composer.tenant.value;
@@ -539,25 +529,16 @@ export function useAnswerSubmission(host: {
     if (waiting && openAtOnce !== null) openUrl(openAtOnce, true);
   }
 
-  function presentedForm(): RuntimeInteractionActionSnapshot | null {
-    const action = presentedAction(host.session());
-    return action?.ui.kind === "form" && action.form !== undefined ? action : null;
-  }
-
-  /** The draft the form's step, Submit or Back takes along, from the field being edited. */
-  function formDraftText(): string | undefined {
-    return host.composer.formDraft()?.text;
-  }
-
   /**
    * Submit: checked with the form as shown, the field being edited committed first. While an update of this form is
-   * not yet answered, it goes unchecked and without a predicted line: the runtime's outcome shows either (rule 6).
+   * not yet answered, it goes unchecked and without a predicted line, since the local check would read a form the runtime
+   * has not reached: the runtime's outcome shows either.
    */
   function submitForm(input: "enter" | "send" | "button" = "button", typed = false): void {
-    const action = presentedForm();
+    const action = presentedForm(host.session());
     if (action === null || action.ui.kind !== "form" || action.form === undefined) return;
     if (pending.value !== null || closed()) return;
-    const draft = formDraftText();
+    const draft = host.composer.formDraft()?.text;
     const intent = intents.formSubmit(draft, input);
     if (host.forms.unacknowledged(action.actionId) > 0)
       return begin(action, typed ? "chat" : "formSubmit", null, typed, intent);
@@ -603,7 +584,7 @@ export function useAnswerSubmission(host: {
   }
 
   function cancelForm(input: "enter" | "send" | "button" = "button", typed = false): void {
-    const action = presentedForm();
+    const action = presentedForm(host.session());
     if (action === null || pending.value !== null || closed()) return;
     if (host.forms.unacknowledged(action.actionId) > 0)
       return begin(action, typed ? "chat" : "formCancel", null, typed, intents.formCancel(input));
@@ -649,19 +630,8 @@ export function useAnswerSubmission(host: {
     cancelForm,
     skipPacing,
     run,
+    closed,
   };
-}
-
-/** The notice of a refused answer or edit; `textBack` when its typed text came back to the composer. */
-export function refusalMessage(
-  outcome: { readonly kind: string; readonly message?: string },
-  textBack = false,
-): string {
-  return outcome.kind === "invalidPayload" && outcome.message !== undefined
-    ? outcome.message
-    : outcome.kind === "executionPending"
-      ? "The script moved on; try again."
-      : questionGone(textBack);
 }
 
 export type AnswerSubmission = ReturnType<typeof useAnswerSubmission>;

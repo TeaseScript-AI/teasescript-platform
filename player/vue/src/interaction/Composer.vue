@@ -42,7 +42,7 @@ const props = withDefaults(
     /** A preselected button waits; Space in the empty input activates it. */
     preselected?: boolean;
     /**
-     * Space in the empty input types nothing (decision 6 of 2026-11-11, #2430): only buttons wait, an answer is under way,
+     * Space in the empty input types nothing (#2430): only buttons wait, an answer is under way,
      * or nothing is asked. It still activates a preselected button.
      */
     inertSpace?: boolean;
@@ -309,20 +309,15 @@ function selectInput(): void {
 const composing = ref(false);
 let endingComposition = false;
 /**
- * Ends the player's composition, only in `field` when given: the browser ends it, with its `compositionend`, when the
+ * Ends the player's composition in the composer's field: the browser ends it, with its `compositionend`, when the
  * field loses focus, which it gets back in the same task with its state as it was (`releaseOnBlur`). The fields report
  * a composition's text at once, with every `input` event, composing ones too (`reportEdit`); ending it before a send or
  * a switch makes the answer the whole text shown, and the switch take nothing after it.
  */
-function endComposition(field?: HTMLElement): void {
+function endComposition(): void {
   if (!composing.value) return;
   const element = document.activeElement;
-  if (
-    !(element instanceof HTMLElement) ||
-    element !== input.value ||
-    (field !== undefined && element !== field)
-  )
-    return;
+  if (!(element instanceof HTMLElement) || element !== input.value) return;
   endingComposition = true;
   try {
     element.blur();
@@ -354,7 +349,8 @@ defineExpose({ focusInput, selectInput, openPicker, finishComposition });
     @compositionstart.capture="composing = true"
     @compositionend.capture="composing = false"
   >
-    <!-- In the composer's own height, which the conversation makes room for: never over a question's controls. -->
+    <!-- In the composer's own height, which the conversation makes room for: never over a question's controls while
+    the conversation shows its end. -->
     <div v-if="feedback" class="composer-notice-slot">
       <p :id="feedbackId" class="composer-notice" role="status" aria-live="polite">
         {{ feedback }}
