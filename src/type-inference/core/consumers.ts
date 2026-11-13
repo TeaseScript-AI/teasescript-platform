@@ -784,7 +784,7 @@ export class Consumers {
 
   /** The capture of each owing destination's contract (`#capture`). */
   #captureOwedContracts(): void {
-    const { program, definitions, lists, contract } = this.pass;
+    const { program, definitions, lists } = this.pass;
     const sites = new Map<string, SourceSite>();
     // (a stopped decision's own marks, the reason `budget`, stand for their stores' checks: the stop owes them, and a
     // stopped key decides nothing to capture)
@@ -822,34 +822,7 @@ export class Consumers {
       requested.add(destination);
       requests.push({ site, place: destination.place, path: destination.path });
     }
-    const reader: ContractReader = {
-      level: (place, path) => {
-        const written = writtenOf(program.place(place).kind);
-        const admitted = admittedLevel(
-          this.admission,
-          place,
-          path,
-          written === null ? null : termAt(written, path),
-          { stopped: false, settled: true, cheap: () => null },
-        );
-        return levelProof(admitted, () =>
-          withoutEmpty(this.solve(contract.contractOf(keyOf(place, path)))),
-        );
-      },
-      // (as `Answers.placeProperties` finds them: a key whose decision stopped names nothing)
-      properties: (place, path) => {
-        // (kept with the names it finds: its text charged where it is text, `keptKeyAt`)
-        const key = keptKeyAt(contract, place, path);
-        const known = this.propertySets.get(key);
-        if (known !== undefined) return known;
-        const names: ReadonlySet<string> =
-          contract.anyStopped && contract.keyStopped(key)
-            ? new Set()
-            : propertyNames(this.pass, (asked) => this.solve(asked), { key });
-        this.propertySets.set(key, names);
-        return names;
-      },
-    };
+    const reader = this.#contractReader(null, null);
     // (its work is the capture's, no consumer read's)
     this.reading = null;
     const left = captureContracts(
@@ -1153,7 +1126,45 @@ export class Consumers {
       closure!.made("listing", key);
       return names;
     };
-    const reader: ContractReader = {
+    const reader = this.#contractReader(closure, list);
+    const descriptors = captureDescriptors(reader, epoch, closure);
+    const dirty = new Set<number>();
+    const extract = (index: number): void => {
+      if (results[index] !== undefined && !dirty.has(index)) return;
+      dirty.delete(index);
+      const { place, path, extent } = requirements[index]!;
+      const make = (): ReceivingResult | null =>
+        extent === "complete"
+          ? extractContract(descriptors, place, path)
+          : shapeOf(reader.level(place, path));
+      results[index] =
+        closure === null
+          ? make()
+          : closure.within("request", String(index), () => {
+              // (a binding reads its pass's targets and rejections: another pass binds the slot anew)
+              closure.took("fact", `targets@${epoch}`);
+              closure.took("fact", `rejected@${epoch}`);
+              return make();
+            });
+      // (a contract that reaches the slice's depth: the program has left the slice, the completion ends)
+      if (closure !== null && extent === "complete" && results[index] === null)
+        throw new LeftSlice();
+    };
+    return { extract, dirty, descriptors, list };
+  }
+
+  /**
+   * The answers' own level reader over this pass (`admittedLevel`): a level's contract by its admitted type, else its
+   * key's contract; a key's property names, kept (`propertySets`), none where its decision stopped. With `closure` (a
+   * completion pass), a listing is its cell, made by `list`, and one not yet made makes the request wait on it
+   * (`Unlisted`); without one, `list` is never asked.
+   */
+  #contractReader(
+    closure: Closure | null,
+    list: ((key: string) => ReadonlySet<string> | { readonly deferred: readonly string[] }) | null,
+  ): ContractReader {
+    const { program, contract } = this.pass;
+    return {
       level: (place, path) => {
         const written = writtenOf(program.place(place).kind);
         const admitted = admittedLevel(
@@ -1185,36 +1196,12 @@ export class Consumers {
           this.propertySets.set(key, names);
           return names;
         }
-        const found = list(key);
+        const found = list!(key);
         if ("deferred" in found) throw new Unlisted(key, found.deferred);
         closure.took("listing", key);
         return found;
       },
     };
-    const descriptors = captureDescriptors(reader, epoch, closure);
-    const dirty = new Set<number>();
-    const extract = (index: number): void => {
-      if (results[index] !== undefined && !dirty.has(index)) return;
-      dirty.delete(index);
-      const { place, path, extent } = requirements[index]!;
-      const make = (): ReceivingResult | null =>
-        extent === "complete"
-          ? extractContract(descriptors, place, path)
-          : shapeOf(reader.level(place, path));
-      results[index] =
-        closure === null
-          ? make()
-          : closure.within("request", String(index), () => {
-              // (a binding reads its pass's targets and rejections: another pass binds the slot anew)
-              closure.took("fact", `targets@${epoch}`);
-              closure.took("fact", `rejected@${epoch}`);
-              return make();
-            });
-      // (a contract that reaches the slice's depth: the program has left the slice, the completion ends)
-      if (closure !== null && extent === "complete" && results[index] === null)
-        throw new LeftSlice();
-    };
-    return { extract, dirty, descriptors, list };
   }
 
   /**
