@@ -1,28 +1,28 @@
-import { dictMethod } from "../../../dict-operations.js";
-import { listMethod, type ListParameterKind } from "../../../list-methods.js";
-import { isTextMethod, TEXT_METHODS, type TextParameterKind } from "../../../text-operations.js";
+import { dictMethod } from "../../../../dict-operations.js";
+import { listMethod, type ListParameterKind } from "../../../../list-methods.js";
+import { isTextMethod, TEXT_METHODS, type TextParameterKind } from "../../../../text-operations.js";
 import {
   orderedFamily,
   VALUE_KIND_NAMES,
   VALUE_KINDS,
   type ValueKind,
-} from "../../../value-kinds.js";
-import type { PlaceId } from "../../graph.js";
-import { isExternal, isOpaque, requiredKind } from "../admission.js";
-import type { Consumers } from "../consumers.js";
-import { REFERENCE } from "../contract.js";
-import { labelBelow } from "../contract/labels.js";
-import { keptParts, keptSteps, READ_DEPTH_LIMIT } from "../budget.js";
-import type { FlowNode } from "../flow-graph.js";
-import { REASON, STOPPED, type Item, type ItemTag } from "../items.js";
-import { propertyStep, type ValueConstraint } from "../program.js";
-import { propertyNames } from "../property-names.js";
-import { offendingKinds, type DiagnosticRule } from "../result.js";
-import { error } from "./diagnostics.js";
-import { hasMethod } from "./kinds.js";
-import { domainItems, keyLabel, ownSpan, quietKinds, receiverKinds, shownLabel } from "./names.js";
+} from "../../../../value-kinds.js";
+import type { PlaceId } from "../../../graph.js";
+import { isExternal, isOpaque, requiredKind } from "../../admission.js";
+import type { Consumers } from "../../consumers.js";
+import { REFERENCE } from "../../contract.js";
+import { labelBelow } from "../../contract/labels.js";
+import { keptParts, keptSteps, READ_DEPTH_LIMIT } from "../../budget.js";
+import type { FlowNode } from "../../flow-graph.js";
+import { REASON, STOPPED, type Item, type ItemTag } from "../../items.js";
+import { propertyStep, type ValueConstraint } from "../../program.js";
+import { propertyNames } from "../../property-names.js";
+import { offendingKinds, type DiagnosticRule } from "../../result.js";
+import { error } from "../reports/diagnostics.js";
+import { hasMethod } from "../kinds.js";
+import { domainItems, keyLabel, ownSpan, quietKinds, receiverKinds, shownLabel } from "../names.js";
 import { consume, writtenNumberUse } from "./operands.js";
-import { obligation, warning } from "./warnings.js";
+import { obligation, warning } from "../reports/warnings.js";
 
 // C13 (S3 §1): a built-in method's arguments and the elements it reads, against what its contract takes.
 

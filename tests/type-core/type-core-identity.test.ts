@@ -435,17 +435,17 @@ const UNWRAPPING: Readonly<Record<string, readonly [number, string]>> = {
     "places: a store's target chain (P1, the written variable's root); the rest values: a count, an argument, an expression's type",
   ],
   "core/check-result/kept-checks.ts": [4, "values: a store's value and its literal data"],
+  "core/check-result/otherwise.ts": [4, "values: a fallback's read and its literals"],
   "core/check-result/runtime-plan.ts": [5, "values: a load's key, a selected literal"],
   "core/check-result/slice-index.ts": [
     5,
     "values: an operand's sites, a count's or an index's role, a node's site; `unwrap` itself",
   ],
   "core/check-result/store-contracts.ts": [7, "values: literal data, a value's provenance"],
-  "core/consumers/diagnostics.ts": [
+  "core/consumers/reports/diagnostics.ts": [
     4,
     "values: a receiver's and an operand's value, a kind present",
   ],
-  "core/consumers/otherwise.ts": [4, "values: a fallback's read and its literals"],
   "core/flow-graph.ts": [1, "a value: a snapshot's literal data"],
   "core/flow-graph/expressions.ts": [5, "values: a callee, literals, an index, a key"],
   "core/flow-graph/statements.ts": [

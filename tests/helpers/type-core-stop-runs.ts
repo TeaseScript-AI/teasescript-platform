@@ -9,7 +9,7 @@ import {
   withTestDemandAllowance,
 } from "../../src/type-inference/core/budget.js";
 import { LIMIT_REASONS } from "../../src/type-inference/core/check-result/slice-index.js";
-import { withoutRecords } from "../../src/type-inference/core/consumers/left-out.js";
+import { withoutRecords } from "../../src/type-inference/core/consumers/reports/left-out.js";
 import type { SourceSite } from "../../src/type-inference/graph.js";
 import { coreRequest, type SourceFile } from "./type-core-analysis.js";
 import { siteKey } from "./site-keys.js";

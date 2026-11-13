@@ -1,19 +1,19 @@
-import type { PlaceId, SourceSite } from "../../graph.js";
-import { isExternal, isOpaque, requiredKind } from "../admission.js";
-import type { Consumers } from "../consumers.js";
-import { withoutEmpty } from "../exact-path.js";
-import type { FlowNode } from "../flow-graph.js";
-import type { Item, ItemTag } from "../items.js";
+import type { PlaceId, SourceSite } from "../../../graph.js";
+import { isExternal, isOpaque, requiredKind } from "../../admission.js";
+import type { Consumers } from "../../consumers.js";
+import { withoutEmpty } from "../../exact-path.js";
+import type { FlowNode } from "../../flow-graph.js";
+import type { Item, ItemTag } from "../../items.js";
 import {
   type CountUse,
   type DiagnosticKind,
   type DiagnosticRule,
   type ObligationKind,
-} from "../result.js";
-import { error } from "./diagnostics.js";
-import { TEXT } from "./kinds.js";
-import { keyLabel, kindsOf, ownSpan, quietKinds, shownLabel, writtenNumber } from "./names.js";
-import { obligation, warnGroups, warning } from "./warnings.js";
+} from "../../result.js";
+import { error } from "../reports/diagnostics.js";
+import { TEXT } from "../kinds.js";
+import { keyLabel, kindsOf, ownSpan, quietKinds, shownLabel, writtenNumber } from "../names.js";
+import { obligation, warnGroups, warning } from "../reports/warnings.js";
 
 // C2, C3, C11, C12, C13: an operand's items against the kinds that fit, a whole number, an index by its receiver.
 

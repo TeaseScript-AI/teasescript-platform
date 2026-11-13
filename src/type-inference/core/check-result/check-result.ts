@@ -35,7 +35,7 @@ import {
 } from "../contract-descriptors.js";
 import { leftOutCompletion } from "../consumers.js";
 import { withoutEmpty } from "../exact-path.js";
-import { otherwiseChains, provesNonNull, unusedFallbackRule } from "../consumers/otherwise.js";
+import { otherwiseChains, provesNonNull, unusedFallbackRule } from "./otherwise.js";
 import { literalTruth, literalRounds, type FlowNode } from "../flow-graph.js";
 import { type ItemTag } from "../items.js";
 import { type CoreAnalysisRequest, propertyStep } from "../program.js";

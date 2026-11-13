@@ -1,14 +1,14 @@
-import type { Expression } from "../../../ast.js";
-import { expressionParts } from "../../../expression-children.js";
-import type { SourceSite } from "../../graph.js";
-import type { Consumers } from "../consumers.js";
-import { REASON, type ItemTag } from "../items.js";
-import { codeOf } from "../messages.js";
-import { selectsElement } from "../method-categories.js";
-import { siteKey } from "../program.js";
-import type { CoreDiagnostic, DiagnosticKind, DiagnosticRule, Presence } from "../result.js";
+import type { Expression } from "../../../../ast.js";
+import { expressionParts } from "../../../../expression-children.js";
+import type { SourceSite } from "../../../graph.js";
+import type { Consumers } from "../../consumers.js";
+import { REASON, type ItemTag } from "../../items.js";
+import { codeOf } from "../../messages.js";
+import { selectsElement } from "../../method-categories.js";
+import { siteKey } from "../../program.js";
+import type { CoreDiagnostic, DiagnosticKind, DiagnosticRule, Presence } from "../../result.js";
 import { expected } from "./expected.js";
-import { anyRecorded, keptTypes } from "./kinds.js";
+import { anyRecorded, keptTypes } from "../kinds.js";
 
 // The consumers' diagnostics: an error at its site, and the facts a fix's code forms read.
 

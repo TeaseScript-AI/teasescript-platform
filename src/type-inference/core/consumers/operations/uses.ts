@@ -1,11 +1,11 @@
-import type { SourceSite } from "../../graph.js";
-import type { Consumers } from "../consumers.js";
-import { makeItem, REASON } from "../items.js";
-import { siteKey } from "../program.js";
-import { BOOLEAN, TEXT } from "./kinds.js";
-import { indexProjection } from "./names.js";
+import type { SourceSite } from "../../../graph.js";
+import type { Consumers } from "../../consumers.js";
+import { makeItem, REASON } from "../../items.js";
+import { siteKey } from "../../program.js";
+import { BOOLEAN, TEXT } from "../kinds.js";
+import { indexProjection } from "../names.js";
 import { consume, indexUse, integerOnly } from "./operands.js";
-import { nullWarning, obligation, warning } from "./warnings.js";
+import { nullWarning, obligation, warning } from "../reports/warnings.js";
 
 // The graph's uses (counts, indexes, conditions, dict keys: C2, C3, C12), and every access to a speaker's field (F19a).
 
