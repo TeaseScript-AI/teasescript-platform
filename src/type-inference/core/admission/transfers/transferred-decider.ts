@@ -338,8 +338,8 @@ export function* transferredDecider(
 }
 
 /**
- * A stored value's root group and asked path with its rests' ids, made once per asked path (`deciderRoot`) and read by
- * `literalRoute`, `transferredDecider` and `writtenDecider`.
+ * A stored value's root group and asked path with its rests' ids, made once per `earliestDecider` call (`deciderRoot`)
+ * and read by `literalRoute`, `transferredDecider` and `writtenDecider`.
  */
 export interface DeciderRoot {
   readonly root: DeciderGroup;

@@ -104,7 +104,11 @@ export function compareLanded(admission: Admission): void {
     }
 }
 
-/** Takes back what admission recorded of a key's decision: `recordDecision`'s maps and `deciderAt`'s site. */
+/**
+ * Deletes a key's published decision: `decided`, `nullable`, `permitsNull`, `inheritsWrittenKeys`, `unrestricted` and
+ * `deciderSites` (which `deciderAt` also fills). `decisions`, `attempted` and `budgetUndecided` are its callers' to
+ * keep or delete.
+ */
 function unrecord(admission: Admission, key: CanonicalKey): void {
   admission.decided.delete(key);
   admission.nullable.delete(key);
@@ -420,6 +424,10 @@ function decidedOf(admission: Admission, at: At, inputs: Inputs | null): Decided
   return found;
 }
 
+/**
+ * A key's `Decided` from its inputs; where a literal element a stop left undecided leaves the path undecided, it also
+ * records the key in `budgetUndecided`.
+ */
 function computeDecided(admission: Admission, at: At, key: Key, inputs: Inputs): Decided {
   const { root, path, depth } = at;
   const { program, lists, contract } = admission.pass;
@@ -661,8 +669,8 @@ function concreteSite(
 }
 
 /**
- * Whether no store on the path or a prefix of it was rejected or copies a written binding, by one walk of the path down
- * those keys' trie (`Admission.dirty`), never a key made per prefix.
+ * Whether no store on the path or a prefix of it was rejected or copies a written or inheriting binding
+ * (`copyLandingKeys`), by one walk of the path down those keys' trie (`Admission.dirty`), never a key made per prefix.
  */
 function isClean(admission: Admission, at: At): boolean {
   // (a cursor's path walked as its span, one step at a time: a wrapper's own cell that copies a written binding lands
