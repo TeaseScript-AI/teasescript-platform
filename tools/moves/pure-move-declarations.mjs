@@ -113,11 +113,12 @@ export function wholeFiles(entries, files, renames) {
 }
 
 /**
- * The line declarations of the change from `mergeBase` to `HEAD` (in `cwd`), each blob one names checked as UTF-8, bound
- * to the lines that take them: `declaredFor(entry)`, asked of a changed unmoved line no form admits, in diff order, binds
- * the first unbound declaration of its file, side and text and gives its reason, or `null`; `cover(refusal)` gives a
- * refused import's covering declaration, `{ reason, taken }` (`taken` when it binds one now), or `null`; `stale()`, the
- * declarations bound to no line.
+ * The line declarations of the change from `mergeBase` to `HEAD` (in `cwd`), each blob one names checked as UTF-8 at
+ * this call (`CannotRun` otherwise), bound to the lines that take them in the order of the calls, so the header's order
+ * holds when every `declaredFor` comes before any `cover`, and `stale()` after both: `declaredFor(entry)`, asked of a
+ * changed unmoved line no form admits, in diff order, binds the first unbound declaration of its file, side and text
+ * and gives its reason, or `null`; `cover(refusal)` gives a refused import's covering declaration, `{ reason, taken }`
+ * (`taken` when it binds one now), or `null`; `stale()`, the declarations bound to no line.
  */
 export function boundDeclarations(declarations, mergeBase, cwd) {
   // a declaration's text is compared exactly, and Git's diff and blobs, read as UTF-8, turn bytes that are not into
@@ -156,7 +157,7 @@ export function boundDeclarations(declarations, mergeBase, cwd) {
     return declarations[index].reason;
   };
   // a refusal is declared by the declaration bound to its line, a changed one or not, else by one of its side and its
-  // line's text bound to none, which it binds; each is printed with the refusal reason it covers
+  // line's text bound to none, which it binds
   const ofSide = (d, refusal) => d.file === refusal.file && d.side === refusal.side;
   const cover = (refusal) => {
     let index = declarations.findIndex(

@@ -188,12 +188,12 @@ export function checkMove(
     files,
     renameMap,
   );
-  const lines = boundDeclarations(declarations, mergeBase, cwd);
+  const lineDeclarations = boundDeclarations(declarations, mergeBase, cwd);
   const { verdicts, moved } = verdictsOf(
     mergeBase,
     "HEAD",
     files.filter((change) => !wholes.some((w) => w.file === change.file)),
-    { cwd, declaredFor: lines.declaredFor },
+    { cwd, declaredFor: lineDeclarations.declaredFor },
   );
   const counts = {
     movedAdded: moved.added,
@@ -216,10 +216,11 @@ export function checkMove(
     } else counts[form] += 1;
   }
   const bindings = bindingDifferences(mergeBase, "HEAD", files, renameMap, git);
+  // each refusal a declaration covers is printed with the refusal reason it covers
   const refused = [];
   const covered = [];
   for (const refusal of bindings.refusals) {
-    const cover = lines.cover(refusal);
+    const cover = lineDeclarations.cover(refusal);
     if (cover === null) refused.push(refusal);
     else {
       if (cover.taken) counts.declared += 1;
@@ -229,7 +230,7 @@ export function checkMove(
   const [kept, notJudged] = unchangedDynamicImports(refused, files, wholes);
   counts.refused = kept.length;
   counts.notJudged = notJudged.length;
-  const stale = lines.stale();
+  const stale = lineDeclarations.stale();
   return {
     mergeBase,
     unadmitted,
