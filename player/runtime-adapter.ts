@@ -62,7 +62,7 @@ import {
 import type { RuntimeChatPacingGateActionSnapshot } from "../src/runtime/actions/model.js";
 import { formValueText } from "../src/interaction-answers.js";
 import { IMAGE_SKIP_TEXT } from "../src/image-input.js";
-import { formSummaryOf, type FormSummaryLine } from "../src/runtime/actions/form.js";
+import { formSummaryOf, type FormSummaryLine } from "../src/runtime/actions/form/submission.js";
 import { instructionSourcePath } from "../src/plan/model.js";
 import { evaluateTagSteps } from "../src/tag-query.js";
 import { PLAYER } from "../src/speaker-terms.js";

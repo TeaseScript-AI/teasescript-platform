@@ -11,7 +11,7 @@ import {
   interactionStringHasNonWhitespace,
 } from "../../../interaction-limits.js";
 import { CAPTURE_UNAVAILABLE_REASONS, fileStoreOperation, isLockOutcome } from "../model.js";
-import { isFormUi } from "../form.js";
+import { isFormUi } from "../form/ui-state.js";
 import { IMAGE_ANSWER_TRANSCRIPT_TEXT, IMAGE_SKIP_TEXT } from "../../../image-input.js";
 import { holdsStoredFile } from "../../host-data/stored-files.js";
 import { isSha256Hex } from "../../values/sha256.js";

@@ -21,7 +21,9 @@ import {
   MAX_INTERACTION_AGGREGATE_UTF8_BYTES,
   MAX_INTERACTION_OPTION_ENTRIES,
 } from "../../../interaction-limits.js";
-import { formShapeFits, isFormUi, validFormResult, validFormUi } from "../form.js";
+import { formShapeFits } from "../form/materialize.js";
+import { isFormUi, validFormUi } from "../form/ui-state.js";
+import { validFormResult } from "../form/submission.js";
 import { validImageRequestFields } from "../../../image-input.js";
 import { recordValidationTestWork } from "../../../validation-testing.js";
 import { isPlainRecord } from "../../values/plain-data.js";
