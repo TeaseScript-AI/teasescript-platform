@@ -162,7 +162,8 @@ export class Runtime {
     return templateText(text, part, span);
   }
   range(expression, start, end) {
-    return Object.freeze({
+    // Not frozen (freezing each range was a fifth of the shot's time); no operation changes a range.
+    return ({
       kind: "range",
       start: rangeBound(expression, "start", shown(start), this.plan),
       end: rangeBound(expression, "end", shown(end), this.plan),

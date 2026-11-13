@@ -541,6 +541,20 @@ export function emitProgram(plan, { resumable = false, runawayCheck = false } = 
         line(`${c} = ${expr(ins.expression)};`);
         line(`if (${c} !== true) { if (${c} === false) break; throw rt.notBool(${konst(ins.expression)}, ${c}); }`);
         scopes.push(new Map());
+      } else if (ins.loopKind === "for" && ins.expression.kind === "range" && ins.valueVariable === undefined) {
+        // A range written in the loop: its whole-number bounds inline; anything else faults through today's checks.
+        const e = ins.expression;
+        const a = x();
+        const b = x();
+        line(`${a} = ${expr(e.start)}; ${b} = ${expr(e.end)};`);
+        line(`if (!(Number.isSafeInteger(${a}) && Number.isSafeInteger(${b}) && Number.isSafeInteger(${b} - ${a}))) rt.forSource(${konst(ins)}, rt.range(${konst(e)}, ${a}, ${b}));`);
+        const i = `i${pc}`;
+        line(`${label}: for (let ${i} = 0, n${pc} = Math.max(0, ${b} - ${a}${e.inclusive ? " + 1" : ""}); ${i} < n${pc}; ${i}++) {`);
+        indent += 1;
+        if (tick) line(tick);
+        scopes.push(new Map());
+        const v = declare(ins.variable);
+        line(`let ${v.code} = ${a} + ${i};`);
       } else if (ins.loopKind === "for") {
         const s = x();
         line(`${s} = rt.forSource(${konst(ins)}, ${expr(ins.expression)});`);
