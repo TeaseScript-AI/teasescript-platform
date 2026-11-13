@@ -56,11 +56,11 @@ const CASES: readonly Composite[] = [
   },
   {
     name: "a closed expression two open constructs deep",
-    files: ['let o = {k: [hostValue, {m: "a" otherwise 2 s}]}\n'],
+    files: ['let o = {k: [hostValue, {m: "a" otherwise -2}]}\n'],
     outer: "objectLiteral",
-    inner: "durationLiteral",
+    inner: "unaryExpression",
     file: 0,
-    at: "2 s",
+    at: "-2",
   },
   {
     name: "a closed statement after an open one in the same list",
@@ -72,11 +72,11 @@ const CASES: readonly Composite[] = [
   },
   {
     name: "a closed expression as a command's operand",
-    files: ['showButton "Go", timeout: 2 s\n'],
+    files: ['showButton "Go", timeout: -2 s\n'],
     outer: "showButtonStatement",
-    inner: "durationLiteral",
+    inner: "unaryExpression",
     file: 0,
-    at: "2 s",
+    at: "-2 s",
   },
   {
     name: "a closed expression as a command's only operand",
@@ -96,7 +96,7 @@ const CASES: readonly Composite[] = [
   },
   {
     name: "the first of two closed constructs in source order, the later one deeper",
-    files: ["let a = [-1, [2 s]]\n"],
+    files: ["let a = [-1, [-2 s]]\n"],
     outer: "listLiteral",
     inner: "unaryExpression",
     file: 0,
@@ -182,6 +182,13 @@ interface Condition {
  * (`UNCONDITIONAL`); the inventory test below keeps the two lists equal to the table's open rows.
  */
 const CONDITIONS: readonly Condition[] = [
+  {
+    row: "durationLiteral",
+    condition: "a literal the plan stores (`storedLiteral`)",
+    source: "let c = 1.5 calendar months",
+    at: "1.5 calendar months",
+    what: "this duration literal",
+  },
   {
     row: "letStatement",
     condition: "a written type of the slice",
@@ -716,6 +723,9 @@ const UNCONDITIONAL: readonly SyntaxKind[] = [
   "parenthesizedExpression",
   "indexExpression",
   "rangeExpression",
+  // (a unit's or an angle's amount is judged after the analysis, `outsideAnswers` and `coreCheckResult`)
+  "unitExpression",
+  "angleExpression",
 ];
 
 test("every open row is in the condition inventory or has no condition of its own", () => {

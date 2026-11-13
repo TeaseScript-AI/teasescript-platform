@@ -1,6 +1,7 @@
 import type {
   Block,
   CallExpression,
+  DurationLiteral,
   Expression,
   InteractionExpression,
   Program,
@@ -10,6 +11,11 @@ import type {
 } from "../../ast.js";
 import { CONVERSIONS, isConversion, type Conversion } from "../../conversions.js";
 import { dictMethod } from "../../dict-operations.js";
+import {
+  durationLiteralValue,
+  isStoredCalendarDurationRecord,
+  isStoredDurationRecord,
+} from "../../duration.js";
 import { isBlankTextAnswer } from "../../interaction-answers.js";
 import { listMethod } from "../../list-methods.js";
 import { isTextMethod, TEXT_METHODS } from "../../text-operations.js";
@@ -300,9 +306,12 @@ export const DISPOSITIONS: { readonly [K in SyntaxKind]: Disposition<K> } = {
   booleanLiteral: modelled(),
   nullLiteral: modelled(),
   numberLiteral: modelled(),
-  durationLiteral: REFUSED,
-  unitExpression: REFUSED,
-  angleExpression: REFUSED,
+  durationLiteral: {
+    row: "modelled",
+    visit: (node) => (storedLiteral(node) ? walk([]) : refuse(node.span, "this duration literal")),
+  },
+  unitExpression: modelled((node) => [node.operand]),
+  angleExpression: modelled((node) => [node.operand]),
   stringLiteral: {
     row: "modelled",
     visit: (node) =>
@@ -430,6 +439,20 @@ export function outsideSyntax(
     }
   }
   return null;
+}
+
+/**
+ * A duration literal the lowering writes and the plan stores: one `durationLiteralValue` gives a value (an exact unit with
+ * any amount, a calendar unit with an amount of whole days or months) that the plan's record check takes (finite
+ * milliseconds, months and days safe whole numbers, `src/plan/validation/expressions.ts`). Today's checker refuses any
+ * other (TSV043, TSV050).
+ */
+function storedLiteral(node: DurationLiteral): boolean {
+  const value = durationLiteralValue(node);
+  if (typeof value === "string") return false;
+  return value.kind === "duration"
+    ? isStoredDurationRecord({ ...value })
+    : isStoredCalendarDurationRecord({ ...value });
 }
 
 /** Whether a comparison is a null test, `x != null` or `x == null` (either side the `null`). */

@@ -66,6 +66,21 @@ const BASE_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly Template[]>>>
     "let b = null != hostValue",
   ],
   typeTestExpression: ["let b = hostValue is integer"],
+  // (each exact and calendar unit, a typed store; the amount of a unit or an angle as the host global, a variable, an
+  // element and a property)
+  durationLiteral: [
+    "let d = 2 ms\nlet e = 1.5 s\nlet f = 3 min\nlet g = 2 h\nlet h = 1 d\nlet i = 2 w",
+    "let c = 2 calendar days\nlet e = 1 calendar week\nlet f = 0.5 calendar years\nlet g = 3 calendar months",
+    "let d: duration = 2 s\nwait d",
+  ],
+  unitExpression: [
+    "let d = hostValue s",
+    "let c = hostValue calendar months",
+    "let n = 2\nlet d = n min",
+    "let xs = [2]\nlet d = xs[0] s",
+    "let o = {v: 2}\nlet d = o.v ms",
+  ],
+  angleExpression: ["let a = 90 deg", "let a = hostValue rad", "let n = 45\nlet a = n deg"],
   callExpression: [
     "let xs = [1]\nlet x: integer = xs.get(hostValue, default: 0)",
     "let xs = [1]\nlet x: integer = xs.get(0, default: hostValue)",

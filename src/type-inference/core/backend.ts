@@ -11,6 +11,7 @@ import {
   SliceIndex,
   OutsideContract,
   SLICE_DEPTH,
+  unwrap,
 } from "./check-result/slice-index.js";
 import { oneType } from "./consumers/kinds.js";
 import { checkedOnSource, identityView, type IdentityView } from "./identity-view.js";
@@ -264,6 +265,47 @@ export const SPEAKER_FIELD_KINDS: ReadonlyMap<string, FieldKinds> = new Map([
   ["gender", { takes: ["string", "null"], check: null }],
 ]);
 
+/**
+ * What the amount of a unit or angle expression takes (`n s`, `n calendar months`, `n deg`; ADR 0021 rule 1.8, today's
+ * TSV043): a number, whole or not, and the evaluator that refuses any other value as it runs (TSR027; TSR009 for a
+ * calendar amount of no whole days or months, TSR036 for one too large to represent).
+ */
+export const UNIT_AMOUNT: { readonly takes: readonly ItemTag[]; readonly check: OperandCheck } = {
+  takes: ["integer", "number"],
+  check: { file: "src/runtime/evaluator.ts", function: "evaluate" },
+};
+
+/**
+ * Whether a unit's or an angle's amount holds only numbers (`UNIT_AMOUNT`), as the admitted set with a refusing default:
+ * each kind the core gives it is one `UNIT_AMOUNT` takes; a read of a place whose type is written or decided holds that
+ * type's kinds (a typed ingress's read is the unknown its store's check stands for); an unknown is admitted only of an
+ * external origin, as the host global itself or a direct read of a place whose type is undecided, beside the
+ * evaluator's check; a missing property is no value there, its read fails first. Any other unknown (one an element, a
+ * call or an operation carries, a stop's) is not shown to be a number (step 1½'s form for command operands, the lead's
+ * R10 there). So the route declines what today's checker plans where only a narrowing or an `otherwise` shows the
+ * amount a number: a read of `n: integer?` under `n != null`, `(n otherwise 1) s`; the core gives no read its narrowing
+ * (`OccurrenceAnswer.narrowing`).
+ */
+function amountAdmitted(answers: Answers, index: SliceIndex, amount: Expression): boolean {
+  const answer = answers.at(nodeOf(answers, index, amount));
+  const read = answer?.place ?? null;
+  const admitted = read === null ? null : answers.place(read.id, read.path).admitted;
+  return (answer?.items ?? []).every((item) => {
+    if (item.tag === "empty") return true;
+    if (item.tag !== "unknown") return UNIT_AMOUNT.takes.includes(item.tag);
+    // (a property read that found no such property fails there, before the amount holds a value: `withoutMissing`)
+    const reasons = item.reasons & ~REASON.missing;
+    if (reasons === 0) return true;
+    if (reasons !== REASON.external) return false;
+    if (admitted !== null)
+      return (
+        admitted.by === "undecided" ||
+        admitted.kinds.every((kind) => UNIT_AMOUNT.takes.includes(kind))
+      );
+    return unwrap(amount).kind === "identifier";
+  });
+}
+
 /** The first answer of the analysis that leaves the slice (see the module's comment), or `null`. */
 function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
   const at = (site: { readonly file: number; readonly start: number; readonly end: number }) =>
@@ -314,6 +356,15 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
             what: "this speaker property",
           };
       }
+  // a unit or angle expression whose amount may hold no number (`UNIT_AMOUNT`): today's compile error, so today's
+  // checker answers; a known amount today refuses is the check result's (`knownAmountRefused`)
+  for (const unit of index.units)
+    if (!amountAdmitted(answers, index, unit.operand))
+      return {
+        file: index.fileOf(unit),
+        span: unit.span,
+        what: unit.kind === "unitExpression" ? "this unit expression" : "this angle expression",
+      };
   // a load whose default is only null: without a declared type, the storage rules' error (F19, S9b's)
   for (const load of index.loads)
     if (

@@ -14,8 +14,13 @@ import {
 import { literalRange } from "../../../switch-cases.js";
 import { type TypePlan } from "../../../plan/model.js";
 import { createSourceSpan, type SourcePosition, createSourcePosition } from "../../../source.js";
-import { type KnownValue, KnownValues, isStaticDuration } from "../../../static-evaluation.js";
-import { isCalendar } from "../../../duration.js";
+import {
+  type KnownValue,
+  KnownValues,
+  findVisibleOverflows,
+  isStaticDuration,
+} from "../../../static-evaluation.js";
+import { isCalendar, unitValue } from "../../../duration.js";
 import { type StaticType, members, UNKNOWN_TYPE, union, openType } from "../../../static-types.js";
 import { typeFromAnnotation } from "../../../static-types/annotations.js";
 import { typeKey } from "../../../storage-types.js";
@@ -136,7 +141,11 @@ export function coreCheckResult(
 ): TypeCheckResult {
   const diagnostics: Diagnostic[][] = request.files.map(() => []);
   const { checks, core, contracts, moved } = runtimeChecks(answers, index, request);
-  const known = knownValues(answers, index, (call) => core.expected.get(call));
+  const values = knownValues(answers, index, (call) => core.expected.get(call));
+  const known = (expression: Expression) => values.known(expression);
+  const refused = knownAmountRefused(index, values, request);
+  if (refused !== null)
+    throw new OutsideContract(refused, `this ${KIND_WORDS[refused.kind] ?? "calculation"}`);
   const fallbacks = fallbackUses(answers, index);
   const result = checkedOf(answers, index, known, fallbacks);
   // (a program the analysis rejects has no plan to let a value through: nothing to decline)
@@ -194,7 +203,7 @@ function knownValues(
   answers: Answers,
   index: SliceIndex,
   expected: (call: CallExpression) => TypePlan | undefined,
-): (expression: Expression) => KnownValue | undefined {
+): KnownValues {
   const values = new KnownValues(
     (identifier) => {
       const initializer = answers.initializers.get(
@@ -214,9 +223,43 @@ function knownValues(
       return kinds.includes("unknown") || admitsKnown(kinds, value);
     },
   );
-  const known = (expression: Expression) => values.known(expression);
-  answers.shareKnown(known);
-  return known;
+  answers.shareKnown((expression) => values.known(expression));
+  return values;
+}
+
+/** A step `knownAmountRefused` refuses, in words. */
+const KIND_WORDS: Readonly<Record<string, string>> = {
+  unitExpression: "unit expression",
+  angleExpression: "angle expression",
+};
+
+/**
+ * The first step whose known amount today's checker refuses, by today's own predicates on the core's known values: a
+ * step whose known operands give no value it can represent (`findVisibleOverflows`, today's TSV050: in the slice, a unit
+ * or an angle of a known amount), then a calendar unit whose known amount gives no whole days or months (`unitValue`,
+ * today's TSV043); `null` where none is. Both read `quantity`, which spends no known-value work, so the checks after it
+ * read what they read without them.
+ */
+function knownAmountRefused(
+  index: SliceIndex,
+  values: KnownValues,
+  request: CoreAnalysisRequest,
+): Expression | null {
+  for (const [file, { program }] of request.files.entries()) {
+    const overflow = findVisibleOverflows(program, values)[0];
+    if (overflow !== undefined)
+      return index.expressionAt({
+        file,
+        start: overflow.span.start.offset,
+        end: overflow.span.end.offset,
+      });
+  }
+  for (const unit of index.units) {
+    if (unit.kind !== "unitExpression" || !unit.calendar) continue;
+    const amount = values.quantity(unit.operand);
+    if (typeof amount === "number" && typeof unitValue(amount, unit) === "string") return unit;
+  }
+  return null;
 }
 
 /**
@@ -361,10 +404,11 @@ export function checkedResult(answers: Answers, request: CoreAnalysisRequest): C
         throw error;
       }
     };
+    const values = knownValues(answers, index, expected);
     return checkedOf(
       answers,
       index,
-      knownValues(answers, index, expected),
+      (expression) => values.known(expression),
       fallbackUses(answers, index),
     );
   });
