@@ -65,9 +65,8 @@ async function worker(): Promise<PlayerBridge> {
   return new PlayerBridge(await connectBridge(nodeWorkerPort(PLAYER_WORKER, BUILD), BUILD));
 }
 
-/** Both backends, the Worker's ended after `body`. */
-async function onBoth(body: (bridge: PlayerBridge, name: string) => Promise<void>) {
-  await body(await inProcessBridge(), "in-process");
+/** `body` on a Worker's backend, ended after it. */
+async function onWorker(body: (bridge: PlayerBridge, name: string) => Promise<void>) {
   const remote = await worker();
   try {
     await body(remote, "worker");
@@ -77,7 +76,7 @@ async function onBoth(body: (bridge: PlayerBridge, name: string) => Promise<void
 }
 
 test("without a demand no publication carries the calls; with one each does; after it ends none does", async () => {
-  await onBoth(async (bridge, name) => {
+  await onWorker(async (bridge, name) => {
     let session = await bridge.start(await prepared(bridge), START, false);
     const minimal = (current: PlayerSession) => {
       assert.equal("calls" in current.state, false, name);
@@ -121,9 +120,7 @@ test("a call view reply of another revision than the store's is dropped", async 
 });
 
 test("a call view request behind an op whose reply is in transit: the op's publication shows first, without calls", async () => {
-  await onBoth(async (bridge, name) => {
-    const remote = name === "worker";
-    const local = remote ? bridge : await inProcessBridge(50);
+  await onWorker(async (local) => {
     const session = await local.start(await prepared(local), START, false);
     const applied: { readonly revision: number; readonly calls: boolean }[] = [];
     const record = () => {
@@ -143,7 +140,6 @@ test("a call view request behind an op whose reply is in transit: the op's publi
       { revision: session.revision + 1, calls: true },
     ]);
     assert.equal(after, local.latest(session));
-    if (!remote) local.client.terminate();
   });
 });
 
@@ -164,7 +160,7 @@ test("a facade call flushes a call view reply in transit and keeps it across a s
 });
 
 test("a Player error stop freezes the session with its call view, unasked, and changes nothing it shows", async () => {
-  await onBoth(async (bridge, name) => {
+  await onWorker(async (bridge, name) => {
     const session = await bridge.start(await prepared(bridge), START, false);
     await bridge.request(session, "observeTime", { atMs: 500, media: [] });
     const before = bridge.latest(session)!;
@@ -246,7 +242,7 @@ test("Debug's readers give results that share nothing with the view they read", 
 /**
  * The debug facts no tape of L5b–L5e reaches, each from a script of its own: a called file's frame, a blocking timer
  * and one that a block suspended, a timed button's countdown, and the frames of a permanent button's and a media cue's
- * blocks. Each runs through publications with its calls viewed, on both backends, where `viewed` checks every reader
+ * blocks. Each runs through publications with its calls viewed, on a Worker, where `viewed` checks every reader
  * against the readers before L5f; the facts seen must cover each kind.
  */
 const KINDS: readonly {
@@ -314,7 +310,7 @@ const KINDS: readonly {
 ];
 
 test("every kind of call, timer and countdown Debug names comes through publications as the readers before the reply's views (#1918) gave it", async () => {
-  await onBoth(async (bridge, backend) => {
+  await onWorker(async (bridge, backend) => {
     const seen = {
       calls: new Set<string>(),
       timers: new Set<string>(),

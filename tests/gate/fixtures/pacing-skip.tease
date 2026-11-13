@@ -1,5 +1,0 @@
-// gate-host: skipsPacing
-// The gate's pacing-skip fixture: paced messages, each gate skipped by the player as soon as it shows.
-say "A paced message"
-say "Another paced message"
-exit

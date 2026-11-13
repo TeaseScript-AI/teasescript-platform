@@ -126,7 +126,7 @@ function mount(
 }
 
 /*
- * Every row runs on both topologies (L5i.7); a restore on the Worker goes through the test entry's `restoreForTest`.
+ * Every row runs on a Worker (L5i.7); a restore goes through the Worker test entry's `restoreForTest`.
  * The file's end checks every registered row ran.
  */
 const RERUN = rerunRegistry({

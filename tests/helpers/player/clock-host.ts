@@ -246,7 +246,7 @@ export async function mount(
   };
   const scope = effectScope();
   const transport =
-    delayMs === undefined ? null : await loadPlayerModule("player/engine-bridge/in-process.ts");
+    delayMs === undefined ? null : await loadPlayerModule("tests/helpers/bridge/in-process.ts");
   // EVIDENCE: validation: the bundle's in-process backend, whose `createInProcessBackend` makes a `PlayerBridge`.
   const create = transport?.createInProcessBackend as
     ((build: unknown, options: unknown) => PlayerBridge) | undefined;

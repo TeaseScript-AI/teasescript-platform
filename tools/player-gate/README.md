@@ -6,7 +6,8 @@ runs real browsers and the Pixel 4a, outside CI, and never sets a threshold. It 
 - the production Player builds it is given;
 - gate variants of those builds, made by `variants/vite.config.mjs`: an `instrumented` bridge seam on both backends,
   and `delayed` replies at 0, 50 or 250 ms; both give the driver the Player's host object (`globalThis.__gatePlayer`);
-- the bridge page (`bridge/`), which runs the real engine Worker entry and the in-process backend below the Player.
+- the bridge page (`bridge/`), which runs the real engine Worker entry, or the tests' in-process backend, below the
+  Player.
 
 Playwright is loaded from the package.json that `PLAYWRIGHT_PACKAGE` names. Without it, or without a phone, the kit
 exits 2.

@@ -1,4 +1,4 @@
-import type { Hatched } from "../../../player/engine-bridge/in-process.js";
+import type { Hatched } from "../bridge/in-process.js";
 import type { PlayerBridge } from "../../../player/runtime/player-bridge.js";
 import type { PlayerRuntimeSession } from "../../../player/runtime/runtime-adapter.js";
 import type { PlayerSession } from "../../../player/runtime/runtime-view.js";
@@ -8,7 +8,7 @@ import { loadPlayerModule } from "../player-modules.js";
 
 /*
  * The UI tests drive the sessions a composable's host shows with the adapter's functions, as a family not yet converted
- * does in the Player through the transition facade (`player/engine-bridge/in-process.ts`). `onHost` gives an adapter
+ * does in the Player through the transition facade (`tests/helpers/bridge/in-process.ts`). `onHost` gives an adapter
  * function that runs such a session's call in its host, through the facade of the bundle the composables run in.
  */
 
@@ -39,7 +39,7 @@ let introduceNow:
 
 /** Loads the facade of the bundle the composables run in; call it in `before`, before any `onHost` call runs. */
 export async function loadHostFacade(): Promise<void> {
-  const facade = await loadPlayerModule("player/engine-bridge/in-process.ts");
+  const facade = await loadPlayerModule("tests/helpers/bridge/in-process.ts");
   if (typeof facade.hatch !== "function") throw new Error("The bundle has no facade.");
   // EVIDENCE: validation: checked as a function above; it is the bundle facade's `hatch`.
   hatch = facade.hatch as Hatch;

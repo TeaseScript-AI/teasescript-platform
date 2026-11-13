@@ -866,40 +866,12 @@ published.
 
 A frozen failure matches no publication, so it is judged by its recorded successful prefix replayed.
 
-### The L5 gate's K/F tapes
-
-`tests/gate/` drives real packages through the bridge for the L5 activation gate. One typed candidate table
-(`candidates.ts`) proposes finite, ordered requests for every kind of foreground presentation and pending action; the
-engine decides; the driver (`driver.ts`) records every request and reply on the client (`tape.ts`), declines and their
-publications included, and ends a tape `halted`, `failed` or `cut` (250 accepted inputs, a complete prefix for this
-policy, each closed by a final capture) or incomplete, reported as such (`notPrepared`, `unsupported`, `refused`,
-`stalled`, a `thrown` request that ended the session, a `captureFailed`, a `harnessError`). The adapter oracle
-(`oracle.ts`) judges every tape against the adapter, keeping its own revision and event cursor, and the fixed tape
-replays on every backend, failing at its first differing entry. Coverage is what the tapes ran, never what they could reach.
-
-`tests/player/player-gate-tapes.test.ts` holds the structural claim (the outcome readings cover exactly the table's candidate
-ops, and `ADAPTER_OPS` has a path for each; `prepare`, `start` and `captureCheckpoint` are the driver's own requests)
-and bounded runtime witnesses generated from the engine's guards, with their controls' mutants. The
-workload runs outside CI on a queue worker: `node tools/player-gate/tapes/record.mjs --out DIR --f DIR --k DIR
---fixtures tests/gate/fixtures [--shard I/N]` in a built tree records, judges and replays every F and K package and
-the gate's fixtures (one small source per mechanism group the corpus never meets), preparation-only ones included, and
-reports what each tape met (`inventory.ts`); `census.mjs` counts every mechanism, lists those no tape met and those met
-only in incomplete tapes, and picks the browser and Pixel cohorts.
-
-In a browser, `node tools/player-gate/tapes/browser.mjs --engine E --bridge DIR --tapes DIR --census FILE --out FILE`
-replays the census's pinned cohort, each tape checked against its pinned hash, on the bridge page's replay mode
-(`tools/player-gate/bridge/replay.mjs`) through both backends, with the same comparison and no tolerance. A tape that
-differs in one engine is a measured value. Since #2147 an authored colour whose numbers have at most 20 significant
-digits normalizes to the same text in every engine, which converts it with engine-independent arithmetic.
-
 ## Worker-topology settings
 
-`tests/helpers/player/worker-topology.ts` runs a row on the in-process host and on a Node Worker. Two settings, read
-when it loads and refused when malformed:
+`tests/helpers/player/worker-topology.ts` runs a row on a Node Worker, as the Player runs its engine. Tests that need
+the host's state synchronously use the in-process backend instead (`tests/helpers/bridge/in-process.ts`), which no
+product path builds. One setting, read when the helper loads and refused when malformed:
 
-- `PLAYER_TEST_TOPOLOGY`: `both` (the default) or `worker`. With `worker`, only the Worker's rows run and are owed by
-  each file's registry; an in-process-only case is not owed, and a standalone in-process test still runs but is no
-  Worker coverage.
 - `PLAYER_TEST_WORKER_DELAY_MS`: a whole number of milliseconds (default 0). Every message and failure from a Worker
   reaches its client that late, in order, on real time that mocked timers neither move nor hold. A loss goes through
   the same queue as the replies by construction; no test asserts that a reply sent before it arrives first. A delivery
@@ -911,11 +883,10 @@ when it loads and refused when malformed:
 
 ```sh
 npm run build:typescript && npm run build:player-test-modules
-PLAYER_TEST_TOPOLOGY=worker PLAYER_TEST_WORKER_DELAY_MS=3000 node tools/test-output-filter.mjs dist/tests/<file>.test.js
+PLAYER_TEST_WORKER_DELAY_MS=3000 node tools/test-output-filter.mjs dist/tests/<file>.test.js
 ```
 
-Select by these settings, not by test title: a title filter skips Worker tests whose title names no topology, and the
-registries then fail for rows they still owe. The runner's exit status is the result. The normal limit per test and
+Select by file, not by test title: a title filter skips tests the registries still owe, which then fail. The runner's exit status is the result. The normal limit per test and
 per hook is not raised for the challenge.
 
 The challenge is a diagnostic, not a gate: no pull request owes a passing challenge. Run it on the affected file when a

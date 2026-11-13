@@ -1,14 +1,18 @@
-import type { InstructionPlan } from "../../src/playback.js";
-import { ensureRun, RetiredRunError, type RunBegin } from "./recording/export-observation.js";
-import type { DebugRecording } from "../debug/debug-recorder.js";
+import type { InstructionPlan } from "../../../src/playback.js";
+import {
+  ensureRun,
+  RetiredRunError,
+  type RunBegin,
+} from "../../../player/engine-bridge/recording/export-observation.js";
+import type { DebugRecording } from "../../../player/debug/debug-recorder.js";
 import {
   createPlayerRuntimeSession,
   type PlayerRuntimeSession,
   type PlayerRuntimeSessionOptions,
-} from "../runtime/runtime-adapter.js";
-import type { PlayerSession } from "../runtime/runtime-view.js";
-import { PlayerBridge } from "../runtime/player-bridge.js";
-import { openBridge, type ClientPort } from "./client.js";
+} from "../../../player/runtime/runtime-adapter.js";
+import type { PlayerSession } from "../../../player/runtime/runtime-view.js";
+import { PlayerBridge } from "../../../player/runtime/player-bridge.js";
+import { openBridge, type ClientPort } from "../../../player/engine-bridge/client.js";
 import {
   alignTrace,
   closeConnection,
@@ -16,8 +20,8 @@ import {
   playerOpsContext,
   type PlayerOpsContext,
   type TracingIntent,
-} from "./player-ops.js";
-import type { BuildIdentity } from "./protocol.js";
+} from "../../../player/engine-bridge/player-ops.js";
+import type { BuildIdentity } from "../../../player/engine-bridge/protocol.js";
 import {
   beginRecordingAt,
   HeldSession,
@@ -25,21 +29,25 @@ import {
   startRandom,
   type StartOptions,
   type StartRandom,
-} from "./ops/session.js";
-import type { RuntimeDebugContext } from "../../src/runtime/debug/debug-trace.js";
-import type { RandomControlOptions } from "../../src/runtime/random/random-control.js";
-import type { Delivery } from "./delivery.js";
-import { decodeMessage } from "./transport.js";
-import { parseHistoryMarks, type HistoryMarks } from "../debug/debug-history-marks.js";
-import { startBridgeHost, type HostPort, type HostSessions } from "./worker-host.js";
+} from "../../../player/engine-bridge/ops/session.js";
+import type { RuntimeDebugContext } from "../../../src/runtime/debug/debug-trace.js";
+import type { RandomControlOptions } from "../../../src/runtime/random/random-control.js";
+import type { Delivery } from "../../../player/engine-bridge/delivery.js";
+import { decodeMessage } from "../../../player/engine-bridge/transport.js";
+import { parseHistoryMarks, type HistoryMarks } from "../../../player/debug/debug-history-marks.js";
+import {
+  startBridgeHost,
+  type HostPort,
+  type HostSessions,
+} from "../../../player/engine-bridge/worker-host.js";
 
 /*
- * The engine's backend in the caller's realm, for tests and the gate kit only: the same host and ops as the engine's
- * Worker (`browser-client.ts`), over a port pair that passes every message through `structuredClone`. A request a
- * session op handles runs when it is posted; replies arrive later, on a microtask or after `delayMs`, as from a Worker.
+ * The engine's backend in the caller's realm, for tests and the gate kit's bridge page: the same host and ops as the
+ * engine's Worker (`player/engine-bridge/browser-client.ts`), over a port pair that passes every message through
+ * `structuredClone`. A request a session op handles runs when it is posted; replies arrive later, on a microtask or after
+ * `delayMs`, as from a Worker. The Player itself always runs its engine in the Worker.
  *
- * The **facade** below reaches the host's sessions synchronously, for tests only. No main-realm module imports this one
- * (`inventory.ts`'s `RATCHET` is empty); the L5 gate requires this module gone, not only RATCHET empty.
+ * The **facade** below reaches the host's sessions synchronously, for tests only.
  */
 
 interface Backend {

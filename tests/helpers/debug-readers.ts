@@ -5,7 +5,7 @@ import {
   interactionDeadlineMs,
   type RuntimeForegroundActionSnapshot,
 } from "../../src/runtime/actions/model.js";
-import { hatch } from "../../player/engine-bridge/in-process.js";
+import { hatch } from "./bridge/in-process.js";
 import { instructionFacts } from "../../player/engine-bridge/instruction-facts.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import type { PlayerRuntimeSession } from "../../player/runtime/runtime-adapter.js";

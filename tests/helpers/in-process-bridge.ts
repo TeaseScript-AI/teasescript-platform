@@ -1,10 +1,10 @@
-import { createInProcessBackend, introduceNow } from "../../player/engine-bridge/in-process.js";
+import { createInProcessBackend, introduceNow } from "./bridge/in-process.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import type { PlayerRuntimeSession } from "../../player/runtime/runtime-adapter.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
 import { NO_MARKS } from "../../player/debug/debug-history-marks.js";
 
-export { hatch } from "../../player/engine-bridge/in-process.js";
+export { hatch } from "./bridge/in-process.js";
 
 const BUILD = { commit: null, dirty: null, mode: null, appVersion: null };
 

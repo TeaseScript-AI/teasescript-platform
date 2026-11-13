@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { compilePlayerProject } from "../../player/runtime/compile-project.js";
 import { BridgeRequestError, connectBridge } from "../../player/engine-bridge/client.js";
-import { heldRandom, introduceNow } from "../../player/engine-bridge/in-process.js";
+import { heldRandom, introduceNow } from "../helpers/bridge/in-process.js";
 import { nodeWorkerPort } from "../../player/engine-bridge/node-client.js";
 import { HeldSession } from "../../player/engine-bridge/ops/session.js";
 import {
@@ -46,9 +46,8 @@ async function worker(): Promise<PlayerBridge> {
   return new PlayerBridge(await connectBridge(nodeWorkerPort(PLAYER_WORKER, BUILD), BUILD));
 }
 
-/** Both backends, the Worker's ended after `body`. */
-async function onBoth(body: (bridge: PlayerBridge, name: string) => Promise<void>) {
-  await body(await inProcessBridge(), "in-process");
+/** `body` on a Worker's backend, ended after it. */
+async function onWorker(body: (bridge: PlayerBridge, name: string) => Promise<void>) {
   const remote = await worker();
   try {
     await body(remote, "worker");
@@ -164,7 +163,7 @@ test("the host's control decides, pauses, refuses and records as the adapter's o
   );
   const [hitSite = "", rollSite = ""] = sitesOf(plan, "chance", "randomInteger");
   const settings: [string, RandomNext][] = [[hitSite, "untried"]];
-  await onBoth(async (bridge, name) => {
+  await onWorker(async (bridge, name) => {
     const mirror = adapterMirror(plan, new Map(settings));
     const session = await bridge.start(await prepared(bridge, plan), START, false, {
       owner: 1,
@@ -212,7 +211,7 @@ test("a refused resolution leaves the history exactly as before, for a site with
     'for turn in 1..=2 {\n    let hit = chance(50)\n    let roll = randomInteger(1..=6)\n}\nshowButton "Done"\nexit',
   );
   const [hitSite = "", rollSite = ""] = sitesOf(plan, "chance", "randomInteger");
-  await onBoth(async (bridge, name) => {
+  await onWorker(async (bridge, name) => {
     const session = await bridge.start(await prepared(bridge, plan), START, false, {
       owner: 1,
       intent: intentOf(1, 1, []),
@@ -251,7 +250,7 @@ test("a settings change posted before an observation applies to the draws that o
   const plan = compiled(
     'wait 1 s\nlet hit = chance(50)\nsay "after", instant\nshowButton "Done"\nexit',
   );
-  await onBoth(async (bridge, name) => {
+  await onWorker(async (bridge, name) => {
     const session = await bridge.start(await prepared(bridge, plan), START, false, { owner: 1 });
     void control(bridge, intentOf(1, 1, []), session);
     await bridge.request(session, "observeTime", { atMs: 2_000, media: [] });
@@ -262,7 +261,7 @@ test("a settings change posted before an observation applies to the draws that o
 
 test("a settings change racing a Start applies to the right session: queued, and through the facade", async () => {
   const plan = compiled('let hit = chance(50)\nsay "after", instant\nshowButton "Done"\nexit');
-  await onBoth(async (bridge, name) => {
+  await onWorker(async (bridge, name) => {
     const token = await prepared(bridge, plan);
     const before = await bridge.start(token, START, false, { owner: 1 });
     // The intent waits behind the earlier session's held turn; the Start carries it.
@@ -301,7 +300,7 @@ test("a reset an intent overtook still resets once, and a repeated watermark res
     'for turn in 1..=3 {\n    let hit = chance(50)\n}\nlet roll = randomInteger(1..=6)\nshowButton "Done"\nexit',
   );
   const [hitSite = ""] = sitesOf(plan, "chance");
-  await onBoth(async (bridge, name) => {
+  await onWorker(async (bridge, name) => {
     const token = await prepared(bridge, plan);
     // The hit site's draws go on by themselves, recorded; each session pauses at its roll.
     const first = await bridge.start(token, START, false, {
@@ -334,7 +333,7 @@ test("a session of a Player that ended neither decides by nor records into the n
     'wait 1 s\nlet hit = chance(50)\nsay "hit ${hit}", instant\nshowButton "Done"\nexit',
   );
   const [hitSite = ""] = sitesOf(plan, "chance");
-  await onBoth(async (bridge, name) => {
+  await onWorker(async (bridge, name) => {
     const token = await prepared(bridge, plan);
     const old = await bridge.start(token, START, false, {
       owner: 1,
@@ -367,7 +366,7 @@ test("an old Player's queued Least tried is refused before it reads the next Pla
     'let roll = randomInteger(1..=6)\nsay "${roll}", instant\nshowButton "Done"\nexit',
   );
   const [rollSite = ""] = sitesOf(plan, "randomInteger");
-  await onBoth(async (bridge, name) => {
+  await onWorker(async (bridge, name) => {
     const token = await prepared(bridge, plan);
     const old = await bridge.start(token, START, false, { owner: 1, intent: intentOf(1, 1, []) });
     const drawId = shown(bridge, old).state.randomDraw!.drawId;
@@ -391,7 +390,7 @@ test("a changed control never meets a catch-up's copy: an adoption keeps its cop
   const plan = compiled(
     'repeat 20 {\n    wait 10 ms\n}\nlet hit = chance(50)\nsay "hit", instant\nshowButton "Done"\nexit',
   );
-  await onBoth(async (bridge, name) => {
+  await onWorker(async (bridge, name) => {
     const token = await prepared(bridge, plan);
     // Adopted after the control changed: the copy ran without it, and the session's next draw pauses.
     const session = await bridge.start(token, START, false, { owner: 1 });

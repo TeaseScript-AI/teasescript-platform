@@ -3,7 +3,7 @@ import test, { before, type TestContext } from "node:test";
 import { effectScope, watch, type Ref } from "vue";
 
 import type * as CompileProject from "../../player/runtime/compile-project.js";
-import type * as InProcess from "../../player/engine-bridge/in-process.js";
+import type * as InProcess from "../helpers/bridge/in-process.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import type * as RuntimeAdapter from "../../player/runtime/runtime-adapter.js";
 import type { PlayerRuntimeSessionOptions } from "../../player/runtime/runtime-adapter.js";
@@ -100,7 +100,7 @@ before(async () => {
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its host API.
   usePlayerSession = module.usePlayerSession as typeof usePlayerSession;
   // EVIDENCE: validation: the bundle the composable runs in, whose facade reaches its sessions.
-  facade = (await loadPlayerModule("player/engine-bridge/in-process.ts")) as typeof facade;
+  facade = (await loadPlayerModule("tests/helpers/bridge/in-process.ts")) as typeof facade;
   // EVIDENCE: validation: the bundle's compiler module, from the same module graph.
   compiler = (await loadPlayerModule("player/runtime/compile-project.ts")) as typeof compiler;
   // EVIDENCE: validation: the bundle's adapter, whose sessions the facade's host holds.

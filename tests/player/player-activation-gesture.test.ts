@@ -6,7 +6,7 @@ import {
   compilePlayerProject,
   createPlayerRuntimeSession,
 } from "../../player/runtime/compile-project.js";
-import type * as InProcess from "../../player/engine-bridge/in-process.js";
+import type * as InProcess from "../helpers/bridge/in-process.js";
 import type { PrepareResult } from "../../player/engine-bridge/player-ops.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
@@ -40,7 +40,7 @@ let heldRecording: typeof InProcess.heldRecording;
 before(async () => {
   await loadHostFacade();
   const module = await loadPlayerModule("player/vue/src/session/usePlayerSession.ts");
-  const facade = await loadPlayerModule("player/engine-bridge/in-process.ts");
+  const facade = await loadPlayerModule("tests/helpers/bridge/in-process.ts");
   assert.equal(typeof module.usePlayerSession, "function");
   assert.equal(typeof facade.createInProcessBackend, "function");
   // EVIDENCE: validation: Vite loaded the real source module and the export is callable; this is its host API.
