@@ -398,6 +398,65 @@ test("a read below a selection takes its narrowing, each selected owner's own se
   }
 });
 
+// the test proves a kind, never an ingress (C9, the lead's ruling (a)): external data keeps exactly one boundary
+// check, at its ingress store or, where no store brought it, at the consumer, through every transfer that
+// keeps the value; a computed result brings no data in (Codex r1–r3 on #1770: the typed store, the operator, the
+// selection without an ingress are rows)
+const transfers: readonly (readonly [string, string, string, string, string])[] = [
+  ["a read", "", "integer", "repeat X {}", "valid, copy-type boundary"],
+  ["a copy", "", "integer", "let c = X\n repeat c {}", "valid, copy-type boundary"],
+  [
+    "a merge of one kind",
+    "",
+    "integer",
+    "let xs = [X, 1]\n repeat xs[0] {}",
+    "valid, copy-type boundary",
+  ],
+  [
+    "a literal's element",
+    "",
+    "integer",
+    "let xs = [X]\n repeat xs[0] {}",
+    "valid, copy-type boundary",
+  ],
+  ["a selection", "", "integer[]", "repeat X[0] {}", "valid, copy-type boundary"],
+  [
+    "an operator",
+    "",
+    "integer",
+    "let out: integer = X + 1\n repeat out {}",
+    "valid, copy-type boundary",
+  ],
+  [
+    "a typed store",
+    "",
+    "integer",
+    "let out: integer = X\n repeat out {}",
+    "valid, copy-type boundary",
+  ],
+  [
+    "an argument",
+    "function f(p: integer) {\n repeat p {}\n}\n",
+    "integer",
+    "f(X)",
+    "valid, copy-type boundary",
+  ],
+  [
+    "a result",
+    "function g(p): integer {\n return p\n}\n",
+    "integer",
+    "let out = g(X)\n repeat out {}",
+    "valid, copy-type boundary",
+  ],
+  [
+    "a default",
+    "",
+    "integer",
+    "let out: integer = X otherwise 0\n repeat out {}",
+    "warning, static warning, copy-type boundary",
+  ],
+];
+
 test("a consumer reads the narrowing as a store does, in the same order (#1073 PR 2, #1320)", () => {
   // (a record's outcome, its diagnostics' kinds and classes and its checks' kinds, in the three modes `record` asks)
   const answer = (...lines: readonly string[]): string => {
@@ -430,64 +489,6 @@ test("a consumer reads the narrowing as a store does, in the same order (#1073 P
     answer("let box = {n: 1.5}", "if box.n < 2 { repeat box.n {} }"),
     "warning-runtime-check, integer-use warning-runtime-check, integer-check",
   );
-  // the test proves a kind, never an ingress (C9, the lead's ruling (a)): external data keeps exactly one boundary
-  // check, at its ingress store or, where no store brought it, at the consumer, through every transfer that
-  // keeps the value; a computed result brings no data in (Codex r1–r3 on #1770: the typed store, the operator, the
-  // selection without an ingress are rows)
-  const transfers: readonly (readonly [string, string, string, string, string])[] = [
-    ["a read", "", "integer", "repeat X {}", "valid, copy-type boundary"],
-    ["a copy", "", "integer", "let c = X\n repeat c {}", "valid, copy-type boundary"],
-    [
-      "a merge of one kind",
-      "",
-      "integer",
-      "let xs = [X, 1]\n repeat xs[0] {}",
-      "valid, copy-type boundary",
-    ],
-    [
-      "a literal's element",
-      "",
-      "integer",
-      "let xs = [X]\n repeat xs[0] {}",
-      "valid, copy-type boundary",
-    ],
-    ["a selection", "", "integer[]", "repeat X[0] {}", "valid, copy-type boundary"],
-    [
-      "an operator",
-      "",
-      "integer",
-      "let out: integer = X + 1\n repeat out {}",
-      "valid, copy-type boundary",
-    ],
-    [
-      "a typed store",
-      "",
-      "integer",
-      "let out: integer = X\n repeat out {}",
-      "valid, copy-type boundary",
-    ],
-    [
-      "an argument",
-      "function f(p: integer) {\n repeat p {}\n}\n",
-      "integer",
-      "f(X)",
-      "valid, copy-type boundary",
-    ],
-    [
-      "a result",
-      "function g(p): integer {\n return p\n}\n",
-      "integer",
-      "let out = g(X)\n repeat out {}",
-      "valid, copy-type boundary",
-    ],
-    [
-      "a default",
-      "",
-      "integer",
-      "let out: integer = X otherwise 0\n repeat out {}",
-      "warning, static warning, copy-type boundary",
-    ],
-  ];
   for (const [name, prelude, type, body, expected] of transfers)
     for (const [where, before, read] of [
       ["an ingress store", "let raw = hostValue\n", "raw"],

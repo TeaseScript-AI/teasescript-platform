@@ -161,6 +161,75 @@ test("a stopped answer's items stand in the kinds' table order too, in the four 
   assert.ok(lists > 100, `${lists} lists`);
 });
 
+// (each diagnostic of a rule, a budget stop set aside)
+const ruled = (answers: Answers) =>
+  answers.diagnostics.flatMap((diagnostic) => ("rule" in diagnostic ? [diagnostic] : []));
+const warnings = (answers: Answers) =>
+  ruled(answers).flatMap((diagnostic) =>
+    diagnostic.class === "warning-runtime-check" ? [diagnostic] : [],
+  );
+const receivers = (answers: Answers) =>
+  warnings(answers).flatMap((warning) =>
+    warning.provenance.detail.receiver === null ? [] : [warning.provenance.detail.receiver.kinds],
+  );
+const sort = "let values: (string | integer)[] = hostValue\nvalues.sort()\nexit\n";
+const fallback =
+  'let direct: string | integer = "s"\nif hostValue == 1 { direct = 1 }\n' +
+  "let value: string | integer | duration = direct otherwise hostOther\nsay value\nexit\n";
+const fallbacks = (answers: Answers) =>
+  warnings(answers).flatMap((warning) => (warning.rule.rule === "fallback" ? [warning] : []));
+const stopped = (request: CoreAnalysisRequest) => analyseCore(request).stoppedAt("work");
+// (the admitted decision of `box`'s `n` elements, borrowed from a written type or not)
+const decided =
+  (inherited: boolean) =>
+  (answers: Answers, request: CoreAnalysisRequest): readonly (readonly string[])[] => {
+    const box = new CoreProgram(request).places.find(
+      ({ kind }) => kind.kind === "binding" && kind.name === "box",
+    )!.id;
+    const { admitted } = answers.place(box, [propertyStep("n"), "element"]);
+    return admitted.by === "decided" && admitted.inherited === inherited ? [admitted.kinds] : [];
+  };
+const deferred = (answers: Answers) =>
+  answers.budget.deferred.flatMap((warning) =>
+    warning.rule.rule === "elements" ? [{ warning, families: warning.rule.families }] : [],
+  );
+// (the items of the last `text` after `before` in `source`, or of its `step`)
+const readOf =
+  (source: string, before: string, text: string, step?: "element") =>
+  (answers: Answers): readonly (readonly string[])[] => {
+    const start = source.lastIndexOf(before + text) + before.length;
+    const node = answers.graph.nodes.find(
+      (found) =>
+        found.span?.start.offset === start && found.span.end.offset === start + text.length,
+    );
+    if (node === undefined) return [];
+    const items =
+      step === undefined ? (answers.at(node)?.items ?? []) : answers.project(node, step);
+    return [items.map((item) => item.tag)];
+  };
+// (a written type's admitted kinds at a path of a binding)
+const written =
+  (name: string, path: readonly string[]) =>
+  (answers: Answers, request: CoreAnalysisRequest): readonly (readonly string[])[] => {
+    const place = new CoreProgram(request).places.find(
+      ({ kind }) => kind.kind === "binding" && kind.name === name,
+    )!.id;
+    const { admitted } = answers.place(place, path);
+    return admitted.by === "written" ? [admitted.kinds] : [];
+  };
+const elements = (answers: Answers) =>
+  warnings(answers).flatMap((warning) =>
+    warning.rule.rule === "elements" ? [{ warning, families: warning.rule.families }] : [],
+  );
+const parse = "let xs: (string | integer)[] = fromJson(hostValue)\nxs.sort()\nexit\n";
+const load = 'let xs: (string | integer)[] = load("k", default: [1])\nxs.sort()\nexit\n';
+const w = "let w: string | integer = fromJson(hostValue)\n";
+const union =
+  "let w: (string | integer)[] | (string | integer)[] = fromJson(hostValue)\nsay w[0]\nexit\n";
+const narrowed =
+  "let x = hostValue\nif x is string | integer {\n  let y = x\n  let a = [y, 1]\n  a.sort()\n}\nexit\n";
+const typedLiteral = "let ys: (string | integer)[] = [fromJson(hostValue), 1]\nsay ys[0]\nexit\n";
+
 /**
  * #1398 (Codex r3, r4 and r5 on #1558): a list of a value's kinds takes its one order where it is
  * completed (`inItsOrder`): a written spelling's where exactly one spelling covers every kind but `null`, `unknown` and
@@ -185,408 +254,331 @@ const COMPOSED_ORDER_ROWS: readonly {
     request: CoreAnalysisRequest,
   ) => readonly (readonly string[])[];
   readonly expected: readonly string[];
-}[] = (() => {
-  // (each diagnostic of a rule, a budget stop set aside)
-  const ruled = (answers: Answers) =>
-    answers.diagnostics.flatMap((diagnostic) => ("rule" in diagnostic ? [diagnostic] : []));
-  const warnings = (answers: Answers) =>
-    ruled(answers).flatMap((diagnostic) =>
-      diagnostic.class === "warning-runtime-check" ? [diagnostic] : [],
-    );
-  const receivers = (answers: Answers) =>
-    warnings(answers).flatMap((warning) =>
-      warning.provenance.detail.receiver === null ? [] : [warning.provenance.detail.receiver.kinds],
-    );
-  const sort = "let values: (string | integer)[] = hostValue\nvalues.sort()\nexit\n";
-  const fallback =
-    'let direct: string | integer = "s"\nif hostValue == 1 { direct = 1 }\n' +
-    "let value: string | integer | duration = direct otherwise hostOther\nsay value\nexit\n";
-  const fallbacks = (answers: Answers) =>
-    warnings(answers).flatMap((warning) => (warning.rule.rule === "fallback" ? [warning] : []));
-  const stopped = (request: CoreAnalysisRequest) => analyseCore(request).stoppedAt("work");
-  // (the admitted decision of `box`'s `n` elements, borrowed from a written type or not)
-  const decided =
-    (inherited: boolean) =>
-    (answers: Answers, request: CoreAnalysisRequest): readonly (readonly string[])[] => {
-      const box = new CoreProgram(request).places.find(
-        ({ kind }) => kind.kind === "binding" && kind.name === "box",
-      )!.id;
-      const { admitted } = answers.place(box, [propertyStep("n"), "element"]);
-      return admitted.by === "decided" && admitted.inherited === inherited ? [admitted.kinds] : [];
-    };
-  const deferred = (answers: Answers) =>
-    answers.budget.deferred.flatMap((warning) =>
-      warning.rule.rule === "elements" ? [{ warning, families: warning.rule.families }] : [],
-    );
-  // (the items of the last `text` after `before` in `source`, or of its `step`)
-  const readOf =
-    (source: string, before: string, text: string, step?: "element") =>
-    (answers: Answers): readonly (readonly string[])[] => {
-      const start = source.lastIndexOf(before + text) + before.length;
-      const node = answers.graph.nodes.find(
-        (found) =>
-          found.span?.start.offset === start && found.span.end.offset === start + text.length,
-      );
-      if (node === undefined) return [];
-      const items =
-        step === undefined ? (answers.at(node)?.items ?? []) : answers.project(node, step);
-      return [items.map((item) => item.tag)];
-    };
-  // (a written type's admitted kinds at a path of a binding)
-  const written =
-    (name: string, path: readonly string[]) =>
-    (answers: Answers, request: CoreAnalysisRequest): readonly (readonly string[])[] => {
-      const place = new CoreProgram(request).places.find(
-        ({ kind }) => kind.kind === "binding" && kind.name === name,
-      )!.id;
-      const { admitted } = answers.place(place, path);
-      return admitted.by === "written" ? [admitted.kinds] : [];
-    };
-  const elements = (answers: Answers) =>
-    warnings(answers).flatMap((warning) =>
-      warning.rule.rule === "elements" ? [{ warning, families: warning.rule.families }] : [],
-    );
-  const parse = "let xs: (string | integer)[] = fromJson(hostValue)\nxs.sort()\nexit\n";
-  const load = 'let xs: (string | integer)[] = load("k", default: [1])\nxs.sort()\nexit\n';
-  const w = "let w: string | integer = fromJson(hostValue)\n";
-  const union =
-    "let w: (string | integer)[] | (string | integer)[] = fromJson(hostValue)\nsay w[0]\nexit\n";
-  const narrowed =
-    "let x = hostValue\nif x is string | integer {\n  let y = x\n  let a = [y, 1]\n  a.sort()\n}\nexit\n";
-  const typedLiteral = "let ys: (string | integer)[] = [fromJson(hostValue), 1]\nsay ys[0]\nexit\n";
-  return [
-    {
-      name: "a receiver beside its contract's reference kinds",
-      source: "let alias: speaker? = null\nsay alias.uppercase()\nexit\n",
-      lists: receivers,
-      expected: ["speaker", "null"],
-    },
-    {
-      name: "a host receiver beside its contract's reference kinds",
-      source: "let alias: speaker? = hostValue\nsay alias.uppercase()\nexit\n",
-      lists: receivers,
-      expected: ["speaker", "unknown"],
-    },
-    {
-      name: "a condition's other kinds at its site",
-      // (its other kinds stored by handlers: a run the compiler does not prove, the warning, never the route rule's error,
-      // AD-1 and X7)
-      source:
-        "let value: integer | string | duration | boolean = true\ntimer async 1 s { value = 1 }\n" +
-        'timer async 2 s { value = "s" }\ntimer async 3 s { value = 1 s }\nif value {}\nexit\n',
-      lists: (answers) =>
-        warnings(answers).flatMap((warning) =>
-          warning.kinds[0] === "integer" && warning.besides.length > 0 ? [warning.besides] : [],
-        ),
-      expected: ["string", "duration"],
-    },
-    {
-      name: "a sort's fits where a domain stands in for host data",
-      source: sort,
-      lists: (answers) =>
-        warnings(answers).flatMap((warning) =>
-          warning.rule.rule === "elements" ? [warning.fits] : [],
-        ),
-      expected: ["integer", "string"],
-    },
-    {
-      name: "a sort's families, in its elements' order",
-      source: sort,
-      lists: (answers) =>
-        ruled(answers).flatMap((diagnostic) =>
-          diagnostic.rule.rule === "elements" && diagnostic.rule.families.length > 0
-            ? [diagnostic.rule.families]
-            : [],
-        ),
-      expected: ["string", "number"],
-    },
-    {
-      name: "a sort's offending kind, by its elements' own order",
-      source: sort,
-      lists: (answers) =>
-        warnings(answers).flatMap((warning) =>
-          warning.rule.rule === "elements" ? [warning.kinds] : [],
-        ),
-      expected: ["integer"],
-    },
-    {
-      name: "toJson's fits where a domain stands in for host data",
-      source: "let values: (string | regex | integer)[] = hostValue\nsay toJson(values)\nexit\n",
-      lists: (answers) =>
-        warnings(answers).flatMap((warning) =>
-          warning.rule.rule === "json" ? [warning.fits] : [],
-        ),
-      expected: ["integer", "string"],
-    },
-    {
-      name: "a fallback's family beside its receiving union",
-      source: fallback,
-      lists: (answers) =>
-        fallbacks(answers).flatMap((warning) =>
-          warning.rule.rule === "fallback"
-            ? [
-                warning.rule.type,
-                warning.obligation.against,
-                warning.obligation.on.split(" against ")[1]!.split("|"),
-              ]
-            : [],
-        ),
-      expected: ["integer", "number", "string", "duration"],
-    },
-    {
-      name: "a fallback's family alone",
-      source:
-        'let direct: string | integer = "s"\nif hostValue == 1 { direct = 1 }\n' +
-        "let value = direct otherwise false\nsay value\nexit\n",
-      lists: (answers) =>
-        fallbacks(answers).flatMap((warning) =>
-          warning.rule.rule === "fallback" ? [warning.rule.type, warning.obligation.against] : [],
-        ),
-      expected: ["integer", "number", "string"],
-    },
-    {
-      name: "what two reads take together",
-      source:
-        'let value = [] + "s"\nlet first: number = value\nlet second = value + 1\nsay second\nexit\n',
-      lists: (answers) =>
-        ruled(answers).flatMap((diagnostic) =>
-          diagnostic.class === "compile-error" && diagnostic.expects?.takes
-            ? [diagnostic.expects.takes]
-            : [],
-        ),
-      expected: ["integer", "number"],
-    },
-    {
-      name: "a shown set's elements",
-      source:
-        'let values: (string | integer | object) set = set["s"]\nif hostValue == 1 { values = set[1] }\n' +
-        'say "${values}"\nexit\n',
-      lists: (answers) =>
-        ruled(answers).flatMap((diagnostic) =>
-          diagnostic.rule.rule === "shown" && diagnostic.rule.elements.length > 0
-            ? [diagnostic.rule.elements]
-            : [],
-        ),
-      expected: ["string", "integer", "object"],
-    },
-    {
-      name: "one place's decision after a stop",
-      source: 'let box = {n: [1, "s"]}\nexit\n',
-      analyse: stopped,
-      lists: decided(false),
-      expected: ["integer", "string"],
-    },
-    {
-      name: "a written type a place's decision borrows after a stop",
-      source: "let w: string | integer = 1\nlet box = {n: [w]}\nexit\n",
-      analyse: stopped,
-      lists: decided(true),
-      expected: ["string", "integer"],
-    },
-    {
-      name: "a written type a fallback's receiving type repeats",
-      source: 'let value: string | integer = load("key", default: false)\nsay value\nexit\n',
-      lists: (answers) =>
-        ruled(answers).flatMap((diagnostic) =>
-          diagnostic.rule.rule === "fallback" ? [diagnostic.rule.type] : [],
-        ),
-      expected: ["string", "integer"],
-    },
-    ...[40, 160].flatMap((allowance) => {
-      const analyse = (request: CoreAnalysisRequest) =>
-        withTestAllowance(allowance, () => analyseCore(request));
-      return [
-        {
-          name: `a deferred sort's offending kind at the allowance ${allowance}`,
-          source: sort,
-          analyse,
-          lists: (answers: Answers) => deferred(answers).map(({ warning }) => warning.kinds),
-          expected: ["integer"],
-        },
-        {
-          name: `a deferred sort's fits at the allowance ${allowance}`,
-          source: sort,
-          analyse,
-          lists: (answers: Answers) => deferred(answers).map(({ warning }) => warning.fits),
-          expected: ["integer", "string"],
-        },
-        {
-          name: `a deferred sort's families at the allowance ${allowance}`,
-          source: sort,
-          analyse,
-          lists: (answers: Answers) => deferred(answers).map(({ families }) => families),
-          expected: ["string", "number"],
-        },
-      ];
-    }),
-    {
-      name: "a literal's sorted elements after a stop",
-      source: 'let ys = ["s", 1].sort()\nexit\n',
-      analyse: (request) => withTestAllowance(40, () => analyseCore(request)),
-      lists: (answers) =>
-        ruled(answers).flatMap((diagnostic) =>
-          diagnostic.rule.rule === "elements" ? [diagnostic.kinds] : [],
-        ),
-      expected: ["integer", "string"],
-    },
-    ...[
-      ["parse", parse],
-      ["load", load],
-    ].flatMap(([how, source]) => [
+}[] = [
+  {
+    name: "a receiver beside its contract's reference kinds",
+    source: "let alias: speaker? = null\nsay alias.uppercase()\nexit\n",
+    lists: receivers,
+    expected: ["speaker", "null"],
+  },
+  {
+    name: "a host receiver beside its contract's reference kinds",
+    source: "let alias: speaker? = hostValue\nsay alias.uppercase()\nexit\n",
+    lists: receivers,
+    expected: ["speaker", "unknown"],
+  },
+  {
+    name: "a condition's other kinds at its site",
+    // (its other kinds stored by handlers: a run the compiler does not prove, the warning, never the route rule's error,
+    // AD-1 and X7)
+    source:
+      "let value: integer | string | duration | boolean = true\ntimer async 1 s { value = 1 }\n" +
+      'timer async 2 s { value = "s" }\ntimer async 3 s { value = 1 s }\nif value {}\nexit\n',
+    lists: (answers) =>
+      warnings(answers).flatMap((warning) =>
+        warning.kinds[0] === "integer" && warning.besides.length > 0 ? [warning.besides] : [],
+      ),
+    expected: ["string", "duration"],
+  },
+  {
+    name: "a sort's fits where a domain stands in for host data",
+    source: sort,
+    lists: (answers) =>
+      warnings(answers).flatMap((warning) =>
+        warning.rule.rule === "elements" ? [warning.fits] : [],
+      ),
+    expected: ["integer", "string"],
+  },
+  {
+    name: "a sort's families, in its elements' order",
+    source: sort,
+    lists: (answers) =>
+      ruled(answers).flatMap((diagnostic) =>
+        diagnostic.rule.rule === "elements" && diagnostic.rule.families.length > 0
+          ? [diagnostic.rule.families]
+          : [],
+      ),
+    expected: ["string", "number"],
+  },
+  {
+    name: "a sort's offending kind, by its elements' own order",
+    source: sort,
+    lists: (answers) =>
+      warnings(answers).flatMap((warning) =>
+        warning.rule.rule === "elements" ? [warning.kinds] : [],
+      ),
+    expected: ["integer"],
+  },
+  {
+    name: "toJson's fits where a domain stands in for host data",
+    source: "let values: (string | regex | integer)[] = hostValue\nsay toJson(values)\nexit\n",
+    lists: (answers) =>
+      warnings(answers).flatMap((warning) => (warning.rule.rule === "json" ? [warning.fits] : [])),
+    expected: ["integer", "string"],
+  },
+  {
+    name: "a fallback's family beside its receiving union",
+    source: fallback,
+    lists: (answers) =>
+      fallbacks(answers).flatMap((warning) =>
+        warning.rule.rule === "fallback"
+          ? [
+              warning.rule.type,
+              warning.obligation.against,
+              warning.obligation.on.split(" against ")[1]!.split("|"),
+            ]
+          : [],
+      ),
+    expected: ["integer", "number", "string", "duration"],
+  },
+  {
+    name: "a fallback's family alone",
+    source:
+      'let direct: string | integer = "s"\nif hostValue == 1 { direct = 1 }\n' +
+      "let value = direct otherwise false\nsay value\nexit\n",
+    lists: (answers) =>
+      fallbacks(answers).flatMap((warning) =>
+        warning.rule.rule === "fallback" ? [warning.rule.type, warning.obligation.against] : [],
+      ),
+    expected: ["integer", "number", "string"],
+  },
+  {
+    name: "what two reads take together",
+    source:
+      'let value = [] + "s"\nlet first: number = value\nlet second = value + 1\nsay second\nexit\n',
+    lists: (answers) =>
+      ruled(answers).flatMap((diagnostic) =>
+        diagnostic.class === "compile-error" && diagnostic.expects?.takes
+          ? [diagnostic.expects.takes]
+          : [],
+      ),
+    expected: ["integer", "number"],
+  },
+  {
+    name: "a shown set's elements",
+    source:
+      'let values: (string | integer | object) set = set["s"]\nif hostValue == 1 { values = set[1] }\n' +
+      'say "${values}"\nexit\n',
+    lists: (answers) =>
+      ruled(answers).flatMap((diagnostic) =>
+        diagnostic.rule.rule === "shown" && diagnostic.rule.elements.length > 0
+          ? [diagnostic.rule.elements]
+          : [],
+      ),
+    expected: ["string", "integer", "object"],
+  },
+  {
+    name: "one place's decision after a stop",
+    source: 'let box = {n: [1, "s"]}\nexit\n',
+    analyse: stopped,
+    lists: decided(false),
+    expected: ["integer", "string"],
+  },
+  {
+    name: "a written type a place's decision borrows after a stop",
+    source: "let w: string | integer = 1\nlet box = {n: [w]}\nexit\n",
+    analyse: stopped,
+    lists: decided(true),
+    expected: ["string", "integer"],
+  },
+  {
+    name: "a written type a fallback's receiving type repeats",
+    source: 'let value: string | integer = load("key", default: false)\nsay value\nexit\n',
+    lists: (answers) =>
+      ruled(answers).flatMap((diagnostic) =>
+        diagnostic.rule.rule === "fallback" ? [diagnostic.rule.type] : [],
+      ),
+    expected: ["string", "integer"],
+  },
+  ...[40, 160].flatMap((allowance) => {
+    const analyse = (request: CoreAnalysisRequest) =>
+      withTestAllowance(allowance, () => analyseCore(request));
+    return [
       {
-        name: `a written ${how}'s elements, read`,
-        source: source!,
-        lists: readOf(source!, "\n", "xs", "element"),
-        expected: ["string", "integer", "empty"],
-      },
-      {
-        name: `a written ${how}'s admitted elements`,
-        source: source!,
-        lists: written("xs", ["element"]),
-        expected: ["string", "integer"],
-      },
-      {
-        name: `a written ${how}'s sorted elements' offending kind`,
-        source: source!,
-        lists: (answers: Answers) => elements(answers).map(({ warning }) => warning.kinds),
-        expected: ["integer"],
-      },
-      {
-        name: `a written ${how}'s sorted elements' families`,
-        source: source!,
-        lists: (answers: Answers) => elements(answers).map(({ families }) => families),
-        expected: ["string", "number"],
-      },
-      ...[40, 160].map((allowance) => ({
-        name: `a written ${how}'s deferred sort's offending kind at the allowance ${allowance}`,
-        source: source!,
-        analyse: (request: CoreAnalysisRequest) =>
-          withTestAllowance(allowance, () => analyseCore(request)),
+        name: `a deferred sort's offending kind at the allowance ${allowance}`,
+        source: sort,
+        analyse,
         lists: (answers: Answers) => deferred(answers).map(({ warning }) => warning.kinds),
         expected: ["integer"],
-      })),
-    ]),
-    {
-      name: "a written value beside an inferred kind it spells",
-      source: `${w}let xs = [1]\nxs.add(w)\nsay xs[0]\nexit\n`,
-      lists: readOf(`${w}let xs = [1]\nxs.add(w)\nsay xs[0]\nexit\n`, "say ", "xs[0]"),
-      expected: ["string", "integer"],
-    },
-    {
-      name: "a written value beside a kind it does not spell",
-      source: `${w}let x = w otherwise true\nsay x\nexit\n`,
-      lists: readOf(`${w}let x = w otherwise true\nsay x\nexit\n`, "say ", "x"),
-      expected: ["integer", "string", "boolean"],
-    },
-    {
-      name: "two spellings of one union joined",
-      source: `${w}let v: integer | string = fromJson(hostOther)\nlet xs = [w]\nxs.add(v)\nsay xs[0]\nexit\n`,
-      lists: readOf(
-        `${w}let v: integer | string = fromJson(hostOther)\nlet xs = [w]\nxs.add(v)\nsay xs[0]\nexit\n`,
-        "say ",
-        "xs[0]",
-      ),
-      expected: ["integer", "string"],
-    },
-    {
-      name: "one spelling read from two written places",
-      source: `${w}let u: string | integer = fromJson(hostOther)\nlet xs = [w]\nxs.add(u)\nsay xs[0]\nexit\n`,
-      lists: readOf(
-        `${w}let u: string | integer = fromJson(hostOther)\nlet xs = [w]\nxs.add(u)\nsay xs[0]\nexit\n`,
-        "say ",
-        "xs[0]",
-      ),
-      expected: ["string", "integer"],
-    },
-    {
-      name: "a written value in a literal's cell",
-      source: `${w}let xs = [w]\nsay xs[0]\nexit\n`,
-      lists: readOf(`${w}let xs = [w]\nsay xs[0]\nexit\n`, "say ", "xs[0]"),
-      expected: ["string", "integer"],
-    },
-    // (after a stop at the test allowance 16: a typed parse's written destination beside a whole number in a literal,
-    // the literal's children's kinds, each once; a sorted literal of a written value and a whole number, its deferred
-    // families; a typed load's default a written value, the stores' syntax decision)
-    {
-      name: "a stopped literal of a typed parse and a whole number",
-      source: typedLiteral,
-      analyse: (request) => withTestAllowance(16, () => analyseCore(request)),
-      lists: readOf(typedLiteral, " = ", "[fromJson(hostValue), 1]", "element"),
-      // (each child's kinds once, beside its sibling's, as a stopped literal's shape gives them)
-      expected: ["string", "integer", "integer"],
-    },
-    {
-      name: "a stopped sort of a literal of a written value and a whole number",
-      source: `${w}[w, 1].sort()\nexit\n`,
-      analyse: (request) => withTestAllowance(16, () => analyseCore(request)),
-      lists: (answers) => deferred(answers).map(({ families }) => families),
-      expected: ["string", "number"],
-    },
-    {
-      name: "a stopped syntax decision of a typed load's written default",
-      source: `${w}let x = load(hostOther, default: w)\nlet ys = [x, 1]\nys.sort()\nexit\n`,
-      analyse: stopped,
-      lists: (answers, request) => {
-        const x = new CoreProgram(request).places.find(
-          ({ kind }) => kind.kind === "binding" && kind.name === "x",
-        )!.id;
-        const { admitted } = answers.place(x, []);
-        return admitted.by === "decided" ? [admitted.kinds] : [];
       },
-      expected: ["string", "integer"],
-    },
-    // (Codex r8: after a stop at the test allowance 16, a sort of a placeless literal's element, #1581's cells)
-    {
-      name: "a stopped sort of a placeless literal's element",
-      source: '["s", 1][0].sort()\nexit\n',
-      analyse: (request) => withTestAllowance(16, () => analyseCore(request)),
-      lists: (answers) =>
-        ruled(answers).flatMap((diagnostic) =>
-          diagnostic.code === "TSV043" ? [diagnostic.kinds] : [],
-        ),
-      expected: ["integer", "string"],
-    },
-    // (Codex r6: after a stop, an inferred range conversion's elements; a written union of one spelling twice; a
-    // stored read a written type test narrows host data to, natural)
-    {
-      name: "a stopped range conversion's elements",
-      source: "let a = (1..5).toList()\nsay a[0]\nexit\n",
-      analyse: stopped,
-      lists: readOf(
-        "let a = (1..5).toList()\nsay a[0]\nexit\n",
-        "= ",
-        "(1..5).toList()",
-        "element",
+      {
+        name: `a deferred sort's fits at the allowance ${allowance}`,
+        source: sort,
+        analyse,
+        lists: (answers: Answers) => deferred(answers).map(({ warning }) => warning.fits),
+        expected: ["integer", "string"],
+      },
+      {
+        name: `a deferred sort's families at the allowance ${allowance}`,
+        source: sort,
+        analyse,
+        lists: (answers: Answers) => deferred(answers).map(({ families }) => families),
+        expected: ["string", "number"],
+      },
+    ];
+  }),
+  {
+    name: "a literal's sorted elements after a stop",
+    source: 'let ys = ["s", 1].sort()\nexit\n',
+    analyse: (request) => withTestAllowance(40, () => analyseCore(request)),
+    lists: (answers) =>
+      ruled(answers).flatMap((diagnostic) =>
+        diagnostic.rule.rule === "elements" ? [diagnostic.kinds] : [],
       ),
-      expected: ["integer", "empty"],
-    },
+    expected: ["integer", "string"],
+  },
+  ...[
+    ["parse", parse],
+    ["load", load],
+  ].flatMap(([how, source]) => [
     {
-      name: "a stopped parse of a written union of one spelling twice",
-      source: union,
-      analyse: (request) => withTestAllowance(16, () => analyseCore(request)),
-      lists: readOf(union, "= ", "fromJson(hostValue)", "element"),
+      name: `a written ${how}'s elements, read`,
+      source: source!,
+      lists: readOf(source!, "\n", "xs", "element"),
       expected: ["string", "integer", "empty"],
     },
     {
-      name: "a stored read a written type test narrows",
-      source: narrowed,
-      lists: readOf(narrowed, "[", "y"),
+      name: `a written ${how}'s admitted elements`,
+      source: source!,
+      lists: written("xs", ["element"]),
       expected: ["string", "integer"],
     },
     {
-      name: "a sort of a stored read a written type test narrows, its families",
-      source: narrowed,
-      lists: (answers) => elements(answers).map(({ families }) => families),
-      expected: ["string", "number"],
-    },
-    {
-      name: "a sort of a stored read a written type test narrows, its offending kind",
-      source: narrowed,
-      lists: (answers) => elements(answers).map(({ warning }) => warning.kinds),
+      name: `a written ${how}'s sorted elements' offending kind`,
+      source: source!,
+      lists: (answers: Answers) => elements(answers).map(({ warning }) => warning.kinds),
       expected: ["integer"],
     },
-  ];
-})();
+    {
+      name: `a written ${how}'s sorted elements' families`,
+      source: source!,
+      lists: (answers: Answers) => elements(answers).map(({ families }) => families),
+      expected: ["string", "number"],
+    },
+    ...[40, 160].map((allowance) => ({
+      name: `a written ${how}'s deferred sort's offending kind at the allowance ${allowance}`,
+      source: source!,
+      analyse: (request: CoreAnalysisRequest) =>
+        withTestAllowance(allowance, () => analyseCore(request)),
+      lists: (answers: Answers) => deferred(answers).map(({ warning }) => warning.kinds),
+      expected: ["integer"],
+    })),
+  ]),
+  {
+    name: "a written value beside an inferred kind it spells",
+    source: `${w}let xs = [1]\nxs.add(w)\nsay xs[0]\nexit\n`,
+    lists: readOf(`${w}let xs = [1]\nxs.add(w)\nsay xs[0]\nexit\n`, "say ", "xs[0]"),
+    expected: ["string", "integer"],
+  },
+  {
+    name: "a written value beside a kind it does not spell",
+    source: `${w}let x = w otherwise true\nsay x\nexit\n`,
+    lists: readOf(`${w}let x = w otherwise true\nsay x\nexit\n`, "say ", "x"),
+    expected: ["integer", "string", "boolean"],
+  },
+  {
+    name: "two spellings of one union joined",
+    source: `${w}let v: integer | string = fromJson(hostOther)\nlet xs = [w]\nxs.add(v)\nsay xs[0]\nexit\n`,
+    lists: readOf(
+      `${w}let v: integer | string = fromJson(hostOther)\nlet xs = [w]\nxs.add(v)\nsay xs[0]\nexit\n`,
+      "say ",
+      "xs[0]",
+    ),
+    expected: ["integer", "string"],
+  },
+  {
+    name: "one spelling read from two written places",
+    source: `${w}let u: string | integer = fromJson(hostOther)\nlet xs = [w]\nxs.add(u)\nsay xs[0]\nexit\n`,
+    lists: readOf(
+      `${w}let u: string | integer = fromJson(hostOther)\nlet xs = [w]\nxs.add(u)\nsay xs[0]\nexit\n`,
+      "say ",
+      "xs[0]",
+    ),
+    expected: ["string", "integer"],
+  },
+  {
+    name: "a written value in a literal's cell",
+    source: `${w}let xs = [w]\nsay xs[0]\nexit\n`,
+    lists: readOf(`${w}let xs = [w]\nsay xs[0]\nexit\n`, "say ", "xs[0]"),
+    expected: ["string", "integer"],
+  },
+  // (after a stop at the test allowance 16: a typed parse's written destination beside a whole number in a literal,
+  // the literal's children's kinds, each once; a sorted literal of a written value and a whole number, its deferred
+  // families; a typed load's default a written value, the stores' syntax decision)
+  {
+    name: "a stopped literal of a typed parse and a whole number",
+    source: typedLiteral,
+    analyse: (request) => withTestAllowance(16, () => analyseCore(request)),
+    lists: readOf(typedLiteral, " = ", "[fromJson(hostValue), 1]", "element"),
+    // (each child's kinds once, beside its sibling's, as a stopped literal's shape gives them)
+    expected: ["string", "integer", "integer"],
+  },
+  {
+    name: "a stopped sort of a literal of a written value and a whole number",
+    source: `${w}[w, 1].sort()\nexit\n`,
+    analyse: (request) => withTestAllowance(16, () => analyseCore(request)),
+    lists: (answers) => deferred(answers).map(({ families }) => families),
+    expected: ["string", "number"],
+  },
+  {
+    name: "a stopped syntax decision of a typed load's written default",
+    source: `${w}let x = load(hostOther, default: w)\nlet ys = [x, 1]\nys.sort()\nexit\n`,
+    analyse: stopped,
+    lists: (answers, request) => {
+      const x = new CoreProgram(request).places.find(
+        ({ kind }) => kind.kind === "binding" && kind.name === "x",
+      )!.id;
+      const { admitted } = answers.place(x, []);
+      return admitted.by === "decided" ? [admitted.kinds] : [];
+    },
+    expected: ["string", "integer"],
+  },
+  // (Codex r8: after a stop at the test allowance 16, a sort of a placeless literal's element, #1581's cells)
+  {
+    name: "a stopped sort of a placeless literal's element",
+    source: '["s", 1][0].sort()\nexit\n',
+    analyse: (request) => withTestAllowance(16, () => analyseCore(request)),
+    lists: (answers) =>
+      ruled(answers).flatMap((diagnostic) =>
+        diagnostic.code === "TSV043" ? [diagnostic.kinds] : [],
+      ),
+    expected: ["integer", "string"],
+  },
+  // (Codex r6: after a stop, an inferred range conversion's elements; a written union of one spelling twice; a
+  // stored read a written type test narrows host data to, natural)
+  {
+    name: "a stopped range conversion's elements",
+    source: "let a = (1..5).toList()\nsay a[0]\nexit\n",
+    analyse: stopped,
+    lists: readOf("let a = (1..5).toList()\nsay a[0]\nexit\n", "= ", "(1..5).toList()", "element"),
+    expected: ["integer", "empty"],
+  },
+  {
+    name: "a stopped parse of a written union of one spelling twice",
+    source: union,
+    analyse: (request) => withTestAllowance(16, () => analyseCore(request)),
+    lists: readOf(union, "= ", "fromJson(hostValue)", "element"),
+    expected: ["string", "integer", "empty"],
+  },
+  {
+    name: "a stored read a written type test narrows",
+    source: narrowed,
+    lists: readOf(narrowed, "[", "y"),
+    expected: ["string", "integer"],
+  },
+  {
+    name: "a sort of a stored read a written type test narrows, its families",
+    source: narrowed,
+    lists: (answers) => elements(answers).map(({ families }) => families),
+    expected: ["string", "number"],
+  },
+  {
+    name: "a sort of a stored read a written type test narrows, its offending kind",
+    source: narrowed,
+    lists: (answers) => elements(answers).map(({ warning }) => warning.kinds),
+    expected: ["integer"],
+  },
+];
 
 /**
  * #1398 (Codex r10 on #1558): a narrowed local read's exact class takes its narrowing once, from its read class

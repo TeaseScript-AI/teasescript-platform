@@ -533,66 +533,71 @@ const EVERY = VALUE_KIND_NAMES.map((kind) =>
       : kind,
 ).join("|");
 
-test("a field that fits, `null` included, survives a sibling's repair: fromJson on both lowerings, nested, through a file store's answer and every checkpoint, and a load, in three layers, in both orders (#1058)", () => {
-  const dictOf = (
-    entries: Readonly<Record<string, SerializableRuntimeValue>>,
-  ): SerializableRuntimeValue => ({
-    kind: "dict",
-    entries: Object.entries(entries).map(([key, value]) => ({ key, value })),
-  });
-  /**
-   * `let out = <call>`: the core's decision, a boundary at the call and at a parse its default runs (`inner`), and its
-   * plan, whose S7 content is `content` of the call's site.
-   */
-  const compiled = (
-    call: string,
-    content: (site: string, source: string) => readonly string[],
-    inner?: string,
-  ) => {
-    const source = `let out = ${call}\nsay "AFTER"\nexit\n`;
-    const site = at(source, call);
-    assert.deepEqual(
-      decision(source).checks,
-      [
-        ...(inner === undefined
-          ? []
-          : [`copy-type fromJson.result [object] boundary @${at(source, inner)}`]),
-        `copy-type out [object] boundary @${site}`,
-      ],
-      source,
-    );
-    const plan = candidatePlan(source);
-    assert.deepEqual(contentOf(plan), content(site, source), source);
-    return { source, site, plan };
-  };
-  /** A typed parse's S7 content: its expected type, and on the instruction lowering the repair at its default. */
-  const parsed = (fallback: string, files: string, type: string) =>
-    compiled(`fromJson(hostValue, default: ${fallback}${files})`, (site, source) =>
-      files === ""
-        ? [
-            `expected fileStore@${site} ${type}`,
-            `repair storeTemporary@${at(source, fallback)} ${type}`,
-          ]
-        : [`expected call@${site} ${type}`],
-    );
-  /** What a run of `plan` with `hostValue` says and warns, and the value `out` holds where it ends. */
-  const read = (plan: InstructionPlan, hostValue: string) => {
-    const result = runWith(plan, hostValue);
-    return { ...ran(result), out: bound(result.snapshot, "out") };
-  };
-  const after = (out: SerializableRuntimeValue, warnings: readonly string[] = []) => ({
-    ...halted(["AFTER"], warnings),
-    out,
-  });
-  // the values a test of absence or truthiness could take for none, each as JSON and as the value a reading keeps
-  const valid: readonly (readonly [json: string, value: SerializableRuntimeValue])[] = [
-    ["null", null],
-    ["false", false],
-    ["0", 0],
-    ['""', ""],
-    ["[]", listOf()],
-    ["{}", dictOf({})],
-  ];
+const dictOf = (
+  entries: Readonly<Record<string, SerializableRuntimeValue>>,
+): SerializableRuntimeValue => ({
+  kind: "dict",
+  entries: Object.entries(entries).map(([key, value]) => ({ key, value })),
+});
+/**
+ * `let out = <call>`: the core's decision, a boundary at the call and at a parse its default runs (`inner`), and its
+ * plan, whose S7 content is `content` of the call's site.
+ */
+const compiled = (
+  call: string,
+  content: (site: string, source: string) => readonly string[],
+  inner?: string,
+) => {
+  const source = `let out = ${call}\nsay "AFTER"\nexit\n`;
+  const site = at(source, call);
+  assert.deepEqual(
+    decision(source).checks,
+    [
+      ...(inner === undefined
+        ? []
+        : [`copy-type fromJson.result [object] boundary @${at(source, inner)}`]),
+      `copy-type out [object] boundary @${site}`,
+    ],
+    source,
+  );
+  const plan = candidatePlan(source);
+  assert.deepEqual(contentOf(plan), content(site, source), source);
+  return { source, site, plan };
+};
+/** A typed parse's S7 content: its expected type, and on the instruction lowering the repair at its default. */
+const parsed = (fallback: string, files: string, type: string) =>
+  compiled(`fromJson(hostValue, default: ${fallback}${files})`, (site, source) =>
+    files === ""
+      ? [
+          `expected fileStore@${site} ${type}`,
+          `repair storeTemporary@${at(source, fallback)} ${type}`,
+        ]
+      : [`expected call@${site} ${type}`],
+  );
+/** What a run of `plan` with `hostValue` says and warns, and the value `out` holds where it ends. */
+const read = (plan: InstructionPlan, hostValue: string) => {
+  const result = runWith(plan, hostValue);
+  return { ...ran(result), out: bound(result.snapshot, "out") };
+};
+const after = (out: SerializableRuntimeValue, warnings: readonly string[] = []) => ({
+  ...halted(["AFTER"], warnings),
+  out,
+});
+// the values a test of absence or truthiness could take for none, each as JSON and as the value a reading keeps
+const valid: readonly (readonly [json: string, value: SerializableRuntimeValue])[] = [
+  ["null", null],
+  ["false", false],
+  ["0", 0],
+  ['""', ""],
+  ["[]", listOf()],
+  ["{}", dictOf({})],
+];
+
+const record = `{n: ${OPEN}, m: 0}`;
+const type = `{n: ${EVERY}, m: integer}`;
+const inner = `fromJson("{\\"m\\": 1}", default: ${record})`;
+
+test("a field that fits, `null` included, survives a sibling's repair: fromJson on both lowerings, nested, through a file store's answer and every checkpoint, in three layers, in both orders (#1058)", () => {
   for (const files of ["", ", files: false"]) {
     // #1058's default: only a missing or wrong `m` is the default's, and `n` keeps what the JSON holds; the issue's
     // reproduction is the first value beside a missing `m`
@@ -665,9 +670,6 @@ test("a field that fits, `null` included, survives a sibling's repair: fromJson 
     );
   }
   // a default that runs as instructions: the JSON's record waits in the result's temporary, restored at every boundary
-  const record = `{n: ${OPEN}, m: 0}`;
-  const type = `{n: ${EVERY}, m: integer}`;
-  const inner = `fromJson("{\\"m\\": 1}", default: ${record})`;
   const waiting = compiled(
     `fromJson("{\\"n\\": null}", default: ${inner})`,
     (site, source) => [
@@ -688,6 +690,9 @@ test("a field that fits, `null` included, survives a sibling's repair: fromJson 
     },
     after(object({ n: null, m: 1 }), [`TSW020@${waiting.site}`]),
   );
+});
+
+test("a field that fits, `null` included, survives a sibling's repair in a load, in three layers, and where the load's default runs as instructions (#1058)", () => {
   // a load repairs a stored record the same way and keeps the stored value, each field it repairs named by TSW016
   const stored = compiled(
     `load("k", default: {n: ${OPEN}, a: {b: {n: ${OPEN}, m: 0}}, m: 0})`,
