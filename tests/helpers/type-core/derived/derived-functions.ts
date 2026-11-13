@@ -10,6 +10,7 @@ import type {
 import { nestedStatements } from "../../../../src/expression-children.js";
 import type { SerializableRuntimeValue } from "../../../../src/runtime/values/serializable-values.js";
 import {
+  type DerivedContent,
   type DerivedStore,
   type Syntax,
   Underivable,
@@ -22,13 +23,14 @@ import { fitsType } from "./type-core-derived-values.js";
 /*
  * The derived oracle's author functions (#2667, step 4a-0): what a call of a function the script declares does by the
  * rules, and where the plan checks a value stored into one of its places. A call evaluates its arguments in source
- * order, then checks each one stored into a parameter with a written type (TSR058 at the argument's value), then binds
- * the parameters, then evaluates in parameter order the default of each one no argument supplies, checking it against
- * the parameter's written type, then runs the body; a `return` checks its value against the function's written result
- * type and ends the call with it, and a body that ends without one gives `null` (V30 §10, §11, §17;
- * `src/runtime/instructions/functions.ts`). A function sees its parameters, its own variables and its file's (V30 §14),
- * which the oracle keeps in one map: a call binds its own names for the call and gives back the caller's after it. Like
- * `evaluate`, it reads the sources and the derived stores, never the plan.
+ * order, then checks each one whose store the derivation holds (TSR058 at the argument's value), then binds the
+ * parameters, then evaluates in parameter order the default of each one no argument supplies, checking it where the
+ * derivation holds its store, then runs the body; a `return` checks its value likewise and ends the call with it, and a
+ * body that ends without one gives `null` (V30 §10, §11, §17; `src/runtime/instructions/functions.ts`). A function sees
+ * its parameters, its own variables and its file's (V30 §14), which the oracle keeps in one map: a call binds its own
+ * names for the call and gives back the caller's after it. Like `evaluate`, it reads the sources and the derived stores,
+ * never the plan. The calling file's run reads its own stores and content by offset, so a call of another file's
+ * function is underivable where the body holds an entry of either file's (its checks are the other file's).
  *
  * Only a value stored into a place with a written type is a store here (`transferStore`): an obligation at an argument, a
  * default or a returned value of an untyped parameter or result is underivable, since the candidate route publishes no
@@ -36,7 +38,7 @@ import { fitsType } from "./type-core-derived-values.js";
  */
 
 /** A value as `evaluate` reads it: the runtime value, and the host globals it came from. */
-export interface FunctionValue {
+export interface EvaluatedValue {
   readonly v: SerializableRuntimeValue;
   readonly from: ReadonlySet<string>;
 }
@@ -135,7 +137,8 @@ export function transferStore(
           ...parameterPlace(fn, parameterOf(fn, expression, argument)),
         });
   }
-  for (const fn of functions.values()) {
+  // (a default or a return is a store of the file that declares the function)
+  for (const fn of visibleFunctions(own.statements).values()) {
     for (const parameter of fn.parameters)
       if (parameter.defaultValue !== null)
         candidates.push({
@@ -223,13 +226,15 @@ export function functionLandings(
 }
 
 /**
- * The name the analysis gives the place a store statement writes: a parameter of the function whose body holds the
- * statement is `<function>.<parameter>`; any other place keeps its own name.
+ * The name the analysis gives the place a store statement writes (`name`, the target's, as `o.a`): one of a parameter of
+ * the function whose body holds the statement is prefixed with the function's, `<function>.<parameter>…`; any other
+ * keeps its own.
  */
 export function storedPlaceName(statement: Statement, name: string, own: Syntax): string {
+  const root = name.split(".")[0];
   for (const fn of own.statements) {
     if (fn.kind !== "functionDeclaration") continue;
-    if (!fn.parameters.some((parameter) => parameter.name.name === name)) continue;
+    if (!fn.parameters.some((parameter) => parameter.name.name === root)) continue;
     if (bodyOf(fn).includes(statement)) return `${fn.name.name}.${name}`;
   }
   return name;
@@ -237,20 +242,28 @@ export function storedPlaceName(statement: Statement, name: string, own: Syntax)
 
 /** A `return` ending a call, with its value. */
 class Returned {
-  public constructor(readonly value: FunctionValue) {}
+  public constructor(readonly value: EvaluatedValue) {}
 }
 
 /** The deepest a call nests in the oracle's runs: deeper is underivable (the runtime's own bound is TSR047's). */
 const DEPTH = 64;
 
+/** A file of the project as the calls read it: its syntax and what `derive` gives for it. */
+export interface ProjectFile {
+  readonly syntax: Syntax;
+  readonly stores: readonly DerivedStore[];
+  readonly content?: DerivedContent;
+}
+
 /** What `evaluate` gives the calls: its reader, its statement runner, its checks and its variables. */
 export interface CallContext {
-  /** The evaluated file's statements. */
+  /** The evaluated file's statements, stores and content. */
   readonly own: readonly Statement[];
-  readonly project: readonly Syntax[];
   readonly stores: readonly DerivedStore[];
-  readonly env: Map<string, FunctionValue>;
-  readonly value: (expression: Expression) => FunctionValue;
+  readonly content: DerivedContent;
+  readonly project: readonly ProjectFile[];
+  readonly env: Map<string, EvaluatedValue>;
+  readonly value: (expression: Expression) => EvaluatedValue;
   readonly run: (block: readonly Statement[]) => void;
   /** A check at `start:end` of a value from `from`: it fails with `code` unless `fits`. */
   readonly fail: (
@@ -265,28 +278,68 @@ export interface CallContext {
 /** The author functions of one evaluation (see the module's comment). */
 export interface FunctionCalls {
   /** The value of `call` where it names an author function, else `undefined`. */
-  call(call: CallExpression): FunctionValue | undefined;
+  call(call: CallExpression): EvaluatedValue | undefined;
   /** Whether `statement` is a function's own, run here: a declaration (nothing runs) or a `return` (ends the call). */
   statement(statement: Statement): boolean;
 }
 
 export function functionCalls(context: CallContext): FunctionCalls {
-  const functions = visibleFunctions(context.own, context.project);
+  const functions = visibleFunctions(
+    context.own,
+    context.project.map((file) => file.syntax),
+  );
   const { env, stores, fail, value } = context;
-  // (a store's check at its value, where the derived stores hold one for the node at `node`)
-  const checked = (node: { readonly span: Expression["span"] }, stored: FunctionValue): void => {
-    const store = stores.find(
-      (candidate) =>
-        candidate.so === node.span.start.offset && candidate.eo === node.span.end.offset,
+  // (a file's entries, stores and content, as the sites a run reads them by)
+  const entries = (
+    held: readonly DerivedStore[],
+    content: DerivedContent | undefined,
+  ): string[] => [
+    ...held.map((store) => `${store.so}:${store.eo}`),
+    ...(content === undefined
+      ? []
+      : [
+          ...content.requireExisting.map((entry) => entry.site),
+          ...content.indexes,
+          ...content.fallbacks.flatMap((entry) => [entry.owner, entry.site]),
+          ...content.expected.map((entry) => entry.owner),
+          ...content.loads.map((entry) => entry.owner),
+        ]),
+  ];
+  // (whether a run of another file's function would read an entry by offset: one of its own file inside it, which the
+  // calling file's run does not hold, or one of the calling file at the site of a node of it)
+  const misread = (fn: FunctionDeclaration, declaring: ProjectFile): boolean => {
+    const [start, end] = [fn.span.start.offset, fn.span.end.offset];
+    if (
+      entries(declaring.stores, declaring.content).some((at) => {
+        const [so, eo] = at.split(":").map(Number);
+        return start <= so! && eo! <= end;
+      })
+    )
+      return true;
+    const nodes = new Set(
+      [
+        ...fn.parameters,
+        ...bodyOf(fn),
+        ...expressions([fn]).flatMap((expression) => [
+          expression,
+          ...(expression.kind === "callExpression" ? expression.arguments : []),
+        ]),
+      ].map((node) => `${node.span.start.offset}:${node.span.end.offset}`),
     );
-    if (store !== undefined)
-      fail("TSR058", store.valueSo, store.valueEo, stored.from, fitsType(stored.v, store.type));
+    return entries(stores, context.content).some((at) => nodes.has(at));
   };
   let depth = 0;
   return {
     call(call) {
       const fn = calleeOf(call, functions);
       if (fn === undefined) return undefined;
+      const declaring = context.own.includes(fn)
+        ? undefined
+        : context.project.find((file) => file.syntax.statements.includes(fn));
+      if (declaring !== undefined && misread(fn, declaring))
+        throw new Underivable(
+          `a call of ${fn.name.name}, another file's function, whose run would read entries by offset`,
+        );
       const supplied = call.arguments.map((argument) => {
         const read = value(argument.value);
         return {
