@@ -260,7 +260,7 @@ export function supportLeaf(contract: Contract, sub: Key): SupportNode {
 
 /**
  * A source's leaf in a summary, once per source and content: its items in their order with everything a reader can
- * tell apart, its ingress stores by their nodes (C9), the text charged as its items' signature is and kept where new.
+ * tell apart, its ingress stores by their nodes, the text charged as its items' signature is and kept where new.
  */
 export function summaryLeaf(contract: Contract, sub: Key, items: readonly Item[]): SupportNode {
   const content = items
@@ -417,9 +417,9 @@ export function union(
 }
 
 /**
- * C5c's reading of one source (`propertyPresence`): from each incoming state (lacks 1, has 2), the state after its
- * items; once a source lacks the property and one has it, no further source is read. An empty source supplies no
- * object; a source without the property gives `missing`, an unknown value of a present property says nothing of it.
+ * A property's presence after one source (`propertyPresence`): from each incoming state (lacks 1, has 2), the state
+ * after its items; once a source lacks the property and one has it, no further source is read. An empty source supplies
+ * no object; a source without the property gives `missing`, an unknown value of a present property says nothing of it.
  */
 export function presenceSteps(all: readonly Item[]): readonly PresenceStep[] {
   const items = withoutEmpty(all);

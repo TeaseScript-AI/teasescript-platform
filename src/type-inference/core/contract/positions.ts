@@ -23,7 +23,7 @@ import { pathAt, stepsOf } from "./literal-index.js";
 import { marksNothing } from "./marks.js";
 import type { ChainRoot, LoneRead, Owner } from "./model.js";
 
-// G3 3a's positioned frontier on the contract side: a read's position one step below its parent's, past wrappers.
+// Positions on the contract side: a read's position one step below its parent's, past wrappers.
 
 /** A position's or an occurrence answer's demand, made since the last stop, which the next stop forgets (`stop`). */
 export function remember(contract: Contract, demand: string): void {
@@ -31,8 +31,8 @@ export function remember(contract: Contract, demand: string): void {
 }
 
 /**
- * A property or index read's contract (`contractOfValue`), a demand at its occurrence that proves its position (G3 3a,
- * `advance`); any other read its owner's one step down.
+ * A property or index read's contract (`contractOfValue`), a demand at its occurrence that proves its position
+ * (`advance`); any other read its owner's one step down.
  */
 export function projected(
   contract: Contract,
@@ -49,7 +49,7 @@ export function projected(
     proves: true,
     make: () => {
       contract.remember(joinParts("cpv", value));
-      // #1668: I, the read takes the run's flow (`own`)
+      // #1668: the read takes the run's flow (`own`)
       return advance(contract, { value: projection.owner }, step, (flow) =>
         contract.contractOfValueAt(projection.owner, [step], flow),
       );
@@ -58,7 +58,7 @@ export function projected(
 }
 
 /**
- * A key's contract as a demand that proves its position (G3 3a, `advance`): a key of a binding by property steps
+ * A key's contract as a demand that proves its position (`advance`): a key of a binding by property steps
  * whose first step passes a wrapper (`wrapperHop`), so a key `k·s` stands one step below `k`'s; its own computation
  * (`keyThrough`) where it does not. `path`: a text key's steps; a cursor's parent, depth and step are the arena's.
  */
@@ -83,7 +83,7 @@ export function positioned(
           ? { key: keyParentIn(contract, key)!, length: keyDepthIn(contract, key) - 1 }
           : { key: keyOf(keyPlace(key), path.slice(0, -1)), length: path.length - 1 };
       const step = path === null || isKeyId(key) ? keyLastIn(contract, key)! : path.at(-1)!;
-      // #1668: I, the read takes the run's flow (`own`)
+      // #1668: the read takes the run's flow (`own`)
       return advance(contract, owner, step, (flow) => contract.keyThrough(key, 0, flow));
     },
   };
@@ -124,9 +124,9 @@ export function positionable(
 }
 
 /**
- * G3 3a: a read one `step` below a read whose position is known (`owner`: a property read's occurrence, a read, or a
- * key with `length` steps, the key's own `owner` its parent's), advanced one step: where every receiver on the way holds
- * a structure and no reference (F19a, `receiverWalk`'s walk, the owner's checked here), a read past a wrapper is its
+ * A read one `step` below a read whose position is known (`owner`: a property read's occurrence, a read, or a key with
+ * `length` steps, the key's own `owner` its parent's), advanced one step: where every receiver on the way holds a
+ * structure and no reference (`receiverWalk`'s walk, the owner's checked here), a read past a wrapper is its
  * frontier's read at its path below with the outermost wrapper's writer (the wrapper's lemma: `wrapperHop`, whatever
  * the path below), and its frontier passes the next wrapper where it stands at one (a property step's alone); before
  * the first wrapper, at a step no position advances by (`positionStep`, a key's; a value's property steps alone), and
@@ -154,12 +154,12 @@ function* advance(
       : null;
   if (from === null || (!from.hopped && hop === null))
     return { items: yield* own(flow), proof: UNPOSITIONED };
-  // F19a (`receiverWalk`): the owner's receiver holds no reference, and a structure, as every one above it did
+  // as `receiverWalk` decides: the owner's receiver holds no reference, and a structure, as every one above it did
   const receiver =
     "key" in owner
-      ? // #1668: R, a receiver decision
+      ? // #1668: a receiver decision
         yield* contract.receiverKinds(owner.key)
-      : // #1668: R, a value receiver decision
+      : // #1668: a value receiver decision
         yield* contract.valueReceiver(owner.value);
   const noRef = from.noRef && !heldReference(receiver);
   const clean = from.clean && noRef && receiver.some(holdsBelow);
@@ -210,7 +210,7 @@ export function* positionOf(contract: Contract, owner: Owner): Work<Position | n
     if (length === 0) return new Position(keyPlace(key), 0, null, false, null, true, true);
     const path = isKeyId(key) ? null : keyPath(key);
     if (!positionable(contract, key, path)) return null;
-    // #1668: R, the position chooses the route: its includer records what the route reads
+    // #1668: the position chooses the route: its includer records what the route reads
     const { proof } = yield* solver.proven(positioned(contract, key, path));
     return proof instanceof Position ? proof : null;
   }
@@ -225,7 +225,7 @@ export function* positionOf(contract: Contract, owner: Owner): Work<Position | n
     contract.wrapperHop(chain.root, chain.first) === null
   )
     return null;
-  // #1668: R, the position chooses the route: its includer records what the route reads
+  // #1668: the position chooses the route: its includer records what the route reads
   const { proof } = yield* solver.proven(projected(contract, value, projection));
   return proof instanceof Position ? proof : null;
 }
@@ -277,7 +277,7 @@ function stepsBelow(contract: Contract, rest: number, step: string): string[] {
 }
 
 /**
- * G3 3a: a literal's step to the one read it holds there (`wrapperHop`), or `null`: its root holds objects that all
+ * A literal's step to the one read it holds there (`wrapperHop`), or `null`: its root holds objects that all
  * have `step` and nothing else; at `step` it holds one read of a binding, unguarded, marking nothing whatever the path
  * and naming no ingress, and nothing else there or below. So its value and contract at a path through `step` are that
  * read's at the rest (its value read at the read's own node, `node`, where it has one). Once per literal and step.

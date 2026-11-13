@@ -19,7 +19,7 @@ import type {
 // A literal's computed values and reads at a path as a gather reads them, a choice's options, a `+`'s repeat.
 
 /**
- * the members of a site its answer reads, by their role minima. Members of one class (`Contract.classOf`)
+ * The members of a site its answer reads, by their role minima. Members of one class (`Contract.classOf`)
  * answer alike at every path apart from the writers of their roles (`classWriters`), each role's writer standing for
  * the kinds it gives, and a merged answer takes each kind's earliest writer: so per class the members whose writer is
  * earliest in some role, merged, answer as all of them, whatever order the writers come in; a class's roles are read
@@ -76,11 +76,11 @@ function roleMinima(
 }
 
 /**
- * S6c (`LiteralIndex.others`, Astra's design review): a literal's computed values at a path as its answer reads them,
- * once per list and side: of values of one class (`classOf`) its role minima (`roleMinima`), the earliest cell writer
- * standing for its kinds (each value's kinds take its cell's writer, F28), and of a mixed class the others; any other
- * value by itself. In order, so the merged answer keeps its kinds' order; the count of the contributions (§3.4's
- * several elements) stays the list's.
+ * A literal's computed values at a path (`IndexNode.others`) as its answer reads them, once per list and side: of
+ * values of one class (`classOf`) its role minima (`roleMinima`), the earliest cell writer standing for its kinds (each
+ * value's kinds take its cell's writer), and of a mixed class the others; any other value by itself. In order, so the
+ * merged answer keeps its kinds' order; the count of the contributions (several past an element step) stays the
+ * list's.
  */
 export function othersAt(
   contract: Contract,
@@ -115,7 +115,7 @@ export function othersAt(
   const charge = (): void => program.work.charge("invSteps");
   for (const { read, rest, all, mixed } of roleMinima(members, charge)) {
     let writer: Writer | null = null;
-    // (F19's loads of a computed key with no receiver, whatever their defaults' class, which no read below their root
+    // (loads of a computed key with no receiver, whatever their defaults' class, which no read below their root
     // consults, and wherever they land: the loads of one path land alike; with the sharing off every value is read at
     // each path)
     let loads = sharing();
@@ -150,8 +150,8 @@ export function othersAt(
  * bound bindings of one class (`boundOf`, `boundClass`), each unguarded or each guarded, none holding a mark, none
  * an ingress, its role minima (`roleMinima`), and of a mixed class the others (`groupItems`), with the contract's
  * earliest cell writer apart from none (`othersAt`'s), the value side's by where each read's declaration stands (its
- * contract read's P3 condition, `declaredBefore`); any other read by itself. In order, so a list of k bindings of
- * loads of one default, read at k properties, reads one binding at each.
+ * contract read's definite-read condition, `declaredBefore`); any other read by itself. In order, so a list of k
+ * bindings of loads of one default, read at k properties, reads one binding at each.
  */
 export function readGroupsAt(
   contract: Contract,
@@ -216,7 +216,7 @@ export function readGroupsAt(
 }
 
 /**
- * S6c: the options of a choice its answer reads, by their index, once per choice and side: of options that answer
+ * The options of a choice its answer reads, by their index, once per choice and side: of options that answer
  * alike at every path apart from their roles' writers (a label of one kind; a choice object's selected value, or any
  * other option, of one class, `classOf`) the role minima (`roleMinima`), and of a mixed class the others, so a choice
  * of k options of one source read at k fields reads it once per field; a list's or a set's buttons by themselves.
@@ -263,7 +263,7 @@ export function choiceOptions(
 }
 
 /**
- * the `+` whose answer below its root a `+` over a run of terms gives (`plusElements`): the value itself,
+ * The `+` whose answer below its root a `+` over a run of terms gives (`plusElements`): the value itself,
  * or, where it stands fourth or later in a run, the run's third. In a run each `+`'s left operand is the `+` before
  * it, and its right operand is of one class with that one's (`classOf`, no mixed one), its roles' writers no earlier:
  * each answers below its root as the one before with that term's elements merged in once more, and the merge and the
@@ -312,7 +312,7 @@ function plusBefore(contract: Contract, value: PlaceId, exact: boolean): PlaceId
   const own = plus(value);
   const left = own === null ? null : plus(own[0]!);
   if (own === null || left === null) return null;
-  // (a join an operand was rejected from answers alone: A6, `joinElements`)
+  // (a join an operand was rejected from answers alone: `joinElements`)
   if (![...own, ...left].every((operand) => contract.pass.lists.joined(operand))) return null;
   const cls = contract.classOf(own[1]!, exact);
   if (

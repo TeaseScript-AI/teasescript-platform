@@ -7,7 +7,7 @@ import { propertyStep, type CoreProgram } from "../program.js";
 import { Retained } from "../retained/retained.js";
 import { defaultOf, typeTags, writtenOf } from "./terms.js";
 
-// A typed parse's or load's default read by its written type (ADR 0021 rule 2.6, "its default's type"; #1072 step 0):
+// A typed parse's or load's default read by its written type (ADR 0021 rule 2.6, "its default's type"; #1072):
 // the rule (`writtenDefault`) and the index of program facts it reads. A variable with a written type gives that type,
 // whatever value it holds at the call: no narrowing at the read (rules 5.1, 5.2) enters it.
 
@@ -92,7 +92,7 @@ export class WrittenDefaults {
       for (const [step, { terms, literals, found }] of gathered)
         steps.set(step, found ? { terms: [...terms], literals: [...literals] } : null);
     }
-    // (#1072 1b: registered once built, so the plain data it holds is sealed when the first run ends)
+    // (#1072: registered once built, so the plain data it holds is sealed when the first run ends)
     Retained.owner(this, "WrittenDefaults");
   }
 
@@ -153,7 +153,7 @@ export class WrittenDefaults {
 
   /**
    * The kinds of a written type a start gave, at `rest` from its step `from` on (`KindsAt`), each step down charged to
-   * `work` (#2403's final review: a demand's path is as long as its source makes it).
+   * `work` (#2403: a demand's path is as long as its source makes it).
    */
   public kindsAt(
     term: TypeTerm,
@@ -176,7 +176,7 @@ export class WrittenDefaults {
  * A written type's kinds at every path into it, as `typeAtStep` reads them: a union taken apart into its members in
  * written order, whose terms one step on are the next path's; a step one member lacks drops that member, and a step to
  * another place's type (`ref`) leaves every path through it without kinds. Each term of the type is at one path, so it
- * is entered once, charged `indexSteps` where the index is built (#2403 review r1: a demand that took a wide union
+ * is entered once, charged `indexSteps` where the index is built (#2403: a demand that took a wide union
  * apart again for each call grew with width times calls, uncharged). A worklist: a deep type recurses nowhere.
  */
 function kindsOf(program: CoreProgram, term: TypeTerm): KindsAt {
@@ -283,7 +283,7 @@ export function writtenDefault(
         const cells = writtenDefaults.cells(literal, rest[level]!);
         if (cells === null) return null;
         for (const term of cells.terms) if (!meet(term, level + 1)) return null;
-        // (each reference charged: literals of one level can share the literals below them, #2403's final review)
+        // (each reference charged: literals of one level can share the literals below them, #2403)
         for (const each of cells.literals) {
           program.work.charge("invSteps");
           below.add(each);
