@@ -25,7 +25,7 @@ import {
   legacyOperation,
   type AdapterExpectation,
   type LegacyExpectation,
-} from "../../helpers/type-core/adapter-parity.js";
+} from "../../helpers/type-core/adapter-cases/adapter-parity.js";
 
 /**
  * Parity of the members of handles with the legacy checker (work note): every property and method of

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 
-import type { OperationInputs } from "../../../src/type-inference/adapters/relation.js";
-import { collectGraph } from "../../../src/type-inference/collector.js";
+import type { OperationInputs } from "../../../../src/type-inference/adapters/relation.js";
+import { collectGraph } from "../../../../src/type-inference/collector.js";
 import type {
   ChoiceElementEvidence,
   ContractRef,
@@ -10,8 +10,8 @@ import type {
   NamedPlace,
   PlaceId,
   SyntaxEvidence,
-} from "../../../src/type-inference/graph.js";
-import type { OperandView } from "../../../src/type-inference/adapters/relation.js";
+} from "../../../../src/type-inference/graph.js";
+import type { OperandView } from "../../../../src/type-inference/adapters/relation.js";
 import {
   closedView,
   dynamicView,
@@ -19,7 +19,7 @@ import {
   structureOf,
   type LegacyOutcome,
 } from "./adapter-parity.js";
-import { parseTypeText } from "../type-text.js";
+import { parseTypeText } from "../../type-text.js";
 
 /**
  * The inputs of an operation's relation, read from the source itself (O4 stage 2b case tables): the collector's

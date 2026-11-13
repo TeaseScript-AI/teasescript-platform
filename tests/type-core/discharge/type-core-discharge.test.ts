@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import type { CallExpression, Expression } from "../../src/ast.js";
-import { lazyDefaultArgument } from "../../src/lazy-defaults.js";
-import { analyseCore } from "../../src/type-inference/core/answers.js";
-import type { Obligation } from "../../src/type-inference/core/result.js";
-import { coreRequest } from "../helpers/type-core-analysis.js";
-import { readFixture } from "../helpers/type-core/type-core-fixture.js";
+import type { CallExpression, Expression } from "../../../src/ast.js";
+import { lazyDefaultArgument } from "../../../src/lazy-defaults.js";
+import { analyseCore } from "../../../src/type-inference/core/answers.js";
+import type { Obligation } from "../../../src/type-inference/core/result.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
+import { readFixture } from "../../helpers/type-core/type-core-fixture.js";
 
 /**
  * The discharge map of the port plan's S3 note ("Completeness"): every check the core emits has a row, which names

@@ -33,7 +33,7 @@ import {
   legacyOperation,
   type AdapterExpectation,
   type LegacyExpectation,
-} from "../../helpers/type-core/adapter-parity.js";
+} from "../../helpers/type-core/adapter-cases/adapter-parity.js";
 
 /**
  * Parity of the clock reads and of the members of date and time values and calendar durations with the legacy

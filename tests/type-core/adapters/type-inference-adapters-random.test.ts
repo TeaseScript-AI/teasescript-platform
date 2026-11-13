@@ -19,7 +19,7 @@ import {
   dynamicView,
   inputsOf,
   legacyOperation,
-} from "../../helpers/type-core/adapter-parity.js";
+} from "../../helpers/type-core/adapter-cases/adapter-parity.js";
 
 const INTEGER = closedView(INTEGER_TYPE);
 

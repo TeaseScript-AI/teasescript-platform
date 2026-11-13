@@ -8,9 +8,9 @@ import {
   STRING_TYPE,
   union,
   type StaticType,
-} from "../../../src/static-types.js";
-import { PropertyTable } from "../../../src/static-types/property-tables.js";
-import type { OperandView } from "../../../src/type-inference/adapters/relation.js";
+} from "../../../../src/static-types.js";
+import { PropertyTable } from "../../../../src/static-types/property-tables.js";
+import type { OperandView } from "../../../../src/type-inference/adapters/relation.js";
 import { closedView, dynamicView } from "./adapter-parity.js";
 
 /**

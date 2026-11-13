@@ -27,8 +27,8 @@ import {
   legacyOperation,
   type AdapterExpectation,
   type LegacyExpectation,
-} from "../../helpers/type-core/adapter-parity.js";
-import { OPERANDS } from "../../helpers/type-core/adapter-operands.js";
+} from "../../helpers/type-core/adapter-cases/adapter-parity.js";
+import { OPERANDS } from "../../helpers/type-core/adapter-cases/adapter-operands.js";
 
 /**
  * Parity of the members of text with the legacy checker (work note): every method of `TEXT_METHODS` with

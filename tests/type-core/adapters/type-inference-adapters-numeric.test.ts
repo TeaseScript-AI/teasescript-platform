@@ -29,8 +29,8 @@ import {
   inputsOf,
   legacyOperation,
   type AdapterExpectation,
-} from "../../helpers/type-core/adapter-parity.js";
-import { OPERANDS } from "../../helpers/type-core/adapter-operands.js";
+} from "../../helpers/type-core/adapter-cases/adapter-parity.js";
+import { OPERANDS } from "../../helpers/type-core/adapter-cases/adapter-operands.js";
 
 /**
  * Parity of the numeric functions and of the value form of `min` and `max` with the legacy checker (work note):
