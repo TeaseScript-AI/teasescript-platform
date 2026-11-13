@@ -419,16 +419,13 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
       }
     }
   // a command's or an ask's operand that may hold a value its instruction does not take (`COMMAND_OPERANDS`, #2488's
-  // step 1½): no consumer of the core judges a command operand against the kinds its instruction takes (its choice
-  // check reads only what a choice's buttons return), and the table reads no kind for an outside value carried there
-  // nor a narrowing; the table keeps such an operand off the route. Last, after the values' own refusals
+  // step 1½); last, after the values' own refusals
   for (const node of [...index.statements, ...index.asks]) {
     const rules = operandRules(node.kind);
     if (rules === undefined) continue;
     for (const [position, operand] of commandOperands(node)) {
       const rule = rules[position];
-      // (a position the table has no rule for is outside: on the route, only `askForm`'s and `askBooleans`', asks the
-      // syntax table refuses first)
+      // (a position the table has no rule for is outside)
       if (rule === undefined || !operandAdmitted(answers, index, operand, rule))
         return {
           file: index.fileOf(operand),
@@ -437,8 +434,7 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
         };
     }
     if (node.kind !== "interactionExpression" || node.interactionKind !== "choice") continue;
-    // (a computed choice object whose text no value of it shows: no value goes unchecked without this refusal, as the
-    // request's own check stops the run as it opens, TSR021; it keeps today's earlier catch, TSV040)
+    // (a computed choice object whose text no value of it shows; #2720)
     const unshown = unshownChoiceText(answers, index, node, rules["askChoice.text"]!.takes);
     if (unshown !== null)
       return {
@@ -446,8 +442,7 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
         span: unshown.span,
         what: "an operand its instruction does not take",
       };
-    // (a choice of more buttons than a request shows, or of none: no value goes unchecked without these refusals, as the
-    // request's own check stops the run as it opens, TSR052; they keep today's earlier catch, TSV029)
+    // (a choice of more buttons than a request shows, or of none; #2720)
     if (
       node.options.every((option) => {
         const written = unwrap(option.expression);
@@ -467,7 +462,7 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
 
 /**
  * The kinds an operand may hold: the core's, with a read of a place whose type is written or decided holding that type's
- * kinds in place of its unknown, as `operandAdmitted` reads such a place.
+ * kinds in place of its unknown.
  */
 function operandKinds(
   answers: Answers,
@@ -485,9 +480,9 @@ function operandKinds(
 }
 
 /**
- * The buttons of a choice as today's checker counts them (`MAX_INTERACTION_OPTION_ENTRIES`): each element of a list
- * written in place, and one for each other option of a known kind beside `null` that is no collection (a computed
- * collection's elements, an unknown option and a `null` one are not counted).
+ * The buttons of a choice: each element of a list written in place, and one for each other option of a known kind
+ * beside `null` that is no collection (a computed collection's elements, an unknown option and a `null` one are not
+ * counted).
  */
 function choiceButtons(answers: Answers, index: SliceIndex, ask: InteractionExpression): number {
   let buttons = 0;
@@ -510,8 +505,8 @@ function choiceButtons(answers: Answers, index: SliceIndex, ask: InteractionExpr
 
 /**
  * The first option or element of a choice that is a computed choice object, or a computed list of them, whose `text`
- * holds only known kinds the button cannot show (`shows`), none of them `null`: today's checker refuses such a text
- * (`checkChoiceText`); one written in place is a position of the table (`askChoice.text`).
+ * holds only known kinds the button cannot show (`shows`), none of them `null`; one written in place is a position of
+ * the table (`askChoice.text`).
  */
 function unshownChoiceText(
   answers: Answers,
@@ -576,12 +571,8 @@ function operandAdmitted(
   return (answer?.items ?? []).every((item) => {
     if (item.tag === "empty") return true;
     if (item.tag !== "unknown") return rule.takes.includes(item.tag);
-    // (a property read that found no such property fails there, before the operand holds a value: `withoutMissing`)
     const reasons = item.reasons & ~REASON.missing;
     if (reasons === 0) return true;
-    // (an opaque, deferred or stopped unknown: none reaches an operand inside the slice, as speakers are refused by
-    // the name rule, parameters by the function row and a budget stop by its gate; the declared positions' tripwire
-    // test fails when one of its sources holds one)
     if (reasons !== REASON.external) return false;
     if (admitted !== null)
       return (
