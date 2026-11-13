@@ -56,8 +56,8 @@ import {
  * The command operand table (#2488's step 1½, `COMMAND_OPERANDS`): each command and request operand position holds a
  * value of every kind from every origin (`samples`), compiled by today's checker and by the candidate route in the four
  * held modes, and run with the host global at every value of the domain and, for a typed ingress, at a value of its
- * kind. Where today's checker refuses the source with the position's compile error, the route refuses it, so today's
- * checker answers (the lead's R1). Where today's checker plans, the route publishes with today's checks and runs, but
+ * kind. Where today's checker refuses the source with the position's compile error, the route refuses it at the operand
+ * (`outsideAnswers`), as the core has no consumer of its own there. Where today's checker plans, the route publishes with today's checks and runs, but
  * where the value's origin is one the table declines (`DECLINED_ORIGINS`: an outside value carried, R10), which is
  * counted (R11). The same holds in each context (`CONTEXTS`); where the route refuses the value alone there, it refuses
  * the command alike (R16).
@@ -95,11 +95,12 @@ const SAMPLES = samples().filter(
 );
 
 /**
- * The positions where the core's check of what the buttons return (`choiceValues`) refuses an outside value carried
- * (`"this operand"`): a choice object's written in place (`CHOICE_OBJECT_OPERANDS`), as it refuses the host global there
- * (`DECLARED_REFUSALS`), and an unlabelled option or element.
+ * The positions where the route's refusal of one of the core's diagnostics (`"this operand"`, whichever consumer gave
+ * it) may decline an outside value carried: a choice object's written in place (`CHOICE_OBJECT_OPERANDS`), as it
+ * refuses the host global there (`DECLARED_REFUSALS`), and an unlabelled option or element, where the core checks what
+ * the buttons return (`choiceValues`).
  */
-const CHOICE_CHECKED = new Set([
+const CORE_REFUSED_AT = new Set([
   "askChoice.returnedText",
   "askChoice.value",
   "askChoice.option",
@@ -172,13 +173,13 @@ function judge(
       return;
     }
     if (mode.outside !== undefined) {
-      // today plans: the route declines only an outside value carried, by the table's refusal or, where the core checks
-      // what the buttons return, the core's; each is counted (R11)
+      // today plans: the route declines only an outside value carried, by the table's refusal or, at a choice's
+      // position, by its refusal of a core diagnostic (`CORE_REFUSED_AT`); each is counted (R11)
       const by =
         mode.outside === TABLE_REFUSAL
           ? "table"
-          : mode.outside === "this operand" && CHOICE_CHECKED.has(sample.operand)
-            ? "choice check"
+          : mode.outside === "this operand" && CORE_REFUSED_AT.has(sample.operand)
+            ? "core"
             : null;
       if (by !== null && DECLINED_ORIGINS.has(sample.origin)) {
         const key = `${sample.origin} (${by === "table" ? by : sample.operand}): ${carrierOf(sample)}`;
