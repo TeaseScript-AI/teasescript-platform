@@ -63,7 +63,7 @@ export function firstDirect(
  * store, the copy that brought the other type its related site (`copy`, else `site`); any other error stays at `site`.
  * `eligible`: the error is that property's, its offending contribution through whole copies.
  */
-export function deferred(
+export function copiedErrorSite(
   walk: Consumers,
   site: SourceSite,
   root: PlaceId,
@@ -114,7 +114,7 @@ function childrenOf(
   walk: Consumers,
   literal: PlaceId,
 ): ReadonlyMap<string, readonly PlaceId[]> | undefined {
-  if (walk.literalChildren === null) {
+  if (walk.childValuesByLiteral === null) {
     const { program, definitions } = walk.pass;
     const index = new Map<PlaceId, Map<string, PlaceId[]>>();
     for (const place of program.places) {
@@ -129,9 +129,9 @@ function childrenOf(
       for (const d of definitions.cellDefs.get(place.id) ?? [])
         if (d.value !== undefined) values.push(d.value);
     }
-    walk.literalChildren = index;
+    walk.childValuesByLiteral = index;
   }
-  return walk.literalChildren.get(literal);
+  return walk.childValuesByLiteral.get(literal);
 }
 
 /** The values standing at one level, after `above`: each a whole copy, a literal, or another value. */

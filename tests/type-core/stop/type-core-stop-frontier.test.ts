@@ -8,11 +8,13 @@ import {
   withTestDemandAllowance,
 } from "../../../src/type-inference/core/budget.js";
 import {
-  FRONTIER_COPIES,
-  FRONTIER_DEPTH,
   withFrontierBound,
   type FrontierRead,
 } from "../../../src/type-inference/core/consumers/host-frontier.js";
+import {
+  FRONTIER_COPIES,
+  FRONTIER_DEPTH,
+} from "../../../src/type-inference/core/consumers/model.js";
 import { coreRequest } from "../../helpers/type-core-analysis.js";
 import {
   heldDemands,
