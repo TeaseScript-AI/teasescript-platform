@@ -46,7 +46,6 @@ export const costlyTestSeconds = {
   "player/player-rewind-lifecycle.test.js": 21,
   "type-core/stop/type-core-stop-labels.test.js": 21,
   "type-core/stop/type-core-enclosing.test.js": 20,
-  "player/player-gate-tapes.test.js": 19,
   "type-core/contract/type-core-positions.test.js": 18,
   "type-core/messages/type-core-messages-paste.test.js": 18,
   "families-runner/families-stalls.test.js": 17,

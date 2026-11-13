@@ -4,8 +4,7 @@ import { DRIVERS, loadDrivers, type PostEntry } from "../helpers/player/post-ord
 
 /*
  * The production post order of a Start and a Continue (L5i.7, O1): every request the real composable posts, in order,
- * on the in-process host. Against the order before L5i.7, these drivers differed only by the lock preload's
- * `planMetadata`.
+ * on a Worker. Against the order before L5i.7, these drivers differed only by the lock preload's `planMetadata`.
  */
 
 before(loadDrivers);

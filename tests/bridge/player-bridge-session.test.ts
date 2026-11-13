@@ -17,7 +17,7 @@ import {
   heldPlan,
   heldRecording,
   introduceNow,
-} from "../../player/engine-bridge/in-process.js";
+} from "../helpers/bridge/in-process.js";
 import { nodeWorkerPort } from "../../player/engine-bridge/node-client.js";
 import type { PrepareResult } from "../../player/engine-bridge/player-ops.js";
 import { startBridgeHost, type HostPort } from "../../player/engine-bridge/worker-host.js";

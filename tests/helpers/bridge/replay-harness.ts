@@ -331,9 +331,8 @@ export const ADAPTER_OPS = {
       ? select(session)
       : answeredByPlayerInput(session, input, () => select(session));
   }),
-  // The ops the L5 gate's K/F tapes send (`tests/gate/candidates.ts`), each as its host op calls the adapter, from the
-  // arguments the host accepted (`ops/input.ts`, `ops/resources.ts`, `ops/media.ts`, `ops/session.ts`). The tapes send
-  // no `input`, so none is recorded as how the player answered.
+  // The other answer ops, each as its host op calls the adapter, from the arguments the host accepted (`ops/input.ts`,
+  // `ops/resources.ts`, `ops/media.ts`, `ops/session.ts`), with no `input` recorded as how the player answered.
   submitComposer: presented((session, args) => {
     // EVIDENCE: validation: the host accepted `text` as a string.
     const text = args["text"] as string;

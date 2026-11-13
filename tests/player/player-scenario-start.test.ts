@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test, { after, before, type TestContext } from "node:test";
 import { effectScope, type Ref } from "vue";
 import { DEMO_PLAYER_PROFILE } from "../../player/demo-player-profile.js";
-import type * as InProcess from "../../player/engine-bridge/in-process.js";
+import type * as InProcess from "../helpers/bridge/in-process.js";
 import type { ScriptStorageProvider } from "../../player/persistence/script-storage.js";
 import type { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import type { PlayerSession } from "../../player/runtime/runtime-view.js";
@@ -37,7 +37,7 @@ const restore: (() => void)[] = [];
 before(async () => {
   const session = await loadPlayerModule("player/vue/src/session/usePlayerSession.ts");
   const scenario = await loadPlayerModule("player/vue/src/development/scenarioStart.ts");
-  const facade = await loadPlayerModule("player/engine-bridge/in-process.ts");
+  const facade = await loadPlayerModule("tests/helpers/bridge/in-process.ts");
   assert.equal(typeof session.usePlayerSession, "function");
   assert.equal(typeof scenario.prepareScenario, "function");
   assert.equal(typeof facade.createInProcessBackend, "function");

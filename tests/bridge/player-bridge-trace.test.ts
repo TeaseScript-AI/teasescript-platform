@@ -13,13 +13,12 @@ import {
 } from "../../player/debug/debug-variables.js";
 import type { DebugView, DebugViewRequest } from "../../player/debug/debug-view.js";
 import { BridgeRequestError, connectBridge } from "../../player/engine-bridge/client.js";
-import { heldTrace } from "../../player/engine-bridge/in-process.js";
+import { heldTrace } from "../helpers/bridge/in-process.js";
 import { nodeWorkerPort } from "../../player/engine-bridge/node-client.js";
 import type { PrepareResult } from "../../player/engine-bridge/player-ops.js";
 import { PlayerBridge } from "../../player/runtime/player-bridge.js";
 import {
   playerRuntimeDebugVariables,
-  playerRuntimeSnapshot,
   type PlayerRuntimeSession,
 } from "../../player/runtime/runtime-adapter.js";
 import {
@@ -76,9 +75,8 @@ async function worker(): Promise<PlayerBridge> {
   return new PlayerBridge(await connectBridge(nodeWorkerPort(PLAYER_WORKER, BUILD), BUILD));
 }
 
-/** Both backends, the Worker's ended after `body`. */
-async function onBoth(body: (bridge: PlayerBridge, name: string) => Promise<void>) {
-  await body(await inProcessBridge(), "in-process");
+/** `body` on a Worker's backend, ended after it. */
+async function onWorker(body: (bridge: PlayerBridge, name: string) => Promise<void>) {
   const remote = await worker();
   try {
     await body(remote, "worker");
@@ -197,10 +195,10 @@ function before(held: PlayerRuntimeSession, trace: RuntimeDebugContext, request:
   };
 }
 
-test("a traced session shows what an untraced one shows, on both backends", async () => {
-  await onBoth(async (bridge, name) => {
+test("a traced session shows what an untraced one shows", async () => {
+  await onWorker(async (bridge, name) => {
     const untraced = await playTape(bridge, false);
-    const other = name === "worker" ? await worker() : await inProcessBridge();
+    const other = await worker();
     try {
       const traced = await playTape(other, true);
       const strip = (steps: unknown[]) =>
@@ -209,13 +207,8 @@ test("a traced session shows what an untraced one shows, on both backends", asyn
           return { ...(step as Record<string, unknown>), view: null };
         });
       assert.deepEqual(strip(traced.steps), strip(untraced.steps), name);
-      if (name === "in-process")
-        assert.deepEqual(
-          hatch(traced.session, (held) => playerRuntimeSnapshot(held)),
-          hatch(untraced.session, (held) => playerRuntimeSnapshot(held)),
-        );
     } finally {
-      if (name === "worker") other.client.terminate();
+      other.client.terminate();
     }
   });
 });
@@ -277,7 +270,7 @@ test("a view opens the rows the player chose and shows more pages, and its copy 
 });
 
 test("a stopped session is still viewed as its stop froze it, and other requests are refused", async () => {
-  await onBoth(async (bridge, name) => {
+  await onWorker(async (bridge, name) => {
     await bridge.client.request("debugTracing", { on: true, intent: 1 });
     const session = await bridge.start(await prepared(bridge), START, false);
     const before = await bridge.read(session, "debugView", { request: everything(0, null) });
@@ -292,7 +285,7 @@ test("a stopped session is still viewed as its stop froze it, and other requests
 });
 
 test("tracing off drops the trace, on makes a new one, and Debug mode is the script's to read", async () => {
-  await onBoth(async (bridge, name) => {
+  await onWorker(async (bridge, name) => {
     const on = (await bridge.client.request("debugTracing", { on: true, intent: 1 })).result;
     assert.deepEqual(on, { traceId: 1 }, name);
     // Asking again changes nothing; an older intent neither.
@@ -384,7 +377,7 @@ test("malformed trace arguments are refused before anything runs", async () => {
 // The view is a read (`PlayerBridge.read`): after a Player error stop it shows the stop line, byte for byte as before
 // the stop, which the session's own ops cannot pass.
 test("a view after a Player error stop is the stop line's, byte for byte", async () => {
-  await onBoth(async (bridge, name) => {
+  await onWorker(async (bridge, name) => {
     await bridge.client.request("debugTracing", { on: true, intent: 1 });
     const session = await bridge.start(await prepared(bridge), START, false);
     await bridge.request(session, "observeTime", { atMs: 1_000, media: [] });
@@ -414,14 +407,4 @@ test("a view after a Player error stop is the stop line's, byte for byte", async
     );
     assert.equal(later, before, `${name}: nothing passed the stop line`);
   });
-});
-
-test("the views in a Worker are the ones in-process", async () => {
-  const local = await playTape(await inProcessBridge(), true);
-  const remote = await worker();
-  try {
-    assert.deepEqual((await playTape(remote, true)).steps, local.steps);
-  } finally {
-    remote.client.terminate();
-  }
 });

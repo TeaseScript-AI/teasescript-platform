@@ -71,8 +71,8 @@ type FakeAudio = EventTarget & {
   paused: boolean;
 };
 
-/** The real composable on `topology` (in-process, replying after `delayMs`), in a surface with fake audio. */
-async function mount(context: TestContext, topology: Topology, delayMs: number) {
+/** The real composable on `topology`, in a surface with fake audio. */
+async function mount(context: TestContext, topology: Topology) {
   const elements: FakeAudio[] = [];
   const surface = {
     document: Object.assign(new EventTarget(), { visibilityState: "visible" }),
@@ -109,7 +109,7 @@ async function mount(context: TestContext, topology: Topology, delayMs: number) 
       else Reflect.deleteProperty(globalThis, name);
     });
   }
-  const transport = await topologyBridge(context, topology, { delayMs });
+  const transport = await topologyBridge(context, topology);
   const bridge = transport.bridge;
   const queued = { current: 0, maximum: 0 };
   const openSection = bridge.client.section.bind(bridge.client);
@@ -146,52 +146,44 @@ async function mount(context: TestContext, topology: Topology, delayMs: number) 
 const transcript = (player: MediaHost) =>
   player.session.value?.transcriptEntries.map((entry) => entry.text) ?? [];
 
-/*
- * The rows that run on both topologies (L5i.7): in-process at each reply delay, and on a Worker, whose replies come as
- * they come, once. The file's end checks every registered row ran.
- */
+/* The rows on a Worker, whose replies come as they come (L5i.7). The file's end checks every registered row ran. */
 const RERUN = rerunRegistry({
-  "load report, 0 ms": ["in-process"],
-  "load report, 50 ms": TOPOLOGIES,
-  "load report, 250 ms": ["in-process"],
+  "load report": TOPOLOGIES,
   "replaced session's report": TOPOLOGIES,
-  "scene time, 0 ms": ["in-process"],
-  "scene time, 50 ms": TOPOLOGIES,
-  "scene time, 250 ms": ["in-process"],
+  "scene time": TOPOLOGIES,
 });
 
-for (const delayMs of [0, 50, 250] as const)
-  RERUN.rows(
-    `load report, ${delayMs} ms`,
-    `a medium's load report goes over the bridge once and the script goes on (${delayMs} ms late)`,
-    async (context, topology, end) => {
-      const { player, elements, start, reports } = await mount(context, topology, delayMs);
-      await start('playAudio async "bell.mp3"\nsay "after", instant\nshowButton "Done"\nexit');
-      for (
-        const within = withinHostTime();
-        !elements.some((element) => element.src.endsWith("bell.mp3"));
-      ) {
-        assert.ok(within(), "the medium did not start");
-        await later();
-      }
-      elements
-        .find((element) => element.src.endsWith("bell.mp3"))!
-        .dispatchEvent(new Event("loadedmetadata"));
-      for (const within = withinHostTime(); !transcript(player).includes("after");) {
-        assert.ok(within(), "the script did not go on");
-        await later();
-      }
-      await later(delayMs + 20);
-      assert.equal(reports().length, 1, "one report, delivered once");
-      return end();
-    },
-  );
+RERUN.rows(
+  "load report",
+  "a medium's load report goes over the bridge once and the script goes on",
+  async (context, topology, end) => {
+    const { player, elements, start, reports } = await mount(context, topology);
+    await start('playAudio async "bell.mp3"\nsay "after", instant\nshowButton "Done"\nexit');
+    for (
+      const within = withinHostTime();
+      !elements.some((element) => element.src.endsWith("bell.mp3"));
+    ) {
+      assert.ok(within(), "the medium did not start");
+      await later();
+    }
+    elements
+      .find((element) => element.src.endsWith("bell.mp3"))!
+      .dispatchEvent(new Event("loadedmetadata"));
+    for (const within = withinHostTime(); !transcript(player).includes("after");) {
+      assert.ok(within(), "the script did not go on");
+      await later();
+    }
+    await later(70);
+    assert.equal(reports().length, 1, "one report, delivered once");
+    return end();
+  },
+);
 
 RERUN.rows(
   "replaced session's report",
   "a replaced session's load report never reaches the session that replaced it",
   async (context, topology, end) => {
-    const { player, elements, start, reports } = await mount(context, topology, 50);
+    const { player, elements, start, reports } = await mount(context, topology);
     await start('playAudio async "old.mp3"\nshowButton "Old"\nexit');
     for (
       const within = withinHostTime();
@@ -369,150 +361,151 @@ async function drainTasks() {
   for (let n = 0; n < 30; n++) await new Promise<void>((resolve) => setImmediate(resolve));
 }
 
-for (const delay of [0, 50, 250] as const)
-  RERUN.rows(
-    `scene time, ${delay} ms`,
-    `with media sampling and late replies, scene time follows the clock and the session advances: ${delay} ms`,
-    async (context, topology, end) => {
-      context.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
-      let now = 0;
-      context.mock.method(performance, "now", () => now);
-      const player = await mount(context, topology, delay);
-      let started = false;
-      // The page's clock when the Start showed, its scene time's 0: after its script's prepare and its `start` reply.
-      let startedAt = 0;
-      let startError: unknown;
-      void player.start('playAudio async "clock.mp3"\nwait 1.5 s\nshowButton "Done"\nexit').then(
-        () => {
-          started = true;
-          startedAt = now;
-        },
-        (e) => {
-          startError = e;
-        },
-      );
-      const advance = async (ms: number) => {
-        for (let i = 0; i < ms; i++) {
-          now++;
-          for (const audio of player.elements) if (!audio.paused) audio.currentTime += 0.001;
-          context.mock.timers.tick(1);
-          await drainTasks();
-        }
-      };
-      // How long a wait on the host may step the mocked clock. In-process, its replies come on mock time, within `steps`.
-      // A Worker's take real time, which no count of steps bounds and `until` cannot wait on here (the test mocks its
-      // timers), so they get as long as a wait on the host may take.
-      const waiting = (steps: number) => {
-        const within = withinHostTime();
-        let step = 0;
-        return () => (topology === "worker" ? within() : step++ < steps);
-      };
-      for (const more = waiting(2000); !started && !startError && more();) await advance(1);
-      if (startError) throw startError;
-      assert.equal(started, true, "start reply releases on mock time");
-      for (
-        const more = waiting(1000);
-        !player.elements.some((a) => a.src.endsWith("clock.mp3")) && more();
-      )
-        await advance(1);
-      const audio = player.elements.find((a) => a.src.endsWith("clock.mp3"));
-      assert.ok(audio, "audio created");
-      audio.dispatchEvent(new Event("loadedmetadata"));
-      let buttonAt: number | null = null;
-      let waitDeadline: number | null = null;
-      for (let n = 0; n < 3500; n++) {
-        await advance(1);
-        const foreground = player.player.session.value?.state.foregroundAction;
-        if (waitDeadline === null && foreground?.kind === "delay")
-          waitDeadline = foreground.deadlineMs;
-        if (
-          buttonAt === null &&
-          player.player.session.value?.state.foregroundAction?.kind === "interaction"
-        )
-          buttonAt = now;
+/** What the scene time row allows one reply on mock time. */
+const REPLY_MS = 50;
+
+RERUN.rows(
+  "scene time",
+  "with media sampling and replies from a Worker, scene time follows the clock and the session advances",
+  async (context, topology, end) => {
+    context.mock.timers.enable({ apis: ["setTimeout", "setInterval"] });
+    let now = 0;
+    context.mock.method(performance, "now", () => now);
+    const player = await mount(context, topology);
+    let started = false;
+    // The page's clock when the Start showed, its scene time's 0: after its script's prepare and its `start` reply.
+    let startedAt = 0;
+    let startError: unknown;
+    void player.start('playAudio async "clock.mp3"\nwait 1.5 s\nshowButton "Done"\nexit').then(
+      () => {
+        started = true;
+        startedAt = now;
+      },
+      (e) => {
+        startError = e;
+      },
+    );
+    const advance = async (ms: number) => {
+      for (let i = 0; i < ms; i++) {
+        now++;
+        for (const audio of player.elements) if (!audio.paused) audio.currentTime += 0.001;
+        context.mock.timers.tick(1);
+        await drainTasks();
       }
-      const shown = player.player.session.value!;
-      const observations = player.posted
-        .filter((p) => p.op === "observeTime")
-        .map((p) => ({ wall: p.at, ...observeArgs(p.args) }));
-      const lags = observations.map((p) => p.wall - p.atMs);
-      assert.ok(
-        observations.filter((p) => p.media.length > 0).length >= 5,
-        "multiple loaded-media observations",
+    };
+    // How long a wait on the host may step the mocked clock. In-process, its replies come on mock time, within `steps`.
+    // A Worker's take real time, which no count of steps bounds and `until` cannot wait on here (the test mocks its
+    // timers), so they get as long as a wait on the host may take.
+    const waiting = (steps: number) => {
+      const within = withinHostTime();
+      let step = 0;
+      return () => (topology === "worker" ? within() : step++ < steps);
+    };
+    for (const more = waiting(2000); !started && !startError && more();) await advance(1);
+    if (startError) throw startError;
+    assert.equal(started, true, "start reply releases on mock time");
+    for (
+      const more = waiting(1000);
+      !player.elements.some((a) => a.src.endsWith("clock.mp3")) && more();
+    )
+      await advance(1);
+    const audio = player.elements.find((a) => a.src.endsWith("clock.mp3"));
+    assert.ok(audio, "audio created");
+    audio.dispatchEvent(new Event("loadedmetadata"));
+    let buttonAt: number | null = null;
+    let waitDeadline: number | null = null;
+    for (let n = 0; n < 3500; n++) {
+      await advance(1);
+      const foreground = player.player.session.value?.state.foregroundAction;
+      if (waitDeadline === null && foreground?.kind === "delay")
+        waitDeadline = foreground.deadlineMs;
+      if (
+        buttonAt === null &&
+        player.player.session.value?.state.foregroundAction?.kind === "interaction"
+      )
+        buttonAt = now;
+    }
+    const shown = player.player.session.value!;
+    const observations = player.posted
+      .filter((p) => p.op === "observeTime")
+      .map((p) => ({ wall: p.at, ...observeArgs(p.args) }));
+    const lags = observations.map((p) => p.wall - p.atMs);
+    assert.ok(
+      observations.filter((p) => p.media.length > 0).length >= 5,
+      "multiple loaded-media observations",
+    );
+    assert.ok(
+      buttonAt !== null &&
+        waitDeadline !== null &&
+        buttonAt - startedAt <= waitDeadline + 3 * REPLY_MS,
+      "shown button by wait plus three replies",
+    );
+    assert.ok(Math.max(...lags) - Math.min(...lags) < 0.001, "turn freshness");
+    assert.ok(
+      player.queued.maximum <= 2,
+      "no periodic backlog beyond startup/media service section",
+    );
+    // The host's session as shown now, read over the bridge as its checkpoint, and the host's recording: both queued in
+    // one turn behind the session's earlier requests, one after the other, so no session work comes between them; both
+    // reply on mock time.
+    const onMockTime = async <T>(reading: Promise<T>, what: string): Promise<T> => {
+      let replied = false;
+      void reading.then(
+        () => void (replied = true),
+        () => void (replied = true),
       );
-      assert.ok(
-        buttonAt !== null &&
-          waitDeadline !== null &&
-          buttonAt - startedAt <= waitDeadline + 3 * delay,
-        "shown button by wait plus three replies",
+      for (const more = waiting(1000); !replied && more();) await advance(1);
+      assert.equal(replied, true, `${what} replies on mock time`);
+      return reading;
+    };
+    const bridge = await player.player.bridge;
+    const shownNow = player.player.session.value!;
+    const checkpointRead = bridge.read(shownNow, "captureCheckpoint");
+    const recordingRead = bridge.client.request(
+      "readRecording",
+      { ticket: null },
+      { after: shownNow.id },
+    );
+    const shownOnHost = await onMockTime(checkpointRead, "the checkpoint's read");
+    // EVIDENCE: validation: `readRecording` replies from the same build with the recording or `null`.
+    const recording = (await onMockTime(recordingRead, "the recording's read"))
+      .result as DebugRecording;
+    const rebuilt = rebuildRecordedSession(
+      recording.plan,
+      recording.anchorSnapshot,
+      recording.operations,
+    );
+    assert.equal(
+      serializeCheckpoint(rebuilt.exportCheckpoint()),
+      shownOnHost.checkpointJson,
+      "delayed loaded-media recording replays",
+    );
+    const input = await runtimeInput();
+    const beganInput = now;
+    let inputResult: string | null = null;
+    let inputError: unknown;
+    void input
+      .runInput(
+        player.player.inputSection,
+        presentedAction(shown),
+        presentedAction,
+        input.intents.choice(null, "button"),
+      )
+      .then(
+        (result) => {
+          inputResult = result.kind;
+        },
+        (error) => {
+          inputError = error;
+        },
       );
-      assert.ok(Math.max(...lags) - Math.min(...lags) < 0.001, "turn freshness");
-      assert.ok(
-        player.queued.maximum <= 2,
-        "no periodic backlog beyond startup/media service section",
-      );
-      // The host's session as shown now, read over the bridge as its checkpoint, and the host's recording: both queued in
-      // one turn behind the session's earlier requests, one after the other, so no session work comes between them; both
-      // reply on mock time.
-      const onMockTime = async <T>(reading: Promise<T>, what: string): Promise<T> => {
-        let replied = false;
-        void reading.then(
-          () => void (replied = true),
-          () => void (replied = true),
-        );
-        for (const more = waiting(1000); !replied && more();) await advance(1);
-        assert.equal(replied, true, `${what} replies on mock time`);
-        return reading;
-      };
-      const bridge = await player.player.bridge;
-      const shownNow = player.player.session.value!;
-      const checkpointRead = bridge.read(shownNow, "captureCheckpoint");
-      const recordingRead = bridge.client.request(
-        "readRecording",
-        { ticket: null },
-        { after: shownNow.id },
-      );
-      const shownOnHost = await onMockTime(checkpointRead, "the checkpoint's read");
-      // EVIDENCE: validation: `readRecording` replies from the same build with the recording or `null`.
-      const recording = (await onMockTime(recordingRead, "the recording's read"))
-        .result as DebugRecording;
-      const rebuilt = rebuildRecordedSession(
-        recording.plan,
-        recording.anchorSnapshot,
-        recording.operations,
-      );
-      assert.equal(
-        serializeCheckpoint(rebuilt.exportCheckpoint()),
-        shownOnHost.checkpointJson,
-        "delayed loaded-media recording replays",
-      );
-      const input = await runtimeInput();
-      const beganInput = now;
-      let inputResult: string | null = null;
-      let inputError: unknown;
-      void input
-        .runInput(
-          player.player.inputSection,
-          presentedAction(shown),
-          presentedAction,
-          input.intents.choice(null, "button"),
-        )
-        .then(
-          (result) => {
-            inputResult = result.kind;
-          },
-          (error) => {
-            inputError = error;
-          },
-        );
-      for (let i = 0; inputResult === null && !inputError && i < 4 * Math.max(1, delay); i++)
-        await advance(1);
-      if (inputError) throw inputError;
-      assert.equal(inputResult, "answered", "real input remains responsive during sampling");
-      assert.ok(
-        now - beganInput <= 3 * Math.max(1, delay),
-        "input waits at most one periodic reply, its observation, and its answer",
-      );
-      return end();
-    },
-  );
+    for (let i = 0; inputResult === null && !inputError && i < 4 * REPLY_MS; i++) await advance(1);
+    if (inputError) throw inputError;
+    assert.equal(inputResult, "answered", "real input remains responsive during sampling");
+    assert.ok(
+      now - beganInput <= 3 * REPLY_MS,
+      "input waits at most one periodic reply, its observation, and its answer",
+    );
+    return end();
+  },
+);

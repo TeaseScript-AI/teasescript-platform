@@ -1,5 +1,0 @@
-// gate-host: silentPlayer
-// The gate's timeout fixture: a timed button the player never presses, so its wait times out.
-let waited = showButton "Go", timeout: 2 s
-say "Timed out", instant
-exit

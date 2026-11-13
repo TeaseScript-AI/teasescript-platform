@@ -18,7 +18,7 @@ import {
   hatch,
   heldPlan,
   introduceNow,
-} from "../../player/engine-bridge/in-process.js";
+} from "../helpers/bridge/in-process.js";
 import {
   closeConnection,
   playerBridgeOps,
