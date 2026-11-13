@@ -248,9 +248,11 @@ copies from a common origin, and constrained descendants of open incoming object
 
 **At a command operand or a speaker's built-in field, an `unknown` is admitted only by a listed reason.**
 
-**Rule.** At a command operand (its row in the syntax table's command operand table, `OperandRule`), the operand as
-written has the row's form where the row names one (a known text, a choice object written in place), and each item of
-the value is a kind the row takes, or an `unknown`. An `unknown` whose only reason is a missing property is admitted:
+**Rule.** At a command operand (its row in the syntax table's command operand table, `OperandRule`), where the row names
+a form, the operand passes it: a form judges only an operand written as a known text (`knownText`: the text meets the
+row's rule, such as a web address or a button background) or, at a choice's button, an object written in place
+(`choiceObjectShape`: a `text` and only a choice object's properties), and every other operand passes it; and each item
+of the value is a kind the row takes, or an `unknown`. An `unknown` whose only reason is a missing property is admitted:
 its read fails before the command. One whose only other reason is external is admitted at the host global itself, at a
 read of a place whose type is undecided, or at a read of a place whose written or decided type has only kinds the row
 takes; any other, a stop's among them, is refused. Every such row cites the runtime check that refuses a value it does
@@ -269,13 +271,14 @@ route refuses (`openUrl([hostValue][0])`), was measured, not estimated.
 
 ### r4-454
 
-**A run of a source whose command has an admitted operand ends in one of three ways.**
+**A run in which an admitted command operand's value would not fit ends in one of three ways.**
 
-**Rule.** In the order the runtime works, a run either does not reach the command, and ends as the same source with a
-fitting operand does; or an operand's evaluation fails, and the run ends as that operand alone does (`let v = <operand>`
-there), with the same code and site; or every operand evaluates, and the command refuses a value it does not take, with
-its position's code. For an ask the third way reads: no field or button opens and the run does not wait; the question
-may already have been said, by its own instruction before the request.
+**Rule.** A run in which an operand the route admitted would hold a value its command does not take ends, in the order
+the runtime works, in one of three ways: it does not reach the command, and ends as the same source with a fitting
+operand does; or an operand's evaluation fails, and the run ends as that operand alone does (`let v = <operand>` there),
+with the same code and site; or every operand evaluates, and the command refuses a value it does not take, with its
+position's code. For an ask the third way reads: no field or button opens and the run does not wait; the question may
+already have been said, by its own instruction before the request.
 
 **Reason.** A claim about the value alone missed an operand whose own evaluation fails before the command
 (`openUrl([1][4])`, round 4 of reach step 1a: the legacy checker gave TSV043, the route then published, and the run

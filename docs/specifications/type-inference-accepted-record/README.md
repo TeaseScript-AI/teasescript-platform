@@ -282,4 +282,4 @@ reviewer ("Codex r2's B1", "#1422 B1", "the owner's reviewer's F1") is a review 
 | [r4-451](contract.md#r4-451) | contract | A `null` that reaches a use through an entry is the use's required check. |
 | [r4-452](contract.md#r4-452) | contract | Read a call of an identity function as its argument in parentheses. |
 | [r4-453](admission.md#r4-453) | admission | At a command operand or a speaker's built-in field, an `unknown` is admitted only by a listed reason. |
-| [r4-454](admission.md#r4-454) | admission | A run of a source whose command has an admitted operand ends in one of three ways. |
+| [r4-454](admission.md#r4-454) | admission | A run in which an admitted command operand's value would not fit ends in one of three ways. |
