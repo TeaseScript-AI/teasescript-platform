@@ -1,6 +1,6 @@
 // The derived oracle's author functions (`derived-functions.ts`, #2667 step 4a-0): on sources whose functions store only
-// into places with a written type, the oracle's checked stores and its runs are today's compiler's, which checks those
-// places as V30 §10, §11 and §17 say; a check into an untyped parameter or result is underivable.
+// into places with a written type, the oracle's checked stores, its content and its runs are today's compiler's, which
+// checks those places as V30 §10, §11 and §17 say; a check into an untyped parameter or result is underivable.
 
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -8,8 +8,10 @@ import { compileProject } from "../../../src/compiler.js";
 import { compactAnalysis, coreRequest } from "../../helpers/type-core-analysis.js";
 import {
   assignments,
+  derivedContent,
   derivedStores,
   planOfFile,
+  plannedContent,
   plannedStores,
   runGlobals,
 } from "../../helpers/type-core-route.js";
@@ -36,8 +38,28 @@ const CASES: readonly [string, Files][] = [
     one("function f(xs: integer[]) {\n  for x in xs {\n    say x\n  }\n}\nf(hostValue)\nexit\n"),
   ],
   [
+    "an argument holding a call of another function",
+    one(
+      "function g(v: integer) {\n  return v\n}\nfunction f(w: integer) {\n  say w\n}\nf(g(hostValue))\nexit\n",
+    ),
+  ],
+  [
+    "a call of a function inside its own argument",
+    one("function f(x: integer) {\n  return x\n}\nsay f(f(hostValue))\nexit\n"),
+  ],
+  [
     "a written default, supplied and not",
     one("function f(x: integer = hostValue) {\n  say x\n}\nf(1)\nf()\nexit\n"),
+  ],
+  [
+    "a written default holding the host value in a list",
+    one(
+      "function f(xs: integer?[] = [hostValue, null, 7]) {\n  for x in xs {\n    say x\n  }\n}\nf()\nexit\n",
+    ),
+  ],
+  [
+    "a returned list holding the host value",
+    one("function f: integer[] {\n  return [hostValue]\n}\nfor x in f() {\n  say x\n}\nexit\n"),
   ],
   [
     "a returned value into a written result",
@@ -69,6 +91,10 @@ const CASES: readonly [string, Files][] = [
     one('function shown(v) {\n  say v\n}\nshown(1)\nshown("x")\nsay hostValue != null\nexit\n'),
   ],
   [
+    "an untyped parameter returned into a written `let`",
+    one("function keep(v) {\n  return v\n}\nlet n: integer = keep(hostValue)\nsay n\nexit\n"),
+  ],
+  [
     "a function that ends without a return",
     one("function f(x: integer) {\n  say x\n}\nlet r = f(hostValue)\nsay r == null\nexit\n"),
   ],
@@ -97,12 +123,20 @@ for (const [name, files] of CASES)
         ...derive(project[index]!, { ...record, checks: own }, project),
       };
     });
-    for (const file of derived)
+    for (const [index, file] of derived.entries()) {
+      const plan = planOfFile(today.plan, file.path);
       assert.deepEqual(
         derivedStores(file.stores),
-        plannedStores(planOfFile(today.plan, file.path)),
+        plannedStores(plan),
         `${name}: the checked stores of ${file.path}`,
       );
+      const source: string = request.files[index]!.source;
+      assert.deepEqual(
+        derivedContent(file.content, source),
+        plannedContent(plan, source),
+        `${name}: the content of ${file.path}`,
+      );
+    }
     for (const inputs of assignments(["hostValue"]))
       assert.deepEqual(
         evaluateProject(derived, inputs).run,
@@ -110,6 +144,54 @@ for (const [name, files] of CASES)
         `${name} with ${JSON.stringify(inputs)}`,
       );
   });
+
+test("an integer that may be null into a written parameter is a store into it, where an earlier argument may change it", () => {
+  // (today's checker refuses the call, TSV041; the record warns, and its runtime check is the parameter's: AD-1)
+  const source =
+    "let n = 1\nfunction reset {\n  n = 2\n  return 0\n}\nfunction f(a: integer, b: integer) {\n  say b\n}\nif hostValue == null {\n  n = null\n}\nf(reset(), n)\nexit\n";
+  const request = coreRequest(one(source));
+  assert.ok(request !== null);
+  const syntax = syntaxOf(source);
+  const at = source.lastIndexOf("n)");
+  assert.deepEqual(derivedStores(derive(syntax, compactAnalysis(request), [syntax]).stores), [
+    `parameter 'b' of 'f' ${at}:${at + 1} ${at}:${at + 1} integer`,
+  ]);
+});
+
+test("a parse into a function's written place reads that type, as a `let`'s: the plan's expected type there", () => {
+  // (today's checker gives the parse no expected type there; the record of the cell that names it does, and the route
+  // follows the record. A `null` default, whose own type is no expected type, shows that the type is the place's)
+  const cases: readonly (readonly [string, readonly (readonly [string, string])[]])[] = [
+    [
+      "function f(n: integer? = fromJson(hostValue, default: null)) {\n  say n\n}\nf()\nf(fromJson(hostValue, default: 1))\nexit\n",
+      [
+        ["fromJson(hostValue, default: null)", "integer|null"],
+        ["fromJson(hostValue, default: 1)", "integer|null"],
+      ],
+    ],
+    [
+      "function f: integer? {\n  return fromJson(hostValue, default: null)\n}\nsay f()\nexit\n",
+      [["fromJson(hostValue, default: null)", "integer|null"]],
+    ],
+    [
+      "function f(n: integer?) {\n  n = fromJson(hostValue, default: null)\n  say n\n}\nf(1)\nexit\n",
+      [["fromJson(hostValue, default: null)", "integer|null"]],
+    ],
+  ];
+  for (const [source, parses] of cases) {
+    const request = coreRequest(one(source));
+    assert.ok(request !== null, source);
+    const syntax = syntaxOf(source);
+    assert.deepEqual(
+      derivedContent(derive(syntax, compactAnalysis(request), [syntax]).content, source),
+      parses.map(([parse, type]) => {
+        const at = source.indexOf(parse);
+        return `expected ${at}:${at + parse.length} ${type}`;
+      }),
+      source,
+    );
+  }
+});
 
 test("the derived oracle refuses a check into an untyped parameter or result: the route publishes none there", () => {
   for (const source of [
