@@ -2,6 +2,7 @@ import { isMessageMarkup } from "../message-markup.js";
 import { isMessagePresentation } from "../message-presentation.js";
 import { isRecord, nonNegativeSafeInteger } from "../plan/validation-support.js";
 import { isFormUi } from "./actions/form/ui-state.js";
+import { validInteractionUiShape } from "./actions/validation/interaction-ui.js";
 import { validFormResult } from "./actions/form/submission.js";
 import type { InterpreterEvent } from "./events.js";
 import { validSpan } from "./snapshot/state.js";
@@ -141,7 +142,8 @@ function validSettlement(settlement: unknown): boolean {
     return false;
   return (
     ui["kind"] !== "form" ||
-    (isFormUi(ui) &&
+    (validInteractionUiShape("form", ui) &&
+      isFormUi(ui) &&
       validFormResult(
         ui,
         settlement["result"],

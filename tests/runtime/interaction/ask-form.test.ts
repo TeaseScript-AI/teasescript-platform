@@ -858,23 +858,11 @@ test("a form that submits at its time limit restores only with a value in every 
   const emptied = structuredClone(cleared.snapshot);
   // oxlint-disable-next-line typescript/no-explicit-any -- EVIDENCE: the test edits a persisted record to an invalid state.
   (emptied.foregroundAction as any).form.values[0] = null;
-  // Today such a state restores, and times out into an answer its own settlement check refuses.
-  assert.equal(validateRuntimeSnapshot(emptied, plan).valid, true);
-  const restored = restoreCheckpoint({
-    ...createCheckpoint(plan, cleared.snapshot),
-    snapshot: emptied,
-  }).snapshot;
-  const timedOut = observeTime(plan, restored, 30_000).snapshot;
-  const settlement = timedOut.lastSettlement;
-  assert.ok(settlement?.actionKind === "interaction" && settlement.settlementKind === "timedOut");
-  assert.deepEqual(settlement.result, {
-    kind: "object",
-    properties: [
-      { name: "level", value: null },
-      { name: "note", value: null },
-    ],
-  });
-  assert.equal(validateRuntimeSnapshot(timedOut, plan).valid, false);
+  // A restore refuses a state without one, which would time out into an answer its settlement check refuses.
+  assert.equal(validateRuntimeSnapshot(emptied, plan).valid, false);
+  assert.throws(() =>
+    restoreCheckpoint({ ...createCheckpoint(plan, cleared.snapshot), snapshot: emptied }),
+  );
 });
 
 test("a stored answer event keeps a form UI only as the engine shows one", () => {
@@ -894,7 +882,10 @@ test("a stored answer event keeps a form UI only as the engine shows one", () =>
   ] as const) {
     const stored = JSON.parse(JSON.stringify(completion));
     Object.assign(stored.settlement.ui, change);
-    // Today the host's check of a stored event accepts each.
-    assert.equal(interpreterEventProblem(stored), null, name);
+    assert.equal(
+      interpreterEventProblem(stored),
+      "The settlement of the 'actionCompleted' event must be a settlement with an action kind and ID, and for an answer its kind, text, and form answers.",
+      name,
+    );
   }
 });
