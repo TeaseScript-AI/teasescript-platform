@@ -116,8 +116,8 @@ snapshot for comparing two analyses of the same sources.
 
   Other O4 foundations include the built-in result relations (`adapters/`): the core reads their operand types and asks
   their member rules (`MEMBER_RULES`) whether a member exists; only the adapter tests read the relations themselves.
-  The condition-shape recognizer (`narrowing-shapes.ts`) is shared: the visitor's branch rules and the core read the
-  same classification.
+  The condition-shape recognizer (`narrowing-shapes.ts`) is shared: `TypeChecker`'s branch rules and the core read
+  the same classification.
 
 - **The switch:** one change makes the constraint backend the compiler's backend in place of the legacy backend, and
   a later stage removes the legacy backend. Until the switch, the compiler's type behavior is the legacy backend's. The
