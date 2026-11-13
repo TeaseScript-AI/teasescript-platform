@@ -279,31 +279,6 @@ export const UNIT_AMOUNT: { readonly takes: readonly ItemTag[]; readonly check: 
   check: { file: "src/runtime/evaluator.ts", function: "evaluate" },
 };
 
-/**
- * Whether the route admits a unit's or an angle's amount: one the core shows to be a number (`UNIT_AMOUNT`), or an
- * external value the evaluator checks as it runs. A missing property's unknown is no value there, as its read fails
- * first; a typed ingress's read is the unknown its store's check stands for. An amount that only a narrowing or an
- * `otherwise` shows to be a number is declined: a read of `n: integer?` under `n != null`, `(n otherwise 1) s`.
- */
-function amountAdmitted(answers: Answers, index: SliceIndex, amount: Expression): boolean {
-  const answer = answers.at(nodeOf(answers, index, amount));
-  const read = answer?.place ?? null;
-  const admitted = read === null ? null : answers.place(read.id, read.path).admitted;
-  return (answer?.items ?? []).every((item) => {
-    if (item.tag === "empty") return true;
-    if (item.tag !== "unknown") return UNIT_AMOUNT.takes.includes(item.tag);
-    const reasons = item.reasons & ~REASON.missing;
-    if (reasons === 0) return true;
-    if (reasons !== REASON.external) return false;
-    if (admitted !== null)
-      return (
-        admitted.by === "undecided" ||
-        admitted.kinds.every((kind) => UNIT_AMOUNT.takes.includes(kind))
-      );
-    return unwrap(amount).kind === "identifier";
-  });
-}
-
 /** The first answer of the analysis that leaves the slice (see the module's comment), or `null`. */
 function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
   const at = (site: { readonly file: number; readonly start: number; readonly end: number }) =>
@@ -355,7 +330,7 @@ function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
           };
       }
   for (const unit of index.units)
-    if (!amountAdmitted(answers, index, unit.operand))
+    if (!operandAdmitted(answers, index, unit.operand, UNIT_AMOUNT))
       return {
         file: index.fileOf(unit),
         span: unit.span,
@@ -544,18 +519,18 @@ function unshownChoiceText(
 }
 
 /**
- * Whether an operand holds only values its rule takes (`OperandRule`): as written, it passes the rule's `form`;
- * each kind the core gives it is one the rule takes; a read of a place whose type is written or decided holds that
- * type's kinds (a typed ingress's read is the unknown its store's check stands for); an unknown is admitted only of an
- * external origin, as the host global itself or a direct read of a place whose type is undecided, beside the
- * instruction's cited check; a missing property is no value there, its read fails first. Any other unknown (one an
- * element, a call or an operation carries, a stop's) is not shown to fit.
+ * Whether an operand holds only values its rule takes (`OperandRule`, or a unit's amount, `UNIT_AMOUNT`): as written,
+ * it passes the rule's `form`; each kind the core gives it is one the rule takes; a read of a place whose type is
+ * written or decided holds that type's kinds (a typed ingress's read is the unknown its store's check stands for); an
+ * unknown is admitted only of an external origin, as the host global itself or a direct read of a place whose type is
+ * undecided, beside the cited check; a missing property is no value there, its read fails first. Any other unknown (one
+ * an element, a call or an operation carries, a stop's) is not shown to fit.
  */
 function operandAdmitted(
   answers: Answers,
   index: SliceIndex,
   operand: Expression,
-  rule: OperandRule,
+  rule: Pick<OperandRule, "takes" | "form">,
 ): boolean {
   if (rule.form !== undefined && !rule.form(operand)) return false;
   const answer = answers.at(nodeOf(answers, index, operand));
