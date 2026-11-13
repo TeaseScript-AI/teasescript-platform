@@ -247,6 +247,11 @@ tablet, laptop, desktop, TV, and ultrawide shapes are useful test cases, but the
 the same constraints produce the same layout. CSS `orientation` describes whether the viewport is wider than it is tall;
 it does not require or imply a physical orientation sensor.
 
+Phones are portrait only. The owner's words: "A landscape screen is unrealistic; make it only for portrait mode on
+phones. A landscape screen can only occur on tablets, desktops and laptops; a phone is always portrait." A phone-sized
+landscape viewport is no test case or layout target; tablet, laptop and desktop landscape sizes stay. Owner decision,
+2026-11-13.
+
 When optional side regions compete with primary content, include their current intrinsic/preferred reservations in the
 fit decision. An outer viewport breakpoint alone cannot tell whether one open side panel fits while several do not.
 
@@ -319,10 +324,10 @@ fashionable default merely to appear distinctive.
 ## Change and verification discipline
 
 Before editing, identify the owning module/layer and the invariants that must remain unchanged. For responsive or
-interaction changes, exercise the current breakpoint and immediately adjacent widths, portrait and landscape,
-low-height windows, representative phone and desktop sizes, automatic and manual panel states, resize/orientation
-changes, outside/inside overlay input, keyboard focus, touch press feedback, scroll placement, and safe-area behavior
-when relevant.
+interaction changes, exercise the current breakpoint and immediately adjacent widths, portrait, landscape at tablet,
+laptop and desktop sizes, low-height windows, representative phone and desktop sizes, automatic and manual panel states,
+resize/orientation changes, outside/inside overlay input, keyboard focus, touch press feedback, scroll placement, and
+safe-area behavior when relevant.
 
 For visual-only work, compare key layout rectangles before and after the change so decoration does not silently alter
 geometry. Reproduce a reported bug and inspect computed layout/state before assigning a cause from a screenshot. For

@@ -126,7 +126,8 @@ You own the structure of the whole: each pull request can be reasonable while th
 package, or at each milestone, run `node tools/structure-report.mjs --json <file>` and compare it with the last report kept
 in the evidence (`--compare`). Before each merge, read the pull request's file signals in the job summary of CI's
 check-3 ([its structure step](TESTING.md#normal-and-diagnostic-verification)). When a signal shows a clear seam, plan the split or the folder move
-as its own pull request, scheduled between packages. Before a package, the brief names the signals and friction issues in the files
+as its own pull request, and its step 2, scheduled between packages. Before a package, the brief names the signals
+and friction issues in the files
 it will touch, and HEAD 0 decides each ([Briefs](#briefs)); the check after the merge then finds only what the package
 added.
 
