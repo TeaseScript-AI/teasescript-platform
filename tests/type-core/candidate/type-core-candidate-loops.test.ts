@@ -8,6 +8,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 
+import { compileProjectWithBackend } from "../../../src/compiler.js";
+import { analyseCore } from "../../../src/type-inference/core/answers.js";
+import { CandidateOutsideSlice, CORE_BACKEND } from "../../../src/type-inference/core/backend.js";
+import { withTestAllowance } from "../../../src/type-inference/core/budget.js";
+import { coreRequest } from "../../helpers/type-core-analysis.js";
 import { DECLARED_WAY_ERRORS } from "../../helpers/type-core/declared-samples.js";
 import {
   diagnosed,
@@ -395,6 +400,31 @@ test("a case value that may never match is refused where today's checker gives T
     (record.checker.diagnostics ?? []).some((each) => each.code === "TSV049"),
   ).length;
   assert.ok(refusedRows > 0 && refusedRows < rows.length, String(refusedRows));
+});
+
+test("a case value that may never match stays refused where the analysis's budget stops it before its subject's kind", () => {
+  // (a stop leaves the subject an unknown of the budget's reason, which today's checker types: refused, never published,
+  // R33's form; never a throw of another kind)
+  for (const source of [
+    'let s = 1\nswitch s {\n  case "a" {\n    say "a"\n  }\n}\nexit\n',
+    'let s = "a"\nlet t = s\nswitch t {\n  case 1..3 {\n    say "r"\n  }\n}\nexit\n',
+    // (a conversion's result, which a stop can leave unknown before the store's own check is decided)
+    'let s = toInteger(hostValue, default: 0)\nswitch s {\n  case "a" {\n    say "a"\n  }\n}\nexit\n',
+  ]) {
+    const files = [{ path: "main.tease", source }];
+    const request = coreRequest(files);
+    assert.ok(request !== null, source);
+    const total = analyseCore(request).budget.total;
+    for (let allowance = 1; allowance < total; allowance += 1)
+      assert.throws(
+        () =>
+          withTestAllowance(allowance, () =>
+            compileProjectWithBackend(files, { globals: ["hostValue"] }, CORE_BACKEND),
+          ),
+        CandidateOutsideSlice,
+        `${source} at ${allowance} of ${total}`,
+      );
+  }
 });
 
 test("a `switch` whose subject's type rules out the no-case way gets TSV052 on the route where today plans (#2660)", (t) => {
