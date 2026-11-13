@@ -86,6 +86,15 @@ if (isMainThread && process.argv[2] === "summary") {
     refused("the base and the head are one build: compare two");
   const set = setOf(given, headRoot);
   const [shard, shards] = (option("--shard") ?? "0/1").split("/").map(Number);
+  // (shards 0/N to N-1/N together hold the set once, as run.mjs's do: another index would run none, #1072 R48)
+  if (!(
+    Number.isInteger(shards) &&
+    shards > 0 &&
+    Number.isInteger(shard) &&
+    shard >= 0 &&
+    shard < shards
+  ))
+    refused(`--shard ${option("--shard")} is no shard i/N with 0 <= i < N`);
   const out = option("--out");
   const limit = option("--limit") === undefined ? Infinity : Number(option("--limit"));
   const units = option("--units") === "none" ? null : Number(option("--units") ?? 4);
@@ -105,6 +114,7 @@ if (isMainThread && process.argv[2] === "summary") {
     .map((_, index) => index)
     .filter((index) => (only === null ? index % shards === shard : only.has(sources[index].name)))
     .slice(0, limit);
+  if (indices.length === 0) refused(`the selection holds no source of ${path.basename(set)}`);
   // (a source already in --out is not run again, its record counted as it stands: a stall stays a stall; by its name and
   // key, as two sources may share a name, #2254: a record without a key matches no source and its source runs again)
   const placed = (unit) => JSON.stringify([unit.name, unit.key]);
