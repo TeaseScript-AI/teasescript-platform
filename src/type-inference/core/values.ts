@@ -609,7 +609,8 @@ export class Values {
   /** The value of a place at a node, read at the path `asked` below it (steps, or a cursor's path or span). */
   public valueItems(value: PlaceId, node: FlowNode | null, asked: Rest): Work<readonly Item[]> {
     // (a cursor's span read by its path's id)
-    if (!isSteps(asked) && asked.kind === "span") return this.valueItemsAt(value, node, asked.id());
+    if (!isSteps(asked) && asked.kind === "span")
+      return this.#valueItemsAt(value, node, asked.id());
     const rest = isSteps(asked) ? asked : asked.steps();
     // a read at a path of property steps stands one step below its parent's position
     if (
@@ -694,7 +695,7 @@ export class Values {
    * steps are property steps and its first passes a wrapper, from the arena's metadata; else its steps made (uncharged,
    * as a caller's array was) for the read's own computation.
    */
-  public valueItemsAt(value: PlaceId, node: FlowNode | null, path: number): Work<readonly Item[]> {
+  #valueItemsAt(value: PlaceId, node: FlowNode | null, path: number): Work<readonly Item[]> {
     const { contract } = this.pass;
     if (
       path > 0 &&
@@ -1146,12 +1147,12 @@ export class Values {
       kind: "value",
       file: site?.file ?? -1,
       offset: site?.start ?? -1,
-      make: () => this.literalValue(literal, stepsRest(rest), node),
+      make: () => this.#literalValue(literal, stepsRest(rest), node),
     };
   }
 
   /** The demand of `#literalItems`. */
-  public *literalValue(literal: PlaceId, rest: Rest, node: FlowNode | null): Work<readonly Item[]> {
+  *#literalValue(literal: PlaceId, rest: Rest, node: FlowNode | null): Work<readonly Item[]> {
     const { program, definitions, contract } = this.pass;
     // the element cell of an empty literal holds no element
     if (!program.hasOf.has(literal) && (definitions.cellDefs.get(literal) ?? []).length === 0)
@@ -1161,7 +1162,7 @@ export class Values {
 
   /**
    * An operation's value at a path: a demand per result and path, and one for every path below a computed-key load's
-   * root, where a computed key gives host data whatever the path (`operationValue`; #1203: `loadsBelow`).
+   * root, where a computed key gives host data whatever the path (`#operationValue`; #1203: `loadsBelow`).
    */
   *#operationItems(c: ValueConstraint, node: FlowNode | null, asked: Steps): Work<readonly Item[]> {
     const site = this.pass.program.places[c.result]?.site ?? c.site;
@@ -1182,7 +1183,7 @@ export class Values {
       make: () =>
         copyMethod(c)
           ? this.#copyValue(c, node, rest)
-          : this.operationValue(c, node, stepsArray(rest)),
+          : this.#operationValue(c, node, stepsArray(rest)),
     };
     // (the one answer below the root is the path's but for the mark of an element step there, `hostAt`)
     return below ? [...items, ...emptyAt(rest)] : items;
@@ -1204,7 +1205,7 @@ export class Values {
 
   /**
    * The demand of `#operationItems` for a method that gives a copy of its receiver's elements (`copyMethod`): as
-   * `operationValue` answers it, its path read as steps (#1857).
+   * `#operationValue` answers it, its path read as steps (#1857).
    */
   *#copyValue(c: CopyOperation, node: FlowNode | null, rest: Steps): Work<readonly Item[]> {
     const { program, contract } = this.pass;
@@ -1215,12 +1216,12 @@ export class Values {
       return alternatives([OPAQUE_MEMBER], program.scope);
     const gives = methodCategory(c.contract.name)?.gives;
     // (`copyMethod` chose it: a copy's, whose `#operation` branch this is)
-    if (gives?.kind !== "copy") return yield* this.operationValue(c, node, stepsArray(rest));
+    if (gives?.kind !== "copy") return yield* this.#operationValue(c, node, stepsArray(rest));
     return alternatives(yield* this.#copied(gives, c.receiver, at, rest), program.scope);
   }
 
   /** The demand of `#operationItems`. */
-  public *operationValue(
+  *#operationValue(
     c: ValueConstraint,
     node: FlowNode | null,
     rest: readonly string[],
