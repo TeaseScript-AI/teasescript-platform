@@ -224,6 +224,28 @@ const visits = { statements: 0, captured: 0 };
 export const snapshotVisits = (): { readonly statements: number; readonly captured: number } => ({
   ...visits,
 });
+/** The part at `steps` of `snap` replaced by `part`, or why it cannot be. */
+const replaced = (snap: Snap, steps: readonly string[], part: Snap): Snap => {
+  if (steps.length === 0) return part;
+  if (snap.t === "refused") return snap;
+  if (snap.t !== "type" || snap.type.kind !== "object" || steps[0] === INDEX)
+    return { t: "refused", why: "a property store below a value of no modelled structure" };
+  const [name, ...rest] = steps;
+  const own = snap.type.properties.find((property) => property.name === name);
+  const next = replaced(own === undefined ? OPEN : { t: "type", type: own.type }, rest, part);
+  if (next.t === "refused") return next;
+  const type: DerivedType = next.t === "open" ? ALL : next.type;
+  return {
+    t: "type",
+    type: {
+      ...snap.type,
+      properties: [
+        ...snap.type.properties.filter((property) => property.name !== name),
+        { name: name!, type },
+      ],
+    },
+  };
+};
 export function snapshotsOf(program: readonly Statement[]): ReadonlyMap<Expression, Resolve> {
   const cached = snapshotTables.get(program);
   if (cached !== undefined) return cached;
@@ -360,28 +382,6 @@ export function snapshotsOf(program: readonly Statement[]): ReadonlyMap<Expressi
           throw error;
         }
     }
-  };
-  /** The part at `steps` of `snap` replaced by `part`, or why it cannot be. */
-  const replaced = (snap: Snap, steps: readonly string[], part: Snap): Snap => {
-    if (steps.length === 0) return part;
-    if (snap.t === "refused") return snap;
-    if (snap.t !== "type" || snap.type.kind !== "object" || steps[0] === INDEX)
-      return { t: "refused", why: "a property store below a value of no modelled structure" };
-    const [name, ...rest] = steps;
-    const own = snap.type.properties.find((property) => property.name === name);
-    const next = replaced(own === undefined ? OPEN : { t: "type", type: own.type }, rest, part);
-    if (next.t === "refused") return next;
-    const type: DerivedType = next.t === "open" ? ALL : next.type;
-    return {
-      t: "type",
-      type: {
-        ...snap.type,
-        properties: [
-          ...snap.type.properties.filter((property) => property.name !== name),
-          { name: name!, type },
-        ],
-      },
-    };
   };
   /**
    * A block walked from `incoming`, reached or not (`live`): the state after it, whether it falls through to what
