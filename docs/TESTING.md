@@ -351,7 +351,7 @@ Not covered, each with its reason:
     while it closes a generator);
   - a `finally` whose call throws after the write.
 
-  No generator `finally` in the core writes retained state today: the six are `core/values.ts:329` and `:964`,
+  No generator `finally` in the core writes retained state today: the six are `core/values.ts:319` and `:972`,
   `core/contract/value-kinds.ts:244` and `:374`, `core/contract-descriptors.ts:299` and `core/budget.ts:392`;
 - a prototype set by a `"__proto__"` key from data on an owner, a registered function or a function the program
   reaches (#1072 R65): no core file writes a key from data to one. Of the 93 lines this lists in `src/type-inference/`
