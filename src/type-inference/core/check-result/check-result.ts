@@ -292,8 +292,10 @@ function fallbackUses(answers: Answers, index: SliceIndex): FallbackUses {
 }
 
 /**
- * The ways of each `otherwise` the plan's checks follow (`WayFacts.operands`), from the one decision (`fallbackUses`):
- * from a chain's first link whose left side is never `null` on, the fallback never runs and the value is always kept.
+ * The ways of the lazy operators the plan's checks follow (`WayFacts.operands`: whether the right side may run, and
+ * whether it may be skipped). Of each `otherwise`, from the one decision (`fallbackUses`): from a chain's first link
+ * whose left side is never `null` on, the fallback never runs and the value is always kept. Of each `and` and `or`, by
+ * the flow graph's own rule (P7): a literal left side decides whether the right side runs, any other may do either.
  */
 function operandWays(index: SliceIndex, fallbacks: FallbackUses): Map<string, readonly boolean[]> {
   const ways = new Map<string, readonly boolean[]>();
@@ -301,6 +303,19 @@ function operandWays(index: SliceIndex, fallbacks: FallbackUses): Map<string, re
     if (first !== null)
       for (const link of chain.slice(first))
         ways.set(placeKey(index.fileOf(link), link.span), [false, true]);
+  for (const expression of index.expressions)
+    if (
+      expression.kind === "binaryExpression" &&
+      (expression.operator === "and" || expression.operator === "or")
+    ) {
+      // (`and` runs its right side after a true left side, `or` after a false one)
+      const truth = literalTruth(expression.left);
+      const runs = expression.operator === "and";
+      ways.set(placeKey(index.fileOf(expression), expression.span), [
+        truth === null || truth === runs,
+        truth === null || truth !== runs,
+      ]);
+    }
   return ways;
 }
 

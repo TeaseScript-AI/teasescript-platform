@@ -64,6 +64,8 @@ const NATIVE_CODES: Readonly<Record<string, readonly (string | null)[]>> = {
   // (C13, S9b: a loop's own check of its source, a call's of its argument)
   iteration: ["TSR044"],
   argument: ["TSV043", "TSV042", "TSR024"],
+  // (C3, C4: an operand that is no boolean, no number, of no order, or an operation without a finite result)
+  operator: ["TSR026", "TSR027", "TSR009", "TSR036"],
   empty: ["TSR018", "TSR019"],
   member: ["TSR003", "TSR004", "TSR008", "TSR016", "TSR017", "TSR061", "TSR062"],
   fallback: ["TSR058"],

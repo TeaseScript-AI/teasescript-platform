@@ -51,8 +51,9 @@ test("a program outside the slice throws at its first construct outside it", () 
   for (const [source, offset] of [
     // a statement outside the slice
     ["let total = 0\nwhile false {\n  total = 1\n}\nexit\n", 14],
-    // another consumer: a condition that is no boolean (C3)
-    ['if 1 {\n  say "never"\n}\nexit\n', 3],
+    // another consumer's diagnostic after the analysis, of a rule the route does not report: `get` of a receiver of
+    // unknown kind, at its index
+    ["let x: integer = hostValue.get(0, default: 0)\nexit\n", 31],
     // lists nested as deep as the facts' walk (256 levels), inferred or written
     [
       `let a = ${"[".repeat(256)}1${"]".repeat(256)}\na = ${"[".repeat(256)}"bad"${"]".repeat(256)}\nexit\n`,

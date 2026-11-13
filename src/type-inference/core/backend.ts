@@ -38,12 +38,13 @@ import {
  * declaration (never a speaker's name as a value), a call as a statement, and `exit`; the asks `SLICE_ASKS` holds,
  * also `as` a speaker, with no prefill or a literal one the request takes (`askPrefillAdmitted`);
  * number, boolean, null, regex and plain text literals, variables, host values, list and object literals, index and
- * property reads, ranges, `otherwise`, a list's `get` with its `default:`, a method of text, a list, a set or a dict that
- * changes nothing in its receiver and a list's `sort`, `toJson` of a value, the conversions of a value with their `default:`, `fromJson`, `fileFromBase64`,
+ * property reads, ranges, the unary and binary operators, a list's `get` with its `default:`, a method of text, a list,
+ * a set or a dict that changes nothing in its receiver and a list's `sort`, `toJson` of a value, the conversions of a value with their `default:`, `fromJson`, `fileFromBase64`,
  * `decryptText` and `decryptFile`, a `load` with a default that is no `null` of a key written as text once in the project
  * or of a computed key (external data, F19), and parentheses (S7: the constructs of the discharge map's new rows). Its consumers are C1 (a store into a
  * place with a written or decided type, A1–A9, with A6's rejections and a literal's elements of one type), C2 (a repeat
- * count, an index), C5 (a member of a receiver at a read or a store), C10 (a fallback or a default) and C13 (a `for`
+ * count, an index), C3 (a condition, an operand of `and`, `or` and `not`), C4 (an operand of an arithmetic or
+ * comparison operator), C5 (a member of a receiver at a read or a store), C10 (a fallback or a default) and C13 (a `for`
  * loop's iterable, a method's arguments and the elements `join` and `sort` read); its ingresses are a host value, a load
  * and a parse, with C9's boundary check where it enters (the store's destination's admitted type) or where it is read.
  * Rejected after the analysis: any other consumer's diagnostic, a property read of a value that may be no object, a
@@ -264,19 +265,26 @@ export const SPEAKER_FIELD_KINDS: ReadonlyMap<string, FieldKinds> = new Map([
   ["gender", { takes: ["string", "null"], check: null }],
 ]);
 
+/**
+ * The rules of the operand diagnostics the route reports as the core gives them: C13's (a `for` loop's iterable, a
+ * method's argument, what `toJson` writes), C3's (a condition, an operand of `and`, `or`, `not`) and C4's (an operand of
+ * an arithmetic or comparison operator). An operand diagnostic of any other rule refuses its program.
+ */
+const ROUTE_OPERAND_RULES: ReadonlySet<string> = new Set([
+  "iterable",
+  "argument",
+  "json",
+  "boolean",
+  "operator",
+]);
+
 /** The first answer of the analysis that leaves the slice (see the module's comment), or `null`. */
 function outsideAnswers(answers: Answers, index: SliceIndex): Outside | null {
   const at = (site: { readonly file: number; readonly start: number; readonly end: number }) =>
     index.spanAt(site);
   for (const diagnostic of answers.diagnostics) {
     if (diagnostic.kind === "budget") continue;
-    // (C13's operands of the slice: a `for` loop's iterable, a method's argument, what `toJson` writes)
-    if (
-      diagnostic.kind === "operator" &&
-      diagnostic.rule.rule !== "iterable" &&
-      diagnostic.rule.rule !== "argument" &&
-      diagnostic.rule.rule !== "json"
-    )
+    if (diagnostic.kind === "operator" && !ROUTE_OPERAND_RULES.has(diagnostic.rule.rule))
       return { file: diagnostic.site.file, span: at(diagnostic.site), what: "this operand" };
   }
   const kindsAt = (expression: Expression): readonly string[] =>

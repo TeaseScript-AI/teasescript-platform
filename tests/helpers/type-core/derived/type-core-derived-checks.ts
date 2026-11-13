@@ -30,6 +30,31 @@ import { expectedType, writtenLanding } from "./type-core-derived-defaults.js";
 import { sourceShape, typeOf } from "./type-core-derived-shapes.js";
 import { snapshotsOf } from "./type-core-derived-snapshots.js";
 
+/**
+ * Whether `at` is the site of an operand of a unary or binary operator but `otherwise`, of such an operation itself, or of
+ * an `if` condition, inside its parentheses.
+ */
+function operatorOperand(
+  all: readonly Expression[],
+  statements: readonly Statement[],
+  at: string,
+): boolean {
+  return (
+    all.some(
+      (expression) =>
+        (expression.kind === "unaryExpression" && site(unwrap(expression.operand)) === at) ||
+        (expression.kind === "binaryExpression" &&
+          expression.operator !== "otherwise" &&
+          [expression, expression.left, expression.right].some(
+            (part) => site(unwrap(part)) === at,
+          )),
+    ) ||
+    statements.some(
+      (statement) => statement.kind === "ifStatement" && site(unwrap(statement.condition)) === at,
+    )
+  );
+}
+
 /** Whether a type holds `null`. */
 function holdsNull(type: DerivedType): boolean {
   return type.kind === "kinds"
@@ -423,6 +448,13 @@ export function derive(
     ) {
       // C13 (S9b): a `for` loop's iterable, which the loop's own check of its source takes (TSR044)
       native("iteration", at);
+    } else if (
+      (check.kind === "operand" || check.kind === "null-check") &&
+      operatorOperand(all, statements, at)
+    ) {
+      // C3, C4: an operand of an operator or a condition, or the operation where no operand alone offends, which the
+      // operation's own check takes where it runs (`derived-operators.ts`)
+      native("operator", at);
     } else if (check.kind === "operand") {
       // C13 (S9b): a method's argument or what `toJson` writes, which the call's own check takes at the call, or the
       // elements `join` or `sort` reads, whose obligation is the whole call's

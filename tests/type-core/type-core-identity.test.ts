@@ -469,7 +469,7 @@ const UNWRAPPING: Readonly<Record<string, readonly [number, string]>> = {
   "core/narrowing/route-tests.ts": [2, "values: a test's subject; a condition's own parentheses"],
   "core/narrowing/routes.ts": [1, "a value: its producer"],
   "core/slice-syntax.ts": [
-    8,
+    6,
     "values: the syntax check's literals, on the source, an ask's prefill among them (`askPrefillAdmitted`)",
   ],
   "effects.ts": [3, "the legacy backend's, on the source"],
