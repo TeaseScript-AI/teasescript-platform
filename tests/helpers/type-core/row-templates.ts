@@ -99,7 +99,8 @@ const BASE_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly Template[]>>>
   hideImageStatement: ["hideImage"],
   // (no nested form after `skippable`, which reads a following `[` as an element of a name)
   sayStatement: ["say skippable hostValue"],
-  // a transfer by each target form the row holds, a typed store of the host global in every file; then a nullable stored
+  // a transfer by each target form the row holds (a quoted glob of one file among them), a typed store of the host global
+  // in every file; then a nullable stored
   // before each of the literal forms and a computed one, a variable of the same name used in the target (#2514's file
   // starts: `let`s are per file and globals closed, so nothing nullable crosses a file)
   gotoStatement: [
@@ -114,6 +115,7 @@ const BASE_TEMPLATES: Readonly<Partial<Record<SyntaxKind, readonly Template[]>>>
       main('if hostValue == null {\n  goto "part.tease"\n}\nlet n: integer = hostValue\nexit\n'),
       { path: "part.tease", source: "let z: integer? = hostValue\nexit\n" },
     ],
+    [main('let n: integer = hostValue\ngoto "p*.tease"\n'), PART_TYPED],
     [
       main('let x: integer? = hostValue\ngoto "part.tease"\n'),
       {
@@ -526,9 +528,12 @@ export const DECLARED_RUN_DIFFERENCES: readonly {
  * fails, as that operand alone does (`let v = <operand>` there), same code and site; where every operand evaluates, the
  * command refuses the value with one of `failure`'s codes, at the statement or at the value, nothing of its effect
  * happening; `at` is the statement, the value, or the call holding the value (a transfer's `script(…)`, whose failure
- * comes before any file is entered). Where today's checker gives no error, both publish and their runs are equal. That holds wherever the command
- * stands (R12), where the route admits the value alone there; where it refuses that, it refuses the command alike (R16).
- * The guard samples kinds and origins (`samples`, `PAIRED_SAMPLES`) and contexts (`CONTEXTS`).
+ * comes before any file is entered). A written type holding both kinds (`string?` at a transfer's path) is today's
+ * error too; the route's runs go on as the command with a value it takes, and end by those three ways with one it does
+ * not (the samples hold single kinds; `type-core-candidate-transfers.test.ts` holds the path's). Where today's checker
+ * gives no error, both publish and their runs are equal. That holds wherever the command stands (R12), where the route
+ * admits the value alone there; where it refuses that, it refuses the command alike (R16). The guard samples kinds and
+ * origins (`samples`, `PAIRED_SAMPLES`) and contexts (`CONTEXTS`).
  */
 export const DECLARED_RULE_DIFFERENCES: readonly {
   readonly row: SyntaxKind;
