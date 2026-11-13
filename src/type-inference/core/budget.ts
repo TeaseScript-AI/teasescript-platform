@@ -1,11 +1,12 @@
 /**
- * The work budget of the coarse core (checkpoint 9): every unit of work the analysis does is charged to one
- * counter as it runs, and the charged total is checked against the program's allowance at each charge, so an analysis
- * stops proving at the unit that crosses it. The allowance is the larger of a fixed floor and a coefficient per syntax
- * node; statement nesting and a read chain's depth have their own limits. A stop is no compile error (the owner's D4,
- * option a′): the ledger then only finishes, every later charge counted apart and none stopping it, and
- * each unit before the stop is counted to the place that spent it, so one warning can name the heaviest. The fallback
- * of a demand over its own allowance is not part of this module.
+ * The work budget of the core: every unit of work the analysis does is charged to one counter as it runs, and the
+ * charged total is checked against the program's allowance at each charge, so an analysis stops proving at the unit
+ * that crosses it. The allowance is the larger of a fixed floor and a coefficient per syntax node; statement nesting
+ * and a read chain's depth have their own limits. A stop is no compile error (D4): the ledger then only finishes, every
+ * later charge counted apart and none stopping it, and each unit before the stop is counted to the place that spent it,
+ * so one warning can name the heaviest. A demand's own allowance, its measure and its signal are here
+ * (`demandAllowanceFor`, `own`, `DemandExhausted`); the solver gives the demand up, and its reader answers with its
+ * key's contract.
  */
 
 /** The allowance every program has, however small. */
@@ -26,9 +27,8 @@ export function allowanceFor(syntaxNodes: number): number {
 }
 
 /**
- * Every counter the analysis charges, by the part of the analysis that charges it (the names of the reference model,
- * so that work records of the port and the model compare counter by counter). A counter that several parts share says
- * what it counts.
+ * Every counter the analysis charges, by the part of the analysis that charges it. A counter that several parts share
+ * says what it counts.
  */
 export type WorkCounter =
   // the program's size, charged once as setup
@@ -92,7 +92,7 @@ export type WorkCounter =
   | "checksSkipped"
   | "rejectPasses"
   | "stopPasses"
-  // admission's copies (S6-CARRIERS §4): alias keys, signatures and groups; the eligibility index; the quiet proofs of a
+  // admission's copies: alias keys, signatures and groups; the eligibility index; the quiet proofs of a
   // class; the member visits a proof that is not quiet makes; the structure levels
   | "aliasSteps"
   | "eligibility"
@@ -107,7 +107,7 @@ export type WorkCounter =
   // asked whether it stopped
   | "readerRecords"
   | "stopAsks"
-  // the receiving closure of a pass that starts with frozen keys (#1526 phase C): each read it keeps (an edge), each
+  // the receiving closure of a pass that starts with frozen keys (#1526): each read it keeps (an edge), each
   // node a walk of it visits (taint, blockers, an invalidation transaction)
   | "closureEdges"
   | "closureVisits";
@@ -244,12 +244,7 @@ const LIMIT_NAMES: Readonly<Record<BudgetLimit, string>> = {
 };
 
 /**
- * Thrown by `charge` at the unit that exceeds the allowance and by `checkReadDepth` past the read-depth limit: the
- * analysis catches it and stops proving. A statement nested past the nesting limit stops nothing: it is checked when
- * the script runs (`nesting`).
- */
-/**
- * A demand that crossed its allowance (S3 §5): the solver gives it up between two steps of its computations,
+ * A demand that crossed its allowance: the solver gives it up between two steps of its computations,
  * so no computation is cut midway; its reader answers with its key's contract and the reason `budget`.
  */
 export class DemandExhausted extends Error {
@@ -260,8 +255,8 @@ export class DemandExhausted extends Error {
 }
 
 /**
- * Work that would pass a ceiling a caller set (`WorkLedger.capped`): the receiving completion's own allowance (#1526
- * phase C), never the analysis's; the charge that would pass it is not made.
+ * Work that would pass a ceiling a caller set (`WorkLedger.capped`): the receiving completion's own allowance (#1526),
+ * never the analysis's; the charge that would pass it is not made.
  */
 export class CapReached extends Error {
   public constructor() {
@@ -270,6 +265,12 @@ export class CapReached extends Error {
   }
 }
 
+/**
+ * Thrown by `charge` at the unit that exceeds the allowance, by `checkReadDepth` past the read-depth limit, and by a
+ * decision that stops again in a pass restarted for one that stopped (`consumers/stores/stores.ts`): the analysis
+ * catches it and stops proving. A statement nested past the nesting limit stops nothing: it is checked when the script
+ * runs (`nesting`).
+ */
 export class BudgetExhausted extends Error {
   public constructor(public readonly limit: BudgetLimit) {
     super(`The analysis exceeded its ${LIMIT_NAMES[limit]}.`);
@@ -366,7 +367,7 @@ export class WorkLedger {
   /**
    * Runs `callback`, the first build of an index every later read of the program shares (the narrowing index): its
    * units count to the analysis as any, but to no demand's allowance, as the read that happened to ask first did not
-   * make them its own work (S3 §5).
+   * make them its own work.
    */
   public shared<T>(callback: () => T): T {
     if (this.#sharing) return callback();
@@ -474,14 +475,17 @@ export class WorkLedger {
     this.#repeated = window.repeated;
   }
 
-  /** Whether a `shared` build is running: its units count as shared once it ends (`own`). */
+  /**
+   * Whether a shared build is open (`shared`, `sharedSteps`, or a `sharedStructure` window): its units count as shared
+   * once it ends (`own`).
+   */
   public get sharing(): boolean {
     return this.#sharing;
   }
 
   /**
    * The analysis's units outside `shared` builds, with what its readers repeat (`repeat`): what a demand's allowance
-   * measures (S3 §5).
+   * measures.
    */
   public get own(): number {
     const window = this.#window;
@@ -505,7 +509,7 @@ export class WorkLedger {
 
   /**
    * Runs `callback` as finishing work without a stop: the checks of statements nested past the nesting limit after an
-   * analysis that ran to its end (D4 a′), a diagnostic's fix facts, what a stop forgets by (`countApart`), counted apart
+   * analysis that ran to its end (D4), a diagnostic's fix facts, what a stop forgets by (`countApart`), counted apart
    * and never stopping it. Inside another `apart` callback it stays apart to that callback's end.
    */
   public apart<T>(callback: () => T): T {
@@ -571,7 +575,7 @@ let testAllowance: number | null = null;
 let testDemandAllowance: number | null = null;
 
 /**
- * A demand's allowance (S3 §5): 256 × the nodes of the reading site's callable, or a test's
+ * A demand's allowance: 256 × the nodes of the reading site's callable, or a test's
  * (`withTestDemandAllowance`).
  */
 export function demandAllowanceFor(callableNodes: number): number {

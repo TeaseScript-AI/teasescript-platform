@@ -18,7 +18,7 @@ import { REASON, type Item, type ItemTag } from "./items.js";
 import { propertyStep, type CoreProgram } from "./program.js";
 import { retainedModule } from "./retained/retained.js";
 
-// The contract proof/descriptor service (#1526 phase A): a store's required contract, assembled level by
+// The contract proof/descriptor service (#1526): a store's required contract, assembled level by
 // level from the stable admission pass's proofs, as an immutable descriptor one per distinct contract, with whether its
 // proof is complete, proved open or lost.
 
@@ -62,9 +62,8 @@ export interface ContractLevel {
 /**
  * A store's required contract: complete (each level written, decided, or proved open), open (nothing constrains it), or
  * lost (a required level's proof is unfinished: the stop of the analysis or of a decision cut it; or, in a receiving
- * completion, a decision it read would reject a store or retarget a selecting store, #1526 phase C). A lost contract
- * keeps the part it holds (`partial`), which the plan carries until decision 2; it is never
- * complete.
+ * completion, a decision it read would reject a store or retarget a selecting store, #1526). A lost contract keeps
+ * the part it holds (`partial`), which the plan carries; it is never complete.
  */
 export type ContractResult =
   | { readonly state: "complete"; readonly ref: ContractRef; readonly epoch: number }
@@ -198,7 +197,7 @@ function isPlain(kind: ValueKind): kind is PlainKind {
   return VALUE_KINDS[kind].type === "kind";
 }
 
-/** An item's kind as a closed type of the adapters (the structure below it is asked through `project`). */
+/** An item's kind as a closed `StaticType` (the structure below it is asked through `project`). */
 export function closedType(tag: ItemTag): StaticType | null {
   if (tag === "unknown" || tag === "empty") return null;
   if (tag === "null") return NULL_TYPE;
@@ -240,7 +239,7 @@ export class ContractDescriptors<R> {
     private readonly stopped: boolean,
     private readonly limit = SLICE_DEPTH,
     /**
-     * The receiving closure of a pass that completes frozen proofs (#1526 phase C): each place's contract assembled at
+     * The receiving closure of a pass that completes frozen proofs (#1526): each place's contract assembled at
      * a path is its cell (an extent), its kept assembly a read of it, and an assembly the closure invalidated goes
      * (`forget`), so the next read assembles it anew.
      */
@@ -294,7 +293,7 @@ export class ContractDescriptors<R> {
       this.cells?.took("extent", key);
       return known;
     }
-    // (an extent cell of the receiving closure's where a completion pass assembles it, #1526 phase C)
+    // (an extent cell of the receiving closure's where a completion pass assembles it, #1526)
     const entered = this.cells?.enter("extent", key) ?? false;
     try {
       const lost: ContractLevel[] = [];
@@ -563,7 +562,7 @@ export function captureDescriptors(
 }
 
 /**
- * The capture of the contracts the stores owing a check require (#1526 phase B): each request's contract
+ * The capture of the contracts the stores owing a check require (#1526): each request's contract
  * from `reader` over the settled admission pass, in order, kept in `into`, its levels decided and their contracts
  * solved while nothing stops the solver, so a later stop finds them retained. The first request deeper than the slice
  * follows ends the capture: the program has left the slice there, as the lowering's check of that store leaves it and
