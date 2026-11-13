@@ -4,7 +4,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { analyseCore } from "../../../src/type-inference/core/answers.js";
 import { WorkLedger } from "../../../src/type-inference/core/budget.js";
-import { coreCheckResult } from "../../../src/type-inference/core/check-result/check-result.js";
+import {
+  checkedResult,
+  coreCheckResult,
+} from "../../../src/type-inference/core/check-result/check-result.js";
 import { SliceIndex } from "../../../src/type-inference/core/check-result/slice-index.js";
 import { checkedOnSource, identityView } from "../../../src/type-inference/core/identity-view.js";
 import type { CoreAnalysisRequest } from "../../../src/type-inference/core/program.js";
@@ -94,7 +97,8 @@ function expectedUnits(request: CoreAnalysisRequest): number {
         for (let next = own.pop(); next !== undefined; next = own.pop()) {
           body += 1;
           if (kindOf(next) === "letStatement") names += 1;
-          if (kindOf(next) === "forStatement") names += isTree(next) && isTree(next["valueVariable"]) ? 2 : 1;
+          if (kindOf(next) === "forStatement")
+            names += isTree(next) && isTree(next["valueVariable"]) ? 2 : 1;
           if (isTree(next)) for (const [, child] of members(next)) own.push(child);
         }
         units += given + body + names;
@@ -215,4 +219,27 @@ test("the result read back onto the source charges a unit per node it translates
   const work = new WorkLedger(1_000_000);
   checkedOnSource(view, checked, work);
   assert.equal(work.counts().get("identitySteps"), nodes);
+});
+
+test("a request analysed twice reads its view again in the second run, unchanged (#2493)", () => {
+  // (the view is kept between runs, frozen where the retained-state instrument runs: the second run only reads it)
+  const request = coreRequest(
+    main(
+      `${PASS}let xs: (integer | string)[] = [1, "s"]\nlet w: integer = pass(xs[1])\nrepeat pass(xs[1]) {}\nexit`,
+    ),
+  )!;
+  const runs = [0, 1].map(() => {
+    const answers = analyseCore(request);
+    const checked = checkedResult(answers, request);
+    return {
+      view: answers.identity,
+      steps: answers.budget.counts.get("identitySteps"),
+      diagnostics: checked.diagnostics,
+      checks: checked.checks,
+    };
+  });
+  const [first, second] = runs;
+  assert.ok(first !== undefined && second !== undefined && first.view.calls > 0);
+  assert.equal(second.view, first.view);
+  assert.deepEqual({ ...second, view: null }, { ...first, view: null });
 });
